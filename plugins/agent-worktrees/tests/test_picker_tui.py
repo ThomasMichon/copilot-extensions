@@ -3998,6 +3998,68 @@ def test_registered_pivot_lists_and_navigates(tmp_path, monkeypatch):
     asyncio.run(run())
 
 
+def test_tasks_view_component_renders_body(tmp_path, monkeypatch):
+    """F5 slice 6: the registered-pivot (Tasks) body is rendered by an
+    encapsulated ``TasksView`` component, not inlined in ``build_body``. Assert
+    (a) the engine exposes a ``tasks_view`` component and the old inline row
+    helpers are gone from the engine; (b) build_body routes the Tasks body
+    through the component, which emits the ``("T", i)`` task stops with grouped
+    sections pinned and renders the task titles. The read-only task data +
+    pivot context stay on the engine (the pivot is background-loaded, no editable
+    state to move)."""
+    from agent_worktrees.picker_tui import pivots as pivots_mod
+    from agent_worktrees.picker_tui.engine import TasksView
+
+    d = tmp_path / "pivots"
+    d.mkdir()
+    _write_tasks_manifest(d)
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+
+    rows = [
+        {"id": "t1", "title": "First task", "target_worktree": "wt-a",
+         "repo_name": "repoA", "labels": ["handoff"]},
+        {"id": "t2", "title": "Second task", "target_worktree": None,
+         "repo_name": "repoB", "labels": []},
+    ]
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            _seed_fake_tasks(scr, rows)
+            scr.htab = scr.htabs.index("Tasks")
+            scr.sel = scr.default_sel()
+            await pilot.pause()
+
+            # (a) The component exists; the inline row-render helpers moved off
+            # the engine onto it. The read-only task data helpers + pivot context
+            # stay on the engine (reached from the component via self._eng).
+            assert isinstance(scr.tasks_view, TasksView)
+            assert not hasattr(scr, "_task_status_row")
+            assert not hasattr(scr, "_task_row")
+            assert hasattr(scr.tasks_view, "build")
+            assert hasattr(scr.tasks_view, "_status_row")
+
+            # (b) build_body routes the Tasks body through the component, which
+            # emits one ("T", i) stop per task with grouped sections pinned.
+            vrows = scr.build_body(118)
+            stops = [getattr(v, "stop", None) for v in vrows]
+            assert stops.count(("T", 0)) == 1
+            assert any(s == ("T", 1) for s in stops)
+            assert any(
+                getattr(v, "stop", None) and v.stop[0] == "T"
+                and getattr(v, "pin_section", None) is not None
+                for v in vrows)
+            # Body renders the task titles (through the real render pipeline).
+            plain = scr.render().plain
+            assert "First task" in plain
+            assert "Second task" in plain
+
+    asyncio.run(run())
+
+
 def test_registered_pivot_action_menu_runs_and_invalidates(tmp_path, monkeypatch):
     from agent_worktrees.picker_tui import pivots as pivots_mod
 
