@@ -1,0 +1,63 @@
+# Machine-local bridge overrides -- annotated recipes
+#
+# Copy the block(s) you need into ~/.agent-mcp/overrides/<id>.yaml, where <id> is
+# the bridge config's top-level `id:` or its filename stem minus `.mcp`
+# (e.g. spark.mcp.yaml -> id `spark` -> ~/.agent-mcp/overrides/spark.yaml).
+#
+# MERGE RULES (deep-merge onto the committed config):
+#   * mappings merge recursively (overlay keys win; base-only keys survive)
+#   * lists AND scalars REPLACE wholesale -- restate a full list to change one item
+#
+# Verify with:  agent-mcp validate <name-or-config>   (loads through the merge)
+
+# ------------------------------------------------------------------------------
+# 1. Ask a header-driven upstream for its full tool catalog.
+#    (Merges into the base `headers:` map -- other headers are preserved.)
+# ------------------------------------------------------------------------------
+headers:
+  X-Toolset-Domain: "*"        # e.g. Spark: '*' returns every tool, not just CORE
+
+# ------------------------------------------------------------------------------
+# 2. Hide tools from the agent with a `filter` decorator.
+#    NOTE: this RESTATES the whole `decorators:` list. If the base config already
+#    has decorators you want to keep, include them here too (in order).
+# ------------------------------------------------------------------------------
+# decorators:
+#   - type: filter
+#     deny: ["learn", "run_code", "*_delete", "*_admin"]
+
+# ------------------------------------------------------------------------------
+# 3. Make a large catalog lean -- defer behind a tool-finder, or code-mode.
+# ------------------------------------------------------------------------------
+# decorators:
+#   - type: defer            # find_tool / execute_tool / load_tools
+#     mode: lazy             #   lazy (default) | eager | meta_only
+#   - type: filter
+#     deny: ["learn"]
+#
+# ...or a single typed run_code tool (needs Node on PATH):
+# decorators:
+#   - type: code-mode
+#     tool: run_code
+#   - type: filter
+#     deny: ["learn"]
+
+# ------------------------------------------------------------------------------
+# 4. Retarget the upstream / tenant and tweak auth + timeout.
+#    `server:` and `auth:` are maps -- only the keys you set change.
+# ------------------------------------------------------------------------------
+# server:
+#   url: https://other-farm.example.com/mcp
+# auth:
+#   resource: 00000003-0000-0ff1-ce00-000000000000
+# timeout: 120
+# headers:
+#   X-FDROUTEKEYHEADER: "b@mysite@<tenantId>"
+
+# ------------------------------------------------------------------------------
+# 5. Test a not-yet-deployed upstream build (bridge stays committed).
+#    e.g. point Spark at a PR-built tools-host bundle via its override header.
+# ------------------------------------------------------------------------------
+# headers:
+#   X-Toolset-Domain: "*"
+#   X-MCP-Tools-Bundle-Url: "https://<allow-listed-cdn>/<build>/mcp-knowledge-agent-tools-host/tools-host.js"
