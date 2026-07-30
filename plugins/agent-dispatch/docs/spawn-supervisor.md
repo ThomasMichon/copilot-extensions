@@ -123,10 +123,36 @@ CLI:
 
 ```
 agent-dispatch supervise [--repo R | --all-repos] [--label L ...] \
-    [--max-concurrent N] [--max-attempts N] [--no-heartbeat] [--interval S] [--once]
+    [--max-concurrent N] [--max-attempts N] [--no-heartbeat] \
+    [--headless-label L ...] [--headless-agent AGENT] [--interval S] [--once]
 agent-dispatch reservations list [--task ID] [--state S]
 agent-dispatch reservations fail|settle <key> [--detail ...]
 ```
+
+### Per-label embody body: CLI-first, headless-ACP opt-in
+
+The supervisor embodies each spawned task as a **mux-wrapped CLI autopilot**
+(`agent-worktrees embody`) by default — the right body for standalone/durable
+work a human may later attach to. But a **self-contained, bounded** task — a
+scheduled or reactive sweep that claims a task, runs it to a deliberate
+completion, and is torn down — needs no human attach, and a seeded CLI session
+can *race the input-prompt caret and never deliver its seed* (deadlocking at 0%).
+For those, `--headless-label LABEL` (repeatable) routes tasks carrying that label
+to a **headless agent-bridge ACP** body instead, sidestepping the
+CLI-start-prompt path entirely. `--headless-agent AGENT` names the agent-bridge
+agent used (default `task-worker`).
+
+The routing is **per label within one supervisor**: unmarked labels stay
+CLI-first (unchanged), only listed labels go headless — so a single service can
+embody interactive worktree work as a CLI session while embodying self-contained
+sweeps headless. The headless body reuses the **same autopilot seed** as the CLI
+backend (claim-under-identity, contract-net evaluation, deferred completion), so
+a headless-embodied task is *driven* identically; only its body differs. A
+headless body is not a worktree, so the worktree-keyed lease heartbeat does not
+apply to it (bounded sweeps drive their own lifecycle to completion);
+reconciliation still settles its reservation on the task's terminal state.
+`--headless-label` applies to **local** (non-pool) spawn — fleet bodies are
+always CLI-embodied on the pool host.
 
 ### Lease heartbeat (built) — the live-worker safety net
 
@@ -256,6 +282,8 @@ AGENT_DISPATCH_SUPERVISE_LABELS=            # comma/space list; REQUIRED to enab
 AGENT_DISPATCH_SUPERVISE_INTERVAL=30        # poll seconds
 AGENT_DISPATCH_SUPERVISE_MAX_CONCURRENT=1   # max-one-active by default
 AGENT_DISPATCH_SUPERVISE_MAX_ATTEMPTS=3     # dead-letter after N failed spawns
+AGENT_DISPATCH_SUPERVISE_HEADLESS_LABELS=   # labels embodied headless-ACP (subset of LABELS)
+AGENT_DISPATCH_SUPERVISE_HEADLESS_AGENT=    # agent-bridge agent for headless bodies (default task-worker)
 AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=        # advanced, e.g. --pool a,b --origin host
 ```
 

@@ -333,3 +333,139 @@ def test_cli_supervise_once(monkeypatch, q, client):
     assert spawn.calls == [t.id]
     assert q.latest_reservation(t.id).state == SpawnState.SPAWNED
 
+
+# -- headless-ACP embody backend ---------------------------------------------
+
+
+def test_make_headless_spawn_uses_bridge_with_autopilot_seed(monkeypatch):
+    """The headless backend embodies via agent-bridge, delivering the SAME
+    autopilot seed the CLI backend uses (parity: identical driving, different
+    body) -- and records no worktree handle (a headless body is not a worktree)."""
+    import subprocess
+
+    from agent_dispatch import bridge, embody
+    from agent_dispatch.supervisor import make_headless_spawn
+
+    calls: dict = {}
+
+    def fake_spawn_worker(
+        task_id, *, agent, coordinator_url, worker_id, prompt, wait, **_kw
+    ):
+        calls.update(
+            task_id=task_id, agent=agent, coordinator_url=coordinator_url,
+            worker_id=worker_id, prompt=prompt, wait=wait,
+        )
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(bridge, "spawn_worker", fake_spawn_worker)
+    monkeypatch.setattr(
+        embody, "autopilot_worker_prompt",
+        lambda task_id, *, coordinator_url, worker_id: f"SEED::{task_id}",
+    )
+
+    spawn = make_headless_spawn("http://coord", agent="board-worker")
+    ok, handle = spawn({"id": "task-1"})
+
+    assert ok is True
+    assert handle["worktree"] is None  # headless body is not a worktree
+    assert calls["agent"] == "board-worker"
+    assert calls["prompt"] == "SEED::task-1"  # the CLI autopilot seed, verbatim
+    assert calls["wait"] is False  # fire-and-forget; the worker drives itself
+
+
+def test_make_headless_spawn_reports_failure_on_nonzero(monkeypatch):
+    import subprocess
+
+    from agent_dispatch import bridge, embody
+    from agent_dispatch.supervisor import make_headless_spawn
+
+    monkeypatch.setattr(embody, "autopilot_worker_prompt", lambda *a, **k: "seed")
+    monkeypatch.setattr(
+        bridge, "spawn_worker",
+        lambda *a, **k: subprocess.CompletedProcess([], 1, "", "boom"),
+    )
+    ok, handle = make_headless_spawn("http://coord")({"id": "t"})
+    assert ok is False
+    assert "boom" in handle["error"]
+
+
+def test_make_headless_spawn_degrades_when_bridge_absent(monkeypatch):
+    from agent_dispatch import bridge, embody
+    from agent_dispatch.supervisor import make_headless_spawn
+
+    monkeypatch.setattr(embody, "autopilot_worker_prompt", lambda *a, **k: "seed")
+
+    def _boom(*a, **k):
+        raise bridge.BridgeUnavailable("no agent-bridge on PATH")
+
+    monkeypatch.setattr(bridge, "spawn_worker", _boom)
+    ok, handle = make_headless_spawn("http://coord")({"id": "t"})
+    assert ok is False
+    assert "agent-bridge" in handle["error"]
+
+
+def test_make_label_routed_spawn_routes_by_label():
+    from agent_dispatch.supervisor import make_label_routed_spawn
+
+    def default(_task):
+        return True, {"session": "cli", "worktree": "wt"}
+
+    def headless(_task):
+        return True, {"session": "headless", "worktree": None}
+
+    routed = make_label_routed_spawn(default, overrides={"sweep": headless})
+
+    assert routed({"id": "a", "labels": ["sweep"]})[1]["session"] == "headless"
+    assert routed({"id": "b", "labels": ["other"]})[1]["session"] == "cli"
+    assert routed({"id": "c", "labels": []})[1]["session"] == "cli"
+    assert routed({"id": "d"})[1]["session"] == "cli"  # no labels key
+
+
+def test_make_label_routed_spawn_no_overrides_returns_default_unwrapped():
+    from agent_dispatch.supervisor import make_label_routed_spawn
+
+    def default(_task):
+        return True, {}
+
+    assert make_label_routed_spawn(default, overrides={}) is default
+
+
+def test_cli_supervise_headless_label_routes(monkeypatch, q, client):
+    """--headless-label routes a marked task to the headless backend while an
+    unmarked task stays CLI-first in the same supervisor (per-label body)."""
+    import types
+
+    from agent_dispatch import __main__ as m
+    from agent_dispatch import supervisor as sup_mod
+
+    marked = q.create("sweep work", labels=["board-sweep"])
+    plain = q.create("interactive work")
+
+    embody_calls: list[str] = []
+    headless_calls: list[str] = []
+
+    def embody_spawn(task):
+        embody_calls.append(task["id"])
+        return True, {"session": "cli", "worktree": "wt"}
+
+    def headless_spawn(task):
+        headless_calls.append(task["id"])
+        return True, {"session": "headless", "worktree": None}
+
+    monkeypatch.setattr(m, "_client", lambda _args, **_kw: client)
+    monkeypatch.setattr(m, "client_url", lambda: "http://coord")
+    monkeypatch.setattr(m, "_scope_repo", lambda _args: TEST_REPO)
+    monkeypatch.setattr(sup_mod, "make_embody_spawn", lambda _url, **_kw: embody_spawn)
+    monkeypatch.setattr(sup_mod, "make_headless_spawn", lambda _url, **_kw: headless_spawn)
+
+    args = types.SimpleNamespace(
+        all_repos=False, repo=None, url=None, token=None, label=None,
+        max_concurrent=5, verify_timeout=0, once=True, interval=30.0,
+        no_heartbeat=False, max_attempts=3,
+        headless_label=["board-sweep"], headless_agent="task-worker",
+    )
+    assert m._cmd_supervise(args) == 0
+    assert headless_calls == [marked.id]
+    assert plain.id in embody_calls
+    assert marked.id not in embody_calls
+

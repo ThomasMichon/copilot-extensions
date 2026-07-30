@@ -343,6 +343,7 @@ double-spawned.
 agent-dispatch supervise --once                       # one cycle (this repo's lane)
 agent-dispatch supervise --label autopilot            # loop; only spawn opted-in tasks
 agent-dispatch supervise --all-repos --max-concurrent 3
+agent-dispatch supervise --label sweep --headless-label sweep   # embody 'sweep' headless-ACP
 agent-dispatch reservations list --state spawned      # what's in flight
 agent-dispatch reservations fail <key>                # release a confirmed-dead spawn
 ```
@@ -353,6 +354,12 @@ lease of every confirmed-alive worker** so a quiet-but-alive session isn't wrong
 re-queued (disable with `--no-heartbeat`). Auto-recovery of a *dead*-but-non-terminal
 embody needs confirmed-death detection and is deferred (see the design doc); until
 then a dead embody's task is *held* and surfaced for `reservations fail`.
+
+Tasks embody as a mux-wrapped **CLI autopilot** by default. Mark **self-contained
+sweep** labels with `--headless-label L` (repeatable, `--headless-agent` to name the
+agent-bridge agent) to embody *those* labels as a **headless agent-bridge ACP** body
+instead — no human attach, no CLI-start-prompt race — while other labels stay
+CLI-first. See the design doc's "Per-label embody body" section.
 
 ## MCP tools (`agent-dispatch mcp`)
 

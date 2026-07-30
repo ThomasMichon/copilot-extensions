@@ -562,6 +562,13 @@ AGENT_DISPATCH_SUPERVISE_MAX_ATTEMPTS=3
 # e.g. "intelligence-dampener=3 coherence-adjudication-board=1" so raising one
 # label's bound never revives another label's stale tasks (N=0 = retry forever):
 AGENT_DISPATCH_SUPERVISE_LABEL_MAX_ATTEMPTS=
+# Labels whose tasks embody as a HEADLESS agent-bridge ACP session (no mux, no
+# CLI-start-prompt) instead of a CLI autopilot -- comma- or space-separated. For
+# self-contained, bounded sweeps that need no human attach; unlisted labels stay
+# CLI-first. Each listed label must also appear in SUPERVISE_LABELS to be watched.
+AGENT_DISPATCH_SUPERVISE_HEADLESS_LABELS=
+# agent-bridge agent name used for headless embody bodies (default: task-worker):
+AGENT_DISPATCH_SUPERVISE_HEADLESS_AGENT=
 # Extra raw flags appended to the invocation (advanced; e.g. fleet mode:
 #   --pool host-a,host-b --origin wheatley):
 AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=
@@ -591,6 +598,8 @@ interval="\${AGENT_DISPATCH_SUPERVISE_INTERVAL:-30}"
 max_concurrent="\${AGENT_DISPATCH_SUPERVISE_MAX_CONCURRENT:-1}"
 max_attempts="\${AGENT_DISPATCH_SUPERVISE_MAX_ATTEMPTS:-3}"
 label_max_attempts="\${AGENT_DISPATCH_SUPERVISE_LABEL_MAX_ATTEMPTS:-}"
+headless_labels="\${AGENT_DISPATCH_SUPERVISE_HEADLESS_LABELS:-}"
+headless_agent="\${AGENT_DISPATCH_SUPERVISE_HEADLESS_AGENT:-}"
 extra="\${AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS:-}"
 
 args=(supervise --all-repos --interval "\$interval" \\
@@ -616,6 +625,15 @@ for lm in \$label_max_attempts; do
     [[ -n "\$lm" ]] || continue
     args+=(--label-max-attempts "\$lm")
 done
+
+# Headless-ACP embody labels: tasks with one of these embody as a headless
+# agent-bridge worker instead of a CLI/mux autopilot (self-contained sweeps).
+headless_labels="\${headless_labels//,/ }"
+for hl in \$headless_labels; do
+    [[ -n "\$hl" ]] || continue
+    args+=(--headless-label "\$hl")
+done
+[[ -n "\$headless_agent" ]] && args+=(--headless-agent "\$headless_agent")
 
 # shellcheck disable=SC2206
 [[ -n "\$extra" ]] && args+=(\$extra)

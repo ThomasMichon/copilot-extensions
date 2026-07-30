@@ -112,7 +112,84 @@ def make_embody_spawn(
             return False, {"error": str(exc)}
         if result.returncode != 0:
             return False, {"error": (result.stderr or "").strip()[:200] or "nonzero exit"}
-        return True, embody.parse_handle(result)
+    return spawn
+
+
+def make_headless_spawn(
+    coordinator_url: str,
+    *,
+    agent: str = "task-worker",
+) -> SpawnFn:
+    """Build a :data:`SpawnFn` that embodies a worker as a **headless
+    agent-bridge ACP** session -- no mux, no CLI-start-prompt.
+
+    This is the embodiment for **self-contained, bounded** tasks that need no
+    human attach: a scheduled/reactive sweep that claims a task, runs it to a
+    deliberate completion, and is torn down. It sidesteps the CLI-start-prompt
+    delivery path entirely (a seeded CLI session can race the input caret and
+    never deliver its seed), so a headless-marked task never deadlocks on that
+    path.
+
+    It reuses the **same autopilot seed** as the CLI backend
+    (:func:`agent_dispatch.embody.autopilot_worker_prompt` -- claim-under-identity,
+    contract-net evaluation, deferred completion), so a headless-embodied task is
+    driven identically to a CLI-embodied one; only the *body* differs. Degrades
+    cleanly: if the ``agent-bridge`` CLI is absent, the spawn reports failure (the
+    supervisor fails the reservation, leaving the task queued).
+
+    A headless body is not a parallel worktree, so no worktree handle is recorded
+    -- the supervisor's worktree-keyed lease heartbeat simply does not apply to it
+    (headless sweeps are expected to be bounded, driving their own lifecycle to
+    completion). Reconciliation still settles the reservation when the task
+    reaches a terminal state.
+    """
+    from . import bridge, embody
+
+    def spawn(task: dict) -> tuple[bool, dict]:
+        worker_id = f"headless-{uuid.uuid4().hex[:8]}"
+        seed = embody.autopilot_worker_prompt(
+            task["id"], coordinator_url=coordinator_url, worker_id=worker_id
+        )
+        try:
+            result = bridge.spawn_worker(
+                task["id"],
+                agent=agent,
+                coordinator_url=coordinator_url,
+                worker_id=worker_id,
+                prompt=seed,
+                wait=False,
+            )
+        except bridge.BridgeUnavailable as exc:
+            return False, {"error": str(exc)}
+        if result.returncode != 0:
+            return False, {"error": (result.stderr or "").strip()[:200] or "nonzero exit"}
+        return True, {"session": worker_id, "worktree": None}
+
+    return spawn
+
+
+def make_label_routed_spawn(
+    default: SpawnFn, *, overrides: Mapping[str, SpawnFn]
+) -> SpawnFn:
+    """Return a :data:`SpawnFn` that routes a task to an **override** backend when
+    any of its labels has one, else to the ``default`` backend.
+
+    This lets a *single* supervisor embody different task classes with different
+    bodies -- e.g. self-contained sweep labels headless (bridge) while
+    interactive/standalone worktree work stays CLI-first (embody) -- without
+    splitting into multiple services. When a task carries several overridden
+    labels, the first match in the task's own label order wins. With no overrides,
+    the ``default`` is returned unwrapped (no behavior change).
+    """
+    if not overrides:
+        return default
+
+    def spawn(task: dict) -> tuple[bool, dict]:
+        for label in task.get("labels") or []:
+            fn = overrides.get(label)
+            if fn is not None:
+                return fn(task)
+        return default(task)
 
     return spawn
 

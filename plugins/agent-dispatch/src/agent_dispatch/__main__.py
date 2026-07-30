@@ -1266,11 +1266,19 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
     exactly once each, via the atomic spawn reservation. See the ``supervisor``
     module for the spawn-at-most-once safety model.
     """
-    from .supervisor import Supervisor, make_embody_spawn
+    from .supervisor import (
+        Supervisor,
+        make_embody_spawn,
+        make_headless_spawn,
+        make_label_routed_spawn,
+    )
 
     repo = None if getattr(args, "all_repos", False) else _scope_repo(args)
     coordinator_url = _resolve_client_target(args)[0]
     pool = [h for h in (getattr(args, "pool", "") or "").split(",") if h.strip()]
+    headless_labels = [
+        label for label in (getattr(args, "headless_label", None) or []) if label
+    ]
     capacity_gate = None
     if pool:
         from . import remote_dispatch
@@ -1291,6 +1299,13 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
         )
         spawn_fn = fleet
         capacity_gate = fleet.can_spawn
+        if headless_labels:
+            print(
+                "agent-dispatch supervise: --headless-label is ignored in fleet "
+                "(--pool) mode; fleet bodies are always CLI-embodied on the pool "
+                "host.",
+                file=sys.stderr,
+            )
         print(
             f"agent-dispatch supervise: fleet mode -- pool={','.join(fleet.pool)} "
             f"origin={origin}",
@@ -1300,6 +1315,19 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
         spawn_fn = make_embody_spawn(
             coordinator_url, verify_timeout=getattr(args, "verify_timeout", 0) or 0
         )
+        if headless_labels:
+            headless_spawn = make_headless_spawn(
+                coordinator_url,
+                agent=getattr(args, "headless_agent", None) or "task-worker",
+            )
+            spawn_fn = make_label_routed_spawn(
+                spawn_fn, overrides={label: headless_spawn for label in headless_labels}
+            )
+            print(
+                "agent-dispatch supervise: headless-ACP embody for label(s): "
+                f"{', '.join(headless_labels)}",
+                file=sys.stderr,
+            )
     with _client(args, ensure=False) as c:
         sup = Supervisor(
             c,
@@ -1857,6 +1885,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="don't hold the lease of confirmed-alive embodied workers "
              "(default: heartbeat live workers so a quiet-but-alive session's "
              "lease doesn't expire)",
+    )
+    p.add_argument(
+        "--headless-label", action="append", metavar="LABEL",
+        help="embody queued tasks carrying this label as a HEADLESS agent-bridge "
+             "ACP session (no mux, no CLI-start-prompt) instead of a CLI "
+             "autopilot (repeatable). For self-contained, bounded sweeps that "
+             "need no human attach; unmarked labels stay CLI-first. Local "
+             "(non-pool) mode only.",
+    )
+    p.add_argument(
+        "--headless-agent", default="task-worker", metavar="AGENT",
+        help="agent-bridge agent name used for headless embody bodies "
+             "(default: task-worker)",
     )
     p.add_argument(
         "--verify-timeout", type=int, default=0,
