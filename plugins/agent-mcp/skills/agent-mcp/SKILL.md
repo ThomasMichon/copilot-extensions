@@ -41,6 +41,12 @@ A bridge config can be referenced two ways:
 > across many repos or that do not belong to a checkout. Both forms read the
 > same config schema; only the lookup differs.
 
+> **Customizing an existing bridge on one machine** — to change a committed or
+> plugin-shipped bridge (which tools it exposes, its decorators, headers, auth)
+> for *this host only*, without editing the shared file, use the
+> **`customizing-bridges`** skill: it writes a deep-merged overlay at
+> `~/.agent-mcp/overrides/<id>.yaml`.
+
 ## Set up a repo-scoped sub-agent (the common case)
 
 This is the end-to-end flow for giving a Copilot sub-agent authenticated MCP
