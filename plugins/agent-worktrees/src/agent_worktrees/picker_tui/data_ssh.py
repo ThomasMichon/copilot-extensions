@@ -122,23 +122,20 @@ def _pwsh_remote(cmd: str) -> str:
     shell-special characters, so it executes correctly regardless of the remote
     default shell (cmd.exe or pwsh).
 
-    ``-WindowStyle Hidden`` keeps the remote pwsh **headless** and matches the
-    quash agent-bridge's ``_build_remote_cmd`` applies to ACP dispatch. When a
-    Windows box's sshd execs this pwsh non-PTY, pwsh ``AllocConsole``s on
-    startup; without ``Hidden`` that console is *visible*, so every remote picker
-    poll (list / stream / profiles / per-worktree op) pops a console window into
-    the target's interactive session -- a picker refresh fans these across the
-    roster into a headed-pwsh *storm*. The flag hides pwsh's own console.
-
-    NOTE: this is necessary but only *sufficient* when the remote sshd's
-    ``DefaultShell`` is **cmd.exe** (the OpenSSH default), so the sshd exec child
-    is ``cmd.exe /c "pwsh -WindowStyle Hidden ..."`` and this hidden pwsh is the
-    *outermost* pwsh. If ``DefaultShell`` is pwsh, sshd instead spawns an
-    ``pwsh -c "..."`` wrapper whose OWN console is already visible before our
-    inner pwsh runs -- a flag on the inner cannot hide the outer. Quashing the
-    storm on such a box additionally requires reverting ``DefaultShell`` to
-    cmd.exe (dotfiles#403 / #369). Effective per-target once the *dispatching*
-    machine runs this build."""
+    ``-WindowStyle Hidden`` matches agent-bridge's ``_build_remote_cmd`` and hides
+    *this* pwsh's own console. NOTE (dotfiles#403): on the dtssh Windows hosts this
+    flag is **parity only -- it does NOT stop the headed-window storm.** Those hosts
+    run ``sshd`` as the user in the *interactive* session (session 1), so the sshd
+    **exec child** -- the ``DefaultShell`` itself, i.e. the ``cmd.exe /c "..."`` or
+    ``pwsh -c "..."`` wrapper that runs *this* command string -- AllocConsoles a
+    *visible* console on the desktop. Verified live: with either DefaultShell, and
+    even wrapping in ``conhost --headless``, non-PTY inbound execs still pop a
+    window; only a PTY avoids it (but a PTY corrupts the JSON via ConPTY
+    line-wrap + VT noise, so the picker can't use one). The window owner is the
+    *outer* exec child, which no flag on this inner pwsh can hide. A real quash is
+    a dtssh/host-level change (a hidden-console DefaultShell launcher, a hidden
+    desktop for the sshd, etc.), tracked in the agent-ssh effort -- not here. This
+    flag stays for consistency with agent-bridge and is harmless."""
     enc = base64.b64encode(cmd.encode("utf-16-le")).decode("ascii")
     return f"pwsh -NoProfile -WindowStyle Hidden -EncodedCommand {enc}"
 
