@@ -6,11 +6,13 @@ Each plugin with a runtime installer must, per language variant:
   2. emit no binstub that sets PYTHONPATH to a runtime lib/ dir,
   3. write a schema_version 3 deploy manifest with a `source` block,
   4. carry a source-kind resolver identical (per language) across plugins,
-  5. adopt the immutable-versioned venv layout (dotfiles #581): ship the
-     byte-identical `scripts/versioned_runtime.py` primitive AND wire it in the
-     installer (the `install-contract:v3 versioned-venv` block), so a version
-     bump builds a fresh versions/<v> slot and swaps a `.venv`/`venv` link
-     instead of ever mutating a live runtime's venv.
+  5. adopt the immutable-versioned venv layout (dotfiles #581): ship a
+     `scripts/versioned_runtime.py` primitive that is byte-identical to the
+     canonical source (`libs/versioned-runtime/versioned_runtime.py`, vendored in
+     by `tools/sync-versioned-runtime.py`) AND wire it in the installer (the
+     `install-contract:v3 versioned-venv` block), so a version bump builds a
+     fresh versions/<v> slot and swaps a `.venv`/`venv` link instead of ever
+     mutating a live runtime's venv.
 
 The enforced entrypoint pair is the plugin's *canonical* installer: `install.*`
 when present (it carries an `update` action), otherwise `init.*` for plugins
@@ -43,6 +45,10 @@ PLUGINS_DIR = REPO / "plugins"
 # docs/patterns/README.md § "Runtime installs are immutable and versioned".
 VERSIONED_MARKER = "install-contract:v3 versioned-venv"
 VERSIONED_RUNTIME_FILE = "versioned_runtime.py"
+# The one canonical source of the primitive. Every Python runtime plugin's
+# scripts/versioned_runtime.py is vendored byte-identically from here by
+# tools/sync-versioned-runtime.py; this check enforces it (drift => run sync).
+VERSIONED_RUNTIME_CANONICAL = REPO / "libs" / "versioned-runtime" / VERSIONED_RUNTIME_FILE
 
 # A binstub/install script must not point PYTHONPATH at a runtime lib/ dir.
 FORBIDDEN_PYTHONPATH = re.compile(r"PYTHONPATH[^\n]*\.agent-[a-z]+[\\/]lib", re.IGNORECASE)
@@ -176,16 +182,26 @@ def check() -> int:
     _check_identical("Get-SourceKind (ps1)", ps1_resolvers, violations)
     _check_identical("_source_kind (sh)", sh_resolvers, violations)
 
-    # The versioned_runtime.py primitive is a self-contained per-plugin copy kept
-    # byte-identical across every Python runtime (plugins are pulled independently
-    # from the marketplace, so it cannot be a shared runtime import). Enforce that.
-    distinct_vrt = set(vrt_hashes.values())
-    if len(distinct_vrt) > 1:
-        detail = ", ".join(f"{k}={v[:8]}" for k, v in sorted(vrt_hashes.items()))
+    # The versioned_runtime.py primitive is a self-contained per-plugin copy
+    # vendored byte-identically from the canonical source
+    # (libs/versioned-runtime/versioned_runtime.py) by
+    # tools/sync-versioned-runtime.py -- it cannot be a shared runtime import
+    # because plugins are pulled independently from the marketplace. Enforce that
+    # every copy matches the canonical (drift => run the sync script).
+    if not VERSIONED_RUNTIME_CANONICAL.exists():
         violations.append(
-            f"scripts/{VERSIONED_RUNTIME_FILE} differs across plugins (must be "
-            f"byte-identical): {detail}"
+            f"missing canonical {VERSIONED_RUNTIME_CANONICAL.relative_to(REPO).as_posix()} "
+            f"-- the shared source of {VERSIONED_RUNTIME_FILE}"
         )
+    elif vrt_hashes:
+        canonical_hash = hashlib.sha256(VERSIONED_RUNTIME_CANONICAL.read_bytes()).hexdigest()
+        drifted = sorted(k for k, v in vrt_hashes.items() if v != canonical_hash)
+        if drifted:
+            violations.append(
+                f"scripts/{VERSIONED_RUNTIME_FILE} differs from the canonical source "
+                f"({VERSIONED_RUNTIME_CANONICAL.relative_to(REPO).as_posix()}) in: "
+                f"{', '.join(drifted)} -- run 'python tools/sync-versioned-runtime.py'"
+            )
 
     if violations:
         print("Install-contract violations:", file=sys.stderr)

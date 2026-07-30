@@ -3,8 +3,12 @@
 Every plugin in this repo installs its runtime the **same way**. Because the
 Copilot CLI marketplace pulls each plugin's payload **independently**, each
 plugin's install flow must be **completely self-contained** — there is no
-shared install module that gets vendored. Instead, this document is the
-reference, and `tools/check-install-contract.py` enforces conformance (run it
+shared install module resolved at install or runtime. Shared primitives such as
+`versioned_runtime.py` are **vendored in byte-identically at authoring time**
+(from a single canonical source, kept in sync by a repo tool) rather than
+resolved from a common location, so each installed plugin still ships everything
+it needs. This document is the reference, and
+`tools/check-install-contract.py` enforces conformance (run it
 manually or wire it as a git `pre-push` hook).
 
 ## Plugin update ≠ runtime install
@@ -150,8 +154,10 @@ write deploy-manifest.json  (schema_version 3, source block, atomic temp+move)
 > is the **default** for every Python runtime plugin (opt out per-plugin with
 > `AGENT_<NAME>_VERSIONED=0`, or globally with `COPILOT_EXT_NO_VERSIONED=1`, which
 > falls back to a plain in-place venv). `tools/check-install-contract.py` (run in
-> CI) **enforces** it: every runtime ships the byte-identical
-> `versioned_runtime.py` primitive and wires the `install-contract:v3
+> CI) **enforces** it: every runtime ships a `versioned_runtime.py` primitive
+> **byte-identical to the canonical source**
+> (`libs/versioned-runtime/versioned_runtime.py`, vendored in by
+> `tools/sync-versioned-runtime.py`) and wires the `install-contract:v3
 > versioned-venv` block. The venv is still `uv pip install`ed exactly as below;
 > only *where* it lives and *how* it is activated change. The per-plugin installer
 > points its venv/binstub/manifest at the slot the primitive returns.
@@ -430,7 +436,10 @@ runtime entrypoint (`install.*` if present, else `init.*`):
 - no canonical `.ps1` entrypoint launches the `…\Scripts\<name>.exe`
   console-script trampoline ([SAC-safe launchers](#sac-safe-launchers-windows)),
 - a `schema_version` 3 manifest with a `source` block is written,
-- the source-kind resolver is identical across plugins (per language).
+- the source-kind resolver is identical across plugins (per language),
+- each Python runtime's `scripts/versioned_runtime.py` is byte-identical to the
+  canonical `libs/versioned-runtime/versioned_runtime.py` (edit the canonical and
+  run `python tools/sync-versioned-runtime.py`; `--check` verifies in CI/pre-push).
 
 Wire it as a `pre-push` hook (see `tools/hooks/pre-push`, which also runs
 `tools/check-no-internal-identifiers.py` — a repo-wide guard that fails the push
