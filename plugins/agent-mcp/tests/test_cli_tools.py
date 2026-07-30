@@ -51,7 +51,7 @@ def test_parse_sidecar_requires_mcp_block():
 
 
 def test_parse_sidecar_requires_name_and_command():
-    with pytest.raises(CliToolError, match="mcp.name"):
+    with pytest.raises(CliToolError, match=r"mcp\.name"):
         parse_sidecar(_sidecar(name=""))
     with pytest.raises(CliToolError, match="invoke"):
         parse_sidecar(_sidecar(invoke={"args": []}))
