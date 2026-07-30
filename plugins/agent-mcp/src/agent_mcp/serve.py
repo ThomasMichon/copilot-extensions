@@ -3,8 +3,18 @@
 ``agent-mcp call`` and the materialized stubs pay a per-call upstream cold-start
 (spawn ``npx``/``bunx``/``node`` + the MCP ``initialize`` handshake) on *every*
 invocation. ``agent-mcp serve`` keeps one warm :class:`OneShotSession` per bridge
-and answers ``call``/``list`` requests over a unix-domain socket, so repeated
+and answers ``call``/``list`` requests over a local IPC socket, so repeated
 calls skip the cold-start entirely.
+
+The IPC transport is chosen per platform. On POSIX the daemon binds an
+**AF_UNIX** socket at the configured path, gated by ordinary filesystem
+permissions. Windows' asyncio event loops don't implement AF_UNIX, so there the
+daemon binds a **loopback TCP** listener (``127.0.0.1:0``) and publishes the
+chosen port plus a per-daemon auth **token** in an ``<socket>.endpoint`` sidecar
+file (port-discovery); the client reads that file to dial the port and presents
+the token on every request, reproducing the single-user gating the unix socket's
+file permissions provide. Both ends derive the transport from the same
+:data:`_HAS_AF_UNIX` probe, so they always agree.
 
 The client (``agent-mcp call`` and thus every materialized stub, unchanged)
 transparently falls back to the stateless one-shot path when the daemon is
@@ -23,6 +33,7 @@ import contextlib
 import json
 import logging
 import os
+import secrets
 import stat
 import time
 from pathlib import Path
@@ -41,31 +52,63 @@ log = logging.getLogger("agent-mcp.serve")
 _SWEEP_INTERVAL = 30.0  # seconds between idle sweeps
 _DEFAULT_IDLE_TIMEOUT = 300.0  # evict a warm session unused this long
 
+# Whether this runtime's asyncio exposes AF_UNIX sockets (POSIX yes, Windows no).
+# The single switch that selects the serve IPC transport on both server + client.
+_HAS_AF_UNIX = hasattr(asyncio, "start_unix_server")
+
+# Loopback host for the Windows/no-AF_UNIX TCP transport.
+_TCP_HOST = "127.0.0.1"
+
 
 def default_socket_path() -> Path:
-    """The default serve socket: ``$AGENT_MCP_HOME/serve.sock``."""
+    """The default serve socket handle: ``$AGENT_MCP_HOME/serve.sock``.
+
+    On POSIX this is the AF_UNIX socket path itself; on Windows it is a logical
+    handle whose ``.endpoint`` sidecar (see :func:`_endpoint_path`) carries the
+    live loopback port + token.
+    """
     home = Path(os.environ.get("AGENT_MCP_HOME", Path.home() / ".agent-mcp"))
     return home / "serve.sock"
 
 
+def _endpoint_path(socket_path: str | Path) -> Path:
+    """The TCP endpoint sidecar for a serve handle (loopback port-discovery)."""
+    return Path(str(socket_path) + ".endpoint")
+
+
+def _read_endpoint(socket_path: str | Path) -> dict | None:
+    """Parse the ``<socket>.endpoint`` sidecar, or ``None`` if absent/invalid."""
+    try:
+        data = json.loads(_endpoint_path(socket_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if isinstance(data, dict) and isinstance(data.get("port"), int):
+        return data
+    return None
+
+
 def serve_socket_if_available(explicit: str | None = None) -> Path | None:
-    """Return the serve socket path if a live socket file exists, else ``None``.
+    """Return the serve handle if a live daemon is advertised, else ``None``.
 
     Honors ``AGENT_MCP_NO_SERVE`` (force the cold path) and
-    ``AGENT_MCP_SERVE_SOCKET`` (override the path). Only an actual socket file
-    counts -- a stale regular file or missing path yields ``None`` so the caller
-    falls back to the one-shot cold path.
+    ``AGENT_MCP_SERVE_SOCKET`` (override the path). On POSIX only an actual
+    AF_UNIX socket file counts; on Windows the presence of a parseable
+    ``.endpoint`` sidecar counts. A stale handle (crashed daemon) still yields a
+    path, but the client's connect then fails and falls back to the cold path --
+    the same self-healing the unix socket already had.
     """
     if os.environ.get("AGENT_MCP_NO_SERVE"):
         return None
     raw = explicit or os.environ.get("AGENT_MCP_SERVE_SOCKET")
     path = Path(raw) if raw else default_socket_path()
-    try:
-        if path.exists() and stat.S_ISSOCK(path.stat().st_mode):
-            return path
-    except OSError:
+    if _HAS_AF_UNIX:
+        try:
+            if path.exists() and stat.S_ISSOCK(path.stat().st_mode):
+                return path
+        except OSError:
+            return None
         return None
-    return None
+    return path if _read_endpoint(path) is not None else None
 
 
 class _WarmEntry:
@@ -165,7 +208,7 @@ class WarmPool:
 
 
 class Server:
-    """A unix-socket server fronting a :class:`WarmPool`."""
+    """A local-IPC server fronting a :class:`WarmPool` (AF_UNIX / loopback TCP)."""
 
     def __init__(self, socket_path: str | Path, *, pool: WarmPool | None = None,
                  idle_timeout: float = _DEFAULT_IDLE_TIMEOUT) -> None:
@@ -173,6 +216,9 @@ class Server:
         self.pool = pool or WarmPool(idle_timeout=idle_timeout)
         self._stop = asyncio.Event()
         self._server: asyncio.AbstractServer | None = None
+        # Per-daemon auth token, minted only for the loopback-TCP transport
+        # (``None`` on AF_UNIX, where filesystem permissions gate access).
+        self._token: str | None = None
 
     async def _handle(self, reader: asyncio.StreamReader,
                       writer: asyncio.StreamWriter) -> None:
@@ -198,6 +244,10 @@ class Server:
                 writer.close()
 
     async def _dispatch(self, req: dict) -> dict:
+        # Loopback-TCP transport: authorize every request against the daemon's
+        # token (a no-op on AF_UNIX, where ``_token`` is None).
+        if self._token is not None and req.get("token") != self._token:
+            return {"ok": False, "error": "unauthorized"}
         op = req.get("op")
         if op == "ping":
             return {"ok": True, "pong": True, "sessions": self.pool.size}
@@ -239,12 +289,23 @@ class Server:
 
     async def serve_forever(self) -> None:
         self.socket_path.parent.mkdir(parents=True, exist_ok=True)
-        # Clear a stale socket from a previous run (safe: a live server holds it).
-        if self.socket_path.exists():
-            self.socket_path.unlink()
-        self._server = await asyncio.start_unix_server(
-            self._handle, path=str(self.socket_path))
-        log.info("serving on %s", self.socket_path)
+        if _HAS_AF_UNIX:
+            # Clear a stale socket from a previous run (safe: a live server holds it).
+            if self.socket_path.exists():
+                self.socket_path.unlink()
+            self._server = await asyncio.start_unix_server(
+                self._handle, path=str(self.socket_path))
+            log.info("serving on unix:%s", self.socket_path)
+        else:
+            # No AF_UNIX (Windows): bind loopback TCP and advertise the port +
+            # a fresh auth token in the endpoint sidecar for port-discovery.
+            self._token = secrets.token_hex(16)
+            self._server = await asyncio.start_server(
+                self._handle, host=_TCP_HOST, port=0)
+            port = self._server.sockets[0].getsockname()[1]
+            self._write_endpoint(port, self._token)
+            log.info("serving on tcp:%s:%d (handle %s)", _TCP_HOST, port,
+                     self.socket_path)
         sweeper = asyncio.create_task(self._sweep_loop())
         try:
             await self._stop.wait()
@@ -253,11 +314,25 @@ class Server:
             self._server.close()
             await self._server.wait_closed()
             await self.pool.close_all()
-            if self.socket_path.exists():
-                try:
-                    self.socket_path.unlink()
-                except OSError:
-                    pass
+            self._cleanup_endpoint()
+
+    def _write_endpoint(self, port: int, token: str) -> None:
+        """Publish the loopback port + token to the endpoint sidecar (owner-only)."""
+        ep = _endpoint_path(self.socket_path)
+        ep.write_text(json.dumps({"port": port, "token": token}), encoding="utf-8")
+        # Best-effort: restrict the token file to the owner so another local user
+        # can't read it (parity with the unix socket's default permissions).
+        with contextlib.suppress(OSError):
+            os.chmod(ep, 0o600)
+
+    def _cleanup_endpoint(self) -> None:
+        """Remove the transport's on-disk handle on clean shutdown."""
+        target = self.socket_path if _HAS_AF_UNIX else _endpoint_path(self.socket_path)
+        try:
+            if target.exists():
+                target.unlink()
+        except OSError:
+            pass
 
     def stop(self) -> None:
         self._stop.set()
@@ -271,6 +346,45 @@ class Server:
             pass
 
 
+async def _connect(socket_path: str | Path):
+    """Open a client connection to the serve daemon (platform transport).
+
+    Returns ``(reader, writer, token)``: the token is ``None`` on AF_UNIX and the
+    daemon's shared secret on the loopback-TCP transport. Raises ``OSError`` when
+    the daemon can't be reached so callers fall back to the cold path.
+    """
+    if _HAS_AF_UNIX:
+        reader, writer = await asyncio.open_unix_connection(str(socket_path))
+        return reader, writer, None
+    ep = _read_endpoint(socket_path)
+    if ep is None:
+        raise OSError(f"no serve endpoint for {socket_path}")
+    reader, writer = await asyncio.open_connection(_TCP_HOST, ep["port"])
+    return reader, writer, ep.get("token")
+
+
+async def request_via_socket(socket_path: str | Path, request: dict) -> dict | None:
+    """Send one op ``request`` to the serve daemon; return the parsed response.
+
+    Handles the platform transport (AF_UNIX or loopback TCP) and injects the
+    auth token on the TCP transport. Returns ``None`` if the daemon closes
+    without replying. Raises ``OSError`` if the daemon can't be reached.
+    """
+    reader, writer, token = await _connect(socket_path)
+    try:
+        req = dict(request)
+        if token is not None:
+            req["token"] = token
+        writer.write((json.dumps(req) + "\n").encode())
+        await writer.drain()
+        line = await reader.readline()
+        if not line:
+            return None
+        return json.loads(line)
+    finally:
+        writer.close()
+
+
 async def call_via_socket(socket_path: str | Path, bridge: str, tool: str,
                           arguments: dict) -> dict:
     """Send one ``call`` over the serve socket and return the parsed response.
@@ -278,14 +392,10 @@ async def call_via_socket(socket_path: str | Path, bridge: str, tool: str,
     Raises ``OSError`` if the socket can't be reached (caller falls back to the
     cold one-shot path).
     """
-    reader, writer = await asyncio.open_unix_connection(str(socket_path))
-    try:
-        req = {"op": "call", "bridge": bridge, "tool": tool, "arguments": arguments}
-        writer.write((json.dumps(req) + "\n").encode())
-        await writer.drain()
-        line = await reader.readline()
-        if not line:
-            raise OSError("serve socket closed without a response")
-        return json.loads(line)
-    finally:
-        writer.close()
+    resp = await request_via_socket(
+        socket_path,
+        {"op": "call", "bridge": bridge, "tool": tool, "arguments": arguments},
+    )
+    if resp is None:
+        raise OSError("serve socket closed without a response")
+    return resp

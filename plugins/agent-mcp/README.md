@@ -751,10 +751,16 @@ agent-mcp serve [--socket PATH] [--idle-timeout SECONDS]
 `call` (and every materialized stub, unchanged) pays a fresh upstream
 cold-start — spawn the runner + MCP `initialize` — on **every** invocation.
 `serve` runs a resident daemon that keeps one **warm session per bridge** and
-answers `call`/`list` requests over a unix socket (default
+answers `call`/`list` requests over a local IPC socket (default handle
 `$AGENT_MCP_HOME/serve.sock`), so repeated calls skip the cold-start entirely.
 
-- **Transparent** — a running `call` auto-detects the socket and routes to it;
+- **Cross-platform IPC** — on POSIX the daemon binds an **AF_UNIX** socket at
+  that path (gated by file permissions). On **Windows** (no asyncio AF_UNIX) it
+  binds a **loopback TCP** listener and publishes the port + a per-daemon auth
+  **token** in a `<socket>.endpoint` sidecar (port-discovery); the client reads
+  it to dial `127.0.0.1` and presents the token on every request, preserving the
+  same single-user gating. This is automatic and needs no configuration.
+- **Transparent** — a running `call` auto-detects the daemon and routes to it;
   when the daemon is absent it **falls back to the stateless one-shot path**.
   So `serve` is an *optional accelerator, never a dependency*. Bypass it with
   `--no-serve` / `AGENT_MCP_NO_SERVE=1`; point elsewhere with
