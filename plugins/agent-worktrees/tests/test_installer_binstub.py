@@ -70,6 +70,32 @@ def test_windows_binstubs_avoid_unsigned_trampoline(monkeypatch, tmp_path: Path)
         assert "agent-worktrees.exe" not in content
 
 
+def test_windows_binstubs_resolve_junction_target_not_traverse(monkeypatch, tmp_path: Path):
+    """RedirectionGuard (dotfiles #637) blocks a protected process from *traversing*
+    an unprivileged .venv junction, though it may still *read* its target. So the
+    Windows binstubs must resolve .venv's reparse target and launch the slot python
+    DIRECTLY: the .cmd via a `dir /a:l` reparse-listing parse, the .ps1 via
+    `(Get-Item .venv).Target`. A plain-dir `.venv` falls through to the default."""
+    if platform.system() != "Windows":
+        import pytest
+        pytest.skip("Windows-only binstub content")
+    lb = tmp_path / "bin"
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+
+    assert inst.deploy_binstubs(repo_dir=tmp_path, project="demoproj") is True
+
+    for name in ("agent-worktrees.cmd", "demoproj.cmd"):
+        content = (lb / name).read_text()
+        assert "dir /a:l" in content, f"{name} must resolve the .venv reparse target (#637)"
+        assert "#637" in content
+    for name in ("demoproj.ps1",):
+        content = (lb / name).read_text()
+        assert ".Target" in content and "Join-Path (@($_t)[0])" in content, (
+            f"{name} must resolve the .venv reparse target (#637)"
+        )
+        assert "#637" in content
+
+
 def test_deploy_binstubs_writes_ps1_on_windows(monkeypatch, tmp_path: Path):
     """On Windows ``register``/``deploy_binstubs`` must emit the ``.ps1`` primary
     (pwsh prefers it), not just the ``.cmd`` fallback -- the omission was the
