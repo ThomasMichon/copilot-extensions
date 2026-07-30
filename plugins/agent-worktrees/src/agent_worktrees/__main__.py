@@ -84,6 +84,10 @@ _ENV_MIGRATION = {
     "WORKTREE_REPO": "APERTURE_REPO",
 }
 
+_SESSION_BIND_PROJECT = "AGENT_WORKTREES_BIND_PROJECT"
+_SESSION_BIND_WORKTREE = "AGENT_WORKTREES_BIND_WORKTREE_ID"
+_SESSION_BIND_SESSION = "AGENT_WORKTREES_BIND_SESSION_ID"
+
 
 def _env_get(new_name: str) -> str | None:
     """Read an env var by its new name, falling back to the legacy name."""
@@ -2786,6 +2790,18 @@ def _resolve_resume(
               f"(no auto-resume, dodges the worktree-cwd start bug).")
         if last_session:
             print(f"   Inside Copilot, run:  /resume {last_session}")
+
+    # Bare resume first creates a temporary session in HOME, then the operator
+    # switches to the intended historical session with /resume. Carry a scoped
+    # binding that the session hooks consume only when the reported session ID
+    # exactly matches that intended target. This stitches the resumed session
+    # back to its worktree without ambient WORKTREE_* identity or accidentally
+    # binding the temporary HOME session.
+    if bare_resume and last_session:
+        merged_env = dict(merged_env)
+        merged_env[_SESSION_BIND_PROJECT] = config.repo_name
+        merged_env[_SESSION_BIND_WORKTREE] = record.worktree_id
+        merged_env[_SESSION_BIND_SESSION] = last_session
 
     print()
 
@@ -10092,7 +10108,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("deregister-session",
                         help="Mark a Copilot session as ended on a worktree")
-    sp.add_argument("--worktree-id", required=True, help="Worktree ID")
+    sp.add_argument("--worktree-id", default=None,
+                    help="Worktree ID (resolved from cwd or launch binding when omitted)")
     sp.add_argument("--session-id", required=True, help="Copilot session ID")
 
     # backfill-sessions (one-time registry population)
@@ -10324,6 +10341,9 @@ def cmd_register_session(args: argparse.Namespace) -> int:
     if not session_id:
         return 0  # nothing to register -- silent no-op
 
+    if not wt_id:
+        wt_id = _activate_session_binding(session_id)
+
     if not wt_id and cwd:
         # The sessionStart hook runs from the *plugin install dir*, not the
         # worktree, and register-session is a no-project command -- so main()
@@ -10353,6 +10373,30 @@ def cmd_register_session(args: argparse.Namespace) -> int:
     return 0
 
 
+def _activate_session_binding(session_id: str | None) -> str | None:
+    """Activate and return a scoped bare-resume worktree binding.
+
+    The launcher publishes the tuple only for two-step bare resume. The exact
+    session-id match is load-bearing: the initial temporary HOME session must
+    remain unbound; only the historical session selected by ``/resume`` adopts
+    the intended project/worktree context.
+    """
+    if not session_id or os.environ.get(_SESSION_BIND_SESSION) != session_id:
+        return None
+    worktree_id = os.environ.get(_SESSION_BIND_WORKTREE)
+    project = os.environ.get(_SESSION_BIND_PROJECT)
+    if not worktree_id or not project:
+        return None
+    try:
+        resolved, _anchor = _resolve_active_project(project)
+        if not resolved:
+            return None
+        cfg.set_active_project(resolved)
+    except Exception:
+        return None
+    return worktree_id
+
+
 def cmd_deregister_session(args: argparse.Namespace) -> int:
     """Mark a Copilot session as ended on a worktree (hook-invoked).
 
@@ -10362,6 +10406,8 @@ def cmd_deregister_session(args: argparse.Namespace) -> int:
     """
     wt_id = getattr(args, "worktree_id", None)
     session_id = getattr(args, "session_id", None)
+    if not wt_id:
+        wt_id = _activate_session_binding(session_id)
     # Infer the worktree from CWD (git-like) when not passed explicitly -- the
     # sessionEnd hook runs in the worktree, so no ambient WORKTREE_ID is needed.
     if not wt_id:

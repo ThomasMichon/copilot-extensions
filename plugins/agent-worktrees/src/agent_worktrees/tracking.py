@@ -711,6 +711,25 @@ def find_worktree_id_by_cwd(cwd: str) -> str | None:
     return best_id
 
 
+def find_worktree_id_by_session(session_id: str) -> str | None:
+    """Resolve a session ID from the active project's tracked worktrees.
+
+    This is the identity fallback for bare resume: the resumed session may keep
+    HOME as its recorded cwd, but the sessionStart hook has explicitly bound
+    that exact session ID to its intended worktree. Ambiguous or absent matches
+    return ``None`` rather than guessing.
+    """
+    if not session_id:
+        return None
+    tracking_path = cfg.tracking_dir()
+    matches = {
+        rec.worktree_id
+        for rec in list_records(tracking_path)
+        if any(s.session_id == session_id for s in (rec.sessions or ()))
+    }
+    return next(iter(matches)) if len(matches) == 1 else None
+
+
 def update_status(record: WorktreeRecord, new_status: WorktreeStatus) -> None:
     """Update a record's status and save it."""
     record.status = new_status

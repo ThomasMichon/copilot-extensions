@@ -49,7 +49,7 @@ def _patch_resume(monkeypatch):
 class TestBareResumePlan:
     def test_normal_resume_uses_worktree_cwd_and_resume(self, monkeypatch):
         plan = _patch_resume(monkeypatch)
-        cfg = argparse.Namespace(auto_fast_forward=False)
+        cfg = argparse.Namespace(auto_fast_forward=False, repo_name="test-project")
         rc = m._resolve_resume(_Rec(), cfg, _resume_args())
         assert rc == 0
         assert plan["work_dir"] == "/w/wtX"
@@ -58,7 +58,7 @@ class TestBareResumePlan:
 
     def test_bare_resume_uses_home_and_omits_resume(self, monkeypatch):
         plan = _patch_resume(monkeypatch)
-        cfg = argparse.Namespace(auto_fast_forward=False)
+        cfg = argparse.Namespace(auto_fast_forward=False, repo_name="test-project")
         rc = m._resolve_resume(_Rec(), cfg, _resume_args(bare_resume=True))
         assert rc == 0
         # launches in HOME, not the worktree cwd
@@ -67,6 +67,16 @@ class TestBareResumePlan:
         assert plan["worktree_id"] == "wtX"
         # NO --resume: the operator restores with a manual /resume
         assert not any(str(a).startswith("--resume=") for a in plan["cmd"])
+        assert plan["env"][m._SESSION_BIND_WORKTREE] == "wtX"
+        assert plan["env"][m._SESSION_BIND_SESSION] == "sid-abc-123"
+        assert plan["env"][m._SESSION_BIND_PROJECT] == "test-project"
+
+    def test_normal_resume_has_no_scoped_session_binding(self, monkeypatch):
+        plan = _patch_resume(monkeypatch)
+        cfg = argparse.Namespace(auto_fast_forward=False, repo_name="test-project")
+        rc = m._resolve_resume(_Rec(), cfg, _resume_args())
+        assert rc == 0
+        assert m._SESSION_BIND_SESSION not in plan["env"]
 
 
 # ── reclaim_one executor ───────────────────────────────────────────────────

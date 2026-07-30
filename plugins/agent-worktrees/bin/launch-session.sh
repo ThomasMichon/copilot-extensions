@@ -43,6 +43,7 @@ chmod 600 "$SETUP_LOG" 2>/dev/null || true
 ls -t "$_SETUP_LOG_DIR"/setup-*.log 2>/dev/null | tail -n +11 | xargs rm -f 2>/dev/null || true
 
 setup_log INFO 'launch-session.sh starting'
+LAUNCH_PROJECT="${WORKTREE_PROJECT:-}"
 
 # Runtime resolution
 RUNTIME_DIR="$HOME/.agent-worktrees"
@@ -58,6 +59,14 @@ fi
 PYTHON="$RUNTIME_DIR/.venv/bin/python"
 export PYTHONPATH="$RUNTIME_DIR/lib"
 unset PYTHONHOME
+
+run_post_exit() {
+    local worktree_id="$1"
+    local post_args=(-m agent_worktrees)
+    [[ -n "$LAUNCH_PROJECT" ]] && post_args+=(--project "$LAUNCH_PROJECT")
+    post_args+=(post-exit "$worktree_id")
+    "$PYTHON" "${post_args[@]}"
+}
 
 # Append a high-level lifecycle event to the persistent activity log.
 # Best-effort and fully detached -- never blocks or fails the launch.
@@ -571,7 +580,7 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
                 # Post-exit finalization
                 if ! tmux has-session -t "=$TMUX_SESS" 2>/dev/null; then
                     if [[ "$POST_EXIT" == "1" && -n "$WORKTREE_ID" ]]; then
-                        "$PYTHON" -m agent_worktrees post-exit "$WORKTREE_ID" || \
+                        run_post_exit "$WORKTREE_ID" || \
                             echo "WARNING: Post-exit finalization failed. Run 'agent-worktrees finalize' to retry." >&2
                     fi
                 fi
@@ -596,7 +605,7 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
 
     # Post-exit finalization
     if [[ "$POST_EXIT" == "1" && -n "$WORKTREE_ID" ]]; then
-        "$PYTHON" -m agent_worktrees post-exit "$WORKTREE_ID" || \
+        run_post_exit "$WORKTREE_ID" || \
             echo "WARNING: Post-exit finalization failed. Run 'agent-worktrees finalize' to retry." >&2
     fi
 
