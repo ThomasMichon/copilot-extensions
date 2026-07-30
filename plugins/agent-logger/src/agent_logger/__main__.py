@@ -64,6 +64,7 @@ def _cmd_chronicle_status(_args: argparse.Namespace) -> int:
         "manifests_dir": str(cfg.chronicle_manifests_dir),
         "default_sink": block.get("default_sink"),
         "routes": block.get("routes", []),
+        "skip_repositories": block.get("skip_repositories", []),
         "sinks": sorted((block.get("sinks", {}) or {}).keys()),
     }
     print(json.dumps(summary, indent=2))

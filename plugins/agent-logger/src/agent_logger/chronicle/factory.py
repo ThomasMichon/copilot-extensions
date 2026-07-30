@@ -76,10 +76,17 @@ def build_chronicler(cfg: Config) -> Chronicler:
         settle_seconds=cfg.chronicle_settle_seconds,
     )
 
-    rules = [
-        RouteRule(repository=r["repository"], sink_id=r["sink"])
+    # Skip sentinels (null-sink routes) are evaluated first so a skipped origin
+    # can never be caught by default_sink.
+    skip_rules = [
+        RouteRule(repository=r, sink_id=None)
+        for r in block.get("skip_repositories", [])
+        if r
+    ]
+    rules = skip_rules + [
+        RouteRule(repository=r["repository"], sink_id=r.get("sink"))
         for r in block.get("routes", [])
-        if r.get("repository") and r.get("sink")
+        if r.get("repository")
     ]
     router = OriginRepoRouter(rules, block.get("default_sink"))
 

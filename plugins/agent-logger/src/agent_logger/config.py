@@ -113,8 +113,15 @@ DEFAULTS: dict[str, Any] = {
         # Sink id for the machine-default fallback route (this machine's own
         # harness repo). None -> route only explicitly-matched sessions.
         "default_sink": None,
-        # Origin-repo -> sink id rules (first substring match wins).
+        # Origin-repo -> sink id rules (first substring match wins). A rule may
+        # set sink to null to SKIP (drop) a matched origin without falling
+        # through to default_sink.
         "routes": [],
+        # Convenience: origin repos to SKIP entirely (another harness owns their
+        # chronicle -- e.g. aperture-labs-origin already chronicled facility-side
+        # by permanent-record). Expanded to leading null-sink routes, so a skip
+        # is evaluated before default_sink can catch it.
+        "skip_repositories": [],
         # Named sinks. Each: {repo_path, output_root, log_path_template,
         # narration_style, exemplars, closing_remark, landing, push}.
         "sinks": {},

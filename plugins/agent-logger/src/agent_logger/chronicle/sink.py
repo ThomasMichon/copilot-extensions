@@ -64,10 +64,17 @@ class RouteRule:
     *repository* is matched case-insensitively as a substring of the session's
     recorded ``workspace.yaml`` ``repository`` (so ``aperture-labs`` matches
     ``git@host:org/aperture-labs.git``). The first matching rule wins.
+
+    ``sink_id=None`` is the **skip sentinel**: a session matching such a rule is
+    dropped (routed nowhere), *without* falling through to the router's
+    ``default_sink``. This expresses "some other harness owns this origin's
+    chronicle" -- e.g. aperture-labs-origin sessions that are already chronicled
+    facility-side by permanent-record, so cloud1 must neither file them into
+    dotfiles nor double-file them.
     """
 
     repository: str
-    sink_id: str
+    sink_id: str | None
 
 
 class Router(ABC):
@@ -81,11 +88,16 @@ class OriginRepoRouter(Router):
     """Route by recorded origin repo, with a machine-default fallback.
 
     Keys off ``session.repository`` (the ``workspace.yaml`` ``repository``).
-    Rules are tried in order; a substring match assigns the sink. A session with
-    no recorded repository, or no rule match, falls back to *default_sink* --
-    the "this-machine's-own harness repo" default. The one hard job on the
-    aperture-labs side: an aperture-labs-origin session must match its rule and
-    route to the aperture-labs sink, never fall through to the dotfiles default.
+    Rules are tried in order; the first substring match decides the outcome --
+    a sink id, or **skip** (drop) when the matched rule's ``sink_id`` is None. A
+    session with no recorded repository, or no rule match, falls back to
+    *default_sink* -- the "this-machine's-own harness repo" default.
+
+    The one hard job on the aperture-labs side: an aperture-labs-origin session
+    must match a rule (a **skip** sentinel in v1) and **never** fall through to
+    the dotfiles default. Because a matched skip returns None *before* the
+    fallback, ``default_sink="dotfiles"`` can safely catch every other
+    dotfiles-machine origin while aperture-labs-origin is explicitly skipped.
     """
 
     def __init__(self, rules: list[RouteRule], default_sink: str | None) -> None:
@@ -97,6 +109,8 @@ class OriginRepoRouter(Router):
         if repo:
             for rule in self.rules:
                 if rule.repository.lower() in repo:
+                    # A matched skip sentinel (sink_id is None) drops the
+                    # session here -- it does NOT fall through to default_sink.
                     return rule.sink_id
         return self.default_sink
 
