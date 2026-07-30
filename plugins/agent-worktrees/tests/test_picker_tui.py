@@ -1924,7 +1924,63 @@ def test_profiles_view_component_renders_body():
     asyncio.run(run())
 
 
-def test_profiles_apply_progress_carries_restart_summary():
+def test_maintenance_view_component_renders_body():
+    """F5 slice 5a: the Maintenance pivot body is rendered by an encapsulated
+    ``MaintenanceView`` component, not inlined in ``build_body``. Assert (a) the
+    engine exposes a ``maintenance_view`` component and the old inline render
+    helpers are gone from the engine; (b) build_body routes the Maintenance body
+    through the component, which emits the select-all / group-header / data-row
+    stops and the Cleanup/Sync button row -- with the group sections still
+    pinned (the component opens them via ``add(new_section=...)``)."""
+    from agent_worktrees.picker_tui import engine as eng_mod
+    from agent_worktrees.picker_tui.engine import MaintenanceView
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            scr.htab = 1                          # Maintenance pivot
+            scr.sel = scr.default_sel()
+            await pilot.pause()
+
+            # (a) The component exists; the inline row-render helpers moved off
+            # the engine onto it (slice 5a). Selection state/behaviour still
+            # lives on the engine for now (moved in a follow-up slice).
+            assert isinstance(scr.maintenance_view, MaintenanceView)
+            assert not hasattr(scr, "_maint_selectall_row")
+            assert not hasattr(scr, "_maint_header")
+            assert not hasattr(scr, "_maint_group_row")
+            assert not hasattr(scr, "_maint_row")
+            assert hasattr(scr.maintenance_view, "build")
+            assert hasattr(scr.maintenance_view, "_selectall_row")
+
+            # (b) build_body routes the Maintenance body through the component,
+            # which emits the button row + select-all / group-header / data-row
+            # stops, with group sections pinned. (The ``_maint_source`` fixture
+            # uses non-hex ids that the pseudo-size ``_size_mb`` can't parse --
+            # orthogonal to componentization -- so neutralize it just for the
+            # render.)
+            orig_size = eng_mod._size_mb
+            eng_mod._size_mb = lambda w: 0
+            try:
+                vrows = scr.build_body(118)
+            finally:
+                eng_mod._size_mb = orig_size
+            stops = {getattr(v, "stop", None) for v in vrows}
+            assert ("BTN", 0) in stops
+            assert ("SA", 0) in stops
+            assert any(s and s[0] == "GH" for s in stops)
+            assert any(s and s[0] == "C" for s in stops)
+            # Group sections survive the extraction: at least one data row is
+            # pinned to a section the component opened.
+            assert any(
+                getattr(v, "stop", None) and v.stop[0] == "C"
+                and getattr(v, "pin_section", None) is not None
+                for v in vrows)
+
+    asyncio.run(run())
     """After confirming an Apply, the progress dict carries the add/remove
     counts the done-state surfaces alongside the restart reminder (#1368)."""
     src = _profiles_source()
