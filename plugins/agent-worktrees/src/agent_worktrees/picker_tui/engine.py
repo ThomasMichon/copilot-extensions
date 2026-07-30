@@ -439,6 +439,12 @@ class PickerScreen(Widget):
         # thin @property + method shims onto it (#88 F5 slices 1-3). Created
         # first, before any shim can be touched during construction.
         self.profiles_view = ProfilesView(self)
+        # Maintenance pivot -- a second encapsulated body sub-view (#88 F5 slice
+        # 5a). Owns the Maintenance render (the select-all / group-header / data
+        # rows + column header); the selection state + grouping behaviour still
+        # live on PickerScreen for now, reached from the component via
+        # ``self._eng`` (moved onto the component in a follow-up slice).
+        self.maintenance_view = MaintenanceView(self)
         self.htab = 0                 # index into self.pivots (built-ins + registered)
         # Cross-plugin pivot registry (Worktrees/Maintenance/Profiles + any
         # pivot a sibling plugin contributed via a manifest). Built here so the
@@ -1735,66 +1741,21 @@ class PickerScreen(Widget):
             t.stylize(C_SEL)
         return t
 
-    def _maint_selectall_row(self, width, focus):
-        ids = self._maint_ids()
-        all_on = self.maint_sel.all_selected(ids)
-        glyph, gc = self._checkbox(all_on)
-        nsel = self.maint_sel.count(ids)
-        t = Text("  ")
-        t.append(glyph, style=gc)
-        t.append("  ")
-        t.append("Select all", style=C_LABEL)
-        t.append(f"   ({nsel}/{len(ids)} selected)", style=C_DIM)
-        t.append(" " * max(0, width - t.cell_len))
-        if focus:
-            t.stylize(C_SEL)
-        return t
-
-    def _maint_header(self, ccols, width):
-        # 4-cell checkbox gutter, then the normal column header.
-        t = Text("    ")
-        body = header_text(ccols, max(1, width - 4), indent=0)
-        t.append_text(body)
-        if t.cell_len < width:
-            t.append(" " * (width - t.cell_len))
-        return t
-
-    def _maint_group_row(self, state, rows, width, focus):
-        ids = {r["id4"] for r in rows}
-        all_on = self.maint_sel.all_selected(ids)
-        glyph, gc = self._checkbox(all_on)
-        t = Text("  ")
-        t.append(glyph, style=gc)
-        t.append("  ")
-        head = Text(f"── {state} ", style=C_SECTION)
-        head.append(f"({len(rows)}) ", style=C_DIM)
-        t.append_text(head)
-        t.append("─" * max(0, width - t.cell_len - 1), style=C_DIM)
-        t.append(" ")
-        if focus:
-            t.stylize(C_SEL)
-        return t
-
-    def _maint_row(self, d, ccols, width, selected, checked, pulse):
-        glyph, gc = self._checkbox(checked)
-        t = Text(" ")
-        t.append(glyph, style=gc)
-        t.append("  ")
-        body = row_text(d, ccols, max(1, width - 4), selected=False, pulse=pulse)
-        t.append_text(body)
-        if t.cell_len < width:
-            t.append(" " * (width - t.cell_len))
-        if selected:
-            t.stylize(C_SEL)
-        return t
-
     # ---- build the scrollable body as VRows ----
     def build_body(self, width):
         vrows = []
         cur_band = None
         cur_section = None
 
-        def add(text, stop=None, kind=None, data=None):
+        def add(text, stop=None, kind=None, data=None, new_section=None):
+            # ``new_section`` lets an extracted body component (e.g.
+            # MaintenanceView, #88 F5) open a section without reaching into this
+            # closure's ``cur_section``/``vrows``: it pins the section to the
+            # label + the vrow index this row will occupy, exactly as the inline
+            # branches do via ``cur_section = (label, len(vrows))``.
+            nonlocal cur_section
+            if new_section is not None:
+                cur_section = (new_section, len(vrows))
             vr = VRow(text, stop, kind, data)
             vr.pin_band = cur_band
             vr.pin_section = cur_section
@@ -1882,37 +1843,7 @@ class PickerScreen(Widget):
                         add(pline)
                     li += 1
         elif self._kind() == "maintenance":
-            add(self.tab_bar(width, sel == ("M", 0)))
-            groups = self.maint_groups()
-            recs = self.maint_records()
-            total = sum(_size_mb(w) for w in recs)
-            nsel = self.maint_sel.count(self._maint_ids())
-            reclaim = sum(_size_mb(w) for w in recs if w["id4"] in self.maint_sel)
-            suffix = f"{len(recs)} candidates · ~{total} MiB"
-            if nsel:
-                suffix += f"  ·  {nsel} selected · ~{reclaim} MiB"
-            add(Text(""))
-            add(self.two_button_row(
-                "Cleanup…", "Sync…", btn_focus, self.btn_idx, suffix, width),
-                stop=("BTN", 0))
-            add(Text(""))
-            # Checkbox column reserves 4 cells in front of the data columns.
-            ccols = fit(CLEAN_SPECS, width - 1 - 4, "title", 12)
-            add(self._maint_selectall_row(width, sel == ("SA", 0)),
-                stop=("SA", 0))
-            add(self._maint_header(ccols, width), kind="colhdr")
-            li = 0
-            for gi, (state, rows) in enumerate(groups):
-                cur_section = (f"{state} ({len(rows)})", len(vrows))
-                add(self._maint_group_row(state, rows, width, sel == ("GH", gi)),
-                    stop=("GH", gi), kind="section")
-                for rec in rows:
-                    d = dict(rec, mib=f"{_size_mb(rec)}M")
-                    checked = rec["id4"] in self.maint_sel
-                    add(self._maint_row(d, ccols, width, sel == ("C", li),
-                                        checked, self.pulse),
-                        stop=("C", li), data=rec)
-                    li += 1
+            self.maintenance_view.build(add, width, sel)
         elif self._kind() == "registered":
             reg = self._reg_pivot()
             add(self.tab_bar(width, sel == ("M", 0)))
@@ -4554,6 +4485,125 @@ class MsgViewScreen(ModalScreen[None]):
             self.dismiss(None)
         else:
             self._refresh()
+
+
+class MaintenanceView:
+    """Encapsulated Maintenance-pivot body sub-view (#88 F5, slice 5a).
+
+    A cohesive sub-view carved out of the picker's monolithic
+    ``PickerScreen.build_body`` into its own component, mirroring
+    :class:`ProfilesView` and per the incremental componentization strategy
+    (#88 F5): peel cohesive sub-views off the God-object one at a time, under a
+    moratorium on new full-screen-at-once renders, until the shared
+    ``sel=(zone,index)`` focus model shrinks to just the chrome.
+
+    This slice (5a) moves the Maintenance pivot's **rendering** -- the body
+    entry (``build``) plus the four row helpers (``_selectall_row`` /
+    ``_header`` / ``_group_row`` / ``_row``). The selection **state**
+    (``maint_sel``) and the grouping/multi-select **behaviour**
+    (``maint_groups`` / ``maint_records`` / ``_maint_ids`` / ``_toggle_*``) still
+    live on ``PickerScreen`` and are read here via ``self._eng``; a follow-up
+    slice (5b) moves them onto the component behind delegating shims, the way
+    ``ProfilesView`` did. A later slice makes this a focusable Textual widget.
+    """
+
+    def __init__(self, eng) -> None:
+        self._eng = eng
+
+    # ---- Maintenance row rendering (#1345; moved here in #88 F5 slice 5a) ----
+    def _selectall_row(self, width, focus):
+        eng = self._eng
+        ids = eng._maint_ids()
+        all_on = eng.maint_sel.all_selected(ids)
+        glyph, gc = eng._checkbox(all_on)
+        nsel = eng.maint_sel.count(ids)
+        t = Text("  ")
+        t.append(glyph, style=gc)
+        t.append("  ")
+        t.append("Select all", style=C_LABEL)
+        t.append(f"   ({nsel}/{len(ids)} selected)", style=C_DIM)
+        t.append(" " * max(0, width - t.cell_len))
+        if focus:
+            t.stylize(C_SEL)
+        return t
+
+    def _header(self, ccols, width):
+        # 4-cell checkbox gutter, then the normal column header.
+        t = Text("    ")
+        body = header_text(ccols, max(1, width - 4), indent=0)
+        t.append_text(body)
+        if t.cell_len < width:
+            t.append(" " * (width - t.cell_len))
+        return t
+
+    def _group_row(self, state, rows, width, focus):
+        eng = self._eng
+        ids = {r["id4"] for r in rows}
+        all_on = eng.maint_sel.all_selected(ids)
+        glyph, gc = eng._checkbox(all_on)
+        t = Text("  ")
+        t.append(glyph, style=gc)
+        t.append("  ")
+        head = Text(f"── {state} ", style=C_SECTION)
+        head.append(f"({len(rows)}) ", style=C_DIM)
+        t.append_text(head)
+        t.append("─" * max(0, width - t.cell_len - 1), style=C_DIM)
+        t.append(" ")
+        if focus:
+            t.stylize(C_SEL)
+        return t
+
+    def _row(self, d, ccols, width, selected, checked, pulse):
+        glyph, gc = self._eng._checkbox(checked)
+        t = Text(" ")
+        t.append(glyph, style=gc)
+        t.append("  ")
+        body = row_text(d, ccols, max(1, width - 4), selected=False, pulse=pulse)
+        t.append_text(body)
+        if t.cell_len < width:
+            t.append(" " * (width - t.cell_len))
+        if selected:
+            t.stylize(C_SEL)
+        return t
+
+    def build(self, add, width, sel):
+        """Emit the Maintenance pivot body into ``add`` (the ``build_body`` VRow
+        sink). Mirrors the former inline ``build_body`` maintenance branch
+        exactly; group sections are opened via ``add(..., new_section=...)`` so
+        this component never touches the closure's ``cur_section``/``vrows``."""
+        eng = self._eng
+        btn_focus = sel == ("BTN", 0)
+        add(eng.tab_bar(width, sel == ("M", 0)))
+        groups = eng.maint_groups()
+        recs = eng.maint_records()
+        total = sum(_size_mb(w) for w in recs)
+        nsel = eng.maint_sel.count(eng._maint_ids())
+        reclaim = sum(_size_mb(w) for w in recs if w["id4"] in eng.maint_sel)
+        suffix = f"{len(recs)} candidates · ~{total} MiB"
+        if nsel:
+            suffix += f"  ·  {nsel} selected · ~{reclaim} MiB"
+        add(Text(""))
+        add(eng.two_button_row(
+            "Cleanup…", "Sync…", btn_focus, eng.btn_idx, suffix, width),
+            stop=("BTN", 0))
+        add(Text(""))
+        # Checkbox column reserves 4 cells in front of the data columns.
+        ccols = fit(CLEAN_SPECS, width - 1 - 4, "title", 12)
+        add(self._selectall_row(width, sel == ("SA", 0)),
+            stop=("SA", 0))
+        add(self._header(ccols, width), kind="colhdr")
+        li = 0
+        for gi, (state, rows) in enumerate(groups):
+            add(self._group_row(state, rows, width, sel == ("GH", gi)),
+                stop=("GH", gi), kind="section",
+                new_section=f"{state} ({len(rows)})")
+            for rec in rows:
+                d = dict(rec, mib=f"{_size_mb(rec)}M")
+                checked = rec["id4"] in eng.maint_sel
+                add(self._row(d, ccols, width, sel == ("C", li),
+                              checked, eng.pulse),
+                    stop=("C", li), data=rec)
+                li += 1
 
 
 class ProfilesView:

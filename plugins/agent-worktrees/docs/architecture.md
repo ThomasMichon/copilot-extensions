@@ -737,4 +737,28 @@ component renders the body, owns the state (`scr.grid is scr.profiles_view.grid`
 `grid` is not a plain engine attribute) and the plumbing (`apply` / `start_load` /
 `commit_applied` live on the component; `_prof_load` is not an engine attribute).
 
+**Second component -- the Maintenance pivot body (`MaintenanceView`).** With the
+Profiles pattern proven, the Maintenance pivot is carved out next. **Slice 5a moves
+the *rendering***: `PickerScreen.build_body`'s maintenance branch now calls
+`self.maintenance_view.build(add, width, sel)` on a `MaintenanceView` component
+(instantiated in `__init__` right after `profiles_view`) instead of the inline
+branch, and the four Maintenance row helpers (`_maint_selectall_row` / `_maint_header`
+/ `_maint_group_row` / `_maint_row`) move onto the component as `_selectall_row` /
+`_header` / `_group_row` / `_row` (all deleted from `PickerScreen`). The selection
+*state* (`maint_sel`) and the grouping/multi-select *behaviour* (`maint_groups` /
+`maint_records` / `_maint_ids` / `_toggle_maint` / `_toggle_maint_all` /
+`_toggle_group`) still live on `PickerScreen` for now and are read from the component
+via `self._eng`; a follow-up slice (5b) moves them onto the component behind
+delegating shims the way `ProfilesView` did. The shared `_checkbox` glyph helper
+stays on the engine (the Worktrees multi-select gutter uses it too) and is likewise
+reached via `self._eng`. One small enabling change: the `build_body` `add` closure
+gained an optional `new_section=` argument so an extracted component can open a
+grouped section (pinning the section label + the vrow index the row will occupy)
+without reaching into the closure's `cur_section` / `vrows` -- exactly reproducing
+the inline `cur_section = (label, len(vrows))` the branch used. Behaviour is
+unchanged -- the same VRows with the same `("SA", 0)` / `("GH", gi)` / `("C", i)`
+stops and pinned group sections are emitted; a guard test
+(`test_maintenance_view_component_renders_body`) asserts the component exists, the
+inline row helpers are gone from the engine, and `build_body` routes the Maintenance
+body through the component with its group sections still pinned.
 
