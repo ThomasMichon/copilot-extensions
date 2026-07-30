@@ -51,6 +51,10 @@ class BridgeClient:
         # Grace window (seconds) to retry an initial connection refusal -- the
         # service may be briefly down mid-restart (stage 1, transient).
         self._connect_grace = max(0.0, connect_grace)
+        # Memoized (protocol_version, min_protocol_version) the daemon advertises
+        # on /health. Cached for this client's (short) lifetime -- a CLI
+        # invocation dials one daemon -- so repeated capability gates cost one GET.
+        self._daemon_proto: tuple[int, int] | None = None
 
     # -- Factory -------------------------------------------------------------
 
@@ -296,6 +300,41 @@ class BridgeClient:
         """GET /health"""
         # Health endpoint is public (no auth needed), but we send it anyway
         return self._request("GET", "/health") or {}
+
+    def daemon_protocol(self, *, refresh: bool = False) -> tuple[int, int]:
+        """The ``(protocol_version, min_protocol_version)`` the daemon advertises.
+
+        Reads the HTTP wire-contract version + supported range from ``/health``
+        (dotfiles #632). A daemon that predates protocol advertisement omits the
+        fields, so we report ``(UNVERSIONED, UNVERSIONED)`` == ``(0, 0)`` — every
+        versioned-capability check then degrades **off** rather than assuming a
+        support it cannot confirm. Memoized for this client's lifetime unless
+        ``refresh`` is set.
+        """
+        from .protocol import UNVERSIONED
+
+        if self._daemon_proto is None or refresh:
+            h = self.health()
+            try:
+                self._daemon_proto = (
+                    int(h.get("protocol_version", UNVERSIONED)),
+                    int(h.get("min_protocol_version", UNVERSIONED)),
+                )
+            except (TypeError, ValueError):
+                self._daemon_proto = (UNVERSIONED, UNVERSIONED)
+        return self._daemon_proto
+
+    def daemon_supports(self, min_version: int) -> bool:
+        """Whether the live daemon speaks at least HTTP protocol ``min_version``.
+
+        The capability gate for a client **newer** than the daemon it calls:
+        check this before using a feature introduced at protocol ``min_version``
+        and fall back gracefully when it is ``False``, instead of blind-sending a
+        request an older daemon will ignore or reject (dotfiles #632). An
+        unreachable or unversioned daemon reports version ``0`` → ``False``.
+        """
+        version, _min_supported = self.daemon_protocol()
+        return version >= min_version
 
     def list_agents(self) -> list[dict[str, Any]]:
         """GET /api/v1/agents"""

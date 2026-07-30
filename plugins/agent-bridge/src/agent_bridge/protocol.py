@@ -1,0 +1,41 @@
+"""Explicit version for the agent-bridge **HTTP wire contract** (dotfiles #632).
+
+Plugin payloads update independently, so a client and the daemon it calls are
+routinely at **different versions**. This module gives the HTTP surface an
+explicit, advertised protocol version — distinct from the package
+``__version__`` (a build stamp, not a contract) and from the ACP /
+session-host ``PROTOCOL_VERSION``\\s (different transports) — so a client can
+**gate a version-introduced capability on the daemon's advertised support**
+instead of blind-sending a request an older daemon would ignore or reject. This
+is the forward-compat half of the *version-skew-tolerant-contracts* invariant
+(``visions/plugin-services`` → *interoperate-across-version-skew*).
+
+Rules for evolving the contract:
+
+- **Bump ``HTTP_PROTOCOL_VERSION``** when the HTTP surface gains a capability a
+  client may need to *detect* (a new endpoint, a new request field with server
+  behavior, a new response field a client depends on). Additive, tolerant-reader
+  changes (a new optional field an old client simply ignores) do **not** require
+  a bump — but bumping lets a newer client *know* the capability is present.
+- **Raise ``HTTP_PROTOCOL_MIN_SUPPORTED``** only on a genuinely **breaking**
+  change, and only after a deprecation window — it declares the oldest client
+  contract this daemon still serves. It should move rarely.
+
+The daemon advertises both on ``/health``; ``BridgeClient`` reads them (see
+``daemon_protocol`` / ``daemon_supports``).
+"""
+
+from __future__ import annotations
+
+# Current HTTP wire-contract version this build speaks.
+HTTP_PROTOCOL_VERSION = 1
+
+# Oldest client HTTP-contract version this daemon still serves (the low end of
+# the supported range). Only ever raised after a deprecation window.
+HTTP_PROTOCOL_MIN_SUPPORTED = 1
+
+# Sentinel for a daemon whose ``/health`` predates protocol advertisement (any
+# build older than this feature): it reports no version, so a reader treats it as
+# ``UNVERSIONED`` and gates every versioned capability **off** rather than
+# assuming support.
+UNVERSIONED = 0
