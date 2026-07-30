@@ -108,7 +108,10 @@ Both **directions** of the bridge are dual-era:
   `UnsupportedProtocolVersionError`) means modern; any other error or a timeout
   means legacy, and it falls back to the `initialize` handshake. Modern requests
   are then stamped with `_meta`; the HTTP transport classifies **each message**
-  independently, so a probe-then-fallback works over one connection.
+  independently, so a probe-then-fallback works over one connection. The probe
+  failure is **quiet** — a legacy Streamable-HTTP server that rejects the modern
+  `MCP-Protocol-Version` header (commonly `400`) is logged at debug and falls
+  back cleanly, never an error on every call.
 - **Exposing an adapter**: the `cli` responder (see [CLI → MCP](#cli--mcp-the-cli-server-type))
   is served as a dual-era MCP server — it answers `server/discover`, negotiates
   `initialize` for legacy clients, advertises cacheable `tools/list` results
@@ -127,7 +130,11 @@ Set the era per bridge with **`server.protocol`**:
 
 Forcing an era skips the auto-probe round-trip: use `modern`/`legacy` when you
 already know what the upstream speaks, or to **pin** the version a `cli` adapter
-advertises. Same-era pass-through needs no configuration; cross-era **translation**
+advertises. In particular, set **`legacy`** on a known legacy Streamable-HTTP
+endpoint (e.g. an Azure DevOps MCP that doesn't yet speak `2026-07-28`) to skip
+the `server/discover` probe entirely — the probe otherwise costs one extra
+round-trip per cold `call` (amortized within a session, and eliminated by a warm
+`serve`). Same-era pass-through needs no configuration; cross-era **translation**
 by a proxying bridge (e.g. a legacy client against a modern upstream *through* the
 bridge) is not yet performed — set `server.protocol` to match the client instead.
 

@@ -100,7 +100,20 @@ class HttpTransport(Transport):
             return
 
         if status >= 400:
-            log.error("upstream HTTP %s: %s", status, text[:200])
+            # A 4xx on the ``server/discover`` **negotiation probe** is the
+            # expected "this upstream is legacy" signal: a legacy Streamable-HTTP
+            # MCP rejects the modern ``MCP-Protocol-Version`` header (ADO, for
+            # one, answers 400 "header value not supported"), and the one-shot
+            # client's ``auto`` negotiation falls back to the ``initialize``
+            # handshake. Log that at debug so a dual-era connection to a legacy
+            # server doesn't spew an error on every call; keep ERROR for a 4xx on
+            # a real request (a genuine failure the caller needs to see). Set
+            # ``server.protocol: legacy`` to skip the probe entirely.
+            if msg.get("method") == "server/discover":
+                log.debug("server/discover probe rejected (HTTP %s) -- "
+                          "treating upstream as legacy", status)
+            else:
+                log.error("upstream HTTP %s: %s", status, text[:200])
             await self._error(msg, f"HTTP {status}")
             return
 

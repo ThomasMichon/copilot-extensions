@@ -140,6 +140,56 @@ async def test_client_forced_legacy_uses_handshake():
         assert sess.server_info.get("name") == "legacy-fixture"
 
 
+async def test_client_quietly_falls_back_when_http_probe_rejected(caplog):
+    """A legacy HTTP server rejects the modern ``server/discover`` probe (the
+    transport surfaces it as a JSON-RPC error). The one-shot must fall back to
+    the legacy handshake **quietly** -- no ERROR log on a routine negotiation."""
+    import logging
+
+    from agent_mcp.transports.base import Transport
+
+    class _LegacyHttpish(Transport):
+        """400s the discover probe (as HttpTransport does), accepts initialize."""
+
+        def __init__(self) -> None:
+            self._emit = None
+
+        async def start(self) -> None:
+            pass
+
+        async def send(self, msg: dict) -> None:
+            mid, method = msg.get("id"), msg.get("method")
+            if method == "server/discover":
+                await self._emit_message({"jsonrpc": "2.0", "id": mid,
+                                          "error": {"code": -32603, "message": "HTTP 400"}})
+            elif method == "initialize":
+                await self._emit_message({"jsonrpc": "2.0", "id": mid, "result": {
+                    "protocolVersion": "2025-06-18",
+                    "serverInfo": {"name": "legacy-http", "version": "1"},
+                    "capabilities": {}}})
+            elif method == "tools/list":
+                await self._emit_message({"jsonrpc": "2.0", "id": mid, "result": {
+                    "tools": [{"name": "t", "inputSchema": {"type": "object"}}]}})
+            # notifications/initialized: no reply
+
+        async def end_input(self) -> None:
+            pass
+
+        async def aclose(self) -> None:
+            pass
+
+    cfg = parse_config({"server": {"type": "http", "url": "https://x/y"},
+                        "auth": {"kind": "none"}, "timeout": 5})
+    with caplog.at_level(logging.DEBUG):
+        async with OneShotSession(cfg, transport=_LegacyHttpish()) as sess:
+            assert not sess.is_modern
+            assert sess.protocol_version == proto.LEGACY
+            assert sess.server_info.get("name") == "legacy-http"
+            tools = await sess.list_tools()
+            assert [x["name"] for x in tools] == ["t"]
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+
 # --- HTTP transport: modern headers vs. legacy session id --------------------
 
 def _http_transport():

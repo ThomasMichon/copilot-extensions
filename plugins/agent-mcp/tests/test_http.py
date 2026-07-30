@@ -80,3 +80,33 @@ async def test_http_error_status_emits_jsonrpc_error():
     await t.send({"jsonrpc": "2.0", "id": 7, "method": "x"})
     assert received[0]["error"]["code"] == -32603
     assert received[0]["id"] == 7
+
+
+async def test_http_400_on_discover_probe_is_quiet(caplog):
+    """A legacy server's 400 on the ``server/discover`` probe is the expected
+    "upstream is legacy" signal -- logged at debug, never error."""
+    import logging
+
+    t, received = _transport()
+    t._post = lambda h, b: (
+        400, {}, '{"error":{"message":"MCP-Protocol-Version 2026-07-28 not supported"}}')
+    with caplog.at_level(logging.DEBUG, logger="agent-mcp.http"):
+        await t.send({"jsonrpc": "2.0", "id": 1, "method": "server/discover",
+                      "params": {}})
+    # The client still receives a JSON-RPC error to drive its fallback...
+    assert received[0]["error"]["code"] == -32603
+    # ...but the transport logged it quietly: no ERROR, a DEBUG probe note.
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert any("probe rejected" in r.getMessage() for r in caplog.records)
+
+
+async def test_http_400_on_real_request_is_error(caplog):
+    """A 4xx on a real request is still a loud ERROR (a genuine failure)."""
+    import logging
+
+    t, _ = _transport()
+    t._post = lambda h, b: (400, {}, "bad request")
+    with caplog.at_level(logging.DEBUG, logger="agent-mcp.http"):
+        await t.send({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                      "params": {"name": "x"}})
+    assert any(r.levelno >= logging.ERROR for r in caplog.records)
