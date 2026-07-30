@@ -110,8 +110,24 @@ def test_build_remote_launch_shape():
     assert sp._NONCE_ENV in cmd
     assert "deadbeef" in cmd
     assert "copilot" in cmd
+    # reap bounds are threaded to the detached far-side host (#145)
+    assert "--unexpected-reap-seconds" in cmd
+    assert "--active-reap-seconds" in cmd
     # child argv comes after the `--` terminator
     assert "--" in cmd
+
+
+def test_build_remote_launch_threads_reap_bounds():
+    cmd = sp.build_remote_launch(
+        "/tmp/agent-bridge/session-host-abc.pyz",
+        "/tmp/agent-bridge/host-s1.json",
+        "/tmp/agent-bridge/host-s1.log",
+        ["copilot", "--acp", "--stdio"],
+        unexpected_reap_seconds=45.0,
+        active_reap_seconds=1800.0,
+    )
+    assert "--unexpected-reap-seconds 45.0" in cmd
+    assert "--active-reap-seconds 1800.0" in cmd
 
 
 # -- spawn happy path -----------------------------------------------------

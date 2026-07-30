@@ -28,6 +28,18 @@ RELAY_PORTS_DIR="$HOME/.agent-bridge/relay-ports"
 RELAY_PORT="${LC_GIT_CREDENTIAL_RELAY:-}"
 RELAY_TOKEN="${LC_GIT_CREDENTIAL_RELAY_TOKEN:-}"
 
+# On-device token cache (#145/#617). A recently-served BARE token
+# (get-access-token, scoped or direct) is cached under RELAY_TOKEN_CACHE_DIR so a
+# brief relay outage does not fail an in-flight `rush update` / npm / nuget
+# fetch: the credential relay lives on the caller's host, which may sleep (a
+# laptop) or briefly drop its -R tunnel. The cache is a FALLBACK only -- a live
+# relay is always preferred and refreshes the cache, and a cached token is served
+# only while within RELAY_TOKEN_CACHE_TTL seconds (default 1500 = 25 min, well
+# under an ADO token's lifetime). Files are written 0600. Git username/password
+# `get` is never cached (it relays to GCM cheaply and caching secrets is worse).
+RELAY_TOKEN_CACHE_DIR="$HOME/.agent-bridge/token-cache"
+RELAY_TOKEN_CACHE_TTL="${LC_GIT_CREDENTIAL_RELAY_CACHE_TTL:-1500}"
+
 # True (0) if a credential-relay channel is accepting on 127.0.0.1:<port>.
 _relay_live() { (echo >"/dev/tcp/127.0.0.1/${1:-0}") 2>/dev/null; }
 
@@ -84,6 +96,12 @@ fi
 if [ -z "$RELAY_PORT" ]; then
     if _relay_live "$DEFAULT_RELAY_PORT"; then
         RELAY_PORT="$DEFAULT_RELAY_PORT"
+    elif [ "$ACTION" = "get-access-token" ]; then
+        # No live relay reachable. For a BARE-token request, fall through with an
+        # empty port so the on-device cache fallback below can serve a recently
+        # cached token across a brief relay outage (the relay host may be asleep
+        # or its tunnel briefly down). Git `get` keeps failing fast (exit 1).
+        RELAY_PORT=""
     else
         exit 1
     fi
@@ -138,109 +156,119 @@ finally:
         ;;
 
     get-access-token)
-        if [ -n "$SCOPE" ]; then
-            # Azure managed-identity scope mode — the official
-            # `azure-auth-helper get-access-token "<scope>"` contract. Mint an
-            # AAD token for <scope> via the relay's gated get-azure-token action
-            # (resolved from the host az identity) and print the bare token.
-            exec python3 -c "
-import socket, sys
-
-port = int(sys.argv[1])
-scope = sys.argv[2]
-auth = sys.argv[3]
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.settimeout(10)
-
-try:
-    s.connect(('localhost', port))
-
-    lines = ['get-azure-token', 'scope=' + scope]
-    if auth:
-        lines.append('auth=' + auth)
-    request = '\n'.join(lines) + '\n\n'
-    s.sendall(request.encode('utf-8'))
-
-    s.settimeout(30)
-    response = b''
-    while True:
-        chunk = s.recv(4096)
-        if not chunk:
-            break
-        response += chunk
-        if b'\n\n' in response:
-            break
-
-    # Response is git-credential key=value framing; extract token=.
-    token = ''
-    for line in response.decode('utf-8').splitlines():
-        if line.startswith('token='):
-            token = line[len('token='):]
-            break
-    if token:
-        print(token)
-    else:
-        sys.exit(1)
-except Exception:
-    sys.exit(1)
-finally:
-    s.close()
-" "$RELAY_PORT" "$SCOPE" "$RELAY_TOKEN"
-        fi
-        # Direct token mode — return a raw ADO access token for npm, nuget, etc.
-        #
-        # The host-less `get-access-token` carries no ADO host, so the relay
-        # server cannot know which Azure DevOps org the token is for and rejects
-        # it ("no host provided and no CODESPACES_ADO_HOST configured"). The
-        # CodeSpace, however, *does* know its ADO host — so discover it here and
-        # pass it to the relay. Source order (never hardcoded to an org):
+        # ADO host discovery for the DIRECT (non-scoped) token (never hardcoded):
         #   1. LC_GIT_CREDENTIAL_RELAY_ADO_HOST (explicit, plumbed by connect)
         #   2. the workspace's git remotes (the ADO host of the checked-out repo)
         # If none is found, fall through host-less and let the relay server apply
         # its own configured default (#64).
         ADO_HOST="${LC_GIT_CREDENTIAL_RELAY_ADO_HOST:-}"
-        if [ -z "$ADO_HOST" ]; then
+        if [ -z "$ADO_HOST" ] && [ -z "$SCOPE" ]; then
             ADO_HOST="$(git -C "${VM_REPO_PATH:-$PWD}" remote -v 2>/dev/null \
                 | grep -oiE '([A-Za-z0-9_-]+\.visualstudio\.com|dev\.azure\.com)' \
                 | head -n1)"
         fi
-        exec python3 -c "
-import socket, sys
+        # Scoped (Azure AAD) mode routes to the gated get-azure-token action;
+        # direct mode returns a raw ADO token for npm/nuget/rush. Both are
+        # cache-backed: a live relay is preferred and refreshes the cache; a
+        # recently-cached token is served only when the relay is unreachable.
+        if [ -n "$SCOPE" ]; then
+            _MODE="azure"; _KEYMAT="$SCOPE"
+        else
+            _MODE="access"; _KEYMAT="$ADO_HOST"
+        fi
+        python3 - "$RELAY_PORT" "$_MODE" "$_KEYMAT" "$RELAY_TOKEN" \
+                  "$RELAY_TOKEN_CACHE_DIR" "$RELAY_TOKEN_CACHE_TTL" <<'PY'
+import hashlib, os, socket, sys, time
 
-port = int(sys.argv[1])
-host = sys.argv[2] if len(sys.argv) > 2 else ''
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.settimeout(10)
+port_s, mode, keymat, auth, cache_dir, ttl_s = sys.argv[1:7]
+port = int(port_s) if port_s.strip().isdigit() else 0
+ttl = float(ttl_s) if ttl_s else 0.0
 
-try:
-    s.connect(('localhost', port))
 
-    request = 'get-access-token\n'
-    if host:
-        request += 'host=' + host + '\n'
-    request += '\n'
-    s.sendall(request.encode('utf-8'))
+def _cache_file():
+    key = hashlib.sha256(("%s|%s" % (mode, keymat)).encode()).hexdigest()[:32]
+    return os.path.join(cache_dir, key + ".tok")
 
-    s.settimeout(30)
-    response = b''
-    while True:
-        chunk = s.recv(4096)
-        if not chunk:
-            break
-        response += chunk
-        if b'\n\n' in response:
-            break
 
-    token = response.decode('utf-8').strip()
-    if token:
-        print(token)
-    else:
-        sys.exit(1)
-except Exception:
-    sys.exit(1)
-finally:
-    s.close()
-" "$RELAY_PORT" "$ADO_HOST"
+def _read_cache():
+    try:
+        with open(_cache_file()) as fh:
+            ts = float(fh.readline().strip())
+            tok = fh.readline().strip()
+    except (OSError, ValueError):
+        return ""
+    if ttl > 0 and (time.time() - ts) > ttl:
+        return ""  # expired: never serve a stale token past the TTL
+    return tok
+
+
+def _write_cache(tok):
+    if ttl <= 0 or not tok:
+        return
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        prev = os.umask(0o177)  # 0600 -- the token is a bearer secret
+        try:
+            with open(_cache_file(), "w") as fh:
+                fh.write("%d\n%s\n" % (int(time.time()), tok))
+        finally:
+            os.umask(prev)
+    except OSError:
+        pass
+
+
+def _fetch():
+    if not port:
+        return ""  # no live relay -- go straight to the cache fallback
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(10)
+    try:
+        s.connect(("localhost", port))
+        if mode == "azure":
+            lines = ["get-azure-token", "scope=" + keymat]
+            if auth:
+                lines.append("auth=" + auth)
+            request = "\n".join(lines) + "\n\n"
+        else:
+            request = "get-access-token\n"
+            if keymat:
+                request += "host=" + keymat + "\n"
+            request += "\n"
+        s.sendall(request.encode("utf-8"))
+        s.settimeout(30)
+        resp = b""
+        while True:
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            resp += chunk
+            if b"\n\n" in resp:
+                break
+    except OSError:
+        return ""
+    finally:
+        s.close()
+    text = resp.decode("utf-8", "replace")
+    if mode == "azure":
+        for line in text.splitlines():
+            if line.startswith("token="):
+                return line[len("token="):].strip()
+        return ""
+    return text.strip()
+
+
+tok = _fetch()
+if tok:
+    _write_cache(tok)          # refresh the cache on every live success
+    sys.stdout.write(tok + "\n")
+    sys.exit(0)
+cached = _read_cache()          # relay unreachable -> serve a fresh-enough cache
+if cached:
+    sys.stdout.write(cached + "\n")
+    sys.exit(0)
+sys.exit(1)
+PY
+        exit $?
         ;;
 
     *)

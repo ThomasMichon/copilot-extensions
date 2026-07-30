@@ -64,7 +64,8 @@ class SessionHost:
     """
 
     def __init__(self, child: ChildProcess, *, nonce: str = "",
-                 unexpected_reap_seconds: float = 60.0) -> None:
+                 unexpected_reap_seconds: float = 60.0,
+                 active_reap_seconds: float = 0.0) -> None:
         self._child = child
         self._nonce = nonce or ""
         self._frames: dict[int, bytes] = {}
@@ -87,9 +88,20 @@ class SessionHost:
         #     reattach can resume the turn -- never reap inadvertently (goal 1).
         # 0 disables the unexpected-grace self-reap (the graceful path still acts).
         self._unexpected_reap_seconds = unexpected_reap_seconds
+        # Bounded keep-alive for an ACTIVE (non-reapable, mid-turn / active
+        # background work) child after the front is lost (#145). Unlike the
+        # unexpected-idle grace above -- which only frees an already-idle child
+        # -- this holds a child that is still mid-work for a longer window so a
+        # reconnecting front can resume the in-flight turn/tool call, then lets
+        # it go (the session stays resumable from disk + worktree). This is the
+        # operator's "keep the task alive ~30 min after a sever" bound. 0
+        # disables (the legacy behavior: an active front-less child lives until
+        # its own stop). A reattach cancels it.
+        self._active_reap_seconds = active_reap_seconds
         self._last_reapable = False
         self._graceful_detach = False
         self._reap_timer: asyncio.TimerHandle | None = None
+        self._active_reap_timer: asyncio.TimerHandle | None = None
         self._self_reap_task: asyncio.Task | None = None
 
     # -- introspection (tests / diagnostics) -------------------------------
@@ -288,15 +300,23 @@ class SessionHost:
         * a **graceful** detach (DETACH seen) reaps a reapable child at once;
         * an **unexpected** drop (bare EOF) arms a grace-window timer so a quick
           reattach still wins, and only then reaps.
+
+        An **active** (non-reapable) child is never freed by the paths above; if
+        an ``active_reap_seconds`` bound is set it instead arms a longer hold
+        timer so a reconnecting front can resume the in-flight turn, and only
+        after that window elapses with no reattach is the child let go.
         """
         if self._closing or self._front is not None:
             return
-        if not self.child_alive or not self._last_reapable:
+        if not self.child_alive:
             return
-        if self._graceful_detach:
-            self._schedule_self_reap("graceful detach + idle child")
-        elif self._unexpected_reap_seconds > 0:
-            self._arm_reap_timer()
+        if self._last_reapable:
+            if self._graceful_detach:
+                self._schedule_self_reap("graceful detach + idle child")
+            elif self._unexpected_reap_seconds > 0:
+                self._arm_reap_timer()
+        elif self._active_reap_seconds > 0:
+            self._arm_active_reap_timer()
 
     def _arm_reap_timer(self) -> None:
         self._cancel_reap_timer()
@@ -312,6 +332,35 @@ class SessionHost:
         if self._reap_timer is not None:
             self._reap_timer.cancel()
             self._reap_timer = None
+        if self._active_reap_timer is not None:
+            self._active_reap_timer.cancel()
+            self._active_reap_timer = None
+
+    def _arm_active_reap_timer(self) -> None:
+        """Arm the bounded hold for an active, front-less child (#145)."""
+        self._cancel_reap_timer()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._active_reap_timer = loop.call_later(
+            self._active_reap_seconds, self._on_active_reap_timer,
+        )
+
+    def _on_active_reap_timer(self) -> None:
+        self._active_reap_timer = None
+        # A reattach (front present) or the child exiting on its own vetoes the
+        # reap; otherwise the hold window elapsed with no reconnect, so let the
+        # still-active child go -- the session remains resumable (fresh child +
+        # load_session replay), which is the whole point of the bound.
+        if self._closing or self._front is not None:
+            return
+        if not self.child_alive:
+            return
+        self._schedule_self_reap(
+            f"unexpected disconnect + active child held "
+            f"{self._active_reap_seconds:.0f}s with no reattach"
+        )
 
     def _on_reap_timer(self) -> None:
         self._reap_timer = None

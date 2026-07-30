@@ -392,6 +392,78 @@ async def test_unexpected_drop_keeps_busy_child():
         await host.close()
 
 
+# --------------------------------------------------------------------------
+# bounded active-child keep-alive (#145)
+# --------------------------------------------------------------------------
+async def _serve_active(
+    child: _FakeChild, active_secs: float, unexpected_secs: float = 60.0,
+) -> tuple[SessionHost, int]:
+    host = SessionHost(
+        child, unexpected_reap_seconds=unexpected_secs,
+        active_reap_seconds=active_secs,
+    )
+    port = await host.serve(port=0)
+    return host, port
+
+
+@pytest.mark.asyncio
+async def test_active_child_held_then_reaped_on_unexpected_drop():
+    """An unexpected drop mid-turn HOLDS the active child, then lets it go once
+    the active window elapses with no reattach (the 30-min bound; #145)."""
+    child = _FakeChild()
+    host, port = await _serve_active(child, 0.2)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.send_status(False)         # a turn is in flight (not reapable)
+        c1._writer.transport.abort()        # unexpected: no graceful DETACH
+        await asyncio.sleep(0.08)
+        assert child.killed is False        # still held within the active window
+        await asyncio.sleep(0.4)
+        assert child.killed is True         # let go once the hold window elapsed
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_reattach_cancels_active_hold_timer():
+    """A reattach during the active-hold window cancels the pending reap so the
+    in-flight turn survives and can be resumed."""
+    child = _FakeChild()
+    host, port = await _serve_active(child, 0.25)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.send_status(False)
+        c1._writer.transport.abort()        # arms the active-hold timer
+        await asyncio.sleep(0.05)
+        c2 = await SessionHostClient.connect(port=port)  # reconnect in time
+        hello = await c2.attach(0)
+        assert hello.child_pid == child.pid
+        await asyncio.sleep(0.4)            # past the original window
+        assert child.killed is False        # cancelled by the reattach
+        await c2.close()
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_active_reap_disabled_keeps_child_indefinitely():
+    """With active_reap_seconds=0 (legacy), an unexpected drop mid-turn never
+    reaps the active child (it lives until its own stop)."""
+    child = _FakeChild()
+    host, port = await _serve_active(child, 0.0, unexpected_secs=0.1)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.send_status(False)
+        c1._writer.transport.abort()
+        await asyncio.sleep(0.3)
+        assert child.killed is False
+    finally:
+        await host.close()
+
+
 @pytest.mark.asyncio
 async def test_reattach_cancels_unexpected_reap_timer():
     """A reattach before the grace elapses cancels the pending self-reap."""

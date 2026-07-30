@@ -435,6 +435,32 @@ class TestResumeSession:
         mock_acp_client.load_session.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_resume_prefers_reattach_over_respawn(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp, mock_acp_client
+    ) -> None:
+        """A resume adopts a surviving Session Host (no fresh child /
+        load_session) when one is still alive for the session (#145)."""
+        session = await session_manager.start_session(spawn_target)
+        await session_manager.stop_session(session.session_id)
+        assert session.status == SessionStatus.STOPPED
+
+        async def _fake_reattach(sess):
+            sess.client = mock_acp_client
+            sess.status = SessionStatus.IDLE
+            return True
+
+        mock_acp_client.load_session.reset_mock()
+        with patch.object(
+            session_manager, "_try_reattach_live_host",
+            AsyncMock(side_effect=_fake_reattach),
+        ):
+            resumed = await session_manager.resume_session(session.session_id)
+
+        assert resumed.status == SessionStatus.IDLE
+        # Reattach path: the running child is adopted, so no fresh-child replay.
+        mock_acp_client.load_session.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_resume_rejects_non_stopped(
         self, session_manager, spawn_target, _patch_spawn, _patch_acp
     ) -> None:

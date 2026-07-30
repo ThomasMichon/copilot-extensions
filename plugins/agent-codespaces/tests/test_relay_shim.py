@@ -146,9 +146,38 @@ class TestProvisioningAndClient:
         assert 'ADO_HOST="${LC_GIT_CREDENTIAL_RELAY_ADO_HOST:-}"' in client
         assert "remote -v" in client
         assert "visualstudio" in client and "azure.com" in client
-        # The discovered host is sent as a request field and passed to python.
-        assert "'host=' + host" in client
-        assert '"$RELAY_PORT" "$ADO_HOST"' in client
+        # The discovered host becomes the request's host field and is passed to
+        # python as the direct-mode key material.
+        assert '"host=" + keymat' in client
+        assert '_KEYMAT="$ADO_HOST"' in client
+
+    def test_relay_client_caches_bare_tokens_for_offline_fallback(self):
+        """A recently-served bare token is cached (0600) and served as a fallback
+        when the relay is briefly unreachable, so an in-flight rush/npm/nuget
+        fetch survives a relay-host sleep / tunnel drop (#145/#617)."""
+        client = asset_text("ado-auth-helper-relay")
+        # Cache location + conservative env-overridable TTL, 0600 files.
+        assert 'RELAY_TOKEN_CACHE_DIR="$HOME/.agent-bridge/token-cache"' in client
+        assert (
+            'RELAY_TOKEN_CACHE_TTL="${LC_GIT_CREDENTIAL_RELAY_CACHE_TTL:-1500}"'
+            in client
+        )
+        assert "os.umask(0o177)" in client
+        # A live relay is preferred and refreshes the cache; the cache is only a
+        # fallback, and an expired entry is never served.
+        assert "_write_cache(tok)" in client
+        assert "_read_cache()" in client
+        assert "expired" in client
+        # Both the scoped (azure) and direct (access) bare-token modes are cached.
+        assert '_MODE="azure"' in client and '_MODE="access"' in client
+
+    def test_relay_client_offline_bare_token_falls_through_to_cache(self):
+        """With no live relay, a bare-token request falls through (empty port) so
+        the on-device cache fallback can run, instead of failing like git `get`."""
+        client = asset_text("ado-auth-helper-relay")
+        assert 'elif [ "$ACTION" = "get-access-token" ]; then' in client
+        # The python treats an empty/invalid port as "no relay" -> cache only.
+        assert "if not port:" in client
 
     def test_relay_client_discovers_live_port_from_mappings(self):
         """The relay client resolves a *live* relay via the port-mapping files
