@@ -85,6 +85,52 @@ path can't work — the named-bridge search is what makes a plugin's MCP resolve
 with **zero** setup. Override the search roots with `AGENT_MCP_PLUGIN_ROOTS`
 (path-separated); a name that appears in two plugins raises an ambiguity error.
 
+## Protocol versions (MCP 2.x / dual-era)
+
+agent-mcp speaks **both** eras of the MCP wire protocol and bridges between them
+transparently:
+
+- **Modern** — revision `2026-07-28` and later. Stateless: there is no
+  `initialize` handshake and no `Mcp-Session-Id`; every request self-describes,
+  carrying its protocol version, client identity, and capabilities in
+  `params._meta` (`io.modelcontextprotocol/*`). Over Streamable HTTP that
+  metadata is also mirrored into the `MCP-Protocol-Version`, `Mcp-Method`, and
+  `Mcp-Name` headers so gateways can route without parsing the body. Capabilities
+  can be fetched up front with the optional `server/discover` RPC.
+- **Legacy** — revision `2025-11-25` and earlier. The stateful
+  `initialize` / `notifications/initialized` handshake plus `Mcp-Session-Id`.
+
+Both **directions** of the bridge are dual-era:
+
+- **Consuming an upstream** (a `call` / `materialize` / warm `serve`): the
+  one-shot client negotiates the upstream's era. In `auto` (default) it probes
+  with `server/discover` — a valid `DiscoverResult` (or a recognized
+  `UnsupportedProtocolVersionError`) means modern; any other error or a timeout
+  means legacy, and it falls back to the `initialize` handshake. Modern requests
+  are then stamped with `_meta`; the HTTP transport classifies **each message**
+  independently, so a probe-then-fallback works over one connection.
+- **Exposing an adapter**: the `cli` responder (see [CLI → MCP](#cli--mcp-the-cli-server-type))
+  is served as a dual-era MCP server — it answers `server/discover`, negotiates
+  `initialize` for legacy clients, advertises cacheable `tools/list` results
+  (`ttlMs`/`cacheScope`), and rejects an unsupported modern version with the
+  standard error. A proxying (`http`/`stdio`) bridge is a transparent pass-through:
+  the client's own negotiation flows end-to-end to the upstream.
+
+Set the era per bridge with **`server.protocol`**:
+
+| Value | Behavior |
+|-------|----------|
+| `auto` (default) | Probe + fall back. Best for unknown upstreams. |
+| `modern` | Force `2026-07-28` — skip the probe, always stamp `_meta`. |
+| `legacy` | Force the `initialize` handshake (`2025-06-18`). |
+| `<YYYY-MM-DD>` | Force an exact revision (modern if `>= 2026-07-28`, else legacy). |
+
+Forcing an era skips the auto-probe round-trip: use `modern`/`legacy` when you
+already know what the upstream speaks, or to **pin** the version a `cli` adapter
+advertises. Same-era pass-through needs no configuration; cross-era **translation**
+by a proxying bridge (e.g. a legacy client against a modern upstream *through* the
+bridge) is not yet performed — set `server.protocol` to match the client instead.
+
 ## Config file
 
 ```yaml
@@ -93,6 +139,7 @@ with **zero** setup. Override the search roots with `AGENT_MCP_PLUGIN_ROOTS`
 server:                                  # original launch info (lift from .mcp.json)
   type: http
   url: https://mcp.dev.azure.com/your-org
+  protocol: auto                         # auto | modern | legacy | <YYYY-MM-DD>  (see Protocol versions)
 auth:
   kind: entra
   resource: 2a72489c-aab2-4b65-b93a-a91edccf33b8   # mcp.dev.azure.com
@@ -639,8 +686,9 @@ people) who would rather `ls`/`cat`/pipe than speak JSON-RPC.
 agent-mcp call <bridge> <tool> '<arguments-json>'
 ```
 
-Connects to the bridge's upstream, runs the MCP `initialize` handshake, invokes
-one tool, and prints its result — then exits. This is the **stateless cold
+Connects to the bridge's upstream, **negotiates its protocol era** (per
+`server.protocol`; see [Protocol versions](#protocol-versions-mcp-2x--dual-era)),
+invokes one tool, and prints its result — then exits. This is the **stateless cold
 path**; when an `agent-mcp serve` daemon is running (see below), `call`
 transparently routes to it and skips the per-call cold-start instead. Force the
 cold path with `--no-serve` or `AGENT_MCP_NO_SERVE=1`.
@@ -756,9 +804,13 @@ stdin/stdout        Bridge        Decorator pipeline           UpstreamClient   
   `storage`/`transform`/`gate` decorators.
 - `bridge.py` — stdio framing, per-request dispatch through the pipeline,
   unsolicited-message passthrough.
-- `client.py` — `OneShotSession`: connect + `initialize` + one `tools/list` /
-  `tools/call` against an upstream, then exit (the engine under `call` and the
-  introspection step of `materialize`).
+- `protocol.py` — the dual-era version model: modern (`2026-07-28`, per-request
+  `_meta`) vs. legacy (`initialize` handshake) constants, `_meta` builders, HTTP
+  metadata headers, `server/discover` result + `UnsupportedProtocolVersionError`
+  builders, and version negotiation. Shared by the client and cli-responder sides.
+- `client.py` — `OneShotSession`: connect + **negotiate era** (`server/discover`
+  probe / forced) + one `tools/list` / `tools/call` against an upstream, then exit
+  (the engine under `call` and the introspection step of `materialize`).
 - `materialize.py` — project a `tools/list` catalog into the on-disk stub fleet
   (symlink farm on POSIX, `.ps1`/`.cmd` shim farm on Windows) + plated sidecars.
 

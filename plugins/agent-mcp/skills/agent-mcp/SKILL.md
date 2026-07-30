@@ -57,6 +57,7 @@ adapt -- at a glance:
 server:
   type: http                       # http | stdio | cli
   url: https://mcp.dev.azure.com/your-org
+  protocol: auto                   # auto | modern | legacy | <YYYY-MM-DD>  (MCP 2.x, see below)
 auth:
   kind: entra                      # entra|az | gh | git-credential | env|static | none
   resource: 2a72489c-aab2-4b65-b93a-a91edccf33b8   # az resource/scope
@@ -64,6 +65,15 @@ tools: { allow: ["repo_*", "wit_*"], deny: [] }    # optional upstream filter
 ```
 
 Validate before wiring: `agent-mcp validate .github/agents/ado.mcp.yaml`.
+
+> **MCP 2.x (dual-era).** agent-mcp speaks both the **modern** stateless
+> revision (`2026-07-28`+ — per-request `_meta`, no `initialize`/session,
+> optional `server/discover`) and the **legacy** `initialize` handshake, in both
+> directions: it negotiates an upstream's era when consuming one, and exposes a
+> `cli` adapter as a dual-era server (answers `server/discover`, cacheable
+> `tools/list`). `server.protocol` defaults to `auto` (probe + fall back to
+> legacy); set `modern`/`legacy`/an explicit `YYYY-MM-DD` to force or pin an era.
+> See the plugin README (§ *Protocol versions (MCP 2.x / dual-era)*).
 
 > **stdio launch — `command` vs `npm`.** A stdio bridge either lists an explicit
 > `server.command` (full control) or names an npm package with `server.npm:

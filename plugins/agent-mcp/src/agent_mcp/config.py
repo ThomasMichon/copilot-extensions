@@ -27,6 +27,11 @@ import yaml
 # the local CLI->MCP responder that has no upstream MCP at all).
 TRANSPORTS = ("http", "stdio", "cli")
 
+# Protocol-era selectors for ``server.protocol``. ``auto`` probes + falls back;
+# ``modern``/``legacy`` force an era; an explicit ``YYYY-MM-DD`` revision forces
+# exactly that version. Validated in :func:`validate_config`.
+PROTOCOL_KEYWORDS = ("auto", "modern", "legacy")
+
 # Auth injector kinds. ``az`` is an alias for ``entra``; ``static`` for ``env``.
 AUTH_KINDS = (
     "entra", "az", "gh", "git-credential", "command", "env", "static", "none",
@@ -87,6 +92,14 @@ class ServerSpec:
     """Upstream MCP launch info (the ``server`` block)."""
 
     type: str = "http"
+    # Protocol era to speak with the upstream (http/stdio) or to expose (cli).
+    #   ``auto``   -- probe with ``server/discover`` and fall back to the legacy
+    #                 ``initialize`` handshake on any non-modern error (default);
+    #   ``modern`` -- force the modern, per-request-metadata revision;
+    #   ``legacy`` -- force the legacy ``initialize`` handshake;
+    #   an explicit ``YYYY-MM-DD`` revision -- speak exactly that (modern if
+    #                 ``>= 2026-07-28``, else legacy). See :mod:`agent_mcp.protocol`.
+    protocol: str = "auto"
     # http
     url: str | None = None
     # stdio
@@ -118,6 +131,30 @@ class ServerSpec:
         if self.npm:
             return " ".join(["npm:" + self.npm, *self.npm_args])
         return "(unconfigured)"
+
+    @property
+    def protocol_is_auto(self) -> bool:
+        """Whether the era should be auto-detected (probe + legacy fallback)."""
+        return (self.protocol or "auto").lower() == "auto"
+
+    def forced_version(self) -> str | None:
+        """The concrete protocol version to speak, or ``None`` when ``auto``.
+
+        Collapses the ``server.protocol`` selector to a wire version:
+        ``modern`` -> :data:`agent_mcp.protocol.MODERN`, ``legacy`` ->
+        :data:`agent_mcp.protocol.LEGACY`, an explicit ``YYYY-MM-DD`` revision
+        verbatim; ``auto`` returns ``None`` so the caller negotiates.
+        """
+        from . import protocol as _proto
+
+        value = (self.protocol or "auto").lower()
+        if value == "auto":
+            return None
+        if value == "modern":
+            return _proto.MODERN
+        if value == "legacy":
+            return _proto.LEGACY
+        return self.protocol
 
 
 @dataclass
@@ -392,6 +429,7 @@ def parse_config(data: dict[str, Any], *, name: str | None = None,
 
     server = ServerSpec(
         type=str(raw_server.get("type", "http")),
+        protocol=str(raw_server.get("protocol", "auto")),
         url=raw_server.get("url"),
         command=command,
         env={str(k): str(v) for k, v in (raw_server.get("env") or {}).items()},
@@ -507,6 +545,14 @@ def load_config(name_or_path: str) -> BridgeConfig:
 # Validation
 # ---------------------------------------------------------------------------
 
+def _looks_like_revision(value: str | None) -> bool:
+    """Whether ``value`` is a ``YYYY-MM-DD`` protocol revision string."""
+    if not value or len(value) != 10 or value[4] != "-" or value[7] != "-":
+        return False
+    digits = value[:4] + value[5:7] + value[8:]
+    return digits.isdigit()
+
+
 def validate_config(cfg: BridgeConfig) -> list[str]:
     """Return a list of human-readable validation errors (empty == valid)."""
     errors: list[str] = []
@@ -520,6 +566,16 @@ def validate_config(cfg: BridgeConfig) -> list[str]:
         errors.append("server.command or server.npm is required for transport 'stdio'")
     if s.type == "cli" and not s.tools_from:
         errors.append("server.tools_from is required for transport 'cli'")
+
+    # ``server.protocol`` selects the era: a keyword (auto/modern/legacy) or an
+    # explicit ``YYYY-MM-DD`` revision. Reject anything else so a typo surfaces
+    # instead of being silently treated as auto.
+    proto = (s.protocol or "auto").lower()
+    if proto not in PROTOCOL_KEYWORDS and not _looks_like_revision(s.protocol):
+        errors.append(
+            f"server.protocol '{s.protocol}' must be one of {PROTOCOL_KEYWORDS} "
+            f"or an explicit YYYY-MM-DD revision"
+        )
 
     # The bridge injects via the transport's native mechanism: header for http,
     # env for stdio. ``inject`` is parsed but the transport ultimately decides, so

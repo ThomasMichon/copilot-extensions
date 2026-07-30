@@ -8,6 +8,12 @@
 server:
   type: http                       # http | stdio
   url: https://mcp.dev.azure.com/your-org
+  protocol: auto                   # auto | modern | legacy | <YYYY-MM-DD>
+                                   #   MCP era to speak with the upstream. auto (default)
+                                   #   probes server/discover and falls back to the legacy
+                                   #   initialize handshake; modern forces 2026-07-28
+                                   #   (per-request _meta, no session); legacy forces the
+                                   #   handshake. See README -> "Protocol versions (MCP 2.x)".
   # For a stdio upstream instead:
   # type: stdio
   # command: ["some-mcp-server", "--flag"]

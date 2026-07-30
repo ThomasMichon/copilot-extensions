@@ -25,6 +25,7 @@ import asyncio
 import logging
 
 from . import __version__
+from . import protocol as proto
 from .auth import build_injector
 from .config import BridgeConfig, ToolFilter
 from .decorators._catalog import fetch_all_tools
@@ -34,10 +35,15 @@ from .transports import Transport, build_transport
 
 log = logging.getLogger("agent-mcp.client")
 
-# The MCP protocol revision we advertise in ``initialize``. Servers negotiate
-# down if they speak an older one; this matches the revision the bridge's own
-# clients use in practice.
-PROTOCOL_VERSION = "2025-06-18"
+# The client identity stamped on the legacy ``initialize`` and on every modern
+# request's ``_meta`` (``io.modelcontextprotocol/clientInfo``).
+CLIENT_INFO = {"name": "agent-mcp", "version": __version__}
+
+# Legacy handshake revision, retained as a module constant for backward
+# compatibility. Era selection now lives in :mod:`agent_mcp.protocol`: a
+# one-shot negotiates modern (per-request ``_meta``) vs. legacy (``initialize``)
+# based on the bridge's ``server.protocol`` and a ``server/discover`` probe.
+PROTOCOL_VERSION = proto.LEGACY
 
 
 class UpstreamError(RuntimeError):
@@ -86,6 +92,11 @@ class OneShotSession:
         self._client: UpstreamClient | None = None
         self._ctx: BridgeContext | None = None
         self._server_info: dict = {}
+        # Negotiated era: ``_modern`` True once we've settled on a per-request
+        # metadata revision; ``_protocol_version`` is the concrete revision we
+        # then stamp on / speak.
+        self._modern: bool = False
+        self._protocol_version: str = proto.LEGACY
 
     async def __aenter__(self) -> OneShotSession:
         injector = build_injector(self.cfg)
@@ -100,7 +111,7 @@ class OneShotSession:
 
         await transport.start()
         try:
-            await self._initialize()
+            await self._negotiate()
         except BaseException:
             # __aexit__ is not called when __aenter__ raises, so tear the
             # transport down here or a spawned upstream child would leak.
@@ -121,16 +132,109 @@ class OneShotSession:
             finally:
                 await transport.aclose()
 
-    async def _initialize(self) -> None:
+    async def _negotiate(self) -> None:
+        """Settle the upstream's protocol era before any list/call.
+
+        ``server.protocol`` forces an era when set (``modern``/``legacy`` or an
+        explicit revision); otherwise (``auto``) we probe with
+        ``server/discover`` and fall back to the legacy ``initialize`` handshake
+        on any non-modern outcome, per the spec's stdio/HTTP fallback rules.
+        """
+        forced = self.cfg.server.forced_version()
+        if forced is not None:
+            if proto.is_modern(forced):
+                self._enter_modern(forced)
+            else:
+                await self._legacy_initialize(forced)
+            return
+        await self._auto_negotiate()
+
+    async def _auto_negotiate(self) -> None:
+        """Probe with ``server/discover``; fall back to ``initialize`` on legacy.
+
+        Three outcomes (spec): a ``DiscoverResult`` -> modern; a recognized
+        ``UnsupportedProtocolVersionError`` -> modern (pick a version it lists);
+        any other error **or a timeout** -> legacy, fall back to the handshake.
+        The fallback must not be keyed to one error code.
+        """
+        req = {
+            "jsonrpc": "2.0",
+            "id": self._need_client().new_id(),
+            "method": "server/discover",
+            "params": {"_meta": proto.client_meta(proto.MODERN, CLIENT_INFO)},
+        }
+        try:
+            resp = await self._request(req)
+        except UpstreamError:
+            # No response within the timeout -> treat as a legacy server.
+            await self._legacy_initialize(proto.LEGACY)
+            return
+
+        if isinstance(resp, dict) and self._is_discover_result(resp.get("result")):
+            result = resp["result"]
+            version = self._pick_version(result.get("supportedVersions"))
+            meta = result.get("_meta") or {}
+            info = meta.get(proto.META_SERVER_INFO)
+            if isinstance(info, dict):
+                self._server_info = info
+            self._enter_modern(version)
+            return
+
+        if isinstance(resp, dict) and proto.is_unsupported_version_error(resp):
+            data = (resp.get("error") or {}).get("data") or {}
+            version = self._pick_version(data.get("supported"))
+            self._enter_modern(version)
+            return
+
+        # Any other outcome -- a JSON-RPC error, or an empty/ill-formed result a
+        # legacy server returns for the unknown ``server/discover`` method -- means
+        # the server is legacy. Fall back to the ``initialize`` handshake.
+        await self._legacy_initialize(proto.LEGACY)
+
+    @staticmethod
+    def _is_discover_result(result: object) -> bool:
+        """Whether a ``server/discover`` result is a well-formed ``DiscoverResult``.
+
+        Requires the ``supportedVersions`` list: a legacy server that answers the
+        unknown method with an empty ``{}`` result must **not** be mistaken for a
+        modern one (that would skip the handshake and lose ``serverInfo``).
+        """
+        return isinstance(result, dict) and isinstance(
+            result.get("supportedVersions"), list)
+
+    def _pick_version(self, supported: object) -> str:
+        """Choose a mutually supported version from a server's advertised list.
+
+        Prefers our own newest-first :data:`SUPPORTED_VERSIONS` order; falls back
+        to the server's first entry, then to :data:`MODERN` when nothing overlaps
+        (we probed modern, so proceed optimistically).
+        """
+        server_versions = [v for v in supported if isinstance(v, str)] \
+            if isinstance(supported, list) else []
+        for ours in proto.SUPPORTED_VERSIONS:
+            if ours in server_versions:
+                return ours
+        return server_versions[0] if server_versions else proto.MODERN
+
+    def _enter_modern(self, version: str) -> None:
+        """Record that the upstream speaks modern ``version`` (no handshake)."""
+        self._modern = True
+        self._protocol_version = version
+        log.debug("upstream negotiated modern protocol %s", version)
+
+    async def _legacy_initialize(self, version: str) -> None:
+        """Run the legacy ``initialize`` / ``notifications/initialized`` handshake."""
+        self._modern = False
+        self._protocol_version = version
         client = self._need_client()
         init_req = {
             "jsonrpc": "2.0",
             "id": client.new_id(),
             "method": "initialize",
             "params": {
-                "protocolVersion": PROTOCOL_VERSION,
+                "protocolVersion": version,
                 "capabilities": {},
-                "clientInfo": {"name": "agent-mcp", "version": __version__},
+                "clientInfo": CLIENT_INFO,
             },
         }
         resp = await self._request(init_req)
@@ -142,6 +246,15 @@ class OneShotSession:
                 self._server_info = result.get("serverInfo") or {}
         # The initialized notification has no id and expects no reply.
         await self._request({"jsonrpc": "2.0", "method": "notifications/initialized"})
+
+    def _prepare(self, msg: dict) -> dict:
+        """Stamp modern ``_meta`` on an outgoing request when the era is modern.
+
+        A no-op in legacy mode, so the same list/call code path serves both eras.
+        """
+        if self._modern:
+            proto.inject_client_meta(msg, self._protocol_version, CLIENT_INFO)
+        return msg
 
     def _need_client(self) -> UpstreamClient:
         if self._client is None:
@@ -169,12 +282,22 @@ class OneShotSession:
 
     async def _paginated_request(self, msg: dict) -> dict | None:
         """The ``Next``-shaped callable handed to :func:`fetch_all_tools`."""
-        return await self._request(msg)
+        return await self._request(self._prepare(msg))
 
     @property
     def server_info(self) -> dict:
-        """The upstream's ``serverInfo`` from the initialize result (may be empty)."""
+        """The upstream's ``serverInfo`` from initialize/discover (may be empty)."""
         return self._server_info
+
+    @property
+    def protocol_version(self) -> str:
+        """The negotiated upstream protocol revision."""
+        return self._protocol_version
+
+    @property
+    def is_modern(self) -> bool:
+        """Whether the upstream negotiated a modern (per-request metadata) era."""
+        return self._modern
 
     async def list_tools(self) -> list[dict]:
         """Fetch the full (paginated) upstream catalog, honoring the tool filter."""
@@ -198,7 +321,7 @@ class OneShotSession:
             "method": "tools/call",
             "params": {"name": name, "arguments": arguments or {}},
         }
-        resp = await self._request(req)
+        resp = await self._request(self._prepare(req))
         if not isinstance(resp, dict):
             raise UpstreamError(f"no response for tools/call '{name}'")
         if "error" in resp:

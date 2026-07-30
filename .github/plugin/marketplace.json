@@ -35,8 +35,8 @@
     },
     {
       "name": "agent-mcp",
-      "description": "Swiss-army MCP bridge - wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP, inject host credentials, and apply a decorator stack (filter, rename, defer, code-mode, storage, transform, gate)",
-      "version": "0.2.0-dev20",
+      "description": "Swiss-army MCP bridge - wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP, inject host credentials, and apply a decorator stack (filter, rename, defer, code-mode, storage, transform, gate). Dual-era: speaks modern MCP 2.x (2026-07-28) and the legacy handshake, in both directions.",
+      "version": "0.2.0-dev21",
       "source": "plugins/agent-mcp"
     },
     {
