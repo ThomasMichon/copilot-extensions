@@ -22,17 +22,6 @@ import time
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from agent_index.chunking import get_chunker
-from agent_index.index_config import ModelProfile, IndexConfig
-from agent_index.engine.client import EngineClient, EngineUnavailableError
-from agent_index.engine.lifecycle import ensure_engine, stop_engine
-from agent_index.indexing.manifest import CrawlManifest, CrawlStats, DeletedFile
-from agent_index.indexing.path_index import PathIndex
-from agent_index.indexing.runner import IndexingCancelled
-from agent_index.indexing.state import IndexState
-from agent_index.sources import get_connector
-from agent_index.store.multi_model_store import MultiModelStore
-
 # UTF-8 stdio so human-facing status glyphs render safely (Rule B, #769).
 _utf8_sys = __import__("sys")
 _utf8_sys.stdout.reconfigure(encoding="utf-8")
@@ -40,15 +29,28 @@ _utf8_sys.stderr.reconfigure(encoding="utf-8")
 
 if TYPE_CHECKING:
     from agent_index.chunking.base import Chunk
+    from agent_index.engine.client import EngineClient
+    from agent_index.index_config import IndexConfig, ModelProfile
+    from agent_index.indexing.manifest import CrawlManifest
+    from agent_index.indexing.path_index import PathIndex
     from agent_index.indexing.runner import ProgressCallback
+    from agent_index.indexing.state import IndexState
     from agent_index.sources.base import FileEntry
+    from agent_index.store.multi_model_store import MultiModelStore
 
 logger = logging.getLogger(__name__)
 
 STREAM_BATCH_SIZE = 500  # chunks per embed+store batch - caps peak RAM
 
-# Phase 2b will register built-in forge sources (files/commits/issues/PRs).
-ALL_SOURCES: list[str] = []
+
+def configured_sources() -> list[str]:
+    """Return the configured default source list for indexing."""
+    raw = os.environ.get("AGENT_INDEX_SOURCES")
+    if raw:
+        sources = [source.strip() for source in raw.split(",") if source.strip()]
+        if sources:
+            return sources
+    return ["git"]
 
 
 def run_reindex(
@@ -67,6 +69,14 @@ def run_reindex(
     Returns:
         Dict with keys: chunks_total, chunks_added, chunks_deleted, files_crawled.
     """
+    from agent_index.engine.client import EngineClient
+    from agent_index.engine.lifecycle import ensure_engine, stop_engine
+    from agent_index.index_config import IndexConfig
+    from agent_index.indexing.path_index import PathIndex
+    from agent_index.indexing.runner import IndexingCancelled
+    from agent_index.indexing.state import IndexState
+    from agent_index.store.multi_model_store import MultiModelStore
+
     config = IndexConfig()
     config.ensure_dirs()
 
@@ -101,7 +111,7 @@ def run_reindex(
 
     sources_to_index: list[str]
     if source is None:
-        sources_to_index = list(ALL_SOURCES)
+        sources_to_index = configured_sources()
     else:
         sources_to_index = [source]
 
@@ -357,6 +367,9 @@ def _crawl_source(
     For incremental: list current paths (cheap), diff for deletions,
     then discover changed files for upserts.
     """
+    from agent_index.indexing.manifest import CrawlManifest, CrawlStats, DeletedFile
+    from agent_index.sources import get_connector
+
     connector = get_connector(source_name)
     commit = connector.current_commit()
 
@@ -435,6 +448,8 @@ def _embed_and_store_files(
 
     Returns total chunks stored.
     """
+    from agent_index.chunking import get_chunker
+
     batch: list[Chunk] = []
     total_chunks = 0
     total_stored = 0
@@ -504,6 +519,8 @@ def _embed_and_store_batch(
     based on ``ModelProfile.content_types``.  Chunks whose type is not
     claimed by any profile are sent to all models as a fallback.
     """
+    from agent_index.engine.client import EngineUnavailableError
+
     # Pre-compute the union of all configured content types so we can
     # detect "unclaimed" chunk types and route them to every model.
     all_claimed_types: frozenset[str] = frozenset()

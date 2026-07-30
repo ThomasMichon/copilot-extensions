@@ -1,0 +1,132 @@
+from __future__ import annotations
+
+import json
+from types import SimpleNamespace
+
+from agent_index import __main__ as cli
+
+
+def _hit(chunk_id: str = "chunk-1") -> SimpleNamespace:
+    return SimpleNamespace(
+        chunk_id=chunk_id,
+        score=0.75,
+        file_path="src/example.py",
+        line_start=3,
+        line_end=7,
+        source="git:repo",
+        chunk_type="code",
+        language="python",
+        content="def example(): pass",
+    )
+
+
+def test_search_dispatches_and_emits_json(monkeypatch, capsys) -> None:
+    from agent_index.search import engine as search_engine
+
+    calls = []
+
+    class FakeEngine:
+        def search(self, query: str, **kwargs):
+            calls.append((query, kwargs))
+            return [_hit()]
+
+    monkeypatch.setattr(search_engine, "create_search_engine", lambda: FakeEngine())
+
+    rc = cli.main([
+        "search",
+        "needle",
+        "--source",
+        "git:repo",
+        "--language",
+        "python",
+        "--repo",
+        "repo",
+        "--limit",
+        "3",
+        "--json",
+    ])
+
+    assert rc == 0
+    assert calls == [
+        (
+            "needle",
+            {"limit": 3, "source": "git:repo", "language": "python", "repo": "repo"},
+        )
+    ]
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == [
+        {
+            "id": "chunk-1",
+            "chunk_id": "chunk-1",
+            "score": 0.75,
+            "file_path": "src/example.py",
+            "line_start": 3,
+            "line_end": 7,
+            "source": "git:repo",
+            "chunk_type": "code",
+            "language": "python",
+            "content": "def example(): pass",
+        }
+    ]
+
+
+def test_similar_dispatches_and_emits_json(monkeypatch, capsys) -> None:
+    from agent_index.search import engine as search_engine
+
+    calls = []
+
+    class FakeEngine:
+        def find_similar(self, chunk_id: str, **kwargs):
+            calls.append((chunk_id, kwargs))
+            return [_hit("nearby")]
+
+    monkeypatch.setattr(search_engine, "create_search_engine", lambda: FakeEngine())
+
+    rc = cli.main(["similar", "chunk-1", "--source", "git:repo", "--limit", "2"])
+
+    assert rc == 0
+    assert calls == [("chunk-1", {"limit": 2, "source": "git:repo"})]
+    payload = json.loads(capsys.readouterr().out)
+    assert payload[0]["id"] == "nearby"
+    assert payload[0]["chunk_id"] == "nearby"
+
+
+def test_index_dispatches_and_emits_json(monkeypatch, capsys) -> None:
+    from agent_index.indexing import engine as indexing_engine
+
+    calls = []
+
+    def fake_run_reindex(*, full: bool, source: str | None, progress_cb=None):
+        calls.append({"full": full, "source": source, "progress_cb": progress_cb})
+        return {"chunks_total": 4, "chunks_deleted": 1, "files_crawled": 2}
+
+    monkeypatch.setattr(indexing_engine, "run_reindex", fake_run_reindex)
+
+    rc = cli.main(["index", "--full", "--source", "git:repo"])
+
+    assert rc == 0
+    assert calls == [{"full": True, "source": "git:repo", "progress_cb": None}]
+    assert json.loads(capsys.readouterr().out) == {
+        "chunks_total": 4,
+        "chunks_deleted": 1,
+        "files_crawled": 2,
+    }
+
+
+def test_unavailable_search_emits_clean_json_error(monkeypatch, capsys) -> None:
+    from agent_index.search import engine as search_engine
+
+    def raise_unavailable():
+        raise RuntimeError("index unavailable")
+
+    monkeypatch.setattr(search_engine, "create_search_engine", raise_unavailable)
+
+    rc = cli.main(["search", "needle", "--json"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert rc == 1
+    assert payload["hits"] == []
+    assert "RuntimeError: index unavailable" == payload["error"]
+    assert "Traceback" not in captured.out
+    assert "Traceback" not in captured.err

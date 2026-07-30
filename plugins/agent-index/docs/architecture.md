@@ -78,3 +78,33 @@ Deployment-specific connectors, secrets bootstrap, and server surfaces from the
 source service are intentionally excluded; a downstream superset provides those
 on top of this reusable engine.
 
+
+## Query + indexing surface (Phase 2c)
+
+Phase 2c exposes the ported search/indexing core through both the CLI and the
+local service API:
+
+- `agent-index index [--source S] [--full]` runs the indexing pipeline and emits a
+  JSON summary. When `--source` is omitted, the pipeline indexes the configured
+  default sources from `AGENT_INDEX_SOURCES` (comma-separated, for example
+  `git:myrepo,github:owner/repo`) or, when unset, the local git checkout (`git`).
+- `agent-index search "<query>" [--source S] [--language L] [--repo R]
+  [--limit N] [--json]` returns JSON hits by default for non-interactive callers.
+- `agent-index similar <chunk_id> [--limit N] [--source S]` returns JSON nearest
+  neighbors for an indexed chunk.
+- `GET /search?q=<query>&source=&language=&repo=&limit=10` returns
+  `{query, available, hits}`.
+- `GET /similar?id=<chunk_id>&limit=10` returns `{id, available, hits}`.
+- `POST /reindex` starts a best-effort background reindex when the optional
+  indexing dependencies are installed, returning `{accepted: true}` immediately.
+
+The query surface degrades cleanly: missing optional dependencies, an unavailable
+store, or an empty/unbuilt index produce JSON error payloads with `hits: []` (and
+HTTP 200 from the service) rather than raw tracebacks or service crashes.
+
+Query-time embedding runs in-process on CPU by default, so search does not need a
+warm accelerator. Indexing is heavier: it embeds batches through the on-demand GPU
+engine subprocess and stores them in the durable index under `~/.agent-index/data/`.
+Full end-to-end runtime validation of the optional stack (`torch`, GPU access,
+LanceDB) is therefore performed on a deployment host that has those dependencies,
+while development tests mock the store and embedder surfaces.
