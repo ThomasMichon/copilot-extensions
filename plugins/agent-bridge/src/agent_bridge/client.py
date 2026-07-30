@@ -514,6 +514,11 @@ class BridgeClient:
             body["worktree_id"] = worktree_id
         if reclaim:
             body["reclaim"] = True
+        # Always declare this client's HTTP contract version so a (cross-host)
+        # receiver can gate capability across version skew (dotfiles #632).
+        from .protocol import HTTP_PROTOCOL_VERSION
+
+        body["protocol_version"] = HTTP_PROTOCOL_VERSION
         return self._request("POST", "/api/v1/sessions", body) or {}
 
     def submit_prompt(self, session_id: str, prompt: str) -> dict[str, Any]:

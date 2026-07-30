@@ -132,3 +132,41 @@ def test_provider_without_protocol_version_still_registers(tmp_path):
         listing = c.get("/api/v1/providers").json()["providers"]
     codespaces = next(p for p in listing if p["name"] == "codespaces")
     assert codespaces["protocol_version"] is None
+
+
+# -- Fabric session-create handshake -----------------------------------------
+
+
+def test_start_session_response_advertises_daemon_version():
+    from agent_bridge.models import SessionStatus, StartSessionResponse
+
+    # Defaulted so every construction site carries the daemon's version.
+    resp = StartSessionResponse(
+        session_id="s1", name="n1", status=SessionStatus.IDLE,
+    )
+    assert resp.protocol_version == HTTP_PROTOCOL_VERSION
+    assert resp.min_protocol_version == HTTP_PROTOCOL_MIN_SUPPORTED
+
+
+def test_start_session_request_accepts_and_defaults_protocol_version():
+    from agent_bridge.models import StartSessionRequest
+
+    assert StartSessionRequest().protocol_version is None  # older caller omits it
+    assert StartSessionRequest(protocol_version=5).protocol_version == 5
+
+
+def test_client_start_session_declares_protocol_version():
+    captured: dict = {}
+
+    c = BridgeClient("http://127.0.0.1:0", "t")
+
+    def _fake_request(method, path, body=None, **kw):
+        captured["method"] = method
+        captured["path"] = path
+        captured["body"] = body
+        return {"session_id": "s1", "name": "n1", "status": "idle"}
+
+    c._request = _fake_request  # type: ignore[method-assign]
+    c.start_session(agent="dev6")
+    assert captured["path"] == "/api/v1/sessions"
+    assert captured["body"]["protocol_version"] == HTTP_PROTOCOL_VERSION

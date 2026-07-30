@@ -118,6 +118,14 @@ class TestSessionRoutes:
         data = resp.json()
         assert "session_id" in data
         assert data["status"] == "idle"
+        # The session-create response advertises the daemon's HTTP contract
+        # version so a cross-host caller can gate across skew (dotfiles #632).
+        from agent_bridge.protocol import (
+            HTTP_PROTOCOL_MIN_SUPPORTED,
+            HTTP_PROTOCOL_VERSION,
+        )
+        assert data["protocol_version"] == HTTP_PROTOCOL_VERSION
+        assert data["min_protocol_version"] == HTTP_PROTOCOL_MIN_SUPPORTED
 
         # Verify it shows in list
         resp2 = client.get("/api/v1/sessions")
