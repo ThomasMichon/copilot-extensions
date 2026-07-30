@@ -97,7 +97,9 @@ fi
 
 # -- Welcome banner -------------------------------------------------------
 BRANCH=$(git branch --show-current 2>/dev/null || echo "(detached)")
-DIRTY=$(git status --porcelain 2>/dev/null)
+# Guard against set -e: outside a git repo (e.g. Bare resume launches Copilot in
+# ~/), `git status` exits 128 and would abort this launcher before `exec copilot`.
+DIRTY=$(git status --porcelain 2>/dev/null || true)
 STATUS="clean"
 [[ -n "$DIRTY" ]] && STATUS="dirty"
 
