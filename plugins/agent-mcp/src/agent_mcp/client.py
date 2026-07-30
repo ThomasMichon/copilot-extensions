@@ -186,9 +186,14 @@ class OneShotSession:
             self._enter_modern(version)
             return
 
-        # Any other outcome -- a JSON-RPC error, or an empty/ill-formed result a
-        # legacy server returns for the unknown ``server/discover`` method -- means
-        # the server is legacy. Fall back to the ``initialize`` handshake.
+        # Any other outcome -- a JSON-RPC error (e.g. a legacy HTTP server's 400
+        # rejecting the modern MCP-Protocol-Version header, or a 404/parse error),
+        # or an empty/ill-formed result a legacy stdio server returns for the
+        # unknown ``server/discover`` method -- means the server is legacy. Fall
+        # back to the ``initialize`` handshake. This is an expected negotiation
+        # outcome, not an error (the transport logs the probe rejection at debug).
+        log.debug("server/discover did not yield a DiscoverResult -- "
+                  "falling back to the legacy initialize handshake")
         await self._legacy_initialize(proto.LEGACY)
 
     @staticmethod
