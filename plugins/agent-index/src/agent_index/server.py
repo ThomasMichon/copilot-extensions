@@ -2,24 +2,54 @@
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 import os
 import socket
 import sys
-from typing import Any
+from threading import Lock, Thread
+from typing import Annotated, Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
+from pydantic import BaseModel
 
 from . import __version__
 from .config import Config, data_dir, load_config, run_dir
+from .query_surface import format_error, hit_to_dict
 from .rendezvous import clear_endpoint, write_endpoint
 
 log = logging.getLogger("agent-index.server")
 
 
+class ReindexRequest(BaseModel):
+    """Request body for kicking a best-effort reindex."""
+
+    full: bool = False
+    source: str | None = None
+
+
 def build_app() -> FastAPI:
-    """Build the Phase 1 service shell application."""
+    """Build the agent-index service application."""
     app = FastAPI(title="agent-index", version=__version__)
+    cached_search_engine: Any | None = None
+    search_engine_lock = Lock()
+
+    def get_search_engine() -> Any:
+        nonlocal cached_search_engine
+        if cached_search_engine is not None:
+            return cached_search_engine
+        with search_engine_lock:
+            if cached_search_engine is not None:
+                return cached_search_engine
+            from agent_index.search import engine as search_engine
+
+            cached_search_engine = search_engine.create_search_engine()
+            return cached_search_engine
+
+    def mark_search_engine_failed() -> None:
+        nonlocal cached_search_engine
+        with search_engine_lock:
+            cached_search_engine = None
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -33,7 +63,75 @@ def build_app() -> FastAPI:
             "index": _index_status(),
         }
 
+    @app.get("/search")
+    def search(
+        q: str,
+        source: str | None = None,
+        language: str | None = None,
+        repo: str | None = None,
+        limit: int = 10,
+    ) -> dict[str, Any]:
+        try:
+            engine = get_search_engine()
+            hits = engine.search(
+                q,
+                limit=limit,
+                source=source,
+                language=language,
+                repo=repo,
+            )
+            return {"query": q, "available": True, "hits": [hit_to_dict(hit) for hit in hits]}
+        except Exception as exc:
+            mark_search_engine_failed()
+            log.debug("Search unavailable", exc_info=True)
+            return {"query": q, "available": False, "error": format_error(exc), "hits": []}
+
+    @app.get("/similar")
+    def similar(
+        chunk_id: Annotated[str, Query(alias="id")],
+        limit: int = 10,
+        source: str | None = None,
+    ) -> dict[str, Any]:
+        try:
+            engine = get_search_engine()
+            hits = engine.find_similar(chunk_id, limit=limit, source=source)
+            return {"id": chunk_id, "available": True, "hits": [hit_to_dict(hit) for hit in hits]}
+        except Exception as exc:
+            mark_search_engine_failed()
+            log.debug("Find-similar unavailable", exc_info=True)
+            return {"id": chunk_id, "available": False, "error": format_error(exc), "hits": []}
+
+    @app.post("/reindex")
+    def reindex(request: ReindexRequest | None = None) -> dict[str, Any]:
+        missing = _missing_indexing_dependencies()
+        if missing:
+            return {"accepted": False, "error": missing}
+        try:
+            from agent_index.indexing import engine as indexing_engine
+        except Exception as exc:
+            return {"accepted": False, "error": format_error(exc)}
+
+        full = request.full if request else False
+        source = request.source if request else None
+
+        def run() -> None:
+            try:
+                indexing_engine.run_reindex(full=full, source=source)
+            except Exception:
+                log.exception("Background reindex failed")
+
+        Thread(target=run, name="agent-index-reindex", daemon=True).start()
+        return {"accepted": True}
+
     return app
+
+
+def _missing_indexing_dependencies() -> str | None:
+    """Return a short missing-dependency message, or None when indexing can start."""
+    missing = [name for name in ("lancedb", "torch") if importlib.util.find_spec(name) is None]
+    if missing:
+        return f"missing optional indexing dependencies: {', '.join(missing)}"
+    return None
 
 
 def _index_status() -> dict[str, Any]:
