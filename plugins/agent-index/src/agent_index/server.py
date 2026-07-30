@@ -6,6 +6,7 @@ import logging
 import os
 import socket
 import sys
+from typing import Any
 
 from fastapi import FastAPI
 
@@ -26,14 +27,54 @@ def build_app() -> FastAPI:
 
     @app.get("/status")
     def status() -> dict:
-        # Phase 2: indexing engine status and ingest queue state land here.
         return {
             "plugin": "agent-index",
             "version": __version__,
-            "index": {"chunks": 0},
+            "index": _index_status(),
         }
 
     return app
+
+
+def _index_status() -> dict[str, Any]:
+    """Return real index counts when the optional store is available."""
+    try:
+        import lancedb
+
+        from .index_config import IndexConfig
+
+        cfg = IndexConfig(data_dir=data_dir())
+        lance_dir = cfg.lance_dir
+        if not lance_dir.exists():
+            return {"chunks": 0, "available": False, "tables": {}, "sources": {}}
+
+        db = lancedb.connect(str(lance_dir))
+        table_names = sorted(db.table_names())
+        tables: dict[str, int] = {}
+        sources: dict[str, int] = {}
+        for table_name in table_names:
+            try:
+                table = db.open_table(table_name)
+                tables[table_name] = int(table.count_rows())
+                if table_name == cfg.content_table and tables[table_name] > 0:
+                    rows = table.search().select(["source"]).limit(tables[table_name]).to_list()
+                    for row in rows:
+                        source = row.get("source")
+                        if source:
+                            sources[source] = sources.get(source, 0) + 1
+            except Exception:
+                log.debug("Failed to read index table %s", table_name, exc_info=True)
+                tables[table_name] = 0
+        chunks = tables.get(cfg.content_table, 0)
+        return {
+            "chunks": chunks,
+            "available": chunks > 0,
+            "tables": tables,
+            "sources": sources,
+        }
+    except Exception:
+        log.debug("Index status unavailable", exc_info=True)
+        return {"chunks": 0, "available": False, "tables": {}, "sources": {}}
 
 
 def serve(cfg: Config | None = None) -> None:
