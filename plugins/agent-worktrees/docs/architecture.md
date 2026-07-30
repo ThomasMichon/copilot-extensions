@@ -789,3 +789,40 @@ body, the inline row helpers are gone from the engine, and `build_body` routes t
 Tasks body through the component with its group sections pinned and the task titles
 rendered.
 
+**Fourth (and last) component -- the Worktrees list body (`WorktreesView`).** The
+picker's **primary** body -- the machine's worktree list -- is componentized last
+(#88 F5 slice 7), once the pattern was proven three times over. `build_body`'s
+`worktrees` branch now calls `self.worktrees_view.build(add, width, sel)` on a
+`WorktreesView` component (instantiated in `__init__` after `tasks_view`). It's the
+largest and most-coupled body: the New-worktree button row, the Active / Recent /
+Completed / Unowned section grouping, the multi-select checkbox gutter (glyph shown
+only in multi-select mode, the 2-cell gutter always reserved so the table never
+shifts), the Clean/Sync focus preview dimming, the layered focus + selection
+highlight (green-invert = focused *and* selected, plain invert = focused, grey bg =
+selected-but-cursor-moved), and the decorative live worktree-status-core pulse
+sub-lines. Like Tasks, this slice moves the **rendering** only: the multi-select
+*state* (`wt_sel` / `wt_anchor`) and its range/toggle behaviour stay on the engine
+because they thread deeply through the shared key-dispatch + focus machinery
+(`_dispatch_key`, `_reconcile_wt_sel`, range-select, focus tracking) -- which is
+exactly the `sel`/`stops` chrome the *final* native-focus step addresses -- so the
+component reads them (and the list data `current_list` / `list_records`, the
+predicates `_wt_multiselect_active` / `_cleanable`, the shared `_checkbox` glyph, and
+the chrome rows `tab_bar` / `new_worktree_row` / `active_button`) via `self._eng`.
+Behaviour is byte-for-byte unchanged -- the golden snapshot
+`tests/goldens/picker/worktrees_list.txt` matches without modification, and a guard
+test (`test_worktrees_view_component_renders_body`) asserts the component renders the
+body with the `("BTN", 0)` button row + one `("L", i)` stop per worktree and pinned
+group sections.
+
+**Body componentization complete (slices 1-7).** All four pivot bodies are now
+self-contained components -- `ProfilesView` (fully: render + state + behaviour + IO),
+`MaintenanceView` (render + selection state/behaviour), `TasksView` (render;
+read-only, no state), and `WorktreesView` (render; multi-select state kept on the
+engine). `build_body` is now just its `add` scaffold plus a four-way `_kind()`
+dispatch to `self.<view>.build(add, width, sel)` -- the monolithic
+render-everything-at-once blob is gone, and the moratorium held. What remains on the
+shared `sel`/`stops` model is the **chrome** (the top pivot tabs / machine row /
+button row) and the multi-select state that rides the key-dispatch machinery. Turning
+*that* residue into native Textual focus -- making each `build` a focusable widget --
+is the small final step, and may still be deferred as a judgement call per the
+vision's stability bias.
