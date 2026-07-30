@@ -99,7 +99,10 @@ core of the principles above; a reviewer checks a change against these.
   not a rebuild. Concurrent live versions are reconciled by drain-and-cutover +
   shared routing/port state, never by racing to overwrite one install — so a
   concurrent-update corruption (duplicate/broken daemons) cannot happen by
-  construction. Realized by the versioned-runtime primitive (`versioned_runtime.py`),
+  construction.   Realized by the versioned-runtime primitive (`versioned_runtime.py`), whose one
+  canonical source is `libs/versioned-runtime/versioned_runtime.py` (vendored
+  byte-identically into each plugin's `scripts/` by
+  `tools/sync-versioned-runtime.py`),
   it is the **default** for every Python runtime and **enforced** by
   `tools/check-install-contract.py` in CI (a runtime that skips the layout fails);
   opt out per-plugin with `AGENT_<NAME>_VERSIONED=0` or globally with
