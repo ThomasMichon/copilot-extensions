@@ -205,6 +205,34 @@ def test_router_none_default_drops_unmatched() -> None:
     assert router.route(_session("b", "owner/webapp")) is None
 
 
+def test_router_skip_sentinel_beats_default() -> None:
+    """A null-sink rule skips its origin without falling through to default."""
+    router = OriginRepoRouter(
+        [RouteRule("aperture-labs", None)], default_sink="dotfiles"
+    )
+    # aperture-labs-origin is dropped (skipped), NOT misfiled into dotfiles.
+    assert router.route(_session("a", "git@host:org/aperture-labs.git")) is None
+    # every other dotfiles-machine origin still defaults to dotfiles.
+    assert router.route(_session("b", "owner/webapp")) == "dotfiles"
+    assert router.route(_session("c", "owner/copilot-extensions")) == "dotfiles"
+    assert router.route(_session("d", None)) == "dotfiles"
+
+
+def test_group_by_day_drops_skipped_origin() -> None:
+    router = OriginRepoRouter(
+        [RouteRule("aperture-labs", None)], default_sink="dotfiles"
+    )
+    digests = group_by_day(
+        [
+            _session("a", "org/aperture-labs"),
+            _session("b", "owner/dotfiles"),
+        ],
+        router,
+    )
+    # only the dotfiles-origin session survives to a digest.
+    assert [(d.sink_id, len(d.sessions)) for d in digests] == [("dotfiles", 1)]
+
+
 def test_group_by_day_buckets_by_sink_and_day() -> None:
     router = OriginRepoRouter(
         [RouteRule("aperture-labs", "ap")], default_sink="dotfiles"
@@ -384,3 +412,31 @@ def test_manifest_writer_persists_manifest(tmp_path: Path) -> None:
     written = list((tmp_path / "manifests").glob("*.json"))
     assert len(written) == 1
     assert "dotfiles-2026-07-28.json" == written[0].name
+
+
+def test_factory_skip_repositories_builds_skip_rule(tmp_path: Path) -> None:
+    """The dotfiles v1 config: skip aperture-labs-origin, default -> dotfiles."""
+    import copy
+
+    from agent_logger.chronicle.factory import build_chronicler
+    from agent_logger.config import DEFAULTS, Config
+
+    data = copy.deepcopy(DEFAULTS)
+    data["chronicle"].update(
+        {
+            "enabled": True,
+            "corpus_root": str(tmp_path / "sessions"),
+            "db_path": str(tmp_path / "c.db"),
+            "manifests_dir": str(tmp_path / "m"),
+            "default_sink": "dotfiles",
+            "skip_repositories": ["aperture-labs"],
+            "sinks": {"dotfiles": {"repo_path": str(tmp_path / "repo")}},
+        }
+    )
+    cfg = Config(data, home=tmp_path)
+    chronicler = build_chronicler(cfg)
+    router = chronicler.router
+    # aperture-labs-origin skipped; everything else -> dotfiles.
+    assert router.route(_session("a", "org/aperture-labs")) is None
+    assert router.route(_session("b", "owner/webapp")) == "dotfiles"
+    assert "dotfiles" in chronicler.sinks
