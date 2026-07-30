@@ -46,6 +46,7 @@ def spawn_worker(
     agent: str = DEFAULT_WORKER_AGENT,
     coordinator_url: str,
     worker_id: str,
+    prompt: str | None = None,
     wait: bool = True,
     timeout: float | None = None,
 ) -> subprocess.CompletedProcess:
@@ -54,11 +55,20 @@ def spawn_worker(
     Runs ``agent-bridge create <agent> "<prompt>" [--no-wait]``. Raises
     :class:`BridgeUnavailable` if the agent-bridge CLI is not on PATH; the caller
     degrades by leaving the task queued.
+
+    ``prompt`` overrides the default worker seed (:func:`worker_prompt`). A caller
+    embodying a task headlessly with richer semantics -- e.g. the supervisor's
+    headless embody backend, which reuses the CLI autopilot seed so a
+    headless-embodied task is driven identically to a CLI-embodied one -- passes
+    the seed it wants delivered verbatim.
     """
     exe = shutil.which("agent-bridge")
     if exe is None:
         raise BridgeUnavailable("agent-bridge CLI not found on PATH")
-    prompt = worker_prompt(task_id, coordinator_url=coordinator_url, worker_id=worker_id)
+    if prompt is None:
+        prompt = worker_prompt(
+            task_id, coordinator_url=coordinator_url, worker_id=worker_id
+        )
     cmd = [exe, "create", agent, prompt]
     if not wait:
         cmd.append("--no-wait")

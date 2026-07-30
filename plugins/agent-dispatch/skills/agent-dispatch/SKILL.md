@@ -493,6 +493,16 @@ agent-dispatch create "Refactor the auth module" \
   when it judges the goal reached (**deferred completion** -- the task's
   `completed` state means the *work is done*, not that a baton was handed over).
 
+**Same body choice in the supervisor, keyed by label.** A persistent
+`agent-dispatch supervise` loop embodies via the **CLI autopilot** (`embody`) by
+default, but `--headless-label L` (repeatable; `--headless-agent` names the
+bridge agent) routes tasks carrying label `L` to the **headless bridge** body
+instead -- for **self-contained sweeps** that need no human attach (and whose
+seeded CLI session could otherwise race the input caret and never start). Only
+listed labels go headless; the rest stay CLI-first. Service knobs:
+`AGENT_DISPATCH_SUPERVISE_HEADLESS_LABELS` / `_HEADLESS_AGENT` in
+`supervisor.env`. See the design doc's "Per-label embody body" section.
+
 > **Cross-machine dispatch (Phase 8, SSH-push).** Add `--target-machine <Y>` to an
 > `embody` spawn to dispatch **on another machine**: `agent-dispatch create <task>
 > --target-machine borealis --spawn --spawn-backend embody`. Because

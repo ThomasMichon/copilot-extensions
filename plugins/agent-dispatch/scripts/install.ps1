@@ -1122,6 +1122,13 @@ AGENT_DISPATCH_SUPERVISE_INTERVAL=30
 AGENT_DISPATCH_SUPERVISE_MAX_CONCURRENT=1
 # Max failed spawn attempts before a task is dead-lettered (default 3; 0=disable):
 AGENT_DISPATCH_SUPERVISE_MAX_ATTEMPTS=3
+# Labels whose tasks embody as a HEADLESS agent-bridge ACP session (no mux, no
+# CLI-start-prompt) instead of a CLI autopilot -- comma- or space-separated. For
+# self-contained, bounded sweeps that need no human attach; unlisted labels stay
+# CLI-first. Each listed label must also appear in SUPERVISE_LABELS to be watched.
+AGENT_DISPATCH_SUPERVISE_HEADLESS_LABELS=
+# agent-bridge agent name used for headless embody bodies (default: task-worker):
+AGENT_DISPATCH_SUPERVISE_HEADLESS_AGENT=
 # Extra raw flags appended to the invocation (advanced; e.g. fleet mode:
 #   --pool host-a,host-b --origin lambda-core):
 AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=
@@ -1149,6 +1156,8 @@ AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=
 `$interval = '30'
 `$maxConcurrent = '1'
 `$maxAttempts = '3'
+`$headlessLabels = ''
+`$headlessAgent = ''
 `$extra = ''
 if (Test-Path `$envFile) {
     foreach (`$line in Get-Content `$envFile) {
@@ -1162,6 +1171,8 @@ if (Test-Path `$envFile) {
             'AGENT_DISPATCH_SUPERVISE_INTERVAL'       { if (`$v) { `$interval = `$v } }
             'AGENT_DISPATCH_SUPERVISE_MAX_CONCURRENT' { if (`$v) { `$maxConcurrent = `$v } }
             'AGENT_DISPATCH_SUPERVISE_MAX_ATTEMPTS'   { if (`$v) { `$maxAttempts = `$v } }
+            'AGENT_DISPATCH_SUPERVISE_HEADLESS_LABELS' { `$headlessLabels = `$v }
+            'AGENT_DISPATCH_SUPERVISE_HEADLESS_AGENT'  { `$headlessAgent = `$v }
             'AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS'     { `$extra = `$v }
         }
     }
@@ -1176,6 +1187,10 @@ if (-not `$haveLabel) {
     Write-Error 'agent-dispatch-supervisor: refusing to run with no opt-in label. A label-less supervisor would embody EVERY queued task. Set AGENT_DISPATCH_SUPERVISE_LABELS in supervisor.env.'
     exit 78  # EX_CONFIG
 }
+foreach (`$hl in (`$headlessLabels -split '[\s,]+')) {
+    if (`$hl) { `$argsList += @('--headless-label', `$hl) }
+}
+if (`$headlessAgent) { `$argsList += @('--headless-agent', `$headlessAgent) }
 if (`$extra) { `$argsList += (`$extra -split '\s+') }
 `$logFile = Join-Path `$PSScriptRoot 'supervise-service.log'
 try {
