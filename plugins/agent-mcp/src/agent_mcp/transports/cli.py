@@ -20,19 +20,23 @@ import asyncio
 import logging
 import os
 
+from .. import __version__
+from .. import protocol as proto
+from .._exec import resolve_spawn
 from ..auth.base import AuthInjector
 from ..cli_tools import CliTool, CliToolError, build_argv, load_cli_tools, tool_in_scope
 from ..config import BridgeConfig
-from .._exec import resolve_spawn
 from .base import Transport
 
 log = logging.getLogger("agent-mcp.transport.cli")
 
-PROTOCOL_VERSION = "2025-06-18"
+# The tool capability this responder advertises (both eras). ``listChanged`` is
+# False: the sidecar set is fixed for the life of the bridge.
+_CAPABILITIES = {"tools": {"listChanged": False}}
 
 # JSON-RPC error codes we return for local failures.
-_METHOD_NOT_FOUND = -32601
-_INTERNAL_ERROR = -32603
+_METHOD_NOT_FOUND = proto.METHOD_NOT_FOUND
+_INTERNAL_ERROR = proto.INTERNAL_ERROR
 
 
 def _result(request: dict, result: object) -> dict:
@@ -98,19 +102,59 @@ class CliTransport(Transport):
             resp = _error(msg, f"cli transport error: {exc}", _INTERNAL_ERROR)
         await self._emit_message(resp)
 
+    def _supported_versions(self) -> tuple[str, ...]:
+        """The protocol revisions this responder advertises.
+
+        ``auto`` exposes both eras (dual-era); a forced ``server.protocol``
+        narrows the responder to just that era/revision so the adapter can be
+        pinned (e.g. ``modern`` to advertise only ``2026-07-28``).
+        """
+        if self.cfg.server.protocol_is_auto:
+            return proto.SUPPORTED_VERSIONS
+        forced = self.cfg.server.forced_version()
+        return (forced,) if forced else proto.SUPPORTED_VERSIONS
+
+    def _server_info(self) -> dict:
+        return {"name": f"agent-mcp-cli:{self.cfg.name or 'bridge'}",
+                "version": __version__}
+
     async def _respond(self, method: str, msg: dict) -> dict:
+        supported = self._supported_versions()
+
+        # ``server/discover`` is the modern probe: always answer it (even for an
+        # unsupported requested version) so the client can learn what we speak.
+        if method == "server/discover":
+            return _result(msg, proto.discover_result(
+                self._server_info(), _CAPABILITIES, supported=supported))
+
+        # Modern requests self-describe their version in ``_meta``. Reject one we
+        # don't support with the standard error carrying our supported list.
+        requested = proto.request_protocol_version(msg)
+        if requested is not None and requested not in supported:
+            return proto.unsupported_version_error(msg, requested, supported)
+
         if method == "initialize":
+            # Legacy handshake: echo the negotiated version, or fall back to our
+            # newest supported one when the client's request isn't representable.
+            params = msg.get("params") or {}
+            asked = params.get("protocolVersion") if isinstance(params, dict) else None
+            negotiated = proto.negotiate(asked, supported) or supported[0]
             return _result(msg, {
-                "protocolVersion": PROTOCOL_VERSION,
-                "capabilities": {"tools": {"listChanged": False}},
-                "serverInfo": {"name": f"agent-mcp-cli:{self.cfg.name or 'bridge'}",
-                               "version": PROTOCOL_VERSION},
+                "protocolVersion": negotiated,
+                "capabilities": _CAPABILITIES,
+                "serverInfo": self._server_info(),
             })
         if method == "ping":
             return _result(msg, {})
         if method == "tools/list":
             tools = [t.mcp_dict() for t in self._tools.values()]
-            return _result(msg, {"tools": tools})
+            # Cacheable list result: the sidecar catalog is host-local and fixed
+            # for the bridge's lifetime, so advertise a short public cache hint.
+            return _result(msg, {
+                "tools": tools,
+                "ttlMs": proto.DEFAULT_TTL_MS,
+                "cacheScope": proto.DEFAULT_CACHE_SCOPE,
+            })
         if method == "tools/call":
             return await self._call(msg)
         return _error(msg, f"method not found: {method}", _METHOD_NOT_FOUND)

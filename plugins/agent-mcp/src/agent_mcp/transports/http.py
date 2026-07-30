@@ -2,9 +2,18 @@
 
 A Streamable HTTP + SSE upstream transport for the MCP bridge:
 the bearer/header is supplied by the configured :class:`AuthInjector` rather than
-hardcoded to a single auth command. Requests are serialized (one in flight at a time), the
-``Mcp-Session-Id`` header is captured and replayed, and a ``401`` triggers one
-auth refresh + retry.
+hardcoded to a single auth command. Requests are serialized (one in flight at a
+time) and a ``401`` triggers one auth refresh + retry.
+
+The transport is **dual-era**, classified per message from the request body
+(:mod:`agent_mcp.protocol`): a request that carries a modern
+``params._meta.io.modelcontextprotocol/protocolVersion`` is a *modern*
+(``2026-07-28``) request -- its metadata is mirrored into the ``MCP-Protocol-Version``,
+``Mcp-Method`` and ``Mcp-Name`` headers and no session is used; a request without
+it is *legacy* -- the ``Mcp-Session-Id`` header is captured from the response and
+replayed on subsequent requests. Because each message is classified
+independently, a client that probes modern then falls back to a legacy
+``initialize`` on the same transport works transparently.
 
 Uses the standard library (``urllib``) on a worker thread to avoid adding an
 HTTP dependency; the bridge is single-flight so blocking I/O off the event loop
@@ -19,6 +28,7 @@ import logging
 import urllib.error
 import urllib.request
 
+from .. import protocol as proto
 from .base import Transport
 from .sse import parse_sse_events
 
@@ -34,14 +44,21 @@ class HttpTransport(Transport):
         self._session_id: str | None = None
         self._lock = asyncio.Lock()
 
-    async def _base_headers(self) -> dict[str, str]:
+    async def _base_headers(self, msg: dict) -> dict[str, str]:
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
         }
         headers.update(self.cfg.headers)
         headers.update(await self.injector.headers())
-        if self._session_id:
+        version = proto.request_protocol_version(msg)
+        if version is not None:
+            # Modern: mirror the request's metadata into HTTP headers so gateways
+            # can route/authorize without parsing the body. Protocol-level
+            # sessions are retired in this era, so no ``Mcp-Session-Id``.
+            headers.update(proto.http_metadata_headers(msg, version))
+        elif self._session_id:
+            # Legacy: replay the session id captured from the handshake response.
             headers["Mcp-Session-Id"] = self._session_id
         return headers
 
@@ -60,7 +77,7 @@ class HttpTransport(Transport):
             await self._send_locked(msg)
 
     async def _send_locked(self, msg: dict, *, retried: bool = False) -> None:
-        headers = await self._base_headers()
+        headers = await self._base_headers(msg)
         body = json.dumps(msg).encode("utf-8")
         try:
             status, resp_headers, text = await asyncio.to_thread(self._post, headers, body)
