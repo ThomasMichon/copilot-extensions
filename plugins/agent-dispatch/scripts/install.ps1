@@ -912,13 +912,13 @@ try {
 # and would kill the long-lived coordinator on its very first log line (observed
 # on Lambda-Core: task launched, banner written, no listener). Drop to
 # 'Continue' for the serve invocation so stderr is captured, never fatal.
-`$ErrorActionPreference = 'Continue'
 `$_venv = '$($LinkDir -replace "'","''")'
 `$_py = '$($LinkPython -replace "'","''")'
 # Resolve the .venv junction's target and launch the slot python DIRECTLY -- never
 # *traverse* the junction (a RedirectionGuard task context is blocked from that,
 # though it may still *read* the target) -- dotfiles #637. Plain-dir keeps `$_py.
 try { `$_t = (Get-Item -LiteralPath `$_venv -Force -ErrorAction Stop).Target; if (`$_t) { `$_py = Join-Path (@(`$_t)[0]) 'Scripts\python.exe' } } catch {}
+`$ErrorActionPreference = 'Continue'
 & `$_py -m agent_dispatch serve 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
 "@
     [System.IO.File]::WriteAllText($launcher, $launcherBody, $utf8NoBom)
@@ -1185,12 +1185,12 @@ try {
 } catch { }
 "[`$(Get-Date -Format o)] agent-dispatch supervisor launch (labels=`$labels interval=`$interval)" |
     Out-File -FilePath `$logFile -Append -Encoding utf8
-`$ErrorActionPreference = 'Continue'
 `$_venv = '$($LinkDir -replace "'","''")'
 `$_py = '$($LinkPython -replace "'","''")'
 # Resolve the .venv junction's target and launch the slot python DIRECTLY (never
 # traverse the junction; reading its target is allowed) -- RedirectionGuard #637.
 try { `$_t = (Get-Item -LiteralPath `$_venv -Force -ErrorAction Stop).Target; if (`$_t) { `$_py = Join-Path (@(`$_t)[0]) 'Scripts\python.exe' } } catch {}
+`$ErrorActionPreference = 'Continue'
 & `$_py -m agent_dispatch @argsList 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
 "@
     [System.IO.File]::WriteAllText($launcher, $launcherBody, $utf8NoBom)

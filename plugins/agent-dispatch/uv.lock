@@ -12,7 +12,7 @@ resolution-markers = [
 
 [[package]]
 name = "agent-dispatch"
-version = "0.1.0.dev90"
+version = "0.1.0.dev91"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
