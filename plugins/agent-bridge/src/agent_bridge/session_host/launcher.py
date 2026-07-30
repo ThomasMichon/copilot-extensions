@@ -83,6 +83,7 @@ def launch_session_host(
     ready_timeout: float = 30.0,
     nonce: str = "",
     unexpected_reap_seconds: float = 60.0,
+    active_reap_seconds: float = 0.0,
 ) -> HostHandle:
     """Spawn a **survivable** Session Host process that owns ``child_argv``.
 
@@ -106,6 +107,7 @@ def launch_session_host(
     if cwd:
         host_argv += ["--cwd", cwd]
     host_argv += ["--unexpected-reap-seconds", str(unexpected_reap_seconds)]
+    host_argv += ["--active-reap-seconds", str(active_reap_seconds)]
     host_argv += ["--", *child_argv]
 
     child_env = os.environ.copy()
@@ -225,6 +227,7 @@ async def run_host(
     ready: asyncio.Event | None = None,
     nonce: str = "",
     unexpected_reap_seconds: float = 60.0,
+    active_reap_seconds: float = 0.0,
 ) -> None:
     """Spawn the child, serve the reattachable endpoint, run until closed.
 
@@ -232,12 +235,16 @@ async def run_host(
     connect-auth: the host then refuses any front that does not present it.
     ``unexpected_reap_seconds`` bounds how long an idle, front-less child lingers
     after an *unexpected* disconnect before the host self-reaps it (0 disables).
+    ``active_reap_seconds`` bounds how long a still-active (mid-turn) front-less
+    child is held after an unexpected disconnect before the host lets it go (0
+    disables -- an active child then lives until its own stop).
     """
     apply_host_survival()
     nonce = nonce or os.environ.get(_NONCE_ENV, "")
     child = await _spawn_child(child_argv, cwd, env)
     host = SessionHost(child, nonce=nonce,
-                       unexpected_reap_seconds=unexpected_reap_seconds)
+                       unexpected_reap_seconds=unexpected_reap_seconds,
+                       active_reap_seconds=active_reap_seconds)
     bound_port = await host.serve(port=port)
     if state_file is not None:
         Path(state_file).write_text(json.dumps({
@@ -275,6 +282,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--state-file", default=None)
     ap.add_argument("--cwd", default=None)
     ap.add_argument("--unexpected-reap-seconds", type=float, default=60.0)
+    ap.add_argument("--active-reap-seconds", type=float, default=0.0)
     ap.add_argument("child", nargs=argparse.REMAINDER,
                     help="child command after `--` (e.g. -- copilot --acp --stdio)")
     args = ap.parse_args(argv)
@@ -288,7 +296,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         asyncio.run(run_host(child_argv, port=args.port, state_file=args.state_file,
                              cwd=args.cwd,
-                             unexpected_reap_seconds=args.unexpected_reap_seconds))
+                             unexpected_reap_seconds=args.unexpected_reap_seconds,
+                             active_reap_seconds=args.active_reap_seconds))
     except KeyboardInterrupt:
         return 0
     return 0

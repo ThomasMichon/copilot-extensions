@@ -619,6 +619,23 @@ class ServiceConfig(BaseModel):
         "the unexpected-grace timer (the graceful fast path still acts). Only "
         "meaningful when session_host_enabled is True.",
     )
+    session_host_active_reap_seconds: int = Field(
+        default=1800,
+        description="Bounded keep-alive for an ACTIVE (mid-turn / active "
+        "background-work) child after an UNEXPECTED disconnect (#145). The "
+        "unexpected-grace above only frees an already-idle child; a still-active "
+        "child is otherwise held until its own stop. When > 0, a detached Session "
+        "Host holds a mid-turn front-less child for this many seconds so a "
+        "reconnecting front (laptop wake, tunnel re-established, SSH re-attached) "
+        "can resume the in-flight turn/tool call, and only after the window "
+        "elapses with no reattach does the host let the child go. The session "
+        "stays resumable (fresh child + load_session replay), so letting go loses "
+        "no persisted work. Default 1800s (30 min): a severed connection during a "
+        "long build/tool call keeps the task alive for half an hour to give the "
+        "client a chance to reconnect and recover control. A reattach cancels the "
+        "timer. 0 disables (legacy: an active child lives indefinitely). Only "
+        "meaningful when session_host_enabled is True.",
+    )
     live_stall_interrupt_after_s: int = Field(
         default=900,
         description="Live-stall interrupt threshold (#2427, Phase 5). When > 0, "

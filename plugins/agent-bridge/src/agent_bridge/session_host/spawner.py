@@ -114,11 +114,15 @@ class LocalSpawner:
 
     boundary = "local"
 
-    def __init__(self, *, unexpected_reap_seconds: float = 60.0) -> None:
+    def __init__(self, *, unexpected_reap_seconds: float = 60.0,
+                 active_reap_seconds: float = 0.0) -> None:
         # Bound on how long an idle, front-less child lingers after an unexpected
         # disconnect before the host self-reaps it (#48). Handed to the launched
         # host process. 0 disables the unexpected-grace self-reap.
         self._unexpected_reap_seconds = unexpected_reap_seconds
+        # Bound on how long an ACTIVE (mid-turn) front-less child is held after
+        # an unexpected disconnect before the host lets it go (#145). 0 disables.
+        self._active_reap_seconds = active_reap_seconds
 
     async def spawn(
         self,
@@ -132,6 +136,7 @@ class LocalSpawner:
         handle = await asyncio.to_thread(
             launch_session_host, child_argv, cwd=cwd, env=env, nonce=nonce,
             unexpected_reap_seconds=self._unexpected_reap_seconds,
+            active_reap_seconds=self._active_reap_seconds,
         )
         return SpawnedHost(
             local_port=handle.port,
@@ -191,6 +196,8 @@ def build_remote_launch(
     *,
     nonce: str = "",
     cwd: str | None = None,
+    unexpected_reap_seconds: float = 60.0,
+    active_reap_seconds: float = 0.0,
 ) -> str:
     """Assemble the far-side bash command that launches a survivable Host.
 
@@ -198,7 +205,10 @@ def build_remote_launch(
     so it **outlives the channel closing** (the POSIX survival seam, validated in
     the #145 live proof), while ``PR_SET_PDEATHSIG`` inside the Host still ties
     the copilot child's life to the Host. The nonce rides in via the env (off the
-    command line). Paths are POSIX (the far side is Linux).
+    command line). ``unexpected_reap_seconds`` / ``active_reap_seconds`` bound how
+    long a front-less idle / active child is held before the detached Host lets
+    it go (so a reconnecting front can resume). Paths are POSIX (the far side is
+    Linux).
     """
     import posixpath
 
@@ -208,6 +218,8 @@ def build_remote_launch(
     host_cmd = (
         f"python3 {shlex.quote(bundle_remote)} --port 0 "
         f"--state-file {shlex.quote(state_remote)} "
+        f"--unexpected-reap-seconds {unexpected_reap_seconds} "
+        f"--active-reap-seconds {active_reap_seconds} "
     )
     if cwd:
         host_cmd += f"--cwd {shlex.quote(cwd)} "
@@ -243,6 +255,8 @@ class CodeSpaceSpawner:
         reverse_forwards: list[str] | None = None,
         ready_timeout: float = 90.0,
         launch_timeout: float = 60.0,
+        unexpected_reap_seconds: float = 60.0,
+        active_reap_seconds: float = 0.0,
     ) -> None:
         self._transport = transport
         self.boundary = getattr(transport, "boundary", "codespace")
@@ -250,6 +264,8 @@ class CodeSpaceSpawner:
         self._reverse_forwards = list(reverse_forwards or [])
         self._ready_timeout = ready_timeout
         self._launch_timeout = launch_timeout
+        self._unexpected_reap_seconds = unexpected_reap_seconds
+        self._active_reap_seconds = active_reap_seconds
 
     async def spawn(
         self,
@@ -282,6 +298,8 @@ class CodeSpaceSpawner:
         launch = build_remote_launch(
             remote_bundle, state_remote, log_remote, child_argv,
             nonce=nonce, cwd=cwd,
+            unexpected_reap_seconds=self._unexpected_reap_seconds,
+            active_reap_seconds=self._active_reap_seconds,
         )
         rc, out, err = await self._transport.run(
             launch, timeout=self._launch_timeout,

@@ -390,6 +390,7 @@ class SessionManager:
         idle_reap_ttl_seconds: float = 0.0,
         live_stall_interrupt_after_s: float = 900.0,
         session_host_unexpected_reap_seconds: float = 60.0,
+        session_host_active_reap_seconds: float = 0.0,
     ) -> None:
         self._db = db
         self._sessions: dict[str, Session] = {}
@@ -419,6 +420,13 @@ class SessionManager:
         # Handed to every LocalSpawner-launched host. 0 disables the timer (the
         # graceful-detach fast path still reaps a reapable child promptly).
         self._session_host_unexpected_reap_seconds = session_host_unexpected_reap_seconds
+        # Bounded keep-alive for an ACTIVE (mid-turn / active background work)
+        # front-less child after an unexpected disconnect (#145): the detached
+        # host holds it this long so a reconnecting front can resume the in-flight
+        # turn, then lets it go (the session stays resumable via fresh child +
+        # load_session replay). 0 disables (legacy: an active child lives until
+        # its own stop). Handed to every LocalSpawner/CodeSpaceSpawner.
+        self._session_host_active_reap_seconds = session_host_active_reap_seconds
         self._host_index: Any = None
         # Live remote-boundary forwards (session_id -> LocalForward). Held so a
         # CodeSpace/mesh Session Host's -L/-R forward can be refreshed on
@@ -989,6 +997,7 @@ class SessionManager:
         if spawner is None:
             spawner = LocalSpawner(
                 unexpected_reap_seconds=self._session_host_unexpected_reap_seconds,
+                active_reap_seconds=self._session_host_active_reap_seconds,
             )
 
         if remote_child_argv is not None:
@@ -1330,6 +1339,53 @@ class SessionManager:
                     rec.session_id, exc_info=True,
                 )
         return True
+
+    async def _try_reattach_live_host(self, session: Session) -> bool:
+        """Adopt a still-alive Session Host for ``session`` instead of respawning.
+
+        For a host-backed session whose frontend transport dropped (laptop sleep,
+        tunnel flap, SSH sever) but whose Session Host + copilot child survive on
+        the far side, reattach and adopt the running child -- recovering the
+        in-flight/just-finished turn -- rather than spawning a *fresh* child +
+        ``load_session``, which abandons the running work (the #145 "each send
+        does a fresh load_session, losing the mid-turn tool call" symptom).
+
+        Returns True on a successful reattach. No-op (False) unless Session-Host
+        mode is on and a live, protocol-compatible host record exists for this
+        session. Passes ``send_resume=False``: a caller resuming to submit a new
+        prompt drives the turn itself, and it avoids re-entering ``submit_prompt``
+        from within a resume.
+        """
+        if not self._session_host_enabled or self._host_index is None:
+            return False
+        if not session.acp_session_id:
+            return False
+        rec = self._host_index.get(session.session_id)
+        if rec is None:
+            return False
+        if not self._rec_host_alive(rec) or not self._rec_child_alive(rec):
+            return False
+        from .session_host.version_mux import HostDisposition, plan_host
+
+        plan = plan_host(
+            protocol_version=rec.protocol_version,
+            child_alive=True,
+            age_seconds=(time.time() - rec.created_at) if rec.created_at else None,
+            stale_reap_seconds=self._session_host_stale_reap_seconds,
+        )
+        if plan.disposition is not HostDisposition.REATTACH:
+            return False
+        try:
+            return await self._reattach_one(
+                rec, session, new_status=SessionStatus.IDLE, send_resume=False,
+            )
+        except Exception:
+            log.warning(
+                "Reattach-before-respawn failed for session %s; "
+                "falling back to a fresh child", session.session_id,
+                exc_info=True,
+            )
+            return False
 
     async def recover_disconnected_hosts(self) -> int:
         """In-session liveness-driven reattach for host-backed sessions (P1).
@@ -1898,6 +1954,8 @@ class SessionManager:
                     )
                 cs_spawner = build_codespace_spawner(
                     cs_target["name"], cs_target["repo"], relay_port=relay_port,
+                    unexpected_reap_seconds=self._session_host_unexpected_reap_seconds,
+                    active_reap_seconds=self._session_host_active_reap_seconds,
                 )
                 # The acp_command is a far-side SHELL string (e.g.
                 # ``cd /workspaces/repo && copilot --acp --stdio``), not an argv,
@@ -2042,6 +2100,20 @@ class SessionManager:
                 raise RuntimeError(
                     f"Session {session_id} has no ACP session ID -- cannot resume"
                 )
+
+            # Prefer reattaching to a surviving Session Host (adopt the running
+            # child + its in-flight turn) over a fresh child + load_session, so a
+            # resume after a transport drop (laptop sleep / tunnel flap / SSH
+            # sever) recovers the SAME work instead of abandoning a mid-turn tool
+            # call (#145). Falls through to the fresh-child path below when no
+            # live host survives (a genuinely dead child).
+            if await self._try_reattach_live_host(session):
+                log.info(
+                    "Session %s (%s) resumed by reattaching to its live "
+                    "Session Host (no respawn)", session_id, session.name,
+                )
+                session.touch()
+                return session
 
             session.status = SessionStatus.STARTING
             self._db.update_session_status(
@@ -2727,4 +2799,5 @@ def session_manager_from_config(db: Database, cfg: ServiceConfig) -> SessionMana
         idle_reap_ttl_seconds=cfg.idle_reap_ttl_seconds,
         live_stall_interrupt_after_s=cfg.live_stall_interrupt_after_s,
         session_host_unexpected_reap_seconds=cfg.session_host_unexpected_reap_seconds,
+        session_host_active_reap_seconds=cfg.session_host_active_reap_seconds,
     )

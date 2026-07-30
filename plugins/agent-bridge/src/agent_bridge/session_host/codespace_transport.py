@@ -201,16 +201,22 @@ def build_codespace_spawner(
     relay_port: int | None = None,
     remote_dir: str = "/tmp/agent-bridge",  # noqa: S108 -- remote CS path, not a local temp
     ready_timeout: float = 120.0,
+    unexpected_reap_seconds: float = 60.0,
+    active_reap_seconds: float = 0.0,
 ):
     """Construct a :class:`CodeSpaceSpawner` wired to a CodeSpace transport.
 
     ``relay_port`` (the daemon's credential-relay port) is carried on the
     persistent forward's ``-R`` so a detached Host keeps a live relay; omit it for
-    an auth-light validation.
+    an auth-light validation. ``unexpected_reap_seconds`` / ``active_reap_seconds``
+    bound how long the detached far-side Host holds a front-less idle / active
+    child before letting it go (so a reconnecting front can resume; #145).
     """
     from .spawner import CodeSpaceSpawner
 
     transport = CodeSpaceTransport(codespace_name, repo, relay_port=relay_port)
     return CodeSpaceSpawner(
         transport, remote_dir=remote_dir, ready_timeout=ready_timeout,
+        unexpected_reap_seconds=unexpected_reap_seconds,
+        active_reap_seconds=active_reap_seconds,
     )
