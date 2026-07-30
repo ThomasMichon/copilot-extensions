@@ -1900,6 +1900,12 @@ def test_profiles_view_component_renders_body():
             assert not hasattr(scr, "_build_profiles_transposed")
             assert hasattr(scr.profiles_view, "_cell_visual")
             assert hasattr(scr.profiles_view, "toggle_cell")
+            # Load/Apply plumbing lives on the component now too (slice 4).
+            assert hasattr(scr.profiles_view, "apply")
+            assert hasattr(scr.profiles_view, "start_load")
+            assert hasattr(scr.profiles_view, "commit_applied")
+            assert "_prof_load" in vars(scr.profiles_view)
+            assert "_prof_load" not in vars(scr)
             # State is the component's; the engine property shim returns the
             # same object.
             assert scr.grid is scr.profiles_view.grid
