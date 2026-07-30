@@ -470,7 +470,8 @@ class PickerScreen(Widget):
         # Clean/Sync scope + New-worktree options are native ModalScreens now
         # (#88 F4): no self.cleanup / self.optmenu state attrs -- see
         # ScopeDlgScreen and _open_cleanup / _open_sync / _open_optmenu.
-        self.maint_sel = ListSelection()   # Maintenance multi-select (#1345)
+        # Maintenance multi-select (#1345) lives on ``self.maintenance_view``
+        # now (#88 F5 slice 5b); the engine reaches it via a @property shim.
         self.wt_sel = ListSelection()      # Worktrees list multi-select (#2228 2b)
         self.wt_anchor = None         # Worktrees range-select anchor index (#2258 P3)
         self.last_l = 0               # remembered Worktrees list focus (Tab memory, #2258 P3)
@@ -517,6 +518,14 @@ class PickerScreen(Widget):
     # ``@property`` pass-throughs keep every existing engine call site
     # (``setup``, ``_dispatch_key``, the Apply/progress plumbing) and the test
     # suite addressing ``self.grid`` / ``self.pcol`` / ... unchanged.
+    @property
+    def maint_sel(self):
+        return self.maintenance_view.maint_sel
+
+    @maint_sel.setter
+    def maint_sel(self, value):
+        self.maintenance_view.maint_sel = value
+
     @property
     def grid(self):
         return self.profiles_view.grid
@@ -1266,51 +1275,28 @@ class PickerScreen(Widget):
         return rows
 
     # ---- Maintenance grouping + multi-select (#1345) ----
+    # State (``maint_sel``) + grouping/multi-select behaviour live on
+    # ``self.maintenance_view`` now (#88 F5 slice 5b); these thin shims keep the
+    # engine call sites (``_open_maint_menu`` / ``_dispatch_key`` / ``_activate``
+    # / the executor poll) and the test suite addressing ``self.maint_groups()``
+    # / ``self.maint_records()`` / ``self._toggle_maint()`` unchanged.
     def maint_groups(self):
-        """Maintenance rows grouped by display state, in MAINT_GROUP_ORDER."""
-        rows = self.cleanup_rows()
-        by = {}
-        for r in rows:
-            by.setdefault(r.get("state", "?"), []).append(r)
-        groups = [(st, by.pop(st)) for st in MAINT_GROUP_ORDER if st in by]
-        groups.extend(by.items())   # any unlisted states, first-seen order
-        return groups
+        return self.maintenance_view.maint_groups()
 
     def maint_records(self):
-        """Flat Maintenance row list in grouped display order (indexes the
-        ("C", i) stops -- must match build_body's ordering)."""
-        out = []
-        for _st, rows in self.maint_groups():
-            out.extend(rows)
-        return out
+        return self.maintenance_view.maint_records()
 
     def _maint_ids(self):
-        return {r["id4"] for r in self.maint_records()}
+        return self.maintenance_view._maint_ids()
 
     def _toggle_maint(self, i):
-        recs = self.maint_records()
-        if 0 <= i < len(recs):
-            wid = recs[i]["id4"]
-            now_on = self.maint_sel.toggle(wid)
-            self.debug = (f"{'selected' if now_on else 'deselected'}"
-                          f" {wid} · {len(self.maint_sel)} selected")
+        self.maintenance_view._toggle_maint(i)
 
     def _toggle_maint_all(self):
-        ids = self._maint_ids()
-        if self.maint_sel.toggle_all(ids):
-            self.debug = f"selected all · {len(ids)}"
-        else:
-            self.debug = "cleared selection"
+        self.maintenance_view._toggle_maint_all()
 
     def _toggle_group(self, gi):
-        groups = self.maint_groups()
-        if 0 <= gi < len(groups):
-            st, rows = groups[gi]
-            ids = {r["id4"] for r in rows}
-            if self.maint_sel.toggle_all(ids):
-                self.debug = f"selected {st} · {len(ids)}"
-            else:
-                self.debug = f"deselected {st} · {len(ids)}"
+        self.maintenance_view._toggle_group(gi)
 
     def _open_maint_menu(self):
         """Open the Maintenance actions menu for the selected set; if nothing
@@ -4497,26 +4483,80 @@ class MaintenanceView:
     moratorium on new full-screen-at-once renders, until the shared
     ``sel=(zone,index)`` focus model shrinks to just the chrome.
 
-    This slice (5a) moves the Maintenance pivot's **rendering** -- the body
-    entry (``build``) plus the four row helpers (``_selectall_row`` /
-    ``_header`` / ``_group_row`` / ``_row``). The selection **state**
-    (``maint_sel``) and the grouping/multi-select **behaviour**
-    (``maint_groups`` / ``maint_records`` / ``_maint_ids`` / ``_toggle_*``) still
-    live on ``PickerScreen`` and are read here via ``self._eng``; a follow-up
-    slice (5b) moves them onto the component behind delegating shims, the way
-    ``ProfilesView`` did. A later slice makes this a focusable Textual widget.
+    This component owns the Maintenance pivot's **rendering** (slice 5a -- the
+    body entry ``build`` plus the four row helpers ``_selectall_row`` /
+    ``_header`` / ``_group_row`` / ``_row``) and now its **selection model**
+    (slice 5b): the state ``maint_sel`` plus the grouping / multi-select
+    behaviour (``maint_groups`` / ``maint_records`` / ``_maint_ids`` /
+    ``_toggle_maint`` / ``_toggle_maint_all`` / ``_toggle_group``).
+    ``PickerScreen`` exposes a ``maint_sel`` ``@property`` shim and one-line
+    delegating methods so its call sites (``_open_maint_menu``, ``_dispatch_key``,
+    ``_activate``, the executor poll) and the test suite address them unchanged.
+    The component reads engine-owned shared infrastructure via ``self._eng``: the
+    scoped ``cleanup_rows`` data layer (used by non-Maintenance code too), the
+    ``_checkbox`` glyph helper (shared with the Worktrees gutter), the status
+    line (``debug``), the tab bar, and the button row. A later slice makes this a
+    focusable Textual widget.
     """
 
     def __init__(self, eng) -> None:
         self._eng = eng
+        self.maint_sel = ListSelection()   # Maintenance multi-select (#1345)
+
+    # ---- Maintenance grouping + multi-select (#1345; moved here #88 F5 5b) ---
+    def maint_groups(self):
+        """Maintenance rows grouped by display state, in MAINT_GROUP_ORDER."""
+        rows = self._eng.cleanup_rows()
+        by = {}
+        for r in rows:
+            by.setdefault(r.get("state", "?"), []).append(r)
+        groups = [(st, by.pop(st)) for st in MAINT_GROUP_ORDER if st in by]
+        groups.extend(by.items())   # any unlisted states, first-seen order
+        return groups
+
+    def maint_records(self):
+        """Flat Maintenance row list in grouped display order (indexes the
+        ("C", i) stops -- must match build's ordering)."""
+        out = []
+        for _st, rows in self.maint_groups():
+            out.extend(rows)
+        return out
+
+    def _maint_ids(self):
+        return {r["id4"] for r in self.maint_records()}
+
+    def _toggle_maint(self, i):
+        recs = self.maint_records()
+        if 0 <= i < len(recs):
+            wid = recs[i]["id4"]
+            now_on = self.maint_sel.toggle(wid)
+            self._eng.debug = (f"{'selected' if now_on else 'deselected'}"
+                               f" {wid} · {len(self.maint_sel)} selected")
+
+    def _toggle_maint_all(self):
+        ids = self._maint_ids()
+        if self.maint_sel.toggle_all(ids):
+            self._eng.debug = f"selected all · {len(ids)}"
+        else:
+            self._eng.debug = "cleared selection"
+
+    def _toggle_group(self, gi):
+        groups = self.maint_groups()
+        if 0 <= gi < len(groups):
+            st, rows = groups[gi]
+            ids = {r["id4"] for r in rows}
+            if self.maint_sel.toggle_all(ids):
+                self._eng.debug = f"selected {st} · {len(ids)}"
+            else:
+                self._eng.debug = f"deselected {st} · {len(ids)}"
 
     # ---- Maintenance row rendering (#1345; moved here in #88 F5 slice 5a) ----
     def _selectall_row(self, width, focus):
         eng = self._eng
-        ids = eng._maint_ids()
-        all_on = eng.maint_sel.all_selected(ids)
+        ids = self._maint_ids()
+        all_on = self.maint_sel.all_selected(ids)
         glyph, gc = eng._checkbox(all_on)
-        nsel = eng.maint_sel.count(ids)
+        nsel = self.maint_sel.count(ids)
         t = Text("  ")
         t.append(glyph, style=gc)
         t.append("  ")
@@ -4539,7 +4579,7 @@ class MaintenanceView:
     def _group_row(self, state, rows, width, focus):
         eng = self._eng
         ids = {r["id4"] for r in rows}
-        all_on = eng.maint_sel.all_selected(ids)
+        all_on = self.maint_sel.all_selected(ids)
         glyph, gc = eng._checkbox(all_on)
         t = Text("  ")
         t.append(glyph, style=gc)
@@ -4574,11 +4614,11 @@ class MaintenanceView:
         eng = self._eng
         btn_focus = sel == ("BTN", 0)
         add(eng.tab_bar(width, sel == ("M", 0)))
-        groups = eng.maint_groups()
-        recs = eng.maint_records()
+        groups = self.maint_groups()
+        recs = self.maint_records()
         total = sum(_size_mb(w) for w in recs)
-        nsel = eng.maint_sel.count(eng._maint_ids())
-        reclaim = sum(_size_mb(w) for w in recs if w["id4"] in eng.maint_sel)
+        nsel = self.maint_sel.count(self._maint_ids())
+        reclaim = sum(_size_mb(w) for w in recs if w["id4"] in self.maint_sel)
         suffix = f"{len(recs)} candidates · ~{total} MiB"
         if nsel:
             suffix += f"  ·  {nsel} selected · ~{reclaim} MiB"
@@ -4599,7 +4639,7 @@ class MaintenanceView:
                 new_section=f"{state} ({len(rows)})")
             for rec in rows:
                 d = dict(rec, mib=f"{_size_mb(rec)}M")
-                checked = rec["id4"] in eng.maint_sel
+                checked = rec["id4"] in self.maint_sel
                 add(self._row(d, ccols, width, sel == ("C", li),
                               checked, eng.pulse),
                     stop=("C", li), data=rec)
