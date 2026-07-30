@@ -10,6 +10,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from .protocol import HTTP_PROTOCOL_MIN_SUPPORTED, HTTP_PROTOCOL_VERSION
+
 # -- Platform defaults -------------------------------------------------------
 
 
@@ -175,6 +177,11 @@ class StartSessionRequest(BaseModel):
     # agent's own args are preserved; these are added after them. None / omitted
     # changes nothing.
     copilot_args: list[str] | None = None
+    # The caller's HTTP wire-contract protocol version (dotfiles #632). A caller
+    # predating negotiation omits it -> the receiving daemon treats it as
+    # unversioned. Lets a (cross-host) receiver know which capabilities the
+    # sender speaks; the response advertises the receiver's version in turn.
+    protocol_version: int | None = None
 
 
 class SubmitPromptRequest(BaseModel):
@@ -221,6 +228,12 @@ class StartSessionResponse(BaseModel):
     session_id: str
     name: str
     status: SessionStatus
+    # The responding daemon's HTTP wire-contract version + supported range, so a
+    # (cross-host) caller learns which capabilities the remote speaks and can gate
+    # across version skew (dotfiles #632). Defaulted to this build's constants so
+    # every construction site advertises it without duplication.
+    protocol_version: int = HTTP_PROTOCOL_VERSION
+    min_protocol_version: int = HTTP_PROTOCOL_MIN_SUPPORTED
 
 
 class SubmitPromptResponse(BaseModel):
