@@ -408,6 +408,49 @@ def discover_local_agents() -> dict[str, AgentConfig]:
     return discovered
 
 
+def load_elevated_projects() -> set[str]:
+    """Return the set of adopted project names that require elevation.
+
+    Reads the agent-worktrees ``projects.yaml`` and collects every project
+    flagged ``elevated: true`` (or the legacy ``requires_admin: true``).
+    Elevation is an **intrinsic property of the repo** (e.g. SPO.Core's
+    base-repo enlistment needs an admin shell), so the derived
+    ``<repo>@<machine>`` topology agent must be born ``requires_admin`` from
+    this same source -- not patched after the fact. Kept independent of
+    :func:`discover_local_agents` so the derivation (which runs first) can
+    consult it without depending on agent-discovery ordering or on a project
+    being ``expose_agent``-visible.
+
+    Fail-safe: returns an empty set if pyyaml or projects.yaml is unavailable.
+    """
+    try:
+        import yaml
+    except ImportError:
+        return set()
+
+    projects_path = Path(
+        os.environ.get("AGENT_WORKTREES_PROJECTS_YAML", _PROJECTS_YAML_DEFAULT)
+    ).expanduser()
+    if not projects_path.exists():
+        return set()
+    try:
+        data = yaml.safe_load(projects_path.read_text()) or {}
+    except Exception as exc:
+        log.warning("Failed to parse projects.yaml at %s: %s", projects_path, exc)
+        return set()
+
+    projects = data.get("projects", {})
+    if not isinstance(projects, dict):
+        return set()
+    elevated: set[str] = set()
+    for project_name, project_data in projects.items():
+        if not isinstance(project_data, dict):
+            continue
+        if project_data.get("requires_admin") or project_data.get("elevated"):
+            elevated.add(str(project_name))
+    return elevated
+
+
 def _detect_platform() -> str:
     """Detect the local platform: 'windows', 'wsl', or 'linux'."""
     import sys
@@ -751,6 +794,7 @@ def derive_topology_agents(
     local_machine: MachineConfig | None,
     local_platform: str = "",
     repos: list[dict] | None = None,
+    elevated_projects: set[str] | None = None,
 ) -> dict[str, AgentConfig]:
     """Synthesize the agent roster from topology (machines × repos × envs).
 
@@ -843,6 +887,7 @@ def derive_topology_agents(
     #    set in the roster (not just the control-plane venue), keyed by repo name
     #    so it holds even for a worktree-loaded machines.yaml. Reachability-gated.
     if local_machine and repos:
+        elevated_projects = elevated_projects or set()
         env = (
             local_machine.get_ssh_env(local_platform) if local_platform else None
         )
@@ -869,6 +914,12 @@ def derive_topology_agents(
                     project=repo,
                     derived=True,
                     display_name=name,
+                    # Elevation is intrinsic to the repo (e.g. a base-repo
+                    # enlistment needing an admin shell): a repo adopted
+                    # ``elevated`` in projects.yaml is born ``requires_admin``
+                    # here, so its derived <repo>@<machine> agent routes through
+                    # the elevated sub-daemon just like the bare project agent.
+                    requires_admin=repo in elevated_projects,
                     description=(
                         f"'{repo}' on {local_machine.display_name} "
                         "[derived from repos.yaml agent-backing checkout]"
@@ -936,7 +987,7 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
         local_machine, local_platform = _detect_local_machine(machines)
         derived = derive_topology_agents(
             machines, cp_project, related, local_machine, local_platform,
-            local_repos,
+            local_repos, load_elevated_projects(),
         )
         for name, agent in derived.items():
             all_agents.setdefault(name, agent)  # explicit agents_config wins
@@ -1337,12 +1388,15 @@ class AgentResolver:
         # name is itself an explicit registry entry (e.g. a ``<repo>@<machine>``
         # agent derived from the machine's repo registry or a ``related.yaml``
         # locus), resolve it directly -- it already carries its host/env/project
-        # and needs no bare venue agent to rebind onto. Otherwise resolve the
-        # venue and run <repo> there instead of the venue's default repo.
+        # and needs no bare venue agent to rebind onto. A ``requires_admin``
+        # entry (an elevated repo's derived local agent) is routed through the
+        # elevated sub-daemon here, exactly as a bare elevated agent is -- so
+        # ``SPO.Core@dev6`` elevates just like bare ``SPO.Core``. Otherwise
+        # resolve the venue and run <repo> there instead of the venue's default.
         repo, venue = _split_repo_venue(agent_name)
         if repo is not None:
             if agent_name in self._agents:
-                return self._resolve_static(agent_name)
+                return await self._resolve_bare(agent_name)
             return await self._resolve_venue_bound(repo, venue)
 
         # Bare name (no prefix): search static/provider agents AND every
