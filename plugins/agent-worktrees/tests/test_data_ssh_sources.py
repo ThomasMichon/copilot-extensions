@@ -407,7 +407,7 @@ def test_argv_for_pwsh_uses_encoded_command():
     assert argv[0] == "ssh"
     assert argv[1] == "host-dev6"
     remote = argv[-1]
-    assert remote.startswith("pwsh -NoProfile -EncodedCommand ")
+    assert remote.startswith("pwsh -NoProfile -WindowStyle Hidden -EncodedCommand ")
     assert "-Command '" not in remote
     enc = remote.split("-EncodedCommand ", 1)[1]
     decoded = base64.b64decode(enc).decode("utf-16-le")
@@ -422,7 +422,7 @@ def test_wrap_remote_pwsh_uses_encoded_command():
 
     argv = data_ssh._wrap_remote("pwsh", "host-cloud1", "dotfiles cleanup --json")
     remote = argv[-1]
-    assert remote.startswith("pwsh -NoProfile -EncodedCommand ")
+    assert remote.startswith("pwsh -NoProfile -WindowStyle Hidden -EncodedCommand ")
     enc = remote.split("-EncodedCommand ", 1)[1]
     assert base64.b64decode(enc).decode("utf-16-le") == "dotfiles cleanup --json"
     # bash path stays a plain -lc invocation
@@ -441,7 +441,7 @@ def test_classify_fallback_is_encoding_aware(monkeypatch):
     # Direct: decode -> drop --classify -> re-encode, still EncodedCommand.
     stripped = data_ssh._drop_classify_arg(argv)
     remote = stripped[-1]
-    assert remote.startswith("pwsh -NoProfile -EncodedCommand ")
+    assert remote.startswith("pwsh -NoProfile -WindowStyle Hidden -EncodedCommand ")
     dec = base64.b64decode(
         remote.split("-EncodedCommand ", 1)[1]).decode("utf-16-le")
     assert "--classify" not in dec
