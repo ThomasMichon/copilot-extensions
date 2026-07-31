@@ -1107,5 +1107,29 @@ decomposition the next slice needs to render the chrome fixed (and focusable) wh
 only the data scrolls. The monolith stays authoritative; the split is consumed by
 the compose tree (behind the toggle) in the following slice.
 
+**NF3 slice 3 -- the compose tree renders the chrome fixed, scrolls only the
+data.** The slice-2 split is now wired into the compose tree: the single
+`#nf-body` widget is replaced by `#nf-body-chrome` (a `_PickerBodyChrome`,
+`height: auto`, rendering the fixed machine-scope + button rows) above
+`#nf-body-data` (a `_PickerBodyData`, `height: 1fr`, windowing only the data
+rows). The data widget scrolls independently via a data-relative offset
+`_data_top` (distinct from the monolith's `top`): `_ensure_data_visible` scrolls
+it to keep the selected data row in view, `_data_sticky` pins the current section
+header, and `_data_lines` windows + pads to the widget's own height. Because the
+body's height budget is the same either way, the composed chrome (N rows) + data
+(`body_h - N` rows) is **byte-identical to the monolith at the top of an unscrolled
+list** (`test_nf_compose_skeleton_mounts_identical_segments`, comparing chrome +
+data against `frame["body"]`). When the list is long enough to scroll, the two
+paths *intentionally* diverge: the monolith scrolls the chrome off with the data,
+while the compose tree keeps the machine-scope + New/Clean/Sync buttons **fixed**
+and scrolls only the rows beneath them (verified by a live `export_screenshot` --
+chrome pinned, `— Recent` section header sticky, scroll arrows lit). That
+divergence is the NF end-state and is fully contained to the opt-in toggle: with
+`AGENT_WORKTREES_PICKER_NF` unset, `render()` and the golden are untouched. The two
+body widgets are still `can_focus = False` -- the fixed chrome they establish is
+what the focusable-region wiring (native Tab across machine-scope / buttons, `sel`
+sync) lands on next.
+
+
 
 
