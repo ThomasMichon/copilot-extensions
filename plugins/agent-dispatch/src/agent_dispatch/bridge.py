@@ -12,6 +12,8 @@ from __future__ import annotations
 import shutil
 import subprocess
 
+from .procutil import no_window_kwargs
+
 DEFAULT_WORKER_AGENT = "task-worker"
 
 
@@ -73,5 +75,6 @@ def spawn_worker(
     if not wait:
         cmd.append("--no-wait")
     return subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
-        cmd, check=False, capture_output=True, text=True, timeout=timeout
+        cmd, check=False, capture_output=True, text=True, timeout=timeout,
+        **no_window_kwargs(),
     )

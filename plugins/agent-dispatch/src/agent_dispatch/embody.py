@@ -24,6 +24,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from .procutil import no_window_kwargs
+
 DEFAULT_DRIVER = "agent-dispatch"
 
 
@@ -224,7 +226,8 @@ def spawn_embodied_worker(
     if verify_timeout:
         cmd += ["--verify-timeout", str(verify_timeout)]
     return subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
-        cmd, check=False, capture_output=True, text=True, timeout=timeout
+        cmd, check=False, capture_output=True, text=True, timeout=timeout,
+        **no_window_kwargs(),
     )
 
 
@@ -358,5 +361,6 @@ def spawn_fleet_embodied_worker(
     # fails fast instead of hanging on a password prompt.
     cmd = [exe, "-o", "BatchMode=yes", host.strip().lower(), remote_cmd]
     return subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
-        cmd, check=False, capture_output=True, text=True, timeout=timeout
+        cmd, check=False, capture_output=True, text=True, timeout=timeout,
+        **no_window_kwargs(),
     )
