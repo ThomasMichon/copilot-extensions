@@ -1984,6 +1984,23 @@ class SessionManager:
                     remote_child_argv=remote_argv,
                     remote_cwd=remote_cwd,
                 )
+            elif self._is_codespace_target(target):
+                # A CodeSpace target MUST run under a Session Host: only then does
+                # copilot's stdio belong to a survivable host on the far side, so
+                # a transport drop (tunnel flap, daemon restart, credential-relay
+                # TTL) merely detaches the front instead of closing the child's
+                # stdio and self-cancelling its in-flight turn ("Operation
+                # cancelled by user"). Reaching this branch means host mode is
+                # disabled or the codespace target was unresolved -- fail loud
+                # rather than silently degrade to a non-survivable classic
+                # session that loses in-flight work on any hiccup.
+                raise RuntimeError(
+                    f"CodeSpace target {getattr(target, 'agent_name', None)!r} "
+                    f"requires session-host mode, but none was established "
+                    f"(session_host_enabled={self._session_host_enabled}, "
+                    f"cs_target={'resolved' if cs_target else 'unresolved'}). "
+                    f"Refusing to run classic (non-survivable) mode."
+                )
             else:
                 # Spawn the subprocess (local/SSH/command). Emits per-stage
                 # checkpoints (auth-env, ssh-connect, worktree) into the event log.
@@ -2499,6 +2516,26 @@ class SessionManager:
         no background sub-agents are still running (#51)."""
         return (session.status == SessionStatus.IDLE
                 and not session.has_active_background_tasks)
+
+    def _is_codespace_target(self, target: "SpawnTarget") -> bool:
+        """True if this target is a CodeSpace boundary agent -- structured
+        ``codespace`` metadata, or a codespace-shaped ``spawn_command``. Such a
+        target must run under a Session Host (never classic), so ``connect``
+        refuses to fall through to the process-owned path for one. Detection is
+        independent of ``session_host_enabled`` on purpose: a CodeSpace with host
+        mode disabled is a misconfiguration to surface, not to silently honor."""
+        cs = getattr(target, "codespace", None)
+        if isinstance(cs, dict) and cs.get("name"):
+            return True
+        sc = getattr(target, "spawn_command", None)
+        if sc:
+            try:
+                from .session_host.codespace_transport import parse_codespace_target
+                if parse_codespace_target(sc) is not None:
+                    return True
+            except Exception:
+                pass
+        return False
 
     def _session_host_client(self, session: Session) -> Any:
         """The session's host control channel, or None if not host-backed."""
