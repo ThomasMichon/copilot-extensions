@@ -1088,4 +1088,24 @@ non-focusable -- the pivots are now their *own* region widget, the granularity t
 focusable-chrome slices (extracting the machine-scope + button regions from
 `build_body`, then wiring native Tab across all chrome regions) build on next.
 
+**NF3 slice 2 -- untangling the body's chrome from its data (source split).**
+The machine-scope (`M`) and button (`BTN`) regions are emitted *interleaved* with
+the scrolling data inside each pivot's view component (`WorktreesView.build`,
+`MaintenanceView.build`, `TasksView.build`), which is exactly what blocks rendering
+them as separate fixed/focusable widgets. This slice untangles that at the source:
+each view's `build()` splits into `build_chrome()` (the leading machine-scope row +
+top New/Clean/Sync button region) and `build_data()` (the column header + the
+scrolling section/row list), with `build()` emitting both in order so the
+monolithic `build_body()` -- and thus `render()` and the golden -- are byte-identical
+(`ProfilesView`, which lives under Configuration with its own host-column axes and
+no top chrome, gets a no-op `build_chrome` for a uniform interface). A new
+`PickerScreen._build_body_split(width)` drives the two emitters into separate VRow
+sinks and returns `(chrome_vrows, data_vrows)`; `test_build_body_split_recomposes_monolith`
+asserts, for **every** pivot, that the concatenated rows equal `build_body()`
+byte-for-byte. Nothing in the live render path changes yet -- this is the pure
+decomposition the next slice needs to render the chrome fixed (and focusable) while
+only the data scrolls. The monolith stays authoritative; the split is consumed by
+the compose tree (behind the toggle) in the following slice.
+
+
 
