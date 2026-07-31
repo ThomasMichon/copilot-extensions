@@ -18,7 +18,7 @@ The full guides are [`AGENTS.md`](../AGENTS.md) (development guide),
 ## What this repo is
 
 A **Copilot CLI plugin marketplace**: a GitHub-hosted registry of plugins that
-machines install via `copilot plugin marketplace add`. Each plugin lives under
+machines install via `copilot plugin marketplace add <owner>/<repo>`. Each plugin lives under
 `plugins/<name>/` and is listed with its version in the marketplace catalog at
 `.github/plugin/marketplace.json`. Plugins fall into two kinds:
 
