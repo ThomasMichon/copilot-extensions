@@ -344,15 +344,37 @@ ACP/Copilot session) before delivering the prompt.
 Longer/other drops (especially CodeSpace) can still strand a session —
 `gh cs ssh` tunnel lifetime, relay credential TTL, CodeSpace idle timeout. When
 `agent-bridge sessions` / `agent-bridge status <sid>` shows the session
-`stopped`/gone, a `send` may attempt to resume it. Verify that the resumed turn
-does real work: some CodeSpace session hosts immediately emit `Operation
-cancelled by user` followed by an empty `end_turn`. If that signature appears,
-discard the stopped session and create a fresh one:
+`stopped`/gone, a `send` **reattaches** to the surviving child (adopts the same
+ACP session id — no respawn) and delivers the prompt. Verify the resumed turn
+did real work.
+
+**Stale-cancel on the first reattached turn.** If a session was `stop`ped (or
+dropped) *mid-turn*, that in-flight turn was graceful-cancelled with an ACP
+`session/cancel`. On reattach the child can surface that **stale cancel** as the
+first turn's result — `Operation cancelled by user` + an empty `end_turn` — even
+though your new prompt was accepted. This is a **host-injected cancel draining**,
+not agent misbehavior and not a categorical "stopped resume does no work". The
+cancel drains after one turn, so the fix is simply to **`send` again** — the
+now-idle session continues normally:
+
+```bash
+agent-bridge send <sid> "<same idempotent prompt>"   # first turn ate the stale cancel; this one runs
+```
+
+Only if it **keeps** cancelling (or the session is genuinely gone) discard and
+recreate:
 
 ```bash
 agent-bridge end <sid>          # a daemon restart can also resurrect an old session as "active" — end that too
 agent-bridge create <agent> "<same idempotent prompt>"
 ```
+
+> A **distinct** cause of the same `Operation cancelled by user` string is a
+> permission/`ask_user` request the headless client can't get answered: the
+> parked request resolves to `cancelled` at teardown. That path shows a
+> permission/`ask_user` event *before* the cancel (the reattach case shows none)
+> and is avoided by dispatching with `--allow-all`. End+create won't help it;
+> re-dispatch with tools pre-authorized.
 
 Because the prompt is idempotent and the agent pushed incrementally, the new
 session continues from the remote with minimal rework.
