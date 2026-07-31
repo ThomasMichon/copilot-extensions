@@ -378,11 +378,16 @@ async def lifespan(app: FastAPI):
                     break
                 await asyncio.sleep(0.1)
             try:
+                # Advertise the *actually bound* port (dotfiles #694): equals
+                # cfg.port in the default path, but the real OS-assigned port
+                # when the daemon bound dynamically. Clients resolve the port
+                # from this routing record, so an ephemeral port is transparent.
+                _bound_port = getattr(app.state, "bound_port", cfg.port)
                 await asyncio.to_thread(
                     routing.publish_active,
                     config_dir(),
                     bind=cfg.bind,
-                    port=cfg.port,
+                    port=_bound_port,
                     pid=_os.getpid(),
                     version=_ver,
                     demote_existing=True,
