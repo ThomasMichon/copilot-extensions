@@ -37,8 +37,8 @@ $Launcher = Join-Path $InstallDir 'service.ps1'
 
 # === install-contract:v3 versioned-venv (agent-index: .venv-as-junction) ===
 # Build each version into versions/<version> and make the historical `.venv`
-# path a junction into the active slot. Disabled by default until callers opt in
-# by default (set AGENT_INDEX_VERSIONED=0 or COPILOT_EXT_NO_VERSIONED=1 to opt out); COPILOT_EXT_NO_VERSIONED=1 force-disables.
+# path a junction into the active slot. Enabled by default (set AGENT_INDEX_VERSIONED=0
+# or COPILOT_EXT_NO_VERSIONED=1 to opt out); COPILOT_EXT_NO_VERSIONED=1 force-disables.
 $LinkDir          = $VenvDir
 $LinkPython       = $VenvPython
 $VersionedRuntime = $false
