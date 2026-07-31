@@ -111,6 +111,17 @@ core of the principles above; a reviewer checks a change against these.
   in dotfiles #581.)
 - **A version bump ships the change.** Every plugin change bumps its version in the
   same commit (see `CONTRIBUTING.md`); an un-bumped push is silently ignored.
+- **Enabling a runtime provisions it.** A runtime plugin that a repo/session
+  **enables** is installed, started, and kept **version-matched to its enabled
+  payload automatically at session start** — idempotent, version-keyed, throttled,
+  and **gated to the machines it belongs on** — with **no manual install step**.
+  A user's only action is enabling; provisioning and version reconciliation are the
+  model's job and must never require hand-running an installer, nor depend on one
+  *particular* sibling being the session launcher. (Serves *Vision plugin-services
+  §Features/self-provisioning-runtime*; realized today by `runtimeScope` +
+  `agent-worktrees reconcile-plugins`, see
+  [`../install-contract.md`](../install-contract.md) § "Automatic reconciliation at
+  launch".)
 - **Repo mutation is an adopt-only power.** `install`/`update` act on
   **machine-local** state only — they may migrate local config *schema* and *warn*
   on a stale/deprecated repo convention, but never alter a repo's committed config
