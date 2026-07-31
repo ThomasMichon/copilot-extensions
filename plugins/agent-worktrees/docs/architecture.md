@@ -1029,4 +1029,39 @@ every other menu (`QuitConfirmScreen` -> `width: 48`; `ProfConfirmScreen` keeps
 latter pushes the confirm directly with a synthetic add/remove diff, avoiding the
 whole profiles-grid drive).
 
+#### NF2 -- the main-screen compose skeleton
+
+With NF1 done (every modal native), NF2 begins migrating the **main screen** off
+its single `render()` leaf toward a Textual container composing child leaf
+widgets. This is the highest-risk stretch: 93 tests `query_one(PickerScreen)` and
+drive its manual `sel`/`on_key` model, the `capture` module and the golden
+(`tests/goldens/picker/worktrees_list.txt`) ride `render()`, so the monolith is
+retired **last**, incrementally, keeping the golden byte-identical at every step.
+
+**NF2 slice 1 -- the segment seam + the `AGENT_WORKTREES_PICKER_NF` live toggle.**
+`render()` was refactored to build its output from a single
+`_frame_segments()` producing the four screen segments -- **header** (title +
+htabs), **chrome** (scroll-border + stats), **body** (the windowed
+`build_body` rows), **footer** (scroll-border + footer line) -- as lists of `Text`
+rows, which `render()` flattens in order via a shared `_join_lines()`. This is a
+pure refactor: the monolith output is byte-identical (golden unchanged). Behind the
+`AGENT_WORKTREES_PICKER_NF` env toggle (default OFF), `PickerScreen.compose()` now
+yields four leaf `_PickerSegment` widgets (`#nf-header/#nf-chrome/#nf-body/#nf-footer`,
+laid out `height: 2 / 2 / 1fr / 2`), each rendering its named slice of
+`_frame_segments()`. Because the body's `body_h` derives from the screen height
+(`H - len(header) - 4`) and the body widget's `1fr` slot resolves to the same
+`H - 6`, the composed tree is pixel-identical to the monolith -- verified by a live
+`export_screenshot` and by `test_nf_compose_skeleton_mounts_identical_segments`,
+which asserts each segment's `render()` equals its slice and that the flattened
+segments equal the whole-screen `render()`.
+
+The toggle is **default OFF**, so `compose()` yields nothing -> `PickerScreen` stays
+a render-leaf and `render()`, the `capture` seams, the golden, and all 93 couplings
+are untouched (`test_nf_compose_skeleton_disabled_by_default`). A `refresh()`
+override propagates state changes to the segment widgets when the skeleton is live
+(a no-op when disabled). The segments are **not focusable** -- NF2 is the *visual*
+compose skeleton only; region/row focus stays on the manual model until NF3/NF4
+migrate the chrome regions and body rows to real focusable widgets, and NF5 retires
+`sel`/`stops`/`_dispatch_key`.
+
 

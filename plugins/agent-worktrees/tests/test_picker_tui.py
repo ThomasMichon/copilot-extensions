@@ -3708,6 +3708,54 @@ def test_escape_on_main_view_confirms_before_quit(monkeypatch):
     asyncio.run(run())
 
 
+def test_nf_compose_skeleton_disabled_by_default():
+    """NF2 (#88): the compose skeleton is OFF unless AGENT_WORKTREES_PICKER_NF is
+    set, so PickerScreen stays a render-leaf (no segment children) and the golden
+    render path is byte-identical."""
+    from agent_worktrees.picker_tui.engine import _PickerSegment
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            assert scr._nf_enabled is False
+            assert len(scr.query(_PickerSegment)) == 0
+
+    asyncio.run(run())
+
+
+def test_nf_compose_skeleton_mounts_identical_segments(monkeypatch):
+    """NF2 (#88): with the toggle on, PickerScreen composes the four leaf segment
+    widgets, and each renders EXACTLY its slice of the monolithic frame -- so the
+    compose tree is byte-identical to ``render()``."""
+    from agent_worktrees.picker_tui.engine import _PickerSegment
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NF", "1")
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            assert scr._nf_enabled is True
+            segs = {w.id: w for w in scr.query(_PickerSegment)}
+            assert set(segs) == {"nf-header", "nf-chrome", "nf-body", "nf-footer"}
+            frame = scr._frame_segments()
+            for key, sid in (("header", "nf-header"), ("chrome", "nf-chrome"),
+                             ("body", "nf-body"), ("footer", "nf-footer")):
+                expect = scr._join_lines(frame[key], frame["W"]).plain
+                assert segs[sid].render().plain == expect
+            # The flattened segments equal the whole-screen monolith render.
+            whole = (frame["header"] + frame["chrome"] + frame["body"]
+                     + frame["footer"])
+            assert (scr._join_lines(whole, frame["W"]).plain
+                    == scr.render().plain)
+
+    asyncio.run(run())
+
+
 def test_hidden_worktrees_filtered_and_toggle():
     """Bridge/system (kind=system) worktrees are hidden by default; Toggle-hidden
     reveals them, and the button appears only when there's something to reveal (#1422)."""

@@ -410,9 +410,40 @@ def _resolve_mock_mode(explicit=None):
     return False
 
 
+def _nf_compose_enabled() -> bool:
+    """NF2 compose-skeleton toggle (#88). When ``AGENT_WORKTREES_PICKER_NF`` is a
+    truthy value, ``PickerScreen`` mounts its four child segment widgets instead
+    of rendering as a single leaf. Default OFF -- the monolithic ``render()`` path
+    (byte-identical, golden-guarded) stays authoritative until NF2+ retires it."""
+    val = os.environ.get("AGENT_WORKTREES_PICKER_NF", "0").strip().lower()
+    return val not in ("", "0", "false", "no", "off")
+
+
+class _PickerSegment(Widget):
+    """One NF2 screen segment (header / chrome / body / footer) -- a leaf widget
+    that renders its slice of ``PickerScreen._frame_segments()`` (#88 NF2).
+
+    The screen owns all state and content; a segment is a pure view that reads
+    its named slice back off the parent screen at render time. Not focusable --
+    NF2 is the *visual* compose skeleton only; focus/keys stay on the manual
+    ``sel``/``on_key`` model until the later NF3/NF4/NF5 slices migrate regions
+    and rows to real focusable widgets.
+    """
+
+    can_focus = False
+
+    def __init__(self, screen: "PickerScreen", seg_key: str, **kw) -> None:
+        super().__init__(**kw)
+        self._screen = screen
+        self._seg_key = seg_key
+
+    def render(self):
+        seg = self._screen._frame_segments()
+        return self._screen._join_lines(seg[self._seg_key], seg["W"])
+
+
 class PickerScreen(Widget):
     can_focus = True
-
     #: Truly-global shortcuts owned by Textual's binding system (#88 F3). When no
     #: modal overlay is active, ``on_key`` lets these bubble to the framework,
     #: which fires the matching ``action_*`` method below -- transferring
@@ -435,6 +466,10 @@ class PickerScreen(Widget):
 
     def __init__(self, source, live=False, mock_mode=None):
         super().__init__()
+        # NF2 compose skeleton toggle (#88): when set, the screen mounts four
+        # child segment widgets instead of rendering as a single leaf. Read once
+        # here so it's stable for this screen's lifetime.
+        self._nf_enabled = _nf_compose_enabled()
         # Profiles configurator -- an encapsulated sub-view component that OWNS
         # the Profiles grid-editing state (grid / applied / pcol / targets /
         # host_cols / _prof_unavailable) and behaviour; PickerScreen exposes
@@ -1894,7 +1929,16 @@ class PickerScreen(Widget):
         return t
 
     # ---- assemble full screen ----
-    def render(self):
+    def _frame_segments(self):
+        """Compute the four screen segments -- header / chrome / body / footer --
+        as lists of ``Text`` line-rows, plus the working width ``W`` (#88 NF2).
+
+        This is the single source of the picker's screen content. The monolithic
+        ``render()`` flattens the four segments in order (byte-identical to the
+        pre-NF2 output); the NF2 compose skeleton (behind
+        ``AGENT_WORKTREES_PICKER_NF``) has each child leaf widget render its own
+        segment from this same dict, so the two paths are guaranteed identical.
+        """
         W = self.size.width or 100
         H = self.size.height or 30
         top = self.topbar(W)              # [title, htabs]  (2 rows)
@@ -1918,10 +1962,18 @@ class PickerScreen(Widget):
         header_border = self._border_row(W, "▲", more_above)
         bottom_border = self._border_row(W, "▼", below > 0)
         stats = self._stats_row(W)
-        lines = list(top) + [header_border, stats] + body_lines + [bottom_border, foot]
-        # Every modal is a native Textual ``ModalScreen`` now (#88 F4): the
-        # framework's screen stack draws + dims them above this widget, so there
-        # is no manual overlay to blit or background to gray out here.
+        return {
+            "W": W,
+            "header": list(top),
+            "chrome": [header_border, stats],
+            "body": body_lines,
+            "footer": [bottom_border, foot],
+        }
+
+    @staticmethod
+    def _join_lines(lines, W):
+        """Join screen rows into a single ``Text``, cropping each to ``W`` so a
+        line never wraps (shared by ``render()`` and the NF2 segment widgets)."""
         out = Text()
         for i, ln in enumerate(lines):
             if i:
@@ -1930,6 +1982,47 @@ class PickerScreen(Widget):
             lt.truncate(W, overflow="crop")   # never let a line wrap
             out.append_text(lt)
         return out
+
+    def render(self):
+        seg = self._frame_segments()
+        # Every modal is a native Textual ``ModalScreen`` now (#88 F4): the
+        # framework's screen stack draws + dims them above this widget, so there
+        # is no manual overlay to blit or background to gray out here.
+        lines = seg["header"] + seg["chrome"] + seg["body"] + seg["footer"]
+        return self._join_lines(lines, seg["W"])
+
+    def compose(self) -> ComposeResult:
+        # NF2 compose skeleton (#88): when AGENT_WORKTREES_PICKER_NF is set, the
+        # screen becomes a *container* of four leaf segment widgets (header /
+        # chrome / body / footer), each emitting the identical lines from
+        # ``_frame_segments()`` -- the incremental replacement for the single
+        # ``render()`` leaf. Default OFF: yielding no children keeps PickerScreen
+        # a render-leaf, so ``render()``, the ``capture`` seams, the golden, and
+        # all 93 couplings are byte-identical and unaffected.
+        if self._nf_enabled:
+            yield _PickerSegment(self, "header", id="nf-header")
+            yield _PickerSegment(self, "chrome", id="nf-chrome")
+            yield _PickerSegment(self, "body", id="nf-body")
+            yield _PickerSegment(self, "footer", id="nf-footer")
+
+    def _refresh_nf_segments(self) -> None:
+        """When the NF2 compose skeleton is live, propagate a state change to the
+        child segment widgets (their ``render()`` reads back off this screen)."""
+        if not getattr(self, "_nf_enabled", False):
+            return
+        for seg_id in ("nf-header", "nf-chrome", "nf-body", "nf-footer"):
+            try:
+                self.query_one(f"#{seg_id}", _PickerSegment).refresh()
+            except Exception:
+                pass
+
+    def refresh(self, *args, **kwargs):
+        # Keep the NF2 segment widgets in step with the screen: any state change
+        # that refreshes the screen must re-render the child segments too (they
+        # read off this screen). A no-op when the skeleton is disabled.
+        result = super().refresh(*args, **kwargs)
+        self._refresh_nf_segments()
+        return result
 
     def _border_row(self, W, arrow, active):
         """A separator line carrying a centered scroll arrow with a blank space
@@ -5389,6 +5482,12 @@ class PickerApp(App):
     CSS = """
     Screen { background: $surface; }
     PickerScreen { width: 100%; height: 100%; }
+    /* NF2 compose skeleton (#88): fixed-height chrome, body fills the rest.
+       Inert unless AGENT_WORKTREES_PICKER_NF mounts the segment widgets. */
+    PickerScreen > #nf-header { width: 100%; height: 2; }
+    PickerScreen > #nf-chrome { width: 100%; height: 2; }
+    PickerScreen > #nf-body   { width: 100%; height: 1fr; }
+    PickerScreen > #nf-footer { width: 100%; height: 2; }
     """
 
     def __init__(self, source, live=False, mock_mode=None):
