@@ -1769,6 +1769,10 @@ def test_index_menus_use_native_optionlist():
             ol = menu.query_one(OptionList)
             assert ol.has_focus
             assert ol.option_count == len(menu._items)
+            # Palette consistency (regression guard for the "dark blue modal"):
+            # the native list adopts the picker's $surface base, not Textual's
+            # bluer default $panel -- so it matches the main screen behind it.
+            assert ol.styles.background == app.screen_stack[0].styles.background
             # Enter selects the highlighted option through the native widget.
             await pilot.press("enter")
             await pilot.pause()
@@ -1791,6 +1795,7 @@ def test_index_menus_use_native_optionlist():
             ol = menu.query_one(OptionList)
             assert ol.has_focus
             assert ol.option_count == len(menu._actions)
+            assert ol.styles.background == app.screen_stack[0].styles.background
 
     asyncio.run(run_cfg())
     asyncio.run(run_maint())

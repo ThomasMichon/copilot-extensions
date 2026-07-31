@@ -884,3 +884,23 @@ lists don't cover (a `Confirm`/`Cancel` button pair; later, the main-screen chro
 needs a small reusable **`FocusGroup`** primitive -- a focusable container whose
 children are not individually focusable, arrow moves an internal highlight, Enter
 activates -- added when the first such case lands, not speculatively.
+
+**NF1 addendum -- modal A/B capture + palette consistency.** Native widgets adopt
+Textual's default theme tokens unless told otherwise, and the first ones did:
+`OptionList`'s default `background` is `$panel` (a bluer grey than the picker's
+`$surface` base) and its cursor uses `$primary` (blue) -- so the converted menus
+read as "dark blue", inconsistent with the rest of the picker. Fixed by pinning the
+modal widgets to the picker palette: `background: $surface` (matching the main
+screen behind the scrim) and an orange highlight
+(`.option-list--option-highlighted { background: #ffaf00; color: black }`, echoing
+`C_BTN_SEL`). To *catch* this class of regression -- and to A/B a modal's look
+across the migration -- two things landed: (1) a `capture.capture_modal(source,
+opener)` seam that exports the **composited app** (picker + the open `ModalScreen`)
+as an SVG via Textual's app-level screenshot, since a native modal lives on the
+screen stack and is invisible to the `PickerScreen.render()` capture seams (this
+also advances vision item A -- modals become auditable/shareable); and (2) an
+automated guard asserting each native modal's list `background` resolves to the same
+`Color` as the base picker screen (i.e. `$surface`, not the bluer `$panel`). The
+before/after for any slice is a `capture_modal` at `HEAD` vs the pre-NF commit --
+Git is the "fork", so no old-vs-new component duplication is kept in the tree.
+

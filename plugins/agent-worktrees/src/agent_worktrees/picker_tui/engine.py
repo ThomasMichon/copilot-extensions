@@ -3650,10 +3650,13 @@ class TaskMenuScreen(ModalScreen[int]):
     TaskMenuScreen { align: center middle; background: $background 55%; }
     TaskMenuScreen > #task-frame {
         width: 72; height: auto; border: round #ffaf00;
-        background: $panel; padding: 0 1;
+        background: $surface; padding: 0 1;
     }
     TaskMenuScreen OptionList {
-        height: auto; border: none; background: $panel; padding: 0;
+        height: auto; border: none; background: $surface; padding: 0;
+    }
+    TaskMenuScreen OptionList > .option-list--option-highlighted {
+        background: #ffaf00; color: black; text-style: bold;
     }
     TaskMenuScreen #task-head { height: auto; padding: 0 0 1 0; }
     TaskMenuScreen #task-desc { color: grey; height: auto; padding: 1 0 0 0; }
@@ -3961,7 +3964,10 @@ class CfgMenuScreen(ModalScreen[int]):
     CfgMenuScreen { align: center middle; background: $background 55%; }
     CfgMenuScreen > OptionList {
         width: 56; height: auto; max-height: 80%;
-        border: round #ffaf00; background: $panel; padding: 0 1;
+        border: round #ffaf00; background: $surface; padding: 0 1;
+    }
+    CfgMenuScreen OptionList > .option-list--option-highlighted {
+        background: #ffaf00; color: black; text-style: bold;
     }
     """
     BINDINGS = [
@@ -4013,10 +4019,13 @@ class MaintMenuScreen(ModalScreen[int]):
     MaintMenuScreen { align: center middle; background: $background 55%; }
     MaintMenuScreen > #maint-frame {
         width: 64; height: auto; border: round #ffaf00;
-        background: $panel; padding: 0 1;
+        background: $surface; padding: 0 1;
     }
     MaintMenuScreen OptionList {
-        height: auto; border: none; background: $panel; padding: 0;
+        height: auto; border: none; background: $surface; padding: 0;
+    }
+    MaintMenuScreen OptionList > .option-list--option-highlighted {
+        background: #ffaf00; color: black; text-style: bold;
     }
     MaintMenuScreen #maint-desc { color: grey; height: auto; padding: 1 0 0 0; }
     """
