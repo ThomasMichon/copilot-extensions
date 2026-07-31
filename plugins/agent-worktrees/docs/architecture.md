@@ -862,3 +862,25 @@ menu items. Later NF1 slices give the remaining modals (the confirms -> `Button`
 the other menus -> `OptionList`) the same treatment; NF2+ then tackle the main
 screen (compose skeleton -> chrome widgets -> body list widgets -> retire
 `sel`/`stops`).
+
+**NF1 slice 2 -- `TaskMenuScreen` -> native `OptionList`.** The registered-pivot
+task action sub-menu gets the same single-select treatment as Cfg/Maint: a native
+`OptionList` (framework-owned focus + up/down + Enter) below a task-title/subtitle
+header and above a description pane that tracks the highlighted action via
+`OptionHighlighted`; `dismiss(event.option_index)` returns the choice, Esc/q cancel
+via `BINDINGS`. The hand-rolled `idx`/`on_key`/`_panel`/`_refresh` are gone.
+Behaviour-preserving (the real-pipeline task-menu tests drive `pilot.press` and read
+`menu._actions` unchanged; the test now also asserts the composed `OptionList` is
+focused).
+
+**A guiding rule for the rest of NF (the tab-group principle).** Each interactive
+*group* becomes **one** native container widget = **one tab-stop**, with the arrow
+keys moving *within* it -- never one tab-stop per item. Textual's list widgets are
+each a tab-group by construction: `OptionList` (single-select menus), `SelectionList`
+(multi-select **checkbox lists** -- the New-worktree options `Bare`/`No Mux`/`Local
+model` and the Clean/Sync scope buckets, both hand-rolled in `ScopeDlgScreen`
+today), and `RadioSet` (pick-exactly-one). Only a *heterogeneous* group the native
+lists don't cover (a `Confirm`/`Cancel` button pair; later, the main-screen chrome)
+needs a small reusable **`FocusGroup`** primitive -- a focusable container whose
+children are not individually focusable, arrow moves an internal highlight, Enter
+activates -- added when the first such case lands, not speculatively.

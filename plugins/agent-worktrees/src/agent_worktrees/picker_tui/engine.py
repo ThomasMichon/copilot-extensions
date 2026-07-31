@@ -3631,72 +3631,85 @@ class ProfConfirmScreen(ModalScreen[bool]):
 
 
 class TaskMenuScreen(ModalScreen[int]):
-    """Native modal action sub-menu for a registered-pivot task (#88 F4).
+    """Native modal action sub-menu for a registered-pivot task (#88 F4;
+    native-focus internals NF1).
 
-    A picker overlay migrated off the manual render/dispatch model onto a Textual
-    ``ModalScreen``. It lists the focused task's declared actions and returns the
-    chosen action *index* via ``dismiss(int)``, or ``dismiss(None)`` on cancel;
-    the caller runs the selected action. Navigation (``up``/``down``, wrapping)
-    updates the highlight and the per-action description in place, mirroring the
-    former ``_key_task_menu`` exactly (Enter selects, Esc/q/Tab cancel).
+    Lists the focused task's declared actions and returns the chosen action
+    *index* via ``dismiss(int)``, or ``dismiss(None)`` on cancel; the caller runs
+    the selected action.
+
+    **Native-focus internals (#88 NF1):** the action list is a native Textual
+    ``OptionList`` -- the framework owns focus, up/down, and Enter-to-select --
+    below a header (task title + subtitle) and above a description pane that
+    tracks the highlighted action (via ``OptionHighlighted``). Esc/q cancel via
+    ``BINDINGS`` actions. Replaces the former hand-rolled ``idx`` + ``on_key``
+    over a static ``Panel``.
     """
 
     CSS = """
     TaskMenuScreen { align: center middle; background: $background 55%; }
-    TaskMenuScreen > #task-menu { width: auto; height: auto; }
+    TaskMenuScreen > #task-frame {
+        width: 72; height: auto; border: round #ffaf00;
+        background: $panel; padding: 0 1;
+    }
+    TaskMenuScreen OptionList {
+        height: auto; border: none; background: $panel; padding: 0;
+    }
+    TaskMenuScreen #task-head { height: auto; padding: 0 0 1 0; }
+    TaskMenuScreen #task-desc { color: grey; height: auto; padding: 1 0 0 0; }
     """
+    BINDINGS = [
+        Binding("escape", "cancel", show=False),
+        Binding("q", "cancel", show=False),
+    ]
 
     def __init__(self, reg, rec, actions) -> None:
         super().__init__()
         self._reg = reg
         self._rec = rec
         self._actions = actions
-        self.idx = 0
 
     def compose(self) -> ComposeResult:
-        yield Static(self._panel(), id="task-menu")
+        with Vertical(id="task-frame"):
+            yield Static(self._header(), id="task-head")
+            yield OptionList(*[a.label for a in self._actions], id="task-list")
+            yield Static("", id="task-desc")
 
-    def _panel(self) -> Panel:
-        reg, rec, acts, idx = self._reg, self._rec, self._actions, self.idx
+    def _header(self) -> Text:
+        reg, rec = self._reg, self._rec
         title = rec.get(reg.title_field) or rec.get(reg.id_field) or ""
         sub_bits = []
         if reg.worktree_field and rec.get(reg.worktree_field):
             sub_bits.append(str(rec.get(reg.worktree_field)))
         if reg.subtitle_field and rec.get(reg.subtitle_field):
             sub_bits.append(str(rec.get(reg.subtitle_field)))
-        body = Text()
-        body.append(f"\n {title}\n", style=C_HEADER)
+        t = Text()
+        t.append(str(title), style=C_HEADER)
         if sub_bits:
-            body.append(" " + " · ".join(sub_bits) + "\n", style=C_DIM)
-        body.append("\n")
-        for i, a in enumerate(acts):
-            mark = " ▸ " if i == idx else "   "
-            body.append(mark + a.label + "\n",
-                        style=C_SEL if i == idx else None)
-        desc = acts[idx].description if acts else ""
-        body.append("\n " + (desc or "") + "\n", style=C_FAINT)
-        return Panel(body, title=reg.label, border_style=C_BAND, width=72)
+            t.append("\n" + " · ".join(sub_bits), style=C_DIM)
+        return t
 
-    def _refresh(self) -> None:
-        self.query_one("#task-menu", Static).update(self._panel())
+    def on_mount(self) -> None:
+        ol = self.query_one("#task-list", OptionList)
+        self.query_one("#task-frame", Vertical).border_title = self._reg.label
+        self._set_desc(0)
+        ol.focus()
 
-    def on_key(self, event) -> None:
-        key = event.key
-        n = len(self._actions)
-        if key == "down":
-            self.idx = (self.idx + 1) % n
-            self._refresh()
-            event.stop()
-        elif key == "up":
-            self.idx = (self.idx - 1) % n
-            self._refresh()
-            event.stop()
-        elif key == "enter":
-            event.stop()
-            self.dismiss(self.idx)
-        elif key in ("escape", "q", "tab"):
-            event.stop()
-            self.dismiss(None)
+    def _set_desc(self, i) -> None:
+        if self._actions and 0 <= i < len(self._actions):
+            self.query_one("#task-desc", Static).update(
+                self._actions[i].description or "")
+
+    def on_option_list_option_highlighted(
+            self, event: "OptionList.OptionHighlighted") -> None:
+        self._set_desc(event.option_index)
+
+    def on_option_list_option_selected(
+            self, event: "OptionList.OptionSelected") -> None:
+        self.dismiss(event.option_index)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class SubMenuScreen(ModalScreen[tuple]):
