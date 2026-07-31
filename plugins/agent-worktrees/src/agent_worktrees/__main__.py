@@ -541,7 +541,8 @@ def _worktree_to_dict(
             if session_ctx is not None else 0
         )
         d["cleanup_bucket"] = prune.cleanup_disposition(
-            rec, state_info, turn_count=_turns).bucket
+            rec, state_info, turn_count=_turns,
+            claimant_alive=_local_claimant_alive).bucket
         d["ff_eligible"] = (
             git_ops.can_fast_forward(state_info)
             and state_info.state != git_ops.WorktreeState.ACTIVE
@@ -4863,6 +4864,55 @@ def cmd_run(args: argparse.Namespace) -> int:
 # cleanup
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _local_claimant_alive(owner_ref: str) -> bool | None:
+    """Same-machine claimant-liveness probe for prune-safety (resource-claims).
+
+    Resolve the owning worktree named by ``owner_ref`` and report whether it is
+    still alive, honoring `claimed-resource-not-reclaimed`:
+
+      * ``False`` -- the owner is on THIS machine and its worktree is gone (its
+        tracking record is missing, or its recorded dir was removed) -> the
+        claim is stale and the resource may be reclaimed.
+      * ``True``  -- the owner is on this machine and still present -> spare.
+      * ``None``  -- the owner is on a DIFFERENT machine (cross-fabric liveness
+        is not yet wired) or the ref can't be resolved -> UNCONFIRMED; spare,
+        because absence of a *local* owner is never proof of no owner.
+
+    Bias is deliberately toward sparing: only a *positively resolved, gone*
+    same-machine owner returns ``False``.
+    """
+    parsed = tracking.parse_claim_ref(owner_ref)
+    if parsed is None:
+        return None
+    try:
+        this_machine = cfg.load_config().machine
+    except Exception:
+        this_machine = None
+    # Cross-machine (or an unknown local machine) -> liveness unconfirmed here.
+    if parsed.machine and this_machine and parsed.machine != this_machine:
+        return None
+    project = parsed.project
+    if not project:
+        # A bare (legacy same-repo) ref -> assume the active project.
+        try:
+            project = cfg.project_name()
+        except Exception:
+            return None
+    try:
+        rec_path = cfg.project_dir(project) / "worktrees" / f"{parsed.worktree_id}.yaml"
+    except Exception:
+        return None
+    if not rec_path.exists():
+        return False  # owner record gone -> claim is stale
+    try:
+        owner_rec = tracking.load_record(rec_path)
+    except Exception:
+        return True  # record present but unreadable -> bias to sparing
+    if owner_rec.worktree_path and not Path(owner_rec.worktree_path).exists():
+        return False  # owner's worktree dir removed -> gone
+    return True  # owner still present -> spare
+
+
 def _reap_worktree(
     rec: tracking.WorktreeRecord,
     info: git_ops.WorktreeStateInfo,
@@ -5020,6 +5070,7 @@ def reap_one(
                 rec, info, turn_count=turns,
                 include_unused=include_unused,
                 include_conversations=include_conversations,
+                claimant_alive=_local_claimant_alive,
             )
             if not disp.cleanable:
                 return _result({"ok": False, "removed": False, "skipped": True,
@@ -5949,7 +6000,8 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
                 except OSError:
                     pass
 
-        verdict = prune.assess(rec, info, turn_count=turns)
+        verdict = prune.assess(rec, info, turn_count=turns,
+                               claimant_alive=_local_claimant_alive)
 
         # Annotate state with dirty indicator / turn count when relevant
         if info.dirty > 0 and info.state != git_ops.WorktreeState.DIRTY:
@@ -5978,10 +6030,13 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
                 rec, info, turn_count=turns,
                 include_unused=args.include_unused,
                 include_conversations=include_conversations,
+                claimant_alive=_local_claimant_alive,
             )
             cleanable = disp.cleanable
             if disp.bucket == "active":
                 skip_reason = "active Copilot session in use"
+            elif disp.bucket == "claimed":
+                skip_reason = disp.reason
             elif disp.bucket == "open-pr":
                 skip_reason = disp.reason
             elif disp.bucket == "closed-unmerged":
