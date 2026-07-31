@@ -110,6 +110,70 @@ _source_kind() {
 }
 # === end install-contract:v3 source-kind ===
 
+# Resolve a vendored library path (libs/<name>) across multiple layouts.
+# Prints the resolved directory path to stdout (nothing else).
+# Returns 0 if found, 1 if not.
+_resolve_vendored_lib() {
+    local lib_name="$1"
+    local candidate
+
+    # 1. Vendored inside agent-index (marketplace install layout)
+    candidate="$PLUGIN_DIR/libs/$lib_name"
+    if [[ -f "$candidate/pyproject.toml" ]]; then
+        cd "$candidate" && pwd
+        return 0
+    fi
+
+    # 2. Relative path (git checkout layout: plugins/agent-index/../../libs/<name>)
+    candidate="$PLUGIN_DIR/../../libs/$lib_name"
+    if [[ -f "$candidate/pyproject.toml" ]]; then
+        cd "$candidate" && pwd
+        return 0
+    fi
+
+    # 3. Git repo registry (~/.git-repos) -- use Python for safe YAML parsing
+    if [[ -f "$HOME/.git-repos" ]]; then
+        candidate="$(python3 -c "
+import pathlib, os
+try:
+    import yaml
+except ImportError:
+    raise SystemExit(1)
+reg = yaml.safe_load(pathlib.Path.home().joinpath('.git-repos').read_text())
+repo = (reg or {}).get('repos', {}).get('copilot-extensions', {})
+if repo:
+    p = repo.get('path', os.path.join(reg.get('srcroot', ''), 'copilot-extensions'))
+    p = os.path.expanduser(p)
+    lib = os.path.join(p, 'libs', '$lib_name')
+    if os.path.isfile(os.path.join(lib, 'pyproject.toml')):
+        print(lib)
+        raise SystemExit(0)
+raise SystemExit(1)
+" 2>/dev/null)" && {
+            echo "$candidate"
+            return 0
+        }
+    fi
+
+    # 4. Common checkout path (repo exists but registry absent/stale)
+    candidate="$HOME/src/copilot-extensions/libs/$lib_name"
+    if [[ -f "$candidate/pyproject.toml" ]]; then
+        cd "$candidate" && pwd
+        return 0
+    fi
+
+    return 1
+}
+
+# zero-downtime cutover primitives (module ``zdd``), extracted from agent-bridge.
+_resolve_zdd() { _resolve_vendored_lib zdd; }
+
+# Check if the zdd cutover lib is already importable in the venv.
+_zdd_installed() {
+    [[ -x "$VENV_DIR/bin/python" ]] || return 1
+    "$VENV_DIR/bin/python" -c 'from zdd.cutover import CutoverOrchestrator' 2>/dev/null
+}
+
 _installed_version() {
     [[ -x "$LINK_PYTHON" ]] || return 1
     local v
@@ -191,6 +255,25 @@ _ensure_runtime() {
         _ok 'Venv created'
     else
         _skip 'Venv already exists'
+    fi
+
+
+    # zdd (zero-downtime cutover primitives: routing table + orchestrator).
+    local zdd_dir
+    if zdd_dir="$(_resolve_zdd)"; then
+        if [[ "$have_uv" -eq 1 ]]; then
+            uv pip install --python "$VENV_PYTHON" "$zdd_dir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet
+        else
+            "$VENV_PYTHON" -m pip install "$zdd_dir" >/dev/null
+        fi || {
+            _fail "zdd install failed"
+            exit 1
+        }
+    elif _zdd_installed; then
+        _skip "zdd already installed in venv (marketplace layout)"
+    else
+        _fail "Cannot locate zdd library. Reinstall the agent-index plugin from the marketplace (copilot plugin install agent-index@copilot-extensions), then rerun this installer."
+        exit 1
     fi
 
     _pip_install() {

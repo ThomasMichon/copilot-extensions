@@ -19,13 +19,18 @@ def install_dir() -> Path:
 
 
 def data_dir() -> Path:
-    """Derived data directory for future index state."""
+    """Durable data directory for index state and task queues."""
     return install_dir() / "data"
 
 
 def run_dir() -> Path:
-    """Directory holding the endpoint rendezvous file."""
+    """Directory holding the legacy endpoint rendezvous file."""
     return Path(os.environ.get(RUN_DIR_ENV) or (install_dir() / "run"))
+
+
+def routing_dir() -> Path:
+    """Stable zdd routing-table directory shared by all installed versions."""
+    return install_dir()
 
 
 @dataclass(frozen=True)
@@ -49,7 +54,7 @@ def load_config() -> Config:
 
 
 def discovered_endpoint():
-    """Return the live local endpoint, or None when the service is not running."""
+    """Return the rendezvous endpoint, or None when the service is not running."""
     from . import rendezvous
 
     override = os.environ.get(ENDPOINT_ENV)
@@ -59,8 +64,23 @@ def discovered_endpoint():
         return None
 
 
+def _routing_url() -> str | None:
+    """Return the zdd active endpoint URL, defensively falling back on failure."""
+    try:
+        from zdd.routing import read_active_endpoint
+
+        ep = read_active_endpoint(routing_dir())
+    except Exception:
+        return None
+    return ep.base_url if ep is not None else None
+
+
 def client_url() -> str | None:
-    """Return the discovered service URL, or None when no service is running."""
+    """Return the active service URL, following zdd routing before rendezvous."""
+    routed = _routing_url()
+    if routed:
+        return routed
+
     ep = discovered_endpoint()
     if ep is None or ep.transport != "tcp":
         return None
