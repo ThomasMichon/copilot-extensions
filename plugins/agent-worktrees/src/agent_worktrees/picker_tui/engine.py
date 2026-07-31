@@ -22,9 +22,10 @@ from rich.panel import Panel
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widget import Widget
-from textual.widgets import Static
+from textual.widgets import OptionList, Static
 
 from .. import profiles as profiles_mod
 from ..update_stage import indicator_state
@@ -3928,21 +3929,32 @@ class ScopeDlgScreen(ModalScreen[bool]):
 
 
 class CfgMenuScreen(ModalScreen[int]):
-    """Native modal ⚙ Configuration menu (#88 F4).
+    """Native modal ⚙ Configuration menu (#88 F4; native-focus internals #88 NF1).
 
     A picker overlay migrated off the manual render/dispatch model onto a Textual
     ``ModalScreen``. It lists the config-hosted pivots (Profiles) plus any
     contributed Configuration sections and returns the chosen item *index* via
     ``dismiss(int)``, or ``dismiss(None)`` on cancel; the caller acts on the
-    selection (switch to that pivot / run that section). Navigation
-    (``up``/``down``, wrapping) moves the highlight in place, mirroring the former
-    ``_key_cfgmenu`` exactly (Enter selects, Esc/q/Tab cancel).
+    selection (switch to that pivot / run that section).
+
+    **Native-focus internals (#88 NF1):** the menu list is now a native Textual
+    ``OptionList`` -- the framework owns focus, up/down movement, and
+    Enter-to-select -- replacing the former hand-rolled ``idx`` + ``on_key`` over
+    a static ``Panel``. The title/hint ride the widget's border; Esc/q cancel via
+    ``BINDINGS`` actions. ``dismiss(event.option_index)`` returns the choice.
     """
 
     CSS = """
     CfgMenuScreen { align: center middle; background: $background 55%; }
-    CfgMenuScreen > #cfg-menu { width: auto; height: auto; }
+    CfgMenuScreen > OptionList {
+        width: 56; height: auto; max-height: 80%;
+        border: round #ffaf00; background: $panel; padding: 0 1;
+    }
     """
+    BINDINGS = [
+        Binding("escape", "cancel", show=False),
+        Binding("q", "cancel", show=False),
+    ]
 
     def __init__(self, items, idx=0) -> None:
         super().__init__()
@@ -3950,99 +3962,88 @@ class CfgMenuScreen(ModalScreen[int]):
         self.idx = idx
 
     def compose(self) -> ComposeResult:
-        yield Static(self._panel(), id="cfg-menu")
+        yield OptionList(*[it["label"] for it in self._items])
 
-    def _panel(self) -> Panel:
-        body = Text()
-        body.append("\n user-local settings\n\n", style=C_DIM)
-        for n, it in enumerate(self._items):
-            mark = " ▸ " if n == self.idx else "   "
-            body.append(mark + it["label"] + "\n",
-                        style=C_SEL if n == self.idx else None)
-        body.append("\n ↑↓ choose · Enter open · Esc back", style=C_MUTED)
-        return Panel(body, title="⚙ Configuration", border_style=C_BAND,
-                     width=56)
+    def on_mount(self) -> None:
+        ol = self.query_one(OptionList)
+        ol.border_title = "⚙ Configuration · user-local settings"
+        ol.border_subtitle = "↑↓ choose · Enter open · Esc back"
+        if 0 <= self.idx < len(self._items):
+            ol.highlighted = self.idx
+        ol.focus()
 
-    def _refresh(self) -> None:
-        self.query_one("#cfg-menu", Static).update(self._panel())
+    def on_option_list_option_selected(
+            self, event: "OptionList.OptionSelected") -> None:
+        self.dismiss(event.option_index)
 
-    def on_key(self, event) -> None:
-        key = event.key
-        n = len(self._items)
-        if key == "down":
-            self.idx = (self.idx + 1) % n
-            self._refresh()
-            event.stop()
-        elif key == "up":
-            self.idx = (self.idx - 1) % n
-            self._refresh()
-            event.stop()
-        elif key == "enter":
-            event.stop()
-            self.dismiss(self.idx)
-        elif key in ("escape", "q", "tab"):
-            event.stop()
-            self.dismiss(None)
+    def action_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class MaintMenuScreen(ModalScreen[int]):
-    """Native modal Maintenance actions menu (#88 F4).
+    """Native modal Maintenance actions menu (#88 F4; native-focus internals NF1).
 
     A picker overlay migrated off the manual render/dispatch model onto a Textual
     ``ModalScreen``. It lists the maintenance actions available for the selected
     worktree set (Sync / Cleanup / Finalize / Stop) and returns the chosen action
     *index* via ``dismiss(int)``, or ``dismiss(None)`` on cancel; the caller runs
-    the selection. Navigation (``up``/``down``, wrapping) moves the highlight and
-    the per-action description in place, mirroring the former ``_key_maint_menu``
-    exactly (Enter selects, Esc/q/Tab cancel).
+    the selection.
+
+    **Native-focus internals (#88 NF1):** the action list is now a native Textual
+    ``OptionList`` -- the framework owns focus, up/down movement, and
+    Enter-to-select -- replacing the former hand-rolled ``idx`` + ``on_key`` over
+    a static ``Panel``. A description pane below the list tracks the highlighted
+    action (via ``OptionHighlighted``); Esc/q cancel via ``BINDINGS`` actions.
     """
 
     CSS = """
     MaintMenuScreen { align: center middle; background: $background 55%; }
-    MaintMenuScreen > #maint-menu { width: auto; height: auto; }
+    MaintMenuScreen > #maint-frame {
+        width: 64; height: auto; border: round #ffaf00;
+        background: $panel; padding: 0 1;
+    }
+    MaintMenuScreen OptionList {
+        height: auto; border: none; background: $panel; padding: 0;
+    }
+    MaintMenuScreen #maint-desc { color: grey; height: auto; padding: 1 0 0 0; }
     """
+    BINDINGS = [
+        Binding("escape", "cancel", show=False),
+        Binding("q", "cancel", show=False),
+    ]
 
     def __init__(self, actions, count) -> None:
         super().__init__()
         self._actions = actions
         self._count = count
-        self.idx = 0
 
     def compose(self) -> ComposeResult:
-        yield Static(self._panel(), id="maint-menu")
+        with Vertical(id="maint-frame"):
+            yield OptionList(*self._actions, id="maint-list")
+            yield Static("", id="maint-desc")
 
-    def _panel(self) -> Panel:
-        acts, idx = self._actions, self.idx
-        body = Text()
-        body.append("\n Action to apply to the selection:\n\n", style=C_HEADER)
-        for i, a in enumerate(acts):
-            mark = " ▸ " if i == idx else "   "
-            body.append(mark + a + "\n", style=C_SEL if i == idx else None)
-        desc = MAINT_ACTION_DESC.get(acts[idx], "") if acts else ""
-        body.append("\n " + desc + "\n", style=C_FAINT)
-        return Panel(body, title=f"Maintenance · {self._count} selected",
-                     border_style=C_BAND, width=64)
+    def on_mount(self) -> None:
+        ol = self.query_one("#maint-list", OptionList)
+        self.query_one("#maint-frame", Vertical).border_title = (
+            f"Maintenance · {self._count} selected")
+        self._set_desc(0)
+        ol.focus()
 
-    def _refresh(self) -> None:
-        self.query_one("#maint-menu", Static).update(self._panel())
+    def _set_desc(self, i) -> None:
+        if self._actions and 0 <= i < len(self._actions):
+            self.query_one("#maint-desc", Static).update(
+                MAINT_ACTION_DESC.get(self._actions[i], ""))
 
-    def on_key(self, event) -> None:
-        key = event.key
-        n = len(self._actions)
-        if key == "down":
-            self.idx = (self.idx + 1) % n
-            self._refresh()
-            event.stop()
-        elif key == "up":
-            self.idx = (self.idx - 1) % n
-            self._refresh()
-            event.stop()
-        elif key == "enter":
-            event.stop()
-            self.dismiss(self.idx)
-        elif key in ("escape", "q", "tab"):
-            event.stop()
-            self.dismiss(None)
+    def on_option_list_option_highlighted(
+            self, event: "OptionList.OptionHighlighted") -> None:
+        self._set_desc(event.option_index)
+
+    def on_option_list_option_selected(
+            self, event: "OptionList.OptionSelected") -> None:
+        self.dismiss(event.option_index)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class ProgressScreen(ModalScreen[None]):
