@@ -1224,6 +1224,12 @@ case "$ACTION" in
         PYTHONUTF8=1 "$VENV_PYTHON" -m agent_worktrees config-migrate 2>&1 \
             | sed 's/^/  /' || warn "Config migration skipped"
 
+        # Machine-wide (temporary): deploy/refresh the extension-reload hang
+        # warning into the global ~/.copilot/instructions/ dir. Non-fatal.
+        # Remove once github/copilot-agent-runtime#13494 has shipped everywhere.
+        PYTHONUTF8=1 "$VENV_PYTHON" -m agent_worktrees deploy-ext-reload-warning 2>&1 \
+            | sed 's/^/  /' || warn "Ext-reload warning deployment skipped"
+
         write_deploy_manifest
 
         echo ""
@@ -1480,6 +1486,12 @@ case "$ACTION" in
         # upgrades ~/.agent-worktrees/{config,repos,projects}.yaml. Non-fatal.
         PYTHONUTF8=1 "$VENV_PYTHON" -m agent_worktrees config-migrate 2>&1 \
             | sed 's/^/  /' || warn "Config migration skipped"
+
+        # Machine-wide (temporary): deploy/refresh the extension-reload hang
+        # warning into the global ~/.copilot/instructions/ dir. Non-fatal.
+        # Remove once github/copilot-agent-runtime#13494 has shipped everywhere.
+        PYTHONUTF8=1 "$VENV_PYTHON" -m agent_worktrees deploy-ext-reload-warning 2>&1 \
+            | sed 's/^/  /' || warn "Ext-reload warning deployment skipped"
 
         write_deploy_manifest
 
