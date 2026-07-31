@@ -904,3 +904,20 @@ automated guard asserting each native modal's list `background` resolves to the 
 before/after for any slice is a `capture_modal` at `HEAD` vs the pre-NF commit --
 Git is the "fork", so no old-vs-new component duplication is kept in the tree.
 
+**NF1 addendum 2 -- native-widget polish to match the picker's craft.** An A/B
+screenshot pass (rasterized from `capture_modal` SVGs) surfaced two more
+regressions the palette fix alone didn't cover: the native menus were vertically
+*cramped* (no breathing room) and used a *loud* full-width solid-orange selection
+bar, versus the old menus' subtle grey. Fixed by adopting the picker's own idiom:
+the highlighted option uses `text-style: bold reverse` (a subtle reverse bar, like
+the worktree list's focused row) rather than a saturated block, `padding: 1 2`
+restores the breathing room, and the key-hint moved from an orange
+`border_subtitle` to a **muted-grey line inside** the frame (so `CfgMenuScreen` now
+shares the framed `Vertical` + inside-hint shape of `Maint`/`Task`). Net: the native
+`OptionList` menus now read like the hand-drawn `Panel`s they replaced -- same
+craft, native focus. (The A/B rasterizer detail that bit once: Textual's SVG
+requests `Fira Code` via a CDN `@font-face`; an offline renderer must remap it to a
+local monospace, e.g. Consolas, or the raster silently falls back to a proportional
+serif and misrepresents the layout.)
+
+

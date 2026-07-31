@@ -3956,19 +3956,24 @@ class CfgMenuScreen(ModalScreen[int]):
     **Native-focus internals (#88 NF1):** the menu list is now a native Textual
     ``OptionList`` -- the framework owns focus, up/down movement, and
     Enter-to-select -- replacing the former hand-rolled ``idx`` + ``on_key`` over
-    a static ``Panel``. The title/hint ride the widget's border; Esc/q cancel via
-    ``BINDINGS`` actions. ``dismiss(event.option_index)`` returns the choice.
+    a static ``Panel``. The title rides the frame border; a muted hint line sits
+    inside (matching Maint/Task); Esc/q cancel via ``BINDINGS`` actions.
+    ``dismiss(event.option_index)`` returns the choice.
     """
 
     CSS = """
     CfgMenuScreen { align: center middle; background: $background 55%; }
-    CfgMenuScreen > OptionList {
+    CfgMenuScreen > #cfg-frame {
         width: 56; height: auto; max-height: 80%;
-        border: round #ffaf00; background: $surface; padding: 0 1;
+        border: round #ffaf00; background: $surface; padding: 1 2;
+    }
+    CfgMenuScreen OptionList {
+        height: auto; border: none; background: $surface; padding: 0;
     }
     CfgMenuScreen OptionList > .option-list--option-highlighted {
-        background: #ffaf00; color: black; text-style: bold;
+        background: $surface; color: $text; text-style: bold reverse;
     }
+    CfgMenuScreen #cfg-hint { color: grey; height: auto; padding: 1 0 0 0; }
     """
     BINDINGS = [
         Binding("escape", "cancel", show=False),
@@ -3981,12 +3986,14 @@ class CfgMenuScreen(ModalScreen[int]):
         self.idx = idx
 
     def compose(self) -> ComposeResult:
-        yield OptionList(*[it["label"] for it in self._items])
+        with Vertical(id="cfg-frame"):
+            yield OptionList(*[it["label"] for it in self._items], id="cfg-list")
+            yield Static("↑↓ choose · Enter open · Esc back", id="cfg-hint")
 
     def on_mount(self) -> None:
-        ol = self.query_one(OptionList)
-        ol.border_title = "⚙ Configuration · user-local settings"
-        ol.border_subtitle = "↑↓ choose · Enter open · Esc back"
+        ol = self.query_one("#cfg-list", OptionList)
+        self.query_one("#cfg-frame", Vertical).border_title = (
+            "⚙ Configuration · user-local settings")
         if 0 <= self.idx < len(self._items):
             ol.highlighted = self.idx
         ol.focus()
@@ -4019,13 +4026,13 @@ class MaintMenuScreen(ModalScreen[int]):
     MaintMenuScreen { align: center middle; background: $background 55%; }
     MaintMenuScreen > #maint-frame {
         width: 64; height: auto; border: round #ffaf00;
-        background: $surface; padding: 0 1;
+        background: $surface; padding: 1 2;
     }
     MaintMenuScreen OptionList {
         height: auto; border: none; background: $surface; padding: 0;
     }
     MaintMenuScreen OptionList > .option-list--option-highlighted {
-        background: #ffaf00; color: black; text-style: bold;
+        background: $surface; color: $text; text-style: bold reverse;
     }
     MaintMenuScreen #maint-desc { color: grey; height: auto; padding: 1 0 0 0; }
     """
