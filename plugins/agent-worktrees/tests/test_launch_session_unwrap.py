@@ -113,3 +113,19 @@ def test_launchers_render_status_bar_from_worktree_path():
     # bash: parse STATUS_PATH (fallback work_dir) and pass it as --path.
     assert "d.get('status_path') or d.get('work_dir','')" in sh
     assert '--path "${STATUS_PATH:-${WORK_DIR:-$PWD}}"' in sh
+
+
+def test_windows_launcher_collapses_psmux_pane_to_single_pwsh():
+    """psmux wraps every pane command in `pwsh -NoLogo -Command "<args>"`; a
+    `pwsh -File <script>` pane therefore spawns a SECOND pwsh. The launcher must
+    collapse the pane command to a single in-process `& '<script>'` string so
+    only one pwsh runs per worktree session (copilot-extensions #102)."""
+    ps = _LAUNCH_PS1.read_text()
+    # The collapse helper exists and rewrites the -File shape to `& '<script>'`.
+    assert "function ConvertTo-PsmuxPaneCommand" in ps
+    assert "& '" in ps
+    assert "-File" in ps and "-f" in ps  # both -File spellings detected
+    # new-session must launch the COLLAPSED pane command, never the raw @cmd.
+    assert "$paneCmd = ConvertTo-PsmuxPaneCommand $cmd" in ps
+    assert "new-session -d -s $sessName -c $plan.work_dir @envFlags @paneCmd" in ps
+    assert "@envFlags @cmd" not in ps

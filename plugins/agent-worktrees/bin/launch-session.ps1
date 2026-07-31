@@ -510,6 +510,54 @@ if ($CopilotPassthrough.Count -gt 0) {
     $cmd += $CopilotPassthrough
 }
 
+# ── Collapse the psmux pane to a SINGLE pwsh ─────────────────────────────
+# psmux (tmux 3.3.6) runs every pane command through a wrapper shell:
+# `pwsh -NoLogo -Command "<space-joined pane args>"`. When the pane command is
+# `pwsh.exe -NoProfile -NoLogo -File <default-setup.ps1> <args>`, that wrapper
+# spawns a SECOND pwsh to run the -File child -- two ~80 MB shells per session,
+# for every worktree tab. Passing the script as a single *in-process* command
+# string (`& '<script>' <args>`) makes the wrapper pwsh run default-setup.ps1
+# directly: one pwsh, not two (empirically verified against psmux 3.3.6).
+#
+# The wrapper pwsh psmux spawns has no -NoProfile (its flags -- `-NoLogo
+# -Command` -- are fixed by psmux; `default-shell` is a bare exe path that
+# cannot carry flags, and a session-scoped option can't reach the initial pane
+# created at new-session time). That is acceptable here: this collapse applies
+# ONLY to the interactive psmux path (ACP / --stdio launches set no_mux and
+# never reach it), where loading the user's PowerShell profile -- if one exists
+# at all -- is legitimate. Non-`pwsh -File` plans (config-driven templates) are
+# already single-pwsh under the wrapper and are passed through unchanged.
+function ConvertTo-PsmuxPaneCommand {
+    param([string[]]$Cmd)
+    if ($null -eq $Cmd -or $Cmd.Count -lt 2) { return $Cmd }
+    $exe = [System.IO.Path]::GetFileNameWithoutExtension($Cmd[0])
+    if ($exe -notin @('pwsh', 'powershell')) { return $Cmd }
+    $fileIdx = -1
+    for ($i = 1; $i -lt $Cmd.Count; $i++) {
+        if ($Cmd[$i] -eq '-File' -or $Cmd[$i] -eq '-f') { $fileIdx = $i; break }
+    }
+    if ($fileIdx -lt 0 -or ($fileIdx + 1) -ge $Cmd.Count) { return $Cmd }
+    $script = $Cmd[$fileIdx + 1]
+    $rest = @()
+    if (($fileIdx + 2) -le ($Cmd.Count - 1)) { $rest = $Cmd[($fileIdx + 2)..($Cmd.Count - 1)] }
+    $sb = [System.Text.StringBuilder]::new()
+    [void]$sb.Append("& '").Append(([string]$script).Replace("'", "''")).Append("'")
+    foreach ($a in $rest) {
+        [void]$sb.Append(' ')
+        # Flags (which never contain whitespace) stay bare so PowerShell binds
+        # them as parameters; values that contain whitespace or are empty are
+        # single-quoted (with embedded quotes doubled) so the space-joined
+        # wrapper -Command string re-tokenizes back to the original args.
+        $s = [string]$a
+        if ($s -eq '' -or $s -match '\s') {
+            [void]$sb.Append("'").Append($s.Replace("'", "''")).Append("'")
+        } else {
+            [void]$sb.Append($s)
+        }
+    }
+    return , @($sb.ToString())
+}
+
 # ── psmux session-per-worktree ───────────────────────────────────────
 # Each worktree gets a single shared psmux session. Multiple terminal
 # connections all land in the same session. The psmux session ends when
@@ -714,16 +762,21 @@ if (-not $noMux -and $psmuxCmd) {
 
     # Pass the command directly to new-session so the psmux session
     # (and its single pane) exits when the process finishes — no
-    # lingering shell, matching the Linux tmux behavior.
+    # lingering shell, matching the Linux tmux behavior. The command is
+    # collapsed to a single in-process pwsh command (see
+    # ConvertTo-PsmuxPaneCommand) so psmux's wrapper shell does not spawn a
+    # redundant second pwsh for the -File child.
     #
     # Clear nesting vars so psmux doesn't kill the detached session.
     # The new session is independent — it shouldn't inherit the parent's
     # nesting state even though we're creating it from inside a psmux pane.
+    $paneCmd = ConvertTo-PsmuxPaneCommand $cmd
+    Write-SetupLog "psmux: pane command: $($paneCmd -join ' ')"
     $savedPsmuxSession = $env:PSMUX_SESSION; $env:PSMUX_SESSION = $null
     $savedTmux = $env:TMUX; $env:TMUX = $null
     $savedTmuxPane = $env:TMUX_PANE; $env:TMUX_PANE = $null
     try {
-        & $script:AwPsmuxBin new-session -d -s $sessName -c $plan.work_dir @envFlags @cmd
+        & $script:AwPsmuxBin new-session -d -s $sessName -c $plan.work_dir @envFlags @paneCmd
     } finally {
         $env:PSMUX_SESSION = $savedPsmuxSession
         $env:TMUX = $savedTmux
