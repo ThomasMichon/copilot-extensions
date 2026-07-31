@@ -86,6 +86,24 @@ def test_spawn_worker_invokes_agent_bridge_create(monkeypatch):
     assert cmd[-1] == "--no-wait"  # wait=False -> --no-wait
 
 
+def test_spawn_worker_passes_no_window_kwargs(monkeypatch):
+    """The console launcher runs windowless (CREATE_NO_WINDOW on Windows)."""
+    calls = {}
+
+    monkeypatch.setattr(bridge.shutil, "which", lambda _n: "/usr/bin/agent-bridge")
+    monkeypatch.setattr(
+        bridge, "no_window_kwargs", lambda: {"creationflags": 0x08000000}
+    )
+
+    def fake_run(cmd, **kwargs):
+        calls["kwargs"] = kwargs
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    bridge.spawn_worker("t", coordinator_url="http://c", worker_id="w")
+    assert calls["kwargs"].get("creationflags") == 0x08000000
+
+
 def test_spawn_worker_wait_omits_no_wait(monkeypatch):
     monkeypatch.setattr(bridge.shutil, "which", lambda _n: "/usr/bin/agent-bridge")
     monkeypatch.setattr(
