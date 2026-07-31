@@ -449,6 +449,47 @@ class _PickerSegment(Widget):
         return self._screen._join_lines(lines, seg["W"])
 
 
+class _PickerBodyChrome(Widget):
+    """The fixed body chrome (machine-scope row + top button region) as its own
+    leaf widget in the NF3 compose tree -- rendered above the scrolling data, so
+    it never scrolls off (#88 NF3). Reads the current pivot's chrome rows from
+    ``_build_body_split``. Not focusable yet (the focusable-region wiring is a
+    later slice); ``height: auto`` so it sizes to however many chrome rows the
+    pivot emits."""
+
+    can_focus = False
+
+    def __init__(self, screen: "PickerScreen", **kw) -> None:
+        super().__init__(**kw)
+        self._screen = screen
+
+    def render(self):
+        scr = self._screen
+        W = scr.size.width or 100
+        chrome, _data = scr._build_body_split(W)
+        return scr._join_lines([vr.text for vr in chrome], W)
+
+
+class _PickerBodyData(Widget):
+    """The scrolling data body as its own leaf widget in the NF3 compose tree --
+    windows just the pivot's data rows (the fixed chrome renders above), scrolling
+    with the selection while the chrome stays put (#88 NF3). ``height: 1fr`` so it
+    fills the space below the chrome; the window is sized to its own height."""
+
+    can_focus = False
+
+    def __init__(self, screen: "PickerScreen", **kw) -> None:
+        super().__init__(**kw)
+        self._screen = screen
+
+    def render(self):
+        scr = self._screen
+        W = scr.size.width or 100
+        _chrome, data = scr._build_body_split(W)
+        h = max(1, self.size.height or 1)
+        return scr._join_lines(scr._data_lines(data, h), W)
+
+
 class PickerScreen(Widget):
     can_focus = True
     #: Truly-global shortcuts owned by Textual's binding system (#88 F3). When no
@@ -477,6 +518,10 @@ class PickerScreen(Widget):
         # child segment widgets instead of rendering as a single leaf. Read once
         # here so it's stable for this screen's lifetime.
         self._nf_enabled = _nf_compose_enabled()
+        # NF3 (#88): scroll offset for the compose tree's data body widget --
+        # data-relative (indexes the scrolling data rows only, since the M/BTN
+        # chrome is fixed above it), distinct from the monolith's ``top``.
+        self._data_top = 0
         # Profiles configurator -- an encapsulated sub-view component that OWNS
         # the Profiles grid-editing state (grid / applied / pcol / targets /
         # host_cols / _prof_unavailable) and behaviour; PickerScreen exposes
@@ -1807,6 +1852,46 @@ class PickerScreen(Widget):
         view.build_data(add_d, width, self.sel)
         return chrome, data
 
+    def _ensure_data_visible(self, data_vrows, data_h):
+        """Scroll the data-body (compose tree) so the selected data row is
+        visible; a no-op for chrome selections (they live in the fixed chrome and
+        aren't in ``data_vrows``, so ``_stop_line`` returns 0) (#88 NF3)."""
+        line = self._stop_line(data_vrows, self.sel)
+        if line < self._data_top:
+            self._data_top = line
+        elif line >= self._data_top + data_h:
+            self._data_top = line - data_h + 1
+        self._data_top = max(0, min(self._data_top,
+                                    max(0, len(data_vrows) - data_h)))
+
+    def _data_sticky(self, data_vrows, data_h):
+        """Pin the current section header at the top of the scrolled data body
+        (mirrors ``_sticky`` over the data-relative offset)."""
+        if self._data_top <= 0 or self._data_top >= len(data_vrows):
+            return []
+        first = data_vrows[self._data_top]
+        ps = first.pin_section
+        if ps and ps[1] < self._data_top:
+            return [self._pin_line(ps[0], "section")]
+        return []
+
+    def _data_lines(self, data_vrows, data_h):
+        """The windowed data-body rows for the compose tree's data widget --
+        scroll + sticky over just the data rows (the fixed chrome renders
+        separately above), padded to ``data_h`` (#88 NF3)."""
+        self._ensure_data_visible(data_vrows, data_h)
+        window = data_vrows[self._data_top: self._data_top + data_h]
+        sticky = self._data_sticky(data_vrows, data_h)
+        for i, s in enumerate(sticky):
+            if i < len(window):
+                window[i] = s
+            else:
+                window.append(s)
+        lines = [vr.text if isinstance(vr, VRow) else vr for vr in window]
+        while len(lines) < data_h:
+            lines.append(Text(""))
+        return lines
+
     def _hl(self, base, selected, focused):
         """Augment a base style with the selection highlight: the inversion
         cursor when the machine region is focused, a subtle bg when merely the
@@ -2049,7 +2134,11 @@ class PickerScreen(Widget):
             yield _PickerSegment(self, "header", slice(0, 1), id="nf-title")
             yield _PickerSegment(self, "header", slice(1, 2), id="nf-pivots")
             yield _PickerSegment(self, "chrome", id="nf-chrome")
-            yield _PickerSegment(self, "body", id="nf-body")
+            # NF3: the body splits into fixed chrome (machine-scope + buttons)
+            # above a scrolling data region -- the untangle that lets the chrome
+            # become fixed/focusable while only the data scrolls.
+            yield _PickerBodyChrome(self, id="nf-body-chrome")
+            yield _PickerBodyData(self, id="nf-body-data")
             yield _PickerSegment(self, "footer", id="nf-footer")
 
     def _refresh_nf_segments(self) -> None:
@@ -2057,10 +2146,10 @@ class PickerScreen(Widget):
         child segment widgets (their ``render()`` reads back off this screen)."""
         if not getattr(self, "_nf_enabled", False):
             return
-        for seg_id in ("nf-title", "nf-pivots", "nf-chrome", "nf-body",
-                       "nf-footer"):
+        for seg_id in ("nf-title", "nf-pivots", "nf-chrome", "nf-body-chrome",
+                       "nf-body-data", "nf-footer"):
             try:
-                self.query_one(f"#{seg_id}", _PickerSegment).refresh()
+                self.query_one(f"#{seg_id}").refresh()
             except Exception:
                 pass
 
@@ -5614,7 +5703,8 @@ class PickerApp(App):
     PickerScreen > #nf-title  { width: 100%; height: 1; }
     PickerScreen > #nf-pivots { width: 100%; height: 1; }
     PickerScreen > #nf-chrome { width: 100%; height: 2; }
-    PickerScreen > #nf-body   { width: 100%; height: 1fr; }
+    PickerScreen > #nf-body-chrome { width: 100%; height: auto; }
+    PickerScreen > #nf-body-data   { width: 100%; height: 1fr; }
     PickerScreen > #nf-footer { width: 100%; height: 2; }
     """
 

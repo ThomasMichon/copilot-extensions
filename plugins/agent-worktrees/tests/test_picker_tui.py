@@ -3736,12 +3736,19 @@ def test_nf_compose_skeleton_disabled_by_default():
 
 def test_nf_compose_skeleton_mounts_identical_segments(monkeypatch):
     """NF2/NF3 (#88): with the toggle on, PickerScreen composes the leaf segment
-    widgets (header split into its title + pivots region rows), and each renders
-    EXACTLY its slice of the monolithic frame -- so the compose tree is
+    widgets (header split into title + pivots; body split into fixed chrome +
+    scrolling data). At the top of an unscrolled list the composed tree is
     byte-identical to ``render()``."""
-    from agent_worktrees.picker_tui.engine import _PickerSegment
+    from agent_worktrees.picker_tui.engine import (
+        _PickerBodyChrome, _PickerBodyData, _PickerSegment)
     monkeypatch.setenv("AGENT_WORKTREES_PICKER_NF", "1")
     src = _fixture_source()
+
+    def _rstrip_blank(lines):
+        out = list(lines)
+        while out and out[-1].strip() == "":
+            out.pop()
+        return out
 
     async def run():
         app = PickerApp(src, live=False)
@@ -3751,22 +3758,26 @@ def test_nf_compose_skeleton_mounts_identical_segments(monkeypatch):
             assert scr._nf_enabled is True
             segs = {w.id: w for w in scr.query(_PickerSegment)}
             assert set(segs) == {"nf-title", "nf-pivots", "nf-chrome",
-                                 "nf-body", "nf-footer"}
+                                 "nf-footer"}
+            body_chrome = scr.query_one("#nf-body-chrome", _PickerBodyChrome)
+            body_data = scr.query_one("#nf-body-data", _PickerBodyData)
             frame = scr._frame_segments()
             # The title + pivots rows recompose the whole header segment.
             title_p = segs["nf-title"].render().plain
             pivots_p = segs["nf-pivots"].render().plain
             assert (title_p + "\n" + pivots_p
                     == scr._join_lines(frame["header"], frame["W"]).plain)
-            for key, sid in (("chrome", "nf-chrome"), ("body", "nf-body"),
-                             ("footer", "nf-footer")):
+            for key, sid in (("chrome", "nf-chrome"), ("footer", "nf-footer")):
                 expect = scr._join_lines(frame[key], frame["W"]).plain
                 assert segs[sid].render().plain == expect
-            # The flattened segments equal the whole-screen monolith render.
-            whole = (frame["header"] + frame["chrome"] + frame["body"]
-                     + frame["footer"])
-            assert (scr._join_lines(whole, frame["W"]).plain
-                    == scr.render().plain)
+            # Body: fixed chrome rows + scrolling data rows recompose the
+            # monolith body (top of an unscrolled list), ignoring trailing pad.
+            combined = (body_chrome.render().plain.split("\n")
+                        + body_data.render().plain.split("\n"))
+            body_p = scr._join_lines(frame["body"], frame["W"]).plain.split("\n")
+            assert _rstrip_blank(combined) == _rstrip_blank(body_p)
+
+    asyncio.run(run())
 
     asyncio.run(run())
 
