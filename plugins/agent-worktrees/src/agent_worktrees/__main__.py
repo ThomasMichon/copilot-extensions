@@ -4815,7 +4815,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     journal the *forward* ``ResourceClaim`` here. The child's stdout is passed
     through verbatim and its exit code is propagated, so ``run`` is transparent.
     """
-    raw = list(getattr(args, "command", None) or [])
+    raw = list(getattr(args, "inner_command", None) or [])
     if not raw:
         output.err('run: no subcommand given. Usage: run "<subcommand ...>"')
         return 2
@@ -10441,7 +10441,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Override the auto-resolved owner ref "
                         "(machine/project/worktree_id[#session]) for the calling "
                         "worktree. Default: resolved from the current directory.")
-    p.add_argument("command", nargs=argparse.REMAINDER,
+    p.add_argument("inner_command", nargs=argparse.REMAINDER,
                    help='The inner subcommand to run, as a quoted string or '
                         'trailing tokens (e.g. "copilot-extensions create --json")')
     p = sub.add_parser("remove-system", help="Remove a system worktree by id")

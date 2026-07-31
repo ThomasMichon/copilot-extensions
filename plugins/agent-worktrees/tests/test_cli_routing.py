@@ -487,3 +487,23 @@ def test_pr_status_no_live_flag():
 
 def test_pr_namespace_routes_create_to_create_pr():
     assert m._PR_NAMESPACE["create"] == "create-pr"
+
+
+def test_run_verb_does_not_shadow_subcommand_dest():
+    # Regression: the `run` verb's REMAINDER positional must NOT reuse the
+    # dest `command` -- that is the subparsers dest holding the subcommand name.
+    # A collision made `args.command` a list and crashed dispatch.
+    args = m.build_parser().parse_args(["run", "copilot-extensions", "create", "--json"])
+    assert args.command == "run"
+    assert args.inner_command == ["copilot-extensions", "create", "--json"]
+
+
+def test_run_verb_single_string_form():
+    args = m.build_parser().parse_args(["run", "copilot-extensions create --json"])
+    assert args.command == "run"
+    assert args.inner_command == ["copilot-extensions create --json"]
+
+
+def test_run_registered_in_command_map():
+    assert m.COMMAND_MAP["run"] is m.cmd_run
+    assert m._WORKTREE_VERBS.get("run") == "run"
