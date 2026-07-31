@@ -2752,8 +2752,10 @@ def _resolve_resume(
     # two-step-restore "Bare resume": launch Copilot in the HOME dir instead of
     # the worktree cwd, and skip --resume, so a CLI bug that fails to start
     # Copilot inside a repo/worktree directory is dodged. The mux session is
-    # still named ``wt-<id>`` (correct worktree identity + status bar); the
-    # operator restores the conversation with a manual ``/resume <id>``.
+    # still named ``wt-<id>`` (correct worktree identity), and the plan carries
+    # ``status_path`` (the real worktree) so the status bar renders the
+    # worktree's locus + git disposition despite the HOME pane cwd; the operator
+    # restores the conversation with a manual ``/resume <id>``.
     bare_resume = getattr(args, "bare_resume", False)
     plan_work_dir = record.worktree_path
     if bare_resume:
@@ -2816,6 +2818,12 @@ def _resolve_resume(
     _emit_plan({
         "action": "exec",
         "work_dir": plan_work_dir,
+        # The mux status bar (status-updater --path) must render the *worktree's*
+        # identity + git disposition, even when Copilot's pane cwd is elsewhere.
+        # In two-step "Bare resume" ``work_dir`` is HOME (to dodge the worktree-
+        # cwd start bug), so carry the real worktree path separately -- otherwise
+        # the bar loses the repo:id4 locus and shows HOME's (base) state.
+        "status_path": record.worktree_path,
         "cmd": launch_cmd,
         "env": merged_env,
         "worktree_id": record.worktree_id,

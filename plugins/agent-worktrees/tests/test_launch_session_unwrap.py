@@ -98,3 +98,18 @@ def test_launchers_pass_project_to_post_exit():
     assert 'LAUNCH_PROJECT="${WORKTREE_PROJECT:-}"' in sh
     assert 'post_args+=(--project "$LAUNCH_PROJECT")' in sh
     assert 'run_post_exit "$WORKTREE_ID"' in sh
+
+
+def test_launchers_render_status_bar_from_worktree_path():
+    """Bare resume launches Copilot in HOME, so the status-updater must render
+    from the plan's status_path (the real worktree) -- not work_dir (HOME) --
+    or the bar loses the worktree's repo:id4 locus + git disposition."""
+    ps = _LAUNCH_PS1.read_text()
+    sh = _LAUNCH_SCRIPT.read_text()
+    # PowerShell: resolve status_path (fallback work_dir) and feed the updater.
+    assert "$plan.PSObject.Properties['status_path']" in ps
+    assert "Start-StatusUpdater $sessName $muxStatusPath" in ps
+    assert "Start-StatusUpdater $sessName $plan.work_dir" not in ps
+    # bash: parse STATUS_PATH (fallback work_dir) and pass it as --path.
+    assert "d.get('status_path') or d.get('work_dir','')" in sh
+    assert '--path "${STATUS_PATH:-${WORK_DIR:-$PWD}}"' in sh

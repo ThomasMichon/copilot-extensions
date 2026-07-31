@@ -400,6 +400,11 @@ if [[ "$ACTION" == "exec" ]]; then
     invoke_update_apply 1 1
 
     WORK_DIR=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('work_dir',''))")
+    # Path the status-bar updater renders from. Normally the pane cwd (work_dir),
+    # but for two-step "Bare resume" work_dir is HOME (to dodge the worktree-cwd
+    # start bug) while the bar must still show the worktree's identity + git
+    # disposition -- so prefer status_path (the real worktree) when present.
+    STATUS_PATH=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('status_path') or d.get('work_dir',''))")
     POST_EXIT=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print('1' if d.get('post_exit') else '0')")
     WORKTREE_ID=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('worktree_id') or '')")
     NO_MUX=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print('1' if d.get('no_mux') else '0')")
@@ -492,7 +497,7 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
             [[ -x "$aw" ]] || aw="$HOME/.local/bin/agent-worktrees"
             [[ -x "$aw" ]] || return 0
             setsid "$aw" status-updater --session "$sess" --mux tmux \
-                --path "${WORK_DIR:-$PWD}" >/dev/null 2>&1 < /dev/null &
+                --path "${STATUS_PATH:-${WORK_DIR:-$PWD}}" >/dev/null 2>&1 < /dev/null &
             disown 2>/dev/null || true
         }
 

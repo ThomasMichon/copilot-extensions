@@ -644,6 +644,17 @@ if (-not $noMux -and $psmuxCmd) {
     $sessName = "wt-$wtId"
     Write-SetupLog "psmux: looking for session $sessName"
 
+    # Path the status-bar updater renders from. Normally the pane cwd, but for
+    # two-step "Bare resume" the pane launches in HOME (to dodge the worktree-
+    # cwd start bug) while the bar must still show the worktree's identity + git
+    # disposition -- so prefer the plan's status_path (the real worktree) and
+    # fall back to work_dir for every other launch.
+    $muxStatusPath = if ($plan.PSObject.Properties['status_path'] -and $plan.status_path) {
+        [string]$plan.status_path
+    } else {
+        [string]$plan.work_dir
+    }
+
     # If a psmux session already exists for this worktree, join it.
     # Note: psmux does not support tmux's "=" exact-match prefix on -t.
     $null = & $script:AwPsmuxBin has-session -t $sessName 2>&1
@@ -659,7 +670,7 @@ if (-not $noMux -and $psmuxCmd) {
         Set-AwSessionOptionsSafe $sessName
         # (Re)assert the updater on join: if the prior one died, this revives
         # the bar; if it's alive, the token guard makes the new one retire.
-        Start-StatusUpdater $sessName $plan.work_dir
+        Start-StatusUpdater $sessName $muxStatusPath
         # Write last_session AFTER spawning the updater, immediately before
         # attach -- mirroring the create branch below. The updater connects to
         # psmux as a background client, which can rewrite ~/.psmux/last_session;
@@ -725,7 +736,7 @@ if (-not $noMux -and $psmuxCmd) {
         # updater (one per session, before any nested-create early-exit so the
         # bar populates either way).
         Set-AwSessionOptionsSafe $sessName
-        Start-StatusUpdater $sessName $plan.work_dir
+        Start-StatusUpdater $sessName $muxStatusPath
         if ($nested) {
             Write-Host "Session created: $sessName (open a new terminal to join)"
             exit 0

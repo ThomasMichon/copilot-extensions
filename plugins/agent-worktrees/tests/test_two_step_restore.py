@@ -56,6 +56,24 @@ class TestBareResumePlan:
         assert plan["worktree_id"] == "wtX"
         assert any(str(a).startswith("--resume=") for a in plan["cmd"])
 
+    def test_normal_resume_status_path_is_worktree(self, monkeypatch):
+        plan = _patch_resume(monkeypatch)
+        cfg = argparse.Namespace(auto_fast_forward=False, repo_name="test-project")
+        assert m._resolve_resume(_Rec(), cfg, _resume_args()) == 0
+        # status bar renders from the worktree; here it equals work_dir.
+        assert plan["status_path"] == "/w/wtX"
+
+    def test_bare_resume_status_path_is_worktree_not_home(self, monkeypatch):
+        """Bare resume launches in HOME, but the mux status bar must still show
+        the worktree's identity + git disposition -- so status_path stays the
+        worktree even as work_dir becomes HOME."""
+        plan = _patch_resume(monkeypatch)
+        cfg = argparse.Namespace(auto_fast_forward=False, repo_name="test-project")
+        assert m._resolve_resume(_Rec(), cfg, _resume_args(bare_resume=True)) == 0
+        assert plan["work_dir"] == os.path.expanduser("~")
+        assert plan["status_path"] == "/w/wtX"
+        assert plan["status_path"] != plan["work_dir"]
+
     def test_bare_resume_uses_home_and_omits_resume(self, monkeypatch):
         plan = _patch_resume(monkeypatch)
         cfg = argparse.Namespace(auto_fast_forward=False, repo_name="test-project")
