@@ -24,6 +24,7 @@ PROSE_CONTENT_TYPES: frozenset[str] = frozenset({
     "heading",
     "text",
     "issue",
+    "work_item",
     "pull_request",
     "comment",
     "wiki",

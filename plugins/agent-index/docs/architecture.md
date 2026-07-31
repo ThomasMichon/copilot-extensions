@@ -107,6 +107,35 @@ Deployment-specific connectors, secrets bootstrap, and server surfaces from the
 source service are intentionally excluded; a downstream superset provides those
 on top of this reusable engine.
 
+## Hosted work-tracking connector (Phase 2e)
+
+`agent-index` includes a first-class hosted work-tracking + pull-request feed
+connector for Azure DevOps, a public SaaS source system. The source name is
+`ado:<org>/<project>`; `azure-devops:<org>/<project>` is accepted as an alias.
+The connector indexes work items and pull requests only. Repository files and
+commits remain the responsibility of the git connector.
+
+The connector is deliberately scoped: every run is tied to one declared project,
+optionally narrowed by `AGENT_INDEX_ADO_AREA_PATH`,
+`AGENT_INDEX_ADO_ITERATION_PATH`, `AGENT_INDEX_ADO_REPOSITORY_ID`, and bounded by
+`AGENT_INDEX_ADO_CHANGED_SINCE` or the incremental marker supplied to
+`discover_changed()`. Work items are discovered through scoped WIQL, then fetched
+in batches; pull requests are read through the Azure DevOps Git API with status
+controlled by `AGENT_INDEX_ADO_PR_STATUS` (`all`, `active`, or `completed`).
+
+Authentication uses an Azure DevOps PAT from `AGENT_INDEX_ADO_TOKEN`, sent as
+HTTP Basic with an empty username. The API base defaults to
+`https://dev.azure.com` and may be overridden with `AGENT_INDEX_ADO_BASE` for
+compatible Azure DevOps Server deployments. No organization, project, collection,
+or host is hardcoded.
+
+Azure DevOps shares the same good-citizen HTTP discipline as the GitHub connector:
+minimum inter-request spacing, `Retry-After` handling for `429`, rate-limit reset
+headers, bounded jittered retries for transient server errors, and sequential
+pagination (including Azure DevOps continuation-token pages). Managed upstreams
+should see a small, polite, project-scoped indexer rather than an organization
+firehose.
+
 
 ## Query + indexing surface (Phase 2c)
 

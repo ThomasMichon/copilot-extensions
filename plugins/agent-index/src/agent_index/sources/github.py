@@ -4,18 +4,20 @@ from __future__ import annotations
 
 import logging
 import os
-import random
-import time
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from email.utils import parsedate_to_datetime
 from typing import Any
-from urllib.parse import urlencode, urljoin
 
 import httpx
 
 from agent_index.sources.base import FileEntry
+from agent_index.sources.good_citizen_http import (
+    ApiResult as _ApiResult,
+)
+from agent_index.sources.good_citizen_http import (
+    GoodCitizenSession,
+    has_next_link,
+)
 
 log = logging.getLogger(__name__)
 
@@ -23,17 +25,6 @@ _DEFAULT_API_BASE = "https://api.github.com"
 _DEFAULT_TIMEOUT = 20.0
 _DEFAULT_PER_PAGE = 100
 _DEFAULT_MIN_INTERVAL_S = 0.2
-_RATE_REMAINING_THRESHOLD = 2
-_MAX_RETRIES = 4
-_BACKOFF_BASE_S = 1.0
-_BACKOFF_CAP_S = 60.0
-
-
-@dataclass(frozen=True)
-class _ApiResult:
-    data: Any
-    headers: httpx.Headers
-    not_modified: bool = False
 
 
 class GitHubConnector:
@@ -57,16 +48,16 @@ class GitHubConnector:
         self._token = token or _env_token()
         if not self._token:
             log.warning("GitHubConnector running without a token; API rate limits will be low")
-        self._client = client or httpx.Client(
+        self._http = GoodCitizenSession(
             base_url=self.api_base,
             headers=self._headers(),
             transport=transport,
+            client=client,
             timeout=_DEFAULT_TIMEOUT,
+            min_interval_s=min_interval_s,
         )
-        self._owns_client = client is None
-        self._min_interval_s = min_interval_s
-        self._last_request_at = 0.0
-        self._etag_cache: dict[str, str] = {}
+        self._client = self._http.client
+        self._owns_client = self._http.owns_client
         self._default_since = since
 
     @property
@@ -247,89 +238,13 @@ class GitHubConnector:
             if result.not_modified:
                 return
             yield result.data
-            if not _has_next_link(result.headers.get("Link", "")):
+            if not has_next_link(result.headers.get("Link", "")):
                 return
             page += 1
 
     def _api_get(self, path: str, **params: Any) -> _ApiResult:
         """GET JSON through the shared good-citizen HTTP path."""
-        retries = 0
-        while True:
-            self._wait_min_interval()
-            url_path = path if path.startswith("/") else f"/{path}"
-            cache_key = self._cache_key(url_path, params)
-            headers: dict[str, str] = {}
-            if etag := self._etag_cache.get(cache_key):
-                headers["If-None-Match"] = etag
-            try:
-                response = self._client.get(url_path, params=params, headers=headers)
-            except httpx.TimeoutException:
-                if retries >= _MAX_RETRIES:
-                    raise
-                self._sleep_backoff(retries)
-                retries += 1
-                continue
-            self._last_request_at = time.monotonic()
-
-            if response.status_code == httpx.codes.NOT_MODIFIED:
-                return _ApiResult(data=None, headers=response.headers, not_modified=True)
-
-            if response.status_code in {httpx.codes.TOO_MANY_REQUESTS, httpx.codes.FORBIDDEN}:
-                if retries >= _MAX_RETRIES:
-                    response.raise_for_status()
-                self._sleep_for_retry(response, retries)
-                retries += 1
-                continue
-
-            if 500 <= response.status_code < 600:
-                if retries >= _MAX_RETRIES:
-                    response.raise_for_status()
-                self._sleep_backoff(retries)
-                retries += 1
-                continue
-
-            response.raise_for_status()
-            if etag := response.headers.get("ETag"):
-                self._etag_cache[cache_key] = etag
-            self._respect_rate_limit(response)
-            return _ApiResult(data=response.json(), headers=response.headers)
-
-    def _wait_min_interval(self) -> None:
-        if self._min_interval_s <= 0 or self._last_request_at <= 0:
-            return
-        elapsed = time.monotonic() - self._last_request_at
-        if elapsed < self._min_interval_s:
-            time.sleep(self._min_interval_s - elapsed)
-
-    def _sleep_for_retry(self, response: httpx.Response, retry: int) -> None:
-        retry_after = response.headers.get("Retry-After")
-        if retry_after:
-            time.sleep(max(_parse_retry_after(retry_after), 0.0))
-            return
-        reset_delay = _rate_reset_delay(response)
-        if reset_delay is not None:
-            time.sleep(reset_delay)
-            return
-        self._sleep_backoff(retry)
-
-    def _respect_rate_limit(self, response: httpx.Response) -> None:
-        remaining_raw = response.headers.get("X-RateLimit-Remaining")
-        if remaining_raw is None:
-            return
-        try:
-            remaining = int(remaining_raw)
-        except ValueError:
-            return
-        if remaining > _RATE_REMAINING_THRESHOLD:
-            return
-        delay = _rate_reset_delay(response)
-        if delay is not None:
-            time.sleep(delay)
-
-    @staticmethod
-    def _sleep_backoff(retry: int) -> None:
-        base = min(_BACKOFF_CAP_S, _BACKOFF_BASE_S * (2**retry))
-        time.sleep(base + random.uniform(0.0, min(base, 1.0)))  # noqa: S311
+        return self._http.get_json(path, params=params)
 
     @staticmethod
     def _parse_source(source: str) -> tuple[str, str]:
@@ -351,10 +266,6 @@ class GitHubConnector:
         if self._token:
             headers["Authorization"] = f"Bearer {self._token}"
         return headers
-
-    def _cache_key(self, path: str, params: dict[str, Any]) -> str:
-        query = urlencode(sorted((k, str(v)) for k, v in params.items() if v is not None))
-        return urljoin(self.api_base + "/", path.lstrip("/")) + (f"?{query}" if query else "")
 
     @staticmethod
     def _since_marker(marker: str | None) -> str | None:
@@ -385,34 +296,3 @@ def _parse_datetime(value: str) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=UTC)
     return parsed
-
-
-def _parse_retry_after(value: str) -> float:
-    try:
-        return float(value)
-    except ValueError:
-        try:
-            return max(0.0, parsedate_to_datetime(value).timestamp() - time.time())
-        except (TypeError, ValueError):
-            return _BACKOFF_BASE_S
-
-
-def _rate_reset_delay(response: httpx.Response) -> float | None:
-    raw = response.headers.get("X-RateLimit-Reset")
-    if not raw:
-        return None
-    try:
-        reset_at = float(raw)
-    except ValueError:
-        return None
-    return max(0.0, reset_at - time.time() + 1.0)
-
-
-def _has_next_link(link_header: str) -> bool:
-    if not link_header:
-        return False
-    for part in link_header.split(","):
-        pieces = [piece.strip() for piece in part.split(";")]
-        if any(piece == 'rel="next"' for piece in pieces[1:]):
-            return True
-    return False
