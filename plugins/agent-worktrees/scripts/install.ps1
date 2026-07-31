@@ -2349,16 +2349,6 @@ switch ($Action) {
             Write-ServiceWarn "Config migration skipped: $_"
         }
 
-        # Machine-wide (temporary): deploy/refresh the extension-reload hang
-        # warning into the global ~/.copilot/instructions/ dir. Non-fatal.
-        # Remove once github/copilot-agent-runtime#13494 has shipped everywhere.
-        try {
-            $env:PYTHONUTF8 = '1'
-            & $VenvPython -m agent_worktrees deploy-ext-reload-warning 2>&1 | ForEach-Object { Write-Host "  $_" }
-        } catch {
-            Write-ServiceWarn "Ext-reload warning deployment skipped: $_"
-        }
-
         Write-V3Manifest
 
         Write-Host ""
@@ -2691,16 +2681,6 @@ switch ($Action) {
             & $VenvPython -m agent_worktrees config-migrate 2>&1 | ForEach-Object { Write-Host "  $_" }
         } catch {
             Write-ServiceWarn "Config migration skipped: $_"
-        }
-
-        # Machine-wide (temporary): deploy/refresh the extension-reload hang
-        # warning into the global ~/.copilot/instructions/ dir. Non-fatal.
-        # Remove once github/copilot-agent-runtime#13494 has shipped everywhere.
-        try {
-            $env:PYTHONUTF8 = '1'
-            & $VenvPython -m agent_worktrees deploy-ext-reload-warning 2>&1 | ForEach-Object { Write-Host "  $_" }
-        } catch {
-            Write-ServiceWarn "Ext-reload warning deployment skipped: $_"
         }
 
         Write-V3Manifest

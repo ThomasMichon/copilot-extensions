@@ -315,7 +315,6 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
 | `update` | Re-deploy runtime from repo source + refresh **every** registered plugin payload and sibling module, then fast-forward the managed repo anchor(s) so in-repo config bindings deploy alongside the plugin. Version-gated: skips a runtime whose deployed version already matches its payload (`--force` re-deploys all; `--no-anchor-sync` skips the anchor sync) |
 | `install-status` | Show installation and deployment status |
 | `deploy-instructions` | Deploy `machine.instructions.md` from `machines.yaml` |
-| `deploy-ext-reload-warning` | Deploy/refresh the machine-wide extension-reload "Loading…/Resuming…" hang warning into the global `~/.copilot/instructions/` dir (temporary; version-gated, self-cleans once the [github/copilot-agent-runtime#13494](https://github.com/github/copilot-agent-runtime/pull/13494) fix ships) |
 | `get` | Query config values (e.g., `agent-worktrees get repo-dir`) |
 
 ## Services, Repos & Validation
