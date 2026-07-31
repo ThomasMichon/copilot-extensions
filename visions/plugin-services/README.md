@@ -5,7 +5,7 @@
   local services on a user's machine.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-07-17
+- **Last revised:** 2026-07-30
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -98,6 +98,19 @@ never requires reconfiguring the survivors.
 A service is supervised by the host OS's own per-user service facility, giving
 auto-start, keep-alive, and restart-on-failure on every supported platform
 (Windows and Linux/WSL) through one coherent contract.
+
+### self-provisioning-runtime
+**Enabling** a runtime plugin is the whole action a user takes — its runtime
+then **provisions itself**. Whenever a session starts on a machine where the
+plugin is enabled (and, for a machine-scoped runtime, *permitted*), the runtime is
+installed if absent and **reconciled to match its enabled payload version** if it
+has drifted — with **no manual install step** and no dependence on one *particular*
+sibling being the launcher. Provisioning is **idempotent, version-keyed** (a no-op
+once already matched), **throttled**, **gated** to the machines a runtime belongs
+on, and **opt-out-able**, and it never blocks or slows a session that is already
+current. "Enabled" is the user's whole intent; "installed, running, and
+version-matched" is the model's job — the same self-healing that keeps a runtime
+immutable-versioned (above) also brings a *missing* runtime into existence.
 
 ### graceful-composition
 When multiple services are present they discover and use one another's optional
@@ -314,3 +327,22 @@ spec-level, not fixed here.
   vision→reality delta: inventory and version the live wire contracts — HTTP,
   ACP-over-WS, the endpoint/rendezvous handshake, cross-plugin relay/provider
   calls, and the fabric coordination contract).
+
+- **2026-07-30** — Added the **self-provisioning-runtime** feature: enabling a
+  runtime plugin auto-installs and version-reconciles its runtime at session
+  start, with no manual install step. Mined from a verification pass on the
+  service model against reality. The launch-time payload+runtime reconciler
+  (`runtimeScope` + `agent-worktrees reconcile-plugins`) already realizes *part*
+  of this — but only via the **agent-worktrees worktree launcher** (so a session
+  not launched through it, or a machine without agent-worktrees, never
+  self-provisions), and a `machine-gated` runtime is **skipped** wherever a gate
+  manifest is absent. The intent generalizes that partial mechanism: *any* enabled
+  runtime self-provisions on *any* session start, gated only by where it is
+  permitted. Tracked as the vision→reality delta in dotfiles (the
+  *self-provisioning-runtime* effort). This pass also **reaffirmed** (did not
+  change) **minimal-network-exposure** / **discoverable-local-endpoint**: the
+  service-bearing plugins still bind **fixed, well-known default ports**
+  (agent-bridge 9280/9281 + relay 9857, agent-dispatch 9847/9331) despite the
+  rendezvous infrastructure already existing — the standing intent is OS-assigned
+  ephemeral (or socket/pipe) endpoints advertised through discovery, never fixed;
+  carved as the *dynamic-endpoints* delta in dotfiles.
