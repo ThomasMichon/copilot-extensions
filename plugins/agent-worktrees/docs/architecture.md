@@ -1064,4 +1064,20 @@ compose skeleton only; region/row focus stays on the manual model until NF3/NF4
 migrate the chrome regions and body rows to real focusable widgets, and NF5 retires
 `sel`/`stops`/`_dispatch_key`.
 
+**NF3 slice 1 -- chrome region decomposition (header -> title + pivots).** NF3's
+job is to turn the chrome regions into real focusable widgets with native Tab
+between them. Its first step is *decomposition*: the chrome regions (pivot tabs,
+machine scope, buttons) are `sel`-coupled and rendered across `topbar()` and
+`build_body()`, so they don't map 1:1 to NF2's four segments -- making them
+focusable together needs each region to be its own widget first. This slice splits
+the **header** segment into its two conceptual region rows: `#nf-title` (the
+identity row -- "Agent Worktrees", version, update indicator, host) and `#nf-pivots`
+(the WORKTREES/Tasks/Bridges pivot tabs + the ⚙ Configuration entry). `_PickerSegment`
+gained an optional `rows` slice so one segment can back several row-widgets; the two
+render header rows `0:1` and `1:2` and recompose the whole header byte-identically
+(`test_nf_compose_skeleton_mounts_identical_segments`). Still toggle-gated, still
+non-focusable -- the pivots are now their *own* region widget, the granularity the
+focusable-chrome slices (extracting the machine-scope + button regions from
+`build_body`, then wiring native Tab across all chrome regions) build on next.
+
 
