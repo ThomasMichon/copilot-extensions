@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import os
 
+import pytest
+
 from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
 
@@ -323,3 +325,76 @@ def test_default_setup_ps1_supports_hook_and_session_path():
     # --stdio (ACP) mode redirects Write-Host + hook output to stderr
     assert "StdioMode" in text
     assert "[Console]::Error.WriteLine" in text
+
+
+# ---------------------------------------------------------------------------
+# cmd_launch: Windows launcher-depth handoff (copilot-extensions #102).
+# Interactive launches hand off straight to pwsh (no cmd.exe shim); ACP/--stdio
+# launches keep the cmd.exe -> .cmd shim for verbatim stdin forwarding.
+# ---------------------------------------------------------------------------
+
+def _fake_popen(captured):
+    class _P:
+        def __init__(self, argv, *a, **k):
+            captured.append(list(argv))
+
+        def wait(self, timeout=None):
+            return 0
+
+    return _P
+
+
+def _win_launch_dir(tmp_path):
+    bind = tmp_path / "bin"
+    bind.mkdir()
+    (bind / "launch-session.cmd").write_text("@echo off\n")
+    (bind / "launch-session.ps1").write_text("# ps\n")
+    return tmp_path
+
+
+def test_windows_interactive_launch_bypasses_cmd_shim(monkeypatch, tmp_path):
+    monkeypatch.setattr(m.cfg, "install_dir", lambda: _win_launch_dir(tmp_path))
+    monkeypatch.setattr(m.cfg, "detect_platform", lambda: "windows")
+    captured: list[list[str]] = []
+    monkeypatch.setattr(m.subprocess, "Popen", _fake_popen(captured))
+
+    with pytest.raises(SystemExit) as exc:
+        m.cmd_launch([])
+    assert exc.value.code == 0
+    argv = captured[0]
+    assert argv[0] == "pwsh.exe"
+    assert "-File" in argv
+    assert any(a.endswith("launch-session.ps1") for a in argv)
+    assert "cmd.exe" not in argv
+
+
+def test_windows_stdio_launch_keeps_cmd_shim(monkeypatch, tmp_path):
+    monkeypatch.setattr(m.cfg, "install_dir", lambda: _win_launch_dir(tmp_path))
+    monkeypatch.setattr(m.cfg, "detect_platform", lambda: "windows")
+    captured: list[list[str]] = []
+    monkeypatch.setattr(m.subprocess, "Popen", _fake_popen(captured))
+
+    with pytest.raises(SystemExit):
+        m.cmd_launch(["--", "--acp", "--stdio"])
+    argv = captured[0]
+    assert argv[0] == "cmd.exe"
+    assert any(a.endswith("launch-session.cmd") for a in argv)
+    # The ACP passthrough is preserved verbatim through the shim.
+    assert "--stdio" in argv
+
+
+def test_windows_interactive_falls_back_to_cmd_when_ps1_absent(monkeypatch, tmp_path):
+    """If only the .cmd is deployed (no sibling .ps1), the interactive path
+    still works by falling back to the cmd.exe shim."""
+    bind = tmp_path / "bin"
+    bind.mkdir()
+    (bind / "launch-session.cmd").write_text("@echo off\n")  # no .ps1
+    monkeypatch.setattr(m.cfg, "install_dir", lambda: tmp_path)
+    monkeypatch.setattr(m.cfg, "detect_platform", lambda: "windows")
+    captured: list[list[str]] = []
+    monkeypatch.setattr(m.subprocess, "Popen", _fake_popen(captured))
+
+    with pytest.raises(SystemExit):
+        m.cmd_launch([])
+    argv = captured[0]
+    assert argv[0] == "cmd.exe"
