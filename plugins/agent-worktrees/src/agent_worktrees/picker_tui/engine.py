@@ -420,26 +420,33 @@ def _nf_compose_enabled() -> bool:
 
 
 class _PickerSegment(Widget):
-    """One NF2 screen segment (header / chrome / body / footer) -- a leaf widget
-    that renders its slice of ``PickerScreen._frame_segments()`` (#88 NF2).
+    """One NF2 screen segment (or a row-slice of one) -- a leaf widget that
+    renders its slice of ``PickerScreen._frame_segments()`` (#88 NF2/NF3).
 
     The screen owns all state and content; a segment is a pure view that reads
-    its named slice back off the parent screen at render time. Not focusable --
-    NF2 is the *visual* compose skeleton only; focus/keys stay on the manual
-    ``sel``/``on_key`` model until the later NF3/NF4/NF5 slices migrate regions
-    and rows to real focusable widgets.
+    its named slice back off the parent screen at render time. An optional
+    ``rows`` selects a sub-range of the named segment's rows (used to split the
+    header into its ``title`` and ``pivots`` region rows, #88 NF3). Not
+    focusable -- the compose tree is the *visual* skeleton only; focus/keys stay
+    on the manual ``sel``/``on_key`` model until the later NF slices migrate
+    regions and rows to real focusable widgets.
     """
 
     can_focus = False
 
-    def __init__(self, screen: "PickerScreen", seg_key: str, **kw) -> None:
+    def __init__(self, screen: "PickerScreen", seg_key: str,
+                 rows: "slice | None" = None, **kw) -> None:
         super().__init__(**kw)
         self._screen = screen
         self._seg_key = seg_key
+        self._rows = rows
 
     def render(self):
         seg = self._screen._frame_segments()
-        return self._screen._join_lines(seg[self._seg_key], seg["W"])
+        lines = seg[self._seg_key]
+        if self._rows is not None:
+            lines = lines[self._rows]
+        return self._screen._join_lines(lines, seg["W"])
 
 
 class PickerScreen(Widget):
@@ -2000,7 +2007,11 @@ class PickerScreen(Widget):
         # a render-leaf, so ``render()``, the ``capture`` seams, the golden, and
         # all 93 couplings are byte-identical and unaffected.
         if self._nf_enabled:
-            yield _PickerSegment(self, "header", id="nf-header")
+            # Header splits into its two region rows -- the identity/title row
+            # and the pivot-tabs row (#88 NF3): the pivots become their own
+            # region widget, the granularity the focusable-chrome slices build on.
+            yield _PickerSegment(self, "header", slice(0, 1), id="nf-title")
+            yield _PickerSegment(self, "header", slice(1, 2), id="nf-pivots")
             yield _PickerSegment(self, "chrome", id="nf-chrome")
             yield _PickerSegment(self, "body", id="nf-body")
             yield _PickerSegment(self, "footer", id="nf-footer")
@@ -2010,7 +2021,8 @@ class PickerScreen(Widget):
         child segment widgets (their ``render()`` reads back off this screen)."""
         if not getattr(self, "_nf_enabled", False):
             return
-        for seg_id in ("nf-header", "nf-chrome", "nf-body", "nf-footer"):
+        for seg_id in ("nf-title", "nf-pivots", "nf-chrome", "nf-body",
+                       "nf-footer"):
             try:
                 self.query_one(f"#{seg_id}", _PickerSegment).refresh()
             except Exception:
@@ -5482,9 +5494,10 @@ class PickerApp(App):
     CSS = """
     Screen { background: $surface; }
     PickerScreen { width: 100%; height: 100%; }
-    /* NF2 compose skeleton (#88): fixed-height chrome, body fills the rest.
+    /* NF2/NF3 compose skeleton (#88): fixed-height chrome, body fills the rest.
        Inert unless AGENT_WORKTREES_PICKER_NF mounts the segment widgets. */
-    PickerScreen > #nf-header { width: 100%; height: 2; }
+    PickerScreen > #nf-title  { width: 100%; height: 1; }
+    PickerScreen > #nf-pivots { width: 100%; height: 1; }
     PickerScreen > #nf-chrome { width: 100%; height: 2; }
     PickerScreen > #nf-body   { width: 100%; height: 1fr; }
     PickerScreen > #nf-footer { width: 100%; height: 2; }

@@ -3727,9 +3727,10 @@ def test_nf_compose_skeleton_disabled_by_default():
 
 
 def test_nf_compose_skeleton_mounts_identical_segments(monkeypatch):
-    """NF2 (#88): with the toggle on, PickerScreen composes the four leaf segment
-    widgets, and each renders EXACTLY its slice of the monolithic frame -- so the
-    compose tree is byte-identical to ``render()``."""
+    """NF2/NF3 (#88): with the toggle on, PickerScreen composes the leaf segment
+    widgets (header split into its title + pivots region rows), and each renders
+    EXACTLY its slice of the monolithic frame -- so the compose tree is
+    byte-identical to ``render()``."""
     from agent_worktrees.picker_tui.engine import _PickerSegment
     monkeypatch.setenv("AGENT_WORKTREES_PICKER_NF", "1")
     src = _fixture_source()
@@ -3741,10 +3742,16 @@ def test_nf_compose_skeleton_mounts_identical_segments(monkeypatch):
             scr = app.query_one(PickerScreen)
             assert scr._nf_enabled is True
             segs = {w.id: w for w in scr.query(_PickerSegment)}
-            assert set(segs) == {"nf-header", "nf-chrome", "nf-body", "nf-footer"}
+            assert set(segs) == {"nf-title", "nf-pivots", "nf-chrome",
+                                 "nf-body", "nf-footer"}
             frame = scr._frame_segments()
-            for key, sid in (("header", "nf-header"), ("chrome", "nf-chrome"),
-                             ("body", "nf-body"), ("footer", "nf-footer")):
+            # The title + pivots rows recompose the whole header segment.
+            title_p = segs["nf-title"].render().plain
+            pivots_p = segs["nf-pivots"].render().plain
+            assert (title_p + "\n" + pivots_p
+                    == scr._join_lines(frame["header"], frame["W"]).plain)
+            for key, sid in (("chrome", "nf-chrome"), ("body", "nf-body"),
+                             ("footer", "nf-footer")):
                 expect = scr._join_lines(frame[key], frame["W"]).plain
                 assert segs[sid].render().plain == expect
             # The flattened segments equal the whole-screen monolith render.
