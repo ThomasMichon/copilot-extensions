@@ -74,8 +74,12 @@ The pluggable adapters that pull a repo's corpus into the index:
 - **Optional, first-class connector class:** **hosted work-tracking and
   code-review feeds** — an enterprise backlog of work items and its associated
   pull-request/review stream — for teams whose real backlog lives in a managed
-  system alongside the forge. Scoped narrowly (a declared project/area, a bounded
-  window), never a firehose of an entire organization.
+  system alongside the forge. Scoped to **operator-supplied query specifications**
+  — the operator curates exactly which subsets are indexed (specific work-item
+  queries for chosen team backlogs and areas; pull-request filters such as "PRs
+  assigned to me" or a couple of key repositories), never a whole-project or
+  whole-organization firehose. Absent an explicit query specification the
+  connector indexes nothing, rather than defaulting to a broad crawl.
 
 Every connector shares one **good-citizen ingest discipline** (see Behaviors):
 incremental by default, event-driven where the source offers it, and rate-aware
@@ -128,7 +132,10 @@ getting throttled or blocked is treated as correctness, not a nicety.
 Sources join through a **uniform connector interface** — the built-in repo
 files/commits/issues/PRs, plus an optional **hosted work-tracking + pull-request
 feed** connector — so a deployment adds a source domain without changing the
-index or query core. Connectors are added, not forked in.
+index or query core. Connectors are added, not forked in. A connector over a
+managed backlog is **driven by operator-supplied query specifications** (curated
+work-item queries and pull-request filters), so the operator indexes exactly the
+subsets they care about and nothing more.
 
 ### source-and-facet-scoping
 Queries scope by source and by meaning-bearing metadata facets (repo, path,
@@ -289,3 +296,11 @@ generic is what lets many different products reuse it.
   other hosts reach the single service over SSH. Honors the `plugin-services`
   §zero-downtime-cutover / §minimal-network-exposure behaviors; realized at intent
   level by the shared `zdd` cutover library.
+
+- **2026-07-31** — Sharpened the **hosted work-tracking connector** scoping intent:
+  ingestion is driven by **operator-supplied query specifications** (curated
+  work-item queries and pull-request filters — chosen team backlogs, key areas,
+  "PRs assigned to me"), and the connector indexes **nothing** absent an explicit
+  query, rather than defaulting to a whole-project crawl. Mined from an operator
+  clarification that they will supply the exact PR/work-item subsets to index.
+  Reinforces good-citizen ingestion and "never a firehose."
