@@ -43,6 +43,35 @@ The plugin follows the service model's **immutable-versioned-runtime** and
   *(Phase 2 wires the drain/handoff of the indexing scheduler; Phase 1 ships the
   versioned-runtime + rendezvous substrate.)*
 
+
+## Zero-downtime cutover (Phase 2d)
+
+`agent-index` now consumes the shared `zdd` library for active/passive runtime
+cutover. Each service process publishes its bound endpoint to the stable routing
+table at `~/.agent-index/active.json`, which lives under `install_dir()` rather
+than a versioned runtime slot, so every installed version reads and writes the
+same client-followed record. Startup publishes the active endpoint after the
+listening socket is bound; shutdown clears the record only when this process
+still owns it. The legacy rendezvous file remains as a fallback for older
+installations and diagnostics.
+
+The drain surface is `POST /drain` and `POST /undrain`. Draining leaves
+`/search` and `/similar` available for in-flight and already-routed callers, but
+`GET /health` reports `{"status": "draining"}` so deploy health checks do not
+select a draining process. The drain gate waits for in-flight searches and pauses
+the `TaskRunner` after its current indexing task; queued indexing work remains in
+the durable SQLite `task_store` under `~/.agent-index/data/`, so the successor
+version (sharing the same durable data directory) resumes scheduled work without
+dropping or double-running queued tasks. `POST /undrain` releases the gate and
+wakes the runner for rollback.
+
+`agent-index deploy` wires `zdd.cutover.CutoverOrchestrator`: it spawns a passive
+`python -m agent_index start --port <p> --passive`, waits for `/health` to return
+`ok`, flips the routing table, drains the old process, asks it to shut down, and
+keeps the new process as active. `agent-index deploy --recover` runs the shared
+breadcrumb recovery path, undraining any survivor left behind by an interrupted
+cutover.
+
 ## Cross-host reach (SSH)
 
 The service is machine-local and opens no new inbound port. A client on **another

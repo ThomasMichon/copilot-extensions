@@ -2,19 +2,24 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import importlib.util
 import logging
 import os
 import socket
 import sys
-from threading import Lock, Thread
+import time
+from collections.abc import Iterator
+from contextlib import asynccontextmanager, contextmanager
+from threading import Condition, Lock
 from typing import Annotated, Any
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request
 from pydantic import BaseModel
 
 from . import __version__
-from .config import Config, data_dir, load_config, run_dir
+from .config import Config, data_dir, load_config, routing_dir, run_dir
 from .query_surface import format_error, hit_to_dict
 from .rendezvous import clear_endpoint, write_endpoint
 
@@ -28,11 +33,102 @@ class ReindexRequest(BaseModel):
     source: str | None = None
 
 
+class DrainRequest(BaseModel):
+    """Request body for the zdd drain endpoint."""
+
+    timeout: float = 300.0
+    poll: float = 1.0
+    force: bool = False
+
+
+class DrainGate:
+    """Process-wide drain state plus in-flight search tracking."""
+
+    def __init__(self) -> None:
+        self._condition = Condition()
+        self._draining = False
+        self._searches = 0
+
+    @property
+    def draining(self) -> bool:
+        with self._condition:
+            return self._draining
+
+    @property
+    def searches(self) -> int:
+        with self._condition:
+            return self._searches
+
+    def set_draining(self, value: bool) -> None:
+        with self._condition:
+            self._draining = value
+            self._condition.notify_all()
+
+    @contextmanager
+    def track_search(self) -> Iterator[None]:
+        with self._condition:
+            self._searches += 1
+        try:
+            yield
+        finally:
+            with self._condition:
+                self._searches = max(0, self._searches - 1)
+                self._condition.notify_all()
+
+    def wait_for_searches(self, *, timeout: float, poll: float) -> bool:
+        deadline = time.monotonic() + max(0.0, timeout)
+        with self._condition:
+            while self._searches > 0:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._condition.wait(timeout=min(max(poll, 0.05), remaining))
+            return True
+
+
+class _EventBus:
+    """Minimal event bus for TaskRunner; SSE fan-out is added by later surfaces."""
+
+    def publish(self, _event: str, _payload: dict[str, Any]) -> None:
+        return
+
+
 def build_app() -> FastAPI:
     """Build the agent-index service application."""
-    app = FastAPI(title="agent-index", version=__version__)
     cached_search_engine: Any | None = None
     search_engine_lock = Lock()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        data_dir().mkdir(parents=True, exist_ok=True)
+        runner = None
+        try:
+            from agent_index.indexing.runner import TaskRunner
+            from agent_index.indexing.task_store import TaskStore
+
+            store = TaskStore(data_dir() / "tasks.db")
+            runner = TaskRunner(store, _EventBus())
+
+            def _run_reindex(**kwargs: Any) -> dict[str, float]:
+                from agent_index.indexing import engine as indexing_engine
+
+                return indexing_engine.run_reindex(**kwargs)
+
+            runner.set_index_fn(_run_reindex)
+            app.state.task_store = store
+            app.state.task_runner = runner
+            await runner.start()
+        except Exception:
+            log.warning("Task runner startup skipped", exc_info=True)
+        try:
+            yield
+        finally:
+            if runner is not None:
+                with contextlib.suppress(Exception):
+                    await runner.stop()
+
+    app = FastAPI(title="agent-index", version=__version__, lifespan=lifespan)
+    app.state.drain_gate = DrainGate()
 
     def get_search_engine() -> Any:
         nonlocal cached_search_engine
@@ -52,76 +148,140 @@ def build_app() -> FastAPI:
             cached_search_engine = None
 
     @app.get("/health")
-    def health() -> dict[str, str]:
-        return {"status": "ok"}
+    def health(request: Request) -> dict[str, str]:
+        gate: DrainGate = request.app.state.drain_gate
+        return {"status": "draining" if gate.draining else "ok"}
 
     @app.get("/status")
-    def status() -> dict:
-        return {
+    def status(request: Request) -> dict[str, Any]:
+        gate: DrainGate = request.app.state.drain_gate
+        payload: dict[str, Any] = {
             "plugin": "agent-index",
             "version": __version__,
+            "draining": gate.draining,
             "index": _index_status(),
         }
+        runner = getattr(request.app.state, "task_runner", None)
+        if runner is not None:
+            payload["indexing"] = runner.status()
+        return payload
 
     @app.get("/search")
     def search(
+        request: Request,
         q: str,
         source: str | None = None,
         language: str | None = None,
         repo: str | None = None,
         limit: int = 10,
     ) -> dict[str, Any]:
-        try:
-            engine = get_search_engine()
-            hits = engine.search(
-                q,
-                limit=limit,
-                source=source,
-                language=language,
-                repo=repo,
-            )
-            return {"query": q, "available": True, "hits": [hit_to_dict(hit) for hit in hits]}
-        except Exception as exc:
-            mark_search_engine_failed()
-            log.debug("Search unavailable", exc_info=True)
-            return {"query": q, "available": False, "error": format_error(exc), "hits": []}
+        gate: DrainGate = request.app.state.drain_gate
+        with gate.track_search():
+            try:
+                engine = get_search_engine()
+                hits = engine.search(q, limit=limit, source=source, language=language, repo=repo)
+                return {
+                    "query": q,
+                    "available": True,
+                    "hits": [hit_to_dict(hit) for hit in hits],
+                }
+            except Exception as exc:
+                mark_search_engine_failed()
+                log.debug("Search unavailable", exc_info=True)
+                return {"query": q, "available": False, "error": format_error(exc), "hits": []}
 
     @app.get("/similar")
     def similar(
+        request: Request,
         chunk_id: Annotated[str, Query(alias="id")],
         limit: int = 10,
         source: str | None = None,
     ) -> dict[str, Any]:
-        try:
-            engine = get_search_engine()
-            hits = engine.find_similar(chunk_id, limit=limit, source=source)
-            return {"id": chunk_id, "available": True, "hits": [hit_to_dict(hit) for hit in hits]}
-        except Exception as exc:
-            mark_search_engine_failed()
-            log.debug("Find-similar unavailable", exc_info=True)
-            return {"id": chunk_id, "available": False, "error": format_error(exc), "hits": []}
+        gate: DrainGate = request.app.state.drain_gate
+        with gate.track_search():
+            try:
+                engine = get_search_engine()
+                hits = engine.find_similar(chunk_id, limit=limit, source=source)
+                return {
+                    "id": chunk_id,
+                    "available": True,
+                    "hits": [hit_to_dict(hit) for hit in hits],
+                }
+            except Exception as exc:
+                mark_search_engine_failed()
+                log.debug("Find-similar unavailable", exc_info=True)
+                return {"id": chunk_id, "available": False, "error": format_error(exc), "hits": []}
 
     @app.post("/reindex")
-    def reindex(request: ReindexRequest | None = None) -> dict[str, Any]:
+    def reindex(request: Request, body: ReindexRequest | None = None) -> dict[str, Any]:
+        gate: DrainGate = request.app.state.drain_gate
+        if gate.draining:
+            return {"accepted": False, "error": "service is draining"}
         missing = _missing_indexing_dependencies()
         if missing:
             return {"accepted": False, "error": missing}
-        try:
-            from agent_index.indexing import engine as indexing_engine
-        except Exception as exc:
-            return {"accepted": False, "error": format_error(exc)}
+        full = body.full if body else False
+        source = body.source if body else None
+        store = getattr(request.app.state, "task_store", None)
+        runner = getattr(request.app.state, "task_runner", None)
+        if store is None or runner is None:
+            return {"accepted": False, "error": "indexing task runner unavailable"}
+        task = store.enqueue(
+            source=source or "all",
+            full=full,
+            trigger_source="api:agent_index_reindex",
+        )
+        runner.notify()
+        return {"accepted": True, "task": task.to_dict()}
 
-        full = request.full if request else False
-        source = request.source if request else None
+    @app.post("/drain")
+    async def drain(request: Request, body: DrainRequest | None = None) -> dict[str, Any]:
+        gate: DrainGate = request.app.state.drain_gate
+        opts = body or DrainRequest()
+        timeout = max(0.0, float(opts.timeout))
+        poll = max(0.05, float(opts.poll))
+        start = time.monotonic()
+        gate.set_draining(True)
+        runner = getattr(request.app.state, "task_runner", None)
+        runner_clean = True
+        if runner is not None:
+            runner_clean = await runner.drain(timeout=timeout, poll=poll)
+        remaining = max(0.0, timeout - (time.monotonic() - start))
+        searches_clean = await asyncio.to_thread(
+            gate.wait_for_searches,
+            timeout=remaining,
+            poll=poll,
+        )
+        clean = runner_clean and searches_clean
+        forced = bool(opts.force and not clean)
+        drained = clean or forced
+        return {
+            "drained": drained,
+            "clean": clean,
+            "forced": forced,
+            "busy_searches": gate.searches,
+            "active_task_id": getattr(runner, "active_task_id", None),
+        }
 
-        def run() -> None:
-            try:
-                indexing_engine.run_reindex(full=full, source=source)
-            except Exception:
-                log.exception("Background reindex failed")
+    @app.post("/undrain")
+    async def undrain(request: Request) -> dict[str, Any]:
+        gate: DrainGate = request.app.state.drain_gate
+        gate.set_draining(False)
+        runner = getattr(request.app.state, "task_runner", None)
+        if runner is not None:
+            await runner.resume()
+        return {"draining": False}
 
-        Thread(target=run, name="agent-index-reindex", daemon=True).start()
-        return {"accepted": True}
+    @app.post("/shutdown")
+    def shutdown(request: Request) -> dict[str, Any]:
+        server = getattr(request.app.state, "uvicorn_server", None)
+        if server is not None:
+            server.should_exit = True
+        return {"shutdown": True}
+
+    @app.post("/adopt-relay")
+    def adopt_relay() -> dict[str, Any]:
+        return {"adopted": False, "reason": "agent-index has no relay"}
 
     return app
 
@@ -145,7 +305,6 @@ def _index_status() -> dict[str, Any]:
         lance_dir = cfg.lance_dir
         if not lance_dir.exists():
             return {"chunks": 0, "available": False, "tables": {}, "sources": {}}
-
         db = lancedb.connect(str(lance_dir))
         table_names = sorted(db.table_names())
         tables: dict[str, int] = {}
@@ -164,18 +323,42 @@ def _index_status() -> dict[str, Any]:
                 log.debug("Failed to read index table %s", table_name, exc_info=True)
                 tables[table_name] = 0
         chunks = tables.get(cfg.content_table, 0)
-        return {
-            "chunks": chunks,
-            "available": chunks > 0,
-            "tables": tables,
-            "sources": sources,
-        }
+        return {"chunks": chunks, "available": chunks > 0, "tables": tables, "sources": sources}
     except Exception:
         log.debug("Index status unavailable", exc_info=True)
         return {"chunks": 0, "available": False, "tables": {}, "sources": {}}
 
 
-def serve(cfg: Config | None = None) -> None:
+def _publish_routing(cfg: Config, bound_port: int, *, passive: bool = False) -> None:
+    """Publish this process into the shared zdd routing table, best-effort."""
+    if passive:
+        return
+    try:
+        from zdd import routing
+
+        routing.publish_active(
+            routing_dir(),
+            bind=cfg.host,
+            port=bound_port,
+            pid=os.getpid(),
+            version=__version__,
+            demote_existing=True,
+        )
+    except Exception:
+        log.warning("Failed to publish routing table", exc_info=True)
+
+
+def _clear_routing() -> None:
+    """Clear this process from the shared zdd routing table, best-effort."""
+    try:
+        from zdd import routing
+
+        routing.clear_if_owner(routing_dir(), os.getpid())
+    except Exception:
+        log.debug("Routing-table clear-on-shutdown skipped", exc_info=True)
+
+
+def serve(cfg: Config | None = None, *, passive: bool = False) -> None:
     """Bind an OS-assigned local endpoint and run the service."""
     import uvicorn
 
@@ -184,14 +367,22 @@ def serve(cfg: Config | None = None) -> None:
     sock = _bind_listen_socket(cfg.host, cfg.port)
     bound_port = sock.getsockname()[1]
     write_endpoint(run_dir(), "tcp", f"{cfg.host}:{bound_port}")
+    _publish_routing(cfg, bound_port, passive=passive)
     from .runtime_version import write_running_version
 
     write_running_version()
+    app = build_app()
+    server = uvicorn.Server(
+        uvicorn.Config(
+            app,
+            log_level=os.environ.get("AGENT_INDEX_LOG_LEVEL", "info"),
+        )
+    )
+    app.state.uvicorn_server = server
     try:
-        uvicorn.Server(
-            uvicorn.Config(build_app(), log_level=os.environ.get("AGENT_INDEX_LOG_LEVEL", "info"))
-        ).run(sockets=[sock])
+        server.run(sockets=[sock])
     finally:
+        _clear_routing()
         clear_endpoint(run_dir())
         sock.close()
 
@@ -204,6 +395,7 @@ def _bind_listen_socket(host: str, port: int) -> socket.socket:
         sock = socket.socket(family, socktype, proto)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(sockaddr)
+        sock.listen(socket.SOMAXCONN)
         return sock
     except OSError as exc:
         print(f"agent-index: failed to bind {host}:{port}: {exc}", file=sys.stderr)

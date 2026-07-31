@@ -117,7 +117,11 @@ class ProgressCallback:
         self._last_stage = stage
 
         # Always persist on stage change or forced; otherwise throttle
-        if force_persist or stage_changed or (now - self._last_persist) >= _PROGRESS_PERSIST_INTERVAL:
+        if (
+            force_persist
+            or stage_changed
+            or (now - self._last_persist) >= _PROGRESS_PERSIST_INTERVAL
+        ):
             self._last_persist = now
             self._store.update_progress(self._task_id, stage, pct, msg)
 
@@ -148,6 +152,7 @@ class TaskRunner:
         self._post_index_fn: Callable[[], None] | None = None
         self._task: asyncio.Task[None] | None = None
         self._shutdown = False
+        self._paused = False
         self._wake = asyncio.Event()
         # Cancellation per running task
         self._cancel_events: dict[str, threading.Event] = {}
@@ -202,6 +207,22 @@ class TaskRunner:
                 await self._task
         log.info("Task runner stopped")
 
+    async def drain(self, *, timeout: float = 300.0, poll: float = 0.5) -> bool:
+        """Pause dequeueing and wait for the current task to finish."""
+        self._paused = True
+        self._wake.set()
+        deadline = time.monotonic() + max(0.0, timeout)
+        while self.running or self.active_task_id is not None:
+            if time.monotonic() >= deadline:
+                return False
+            await asyncio.sleep(max(0.05, poll))
+        return True
+
+    async def resume(self) -> None:
+        """Resume dequeueing queued tasks after a drain rollback."""
+        self._paused = False
+        self._wake.set()
+
     def notify(self) -> None:
         """Wake the worker loop (call after enqueueing)."""
         self._wake.set()
@@ -229,6 +250,7 @@ class TaskRunner:
     def status(self) -> dict[str, Any]:
         return {
             "running": self.running,
+            "paused": self._paused,
             "active_task_id": self.active_task_id,
             "stats": {
                 "completed": self.tasks_completed,
@@ -244,6 +266,14 @@ class TaskRunner:
         await asyncio.sleep(2)
 
         while not self._shutdown:
+            if self._paused:
+                self._wake.clear()
+                try:
+                    await asyncio.wait_for(self._wake.wait(), timeout=10.0)
+                except TimeoutError:
+                    continue
+                continue
+
             task = await asyncio.to_thread(self.store.dequeue_next)
             if task is None:
                 self._wake.clear()
