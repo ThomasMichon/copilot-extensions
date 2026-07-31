@@ -579,9 +579,10 @@ class _PickerBodyData(_FocusRegion):
         return scr._join_lines(scr._data_lines(data, h), W)
 
     def on_click(self, event) -> None:
-        # Click-to-select a data row (#88 NF4): map the click's row offset onto
-        # the drawn window and, if it lands on a real data row, point sel there
-        # (Textual has already focused this region on the press).
+        # Click-to-select a data row (#88 NF4); double-click activates it (opens
+        # the row's action -- the submenu for a worktree, etc.), the natural
+        # pointer parallel to Enter. Maps the click's row offset onto the drawn
+        # window and, if it lands on a real data row, points sel there.
         scr = self._screen
         event.stop()
         W = scr.size.width or 100
@@ -591,6 +592,8 @@ class _PickerBodyData(_FocusRegion):
         if stop is not None:
             scr.sel = stop
             scr._wt_track_focus()
+            if getattr(event, "chain", 1) >= 2:
+                scr._activate()
             scr.refresh()
 
     def on_mouse_scroll_down(self, event) -> None:

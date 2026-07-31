@@ -1166,9 +1166,11 @@ focusable widget on press; `on_focus` then points `sel` at the region head).
 click's row offset onto the drawn window (`_data_stop_at`, which shares
 `_data_window` with the renderer so a click hits exactly the row that was drawn)
 and, when it lands on a real data row, points `sel` there and lets single-select
-track focus (`_wt_track_focus`). Scroll-wheel over the data body moves the
-selection (`on_mouse_scroll_down`/`up` -> `_dispatch_key`). Verified by
-`test_nf_pointer_click_selects_data_row`. Still toggle-gated; the full native list
+track focus (`_wt_track_focus`); a **double-click** activates the row (opens its
+action -- the submenu for a worktree -- the pointer parallel to Enter). Scroll-wheel
+over the data body moves the selection (`on_mouse_scroll_down`/`up` ->
+`_dispatch_key`). Verified by `test_nf_pointer_click_selects_data_row` and
+`test_nf_pointer_double_click_opens_row`. Still toggle-gated; the full native list
 widget (rows as individual native options) and NF5's retirement of the manual model
 remain.
 
