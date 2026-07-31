@@ -1043,3 +1043,40 @@ class TestTeardownDuringDrain:
         # ...but teardown of the existing session still succeeds.
         await session_manager.end_session(session.session_id)
         assert session_manager.get_session(session.session_id) is None
+
+
+class TestCodespaceRequiresSessionHost:
+    """A CodeSpace target must never silently fall to classic (non-survivable)
+    mode -- ``connect`` refuses it, keyed off ``_is_codespace_target``."""
+
+    def test_detects_structured_codespace_metadata(self, tmp_db) -> None:
+        from agent_bridge.transport import SpawnTarget
+        mgr = SessionManager(tmp_db)
+        meta = {"name": "cs-foo", "repo": "org/repo",
+                "acp_command": "cd /workspaces/x && copilot --acp --stdio"}
+        t = SpawnTarget(type="command", spawn_command=["x"], codespace=meta)
+        assert mgr._is_codespace_target(t) is True
+
+    def test_detects_codespace_shaped_spawn_command(self, tmp_db) -> None:
+        from agent_bridge.transport import SpawnTarget
+        mgr = SessionManager(tmp_db)
+        cmd = [
+            "python", "-m", "agent_codespaces", "ssh", "--stdio",
+            "cs-x", "--repo", "org/repo-codespaces",
+            "--remote-cmd", "cd /workspaces/repo && copilot --acp --stdio",
+        ]
+        t = SpawnTarget(type="command", spawn_command=cmd)
+        assert mgr._is_codespace_target(t) is True
+
+    def test_local_and_ssh_targets_are_not_codespace(self, tmp_db) -> None:
+        from agent_bridge.transport import SpawnTarget
+        mgr = SessionManager(tmp_db)
+        assert mgr._is_codespace_target(SpawnTarget(type="local", cwd="/wt")) is False
+        assert mgr._is_codespace_target(
+            SpawnTarget(type="ssh", host="h", cwd="/w")) is False
+        # agent_codespaces but not an stdio launch -> not a host-required target.
+        assert mgr._is_codespace_target(SpawnTarget(
+            type="command",
+            spawn_command=["python", "-m", "agent_codespaces", "ssh", "cs-x",
+                           "--remote-cmd", "ls"],
+        )) is False

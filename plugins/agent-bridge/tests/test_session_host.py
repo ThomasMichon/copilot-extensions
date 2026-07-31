@@ -451,6 +451,65 @@ async def test_active_child_streaming_output_is_not_reaped_then_reaped_when_quie
 
 
 @pytest.mark.asyncio
+async def test_inflight_prompt_turn_held_through_silence_then_reaped_at_boundary():
+    """A severed child with a genuine ``session/prompt`` turn in flight is held
+    even while it falls SILENT (a slow test emitting no output) -- never reaped
+    mid-task -- and is reclaimed only once the turn's response closes the
+    boundary and the child goes idle."""
+    child = _FakeChild()
+    host, port = await _serve_active(child, 0.2)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        # Open a real prompt turn (client -> agent), then sever with no DETACH.
+        await c1.write(b'{"jsonrpc":"2.0","id":7,"method":"session/prompt"}\n')
+        await c1.send_status(False)             # a turn is in flight
+        await asyncio.sleep(0.05)
+        assert host._turn_in_flight is True
+        c1._writer.transport.abort()            # unexpected sever
+        # Silent for well over the active window -- a running-but-quiet turn is
+        # NEVER reaped mid-task (the protocol-aware hold protects it).
+        await asyncio.sleep(0.6)
+        assert child.killed is False
+        # The turn completes: the agent's prompt RESPONSE closes the boundary.
+        child.feed_frame(b'{"jsonrpc":"2.0","id":7,"result":{"stopReason":"end_turn"}}')
+        await asyncio.sleep(0.05)
+        assert host._turn_in_flight is False
+        # Now idle + quiet -> reclaimed within a couple of windows.
+        await asyncio.sleep(0.7)
+        assert child.killed is True
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_observe_frame_is_tolerant_of_unclassifiable_bytes():
+    """The turn-state observer never raises and only moves on real prompt
+    request/response frames -- notifications, unknown methods, non-JSON, and
+    partial bytes leave the state unchanged (fail-safe)."""
+    child = _FakeChild()
+    host = SessionHost(child)
+    # Noise that must NOT start a turn.
+    for junk in (
+        b"not json at all",
+        b'{"jsonrpc":"2.0","method":"session/update","params":{}}',   # notification
+        b'{"jsonrpc":"2.0","id":1,"method":"fs/read_text_file"}',      # other request
+        b'{"jsonrpc":"2.0","id":2,"result":{}}',                       # stray response
+        b'[1,2,3]',                                                    # batch/array
+    ):
+        host._observe_frame(junk, to_child=True)
+        host._observe_frame(junk, to_child=False)
+    assert host._turn_in_flight is False
+    # A real prompt request opens a turn; its response closes it.
+    host._observe_frame(b'{"jsonrpc":"2.0","id":9,"method":"session/prompt"}', to_child=True)
+    assert host._turn_in_flight is True
+    boundary = host._observe_frame(
+        b'{"jsonrpc":"2.0","id":9,"result":{"stopReason":"end_turn"}}', to_child=False)
+    assert boundary is True
+    assert host._turn_in_flight is False
+
+
+@pytest.mark.asyncio
 async def test_reattach_cancels_active_hold_timer():
     """A reattach during the active-hold window cancels the pending reap so the
     in-flight turn survives and can be resumed."""

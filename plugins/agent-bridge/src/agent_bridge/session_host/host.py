@@ -16,6 +16,7 @@ identity (Phase 3 anchors event IDs to it).
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Protocol, runtime_checkable
 
@@ -113,6 +114,16 @@ class SessionHost:
         # to its natural boundary using only the host's frame-agnostic progress
         # signal, never parsing ACP frames.
         self._active_reap_since_seq = 0
+        # Protocol-aware turn state (observational only -- see ``_observe_frame``).
+        # The set of ``session/prompt`` JSON-RPC request ids the host has seen
+        # written toward the child but not yet answered; non-empty == a turn is
+        # genuinely in flight. Used ONLY to make front-less reap decisions
+        # turn-boundary-accurate -- so a long turn that falls *silent* (a slow
+        # test emitting no output) is held as in-progress rather than mistaken
+        # for idle. Frames are still relayed verbatim; this never gates, rewrites
+        # or drops them, and any unparseable/unknown frame leaves the state
+        # unchanged (fail-safe: uncertainty biases toward "in a turn" -> hold).
+        self._inflight_prompt_ids: set[object] = set()
         self._self_reap_task: asyncio.Task | None = None
 
     # -- introspection (tests / diagnostics) -------------------------------
@@ -146,6 +157,8 @@ class SessionHost:
                 break
             self._max_seq += 1
             self._frames[self._max_seq] = line
+            # Observe (never gate) the agent->client frame for turn state.
+            self._observe_frame(line, to_child=False)
             front = self._front
             if front is not None and not front.closed:
                 await self._flush_front(front)
@@ -276,6 +289,9 @@ class SessionHost:
             del self._frames[s]
 
     async def _on_write(self, payload: bytes) -> None:
+        # Observe (never gate) the client->agent frame for turn state, then relay
+        # the bytes verbatim.
+        self._observe_frame(payload, to_child=True)
         stdin = self._child.stdin
         if stdin is None:
             return
@@ -284,6 +300,53 @@ class SessionHost:
             await stdin.drain()
         except (OSError, ConnectionError):
             log.warning("failed to relay WRITE to child stdin")
+
+    # -- protocol-aware turn state (observational; never gates the relay) ---
+    _PROMPT_METHOD = "session/prompt"
+
+    @property
+    def _turn_in_flight(self) -> bool:
+        """True while at least one ``session/prompt`` request is unanswered."""
+        return bool(self._inflight_prompt_ids)
+
+    def _observe_frame(self, raw: bytes, *, to_child: bool) -> bool:
+        """Best-effort, tolerant peek at one relayed ACP frame to track whether a
+        ``session/prompt`` turn is in flight. Returns True iff this frame closed
+        the last outstanding turn (a boundary was just reached).
+
+        Future-compatible by construction: it keys only off JSON-RPC structural
+        invariants (a request carries ``method`` + ``id``; a response carries
+        ``id`` + ``result``/``error`` and no ``method``) plus the stable
+        ``session/prompt`` method name, and silently ignores anything it cannot
+        classify -- notifications, unknown methods, batch arrays, partial or
+        non-JSON bytes. It never raises and never mutates the frame; the caller
+        relays the bytes verbatim regardless.
+        """
+        was_in_turn = bool(self._inflight_prompt_ids)
+        for chunk in raw.split(b"\n"):
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            try:
+                msg = json.loads(chunk)
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(msg, dict):
+                continue
+            mid = msg.get("id")
+            if mid is None:
+                continue
+            if to_child:
+                # client -> agent: a prompt REQUEST opens a turn.
+                if msg.get("method") == self._PROMPT_METHOD:
+                    try:
+                        self._inflight_prompt_ids.add(mid)
+                    except TypeError:
+                        pass  # unhashable id -- ignore (fail-safe)
+            elif "method" not in msg and ("result" in msg or "error" in msg):
+                # agent -> client: a RESPONSE to a tracked prompt closes it.
+                self._inflight_prompt_ids.discard(mid)
+        return was_in_turn and not self._inflight_prompt_ids
 
     async def _terminate_child(self) -> None:
         """Explicit, sanctioned reap (goal 1's only allowed termination path)."""
@@ -315,10 +378,12 @@ class SessionHost:
         An **active** (non-reapable) child is never freed by the paths above; if
         an ``active_reap_seconds`` bound is set it instead arms a longer hold
         timer so a reconnecting front can resume the in-flight turn. That hold is
-        **progress-aware**: while the severed child keeps streaming frames (a
-        task still in progress) the window re-arms rather than killing mid-task;
-        the child is only let go once it has produced nothing for a full window
-        (wedged/idle, no active task) and no reattach has arrived.
+        **turn-aware**: while a ``session/prompt`` turn is genuinely in flight
+        (protocol-observed) the child is held regardless of output silence -- a
+        long, quiet turn is never killed mid-task. With no turn in flight the
+        hold is progress-aware -- it re-arms while frames still stream (e.g. a
+        background sub-agent working) and lets the child go only after a full
+        window with no output and no reattach (idle, resumable).
         """
         if self._closing or self._front is not None:
             return
@@ -373,18 +438,21 @@ class SessionHost:
             return
         if not self.child_alive:
             return
-        # Progress-aware hold: if the child streamed new frames during the
-        # window it still has a task in progress -- never kill it mid-task; keep
-        # holding by re-arming with a fresh high-water baseline. Only a child
-        # that produced nothing for the whole window (wedged/idle, no active
-        # task) and never got a reattach is let go -- the session stays resumable
-        # (fresh child + load_session replay), which is the whole point of the
-        # bound.
+        # A genuinely in-flight prompt turn is protected regardless of output:
+        # a long turn that falls silent (a slow test with no stdout) must never
+        # be reaped mid-task. Hold by re-arming; the turn's completion (observed
+        # as the prompt response -> boundary) or a reattach reclaims it.
+        if self._turn_in_flight:
+            self._arm_active_reap_timer()
+            return
+        # No turn in flight. Reclaim only if the child produced nothing during
+        # the window (quiet + idle -> safe, resumable). Any output -- e.g. a
+        # background sub-agent still emitting -- re-arms rather than reaping.
         if self._max_seq > self._active_reap_since_seq:
             self._arm_active_reap_timer()
             return
         self._schedule_self_reap(
-            f"unexpected disconnect + active child idle for "
+            f"unexpected disconnect + idle child quiet for "
             f"{self._active_reap_seconds:.0f}s with no reattach"
         )
 
