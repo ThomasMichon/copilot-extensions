@@ -31,16 +31,22 @@ def _machine(cfg: Config) -> str:
     return cfg.machine_name or detect_machine()
 
 
-def _session_matches_allowlist(session_dir, allowlist: list[str]) -> bool:
+def _session_matches_allowlist(session_dir, allowlist: list[str],
+                               fail_closed: bool = False) -> bool:
     """Match a session's workspace cwd/git_root against the allowlist.
 
-    Case-insensitive substring match. Sessions with no workspace.yaml or no
-    cwd/git_root are considered matching (fail-open), to avoid silently
-    dropping sessions that predate workspace metadata.
+    Case-insensitive substring match. Sessions that cannot be positively
+    classified -- no workspace.yaml, no cwd/git_root, or a read error --
+    resolve to the *fail direction*: ``fail_closed=False`` (default) treats
+    them as matching (fail-open), to avoid silently dropping sessions that
+    predate workspace metadata; ``fail_closed=True`` treats them as NOT
+    matching (fail-closed), so a dual-use machine never leaks an
+    unclassifiable (e.g. employer) session.
     """
+    unclassified = not fail_closed
     ws = session_dir / "workspace.yaml"
     if not ws.is_file():
-        return True
+        return unclassified
     try:
         paths: list[str] = []
         with open(ws, encoding="utf-8", errors="replace") as fh:
@@ -52,13 +58,14 @@ def _session_matches_allowlist(session_dir, allowlist: list[str]) -> bool:
                         if val:
                             paths.append(val.lower())
         if not paths:
-            return True
+            return unclassified
         return any(p.lower() in path_val for path_val in paths for p in allowlist)
     except OSError:
-        return True
+        return unclassified
 
 
-def _included_sessions(source, allowlist: list[str]) -> set[str] | None:
+def _included_sessions(source, allowlist: list[str],
+                       fail_closed: bool = False) -> set[str] | None:
     """Resolve the allowlist to a set of included session-state ids.
 
     Returns ``None`` when the allowlist is empty (sync everything).
@@ -71,7 +78,7 @@ def _included_sessions(source, allowlist: list[str]) -> set[str] | None:
     return {
         d.name
         for d in ss.iterdir()
-        if d.is_dir() and _session_matches_allowlist(d, allowlist)
+        if d.is_dir() and _session_matches_allowlist(d, allowlist, fail_closed)
     }
 
 
@@ -91,7 +98,8 @@ def run_sync(
     source = cfg.sync_source
     target = build_target(cfg.sync_target, cfg.target_options(cfg.sync_target))
     allowlist = cfg.sync_repo_allowlist
-    include = _included_sessions(source, allowlist)
+    include = _included_sessions(source, allowlist,
+                                 cfg.sync_repo_allowlist_fail_closed)
 
     if verbose:
         print(f"machine:   {machine}")

@@ -296,6 +296,33 @@ def test_allowlist_fail_open_without_workspace(tmp_path: Path) -> None:
     assert included == {"no-ws"}  # fail-open: kept when repo unknown
 
 
+def test_allowlist_fail_closed_excludes_unclassified(tmp_path: Path) -> None:
+    src = tmp_path / "copilot"
+    # unclassifiable: no workspace.yaml
+    nows = src / "session-state" / "no-ws"
+    nows.mkdir(parents=True)
+    (nows / "events.jsonl").write_text("{}\n", encoding="utf-8")
+    # positively classified: cwd matches the allowlist
+    ok = src / "session-state" / "dotfiles-sess"
+    ok.mkdir(parents=True)
+    (ok / "workspace.yaml").write_text("cwd: /home/u/dotfiles\n", encoding="utf-8")
+
+    # fail-open (default): both kept
+    assert engine._included_sessions(src, ["dotfiles"]) == {"no-ws", "dotfiles-sess"}
+    # fail-closed: only the positively-classified session is kept
+    assert engine._included_sessions(
+        src, ["dotfiles"], fail_closed=True) == {"dotfiles-sess"}
+
+
+def test_config_repo_allowlist_fail_closed_flag(tmp_path: Path) -> None:
+    base = load_config(home=tmp_path).as_dict()
+    # default is fail-open (false)
+    assert Config(dict(base), tmp_path).sync_repo_allowlist_fail_closed is False
+    data = dict(base)
+    data["sync"] = dict(data["sync"], repo_allowlist_fail_closed=True)
+    assert Config(data, tmp_path).sync_repo_allowlist_fail_closed is True
+
+
 def _make_polluted_source(root: Path) -> Path:
     """Source with one session plus non-session ~/.copilot junk and secrets."""
     src = root / "copilot"
