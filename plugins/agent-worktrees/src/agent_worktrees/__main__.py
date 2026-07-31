@@ -11449,9 +11449,17 @@ def _git_toplevel(path: Path) -> Path | None:
 # worktree), so CWD-based project resolution in main() would balk; it resolves
 # its own project from the sessionStart payload's cwd instead (see
 # cmd_register_session -> _activate_project_for_path).
+# Commands that run WITHOUT resolving a project context. ``reap-sessions`` is
+# deliberately NOT here: although it enumerates mux sessions machine-wide, it
+# correlates each against a project's tracking records (``cfg.tracking_dir()``
+# -> ``project_name()``), so it must resolve a project like ``cleanup``/``gc``.
+# Listing it here made the bare ``agent-worktrees reap-sessions`` binstub crash
+# with a RuntimeError deep in ``project_name()`` (no project ever resolved);
+# now it resolves from CWD, or from the ``--project`` a project binstub injects,
+# and balks helpfully when neither is available.
 _NO_PROJECT_COMMANDS = {
     "--version", "-V", "--help", "-h", "repos", "accounts", "install", "register", "hook",
-    "picker", "reap-sessions", "status-updater", "restart", "register-session",
+    "picker", "status-updater", "restart", "register-session",
     "head-session", "conclude-session", "link-succession", "config-migrate",
 }
 
