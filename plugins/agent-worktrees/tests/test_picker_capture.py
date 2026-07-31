@@ -127,6 +127,28 @@ def test_capture_is_deterministic(monkeypatch, tmp_path):
     assert first == second
 
 
+def test_capture_modal_screenshots_a_native_modal(monkeypatch, tmp_path):
+    """``capture_modal`` exports the COMPOSITED app (picker + an open native
+    ``ModalScreen``) as an SVG. The native modals (#88 F4+) live on the app's
+    screen stack, invisible to the ``PickerScreen.render()`` seams, so this
+    app-level capture is what audits / A/B-compares a modal's appearance
+    (#88 NF1). Opens the ⚙ Configuration menu and asserts its content is in the
+    screenshot."""
+    _isolate_pivots(monkeypatch, tmp_path)
+
+    async def open_cfg(scr, pilot):
+        scr.sel = ("CFG", 0)
+        scr._activate()
+        await pilot.pause()
+
+    svg = pcap.capture_modal(_fixture_source(), open_cfg)
+    assert svg.lstrip().startswith("<svg")
+    # The modal's own content (the ⚙ Configuration menu's Profiles option) is in
+    # the screenshot -- proving the composited app, not just the main screen,
+    # was captured.
+    assert "Profiles" in svg
+
+
 # --- obscuring (shareable capture) -------------------------------------------
 
 def _secret_dump():

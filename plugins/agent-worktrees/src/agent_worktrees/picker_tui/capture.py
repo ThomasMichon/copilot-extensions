@@ -1,11 +1,13 @@
 """Deterministic capture of the picker's rendered screen -- for audit + tests.
 
 The picker is a *deterministic renderer*: :meth:`PickerScreen.render` composes the
-entire screen (topbar, pivots, machine tabs, borders, body window, footer, and
-any modal overlay) into a single styled Rich :class:`~rich.text.Text`. Given
-injected ``source`` data, the same inputs yield the same grid -- so any state can
-be exported as a human-auditable **SVG screenshot** or captured as a **character
-grid** a test asserts against, with no live terminal and no human watching.
+entire main screen (topbar, pivots, machine tabs, borders, body window, footer)
+into a single styled Rich :class:`~rich.text.Text`. Given injected ``source``
+data, the same inputs yield the same grid -- so any state can be exported as a
+human-auditable **SVG screenshot** or captured as a **character grid** a test
+asserts against, with no live terminal and no human watching. (Overlays are
+native Textual ``ModalScreen``s since #88 F4, drawn by the compositor rather than
+``render()``; capture one with :func:`capture_modal_async`, the app-level seam.)
 
 Realizes the picker vision's Features/``auditable-testable-rendering`` and
 Behaviors/``renderable-and-assertable-headless`` (rides on
@@ -206,3 +208,56 @@ def capture(source: Any, **kwargs: Any) -> dict[str, str]:
     import asyncio
 
     return asyncio.run(capture_async(source, **kwargs))
+
+
+async def capture_modal_async(
+    source: Any,
+    opener: Callable[[Any, Any], Awaitable[None]],
+    *,
+    live: bool = False,
+    size: tuple[int, int] = DEFAULT_SIZE,
+    view: str = "local",
+    title: str = "Worktree Picker",
+) -> str:
+    """SVG screenshot of the **composited app** -- the picker *plus* any open
+    native ``ModalScreen``.
+
+    The three ``screen_to_*`` seams above capture ``PickerScreen.render()``, the
+    picker's own Rich ``Text``. Since #88 F4 the picker's overlays are native
+    Textual ``ModalScreen``s pushed on the app's screen stack -- they are drawn by
+    Textual's compositor, *not* by ``PickerScreen.render()`` -- so a modal is
+    invisible to those seams. This helper instead exports Textual's own
+    app-level screenshot (the full compositor, modal included), which is the
+    right seam for auditing / A/B-comparing a modal's appearance.
+
+    ``opener`` is a coroutine ``(screen, pilot) -> None`` that drives the picker
+    to open the target modal before the screenshot is taken (e.g. set
+    ``scr.sel`` and call ``scr._activate()``).
+    """
+    from .engine import PickerApp, PickerScreen
+
+    app = PickerApp(source, live=live)
+    async with app.run_test(size=size) as pilot:
+        scr = app.query_one(PickerScreen)
+        if view == "all":
+            scr.machine_idx = 0
+        else:
+            try:
+                scr.machine_idx = scr.local_index()
+            except Exception:
+                pass
+        await pilot.pause()
+        await opener(scr, pilot)
+        await pilot.pause()
+        return app.export_screenshot(title=title)
+
+
+def capture_modal(
+    source: Any,
+    opener: Callable[[Any, Any], Awaitable[None]],
+    **kwargs: Any,
+) -> str:
+    """Synchronous :func:`capture_modal_async` -- composited-app modal SVG."""
+    import asyncio
+
+    return asyncio.run(capture_modal_async(source, opener, **kwargs))
