@@ -221,6 +221,7 @@ class TestReapOrphans:
 def test_sweep_orphans_on_exit_is_best_effort(monkeypatch):
     """A reap hiccup at session end never propagates out of post-exit."""
     monkeypatch.setattr(cli, "_sweep_managed_on_exit", lambda: None)
+    monkeypatch.setattr(cli, "_sweep_launcher_shells_on_exit", lambda: None)
 
     def boom():
         raise RuntimeError("mux enumeration failed")
@@ -232,6 +233,7 @@ def test_sweep_orphans_on_exit_is_best_effort(monkeypatch):
 def test_sweep_orphans_on_exit_runs_the_reaper(monkeypatch):
     seen = {"n": 0}
     monkeypatch.setattr(cli, "_sweep_managed_on_exit", lambda: None)
+    monkeypatch.setattr(cli, "_sweep_launcher_shells_on_exit", lambda: None)
     monkeypatch.setattr(
         cli, "reap_orphan_mux_sessions",
         lambda: (seen.__setitem__("n", seen["n"] + 1)
@@ -244,6 +246,7 @@ def test_sweep_orphans_on_exit_also_sweeps_managed(monkeypatch):
     """The session-end boundary runs the managed (system/bridge) leak GC too,
     on the same no-daemon cadence (#1069)."""
     seen = {"mux": 0, "managed": 0}
+    monkeypatch.setattr(cli, "_sweep_launcher_shells_on_exit", lambda: None)
     monkeypatch.setattr(
         cli, "reap_orphan_mux_sessions",
         lambda: (seen.__setitem__("mux", 1)
@@ -254,6 +257,31 @@ def test_sweep_orphans_on_exit_also_sweeps_managed(monkeypatch):
                          or {"removed": [], "skipped": []}))
     cli._sweep_orphans_on_exit()
     assert seen == {"mux": 1, "managed": 1}
+
+
+def test_sweep_orphans_on_exit_also_sweeps_launcher_shells(monkeypatch):
+    """The session-end boundary also reaps orphaned launcher shells on the same
+    no-daemon cadence (copilot-extensions #102)."""
+    seen = {"shells": 0}
+    monkeypatch.setattr(cli, "reap_orphan_mux_sessions",
+                        lambda: {"available": True, "reaped": [], "skipped": [],
+                                 "errors": []})
+    monkeypatch.setattr(cli, "_sweep_managed_on_exit", lambda: None)
+    monkeypatch.setattr(
+        cli, "reap_orphan_launcher_shells",
+        lambda **k: (seen.__setitem__("shells", 1)
+                     or {"available": True, "reaped": [], "candidates": [],
+                         "skipped": [], "errors": []}))
+    cli._sweep_orphans_on_exit()
+    assert seen["shells"] == 1
+
+
+def test_sweep_launcher_shells_on_exit_is_best_effort(monkeypatch):
+    """A launcher-shell reap hiccup at session end is swallowed."""
+    def boom(**k):
+        raise RuntimeError("enumeration blew up")
+    monkeypatch.setattr(cli, "reap_orphan_launcher_shells", boom)
+    assert cli._sweep_launcher_shells_on_exit() is None
 
 
 def test_sweep_managed_on_exit_is_best_effort(monkeypatch):

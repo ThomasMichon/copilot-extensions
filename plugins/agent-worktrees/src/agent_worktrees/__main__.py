@@ -2624,6 +2624,8 @@ def _run_new_picker(config: cfg.Config, args: argparse.Namespace) -> int:
             pass
         # Same no-daemon cadence for the managed (system/bridge) leak GC (#1069).
         _sweep_managed_on_exit()
+        # ...and for orphaned launcher shells (copilot-extensions #102).
+        _sweep_launcher_shells_on_exit()
     threading.Thread(target=_reap_bg, name="reap-orphans", daemon=True).start()
 
     # Avoid a confusing double hop: when this picker is itself running over SSH,
@@ -3126,6 +3128,7 @@ def _sweep_orphans_on_exit() -> None:
     except Exception:
         pass
     _sweep_managed_on_exit()
+    _sweep_launcher_shells_on_exit()
 
 
 def _sweep_managed_on_exit() -> None:
@@ -3146,6 +3149,30 @@ def _sweep_managed_on_exit() -> None:
             output.ok(
                 f"GC'd {len(removed)} leaked managed worktree(s): "
                 + ", ".join(x["id"] for x in removed)
+            )
+    except Exception:
+        pass
+
+
+def _sweep_launcher_shells_on_exit() -> None:
+    """Best-effort reap of orphaned launcher shells on the no-daemon cadence.
+
+    Runs the same conservative, positive-signature predicate as the
+    ``reap-shells`` command (parent-exited + idle, with service/self/live-
+    descendant safety), killing for real. Shares the picker-launch + session-end
+    cadence with the mux and managed sweeps so pwsh/python launcher scaffolding
+    stranded by a force-closed terminal doesn't accumulate without a daemon
+    (copilot-extensions #102). The ending session's own tree is always spared
+    (self-preservation), and a live session's launcher is spared while its
+    terminal (its parent) is alive. Never raises.
+    """
+    try:
+        payload = reap_orphan_launcher_shells(dry_run=False)
+        reaped = payload.get("reaped") or []
+        if reaped:
+            output.ok(
+                f"Reaped {len(reaped)} orphaned launcher shell(s): "
+                + ", ".join(str(p) for p in reaped)
             )
     except Exception:
         pass
@@ -5919,6 +5946,30 @@ def _print_gc_managed(report: dict, dry_run: bool) -> None:
                   f"{len(skipped)} kept.")
 
 
+def _print_gc_shells(report: dict, dry_run: bool) -> None:
+    """Human-facing summary of the orphaned launcher-shell reap."""
+    reaped = report.get("reaped", [])
+    candidates = report.get("candidates", [])
+    print()
+    print("🧹 Launcher shells -- orphaned pwsh/python scaffolding (stranded)")
+    if not report.get("available"):
+        print("  (skipped or process enumeration unavailable.)")
+        return
+    if not reaped:
+        print("  none found.")
+        return
+    verb = "would reap" if dry_run else "reaped"
+    for c in candidates:
+        print(f"  ✓ {verb}: pid {c['pid']}  {c['cmdline'][:80]}")
+    for e in report.get("errors", []):
+        output.warn(f"  ! pid {e['pid']}: {e['reason']}")
+    print()
+    if dry_run:
+        print(f"{len(reaped)} orphaned launcher shell(s) would be reaped.")
+    else:
+        output.ok(f"Reaped {len(reaped)} orphaned launcher shell(s).")
+
+
 def cmd_gc(args: argparse.Namespace) -> int:
     """Garbage-collect this project's worktrees on this machine.
 
@@ -5937,12 +5988,17 @@ def cmd_gc(args: argparse.Namespace) -> int:
          worktree nor a tracking record (leftovers from interrupted/forced
          removals), with a locked-directory retry/skip; a leftover holding real
          files is reported, never auto-deleted.
-      4. ``git worktree prune`` to drop stale registrations.
+      4. **Orphaned launcher-shell reap** -- terminates pwsh/python
+         ``-m agent_worktrees`` scaffolding stranded by a force-closed terminal
+         (parent exited, nothing live under it, idle past the grace window).
+         Service-safe (positive launcher-signature only). Skip with
+         ``--no-reap-shells`` (copilot-extensions #102).
+      5. ``git worktree prune`` to drop stale registrations.
 
     Idempotent: a second run right after the first finds nothing to do.
 
-    ``--json`` reports the managed + orphan sweeps (machine-readable); the
-    tracked reap runs in text mode.
+    ``--json`` reports the managed + orphan + shell sweeps (machine-readable);
+    the tracked reap runs in text mode.
     """
     from . import gc as gc_mod
 
@@ -5953,6 +6009,7 @@ def cmd_gc(args: argparse.Namespace) -> int:
     json_mode = getattr(args, "json", False)
     orphans_only = getattr(args, "orphans_only", False)
     do_managed = not getattr(args, "no_managed", False) and not orphans_only
+    do_shells = not getattr(args, "no_reap_shells", False) and not orphans_only
 
     # 1. Tracked reap -- reuse the cleanup verdict machinery (one fetch, full
     #    safety). Skipped in --json mode (its output is text) and --orphans-only.
@@ -5977,19 +6034,32 @@ def cmd_gc(args: argparse.Namespace) -> int:
     # 3. Orphan-directory sweep (the GC-specific capability).
     orphans = gc_mod.sweep_orphans(repo, records, dry_run=dry)
 
-    # 4. Prune stale worktree registrations.
+    # 4. Orphaned launcher-shell reap (machine-wide; #102). Service-safe and
+    #    idle-gated -- only pwsh/python launcher scaffolding stranded by a
+    #    force-closed terminal is reaped.
+    shells_grace = getattr(args, "reap_shells_grace_hours", None)
+    shell_kwargs = {"dry_run": dry}
+    if shells_grace is not None:
+        shell_kwargs["idle_grace_secs"] = float(shells_grace) * 3600
+    shells = reap_orphan_launcher_shells(**shell_kwargs) if do_shells \
+        else {"available": False, "reaped": [], "candidates": [],
+              "skipped": [], "errors": []}
+
+    # 5. Prune stale worktree registrations.
     if not dry:
         git_ops.prune_worktrees(cwd=repo.anchor)
 
     if json_mode:
         print(json.dumps(
             {"dry_run": dry, "repo": config.repo_name,
-             "managed": managed, "orphans": orphans},
+             "managed": managed, "orphans": orphans, "shells": shells},
             indent=2))
         return 0
     if do_managed:
         _print_gc_managed(managed, dry)
     _print_gc_orphans(orphans, dry)
+    if do_shells:
+        _print_gc_shells(shells, dry)
     return 0
 
 
@@ -10309,6 +10379,12 @@ def build_parser() -> argparse.ArgumentParser:
                         "and the managed (system/bridge) sweep")
     p.add_argument("--no-managed", action="store_true",
                    help="Skip the managed (system/bridge) leak sweep")
+    p.add_argument("--no-reap-shells", action="store_true",
+                   help="Skip the orphaned launcher-shell reap (pwsh/python "
+                        "scaffolding stranded by a force-closed terminal)")
+    p.add_argument("--reap-shells-grace-hours", type=float, default=None,
+                   help="Idle window before an orphaned launcher shell is "
+                        "eligible (default 1h); a fresh one is always spared")
     p.add_argument("--managed-grace-hours", type=float, default=None,
                    help="Idle window before a dead managed worktree is reaped "
                         "(default 1h); a still-fresh one is always spared")
