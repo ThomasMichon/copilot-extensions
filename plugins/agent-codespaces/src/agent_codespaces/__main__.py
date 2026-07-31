@@ -12,6 +12,7 @@ Subcommands:
   borrow <effort> <cs>  Advisory-lease a CodeSpace to an effort (check out)
   release <target>      Release a lease (by CodeSpace or effort name)
   leases                Show active CodeSpace leases
+  pool                  Show the CodeSpace pool (disposition + core-budget)
   wait <name>           Patiently wait for Available (fail-fast on dead state)
   status                Show service status
 """
@@ -31,6 +32,7 @@ from pathlib import Path
 
 from .codespace_config import CodespaceSource
 from . import relay_launch
+from . import pool as pool_mod
 from .config import (
     ADOPTED_REPOS_FILE,
     RUNTIME_DIR,
@@ -348,6 +350,26 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("leases", help="Show active CodeSpace leases")
 
+    # --- pool (finite, budget-bounded pool view: disposition + budget) ---
+    pool_p = sub.add_parser(
+        "pool",
+        help="Show the CodeSpace pool: per-box disposition "
+             "(in-use/idle/clean/stale) + allocation + core-budget headroom",
+    )
+    pool_p.add_argument(
+        "--json", dest="json_output", action="store_true",
+        help="Emit machine-readable JSON (members + budget)",
+    )
+    pool_p.add_argument(
+        "--budget", type=int, default=None,
+        help=f"Account concurrent-core budget (default: {pool_mod.DEFAULT_BUDGET_CORES})",
+    )
+    pool_p.add_argument(
+        "--stale-after", type=float, default=None,
+        help="Seconds an unheld running box may idle before it ages to 'stale' "
+             f"(default: {int(pool_mod.DEFAULT_STALE_AFTER)})",
+    )
+
     # --- wait (patient, fail-fast, backgroundable) ---
     wait_p = sub.add_parser(
         "wait",
@@ -417,6 +439,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_release(args)
         if args.command == "leases":
             return _cmd_leases()
+        if args.command == "pool":
+            return _cmd_pool(args)
         if args.command == "wait":
             return _cmd_wait(args)
         if args.command == "status":
@@ -2276,6 +2300,60 @@ def _cmd_leases() -> int:
             f"{lease.codespace:<40} {lease.effort:<24} "
             f"{lease.host:<16} {lease.pid}"
         )
+    return 0
+
+
+def _cmd_pool(args: argparse.Namespace) -> int:
+    """Show the CodeSpace pool: per-box disposition + allocation + core budget.
+
+    A *derived* view (no store of its own) over ``list_codespaces`` + leases +
+    the finalize/prune markers. ``--json`` emits ``{"budget":..,"members":[..]}``
+    -- the programmatic surface the Picker's CodeSpaces pivot and the
+    reuse/recycle policies consume.
+    """
+    budget_cores = args.budget if args.budget is not None else pool_mod.DEFAULT_BUDGET_CORES
+    stale_after = (
+        args.stale_after if args.stale_after is not None
+        else pool_mod.DEFAULT_STALE_AFTER
+    )
+    members, budget = pool_mod.build_pool(
+        budget_cores=budget_cores, stale_after=stale_after,
+    )
+
+    if args.json_output:
+        print(json.dumps({
+            "budget": budget.to_dict(),
+            "members": [m.to_dict() for m in members],
+        }, indent=2))
+        return 0
+
+    unknown = (
+        f" ({budget.unknown_cores_count} running box"
+        f"{'es' if budget.unknown_cores_count != 1 else ''} w/ unknown cores)"
+        if budget.unknown_cores_count else ""
+    )
+    print(
+        f"Budget: {budget.spent_cores}/{budget.total_cores} cores in use, "
+        f"{budget.headroom_cores} free  "
+        f"({budget.running_count} running / {budget.total_count} total){unknown}"
+    )
+    if not members:
+        print("No CodeSpaces in the pool.")
+        return 0
+    print()
+    print(f"{'NAME':<38} {'REPO':<30} {'DISPOSITION':<13} "
+          f"{'CORES':<6} {'HOLDER (effort@host)'}")
+    print("-" * 110)
+    for m in sorted(members, key=lambda x: (x.disposition, x.name)):
+        cores = str(m.cores) if m.cores_known else "?"
+        if m.holder_effort:
+            holder = f"{m.holder_effort}@{m.holder_host or '?'}"
+        elif m.beacon:
+            holder = f"(beacon #{m.beacon})"
+        else:
+            holder = ""
+        print(f"{m.name:<38} {m.repository:<30} {m.disposition:<13} "
+              f"{cores:<6} {holder}")
     return 0
 
 

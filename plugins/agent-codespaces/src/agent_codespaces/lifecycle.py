@@ -61,6 +61,9 @@ class CodespaceInfo:
     # when listed under the ambient active account (no account_map). Per-name
     # ops (stop/delete/ssh) run under this account's token. See gh_account.
     account: str = ""
+    # ISO-8601 last-used timestamp (from ``gh``); the freshness signal the pool
+    # disposition model uses to age an idle CodeSpace toward "stale".
+    last_used_at: str = ""
 
 
 def _creation_flags() -> int:
@@ -110,7 +113,8 @@ def _list_codespaces_under(login: str | None) -> list[CodespaceInfo]:
 
     args = [
         "gh", "codespace", "list",
-        "--json", "name,displayName,repository,gitStatus,state,machineName",
+        "--json",
+        "name,displayName,repository,gitStatus,state,machineName,lastUsedAt",
         "--limit", "50",
     ]
     env = gh_account.env_for_account(login) if login else None
@@ -146,6 +150,7 @@ def _list_codespaces_under(login: str | None) -> list[CodespaceInfo]:
             state=e.get("state", ""),
             machine=e.get("machineName", ""),
             account=login or "",
+            last_used_at=e.get("lastUsedAt", ""),
         ))
     return codespaces
 
