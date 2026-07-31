@@ -405,23 +405,12 @@ def _parse_gate_manifest(raw: Any, gate: dict[str, set[str]]) -> None:
                 _ingest_gate_entries(rdata.get("services"), gate)
 
 
-def load_runtime_gate(repo_dir: Path) -> dict[str, set[str]]:
-    """Map plugin name -> allowed machine set from a control-harness manifest.
-
-    Looks for a gate manifest -- ``services.yaml`` (preferred) or the legacy
-    ``external-repos.yaml`` (both overridable to a single name via
-    ``WORKTREE_GATE_MANIFEST``) -- in the current repo first, then -- if an
-    anchor repo is configured (``GATE_ANCHOR``; override with
-    ``WORKTREE_GATE_ANCHOR``) -- in that repo as resolved via the repos
-    registry. Accepts either the native top-level ``plugins:`` schema or the
-    legacy ``repos.<group>.services[].{name, deploy_machines}`` schema. Returns
-    ``{}`` when no manifest is found, which makes every ``machine-gated`` runtime
-    skip (the safe default).
-
-    Precedence: within a directory ``services.yaml`` is tried before
-    ``external-repos.yaml``, and the current repo before the anchor; the first
-    manifest that yields a non-empty gate wins (so a migrated ``services.yaml``
-    shadows a lingering legacy file during transition).
+def _gate_candidate_paths(repo_dir: Path) -> list[Path]:
+    """Ordered gate-manifest candidate paths: the current repo first, then the
+    configured anchor repo (resolved via the repos registry), each tried for
+    every name in ``GATE_MANIFESTS`` (``services.yaml`` before the legacy
+    ``external-repos.yaml``). Shared by :func:`load_runtime_gate` and
+    :func:`gate_manifest_present` so presence detection and parsing agree.
     """
     search_dirs = [repo_dir]
     if GATE_ANCHOR:
@@ -433,8 +422,44 @@ def load_runtime_gate(repo_dir: Path) -> dict[str, set[str]]:
                 search_dirs.append(Path(anchor))
         except Exception:
             pass
+    return [d / name for d in search_dirs for name in GATE_MANIFESTS]
 
-    candidates = [d / name for d in search_dirs for name in GATE_MANIFESTS]
+
+def gate_manifest_present(repo_dir: Path) -> bool:
+    """True if *any* gate manifest file exists (current repo or anchor).
+
+    Distinguishes "the harness configured gating" from "no gating configured at
+    all". When no manifest exists anywhere, an explicitly-enabled
+    ``machine-gated`` runtime provisions on the local machine (dotfiles #693
+    Phase 3) rather than silently skipping -- because *enabling* the plugin is
+    the whole intent and there is no gate to defer to. When a manifest **is**
+    present it is authoritative and the strict machine check applies.
+    """
+    return any(p.is_file() for p in _gate_candidate_paths(repo_dir))
+
+
+def load_runtime_gate(repo_dir: Path) -> dict[str, set[str]]:
+    """Map plugin name -> allowed machine set from a control-harness manifest.
+
+    Looks for a gate manifest -- ``services.yaml`` (preferred) or the legacy
+    ``external-repos.yaml`` (both overridable to a single name via
+    ``WORKTREE_GATE_MANIFEST``) -- in the current repo first, then -- if an
+    anchor repo is configured (``GATE_ANCHOR``; override with
+    ``WORKTREE_GATE_ANCHOR``) -- in that repo as resolved via the repos
+    registry. Accepts either the native top-level ``plugins:`` schema or the
+    legacy ``repos.<group>.services[].{name, deploy_machines}`` schema. Returns
+    ``{}`` when no manifest is found. A ``{}`` gate no longer *unconditionally*
+    skips every ``machine-gated`` runtime: :func:`runtime_allowed` also consults
+    :func:`gate_manifest_present`, so an explicitly-enabled runtime still
+    provisions locally when **no** manifest exists at all (#693 Phase 3), while a
+    manifest that simply omits a plugin/machine remains conservative.
+
+    Precedence: within a directory ``services.yaml`` is tried before
+    ``external-repos.yaml``, and the current repo before the anchor; the first
+    manifest that yields a non-empty gate wins (so a migrated ``services.yaml``
+    shadows a lingering legacy file during transition).
+    """
+    candidates = _gate_candidate_paths(repo_dir)
 
     gate: dict[str, set[str]] = {}
     for path in candidates:
@@ -452,13 +477,27 @@ def load_runtime_gate(repo_dir: Path) -> dict[str, set[str]]:
 
 
 def runtime_allowed(scope: str, name: str, machine: str,
-                    gate: dict[str, set[str]]) -> bool:
-    """Whether a plugin's runtime should be reconciled on this machine."""
+                    gate: dict[str, set[str]], *, gate_present: bool = True) -> bool:
+    """Whether a plugin's runtime should be reconciled on this machine.
+
+    ``universal`` always reconciles. ``machine-gated`` reconciles when the gate
+    manifest lists this machine for the plugin. The #693 Phase 3 refinement: when
+    **no** gate manifest exists anywhere (``gate_present`` False), an
+    explicitly-enabled ``machine-gated`` runtime is provisioned on the local
+    machine -- there is no gate to defer to and enabling the plugin is the whole
+    intent. A manifest that is *present* stays authoritative: a plugin/machine it
+    omits is still skipped (conservative). ``gate_present`` defaults to True so a
+    caller that does not thread it keeps the strict, pre-Phase-3 behavior.
+    """
     if scope == "universal":
         return True
     if scope == "machine-gated":
         allowed = gate.get(name)
-        return bool(allowed) and machine in allowed
+        if allowed is not None:
+            return machine in allowed
+        # Not named in the gate: provision locally only when no gate manifest
+        # exists at all; a present-but-silent manifest stays conservative.
+        return not gate_present
     return False
 
 
@@ -521,6 +560,7 @@ def build_plan(
 
     names = read_enabled_plugins(repo_dir)
     gate = load_runtime_gate(repo_dir)
+    gate_present = gate_manifest_present(repo_dir)
     updates: list[dict[str, Any]] = []
 
     for name in names:
@@ -558,7 +598,9 @@ def build_plan(
 
         # Runtime reconciliation (local, version-keyed, gated).
         scope = manifest_runtime_scope(pdir) or "none"
-        if scope != "none" and runtime_allowed(scope, name, machine, gate):
+        if scope != "none" and runtime_allowed(
+            scope, name, machine, gate, gate_present=gate_present
+        ):
             rdep = runtime_deployed_version(name)
             rrun = runtime_running_version(name)
             # Prefer the *running* version when a live service reports one, so a

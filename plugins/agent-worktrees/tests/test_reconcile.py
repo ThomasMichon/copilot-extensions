@@ -240,11 +240,25 @@ def test_machine_gated_disallowed_machine(env):
     assert _services(plan, phase="runtime") == set()
 
 
-def test_machine_gated_no_gate_info_skips_runtime(env):
+def test_machine_gated_no_manifest_provisions_locally(env):
+    # #693 Phase 3: with NO gate manifest anywhere, an explicitly-enabled
+    # machine-gated runtime provisions on the local machine (enabling it is the
+    # intent; there is no gate to defer to). The env fixture pins the anchor
+    # resolve to None, so the test repo having no manifest means none exists.
     env.write_settings({f"agent-bridge@{MKT}": True})
     env.install_payload("agent-bridge", "3.0.0", scope="machine-gated")
     env.deploy_runtime("agent-bridge", "2.0.0")  # drift
-    # no external-repos.yaml written -> empty gate -> safe skip
+    plan = reconcile.build_plan(env.repo, machine="lambda-core", cache={}, save=False)
+    assert _services(plan, phase="runtime") == {"agent-bridge"}
+
+
+def test_machine_gated_manifest_present_but_omits_plugin_skips(env):
+    # A gate manifest that exists but does not name this plugin is authoritative
+    # and conservative: skip (the harness configured gating and left it out).
+    env.write_settings({f"agent-bridge@{MKT}": True})
+    env.install_payload("agent-bridge", "3.0.0", scope="machine-gated")
+    env.deploy_runtime("agent-bridge", "2.0.0")  # drift
+    env.write_gate({"some-other-plugin": ["lambda-core"]})
     plan = reconcile.build_plan(env.repo, machine="lambda-core", cache={}, save=False)
     assert _services(plan, phase="runtime") == set()
 
@@ -256,6 +270,31 @@ def test_invalid_scope_treated_as_none(env):
     env.write_gate({"agent-bridge": ["lambda-core"]})
     plan = reconcile.build_plan(env.repo, machine="lambda-core", cache={}, save=False)
     assert _services(plan, phase="runtime") == set()
+
+
+def test_runtime_allowed_gate_present_semantics():
+    # Pure-function semantics of the #693 Phase 3 gate_present refinement.
+    gate = {"a": {"m1"}}
+    # Listed plugin: strict machine check regardless of gate_present.
+    assert reconcile.runtime_allowed("machine-gated", "a", "m1", gate) is True
+    assert reconcile.runtime_allowed("machine-gated", "a", "m2", gate) is False
+    # Unlisted plugin, manifest PRESENT -> conservative skip.
+    assert reconcile.runtime_allowed(
+        "machine-gated", "b", "m1", gate, gate_present=True
+    ) is False
+    # Unlisted plugin, NO manifest -> provision locally.
+    assert reconcile.runtime_allowed(
+        "machine-gated", "b", "m1", {}, gate_present=False
+    ) is True
+    # universal always; none never.
+    assert reconcile.runtime_allowed("universal", "b", "m1", {}, gate_present=False) is True
+    assert reconcile.runtime_allowed("none", "b", "m1", {}, gate_present=False) is False
+
+
+def test_gate_manifest_present_detects_repo_file(env):
+    assert reconcile.gate_manifest_present(env.repo) is False
+    env.write_gate({"agent-bridge": ["lambda-core"]})
+    assert reconcile.gate_manifest_present(env.repo) is True
 
 
 # ---------------------------------------------------------------------------
