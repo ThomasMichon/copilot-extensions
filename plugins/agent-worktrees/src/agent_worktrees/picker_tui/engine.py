@@ -1771,6 +1771,42 @@ class PickerScreen(Widget):
             self.profiles_view.build(add, width, sel)
         return vrows
 
+    def _current_view(self):
+        return {
+            "worktrees": self.worktrees_view,
+            "maintenance": self.maintenance_view,
+            "registered": self.tasks_view,
+        }.get(self._kind(), self.profiles_view)
+
+    def _build_body_split(self, width):
+        """Return ``(chrome_vrows, data_vrows)`` for the current pivot -- the
+        fixed machine-scope + button chrome vs the scrolling data -- by driving
+        the view's ``build_chrome`` / ``build_data`` emitters into two separate
+        VRow sinks (#88 NF3). Concatenated, the rendered rows equal
+        ``build_body(width)`` byte-for-byte; the split lets the compose tree
+        render the chrome fixed and scroll only the data. (The monolithic
+        ``build_body`` / ``render`` path is untouched and stays authoritative
+        while the toggle is off.)"""
+        def make_sink():
+            vrows = []
+            section = {"cur": None}
+
+            def add(text, stop=None, kind=None, data=None, new_section=None):
+                if new_section is not None:
+                    section["cur"] = (new_section, len(vrows))
+                vr = VRow(text, stop, kind, data)
+                vr.pin_section = section["cur"]
+                vrows.append(vr)
+                return vr
+            return vrows, add
+
+        view = self._current_view()
+        chrome, add_c = make_sink()
+        view.build_chrome(add_c, width, self.sel)
+        data, add_d = make_sink()
+        view.build_data(add_d, width, self.sel)
+        return chrome, data
+
     def _hl(self, base, selected, focused):
         """Augment a base style with the selection highlight: the inversion
         cursor when the machine region is focused, a subtle bg when merely the
@@ -4795,11 +4831,19 @@ class MaintenanceView:
         """Emit the Maintenance pivot body into ``add`` (the ``build_body`` VRow
         sink). Mirrors the former inline ``build_body`` maintenance branch
         exactly; group sections are opened via ``add(..., new_section=...)`` so
-        this component never touches the closure's ``cur_section``/``vrows``."""
+        this component never touches the closure's ``cur_section``/``vrows``.
+
+        Split into ``build_chrome`` (the machine-scope + Cleanup/Sync button
+        region) and ``build_data`` (the select-all row, column header, and the
+        scrolling group/row list) so the concerns render into separate widgets;
+        ``build`` emits both in order, byte-identically (#88 NF3)."""
+        self.build_chrome(add, width, sel)
+        self.build_data(add, width, sel)
+
+    def build_chrome(self, add, width, sel):
         eng = self._eng
         btn_focus = sel == ("BTN", 0)
         add(eng.tab_bar(width, sel == ("M", 0)))
-        groups = self.maint_groups()
         recs = self.maint_records()
         total = sum(_size_mb(w) for w in recs)
         nsel = self.maint_sel.count(self._maint_ids())
@@ -4812,6 +4856,10 @@ class MaintenanceView:
             "Cleanup…", "Sync…", btn_focus, eng.btn_idx, suffix, width),
             stop=("BTN", 0))
         add(Text(""))
+
+    def build_data(self, add, width, sel):
+        eng = self._eng
+        groups = self.maint_groups()
         # Checkbox column reserves 4 cells in front of the data columns.
         ccols = fit(CLEAN_SPECS, width - 1 - 4, "title", 12)
         add(self._selectall_row(width, sel == ("SA", 0)),
@@ -4862,7 +4910,17 @@ class WorktreesView:
         """Emit the Worktrees-list body into ``add`` (the ``build_body`` VRow
         sink). Mirrors the former inline ``build_body`` worktrees branch exactly;
         group sections are opened via ``add(..., new_section=...)`` so this
-        component never touches the closure's ``cur_section``/``vrows``."""
+        component never touches the closure's ``cur_section``/``vrows``.
+
+        Split into ``build_chrome`` (the machine-scope + New/Clean/Sync button
+        region -- the fixed chrome the NF3 focusable-region slices target) and
+        ``build_data`` (the column header + the scrolling section/row list), so
+        the two concerns can render into separate widgets; ``build`` emits both
+        in order, byte-identically (#88 NF3)."""
+        self.build_chrome(add, width, sel)
+        self.build_data(add, width, sel)
+
+    def build_chrome(self, add, width, sel):
         eng = self._eng
         btn_focus = sel == ("BTN", 0)
         add(eng.tab_bar(width, sel == ("M", 0)))
@@ -4870,6 +4928,10 @@ class WorktreesView:
         add(eng.new_worktree_row(width, btn_focus, eng.btn_idx),
             stop=("BTN", 0))
         add(Text(""))  # breathing room below the buttons
+
+    def build_data(self, add, width, sel):
+        eng = self._eng
+        btn_focus = sel == ("BTN", 0)
         cols, sections = eng.current_list()
         # The checkbox gutter's two left cells (box + margin) are ALWAYS
         # reserved so the table never shifts when multi-select mode toggles
@@ -5015,11 +5077,23 @@ class TasksView:
         ``build_body`` VRow sink). Mirrors the former inline ``build_body``
         registered branch exactly; group sections are opened via
         ``add(..., new_section=...)`` so this component never touches the
-        closure's ``cur_section``/``vrows``."""
+        closure's ``cur_section``/``vrows``.
+
+        Split into ``build_chrome`` (the machine-scope row -- Tasks has no button
+        region) and ``build_data`` (the status line + the scrolling task list) so
+        the concerns render into separate widgets; ``build`` emits both in order,
+        byte-identically (#88 NF3)."""
+        self.build_chrome(add, width, sel)
+        self.build_data(add, width, sel)
+
+    def build_chrome(self, add, width, sel):
         eng = self._eng
-        reg = eng._reg_pivot()
         add(eng.tab_bar(width, sel == ("M", 0)))
         add(Text(""))
+
+    def build_data(self, add, width, sel):
+        eng = self._eng
+        reg = eng._reg_pivot()
         state, rows, err = eng._task_state()
         add(self._status_row(reg, state, rows, err, width))
         add(Text(""))
@@ -5294,6 +5368,16 @@ class ProfilesView:
                 hi = it["hi"]
                 for ti in range(len(self.targets)):
                     self.applied[(ti, hi)] = self.grid.get((ti, hi), False)
+
+    def build_chrome(self, add, width, sel):
+        # Profiles lives under Configuration with its own host-column axes -- no
+        # machine-scope row and no top button region, so its chrome is empty
+        # (the Apply/Reset buttons ride the bottom of the data). Uniform with the
+        # other views' build_chrome/build_data split (#88 NF3).
+        return
+
+    def build_data(self, add, width, sel):
+        self.build(add, width, sel)
 
     def build(self, add, width, sel):
         """Emit the Profiles pivot body into ``add`` (the ``build_body`` VRow

@@ -3771,6 +3771,33 @@ def test_nf_compose_skeleton_mounts_identical_segments(monkeypatch):
     asyncio.run(run())
 
 
+def test_build_body_split_recomposes_monolith():
+    """NF3 (#88): _build_body_split's chrome + data rows recompose build_body
+    byte-for-byte for every pivot -- the untangle is a pure decomposition, so the
+    monolith render path stays authoritative and byte-identical."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            W = 118
+            for h in range(len(scr.htabs)):
+                scr.htab = h
+                scr.sel = scr.default_sel()
+                await pilot.pause()
+                chrome, data = scr._build_body_split(W)
+                whole = scr.build_body(W)
+                got = ([vr.text.plain for vr in chrome]
+                       + [vr.text.plain for vr in data])
+                want = [vr.text.plain for vr in whole]
+                assert got == want, f"pivot {scr.htabs[h]} split != monolith"
+
+    asyncio.run(run())
+
+
 def test_hidden_worktrees_filtered_and_toggle():
     """Bridge/system (kind=system) worktrees are hidden by default; Toggle-hidden
     reveals them, and the button appears only when there's something to reveal (#1422)."""
