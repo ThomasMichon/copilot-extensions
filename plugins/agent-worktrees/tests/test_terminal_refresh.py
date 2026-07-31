@@ -14,8 +14,13 @@ and returns an accurate success bool.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from agent_worktrees import __main__ as m
+
+_PLUGIN_ROOT = Path(__file__).resolve().parents[1]
+_INSTALL_PS = _PLUGIN_ROOT / "scripts" / "install.ps1"
+_INSTALL_SH = _PLUGIN_ROOT / "scripts" / "install.sh"
 
 
 def _write_manifest(install_dir, plugin_source):
@@ -155,3 +160,19 @@ def test_refresh_returns_false_on_timeout(tmp_path, monkeypatch):
 
     assert m._refresh_terminal_profiles() is False
     assert warnings and "Windows Terminal profiles" in warnings[0]
+
+
+def test_installers_preserve_registered_anchor_without_repo_context():
+    """Marketplace updates run from the payload, not the adopted repo."""
+    ps = _INSTALL_PS.read_text()
+    sh = _INSTALL_SH.read_text()
+
+    assert "from agent_worktrees.repos import find_repo" in ps
+    assert "e.local_path('windows')" in ps
+    assert "$entry[$prop.Name] = $prop.Value" in ps
+    assert "if ($RepoDir) {" in ps
+    assert "$currentAnchor = $currentRegEntry.anchor" in ps
+    assert "from agent_worktrees.repos import find_repo" in sh
+    assert "entry.local_path()" in sh
+    assert "entry = dict(existing)" in sh
+    assert "if anchor:" in sh

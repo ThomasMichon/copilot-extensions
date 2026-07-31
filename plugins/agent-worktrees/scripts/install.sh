@@ -173,6 +173,22 @@ if [[ "${COPILOT_EXT_NO_VERSIONED:-}" != "1" && ! "${AGENT_WORKTREES_VERSIONED:-
     fi
 fi
 
+# Layered project config deliberately omits machine paths. During marketplace
+# update the cwd is the installed payload, so resolve the adopted repo's anchor
+# from the canonical global repo registry through the previous-good runtime.
+if $HAS_PROJECT && [[ -z "$REPO_DIR" && -x "$LINK_PYTHON" ]]; then
+    _registry_anchor="$(PYTHONPATH= "$LINK_PYTHON" -c '
+import sys
+from agent_worktrees.repos import find_repo
+entry = find_repo(sys.argv[1])
+print((entry.local_path() if entry else "") or "")
+' "$PROJECT_NAME" 2>/dev/null || true)"
+    if [[ -n "$_registry_anchor" ]] &&
+            git -C "$_registry_anchor" rev-parse --show-toplevel >/dev/null 2>&1; then
+        REPO_DIR="$_registry_anchor"
+    fi
+fi
+
 _versioned_activate() {
     # CLI (no daemon): health-gate the freshly-built slot, swap the stable `.venv`
     # symlink onto it (first migration moves a legacy real `.venv` aside), then gc
@@ -303,16 +319,23 @@ else:
 
 projects = data.setdefault('projects', {})
 
-# Preserve existing entry fields we don't want to clobber
+# Preserve registry-owned fields. During marketplace update the installer runs
+# from the installed payload, so config/CWD may provide no repo path; that must
+# not erase a previously registered anchor or classification.
 existing = projects.get(project_name, {})
 
-entry = {
-    'anchor': anchor or None,
-    'machines_yaml': machines_yaml or None,
+entry = dict(existing) if isinstance(existing, dict) else {}
+entry.update({
     'registered_at': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
     'default_branch': default_branch,
     'config_dir': config_dir,
-}
+})
+if anchor:
+    entry['anchor'] = anchor
+    entry['machines_yaml'] = machines_yaml or None
+else:
+    entry.setdefault('anchor', None)
+    entry.setdefault('machines_yaml', None)
 
 # Set WSL state when running inside WSL
 if platform in ('wsl', 'linux'):

@@ -180,6 +180,19 @@ function Invoke-VersionedActivate {
 }
 # === end install-contract:v3 versioned-venv ===
 
+# Layered project config deliberately omits machine paths. During marketplace
+# update the cwd is the installed payload, so resolve the adopted repo's anchor
+# from the canonical global repo registry through the previous-good runtime.
+if ($HasProject -and -not $RepoDir -and (Test-Path $LinkPython)) {
+    try {
+        $candidate = & $LinkPython -c "import sys; from agent_worktrees.repos import find_repo; e=find_repo(sys.argv[1]); print((e.local_path('windows') if e else '') or '')" $ProjectName 2>$null
+        $candidate = ("$candidate").Trim()
+        if ($candidate -and (Test-Path $candidate)) {
+            $RepoDir = $candidate
+        }
+    } catch { }
+}
+
 # -- Projects registry ----------------------------------------------------
 
 $ProjectsYamlPath = Join-Path $InstallDir 'projects.yaml'
@@ -267,15 +280,45 @@ function Write-ProjectsRegistry {
 
 function Register-ProjectEntry {
     <# Add or update this project in the projects registry.
-       Preserves existing WSL state when re-registering from Windows. #>
+       Preserves registry-owned fields when an update runs from the installed
+       plugin directory and therefore has no repo path context. #>
     $registry = Read-ProjectsRegistry
 
-    $entry = @{
-        config_dir     = "~/.${ProjectName}"
-        anchor         = if ($RepoDir) { $RepoDir } else { '' }
-        machines_yaml  = if ($RepoDir -and (Test-Path (Join-Path $RepoDir 'machines.yaml'))) { [string](Join-Path $RepoDir 'machines.yaml') } else { $null }
-        default_branch = 'master'
-        registered_at  = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    $existing = $null
+    if ($registry.projects -is [PSCustomObject] -and $registry.projects.PSObject.Properties[$ProjectName]) {
+        $existing = $registry.projects.$ProjectName
+    } elseif ($registry.projects -is [hashtable] -and $registry.projects.ContainsKey($ProjectName)) {
+        $existing = $registry.projects[$ProjectName]
+    }
+
+    # Start from the existing entry so update cannot erase anchor, agent
+    # exposure, base-repo/elevation, or WSL metadata merely because its cwd is
+    # the marketplace payload rather than the adopted repo.
+    $entry = @{}
+    if ($existing -is [PSCustomObject]) {
+        foreach ($prop in $existing.PSObject.Properties) {
+            $entry[$prop.Name] = $prop.Value
+        }
+    } elseif ($existing -is [hashtable]) {
+        foreach ($key in $existing.Keys) {
+            $entry[$key] = $existing[$key]
+        }
+    }
+    $entry['config_dir'] = "~/.${ProjectName}"
+    $entry['registered_at'] = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    if (-not $entry.ContainsKey('default_branch')) {
+        $entry['default_branch'] = 'master'
+    }
+    if ($RepoDir) {
+        $entry['anchor'] = $RepoDir
+        $entry['machines_yaml'] = if (Test-Path (Join-Path $RepoDir 'machines.yaml')) {
+            [string](Join-Path $RepoDir 'machines.yaml')
+        } else {
+            $null
+        }
+    } elseif (-not $entry.ContainsKey('anchor')) {
+        $entry['anchor'] = ''
+        $entry['machines_yaml'] = $null
     }
 
     # Try to read default_branch from existing config
@@ -285,23 +328,6 @@ function Register-ProjectEntry {
         if ($cfgRaw -match 'default_branch:\s*(\S+)') {
             $entry['default_branch'] = $Matches[1]
         }
-    }
-
-    # Preserve existing WSL state from previous registration
-    $existingWsl = $null
-    if ($registry.projects -is [PSCustomObject] -and $registry.projects.PSObject.Properties[$ProjectName]) {
-        $existing = $registry.projects.$ProjectName
-        if ($existing.PSObject.Properties['wsl'] -and $existing.wsl) {
-            $existingWsl = $existing.wsl
-        }
-    } elseif ($registry.projects -is [hashtable] -and $registry.projects.ContainsKey($ProjectName)) {
-        $existing = $registry.projects[$ProjectName]
-        if ($existing -is [PSCustomObject] -and $existing.PSObject.Properties['wsl'] -and $existing.wsl) {
-            $existingWsl = $existing.wsl
-        }
-    }
-    if ($existingWsl) {
-        $entry['wsl'] = $existingWsl
     }
 
     # Upsert into registry
@@ -1421,10 +1447,25 @@ function Build-TerminalFragment {
     } elseif ($registry.projects -is [hashtable] -and $registry.projects.ContainsKey($ProjectName)) {
         $currentRegEntry = $registry.projects[$ProjectName]
     }
+    $currentAnchor = $RepoDir
+    if (-not $currentAnchor -and $currentRegEntry -and
+        $currentRegEntry.PSObject.Properties['anchor']) {
+        $currentAnchor = $currentRegEntry.anchor
+    }
+    $currentMachinesYaml = if ($currentAnchor -and
+        (Test-Path (Join-Path $currentAnchor 'machines.yaml'))) {
+        [string](Join-Path $currentAnchor 'machines.yaml')
+    } elseif ($currentRegEntry -and
+        $currentRegEntry.PSObject.Properties['machines_yaml'] -and
+        $currentRegEntry.machines_yaml -is [string]) {
+        [string]$currentRegEntry.machines_yaml
+    } else {
+        $null
+    }
     $currentEntry = @{
         name          = $ProjectName
-        anchor        = $RepoDir
-        machines_yaml = if ($RepoDir -and (Test-Path (Join-Path $RepoDir 'machines.yaml'))) { [string](Join-Path $RepoDir 'machines.yaml') } else { $null }
+        anchor        = $currentAnchor
+        machines_yaml = $currentMachinesYaml
         wsl_info      = if ($currentRegEntry) { Get-WslInfo $currentRegEntry } else { $null }
     }
     $projectList += [PSCustomObject]$currentEntry
