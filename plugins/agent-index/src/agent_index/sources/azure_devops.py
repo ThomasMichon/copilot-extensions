@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import base64
+import json
+import logging
 import os
 import re
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime, timedelta
 from html import unescape
 from html.parser import HTMLParser
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 import httpx
 
+from agent_index.config import install_dir
 from agent_index.sources.base import FileEntry
 from agent_index.sources.good_citizen_http import GoodCitizenSession
 
@@ -24,8 +28,10 @@ _DEFAULT_API_VERSION = "7.1"
 _DEFAULT_COMMENT_API_VERSION = "7.1-preview.3"
 _DEFAULT_BATCH_SIZE = 200
 _DEFAULT_PAGE_SIZE = 100
-_DEFAULT_LOOKBACK_DAYS = 30
 _DEFAULT_OVERLAP_SECONDS = 300
+_ADO_CONFIG_ENV = "AGENT_INDEX_ADO_CONFIG"
+
+log = logging.getLogger(__name__)
 
 
 class AzureDevOpsConnector:
@@ -43,6 +49,9 @@ class AzureDevOpsConnector:
         changed_since: str | None = None,
         area_path: str | None = None,
         iteration_path: str | None = None,
+        work_item_queries: list[dict[str, Any]] | None = None,
+        pull_request_queries: list[dict[str, Any]] | None = None,
+        config_path: str | Path | None = None,
         pull_request_status: str | None = None,
         repository_id: str | None = None,
         batch_size: int = _DEFAULT_BATCH_SIZE,
@@ -55,18 +64,28 @@ class AzureDevOpsConnector:
         self._token = token or os.environ.get("AGENT_INDEX_ADO_TOKEN")
         if not self._token:
             raise ValueError("Azure DevOps source requires AGENT_INDEX_ADO_TOKEN or token=...")
-        self._changed_since = changed_since or os.environ.get("AGENT_INDEX_ADO_CHANGED_SINCE")
-        self._area_path = area_path or os.environ.get("AGENT_INDEX_ADO_AREA_PATH")
-        self._iteration_path = iteration_path or os.environ.get("AGENT_INDEX_ADO_ITERATION_PATH")
-        self._pull_request_status = (
-            pull_request_status or os.environ.get("AGENT_INDEX_ADO_PR_STATUS") or "all"
-        ).lower()
-        self._repository_id = repository_id or os.environ.get("AGENT_INDEX_ADO_REPOSITORY_ID")
+        needs_config = work_item_queries is None or (
+            pull_request_queries is None
+            and pull_request_status is None
+            and repository_id is None
+        )
+        query_config = _load_query_config(config_path) if needs_config else {}
+        self._work_item_queries = _resolve_work_item_queries(work_item_queries, query_config)
+        self._pull_request_queries = _resolve_pull_request_queries(
+            pull_request_queries,
+            query_config,
+            pull_request_status=pull_request_status,
+            repository_id=repository_id,
+        )
         self._batch_size = batch_size
         self._page_size = page_size
         self._overlap_seconds = int(
             os.environ.get("AGENT_INDEX_ADO_OVERLAP_SECONDS", str(_DEFAULT_OVERLAP_SECONDS))
         )
+        self._repository_ids_by_name: dict[str, str] = {}
+        self._authenticated_user_id: str | None = None
+        self._logged_no_work_item_queries = False
+        self._logged_no_pull_request_queries = False
         self._http = GoodCitizenSession(
             base_url=self.api_base,
             headers=self._headers(),
@@ -82,10 +101,9 @@ class AzureDevOpsConnector:
         return f"ado:{self.org}/{self.project}"
 
     def discover(self, cancel_check: Callable[[], None] | None = None) -> list[FileEntry]:
-        """Discover work items and pull requests within the configured bounded scope."""
-        since = self._bounded_since_marker()
+        """Discover work items and pull requests from operator-supplied query specs."""
         return [
-            *self._discover_work_items(since=since, cancel_check=cancel_check),
+            *self._discover_work_items(since=None, cancel_check=cancel_check),
             *self._discover_pull_requests(since=None, cancel_check=cancel_check),
         ]
 
@@ -108,9 +126,8 @@ class AzureDevOpsConnector:
         cancel_check: Callable[[], None] | None = None,
     ) -> dict[str, set[str]]:
         """Return current work item and pull request paths without fetching bodies/comments."""
-        since = self._bounded_since_marker()
         work_items: set[str] = set()
-        for work_item_id in self._work_item_ids(since=since):
+        for work_item_id in self._work_item_ids():
             if cancel_check:
                 cancel_check()
             work_items.add(f"workitems/{work_item_id}.md")
@@ -143,11 +160,12 @@ class AzureDevOpsConnector:
     def _discover_work_items(
         self,
         *,
-        since: str,
+        since: str | None,
         cancel_check: Callable[[], None] | None,
     ) -> list[FileEntry]:
-        ids = self._work_item_ids(since=since)
+        ids = self._work_item_ids()
         entries: list[FileEntry] = []
+        since_dt = _parse_datetime(since) if since else None
         for chunk in _chunks(ids, self._batch_size):
             if cancel_check:
                 cancel_check()
@@ -158,28 +176,36 @@ class AzureDevOpsConnector:
             )
             for item in _values(result.data):
                 if isinstance(item, dict):
+                    if since_dt and not self._work_item_in_window(item, since_dt):
+                        continue
                     comments = self._work_item_comments(item.get("id"))
                     entries.append(self._work_item_entry(item, comments))
         return entries
 
-    def _work_item_ids(self, *, since: str) -> list[int]:
-        result = self._http.post_json(
-            self._project_path("_apis", "wit", "wiql"),
-            params={"api-version": _DEFAULT_API_VERSION},
-            json={"query": self._wiql(since=since)},
-        )
+    def _work_item_ids(self) -> list[int]:
+        if not self._work_item_queries:
+            self._log_no_work_item_queries()
+            return []
         ids: list[int] = []
-        for item in result.data.get("workItems", []) if isinstance(result.data, dict) else []:
-            if isinstance(item, dict) and item.get("id") is not None:
-                ids.append(int(item["id"]))
-        relations = (
-            result.data.get("workItemRelations", []) if isinstance(result.data, dict) else []
-        )
-        for relation in relations:
-            target = relation.get("target") if isinstance(relation, dict) else None
-            if isinstance(target, dict) and target.get("id") is not None:
-                ids.append(int(target["id"]))
+        for query in self._work_item_queries:
+            result = self._run_work_item_query(query)
+            ids.extend(_work_item_ids_from_result(result.data))
         return list(dict.fromkeys(ids))
+
+    def _run_work_item_query(self, query: dict[str, Any]) -> Any:
+        if wiql := query.get("wiql"):
+            result = self._http.post_json(
+                self._project_path("_apis", "wit", "wiql"),
+                params={"api-version": _DEFAULT_API_VERSION},
+                json={"query": wiql},
+            )
+            return result
+
+        saved_query_id = str(query["saved_query_id"])
+        return self._http.get_json(
+            self._project_path("_apis", "wit", "wiql", saved_query_id),
+            params={"api-version": _DEFAULT_API_VERSION},
+        )
 
     def _work_item_comments(self, work_item_id: Any) -> list[dict[str, Any]]:
         if work_item_id is None:
@@ -206,9 +232,14 @@ class AzureDevOpsConnector:
     ) -> list[FileEntry]:
         entries: list[FileEntry] = []
         since_dt = _parse_datetime(since) if since else None
+        seen_ids: set[Any] = set()
         for pull_request in self._iter_pull_requests(since=since):
             if cancel_check:
                 cancel_check()
+            pull_request_id = pull_request.get("pullRequestId")
+            if pull_request_id in seen_ids:
+                continue
+            seen_ids.add(pull_request_id)
             if since_dt and not self._pull_request_in_window(pull_request, since_dt):
                 continue
             comments = self._pull_request_comments(pull_request)
@@ -216,23 +247,93 @@ class AzureDevOpsConnector:
         return entries
 
     def _iter_pull_requests(self, *, since: str | None) -> Iterable[dict[str, Any]]:
+        if not self._pull_request_queries:
+            self._log_no_pull_request_queries()
+            return
+
+        seen_ids: set[Any] = set()
+        for query in self._pull_request_queries:
+            params = self._pull_request_params(query)
+            if since:
+                params["searchCriteria.minTime"] = since
+
+            for result in self._http.paginate_continuation(
+                self._project_path("_apis", "git", "pullrequests"),
+                params=params,
+            ):
+                for item in _values(result.data):
+                    if not isinstance(item, dict):
+                        continue
+                    pull_request_id = item.get("pullRequestId")
+                    if pull_request_id in seen_ids:
+                        continue
+                    seen_ids.add(pull_request_id)
+                    yield item
+
+    def _pull_request_params(self, query: dict[str, Any]) -> dict[str, Any]:
         params: dict[str, Any] = {
             "api-version": _DEFAULT_API_VERSION,
-            "searchCriteria.status": self._pull_request_status,
+            "searchCriteria.status": str(query.get("status") or "all").lower(),
             "$top": self._page_size,
         }
-        if self._repository_id:
-            params["searchCriteria.repositoryId"] = self._repository_id
-        if since:
-            params["searchCriteria.minTime"] = since
+        repository_id = query.get("repository_id")
+        if not repository_id and query.get("repository"):
+            repository_id = self._resolve_repository_id(str(query["repository"]))
+        if repository_id:
+            params["searchCriteria.repositoryId"] = str(repository_id)
+        if creator := query.get("creator"):
+            params["searchCriteria.creatorId"] = self._resolve_identity_filter(creator)
+        if reviewer := query.get("reviewer"):
+            params["searchCriteria.reviewerId"] = self._resolve_identity_filter(reviewer)
+        if source_ref := query.get("source_ref"):
+            params["searchCriteria.sourceRefName"] = str(source_ref)
+        if target_ref := query.get("target_ref"):
+            params["searchCriteria.targetRefName"] = str(target_ref)
+        return params
 
-        for result in self._http.paginate_continuation(
-            self._project_path("_apis", "git", "pullrequests"),
-            params=params,
-        ):
-            for item in _values(result.data):
-                if isinstance(item, dict):
-                    yield item
+    def _resolve_repository_id(self, repository: str) -> str:
+        if _looks_like_guid(repository):
+            return repository
+        cache_key = repository.casefold()
+        if cached := self._repository_ids_by_name.get(cache_key):
+            return cached
+        result = self._http.get_json(
+            self._project_path("_apis", "git", "repositories"),
+            params={"api-version": _DEFAULT_API_VERSION},
+        )
+        for item in _values(result.data):
+            if not isinstance(item, dict):
+                continue
+            repository_id = item.get("id")
+            name = item.get("name")
+            if repository_id and (
+                str(repository_id).casefold() == cache_key
+                or (name is not None and str(name).casefold() == cache_key)
+            ):
+                resolved = str(repository_id)
+                self._repository_ids_by_name[cache_key] = resolved
+                return resolved
+        raise ValueError(f"Azure DevOps repository {repository!r} was not found")
+
+    def _resolve_identity_filter(self, value: Any) -> str:
+        text = str(value)
+        if text.casefold() == "me":
+            return self._get_authenticated_user_id()
+        return text
+
+    def _get_authenticated_user_id(self) -> str:
+        if self._authenticated_user_id:
+            return self._authenticated_user_id
+        result = self._http.get_json(
+            self._org_path("_apis", "connectionData"),
+            params={"api-version": _DEFAULT_API_VERSION},
+        )
+        user = result.data.get("authenticatedUser") if isinstance(result.data, dict) else None
+        user_id = user.get("id") if isinstance(user, dict) else None
+        if not user_id:
+            raise ValueError("Azure DevOps connectionData did not include authenticatedUser.id")
+        self._authenticated_user_id = str(user_id)
+        return self._authenticated_user_id
 
     def _pull_request_comments(self, pull_request: dict[str, Any]) -> list[dict[str, Any]]:
         repository = pull_request.get("repository") or {}
@@ -383,27 +484,6 @@ class AzureDevOpsConnector:
                     lines.extend([f"### {author or 'unknown'} at {updated}", "", text, ""])
         return "\n".join(lines).strip() + "\n"
 
-    def _wiql(self, *, since: str) -> str:
-        clauses = [
-            f"[System.TeamProject] = '{_wiql_escape(self.project)}'",
-            f"[System.ChangedDate] >= '{_wiql_escape(since)}'",
-        ]
-        if self._area_path:
-            clauses.append(f"[System.AreaPath] UNDER '{_wiql_escape(self._area_path)}'")
-        if self._iteration_path:
-            clauses.append(f"[System.IterationPath] UNDER '{_wiql_escape(self._iteration_path)}'")
-        return (
-            "SELECT [System.Id] FROM WorkItems WHERE "  # noqa: S608 - WIQL, not SQL.
-            + " AND ".join(clauses)
-            + " ORDER BY [System.ChangedDate] ASC"
-        )
-
-    def _bounded_since_marker(self) -> str:
-        if self._changed_since:
-            return self._format_marker(self._changed_since)
-        marker = datetime.now(UTC) - timedelta(days=_DEFAULT_LOOKBACK_DAYS)
-        return marker.isoformat(timespec="seconds").replace("+00:00", "Z")
-
     def _marker_with_overlap(self, marker: str) -> str:
         dt = _parse_datetime(marker)
         if dt is None:
@@ -421,6 +501,29 @@ class AzureDevOpsConnector:
         quoted = [quote(self.org, safe=""), quote(self.project, safe="")]
         quoted.extend(quote(part, safe="") for part in parts)
         return "/" + "/".join(quoted)
+
+    def _org_path(self, *parts: str) -> str:
+        quoted = [quote(self.org, safe="")]
+        quoted.extend(quote(part, safe="") for part in parts)
+        return "/" + "/".join(quoted)
+
+    def _log_no_work_item_queries(self) -> None:
+        if self._logged_no_work_item_queries:
+            return
+        self._logged_no_work_item_queries = True
+        log.warning(
+            "No Azure DevOps work-item queries configured "
+            "(set AGENT_INDEX_ADO_CONFIG or work_item_queries) -- skipping work items."
+        )
+
+    def _log_no_pull_request_queries(self) -> None:
+        if self._logged_no_pull_request_queries:
+            return
+        self._logged_no_pull_request_queries = True
+        log.warning(
+            "No Azure DevOps pull-request queries configured "
+            "(set AGENT_INDEX_ADO_CONFIG or pull_request_queries) -- skipping pull requests."
+        )
 
     @staticmethod
     def _parse_source(source: str) -> tuple[str, str]:
@@ -453,6 +556,162 @@ class AzureDevOpsConnector:
             if parsed and parsed >= since:
                 return True
         return False
+
+    @staticmethod
+    def _work_item_in_window(item: dict[str, Any], since: datetime) -> bool:
+        fields = item.get("fields") or {}
+        parsed = _parse_datetime(fields.get("System.ChangedDate"))
+        return bool(parsed and parsed >= since)
+
+
+def _load_query_config(config_path: str | Path | None) -> dict[str, Any]:
+    explicit_path = config_path or os.environ.get(_ADO_CONFIG_ENV)
+    path = Path(explicit_path) if explicit_path else install_dir() / "ado.json"
+    if not path.exists():
+        if explicit_path:
+            raise FileNotFoundError(f"Azure DevOps query config not found: {path}")
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Azure DevOps query config is not valid JSON: {path}") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"Azure DevOps query config must be a JSON object: {path}")
+    return data
+
+
+def _resolve_work_item_queries(
+    explicit: list[dict[str, Any]] | None,
+    config: dict[str, Any],
+) -> list[dict[str, Any]]:
+    if explicit is not None:
+        return _normalize_work_item_queries(explicit, "work_item_queries")
+    if (configured := _query_specs_from_config(config, "work_item_queries")) is not None:
+        return _normalize_work_item_queries(configured, "work_item_queries")
+    if wiql := os.environ.get("AGENT_INDEX_ADO_WIQL"):
+        return _normalize_work_item_queries(
+            [{"name": "env-wiql", "wiql": wiql}],
+            "AGENT_INDEX_ADO_WIQL",
+        )
+    return []
+
+
+def _resolve_pull_request_queries(
+    explicit: list[dict[str, Any]] | None,
+    config: dict[str, Any],
+    *,
+    pull_request_status: str | None,
+    repository_id: str | None,
+) -> list[dict[str, Any]]:
+    if explicit is not None:
+        return _normalize_pull_request_queries(explicit, "pull_request_queries")
+    if pull_request_status is not None or repository_id is not None:
+        query: dict[str, Any] = {"name": "kwargs-pr", "status": pull_request_status or "all"}
+        if repository_id is not None:
+            query["repository_id"] = repository_id
+        return _normalize_pull_request_queries([query], "pull-request kwargs")
+    if (configured := _query_specs_from_config(config, "pull_request_queries")) is not None:
+        return _normalize_pull_request_queries(configured, "pull_request_queries")
+    env_query = _pull_request_query_from_env()
+    if not env_query:
+        return []
+    return _normalize_pull_request_queries([env_query], "AGENT_INDEX_ADO_PR_*")
+
+
+def _query_specs_from_config(config: dict[str, Any], key: str) -> list[dict[str, Any]] | None:
+    if key not in config:
+        return None
+    value = config[key]
+    if not isinstance(value, list):
+        raise ValueError(f"Azure DevOps config field {key!r} must be a list")
+    specs: list[dict[str, Any]] = []
+    for index, item in enumerate(value, start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"Azure DevOps config field {key}[{index}] must be an object")
+        specs.append(dict(item))
+    return specs
+
+
+def _normalize_work_item_queries(
+    queries: list[dict[str, Any]],
+    source: str,
+) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for index, query in enumerate(queries, start=1):
+        if not isinstance(query, dict):
+            raise ValueError(f"Azure DevOps {source}[{index}] must be an object")
+        has_wiql = bool(query.get("wiql"))
+        has_saved = bool(query.get("saved_query_id"))
+        if has_wiql == has_saved:
+            raise ValueError(
+                f"Azure DevOps {source}[{index}] must set exactly one of "
+                "'wiql' or 'saved_query_id'"
+            )
+        spec = {"name": str(query.get("name") or f"work-item-query-{index}")}
+        if has_wiql:
+            spec["wiql"] = str(query["wiql"])
+        else:
+            spec["saved_query_id"] = str(query["saved_query_id"])
+        normalized.append(spec)
+    return normalized
+
+
+def _normalize_pull_request_queries(
+    queries: list[dict[str, Any]],
+    source: str,
+) -> list[dict[str, Any]]:
+    allowed = {
+        "name",
+        "status",
+        "repository",
+        "repository_id",
+        "creator",
+        "reviewer",
+        "source_ref",
+        "target_ref",
+    }
+    normalized: list[dict[str, Any]] = []
+    for index, query in enumerate(queries, start=1):
+        if not isinstance(query, dict):
+            raise ValueError(f"Azure DevOps {source}[{index}] must be an object")
+        spec = {
+            key: value
+            for key, value in query.items()
+            if key in allowed and value is not None and value != ""
+        }
+        spec["name"] = str(spec.get("name") or f"pull-request-query-{index}")
+        spec["status"] = str(spec.get("status") or "all").lower()
+        normalized.append(spec)
+    return normalized
+
+
+def _pull_request_query_from_env() -> dict[str, Any] | None:
+    env_map = {
+        "status": os.environ.get("AGENT_INDEX_ADO_PR_STATUS"),
+        "repository": os.environ.get("AGENT_INDEX_ADO_PR_REPOSITORY"),
+        "repository_id": os.environ.get("AGENT_INDEX_ADO_REPOSITORY_ID"),
+        "creator": os.environ.get("AGENT_INDEX_ADO_PR_CREATOR"),
+        "reviewer": os.environ.get("AGENT_INDEX_ADO_PR_REVIEWER"),
+    }
+    query = {key: value for key, value in env_map.items() if value}
+    if not query:
+        return None
+    query.setdefault("name", "env-pr")
+    query.setdefault("status", "all")
+    return query
+
+
+def _work_item_ids_from_result(data: Any) -> list[int]:
+    ids: list[int] = []
+    for item in data.get("workItems", []) if isinstance(data, dict) else []:
+        if isinstance(item, dict) and item.get("id") is not None:
+            ids.append(int(item["id"]))
+    relations = data.get("workItemRelations", []) if isinstance(data, dict) else []
+    for relation in relations:
+        target = relation.get("target") if isinstance(relation, dict) else None
+        if isinstance(target, dict) and target.get("id") is not None:
+            ids.append(int(target["id"]))
+    return ids
 
 
 def _values(data: Any) -> list[Any]:
@@ -515,8 +774,14 @@ def _plain(value: Any) -> str:
     return stripped.strip()
 
 
-def _wiql_escape(value: str) -> str:
-    return value.replace("'", "''")
+def _looks_like_guid(value: str) -> bool:
+    return bool(
+        re.fullmatch(
+            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+            r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+            value,
+        )
+    )
 
 
 class _HtmlStripper(HTMLParser):

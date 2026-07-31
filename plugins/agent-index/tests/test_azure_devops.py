@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import time
+from pathlib import Path
 
 import httpx
 
@@ -23,10 +24,33 @@ def _json_response(
     )
 
 
+def _work_item_payload(work_item_id: int, *, changed: str = "2026-01-02T03:04:05Z") -> dict:
+    return {
+        "id": work_item_id,
+        "fields": {
+            "System.WorkItemType": "Bug",
+            "System.Title": "Escapes <b>HTML</b>",
+            "System.State": "Active",
+            "System.AreaPath": "widgets\\service",
+            "System.IterationPath": "widgets\\sprint 1",
+            "System.Tags": "api; regression",
+            "System.AssignedTo": {"displayName": "Ada Lovelace"},
+            "System.ChangedDate": changed,
+            "System.Description": "<p>Description <b>body</b></p>",
+            "Microsoft.VSTS.TCM.ReproSteps": "<div>Step one<br>Step two</div>",
+            "Microsoft.VSTS.Common.AcceptanceCriteria": "<ul><li>Done</li></ul>",
+        },
+    }
+
+
 def test_ado_discovers_work_items_and_pull_requests_with_pagination() -> None:
     auth_header = "Basic " + base64.b64encode(b":pat-token").decode("ascii")
     seen_paths: list[str] = []
     seen_tokens: list[str | None] = []
+    operator_wiql = (
+        "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = 'widgets' "
+        "AND [System.AreaPath] UNDER 'widgets\\service'"
+    )
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["Authorization"] == auth_header
@@ -34,36 +58,11 @@ def test_ado_discovers_work_items_and_pull_requests_with_pagination() -> None:
         path = request.url.path
         if path.endswith("/_apis/wit/wiql"):
             wiql = json.loads(request.content.decode("utf-8"))["query"]
-            assert "[System.TeamProject] = 'widgets'" in wiql
-            assert "[System.AreaPath] UNDER 'widgets\\service'" in wiql
-            assert "[System.IterationPath] UNDER 'widgets\\sprint 1'" in wiql
+            assert wiql == operator_wiql
             return _json_response(200, {"workItems": [{"id": 42}]})
         if path.endswith("/_apis/wit/workitemsbatch"):
-            return _json_response(
-                200,
-                {
-                    "value": [
-                        {
-                            "id": 42,
-                            "fields": {
-                                "System.WorkItemType": "Bug",
-                                "System.Title": "Escapes <b>HTML</b>",
-                                "System.State": "Active",
-                                "System.AreaPath": "widgets\\service",
-                                "System.IterationPath": "widgets\\sprint 1",
-                                "System.Tags": "api; regression",
-                                "System.AssignedTo": {"displayName": "Ada Lovelace"},
-                                "System.ChangedDate": "2026-01-02T03:04:05Z",
-                                "System.Description": "<p>Description <b>body</b></p>",
-                                "Microsoft.VSTS.TCM.ReproSteps": "<div>Step one<br>Step two</div>",
-                                "Microsoft.VSTS.Common.AcceptanceCriteria": (
-                                    "<ul><li>Done</li></ul>"
-                                ),
-                            },
-                        }
-                    ]
-                },
-            )
+            assert json.loads(request.content.decode("utf-8"))["ids"] == [42]
+            return _json_response(200, {"value": [_work_item_payload(42)]})
         if path.endswith("/_apis/wit/workItems/42/comments"):
             return _json_response(
                 200,
@@ -78,6 +77,8 @@ def test_ado_discovers_work_items_and_pull_requests_with_pagination() -> None:
                 },
             )
         if path.endswith("/_apis/git/pullrequests"):
+            assert request.url.params["searchCriteria.repositoryId"] == "repo-1"
+            assert request.url.params["searchCriteria.status"] == "all"
             token = request.url.params.get("continuationToken")
             seen_tokens.append(token)
             if token is None:
@@ -143,9 +144,8 @@ def test_ado_discovers_work_items_and_pull_requests_with_pagination() -> None:
         token="pat-token",
         transport=httpx.MockTransport(handler),
         min_interval_s=0,
-        changed_since="2026-01-01T00:00:00Z",
-        area_path="widgets\\service",
-        iteration_path="widgets\\sprint 1",
+        work_item_queries=[{"name": "team-backlog", "wiql": operator_wiql}],
+        pull_request_queries=[{"name": "repo-prs", "status": "all", "repository_id": "repo-1"}],
     )
 
     entries = connector.discover()
@@ -189,6 +189,176 @@ def test_ado_discovers_work_items_and_pull_requests_with_pagination() -> None:
     assert any(path.endswith("/_apis/wit/workitemsbatch") for path in seen_paths)
 
 
+def test_ado_multiple_work_item_queries_union_and_dedupe_ids() -> None:
+    batch_ids: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/_apis/wit/wiql"):
+            wiql = json.loads(request.content.decode("utf-8"))["query"]
+            if "Query A" in wiql:
+                return _json_response(200, {"workItems": [{"id": 1}, {"id": 2}]})
+            if "Query B" in wiql:
+                return _json_response(200, {"workItems": [{"id": 2}, {"id": 3}]})
+        if path.endswith("/_apis/wit/workitemsbatch"):
+            batch_ids.extend(json.loads(request.content.decode("utf-8"))["ids"])
+            return _json_response(
+                200,
+                {
+                    "value": [
+                        _work_item_payload(1),
+                        _work_item_payload(2),
+                        _work_item_payload(3),
+                    ]
+                },
+            )
+        if path.endswith("/comments"):
+            return _json_response(200, {"comments": []})
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    connector = AzureDevOpsConnector(
+        "ado:acme/widgets",
+        token="pat-token",
+        transport=httpx.MockTransport(handler),
+        min_interval_s=0,
+        work_item_queries=[
+            {"name": "a", "wiql": "SELECT [System.Id] FROM WorkItems WHERE Query A"},
+            {"name": "b", "wiql": "SELECT [System.Id] FROM WorkItems WHERE Query B"},
+        ],
+        pull_request_queries=[],
+    )
+
+    entries = connector.discover()
+
+    assert batch_ids == [1, 2, 3]
+    assert {entry.path for entry in entries} == {
+        "workitems/1.md",
+        "workitems/2.md",
+        "workitems/3.md",
+    }
+
+
+def test_ado_saved_query_id_path_resolves_and_runs() -> None:
+    seen_paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        seen_paths.append(url)
+        if "/_apis/wit/wiql/shared%2Fmy%20query" in url:
+            return _json_response(200, {"workItemRelations": [{"target": {"id": 99}}]})
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    connector = AzureDevOpsConnector(
+        "ado:acme/widgets",
+        token="pat-token",
+        transport=httpx.MockTransport(handler),
+        min_interval_s=0,
+        work_item_queries=[{"name": "saved", "saved_query_id": "shared/my query"}],
+        pull_request_queries=[],
+    )
+
+    assert connector.list_paths()["ado:acme/widgets:workitems"] == {"workitems/99.md"}
+    assert any("shared%2Fmy%20query" in path for path in seen_paths)
+
+
+def test_ado_pr_reviewer_me_resolves_connection_data_once() -> None:
+    connection_data_calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal connection_data_calls
+        path = request.url.path
+        if path.endswith("/_apis/connectionData"):
+            connection_data_calls += 1
+            return _json_response(200, {"authenticatedUser": {"id": "user-id-1"}})
+        if path.endswith("/_apis/git/pullrequests"):
+            assert request.url.params["searchCriteria.reviewerId"] == "user-id-1"
+            assert request.url.params["searchCriteria.status"] == "active"
+            return _json_response(200, {"value": []})
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    connector = AzureDevOpsConnector(
+        "ado:acme/widgets",
+        token="pat-token",
+        transport=httpx.MockTransport(handler),
+        min_interval_s=0,
+        work_item_queries=[],
+        pull_request_queries=[
+            {"name": "mine", "reviewer": "me", "status": "active"},
+            {"name": "mine-again", "reviewer": "me", "status": "active"},
+        ],
+    )
+
+    assert connector.list_paths()["ado:acme/widgets:pulls"] == set()
+    assert connection_data_calls == 1
+
+
+def test_ado_config_file_loading_from_env(monkeypatch) -> None:
+    config_path = Path.cwd() / ".agent-index-ado-test-config.json"
+    try:
+        config_path.write_text(
+            json.dumps(
+                {
+                    "work_item_queries": [
+                        {
+                            "name": "configured-wiql",
+                            "wiql": "SELECT [System.Id] FROM WorkItems WHERE Configured WIQL",
+                        }
+                    ],
+                    "pull_request_queries": [
+                        {"name": "configured-pr", "status": "active", "creator": "creator-id"}
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("AGENT_INDEX_ADO_CONFIG", str(config_path))
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            path = request.url.path
+            if path.endswith("/_apis/wit/wiql"):
+                assert "Configured WIQL" in json.loads(request.content.decode("utf-8"))["query"]
+                return _json_response(200, {"workItems": [{"id": 5}]})
+            if path.endswith("/_apis/git/pullrequests"):
+                assert request.url.params["searchCriteria.status"] == "active"
+                assert request.url.params["searchCriteria.creatorId"] == "creator-id"
+                return _json_response(200, {"value": [{"pullRequestId": 12}]})
+            raise AssertionError(f"unexpected request: {request.url}")
+
+        connector = AzureDevOpsConnector(
+            "ado:acme/widgets",
+            token="pat-token",
+            transport=httpx.MockTransport(handler),
+            min_interval_s=0,
+        )
+
+        assert connector.list_paths() == {
+            "ado:acme/widgets:workitems": {"workitems/5.md"},
+            "ado:acme/widgets:pulls": {"pulls/12.md"},
+        }
+    finally:
+        config_path.unlink(missing_ok=True)
+
+
+def test_ado_no_firehose_without_queries() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    connector = AzureDevOpsConnector(
+        "ado:acme/widgets",
+        token="pat-token",
+        transport=httpx.MockTransport(handler),
+        min_interval_s=0,
+        work_item_queries=[],
+        pull_request_queries=[],
+    )
+
+    assert connector.discover() == []
+    assert requests == []
+
+
 def test_ado_429_retry_after_sleeps_then_proceeds(monkeypatch) -> None:
     sleeps: list[float] = []
     monkeypatch.setattr(time, "sleep", sleeps.append)
@@ -210,7 +380,10 @@ def test_ado_429_retry_after_sleeps_then_proceeds(monkeypatch) -> None:
         token="pat-token",
         transport=httpx.MockTransport(handler),
         min_interval_s=0,
-        changed_since="2026-01-01T00:00:00Z",
+        work_item_queries=[
+            {"name": "empty", "wiql": "SELECT [System.Id] FROM WorkItems WHERE Empty"}
+        ],
+        pull_request_queries=[{"name": "active", "status": "active"}],
     )
 
     assert connector.list_paths() == {
@@ -240,7 +413,8 @@ def test_ado_list_paths_returns_ids_only() -> None:
         token="pat-token",
         transport=httpx.MockTransport(handler),
         min_interval_s=0,
-        changed_since="2026-01-01T00:00:00Z",
+        work_item_queries=[{"name": "ids", "wiql": "SELECT [System.Id] FROM WorkItems WHERE Ids"}],
+        pull_request_queries=[{"name": "all", "status": "all"}],
     )
 
     assert connector.list_paths() == {

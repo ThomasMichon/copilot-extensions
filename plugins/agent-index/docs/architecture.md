@@ -115,13 +115,55 @@ connector for Azure DevOps, a public SaaS source system. The source name is
 The connector indexes work items and pull requests only. Repository files and
 commits remain the responsibility of the git connector.
 
-The connector is deliberately scoped: every run is tied to one declared project,
-optionally narrowed by `AGENT_INDEX_ADO_AREA_PATH`,
-`AGENT_INDEX_ADO_ITERATION_PATH`, `AGENT_INDEX_ADO_REPOSITORY_ID`, and bounded by
-`AGENT_INDEX_ADO_CHANGED_SINCE` or the incremental marker supplied to
-`discover_changed()`. Work items are discovered through scoped WIQL, then fetched
-in batches; pull requests are read through the Azure DevOps Git API with status
-controlled by `AGENT_INDEX_ADO_PR_STATUS` (`all`, `active`, or `completed`).
+The connector is deliberately operator-query-driven. It never synthesizes a
+whole-project WIQL query or unfiltered pull-request crawl. The operator supplies
+the exact work-item and pull-request subsets to index through kwargs, a config
+file, or single-query environment shortcuts, with precedence in that order:
+
+- `work_item_queries=[...]` and `pull_request_queries=[...]` kwargs passed to the
+  connector factory.
+- A JSON config file at `AGENT_INDEX_ADO_CONFIG`, or `~/.agent-index/ado.json`
+  by default (under the plugin install root).
+- Convenience environment variables: `AGENT_INDEX_ADO_WIQL` for one raw WIQL
+  query, and `AGENT_INDEX_ADO_PR_STATUS`, `AGENT_INDEX_ADO_PR_REPOSITORY`,
+  `AGENT_INDEX_ADO_PR_CREATOR`, and `AGENT_INDEX_ADO_PR_REVIEWER` for one
+  pull-request filter. The legacy `AGENT_INDEX_ADO_REPOSITORY_ID` is still
+  accepted as a direct repository-id filter.
+
+The config file schema is:
+
+```json
+{
+  "work_item_queries": [
+    { "name": "team-backlog-a", "wiql": "SELECT [System.Id] FROM WorkItems WHERE ..." },
+    { "name": "area-x", "saved_query_id": "<guid-or-path>" }
+  ],
+  "pull_request_queries": [
+    { "name": "my-prs", "reviewer": "me", "status": "active" },
+    { "name": "key-repo", "repository": "<repo-name-or-id>", "status": "all" }
+  ]
+}
+```
+
+Each work-item query sets exactly one of `wiql` (posted as-is) or
+`saved_query_id` (run through the Azure DevOps saved-query WIQL endpoint). The
+connector unions and dedupes ids across all configured queries, then batch-fetches
+work-item fields and comments. Incremental discovery does not rewrite WIQL; it
+runs the operator's queries as-is and filters the fetched items client-side by
+`System.ChangedDate` using the incremental marker plus the overlap window.
+
+Each pull-request query maps to Azure DevOps Git `searchCriteria.*`: `status`,
+`repository`/`repository_id`, `creator`, `reviewer`, `source_ref`, and
+`target_ref`. A repository name is resolved to an id through the repositories
+API; a direct `repository_id` or GUID is passed through. `creator: "me"` and
+`reviewer: "me"` resolve the authenticated user's id once through
+`/_apis/connectionData` and reuse it for the run. Pull-request incremental scans
+keep the existing client-side creation/closed-date window filter.
+
+If no work-item queries are configured, the work-item side returns nothing and
+logs an actionable warning. If no pull-request queries are configured, the
+pull-request side does the same. No explicit query means no indexing for that
+kind.
 
 Authentication uses an Azure DevOps PAT from `AGENT_INDEX_ADO_TOKEN`, sent as
 HTTP Basic with an empty username. The API base defaults to
