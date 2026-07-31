@@ -91,17 +91,28 @@ class SessionHost:
         # Bounded keep-alive for an ACTIVE (non-reapable, mid-turn / active
         # background work) child after the front is lost (#145). Unlike the
         # unexpected-idle grace above -- which only frees an already-idle child
-        # -- this holds a child that is still mid-work for a longer window so a
-        # reconnecting front can resume the in-flight turn/tool call, then lets
-        # it go (the session stays resumable from disk + worktree). This is the
-        # operator's "keep the task alive ~30 min after a sever" bound. 0
-        # disables (the legacy behavior: an active front-less child lives until
-        # its own stop). A reattach cancels it.
+        # -- this holds a child that is still mid-work so a reconnecting front
+        # can resume the in-flight turn/tool call. The hold is progress-aware:
+        # each window that sees new child frames re-arms (a task in progress is
+        # never killed mid-flight); the child is let go only after a full window
+        # with no output and no reattach (the session stays resumable from disk
+        # + worktree). This is the operator's "keep the task alive after a sever"
+        # bound. 0 disables (the legacy behavior: an active front-less child
+        # lives until its own stop). A reattach cancels it.
         self._active_reap_seconds = active_reap_seconds
         self._last_reapable = False
         self._graceful_detach = False
         self._reap_timer: asyncio.TimerHandle | None = None
         self._active_reap_timer: asyncio.TimerHandle | None = None
+        # The child-frame high-water mark captured when the active-hold timer was
+        # armed. If the child has produced new frames since (``_max_seq`` moved),
+        # a task is still actively streaming work, so the hold is *re-armed*
+        # rather than the child killed mid-task -- we only reclaim a front-less
+        # active child once it has gone quiet for a full window (wedged/idle, no
+        # task in progress). This keeps a genuinely-working severed child alive
+        # to its natural boundary using only the host's frame-agnostic progress
+        # signal, never parsing ACP frames.
+        self._active_reap_since_seq = 0
         self._self_reap_task: asyncio.Task | None = None
 
     # -- introspection (tests / diagnostics) -------------------------------
@@ -303,8 +314,11 @@ class SessionHost:
 
         An **active** (non-reapable) child is never freed by the paths above; if
         an ``active_reap_seconds`` bound is set it instead arms a longer hold
-        timer so a reconnecting front can resume the in-flight turn, and only
-        after that window elapses with no reattach is the child let go.
+        timer so a reconnecting front can resume the in-flight turn. That hold is
+        **progress-aware**: while the severed child keeps streaming frames (a
+        task still in progress) the window re-arms rather than killing mid-task;
+        the child is only let go once it has produced nothing for a full window
+        (wedged/idle, no active task) and no reattach has arrived.
         """
         if self._closing or self._front is not None:
             return
@@ -337,8 +351,12 @@ class SessionHost:
             self._active_reap_timer = None
 
     def _arm_active_reap_timer(self) -> None:
-        """Arm the bounded hold for an active, front-less child (#145)."""
+        """Arm the bounded, progress-aware hold for an active, front-less child
+        (#145). Captures the current frame high-water mark so the timer can tell
+        whether the child produced work during the window (re-arm) or went quiet
+        (reclaim)."""
         self._cancel_reap_timer()
+        self._active_reap_since_seq = self._max_seq
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -350,15 +368,23 @@ class SessionHost:
     def _on_active_reap_timer(self) -> None:
         self._active_reap_timer = None
         # A reattach (front present) or the child exiting on its own vetoes the
-        # reap; otherwise the hold window elapsed with no reconnect, so let the
-        # still-active child go -- the session remains resumable (fresh child +
-        # load_session replay), which is the whole point of the bound.
+        # reap.
         if self._closing or self._front is not None:
             return
         if not self.child_alive:
             return
+        # Progress-aware hold: if the child streamed new frames during the
+        # window it still has a task in progress -- never kill it mid-task; keep
+        # holding by re-arming with a fresh high-water baseline. Only a child
+        # that produced nothing for the whole window (wedged/idle, no active
+        # task) and never got a reattach is let go -- the session stays resumable
+        # (fresh child + load_session replay), which is the whole point of the
+        # bound.
+        if self._max_seq > self._active_reap_since_seq:
+            self._arm_active_reap_timer()
+            return
         self._schedule_self_reap(
-            f"unexpected disconnect + active child held "
+            f"unexpected disconnect + active child idle for "
             f"{self._active_reap_seconds:.0f}s with no reattach"
         )
 

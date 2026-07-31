@@ -426,6 +426,31 @@ async def test_active_child_held_then_reaped_on_unexpected_drop():
 
 
 @pytest.mark.asyncio
+async def test_active_child_streaming_output_is_not_reaped_then_reaped_when_quiet():
+    """A severed active child that keeps STREAMING frames is never reaped
+    mid-task -- the progress-aware hold re-arms while output flows -- and is
+    reclaimed only once it goes quiet for a full window with no reattach."""
+    child = _FakeChild()
+    host, port = await _serve_active(child, 0.2)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.send_status(False)          # a turn is in flight (not reapable)
+        c1._writer.transport.abort()         # unexpected: arms the active hold
+        # Keep streaming child output across several hold windows.
+        for _ in range(10):
+            child.feed_frame(b'{"jsonrpc":"2.0","method":"x"}')
+            await asyncio.sleep(0.05)
+        assert child.killed is False         # never killed while producing work
+        assert host.max_seq >= 10            # frames were relayed/buffered
+        # Go quiet: no more frames for a full window -> reclaimed.
+        await asyncio.sleep(0.5)
+        assert child.killed is True
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
 async def test_reattach_cancels_active_hold_timer():
     """A reattach during the active-hold window cancels the pending reap so the
     in-flight turn survives and can be resumed."""
