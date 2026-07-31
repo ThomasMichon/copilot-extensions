@@ -275,7 +275,9 @@ register_project() {
 
     local platform
     platform="$(detect_platform)"
-    local -a args=(--project "$PROJECT_NAME")
+    # Positional project name (NOT --project: main() pre-pops a global
+    # --project flag before argparse reaches this subcommand).
+    local -a args=("$PROJECT_NAME")
     if [[ "$platform" == "wsl" || "$platform" == "linux" ]]; then
         args+=(--wsl-state adopted)
         [[ -n "${WSL_DISTRO_NAME:-}" ]] && args+=(--wsl-distro "$WSL_DISTRO_NAME")

@@ -263,7 +263,7 @@ function Register-ProjectEntry {
     param([string[]]$ExtraArgs = @())
     if (-not (Test-Path $VenvPython)) { return }
     $awArgs = @('-m', 'agent_worktrees', 'register-project-entry',
-                '--project', $ProjectName) + $ExtraArgs
+                $ProjectName) + $ExtraArgs
     $prevPythonPath = $env:PYTHONPATH
     try {
         $env:PYTHONPATH = $null
