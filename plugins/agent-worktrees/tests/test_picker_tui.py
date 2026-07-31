@@ -2751,8 +2751,9 @@ def test_resume_decision_exits_with_worktree():
 
 
 def test_open_submenu_no_mux_toggle():
-    """No Mux is a native, Tab-focusable Checkbox (#88 NF1): Tab to it, tick it,
-    Tab back to the verb list, Open -> the resume decision carries no_mux (#1343)."""
+    """No Mux is an arrow-reachable toggle ROW at the bottom of the verb list
+    (#88 NF1 fix): ↓ onto it, Space flips it, ↑ back to Open, Enter -> the resume
+    decision carries no_mux. No Tab, no separate checkbox (#1343)."""
     src = _fixture_source()
 
     async def run():
@@ -2765,12 +2766,19 @@ def test_open_submenu_no_mux_toggle():
             await pilot.pause()
             menu = _sub_menu(scr)
             assert menu is not None
-            await pilot.press("tab")        # verb list -> native No Mux checkbox
-            await pilot.press("space")      # tick it
+            assert "Open" in menu._actions
+            assert menu._nomux_index is not None
+            # Arrow down onto the No Mux row and Space-toggle it (reachable by
+            # arrows alone -- the bug this replaced needed an unreachable Tab).
+            for _ in range(menu._nomux_index):
+                await pilot.press("down")
+            await pilot.press("space")
             await pilot.pause()
             assert menu.no_mux is True
-            await pilot.press("tab")        # checkbox -> back to verb list
-            await pilot.press("enter")      # select the highlighted Open verb
+            # Arrow back up to Open and launch.
+            for _ in range(menu._nomux_index):
+                await pilot.press("up")
+            await pilot.press("enter")
             await pilot.pause()
         assert app.result["action"] == "resume"
         assert app.result["options"]["no_mux"] is True

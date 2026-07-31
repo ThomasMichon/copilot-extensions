@@ -973,15 +973,23 @@ Textual **`OptionList`** for the verbs (the framework owns focus, up/down, and
 Enter-to-select; a description pane tracks the highlight via `OptionHighlighted`)
 inside the same orange-framed `Vertical` as the other menus, above a description
 pane, with the header (title + meta + session id) on top. Per an explicit operator
-steer -- *"remove any specific keyboarding requirement for no-mux"* -- **No-mux is
-now a native, Tab-focusable `Checkbox`** (shown only when *Open* is offered, since
-it modifies only Open): Tab to it, Space/Enter to tick, no more Space-only-while-
-Open modifier. The screen's `no_mux` became a property reading straight off that
-checkbox, so `dismiss((verb, no_mux))` and every caller (`_after`,
+steer -- *"remove any specific keyboarding requirement for no-mux"* -- No-mux
+became a native toggle control. Its **first** form was a separate `Checkbox`,
+which shipped a usability bug: the checkbox was only reachable by **Tab**, and the
+operator (naturally arrow-driving the menu) could not reach it. The **fix** folds
+No-mux into the OptionList itself as an arrow-reachable **toggle row** at the
+bottom of the verb list (`☐ No Mux` / `☑ No Mux`, shown only when *Open* is
+offered, since it modifies only Open): ↓ onto the row, Enter or Space flips it and
+stays open; Enter on a verb dismisses with `(verb, no_mux)`. No Tab, no separate
+widget -- pure arrow navigation. `no_mux` is plain screen state (`_no_mux`), the
+toggle row's prompt is swapped via `replace_option_prompt_at_index`, and a
+`space` screen binding toggles it only while that row is highlighted (a stray
+Space on a verb is inert). `dismiss((verb, no_mux))` and every caller (`_after`,
 `_resume_decision`) are unchanged; `_open_submenu` and the ~20 tests reading
-`menu._actions` / `menu.no_mux` still hold (the one toggle test was rewritten to
-Tab-to-checkbox). The Checkbox's `$primary`-blue check glyph was repinned to the
-picker's dim-grey / green idiom, matching the `SelectionList` treatment.
+`menu._actions` / `menu.no_mux` still hold (the toggle test drives ↓ + Space, no
+Tab). The glyph uses the picker's dim-grey (unchecked) / green (checked) idiom,
+matching the `SelectionList` treatment.
+
 
 A palette gotcha this slice surfaced (caught by the A/B render, invisible to the
 all-green behaviour tests): Textual's `OptionList` applies `&:focus {
