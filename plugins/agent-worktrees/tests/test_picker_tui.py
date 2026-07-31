@@ -3740,7 +3740,7 @@ def test_nf_compose_skeleton_mounts_identical_segments(monkeypatch):
     scrolling data). At the top of an unscrolled list the composed tree is
     byte-identical to ``render()``."""
     from agent_worktrees.picker_tui.engine import (
-        _PickerBodyChrome, _PickerBodyData, _PickerSegment)
+        _PickerBodyData, _PickerButtons, _PickerMachine, _PickerSegment)
     monkeypatch.setenv("AGENT_WORKTREES_PICKER_NF", "1")
     src = _fixture_source()
 
@@ -3757,27 +3757,64 @@ def test_nf_compose_skeleton_mounts_identical_segments(monkeypatch):
             scr = app.query_one(PickerScreen)
             assert scr._nf_enabled is True
             segs = {w.id: w for w in scr.query(_PickerSegment)}
-            assert set(segs) == {"nf-title", "nf-pivots", "nf-chrome",
-                                 "nf-footer"}
-            body_chrome = scr.query_one("#nf-body-chrome", _PickerBodyChrome)
+            assert set(segs) == {"nf-title", "nf-chrome", "nf-footer"}
+            machine = scr.query_one("#nf-machine", _PickerMachine)
+            buttons = scr.query_one("#nf-buttons", _PickerButtons)
             body_data = scr.query_one("#nf-body-data", _PickerBodyData)
             frame = scr._frame_segments()
-            # The title + pivots rows recompose the whole header segment.
+            # Title + pivots recompose the header segment.
             title_p = segs["nf-title"].render().plain
-            pivots_p = segs["nf-pivots"].render().plain
+            pivots_p = scr.query_one("#nf-pivots").render().plain
             assert (title_p + "\n" + pivots_p
                     == scr._join_lines(frame["header"], frame["W"]).plain)
             for key, sid in (("chrome", "nf-chrome"), ("footer", "nf-footer")):
                 expect = scr._join_lines(frame[key], frame["W"]).plain
                 assert segs[sid].render().plain == expect
-            # Body: fixed chrome rows + scrolling data rows recompose the
-            # monolith body (top of an unscrolled list), ignoring trailing pad.
-            combined = (body_chrome.render().plain.split("\n")
+            # Body: machine + buttons (fixed chrome) + scrolling data recompose
+            # the monolith body at the top of an unscrolled list.
+            combined = (machine.render().plain.split("\n")
+                        + buttons.render().plain.split("\n")
                         + body_data.render().plain.split("\n"))
             body_p = scr._join_lines(frame["body"], frame["W"]).plain.split("\n")
             assert _rstrip_blank(combined) == _rstrip_blank(body_p)
 
     asyncio.run(run())
+
+
+def test_nf_focus_bridge_tab_moves_between_regions(monkeypatch):
+    """NF3 (#88): with the toggle on, the chrome + data regions are focusable
+    widgets. Native Tab cycles through them via ``region_heads``, and native
+    focus stays mirrored onto whatever region ``sel`` names (the focus bridge)."""
+    from agent_worktrees.picker_tui.engine import _FocusRegion
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NF", "1")
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+
+            def zone_widget():
+                return scr._widget_for_zone(scr.sel[0])
+
+            # Initial focus mirrors the default sel's region.
+            assert isinstance(app.focused, _FocusRegion)
+            assert app.focused.id == zone_widget()
+
+            # Tab cycles through every region head; focus tracks sel each step.
+            seen = set()
+            for _ in range(len(scr.region_heads()) + 1):
+                assert app.focused.id == zone_widget(), (scr.sel, app.focused.id)
+                seen.add(scr.sel[0])
+                await pilot.press("tab")
+                await pilot.pause()
+            # Every region-head zone was visited and focus never desynced.
+            head_zones = {h[0] for h in scr.region_heads()}
+            assert head_zones <= seen
 
     asyncio.run(run())
 

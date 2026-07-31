@@ -449,38 +449,121 @@ class _PickerSegment(Widget):
         return self._screen._join_lines(lines, seg["W"])
 
 
-class _PickerBodyChrome(Widget):
-    """The fixed body chrome (machine-scope row + top button region) as its own
-    leaf widget in the NF3 compose tree -- rendered above the scrolling data, so
-    it never scrolls off (#88 NF3). Reads the current pivot's chrome rows from
-    ``_build_body_split``. Not focusable yet (the focusable-region wiring is a
-    later slice); ``height: auto`` so it sizes to however many chrome rows the
-    pivot emits."""
+class _FocusRegion(Widget):
+    """Base for a focusable chrome/data region in the NF3 compose tree (#88).
 
-    can_focus = False
+    A region widget holds native framework focus and mirrors the picker's manual
+    ``sel`` model, forming the bridge that lets native Tab move between regions
+    while the manual dispatcher still owns the actual navigation (retired only at
+    NF5):
+
+    * ``on_focus`` -- the framework put focus here (Tab, or click): point ``sel``
+      at this region's head (unless it already sits in this region).
+    * ``on_key`` -- forward every key to the manual ``_dispatch_key`` (the single
+      source of truth), then mirror focus back onto whatever region ``sel`` now
+      names and repaint. Consuming the key here suppresses Textual's own Tab so
+      region movement runs through ``region_heads`` exactly as before.
+
+    Subclasses set ``_zone`` (the ``sel`` zone this region represents) and
+    implement ``render``.
+    """
+
+    can_focus = True
+    _zone: str = ""
 
     def __init__(self, screen: "PickerScreen", **kw) -> None:
         super().__init__(**kw)
         self._screen = screen
+
+    def on_focus(self) -> None:
+        scr = self._screen
+        if scr._nf_syncing or not scr._nf_mounted:
+            return
+        # Only move sel if it isn't already within this region (so a focus that
+        # merely mirrors sel doesn't stomp the in-region index).
+        if scr._widget_for_zone(scr.sel[0]) != (self.id or ""):
+            scr.sel = scr.region_head(self._zone)
+            scr.refresh()
+
+    def on_key(self, event) -> None:
+        scr = self._screen
+        key = event.key
+        # Global pivot/machine shortcuts stay owned by the picker's BINDINGS: let
+        # them bubble (do NOT stop) so the action_* fires, exactly as
+        # PickerScreen.on_key does. Everything else runs through the manual
+        # dispatcher, then we mirror focus back onto whatever region sel names.
+        if key in scr.BINDING_KEYS:
+            return
+        event.stop()
+        event.prevent_default()
+        if event.character in ("[", "]"):
+            key = event.character
+        scr._dispatch_key(key)
+        scr._sync_focus_to_sel()
+        scr.refresh()
+
+
+class _PickerPivots(_FocusRegion):
+    """The WORKTREES/Tasks/Bridges pivot-tabs row + ⚙ Configuration entry, as a
+    focusable region (zone ``V``) (#88 NF3)."""
+
+    _zone = "V"
+
+    def render(self):
+        scr = self._screen
+        seg = scr._frame_segments()
+        return scr._join_lines(seg["header"][1:2], seg["W"])
+
+
+class _PickerMachine(_FocusRegion):
+    """The machine-scope (``All / <machine> <env>``) row, as a focusable region
+    (zone ``M``) (#88 NF3). Height auto -- it's the leading chrome rows up to the
+    button region."""
+
+    _zone = "M"
 
     def render(self):
         scr = self._screen
         W = scr.size.width or 100
         chrome, _data = scr._build_body_split(W)
-        return scr._join_lines([vr.text for vr in chrome], W)
+        machine, _buttons = scr._chrome_split(chrome)
+        return scr._join_lines([vr.text for vr in machine], W)
 
 
-class _PickerBodyData(Widget):
-    """The scrolling data body as its own leaf widget in the NF3 compose tree --
-    windows just the pivot's data rows (the fixed chrome renders above), scrolling
-    with the selection while the chrome stays put (#88 NF3). ``height: 1fr`` so it
-    fills the space below the chrome; the window is sized to its own height."""
+class _PickerButtons(_FocusRegion):
+    """The New/Clean/Sync (or Cleanup/Sync) button row, as a focusable region
+    (zone ``BTN``) (#88 NF3). Empty (and effectively skipped) for pivots without
+    a top button region, e.g. Tasks."""
 
-    can_focus = False
+    _zone = "BTN"
 
-    def __init__(self, screen: "PickerScreen", **kw) -> None:
-        super().__init__(**kw)
-        self._screen = screen
+    def render(self):
+        scr = self._screen
+        W = scr.size.width or 100
+        chrome, _data = scr._build_body_split(W)
+        _machine, buttons = scr._chrome_split(chrome)
+        return scr._join_lines([vr.text for vr in buttons], W)
+
+
+class _PickerBodyData(_FocusRegion):
+    """The scrolling data body as a focusable region (#88 NF3) -- windows just the
+    pivot's data rows (the fixed chrome renders above), scrolling with the
+    selection while the chrome stays put. ``height: 1fr`` so it fills the space
+    below the chrome; the window is sized to its own height. Its ``_zone`` is a
+    placeholder -- the data region's head is resolved per-pivot via
+    ``region_head`` on focus."""
+
+    _zone = "L"
+
+    def on_focus(self) -> None:
+        scr = self._screen
+        if scr._nf_syncing or not scr._nf_mounted:
+            return
+        # The data region's head zone varies by pivot (L / C / T / PR); land on
+        # the current pivot's default body stop rather than a fixed zone.
+        if scr._widget_for_zone(scr.sel[0]) != "nf-body-data":
+            scr.sel = scr.default_sel()
+            scr.refresh()
 
     def render(self):
         scr = self._screen
@@ -522,6 +605,12 @@ class PickerScreen(Widget):
         # data-relative (indexes the scrolling data rows only, since the M/BTN
         # chrome is fixed above it), distinct from the monolith's ``top``.
         self._data_top = 0
+        # NF3 focus bridge (#88): guards the on_focus <-> sel mirror so focusing
+        # a region widget to match ``sel`` doesn't recurse back into a sel write.
+        self._nf_syncing = False
+        # Set once the initial region focus is placed, so the framework's own
+        # mount-time auto-focus can't stomp the default ``sel`` before then.
+        self._nf_mounted = False
         # Profiles configurator -- an encapsulated sub-view component that OWNS
         # the Profiles grid-editing state (grid / applied / pcol / targets /
         # host_cols / _prof_unavailable) and behaviour; PickerScreen exposes
@@ -839,7 +928,13 @@ class PickerScreen(Widget):
     def on_mount(self):
         self.setup()
         self.sel = self.default_sel()
-        self.focus()
+        if self._nf_enabled:
+            # NF3: focus the region widget that owns the default sel (deferred
+            # until the children are mounted). ``_nf_mounted`` stays False until
+            # then so the framework's mount-time auto-focus can't move sel.
+            self.call_after_refresh(self._nf_initial_focus)
+        else:
+            self.focus()
         # Update indicator (#1430): the launcher stages the marketplace update
         # in the background; the picker polls its status file to show a
         # spinner -> checkmark (current) / refresh (update available) next to
@@ -1892,6 +1987,60 @@ class PickerScreen(Widget):
             lines.append(Text(""))
         return lines
 
+    def _chrome_split(self, chrome):
+        """Split the pivot's chrome vrows into ``(machine_vrows, button_vrows)``
+        at the button row, so the machine-scope and button regions can be
+        separate focusable widgets (#88 NF3). Pivots without a top button region
+        (Tasks) return all-machine + empty buttons."""
+        bi = next((i for i, vr in enumerate(chrome)
+                   if vr.stop == ("BTN", 0)), None)
+        if bi is None:
+            return chrome, []
+        return chrome[:bi], chrome[bi:]
+
+    #: Which compose region widget owns each ``sel`` zone (#88 NF3 focus bridge).
+    _ZONE_WIDGET = {
+        "V": "nf-pivots", "CFG": "nf-pivots", "UPD": "nf-pivots",
+        "M": "nf-machine", "BTN": "nf-buttons",
+    }
+
+    def _widget_for_zone(self, zone):
+        return self._ZONE_WIDGET.get(zone, "nf-body-data")
+
+    def _nf_initial_focus(self):
+        """Place the initial region focus on the widget that owns the default
+        ``sel`` and arm the focus bridge (#88 NF3). Runs after the region widgets
+        mount; guarded so it sets focus without a sel round-trip."""
+        self._nf_syncing = True
+        try:
+            wid = self._widget_for_zone(self.sel[0])
+            try:
+                self.query_one(f"#{wid}").focus()
+            except Exception:
+                pass
+        finally:
+            self._nf_syncing = False
+        self._nf_mounted = True
+
+    def _sync_focus_to_sel(self):
+        """Mirror native focus onto the region widget that owns the current
+        ``sel`` (the other half of the on_focus -> sel bridge), so Tab/arrow
+        navigation through the manual model keeps the framework's focus in step
+        (#88 NF3). Guarded so the resulting ``focus()`` can't recurse."""
+        if not self._nf_enabled:
+            return
+        wid = self._widget_for_zone(self.sel[0])
+        try:
+            w = self.query_one(f"#{wid}")
+        except Exception:
+            return
+        if getattr(w, "can_focus", False) and self.app.focused is not w:
+            self._nf_syncing = True
+            try:
+                w.focus()
+            finally:
+                self._nf_syncing = False
+
     def _hl(self, base, selected, focused):
         """Augment a base style with the selection highlight: the inversion
         cursor when the machine region is focused, a subtle bg when merely the
@@ -2128,16 +2277,16 @@ class PickerScreen(Widget):
         # a render-leaf, so ``render()``, the ``capture`` seams, the golden, and
         # all 93 couplings are byte-identical and unaffected.
         if self._nf_enabled:
-            # Header splits into its two region rows -- the identity/title row
-            # and the pivot-tabs row (#88 NF3): the pivots become their own
-            # region widget, the granularity the focusable-chrome slices build on.
+            # NF3 focusable-region compose tree: the title stays a passive view;
+            # the pivots, machine-scope, button, and data regions are real
+            # focusable widgets (native Tab moves between them, on_focus mirrors
+            # ``sel``). The body's machine-scope + button chrome renders fixed
+            # above the scrolling data region.
             yield _PickerSegment(self, "header", slice(0, 1), id="nf-title")
-            yield _PickerSegment(self, "header", slice(1, 2), id="nf-pivots")
+            yield _PickerPivots(self, id="nf-pivots")
             yield _PickerSegment(self, "chrome", id="nf-chrome")
-            # NF3: the body splits into fixed chrome (machine-scope + buttons)
-            # above a scrolling data region -- the untangle that lets the chrome
-            # become fixed/focusable while only the data scrolls.
-            yield _PickerBodyChrome(self, id="nf-body-chrome")
+            yield _PickerMachine(self, id="nf-machine")
+            yield _PickerButtons(self, id="nf-buttons")
             yield _PickerBodyData(self, id="nf-body-data")
             yield _PickerSegment(self, "footer", id="nf-footer")
 
@@ -2146,8 +2295,8 @@ class PickerScreen(Widget):
         child segment widgets (their ``render()`` reads back off this screen)."""
         if not getattr(self, "_nf_enabled", False):
             return
-        for seg_id in ("nf-title", "nf-pivots", "nf-chrome", "nf-body-chrome",
-                       "nf-body-data", "nf-footer"):
+        for seg_id in ("nf-title", "nf-pivots", "nf-chrome", "nf-machine",
+                       "nf-buttons", "nf-body-data", "nf-footer"):
             try:
                 self.query_one(f"#{seg_id}").refresh()
             except Exception:
@@ -5703,7 +5852,8 @@ class PickerApp(App):
     PickerScreen > #nf-title  { width: 100%; height: 1; }
     PickerScreen > #nf-pivots { width: 100%; height: 1; }
     PickerScreen > #nf-chrome { width: 100%; height: 2; }
-    PickerScreen > #nf-body-chrome { width: 100%; height: auto; }
+    PickerScreen > #nf-machine { width: 100%; height: auto; }
+    PickerScreen > #nf-buttons { width: 100%; height: auto; }
     PickerScreen > #nf-body-data   { width: 100%; height: 1fr; }
     PickerScreen > #nf-footer { width: 100%; height: 2; }
     """
