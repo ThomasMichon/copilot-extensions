@@ -3485,78 +3485,98 @@ PROF_SPECS = [
 
 
 class QuitConfirmScreen(ModalScreen[bool]):
-    """Native modal confirm for Esc/q on a top-level picker view (#88 F4).
+    """Native modal confirm for Esc/q on a top-level picker view (#88 F4;
+    native-focus internals NF1).
 
-    The first picker overlay migrated off the manual render/dispatch model onto
-    a Textual ``ModalScreen``: Textual owns the screen stack, the dim backdrop,
-    and key routing, and the screen returns its verdict via ``dismiss(bool)`` --
-    ``True`` quits, ``False`` stays. Key handling mirrors the former
-    ``_key_quit_confirm`` exactly (y / n / Esc / q / arrows / Enter / Space) and
-    lives in ``on_key`` so it fires as the active screen regardless of child
-    focus. *Stay* is the default so a reflexive Enter never quits.
+    Migrated off the manual render/dispatch model onto a Textual ``ModalScreen``:
+    Textual owns the screen stack, the dim backdrop, and key routing, and the
+    screen returns its verdict via ``dismiss(bool)`` -- ``True`` quits, ``False``
+    stays.
+
+    **Native-focus internals (#88 NF1):** the ``[Quit] [Stay]`` row is a
+    :class:`FocusGroup` (one tab-stop; ◀▶ to choose, Enter/Space to activate),
+    replacing the former hand-rolled ``idx`` + ``on_key`` over a static ``Panel``.
+    *Stay* is the group's initial choice, so a reflexive Enter never quits. The
+    prompt and key-hint are ``Static``s in the same orange-framed ``Vertical`` as
+    the menus. The y / n / Esc / q shortcuts stay as screen ``BINDINGS`` so they
+    fire regardless of child focus.
     """
 
     CSS = """
     QuitConfirmScreen { align: center middle; background: $background 55%; }
-    QuitConfirmScreen > #quit-dialog { width: auto; height: auto; }
+    QuitConfirmScreen > #quit-frame {
+        width: 48; height: auto; border: round #ffaf00;
+        background: $surface; padding: 1 2;
+    }
+    QuitConfirmScreen #quit-prompt { height: auto; padding: 0 0 1 0; }
+    QuitConfirmScreen FocusGroup { height: auto; }
+    QuitConfirmScreen #quit-hint { color: grey; height: auto; padding: 1 0 0 0; }
     """
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.idx = 1                       # 0 = Quit, 1 = Stay (safe default)
+    BINDINGS = [
+        Binding("y", "quit", show=False),
+        Binding("n", "stay", show=False),
+        Binding("escape", "stay", show=False),
+        Binding("q", "stay", show=False),
+    ]
 
     def compose(self) -> ComposeResult:
-        yield Static(self._panel(), id="quit-dialog")
+        with Vertical(id="quit-frame"):
+            yield Static(Text(" Leave the worktree picker?", style=C_HEADER),
+                         id="quit-prompt")
+            yield FocusGroup([("quit", "Quit"), ("stay", "Stay")], initial=1,
+                             id="quit-buttons")
+            yield Static("y quit · n/Esc stay · ←/→ choose", id="quit-hint")
 
-    def _panel(self) -> Panel:
-        body = Text()
-        body.append("\n Leave the worktree picker?\n\n", style=C_HEADER)
-        btns = Text("   ")
-        btns.append(" Quit ", style=C_BTN_SEL if self.idx == 0 else C_BTN)
-        btns.append("   ")
-        btns.append(" Stay ", style=C_BTN_SEL if self.idx == 1 else C_BTN)
-        body.append_text(btns)
-        body.append("\n\n y quit · n/Esc stay · ←/→ choose", style=C_MUTED)
-        return Panel(body, title="Quit the Picker?", border_style=C_BAND,
-                     width=48)
+    def on_mount(self) -> None:
+        self.query_one("#quit-frame", Vertical).border_title = "Quit the Picker?"
+        # The FocusGroup composes its own child, so it may not be mounted yet at
+        # screen on_mount; defer the focus until the layout settles.
+        self.call_after_refresh(
+            lambda: self.query_one("#quit-buttons", FocusGroup).focus())
 
-    def _refresh(self) -> None:
-        self.query_one("#quit-dialog", Static).update(self._panel())
+    def on_focus_group_activated(self, event: "FocusGroup.Activated") -> None:
+        self.dismiss(event.value == "quit")
 
-    def on_key(self, event) -> None:
-        key = event.key
-        if key in ("left", "right", "tab"):
-            self.idx ^= 1
-            self._refresh()
-            event.stop()
-        elif key == "y":
-            event.stop()
-            self.dismiss(True)
-        elif key in ("n", "escape", "q"):
-            event.stop()
-            self.dismiss(False)
-        elif key in ("enter", "space"):
-            event.stop()
-            self.dismiss(self.idx == 0)
+    def action_quit(self) -> None:
+        self.dismiss(True)
+
+    def action_stay(self) -> None:
+        self.dismiss(False)
 
 
 class ProfConfirmScreen(ModalScreen[bool]):
-    """Native modal confirm for a Profiles *Apply* (#88 F4).
+    """Native modal confirm for a Profiles *Apply* (#88 F4; native-focus
+    internals NF1).
 
-    The second picker overlay migrated off the manual render/dispatch model onto
-    a Textual ``ModalScreen``. It lists the exact terminal profiles each changed
-    host column will gain (``+``) or lose (``-``) before anything is written, and
-    returns its verdict via ``dismiss(True|False)`` -- ``True`` runs the per-host
-    Apply, ``False`` cancels. Key handling mirrors the former ``_key_prof_confirm``
-    exactly (Enter/Space apply, Esc/q cancel) and lives in ``on_key`` so it fires
-    as the active screen. The regeneration is destructive to the terminal app's
-    profile list, so the explicit add/remove diff is always shown first.
+    Migrated off the manual render/dispatch model onto a Textual ``ModalScreen``.
+    It lists the exact terminal profiles each changed host column will gain (``+``)
+    or lose (``-``) before anything is written, and returns its verdict via
+    ``dismiss(True|False)`` -- ``True`` runs the per-host Apply, ``False`` cancels.
+    The regeneration is destructive to the terminal app's profile list, so the
+    explicit add/remove diff is always shown first.
+
+    **Native-focus internals (#88 NF1):** the ``[Apply] [Cancel]`` row is a
+    :class:`FocusGroup` (one tab-stop; ◀▶ to choose, Enter/Space to activate),
+    replacing the former hand-rolled ``on_key`` over a static ``Panel``. The diff,
+    the destructive-change warning, and the key-hint are ``Static``s in the same
+    orange-framed ``Vertical`` as the menus. Esc/q cancel via ``BINDINGS``.
     """
 
     CSS = """
     ProfConfirmScreen { align: center middle; background: $background 55%; }
-    ProfConfirmScreen > #prof-dialog { width: auto; height: auto; max-height: 90%; }
+    ProfConfirmScreen > #prof-frame {
+        width: 72; height: auto; max-height: 90%;
+        border: round #ffaf00; background: $surface; padding: 1 2;
+    }
+    ProfConfirmScreen #prof-diff { height: auto; }
+    ProfConfirmScreen #prof-warn { height: auto; padding: 1 0 0 0; }
+    ProfConfirmScreen FocusGroup { height: auto; padding: 1 0 0 0; }
+    ProfConfirmScreen #prof-hint { color: grey; height: auto; padding: 1 0 0 0; }
     """
+    BINDINGS = [
+        Binding("escape", "cancel", show=False),
+        Binding("q", "cancel", show=False),
+    ]
 
     def __init__(self, cf, host_cols) -> None:
         super().__init__()
@@ -3564,9 +3584,16 @@ class ProfConfirmScreen(ModalScreen[bool]):
         self._host_cols = host_cols
 
     def compose(self) -> ComposeResult:
-        yield Static(self._panel(), id="prof-dialog")
+        with Vertical(id="prof-frame"):
+            yield Static(self._diff_body(), id="prof-diff")
+            yield Static(Text(" ⚠ Regenerates terminal profiles · fully restart "
+                              "the terminal to see changes.", style=C_CAUTION),
+                         id="prof-warn")
+            yield FocusGroup([("apply", "Apply"), ("cancel", "Cancel")],
+                             initial=0, id="prof-buttons")
+            yield Static("Enter apply · Esc cancel", id="prof-hint")
 
-    def _panel(self) -> Panel:
+    def _diff_body(self) -> Text:
         cf = self._cf
         changed = cf["changed"]
         n_add = sum(len(cf["diffs"][hi][0]) for hi in changed)
@@ -3584,7 +3611,7 @@ class ProfConfirmScreen(ModalScreen[bool]):
             maxr = 24
 
         body = Text()
-        body.append(f"\n Review: +{n_add} added, -{n_rem} removed\n\n",
+        body.append(f" Review: +{n_add} added, -{n_rem} removed\n\n",
                     style=C_HEADER)
         shown = 0
         truncated = False
@@ -3609,26 +3636,23 @@ class ProfConfirmScreen(ModalScreen[bool]):
                 body.append(f"   - {_t(s)}\n", style=C_WARN)
                 shown += 1
         if truncated:
-            body.append("   …\n", style=C_MUTED)
-        body.append("\n")
-        body.append(" ⚠ Regenerates terminal profiles · fully restart the "
-                    "terminal to see changes.\n\n", style=C_CAUTION)
-        btns = Text("   ")
-        btns.append(" Apply ", style=C_BTN_SEL)
-        btns.append("   Cancel ", style=C_BTN)
-        body.append_text(btns)
-        body.append("\n\n Enter: apply · Esc cancel", style=C_MUTED)
-        return Panel(body, title=f"Apply profiles · {len(changed)} host "
-                     f"column(s)", border_style=C_BAND, width=72)
+            body.append("   …", style=C_MUTED)
+        return body
 
-    def on_key(self, event) -> None:
-        key = event.key
-        if key in ("enter", "space"):
-            event.stop()
-            self.dismiss(True)
-        elif key in ("escape", "q"):
-            event.stop()
-            self.dismiss(False)
+    def on_mount(self) -> None:
+        changed = self._cf["changed"]
+        self.query_one("#prof-frame", Vertical).border_title = (
+            f"Apply profiles · {len(changed)} host column(s)")
+        # The FocusGroup composes its own child, so it may not be mounted yet at
+        # screen on_mount; defer the focus until the layout settles.
+        self.call_after_refresh(
+            lambda: self.query_one("#prof-buttons", FocusGroup).focus())
+
+    def on_focus_group_activated(self, event: "FocusGroup.Activated") -> None:
+        self.dismiss(event.value == "apply")
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
 
 
 class TaskMenuScreen(ModalScreen[int]):

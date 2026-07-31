@@ -999,4 +999,34 @@ every native menu renders its focused option consistently whenever it lists 2+
 options. `render.py` gained `--modal submenu` (and `--modal maint`) openers for the
 standing A/B habit.
 
+**NF1 slice 5 -- the confirm modals (`QuitConfirmScreen` / `ProfConfirmScreen`) ->
+the `FocusGroup` primitive.** The two remaining hand-rolled modals -- both an
+`idx` + `on_key` (Quit) / `on_key` (Prof) over a static `Panel` -- convert their
+button rows to the reusable `FocusGroup` introduced in slice 3. `QuitConfirmScreen`
+composes the prompt + a `[Quit] [Stay]` FocusGroup (`initial=1`, so *Stay* is the
+safe default a reflexive Enter can't override) + a muted key-hint, all in the
+orange-framed `Vertical`; y / n / Esc / q remain screen `BINDINGS` so they fire
+regardless of child focus. `ProfConfirmScreen` keeps its verbatim add/remove diff
+body (now a `Static` via `_diff_body()`) and destructive-change warning, and swaps
+its Apply/Cancel row for a `[Apply] [Cancel]` FocusGroup (`initial=0`); Esc/q cancel
+via `BINDINGS`. Both return their verdict from `on_focus_group_activated` ->
+`dismiss(bool)`; `_cf`/`_host_cols` and every caller/test contract are unchanged
+(`test_escape_on_main_view_confirms_before_quit`, the profiles-apply confirm/cancel
+tests). That completes NF1 -- **all nine picker modals now navigate via native
+Textual widgets** (`OptionList` single-select, `SelectionList` multi-select,
+`FocusGroup` heterogeneous rows), one tab-stop per group, arrow-within, no
+hand-rolled `idx`/`on_key`/`_panel`.
+
+Two gotchas this slice surfaced (both caught by the A/B render, invisible to the
+green tests): (1) a `FocusGroup` composes its own child `Static`, so at *screen*
+`on_mount` the grandchild may not be mounted yet and `query_one("#…buttons",
+FocusGroup).focus()` raised `NoMatches` -- fixed by deferring the focus with
+`call_after_refresh` (ScopeDlg dodged this only because its default path focuses the
+`SelectionList`, not the FocusGroup); (2) a `width: auto` framed `Vertical` with a
+border collapsed to an empty box -- the confirm frames need a **fixed** width like
+every other menu (`QuitConfirmScreen` -> `width: 48`; `ProfConfirmScreen` keeps
+`width: 72`). `render.py` gained `--modal quit` and `--modal prof` openers (the
+latter pushes the confirm directly with a synthetic add/remove diff, avoiding the
+whole profiles-grid drive).
+
 

@@ -105,11 +105,45 @@ async def _open_maint(scr, pilot):
     await pilot.pause()
 
 
+async def _open_quit(scr, pilot):
+    # Esc on a top-level view opens the native quit-confirm ModalScreen.
+    await pilot.press("escape")
+    await pilot.pause()
+
+
+async def _open_prof(scr, pilot):
+    # Push the Profiles-Apply confirm directly with a synthetic add/remove diff
+    # (avoids driving the whole profiles grid just to render the confirm).
+    from agent_worktrees.picker_tui.engine import ProfConfirmScreen
+
+    def _sel(machine, env, kind):
+        return types.SimpleNamespace(machine=machine, env=env, kind=kind)
+
+    host_cols = [
+        ("Lambda-Core·Win", "Lambda-Core", "Win"),
+        ("Borealis·Win", "Borealis", "Win"),
+    ]
+    cf = {
+        "changed": [1],
+        "diffs": {
+            1: (
+                [_sel("Lambda-Core", "Win", "worktree"),
+                 _sel("Wheatley", "WSL", "bridge")],
+                [_sel("Borealis", "Win", "stale")],
+            ),
+        },
+    }
+    scr.app.push_screen(ProfConfirmScreen(cf, host_cols))
+    await pilot.pause()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Render a picker snapshot to PNG.")
     ap.add_argument("out", help="output PNG path")
-    ap.add_argument("--modal", choices=["cfg", "clean", "new", "submenu", "maint"],
-                    help="open a native modal before capturing (composited app)")
+    ap.add_argument(
+        "--modal",
+        choices=["cfg", "clean", "new", "submenu", "maint", "quit", "prof"],
+        help="open a native modal before capturing (composited app)")
     ap.add_argument("--zoom", default="3", help="rasterizer zoom (default 3)")
     args = ap.parse_args()
 
@@ -124,6 +158,10 @@ def main() -> int:
         svg = pcap.capture_modal(src, _open_submenu, title="Worktree action menu")
     elif args.modal == "maint":
         svg = pcap.capture_modal(src, _open_maint, title="Maintenance menu")
+    elif args.modal == "quit":
+        svg = pcap.capture_modal(src, _open_quit, title="Quit confirm")
+    elif args.modal == "prof":
+        svg = pcap.capture_modal(src, _open_prof, title="Profiles apply confirm")
     else:
         svg = pcap.capture(src, update_state="current")["svg"]
 
