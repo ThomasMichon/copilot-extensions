@@ -116,16 +116,18 @@ agent-bridge session-usage <session-id>   # how full is its context?
 ```
 
 - **Relevant & healthy** (same effort, context well under ~70%) → `send`
-  to continue it. Idle sessions continue normally. For a stopped CodeSpace
-  session, inspect the resumed turn: if it immediately emits `Operation
-  cancelled by user` and an empty `end_turn`, end it and use `create`.
+  to continue it. Idle sessions continue normally. A session that was stopped
+  *mid-turn* can return `Operation cancelled by user` + an empty `end_turn` on
+  the **first** reattached turn (a stale host cancel draining, not a broken
+  resume) — just `send` again and it continues.
 - **Stale / unrelated / context-heavy** (different effort, near the context
   limit, or known-bad state) → `agent-bridge end <session-id>` then
   `agent-bridge create` for a clean start.
 
-`send` is the safe default for an idle session. Reach for `create` when you have
-decided the existing session must be discarded or a stopped-session resume
-produces the cancellation/no-op signature above.
+`send` is the safe default; it reuses/resumes and drains a stale cancel after
+one turn. Reach for `create` only when you have decided the existing session must
+be discarded (or the cancel signature *persists* across sends). See the
+*Resume on drop* section of the skill for the cause.
 
 ### Session Management
 
