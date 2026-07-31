@@ -5,7 +5,7 @@
       {
         "type": "command",
         "bash": "s=\"$HOME/.local/bin/session-sync\"; [ -x \"$s\" ] && ( cd \"${TMPDIR:-/tmp}\" && nohup \"$s\" run --detach >/dev/null 2>&1 </dev/null & )",
-        "powershell": "$b = Join-Path $env:USERPROFILE '.local\\bin\\session-sync.cmd'; if (Test-Path $b) { Start-Process -FilePath $b -ArgumentList 'run','--detach' -WorkingDirectory $env:TEMP -WindowStyle Hidden }",
+        "powershell": "$h = if ($env:AGENT_LOGGER_HOME) { $env:AGENT_LOGGER_HOME } else { Join-Path $env:USERPROFILE '.agent-logger' }; $pw = Join-Path $h '.venv\\Scripts\\pythonw.exe'; if (Test-Path $pw) { Start-Process -FilePath $pw -ArgumentList '-m','agent_logger.sync.engine','run','--detach' -WorkingDirectory $env:TEMP -WindowStyle Hidden }",
         "timeoutSec": 5
       }
     ]
