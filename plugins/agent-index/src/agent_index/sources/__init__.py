@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from agent_index.sources.azure_devops import AzureDevOpsConnector
 from agent_index.sources.base import FileEntry, SourceConnector
 from agent_index.sources.git_repo import GitRepoConnector
 from agent_index.sources.github import GitHubConnector
@@ -44,3 +45,5 @@ def get_connector(source: str, **kwargs: Any) -> SourceConnector:
     raise ValueError(f"Unknown source: {source!r}. No connector is registered.")
 register_connector("git", GitRepoConnector)
 register_connector("github", GitHubConnector)
+register_connector("ado", AzureDevOpsConnector)
+register_connector("azure-devops", AzureDevOpsConnector)
