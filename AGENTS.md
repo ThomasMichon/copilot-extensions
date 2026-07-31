@@ -157,6 +157,10 @@ docs honest; run it before pushing doc changes.)
 
 ### Test Before Push
 
+> **Full testing guide: [`TESTING.md`](TESTING.md)** — the runner reference, the
+> lint/contract gates, and the **opt-in end-to-end smoke tests** (real-infra,
+> caller-supplied targets, skipped by default).
+
 Run a plugin's suite **on demand** with the turn-key runner (builds/reuses a
 cached dev venv per plugin under `.test-venvs/`, git-ignored; uses `uv`, so
 vendored `[tool.uv.sources]` path deps resolve):

@@ -85,7 +85,10 @@ installer. Know which kind you are changing.
    update) or a runtime dir (`~/.agent-*/lib`, service venvs).
 3. **Test.** Run `pytest` from the changed runtime plugin's dir
    (`plugins/<plugin>/`). agent-worktrees has no suite yet — verify worktree ops
-   end-to-end. Lint touched Python with `ruff check --select F,E9`.
+   end-to-end. Lint touched Python with `ruff check --select F,E9`. See the
+   repo's `TESTING.md` for the turn-key runner and the **opt-in end-to-end smoke
+   tests** (real-infra flows whose target is caller-supplied — no defaults — and
+   which skip unless configured).
 4. **Install-contract gate (runtime plugins).** Run
    `python tools/check-install-contract.py` — it must report **zero
    violations**.
@@ -177,6 +180,7 @@ contributor — because to a reader, you are.
 ## Reference
 
 `CONTRIBUTING.md` (versioning + release), `AGENTS.md` (dev guide),
+`TESTING.md` (running the suites + the opt-in end-to-end smoke tests),
 `docs/install-contract.md` (the runtime-plugin contract),
 `docs/architecture.md` (payload/runtime split, ports), `docs/patterns/` (how we
 build — shapes, principles, invariants, focused patterns), `visions/` (the
