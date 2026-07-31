@@ -237,6 +237,43 @@ def _cmd_session_host_agent(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def _dynamic_bind_requested(explicit_port: bool) -> bool:
+    """True when the daemon should bind an OS-assigned ephemeral port.
+
+    Opt-in via a truthy ``AGENT_BRIDGE_DYNAMIC_PORT`` and only when the operator
+    did not pin a port with ``--port`` -- an explicit pin always wins. This is
+    the dotfiles #694 dynamic-endpoint plumbing: it stays **off by default** so
+    the live daemon and the ZDD cutover protocol (which still assume a knowable
+    fixed port) are unchanged until the deferred live-cutover validation flips
+    the default to dynamic.
+    """
+    if explicit_port:
+        return False
+    val = os.environ.get("AGENT_BRIDGE_DYNAMIC_PORT", "").strip().lower()
+    return val in ("1", "true", "yes", "on")
+
+
+def _bind_listen_socket(host: str, port: int) -> "socket.socket":
+    """Bind and return a listening TCP socket for ``host:port``.
+
+    With ``port == 0`` the OS assigns an ephemeral port, read back via
+    ``getsockname``. Uses ``getaddrinfo`` so an IPv4 or IPv6 bind host both work.
+    Mirrors agent-dispatch's proven Stage-C bind helper.
+    """
+    import socket
+
+    infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    family, socktype, proto, _canon, sockaddr = infos[0]
+    sock = socket.socket(family, socktype, proto)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(sockaddr)
+    except OSError:
+        sock.close()
+        raise
+    return sock
+
+
 def _cmd_start(args: argparse.Namespace) -> None:
     """Start the agent-bridge server."""
     import os
@@ -275,6 +312,7 @@ def _cmd_start(args: argparse.Namespace) -> None:
     from .winjob import setup_kill_on_close_job
     setup_kill_on_close_job()
 
+    explicit_port = bool(args.port)
     if args.port:
         cfg.port = args.port
     if args.bind:
@@ -324,30 +362,67 @@ def _cmd_start(args: argparse.Namespace) -> None:
     # orchestrator flips the table after a health check.
     app.state.publish_on_ready = not passive
 
-    print(f"[agent-bridge] Starting on {cfg.bind}:{cfg.port}")
+    # Dynamic-endpoint plumbing (dotfiles #694): when opt-in via
+    # AGENT_BRIDGE_DYNAMIC_PORT and no explicit --port pin, bind an OS-assigned
+    # ephemeral port instead of the fixed default (9280/9281). We pre-bind the
+    # listening socket ourselves so we can read the *actual* bound port back and
+    # advertise it in the routing table (active.json) before serving; clients
+    # already resolve the port from active.json, so an ephemeral daemon port is
+    # transparent to them. The DEFAULT path (flag unset) is unchanged: uvicorn
+    # binds cfg.port exactly as before -- so the live daemon + the ZDD cutover
+    # protocol (which still assumes a knowable port) are untouched until the
+    # deferred live-cutover validation flips the default. See the effort README.
+    dynamic_port = _dynamic_bind_requested(explicit_port)
+    listen_sock = None
+    bound_port = cfg.port
+    if dynamic_port:
+        try:
+            listen_sock = _bind_listen_socket(cfg.bind, 0)
+            bound_port = listen_sock.getsockname()[1]
+        except OSError as exc:
+            logging.getLogger("agent-bridge").warning(
+                "dynamic bind failed (%s); falling back to fixed port %s",
+                exc, cfg.port,
+            )
+            listen_sock = None
+            bound_port = cfg.port
+    # The port every downstream reader (routing-table publish, /status) should
+    # advertise -- the *actually bound* port, which equals cfg.port in the
+    # default (non-dynamic) path.
+    app.state.bound_port = bound_port
+
+    print(f"[agent-bridge] Starting on {cfg.bind}:{bound_port}")
     print(f"[agent-bridge] Auth token: {token[:8]}...")
     print(f"[agent-bridge] DB: {cfg.db_path}")
     if cfg.idle_shutdown_seconds and cfg.idle_shutdown_seconds > 0:
         print(f"[agent-bridge] Idle shutdown after {cfg.idle_shutdown_seconds}s")
 
     # Use an explicit Server (not uvicorn.run) so the idle-shutdown monitor in
-    # the lifespan can request a graceful stop via server.should_exit.
-    config = uvicorn.Config(
-        app,
-        host=cfg.bind,
-        port=cfg.port,
-        log_level=cfg.log_level,
+    # the lifespan can request a graceful stop via server.should_exit. When we
+    # pre-bound a socket (dynamic path) uvicorn serves it directly and ignores
+    # host/port; otherwise it binds host/port itself exactly as before.
+    config_kwargs: dict[str, Any] = {
+        "log_level": cfg.log_level,
         # Pure-Python WebSocket protocol (wsproto) for the ACP-over-WS
         # transport. Explicit so we never silently fall back to "none" (which
         # would 403 every /acp WebSocket upgrade) on a host without it.
-        ws="wsproto",
-    )
+        "ws": "wsproto",
+    }
+    if listen_sock is None:
+        config_kwargs["host"] = cfg.bind
+        config_kwargs["port"] = cfg.port
+    config = uvicorn.Config(app, **config_kwargs)
     server = uvicorn.Server(config)
     app.state.uvicorn_server = server
     try:
-        server.run()
+        if listen_sock is not None:
+            server.run(sockets=[listen_sock])
+        else:
+            server.run()
     finally:
         singleton.release()
+        if listen_sock is not None:
+            listen_sock.close()
 
 
 def _cmd_status(args: argparse.Namespace) -> None:
