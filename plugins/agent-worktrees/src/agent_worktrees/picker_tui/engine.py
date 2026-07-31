@@ -23,9 +23,10 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
+from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widget import Widget
-from textual.widgets import OptionList, Static
+from textual.widgets import OptionList, SelectionList, Static
 
 from .. import profiles as profiles_mod
 from ..update_stage import indicator_state
@@ -3805,37 +3806,145 @@ class SubMenuScreen(ModalScreen[tuple]):
             self.dismiss(None)
 
 
+class FocusGroup(Widget):
+    """A single focusable tab-stop containing several button-like choices; the
+    arrow keys move an internal highlight and Enter/Space activate the
+    highlighted one (#88 NF).
+
+    The native answer to the tab-group requirement -- "one entry in a group
+    receives tab-focus, you arrow to the rest" -- for the *heterogeneous* rows
+    Textual's list widgets (`OptionList` / `SelectionList` / `RadioSet`) don't
+    cover, e.g. a `Confirm` / `Cancel` button pair. The framework owns focus
+    (this is one tab-stop); the widget owns only the intra-group highlight, and
+    posts a :class:`FocusGroup.Activated` message on Enter/Space.
+    """
+
+    can_focus = True
+    BINDINGS = [
+        Binding("left", "move(-1)", show=False),
+        Binding("up", "move(-1)", show=False),
+        Binding("right", "move(1)", show=False),
+        Binding("down", "move(1)", show=False),
+        Binding("enter", "activate", show=False),
+        Binding("space", "activate", show=False),
+    ]
+
+    class Activated(Message):
+        """Posted when a choice is activated (Enter/Space on the highlight)."""
+
+        def __init__(self, group: "FocusGroup", index: int, value: str) -> None:
+            super().__init__()
+            self.group = group
+            self.index = index
+            self.value = value
+
+    def __init__(self, options, *, initial: int = 0, **kw) -> None:
+        # options: list of (value, label)
+        super().__init__(**kw)
+        self._options = list(options)
+        self._idx = max(0, min(initial, max(0, len(self._options) - 1)))
+        self._focused = False
+
+    @property
+    def value(self) -> str:
+        return self._options[self._idx][0]
+
+    def compose(self) -> ComposeResult:
+        # A child Static measures its own content width (a bare Widget.render()
+        # does not, and Textual then clips the row) -- so the button row renders
+        # in full.
+        yield Static(self._row(), id="fg-row")
+
+    def _row(self) -> Text:
+        t = Text()
+        for i, (_v, label) in enumerate(self._options):
+            if i:
+                t.append("   ")
+            focused = self._focused and i == self._idx
+            t.append(f" {label} ", style=C_BTN_SEL if focused else C_BTN)
+        return t
+
+    def _refresh_row(self) -> None:
+        self.query_one("#fg-row", Static).update(self._row())
+
+    def action_move(self, delta: int) -> None:
+        if self._options:
+            self._idx = (self._idx + delta) % len(self._options)
+            self._refresh_row()
+
+    def action_activate(self) -> None:
+        if self._options:
+            v, _label = self._options[self._idx]
+            self.post_message(self.Activated(self, self._idx, v))
+
+    def on_focus(self) -> None:
+        self._focused = True
+        self._refresh_row()
+
+    def on_blur(self) -> None:
+        self._focused = False
+        self._refresh_row()
+
+
 class ScopeDlgScreen(ModalScreen[bool]):
-    """Native modal scope dialog for Clean/Sync and New-worktree options (#88 F4).
+    """Native modal scope dialog for Clean/Sync and New-worktree options (#88 F4;
+    native-focus internals #88 NF1).
 
-    Replaces the manual ``scopedlg`` overlay shared by ``cleanup`` (Clean/Sync)
-    and ``optmenu`` (New-worktree options). It renders the option toggles and a
-    ``[Confirm] [Cancel]`` button row, and -- for the Clean/Sync variant -- a
-    **read-only impact list** naming exactly which worktrees the current toggle
-    selection will act on (the count also rides the Confirm label). Returns
-    ``dismiss(True)`` on Confirm / ``dismiss(False)`` on Cancel or Esc; the option
-    toggles are mutated in place on the passed ``dlg`` dict, so the caller reads
-    the confirmed selection straight off it.
+    Shared by ``cleanup`` (Clean/Sync) and ``optmenu`` (New-worktree options): a
+    multi-select list of option toggles, a ``[Confirm] [Cancel]`` row, and -- for
+    the Clean/Sync variant -- a **read-only impact list** naming exactly which
+    worktrees the current toggle selection will act on. Returns ``dismiss(True)``
+    on Confirm / ``dismiss(False)`` on Cancel or Esc; the option toggles are
+    mirrored back onto the passed ``dlg`` dict (``opts[i]["on"]``) so the caller
+    reads the confirmed selection straight off it, and ``_union()`` /
+    ``_impact_fn`` stay valid live.
 
-    Two focus sections (toggles <-> buttons) mirror the former *non-live*
-    ``_key_scopedlg`` exactly. The old third section -- the live filter over the
-    main worktree list with per-row exclusion (#2179) -- is gone: scope now comes
-    from the main-list selection *before* the dialog opens, so the impact is shown
-    here (self-contained) rather than by dimming the list behind a docked panel.
+    **Native-focus internals (#88 NF1):** the toggles are a native Textual
+    ``SelectionList`` (one tab-stop; arrow to move, Space to toggle -- the
+    framework owns focus + checkbox state) and the button row is a
+    :class:`FocusGroup` (one tab-stop; ◀▶ to choose, Enter to activate). Tab
+    moves between the two -- the two-section model, now framework-native --
+    replacing the former hand-rolled ``section``/``idx``/``bidx`` + ``on_key``
+    over a static ``Panel``. Esc/q cancel via ``BINDINGS`` actions.
     """
 
     CSS = """
     ScopeDlgScreen { align: center middle; background: $background 55%; }
-    ScopeDlgScreen > #scope-dlg { width: auto; height: auto; max-height: 90%; }
+    ScopeDlgScreen > #scope-frame {
+        width: 68; height: auto; max-height: 90%;
+        border: round #ffaf00; background: $surface; padding: 1 2;
+    }
+    ScopeDlgScreen SelectionList {
+        height: auto; border: none; background: $surface; padding: 0;
+    }
+    ScopeDlgScreen SelectionList > .option-list--option-highlighted {
+        background: $surface; color: $text; text-style: bold reverse;
+    }
+    ScopeDlgScreen SelectionList > .selection-list--button {
+        background: $surface; color: #5f5f5f;
+    }
+    ScopeDlgScreen SelectionList > .selection-list--button-highlighted {
+        background: $surface; color: #5f5f5f;
+    }
+    ScopeDlgScreen SelectionList > .selection-list--button-selected {
+        background: $surface; color: green;
+    }
+    ScopeDlgScreen SelectionList > .selection-list--button-selected-highlighted {
+        background: $surface; color: green;
+    }
+    ScopeDlgScreen #scope-prompt { height: auto; padding: 0 0 1 0; }
+    ScopeDlgScreen #scope-impact { height: auto; padding: 1 0 0 0; }
+    ScopeDlgScreen #scope-buttons { width: 1fr; height: auto; padding: 1 0 0 0; }
     """
+    BINDINGS = [
+        Binding("escape", "cancel", show=False),
+        Binding("q", "cancel", show=False),
+    ]
 
     def __init__(self, dlg, impact_fn=None) -> None:
         super().__init__()
         self._dlg = dlg
         self._impact_fn = impact_fn      # (ids:set) -> list[(id4, machine_env, title)]
-        self.idx = 0                     # toggle cursor
-        self.section = dlg.get("section", 0)   # 0 = toggles, 1 = buttons
-        self.bidx = dlg.get("bidx", 0)         # 0 = Confirm, 1 = Cancel
 
     def _union(self) -> set:
         s: set = set()
@@ -3844,104 +3953,73 @@ class ScopeDlgScreen(ModalScreen[bool]):
                 s |= set(o.get("ids", ()))
         return s
 
-    def compose(self) -> ComposeResult:
-        yield Static(self._panel(), id="scope-dlg")
+    def _opt_prompt(self, o) -> Text:
+        t = Text(f"{o['label']:<14}", style=C_LABEL)
+        if o.get("hint"):
+            t.append("  " + o["hint"], style=C_META)
+        return t
 
-    def _panel(self) -> Panel:
+    def compose(self) -> ComposeResult:
         dlg = self._dlg
         opts = dlg["opts"]
+        with Vertical(id="scope-frame"):
+            yield Static(Text(dlg.get("prompt", "Select:"), style=C_HEADER),
+                         id="scope-prompt")
+            yield SelectionList[int](
+                *[(self._opt_prompt(o), i, o["on"]) for i, o in enumerate(opts)],
+                id="scope-opts")
+            if self._impact_fn is not None:
+                yield Static("", id="scope-impact")
+            yield FocusGroup(
+                [("confirm", dlg.get("confirm", "Confirm")), ("cancel", "Cancel")],
+                id="scope-buttons")
+
+    def on_mount(self) -> None:
+        dlg = self._dlg
         verb = dlg.get("verb", "Clean up")
         scope = ("{} {}".format(*dlg["target"]) if "target" in dlg
                  else dlg.get("scope", ""))
+        self.query_one("#scope-frame", Vertical).border_title = f"{verb} · {scope}"
+        self._sync_from_selection()
+        # optmenu opens straight on the Create button (section 1); Clean/Sync
+        # opens on the toggle list.
+        if dlg.get("section", 0) == 1:
+            self.query_one("#scope-buttons", FocusGroup).focus()
+        else:
+            self.query_one("#scope-opts", SelectionList).focus()
+
+    def _sync_from_selection(self) -> None:
+        """Mirror the SelectionList's checked state back onto ``dlg['opts']`` so
+        the caller (and ``_union`` / the impact list) reads the live selection."""
+        chosen = set(self.query_one("#scope-opts", SelectionList).selected)
+        for i, o in enumerate(self._dlg["opts"]):
+            o["on"] = i in chosen
+        if self._impact_fn is not None:
+            self._update_impact()
+
+    def _update_impact(self) -> None:
+        verb = self._dlg.get("verb", "Clean up")
+        rows = self._impact_fn(self._union())
         body = Text()
-        body.append(f" {dlg.get('prompt', 'Select:')}\n\n", style=C_HEADER)
-        for i, o in enumerate(opts):
-            mark = " ▸ " if (self.section == 0 and self.idx == i) else "   "
-            box = "[x]" if o["on"] else "[ ]"
-            line = Text(mark)
-            line.append(box, style="green" if o["on"] else "grey50")
-            line.append(f" {o['label']:<14} ", style="white")
-            line.append(o.get("hint", ""), style=C_META)
-            if self.section == 0 and self.idx == i:
-                line.stylize(C_SEL)
-            body.append_text(line)
-            body.append("\n")
-        # Read-only impact list (Clean/Sync only): exactly what Confirm will act
-        # on, recomputed from the live toggle state.
-        if self._impact_fn is not None:
-            ids = self._union()
-            rows = self._impact_fn(ids)
-            body.append(f"\n {verb}s {len(rows)} worktree(s):\n",
-                        style=C_HEADER)
-            maxr = 10
-            for id4, machine_env, title in rows[:maxr]:
-                body.append(f"   {id4} · {machine_env} · {title}\n",
-                            style=C_FAINT)
-            if len(rows) > maxr:
-                body.append(f"   … +{len(rows) - maxr} more\n", style=C_MUTED)
-            if not rows:
-                body.append("   (nothing selected)\n", style=C_MUTED)
-        # Button row.
-        clabel = dlg.get("confirm", "Confirm")
-        if self._impact_fn is not None:
-            clabel = f"{clabel} ({len(self._union())})"
-        btns = Text("\n   ")
-        btns.append(f" {clabel} ",
-                    style=C_BTN_SEL if (self.section == 1 and self.bidx == 0)
-                    else C_BTN)
-        btns.append("   ")
-        btns.append(" Cancel ",
-                    style=C_BTN_SEL if (self.section == 1 and self.bidx == 1)
-                    else C_BTN)
-        body.append_text(btns)
-        body.append("\n\n Tab section · Space toggle · Enter confirm · Esc cancel",
-                    style=C_MUTED)
-        return Panel(body, title=f"{verb} · {scope}", border_style=C_BAND,
-                     width=68)
+        body.append(f"{verb}s {len(rows)} worktree(s):\n", style=C_HEADER)
+        maxr = 10
+        for id4, machine_env, title in rows[:maxr]:
+            body.append(f"  {id4} · {machine_env} · {title}\n", style=C_FAINT)
+        if len(rows) > maxr:
+            body.append(f"  … +{len(rows) - maxr} more\n", style=C_MUTED)
+        if not rows:
+            body.append("  (nothing selected)\n", style=C_MUTED)
+        self.query_one("#scope-impact", Static).update(body)
 
-    def _refresh(self) -> None:
-        self.query_one("#scope-dlg", Static).update(self._panel())
+    def on_selection_list_selected_changed(
+            self, event: "SelectionList.SelectedChanged") -> None:
+        self._sync_from_selection()
 
-    def on_key(self, event) -> None:
-        key = event.key
-        dlg = self._dlg
-        opts = dlg["opts"]
-        n = len(opts)
-        if key in ("escape", "q"):
-            event.stop()
-            self.dismiss(False)
-            return
-        if key in ("tab", "shift+tab"):
-            self.section = 1 - self.section
-            self.bidx = 0
-            self._refresh()
-            event.stop()
-            return
-        if self.section == 0:            # the option toggles
-            if key == "down":
-                self.idx = min(self.idx + 1, n - 1)
-                self._refresh()
-            elif key == "up":
-                self.idx = max(self.idx - 1, 0)
-                self._refresh()
-            elif key == "space":
-                opts[self.idx]["on"] = not opts[self.idx]["on"]
-                self._refresh()
-            elif key == "enter":
-                self.section = 1
-                self.bidx = 0
-                self._refresh()
-            event.stop()
-        else:                            # the [Confirm] [Cancel] button row
-            if key in ("left", "right"):
-                self.bidx = 1 - self.bidx
-                self._refresh()
-            elif key == "up":
-                self.section = 0
-                self._refresh()
-            elif key == "enter":
-                self.dismiss(self.bidx == 0)
-            event.stop()
+    def on_focus_group_activated(self, event: "FocusGroup.Activated") -> None:
+        self.dismiss(event.value == "confirm")
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
 
 
 class CfgMenuScreen(ModalScreen[int]):

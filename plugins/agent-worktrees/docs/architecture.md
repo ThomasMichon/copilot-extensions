@@ -927,4 +927,39 @@ codified as a reusable tool -- `scripts/picker-snapshot/` (capture -> SVG ->
 `svg2png.mjs` with Fira Code @ 3x) -- so demos/A-B renders are reproducible and the
 choppy-substitute mistake isn't re-derivable.)
 
+**NF1 slice 3 -- the checkbox dialogs -> `SelectionList` + the `FocusGroup`
+primitive.** `ScopeDlgScreen` (shared by Clean/Sync scope and the New-worktree
+options `Bare`/`No Mux`/`Local model`/`Anchor repo`) was the picker's genuine
+**multi-select checkbox list**, hand-rolled as a `section`/`idx`/`bidx` cursor over
+a static `Panel`. It now composes a native Textual **`SelectionList`** for the
+toggles (one tab-stop; arrow to move, Space to toggle -- the framework owns focus +
+checkbox state) plus the migration's first reusable **`FocusGroup`** for the
+`[Confirm] [Cancel]` row. `FocusGroup` is the native answer to the *tab-group*
+requirement: a single focusable tab-stop whose children are **not** individually
+focusable -- arrow moves an internal highlight, Enter/Space activates (posting a
+`FocusGroup.Activated` message) -- for the heterogeneous rows the list widgets
+don't cover. Tab moves between the two, giving the old two-section model natively.
+The `dlg["opts"][i]["on"]` toggles are mirrored back from the `SelectionList`
+selection on every `SelectedChanged`, so `_union()`, the live impact list, and the
+callers (`_confirm_new_worktree` / `_confirm_cleanup`) read the confirmed selection
+unchanged. A guard (`test_scope_dialog_uses_native_selectionlist_and_focusgroup`)
+asserts the native widgets + palette; the two tests that drove the old
+`section`/`idx` model were updated to the native flow (Tab between widgets, focus
+assertions).
+
+Three `FocusGroup`/`SelectionList` implementation gotchas the A/B render caught that
+the unit tests did **not** (all four are invisible to behaviour tests -- the value
+of the `capture_modal` A/B habit): (1) a bare `Widget.render()` returning a `Text`
+has **no content-width measurement**, so Textual clips the row to a few columns and
+the second button vanished -- fixed by composing a child `Static` (which measures
+its content); (2) `height: 1` on the `FocusGroup` clipped that child (it laid out
+one row *below* the parent's single-row region) -- fixed with `height: auto` so it
+sizes to the child; (3) `has_focus` on the container read unreliably at
+screenshot time, so the focused button lost its highlight -- fixed with an explicit
+`_focused` flag toggled in `on_focus`/`on_blur`; and (4) `SelectionList`'s checkbox
+inherits Textual's `$panel`/`$primary` (blue) tokens -- repinned via the
+`selection-list--button*` component classes to a dim grey for unchecked and green
+for checked (the picker's ☐/☑ idiom), on `$surface`. Same `$surface` +
+reverse-highlight + framed-layout craft as the menu slices.
+
 
