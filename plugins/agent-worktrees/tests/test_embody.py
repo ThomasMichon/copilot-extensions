@@ -66,6 +66,8 @@ class TestBuildMuxNewSessionArgv:
         i = argv.index("-s")
         assert argv[i + 1] == "wt-id2"
         assert "env" not in argv
+        # psmux runs the command verbatim (not collapsed) so `--allow-all`
+        # reaches Copilot; see _mux_pane_cmd / #102.
         assert argv[-3:] == ["pwsh.exe", "-File", "s.ps1"]
 
     def test_empty_work_dir_omits_c_flag(self):

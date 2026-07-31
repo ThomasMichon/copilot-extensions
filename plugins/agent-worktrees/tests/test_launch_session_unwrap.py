@@ -115,17 +115,16 @@ def test_launchers_render_status_bar_from_worktree_path():
     assert '--path "${STATUS_PATH:-${WORK_DIR:-$PWD}}"' in sh
 
 
-def test_windows_launcher_collapses_psmux_pane_to_single_pwsh():
-    """psmux wraps every pane command in `pwsh -NoLogo -Command "<args>"`; a
-    `pwsh -File <script>` pane therefore spawns a SECOND pwsh. The launcher must
-    collapse the pane command to a single in-process `& '<script>'` string so
-    only one pwsh runs per worktree session (copilot-extensions #102)."""
+def test_windows_launcher_passes_psmux_pane_verbatim():
+    """psmux wraps every pane command in `pwsh -NoLogo -Command "<args>"`. An
+    earlier optimization (#102) collapsed `pwsh -File <script> <args>` to a
+    single `& '<script>' <args>` string to avoid a second pwsh -- but under
+    `-Command`, PowerShell treats the always-appended `--allow-all` as the
+    end-of-parameters marker, so it binds POSITIONALLY to a string param
+    (-SetupHook/-EnvScript) and never reaches Copilot (auto-approve silently
+    lost; "env_script not found: --allow-all"). The launcher must pass the
+    command VERBATIM so `pwsh -File` receives its args literally."""
     ps = _LAUNCH_PS1.read_text()
-    # The collapse helper exists and rewrites the -File shape to `& '<script>'`.
-    assert "function ConvertTo-PsmuxPaneCommand" in ps
-    assert "& '" in ps
-    assert "-File" in ps and "-f" in ps  # both -File spellings detected
-    # new-session must launch the COLLAPSED pane command, never the raw @cmd.
-    assert "$paneCmd = ConvertTo-PsmuxPaneCommand $cmd" in ps
-    assert "new-session -d -s $sessName -c $plan.work_dir @envFlags @paneCmd" in ps
-    assert "@envFlags @cmd" not in ps
+    # The collapse helper must be gone, and new-session must launch @cmd raw.
+    assert "ConvertTo-PsmuxPaneCommand" not in ps
+    assert "new-session -d -s $sessName -c $plan.work_dir @envFlags @cmd" in ps

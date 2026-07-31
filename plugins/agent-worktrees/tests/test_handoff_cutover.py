@@ -73,6 +73,9 @@ class TestBuildMuxNewWindowArgv:
         assert argv[i + 1] == "wt-id2"
         # no identity-strip prefix on Windows
         assert "env" not in argv
+        # psmux runs the command verbatim -- `pwsh -File <script>` passes its
+        # args literally so `--`-prefixed passthrough (e.g. --allow-all) reaches
+        # Copilot; the pane command is NOT collapsed to `& '<script>'` (#102).
         assert argv[-5:] == ["pwsh.exe", "-File", "s.ps1", "-i", "seed"]
 
     def test_psmux_runs_command_verbatim_no_quoting(self):
@@ -148,6 +151,32 @@ class TestMuxRetirePane:
                                        poll_interval=0, settle_timeout=0)
         assert out["gone"] is False
         assert out["method"] == "failed"
+
+    def test_third_ctrl_c_when_two_dont_land(self, monkeypatch):
+        # Alive through the double-interrupt escalate window, gone only after
+        # the conditional third Ctrl-C -- verifies three C-c are sent (#3946).
+        calls: list[list[str]] = []
+
+        # alive for: initial check + escalate poll (still up), then gone.
+        states = iter([True, True, False])
+        monkeypatch.setattr(sessions, "_mux_pane_alive",
+                            lambda p, b: next(states))
+        import subprocess
+
+        def _fake_run(*a, **k):
+            calls.append(list(a[0]))
+            return type("R", (), {"returncode": 0})()
+
+        monkeypatch.setattr(subprocess, "run", _fake_run)
+        out = sessions.mux_retire_pane(
+            "%3", mux="tmux", ctrl_c_gap=0, poll_interval=0,
+            settle_timeout=2, escalate_after=0,
+        )
+        assert out["gone"] is True
+        assert out["method"] == "graceful"
+        ctrl_c = [c for c in calls if c[1] == "send-keys" and c[-1] == "C-c"]
+        assert len(ctrl_c) == 3
+        assert not any(c[1] == "kill-pane" for c in calls)
 
 
 # â”€â”€ cmd_handoff_cutover control flow â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
