@@ -342,19 +342,22 @@ resuming from the caller's acked delivery cursor — it no longer hard-fails wit
 ACP/Copilot session) before delivering the prompt.
 
 Longer/other drops (especially CodeSpace) can still strand a session —
-`gh cs ssh` tunnel lifetime, relay credential TTL, CodeSpace idle timeout. When
-`agent-bridge sessions` / `agent-bridge status <sid>` shows the session
-`stopped`/gone, a `send` **reattaches** to the surviving child (adopts the same
-ACP session id — no respawn) and delivers the prompt. Verify the resumed turn
-did real work.
+`gh cs ssh` tunnel lifetime, relay credential TTL, CodeSpace idle timeout. A
+session the bridge marks `stopped` because it **lost the connection** to the
+child is **not** gone: its session host keeps the child alive. **Resume it with
+`send`** — the bridge reattaches to the surviving child (adopts the same ACP
+session id — no respawn) and delivers the prompt. Do **not** reflexively
+`end`+`create` a connection-loss stop; that throws away a live, resumable child
+and its in-flight work. Just verify the resumed turn did real work.
 
 **Stale-cancel on the first reattached turn.** If a session was `stop`ped (or
-dropped) *mid-turn*, that in-flight turn was graceful-cancelled with an ACP
-`session/cancel`. On reattach the child can surface that **stale cancel** as the
-first turn's result — `Operation cancelled by user` + an empty `end_turn` — even
-though your new prompt was accepted. This is a **host-injected cancel draining**,
-not agent misbehavior and not a categorical "stopped resume does no work". The
-cancel drains after one turn, so the fix is simply to **`send` again** — the
+severed) *mid-turn*, that turn may have been cancelled with an ACP
+`session/cancel` (an explicit stop, a stall-heal, or a redeploy). On reattach
+the child can surface that **stale cancel** as the first turn's result —
+`Operation cancelled by user` + an empty `end_turn` — even though your new prompt
+was accepted. This is a **host/bridge-injected cancel draining**, not agent
+misbehavior and not a categorical "stopped resume does no work". The cancel
+drains after one turn, so the fix is still `send` — **`send` again**, and the
 now-idle session continues normally:
 
 ```bash
