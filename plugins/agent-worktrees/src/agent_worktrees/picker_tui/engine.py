@@ -26,7 +26,7 @@ from textual.containers import Vertical
 from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widget import Widget
-from textual.widgets import Checkbox, OptionList, SelectionList, Static
+from textual.widgets import OptionList, SelectionList, Static
 
 from .. import profiles as profiles_mod
 from ..update_stage import indicator_state
@@ -334,8 +334,8 @@ def target_rows(target_envs):
 # Clarify each worktree action in the sub-menu (aperture-labs #1343).
 ACTION_DESC = {
     "Open": "Attach the worktree's live terminal (PSMux/TMux); launch one if "
-            "none. Tick the No Mux checkbox to launch without the wrapper, for "
-            "troubleshooting.",
+            "none. Arrow to the No Mux row below to launch without the wrapper, "
+            "for troubleshooting.",
     "Resume": "Relaunch this stopped worktree's Copilot, resuming its last "
               "session in a fresh TMux/PSMux.",
     "Messages": "Peek the last few messages of this worktree's latest session "
@@ -3857,15 +3857,19 @@ class SubMenuScreen(ModalScreen[tuple]):
     ``(action_label, no_mux)`` via ``dismiss(tuple)`` -- or ``dismiss(None)`` on
     cancel; the caller dispatches the verb.
 
-    **Native-focus internals (#88 NF1):** the verb list is a native Textual
+    **Native-focus internals (#88 NF1):** the verbs are a native Textual
     ``OptionList`` -- the framework owns focus, up/down, and Enter-to-select --
     below a header (title + meta + session id) and above a description pane that
-    tracks the highlighted verb (via ``OptionHighlighted``). **No-mux** is a
-    native, Tab-focusable ``Checkbox`` (shown only when *Open* is offered, since
-    it modifies only Open) -- the operator's "no special keyboarding" steer:
-    Tab to it, Space/Enter to tick, no more Space-only-while-Open modifier.
-    ``no_mux`` reads straight off that checkbox. Esc/q cancel via ``BINDINGS``.
-    Replaces the former hand-rolled ``idx`` + ``on_key`` over a static ``Panel``.
+    tracks the highlight (via ``OptionHighlighted``). **No-mux** is an
+    arrow-reachable **toggle row** at the bottom of that same list (shown only
+    when *Open* is offered, since it modifies only Open): the operator's "no
+    special keyboarding" steer, made reachable purely by the arrow keys -- ↓ onto
+    the ``☐ No Mux`` row, Enter/Space flips it to ``☑`` and stays open; Enter on a
+    verb dismisses. (An earlier take used a separate ``Checkbox`` only reachable
+    by Tab, which the operator couldn't reach with the arrows -- folding it into
+    the list fixes that.) ``no_mux`` is plain screen state. Esc/q cancel via
+    ``BINDINGS``. Replaces the former hand-rolled ``idx`` + ``on_key`` over a
+    static ``Panel``.
     """
 
     CSS = """
@@ -3883,46 +3887,50 @@ class SubMenuScreen(ModalScreen[tuple]):
     SubMenuScreen OptionList:focus > .option-list--option-highlighted {
         background: $surface; color: $text; text-style: bold reverse;
     }
-    SubMenuScreen Checkbox {
-        border: none; background: $surface; height: auto;
-        padding: 0; margin: 1 0 0 0;
-    }
-    SubMenuScreen Checkbox > .toggle--button {
-        background: $surface; color: #5f5f5f;
-    }
-    SubMenuScreen Checkbox.-on > .toggle--button {
-        background: $surface; color: green;
-    }
-    SubMenuScreen Checkbox:focus > .toggle--label {
-        text-style: bold reverse;
-    }
     SubMenuScreen #sub-desc { color: grey; height: auto; padding: 1 0 0 0; }
     """
     BINDINGS = [
         Binding("escape", "cancel", show=False),
         Binding("q", "cancel", show=False),
+        Binding("space", "toggle_nomux", show=False),
     ]
+
+    _NOMUX_DESC = ("Launch Open WITHOUT the PSMux/TMux wrapper (for "
+                   "troubleshooting). Enter/Space toggles this row.")
 
     def __init__(self, rec, actions) -> None:
         super().__init__()
         self._rec = rec
         self._actions = actions
+        self._no_mux = False
+        # The No-mux modifier rides the Open verb, so the toggle row is offered
+        # only when Open is available. It sits at the end of the OptionList.
+        self._has_nomux = "Open" in actions
+        self._nomux_index = len(actions) if self._has_nomux else None
 
     @property
     def no_mux(self) -> bool:
-        """The live No-mux toggle (native ``Checkbox``); ``False`` when the
-        checkbox isn't shown (no *Open* verb) or not yet mounted."""
-        try:
-            return bool(self.query_one("#sub-nomux", Checkbox).value)
-        except Exception:
-            return False
+        """The live No-mux toggle -- plain screen state, flipped from the
+        arrow-reachable ``No Mux`` row."""
+        return self._no_mux
+
+    def _nomux_prompt(self) -> Text:
+        glyph, gstyle = ("☑", "green") if self._no_mux else ("☐", "#5f5f5f")
+        t = Text()
+        t.append(glyph + " ", style=gstyle)
+        t.append("No Mux")
+        return t
+
+    def _prompts(self):
+        prompts = [Text(a) for a in self._actions]
+        if self._has_nomux:
+            prompts.append(self._nomux_prompt())
+        return prompts
 
     def compose(self) -> ComposeResult:
         with Vertical(id="sub-frame"):
             yield Static(self._header(), id="sub-head")
-            yield OptionList(*self._actions, id="sub-list")
-            if "Open" in self._actions:
-                yield Checkbox("No Mux", value=False, id="sub-nomux")
+            yield OptionList(*self._prompts(), id="sub-list")
             yield Static("", id="sub-desc")
 
     def _header(self) -> Text:
@@ -3957,9 +3965,17 @@ class SubMenuScreen(ModalScreen[tuple]):
         ol.focus()
 
     def _set_desc(self, i) -> None:
-        if self._actions and 0 <= i < len(self._actions):
+        if i == self._nomux_index:
+            self.query_one("#sub-desc", Static).update(self._NOMUX_DESC)
+        elif self._actions and 0 <= i < len(self._actions):
             self.query_one("#sub-desc", Static).update(
                 ACTION_DESC.get(self._actions[i], ""))
+
+    def _toggle_nomux(self) -> None:
+        self._no_mux = not self._no_mux
+        ol = self.query_one("#sub-list", OptionList)
+        ol.replace_option_prompt_at_index(self._nomux_index, self._nomux_prompt())
+        self._set_desc(self._nomux_index)
 
     def on_option_list_option_highlighted(
             self, event: "OptionList.OptionHighlighted") -> None:
@@ -3967,10 +3983,25 @@ class SubMenuScreen(ModalScreen[tuple]):
 
     def on_option_list_option_selected(
             self, event: "OptionList.OptionSelected") -> None:
-        self.dismiss((self._actions[event.option_index], self.no_mux))
+        # Enter on the No-mux row toggles it and stays open; Enter on a verb
+        # dismisses with the chosen action + the current No-mux state.
+        if event.option_index == self._nomux_index:
+            self._toggle_nomux()
+            return
+        self.dismiss((self._actions[event.option_index], self._no_mux))
+
+    def action_toggle_nomux(self) -> None:
+        # Space also toggles, but only while the No-mux row is highlighted (so a
+        # stray Space on a verb is an inert no-op, never a launch).
+        if self._nomux_index is None:
+            return
+        ol = self.query_one("#sub-list", OptionList)
+        if ol.highlighted == self._nomux_index:
+            self._toggle_nomux()
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
 
 
 class FocusGroup(Widget):
