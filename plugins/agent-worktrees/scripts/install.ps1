@@ -253,98 +253,24 @@ function Write-YamlFields {
     return $result
 }
 
-function Write-ProjectsRegistry {
-    <# Write the projects registry back to projects.yaml. #>
-    param([object]$Registry)
-    if (-not (Test-Path $VenvPython)) { return }
-    Ensure-InstallDir (Split-Path $ProjectsYamlPath)
-
-    # Build YAML content manually (simple structure, avoid Python dependency for writing)
-    $lines = @("# ~/.agent-worktrees/projects.yaml", "# Registry of adopted repos for terminal profile generation.", "", "projects:")
-    $projects = $Registry.projects
-    if ($projects -is [PSCustomObject]) {
-        foreach ($prop in $projects.PSObject.Properties) {
-            $lines += "  $($prop.Name):"
-            $lines += Write-YamlFields -Entry $prop.Value -Indent 4
-        }
-    } elseif ($projects -is [hashtable]) {
-        foreach ($name in ($projects.Keys | Sort-Object)) {
-            $lines += "  ${name}:"
-            $lines += Write-YamlFields -Entry $projects[$name] -Indent 4
-        }
-    }
-    $content = ($lines -join "`n") + "`n"
-    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllText($ProjectsYamlPath, $content, $utf8NoBom)
-}
-
 function Register-ProjectEntry {
-    <# Add or update this project in the projects registry.
-       Preserves registry-owned fields when an update runs from the installed
-       plugin directory and therefore has no repo path context. #>
-    $registry = Read-ProjectsRegistry
-
-    $existing = $null
-    if ($registry.projects -is [PSCustomObject] -and $registry.projects.PSObject.Properties[$ProjectName]) {
-        $existing = $registry.projects.$ProjectName
-    } elseif ($registry.projects -is [hashtable] -and $registry.projects.ContainsKey($ProjectName)) {
-        $existing = $registry.projects[$ProjectName]
+    <# Thin wrapper: the projects.yaml write lives in ONE place -- the Python
+       `register-project-entry` subcommand (installer.register_project). Both
+       platform installers call it rather than reimplementing the registry
+       logic, so the lean-entry rules, field preservation, and schema stamping
+       have a single owner (the drift that caused the anchor bug is removed).
+       `expose_agent` is resolved from repos.yaml inside the subcommand. #>
+    param([string[]]$ExtraArgs = @())
+    if (-not (Test-Path $VenvPython)) { return }
+    $awArgs = @('-m', 'agent_worktrees', 'register-project-entry',
+                '--project', $ProjectName) + $ExtraArgs
+    $prevPythonPath = $env:PYTHONPATH
+    try {
+        $env:PYTHONPATH = $null
+        & $VenvPython @awArgs
+    } finally {
+        $env:PYTHONPATH = $prevPythonPath
     }
-
-    # Start from the existing entry so update cannot erase anchor, agent
-    # exposure, base-repo/elevation, or WSL metadata merely because its cwd is
-    # the marketplace payload rather than the adopted repo.
-    $entry = @{}
-    if ($existing -is [PSCustomObject]) {
-        foreach ($prop in $existing.PSObject.Properties) {
-            $entry[$prop.Name] = $prop.Value
-        }
-    } elseif ($existing -is [hashtable]) {
-        foreach ($key in $existing.Keys) {
-            $entry[$key] = $existing[$key]
-        }
-    }
-    $entry['config_dir'] = "~/.${ProjectName}"
-    $entry['registered_at'] = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-    if (-not $entry.ContainsKey('default_branch')) {
-        $entry['default_branch'] = 'master'
-    }
-    if ($RepoDir) {
-        $entry['anchor'] = $RepoDir
-        $entry['machines_yaml'] = if (Test-Path (Join-Path $RepoDir 'machines.yaml')) {
-            [string](Join-Path $RepoDir 'machines.yaml')
-        } else {
-            $null
-        }
-    } elseif (-not $entry.ContainsKey('anchor')) {
-        $entry['anchor'] = ''
-        $entry['machines_yaml'] = $null
-    }
-
-    # Try to read default_branch from existing config
-    $cfgPath = Join-Path $ProjectDir 'config.yaml'
-    if (Test-Path $cfgPath) {
-        $cfgRaw = Get-Content $cfgPath -Raw
-        if ($cfgRaw -match 'default_branch:\s*(\S+)') {
-            $entry['default_branch'] = $Matches[1]
-        }
-    }
-
-    # Upsert into registry
-    if ($registry.projects -is [PSCustomObject]) {
-        # Convert to hashtable for mutation
-        $ht = @{}
-        foreach ($p in $registry.projects.PSObject.Properties) { $ht[$p.Name] = $p.Value }
-        $ht[$ProjectName] = [PSCustomObject]$entry
-        $registry = @{ projects = $ht }
-    } elseif ($registry.projects -is [hashtable]) {
-        $registry.projects[$ProjectName] = [PSCustomObject]$entry
-    } else {
-        $registry = @{ projects = @{ $ProjectName = [PSCustomObject]$entry } }
-    }
-
-    Write-ProjectsRegistry $registry
-    Write-ServiceOk "Project '$ProjectName' registered in projects.yaml"
 }
 
 # -- WSL availability (cached, with timeout) ------------------------------
@@ -1313,6 +1239,61 @@ function Build-TerminalFragment {
     $projectList = @()
     $registry = Read-ProjectsRegistry
 
+    # Resolve every registered repo's anchor from repos.yaml -- the single
+    # owning store of paths. projects.yaml is lean and name-keyed to these
+    # entries (derive-don't-duplicate), so per-project anchors are derived here
+    # rather than read from projects.yaml. Loaded once; falls back per-project
+    # to any residual projects.yaml 'anchor' for a not-yet-migrated file.
+    function Get-RepoAnchorMap {
+        $map = @{}
+        if (-not (Test-Path $VenvPython)) { return $map }
+        try {
+            $json = & $VenvPython -c "import json; from agent_worktrees import repos; reg = repos.read_registry(); print(json.dumps({n: (e.local_path('windows') or '') for n, e in reg.repos.items()}))" 2>$null
+            if ($json) {
+                $obj = $json | ConvertFrom-Json
+                foreach ($p in $obj.PSObject.Properties) { $map[$p.Name] = $p.Value }
+            }
+        } catch { }
+        return $map
+    }
+    $RepoAnchorMap = Get-RepoAnchorMap
+
+    # Anchor for a project name: repos.yaml wins; fall back to a residual
+    # projects.yaml 'anchor' (pre-migration file) or an explicit override.
+    function Resolve-ProjectAnchor {
+        param([string]$Name, [object]$Entry, [string]$Override)
+        if ($Override) { return $Override }
+        $fromRegistry = $RepoAnchorMap[$Name]
+        if ($fromRegistry -and (Test-Path $fromRegistry)) { return $fromRegistry }
+        if ($Entry -and $Entry.PSObject.Properties['anchor'] -and $Entry.anchor -is [string] -and $Entry.anchor) {
+            return [string]$Entry.anchor
+        }
+        if ($fromRegistry) { return $fromRegistry }
+        return $null
+    }
+
+    # machines.yaml for a resolved anchor (derived), else a residual override.
+    function Resolve-ProjectMachinesYaml {
+        param([string]$Anchor, [object]$Entry)
+        if ($Anchor -and (Test-Path (Join-Path $Anchor 'machines.yaml'))) {
+            return [string](Join-Path $Anchor 'machines.yaml')
+        }
+        if ($Entry -and $Entry.PSObject.Properties['machines_yaml'] -and $Entry.machines_yaml -is [string] -and $Entry.machines_yaml) {
+            return [string]$Entry.machines_yaml
+        }
+        return $null
+    }
+
+    # Display casing: an explicit projects.yaml 'display_name' wins; else the
+    # title-cased slug.
+    function Resolve-ProjectDisplay {
+        param([string]$Name, [object]$Entry)
+        if ($Entry -and $Entry.PSObject.Properties['display_name'] -and $Entry.display_name) {
+            return [string]$Entry.display_name
+        }
+        return (Get-DisplayName $Name)
+    }
+
     # Helper: load a project's terminal-profile SELECTION (own-column model).
     # Reads top-level ``terminal_profiles`` from ~/.<project>/config.yaml and
     # returns a hashtable keyed "machine|env|kind". Returns $null when the file
@@ -1447,25 +1428,13 @@ function Build-TerminalFragment {
     } elseif ($registry.projects -is [hashtable] -and $registry.projects.ContainsKey($ProjectName)) {
         $currentRegEntry = $registry.projects[$ProjectName]
     }
-    $currentAnchor = $RepoDir
-    if (-not $currentAnchor -and $currentRegEntry -and
-        $currentRegEntry.PSObject.Properties['anchor']) {
-        $currentAnchor = $currentRegEntry.anchor
-    }
-    $currentMachinesYaml = if ($currentAnchor -and
-        (Test-Path (Join-Path $currentAnchor 'machines.yaml'))) {
-        [string](Join-Path $currentAnchor 'machines.yaml')
-    } elseif ($currentRegEntry -and
-        $currentRegEntry.PSObject.Properties['machines_yaml'] -and
-        $currentRegEntry.machines_yaml -is [string]) {
-        [string]$currentRegEntry.machines_yaml
-    } else {
-        $null
-    }
+    $currentAnchor = Resolve-ProjectAnchor $ProjectName $currentRegEntry $RepoDir
+    $currentMachinesYaml = Resolve-ProjectMachinesYaml $currentAnchor $currentRegEntry
     $currentEntry = @{
         name          = $ProjectName
         anchor        = $currentAnchor
         machines_yaml = $currentMachinesYaml
+        display       = Resolve-ProjectDisplay $ProjectName $currentRegEntry
         wsl_info      = if ($currentRegEntry) { Get-WslInfo $currentRegEntry } else { $null }
     }
     $projectList += [PSCustomObject]$currentEntry
@@ -1479,18 +1448,16 @@ function Build-TerminalFragment {
             if ($prop.Name -in $registeredNames) { continue }
             $registeredNames += $prop.Name
             $e = $prop.Value
-            $anchor = if ($e.PSObject.Properties['anchor']) { $e.anchor } else { $null }
-            # Only accept string values -- corrupted registries from the
-            # PSObject-wrapping bug may have machines_yaml as {Length: N}.
-            # Fall back to anchor/machines.yaml if stored path is missing or stale.
-            $my = if ($e.PSObject.Properties['machines_yaml'] -and $e.machines_yaml -is [string]) { [string]$e.machines_yaml } else { $null }
-            if ((-not $my -or -not (Test-Path $my)) -and $anchor -and (Test-Path (Join-Path $anchor 'machines.yaml'))) {
-                $my = [string](Join-Path $anchor 'machines.yaml')
-            }
+            # Anchor + machines.yaml derive from repos.yaml by name (single
+            # owning store); a residual projects.yaml value is only a
+            # pre-migration fallback.
+            $anchor = Resolve-ProjectAnchor $prop.Name $e $null
+            $my = Resolve-ProjectMachinesYaml $anchor $e
             $projectList += [PSCustomObject]@{
                 name          = $prop.Name
                 anchor        = $anchor
                 machines_yaml = $my
+                display       = Resolve-ProjectDisplay $prop.Name $e
                 wsl_info      = Get-WslInfo $e
             }
         }
@@ -1503,7 +1470,7 @@ function Build-TerminalFragment {
 
     foreach ($proj in $projectList) {
         $pName = $proj.name
-        $pDisplay = Get-DisplayName $pName
+        $pDisplay = $proj.display
         $pAnchor = $proj.anchor
         $pMachinesYaml = $proj.machines_yaml
         $pWslInfo = $proj.wsl_info
@@ -1952,23 +1919,9 @@ fi
         if ($r.Success) {
             Write-ServiceOk "WSL binstub deployed to ~/.local/bin/$ProjectName ($distro)"
 
-            # Record distro in projects registry (metadata only, not used for gating)
-            $registry = Read-ProjectsRegistry
-            $projEntry = $null
-            if ($registry.projects -is [PSCustomObject] -and $registry.projects.PSObject.Properties[$ProjectName]) {
-                $projEntry = $registry.projects.$ProjectName
-            } elseif ($registry.projects -is [hashtable] -and $registry.projects.ContainsKey($ProjectName)) {
-                $projEntry = $registry.projects[$ProjectName]
-            }
-            if ($projEntry) {
-                $wslBlock = @{ distro = $distro }
-                if ($projEntry -is [PSCustomObject]) {
-                    $projEntry | Add-Member -NotePropertyName 'wsl' -NotePropertyValue ([PSCustomObject]$wslBlock) -Force
-                } elseif ($projEntry -is [hashtable]) {
-                    $projEntry['wsl'] = [PSCustomObject]$wslBlock
-                }
-                Write-ProjectsRegistry $registry
-            }
+            # Record distro in projects registry (metadata only, not used for
+            # gating) through the single Python registry writer.
+            Register-ProjectEntry -ExtraArgs @('--wsl-state', 'bootstrap', '--wsl-distro', $distro)
 
             return $true
         } else {

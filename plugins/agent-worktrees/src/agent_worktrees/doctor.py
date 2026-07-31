@@ -3,10 +3,14 @@
 agent-worktrees keeps two overlapping registries that can drift:
 
 * ``repos.yaml`` -- identity/catalog: name, ``class``, ``remote``, per-platform
-  paths, ``srcroot``, ``tags``, ``contributing``  (owned by :mod:`repos`).
-* ``projects.yaml`` -- adoption/launch: ``anchor``, ``config_dir``,
-  ``default_branch``, ``expose_agent``, ``base_repo``, ``elevated``, ``wsl``,
-  ``machines_yaml``  (owned by :mod:`installer`; read by ``config.load_config``).
+  paths, ``srcroot``, ``tags``, ``contributing``, ``default_branch``, ``agent``
+  (owned by :mod:`repos`).
+* ``projects.yaml`` -- adoption/launch (**lean**, schema v2): ``config_dir``,
+  ``expose_agent``, ``base_repo``, ``elevated``, ``wsl``, ``display_name``, and
+  the *fact* that a repo is adopted. It no longer carries ``anchor``,
+  ``machines_yaml``, or ``default_branch`` -- those are identity/location facts
+  resolved from ``repos.yaml`` by the project *name* (owned by :mod:`installer`;
+  read by ``config.load_config``).
 
 They overlap on **anchor/path, class, and agent-exposure**.  ``repos doctor``
 diagnoses the drift; ``repos doctor --fix`` reconciles the **data-only** cases.

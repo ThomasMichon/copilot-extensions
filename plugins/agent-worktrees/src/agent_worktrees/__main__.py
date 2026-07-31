@@ -10086,6 +10086,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="Reconcile ~/.local/bin project binstubs against projects.yaml "
              "(add for every registered project, remove deregistered ones)")
 
+    # register-project-entry (single Python owner of the projects.yaml write --
+    # both installers call this instead of reimplementing the registry logic)
+    sp = sub.add_parser(
+        "register-project-entry",
+        help="Write a lean projects.yaml entry (installer-invoked; the single "
+             "Python owner of the registry write)")
+    sp.add_argument("--project", required=True, help="Project name")
+    sp.add_argument("--repo-dir", default=None,
+                    help="Anchor dir (only for WSL path capture; not persisted)")
+    sp.add_argument("--display-name", default=None,
+                    help="Harness display casing override")
+    _ea = sp.add_mutually_exclusive_group()
+    _ea.add_argument("--expose-agent", dest="expose_agent",
+                     action="store_true", default=None,
+                     help="Force agent exposure on (default: from repos.yaml)")
+    _ea.add_argument("--no-expose-agent", dest="expose_agent",
+                     action="store_false",
+                     help="Force reference-only (no agent)")
+    sp.add_argument("--base-repo", dest="base_repo", action="store_true",
+                    default=None, help="Mark base-repo (no-worktree) adoption")
+    sp.add_argument("--elevated", dest="elevated", action="store_true",
+                    default=None, help="Mark elevated agent context")
+    sp.add_argument("--wsl-state", default=None,
+                    choices=["adopted", "bootstrap"], help="WSL adoption state")
+    sp.add_argument("--wsl-distro", default=None, help="WSL distro name")
+    sp.add_argument("--wsl-path", default=None, help="Repo anchor path in WSL")
+
     # dev (repo development tooling)
     sp = sub.add_parser("dev", help="Dev venv and test runner")
     sp.add_argument("dev_action", nargs="?", default="status",
@@ -11069,6 +11096,41 @@ def cmd_reconcile_binstubs(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_register_project_entry(args: argparse.Namespace) -> int:
+    """Write a lean projects.yaml entry -- the single Python owner of the
+    registry write, invoked by both platform installers.
+
+    ``expose_agent`` is authoritative in ``repos.yaml`` (the identity registry):
+    unless explicitly forced with ``--expose-agent`` / ``--no-expose-agent``, it
+    is resolved from the repo's ``agent`` classification, so a reference-only
+    adoption stays reference-only across a re-register. All other fields default
+    to preserve-existing in :func:`installer.register_project`.
+    """
+    project = args.project
+    expose = getattr(args, "expose_agent", None)
+    if expose is None:
+        try:
+            from . import repos as _repos
+            entry = _repos.find_repo(project)
+            if entry is not None:
+                expose = entry.agent
+        except Exception:
+            expose = None
+
+    inst.register_project(
+        project,
+        repo_dir=getattr(args, "repo_dir", None),
+        expose_agent=expose,
+        base_repo=getattr(args, "base_repo", None),
+        elevated=getattr(args, "elevated", None),
+        display_name=getattr(args, "display_name", None),
+        wsl_state=getattr(args, "wsl_state", None),
+        wsl_distro=getattr(args, "wsl_distro", None),
+        wsl_path=getattr(args, "wsl_path", None),
+    )
+    return 0
+
+
 def cmd_anchor_check(args: argparse.Namespace) -> int:
     """Check anchor repo for uncommitted work and stash entries."""
     from . import anchor_hygiene
@@ -11167,6 +11229,7 @@ COMMAND_MAP = {
     "stage-update": cmd_stage_update,
     "reconcile-plugins": cmd_reconcile_plugins,
     "reconcile-binstubs": cmd_reconcile_binstubs,
+    "register-project-entry": cmd_register_project_entry,
     "dev": cmd_dev,
     "register-session": cmd_register_session,
     "deregister-session": cmd_deregister_session,
