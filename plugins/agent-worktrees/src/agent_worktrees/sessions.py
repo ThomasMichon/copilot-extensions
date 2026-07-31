@@ -1346,8 +1346,13 @@ def _mux_pane_cmd(
 
     On Linux/WSL (tmux) the command is prefixed with ``env -u <identity vars>``
     and wrapped by the pane-wrapper (when present); on Windows (psmux) the server
-    env is already identity-clean so the command runs verbatim (and psmux cannot
-    carry a spaces-containing pane arg -- see :func:`build_mux_new_window_argv`).
+    env is already identity-clean and the command runs VERBATIM (a
+    ``pwsh -File <script> … --allow-all`` pane: psmux wraps it in its own
+    ``pwsh -Command`` shell, but the -File child receives its args literally so
+    ``--allow-all`` reaches Copilot -- do NOT collapse to ``& '<script>' …``,
+    which breaks ``--`` passthrough binding, #102). Every element stays a single
+    token (psmux cannot carry a spaces-containing pane arg -- see
+    :func:`build_mux_new_window_argv`).
     """
     if not is_tmux:
         # psmux: run verbatim; keep every element single-token.
@@ -1673,6 +1678,7 @@ def mux_retire_pane(
     settle_timeout: float = 6.0,
     poll_interval: float = 0.3,
     ctrl_c_gap: float = 0.6,
+    escalate_after: float = 1.5,
 ) -> dict:
     """Retire a specific pane by asking its Copilot to quit cleanly.
 
@@ -1681,6 +1687,15 @@ def mux_retire_pane(
     Unlike that session-scoped helper, this targets one ``pane_id`` so it retires
     the OLD Copilot after a cutover without touching the successor (the session's
     new active pane). Falls back to ``kill-pane`` if it does not exit in time.
+
+    **Escalation ladder (up to three Ctrl-C).** Two interrupts is the common
+    case, but some Copilot states swallow the second (mid-render, a modal, a busy
+    turn flushing state) -- so after the double-interrupt we wait a brief
+    ``escalate_after`` window and, only if the pane is still alive, deliver a
+    conditional **third** Ctrl-C before the hard ``kill-pane`` fallback. This
+    mirrors :func:`graceful_quit_mux_session` (a76ab47 / #2614) so a stubborn old
+    pane is retired cleanly (persisting session state) instead of being severed,
+    which is the failure mode behind a lingering un-retired pane (#3946).
 
     Returns ``{ok, pane, gone, method}`` where ``method`` is ``already-gone``,
     ``graceful``, ``hard``, or ``failed``.
@@ -1700,6 +1715,14 @@ def mux_retire_pane(
         except (OSError, subprocess.TimeoutExpired):
             return False
 
+    def _gone_within(window: float) -> bool:
+        deadline = time.monotonic() + window
+        while time.monotonic() < deadline:
+            if not _mux_pane_alive(pane_id, mux_bin):
+                return True
+            time.sleep(poll_interval)
+        return not _mux_pane_alive(pane_id, mux_bin)
+
     if not _mux_pane_alive(pane_id, mux_bin):
         return {"ok": True, "pane": pane_id, "gone": True, "method": "already-gone"}
 
@@ -1707,11 +1730,15 @@ def mux_retire_pane(
     time.sleep(ctrl_c_gap)
     _send("C-c")
 
-    deadline = time.monotonic() + settle_timeout
-    while time.monotonic() < deadline:
-        if not _mux_pane_alive(pane_id, mux_bin):
-            return {"ok": True, "pane": pane_id, "gone": True, "method": "graceful"}
-        time.sleep(poll_interval)
+    # Brief window for the double-interrupt to land before escalating.
+    escalate_at = min(max(escalate_after, 0.0), settle_timeout)
+    if _gone_within(escalate_at):
+        return {"ok": True, "pane": pane_id, "gone": True, "method": "graceful"}
+
+    # Still alive after two -- conditional third, then wait out the budget.
+    _send("C-c")
+    if _gone_within(settle_timeout - escalate_at):
+        return {"ok": True, "pane": pane_id, "gone": True, "method": "graceful"}
 
     # Graceful quit did not land -- hard-kill the pane.
     try:
