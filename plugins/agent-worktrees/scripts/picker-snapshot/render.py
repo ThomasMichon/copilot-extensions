@@ -65,10 +65,25 @@ async def _open_cfg(scr, pilot):
     await pilot.pause()
 
 
+async def _open_clean(scr, pilot):
+    scr.sel = ("BTN", 0)
+    scr.btn_idx = scr.button_set().index("K")
+    scr._activate()
+    await pilot.pause()
+
+
+async def _open_new(scr, pilot):
+    scr.htab = 0
+    scr.btn_idx = 0
+    scr.sel = ("BTN", 0)
+    scr._activate()
+    await pilot.pause()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Render a picker snapshot to PNG.")
     ap.add_argument("out", help="output PNG path")
-    ap.add_argument("--modal", choices=["cfg"],
+    ap.add_argument("--modal", choices=["cfg", "clean", "new"],
                     help="open a native modal before capturing (composited app)")
     ap.add_argument("--zoom", default="3", help="rasterizer zoom (default 3)")
     args = ap.parse_args()
@@ -76,6 +91,10 @@ def main() -> int:
     src = _demo_source()
     if args.modal == "cfg":
         svg = pcap.capture_modal(src, _open_cfg, title="Configuration menu")
+    elif args.modal == "clean":
+        svg = pcap.capture_modal(src, _open_clean, title="Clean scope dialog")
+    elif args.modal == "new":
+        svg = pcap.capture_modal(src, _open_new, title="New-worktree options")
     else:
         svg = pcap.capture(src, update_state="current")["svg"]
 

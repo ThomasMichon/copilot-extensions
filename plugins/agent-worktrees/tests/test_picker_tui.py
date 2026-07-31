@@ -3041,7 +3041,9 @@ def test_new_worktree_decision_exits():
             await pilot.pause()
             dlg = _scope_dlg(scr)
             assert dlg is not None
-            assert dlg.section == 1              # Create default-selected
+            from agent_worktrees.picker_tui.engine import FocusGroup
+            # optmenu opens focused on the Create button group (native focus).
+            assert dlg.query_one("#scope-buttons", FocusGroup).has_focus
             assert all(not o["on"] for o in dlg._dlg["opts"])
             await pilot.press("enter")      # confirm Create, no options
             await pilot.pause()
@@ -3073,20 +3075,58 @@ def test_new_worktree_no_mux_option():
             await pilot.pause()
             dlg = _scope_dlg(scr)
             assert dlg is not None
+            from textual.widgets import SelectionList
             labels = [o["label"] for o in dlg._dlg["opts"]]
             assert "No Mux" in labels
             nm = labels.index("No Mux")
-            await pilot.press("up")             # Create button -> options
-            assert dlg.section == 0
-            while dlg.idx < nm:
+            await pilot.press("tab")            # Create button group -> options
+            assert dlg.query_one("#scope-opts", SelectionList).has_focus
+            for _ in range(nm):
                 await pilot.press("down")
             await pilot.press("space")          # toggle No Mux on
             assert dlg._dlg["opts"][nm]["on"] is True
-            await pilot.press("enter")          # options -> button row
+            await pilot.press("tab")            # options -> button group
             await pilot.press("enter")          # confirm Create
             await pilot.pause()
         assert app.result["action"] == "new"
         assert app.result["options"]["no_mux"] is True
+
+    asyncio.run(run())
+
+
+def test_scope_dialog_uses_native_selectionlist_and_focusgroup():
+    """#88 NF1: the Clean/Sync + New-worktree options dialog navigates via a
+    native Textual ``SelectionList`` (checkbox toggles -- one tab-stop, arrow +
+    Space; the framework owns focus + checkbox state) and a ``FocusGroup`` button
+    row (one tab-stop, arrow + Enter), not the former hand-rolled
+    ``section``/``idx``/``bidx`` over a static ``Panel``. Tab moves between the
+    two. Palette pinned to ``$surface`` (regression guard for the dark-blue
+    modal)."""
+    from agent_worktrees.picker_tui.engine import FocusGroup
+    from textual.widgets import SelectionList
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            scr.sel = ("BTN", 0)
+            scr.btn_idx = scr.button_set().index("K")
+            scr._activate()                       # open the Clean modal
+            await pilot.pause()
+            dlg = _scope_dlg(scr)
+            assert dlg is not None
+            sel = dlg.query_one("#scope-opts", SelectionList)
+            btns = dlg.query_one("#scope-buttons", FocusGroup)
+            assert sel.option_count == len(dlg._dlg["opts"])
+            assert sel.has_focus                  # Clean opens on the toggle list
+            # Palette consistency: native list on $surface, not the bluer $panel.
+            assert sel.styles.background == app.screen_stack[0].styles.background
+            # Tab moves to the FocusGroup button row (each is one tab-stop).
+            await pilot.press("tab")
+            assert btns.has_focus
 
     asyncio.run(run())
 
