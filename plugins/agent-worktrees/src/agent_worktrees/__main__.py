@@ -6536,6 +6536,145 @@ def _deploy_worktree_conduct(proj_dir: Path) -> None:
         output.changed(f"worktree-conduct.instructions.md -> {path}")
 
 
+# ── Temporary: extension-reload "Loading…/Resuming…" hang warning ──────────
+# A machine-wide custom-instruction warning about the CAR extension-reload
+# generation-race hang (github/copilot-agent-runtime#13492; fix: #13494).
+# Deployed to the GLOBAL ~/.copilot/instructions/ directory -- NOT the per-project
+# COPILOT_CUSTOM_INSTRUCTIONS_DIRS -- so it reaches EVERY session regardless of
+# launcher or cwd. That matters because the bug's worst cases are exactly the
+# sessions that never go through an agent-worktrees launch (so the per-project
+# env var is never set): user/machine-resumed sessions and "Bare resume" (where
+# cwd is ~/, not the worktree).
+#
+# TEMPORARY: remove this whole feature (constant, helpers, call sites, script
+# wiring, and test) once the #13494 fix has shipped and rolled out everywhere.
+# Until then it is version-gated (see below) and self-cleans on upgrade.
+
+# First Copilot CLI version that carries the #13494 fix. ``None`` means the fix
+# has not shipped anywhere yet, so every CLI build is affected and the warning is
+# always deployed. Once #13494 lands and a fixed CLI is released, set this to that
+# version string (e.g. "1.0.80"): the installer then stops deploying the warning
+# and deletes any file it left behind, self-cleaning on the next install/update
+# after the fleet upgrades.
+_EXT_RELOAD_FIX_VERSION: str | None = None
+
+_EXT_RELOAD_WARNING = """# Known CLI bug: extension-reload "Loading…/Resuming…" hang (temporary)
+
+Applies while running Copilot CLI with worktree-based plugins that load at least
+one extension, on a CLI build predating the fix for
+github/copilot-agent-runtime#13492 (fix: github/copilot-agent-runtime#13494).
+
+A generation race in extension reload can leave the `extensions` env-loading
+participant incomplete, so startup never finishes. Account for:
+
+1. A newly launched **headed** session with a queued startup prompt can hang on
+   "Loading…" with the prompt queued **indefinitely** (it never submits). This
+   hits headed agents kicked via agent-dispatch -- verify a dispatched headed
+   session actually reached an interactive/ready state before assuming its
+   startup prompt ran.
+
+2. A user- or machine-**resumed headed** session can hang on "Resuming…"
+   indefinitely unless it is started with **Bare resume**. Under Bare resume the
+   Copilot working directory is `~/` (home), **not** the worktree -- so
+   worktree-scoped extensions/plugins and `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` may
+   not load, and `agent-*` commands that infer the worktree from the cwd can
+   misbehave. **If your cwd is `~/`, `cd` into your worktree directory first**
+   before running any `agent-worktrees` / `agent-*` command.
+
+3. Extensions may reload several times during a single startup, emitting
+   duplicate / conflicting "extension ready" notifications -- treat repeated
+   ready signals from one startup as expected noise, not separate successful
+   loads.
+
+Workarounds for the hang itself: launch from `~/` then `/resume`, or run with
+`--no-experimental` (disables extensions).
+"""
+
+
+def _ext_reload_warning_path() -> Path:
+    """Global custom-instructions path for the ext-reload hang warning."""
+    return (
+        cfg._home() / ".copilot" / "instructions"
+        / "agent-worktrees-ext-reload-hang.instructions.md"
+    )
+
+
+def _installed_copilot_version() -> str | None:
+    """Best-effort running Copilot CLI version via ``copilot --version``."""
+    copilot = shutil.which("copilot")
+    if not copilot:
+        return None
+    try:
+        r = subprocess.run(
+            [copilot, "--version"], capture_output=True, text=True, timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0:
+        return None
+    import re
+    m = re.search(r"\d+\.\d+\.\d+(?:-\d+)?", (r.stdout or "") + (r.stderr or ""))
+    return m.group(0) if m else None
+
+
+def _ext_reload_bug_affects_cli() -> bool:
+    """True when the running CLI predates the #13494 fix (so we warn)."""
+    fixed = _EXT_RELOAD_FIX_VERSION
+    if not fixed:
+        # Fix not released anywhere yet -> every build is affected.
+        return True
+    current = _installed_copilot_version()
+    if not current:
+        # Unknown running version -> warn conservatively.
+        return True
+    try:
+        from packaging.version import InvalidVersion, Version
+        try:
+            return Version(current) < Version(fixed)
+        except InvalidVersion:
+            return True
+    except Exception:
+        return True
+
+
+def _deploy_ext_reload_warning() -> None:
+    """Deploy (or remove) the machine-wide ext-reload hang warning.
+
+    Writes a marked custom-instruction into the GLOBAL ~/.copilot/instructions/
+    directory so the warning reaches every session regardless of launcher or cwd
+    (including Bare resume). Idempotent and version-gated: once the running CLI is
+    at/past ``_EXT_RELOAD_FIX_VERSION`` the marked file is removed instead. Safe
+    to call from every install/update path; never touches unmarked user files.
+    """
+    path = _ext_reload_warning_path()
+    content = f"{_INSTRUCTION_MARKER}\n{_EXT_RELOAD_WARNING}"
+
+    if _ext_reload_bug_affects_cli():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists() and path.read_text(encoding="utf-8") == content:
+            output.skipped("ext-reload hang warning already in sync")
+        else:
+            path.write_text(content, encoding="utf-8")
+            output.changed(f"ext-reload hang warning -> {path}")
+        return
+
+    # Fix present: remove our marked file if we left one (leave user files alone).
+    _remove_ext_reload_warning()
+
+
+def _remove_ext_reload_warning() -> None:
+    """Delete the ext-reload warning file if it carries our ownership marker."""
+    path = _ext_reload_warning_path()
+    if not path.exists():
+        return
+    try:
+        if _INSTRUCTION_MARKER in path.read_text(encoding="utf-8"):
+            path.unlink()
+            output.changed(f"removed ext-reload hang warning -> {path}")
+    except OSError:
+        pass
+
+
 def _deploy_copilot_instructions(
     proj_dir: Path, entry: cfg.MachineEntry,
     project: str = "",
@@ -6683,6 +6822,9 @@ def cmd_install(args: argparse.Namespace) -> int:
     # Deploy global machine-wide config (lowest tier), then per-project config
     config_path = proj_dir / "config.yaml"
     _write_global_config(machine, plat, repo_dir.parent)
+    # Machine-wide (temporary): extension-reload hang warning into the global
+    # ~/.copilot/instructions/ dir. See _deploy_ext_reload_warning.
+    _deploy_ext_reload_warning()
     if not config_path.exists() or args.force:
         _write_config(config_path, repo_dir, machine, plat, project)
     else:
@@ -7006,6 +7148,9 @@ def cmd_register(args: argparse.Namespace) -> int:
     # Write global machine-wide config (lowest tier), then per-project config
     config_path = proj_dir / "config.yaml"
     _write_global_config(machine, plat, repo_dir.parent)
+    # Machine-wide (temporary): extension-reload hang warning into the global
+    # ~/.copilot/instructions/ dir. See _deploy_ext_reload_warning.
+    _deploy_ext_reload_warning()
     # Resolve agent exposure up front: explicit flags win, else the repos.yaml
     # classification, else default ON (adopting a repo means working in it).
     # A no-agent adoption is worked programmatically (create --json) rather than
@@ -7143,6 +7288,9 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
         if p.exists():
             p.unlink()
     output.changed(f"Removed wrappers from {bd}")
+
+    # Remove the machine-wide ext-reload hang warning (temporary feature).
+    _remove_ext_reload_warning()
 
     # Remove venv
     venv = inst.venv_dir()
@@ -7779,6 +7927,16 @@ def cmd_deploy_instructions(args: argparse.Namespace) -> int:
     _deploy_copilot_instructions(
         proj_dir, registry[machine], project=project,
     )
+    return 0
+
+
+def cmd_deploy_ext_reload_warning(args: argparse.Namespace) -> int:
+    """Deploy/refresh (or version-gated remove) the ext-reload hang warning.
+
+    Machine-wide and project-independent: writes a single marked file into the
+    global ~/.copilot/instructions/ dir. Temporary until #13494 ships everywhere.
+    """
+    _deploy_ext_reload_warning()
     return 0
 
 
@@ -10394,6 +10552,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--machine", default=None,
                    help="Machine name (auto-detected from config if omitted)")
 
+    # deploy-ext-reload-warning (machine-wide; temporary until #13494 ships)
+    sub.add_parser(
+        "deploy-ext-reload-warning",
+        help="Deploy/refresh the machine-wide extension-reload hang warning",
+    )
+
     # get (query project paths and config values)
     p = sub.add_parser("get", help="Query project paths and config values")
     p.add_argument("key", help="Key to query (use 'keys' to list available keys)")
@@ -11620,6 +11784,7 @@ COMMAND_MAP = {
     "update": cmd_update,
     "install-status": cmd_install_status,
     "deploy-instructions": cmd_deploy_instructions,
+    "deploy-ext-reload-warning": cmd_deploy_ext_reload_warning,
     "get": cmd_get,
     "pre-launch": cmd_pre_launch,
     "stage-update": cmd_stage_update,
@@ -11816,6 +11981,7 @@ _NO_PROJECT_COMMANDS = {
     "--version", "-V", "--help", "-h", "repos", "accounts", "install", "register", "hook",
     "picker", "reap-shells", "status-updater", "restart", "register-session",
     "head-session", "conclude-session", "link-succession", "config-migrate",
+    "deploy-ext-reload-warning",
 }
 
 
