@@ -248,3 +248,73 @@ class TestCleanupDisposition:
     def test_follow_up_no_effect_when_not_flagged(self):
         d = prune.cleanup_disposition(_rec(status="finalized"), _info(S.COMPLETED))
         assert d.cleanable is True and d.bucket == "clean"
+
+
+# --- claimed-resource safety (resource-claims) ------------------------------
+
+def _rec_owned(owner_ref, status="active", prs=None):
+    r = _rec(status=status, prs=prs)
+    r.owner_ref = owner_ref
+    return r
+
+
+class TestAssessClaimedResource:
+    """A resource worktree with a live / not-confirmed-gone claimant is never
+    prunable, above the git/PR verdict (claimed-resource-not-reclaimed)."""
+
+    OWNER = "lambda-core/aperture-labs/wt-A#s1"
+
+    def test_claimed_alive_overrides_empty(self):
+        rec = _rec_owned(self.OWNER, status="active")
+        v = prune.assess(rec, _info(S.UNUSED), claimant_alive=lambda ref: True)
+        assert v.safe is False and v.category == "claimed"
+        assert self.OWNER in v.reason and "alive" in v.reason
+
+    def test_claimed_unknown_spares(self):
+        # None (unconfirmed) -> spare; absence of a local owner is not proof.
+        rec = _rec_owned(self.OWNER)
+        v = prune.assess(rec, _info(S.COMPLETED), claimant_alive=lambda ref: None)
+        assert v.safe is False and v.category == "claimed"
+        assert "unconfirmed" in v.reason
+
+    def test_claimed_gone_falls_through(self):
+        # False (confirmed gone) -> normal git verdict applies (empty is safe).
+        rec = _rec_owned(self.OWNER)
+        v = prune.assess(rec, _info(S.UNUSED), turn_count=0,
+                         claimant_alive=lambda ref: False)
+        assert v.safe is True and v.category == "empty"
+
+    def test_no_probe_ignores_owner_ref(self):
+        # Behavior is byte-identical when no probe is injected.
+        rec = _rec_owned(self.OWNER)
+        v = prune.assess(rec, _info(S.UNUSED), turn_count=0)
+        assert v.category == "empty" and v.safe is True
+
+    def test_probe_not_consulted_without_owner_ref(self):
+        called = []
+        rec = _rec(status="active")  # no owner_ref
+        prune.assess(rec, _info(S.UNUSED),
+                     claimant_alive=lambda ref: called.append(ref) or True)
+        assert called == []
+
+    def test_active_still_wins_over_claimed(self):
+        rec = _rec_owned(self.OWNER)
+        v = prune.assess(rec, _info(S.ACTIVE), claimant_alive=lambda ref: True)
+        assert v.category == "active"
+
+
+class TestCleanupDispositionClaimed:
+    OWNER = "lambda-core/aperture-labs/wt-A#s1"
+
+    def test_claimed_overrides_finalized_clean(self):
+        # Even a finalized resource is spared while its claimant is alive.
+        rec = _rec_owned(self.OWNER, status="finalized")
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED),
+                                      claimant_alive=lambda ref: True)
+        assert d.cleanable is False and d.bucket == "claimed"
+
+    def test_claimed_gone_is_cleanable(self):
+        rec = _rec_owned(self.OWNER, status="finalized")
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED),
+                                      claimant_alive=lambda ref: False)
+        assert d.cleanable is True and d.bucket == "clean"

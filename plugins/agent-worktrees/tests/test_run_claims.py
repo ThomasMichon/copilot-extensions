@@ -101,3 +101,51 @@ class TestJournalRunClaim:
         assert m._journal_run_claim("lambda-core/aperture-labs/wt-A", "junk") is None
         reloaded = tracking.load_record(tmp_path / "wt-A.yaml")
         assert reloaded.resources == []
+
+
+class TestLocalClaimantAlive:
+    """_local_claimant_alive resolves same-machine owners and biases to sparing:
+    only a positively-resolved gone owner returns False; cross-machine is None."""
+
+    def _wire(self, tmp_path, monkeypatch, machine="lambda-core"):
+        import types
+        monkeypatch.setattr("agent_worktrees.config.load_config",
+                            lambda *a, **k: types.SimpleNamespace(machine=machine))
+        # project_dir(project) -> tmp_path/.<project>
+        monkeypatch.setattr("agent_worktrees.config.project_dir",
+                            lambda name=None: tmp_path / f".{name}")
+
+    def _make_owner(self, tmp_path, project, wt_id, exists=True):
+        wdir = tmp_path / "trees" / wt_id
+        if exists:
+            wdir.mkdir(parents=True, exist_ok=True)
+        tdir = tmp_path / f".{project}" / "worktrees"
+        tdir.mkdir(parents=True, exist_ok=True)
+        tracking.create_new_record(
+            wt_id, f"worktree/{wt_id}", str(wdir), project,
+            "lambda-core", "wsl", tdir,
+        )
+
+    def test_cross_machine_is_unconfirmed(self, tmp_path, monkeypatch):
+        self._wire(tmp_path, monkeypatch, machine="lambda-core")
+        ref = "borealis/aperture-labs/wt-A#s1"
+        assert m._local_claimant_alive(ref) is None
+
+    def test_present_owner_is_alive(self, tmp_path, monkeypatch):
+        self._wire(tmp_path, monkeypatch)
+        self._make_owner(tmp_path, "aperture-labs", "wt-A", exists=True)
+        assert m._local_claimant_alive("lambda-core/aperture-labs/wt-A#s1") is True
+
+    def test_missing_record_is_gone(self, tmp_path, monkeypatch):
+        self._wire(tmp_path, monkeypatch)
+        # no owner record created
+        assert m._local_claimant_alive("lambda-core/aperture-labs/wt-A") is False
+
+    def test_missing_dir_is_gone(self, tmp_path, monkeypatch):
+        self._wire(tmp_path, monkeypatch)
+        self._make_owner(tmp_path, "aperture-labs", "wt-A", exists=False)
+        assert m._local_claimant_alive("lambda-core/aperture-labs/wt-A") is False
+
+    def test_empty_ref_is_none(self, tmp_path, monkeypatch):
+        self._wire(tmp_path, monkeypatch)
+        assert m._local_claimant_alive("") is None

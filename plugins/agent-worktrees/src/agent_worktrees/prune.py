@@ -26,9 +26,19 @@ wire the concrete provider and the assessment stays unit-testable.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Optional
 
 from . import git_ops, tracking
+
+# A claimant-liveness probe: given a resource's qualified ``owner_ref``, report
+# whether the owning worktree is still alive. Tri-state on purpose:
+#   * True  -- claimant confirmed alive           -> spare the resource
+#   * None  -- claimant liveness UNCONFIRMED       -> spare the resource
+#              (absence of a *local* owner is NOT proof of no owner)
+#   * False -- claimant confirmed GONE             -> fall through to git/PR state
+# Injected (not called inline) so the pure assessment stays unit-testable and a
+# caller wires the concrete same-machine / cross-fabric resolver.
+ClaimantAliveProbe = Callable[[str], Optional[bool]]
 
 # --- Verdict categories -----------------------------------------------------
 #
@@ -48,6 +58,9 @@ from . import git_ops, tracking
 #                          content is not confirmed on the default branch
 #   "gone"              -- worktree directory is missing (caller verifies the
 #                          branch is merged before deleting)
+#   "claimed"           -- owned as an outbound resource by another worktree
+#                          whose claimant is alive or not-confirmed-gone
+#                          (agent-fabric `claimed-resource-not-reclaimed`)
 
 CATEGORY_SAFE = {"merged", "completed-local", "empty"}
 
@@ -67,6 +80,7 @@ def assess(
     info: git_ops.WorktreeStateInfo,
     *,
     turn_count: int = 0,
+    claimant_alive: ClaimantAliveProbe | None = None,
 ) -> PruneVerdict:
     """Classify a worktree's prune-safety from its record, git state, and turns.
 
@@ -74,6 +88,14 @@ def assess(
     :func:`reconcile_pr_states`) so that ``rec.prs`` reflects *live* PR state;
     a stale ``open`` here yields a (false) ``open-pr`` verdict, which is the
     safe failure direction.
+
+    When ``claimant_alive`` is injected and this worktree carries an
+    ``owner_ref`` (it was created as another worktree's outbound resource), the
+    claimant-safety rule applies **before** any git/PR verdict: a resource with
+    a live -- or not-confirmed-gone -- claimant is never prunable, so a
+    machine-local sweep can't mistake an actively-owned cross-repo resource for
+    an orphan. Only a claimant *confirmed gone* (probe returns ``False``) lets
+    assessment fall through to the git/PR state below.
     """
     state = info.state
     S = git_ops.WorktreeState
@@ -88,6 +110,19 @@ def assess(
     if state == S.GONE:
         return PruneVerdict(False, "gone", "worktree directory missing",
                             turn_count)
+
+    # Claimed-resource safety (agent-fabric `claimed-resource-not-reclaimed`):
+    # this worktree is another worktree's outbound resource. Spare it unless the
+    # claimant is confirmed gone -- absence of a local owner is not proof of no
+    # owner. Sits above the git/PR verdict so a "looks empty/merged" resource a
+    # remote agent still owns is not reclaimed.
+    if rec.owner_ref and claimant_alive is not None:
+        alive = claimant_alive(rec.owner_ref)
+        if alive is not False:
+            why = "claimant alive" if alive else "claimant liveness unconfirmed"
+            return PruneVerdict(False, "claimed",
+                                f"owned as a resource by {rec.owner_ref} "
+                                f"({why})", turn_count)
 
     # Uncommitted changes in the working tree -- unsafe to remove.
     if state == S.DIRTY:
@@ -165,6 +200,7 @@ def cleanup_disposition(
     turn_count: int = 0,
     include_unused: bool = False,
     include_conversations: bool = False,
+    claimant_alive: ClaimantAliveProbe | None = None,
 ) -> CleanupDisposition:
     """Map a prune verdict onto a cleanup action + bucket.
 
@@ -177,12 +213,24 @@ def cleanup_disposition(
     branch, so removing the local copy loses nothing.  This preserves the
     long-standing default and avoids over-preserving on a *stale* local PR
     state (use ``--reconcile-prs`` / live reconcile to refine those).
+
+    The **one exception** is a claimed resource (agent-fabric
+    `claimed-resource-not-reclaimed`): when ``claimant_alive`` is injected and
+    the claimant is alive / not-confirmed-gone, the worktree is spared even if
+    it is finalized or git-COMPLETED, because its owner may still be using it.
     """
-    v = assess(rec, info, turn_count=turn_count)
+    v = assess(rec, info, turn_count=turn_count, claimant_alive=claimant_alive)
     S = git_ops.WorktreeState
 
     if info.state == S.ACTIVE:
         return CleanupDisposition(False, "active", v.reason)
+
+    # Claimed-resource safety overrides even the finalized/COMPLETED clean path
+    # below -- a live claimant means the resource is still owned. (Only fires
+    # when the probe is injected; a confirmed-gone claimant yields a non-claimed
+    # verdict and flows through normally.)
+    if v.category == "claimed":
+        return CleanupDisposition(False, "claimed", v.reason)
 
     # worktree-status-core: an agent-asserted follow-up overrides a would-be
     # SAFE verdict. A finalized/merged/completed worktree the agent flagged as
