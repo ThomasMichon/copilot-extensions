@@ -1080,3 +1080,19 @@ class TestCodespaceRequiresSessionHost:
             spawn_command=["python", "-m", "agent_codespaces", "ssh", "cs-x",
                            "--remote-cmd", "ls"],
         )) is False
+
+    @pytest.mark.asyncio
+    async def test_codespace_target_fails_loud_instead_of_classic(self, tmp_db) -> None:
+        """With host mode OFF, starting a CodeSpace target must FAIL LOUD (a
+        clear session-host-required error) rather than silently degrade to the
+        classic, non-survivable process-owned path."""
+        from agent_bridge.transport import SpawnTarget
+        mgr = SessionManager(tmp_db, session_host_enabled=False)
+        meta = {"name": "cs-foo", "repo": "org/repo",
+                "acp_command": "cd /workspaces/x && copilot --acp --stdio"}
+        target = SpawnTarget(type="command", spawn_command=["x"], codespace=meta)
+        session = await mgr.start_session(target, agent_name="cs-foo")
+        assert session.status == SessionStatus.FAILED
+        msgs = [e.data.get("message", "") for e in session.event_log.get_events()
+                if e.event == "error"]
+        assert any("session-host mode" in m for m in msgs), msgs
