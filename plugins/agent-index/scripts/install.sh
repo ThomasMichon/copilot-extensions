@@ -48,8 +48,8 @@ ENV_FILE="$INSTALL_DIR/service.env"
 
 # === install-contract:v3 versioned-venv (agent-index: .venv-as-symlink) ===
 # Build each version into versions/<version> and make the historical `.venv`
-# path a symlink into the active slot. Disabled by default until callers opt in
-# by default (set AGENT_INDEX_VERSIONED=0 or COPILOT_EXT_NO_VERSIONED=1 to opt out); COPILOT_EXT_NO_VERSIONED=1 force-disables.
+# path a symlink into the active slot. Enabled by default (set AGENT_INDEX_VERSIONED=0
+# or COPILOT_EXT_NO_VERSIONED=1 to opt out); COPILOT_EXT_NO_VERSIONED=1 force-disables.
 LINK_DIR="$VENV_DIR"
 LINK_PYTHON="$VENV_PYTHON"
 VERSIONED_RUNTIME=0
