@@ -1130,6 +1130,35 @@ body widgets are still `can_focus = False` -- the fixed chrome they establish is
 what the focusable-region wiring (native Tab across machine-scope / buttons, `sel`
 sync) lands on next.
 
+**NF3 slice 4 -- the chrome + data regions become focusable widgets (the focus
+bridge).** With the fixed-chrome layout in place, the region views become real
+focusable widgets: `_PickerPivots` (zone `V`), `_PickerMachine` (`M`),
+`_PickerButtons` (`BTN`), and `_PickerBodyData` (the data region), all subclassing
+`_FocusRegion`. The body's `#nf-body-chrome` splits into `#nf-machine` +
+`#nf-buttons` (via `_chrome_split`, at the button row) so the machine-scope and
+button regions are independently focusable. `_FocusRegion` is the **bridge** that
+lets native Tab move between regions while the manual dispatcher still owns
+navigation (retired only at NF5):
+
+* `on_focus` -> point `sel` at this region's head (unless it already sits here);
+* `on_key` -> forward every key to `_dispatch_key` (mirroring `PickerScreen.on_key`
+  exactly, incl. letting the global pivot/machine `BINDINGS` bubble and the `[`/`]`
+  character shortcut), then `_sync_focus_to_sel` mirrors native focus back onto the
+  region `sel` now names, and repaint. Consuming the key suppresses Textual's own
+  Tab so region movement runs through `region_heads` unchanged.
+
+`_sync_focus_to_sel` maps `sel[0]` -> region widget (`_ZONE_WIDGET`), and on mount
+`_nf_initial_focus` places focus on the default `sel`'s region (guarded by
+`_nf_mounted` so the framework's mount-time auto-focus can't stomp the default sel).
+Net effect (verified live and by `test_nf_focus_bridge_tab_moves_between_regions`):
+Tab cycles pivots -> machine -> buttons -> data and back, the focused region
+carries the picker's own `sel`-driven highlight, and the footer hint tracks it --
+all still contained to the `AGENT_WORKTREES_PICKER_NF` toggle (default OFF =
+untouched monolith). NF5 will invert the bridge (native focus becomes the source of
+truth and `sel`/`stops`/`_dispatch_key` retire), and NF4 makes the data rows
+individually focusable within `_PickerBodyData`.
+
+
 
 
 
