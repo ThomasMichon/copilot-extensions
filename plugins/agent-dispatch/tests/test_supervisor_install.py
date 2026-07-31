@@ -199,3 +199,33 @@ class TestWindowsSupervisorInstall:
         # install + update call Install-SupervisorTask; uninstall removes it.
         assert text.count("Install-SupervisorTask") >= 3  # def + install + update
         assert "Unregister-ScheduledTask -TaskName $SupervisorTaskName" in text
+
+    def test_launchers_survive_a_locked_log(self):
+        """A busy/locked ``*-service.log`` must never block startup.
+
+        Regression: the generated launchers set ``$ErrorActionPreference = 'Stop'``
+        and wrote a banner to a fixed ``serve-service.log`` / ``supervise-service.log``
+        with ``Out-File``. When another process held that log (observed on
+        Lambda-Core), the banner write threw and killed the launch before the
+        coordinator/supervisor ever started. Both launchers must instead resolve a
+        WRITABLE log -- the canonical file, else a version+pid-aware fallback -- and
+        never let a banner-write failure be fatal.
+        """
+        text = _ps1_text()
+        # Both launchers define + use the writable-log resolver.
+        assert text.count("function Resolve-WritableLog") == 2, (
+            "both the coordinator and supervisor launchers must resolve a writable "
+            "log so a locked log can't block startup"
+        )
+        assert "Resolve-WritableLog (Join-Path `$PSScriptRoot 'serve-service.log')" in text
+        assert "Resolve-WritableLog (Join-Path `$PSScriptRoot 'supervise-service.log')" in text
+        # The fallback is version- and pid-aware (never contends).
+        assert "-`$ver-`$PID.log" in text, (
+            "the fallback log path must be version+pid aware so it never contends"
+        )
+        # The old fatal pattern -- a bare banner Out-File to a fixed path -- is gone.
+        assert "'serve-service.log'\n" not in text
+        assert (
+            "\"[`$(Get-Date -Format o)] agent-dispatch coordinator launch "
+            "(host=`$pinned port=`$portShown)\" |\n    Out-File" not in text
+        ), "the coordinator banner write must be wrapped, not a bare fatal Out-File"

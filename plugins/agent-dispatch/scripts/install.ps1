@@ -895,7 +895,28 @@ if (Test-Path `$envFile) {
         }
     }
 }
-`$logFile = Join-Path `$PSScriptRoot 'serve-service.log'
+# Resolve the .venv junction's target and launch the slot python DIRECTLY -- never
+# *traverse* the junction (a RedirectionGuard task context is blocked from that,
+# though it may still *read* the target) -- dotfiles #637. Plain-dir keeps `$_py.
+# Resolved up front so the version (`$_slot leaf) is available for the log fallback.
+`$_venv = '$($LinkDir -replace "'","''")'
+`$_py = '$($LinkPython -replace "'","''")'
+`$_slot = ''
+try { `$_t = (Get-Item -LiteralPath `$_venv -Force -ErrorAction Stop).Target; if (`$_t) { `$_slot = @(`$_t)[0]; `$_py = Join-Path `$_slot 'Scripts\python.exe' } } catch {}
+# A busy/locked log must NEVER block the coordinator launch. Prefer the canonical
+# serve-service.log; if it cannot be opened for append (a stale or concurrent
+# process still holds the handle), fall back to a VERSION- and pid-aware file so
+# startup always has a writable log. (Previously a locked log threw under
+# -ErrorActionPreference Stop and killed the launch before serve ever ran.)
+function Resolve-WritableLog([string]`$primary, [string]`$slot) {
+    `$ver = if (`$slot) { Split-Path -Leaf `$slot } else { 'unknown' }
+    `$alt = (`$primary -replace '\.log`$', "-`$ver-`$PID.log")
+    foreach (`$cand in @(`$primary, `$alt)) {
+        try { `$fs = [System.IO.File]::Open(`$cand, 'Append', 'Write', 'ReadWrite'); `$fs.Close(); return `$cand } catch { }
+    }
+    return `$alt
+}
+`$logFile = Resolve-WritableLog (Join-Path `$PSScriptRoot 'serve-service.log') `$_slot
 try {
     if ((Test-Path `$logFile) -and ((Get-Item `$logFile).Length -gt 1MB)) {
         Move-Item -Force `$logFile "`$logFile.1"
@@ -903,8 +924,12 @@ try {
 } catch { }
 `$pinned = if (`$env:AGENT_DISPATCH_HOST) { `$env:AGENT_DISPATCH_HOST } else { 'auto (resolved by serve)' }
 `$portShown = if (`$env:AGENT_DISPATCH_PORT) { `$env:AGENT_DISPATCH_PORT } else { 'default' }
-"[`$(Get-Date -Format o)] agent-dispatch coordinator launch (host=`$pinned port=`$portShown)" |
-    Out-File -FilePath `$logFile -Append -Encoding utf8
+# Banner write is best-effort -- a logging hiccup must not be fatal (wrapped so a
+# late lock on the resolved path still can't kill startup).
+try {
+    "[`$(Get-Date -Format o)] agent-dispatch coordinator launch (host=`$pinned port=`$portShown log=`$logFile)" |
+        Out-File -FilePath `$logFile -Append -Encoding utf8
+} catch { }
 # Tee every stream (stdout/stderr/warning/info) to the log while still writing
 # through, so the retry lines from serve's bind-host resolution are captured.
 # serve logs via uvicorn to STDERR; under `$ErrorActionPreference = 'Stop'`
@@ -912,14 +937,14 @@ try {
 # and would kill the long-lived coordinator on its very first log line (observed
 # on Lambda-Core: task launched, banner written, no listener). Drop to
 # 'Continue' for the serve invocation so stderr is captured, never fatal.
-`$_venv = '$($LinkDir -replace "'","''")'
-`$_py = '$($LinkPython -replace "'","''")'
-# Resolve the .venv junction's target and launch the slot python DIRECTLY -- never
-# *traverse* the junction (a RedirectionGuard task context is blocked from that,
-# though it may still *read* the target) -- dotfiles #637. Plain-dir keeps `$_py.
-try { `$_t = (Get-Item -LiteralPath `$_venv -Force -ErrorAction Stop).Target; if (`$_t) { `$_py = Join-Path (@(`$_t)[0]) 'Scripts\python.exe' } } catch {}
 `$ErrorActionPreference = 'Continue'
-& `$_py -m agent_dispatch serve 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
+try {
+    & `$_py -m agent_dispatch serve 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
+} catch {
+    # Teeing to the log failed (e.g. it got locked after resolution) -- keep the
+    # coordinator alive without the tee rather than let logging kill the service.
+    & `$_py -m agent_dispatch serve *> `$null
+}
 "@
     [System.IO.File]::WriteAllText($launcher, $launcherBody, $utf8NoBom)
 
@@ -1192,21 +1217,40 @@ foreach (`$hl in (`$headlessLabels -split '[\s,]+')) {
 }
 if (`$headlessAgent) { `$argsList += @('--headless-agent', `$headlessAgent) }
 if (`$extra) { `$argsList += (`$extra -split '\s+') }
-`$logFile = Join-Path `$PSScriptRoot 'supervise-service.log'
+# Resolve the .venv junction's target and launch the slot python DIRECTLY (never
+# traverse the junction; reading its target is allowed) -- RedirectionGuard #637.
+# Resolved up front so the version (`$_slot leaf) is available for the log fallback.
+`$_venv = '$($LinkDir -replace "'","''")'
+`$_py = '$($LinkPython -replace "'","''")'
+`$_slot = ''
+try { `$_t = (Get-Item -LiteralPath `$_venv -Force -ErrorAction Stop).Target; if (`$_t) { `$_slot = @(`$_t)[0]; `$_py = Join-Path `$_slot 'Scripts\python.exe' } } catch {}
+# A busy/locked log must NEVER block the supervisor launch -- prefer the canonical
+# supervise-service.log, else a VERSION- and pid-aware fallback (see serve-service).
+function Resolve-WritableLog([string]`$primary, [string]`$slot) {
+    `$ver = if (`$slot) { Split-Path -Leaf `$slot } else { 'unknown' }
+    `$alt = (`$primary -replace '\.log`$', "-`$ver-`$PID.log")
+    foreach (`$cand in @(`$primary, `$alt)) {
+        try { `$fs = [System.IO.File]::Open(`$cand, 'Append', 'Write', 'ReadWrite'); `$fs.Close(); return `$cand } catch { }
+    }
+    return `$alt
+}
+`$logFile = Resolve-WritableLog (Join-Path `$PSScriptRoot 'supervise-service.log') `$_slot
 try {
     if ((Test-Path `$logFile) -and ((Get-Item `$logFile).Length -gt 1MB)) {
         Move-Item -Force `$logFile "`$logFile.1"
     }
 } catch { }
-"[`$(Get-Date -Format o)] agent-dispatch supervisor launch (labels=`$labels interval=`$interval)" |
-    Out-File -FilePath `$logFile -Append -Encoding utf8
-`$_venv = '$($LinkDir -replace "'","''")'
-`$_py = '$($LinkPython -replace "'","''")'
-# Resolve the .venv junction's target and launch the slot python DIRECTLY (never
-# traverse the junction; reading its target is allowed) -- RedirectionGuard #637.
-try { `$_t = (Get-Item -LiteralPath `$_venv -Force -ErrorAction Stop).Target; if (`$_t) { `$_py = Join-Path (@(`$_t)[0]) 'Scripts\python.exe' } } catch {}
+try {
+    "[`$(Get-Date -Format o)] agent-dispatch supervisor launch (labels=`$labels interval=`$interval log=`$logFile)" |
+        Out-File -FilePath `$logFile -Append -Encoding utf8
+} catch { }
 `$ErrorActionPreference = 'Continue'
-& `$_py -m agent_dispatch @argsList 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
+try {
+    & `$_py -m agent_dispatch @argsList 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
+} catch {
+    # Teeing to the log failed -- keep the supervisor alive without the tee.
+    & `$_py -m agent_dispatch @argsList *> `$null
+}
 "@
     [System.IO.File]::WriteAllText($launcher, $launcherBody, $utf8NoBom)
 
