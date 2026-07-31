@@ -10106,7 +10106,10 @@ def build_parser() -> argparse.ArgumentParser:
         "register-project-entry",
         help="Write a lean projects.yaml entry (installer-invoked; the single "
              "Python owner of the registry write)")
-    sp.add_argument("--project", required=True, help="Project name")
+    # Positional (NOT --project): main() pre-pops a global --project/-p flag as
+    # the active-project selector, so a --project flag here would be swallowed
+    # before argparse dispatches to this subparser.
+    sp.add_argument("project", help="Project name")
     sp.add_argument("--repo-dir", default=None,
                     help="Anchor dir (only for WSL path capture; not persisted)")
     sp.add_argument("--display-name", default=None,

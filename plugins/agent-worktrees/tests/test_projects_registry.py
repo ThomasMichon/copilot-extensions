@@ -143,6 +143,18 @@ def _entry_args(**over) -> argparse.Namespace:
     return argparse.Namespace(**base)
 
 
+def test_subcommand_uses_positional_project_not_flag():
+    """Regression: the project must be POSITIONAL. main() pre-pops a global
+    --project/-p selector before argparse, so a --project flag here would be
+    swallowed and the installer registration would silently no-op."""
+    ns = m.build_parser().parse_args(["register-project-entry", "myproj"])
+    assert ns.project == "myproj"
+    # And the extractor that caused the collision leaves a positional alone.
+    remaining, project = m._extract_project_flag(["register-project-entry", "myproj"])
+    assert project is None
+    assert remaining == ["register-project-entry", "myproj"]
+
+
 def test_subcommand_resolves_expose_agent_from_repos(monkeypatch, tmp_path: Path):
     target = _patch_registry_path(monkeypatch, tmp_path)
 
