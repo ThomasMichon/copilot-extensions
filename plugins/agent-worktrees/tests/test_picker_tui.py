@@ -4182,6 +4182,9 @@ def test_registered_pivot_action_menu_runs_and_invalidates(tmp_path, monkeypatch
             assert menu is not None
             assert [a.label for a in menu._actions] == [
                 "Open into a CLI session", "Abandon"]
+            # NF1: the action list is a native, focused Textual OptionList.
+            from textual.widgets import OptionList
+            assert menu.query_one(OptionList).has_focus
 
             # Select "Abandon" (idx 1) and run it through the real pipeline.
             await pilot.press("down")
