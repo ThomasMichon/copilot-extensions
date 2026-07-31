@@ -28,6 +28,11 @@ def test_deploys_marked_warning_when_fix_unreleased(tmp_path: Path, monkeypatch)
     path = _warning_file(home)
     assert path.exists(), "warning should deploy when the fix is unreleased"
     text = path.read_text(encoding="utf-8")
+    # Frontmatter is REQUIRED for a $HOME/.copilot/instructions/*.instructions.md
+    # file to be applied, and must be the very first thing in the file.
+    assert text.startswith("---\n"), "YAML frontmatter must be first"
+    assert "applyTo: '**'" in text, "applyTo glob makes it always-apply"
+    assert "description:" in text
     assert m._INSTRUCTION_MARKER in text
     assert "Bare resume" in text
     assert "github/copilot-agent-runtime#13492" in text

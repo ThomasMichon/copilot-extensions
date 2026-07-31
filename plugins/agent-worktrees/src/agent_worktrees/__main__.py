@@ -6628,6 +6628,20 @@ def _deploy_worktree_conduct(proj_dir: Path) -> None:
 # after the fleet upgrades.
 _EXT_RELOAD_FIX_VERSION: str | None = None
 
+# Files under $HOME/.copilot/instructions/**/*.instructions.md are MODULAR,
+# path-specific instructions: the Copilot CLI only applies them when their
+# ``applyTo`` glob matches, and YAML frontmatter (description + applyTo) is
+# REQUIRED. Without it the file is discovered but never applied (this bit us --
+# the warning silently didn't load). ``applyTo: '**'`` is the documented
+# always-apply pattern, so this reaches every session regardless of cwd/file.
+_EXT_RELOAD_FRONTMATTER = (
+    "---\n"
+    "description: 'Temporary warning about the CAR extension-reload "
+    "Loading/Resuming hang (github/copilot-agent-runtime#13494)'\n"
+    "applyTo: '**'\n"
+    "---\n"
+)
+
 _EXT_RELOAD_WARNING = """# Known CLI bug: extension-reload "Loading…/Resuming…" hang (temporary)
 
 Applies while running Copilot CLI with worktree-based plugins that load at least
@@ -6717,7 +6731,13 @@ def _deploy_ext_reload_warning() -> None:
     to call from every install/update path; never touches unmarked user files.
     """
     path = _ext_reload_warning_path()
-    content = f"{_INSTRUCTION_MARKER}\n{_EXT_RELOAD_WARNING}"
+    # Frontmatter MUST be the first thing in the file (line 1 ``---``); the
+    # ownership marker follows it as an HTML comment (substring detection for
+    # idempotency + safe removal still works wherever the marker sits).
+    content = (
+        f"{_EXT_RELOAD_FRONTMATTER}"
+        f"{_INSTRUCTION_MARKER}\n{_EXT_RELOAD_WARNING}"
+    )
 
     if _ext_reload_bug_affects_cli():
         path.parent.mkdir(parents=True, exist_ok=True)
