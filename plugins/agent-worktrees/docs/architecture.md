@@ -962,4 +962,41 @@ inherits Textual's `$panel`/`$primary` (blue) tokens -- repinned via the
 for checked (the picker's ☐/☑ idiom), on `$surface`. Same `$surface` +
 reverse-highlight + framed-layout craft as the menu slices.
 
+**NF1 slice 4 -- `SubMenuScreen` (the per-worktree action menu) -> native
+`OptionList` + a native `Checkbox` for No-mux.** The trickiest NF1 modal: a
+single-select verb menu (Open/Resume, Messages, Sync, Cleanup, Finalize, Stop,
+Reclaim, Jump to host/caller, plus contributed actions) *and* a boolean modifier
+(No-mux) that previously rode on the Open verb -- a hand-rolled `idx` + `on_key`
+over a static `Panel`, where **Space toggled No-mux only while Open was
+highlighted** and the label mutated to "Open · no-mux". It now composes a native
+Textual **`OptionList`** for the verbs (the framework owns focus, up/down, and
+Enter-to-select; a description pane tracks the highlight via `OptionHighlighted`)
+inside the same orange-framed `Vertical` as the other menus, above a description
+pane, with the header (title + meta + session id) on top. Per an explicit operator
+steer -- *"remove any specific keyboarding requirement for no-mux"* -- **No-mux is
+now a native, Tab-focusable `Checkbox`** (shown only when *Open* is offered, since
+it modifies only Open): Tab to it, Space/Enter to tick, no more Space-only-while-
+Open modifier. The screen's `no_mux` became a property reading straight off that
+checkbox, so `dismiss((verb, no_mux))` and every caller (`_after`,
+`_resume_decision`) are unchanged; `_open_submenu` and the ~20 tests reading
+`menu._actions` / `menu.no_mux` still hold (the one toggle test was rewritten to
+Tab-to-checkbox). The Checkbox's `$primary`-blue check glyph was repinned to the
+picker's dim-grey / green idiom, matching the `SelectionList` treatment.
+
+A palette gotcha this slice surfaced (caught by the A/B render, invisible to the
+all-green behaviour tests): Textual's `OptionList` applies `&:focus {
+background-tint: $foreground 5% }` to the *whole* focused list, and its
+`OptionList:focus > .option-list--option-highlighted` rule (higher specificity than
+a plain `.option-list--option-highlighted` override) repaints the highlighted row
+with `$block-cursor-background`. Net effect on a multi-option focused menu: the
+selected row looked **recessed** while the *non*-selected rows carried a distracting
+grey band -- an inverted focus affordance. Fixed by (a) neutralising the tint with
+`OptionList:focus { background-tint: $surface 0% }` and (b) adding the `:focus >
+.option-list--option-highlighted` variant to the highlight override so the picker's
+reverse-bar wins. The same two lines were applied to `CfgMenuScreen`,
+`MaintMenuScreen`, and `TaskMenuScreen` (identical idiom, same Textual default) so
+every native menu renders its focused option consistently whenever it lists 2+
+options. `render.py` gained `--modal submenu` (and `--modal maint`) openers for the
+standing A/B habit.
+
 
