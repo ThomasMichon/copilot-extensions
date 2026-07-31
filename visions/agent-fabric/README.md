@@ -5,7 +5,7 @@
   spanning worktrees, machines, CodeSpaces, and containers.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-07-26
+- **Last revised:** 2026-07-31
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
   `docs/architecture.md`
@@ -181,6 +181,22 @@ intent signals, needing no cooperation, giving a rapid — if coarse — sense o
 current motion. The disposition is high-signal and slow; the pulse is low-signal
 and fast; neither is faked from the other.
 
+### resource-claims
+Every worktree carries a **legible claim ledger** — the resources and work it is
+responsible for — answerable in **both directions**: *what does this worktree
+hold?* and *who holds this resource?* Claims come in two complementary
+directions. **Outbound** claims are the resources a worktree **produces and
+owns**: pull requests it opened, worktrees it spun up in **other repos**,
+CodeSpaces and containers it provisioned, SSH connections it leased, working
+directories it took. **Inbound** claims are the external work a worktree **pulls
+in and takes responsibility for**: a tracked bug or work item, a pull request it
+adopted for review or maintenance, an effort or vision it is advancing. The
+dividing line is **direction of creation** — who brought the thing into the
+system — not a rigid taxonomy; a resource that blurs the line is placed by which
+worktree originated it. The ledger makes a worktree's true footprint
+first-class: a resource is never an anonymous orphan, and a worktree is never a
+black box about what it is using elsewhere.
+
 ### externally-observable
 Beyond the fabric's own picker legibility, each layer's lifecycle is
 **externally observable** through a **backend-agnostic telemetry seam**: a layer
@@ -217,6 +233,19 @@ credentials) has a **single owning layer**. Higher layers **read and coordinate
 over** lower-layer state; they do not persist a competing copy. Cross-layer
 answers (e.g. "who is on this target, and are they live or parked?") are
 **derived** at read time from the owning layers, not stored anew.
+
+### claims-owned-by-direction
+The two halves of a worktree's claim ledger (§Features/*resource-claims*) have
+**different owning layers**, per *derive-dont-duplicate*. **Outbound** claims —
+the resources a worktree creates and manages — are owned by the **ground
+layer**, which already owns the worktree and everything spun from it. **Inbound**
+claims — the external work a worktree takes on — are owned by the **delegation
+layer**, which already owns the claimable task. Neither half is copied into a
+third store: the fabric **derives** a worktree's *full* ledger by reading both
+owning layers at read time. Each half resolves **both ways** from its owner —
+worktree→its claims, and claim→its owning worktree — so the reverse lookup
+(which worktree holds this pull request, container, or task?) is always
+answerable without a central registry.
 
 ### passive-legibility-floor
 The ground layer is legible **without any running service** — its state is
@@ -258,6 +287,19 @@ process **loses nothing**: the agent stays **resumable** from its recovered stat
 so the fabric owns process lifetime by *connection and activity* while the
 consumer need only connect and disconnect. The complement of *recover-not-lose*:
 one keeps *work* from vanishing; this keeps *idle processes* from accumulating.
+
+### claimed-resource-not-reclaimed
+A resource with a **live claimant is never reclaimed** — not pruned, reaped, or
+garbage-collected as idle — even when its claimant lives in a **different
+worktree, repo, or machine**. A cross-repo worktree spun up as a resource, a
+provisioned container or CodeSpace, a leased SSH connection: each stays held
+while its claiming worktree/session is alive, and becomes reclaimable **only when
+its claimant is confirmed gone** — the outbound expression of
+*reclaim-idle-process* and the delegation layer's *liveness-not-lease*. A sweep
+that cannot see a resource's claimant must treat it as **potentially owned**, not
+assume it abandoned: absence of a *local* owner is not proof of *no* owner. This
+is what keeps an actively-owned resource from being mistaken for an orphan and
+torn out from under the worktree still using it.
 
 ### summary-status-is-first-class
 The fabric distinguishes an agent's **in-conversation messages** (what it is
@@ -394,3 +436,18 @@ degrades to the same claimable record, not to a silent no-op.
   environment variable; the attachment mechanism and on-disk config shape stay
   spec-level. Paired with the leaf `visions/plugins/agent-dispatch`
   *observable-lifecycle* feature.
+- **2026-07-31** — Added §Features/`resource-claims` and §Behaviors/
+  `claims-owned-by-direction` + `claimed-resource-not-reclaimed`: a worktree
+  carries a **claim ledger** of the resources and work it is responsible for,
+  split by **direction** — *outbound* (resources it produces/owns: pull requests,
+  cross-repo worktrees, CodeSpaces, containers, SSH connections, working
+  directories) owned by the ground layer, *inbound* (external work it takes on:
+  bugs, review PRs, efforts/visions) owned by the delegation layer — each
+  resolvable both ways, the union derived not duplicated, and a resource never
+  reclaimed while its claimant lives (even cross-repo/cross-machine). Mined from
+  a concrete seam: an agent editing a **cross-repo** worktree as a resource left
+  no ownership trace, so a machine-local, point-in-time prune sweep could not
+  tell an actively-owned resource worktree from an abandoned one. Generalizes the
+  existing same-repo bridge caller-link into a directional, cross-repo claim
+  model, and states the safety rule (absence of a *local* owner is not proof of
+  no owner) that a reaper must honor.

@@ -6,7 +6,7 @@
   version-control remote or minting an account per agent.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-07-26
+- **Last revised:** 2026-07-31
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's `plugins/agent-dispatch/` (skill `agent-dispatch`, `pick-and-claim`)
 
@@ -63,6 +63,17 @@ worktree; a task addressed to a worktree sticks to it, while an unaddressed task
 floats to any capable worker. This is what lets a claimed, embodied task be
 joined back to the live session doing it — the delegation layer *derives* that
 liveness from the ground/coordination layers rather than keeping its own copy.
+
+Because the claim is stamped to the worktree, a task resolves **both ways** — a
+worktree enumerates the tasks it holds, and any task resolves back to the
+worktree that claimed it. This is the **inbound half** of a worktree's fabric
+**claim ledger** (parent vision §Features/*resource-claims*): the external work a
+worktree has taken responsibility for — bugs and work items, pull requests
+adopted for review or maintenance, efforts or visions it is advancing — the
+delegation-layer counterpart of the ground layer's *outbound* resource claims.
+Both halves are derived from their owning layer, never merged into a third
+store, and each answers the reverse lookup (which worktree holds this?) on its
+own.
 
 ### Producers — the four ways tasks are created
 The coordinator only owns the queue; anything that *creates* a task is a
@@ -261,3 +272,12 @@ this layer.)
   runtime. Crystallizes the *process-to-process over a declared transport, not a
   shared runtime* property behind the seam. Mined from an operator steer to treat
   the plugin's own runtime as sealed and integrate telemetry process-to-process.
+- **2026-07-31** — Extended §Concepts/*Worker identity — the worktree* with the
+  **inbound-claims** framing: a claim stamped to a worktree makes claimed work
+  resolvable **both ways** (worktree→its tasks, task→its claimant), and is the
+  **inbound half** of a worktree's fabric claim ledger (parent §Features/
+  *resource-claims*) — the delegation-layer counterpart of the ground layer's
+  outbound resource claims. Mined alongside the parent revision that introduced
+  the directional claim model; states the reverse-lookup intent already implied
+  by claim-stamped-to-worktree, and names this layer as the owner of the inbound
+  half (both halves derived, never merged).
