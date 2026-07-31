@@ -1158,6 +1158,20 @@ untouched monolith). NF5 will invert the bridge (native focus becomes the source
 truth and `sel`/`stops`/`_dispatch_key` retire), and NF4 makes the data rows
 individually focusable within `_PickerBodyData`.
 
+**NF4 (in progress) -- pointer parity for the focusable regions.** The first NF4
+step leverages a native capability the hand-rolled `sel` model never had: the
+mouse. `_FocusRegion.on_click` focuses the clicked region (Textual focuses a
+focusable widget on press; `on_focus` then points `sel` at the region head).
+`_PickerBodyData` overrides `on_click` to address a finer target -- it maps the
+click's row offset onto the drawn window (`_data_stop_at`, which shares
+`_data_window` with the renderer so a click hits exactly the row that was drawn)
+and, when it lands on a real data row, points `sel` there and lets single-select
+track focus (`_wt_track_focus`). Scroll-wheel over the data body moves the
+selection (`on_mouse_scroll_down`/`up` -> `_dispatch_key`). Verified by
+`test_nf_pointer_click_selects_data_row`. Still toggle-gated; the full native list
+widget (rows as individual native options) and NF5's retirement of the manual model
+remain.
+
 
 
 

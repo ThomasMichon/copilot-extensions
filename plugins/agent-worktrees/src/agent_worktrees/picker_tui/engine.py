@@ -502,6 +502,12 @@ class _FocusRegion(Widget):
         scr._sync_focus_to_sel()
         scr.refresh()
 
+    def on_click(self, event) -> None:
+        # Pointer parity (#88 NF4): clicking a region focuses it (Textual does
+        # this for a focusable widget; on_focus then points sel at the region
+        # head). Subclasses that address a finer target (a data row) override.
+        event.stop()
+
 
 class _PickerPivots(_FocusRegion):
     """The WORKTREES/Tasks/Bridges pivot-tabs row + ⚙ Configuration entry, as a
@@ -571,6 +577,35 @@ class _PickerBodyData(_FocusRegion):
         _chrome, data = scr._build_body_split(W)
         h = max(1, self.size.height or 1)
         return scr._join_lines(scr._data_lines(data, h), W)
+
+    def on_click(self, event) -> None:
+        # Click-to-select a data row (#88 NF4): map the click's row offset onto
+        # the drawn window and, if it lands on a real data row, point sel there
+        # (Textual has already focused this region on the press).
+        scr = self._screen
+        event.stop()
+        W = scr.size.width or 100
+        _chrome, data = scr._build_body_split(W)
+        h = max(1, self.size.height or 1)
+        stop = scr._data_stop_at(data, h, int(event.y))
+        if stop is not None:
+            scr.sel = stop
+            scr._wt_track_focus()
+            scr.refresh()
+
+    def on_mouse_scroll_down(self, event) -> None:
+        scr = self._screen
+        event.stop()
+        scr._dispatch_key("down")
+        scr._sync_focus_to_sel()
+        scr.refresh()
+
+    def on_mouse_scroll_up(self, event) -> None:
+        scr = self._screen
+        event.stop()
+        scr._dispatch_key("up")
+        scr._sync_focus_to_sel()
+        scr.refresh()
 
 
 class PickerScreen(Widget):
@@ -1974,6 +2009,14 @@ class PickerScreen(Widget):
         """The windowed data-body rows for the compose tree's data widget --
         scroll + sticky over just the data rows (the fixed chrome renders
         separately above), padded to ``data_h`` (#88 NF3)."""
+        return [vr.text if isinstance(vr, VRow) else vr
+                for vr in self._data_window(data_vrows, data_h, pad=True)]
+
+    def _data_window(self, data_vrows, data_h, pad=False):
+        """The concrete window of data VRows (with the sticky section header
+        substituted at the top when scrolled) -- shared by ``_data_lines`` (render)
+        and ``_data_stop_at`` (pointer hit-testing) so a click maps to exactly the
+        row that was drawn (#88 NF4)."""
         self._ensure_data_visible(data_vrows, data_h)
         window = data_vrows[self._data_top: self._data_top + data_h]
         sticky = self._data_sticky(data_vrows, data_h)
@@ -1982,10 +2025,23 @@ class PickerScreen(Widget):
                 window[i] = s
             else:
                 window.append(s)
-        lines = [vr.text if isinstance(vr, VRow) else vr for vr in window]
-        while len(lines) < data_h:
-            lines.append(Text(""))
-        return lines
+        if pad:
+            window = list(window)
+            while len(window) < data_h:
+                window.append(Text(""))
+        return window
+
+    def _data_stop_at(self, data_vrows, data_h, y):
+        """The ``sel`` stop of the data row drawn at visible offset ``y`` in the
+        data body, or ``None`` (blank line, sticky/section header, out of range)
+        -- for click-to-select (#88 NF4)."""
+        window = self._data_window(data_vrows, data_h)
+        if 0 <= y < len(window):
+            vr = window[y]
+            stop = getattr(vr, "stop", None)
+            if stop is not None:
+                return stop
+        return None
 
     def _chrome_split(self, chrome):
         """Split the pivot's chrome vrows into ``(machine_vrows, button_vrows)``

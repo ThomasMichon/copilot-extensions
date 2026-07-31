@@ -3819,6 +3819,42 @@ def test_nf_focus_bridge_tab_moves_between_regions(monkeypatch):
     asyncio.run(run())
 
 
+def test_nf_pointer_click_selects_data_row(monkeypatch):
+    """NF4 (#88): clicking a data row in the compose tree points sel at that row
+    (pointer parity the manual model never had), and focuses the data region."""
+    from agent_worktrees.picker_tui.engine import _PickerBodyData
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NF", "1")
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            bd = scr.query_one("#nf-body-data", _PickerBodyData)
+            W = scr.size.width or 100
+            _c, data = scr._build_body_split(W)
+            h = max(1, bd.size.height or 1)
+            # Find a visible offset that maps to a real worktree row.
+            target = None
+            for y in range(h):
+                stop = scr._data_stop_at(data, h, y)
+                if stop and stop[0] == "L":
+                    target = (y, stop)
+                    break
+            assert target is not None, "no data row visible to click"
+            y, stop = target
+            await pilot.click(bd, offset=(10, y))
+            await pilot.pause()
+            assert scr.sel == stop
+            assert app.focused.id == "nf-body-data"
+
+    asyncio.run(run())
+
+
 def test_build_body_split_recomposes_monolith():
     """NF3 (#88): _build_body_split's chrome + data rows recompose build_body
     byte-for-byte for every pivot -- the untangle is a pure decomposition, so the
