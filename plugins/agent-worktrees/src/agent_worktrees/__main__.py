@@ -475,6 +475,7 @@ def _worktree_to_dict(
         "id": rec.worktree_id,
         "branch": rec.branch,
         "path": rec.worktree_path,
+        "repo": rec.repo,
         "machine": rec.machine,
         "platform": rec.platform,
         "status": rec.status,
@@ -507,6 +508,22 @@ def _worktree_to_dict(
     # "Jump to caller" from a bridge worktree.
     if rec.caller_worktree:
         d["caller_worktree"] = rec.caller_worktree
+    # resource-claims: expose the backward owner link + forward outbound claim
+    # list so the ledger view (and consumers like `run`) can read a worktree's
+    # full claim set. Emitted only when present, keeping the envelope lean.
+    if rec.owner_ref:
+        d["owner_ref"] = rec.owner_ref
+    if rec.resources:
+        d["resources"] = [
+            {
+                "kind": c.kind,
+                "ref": c.ref,
+                "created_at": c.created_at,
+                "state": c.state,
+                **({"note": c.note} if c.note else {}),
+            }
+            for c in rec.resources
+        ]
     if state_info is not None:
         d["state"] = state_info.state.value
         d["ahead"] = state_info.ahead
@@ -599,6 +616,7 @@ def _create_worktree_core(
     name: str | None = None,
     parent_session: str | None = None,
     caller_worktree: str | None = None,
+    owner_ref: str | None = None,
 ) -> dict:
     """Create a new worktree and return a dict with worktree info + launch plan.
 
@@ -672,6 +690,10 @@ def _create_worktree_core(
         # #2178: for a bridge spawn, record the caller worktree so the Picker can
         # jump back to it.
         caller_worktree=caller_worktree or None,
+        # resource-claims: the qualified backward owner link, for a worktree
+        # spun up as another worktree's outbound resource (stamped by `run` /
+        # an explicit --owner-ref). Absent = unclaimed.
+        owner_ref=owner_ref or None,
     )
 
     # Clone permissions
@@ -4657,6 +4679,15 @@ def cmd_create(args: argparse.Namespace) -> int:
     Copilot -- a daemon uses only the returned ``path``.
     """
     is_system = getattr(args, "system", False)
+    # resource-claims: an explicit --owner-ref flag wins; otherwise inherit the
+    # ambient AGENT_WORKTREES_OWNER_REF injected by a `run` wrapper. Stamped only
+    # on non-system (session) worktrees -- a daemon worktree is not an outbound
+    # resource of another worktree.
+    owner_ref = (
+        None if is_system
+        else (getattr(args, "owner_ref", None)
+              or os.environ.get("AGENT_WORKTREES_OWNER_REF") or None)
+    )
     with output.stdout_to_stderr():
         try:
             config = cfg.load_config()
@@ -4668,6 +4699,7 @@ def cmd_create(args: argparse.Namespace) -> int:
                 name=getattr(args, "name", None) if is_system else None,
                 interface=getattr(args, "interface", None),
                 origin=getattr(args, "origin", None),
+                owner_ref=owner_ref,
             )
         except Exception as e:
             if args.json:
@@ -4685,6 +4717,146 @@ def cmd_create(args: argparse.Namespace) -> int:
     print(f"   Path:   {wt['path']}")
     print(f"   Branch: {wt['branch']}")
     return 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# run -- execute an inner subcommand and journal the resource it produces as an
+# outbound claim on THIS (the calling) worktree (agent-fabric resource-claims)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _resolve_owner_ref() -> str | None:
+    """Build this worktree's qualified owner ref from the current context.
+
+    Resolves the calling worktree id from the CWD (git-identity first), then
+    qualifies it with machine + active project (+ session) so a claim stamped
+    on a resource resolves back here across repos/machines. Returns None when
+    the caller is not inside a managed worktree.
+    """
+    try:
+        config = cfg.load_config()
+    except Exception:
+        return None
+    caller_id = _infer_worktree_id_from_cwd(config)
+    if not caller_id:
+        return None
+    try:
+        project = cfg.project_name()
+    except Exception:
+        project = config.repo_name
+    session = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
+    return tracking.format_claim_ref(config.machine, project, caller_id, session)
+
+
+def _claim_from_run_output(stdout: str) -> tracking.ResourceClaim | None:
+    """Recognize the resource an inner command produced from its JSON output.
+
+    Currently understands the ``create`` envelope (``{"worktree": {...}}``) and
+    the bare worktree dict. Unknown shapes yield None (no forward claim; the
+    backward link via the injected env still applies). New resource kinds add a
+    recognizer here without a schema change.
+    """
+    try:
+        data = json.loads(stdout)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    wt = data.get("worktree")
+    if not isinstance(wt, dict):
+        # Tolerate a bare worktree dict (``{"id": ..., "machine": ...}``).
+        wt = data if data.get("id") and data.get("machine") else None
+    if not isinstance(wt, dict):
+        return None
+    wid = wt.get("id")
+    machine = wt.get("machine")
+    project = wt.get("repo")
+    if not wid or not machine:
+        return None
+    ref = tracking.format_claim_ref(str(machine), str(project) if project else None,
+                                    str(wid))
+    return tracking.ResourceClaim(
+        kind="worktree",
+        ref=ref,
+        created_at=tracking._now_iso(),
+        state="active",
+    )
+
+
+def _journal_run_claim(owner_ref: str, stdout: str) -> tracking.ResourceClaim | None:
+    """Append the produced-resource claim to the caller's tracking record.
+
+    The caller (owner) record lives in the active project's tracking dir --
+    which is the caller's project, since ``main`` resolved context from the
+    caller's CWD before ``run`` executed the (possibly cross-repo) child.
+    """
+    claim = _claim_from_run_output(stdout)
+    if claim is None:
+        return None
+    parsed = tracking.parse_claim_ref(owner_ref)
+    if parsed is None:
+        return None
+    rec_path = cfg.tracking_dir() / f"{parsed.worktree_id}.yaml"
+    if not rec_path.exists():
+        return None
+    record = tracking.load_record(rec_path)
+    tracking.add_resource_claim(record, claim, save=False)
+    tracking.save_record(record, rec_path)
+    return claim
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    """Run an inner subcommand and journal the resource it produces as an
+    outbound claim on THIS worktree.
+
+    Run it from the OWNER worktree: it resolves this worktree's identity from
+    its own context, executes the (possibly cross-repo) inner subcommand with
+    ``AGENT_WORKTREES_OWNER_REF`` injected -- so a resource-creating command
+    stamps the *backward* owner link -- then parses the child's JSON output to
+    journal the *forward* ``ResourceClaim`` here. The child's stdout is passed
+    through verbatim and its exit code is propagated, so ``run`` is transparent.
+    """
+    raw = list(getattr(args, "command", None) or [])
+    if not raw:
+        output.err('run: no subcommand given. Usage: run "<subcommand ...>"')
+        return 2
+    # Accept either a single quoted string or trailing tokens.
+    cmd_str = raw[0] if len(raw) == 1 else " ".join(raw)
+
+    owner_ref = getattr(args, "owner_ref", None) or _resolve_owner_ref()
+    if not owner_ref:
+        output.err(
+            "run: could not resolve the calling worktree from the current "
+            "directory -- running the inner command WITHOUT journaling a claim. "
+            "Run from inside a managed worktree, or pass --owner-ref.")
+
+    child_env = dict(os.environ)
+    if owner_ref:
+        child_env["AGENT_WORKTREES_OWNER_REF"] = owner_ref
+
+    # Capture stdout (to parse the produced resource) while stderr streams
+    # through; re-emit stdout verbatim so callers/pipes see the child output.
+    try:
+        proc = subprocess.run(
+            cmd_str, shell=True, env=child_env,
+            stdout=subprocess.PIPE, text=True,
+        )
+    except Exception as e:
+        output.err(f"run: failed to execute inner command: {e}")
+        return 1
+    child_stdout = proc.stdout or ""
+    sys.stdout.write(child_stdout)
+    sys.stdout.flush()
+
+    if owner_ref and proc.returncode == 0 and child_stdout.strip():
+        try:
+            claim = _journal_run_claim(owner_ref, child_stdout)
+            if claim is not None:
+                output.err(f"run: journaled outbound claim {claim.ref} "
+                           f"({claim.kind}) on {owner_ref}")
+        except Exception as e:
+            output.err(f"run: could not journal claim: {e}")
+
+    return proc.returncode
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -8097,6 +8269,7 @@ def _service_is_installed(service: svc.ServiceInfo) -> bool:
 # Worktree namespace verb -> canonical top-level command.
 _WORKTREE_VERBS = {
     "create": "create",
+    "run": "run",
     "remove-system": "remove-system",
     "list": "list",
     "status": "status",
@@ -10247,10 +10420,30 @@ def build_parser() -> argparse.ArgumentParser:
                         "user = operator (NF/Picker), delegate = agent-spawned, "
                         "system = background/daemon. Default: derived from kind + "
                         "caller. Governs Picker/cockpit visibility. See #2668.")
+    p.add_argument("--owner-ref", default=None, dest="owner_ref",
+                   help="Qualified ref (machine/project/worktree_id[#session]) of "
+                        "the worktree that owns this one as an outbound resource. "
+                        "Usually injected by `run` via AGENT_WORKTREES_OWNER_REF; "
+                        "the flag is the low-level primitive for scripts/tools "
+                        "that already know both sides.")
     p.add_argument("--json", action="store_true",
                    help="JSON output mode (stdout is JSON only)")
 
-    # remove-system (tear down a system worktree by id)
+    # run (execute an inner subcommand; journal the resource it produces as an
+    # outbound claim on THIS worktree -- resource-claims)
+    p = sub.add_parser(
+        "run",
+        help="Run an inner (possibly cross-repo) subcommand and journal the "
+             "resource it produces as an outbound claim on THIS worktree "
+             '(e.g. run "<other-project> create --json")',
+    )
+    p.add_argument("--owner-ref", default=None, dest="owner_ref",
+                   help="Override the auto-resolved owner ref "
+                        "(machine/project/worktree_id[#session]) for the calling "
+                        "worktree. Default: resolved from the current directory.")
+    p.add_argument("command", nargs=argparse.REMAINDER,
+                   help='The inner subcommand to run, as a quoted string or '
+                        'trailing tokens (e.g. "copilot-extensions create --json")')
     p = sub.add_parser("remove-system", help="Remove a system worktree by id")
     p.add_argument("worktree_id", help="Worktree id to remove")
     p.add_argument("--json", action="store_true",
@@ -11750,6 +11943,7 @@ COMMAND_MAP = {
     "embody": cmd_embody,
     "list": cmd_list,
     "create": cmd_create,
+    "run": cmd_run,
     "remove-system": cmd_remove_system,
     "cleanup": cmd_cleanup,
     "gc": cmd_gc,

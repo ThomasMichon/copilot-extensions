@@ -129,6 +129,115 @@ def _pr_is_terminal(pr: PRRecord) -> bool:
     return pr.state not in _PR_NON_TERMINAL
 
 
+# ---------------------------------------------------------------------------
+# Resource claims -- the outbound claim ledger (agent-fabric `resource-claims`)
+# ---------------------------------------------------------------------------
+
+# The kinds of outbound resource a worktree can own and claim. ``worktree`` is
+# a cross-repo worktree it spun up; the others are placeholders the ledger view
+# already understands so later phases can journal them without a schema change.
+ResourceKind = Literal["worktree", "codespace", "container", "ssh", "workdir", "pr"]
+
+# Claim lifecycle: "active" while the owner still holds the resource, "released"
+# once it explicitly lets go. Unknown/absent degrades to "active" so a stray
+# value never hides a live claim from the reap-safety check.
+_CLAIM_LIVE_STATES: tuple[str, ...] = ("", "active")
+
+
+@dataclass
+class ClaimRef:
+    """A parsed qualified reference to a claimed resource / owning worktree.
+
+    Canonical string form: ``<machine>/<project>/<worktree_id>[#<session>]`` --
+    enough to resolve **across repos and machines**, unlike the bare same-repo
+    ``caller_worktree`` (which parses here as machine=None, project=None so both
+    can share one parser). ``worktree_id`` is always present; the coarser fields
+    are None when the ref was bare.
+    """
+
+    worktree_id: str
+    machine: str | None = None
+    project: str | None = None
+    session: str | None = None
+
+    @property
+    def is_qualified(self) -> bool:
+        """True when the ref carries machine + project (cross-repo-resolvable)."""
+        return bool(self.machine and self.project)
+
+    def canonical(self) -> str:
+        """Render back to the canonical string form."""
+        return format_claim_ref(
+            self.machine, self.project, self.worktree_id, self.session
+        )
+
+
+def format_claim_ref(
+    machine: str | None,
+    project: str | None,
+    worktree_id: str,
+    session: str | None = None,
+) -> str:
+    """Build the canonical ``<machine>/<project>/<worktree_id>[#<session>]`` ref.
+
+    When machine/project are absent the ref degrades to the bare
+    ``worktree_id`` (the legacy same-repo form), so a same-repo owner reads
+    identically through :func:`parse_claim_ref`.
+    """
+    core = worktree_id
+    if machine and project:
+        core = f"{machine}/{project}/{worktree_id}"
+    return f"{core}#{session}" if session else core
+
+
+def parse_claim_ref(ref: str) -> ClaimRef | None:
+    """Parse a claim ref string into a :class:`ClaimRef`, or None if empty.
+
+    Accepts both the qualified ``machine/project/worktree_id[#session]`` form
+    and a bare ``worktree_id`` (legacy / same-repo). A malformed value never
+    raises -- the worktree_id is recovered best-effort so a stray ref cannot
+    crash a reap/ledger read.
+    """
+    if not ref:
+        return None
+    body, _, session = ref.partition("#")
+    session_val = session or None
+    parts = body.split("/")
+    if len(parts) >= 3:
+        machine, project = parts[0], parts[1]
+        worktree_id = "/".join(parts[2:])
+        return ClaimRef(
+            worktree_id=worktree_id,
+            machine=machine or None,
+            project=project or None,
+            session=session_val,
+        )
+    return ClaimRef(worktree_id=body, session=session_val)
+
+
+@dataclass
+class ResourceClaim:
+    """One outbound resource a worktree owns (an entry in its claim ledger).
+
+    Self-describing like ``PRRecord``: it carries its own ``kind`` and a
+    qualified ``ref`` (for a ``worktree`` kind, a
+    ``machine/project/worktree_id`` ref; for others a URL / host / path). The
+    forward list of these lives on the *owner's* record; the matching backward
+    link lives as ``owner_ref`` on the *resource's* record.
+    """
+
+    kind: str = "worktree"      # ResourceKind
+    ref: str = ""               # qualified target ref (kind-specific)
+    created_at: str = ""        # ISO timestamp the claim was journaled
+    state: str = "active"       # active | released
+    note: str = ""              # optional human label
+
+    @property
+    def is_live(self) -> bool:
+        """True while the owner still holds this resource (not released)."""
+        return self.state in _CLAIM_LIVE_STATES
+
+
 @dataclass
 class WorktreeRecord:
     """Parsed worktree tracking record."""
@@ -178,6 +287,18 @@ class WorktreeRecord:
     # it (agent-bridge's caller_id == the caller's WORKTREE_ID). Lets the Picker
     # "Jump to caller" from a bridge worktree back to the worktree that kicked it.
     caller_worktree: str | None = None
+    # agent-fabric `resource-claims` -- the outbound claim ledger (both halves):
+    #   * owner_ref -- the BACKWARD link: the qualified ref
+    #     (machine/project/worktree_id[#session]) of the worktree that OWNS this
+    #     one as a cross-repo resource. Generalizes the same-repo `caller_worktree`
+    #     across repos/machines; read locally on this record so a reap sweep can
+    #     resolve "who holds me?" without a fabric scan. Absent = unclaimed.
+    #   * resources -- the FORWARD list: the outbound resources THIS worktree
+    #     produced and owns (each a self-describing ResourceClaim, analogous to
+    #     `prs`). Both are emitted only when set/non-empty, so legacy YAMLs load
+    #     byte-identically.
+    owner_ref: str | None = None
+    resources: list[ResourceClaim] = field(default_factory=list)
     # worktree-status-core: the agent-asserted DISPOSITION overlay -- orthogonal
     # to git/session state (which cannot tell "done" from "finalized-with-
     # follow-ups"). Set via `agent-worktrees status`; absent (legacy) = the safe
@@ -187,6 +308,16 @@ class WorktreeRecord:
     follow_up: bool = False
     summary: str = ""
     status_note_at: str | None = None
+
+    @property
+    def owner_claim_ref(self) -> ClaimRef | None:
+        """The parsed backward owner link, or None when unclaimed."""
+        return parse_claim_ref(self.owner_ref) if self.owner_ref else None
+
+    @property
+    def live_resources(self) -> list[ResourceClaim]:
+        """The outbound resources this worktree still actively holds."""
+        return [r for r in self.resources if r.is_live]
 
     @property
     def resolved_interface(self) -> WorktreeInterface:
@@ -388,6 +519,34 @@ def _pr_to_yaml_dict(pr: PRRecord) -> dict[str, object]:
     return d
 
 
+def _parse_claim_mapping(raw: dict) -> ResourceClaim:
+    """Parse one ResourceClaim mapping from a ``resources:`` list item."""
+    kind = str(raw.get("kind", "worktree")) or "worktree"
+    state_raw = raw.get("state")
+    state = state_raw if state_raw in ("active", "released") else "active"
+    return ResourceClaim(
+        kind=kind,
+        ref=str(raw.get("ref", "")),
+        created_at=str(raw.get("created_at", "")),
+        state=state,
+        note=str(raw.get("note", "")),
+    )
+
+
+def _claim_to_yaml_dict(claim: ResourceClaim) -> dict[str, object]:
+    """Serialize a ResourceClaim to a YAML-friendly mapping (omit empties)."""
+    d: dict[str, object] = {"kind": claim.kind, "ref": claim.ref}
+    if claim.created_at:
+        d["created_at"] = claim.created_at
+    # Emit state only when it deviates from the default ("active") to keep the
+    # common-case entry lean.
+    if claim.state and claim.state != "active":
+        d["state"] = claim.state
+    if claim.note:
+        d["note"] = claim.note
+    return d
+
+
 def load_record(path: Path) -> WorktreeRecord:
     """Load a worktree tracking record from a YAML file."""
     with open(path, encoding="utf-8") as f:
@@ -478,6 +637,16 @@ def load_record(path: Path) -> WorktreeRecord:
     origin_val: WorktreeOrigin | None = (
         origin_raw if origin_raw in ("user", "system", "delegate") else None)
 
+    # agent-fabric resource-claims: the forward outbound list. Absent in
+    # worktrees that own nothing (the common case), so legacy records parse to
+    # an empty list and re-serialize byte-identically.
+    resources_list: list[ResourceClaim] = []
+    raw_resources = data.get("resources")
+    if isinstance(raw_resources, list):
+        for raw in raw_resources:
+            if isinstance(raw, dict) and raw.get("ref"):
+                resources_list.append(_parse_claim_mapping(raw))
+
     return WorktreeRecord(
         worktree_id=data["worktree_id"],
         branch=data["branch"],
@@ -503,6 +672,9 @@ def load_record(path: Path) -> WorktreeRecord:
                       if data.get("head_session") else None),
         caller_worktree=(str(data["caller_worktree"])
                          if data.get("caller_worktree") else None),
+        owner_ref=(str(data["owner_ref"])
+                   if data.get("owner_ref") else None),
+        resources=resources_list,
         follow_up=bool(data.get("follow_up", False)),
         summary=str(data.get("summary", "") or ""),
         status_note_at=(str(data["status_note_at"])
@@ -604,6 +776,18 @@ def save_record(record: WorktreeRecord, path: Path | None = None) -> None:
     # #2178: bridge caller-worktree pointer. Emitted only when set.
     if record.caller_worktree:
         content += f"caller_worktree: {record.caller_worktree}\n"
+    # agent-fabric resource-claims: the backward owner link. Emitted only when
+    # set, so an unclaimed worktree's YAML stays byte-identical.
+    if record.owner_ref:
+        content += f"owner_ref: {record.owner_ref}\n"
+    # agent-fabric resource-claims: the forward outbound list. Emitted only when
+    # non-empty (the common case owns nothing), keeping legacy YAMLs identical.
+    if record.resources:
+        content += yaml.safe_dump(
+            {"resources": [_claim_to_yaml_dict(c) for c in record.resources]},
+            default_flow_style=False,
+            sort_keys=False,
+        )
 
     # Serialize PR records.  Emit the multi-PR ``prs:`` list and mirror the
     # active PR to a legacy ``pr:`` block for one release, so a same-machine
@@ -885,6 +1069,7 @@ def create_new_record(
     origin: WorktreeOrigin | None = None,
     parent_session: str | None = None,
     caller_worktree: str | None = None,
+    owner_ref: str | None = None,
 ) -> WorktreeRecord:
     """Create and save a new worktree tracking record."""
     now = _now_iso()
@@ -908,10 +1093,40 @@ def create_new_record(
         origin=origin,
         parent_session=parent_session or None,
         caller_worktree=caller_worktree or None,
+        owner_ref=owner_ref or None,
     )
     path = tracking_path / f"{worktree_id}.yaml"
     save_record(record, path)
     return record
+
+
+def add_resource_claim(
+    record: WorktreeRecord,
+    claim: ResourceClaim,
+    *,
+    save: bool = True,
+) -> ResourceClaim:
+    """Journal an outbound resource claim onto ``record`` (dedup by ref).
+
+    If a claim with the same ``ref`` already exists it is refreshed in place
+    (kind/state/note/created_at) rather than duplicated, so re-running the
+    owning ``run`` wrapper is idempotent. Returns the stored claim.
+    """
+    for existing in record.resources:
+        if existing.ref == claim.ref:
+            existing.kind = claim.kind
+            existing.state = claim.state
+            if claim.note:
+                existing.note = claim.note
+            if claim.created_at:
+                existing.created_at = claim.created_at
+            if save:
+                save_record(record)
+            return existing
+    record.resources.append(claim)
+    if save:
+        save_record(record)
+    return claim
 
 
 # ---------------------------------------------------------------------------

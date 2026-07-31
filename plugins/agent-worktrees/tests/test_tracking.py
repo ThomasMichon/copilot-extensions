@@ -5,16 +5,21 @@ from __future__ import annotations
 from pathlib import Path
 
 from agent_worktrees.tracking import (
+    ClaimRef,
+    ResourceClaim,
     SessionEntry,
     WorktreeRecord,
     _atomic_write,
+    add_resource_claim,
     create_new_record,
     deregister_session,
     find_worktree_id_by_cwd,
     find_worktree_id_by_session,
+    format_claim_ref,
     list_records,
     load_record,
     mark_resumed,
+    parse_claim_ref,
     register_session,
     resolve_worktree_path,
     save_record,
@@ -115,6 +120,54 @@ class TestSaveLoadRoundTrip:
         save_record(rec2, path2)
         assert "caller_worktree" not in path2.read_text()
         assert load_record(path2).caller_worktree is None
+
+    def test_owner_ref_round_trip(self, tmp_path: Path):
+        # resource-claims: the backward owner link survives save/load, is
+        # omitted when unset, and parses into a qualified ClaimRef.
+        ref = "lambda-core/aperture-labs/wt-A#sess1"
+        rec = self._make_record(owner_ref=ref)
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        assert f"owner_ref: {ref}" in path.read_text()
+        loaded = load_record(path)
+        assert loaded.owner_ref == ref
+        cr = loaded.owner_claim_ref
+        assert cr is not None and cr.worktree_id == "wt-A"
+        assert cr.machine == "lambda-core" and cr.project == "aperture-labs"
+        assert cr.session == "sess1" and cr.is_qualified
+        rec2 = self._make_record()
+        path2 = tmp_path / "wt2.yaml"
+        save_record(rec2, path2)
+        assert "owner_ref" not in path2.read_text()
+        assert load_record(path2).owner_ref is None
+        assert load_record(path2).owner_claim_ref is None
+
+    def test_resources_round_trip(self, tmp_path: Path):
+        # resource-claims: the forward outbound list survives save/load and is
+        # omitted when empty (legacy YAMLs stay byte-identical).
+        claim = ResourceClaim(
+            kind="worktree",
+            ref="lambda-core/copilot-extensions/wt-B",
+            created_at="2026-07-31T15:00:00",
+        )
+        rec = self._make_record(resources=[claim])
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        txt = path.read_text()
+        assert "resources:" in txt
+        assert "ref: lambda-core/copilot-extensions/wt-B" in txt
+        loaded = load_record(path)
+        assert len(loaded.resources) == 1
+        got = loaded.resources[0]
+        assert got.kind == "worktree" and got.is_live
+        assert got.ref == "lambda-core/copilot-extensions/wt-B"
+        assert loaded.live_resources == loaded.resources
+        # empty list omits the key entirely
+        rec2 = self._make_record()
+        path2 = tmp_path / "wt2.yaml"
+        save_record(rec2, path2)
+        assert "resources:" not in path2.read_text()
+        assert load_record(path2).resources == []
 
     def test_disposition_absent_omitted(self, tmp_path: Path):
         # worktree-status-core: an un-annotated record emits no disposition
@@ -1242,3 +1295,111 @@ class TestResolveWorktreePath:
             resolve_worktree_path("wt-empty", worktree_root)
             == str(Path(worktree_root) / "wt-empty")
         )
+
+
+# ---------------------------------------------------------------------------
+# resource-claims -- qualified refs + the outbound claim ledger
+# ---------------------------------------------------------------------------
+
+class TestClaimRefHelpers:
+    """format_claim_ref / parse_claim_ref round-trip both the qualified and the
+    bare (legacy same-repo) forms."""
+
+    def test_qualified_round_trip(self):
+        ref = format_claim_ref("lambda-core", "aperture-labs", "wt-A", "sess1")
+        assert ref == "lambda-core/aperture-labs/wt-A#sess1"
+        cr = parse_claim_ref(ref)
+        assert cr == ClaimRef("wt-A", "lambda-core", "aperture-labs", "sess1")
+        assert cr.is_qualified and cr.canonical() == ref
+
+    def test_qualified_without_session(self):
+        ref = format_claim_ref("m1", "proj", "wt-B")
+        assert ref == "m1/proj/wt-B"
+        cr = parse_claim_ref(ref)
+        assert cr.session is None and cr.is_qualified
+
+    def test_bare_form_degrades(self):
+        # A bare worktree id (legacy same-repo) parses with machine/project None
+        # and formats back to just the id.
+        assert format_claim_ref(None, None, "just-an-id") == "just-an-id"
+        cr = parse_claim_ref("just-an-id")
+        assert cr.worktree_id == "just-an-id"
+        assert cr.machine is None and cr.project is None
+        assert not cr.is_qualified
+
+    def test_partial_machine_only_stays_bare(self):
+        # machine without project cannot qualify -> bare form (no false split).
+        assert format_claim_ref("m1", None, "wt") == "wt"
+
+    def test_empty_ref_is_none(self):
+        assert parse_claim_ref("") is None
+
+    def test_worktree_id_with_slashes_preserved(self):
+        # Defensive: a worktree_id is not expected to contain '/', but if it did
+        # the remainder after machine/project is rejoined rather than lost.
+        cr = parse_claim_ref("m/p/a/b")
+        assert cr.machine == "m" and cr.project == "p" and cr.worktree_id == "a/b"
+
+
+class TestResourceClaimState:
+    """ResourceClaim.is_live degrades unknown/absent state to live so a stray
+    value never hides a claim from reap-safety."""
+
+    def test_default_active_is_live(self):
+        assert ResourceClaim(ref="x").is_live
+
+    def test_released_not_live(self):
+        assert not ResourceClaim(ref="x", state="released").is_live
+
+    def test_unknown_state_degrades_to_live(self, tmp_path: Path):
+        # An unknown persisted state loads back as "active" (never hidden).
+        path = tmp_path / "wt.yaml"
+        path.write_text(
+            "worktree_id: w\nbranch: b\nworktree_path: /tmp/w\nrepo: r\n"
+            "machine: m\nplatform: wsl\nstarted_at: t\nlast_resumed_at: t\n"
+            "resume_count: 0\ntitle: null\nstatus: active\ncompleted_at: null\n"
+            "resources:\n- kind: worktree\n  ref: m/p/w2\n  state: bogus\n"
+        )
+        loaded = load_record(path)
+        assert loaded.resources[0].state == "active"
+        assert loaded.resources[0].is_live
+
+
+class TestAddResourceClaim:
+    """add_resource_claim journals + dedups outbound claims by ref."""
+
+    def _rec(self, tmp_path: Path) -> WorktreeRecord:
+        return create_new_record(
+            "wt-A", "worktree/wt-A", str(tmp_path / "wt-A"), "aperture-labs",
+            "lambda-core", "wsl", tmp_path,
+        )
+
+    def test_append_and_persist(self, tmp_path: Path):
+        rec = self._rec(tmp_path)
+        claim = ResourceClaim(kind="worktree", ref="lambda-core/copilot-extensions/wt-B")
+        add_resource_claim(rec, claim, save=False)
+        save_record(rec, tmp_path / "wt-A.yaml")
+        loaded = load_record(tmp_path / "wt-A.yaml")
+        assert [c.ref for c in loaded.resources] == ["lambda-core/copilot-extensions/wt-B"]
+
+    def test_dedup_by_ref_refreshes(self, tmp_path: Path):
+        rec = self._rec(tmp_path)
+        ref = "lambda-core/copilot-extensions/wt-B"
+        add_resource_claim(rec, ResourceClaim(kind="worktree", ref=ref, note="first"),
+                           save=False)
+        add_resource_claim(rec, ResourceClaim(kind="worktree", ref=ref, state="released",
+                                              note="second"), save=False)
+        assert len(rec.resources) == 1
+        assert rec.resources[0].state == "released"
+        assert rec.resources[0].note == "second"
+
+    def test_stamp_owner_ref_via_create(self, tmp_path: Path):
+        # create_new_record stamps the backward owner link on the resource.
+        create_new_record(
+            "wt-B", "worktree/wt-B", str(tmp_path / "wt-B"), "copilot-extensions",
+            "lambda-core", "wsl", tmp_path,
+            owner_ref="lambda-core/aperture-labs/wt-A#s1",
+        )
+        loaded = load_record(tmp_path / "wt-B.yaml")
+        assert loaded.owner_ref == "lambda-core/aperture-labs/wt-A#s1"
+        assert loaded.owner_claim_ref.worktree_id == "wt-A"
