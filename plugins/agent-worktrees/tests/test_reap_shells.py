@@ -202,3 +202,76 @@ def test_reap_shells_registered_as_no_project_command():
     project context (the bare binstub)."""
     assert "reap-shells" in cli._NO_PROJECT_COMMANDS
     assert "reap-shells" in cli.COMMAND_MAP
+
+
+# ── gc integration: garbage collection reaps orphaned shells too (#102) ──────
+
+def _gc_args(**over):
+    import argparse
+    base = dict(dry_run=True, json=False, orphans_only=False, no_managed=True,
+                no_reap_shells=False, reap_shells_grace_hours=None,
+                managed_grace_hours=None, include_unused=False,
+                include_conversations=False, reconcile_prs=False, max_age_days=7)
+    base.update(over)
+    return argparse.Namespace(**base)
+
+
+def _patch_gc(monkeypatch, calls):
+    import types
+    from pathlib import Path
+
+    from agent_worktrees import gc as gc_mod
+    repo = types.SimpleNamespace(anchor="/a", remote="origin", default_branch="main")
+    config = types.SimpleNamespace(default_repo=repo, repo_name="ext")
+    monkeypatch.setattr(cli.cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(cli.cfg, "tracking_dir", lambda: Path("/t"))
+    monkeypatch.setattr(cli.tracking, "list_records", lambda p: [])
+    monkeypatch.setattr(cli, "cmd_cleanup", lambda a: 0)
+    monkeypatch.setattr(cli, "sweep_managed_worktrees",
+                        lambda **k: {"removed": [], "skipped": []})
+    monkeypatch.setattr(cli.git_ops, "prune_worktrees", lambda **k: None)
+    monkeypatch.setattr(gc_mod, "sweep_orphans",
+                        lambda *a, **k: {"scanned": False, "removed": [], "skipped": []})
+
+    def _reap(**k):
+        calls.append(k)
+        return {"available": True, "reaped": [], "candidates": [],
+                "skipped": [], "errors": []}
+
+    monkeypatch.setattr(cli, "reap_orphan_launcher_shells", _reap)
+
+
+def test_gc_reaps_shells_by_default(monkeypatch):
+    calls: list[dict] = []
+    _patch_gc(monkeypatch, calls)
+    cli.cmd_gc(_gc_args())
+    assert len(calls) == 1
+    assert calls[0]["dry_run"] is True   # honors gc --dry-run
+
+
+def test_gc_no_reap_shells_skips(monkeypatch):
+    calls: list[dict] = []
+    _patch_gc(monkeypatch, calls)
+    cli.cmd_gc(_gc_args(no_reap_shells=True))
+    assert calls == []
+
+
+def test_gc_orphans_only_skips_shells(monkeypatch):
+    calls: list[dict] = []
+    _patch_gc(monkeypatch, calls)
+    cli.cmd_gc(_gc_args(orphans_only=True))
+    assert calls == []
+
+
+def test_gc_reap_shells_grace_hours_forwarded(monkeypatch):
+    calls: list[dict] = []
+    _patch_gc(monkeypatch, calls)
+    cli.cmd_gc(_gc_args(reap_shells_grace_hours=2.0))
+    assert calls[0]["idle_grace_secs"] == 7200.0
+
+
+def test_gc_parser_has_reap_shells_flags():
+    args = cli.build_parser().parse_args(
+        ["gc", "--no-reap-shells", "--reap-shells-grace-hours", "3"])
+    assert args.no_reap_shells is True
+    assert args.reap_shells_grace_hours == 3.0
