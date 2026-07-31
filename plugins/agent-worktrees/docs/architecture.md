@@ -915,9 +915,13 @@ restores the breathing room, and the key-hint moved from an orange
 `border_subtitle` to a **muted-grey line inside** the frame (so `CfgMenuScreen` now
 shares the framed `Vertical` + inside-hint shape of `Maint`/`Task`). Net: the native
 `OptionList` menus now read like the hand-drawn `Panel`s they replaced -- same
-craft, native focus. (The A/B rasterizer detail that bit once: Textual's SVG
-requests `Fira Code` via a CDN `@font-face`; an offline renderer must remap it to a
-local monospace, e.g. Consolas, or the raster silently falls back to a proportional
-serif and misrepresents the layout.)
+craft, native focus. (The A/B rasterizer detail that bit twice: Rich lays out the
+SVG by placing every glyph at an x-position computed from **Fira Code**'s metrics
+and names it via a CDN `@font-face`. An offline rasterizer must supply the *actual*
+Fira Code font file -- substituting another monospace (e.g. Consolas) renders the
+text but leaves the **box-drawing borders choppy**, because its glyph advance
+doesn't match Rich's cell grid; and letting it fall back to a proportional serif
+misrepresents the layout entirely. The picker and the `capture` SVG are unaffected
+either way -- a real terminal always paints on its own cell grid.)
 
 
