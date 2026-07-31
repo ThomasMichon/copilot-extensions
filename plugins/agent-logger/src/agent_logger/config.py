@@ -40,6 +40,12 @@ DEFAULTS: dict[str, Any] = {
         # Only sync sessions whose workspace cwd/git_root matches one of
         # these (case-insensitive substring). Empty -> sync all sessions.
         "repo_allowlist": [],
+        # When true (dual-use machines), a session that cannot be positively
+        # classified as an allowlisted repo (no workspace.yaml / no cwd /
+        # read error) is EXCLUDED rather than synced. Default false =
+        # fail-open (keep metadata-less sessions). Only meaningful alongside
+        # a non-empty repo_allowlist.
+        "repo_allowlist_fail_closed": False,
         # Retention for destination pruning. None/<=0 -> retain everything.
         "retention_days": None,
         "lock_timeout_sec": 10,
@@ -515,6 +521,15 @@ class Config:
         if isinstance(raw, str):
             return [s.strip() for s in raw.split(",") if s.strip()]
         return [str(s).strip() for s in raw if str(s).strip()]
+
+    @property
+    def sync_repo_allowlist_fail_closed(self) -> bool:
+        """When true, exclude sessions that can't be positively classified
+        against the allowlist (no workspace.yaml / no cwd / read error)
+        instead of keeping them. Dual-use machines set this to prevent
+        employer/work sessions leaking. Default false (fail-open)."""
+        return bool(self._data.get("sync", {}).get(
+            "repo_allowlist_fail_closed", False))
 
     @property
     def sync_notify(self) -> dict[str, Any]:
