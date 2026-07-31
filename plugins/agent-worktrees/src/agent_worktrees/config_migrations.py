@@ -51,17 +51,55 @@ SCHEMA_REPOS = "agent-worktrees/repos"
 SCHEMA_PROJECTS = "agent-worktrees/projects"
 
 
+# Fields a projects.yaml entry must NOT carry from v2 on: they are identity/
+# location facts owned by ``repos.yaml`` (the single owning store -- see the
+# derive-don't-duplicate vision invariant). Each is resolved from the repo
+# registry by the project's *name*, so a second copy here only drifts.
+#   * ``anchor``         -> repos.yaml per-platform path
+#   * ``machines_yaml``  -> derived from the anchor (``<anchor>/machines.yaml``)
+#   * ``default_branch`` -> repos.yaml identity
+# projects.yaml keeps only harness/adoption-runtime facts repos.yaml can't model
+# (``config_dir``, ``registered_at``, ``wsl``, ``base_repo``, ``elevated``,
+# ``expose_agent``, and the optional ``display_name`` casing override).
+_PROJECTS_REGISTRY_OWNED_FIELDS = ("anchor", "machines_yaml", "default_branch")
+
+
+def _projects_v1_to_v2(doc: dict[str, Any]) -> dict[str, Any]:
+    """Slim each project entry to lean adoption-runtime facts (v1 -> v2).
+
+    Drops the registry-owned identity/location fields (``anchor``,
+    ``machines_yaml``, ``default_branch``) that duplicate ``repos.yaml``; every
+    consumer now resolves them from the repo registry by the project name. Lean
+    fields (``wsl``, ``base_repo``, ``elevated``, ``expose_agent``,
+    ``config_dir``, ``registered_at``, ``display_name``) are preserved.
+    """
+    projects = doc.get("projects")
+    if isinstance(projects, dict):
+        for entry in projects.values():
+            if isinstance(entry, dict):
+                for field in _PROJECTS_REGISTRY_OWNED_FIELDS:
+                    entry.pop(field, None)
+    return doc
+
+
 def _build_registry() -> Any:
     """Register agent-worktrees' machine-local schemas at their current versions.
 
-    All three start at **v1** (baseline). When a shape first changes, bump that
-    schema's ``current_version`` here and add the ``vN->vN+1`` migrator -- and a
-    prior-version fixture in the tests (the backward-compat invariant).
+    ``config`` and ``repos`` remain at **v1** (baseline). ``projects`` is at
+    **v2**: the ``v1->v2`` migrator strips the registry-owned identity/location
+    fields so projects.yaml defers to ``repos.yaml`` for them (single owning
+    store). When another shape changes, bump that schema's ``current_version``
+    and add the ``vN->vN+1`` migrator -- plus a prior-version fixture in the
+    tests (the backward-compat invariant).
     """
     reg = SchemaRegistry()
     reg.register(SCHEMA_CONFIG, current_version=1)
     reg.register(SCHEMA_REPOS, current_version=1)
-    reg.register(SCHEMA_PROJECTS, current_version=1)
+    reg.register(
+        SCHEMA_PROJECTS,
+        current_version=2,
+        migrators={1: _projects_v1_to_v2},
+    )
     return reg
 
 

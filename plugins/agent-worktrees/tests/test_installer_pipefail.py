@@ -105,9 +105,13 @@ def test_unguarded_pattern_would_abort():
 
 def test_install_sh_guards_value_greps():
     """Drift guard: the install.sh value-extraction greps keep their `|| true`
-    so a missing config key can't abort the update before sibling modules."""
+    so a missing config key can't abort the update before sibling modules.
+
+    (``default_branch`` is no longer grep-extracted -- the projects.yaml write
+    moved to the Python `register-project-entry` subcommand -- so only the
+    ``anchor:`` REPO_DIR detection remains.)"""
     text = _INSTALL_SH.read_text()
-    for key in ("anchor:", "default_branch:"):
+    for key in ("anchor:",):
         line = next(
             ln for ln in text.splitlines()
             if f"grep '{key}'" in ln and "$(" in ln

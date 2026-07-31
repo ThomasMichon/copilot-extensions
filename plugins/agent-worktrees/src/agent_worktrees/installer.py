@@ -956,7 +956,12 @@ def write_projects_registry(registry: dict, path: Path | None = None) -> None:
 
     lines = [
         "# ~/.agent-worktrees/projects.yaml",
-        "# Registry of adopted repos for terminal profile generation.",
+        "# Adoption/launch registry: lean, name-keyed to repos.yaml (the single",
+        "# owning store of anchor/path/branch). Carries only harness/adoption-",
+        "# runtime facts (config_dir, wsl, base_repo, elevated, expose_agent,",
+        "# display_name).",
+        "",
+        "schema_version: 2",
         "",
         "projects:",
     ]
@@ -983,32 +988,45 @@ def register_project(
     repo_dir: Path | str | None = None,
     default_branch: str = "master",
     *,
-    expose_agent: bool = True,
-    base_repo: bool = False,
-    elevated: bool = False,
+    expose_agent: bool | None = None,
+    base_repo: bool | None = None,
+    elevated: bool | None = None,
+    display_name: str | None = None,
     wsl_state: str | None = None,
     wsl_distro: str | None = None,
     wsl_path: str | None = None,
 ) -> None:
-    """Add or update a project entry in projects.yaml.
+    """Add or update a lean project entry in projects.yaml.
+
+    projects.yaml is the **adoption/launch** registry; it defers to
+    ``repos.yaml`` (the single owning store) for identity/location facts --
+    ``anchor``, ``machines_yaml``, ``default_branch`` -- which every consumer
+    resolves from the repo registry by the project *name*. This function
+    therefore records only the harness/adoption-runtime facts repos.yaml can't
+    model. ``repo_dir``/``default_branch`` are accepted for call-site
+    compatibility but are **not** persisted (they live in repos.yaml).
+
+    Fields default to **preserve-existing** (``None``) so a context-less
+    re-register from the marketplace payload cannot drop a prior adoption fact.
 
     Parameters
     ----------
     expose_agent
         Whether agent-bridge should expose a same-machine agent for this
-        project. Defaults ``True``; pass ``False`` for a reference-only
-        adoption (worktree-managed but no agent).
+        project. ``None`` preserves the existing value (or ``True`` when new);
+        the authoritative source is ``repos.yaml`` ``agent`` (the caller
+        resolves it and passes it in).
     base_repo
-        When true, the project is adopted in **base-repo (no-worktree)** mode:
-        the anchor checkout is used directly and no worktree is created. For
-        repos that can't support worktrees (e.g. an enlistment monorepo). The
-        functional gate also lives in ``repos.<name>.base_repo`` of the
-        user-local ``~/.<project>/config.yaml``; this flag records intent on the
-        projects.yaml entry.
+        When true, the project is adopted in **base-repo (no-worktree)** mode.
+        ``None`` preserves the existing value.
     elevated
-        When true, agent-bridge should run this project's agent in an elevated
-        (admin) context. Recorded here for the bridge to consume; the elevation
-        mechanism itself is owned by agent-bridge.
+        When true, agent-bridge runs this project's agent elevated. ``None``
+        preserves the existing value.
+    display_name
+        Optional harness-level display casing for terminal profiles / shortcuts
+        (e.g. ``"SPO.Core"`` for a ``spo-core`` slug). When omitted the
+        generator title-cases the project name. Preserved across re-registration
+        when not explicitly provided.
     wsl_state
         WSL adoption state: ``"adopted"`` (full install exists in WSL),
         ``"bootstrap"`` (bootstrap stub deployed), or *None* (no WSL).
@@ -1019,28 +1037,37 @@ def register_project(
         Path to the repo anchor inside WSL (e.g. ``~/src/my-project``).
     """
     registry = read_projects_registry()
+    existing = registry["projects"].get(project, {})
+    if not isinstance(existing, dict):
+        existing = {}
 
-    repo_path = Path(repo_dir) if repo_dir else None
-    machines_yaml: str | None = None
-    if repo_path and (repo_path / "machines.yaml").exists():
-        machines_yaml = str(repo_path / "machines.yaml")
+    eff_expose = expose_agent if expose_agent is not None else bool(
+        existing.get("expose_agent", True)
+    )
+    eff_base = base_repo if base_repo is not None else bool(
+        existing.get("base_repo", False)
+    )
+    eff_elevated = elevated if elevated is not None else bool(
+        existing.get("elevated", False)
+    )
 
     entry: dict = {
         "config_dir": f"~/.{project}",
-        "anchor": str(repo_path) if repo_path else "",
-        "machines_yaml": machines_yaml,
-        "default_branch": default_branch,
-        "expose_agent": expose_agent,
+        "expose_agent": eff_expose,
         "registered_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
-    if base_repo:
+    if eff_base:
         entry["base_repo"] = True
-    if elevated:
+    if eff_elevated:
         entry["elevated"] = True
 
+    # Display casing: explicit value wins, else preserve any prior override.
+    resolved_display = display_name or existing.get("display_name")
+    if resolved_display:
+        entry["display_name"] = resolved_display
+
     # Preserve existing WSL state when re-registering from Windows
-    existing = registry["projects"].get(project, {})
-    existing_wsl = existing.get("wsl") if isinstance(existing, dict) else None
+    existing_wsl = existing.get("wsl")
 
     # Build WSL metadata block
     if wsl_state:

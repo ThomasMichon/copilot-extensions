@@ -162,17 +162,22 @@ def test_refresh_returns_false_on_timeout(tmp_path, monkeypatch):
     assert warnings and "Windows Terminal profiles" in warnings[0]
 
 
-def test_installers_preserve_registered_anchor_without_repo_context():
-    """Marketplace updates run from the payload, not the adopted repo."""
+def test_installers_delegate_registry_write_to_python():
+    """The projects.yaml write has ONE owner -- the Python
+    `register-project-entry` subcommand -- and both installers call it rather
+    than reimplementing the registry logic. The Windows terminal generator still
+    resolves anchors from repos.yaml by name (single owning store)."""
     ps = _INSTALL_PS.read_text()
     sh = _INSTALL_SH.read_text()
 
-    assert "from agent_worktrees.repos import find_repo" in ps
+    # Both installers delegate the write to the single Python owner.
+    assert "register-project-entry" in ps
+    assert "register-project-entry" in sh
+    # The reimplemented PS writer is gone (no parallel YAML-in-PowerShell).
+    assert "function Write-ProjectsRegistry" not in ps
+    # Neither installer persists identity/location facts to projects.yaml.
+    assert "$entry['anchor']" not in ps
+    assert "entry['anchor']" not in sh
+    # The Windows generator derives anchors from repos.yaml by name.
+    assert "from agent_worktrees import repos" in ps
     assert "e.local_path('windows')" in ps
-    assert "$entry[$prop.Name] = $prop.Value" in ps
-    assert "if ($RepoDir) {" in ps
-    assert "$currentAnchor = $currentRegEntry.anchor" in ps
-    assert "from agent_worktrees.repos import find_repo" in sh
-    assert "entry.local_path()" in sh
-    assert "entry = dict(existing)" in sh
-    assert "if anchor:" in sh
