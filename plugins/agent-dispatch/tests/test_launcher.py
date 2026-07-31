@@ -66,17 +66,41 @@ def test_serve_invocation_drops_to_continue():
     )
 
 
+def _function_body(text: str, name: str) -> str:
+    """The full body of a PowerShell ``function <name> { ... }``.
+
+    Bounds the body at the next **top-level** ``function`` declaration that is not
+    inside a here-string. A naive "stop at the next ``function ``" scan breaks when
+    the body embeds a launcher here-string that itself declares a helper function
+    at column 0 (e.g. ``Resolve-WritableLog`` inside ``$launcherBody``), which
+    truncates the body before the real content (triggers/principal). Here-string
+    spans (``@" ... "@`` / ``@' ... '@``) are skipped so an embedded ``function``
+    line does not end the body prematurely.
+    """
+    m = re.search(rf"function\s+{re.escape(name)}\s*[({{]", text)
+    assert m, f"could not locate {name} in install.ps1"
+    out: list[str] = []
+    in_here = False
+    for line in text[m.end():].splitlines(keepends=True):
+        s = line.rstrip("\r\n")
+        if in_here:
+            out.append(line)
+            if re.match(r"^\s*[\"']@", s):  # here-string terminator (start of line)
+                in_here = False
+            continue
+        if re.match(r"^function ", line):  # next top-level function ends the body
+            break
+        out.append(line)
+        if re.search(r"@[\"']\s*$", s):  # here-string opener at end of line
+            in_here = True
+    return "".join(out)
+
+
 def _install_coordinator_task_body() -> str:
     """The body of the `Install-CoordinatorTask` function -- the coordinator's
     scheduled-task registration -- isolated from the separate supervisor task
     (which deliberately keeps a different principal)."""
-    text = INSTALL_PS1.read_text(encoding="utf-8")
-    m = re.search(r"function\s+Install-CoordinatorTask\s*\{", text)
-    assert m, "could not locate Install-CoordinatorTask in install.ps1"
-    # Body runs until the next column-0 `function ` declaration.
-    rest = text[m.end() :]
-    nxt = re.search(r"\n function |\nfunction ", rest)
-    return rest[: nxt.start()] if nxt else rest
+    return _function_body(INSTALL_PS1.read_text(encoding="utf-8"), "Install-CoordinatorTask")
 
 
 def test_coordinator_task_runs_headless_via_s4u():

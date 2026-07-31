@@ -19,6 +19,34 @@ def _text() -> str:
     return INSTALL_PS1.read_text(encoding="utf-8")
 
 
+def _function_body(text: str, name: str) -> str:
+    """The full body of a PowerShell ``function <name> { ... }``.
+
+    Bounds the body at the next **top-level** ``function`` declaration that is not
+    inside a here-string, so a launcher here-string that declares a helper
+    function at column 0 (e.g. ``Resolve-WritableLog`` inside ``$launcherBody``)
+    does not truncate the body before its triggers/principal. Here-string spans
+    (``@" ... "@`` / ``@' ... '@``) are skipped.
+    """
+    m = re.search(rf"function\s+{re.escape(name)}\s*[({{]", text)
+    assert m, f"could not locate {name} in install.ps1"
+    out: list[str] = []
+    in_here = False
+    for line in text[m.end():].splitlines(keepends=True):
+        s = line.rstrip("\r\n")
+        if in_here:
+            out.append(line)
+            if re.match(r"^\s*[\"']@", s):
+                in_here = False
+            continue
+        if re.match(r"^function ", line):
+            break
+        out.append(line)
+        if re.search(r"@[\"']\s*$", s):
+            in_here = True
+    return "".join(out)
+
+
 def test_interactive_switch_is_a_param():
     assert re.search(r"\[switch\]\$Interactive", _text()), (
         "install.ps1 must expose a first-class -Interactive switch"
@@ -36,11 +64,7 @@ def test_interactive_mode_uses_logon_autostart_not_a_task():
     """In interactive mode the coordinator install must take the non-elevated
     logon auto-start path (Primary) and return BEFORE the S4U task registration."""
     text = _text()
-    m = re.search(r"function\s+Install-CoordinatorTask\s*\{", text)
-    assert m, "could not locate Install-CoordinatorTask"
-    rest = text[m.end():]
-    nxt = re.search(r"\n function |\nfunction ", rest)
-    body = rest[: nxt.start()] if nxt else rest
+    body = _function_body(text, "Install-CoordinatorTask")
 
     branch = body.index("(Get-ServiceMode) -eq 'interactive'")
     reg = body.index("Register-ScheduledTask -TaskName")
@@ -80,10 +104,7 @@ def test_interactive_mode_pins_loopback():
     text = _text()
     assert "function Set-ServiceEnvLoopback" in text
     assert "AGENT_DISPATCH_HOST=127.0.0.1" in text
-    m = re.search(r"function\s+Install-CoordinatorTask\s*\{", text)
-    rest = text[m.end():]
-    nxt = re.search(r"\n function |\nfunction ", rest)
-    body = rest[: nxt.start()] if nxt else rest
+    body = _function_body(text, "Install-CoordinatorTask")
     interactive_block = body[body.index("(Get-ServiceMode) -eq 'interactive'"):body.index("Register-ScheduledTask -TaskName")]
     assert "Set-ServiceEnvLoopback" in interactive_block, (
         "interactive mode must pin loopback before starting the coordinator"
