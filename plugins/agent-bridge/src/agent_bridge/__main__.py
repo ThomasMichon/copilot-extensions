@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import urllib.error
@@ -253,15 +254,13 @@ def _dynamic_bind_requested(explicit_port: bool) -> bool:
     return val in ("1", "true", "yes", "on")
 
 
-def _bind_listen_socket(host: str, port: int) -> "socket.socket":
+def _bind_listen_socket(host: str, port: int) -> socket.socket:
     """Bind and return a listening TCP socket for ``host:port``.
 
     With ``port == 0`` the OS assigns an ephemeral port, read back via
     ``getsockname``. Uses ``getaddrinfo`` so an IPv4 or IPv6 bind host both work.
     Mirrors agent-dispatch's proven Stage-C bind helper.
     """
-    import socket
-
     infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     family, socktype, proto, _canon, sockaddr = infos[0]
     sock = socket.socket(family, socktype, proto)
