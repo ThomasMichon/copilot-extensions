@@ -152,21 +152,38 @@ def cmd_launch(argv: list[str]) -> int:
         return 1
 
     if plat == "windows":
-        # On Windows, use cmd.exe to run the .cmd launcher.
-        # Use Popen + wait so we can catch KeyboardInterrupt (Ctrl+C)
-        # and still let the child finish its cleanup. launch-session.ps1
-        # has a try/finally that checks for handoff state and runs
-        # post-exit finalization -- we must not kill it prematurely.
-        proc = subprocess.Popen(
-            ["cmd.exe", "/c", str(launch_script), *passthrough],
-        )
+        # Two launch shapes on Windows (copilot-extensions #102 -- launcher
+        # depth):
+        #   * ACP / --stdio: keep the cmd.exe -> .cmd shim. The .cmd forwards
+        #     stdin verbatim, which a stdio MCP server requires
+        #     (docs/patterns/cross-platform-parity.md); dropping it risks
+        #     corrupting the JSON-RPC channel.
+        #   * Interactive: hand off straight to `pwsh -File launch-session.ps1`,
+        #     dropping the cmd.exe shim entirely -- one fewer resident process
+        #     per worktree session. The .cmd's only extra job (native recovery
+        #     when the venv is broken) is unreachable here anyway: reaching
+        #     cmd_launch means Python already ran, so the venv is healthy.
+        is_stdio = "--stdio" in passthrough or "--acp" in passthrough
+        ps1 = launch_script.with_name("launch-session.ps1")
+        if is_stdio or not ps1.exists():
+            argv = ["cmd.exe", "/c", str(launch_script), *passthrough]
+        else:
+            argv = ["pwsh.exe", "-NoProfile", "-NoLogo", "-File",
+                    str(ps1), *passthrough]
+        # Popen + wait (never os.exec on Windows, which has no true exec and
+        # would detach the child from the console): hold the console and catch
+        # KeyboardInterrupt (Ctrl+C) so the child (launch-session.ps1) can finish
+        # its try/finally handoff check + post-exit finalization instead of being
+        # killed mid-cleanup.
+        proc = subprocess.Popen(argv)
         try:
             rc = proc.wait()
         except KeyboardInterrupt:
             # Ctrl+C was sent to the entire console process group.
-            # The child (cmd.exe -> pwsh -> copilot) received it too.
-            # Wait for the child to finish its cleanup (handoff check,
-            # post-exit finalization) rather than killing it.
+            # The child (pwsh -> copilot, or cmd.exe -> pwsh -> copilot in
+            # stdio mode) received it too. Wait for the child to finish its
+            # cleanup (handoff check, post-exit finalization) rather than
+            # killing it.
             try:
                 rc = proc.wait(timeout=30)
             except subprocess.TimeoutExpired:
