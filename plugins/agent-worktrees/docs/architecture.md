@@ -922,6 +922,9 @@ Fira Code font file -- substituting another monospace (e.g. Consolas) renders th
 text but leaves the **box-drawing borders choppy**, because its glyph advance
 doesn't match Rich's cell grid; and letting it fall back to a proportional serif
 misrepresents the layout entirely. The picker and the `capture` SVG are unaffected
-either way -- a real terminal always paints on its own cell grid.)
+either way -- a real terminal always paints on its own cell grid. This flow is
+codified as a reusable tool -- `scripts/picker-snapshot/` (capture -> SVG ->
+`svg2png.mjs` with Fira Code @ 3x) -- so demos/A-B renders are reproducible and the
+choppy-substitute mistake isn't re-derivable.)
 
 

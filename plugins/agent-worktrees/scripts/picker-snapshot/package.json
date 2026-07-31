@@ -1,0 +1,9 @@
+{
+  "name": "picker-snapshot",
+  "private": true,
+  "type": "module",
+  "description": "Rasterize agent-worktrees picker capture SVGs to PNG using the SVG's own Fira Code font (the #88 NF A/B / demo render flow). A substitute font breaks Rich's box-drawing tiling, so this tool always renders with Fira Code.",
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2"
+  }
+}
