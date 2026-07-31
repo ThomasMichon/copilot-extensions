@@ -542,3 +542,81 @@ def test_running_version_lag_no_false_drift_on_pep440(env, monkeypatch):
 def test_running_version_lag_empty_without_settings(env):
     """No enabled plugins -> empty, never raises."""
     assert reconcile.running_version_lag(env.repo) == []
+
+
+# ---------------------------------------------------------------------------
+# apply_plan -- in-process 2-pass execution (session-start self-provisioning)
+# ---------------------------------------------------------------------------
+
+def test_apply_plan_noop_when_current(env):
+    """Nothing to do -> action 'continue', runner never called."""
+    import time
+    env.write_settings({f"agent-bridge@{MKT}": True})
+    env.install_payload("agent-bridge", "1.0.0", scope="universal")
+    env.deploy_runtime("agent-bridge", "1.0.0")
+    # Seed the persisted reconcile cache so the throttled payload refresh
+    # (copilot plugin update) is suppressed -- isolating the runtime decision,
+    # exactly as a steady-state (non-first) launch behaves.
+    reconcile.save_cache({"plugins": {"agent-bridge": {"last_payload_update": time.time()}}})
+
+    calls: list = []
+    summary = reconcile.apply_plan(
+        env.repo, machine="anywhere", passes=1,
+        runner=lambda argv: calls.append(list(argv)) or 0,
+    )
+    assert summary["action"] == "continue"
+    assert summary["executed"] == []
+    assert calls == []
+
+
+def test_apply_plan_runs_runtime_drift(env):
+    """A drifted runtime -> the installer argv is executed and recorded."""
+    import time
+    env.write_settings({f"agent-bridge@{MKT}": True})
+    env.install_payload("agent-bridge", "2.0.0", scope="universal")
+    env.deploy_runtime("agent-bridge", "1.0.0")  # drift
+    reconcile.save_cache({"plugins": {"agent-bridge": {"last_payload_update": time.time()}}})
+
+    calls: list = []
+    summary = reconcile.apply_plan(
+        env.repo, machine="anywhere", passes=1,
+        runner=lambda argv: calls.append(list(argv)) or 0,
+    )
+    assert summary["action"] == "reconcile"
+    assert len(calls) == 1
+    assert calls[0][0] == "bash"  # install.sh runtime installer (POSIX-pinned)
+    assert summary["executed"][0]["service"] == "agent-bridge"
+    assert summary["executed"][0]["ok"] is True
+
+
+def test_apply_plan_skips_copilot_when_absent(env, monkeypatch):
+    """A 'copilot ...' payload step is skipped when copilot is not on PATH."""
+    env.write_settings({f"agent-bridge@{MKT}": True})
+    # No installed payload -> the plan emits a `copilot plugin install` step.
+    monkeypatch.setattr(reconcile.shutil, "which", lambda _c: None)
+
+    calls: list = []
+    summary = reconcile.apply_plan(
+        env.repo, machine="anywhere", passes=1,
+        runner=lambda argv: calls.append(list(argv)) or 0,
+    )
+    # The copilot step was planned but skipped (not executed).
+    assert calls == []
+    assert summary["executed"] == []
+
+
+def test_apply_plan_records_step_failure(env):
+    """A non-zero runner exit is recorded as ok=False, never raised."""
+    import time
+    env.write_settings({f"agent-bridge@{MKT}": True})
+    env.install_payload("agent-bridge", "2.0.0", scope="universal")
+    env.deploy_runtime("agent-bridge", "1.0.0")
+    reconcile.save_cache({"plugins": {"agent-bridge": {"last_payload_update": time.time()}}})
+
+    summary = reconcile.apply_plan(
+        env.repo, machine="anywhere", passes=1,
+        runner=lambda _argv: 7,
+    )
+    assert summary["executed"][0]["ok"] is False
+
+

@@ -38,7 +38,10 @@ from __future__ import annotations
 import json
 import os
 import platform
+import shutil
+import subprocess
 import time
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -591,3 +594,81 @@ def build_plan(
     if updates:
         return {"action": "reconcile", "machine": machine, "updates": updates}
     return {"action": "continue", "machine": machine}
+
+
+# --------------------------------------------------------------------------
+# In-process plan execution (the session-start self-provisioning path)
+# --------------------------------------------------------------------------
+
+def apply_plan(
+    repo_dir: Path,
+    *,
+    machine: str | None = None,
+    passes: int = 2,
+    log: Callable[[str], None] | None = None,
+    runner: Callable[[Sequence[str]], int] | None = None,
+) -> dict[str, Any]:
+    """Execute the reconciliation plan **in-process** (the launcher's 2-pass loop).
+
+    The worktree launchers run ``reconcile-plugins`` and execute the emitted
+    ``argv`` vectors themselves, re-invoking for a second pass so a freshly
+    installed payload's runtime is picked up. This function is that same loop in
+    Python, so a session that does **not** go through the worktree launcher can
+    still self-provision an enabled plugin's runtime (dotfiles #693). The
+    ``provision-check`` sessionStart shim spawns ``reconcile-plugins --apply``
+    (which calls this) **detached**, so a slow first-run venv build never blocks
+    session start.
+
+    Best-effort: a step failure is logged and the loop continues; nothing here
+    raises for a bad step. A ``copilot ...`` step is skipped when ``copilot`` is
+    not on ``PATH`` (mirrors the launcher, which cannot install a payload without
+    the CLI). Returns a summary dict ``{"executed": [...], "passes": N,
+    "action": "reconcile"|"continue"}``.
+    """
+    _log = log or (lambda _m: None)
+
+    def _default_runner(argv: Sequence[str]) -> int:
+        proc = subprocess.run(  # noqa: S603 -- argv from our own plan builder
+            list(argv),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        if proc.stdout:
+            for line in proc.stdout.splitlines():
+                _log(f"    {line}")
+        return proc.returncode
+
+    run = runner or _default_runner
+    executed: list[dict[str, Any]] = []
+    final_action = "continue"
+
+    for pass_no in range(1, passes + 1):
+        plan = build_plan(repo_dir, machine=machine)
+        if plan.get("action") != "reconcile":
+            if pass_no == 1:
+                _log("provision: nothing to do (runtimes current)")
+            break
+        final_action = "reconcile"
+        for upd in plan.get("updates", []):
+            service = upd.get("service", "?")
+            argv = list(upd.get("argv") or [])
+            if not argv:
+                continue
+            if argv[0] == "copilot" and shutil.which("copilot") is None:
+                _log(f"provision: skipping {service} (copilot not on PATH)")
+                continue
+            _log(f"provision: {service} [{upd.get('reason', '?')}] -> {' '.join(argv)}")
+            try:
+                rc = run(argv)
+            except Exception as exc:  # never raise from a background provision
+                _log(f"provision: step FAILED for {service}: {exc}")
+                executed.append({"service": service, "argv": argv, "ok": False})
+                continue
+            ok = rc == 0
+            if not ok:
+                _log(f"provision: step for {service} exited {rc}")
+            executed.append({"service": service, "argv": argv, "ok": ok})
+
+    return {"action": final_action, "passes": passes, "executed": executed}
+
