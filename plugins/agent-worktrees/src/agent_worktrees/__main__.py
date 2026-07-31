@@ -4962,6 +4962,328 @@ def reap_orphan_mux_sessions(*, dry_run: bool = False,
             "skipped": skipped, "errors": errors}
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Orphaned launcher-shell reaper (copilot-extensions #102)
+# ═══════════════════════════════════════════════════════════════════════════
+# After a worktree session ends cleanly its launcher shells (the pwsh running
+# launch-session.ps1 and the `python -m agent_worktrees` waiter) exit with it.
+# But a *force-closed* terminal (window closed with the X, a dropped SSH pipe)
+# can strand them: the console dies, the shells are re-parented away from a now-
+# dead pid, nothing runs under them -- yet they pin memory indefinitely. This
+# sweep reclaims those, closing the same intent as the mux reaper
+# (visions/agent-fabric §Features/reclaim-idle-process).
+#
+# SAFETY -- this KILLS processes, so it is engineered to fail SAFE. A live
+# telemetry sampler was once wrongly killed because a non-elevated query made a
+# hidden scheduled-task service (blank command line, exited parent) look exactly
+# like an orphan. The lesson is baked in as independent layers, EVERY one of
+# which must pass before a pid is even a candidate:
+#   1. POSITIVE signature only. A pid is a candidate ONLY if its command line
+#      positively matches an agent-worktrees launcher marker. A service with a
+#      blank/absent command line can NEVER match -- we never reap "things that
+#      merely look orphaned".
+#   2. Service/daemon veto. A session-0 (service) pid, or one whose command line
+#      bears a daemon/service/ACP marker, is skipped even if it matched (1).
+#   3. Liveness gate. A shell with a live descendant (copilot/node, or a mux
+#      client) is a LIVE session and is always spared.
+#   4. Self-preservation. The reaper never touches its own process tree.
+#   5. Orphan + idle gates. Only a shell whose parent has exited AND that has
+#      been alive past the grace window is eligible.
+#   6. Dry-run by DEFAULT. Unlike the mux reaper, nothing is killed unless the
+#      caller explicitly passes --yes; the default is a report.
+
+REAP_SHELL_GRACE_SECS = 3600  # 1h: an orphaned launcher shell must be this old
+
+# Process image names this reaper is willing to consider (lowercased).
+_LAUNCHER_SHELL_NAMES = frozenset({
+    "pwsh.exe", "powershell.exe", "python.exe",
+    "pwsh", "powershell", "python", "python3",
+})
+# Command-line substrings that POSITIVELY identify an agent-worktrees launcher
+# shell (lowercased match). Nothing is EVER reaped without one of these.
+_LAUNCHER_SIGNATURES = ("launch-session", "-m agent_worktrees",
+                        "agent_worktrees.__main__")
+# Command-line substrings that VETO a reap even when a launcher signature is
+# present -- services/daemons, ACP/stdio sessions, and the reaper's own verbs.
+_LAUNCHER_REAP_VETOES = (
+    "serve-service", "agent_dispatch", "agent-dispatch", "telemetry",
+    "status-updater", "vault", "--acp", "--stdio",
+    "reap-shells", "reap_shells", "reap-sessions",
+)
+# Descendant image names that mark a LIVE session under a launcher shell ->
+# spare it. Deliberately broad: over-sparing is safe, over-reaping is not.
+_LIVE_DESCENDANT_NAMES = ("copilot", "node", "tmux", "psmux")
+
+
+def select_orphan_launcher_shells(
+    procs: list[dict], *, now: float, idle_grace_secs: float, self_pid: int,
+) -> tuple[list[dict], list[dict]]:
+    """Pure predicate: partition launcher shells into (reap, skipped).
+
+    ``procs`` is a list of process dicts with keys ``pid``, ``ppid``, ``name``,
+    ``cmdline``, ``create_epoch`` (float|None), ``session_id`` (int). Pure and
+    deterministic -- no process I/O -- so the full safety predicate is unit
+    testable. ``skipped`` entries carry a ``reason`` for legibility.
+    """
+    by_pid = {int(p["pid"]): p for p in procs if p.get("pid") is not None}
+    children: dict[int, list[int]] = {}
+    for p in procs:
+        children.setdefault(int(p.get("ppid", -1) or -1), []).append(int(p["pid"]))
+
+    def _descendants(pid: int) -> set[int]:
+        out: set[int] = set()
+        stack = list(children.get(pid, []))
+        while stack:
+            c = stack.pop()
+            if c in out or c == pid:
+                continue
+            out.add(c)
+            stack.extend(children.get(c, []))
+        return out
+
+    def _ancestors(pid: int) -> set[int]:
+        out: set[int] = set()
+        cur, guard = pid, 0
+        while cur in by_pid and guard < 128:
+            pp = int(by_pid[cur].get("ppid", -1) or -1)
+            if pp in out or pp <= 0:
+                break
+            out.add(pp)
+            cur = pp
+            guard += 1
+        return out
+
+    self_tree = {self_pid} | _descendants(self_pid) | _ancestors(self_pid)
+
+    reap: list[dict] = []
+    skipped: list[dict] = []
+    for p in procs:
+        pid = int(p["pid"])
+        name = (p.get("name") or "").lower()
+        cmd = (p.get("cmdline") or "").lower()
+        if name not in _LAUNCHER_SHELL_NAMES:
+            continue  # not a shell we manage -- ignored silently, never listed
+        if not any(sig in cmd for sig in _LAUNCHER_SIGNATURES):
+            continue  # (1) no positive launcher signature -> never a candidate
+        if pid in self_tree:
+            skipped.append({"pid": pid, "reason": "self"})
+            continue
+        sid = p.get("session_id", -1)
+        if int(sid if sid is not None else -1) == 0:
+            skipped.append({"pid": pid, "reason": "service-session"})  # (2)
+            continue
+        if any(v in cmd for v in _LAUNCHER_REAP_VETOES):
+            skipped.append({"pid": pid, "reason": "service-marker"})  # (2)
+            continue
+        live = False
+        for d in _descendants(pid):
+            dn = (by_pid.get(d, {}).get("name") or "").lower()
+            if any(m in dn for m in _LIVE_DESCENDANT_NAMES):
+                live = True
+                break
+        if live:
+            skipped.append({"pid": pid, "reason": "live-descendant"})  # (3)
+            continue
+        ppid = int(p.get("ppid", -1) or -1)
+        if ppid > 0 and ppid in by_pid:
+            skipped.append({"pid": pid, "reason": "parent-alive"})  # (5)
+            continue
+        ce = p.get("create_epoch")
+        if ce is None:
+            skipped.append({"pid": pid, "reason": "age-unknown"})
+            continue
+        if now - float(ce) < idle_grace_secs:
+            skipped.append({"pid": pid, "reason": "fresh"})  # (5)
+            continue
+        reap.append(p)
+    return reap, skipped
+
+
+def _enumerate_launcher_shells() -> list[dict] | None:
+    """Snapshot pwsh/powershell/python processes with command lines.
+
+    Returns a list of ``{pid, ppid, name, cmdline, create_epoch, session_id}``
+    dicts, or ``None`` if enumeration is unavailable. Best-effort and never
+    raises; only the shell images we might reap are returned.
+    """
+    if platform.system() == "Windows":
+        return _enumerate_launcher_shells_windows()
+    return _enumerate_launcher_shells_posix()
+
+
+def _enumerate_launcher_shells_windows() -> list[dict] | None:
+    ps = (
+        "Get-CimInstance Win32_Process -Filter "
+        "\"Name='pwsh.exe' OR Name='powershell.exe' OR Name='python.exe'\" | "
+        "Select-Object ProcessId,ParentProcessId,Name,CommandLine,SessionId,"
+        "@{n='Create';e={try{([DateTimeOffset]$_.CreationDate)"
+        ".ToUnixTimeSeconds()}catch{$null}}} | ConvertTo-Json -Compress -Depth 3"
+    )
+    try:
+        out = subprocess.run(
+            ["pwsh", "-NoProfile", "-NonInteractive", "-Command", ps],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    raw = (out.stdout or "").strip()
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(data, dict):
+        data = [data]
+    procs: list[dict] = []
+    for d in data:
+        try:
+            procs.append({
+                "pid": int(d.get("ProcessId")),
+                "ppid": int(d.get("ParentProcessId") or -1),
+                "name": (d.get("Name") or "").lower(),
+                "cmdline": d.get("CommandLine") or "",
+                "create_epoch": (float(d["Create"]) if d.get("Create") is not None
+                                 else None),
+                "session_id": int(d.get("SessionId") or -1),
+            })
+        except (TypeError, ValueError):
+            continue
+    return procs
+
+
+def _enumerate_launcher_shells_posix() -> list[dict] | None:
+    proc = Path("/proc")
+    try:
+        entries = [e for e in proc.iterdir() if e.name.isdigit()]
+    except OSError:
+        return None
+    try:
+        clk = os.sysconf("SC_CLK_TCK")
+    except (ValueError, OSError):
+        clk = 100
+    boot = _proc_boot_time()
+    procs: list[dict] = []
+    for entry in entries:
+        pid = int(entry.name)
+        try:
+            comm = (entry / "comm").read_text(errors="ignore").strip().lower()
+        except OSError:
+            continue
+        if comm not in _LAUNCHER_SHELL_NAMES:
+            continue
+        try:
+            cmdline = (entry / "cmdline").read_bytes().replace(b"\x00", b" ").decode(
+                errors="ignore").strip()
+        except OSError:
+            cmdline = ""
+        ppid, sid, start_ticks = -1, -1, None
+        try:
+            stat = (entry / "stat").read_text(errors="ignore")
+            rparen = stat.rfind(")")
+            rest = stat[rparen + 1:].split()
+            # After comm: state(0) ppid(1) pgrp(2) session(3) ... starttime(19).
+            ppid = int(rest[1])
+            sid = int(rest[3])
+            start_ticks = int(rest[19])
+        except (OSError, IndexError, ValueError):
+            pass
+        create_epoch = (boot + (start_ticks / clk)
+                        if (boot and start_ticks is not None) else None)
+        procs.append({
+            "pid": pid, "ppid": ppid, "name": comm, "cmdline": cmdline,
+            "create_epoch": create_epoch, "session_id": sid,
+        })
+    return procs
+
+
+def _proc_boot_time() -> float | None:
+    try:
+        for line in Path("/proc/stat").read_text(errors="ignore").splitlines():
+            if line.startswith("btime "):
+                return float(line.split()[1])
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def reap_orphan_launcher_shells(
+    *, dry_run: bool = True, idle_grace_secs: float = REAP_SHELL_GRACE_SECS,
+    now: float | None = None, processes: list[dict] | None = None,
+) -> dict:
+    """Reap orphaned agent-worktrees launcher shells (pwsh/python).
+
+    Conservative and dry-run by default: only shells that pass every safety
+    layer in :func:`select_orphan_launcher_shells` are candidates, and none are
+    killed unless ``dry_run=False``. ``processes`` may be injected for testing.
+
+    Returns::
+
+        {"available": bool,                # False when enumeration is impossible
+         "reaped":     [pid, ...],         # killed (or would-be, in dry-run)
+         "candidates": [{"pid","cmdline"}] # the reap set, for report/preview
+         "skipped":    [{"pid","reason"}],
+         "errors":     [{"pid","reason"}]}
+    """
+    now = time.time() if now is None else now
+    proc_list = processes if processes is not None else _enumerate_launcher_shells()
+    if proc_list is None:
+        return {"available": False, "reaped": [], "candidates": [],
+                "skipped": [], "errors": []}
+    reap, skipped = select_orphan_launcher_shells(
+        proc_list, now=now, idle_grace_secs=idle_grace_secs, self_pid=os.getpid())
+    reaped: list[int] = []
+    errors: list[dict] = []
+    for p in reap:
+        pid = int(p["pid"])
+        if dry_run:
+            reaped.append(pid)
+            continue
+        if procs.terminate_pid(pid):
+            reaped.append(pid)
+            try:
+                activity.log_event("launcher_shell_reaped", pid=pid,
+                                   cmdline=(p.get("cmdline") or "")[:200])
+            except Exception:
+                pass
+        else:
+            errors.append({"pid": pid, "reason": "kill failed"})
+    candidates = [{"pid": int(p["pid"]), "cmdline": p.get("cmdline") or ""}
+                  for p in reap]
+    return {"available": True, "reaped": reaped, "candidates": candidates,
+            "skipped": skipped, "errors": errors}
+
+
+def cmd_reap_shells(args: argparse.Namespace) -> int:
+    """``reap-shells`` -- reap orphaned launcher shells (copilot-extensions #102).
+
+    Reports candidates by default; requires ``--yes`` to actually terminate.
+    """
+    grace_hours = getattr(args, "grace_hours", None)
+    kwargs: dict = {"dry_run": not getattr(args, "yes", False)}
+    if grace_hours is not None:
+        kwargs["idle_grace_secs"] = float(grace_hours) * 3600
+    payload = reap_orphan_launcher_shells(**kwargs)
+    if getattr(args, "json", False):
+        _json_output(payload)
+        return 0
+    if not payload["available"]:
+        print("Process enumeration unavailable -- nothing to reap.")
+        return 0
+    dry = not getattr(args, "yes", False)
+    verb = "Would reap" if dry else "Reaped"
+    ids = payload["reaped"]
+    print(f"{verb} {len(ids)} orphaned launcher shell(s)"
+          + (":" if ids else "."))
+    for c in payload["candidates"]:
+        print(f"  pid {c['pid']}: {c['cmdline'][:100]}")
+    for e in payload["errors"]:
+        print(f"  ! pid {e['pid']}: {e['reason']}")
+    if dry and ids:
+        print("Re-run with --yes to terminate the shells above.")
+    return 0
+
+
 def _remove_managed_worktree(rec, repo, tracking_path: Path) -> list[str]:
     """Tear down one managed (system/bridge) worktree: mux, git worktree,
     branch, tracking record. Mirrors ``cmd_remove_system``'s removal steps.
@@ -9860,6 +10182,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true",
                    help="Emit a single JSON result object")
 
+    # reap-shells (GC orphaned launcher shells -- copilot-extensions #102)
+    p = sub.add_parser(
+        "reap-shells",
+        help="Reap orphaned agent-worktrees launcher shells (pwsh/python left "
+             "by a force-closed terminal). Reports candidates by default; only "
+             "kills with --yes. Positive-signature + service-safe + idle-gated.")
+    p.add_argument("--yes", action="store_true",
+                   help="Actually terminate the shells (default is a dry-run "
+                        "report -- nothing is killed without this flag)")
+    p.add_argument("--grace-hours", type=float, default=None,
+                   help="Minimum age before an orphaned shell is eligible "
+                        "(default 1h)")
+    p.add_argument("--json", action="store_true",
+                   help="Emit a single JSON result object")
+
     # restart (terminate a worktree's interactive Copilot, keep the worktree)
     p = sub.add_parser(
         "restart",
@@ -11267,6 +11604,7 @@ COMMAND_MAP = {
     "cleanup": cmd_cleanup,
     "gc": cmd_gc,
     "reap-sessions": cmd_reap_sessions,
+    "reap-shells": cmd_reap_shells,
     "reclaim": cmd_reclaim,
     "remux": cmd_remux,
     "restart": cmd_restart,
@@ -11476,7 +11814,7 @@ def _git_toplevel(path: Path) -> Path | None:
 # and balks helpfully when neither is available.
 _NO_PROJECT_COMMANDS = {
     "--version", "-V", "--help", "-h", "repos", "accounts", "install", "register", "hook",
-    "picker", "status-updater", "restart", "register-session",
+    "picker", "reap-shells", "status-updater", "restart", "register-session",
     "head-session", "conclude-session", "link-succession", "config-migrate",
 }
 
