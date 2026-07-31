@@ -1746,6 +1746,56 @@ def test_maint_menu_no_actionable_selection_does_not_open():
     asyncio.run(run())
 
 
+def test_index_menus_use_native_optionlist():
+    """#88 NF1: the two simple index-menu modals (⚙ Configuration + Maintenance
+    actions) navigate via a native Textual ``OptionList`` -- the framework owns
+    focus + up/down + Enter -- not the former hand-rolled ``idx``/``on_key`` over
+    a static ``Panel``. Assert each modal composes a focused ``OptionList`` whose
+    options mirror the menu items, and that selecting through the real pipeline
+    still returns the chosen index."""
+    from textual.widgets import OptionList
+
+    # CfgMenuScreen: options mirror the item labels; the list is focused.
+    async def run_cfg():
+        app = PickerApp(_fixture_source(), live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+            scr.sel = ("CFG", 0)
+            scr._activate()
+            await pilot.pause()
+            menu = _cfg_menu(scr)
+            assert menu is not None
+            ol = menu.query_one(OptionList)
+            assert ol.has_focus
+            assert ol.option_count == len(menu._items)
+            # Enter selects the highlighted option through the native widget.
+            await pilot.press("enter")
+            await pilot.pause()
+            assert not _cfg_menu_open(scr)
+
+    # MaintMenuScreen: options mirror the actions; description pane present.
+    async def run_maint():
+        app = PickerApp(_maint_source(), live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            recs = scr.maint_records()
+            ci = next(i for i, r in enumerate(recs) if scr._cleanable(r))
+            scr.sel = ("C", ci)
+            scr._activate()
+            await pilot.pause()
+            menu = _maint_menu(scr)
+            assert menu is not None
+            ol = menu.query_one(OptionList)
+            assert ol.has_focus
+            assert ol.option_count == len(menu._actions)
+
+    asyncio.run(run_cfg())
+    asyncio.run(run_maint())
+
+
 def _profiles_source():
     """Fixture source exposing config-bound axes + profile IO hooks (no SSH)."""
     src = _fixture_source()

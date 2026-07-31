@@ -826,3 +826,39 @@ button row) and the multi-select state that rides the key-dispatch machinery. Tu
 *that* residue into native Textual focus -- making each `build` a focusable widget --
 is the small final step, and may still be deferred as a judgement call per the
 vision's stability bias.
+
+### Native focus (NF) -- leveraging the framework's focus system
+
+With the overlays native (F4) and the bodies componentized (F5), the picker's
+last hand-rolled subsystem is **focus itself**: `PickerApp` composes a single
+`PickerScreen(Widget)` that blits the whole screen in one `render()` and drives
+focus manually (`sel=(zone,index)` + `stops()` + `on_key` -> `_dispatch_key`).
+NF migrates that toward Textual's **native focus** -- real focusable widgets the
+framework moves focus between and styles (`:focus`) -- rather than an immediate-mode
+monolith. This is the deliberate application of a standing goal: *leverage the
+native capabilities of the chosen framework* instead of reimplementing them. Like
+F4/F5 it is a **sequence of independently-shippable, behaviour-preserving slices**,
+never a big-bang; the main-screen `sel`/`stops` model (87 engine refs, ~93 test
+couplings, the capture/golden pipeline) is migrated last, incrementally.
+
+**NF1 -- native focus *inside* the modals (the beachhead).** The F4
+`ModalScreen`s made the *overlays* native, but each still navigated its own
+**internals** by hand: a `self.idx` cursor, an `on_key` if/elif, and a re-rendered
+static `Panel`. NF1 replaces those internals with real focusable Textual widgets --
+the natural first slice, fully isolated from the main-screen focus model. **First
+slice:** the two simple index-menu modals, `CfgMenuScreen` (⚙ Configuration) and
+`MaintMenuScreen` (Maintenance actions), now compose a native
+[`OptionList`](https://textual.textualize.io/widgets/option_list/): the framework
+owns focus, up/down movement, and Enter-to-select, and the menu returns its choice
+via `on_option_list_option_selected` -> `dismiss(event.option_index)`. The manual
+`idx`/`on_key`/`_panel`/`_refresh` are gone; the title/hint ride the widget border
+(Cfg) or a description pane that tracks the highlighted action via
+`on_option_list_option_highlighted` (Maint); Esc/q cancel through `BINDINGS`
+actions. Modest, cleaner look; behaviour-preserving -- every existing menu test
+(which drives `pilot.press("down"/"enter")` and reads `menu._items`/`_actions`)
+passes unchanged, and a guard test (`test_index_menus_use_native_optionlist`)
+asserts each modal composes a focused `OptionList` whose option count mirrors the
+menu items. Later NF1 slices give the remaining modals (the confirms -> `Button`s,
+the other menus -> `OptionList`) the same treatment; NF2+ then tackle the main
+screen (compose skeleton -> chrome widgets -> body list widgets -> retire
+`sel`/`stops`).
