@@ -24,9 +24,10 @@ description: >
 # Contributing to copilot-extensions
 
 The authoritative, versioned rules live in the repo's own **`CONTRIBUTING.md`**,
-**`AGENTS.md`**, **`docs/install-contract.md`**, and **`docs/architecture.md`** —
-read them for the current detail. This skill is the operator's map: what to
-touch, in what order, and the gotchas that bite.
+**`AGENTS.md`**, **`TESTING.md`**, **`docs/install-contract.md`**, and
+**`docs/architecture.md`** — read and respect them for the current detail (they
+are the repo's own root docs, not carried by this plugin). This skill is the
+operator's map: what to touch, in what order, and the gotchas that bite.
 
 **Two guidance layers a change reconciles to** (design work, not just the
 mechanical flow):
@@ -85,10 +86,8 @@ installer. Know which kind you are changing.
    update) or a runtime dir (`~/.agent-*/lib`, service venvs).
 3. **Test.** Run `pytest` from the changed runtime plugin's dir
    (`plugins/<plugin>/`). agent-worktrees has no suite yet — verify worktree ops
-   end-to-end. Lint touched Python with `ruff check --select F,E9`. See the
-   repo's `TESTING.md` for the turn-key runner and the **opt-in end-to-end smoke
-   tests** (real-infra flows whose target is caller-supplied — no defaults — and
-   which skip unless configured).
+   end-to-end. Lint touched Python with `ruff check --select F,E9`. Respect the
+   repo's `TESTING.md` for how to run the suites and the opt-in e2e smoke tests.
 4. **Install-contract gate (runtime plugins).** Run
    `python tools/check-install-contract.py` — it must report **zero
    violations**.
@@ -180,9 +179,8 @@ contributor — because to a reader, you are.
 ## Reference
 
 `CONTRIBUTING.md` (versioning + release), `AGENTS.md` (dev guide),
-`TESTING.md` (running the suites + the opt-in end-to-end smoke tests),
-`docs/install-contract.md` (the runtime-plugin contract),
-`docs/architecture.md` (payload/runtime split, ports), `docs/patterns/` (how we
-build — shapes, principles, invariants, focused patterns), `visions/` (the
+`TESTING.md` (running the suites), `docs/install-contract.md` (the runtime-plugin
+contract), `docs/architecture.md` (payload/runtime split, ports), `docs/patterns/`
+(how we build — shapes, principles, invariants, focused patterns), `visions/` (the
 standing what-should-be). To work the repo as a good citizen from another control
 repo, pair this with the `working-cross-repo` skill.
