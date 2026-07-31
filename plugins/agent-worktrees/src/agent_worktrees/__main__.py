@@ -10079,6 +10079,12 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Machine name (auto-detected from hostname if omitted)")
     sp.add_argument("--repo", default=None,
                     help="Repo path to reconcile (defaults to the resolved anchor)")
+    sp.add_argument("--apply", action="store_true",
+                    help="Execute the plan in-process (2-pass) instead of printing "
+                         "it. Used by the provision-check sessionStart shim.")
+    sp.add_argument("--peek", action="store_true",
+                    help="Print the plan WITHOUT persisting the reconcile cache "
+                         "(read-only preview; no throttle side effects).")
 
     # reconcile-binstubs (project launchers in ~/.local/bin vs projects.yaml)
     sub.add_parser(
@@ -11069,6 +11075,13 @@ def cmd_reconcile_plugins(args: argparse.Namespace) -> int:
     plugin's ``runtimeScope`` + facility machine gate. The launcher executes the
     ``argv`` vectors and re-invokes for a second pass (payload, then runtime).
 
+    With ``--apply`` the plan is executed **in-process** (the same 2-pass loop),
+    so a session that did not go through the worktree launcher still
+    self-provisions an enabled plugin's runtime (dotfiles #693). With ``--peek``
+    the plan is printed WITHOUT persisting the reconcile cache (a read-only
+    preview the provision-check shim uses to decide whether to spawn the apply
+    worker, with no throttle side effects).
+
     Never fails the launch: any error degrades to ``{"action": "continue"}``.
     """
     from . import reconcile
@@ -11080,8 +11093,25 @@ def cmd_reconcile_plugins(args: argparse.Namespace) -> int:
         return 0
 
     machine = getattr(args, "machine", None)
+
+    if getattr(args, "apply", False):
+        # Execute in-process (background self-provisioning path). Log to stderr
+        # so a detached worker's output lands in the redirected setup log.
+        def _log(msg: str) -> None:
+            print(msg, file=sys.stderr, flush=True)
+
+        try:
+            summary = reconcile.apply_plan(Path(repo_dir), machine=machine, log=_log)
+        except Exception as e:  # never raise from a background provision
+            print(f"provision: error: {e}", file=sys.stderr)
+            return 0
+        print(json.dumps(summary))
+        return 0
+
     try:
-        plan = reconcile.build_plan(Path(repo_dir), machine=machine)
+        plan = reconcile.build_plan(
+            Path(repo_dir), machine=machine, save=not getattr(args, "peek", False)
+        )
     except Exception as e:  # never break the launch
         print(json.dumps({"action": "continue", "reason": f"error: {e}"}))
         return 0
