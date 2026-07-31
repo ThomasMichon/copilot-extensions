@@ -273,6 +273,46 @@ def test_version_works_without_project(monkeypatch, capsys):
     assert "agent-worktrees" in capsys.readouterr().out
 
 
+def test_reap_sessions_is_project_scoped_not_no_project():
+    """reap-sessions correlates machine-wide mux sessions against a project's
+    tracking records, so it must resolve a project (like cleanup/gc) rather than
+    run context-free -- otherwise the bare binstub crashes in project_name()
+    (copilot-extensions #102)."""
+    assert "reap-sessions" not in m._NO_PROJECT_COMMANDS
+
+
+def test_bare_reap_sessions_without_project_balks_not_crashes(monkeypatch, capsys):
+    """`agent-worktrees reap-sessions` from a non-repo dir balks helpfully
+    instead of raising RuntimeError deep in project_name() (#102)."""
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m, "_git_toplevel", lambda p: None)
+
+    def _boom(args):
+        raise AssertionError("cmd_reap_sessions must not run without a project")
+
+    monkeypatch.setitem(m.COMMAND_MAP, "reap-sessions", _boom)
+    rc = m.main(["reap-sessions"])
+    assert rc == 1
+    assert "Could not resolve a project" in capsys.readouterr().err
+
+
+def test_reap_sessions_resolves_project_from_flag(monkeypatch):
+    """A project binstub injects ``--project <name>``; reap-sessions then
+    resolves it and runs (the aperture-labs reap-sessions path)."""
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m, "_anchor_for_project", lambda name: None)
+    seen = {}
+
+    def _ran(args):
+        seen["project"] = m.cfg.active_project()
+        return 0
+
+    monkeypatch.setitem(m.COMMAND_MAP, "reap-sessions", _ran)
+    rc = m.main(["--project", "demo", "reap-sessions"])
+    assert rc == 0
+    assert seen["project"] == "demo"
+
+
 def test_help_unrouted_inside_adopted_project(monkeypatch, capsys, tmp_path: Path):
     anchor = tmp_path / "myproj"
     anchor.mkdir()
