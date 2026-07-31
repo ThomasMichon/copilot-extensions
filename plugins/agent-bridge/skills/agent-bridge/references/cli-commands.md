@@ -116,13 +116,16 @@ agent-bridge session-usage <session-id>   # how full is its context?
 ```
 
 - **Relevant & healthy** (same effort, context well under ~70%) → `send`
-  to continue it (it resumes automatically if stopped).
+  to continue it. Idle sessions continue normally. For a stopped CodeSpace
+  session, inspect the resumed turn: if it immediately emits `Operation
+  cancelled by user` and an empty `end_turn`, end it and use `create`.
 - **Stale / unrelated / context-heavy** (different effort, near the context
   limit, or known-bad state) → `agent-bridge end <session-id>` then
   `agent-bridge create` for a clean start.
 
-`send` is the safe default (it reuses/resumes); reach for `create` only when
-you have decided the existing session must be discarded.
+`send` is the safe default for an idle session. Reach for `create` when you have
+decided the existing session must be discarded or a stopped-session resume
+produces the cancellation/no-op signature above.
 
 ### Session Management
 
@@ -324,4 +327,3 @@ agent-bridge config validate
 
 For first-time setup, see the `copilot-extensions-setup` skill. For
 detailed topology configuration, see `plugins/agent-bridge/docs/machine-config.md`.
-

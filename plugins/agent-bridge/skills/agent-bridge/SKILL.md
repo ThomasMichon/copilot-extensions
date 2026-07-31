@@ -344,7 +344,10 @@ ACP/Copilot session) before delivering the prompt.
 Longer/other drops (especially CodeSpace) can still strand a session —
 `gh cs ssh` tunnel lifetime, relay credential TTL, CodeSpace idle timeout. When
 `agent-bridge sessions` / `agent-bridge status <sid>` shows the session
-`stopped`/gone:
+`stopped`/gone, a `send` may attempt to resume it. Verify that the resumed turn
+does real work: some CodeSpace session hosts immediately emit `Operation
+cancelled by user` followed by an empty `end_turn`. If that signature appears,
+discard the stopped session and create a fresh one:
 
 ```bash
 agent-bridge end <sid>          # a daemon restart can also resurrect an old session as "active" — end that too
