@@ -78,7 +78,7 @@
     {
       "name": "agent-dispatch",
       "description": "Portable agent task-queue + per-host coordinator: a single-writer SQLite work queue (seven-state model, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.1.0-dev94",
+      "version": "0.1.0-dev95",
       "source": "plugins/agent-dispatch"
     },
     {
