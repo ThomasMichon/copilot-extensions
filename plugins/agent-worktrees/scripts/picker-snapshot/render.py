@@ -41,7 +41,9 @@ def _demo_source():
     raws = [
         {"id": "lambda-core-win-20260627-aaaa", "title": "Fix the parser bug",
          "status": "active", "started_at": "2026-06-27T17:00:00",
-         "turn_count": 12, "state": "wip", "ahead": 2, "behind": 1},
+         "turn_count": 12, "state": "wip", "ahead": 2, "behind": 1,
+         "session_count": 1, "mux_session": True, "mux_attached": True,
+         "mux_clients": 1},
         {"id": "lambda-core-win-20260627-bbbb",
          "title": "Add SelectionList to picker", "status": "active",
          "started_at": "2026-06-27T14:30:00", "turn_count": 5, "state": "active"},
@@ -80,10 +82,33 @@ async def _open_new(scr, pilot):
     await pilot.pause()
 
 
+async def _open_submenu(scr, pilot):
+    scr.machine_idx = scr.local_index()
+    # Prefer a worktree that offers Open, so the demo shows the native No Mux
+    # checkbox (the NF1 element this render is meant to exercise).
+    recs = scr.list_records()
+    idx = next((i for i, r in enumerate(recs)
+                if r.get("sessionless") or r.get("mux_live")), 0)
+    scr.sel = ("L", idx)
+    scr._open_submenu()
+    await pilot.pause()
+
+
+async def _open_maint(scr, pilot):
+    scr.machine_idx = scr.local_index()
+    recs = scr.maint_records()
+    ids = {r["id4"] for r in recs
+           if scr._cleanable(r) or r.get("ff_eligible")}
+    if ids:
+        scr.maint_sel.replace(ids)
+    scr._open_maint_menu()
+    await pilot.pause()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Render a picker snapshot to PNG.")
     ap.add_argument("out", help="output PNG path")
-    ap.add_argument("--modal", choices=["cfg", "clean", "new"],
+    ap.add_argument("--modal", choices=["cfg", "clean", "new", "submenu", "maint"],
                     help="open a native modal before capturing (composited app)")
     ap.add_argument("--zoom", default="3", help="rasterizer zoom (default 3)")
     args = ap.parse_args()
@@ -95,6 +120,10 @@ def main() -> int:
         svg = pcap.capture_modal(src, _open_clean, title="Clean scope dialog")
     elif args.modal == "new":
         svg = pcap.capture_modal(src, _open_new, title="New-worktree options")
+    elif args.modal == "submenu":
+        svg = pcap.capture_modal(src, _open_submenu, title="Worktree action menu")
+    elif args.modal == "maint":
+        svg = pcap.capture_modal(src, _open_maint, title="Maintenance menu")
     else:
         svg = pcap.capture(src, update_state="current")["svg"]
 
