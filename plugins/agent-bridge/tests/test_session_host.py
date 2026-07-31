@@ -510,6 +510,113 @@ async def test_observe_frame_is_tolerant_of_unclassifiable_bytes():
 
 
 @pytest.mark.asyncio
+async def test_turnstate_multiple_concurrent_prompts_need_all_responses():
+    """Two overlapping prompt turns stay in flight until BOTH are answered; only
+    the response that empties the set reports a boundary."""
+    host = SessionHost(_FakeChild())
+    host._observe_frame(b'{"jsonrpc":"2.0","id":1,"method":"session/prompt"}', to_child=True)
+    host._observe_frame(b'{"jsonrpc":"2.0","id":2,"method":"session/prompt"}', to_child=True)
+    assert host._turn_in_flight is True
+    assert host._observe_frame(b'{"jsonrpc":"2.0","id":1,"result":{}}', to_child=False) is False
+    assert host._turn_in_flight is True                     # id 2 still open
+    assert host._observe_frame(b'{"jsonrpc":"2.0","id":2,"result":{}}', to_child=False) is True
+    assert host._turn_in_flight is False
+
+
+@pytest.mark.asyncio
+async def test_turnstate_string_id_and_error_response_close_turn():
+    """A string JSON-RPC id is tracked, and an ERROR response (not ``result``)
+    still closes the turn."""
+    host = SessionHost(_FakeChild())
+    host._observe_frame(b'{"jsonrpc":"2.0","id":"abc","method":"session/prompt"}', to_child=True)
+    assert host._turn_in_flight is True
+    boundary = host._observe_frame(
+        b'{"jsonrpc":"2.0","id":"abc","error":{"code":-32000,"message":"x"}}', to_child=False)
+    assert boundary is True
+    assert host._turn_in_flight is False
+
+
+@pytest.mark.asyncio
+async def test_turnstate_multiple_messages_in_one_payload():
+    """A single relayed payload may carry several newline-delimited frames; each
+    is observed independently."""
+    host = SessionHost(_FakeChild())
+    host._observe_frame(
+        b'{"jsonrpc":"2.0","id":5,"method":"session/prompt"}\n'
+        b'{"jsonrpc":"2.0","method":"session/update","params":{}}\n',
+        to_child=True)
+    assert host._turn_in_flight is True
+    host._observe_frame(
+        b'{"jsonrpc":"2.0","method":"session/update","params":{}}\n'
+        b'{"jsonrpc":"2.0","id":5,"result":{"stopReason":"end_turn"}}\n',
+        to_child=False)
+    assert host._turn_in_flight is False
+
+
+@pytest.mark.asyncio
+async def test_turnstate_server_request_is_not_a_response():
+    """A server->client REQUEST during a turn (``method`` + ``id``, e.g. a
+    permission ask) must not be mistaken for the prompt response -- even if its
+    id collides."""
+    host = SessionHost(_FakeChild())
+    host._observe_frame(b'{"jsonrpc":"2.0","id":7,"method":"session/prompt"}', to_child=True)
+    host._observe_frame(
+        b'{"jsonrpc":"2.0","id":7,"method":"session/request_permission"}', to_child=False)
+    assert host._turn_in_flight is True                     # not closed by a request
+    host._observe_frame(b'{"jsonrpc":"2.0","id":7,"result":{}}', to_child=False)
+    assert host._turn_in_flight is False
+
+
+@pytest.mark.asyncio
+async def test_turnstate_response_for_unknown_id_is_noop():
+    """A response to an id we never saw as a prompt neither crashes nor reports a
+    boundary."""
+    host = SessionHost(_FakeChild())
+    assert host._observe_frame(b'{"jsonrpc":"2.0","id":99,"result":{}}', to_child=False) is False
+    assert host._turn_in_flight is False
+
+
+@pytest.mark.asyncio
+async def test_turn_boundary_with_front_present_does_not_self_reap():
+    """Observing a turn boundary while a front is still attached never triggers a
+    front-less self-reap -- the attached front owns the child's lifetime."""
+    child = _FakeChild()
+    host, port = await _serve_active(child, 0.15)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.write(b'{"jsonrpc":"2.0","id":3,"method":"session/prompt"}\n')
+        await c1.send_status(False)
+        await asyncio.sleep(0.03)
+        child.feed_frame(b'{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}')
+        await asyncio.sleep(0.4)
+        assert child.killed is False        # front attached -> never self-reaped
+    finally:
+        await c1.close()
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_inflight_child_exit_frontless_is_not_killed():
+    """A front-less child mid-turn that EXITS on its own is never 'reaped'
+    (killed) by the hold timer -- child liveness gates the reap."""
+    child = _FakeChild()
+    host, port = await _serve_active(child, 0.12)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.write(b'{"jsonrpc":"2.0","id":4,"method":"session/prompt"}\n')
+        await c1.send_status(False)
+        c1._writer.transport.abort()        # sever mid-turn
+        await asyncio.sleep(0.05)
+        child.finish(0)                     # child exits on its own
+        await asyncio.sleep(0.4)
+        assert child.killed is False        # it exited itself; never force-killed
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
 async def test_reattach_cancels_active_hold_timer():
     """A reattach during the active-hold window cancels the pending reap so the
     in-flight turn survives and can be resumed."""
