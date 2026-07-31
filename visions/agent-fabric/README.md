@@ -105,7 +105,11 @@ liveness-reconciled recovery over lease timers.
 environment to **run agents headlessly** there, and then presents those CodeSpace
 agents to the fabric as a **provider for the coordination layer** — so a remote
 CodeSpace agent is created, inspected, and reached by the *same* contract as a
-local one.
+local one. A per-plugin child vision refines it at
+[`visions/plugins/agent-codespaces/`](../plugins/agent-codespaces/README.md) — the
+venue lifecycle (boot-on-connect, session-survival on teardown), the single
+multiplexed transport, the host-credential relay (*borrow identity, never bottle
+it*), and the parent service-model invariants stated in the venue's own terms.
 
 ### agent-containers — a venue provider
 Does the same for **local containers**: provision and set up a container-hosted

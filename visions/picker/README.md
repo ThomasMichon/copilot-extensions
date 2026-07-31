@@ -5,7 +5,7 @@
   worktree-backed agents of a project.
 - **Scope:** leaf (concrete component; child of the agent-fabric vision)
 - **Status:** Active
-- **Last revised:** 2026-07-25
+- **Last revised:** 2026-07-30
 - **Reality docs:**
   [`plugins/agent-worktrees/docs/picker.md`](../../plugins/agent-worktrees/docs/picker.md) ·
   [`plugins/agent-worktrees/docs/architecture.md`](../../plugins/agent-worktrees/docs/architecture.md) ·
@@ -237,6 +237,11 @@ regression is something a test can catch before an operator does.
   duplicate, uniform venue reach) the Picker renders.
 - Sibling context: [plugin-services](../plugin-services/README.md) — the per-host
   service model the fabric layers deploy as.
+- CodeSpaces-pivot data owner: [agent-codespaces](../plugins/agent-codespaces/README.md)
+  — the Picker's **CodeSpaces** pivot renders that venue's pool membership,
+  per-venue state (in-use / idle / clean / stale), allocation, and budget
+  headroom, which agent-codespaces **owns and defines**; the Picker renders and
+  derives it (per *render-derive-not-own*), never redefines or re-stores it.
 - Reality docs:
   [`plugins/agent-worktrees/docs/picker.md`](../../plugins/agent-worktrees/docs/picker.md)
   (operator walkthrough) ·
