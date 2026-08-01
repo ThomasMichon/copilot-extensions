@@ -101,6 +101,8 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
         target_worktree: str | None = None,
         target_repo: str | None = None,
         dedup_key: str | None = None,
+        goal: str | None = None,
+        done_criteria: str | None = None,
         not_before: float = 0.0,
         proposed: bool = False,
     ) -> dict:
@@ -110,6 +112,11 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
         it is required -- tasks stay in their producing repo's lane. ``payload``
         is inline Markdown; a large one spills to a content-addressed blob.
         ``sweep``/``find`` before ``create`` to avoid duplicates.
+
+        ``goal`` + ``done_criteria`` make the task a **durable, resumable goal**
+        (the *resumable-goal* feature): a worker loops toward ``goal`` and
+        completes only once ``done_criteria`` are met, resuming from the
+        accumulated progress log. Omit both for a plain one-shot task.
         """
         lane = _repo(ctx, repo)
         if not lane:
@@ -129,6 +136,8 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
             target_worktree=target_worktree,
             target_repo=target_repo,
             dedup_key=dedup_key,
+            goal=goal,
+            done_criteria=done_criteria,
             not_before=not_before,
         )
         result = asdict(task)

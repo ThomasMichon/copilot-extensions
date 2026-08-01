@@ -121,6 +121,10 @@ def build_remote_create_argv(
         argv += ["--source", args.source]
     if getattr(args, "dedup_key", None):
         argv += ["--dedup-key", args.dedup_key]
+    if getattr(args, "goal", None):
+        argv += ["--goal", args.goal]
+    if getattr(args, "done_criteria", None):
+        argv += ["--done-criteria", args.done_criteria]
     verify_timeout = getattr(args, "verify_timeout", 0) or 0
     if verify_timeout:
         argv += ["--verify-timeout", str(verify_timeout)]

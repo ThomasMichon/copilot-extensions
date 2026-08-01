@@ -66,6 +66,20 @@ def test_parser_create_flags():
     assert args.proposed is True
 
 
+def test_parser_create_goal_flags():
+    args = build_parser().parse_args(
+        ["create", "pursue", "--goal", "reach X", "--done-criteria", "X is met"]
+    )
+    assert args.goal == "reach X"
+    assert args.done_criteria == "X is met"
+
+
+def test_parser_create_goal_flags_default_none():
+    args = build_parser().parse_args(["create", "plain"])
+    assert args.goal is None
+    assert args.done_criteria is None
+
+
 def test_parser_claim_flags():
     args = build_parser().parse_args(
         ["claim", "w1", "--capability", "review", "--lease-seconds", "60"]

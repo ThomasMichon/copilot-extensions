@@ -46,6 +46,15 @@ originating conversation. It also carries **routing** (required capabilities,
 soft affinities) and **targeting** (an optional machine/worktree/repo it is
 addressed to). A task is the atom the whole layer moves through its lifecycle.
 
+For work that is **pursued** rather than performed in one shot, the record is
+richer than a fire-once prompt: it can carry a **durable goal** — an objective
+plus the criteria for *done* — and an **accumulated progress log** that grows as
+the work advances. The task is then a *resumable statement of an outcome to
+reach*, not just an instruction. That durability is what lets a task genuinely
+outlive the specific agent pursuing it: a worker that vanishes mid-goal is
+replaced by one that **resumes from the recorded progress**, not one that starts
+the goal over.
+
 ### The coordinator — the single-writer store
 A per-host **coordinator** owns the queue: a single-writer store that hands out
 an **atomic claim** so that, of any number of agents that could do a piece of
@@ -136,6 +145,21 @@ the live transcript (the coordination layer's *summary-status-is-first-class*,
 seen from the delegation side). A caller or operator surveys the fleet's progress
 at a glance without reading each session.
 
+### resumable-goal
+A task may be a **durable goal an agent works toward across turns — and across
+embodiments** — not only a one-shot instruction. The record can carry the
+objective, the criteria for *done*, and an **append-only progress log** (distinct
+from the latest-only status beat) that accumulates as the work advances. This is
+what turns a standing charge — *pick one thing and improve it*, *drive this
+change to a ready state* — into a first-class unit the layer can carry: a worker
+**loops toward the goal**, records what it accomplished at each pass, and
+completes only once it judges the done-criteria met. Because the goal and its
+accumulated progress are durable, an interruption costs the fabric only the
+*remainder* of the work: the next worker continues from the recorded progress
+rather than from nothing. The layer does not drive that loop turn-by-turn
+(*fire-and-forget-not-driven*); it makes the goal **durable and resumable** so the
+worker — or its replacement — can.
+
 ### observable-lifecycle
 The layer's task lifecycle is **externally observable** through a
 **backend-agnostic telemetry seam**: the coordinator declares its lifecycle
@@ -198,6 +222,17 @@ it explicitly** once it judges the goal reached (deferred completion). The one
 exception is a **continuation baton**: a handoff task is spent the moment it is
 picked up, because the continuing *work* is tracked by its own effort or issue,
 not by the handoff record.
+
+### resume-the-goal-not-restart-it
+When a worker owning a goal-bearing task is confirmed gone (*liveness-not-lease*),
+recovery does not discard the work already done. The task's durable goal and its
+**accumulated progress** are what return to the queue, so the next worker to claim
+it **resumes** — continuing toward the same done-criteria from the recorded
+progress — rather than restarting the goal from nothing. A vanished worker costs
+the fabric the *remainder* of a goal, never the whole of it. This is the recovery
+counterpart of *resumable-goal*: the depth of a resume is only ever as rich as the
+progress the work took care to record, and a one-shot task with no accumulated
+progress simply re-claims.
 
 ### repo-lane-isolation
 Every task belongs to the **repo lane** of the agent that produced it, and the
@@ -281,3 +316,15 @@ this layer.)
   the directional claim model; states the reverse-lookup intent already implied
   by claim-stamped-to-worktree, and names this layer as the owner of the inbound
   half (both halves derived, never merged).
+- **2026-07-31** — Extended for the **goal-loop / full-auto** intent: §Concepts/
+  *The task* now carries an optional **durable goal** (objective + done-criteria)
+  and an **accumulated progress log**; added the *resumable-goal* feature (a task
+  as a goal a worker loops toward across turns and embodiments, completing on
+  self-judged done-criteria) and the *resume-the-goal-not-restart-it* behavior
+  (recovery returns the goal + accumulated progress so the next worker resumes,
+  not restarts). Consistent with *fire-and-forget-not-driven* (the layer makes the
+  goal durable/resumable; it does not drive the worker's loop) and
+  *complete-means-done* (deferred, self-judged completion). Mined from an operator
+  design conversation on standing "pick one thing and improve it" board charters
+  and an Intelligence-Dampener-style "drive this change to ready" goal — the intent
+  the implementing work then closes.

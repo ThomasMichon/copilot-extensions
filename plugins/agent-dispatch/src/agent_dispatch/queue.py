@@ -220,6 +220,13 @@ class Task:
     #: Latest-only structured progress beat (JSON: phase/summary/blocker/pr/ts),
     #: or None. The "how far toward the goal" signal for at-a-glance tracking.
     latest_progress: str | None = None
+    #: Durable goal an agent works toward across turns and embodiments (the
+    #: *resumable-goal* feature): the objective (``goal``) and the explicit
+    #: criteria for *done* (``done_criteria``). Both None for a plain one-shot
+    #: task. The accumulated (append-only) progress toward this goal lives in the
+    #: ``task_progress`` table, read via :meth:`progress_log`.
+    goal: str | None = None
+    done_criteria: str | None = None
     #: The live-session identity that owns this task (captured at ``start``), and
     #: a monotonic fence bumped each claim. Liveness GC compares the *owner's*
     #: session identity -- not mere worktree occupancy -- and fences the requeue
@@ -267,6 +274,8 @@ class Task:
             completed_at=row["completed_at"],
             result_ref=row["result_ref"],
             latest_progress=row["latest_progress"],
+            goal=row["goal"],
+            done_criteria=row["done_criteria"],
             owner_session_id=row["owner_session_id"],
             generation=row["generation"],
             last_seen_at=row["last_seen_at"],
@@ -398,6 +407,12 @@ _COLUMNS: dict[str, str] = {
     "completed_at": "REAL",
     "result_ref": "TEXT",
     "latest_progress": "TEXT",
+    # Durable goal: the objective a worker loops toward (``goal``) and the
+    # explicit criteria for when it is met (``done_criteria``). Both nullable --
+    # a task with no goal behaves exactly as a plain one-shot task. The
+    # append-only counterpart of ``latest_progress`` lives in ``task_progress``.
+    "goal": "TEXT",
+    "done_criteria": "TEXT",
     "owner_session_id": "TEXT",
     "generation": "INTEGER NOT NULL DEFAULT 0",
     "last_seen_at": "REAL",
@@ -489,6 +504,26 @@ class TaskQueue:
                 "  worker TEXT,"
                 "  note TEXT"
                 ")"
+            )
+            # Append-only progress log -- the *accumulated* counterpart of the
+            # latest-only ``latest_progress`` beat (the *resumable-goal* feature).
+            # Each ``record_progress`` appends one row here in addition to
+            # overwriting ``latest_progress``, so a re-embodied worker resumes
+            # from the recorded progress rather than restarting the goal.
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS task_progress ("
+                "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "  task_id TEXT NOT NULL,"
+                "  ts REAL NOT NULL,"
+                "  phase TEXT,"
+                "  summary TEXT,"
+                "  detail TEXT,"
+                "  worker TEXT"
+                ")"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_task_progress_task "
+                "ON task_progress(task_id)"
             )
             # Spawn reservations -- the atomic "exactly one embody spawn per
             # (task, attempt)" record that closes the gap between the queue's
@@ -630,6 +665,8 @@ class TaskQueue:
         source: str | None = None,
         origin_ref: str | None = None,
         dedup_key: str | None = None,
+        goal: str | None = None,
+        done_criteria: str | None = None,
         not_before: float = 0.0,
         claim_as: str | None = None,
         now: float | None = None,
@@ -679,8 +716,9 @@ class TaskQueue:
                 "INSERT INTO tasks (id, title, prompt, status, repo, requires, excludes,"
                 " affinity, labels, payload_ref, payload_inline, target_machine,"
                 " target_worktree, target_repo,"
-                " source, origin_ref, dedup_key, not_before, created_at, updated_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " source, origin_ref, dedup_key, goal, done_criteria,"
+                " not_before, created_at, updated_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     task_id,
                     title,
@@ -699,6 +737,8 @@ class TaskQueue:
                     source,
                     origin_ref,
                     dedup_key,
+                    goal,
+                    done_criteria,
                     not_before,
                     ts,
                     ts,
@@ -1046,6 +1086,7 @@ class TaskQueue:
         summary: str,
         blocker: str | None = None,
         pr: str | None = None,
+        detail: str | None = None,
         extend_lease: bool = True,
         now: float | None = None,
     ) -> Task:
@@ -1057,10 +1098,28 @@ class TaskQueue:
         a heartbeat (refreshes the lease) since a worker reporting progress is
         alive. The summary is hard-capped (:data:`PROGRESS_SUMMARY_MAX`) so the
         beat can never balloon into a chat log.
+
+        In addition to the latest-only beat, every call **appends** a row to the
+        append-only ``task_progress`` log (the *resumable-goal* feature), so a
+        re-embodied worker resumes from the accumulated progress rather than
+        restarting the goal. ``detail`` is an optional longer note for the log
+        row; when omitted it falls back to the beat's blocker/pr context. Read
+        the accumulated log via :meth:`progress_log`.
         """
         ts = self._now(now)
         snapshot = _progress_snapshot(phase, summary, blocker=blocker, pr=pr, ts=ts)
         payload = json.dumps(snapshot, separators=(",", ":"))
+        # The log row's detail: an explicit ``detail`` wins; otherwise carry the
+        # beat's blocker/pr context so the durable log is at least as rich as the
+        # latest-only beat it accumulates.
+        log_detail = _clip(detail, PROGRESS_SUMMARY_MAX)
+        if log_detail is None:
+            parts = []
+            if snapshot.get("blocker"):
+                parts.append(f"blocker: {snapshot['blocker']}")
+            if snapshot.get("pr"):
+                parts.append(f"pr: {snapshot['pr']}")
+            log_detail = "; ".join(parts) or None
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             task = self._fetch(conn, task_id)
@@ -1087,6 +1146,18 @@ class TaskQueue:
                     " updated_at = ? WHERE id = ?",
                     (payload, ts, ts, task_id),
                 )
+            conn.execute(
+                "INSERT INTO task_progress (task_id, ts, phase, summary, detail, worker) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    task_id,
+                    ts,
+                    snapshot.get("phase") or None,
+                    snapshot["summary"],
+                    log_detail,
+                    worker_id,
+                ),
+            )
             phase_tag = f"[{snapshot['phase']}] " if snapshot.get("phase") else ""
             self._audit(
                 conn,
@@ -1489,6 +1560,23 @@ class TaskQueue:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT ts, from_status, to_status, worker, note FROM task_events "
+                "WHERE task_id = ? ORDER BY id ASC",
+                (task_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def progress_log(self, task_id: str) -> list[dict[str, object]]:
+        """Return the accumulated append-only progress log for a task.
+
+        Rows are chronological (oldest first) -- the durable, resumable record of
+        every progress beat (the *resumable-goal* feature). Distinct from the
+        latest-only ``latest_progress`` beat on the task row: a re-embodied worker
+        reads this to continue toward the goal from recorded progress rather than
+        restarting it.
+        """
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT ts, phase, summary, detail, worker FROM task_progress "
                 "WHERE task_id = ? ORDER BY id ASC",
                 (task_id,),
             ).fetchall()

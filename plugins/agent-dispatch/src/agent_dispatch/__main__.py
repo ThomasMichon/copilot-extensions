@@ -376,6 +376,8 @@ def _cmd_create(args: argparse.Namespace) -> int:
             source=args.source,
             origin_ref=args.origin_ref,
             dedup_key=args.dedup_key,
+            goal=args.goal,
+            done_criteria=args.done_criteria,
             not_before=args.not_before,
             claim_as=claim_as,
         )
@@ -676,6 +678,11 @@ def _cmd_worktree_status(args: argparse.Namespace) -> int:
 def _cmd_show(args: argparse.Namespace) -> int:
     with _client(args) as c:
         task = c.get(args.task_id)
+        # Surface the accumulated append-only progress log alongside the task, so
+        # a (re-)embodied worker reads its goal, done-criteria, AND recorded
+        # progress in one call and resumes from it rather than restarting.
+        task = dict(task)
+        task["progress_log"] = c.progress_log(args.task_id)
     from . import tracking
 
     return _emit(tracking.enrich_task(_enrich(task)))
@@ -1451,6 +1458,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--source")
     p.add_argument("--origin-ref")
     p.add_argument("--dedup-key")
+    p.add_argument(
+        "--goal",
+        help="durable objective the worker loops toward across turns/embodiments "
+             "(the resumable-goal feature); a worker resumes it from recorded "
+             "progress rather than restarting. Omit for a plain one-shot task.",
+    )
+    p.add_argument(
+        "--done-criteria",
+        help="explicit criteria for when --goal is met; the worker completes only "
+             "once it judges these satisfied (deferred completion).",
+    )
     p.add_argument("--not-before", type=float, default=0.0)
     p.add_argument(
         "--spawn", action="store_true",
