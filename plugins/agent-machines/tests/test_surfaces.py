@@ -80,15 +80,86 @@ def test_backup_created_on_change(tmp_path):
     assert Path(result.backup_path).exists()
 
 
-def test_apply_surfaces_dispatch_and_pending(tmp_path):
+def test_apply_surfaces_dispatch_all_three(tmp_path):
+    repo = tmp_path / "acme"
+    repo.mkdir()
     data = base_package("a/x", gate=["*"])
-    data["manage"]["copilot.settings"] = {"disposition": "enforce", "values": {"model": "opus"}}
-    data["manage"]["copilot.permissions"] = {"disposition": "ensure-present", "values": {"x": 1}}
-    pkg = load_package(write_package(tmp_path / "a", "p.yaml", data), source_repo="a")
+    data["manage"] = {
+        "copilot.settings": {"disposition": "enforce", "values": {"model": "opus"}},
+        "copilot.permissions": {
+            "disposition": "ensure-present",
+            "by-location-class": [
+                {"match": "$REPO(acme)", "tool_approvals": [{"kind": "commands"}]}
+            ],
+        },
+        "copilot.trustedFolders": {
+            "disposition": "ensure-present",
+            "by-location-class": ["$REPO(acme)"],
+        },
+    }
+    pkg = load_package(write_package(repo, "p.yaml", data), source_repo="acme")
     results = apply_surfaces([pkg], home=_settings(tmp_path), dry_run=True)
-    surfaces = {r.surface: r for r in results}
-    assert "copilot.settings" in surfaces
-    assert surfaces["copilot.permissions"].skipped_reason is not None
+    surfaces = {r.surface for r in results}
+    assert surfaces == {"copilot.settings", "copilot.permissions", "copilot.trustedFolders"}
+
+
+def test_only_filter_scopes_surfaces(tmp_path):
+    repo = tmp_path / "acme"
+    repo.mkdir()
+    data = base_package("a/x", gate=["*"])
+    data["manage"] = {
+        "copilot.settings": {"disposition": "enforce", "values": {"model": "opus"}},
+        "copilot.trustedFolders": {"disposition": "ensure-present",
+                                   "by-location-class": ["$REPO(acme)"]},
+    }
+    pkg = load_package(write_package(repo, "p.yaml", data), source_repo="acme")
+    results = apply_surfaces([pkg], home=_settings(tmp_path), dry_run=True, only=["settings"])
+    assert {r.surface for r in results} == {"copilot.settings"}
+
+
+def test_trusted_folders_union_preserves_other_config(tmp_path):
+    from agent_machines.surfaces import trusted_folders
+    repo = tmp_path / "acme"
+    repo.mkdir()
+    home = _settings(tmp_path)
+    (home / "config.json").write_text(
+        json.dumps({"trustedFolders": ["/old"], "expAssignmentsCache": {"x": 1}}), encoding="utf-8"
+    )
+    spec = [{"disposition": "ensure-present", "by-location-class": ["$REPO(acme)"]}]
+    trusted_folders.apply(spec, {"acme": repo}, home=home, dry_run=False)
+    cfg = json.loads((home / "config.json").read_text())
+    assert "/old" in cfg["trustedFolders"]
+    assert str(repo) in cfg["trustedFolders"]
+    assert cfg["expAssignmentsCache"] == {"x": 1}  # machine-junk untouched (allowlist)
+
+
+def test_permissions_union_no_duplicate(tmp_path):
+    from agent_machines.surfaces import permissions
+    repo = tmp_path / "acme"
+    repo.mkdir()
+    home = _settings(tmp_path)
+    approval = {"kind": "commands", "commandIdentifiers": ["git"]}
+    (home / "permissions-config.json").write_text(
+        json.dumps({"locations": {str(repo): {"tool_approvals": [approval]}}}), encoding="utf-8"
+    )
+    spec = [{"disposition": "ensure-present",
+             "by-location-class": [{"match": "$REPO(acme)",
+                                    "tool_approvals": [approval, {"kind": "write"}]}]}]
+    result = permissions.apply(spec, {"acme": repo}, home=home, dry_run=False)
+    data = json.loads((home / "permissions-config.json").read_text())
+    approvals = data["locations"][str(repo)]["tool_approvals"]
+    assert approval in approvals and {"kind": "write"} in approvals
+    assert len(approvals) == 2  # existing not duplicated
+    assert result.changed
+
+
+def test_settings_diff_records_before_after(tmp_path):
+    home = _settings(tmp_path)
+    (home / "settings.json").write_text('{"model": "stale"}', encoding="utf-8")
+    result = settings.apply([("enforce", {"model": "opus"})], home=home, dry_run=True)
+    change = next(c for c in result.changes if c["key"] == "model")
+    assert change["before"] == "stale"
+    assert change["after"] == "opus"
 
 
 def test_collect_contributions_prefix_scoping(tmp_path):
