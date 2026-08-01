@@ -223,6 +223,18 @@ exception is a **continuation baton**: a handoff task is spent the moment it is
 picked up, because the continuing *work* is tracked by its own effort or issue,
 not by the handoff record.
 
+### verify-the-completion-claim
+A worker's completion is a **claim to verify**, not a fact to trust on faith. For
+a **goal-bearing** task the layer corroborates the claim against what was actually
+recorded — a result reference, and progress consistent with the stated
+done-criteria — before treating the goal as met. A completion asserted with **no
+recorded result and no progress** toward a real goal is **held for attention**
+rather than silently accepted, so a worker that declares done without doing the
+work cannot quietly close a goal. This is *complete-means-done* made defensive:
+the worker still self-judges completion, but a goal's closure is corroborated, not
+assumed. (A plain one-shot task with no goal keeps the simple deferred-completion
+contract.)
+
 ### resume-the-goal-not-restart-it
 When a worker owning a goal-bearing task is confirmed gone (*liveness-not-lease*),
 recovery does not discard the work already done. The task's durable goal and its
@@ -233,6 +245,19 @@ the fabric the *remainder* of a goal, never the whole of it. This is the recover
 counterpart of *resumable-goal*: the depth of a resume is only ever as rich as the
 progress the work took care to record, and a one-shot task with no accumulated
 progress simply re-claims.
+
+### nudge-before-recover
+Recovery is **graduated, and liveness gates every step**. A worker *confirmed
+gone* has its goal-bearing work **re-embodied**, so a replacement resumes from the
+accumulated progress (*resume-the-goal-not-restart-it*). But a worker that is
+**alive yet quiet** — still holding its claim, merely not emitting progress — is
+**not** a recovery candidate: it is first **nudged** (an attributed steering
+message to its live session) to re-engage, never killed on elapsed time. Only a
+worker *confirmed gone*, or one still unresponsive after a nudge, escalates to
+re-embodiment. Elapsed time may trigger a **liveness check**; it never by itself
+declares death. This is the graduated complement of *liveness-not-lease*: a
+slow-but-working worker is left alone, a quiet-but-live worker is prodded, and only
+a truly absent worker is replaced.
 
 ### repo-lane-isolation
 Every task belongs to the **repo lane** of the agent that produced it, and the
@@ -328,3 +353,14 @@ this layer.)
   design conversation on standing "pick one thing and improve it" board charters
   and an Intelligence-Dampener-style "drive this change to ready" goal — the intent
   the implementing work then closes.
+- **2026-07-31** — Extended for **supervised auto-recovery** (the full-auto slice):
+  added the *verify-the-completion-claim* behavior (a goal-bearing `complete` is
+  corroborated against a recorded result + progress before the goal is treated as
+  met; an empty "done" is held for attention) and the *nudge-before-recover*
+  behavior (graduated, liveness-gated recovery — a *confirmed-gone* worker's goal
+  is re-embodied to resume from progress; an *alive-but-quiet* worker is nudged, not
+  killed; elapsed time triggers a liveness check, never a death verdict). Makes
+  *resume-the-goal-not-restart-it* operational and defends *complete-means-done*.
+  Mined from an operator design conversation refining the recovery flow (heartbeat +
+  state payloads → verify-or-mitigate on a bad "done" → nudge/re-embody on a stalled
+  or gone worker).

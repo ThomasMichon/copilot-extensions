@@ -62,6 +62,9 @@ class QueueBackedClient:
     def heartbeat(self, task_id, worker_id):
         return asdict(self._q.heartbeat(task_id, worker_id))
 
+    def progress_log(self, task_id):
+        return self._q.progress_log(task_id)
+
 
 @pytest.fixture
 def q(tmp_path):
@@ -469,3 +472,162 @@ def test_cli_supervise_headless_label_routes(monkeypatch, q, client):
     assert plain.id in embody_calls
     assert marked.id not in embody_calls
 
+
+
+# -- Slice 2: liveness-gated auto-recovery -----------------------------------
+
+
+def test_recover_gone_releases_stale_reservation_and_respawns(q, client):
+    """A *confirmed-gone* embody's stale reservation is released so the task is
+    re-embodied (the replacement resumes from progress_log)."""
+    t = q.create("work")
+    spawn = _ok_spawn()
+    sup = Supervisor(
+        client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5,
+        verdict_fn=lambda wt, mc, sid: "gone",
+    )
+    sup.poll_once()  # spawn #1 -> reservation SPAWNED
+    assert spawn.calls == [t.id]
+
+    # embody claimed + started, then its worker vanished -> coordinator GC requeues
+    q.claim_one("m/wt-1", task_id=t.id, machine="m", worktree="wt-1")
+    q.start(t.id, "m/wt-1")
+    q.reconcile_liveness(lambda wt, mc, sid: "gone")
+    assert q.get(t.id).status == Status.QUEUED
+
+    # next cycle: recover_gone releases the stale reservation, then re-embodies
+    assert sup.poll_once() == [t.id]
+    assert spawn.calls == [t.id, t.id]  # re-spawned
+    assert q.latest_reservation(t.id).state == SpawnState.SPAWNED
+    assert q.latest_reservation(t.id).attempt == 2
+
+
+@pytest.mark.parametrize("verdict", ["live", "unknown"])
+def test_recover_leaves_live_or_unknown(q, client, verdict):
+    """Recovery never fires on a live or can't-tell verdict (the safety guarantee
+    behind liveness-not-lease): the reservation is held, no re-spawn."""
+    t = q.create("work")
+    spawn = _ok_spawn()
+    sup = Supervisor(
+        client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5,
+        verdict_fn=lambda *_: verdict,
+    )
+    sup.poll_once()  # spawn #1
+    assert spawn.calls == [t.id]
+
+    q.claim_one("m/wt-1", task_id=t.id, machine="m", worktree="wt-1")
+    q.start(t.id, "m/wt-1")
+    q.reconcile_liveness(lambda wt, mc, sid: "gone")  # queue requeues
+    assert q.get(t.id).status == Status.QUEUED
+
+    # supervisor's OWN verdict is not 'gone' -> hold, never re-spawn on ignorance
+    assert sup.poll_once() == []
+    assert spawn.calls == [t.id]
+    assert q.latest_reservation(t.id).state == SpawnState.SPAWNED
+
+
+def test_recover_disabled_holds_for_human(q, client):
+    """recover=False restores the old hold-for-a-human default even on a gone
+    verdict."""
+    t = q.create("work")
+    spawn = _ok_spawn()
+    sup = Supervisor(
+        client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5,
+        recover=False, verdict_fn=lambda *_: "gone",
+    )
+    sup.poll_once()  # spawn #1
+    assert sup.poll_once() == []  # gone, but recovery disabled -> no re-spawn
+    assert spawn.calls == [t.id]
+    assert q.latest_reservation(t.id).state == SpawnState.SPAWNED
+
+
+# -- Slice 2: completion-claim verification ----------------------------------
+
+
+def test_completion_verify_flags_empty_goal_completion(q, client):
+    """A goal-bearing task completed with no result-ref and no progress is
+    flagged in the reservation detail (held for review), not silently accepted."""
+    t = q.create("goal work", goal="reach X", done_criteria="X is done")
+    spawn = _ok_spawn()
+    sup = Supervisor(client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5)
+    sup.poll_once()
+    q.claim_one("m/wt-1", task_id=t.id, machine="m", worktree="wt-1")
+    q.start(t.id, "m/wt-1")
+    q.complete(t.id, "m/wt-1")  # no result-ref, no progress
+    assert sup.reconcile() == 1
+    res = q.latest_reservation(t.id)
+    assert res.state == SpawnState.SETTLED
+    assert "UNVERIFIED" in (res.detail or "")
+
+
+def test_completion_verify_accepts_goal_with_progress(q, client):
+    """A goal completed after recording progress verifies cleanly."""
+    t = q.create("goal work", goal="reach X", done_criteria="X is done")
+    spawn = _ok_spawn()
+    sup = Supervisor(client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5)
+    sup.poll_once()
+    q.claim_one("m/wt-1", task_id=t.id, machine="m", worktree="wt-1")
+    q.start(t.id, "m/wt-1")
+    q.record_progress(t.id, "m/wt-1", phase="p1", summary="did a unit of work")
+    q.complete(t.id, "m/wt-1")
+    assert sup.reconcile() == 1
+    res = q.latest_reservation(t.id)
+    assert res.state == SpawnState.SETTLED
+    assert "UNVERIFIED" not in (res.detail or "")
+    assert "progress" in (res.detail or "")
+
+
+def test_completion_verify_ignores_one_shot_task(q, client):
+    """A plain one-shot task (no goal) is never flagged, even with no evidence."""
+    t = q.create("plain work")  # no goal
+    spawn = _ok_spawn()
+    sup = Supervisor(client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5)
+    sup.poll_once()
+    q.claim_one("m/wt-1", task_id=t.id, machine="m", worktree="wt-1")
+    q.start(t.id, "m/wt-1")
+    q.complete(t.id, "m/wt-1")
+    sup.reconcile()
+    assert "UNVERIFIED" not in (q.latest_reservation(t.id).detail or "")
+
+
+# -- Slice 2: nudge-before-recover (stalled-but-live) ------------------------
+
+
+def test_nudge_stalled_live_worker_once(q, client):
+    """A confirmed-alive worker with no progress within the window is nudged
+    once (cooldown prevents re-nudging the same window)."""
+    t = q.create("work")
+    spawn = _ok_spawn()
+    sent = []
+    sup = Supervisor(
+        client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5,
+        stall_seconds=1.0,
+        liveness_fn=lambda wt, mc: {"session": "s"},  # confirmed alive
+        nudge_fn=lambda wt, mc, task: (sent.append(task["id"]) or True),
+    )
+    sup.poll_once()
+    q.claim_one("m/wt-1", task_id=t.id, machine="m", worktree="wt-1")
+    q.start(t.id, "m/wt-1")
+    future = (q.get(t.id).started_at or 0) + 100
+    assert sup.nudge_stalled(now=future) == 1
+    assert sent == [t.id]
+    # cooldown: another check within the window does not re-nudge
+    assert sup.nudge_stalled(now=future + 0.5) == 0
+
+
+def test_nudge_skips_when_not_confirmed_alive(q, client):
+    """A worker that is not confirmed alive is left to recovery, never nudged."""
+    t = q.create("work")
+    spawn = _ok_spawn()
+    sent = []
+    sup = Supervisor(
+        client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5,
+        stall_seconds=1.0,
+        liveness_fn=lambda wt, mc: None,  # not confirmed alive
+        nudge_fn=lambda wt, mc, task: (sent.append(1) or True),
+    )
+    sup.poll_once()
+    q.claim_one("m/wt-1", task_id=t.id, machine="m", worktree="wt-1")
+    q.start(t.id, "m/wt-1")
+    assert sup.nudge_stalled(now=(q.get(t.id).started_at or 0) + 100) == 0
+    assert sent == []
