@@ -68,6 +68,10 @@ class DispatchClient:
     def events(self, task_id: str) -> list[dict]:
         return self._unwrap(self._http.get(f"/tasks/{task_id}/events"))
 
+    def progress_log(self, task_id: str) -> list[dict]:
+        """The accumulated append-only progress log for a task (oldest first)."""
+        return self._unwrap(self._http.get(f"/tasks/{task_id}/progress-log"))
+
     def payload(self, task_id: str) -> dict:
         return self._unwrap(self._http.get(f"/tasks/{task_id}/payload"))
 

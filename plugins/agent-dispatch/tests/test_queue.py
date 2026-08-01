@@ -225,6 +225,71 @@ def test_record_progress_appends_audit(q):
     assert any(n and "progress:" in n and "settled the plan" in n for n in notes)
 
 
+# -- durable goal + append-only progress log ---------------------------------
+
+
+def test_goal_and_done_criteria_round_trip(q):
+    t = q.create(
+        "improve one thing",
+        prompt="pick something and improve it",
+        goal="raise test coverage of module X",
+        done_criteria="coverage >= 90% and CI green",
+    )
+    assert t.goal == "raise test coverage of module X"
+    assert t.done_criteria == "coverage >= 90% and CI green"
+    # Re-read from the store: fields persist on the row.
+    got = q.get(t.id)
+    assert got.goal == "raise test coverage of module X"
+    assert got.done_criteria == "coverage >= 90% and CI green"
+
+
+def test_create_without_goal_defaults_to_none(q):
+    t = q.create("plain one-shot")
+    assert t.goal is None
+    assert t.done_criteria is None
+    assert q.progress_log(t.id) == []
+
+
+def test_record_progress_appends_to_progress_log(q):
+    import json
+
+    t = q.create("work", goal="reach the goal", done_criteria="it is done")
+    q.claim_one("w1")
+    q.start(t.id, "w1")
+    q.record_progress(t.id, "w1", phase="planning", summary="first pass", now=1000.0)
+    q.record_progress(t.id, "w1", phase="implementing", summary="second pass", now=2000.0)
+
+    # latest-only beat still overwrites (no regression).
+    snap = json.loads(q.get(t.id).latest_progress)
+    assert snap["phase"] == "implementing" and snap["summary"] == "second pass"
+
+    # append-only log accumulates BOTH beats, in chronological order.
+    log = q.progress_log(t.id)
+    assert [(r["phase"], r["summary"], r["worker"]) for r in log] == [
+        ("planning", "first pass", "w1"),
+        ("implementing", "second pass", "w1"),
+    ]
+    assert log[0]["ts"] == pytest.approx(1000.0)
+    assert log[1]["ts"] == pytest.approx(2000.0)
+
+
+def test_progress_log_carries_detail_and_blocker(q):
+    t = q.create("work")
+    q.claim_one("w1")
+    # An explicit detail wins.
+    q.record_progress(t.id, "w1", phase="p", summary="s", detail="a longer note")
+    # Otherwise the beat's blocker/pr context becomes the log detail.
+    q.record_progress(t.id, "w1", phase="pr", summary="opened", pr="pr/42")
+    log = q.progress_log(t.id)
+    assert log[0]["detail"] == "a longer note"
+    assert log[1]["detail"] == "pr: pr/42"
+
+
+def test_progress_log_empty_for_untouched_task(q):
+    t = q.create("work")
+    assert q.progress_log(t.id) == []
+
+
 # -- capability gating -------------------------------------------------------
 
 

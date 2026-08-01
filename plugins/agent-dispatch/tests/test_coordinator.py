@@ -121,6 +121,43 @@ def test_progress_over_http(api):
     ).status_code == 409
 
 
+def test_goal_and_progress_log_over_http(api):
+    # A goal-bearing task carries goal + done_criteria on the row...
+    r = api.post(
+        "/tasks",
+        json={
+            "title": "pursue",
+            "goal": "reach the goal",
+            "done_criteria": "it is done",
+        },
+    )
+    tid = r.json()["id"]
+    assert r.json()["goal"] == "reach the goal"
+    assert r.json()["done_criteria"] == "it is done"
+
+    api.post("/claim", json={"worker_id": "w1"})
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
+    api.post(
+        f"/tasks/{tid}/progress",
+        json={"worker_id": "w1", "phase": "plan", "summary": "first"},
+    )
+    api.post(
+        f"/tasks/{tid}/progress",
+        json={"worker_id": "w1", "phase": "impl", "summary": "second"},
+    )
+
+    # ...and the append-only progress log accumulates every beat in order.
+    log = api.get(f"/tasks/{tid}/progress-log").json()
+    assert [(r["phase"], r["summary"]) for r in log] == [
+        ("plan", "first"),
+        ("impl", "second"),
+    ]
+
+
+def test_progress_log_missing_task_is_404(api):
+    assert api.get("/tasks/nope/progress-log").status_code == 404
+
+
 def test_claim_empty_returns_null(api):
     assert api.post("/claim", json={"worker_id": "w1"}).json() is None
 

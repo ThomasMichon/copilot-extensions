@@ -85,6 +85,8 @@ class DispatchTools:
         target_worktree: str | None = None,
         target_repo: str | None = None,
         dedup_key: str | None = None,
+        goal: str | None = None,
+        done_criteria: str | None = None,
         not_before: float = 0.0,
         proposed: bool = False,
     ) -> dict:
@@ -98,6 +100,12 @@ class DispatchTools:
         ``payload`` is inline Markdown; the coordinator spills it to a
         content-addressed blob when large. Prefer ``sweep``/``find`` before
         ``create`` to avoid duplicates (``dedup_key`` backstops it).
+
+        ``goal`` + ``done_criteria`` make the task a **durable, resumable goal**
+        (the *resumable-goal* feature): a worker loops toward ``goal`` and
+        completes only once it judges ``done_criteria`` met, resuming from the
+        accumulated progress log rather than restarting. Omit both for a plain
+        one-shot task.
         """
         lane = self._scope_repo(repo)
         if not lane:
@@ -120,6 +128,8 @@ class DispatchTools:
                 target_worktree=target_worktree,
                 target_repo=target_repo,
                 dedup_key=dedup_key,
+                goal=goal,
+                done_criteria=done_criteria,
                 not_before=not_before,
             )
 

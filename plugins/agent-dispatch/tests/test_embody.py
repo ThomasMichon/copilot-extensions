@@ -39,6 +39,23 @@ def test_autopilot_prompt_mentions_task_verbs_and_deferred_completion():
     assert "agent-dispatch abandon abc123 --duplicate-of" in prompt
 
 
+def test_autopilot_prompt_carries_goal_loop_contract():
+    prompt = embody.autopilot_worker_prompt(
+        "abc123", coordinator_url="http://c", worker_id="w9"
+    )
+    # The seed reads the durable goal + done-criteria + prior progress log and
+    # resumes rather than restarting (the resumable-goal contract).
+    assert "agent-dispatch show abc123" in prompt
+    assert "goal" in prompt.lower()
+    assert "done_criteria" in prompt or "done-criteria" in prompt.lower()
+    assert "progress_log" in prompt
+    assert "resume" in prompt.lower()
+    # An explicit loop: work -> progress -> re-check done-criteria -> repeat.
+    assert "loop" in prompt.lower()
+    # A plain one-shot task (no goal) still behaves as before.
+    assert "one-shot" in prompt.lower()
+
+
 def test_embody_available_false_without_cli(monkeypatch):
     monkeypatch.setattr(embody, "_agent_worktrees_launch_prefix", lambda: None)
     assert embody.embody_available() is False

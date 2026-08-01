@@ -97,6 +97,8 @@ class CreateBody(BaseModel):
     source: str | None = None
     origin_ref: str | None = None
     dedup_key: str | None = None
+    goal: str | None = None
+    done_criteria: str | None = None
     not_before: float = 0.0
     claim_as: str | None = None
 
@@ -342,6 +344,12 @@ def create_app(
     def get_events(task_id: str) -> list[dict]:
         _require(queue.get(task_id))
         return queue.events(task_id)
+
+    @app.get("/tasks/{task_id}/progress-log")
+    def get_progress_log(task_id: str) -> list[dict]:
+        """The accumulated append-only progress log (oldest first)."""
+        _require(queue.get(task_id))
+        return queue.progress_log(task_id)
 
     @app.get("/tasks/{task_id}/payload")
     def get_payload(task_id: str) -> dict:
