@@ -38,11 +38,37 @@ agent-machines restore --dry-run  # converge the machine (apply lands next; see 
 agent-machines version
 ```
 
+## Repo-local modules
+
+The engine converges Copilot settings directly, but sensitive OS-mutating work
+(install a package manager, bootstrap WSL, configure SSH, change power settings)
+stays in each harness repo as a **module** the engine invokes — so this public
+plugin ships no such logic. A package declares modules that run a repo-local
+command, gated per machine, cross-platform, and **dry-run-safe** (a module runs
+during `restore --dry-run` only if it declares `dry_run_args`):
+
+```yaml
+modules:
+  - name: ssh
+    gate: [my-box]                 # optional; defaults to the package gate
+    windows:
+      command: ["pwsh", "-File", "tools/restore/Restore-MachineState.ps1", "-Section", "SSH"]
+      dry_run_args: ["-DryRun"]
+    linux:
+      command: ["bash", "tools/restore/restore-machine-state.sh", "--section", "ssh"]
+      dry_run_args: ["--dry-run"]
+```
+
+Commands are argv lists run with the package's repo root as the working
+directory. This is how a monolithic restore engine gets **modularized** into the
+framework: each section becomes a declared module.
+
 ## Status
 
-Engine core (discover / manifest + layering / locations / validator / plan) is in
-place. The mutating surface handlers (`copilot.settings` / `permissions` /
-`trustedFolders`) and the `capture` / `prune` verbs are the next slice.
+Engine core (discover / manifest + layering / locations / validator / plan) and
+the **repo-local module runner** are in place. The mutating Copilot-settings
+surface handlers (`copilot.settings` / `permissions` / `trustedFolders`) and the
+`capture` / `prune` verbs are the next slice.
 
 ## Install
 
