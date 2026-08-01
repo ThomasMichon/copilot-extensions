@@ -32,11 +32,18 @@ per-machine data live in each harness repo, never in this plugin.
 
 ```
 agent-machines discover           # this machine's requirement-package set
-agent-machines plan               # read-only: managed surfaces + drift key
+agent-machines plan               # read-only: managed surfaces + modules + drift key
 agent-machines validate           # run the conflict validator
-agent-machines restore --dry-run  # converge the machine (apply lands next; see below)
+agent-machines restore            # DRY-RUN by default: preview what would change and why
+agent-machines restore --apply    # actually apply (surfaces + modules)
+agent-machines restore --only ssh --apply   # review + apply one section at a time
 agent-machines version
 ```
+
+**Restore is deliberate and reviewable.** It defaults to a dry-run that shows the
+per-key/-location diff; `--apply` makes changes; `--only` scopes to named
+surfaces/modules. Surfaces back up before writing; a module runs during a dry-run
+only if it declares `dry_run_args`.
 
 ## Repo-local modules
 
@@ -66,10 +73,12 @@ framework: each section becomes a declared module.
 ## Status
 
 Engine core (discover / manifest + layering / locations / validator / plan), the
-**repo-local module runner**, and the **`copilot.settings` surface apply**
-(enforce scalars + ensure-present union, backup-before-write, dry-run) are in
-place. The `copilot.permissions` / `copilot.trustedFolders` surfaces (their
-location-class model) and the `capture` / `prune` verbs are the next slice.
+**repo-local module runner**, and **all three Copilot surfaces** — `settings`
+(enforce scalars + ensure-present union), `permissions` and `trustedFolders`
+(by-location-class ensure-present floors) — apply, with dry-run-default, per-change
+diffs, `--only` scoping, and backup-before-write. Automatic run at session launch
+is intentionally **not** wired: restore stays on-demand. The `capture` / `prune`
+verbs are the next slice.
 
 ## Install
 

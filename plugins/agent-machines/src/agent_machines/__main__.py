@@ -84,8 +84,14 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     return 1 if _validator.has_errors(findings) else 0
 
 
+def _fmt_val(v: object) -> str:
+    s = json.dumps(v) if not isinstance(v, str) else v
+    return s if len(s) <= 80 else s[:77] + "..."
+
+
 def _cmd_restore(args: argparse.Namespace) -> int:
     machine = args.machine or _discover.current_machine()
+    dry_run = not args.apply
     packages = _collect_packages(machine)
     resolved = _reconcile.resolve_union(packages, machine)
     findings = _validator.validate(resolved)
@@ -96,9 +102,10 @@ def _cmd_restore(args: argparse.Namespace) -> int:
                 print(f"  {f.code}: {f.message}", file=sys.stderr)
         return 1
 
-    result = _reconcile.restore(packages, machine, dry_run=args.dry_run)
-    prefix = "DRY-RUN " if args.dry_run else ""
-    print(f"{prefix}restore for {machine}  (drift-key {result.plan.drift_key})")
+    result = _reconcile.restore(packages, machine, dry_run=dry_run, only=args.only)
+    header = "DRY-RUN (preview only; re-run with --apply to make changes)" if dry_run else "APPLY"
+    print(f"restore [{header}] for {machine}  (drift-key {result.plan.drift_key})")
+
     if not result.surface_results:
         print("  surfaces: none")
     for s in result.surface_results:
@@ -106,10 +113,18 @@ def _cmd_restore(args: argparse.Namespace) -> int:
             print(f"  surface {s.surface}: skipped ({s.skipped_reason})")
         elif s.changed:
             verb = "would change" if s.dry_run else "changed"
-            backup = f" (backup {s.backup_path})" if s.backup_path else ""
-            print(f"  surface {s.surface} [{s.file}]: {verb} {', '.join(s.applied_keys)}{backup}")
+            backup = f"  (backup {s.backup_path})" if s.backup_path else ""
+            print(f"  surface {s.surface} [{s.file}]: {verb}{backup}")
+            for ch in s.changes:  # what changes and why
+                if "added" in ch:
+                    for item in ch["added"]:
+                        print(f"      + {ch.get('key', ch.get('location'))}: {_fmt_val(item)}")
+                else:
+                    before, after = _fmt_val(ch["before"]), _fmt_val(ch["after"])
+                    print(f"      ~ {ch['key']}: {before} -> {after}")
         else:
             print(f"  surface {s.surface} [{s.file}]: up-to-date")
+
     if not result.module_results:
         print("  modules: none")
     for r in result.module_results:
@@ -145,7 +160,10 @@ def _build_parser() -> argparse.ArgumentParser:
     add("plan", _cmd_plan)
     add("validate", _cmd_validate)
     restore = add("restore", _cmd_restore)
-    restore.add_argument("--dry-run", action="store_true", help="print the plan, do not apply")
+    restore.add_argument("--apply", action="store_true",
+                         help="make changes (default is a dry-run preview)")
+    restore.add_argument("--only", action="append", metavar="NAME",
+                         help="restrict to named surfaces/modules (repeatable)")
     for verb in ("capture", "prune"):
         p = add(verb, _cmd_todo)
         p.set_defaults(verb=verb)

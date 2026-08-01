@@ -60,6 +60,40 @@ def matches(resolved: ResolvedLocation, concrete_path: str) -> bool:
     return norm == pat or fnmatch.fnmatch(norm, pat + "/*") or norm == pat.rstrip("/*")
 
 
+def worktrees_root_for(repo_path: Path) -> Path:
+    """Convention: worktrees of ``<root>/<repo>`` live at ``<root>/<repo>.worktrees``."""
+    return repo_path.parent / (repo_path.name + ".worktrees")
+
+
+def resolve_concrete_paths(spec: str, home: Path, repo_paths: dict[str, Path]) -> list[Path]:
+    """Resolve a location-class spec to concrete, existing paths (for apply).
+
+    ``$HOME`` -> the home dir; ``$REPO(<name>)`` -> that repo's checkout (if it
+    exists); ``$WORKTREES/<name>/*`` (or ``$WORKTREES(<name>)``) -> every existing
+    worktree dir of that repo. A future worktree cannot be pre-materialized, so a
+    glob resolves only to directories that exist now.
+    """
+    match = _ANCHOR_RE.match(spec)
+    if not match:
+        path = Path(spec)
+        return [path] if path.exists() else []
+    anchor, arg, tail = match.groups()
+    tail = tail or ""
+    if anchor == "HOME":
+        return [home]
+    if anchor == "REPO":
+        base = repo_paths.get(arg or "")
+        return [base] if base and base.exists() else []
+    repo = arg or tail.strip("/\\").split("/", 1)[0].split("\\", 1)[0]
+    base = repo_paths.get(repo)
+    if not base:
+        return []
+    root = worktrees_root_for(base)
+    if not root.is_dir():
+        return []
+    return sorted(d for d in root.iterdir() if d.is_dir())
+
+
 def is_manifestable(concrete_path: str, home: Path, known_roots: list[Path]) -> bool:
     """A location is manifestable when it resolves under a known, stable root.
 

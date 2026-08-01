@@ -17,6 +17,7 @@ from ._common import (
     SurfaceResult,
     backup_file,
     copilot_home,
+    diff_keys,
     merge_enforce,
     merge_floor,
     read_json,
@@ -62,5 +63,6 @@ def apply(
         changed=changed,
         dry_run=dry_run,
         applied_keys=sorted(set(applied)),
+        changes=diff_keys(live, new, applied),
         backup_path=str(backup) if backup else None,
     )

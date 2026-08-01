@@ -124,16 +124,30 @@ def restore(
     dry_run: bool = True,
     plat: str | None = None,
     home: Any = None,
+    only: list[str] | None = None,
 ) -> RestoreResult:
     """Converge ``machine`` to the package union.
 
-    Applies the implemented Copilot **surfaces** (settings.json, by disposition,
-    backup-before-write) and runs the repo-local **modules** (the sensitive
-    OS-mutating work), both honoring the dry-run safety rules.
+    Applies the Copilot **surfaces** (by disposition, backup-before-write) and
+    runs the repo-local **modules**, both honoring the dry-run safety rules.
+    ``only`` restricts the run to named surfaces/modules -- the "review a section,
+    then apply just that section" flow.
     """
     plat = plat or current_platform()
     p = plan(packages, machine, plat)
     resolved = resolve_union(packages, machine)
-    surfaces = apply_surfaces(resolved, home=home, dry_run=dry_run)
-    results = _modules.run_modules(resolved, machine, plat, dry_run=dry_run)
+    surfaces = apply_surfaces(resolved, home=home, dry_run=dry_run, only=only)
+    all_modules: list[_modules.ModuleResult] = []
+    if _want_modules(only):
+        all_modules = _modules.run_modules(resolved, machine, plat, dry_run=dry_run)
+    results = [r for r in all_modules if not only or r.name in only]
     return RestoreResult(plan=p, surface_results=surfaces, module_results=results)
+
+
+def _want_modules(only: list[str] | None) -> bool:
+    """Skip running modules entirely when ``only`` names surfaces exclusively."""
+    if not only:
+        return True
+    surface_names = {"copilot.settings", "copilot.permissions", "copilot.trustedFolders",
+                     "settings", "permissions", "trustedFolders"}
+    return any(name not in surface_names for name in only)

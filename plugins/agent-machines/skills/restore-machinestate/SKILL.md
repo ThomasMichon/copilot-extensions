@@ -44,11 +44,16 @@ of every discovered package, not one anchor repo.
    Scalar `enforce` disagreements and bootstrap-floor violations are errors; the
    validator reports, it does not auto-arbitrate. Fix conflicting packages.
 
-4. **Restore** -- converge (start with `--dry-run`):
+4. **Restore** -- deliberate + reviewable (dry-run is the default):
    ```
-   agent-machines restore --dry-run
-   agent-machines restore
+   agent-machines restore                       # DRY-RUN: what would change and why
+   agent-machines restore --only ssh            # preview one section
+   agent-machines restore --only ssh --apply    # apply just that section
+   agent-machines restore --apply               # apply everything
    ```
+   Restore previews by default; `--apply` makes changes; `--only` scopes to named
+   surfaces/modules so you review and apply section by section. Surfaces back up
+   before writing; a module runs in a dry-run only if it declares `dry_run_args`.
    Restore refuses to apply while the validator reports errors.
 
 ## Dispositions

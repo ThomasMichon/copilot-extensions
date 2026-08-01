@@ -13,9 +13,9 @@ backup-before-write. Planned surfaces (issue #4006):
 The allowlist stance means an undeclared key is ``ignore`` (never touched), and
 ``exclude`` keys (e.g. ``mcp-oauth-config/**``) are never serialized by capture.
 
-This package now applies the ``copilot.settings`` surface; the
-``copilot.permissions`` and ``copilot.trustedFolders`` surfaces (their
-location-class model) are the next slice.
+All three surfaces apply: ``copilot.settings`` (by disposition),
+``copilot.permissions`` and ``copilot.trustedFolders`` (by location-class,
+``ensure-present`` floors).
 """
 
 from __future__ import annotations
@@ -36,12 +36,6 @@ SURFACE_FILES = {
     "copilot.trustedFolders": ("config.json",),
 }
 
-#: Surfaces whose apply is not yet implemented (declared, reported, not written).
-_PENDING = {
-    "copilot.permissions": "permissions surface apply not yet implemented (#4006 follow-up)",
-    "copilot.trustedFolders": "trustedFolders surface apply not yet implemented (#4006 follow-up)",
-}
-
 
 def collect_contributions(
     packages: list[RequirementPackage], prefix: str
@@ -57,23 +51,53 @@ def collect_contributions(
     return out
 
 
+def collect_specs(packages: list[RequirementPackage], prefix: str) -> list[dict[str, Any]]:
+    """Gather the raw manage-key specs under ``prefix`` (for by-location-class surfaces)."""
+    out: list[dict[str, Any]] = []
+    for pkg in packages:
+        for key, spec in pkg.manage.items():
+            if key == prefix or key.startswith(prefix + "."):
+                out.append(spec)
+    return out
+
+
+def _repo_paths(packages: list[RequirementPackage]) -> dict[str, Any]:
+    paths: dict[str, Any] = {}
+    for pkg in packages:
+        root = pkg.repo_root()
+        if root is not None:
+            paths.setdefault(pkg.source_repo, root)
+    return paths
+
+
 def apply_surfaces(
     packages: list[RequirementPackage],
     home: Path | None = None,
     dry_run: bool = True,
+    only: list[str] | None = None,
 ) -> list[SurfaceResult]:
-    """Apply every implemented surface; report declared-but-pending ones."""
+    """Apply every implemented surface (optionally filtered by ``only`` names)."""
+    from . import permissions as _permissions
     from . import settings as _settings
+    from . import trusted_folders as _trusted
 
+    def wanted(name: str) -> bool:
+        return not only or name in only or name.rsplit(".", 1)[-1] in only
+
+    repo_paths = _repo_paths(packages)
     results: list[SurfaceResult] = []
-    settings_contribs = collect_contributions(packages, "copilot.settings")
-    if settings_contribs:
-        results.append(_settings.apply(settings_contribs, home=home, dry_run=dry_run))
-    for prefix, note in _PENDING.items():
-        if collect_contributions(packages, prefix):
-            results.append(
-                SurfaceResult(prefix, SURFACE_FILES[prefix][0], changed=False,
-                              dry_run=dry_run, skipped_reason=note)
-            )
+
+    if wanted("copilot.settings"):
+        contribs = collect_contributions(packages, "copilot.settings")
+        if contribs:
+            results.append(_settings.apply(contribs, home=home, dry_run=dry_run))
+    if wanted("copilot.permissions"):
+        specs = collect_specs(packages, "copilot.permissions")
+        if specs:
+            results.append(_permissions.apply(specs, repo_paths, home=home, dry_run=dry_run))
+    if wanted("copilot.trustedFolders"):
+        specs = collect_specs(packages, "copilot.trustedFolders")
+        if specs:
+            results.append(_trusted.apply(specs, repo_paths, home=home, dry_run=dry_run))
     return results
 

@@ -28,8 +28,19 @@ class SurfaceResult:
     changed: bool
     dry_run: bool
     applied_keys: list[str] = field(default_factory=list)
+    changes: list[dict[str, Any]] = field(default_factory=list)
     backup_path: str | None = None
     skipped_reason: str | None = None
+
+
+def diff_keys(live: dict[str, Any], new: dict[str, Any], keys: list[str]) -> list[dict[str, Any]]:
+    """The 'what changes and why' record: before/after for each changed key."""
+    out: list[dict[str, Any]] = []
+    for key in sorted(set(keys)):
+        before, after = live.get(key), new.get(key)
+        if before != after:
+            out.append({"key": key, "before": before, "after": after})
+    return out
 
 
 def read_json(path: Path) -> dict[str, Any]:
