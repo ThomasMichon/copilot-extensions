@@ -1,10 +1,9 @@
 """Discoverable MCP toolset over the agent-index HTTP API.
 
 Exposes agent-index's query surface — ``agent_index_search``,
-``agent_index_find_similar``, ``agent_index_status``, ``agent_index_reindex`` —
-as MCP tools so agents find semantic retrieval directly, without knowing the
-HTTP shape. (``agent_index_clusters`` follows once the clustering pass is wired
-into indexing.)
+``agent_index_find_similar``, ``agent_index_clusters``, ``agent_index_status``,
+``agent_index_reindex`` — as MCP tools so agents find semantic retrieval
+directly, without knowing the HTTP shape.
 
 **Toolset vs transport.** The tools are a *transport-agnostic* HTTP client over a
 **configurable endpoint**: resolved from ``AGENT_INDEX_ENDPOINT`` if set, else
@@ -35,7 +34,8 @@ mcp = FastMCP(
         "Semantic + lexical search over a harness repo's code, docs, commits, "
         "issues, and pull requests. Use agent_index_search to find content by "
         "meaning, agent_index_find_similar to pivot from a result into 'more like "
-        "this', and agent_index_status for index health."
+        "this', agent_index_clusters to list near-duplicate items, and "
+        "agent_index_status for index health."
     ),
 )
 
@@ -85,6 +85,27 @@ def _format_hits(hits: list[dict[str, Any]], header: str) -> str:
             f"src={hit.get('source', '')}"
         )
         lines.append(_clip(hit.get("content", "")))
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _format_clusters(clusters: list[dict[str, Any]], count: int) -> str:
+    lines = [f"Found {count} cluster(s)", ""]
+    for i, cluster in enumerate(clusters, 1):
+        rep = cluster.get("representative") or {}
+        dupe = " [has exact dupes]" if cluster.get("has_exact_dupes") else ""
+        lines.append(
+            f"[{i}] {cluster.get('bucket', '')} / {cluster.get('model_id', '')} -- "
+            f"{cluster.get('size', 0)} items, "
+            f"avg={float(cluster.get('avg_score', 0.0)):.3f}{dupe}"
+        )
+        lines.append(f"    rep: {rep.get('source', '')} :: {rep.get('file_path', '')}")
+        for member in cluster.get("members", []):
+            tag = " (exact)" if member.get("is_exact_dupe") else ""
+            lines.append(
+                f"      - {member.get('source', '')} :: {member.get('file_path', '')} "
+                f"(score={float(member.get('score', 0.0)):.3f}){tag}"
+            )
         lines.append("")
     return "\n".join(lines)
 
@@ -145,6 +166,43 @@ async def agent_index_find_similar(
     if not hits:
         return f"No similar items for chunk {chunk_id}"
     return _format_hits(hits, f"Found {len(hits)} similar item(s) for chunk {chunk_id}")
+
+
+@mcp.tool()
+async def agent_index_clusters(
+    source: str | None = None,
+    bucket: str | None = None,
+    model: str | None = None,
+    exact_dupes_only: bool = False,
+    limit: int = 20,
+) -> str:
+    """List clusters of near-duplicate indexed items.
+
+    Answers "which items are basically the same?" — filed issues, docs, or
+    quips that duplicate each other. Clusters are largest/tightest first.
+
+    Args:
+        source: Scope to a source (collapsed to its bucket, e.g.
+            "git:my-repo" -> all that repo's files).
+        bucket: Explicit bucket (e.g. "git", "gitea:issues").
+        model: Embedding space ("code" or "prose").
+        exact_dupes_only: Only clusters that contain a byte-identical pair.
+        limit: Max clusters (default 20).
+    """
+    params: dict[str, Any] = {"limit": limit, "exact_dupes_only": exact_dupes_only}
+    if source:
+        params["source"] = source
+    if bucket:
+        params["bucket"] = bucket
+    if model:
+        params["model"] = model
+    data = await _get("/clusters", params)
+    if not data.get("available", True):
+        return f"agent-index clusters unavailable: {data.get('error', 'unknown error')}"
+    clusters = data.get("clusters", [])
+    if not clusters:
+        return "No clusters found for the given filters."
+    return _format_clusters(clusters, data.get("count", len(clusters)))
 
 
 @mcp.tool()

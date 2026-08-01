@@ -192,15 +192,39 @@ local service API:
   [--limit N] [--json]` returns JSON hits by default for non-interactive callers.
 - `agent-index similar <chunk_id> [--limit N] [--source S]` returns JSON nearest
   neighbors for an indexed chunk.
+- `agent-index clusters [--source S] [--bucket B] [--model M] [--exact-dupes-only]
+  [--limit N]` lists similarity clusters of near-duplicate items (largest/tightest
+  first) as JSON.
 - `GET /search?q=<query>&source=&language=&repo=&limit=10` returns
   `{query, available, hits}`.
 - `GET /similar?id=<chunk_id>&limit=10` returns `{id, available, hits}`.
+- `GET /clusters?source=&bucket=&model=&exact_dupes_only=&limit=50&offset=0`
+  returns `{available, count, clusters}`.
 - `POST /reindex` starts a best-effort background reindex when the optional
   indexing dependencies are installed, returning `{accepted: true}` immediately.
 
 The query surface degrades cleanly: missing optional dependencies, an unavailable
 store, or an empty/unbuilt index produce JSON error payloads with `hits: []` (and
 HTTP 200 from the service) rather than raw tracebacks or service crashes.
+
+### Discoverable MCP toolset
+
+`agent-index mcp` runs a stdio FastMCP server (`agent_index/mcp_app.py`) that
+exposes the query surface as five discoverable MCP tools — `agent_index_search`,
+`agent_index_find_similar`, `agent_index_clusters`, `agent_index_status`, and
+`agent_index_reindex` — so an agent finds semantic retrieval directly without
+knowing the HTTP shape. The tools are a transport-agnostic HTTP client over a
+**configurable endpoint** (`AGENT_INDEX_ENDPOINT`, else local endpoint
+discovery), so each consumer wires its own transport (direct local HTTP,
+SSH-forwarded port, or a gateway URL).
+
+The similarity-cluster artifact backing `agent_index_clusters` / `GET /clusters`
+is refreshed **post-index** inside the indexing pipeline (`run_reindex` calls the
+cluster pass over the just-updated vectors, reusing stored embeddings — no
+re-embedding). Clustering is best-effort and guarded by `AGENT_INDEX_CLUSTER_ENABLED`;
+a clustering failure never fails the reindex it follows. The artifact lives in its
+own `clusters.db` (separate from LanceDB and `tasks.db`) so a recluster never
+touches the index.
 
 Query-time embedding runs in-process on CPU by default, so search does not need a
 warm accelerator. Indexing is heavier: it embeds batches through the on-demand GPU

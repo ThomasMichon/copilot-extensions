@@ -9,6 +9,7 @@ import agent_index.mcp_app as mcp_app
 _TOOLS = {
     "agent_index_search",
     "agent_index_find_similar",
+    "agent_index_clusters",
     "agent_index_status",
     "agent_index_reindex",
 }
@@ -135,6 +136,64 @@ def test_reindex_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     out = asyncio.run(mcp_app.agent_index_reindex())
     assert "not accepted" in out
     assert "draining" in out
+
+
+def test_clusters_delegates_and_formats(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_get(path: str, params: dict) -> dict:
+        assert path == "/clusters"
+        assert params["source"] == "git:repo"
+        assert params["exact_dupes_only"] is True
+        assert params["limit"] == 5
+        return {
+            "available": True,
+            "count": 1,
+            "clusters": [
+                {
+                    "cluster_id": "cid-1",
+                    "bucket": "git",
+                    "model_id": "code",
+                    "size": 2,
+                    "avg_score": 0.951,
+                    "has_exact_dupes": True,
+                    "representative": {"source": "git:repo", "file_path": "a.py"},
+                    "members": [
+                        {"source": "git:repo", "file_path": "a.py", "score": 1.0,
+                         "is_exact_dupe": False},
+                        {"source": "git:repo", "file_path": "b.py", "score": 0.95,
+                         "is_exact_dupe": True},
+                    ],
+                }
+            ],
+        }
+
+    monkeypatch.setattr(mcp_app, "_get", fake_get)
+    out = asyncio.run(
+        mcp_app.agent_index_clusters(source="git:repo", exact_dupes_only=True, limit=5)
+    )
+    assert "Found 1 cluster(s)" in out
+    assert "git / code -- 2 items" in out
+    assert "avg=0.951" in out
+    assert "[has exact dupes]" in out
+    assert "rep: git:repo :: a.py" in out
+    assert "b.py (score=0.950) (exact)" in out
+
+
+def test_clusters_no_results(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_get(path: str, params: dict) -> dict:
+        return {"available": True, "count": 0, "clusters": []}
+
+    monkeypatch.setattr(mcp_app, "_get", fake_get)
+    assert "No clusters found" in asyncio.run(mcp_app.agent_index_clusters())
+
+
+def test_clusters_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_get(path: str, params: dict) -> dict:
+        return {"available": False, "error": "no cluster db"}
+
+    monkeypatch.setattr(mcp_app, "_get", fake_get)
+    out = asyncio.run(mcp_app.agent_index_clusters())
+    assert "unavailable" in out
+    assert "no cluster db" in out
 
 
 def test_endpoint_override(monkeypatch: pytest.MonkeyPatch) -> None:
