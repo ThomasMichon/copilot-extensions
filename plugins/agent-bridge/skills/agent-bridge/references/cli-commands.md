@@ -195,13 +195,14 @@ agent-bridge service status     # running state + bound port + PID
 
 `agent-bridge start` (no `service`) runs the server in the **foreground** -- it
 is the entry point the service manager invokes, and is useful for debugging.
-Add `--port` / `--bind` to override the platform default (9280 Windows / 9281
-Linux/WSL).
+By default the daemon binds an **OS-assigned ephemeral** loopback port and
+advertises it via the routing table (`active.json`); add `--port` / `--bind`
+only to pin a fixed port (e.g. for debugging).
 
 ```bash
 # Foreground (debugging) -- blocks the terminal
 agent-bridge start
-agent-bridge start --port 9280 --bind 127.0.0.1
+agent-bridge start --port 9280 --bind 127.0.0.1   # pin a fixed port (default is dynamic)
 
 # Health check (also shows the bound URL)
 agent-bridge status
@@ -246,7 +247,7 @@ AGENT_BRIDGE_ZERO_DOWNTIME=1 aperture-labs services agent-bridge update
 ```
 
 > A passive instance (`agent-bridge start --passive`) does not self-publish the
-> routing table or bind the credential relay (9857) -- the deploy orchestrator
+> routing table or bind the credential relay (ephemeral) -- the deploy orchestrator
 > flips the table after a health check and calls `/api/v1/relay/adopt` once the
 > old daemon releases the relay port. The port-keyed singleton lock lets the
 > active and passive daemons coexist on one config dir during the overlap.
@@ -281,11 +282,14 @@ agent-bridge send <Project> "do the elevated work"
 The (non-elevated) primary daemon cannot spawn an elevated Copilot directly, so
 for a flagged agent it transparently:
 
-1. **auto-ensures an elevated sub-daemon** -- a second agent-bridge on loopback
-   `127.0.0.1:9281`, run elevated via a persistent `/RL HIGHEST` scheduled task,
-   isolated under `<config>/elevated/`; and
+1. **auto-ensures an elevated sub-daemon** -- a second agent-bridge on an
+   **OS-assigned ephemeral** loopback port (discovered via its own
+   `<config>/elevated/active.json` routing table; dotfiles #694), run elevated
+   via a persistent `/RL HIGHEST` scheduled task, isolated under
+   `<config>/elevated/`; and
 2. **relays** the session to it over ACP-over-WebSocket (`agent-bridge
-   acp-connect ws://127.0.0.1:9281/acp/<Project>`). Because the whole sub-daemon
+   acp-connect ws://127.0.0.1:<port>/acp/<Project>`, where `<port>` is the
+   discovered elevated port). Because the whole sub-daemon
    is elevated, the agent it spawns is elevated too.
 
 This only triggers on Windows when the primary is **not already elevated**; an

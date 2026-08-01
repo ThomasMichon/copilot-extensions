@@ -82,14 +82,16 @@ Platform service:
   Linux/WSL: ~/.config/systemd/user/agent-bridge.service (enabled)
 
 Credential relay:
-  Port 9857                Starts with agent-bridge; no separate relay setup
-                           needed when agent-codespaces is installed as a
-                           sibling plugin
+  Ephemeral (discovered)   Starts with agent-bridge; binds an OS-assigned
+                           loopback port and publishes it for clients. No
+                           separate relay setup needed when agent-codespaces
+                           is installed as a sibling plugin
 ```
 
 The credential relay is part of agent-bridge startup. If the
 `agent-codespaces` plugin is installed into the same venv, agent-bridge
-starts the relay automatically on port `9857`.
+starts the relay automatically on an OS-assigned ephemeral loopback port
+(published for SSH-tunnel clients to discover).
 
 ### Verify
 
@@ -123,7 +125,7 @@ roster is **derived** from it (+ `.agent-worktrees/related.yaml`). See
 Edit `~/.agent-bridge/config.yaml` directly:
 
 ```yaml
-port: 9280            # host default: 9280; only a WSL guest uses 9281 (omit to auto-select)
+port: 0               # dynamic by default: OS-assigned ephemeral, advertised via active.json (set a positive port only to pin)
 bind: 127.0.0.1
 log_level: info
 
@@ -152,15 +154,17 @@ agent-bridge start
 ### Verify it's running
 
 ```bash
-agent-bridge status
-curl http://localhost:9280/health   # 9281 only on a WSL guest
+agent-bridge status                 # prints the live loopback URL (dynamic port)
+# then health-check that URL, e.g.:
+# curl http://127.0.0.1:<port>/health
 ```
 
-> **Port note:** the bridge listens on a host default of **9280**. Only a
-> **WSL guest** — which shares the Windows host's TCP port namespace — uses
-> **9281**, to avoid a collision with the host's own daemon; bare-metal Linux
-> is an ordinary host on 9280. `agent-bridge status` prints the
-> active port; use it (not a hardcoded number) when probing health.
+> **Port note:** the bridge binds an **OS-assigned ephemeral** loopback port by
+> default (dotfiles #694) and advertises the actual port via its routing table
+> (`active.json`), so nothing well-known (9280/9281) is reserved and there is no
+> Windows/WSL collision to design around. `agent-bridge status` prints the live
+> port; always use it (never a hardcoded number) when probing health. Pin a
+> fixed port only for debugging via `--port` or a positive `port:` in config.
 
 ## 5. Test It
 

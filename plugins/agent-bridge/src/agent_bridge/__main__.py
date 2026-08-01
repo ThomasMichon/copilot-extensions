@@ -198,7 +198,7 @@ def _cmd_elevated(args: argparse.Namespace) -> None:
         except Exception as exc:
             print(f"Failed to start elevated sub-daemon: {exc}")
             sys.exit(1)
-        port = elevated.ELEVATED_PORT
+        port = elevated.discovered_port()
         print(f"Elevated sub-daemon up on 127.0.0.1:{port}")
         print(f"Token:  {tok[:8]}...")
         print(f"ACP WS: ws://127.0.0.1:{port}/acp/<agent>")

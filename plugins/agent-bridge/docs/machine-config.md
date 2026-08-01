@@ -368,7 +368,7 @@ the agent and go.
 Profiles live in `~/.agent-bridge/config.yaml` under the `topologies` key:
 
 ```yaml
-port: 9280            # host default: 9280; only a WSL guest uses 9281 (omit to auto-select)
+port: 0               # dynamic by default: OS-assigned ephemeral, advertised via active.json (set a positive port only to pin)
 bind: 127.0.0.1
 log_level: info
 

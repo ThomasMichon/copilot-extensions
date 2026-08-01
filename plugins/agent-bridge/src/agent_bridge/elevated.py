@@ -43,11 +43,18 @@ import urllib.request
 from pathlib import Path
 
 import yaml
+from zdd.routing import read_active_endpoint
 
 from .config import config_dir, load_config
 
 log = logging.getLogger("agent-bridge")
 
+# Legacy fixed port for the elevated sub-daemon, kept ONLY as a
+# backward-compatible discovery fallback (dotfiles #694). The sub-daemon now
+# binds an OS-assigned ephemeral loopback port and advertises the actual port via
+# its own routing table (``<primary>/elevated/active.json``); callers resolve it
+# with ``discovered_port()``. This constant applies only when no routing table
+# has been published yet (e.g. an older sub-daemon that still pinned 9281).
 ELEVATED_PORT = 9281
 TASK_NAME = "agent-bridge-elevated"
 _SUBDIR = "elevated"
@@ -236,7 +243,7 @@ def relay_applicable(requires_admin: bool) -> bool:
 
 
 def relay_spawn_command(
-    agent_name: str, *, token: str, port: int = ELEVATED_PORT
+    agent_name: str, *, token: str, port: int | None = None
 ) -> list[str]:
     """Build the ``acp-connect`` relay command for an elevated agent.
 
@@ -248,6 +255,8 @@ def relay_spawn_command(
     """
     import sys
 
+    if port is None:
+        port = discovered_port()
     url = f"ws://127.0.0.1:{port}/acp/{agent_name}"
     return [
         sys.executable, "-m", "agent_bridge", "acp-connect",
@@ -255,8 +264,27 @@ def relay_spawn_command(
     ]
 
 
-def is_up(port: int = ELEVATED_PORT, timeout: float = 1.0) -> bool:
-    """True if a bridge answers /health on the loopback port."""
+def discovered_port(fallback: int = ELEVATED_PORT) -> int:
+    """Resolve the elevated sub-daemon's live loopback port (dotfiles #694).
+
+    The sub-daemon binds an OS-assigned ephemeral port and advertises it via its
+    own routing table at ``<primary>/elevated/active.json``. Returns the recorded
+    active port, or the legacy fixed ``ELEVATED_PORT`` as a backward-compatible
+    fallback when no table has been published yet. The listener is not verified
+    here -- callers that need liveness use ``is_up``.
+    """
+    ep = read_active_endpoint(elevated_dir(), verify_listener=False)
+    return ep.port if ep is not None else fallback
+
+
+def is_up(port: int | None = None, timeout: float = 1.0) -> bool:
+    """True if a bridge answers /health on the sub-daemon's loopback port.
+
+    ``port`` defaults to the discovered (ephemeral) port; pass an explicit port
+    to probe a specific one.
+    """
+    if port is None:
+        port = discovered_port()
     try:
         with urllib.request.urlopen(
             f"http://127.0.0.1:{port}/health", timeout=timeout
@@ -279,7 +307,7 @@ def read_token() -> str | None:
         return None
 
 
-def ensure_running(port: int = ELEVATED_PORT, *, wait: float = 60.0) -> str:
+def ensure_running(*, wait: float = 60.0) -> str:
     """Ensure the elevated sub-daemon is up; return its bearer token.
 
     Idempotent and **headless after first use**: if already serving, returns the
@@ -287,14 +315,19 @@ def ensure_running(port: int = ELEVATED_PORT, *, wait: float = 60.0) -> str:
     very first start registers a persistent ``/RL HIGHEST`` scheduled task (one
     UAC prompt); every subsequent cold start runs that already-consented task
     via ``schtasks /run`` with **no** prompt.
+
+    The sub-daemon binds an OS-assigned ephemeral loopback port (dotfiles #694,
+    seeded via ``port 0``) and advertises it through ``<primary>/elevated/
+    active.json``; callers resolve the live port with ``discovered_port()`` /
+    ``is_up()``.
     """
-    if is_up(port):
+    if is_up():
         tok = read_token()
         if tok:
             return tok
 
-    ed = _seed_config(port)
-    launcher = _write_launcher(ed, port)
+    ed = _seed_config(0)
+    launcher = _write_launcher(ed, 0)
 
     if _task_registered():
         # The task may be a zombie: schtasks reports the instance "Running"
@@ -304,37 +337,39 @@ def ensure_running(port: int = ELEVATED_PORT, *, wait: float = 60.0) -> str:
         # process tree so the restart can rebind the API port cleanly. (The
         # sub-daemon no longer hosts the credential relay, so there is no
         # orphaned 9857 relay child to reap -- see _seed_config.)
-        if not is_up(port):
+        if not is_up():
             _end_task()
             time.sleep(0.5)
         log.info(
             "Starting elevated sub-daemon headlessly via scheduled task "
-            "(127.0.0.1:%d)", port,
+            "(dynamic loopback port)",
         )
         _run_task()
     else:
         bootstrap = _write_bootstrap(ed, launcher, action="start")
         log.info(
-            "Registering elevated sub-daemon task on 127.0.0.1:%d "
-            "(expect one UAC prompt -- subsequent starts are headless)", port,
+            "Registering elevated sub-daemon task (dynamic loopback port; "
+            "expect one UAC prompt -- subsequent starts are headless)",
         )
         _run_elevated(bootstrap)
 
     deadline = time.time() + wait
     while time.time() < deadline:
-        if is_up(port):
+        if is_up():
             tok = read_token()
             if tok:
-                log.info("Elevated sub-daemon ready on 127.0.0.1:%d", port)
+                log.info(
+                    "Elevated sub-daemon ready on 127.0.0.1:%d", discovered_port(),
+                )
                 return tok
         time.sleep(1.0)
     raise RuntimeError(
-        f"Elevated sub-daemon did not become ready on port {port} within {wait}s "
+        f"Elevated sub-daemon did not become ready within {wait}s "
         f"(see {ed / 'elevated-daemon.log'})"
     )
 
 
-def stop(port: int = ELEVATED_PORT, *, deregister: bool = False) -> None:
+def stop(*, deregister: bool = False) -> None:
     """Stop the elevated sub-daemon. Headless by default.
 
     Ends the running task instance via ``schtasks /end`` (no UAC) but **keeps**
@@ -350,9 +385,11 @@ def stop(port: int = ELEVATED_PORT, *, deregister: bool = False) -> None:
         _run_elevated(bootstrap)
 
 
-def status(port: int = ELEVATED_PORT) -> dict:
+def status() -> dict:
     """Return a small status dict for the sub-daemon."""
-    info: dict = {"port": port, "up": is_up(port), "config_dir": str(elevated_dir())}
+    port = discovered_port()
+    up = is_up(port)
+    info: dict = {"port": port, "up": up, "config_dir": str(elevated_dir())}
     try:
         out = subprocess.run(
             ["schtasks", "/query", "/tn", TASK_NAME, "/fo", "LIST"],
@@ -361,7 +398,7 @@ def status(port: int = ELEVATED_PORT) -> dict:
         info["task_registered"] = out.returncode == 0
     except OSError:
         info["task_registered"] = False
-    info["agents"] = _list_agents(port) if info["up"] else []
+    info["agents"] = _list_agents(port) if up else []
     return info
 
 

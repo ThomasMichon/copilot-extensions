@@ -2,14 +2,17 @@
 
 ## Service Design
 
-Agent Bridge runs as a persistent HTTP service on `localhost:9280`. It
+Agent Bridge runs as a persistent HTTP service on a loopback port. By default
+it binds an **OS-assigned ephemeral** port and advertises the actual port
+through its routing table (`active.json`), so nothing well-known is reserved
+(dotfiles #694); clients discover it (`agent-bridge status` prints it). It
 manages agent conversations across multiple Copilot CLI sessions,
 spawning agent subprocesses locally or via SSH.
 
 ```
 Copilot CLI sessions (multiple)
   |
-  |  HTTP (localhost:9280)
+  |  HTTP (loopback, discovered port)
   v
 +--------------------------------------------+
 |  agent-bridge (persistent, one per machine) |
@@ -39,7 +42,7 @@ Copilot CLI sessions (multiple)
 | Config | `config.py` | Config loading, topology management |
 | Client | `client.py` | HTTP client for CLI commands |
 | Single-instance guard | `singleton.py` | OS-level lock: one daemon per config dir |
-| Elevated sub-daemon | `elevated.py` | Windows admin sub-daemon launcher (port 9281) |
+| Elevated sub-daemon | `elevated.py` | Windows admin sub-daemon launcher (ephemeral loopback port, discovered via its routing table) |
 | CLI | `__main__.py` | Command-line interface |
 
 ## Single-Instance Guard
@@ -67,7 +70,9 @@ also have distinct config dirs, so each gets its own single instance.
 
 Agent-bridge starts a credential relay server during its FastAPI
 lifespan in `app.py` by instantiating agent-codespaces'
-`CredentialRelayServer`. The relay listens on port `9857` and proxies
+`CredentialRelayServer`. The relay binds an **OS-assigned ephemeral** loopback
+port (dotfiles #694) and publishes it (via the daemon's live `relay-port` state)
+so SSH-tunnel clients discover it; it proxies
 requests to the local Git Credential Manager via agent-codespaces'
 credential source integration.
 
@@ -80,7 +85,7 @@ The relay speaks the git credential protocol over TCP and supports the
 standard `get`, `store`, and `erase` actions plus `get-access-token`,
 which returns a raw ADO PAT for callers that need an access token.
 
-**Single owner of port 9857.** Only the **primary** daemon hosts the relay. The
+**Single owner of the credential relay.** Only the **primary** daemon hosts the relay. The
 Windows elevated sub-daemon sets `enable_credential_relay: false` in its seeded
 config (`elevated.py` -> `_seed_config`), so it never re-binds -- and thus never
 evicts -- the primary's relay; local elevated agents reuse the primary's relay on
@@ -128,7 +133,7 @@ GET    /health                           # Service health (no auth); reports {st
 POST   /api/v1/drain                     # Open the drain gate; wait for busy sessions to settle
 POST   /api/v1/undrain                   # Release the drain gate (cutover rollback)
 POST   /api/v1/shutdown                  # Clean daemon shutdown (retires its own routing-table entry)
-POST   /api/v1/relay/adopt               # Bind the credential relay (9857) on this daemon
+POST   /api/v1/relay/adopt               # Bind the credential relay (ephemeral) on this daemon
 POST   /api/v1/gc                        # Prune aged terminal/disconnected sessions
 ```
 
@@ -290,7 +295,7 @@ cutover (`zdd.cutover.CutoverOrchestrator`):
 4. **drain** the old daemon (busy-oracle wait, optional `--force`);
 5. **-- commit point --** shut the old daemon down (a clean exit; it
    `clear_if_owner`s only its own route entry);
-6. best-effort: adopt the credential relay (9857) on the new daemon.
+6. best-effort: adopt the credential relay (ephemeral) on the new daemon.
 
 Any failure **before** the commit point rolls back: re-publish the old endpoint
 as active, undrain the old daemon, and terminate the freshly spawned passive. If

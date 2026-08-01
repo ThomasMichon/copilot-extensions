@@ -33,6 +33,32 @@ def test_constants():
     assert elevated.TASK_NAME == "agent-bridge-elevated"
 
 
+def test_discovered_port_reads_active_json(tmp_path, monkeypatch):
+    # dotfiles #694: the sub-daemon advertises its OS-assigned ephemeral port via
+    # its own routing table (<primary>/elevated/active.json); discovered_port
+    # resolves it, and falls back to the legacy fixed port when none is published.
+    import json as _json
+
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))
+    ed = tmp_path / "elevated"
+    ed.mkdir(parents=True, exist_ok=True)
+    # No routing table yet -> legacy fixed-port fallback.
+    assert elevated.discovered_port() == elevated.ELEVATED_PORT
+    # Published ephemeral port -> discovered.
+    (ed / "active.json").write_text(
+        _json.dumps(
+            {
+                "active": {
+                    "bind": "127.0.0.1", "port": 61234, "pid": 4242,
+                    "version": "0.4.0", "generation": 3,
+                },
+                "epoch": "2026-07-31T00:00:00Z",
+            }
+        )
+    )
+    assert elevated.discovered_port() == 61234
+
+
 def test_relay_spawn_command_shape():
     cmd = elevated.relay_spawn_command("SPO.Core", token="tok123", port=9281)
     assert cmd[1:] == [
@@ -83,6 +109,7 @@ def _stub_start(monkeypatch, tmp_path):
     """
     state = {"up": False}
     monkeypatch.setattr(elevated, "is_up", lambda *a, **k: state["up"])
+    monkeypatch.setattr(elevated, "discovered_port", lambda *a, **k: 55555)
     monkeypatch.setattr(elevated, "read_token", lambda: "subtok")
     monkeypatch.setattr(elevated, "_seed_config", lambda port: tmp_path)
     monkeypatch.setattr(
@@ -166,6 +193,36 @@ def test_ensure_running_registers_when_task_absent(monkeypatch, tmp_path):
     assert tok == "subtok"
     # First time: one elevated registration bootstrap, no headless /run.
     assert calls == ["elevated"]
+
+
+def test_ensure_running_seeds_dynamic_port(monkeypatch, tmp_path):
+    # dotfiles #694: the sub-daemon must bind an OS-assigned ephemeral port, so
+    # ensure_running seeds config + launcher with port 0 (dynamic), never 9281.
+    seen: dict = {}
+    state = {"up": False}
+    monkeypatch.setattr(elevated, "is_up", lambda *a, **k: state["up"])
+    monkeypatch.setattr(elevated, "discovered_port", lambda *a, **k: 55001)
+    monkeypatch.setattr(elevated, "read_token", lambda: "subtok")
+    monkeypatch.setattr(
+        elevated, "_seed_config",
+        lambda port: seen.__setitem__("seed", port) or tmp_path,
+    )
+    monkeypatch.setattr(
+        elevated, "_write_launcher",
+        lambda ed, port: seen.__setitem__("launch", port)
+        or (tmp_path / "launcher.cmd"),
+    )
+    monkeypatch.setattr(elevated, "_end_task", lambda: 0)
+    monkeypatch.setattr(elevated, "_task_registered", lambda: True)
+
+    def _run():
+        state["up"] = True
+        return 0
+
+    monkeypatch.setattr(elevated, "_run_task", _run)
+    tok = elevated.ensure_running(wait=2.0)
+    assert tok == "subtok"
+    assert seen == {"seed": 0, "launch": 0}
 
 
 def test_stop_is_headless_by_default(monkeypatch):

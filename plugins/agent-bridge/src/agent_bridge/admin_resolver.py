@@ -155,7 +155,7 @@ class AdminResolver:
             cmd = elevated.relay_spawn_command(name, token=token)
             log.info(
                 "Routing admin:%s via elevated sub-daemon relay (port %d)",
-                name, elevated.ELEVATED_PORT,
+                name, elevated.discovered_port(),
             )
             return ST(
                 type="command", spawn_command=cmd, project=target.project,
