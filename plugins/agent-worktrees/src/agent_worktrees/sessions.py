@@ -1036,6 +1036,93 @@ class MuxInfo:
         return self.clients > 0
 
 
+@dataclass
+class LiveVerdict:
+    """Authoritative single-worktree liveness, for the menu-open / Enter moments.
+
+    The picker-populate path derives liveness cheaply and in bulk (batched
+    ``list-sessions`` + the per-worktree session registry). This verdict is the
+    opposite trade: the *truth* for the ONE worktree the operator is about to act
+    on, paid for only at (a) Actions-menu open and (b) Enter->Open/Resume. It
+    combines mux presence with the authoritative, **cwd-independent**
+    ``inuse.<pid>.lock`` binding (via :mod:`reclaim`), so it also catches a
+    **bare** (un-muxed) bound Copilot that the mux fleet view cannot see -- the
+    session-registration reality that the picker's cwd-keyed populate scan misses
+    (aperture-labs #662/#1416).
+    """
+
+    active: bool = False
+    """A live mux session OR a live bound Copilot owns the worktree right now."""
+
+    mux_live: bool = False
+    """A ``wt-<id>`` mux session exists."""
+
+    mux_clients: int = 0
+    """Attached terminal clients on the mux session (0 when unknown/none)."""
+
+    live_session_ids: list[str] = field(default_factory=list)
+    """Session ids with a live ``inuse.<pid>.lock`` (a bound Copilot process)."""
+
+    bare: bool = False
+    """A bound Copilot exists with NO mux ancestor (an un-muxed/orphaned one)."""
+
+    source: str = "none"
+    """Where liveness came from: ``mux`` | ``lock`` | ``both`` | ``none``."""
+
+
+def verify_worktree_active(record) -> "LiveVerdict":
+    """Authoritatively verify whether ONE worktree has a live session right now.
+
+    Unlike the batched populate scan, this pays for a precise single-worktree
+    truth-check: the mux ``has-session`` presence AND the authoritative
+    ``inuse.<pid>.lock`` binding resolved by :func:`reclaim.resolve_bound_copilots`
+    (which binds pid<->session<->worktree from the lock file, not a cwd guess, so
+    a bare Copilot -- launched straight in a terminal and ``/resume``-d -- is
+    still found as long as its session is registered on the record). Intended for
+    the exact moments the operator acts on a worktree (Actions-menu open,
+    Enter->Open/Resume), never the fleet-wide populate.
+
+    Returns a :class:`LiveVerdict`. Best-effort and never raises: a mux or
+    reclaim hiccup degrades to whichever signal succeeded.
+    """
+    from . import reclaim
+
+    wt_id = record.worktree_id
+    try:
+        info = mux_status_many([wt_id]).get(wt_id) or MuxInfo()
+    except Exception:
+        info = MuxInfo()
+    mux_live = bool(info.exists)
+
+    live_ids: list[str] = []
+    bare = False
+    try:
+        bound = reclaim.resolve_bound_copilots(worktree_id=wt_id)
+        live_ids = sorted({b["session_id"] for b in bound if b.get("session_id")})
+        bare = any(b.get("homing") == "bare" for b in bound)
+    except Exception:
+        pass
+    lock_live = bool(live_ids)
+
+    if mux_live and lock_live:
+        source = "both"
+    elif mux_live:
+        source = "mux"
+    elif lock_live:
+        source = "lock"
+    else:
+        source = "none"
+
+    return LiveVerdict(
+        active=(mux_live or lock_live),
+        mux_live=mux_live,
+        mux_clients=(info.clients or 0),
+        live_session_ids=live_ids,
+        bare=bare,
+        source=source,
+    )
+
+
 def has_mux_session(worktree_id: str) -> bool:
     """Check if a multiplexer session exists for a worktree (without killing it).
 
