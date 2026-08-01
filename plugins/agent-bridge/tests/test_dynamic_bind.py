@@ -69,21 +69,3 @@ def test_bind_listen_socket_is_a_real_socket():
         sock.listen(1)
     finally:
         sock.close()
-
-    sock = m._bind_listen_socket("127.0.0.1", 0)
-    try:
-        host, port = sock.getsockname()[:2]
-        assert host == "127.0.0.1"
-        assert isinstance(port, int) and port > 0
-    finally:
-        sock.close()
-
-
-def test_bind_listen_socket_is_a_real_socket():
-    sock = m._bind_listen_socket("127.0.0.1", 0)
-    try:
-        assert isinstance(sock, socket.socket)
-        # Listening is possible on the returned bound socket.
-        sock.listen(1)
-    finally:
-        sock.close()
