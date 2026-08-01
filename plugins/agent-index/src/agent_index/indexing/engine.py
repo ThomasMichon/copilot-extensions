@@ -223,12 +223,51 @@ def run_reindex(
     elapsed = time.monotonic() - start
     print(f"\nIndexing complete: {total_chunks} chunks in {elapsed:.1f}s")
 
-    return {
+    result: dict[str, float] = {
         "chunks_total": total_chunks,
         "chunks_deleted": total_deleted,
         "files_crawled": total_files_crawled,
         "duration_seconds": round(elapsed, 1),
     }
+
+    # Refresh the similarity-cluster artifact from the just-updated vectors.
+    # Reuses stored embeddings (no re-embedding), so it runs post-index in the
+    # same pipeline (covering both the service task runner and the CLI). Must
+    # never fail a reindex, so it is best-effort and guarded by config.
+    cluster_stats = _refresh_clusters(multi_store, config)
+    if cluster_stats is not None:
+        result["clusters"] = cluster_stats["clusters"]
+
+    return result
+
+
+def _refresh_clusters(
+    multi_store: MultiModelStore, config: IndexConfig
+) -> dict[str, int | float] | None:
+    """Recompute the similarity-cluster artifact after indexing (best-effort).
+
+    Sweeps stored centroids and replaces ``clusters.db``; never re-embeds.
+    Returns the pass stats dict, or ``None`` when clustering is disabled or
+    fails (a clustering failure must never fail the reindex it follows).
+    """
+    if not config.cluster_enabled:
+        return None
+    try:
+        from agent_index.indexing.cluster_pass import run_clustering_pass
+        from agent_index.store.cluster_store import ClusterStore
+
+        cluster_store = ClusterStore(config.clusters_db)
+        print("\nRefreshing similarity clusters...")
+        stats = run_clustering_pass(multi_store, cluster_store, config)
+        print(
+            f"  {stats['clusters']} clusters across {stats['slices']} slices "
+            f"({stats['items']} items, {stats['elapsed_ms']}ms)"
+        )
+        return stats
+    except Exception:
+        logger.warning("Clustering pass failed", exc_info=True)
+        print("  WARNING: clustering pass failed (see logs)")
+        return None
 
 
 def _index_source(

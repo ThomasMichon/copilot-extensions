@@ -20,7 +20,7 @@ from pydantic import BaseModel
 
 from . import __version__
 from .config import Config, data_dir, load_config, routing_dir, run_dir
-from .query_surface import format_error, hit_to_dict
+from .query_surface import format_error, hit_to_dict, stored_cluster_to_dict
 from .rendezvous import clear_endpoint, write_endpoint
 
 log = logging.getLogger("agent-index.server")
@@ -211,6 +211,42 @@ def build_app() -> FastAPI:
                 mark_search_engine_failed()
                 log.debug("Find-similar unavailable", exc_info=True)
                 return {"id": chunk_id, "available": False, "error": format_error(exc), "hits": []}
+
+    @app.get("/clusters")
+    def clusters(
+        request: Request,
+        source: str | None = None,
+        bucket: str | None = None,
+        model: str | None = None,
+        exact_dupes_only: bool = False,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        try:
+            from .index_config import IndexConfig
+            from .store.cluster_store import ClusterStore
+            from .store.clustering import source_bucket
+
+            if source and not bucket:
+                bucket = source_bucket(source)
+            limit = max(1, min(limit, 200))
+            cfg = IndexConfig(data_dir=data_dir())
+            store = ClusterStore(cfg.clusters_db)
+            stored = store.list_clusters(
+                bucket=bucket,
+                model_id=model,
+                has_exact_dupes=True if exact_dupes_only else None,
+                limit=limit,
+                offset=max(0, offset),
+            )
+            return {
+                "available": True,
+                "count": len(stored),
+                "clusters": [stored_cluster_to_dict(c) for c in stored],
+            }
+        except Exception as exc:
+            log.debug("Clusters unavailable", exc_info=True)
+            return {"available": False, "error": format_error(exc), "count": 0, "clusters": []}
 
     @app.post("/reindex")
     def reindex(request: Request, body: ReindexRequest | None = None) -> dict[str, Any]:

@@ -195,6 +195,31 @@ def cmd_similar(args: argparse.Namespace) -> int:
         return _emit_error(exc)
 
 
+def cmd_clusters(args: argparse.Namespace) -> int:
+    try:
+        from agent_index.index_config import IndexConfig
+        from agent_index.store.cluster_store import ClusterStore
+        from agent_index.store.clustering import source_bucket
+
+        from .query_surface import stored_cluster_to_dict
+
+        bucket = args.bucket
+        if args.source and not bucket:
+            bucket = source_bucket(args.source)
+        config = IndexConfig()
+        store = ClusterStore(config.clusters_db)
+        stored = store.list_clusters(
+            bucket=bucket,
+            model_id=args.model,
+            has_exact_dupes=True if args.exact_dupes_only else None,
+            limit=args.limit,
+            offset=0,
+        )
+        return _emit([stored_cluster_to_dict(c) for c in stored])
+    except Exception as exc:
+        return _emit_error(exc)
+
+
 def cmd_deploy(args: argparse.Namespace) -> int:
     from zdd import breadcrumb
     from zdd.cutover import CutoverOrchestrator
@@ -349,6 +374,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_similar.add_argument("--limit", type=int, default=10, help="maximum hits to return")
     p_similar.add_argument("--source", help="filter by source")
     p_similar.set_defaults(func=cmd_similar)
+
+    p_clusters = sub.add_parser(
+        "clusters", help="list similarity clusters of near-duplicate items"
+    )
+    p_clusters.add_argument("--source", help="scope to a source (collapsed to its bucket)")
+    p_clusters.add_argument("--bucket", help="explicit bucket (e.g. git, gitea:issues)")
+    p_clusters.add_argument("--model", help="embedding space (code or prose)")
+    p_clusters.add_argument(
+        "--exact-dupes-only",
+        dest="exact_dupes_only",
+        action="store_true",
+        help="only clusters that contain a byte-identical pair",
+    )
+    p_clusters.add_argument("--limit", type=int, default=50, help="maximum clusters to return")
+    p_clusters.set_defaults(func=cmd_clusters)
     return parser
 
 
