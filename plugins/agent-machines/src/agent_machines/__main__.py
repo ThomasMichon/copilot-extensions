@@ -99,9 +99,17 @@ def _cmd_restore(args: argparse.Namespace) -> int:
     result = _reconcile.restore(packages, machine, dry_run=args.dry_run)
     prefix = "DRY-RUN " if args.dry_run else ""
     print(f"{prefix}restore for {machine}  (drift-key {result.plan.drift_key})")
-    if result.plan.surfaces:
-        print(f"  surfaces: {len(result.plan.surfaces)} managed "
-              "(Copilot-settings apply pending, issue #4006)")
+    if not result.surface_results:
+        print("  surfaces: none")
+    for s in result.surface_results:
+        if s.skipped_reason:
+            print(f"  surface {s.surface}: skipped ({s.skipped_reason})")
+        elif s.changed:
+            verb = "would change" if s.dry_run else "changed"
+            backup = f" (backup {s.backup_path})" if s.backup_path else ""
+            print(f"  surface {s.surface} [{s.file}]: {verb} {', '.join(s.applied_keys)}{backup}")
+        else:
+            print(f"  surface {s.surface} [{s.file}]: up-to-date")
     if not result.module_results:
         print("  modules: none")
     for r in result.module_results:
