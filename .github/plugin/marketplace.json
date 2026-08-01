@@ -48,7 +48,7 @@
     {
       "name": "agent-logger",
       "description": "Reusable Copilot CLI session logging - segment sessions into digestible chunks, write Markdown session logs, sync raw sessions to a configurable target, and optionally run a scheduled orchestrator that crunches a backlog into committed logs",
-      "version": "0.1.1-dev32",
+      "version": "0.1.1-dev33",
       "source": "plugins/agent-logger"
     },
     {
@@ -102,7 +102,7 @@
     {
       "name": "agent-index",
       "description": "Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem, with good-citizen ingestion.",
-      "version": "0.1.0-dev9",
+      "version": "0.1.0-dev10",
       "source": "plugins/agent-index"
     },
     {
