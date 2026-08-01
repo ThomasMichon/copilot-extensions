@@ -308,6 +308,15 @@ class WorktreeRecord:
     follow_up: bool = False
     summary: str = ""
     status_note_at: str | None = None
+    # #4057 cached liveness (single-owning-layer): the last-known multiplexer
+    # liveness for this worktree, stamped by the authoritative single-worktree
+    # verify at the action moments (Actions-menu / Enter) and cleared on Stop, so
+    # a follow-up populate can prefer this cached hint over a live probe. A
+    # *hint*, never authority -- reconciled by the batched live scan / verify;
+    # ``mux_live_at`` bounds its freshness. None (absent) = never stamped, so a
+    # legacy YAML stays byte-identical.
+    mux_live: bool | None = None
+    mux_live_at: str | None = None
 
     @property
     def owner_claim_ref(self) -> ClaimRef | None:
@@ -570,6 +579,15 @@ def load_record(path: Path) -> WorktreeRecord:
     elif hasattr(completed_raw, "isoformat"):
         completed_raw = completed_raw.isoformat()
 
+    # #4057: YAML may parse an ISO timestamp into a datetime -- normalize back to
+    # an isoformat string (mirrors started_at/last_resumed_at handling) so the
+    # stamp round-trips as text, not "2026-07-31 20:00:00".
+    mux_live_at_raw = data.get("mux_live_at")
+    if hasattr(mux_live_at_raw, "isoformat"):
+        mux_live_at_raw = mux_live_at_raw.isoformat()
+    elif mux_live_at_raw in (None, "", "null"):
+        mux_live_at_raw = None
+
     # Parse sessions list -- None means "not yet indexed" (pre-registry),
     # [] means "indexed, no sessions recorded".  This distinction drives
     # fallback: None -> full scan, [] -> skip scan.
@@ -679,6 +697,9 @@ def load_record(path: Path) -> WorktreeRecord:
         summary=str(data.get("summary", "") or ""),
         status_note_at=(str(data["status_note_at"])
                         if data.get("status_note_at") else None),
+        mux_live=(bool(data["mux_live"])
+                  if data.get("mux_live") is not None else None),
+        mux_live_at=(str(mux_live_at_raw) if mux_live_at_raw else None),
     )
 
 
@@ -764,6 +785,12 @@ def save_record(record: WorktreeRecord, path: Path | None = None) -> None:
         content += f"summary: '{safe_summary}'\n"
     if record.status_note_at:
         content += f"status_note_at: {record.status_note_at}\n"
+    # #4057 cached liveness -- emitted only when stamped (None absent), so a
+    # never-verified worktree's YAML stays byte-identical.
+    if record.mux_live is not None:
+        content += f"mux_live: {'true' if record.mux_live else 'false'}\n"
+        if record.mux_live_at:
+            content += f"mux_live_at: {record.mux_live_at}\n"
 
     # #1029: originating-session pointer. Emitted only when set, so the
     # common-case session-record YAML stays byte-identical (no churn).
@@ -950,6 +977,32 @@ def mark_resumed(record: WorktreeRecord) -> None:
     record.resume_count += 1
     record.last_resumed_at = _now_iso()
     save_record(record)
+
+
+def stamp_mux_live(worktree_id: str, live: bool) -> None:
+    """Cache the last-known multiplexer liveness on a worktree's record (#4057).
+
+    A best-effort, locked read-modify-write that persists ``mux_live`` +
+    ``mux_live_at`` so a follow-up picker populate can prefer this cached hint
+    over a live probe. Called by the authoritative single-worktree verify at the
+    action moments (Actions-menu / Enter -> ``live=True``/``False``) and by Stop
+    (``live=False``). It is a *hint*, always reconciled by the batched live scan;
+    never raises, and no-ops when the record is absent or unchanged (so it adds
+    no YAML churn when the liveness has not moved).
+    """
+    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+    if not yaml_path.exists():
+        return
+    try:
+        with _RecordLock(yaml_path):
+            record = load_record(yaml_path)
+            if record.mux_live is live and record.mux_live_at:
+                return  # unchanged -- skip a pointless rewrite
+            record.mux_live = live
+            record.mux_live_at = _now_iso()
+            save_record(record)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------

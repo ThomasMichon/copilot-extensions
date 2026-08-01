@@ -1382,6 +1382,7 @@ def restart_worktree_copilot(
     ``failed``.
     """
     if not has_mux_session(worktree_id):
+        _stamp_mux_live_quiet(worktree_id, False)
         return {
             "worktree_id": worktree_id, "had_session": False,
             "method": "none", "ok": True,
@@ -1389,15 +1390,27 @@ def restart_worktree_copilot(
     if graceful and graceful_quit_mux_session(
         worktree_id, settle_timeout=settle_timeout,
     ):
+        _stamp_mux_live_quiet(worktree_id, False)
         return {
             "worktree_id": worktree_id, "had_session": True,
             "method": "graceful", "ok": True,
         }
     killed = kill_tmux_session(worktree_id)
+    if killed:
+        _stamp_mux_live_quiet(worktree_id, False)
     return {
         "worktree_id": worktree_id, "had_session": True,
         "method": "hard" if killed else "failed", "ok": killed,
     }
+
+
+def _stamp_mux_live_quiet(worktree_id: str, live: bool) -> None:
+    """Best-effort #4057 cached-liveness stamp; never disturbs the caller."""
+    try:
+        from . import tracking
+        tracking.stamp_mux_live(worktree_id, live)
+    except Exception:
+        pass
 
 
 # ── Live-cutover handoff mux primitives (issue #2250) ─────────────────────
