@@ -218,10 +218,18 @@ function agentWorktreesGet(key, cwd) {
 // `agent-worktrees handoff-cutover`; this extension is a thin trigger. All
 // best-effort: any failure returns null / a safe default so the caller falls
 // back to the normal store-task-and-reply flow.
-
 // Spawn the successor + cut over. `seed` is the successor's first interactive
-// prompt (copilot -i). Returns { ok, old_pane, new_pane } or null on any error
-// (not under mux, mux verb failed, agent-worktrees missing, ...).
+// prompt (copilot -i). Returns a structured result so the caller can give an
+// accurate reason on failure:
+//   { ok: true, old_pane, new_pane }                         -- cutover started
+//   { ok: false, reason: "no-worktree" | "no-mux" | "error", // failed
+//     error: "<host message>" }
+// The host verb distinguishes the two common bare-resume failure modes by exit
+// code: 2 = could not resolve a worktree id from cwd (e.g. a bare-resume left
+// cwd at HOME even though the process IS inside the wt-<id> mux), 3 = resolved a
+// worktree but it has no live mux session. The extension used to collapse both
+// (and every other error) into a single misleading "not under a mux session"
+// message; surfacing the host's own error text keeps the reason honest.
 function runHandoffCutover(cwd, seed) {
   const argv = ["handoff-cutover", "--seed", seed];
   // The extension runs inside the OLD pane; $TMUX_PANE pins it precisely so the
@@ -235,9 +243,22 @@ function runHandoffCutover(cwd, seed) {
       timeout: 20000,
     });
     const result = JSON.parse(out);
-    return result?.ok ? result : null;
-  } catch {
-    return null;
+    return result?.ok ? result : { ok: false, reason: "error", error: null };
+  } catch (e) {
+    // execFileSync/execSync throw on a non-zero exit; the host still wrote its
+    // JSON error envelope to stdout, and the exit code names the cause.
+    const status = typeof e?.status === "number" ? e.status : null;
+    let error = null;
+    try {
+      const stdout = (e?.stdout || "").toString();
+      const parsed = stdout ? JSON.parse(stdout) : null;
+      error = parsed?.error || null;
+    } catch {
+      /* stdout was not JSON (e.g. agent-worktrees not found) */
+    }
+    const reason =
+      status === 2 ? "no-worktree" : status === 3 ? "no-mux" : "error";
+    return { ok: false, reason, error };
   }
 }
 
@@ -777,13 +798,40 @@ const session = await joinSession({
         }
         const cwd = state.cwd || process.cwd();
         const result = runHandoffCutover(cwd, seed);
-        if (!result) {
+        if (!result || !result.ok) {
+          const reason = result?.reason || "error";
+          const tail =
+            " Nothing destructive was done. The handoff is safely stored -- " +
+            "resume it the normal way (paste the reply prompt into '/clear', or " +
+            "run /resume-handoff in a fresh session in this worktree).";
+          if (reason === "no-worktree") {
+            // The common bare-resume case: the process IS inside the wt-<id>
+            // mux, but Copilot was launched with its cwd at HOME (e.g. a "Bare
+            // resume", or the #1416 HOME-cwd binding), so the host verb could
+            // not resolve WHICH worktree from cwd -- not a genuine "no mux".
+            return (
+              "Live cutover is unavailable: could not determine which worktree " +
+              "this session belongs to from its working directory (it looks like " +
+              "a bare/HOME-cwd resume). The session may well be inside a mux, but " +
+              "the cutover needs the worktree checkout as its cwd. `cd` into this " +
+              "worktree's directory and try the handoff again, or resume it the " +
+              "normal way." +
+              tail +
+              (result?.error ? ` [host: ${result.error}]` : "")
+            );
+          }
+          if (reason === "no-mux") {
+            return (
+              "Live cutover is unavailable: this session is not running under a " +
+              "mux session (no live wt-<id> session to cut into)." +
+              tail +
+              (result?.error ? ` [host: ${result.error}]` : "")
+            );
+          }
           return (
-            "Live cutover is unavailable: this session is not running under a mux " +
-            "session, or the cutover verb failed. Nothing destructive was done. " +
-            "The handoff is safely stored -- resume it the normal way (paste the " +
-            "reply prompt into '/clear', or run /resume-handoff in a fresh session " +
-            "in this worktree)."
+            "Live cutover is unavailable: the cutover verb failed." +
+            tail +
+            (result?.error ? ` [host: ${result.error}]` : "")
           );
         }
         // Completion is owned by the successor's `agent-dispatch consume` (the
