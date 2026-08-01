@@ -150,7 +150,13 @@ duplicated or a bug is filed twice.
 ### continuous-delta-freshness
 The index tracks the repo closely through **change-driven, incremental** updates
 — new commits, edited issues, merged PRs — rather than periodic full re-crawls,
-so hits stay current without repeatedly re-reading unchanged history.
+so hits stay current without repeatedly re-reading unchanged history. What it
+tracks is the repo's **canonical default branch as fetched from its remote** (the
+pushed/merged state the team shares) — not a local working tree that may sit on a
+feature branch, carry uncommitted edits, or lag `origin`. Freshness means the
+index reflects what has actually landed on the mainline, fetched fresh before it
+reindexes. (A purely local repo with no remote still indexes cleanly from its
+local history — the remote is the *default* source of truth, not a requirement.)
 
 ### self-contained-service
 agent-index is a complete, standalone plugin: a user installs it and it works on
