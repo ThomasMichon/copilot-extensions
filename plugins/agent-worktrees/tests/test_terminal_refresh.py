@@ -167,8 +167,8 @@ def test_installers_delegate_registry_write_to_python():
     `register-project-entry` subcommand -- and both installers call it rather
     than reimplementing the registry logic. The Windows terminal generator still
     resolves anchors from repos.yaml by name (single owning store)."""
-    ps = _INSTALL_PS.read_text()
-    sh = _INSTALL_SH.read_text()
+    ps = _INSTALL_PS.read_text(encoding="utf-8")
+    sh = _INSTALL_SH.read_text(encoding="utf-8")
 
     # Both installers delegate the write to the single Python owner.
     assert "register-project-entry" in ps

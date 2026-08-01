@@ -264,16 +264,32 @@ def _build_active_paths(
     records: list[tracking.WorktreeRecord],
     session_ctx: sessions.SessionContext | None = None,
 ) -> set[str]:
-    """Build set of normalized paths with live sessions (lock files OR mux sessions)."""
+    """Build set of normalized paths with live sessions (lock files OR mux sessions).
+
+    The mux check is **batched**: a single ``list-sessions`` snapshot
+    (:func:`sessions._list_mux_sessions`) is diffed against the records instead
+    of one ``has-session`` subprocess *per worktree*. On the picker-populate hot
+    path that collapses N mux spawns (each up to a 5 s timeout) into one, which
+    is the dominant cost of populating the Active section. Falls back to the
+    per-worktree probe only when the batch list is unavailable (old/blocked mux).
+    """
     if session_ctx is None:
         session_ctx = sessions.scan_sessions_fast(records)
     active = {
         _normalize_path(p) for p, sids in session_ctx.active_sessions.items() if sids
     }
-    # Also check for live multiplexer sessions (independent of lock files)
-    for rec in records:
-        if rec.worktree_path and sessions.has_mux_session(rec.worktree_id):
-            active.add(_normalize_path(rec.worktree_path))
+    # Live multiplexer sessions (independent of lock files), batched.
+    mux_sessions = sessions._list_mux_sessions()
+    if mux_sessions is not None:
+        for rec in records:
+            if rec.worktree_path and f"wt-{rec.worktree_id}" in mux_sessions:
+                active.add(_normalize_path(rec.worktree_path))
+    else:
+        # Batch list unavailable (mux missing or blocked): degrade to the
+        # per-worktree has-session probe rather than lose mux liveness.
+        for rec in records:
+            if rec.worktree_path and sessions.has_mux_session(rec.worktree_id):
+                active.add(_normalize_path(rec.worktree_path))
     return active
 
 
