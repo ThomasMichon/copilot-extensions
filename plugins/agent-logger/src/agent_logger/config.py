@@ -46,6 +46,12 @@ DEFAULTS: dict[str, Any] = {
         # fail-open (keep metadata-less sessions). Only meaningful alongside
         # a non-empty repo_allowlist.
         "repo_allowlist_fail_closed": False,
+        # Known harness repos on this machine (names; case-insensitive
+        # substring match against a session's git_root/cwd). Used to derive
+        # each session's origin sidecar (origin.json). A session whose path
+        # matches none is marked machine-only. Superset of repo_allowlist
+        # (which governs what syncs); this governs what the origin mark records.
+        "harness_repos": [],
         # Retention for destination pruning. None/<=0 -> retain everything.
         "retention_days": None,
         "lock_timeout_sec": 10,
@@ -530,6 +536,16 @@ class Config:
         employer/work sessions leaking. Default false (fail-open)."""
         return bool(self._data.get("sync", {}).get(
             "repo_allowlist_fail_closed", False))
+
+    @property
+    def sync_harness_repos(self) -> list[str]:
+        """Known harness repo names on this machine, used to derive each
+        session's origin sidecar. Case-insensitive substring match against the
+        session's git_root/cwd. Empty means every session marks machine-only."""
+        raw = self._data.get("sync", {}).get("harness_repos", [])
+        if isinstance(raw, str):
+            return [s.strip() for s in raw.split(",") if s.strip()]
+        return [str(s).strip() for s in raw if str(s).strip()]
 
     @property
     def sync_notify(self) -> dict[str, Any]:
