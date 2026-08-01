@@ -85,7 +85,12 @@ class CredentialsConfig:
     """Credential relay configuration."""
 
     sources: dict[str, CredentialSourceConfig] = field(default_factory=dict)
-    relay_port: int = 9857
+    # Relay TCP port. 0 (the default) means "dynamic": the host relay binds an
+    # OS-assigned ephemeral port and publishes it via relay_state, and the SSH
+    # reverse-forward + LC_GIT_CREDENTIAL_RELAY env are sourced from that live
+    # port -- so nothing well-known (9857) is reserved (dotfiles #694). A
+    # positive value pins a fixed port (must match what the tunnel forwards).
+    relay_port: int = 0
     # Default ADO host for bare `get-access-token` requests that carry no host.
     # Set this to your Azure DevOps host (e.g. ``your-org.visualstudio.com`` or
     # ``dev.azure.com``). Left unset, such requests are rejected rather than

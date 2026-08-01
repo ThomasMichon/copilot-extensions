@@ -150,3 +150,46 @@ def test_build_relay_portmap_write_shape():
     assert '"port":%s' in snip
     assert "$LC_GIT_CREDENTIAL_RELAY_TOKEN" in snip   # token not re-interpolated
     assert snip.rstrip().endswith("|| true;") or "|| true" in snip
+
+
+# --- effective_relay_port (the direct -R / ssh / provision resolution, #694) ---
+
+def _cfg(relay_port):
+    class _Creds:
+        pass
+
+    class _Cfg:
+        credentials = _Creds()
+
+    c = _Cfg()
+    c.credentials.relay_port = relay_port
+    return c
+
+
+def test_effective_relay_port_prefers_published_live(monkeypatch, tmp_path):
+    # A published (ephemeral) live port wins over the configured value.
+    import agent_codespaces.relay_launch as rl
+    (tmp_path / "relay-port").write_text("52731", encoding="utf-8")
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))
+    assert rl.effective_relay_port(_cfg(0)) == 52731
+    # even when a fixed port is configured, the live port still wins.
+    assert rl.effective_relay_port(_cfg(9857)) == 52731
+
+
+def test_effective_relay_port_dynamic_default_falls_back_to_legacy(monkeypatch, tmp_path):
+    # No published port + the dynamic default (0) -> the legacy backstop.
+    import agent_codespaces.relay_launch as rl
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))  # empty: no relay-port file
+    assert rl.effective_relay_port(_cfg(0)) == rl.LEGACY_RELAY_PORT == 9857
+
+
+def test_effective_relay_port_honors_configured_pin(monkeypatch, tmp_path):
+    # No published port but an explicit positive config pin -> use the pin.
+    import agent_codespaces.relay_launch as rl
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))
+    assert rl.effective_relay_port(_cfg(9500)) == 9500
+
+
+def test_credentials_config_relay_port_defaults_to_dynamic_sentinel():
+    from agent_codespaces.config import CredentialsConfig
+    assert CredentialsConfig().relay_port == 0

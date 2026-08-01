@@ -130,3 +130,33 @@ def _published_live_relay_port() -> int | None:
         return int(txt) if txt else None
     except (OSError, ValueError):
         return None
+
+
+# Last-resort relay port when neither a live (published) nor a configured port
+# is available -- the retired fixed default, kept only as a backstop (#694).
+LEGACY_RELAY_PORT = 9857
+
+
+def effective_relay_port(config) -> int:
+    """Resolve the relay port for a directly-constructed SSH ``-R`` forward + env.
+
+    The relay now binds a **dynamic** port by default (``credentials.relay_port``
+    defaults to 0 -> the daemon binds an OS-assigned ephemeral port). The paths
+    that build the ``-R`` reverse-forward straight from config -- the interactive
+    ``ssh`` connect and ``provision`` -- must therefore follow the daemon's
+    **live** port, not the (now 0) static config, exactly like
+    :func:`build_relay_launch_env` does for the detached path. Resolution:
+
+    1. the port the agent-bridge daemon **publishes** (``relay_state`` rendezvous,
+       read without importing ``agent_bridge``) -- honors an ephemeral/dynamic bind;
+    2. else a **positive** configured ``credentials.relay_port`` (an explicit pin);
+    3. else :data:`LEGACY_RELAY_PORT` (9857) as a last-resort backstop.
+    """
+    published = _published_live_relay_port()
+    if published:
+        return published
+    try:
+        configured = int(getattr(config.credentials, "relay_port", 0) or 0)
+    except (TypeError, ValueError):
+        configured = 0
+    return configured or LEGACY_RELAY_PORT
