@@ -1,13 +1,15 @@
 """Deterministic capture of the picker's rendered screen -- for audit + tests.
 
-The picker is a *deterministic renderer*: :meth:`PickerScreen.render` composes the
-entire main screen (topbar, pivots, machine tabs, borders, body window, footer)
-into a single styled Rich :class:`~rich.text.Text`. Given injected ``source``
-data, the same inputs yield the same grid -- so any state can be exported as a
-human-auditable **SVG screenshot** or captured as a **character grid** a test
-asserts against, with no live terminal and no human watching. (Overlays are
-native Textual ``ModalScreen``s since #88 F4, drawn by the compositor rather than
-``render()``; capture one with :func:`capture_modal_async`, the app-level seam.)
+The picker is a *deterministic renderer*: given injected ``source`` data, the
+composed segment/region widget tree paints the same character grid every time
+(topbar, pivots, machine tabs, borders, body window, footer). Capture reads that
+grid straight off Textual's **compositor** -- the live composited display -- and
+serializes it (styles stripped, with ANSI colour, or as an SVG). So any state can
+be exported as a human-auditable **SVG screenshot** or captured as a **character
+grid** a test asserts against, with no live terminal and no human watching.
+(Overlays are native Textual ``ModalScreen``s since #88 F4, drawn by the
+compositor rather than the base screen; capture one with
+:func:`capture_modal_async`, the app-level seam.)
 
 Realizes the picker vision's Features/``auditable-testable-rendering`` and
 Behaviors/``renderable-and-assertable-headless`` (rides on
@@ -32,17 +34,36 @@ import io
 from typing import Any, Awaitable, Callable, Optional
 
 from rich.console import Console
-from rich.text import Text
+from rich.segment import Segment, Segments
 
 # The picker's canonical headless render size (matches the test suite). A wide
 # grid so columns don't get dropped by the responsive fitter.
 DEFAULT_SIZE = (118, 40)
 
 
-def _rendered_text(scr: Any) -> Text:
-    """The screen the picker would paint, as a Rich ``Text`` (one call, no loop)."""
-    rendered = scr.render()
-    return rendered if isinstance(rendered, Text) else Text(str(rendered))
+def _screen_segments(scr: Any) -> list:
+    """Segments of the *composited* screen -- what the picker actually displays.
+
+    NF5-4 (#88): capture sources from the live Textual compositor (the composed
+    segment/region widget tree that drives the real display), not a parallel
+    whole-screen ``render()``. The compositor's per-row strips are flattened into
+    one newline-separated ``Segment`` stream and fed to the same recording
+    ``Console`` below -- so ``text`` / ``ansi`` / ``svg`` are byte-identical to
+    the former ``render()``-based seam (the two derive from the same
+    ``_frame_segments`` / ``_build_body_split`` source) while now reflecting the
+    exact composited display. This is what lets ``PickerScreen.render()`` retire.
+    """
+    comp = scr.screen._compositor
+    segments: list = []
+    for strip in comp.render_strips():
+        segments.extend(strip)
+        segments.append(Segment("\n"))
+    return segments
+
+
+def _screen_text(scr: Any) -> str:
+    """The plain character grid of the composited screen."""
+    return "".join(seg.text for seg in _screen_segments(scr))
 
 
 def _console(scr: Any) -> Console:
@@ -65,20 +86,20 @@ def _console(scr: Any) -> Console:
 
 def screen_to_text(scr: Any) -> str:
     """The plain character grid the picker paints (all styling stripped)."""
-    return _rendered_text(scr).plain
+    return _screen_text(scr)
 
 
 def screen_to_ansi(scr: Any) -> str:
     """The character grid with ANSI colour -- a colour-aware, diffable golden."""
     console = _console(scr)
-    console.print(_rendered_text(scr), end="")
+    console.print(Segments(_screen_segments(scr)), end="")
     return console.export_text(styles=True)
 
 
 def screen_to_svg(scr: Any, *, title: str = "Worktree Picker") -> str:
     """The rendered state as a standalone SVG screenshot (colours preserved)."""
     console = _console(scr)
-    console.print(_rendered_text(scr), end="")
+    console.print(Segments(_screen_segments(scr)), end="")
     return console.export_svg(title=title)
 
 
@@ -222,13 +243,11 @@ async def capture_modal_async(
     """SVG screenshot of the **composited app** -- the picker *plus* any open
     native ``ModalScreen``.
 
-    The three ``screen_to_*`` seams above capture ``PickerScreen.render()``, the
-    picker's own Rich ``Text``. Since #88 F4 the picker's overlays are native
-    Textual ``ModalScreen``s pushed on the app's screen stack -- they are drawn by
-    Textual's compositor, *not* by ``PickerScreen.render()`` -- so a modal is
-    invisible to those seams. This helper instead exports Textual's own
-    app-level screenshot (the full compositor, modal included), which is the
-    right seam for auditing / A/B-comparing a modal's appearance.
+    The three ``screen_to_*`` seams above capture the base picker screen off the
+    compositor. A pushed native ``ModalScreen`` (since #88 F4) lives *above* the
+    base screen on the app's screen stack -- so this helper instead exports
+    Textual's own app-level screenshot (the full compositor, modal included),
+    which is the right seam for auditing / A/B-comparing a modal's appearance.
 
     ``opener`` is a coroutine ``(screen, pilot) -> None`` that drives the picker
     to open the target modal before the screenshot is taken (e.g. set

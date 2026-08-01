@@ -2304,14 +2304,6 @@ class PickerScreen(Widget):
             out.append_text(lt)
         return out
 
-    def render(self):
-        seg = self._frame_segments()
-        # Every modal is a native Textual ``ModalScreen`` now (#88 F4): the
-        # framework's screen stack draws + dims them above this widget, so there
-        # is no manual overlay to blit or background to gray out here.
-        lines = seg["header"] + seg["chrome"] + seg["body"] + seg["footer"]
-        return self._join_lines(lines, seg["W"])
-
     def compose(self) -> ComposeResult:
         # NF5 (#88): the native compose tree is the *sole display path*. The
         # screen is a container of segment/region widgets -- a passive title +
