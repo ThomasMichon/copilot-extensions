@@ -259,6 +259,21 @@ declares death. This is the graduated complement of *liveness-not-lease*: a
 slow-but-working worker is left alone, a quiet-but-live worker is prodded, and only
 a truly absent worker is replaced.
 
+### react-to-turn-end
+Supervision advances on the **worker's turn boundary, not only on a timer**. When
+the coordination layer exposes a worker's turn signal, the layer reacts to an
+embodied worker **settling a turn** (going idle) by running a
+reconcile/recover/spawn pass **promptly** — so a completed goal is settled and the
+next task embodied without waiting out a poll interval, and a worker that just fell
+quiet is checked for a nudge sooner. This is a **latency optimization layered on**
+the liveness reconcile of *liveness-not-lease*, never a replacement for it: the
+periodic reconcile remains the **floor** that catches missed signals, workers whose
+turn stream is unavailable, and workers with no live session at all. Correctness
+never depends on receiving a turn signal — only *promptness* improves — and the
+loop **degrades cleanly** to exactly the periodic reconcile where no turn signal is
+observable. *Which* signal (a raw event subscription, a derived turn-state sample)
+carries the turn boundary is spec-level, not fixed here.
+
 ### repo-lane-isolation
 Every task belongs to the **repo lane** of the agent that produced it, and the
 queue is scoped to that lane by default — an agent sees and claims **its own
@@ -361,6 +376,15 @@ this layer.)
   is re-embodied to resume from progress; an *alive-but-quiet* worker is nudged, not
   killed; elapsed time triggers a liveness check, never a death verdict). Makes
   *resume-the-goal-not-restart-it* operational and defends *complete-means-done*.
+- **2026-07-31** — Extended for **event-driven supervision**: added the
+  *react-to-turn-end* behavior — supervision reacts to an embodied worker settling
+  a turn (going idle) by running a reconcile/recover/spawn pass promptly, instead of
+  only sampling on the poll cadence. Framed strictly as a latency optimization
+  *layered on* the *liveness-not-lease* periodic reconcile (which stays the correctness
+  floor and the degrade-clean fallback), so a completed goal is settled and the next
+  task embodied without waiting out an interval. The signal carrying the turn boundary
+  (raw event subscription vs derived turn-state sample) is left spec-level. Mined from
+  the operator's "reactive-on-turn-end" steer as the fourth full-auto piece.
   Mined from an operator design conversation refining the recovery flow (heartbeat +
   state payloads → verify-or-mitigate on a bad "done" → nudge/re-embody on a stalled
   or gone worker).

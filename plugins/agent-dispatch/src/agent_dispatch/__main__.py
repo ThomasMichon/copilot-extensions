@@ -1347,6 +1347,8 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
                 getattr(args, "label_max_attempts", None)
             ),
             heartbeat=not args.no_heartbeat,
+            reactive=not getattr(args, "no_reactive", False),
+            reactive_interval=getattr(args, "reactive_interval", 2.0) or 2.0,
             capacity_gate=capacity_gate,
         )
         if args.once:
@@ -1924,6 +1926,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--interval", type=float, default=30.0,
         help="serve loop poll interval in seconds (default: 30)",
+    )
+    p.add_argument(
+        "--no-reactive", action="store_true",
+        help="don't wake the serve loop on a worker turn-end; wait the full "
+             "--interval each cycle (default: react to an embodied worker settling "
+             "a turn so a completed goal is reconciled and the next task embodied "
+             "promptly; the poll interval stays the floor)",
+    )
+    p.add_argument(
+        "--reactive-interval", type=float, default=2.0,
+        help="how often (seconds) the reactive wait re-samples embodied workers' "
+             "turn state within one --interval (default: 2)",
     )
     p.add_argument(
         "--once", action="store_true", help="run a single supervision cycle and exit"
