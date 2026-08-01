@@ -3287,6 +3287,31 @@ class PickerScreen(Widget):
         rec = self._submenu_target()
         if not rec:
             return
+        # #4057: the fleet populate derives liveness cheaply/in bulk (and can lag,
+        # or miss a **bare** un-muxed Copilot the mux view can't see). Opening the
+        # Actions menu is one of the two moments we truly need the truth for THIS
+        # worktree, so authoritatively re-verify its mux + bound-Copilot liveness
+        # here and overlay the fresh signals before computing the verb set. This
+        # keeps Open-vs-Resume, Stop, and Reclaim honest at the point of action.
+        # Gated on real_ops + an on-disk tracking record, so a mock/fixture source
+        # (no record) keeps its hand-set liveness untouched.
+        raw = rec.get("raw") or {}
+        _wt_id = raw.get("id")
+        if self.real_ops and _wt_id:
+            try:
+                import types as _types
+
+                from .. import config as _config
+                from .. import sessions as _sessions
+                if (_config.tracking_dir() / f"{_wt_id}.yaml").exists():
+                    _verdict = _sessions.verify_worktree_active(
+                        _types.SimpleNamespace(worktree_id=_wt_id))
+                    rec["mux_live"] = _verdict.mux_live
+                    rec["attached"] = _verdict.mux_clients > 0
+                    rec["session_lock_live"] = bool(_verdict.live_session_ids)
+                    rec["session_bare_orphan"] = _verdict.bare
+            except Exception:
+                pass  # best-effort: fall back to the populate-derived signals
         # Primary verb tracks the session's liveness (#1343): a **live** mux ->
         # "Open" (attach to the running session); a **stopped** session (history
         # but no live mux) -> "Resume" (relaunch, resuming the last
