@@ -86,6 +86,41 @@ def _payload(origin: dict) -> str:
     return json.dumps(origin, indent=2, sort_keys=True) + "\n"
 
 
+def effective_harness(allowlist: list[str], harness_repos: list[str]) -> list[str]:
+    """Union of the sync allowlist and the machine's harness repos, allowlist
+    first (so an allowlisted repo wins naming precedence). This is the set an
+    origin is derived against for both marking and the sync decision, so a
+    session that syncs is always marked with a recognized repo."""
+    out: dict[str, str] = {}
+    for repo in [*allowlist, *harness_repos]:
+        if repo and repo.lower() not in out:
+            out[repo.lower()] = repo
+    return list(out.values())
+
+
+def classify_for_sync(session_dir: Path, machine: str, allowlist: list[str],
+                      effective: list[str], *,
+                      fail_closed: bool = False) -> tuple[bool, dict]:
+    """Origin-based per-repo sync decision. Returns ``(include, origin)``.
+
+    A session **syncs iff** its derived ``source_repo`` is in ``allowlist``.
+    A session whose recorded workspace path resolves to a repo **not** in the
+    allowlist (a known work repo, or any other path) is **excluded** -- it ran
+    somewhere, just not a synced repo. A session with **no** resolvable path at
+    all (no workspace / no cwd|git_root) follows ``fail_closed``: kept when
+    fail-open, dropped when fail-closed. This is exactly the prior flat-allowlist
+    semantics, re-expressed through the single origin classifier.
+    """
+    origin = derive_origin(session_dir, machine, effective)
+    allow = {a.lower() for a in allowlist if a}
+    src = origin["source_repo"]
+    if src is not None:
+        return (src.lower() in allow), origin
+    if _read_workspace_paths(session_dir):
+        return False, origin
+    return (not fail_closed), origin
+
+
 def write_origin_sidecar(session_dir: Path, origin: dict) -> bool:
     """Write ``origin.json`` into ``session_dir``. Idempotent: returns ``False``
     when the file already holds the identical payload, ``True`` when written."""

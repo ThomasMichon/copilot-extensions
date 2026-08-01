@@ -19,7 +19,7 @@ from agent_logger.config import Config, load_config
 from agent_logger.segmenter.platform import detect_machine
 from agent_logger.sync.lock import sync_lock
 from agent_logger.sync.notify import post_notify
-from agent_logger.sync.origin import mark_all
+from agent_logger.sync.origin import classify_for_sync, effective_harness, mark_all
 from agent_logger.sync.targets import build_target
 
 
@@ -32,55 +32,34 @@ def _machine(cfg: Config) -> str:
     return cfg.machine_name or detect_machine()
 
 
-def _session_matches_allowlist(session_dir, allowlist: list[str],
-                               fail_closed: bool = False) -> bool:
-    """Match a session's workspace cwd/git_root against the allowlist.
-
-    Case-insensitive substring match. Sessions that cannot be positively
-    classified -- no workspace.yaml, no cwd/git_root, or a read error --
-    resolve to the *fail direction*: ``fail_closed=False`` (default) treats
-    them as matching (fail-open), to avoid silently dropping sessions that
-    predate workspace metadata; ``fail_closed=True`` treats them as NOT
-    matching (fail-closed), so a dual-use machine never leaks an
-    unclassifiable (e.g. employer) session.
-    """
-    unclassified = not fail_closed
-    ws = session_dir / "workspace.yaml"
-    if not ws.is_file():
-        return unclassified
-    try:
-        paths: list[str] = []
-        with open(ws, encoding="utf-8", errors="replace") as fh:
-            for raw in fh:
-                line = raw.strip()
-                for key in ("cwd:", "git_root:", "repository:"):
-                    if line.startswith(key):
-                        val = line[len(key):].strip()
-                        if val:
-                            paths.append(val.lower())
-        if not paths:
-            return unclassified
-        return any(p.lower() in path_val for path_val in paths for p in allowlist)
-    except OSError:
-        return unclassified
-
-
 def _included_sessions(source, allowlist: list[str],
-                       fail_closed: bool = False) -> set[str] | None:
-    """Resolve the allowlist to a set of included session-state ids.
+                       fail_closed: bool = False,
+                       effective: list[str] | None = None,
+                       machine: str = "") -> set[str] | None:
+    """Resolve the per-repo sync policy to a set of included session ids.
 
-    Returns ``None`` when the allowlist is empty (sync everything).
+    Returns ``None`` when the allowlist is empty (sync everything). Otherwise a
+    session is included iff its **derived origin** (see
+    :func:`~agent_logger.sync.origin.classify_for_sync`) resolves to an
+    allowlisted repo -- the single origin classifier drives both the origin
+    mark and this decision. ``effective`` is the origin-derivation set (allowlist
+    plus harness repos); it defaults to the allowlist alone.
     """
     if not allowlist:
         return None
     ss = source / "session-state"
     if not ss.is_dir():
         return set()
-    return {
-        d.name
-        for d in ss.iterdir()
-        if d.is_dir() and _session_matches_allowlist(d, allowlist, fail_closed)
-    }
+    eff = effective if effective is not None else list(allowlist)
+    included: set[str] = set()
+    for d in ss.iterdir():
+        if not d.is_dir():
+            continue
+        include, _ = classify_for_sync(d, machine, allowlist, eff,
+                                       fail_closed=fail_closed)
+        if include:
+            included.add(d.name)
+    return included
 
 
 def run_sync(
@@ -99,8 +78,10 @@ def run_sync(
     source = cfg.sync_source
     target = build_target(cfg.sync_target, cfg.target_options(cfg.sync_target))
     allowlist = cfg.sync_repo_allowlist
+    effective = effective_harness(allowlist, cfg.sync_harness_repos)
     include = _included_sessions(source, allowlist,
-                                 cfg.sync_repo_allowlist_fail_closed)
+                                 cfg.sync_repo_allowlist_fail_closed,
+                                 effective, machine)
 
     if verbose:
         print(f"machine:   {machine}")
@@ -115,8 +96,7 @@ def run_sync(
 
     # Tag every local session with its origin (harness repo + machine) so the
     # sidecar syncs with the session and downstream daemons can route by origin.
-    origin_summary = mark_all(source, machine, cfg.sync_harness_repos,
-                              dry_run=dry_run)
+    origin_summary = mark_all(source, machine, effective, dry_run=dry_run)
     if verbose:
         print(f"origin:    marked {origin_summary['marked']}/"
               f"{origin_summary['total']} session(s) {origin_summary['by_repo']}")
