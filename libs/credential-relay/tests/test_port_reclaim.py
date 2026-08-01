@@ -144,3 +144,20 @@ class TestReclaim:
             assert bound not in (0, port)  # fell back to a distinct ephemeral port
         finally:
             s.close()
+
+    def test_start_with_port_zero_binds_and_reads_back_ephemeral(self):
+        # The dynamic default (dotfiles #694): port 0 -> the OS assigns an
+        # ephemeral port and start() reads the actually-bound port back into
+        # self.port so relay_state can publish the real port to consumers.
+        server = CredentialRelayServer(port=0)
+
+        async def _run() -> tuple[bool, int]:
+            await server.start()
+            running = server.running
+            bound = server.port
+            await server.stop()
+            return running, bound
+
+        running, bound = asyncio.run(_run())
+        assert running is True
+        assert isinstance(bound, int) and bound > 0  # real port, not the 0 sentinel

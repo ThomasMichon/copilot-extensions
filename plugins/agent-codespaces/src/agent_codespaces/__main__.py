@@ -522,7 +522,8 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
 
     source = CodespaceSource(args.name, account=account_for_codespace(args.name))
     config = load_merged_config()
-    relay_port = config.credentials.relay_port
+    from .relay_launch import effective_relay_port
+    relay_port = effective_relay_port(config)
 
     # Reusing a box (an explicit ssh connect) clears any prune-lifecycle marker
     # -- it is active work again, not a recovered/prunable reclaim candidate.
@@ -830,10 +831,11 @@ async def _provision_dotfiles(manager, name: str, config) -> None:
         return
 
     from .provision import build_dotfiles_command
+    from .relay_launch import effective_relay_port
 
     try:
         command = build_dotfiles_command(
-            config.dotfiles_repo, config.credentials.relay_port,
+            config.dotfiles_repo, effective_relay_port(config),
         )
         # Run under a LOGIN shell: the dotfiles clone authenticates to GitHub via
         # the CodeSpace's own credential helper (gitcredential_github.sh), which
@@ -872,10 +874,11 @@ async def _provision_harness(manager, name: str, config) -> None:
         return
 
     from .provision import build_harness_command
+    from .relay_launch import effective_relay_port
 
     try:
         command = build_harness_command(
-            config.harness_repo, config.credentials.relay_port,
+            config.harness_repo, effective_relay_port(config),
         )
         # Login shell, same rationale as the dotfiles clone: the harness clone
         # authenticates to GitHub via the CodeSpace's own credential helper,
@@ -1799,7 +1802,11 @@ def _config_show() -> int:
         print(f"  acp_command: {config.acp_command} (explicit override)")
     print(f"  effective_acp_command: {config.effective_acp_command}")
 
-    print(f"\nCredential relay port: {config.credentials.relay_port}")
+    from .relay_launch import effective_relay_port
+    _rp = config.credentials.relay_port
+    _eff = effective_relay_port(config)
+    _rp_desc = f"{_eff} (dynamic)" if not _rp else str(_eff)
+    print(f"\nCredential relay port: {_rp_desc}")
     for name, source in config.credentials.sources.items():
         status = "enabled" if source.enabled else "disabled"
         print(f"  {name}: {status}")
@@ -2178,7 +2185,8 @@ def _cmd_create(args: argparse.Namespace) -> int:
 
     # Provision over SSH: relay helpers + dotfiles bootstrap + repo hooks
     # (including on_create extras).
-    relay_port = config.credentials.relay_port
+    from .relay_launch import effective_relay_port
+    relay_port = effective_relay_port(config)
     port_forwards = [f"-R {relay_port}:127.0.0.1:{relay_port}"]
     source = CodespaceSource(info.name, account=info.account or None)
     manager = ConnectionManager()

@@ -45,6 +45,17 @@ def test_builder_require_token_wires_server():
     assert srv.token_validator is not None
 
 
+def test_builder_set_port_zero_yields_dynamic_server():
+    """set_port(0) -- the dynamic default (codespaces relay_port now 0, dotfiles
+    #694) -- builds a server carrying port 0, so start() binds an OS-assigned
+    ephemeral port (verified in test_port_reclaim)."""
+    b = RelayBuilder()
+    b.add_source(_AzStub())
+    b.set_port(0)
+    srv = b.build()
+    assert srv.port == 0
+
+
 async def _roundtrip(srv: CredentialRelayServer, request: str) -> str:
     reader, writer = await asyncio.open_connection("127.0.0.1", srv.port)
     writer.write(request.encode())

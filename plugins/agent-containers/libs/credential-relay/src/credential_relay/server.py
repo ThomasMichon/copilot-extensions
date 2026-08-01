@@ -257,18 +257,21 @@ class CredentialRelayServer:
     async def start(self) -> None:
         """Start the TCP relay server, reclaiming the port from a stale holder.
 
-        On a fresh start the bind normally succeeds. If a previous relay (e.g.
-        an ungracefully-killed agent-bridge daemon) still holds the dedicated
-        relay port, the first bind fails with "address already in use"; we evict
-        the stale owner (#19) and retry once so the relay -- and therefore ADO
-        auth over the tunnel -- comes up instead of being silently disabled.
+        The relay binds ``self.port``. When that is **0** (the dynamic default --
+        no fixed port was pinned) the OS assigns an ephemeral port and nothing
+        well-known is reserved (dotfiles #694). A pinned fixed port binds as
+        given; if a previous relay (e.g. an ungracefully-killed agent-bridge
+        daemon) still holds it, the first bind fails with "address already in
+        use" and we evict the stale owner (#19) and retry once so the relay --
+        and therefore ADO auth over the tunnel -- comes up instead of being
+        silently disabled.
 
-        If the preferred port is held by a *live* occupant that cannot be
-        reclaimed (a sibling/elevated daemon, or eviction failed), we fall back
-        to an OS-assigned **ephemeral** port and update ``self.port`` to it,
-        rather than raising (#540). Consumers discover the actually-bound port
-        via ``relay_state`` (which reads ``server.port`` after start), so auth
-        still works even when the declared port is occupied.
+        If a pinned port is held by a *live* occupant that cannot be reclaimed
+        (a sibling/elevated daemon, or eviction failed), we fall back to an
+        OS-assigned ephemeral port rather than raising (#540). In every case the
+        **actually-bound** port is read back into ``self.port`` after the bind,
+        and consumers discover it via ``relay_state`` (which reads ``server.port``
+        after start), so auth works regardless of which port we ended up on.
         """
         try:
             self._server = await asyncio.start_server(
@@ -289,8 +292,7 @@ class CredentialRelayServer:
             else:
                 # A live occupant holds the preferred port and can't be evicted
                 # (e.g. a sibling/elevated daemon, or the current process). Bind
-                # an OS-assigned ephemeral port instead of failing, and record
-                # it so relay_state publishes the real port to consumers (#540).
+                # an OS-assigned ephemeral port instead of failing (#540).
                 log.warning(
                     "Relay port %d held by a live occupant -- binding an "
                     "ephemeral port instead", self.port,
@@ -300,7 +302,11 @@ class CredentialRelayServer:
                     host="127.0.0.1",
                     port=0,
                 )
-                self.port = self._server.sockets[0].getsockname()[1]
+        # Read back the actually-bound port for ALL paths: a pinned fixed port,
+        # a reclaimed one, an ephemeral fallback, or -- the common case now --
+        # the dynamic default (port 0 -> OS-assigned). relay_state publishes THIS
+        # to consumers, so discovery follows the real port (dotfiles #694/#540).
+        self.port = self._server.sockets[0].getsockname()[1]
         self.stats.start_time = time.time()
         log.info(
             "Credential relay started on 127.0.0.1:%d (%d sources, %d allowed hosts)",
