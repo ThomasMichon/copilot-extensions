@@ -3,12 +3,13 @@
 - **Subject:** The **CodeSpace venue provider** of the agent fabric — the plugin
   that provisions GitHub Codespaces for a repo, sets them up to **run agents
   headlessly**, reaches them over a single secured transport, lends them the
-  **host's** credentials without minting secrets inside them, and presents those
-  CodeSpace agents to the fabric under the **same coordination contract** as a
-  local one.
+  **host's** credentials — resiliently, so a dropped transport does not starve a
+  still-running agent — without bottling a long-lived secret inside them, and
+  presents those CodeSpace agents to the fabric under the **same coordination
+  contract** as a local one.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-07-30
+- **Last revised:** 2026-07-31
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) (install
   topology, the credential-relay path, the `codespace:` resolver) · the plugin's
   [`README`](../../../plugins/agent-codespaces/README.md) and its skills
@@ -32,15 +33,21 @@ interface.** A caller says "run this in a CodeSpace for `owner/repo`" and the
 provider handles the rest: boot the machine (or wake a shut-down one), set it up
 to host an agent, open one secured door to it, make the host's identity reachable
 *through* that door so the CodeSpace can talk to GitHub and Azure DevOps **without
-ever holding a token of its own**, and make sure that when the ephemeral machine
-goes away its **work does not vanish with it**.
+bottling a long-lived secret of its own** — resiliently enough that a dropped
+transport does not starve a running agent mid-task — and make sure that when the
+ephemeral machine goes away its **work does not vanish with it**.
 
 Two promises sit under everything:
 
-- **Borrow identity, never bottle it.** A CodeSpace authenticates as *you* by
-  reaching back to the host's credential store over the one trusted transport —
-  so no personal access token, no long-lived secret, is ever written into a
-  disposable cloud machine.
+- **Borrow identity, never bottle it — but never starve for it either.** A
+  CodeSpace authenticates as *you* by reaching back to the host's credential
+  store — so no **long-lived** secret (a personal access token, a durable
+  credential) is ever written into a disposable cloud machine. Yet the borrowed
+  identity must **survive a dropped connection**: it may be **pre-fetched** for
+  the session's predictable needs and held in a **short-lived, scoped,
+  self-expiring cache**, and it must not share fate with the single transport
+  that also drives the agent — so a disconnect never *starves* a still-running
+  agent of the auth it needs to finish.
 - **Ephemeral venue, durable work.** The machine is disposable; the *work* is
   not. Tearing down (or pausing) a CodeSpace first rescues its session state, so
   a successor agent can pick up what a vanished one was doing.
@@ -78,11 +85,34 @@ the seam every other capability rides on.
 ### The credential relay — the host's identity, lent over the door
 The **credential relay** lets an agent inside a CodeSpace authenticate to
 GitHub and Azure DevOps using the **host's** credentials, fetched **just in
-time** back across the transport and **never stored** in the CodeSpace. The relay
-is **policy-gated** (each request is checked against an allowed action + host/
-resource allowlist), **pluggable** in what identity sources it draws on (git
-credential, GitHub auth, Azure login), and **secret-silent** (a lent token is
-never logged). It is the mechanism behind *borrow identity, never bottle it*.
+time** back across the transport and **never bottled** as a long-lived secret in
+the CodeSpace. The relay is **policy-gated** (each request is checked against an
+allowed action + host/resource allowlist), **pluggable** in what identity
+sources it draws on (git credential, GitHub auth, Azure login), and
+**secret-silent** (a lent token is never logged). Crucially, it serves **every
+credential *shape* the agent's real work needs** — not only the
+git-credential-helper path for `fetch`/`push`, but the **raw access/bearer
+tokens** that REST APIs (updating a pull request, replying to review threads,
+editing a work item) and **package/artifact feeds** (npm, NuGet) consume. It is
+the mechanism behind *borrow identity, never bottle it*.
+
+### Disconnect-resilient credentials — the door outlives its opener
+The credentialed door **must not share fate** with the single transport that also
+carries the coordination channel. Today one SSH session tunnels *both* the agent
+(the coordination layer) *and* the relay, so a dropped link **starves** a
+still-running agent of auth mid-task — it can do local git, but `push`, a REST
+write, or a package restore all fail. The north star is that a headless agent
+keeps the auth it needs across a transient disconnect, through any of three
+complementary means: **pre-fetch** — at session start the provider warms the
+**predictable** credential set (every configured git remote, plus the
+package/artifact feeds the repo uses) so common needs are satisfied before
+anything can drop; **bounded cache** — a lent token may live in a **short-lived,
+scoped, self-expiring** cache on the CodeSpace so a brief disconnect doesn't
+immediately fail a `push` or a REST write; and an optional **independent
+back-channel** — an authenticated, owner-scoped side path (e.g. a Dev Tunnel) the
+relay can ride so it is **not** tied to the single SSH/coordination session's
+liveness. None of these bottles a **long-lived** secret; they keep a **borrowed,
+expiring** one usable long enough to finish the work.
 
 ### The coordination-layer face — a provider, not a new interface
 The provider presents its CodeSpace agents to the fabric's **coordination
@@ -179,15 +209,39 @@ first-class fabric participant, not a bare shell.
 ### single-transport-reach
 Every form of reach into a CodeSpace flows through **one shared, multiplexed
 transport**, so connection and credential state are established once and reused.
-The provider's wrapped door is the *only* supported path; going around it is
-unsupported by design.
+The credentialed door is present on **every** reach mode — an interactive shell, a
+one-shot command, **and** the structured agent (ACP) channel alike — so an agent
+is never handed a shell that can commit but cannot `push` for want of the relay
+wiring. The provider's wrapped door is the *only* supported path; going around it
+is unsupported by design.
 
 ### host-credential-relay
 An agent in a CodeSpace authenticates to GitHub and Azure DevOps as the **host
-user**, via a **just-in-time, policy-gated, secret-silent** relay — **no personal
-access token or long-lived secret is ever stored in the CodeSpace**. The set of
-identity sources is pluggable and each is admitted only for its allowed hosts/
-resources.
+user**, via a **just-in-time, policy-gated, secret-silent** relay — **no
+long-lived secret (a personal access token, a durable credential) is ever bottled
+in the CodeSpace**. The set of identity sources is pluggable and each is admitted
+only for its allowed hosts/resources.
+
+### full-credential-shape-coverage
+The borrowed identity covers **every credential shape the agent's work uses**,
+not just one: the **git-credential-helper** path for `fetch`/`push`, the **raw
+access/bearer tokens** that Azure DevOps **REST** writes need (updating a PR,
+replying to or resolving review threads, editing a work item), and the
+**package/artifact-feed tokens** (npm, NuGet) a build/restore consumes. A
+CodeSpace that can `git push` but cannot obtain a REST bearer or a feed token is
+**not** considered authenticated — the coverage is the whole set the work depends
+on, not the git path alone.
+
+### disconnect-resilient-credentials
+The borrowed-identity path **survives a dropped transport** so a headless agent is
+never starved of auth mid-task. Three complementary mechanisms realize it, used
+together: **session-start pre-fetch** of the predictable credential set (every
+configured git remote + the repo's package/artifact feeds) so common needs are
+met before anything drops; a **short-lived, scoped, self-expiring token cache** on
+the CodeSpace that rides out a transient disconnect; and an optional
+**independent, authenticated back-channel** (e.g. a Dev Tunnel) that decouples the
+relay from the SSH/coordination session's liveness. The credential path does
+**not** share a single point of failure with the coordination channel.
 
 ### coordination-layer-provider
 CodeSpace agents are presented to the fabric under its **one coordination
@@ -203,8 +257,11 @@ copying or mutating it; only **adoption** wires a repo in.
 ### per-repo-identity
 Host-side operations run under the account that can access the **target repo's
 org**, resolved per target, with **cross-account discovery** so no CodeSpace is
-hidden by the active-account default. Fully **additive**: unconfigured, it is a
-single ambient identity.
+hidden by the active-account default. The venue's identity is **bound at provision
+and stable for its life** — persisted as a CodeSpace→owning-account binding that
+resolvers consult, so the venue keeps borrowing the **right** account even when
+the host's **ambient active account flips** underneath it mid-session. Fully
+**additive**: unconfigured, it is a single ambient identity.
 
 ### session-survival
 Teardown and pause **rescue session state first**, so an ephemeral CodeSpace's
@@ -312,9 +369,13 @@ no error for "it was asleep." First reach may be slow, and *advisory-borrow*'s
 startup tolerance covers that patiently.
 
 ### credentials-borrowed-not-bottled
-A CodeSpace never holds a credential of its own. It authenticates by reaching the
-**host's** store over the transport at the moment of need; the token is used and
-**not persisted, not logged**. Removing the CodeSpace leaks nothing.
+A CodeSpace never holds a **long-lived** credential of its own. It authenticates
+by reaching the **host's** store at the moment of need; a borrowed token is used
+and **not logged**. A token may be held only in a **short-lived, scoped,
+self-expiring** cache to ride out a transient disconnect — never written to a
+durable file, config, or checkout, and never as a personal access token or other
+lasting secret. Removing the CodeSpace leaks **nothing durable**: whatever was
+cached expires on its own.
 
 ### fail-loud-not-hang
 When a credential cannot be resolved, the relay makes the request **fail fast
@@ -329,7 +390,42 @@ the trusted transport tunnel**, never by an ambient network listener open to the
 wider machine or network. Crossing the host↔CodeSpace boundary is an **explicit,
 opt-in tunnel over the already-trusted transport**, and the steady-state ideal is
 that lending identity to a CodeSpace adds **no new externally-reachable listening
-port** to the host.
+port** to the host. When an **independent back-channel** (e.g. a Dev Tunnel) is
+used to decouple the relay from the SSH/coordination session, it is not an
+exception to this: it is an **authenticated, owner-scoped** tunnel — reachable
+only by the CodeSpace acting as the operator, never an anonymous open port — so
+disconnect-resilience is bought without widening exposure.
+
+### auth-survives-transport-loss
+A headless or on-device agent does not lose auth when the **launching session
+disconnects**. Because the credential path is pre-fetched, short-TTL-cached, and/
+or carried on an independent back-channel, a dropped SSH/coordination link leaves
+a still-running agent able to `push`, open or adjust a PR, or restore packages
+rather than being **starved** mid-task. When a credential genuinely cannot be
+resolved or has expired, the agent **defers and reports it as a resumable step**
+— it **never** falls through into an interactive device-code login that **wedges**
+the transport, and it never silently hangs.
+
+### credential-readiness-verified-end-to-end
+The credentialed door's readiness is confirmed **through to a real credential**,
+not inferred from the transport being up. A **dead relay behind a live `sshd`**
+(the tunnel accepted, but nothing answers behind it) is **detected and healed**
+before work begins — and a reconnect **reclaims or evicts** a stale relay endpoint
+rather than colliding with it — so an agent is never told "auth is ready" when the
+next `push` will fail.
+
+### identity-stable-under-host-churn
+The venue keeps borrowing the **correct** account for its target even as the
+host's **ambient active account changes** underneath it. Identity is resolved from
+the **persisted per-venue binding**, so a mid-session account flip on the host does
+not silently redirect a CodeSpace's pushes to the wrong identity.
+
+### tokens-fresh-not-baked
+Tokens the work consumes — REST bearers, package/artifact-feed tokens — are
+obtained **fresh, just in time** (or from the self-expiring cache), and are
+**never depended on from a stale baked file** (a pre-written feed token, an
+env-var PAT) that silently expires. A CodeSpace resumed after a long pause
+re-borrows rather than trusting a token baked in at creation.
 
 ### adoption-only-mutates-owned-repos
 Installing or running the provider **never alters a repo**. The venue policy is
@@ -420,7 +516,9 @@ tooling.)
   Codespace** venue.
 - **Not a secret store or account minter.** The provider **borrows** the host's
   identity per request; it never mints a per-agent account and never persists a
-  credential inside a CodeSpace.
+  **long-lived** credential inside a CodeSpace. The short-lived, self-expiring
+  cache that buys disconnect-resilience is **not** a secret store — it holds only
+  borrowed, expiring tokens, never a durable secret — so this boundary stands.
 - **Not a specification.** This vision fixes the venue provider's **role,
   guarantees, and behaviors**, not the wiring — it does not pin the transport
   mechanism, the relay's port or protocol, the resolver's namespace grammar, the
@@ -493,3 +591,40 @@ tooling.)
   north-star-ahead of reality (which today has only a per-machine advisory lease,
   startup tolerance, and graceful-teardown session rescue), so the deltas are
   additive build-out; no Non-Goal reality violates was introduced.
+
+- **2026-07-31** — Extended (vision-extending, in place) with the **reliable /
+  disconnect-resilient auth** intent, from operator direction. The sharpening
+  insight: a **single SSH session carries both the coordination channel and the
+  credential relay**, so one disconnect **starves** a still-running agent of auth
+  mid-task (it can do local git, but `push` / PR / REST write / package restore
+  all fail). Added: *disconnect-resilient-credentials* (session-start **pre-fetch**
+  of the predictable set — every configured git remote + the package/artifact
+  feeds — plus a **short-lived, scoped, self-expiring cache** and an optional
+  **authenticated, owner-scoped back-channel** such as a Dev Tunnel that decouples
+  the relay from the SSH/coordination session); *full-credential-shape-coverage*
+  (the git-credential-helper path **and** raw REST bearer tokens **and**
+  package/artifact-feed tokens — a CodeSpace that can `push` but cannot obtain a
+  REST bearer or feed token is not "authenticated"); the credential path present
+  on **every** reach mode incl. the structured agent (ACP) channel; and the
+  behaviors *auth-survives-transport-loss* (defer + report a resumable step, never
+  a wedging device-code prompt), *credential-readiness-verified-end-to-end* (a dead
+  relay behind a live `sshd` is detected/healed, reconnect reclaims a stale
+  endpoint), *identity-stable-under-host-churn* (a persisted per-venue account
+  binding survives the host's ambient active account flipping), and
+  *tokens-fresh-not-baked*. The hard **borrow-not-bottle** invariant was
+  **reconciled, not weakened**: a CodeSpace still never bottles a **long-lived**
+  secret, but a **borrowed, expiring** token may be cached briefly to ride out a
+  disconnect — so *credentials-borrowed-not-bottled* and *local-first-relay-
+  exposure* were reworded (the back-channel is authenticated + owner-scoped, not a
+  new anonymous open port), and the *not a secret store* Non-Goal now states the
+  short-TTL cache is not a secret store. All additions are north-star-ahead of
+  reality (whose relay is fate-shared with the SSH tunnel, serves only the
+  git-helper shape, and reads the ambient active account), so the deltas are
+  additive build-out; no Non-Goal reality violates was introduced. Related public
+  connectivity/identity issues:
+  [#22](https://github.com/ThomasMichon/copilot-extensions/issues/22) (the
+  coordination transport dropping mid-turn) and
+  [#69](https://github.com/ThomasMichon/copilot-extensions/issues/69) (repo-scoped
+  multi-account identity); the connectivity substrate itself is
+  [agent-ssh](../agent-ssh/README.md) /
+  [#63](https://github.com/ThomasMichon/copilot-extensions/issues/63).
