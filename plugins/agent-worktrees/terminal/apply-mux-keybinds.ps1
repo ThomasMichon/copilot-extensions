@@ -112,12 +112,23 @@ function Invoke-LiveApply {
         Write-Host 'apply-mux-keybinds: no running psmux server -- the persisted block applies when one starts'
         return
     }
-    & $muxBin set-option -g prefix C-b 2>&1 | Out-Null
-    & $muxBin unbind-key -a -T root 2>&1 | Out-Null
-    & $muxBin bind-key -T root WheelUpPane   send-keys -M 2>&1 | Out-Null
-    & $muxBin bind-key -T root WheelDownPane send-keys -M 2>&1 | Out-Null
-    & $muxBin set-option -g paste-detection off 2>&1 | Out-Null
-    Write-Host 'apply-mux-keybinds: applied keystroke passthrough to the running psmux server'
+    # psmux runs a SEPARATE server per session (key tables are per-server), and
+    # command-line `bind-key`/`unbind-key` silently no-op there -- only
+    # `source-file` reliably applies key-table directives. So apply the deployed
+    # passthrough fragment to EVERY live session's server via `source-file -t`
+    # (not just the last_session one), so all existing panes pick it up.
+    $fragment = Join-Path $PSScriptRoot 'psmux-passthrough.conf'
+    if (-not (Test-Path $fragment)) {
+        Write-Warning "apply-mux-keybinds: passthrough fragment not found at $fragment (run 'agent-worktrees update')"
+        return
+    }
+    $applied = 0
+    foreach ($line in $sessions) {
+        $name = ($line -split ':', 2)[0].Trim()
+        if (-not $name) { continue }
+        try { & $muxBin source-file -t $name $fragment 2>&1 | Out-Null; $applied++ } catch {}
+    }
+    Write-Host "apply-mux-keybinds: applied keystroke passthrough to $applied live psmux session(s) via source-file"
 }
 
 if (-not $NoPersist) { Persist-Block }
