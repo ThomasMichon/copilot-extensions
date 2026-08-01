@@ -3883,6 +3883,55 @@ def test_nf_pointer_double_click_opens_row(monkeypatch):
     asyncio.run(run())
 
 
+def test_size_mb_handles_non_hex_id():
+    """NF5 parity (#88): the cleanup pseudo-size ``_size_mb`` must never raise on
+    a non-hex ``id4``. Real/demo worktree suffixes are hex (kept byte-identical
+    here), but the compose/NF path renders the maintenance size counter eagerly
+    over *any* id (test fixtures use non-hex ids like 'cl00'), so a bad parse
+    would crash the toggle-ON maintenance pivot."""
+    from agent_worktrees.picker_tui.engine import _size_mb
+    # Hex ids keep the exact historical value (120 + int(id,16) % 300).
+    assert _size_mb({"id4": "aaaa"}) == 120 + (0xAAAA % 300)
+    assert _size_mb({"id4": "00ff"}) == 120 + (0x00FF % 300)
+    # Non-hex ids return a stable in-range pseudo-size instead of raising.
+    for bad in ("cl00", "un00", "zzzz", ""):
+        v = _size_mb({"id4": bad})
+        assert 120 <= v < 420
+    # Deterministic: same id -> same size.
+    assert _size_mb({"id4": "cl00"}) == _size_mb({"id4": "cl00"})
+
+
+def test_nf_maintenance_pivot_renders_under_toggle(monkeypatch):
+    """NF5 parity (#88): with the toggle on, switching to the Maintenance pivot
+    renders its body (select-all / group headers / data rows) and the '~N MiB'
+    size counter through the compose/segment path without raising -- the native
+    path that the flip makes the default. Guards the ``_size_mb`` hardening end
+    to end (the fixture uses non-hex ids)."""
+    from agent_worktrees.picker_tui.engine import _PickerBodyData
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NF", "1")
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            scr.htab = 1                          # Maintenance pivot
+            scr.sel = scr.default_sel()
+            scr.refresh()
+            await pilot.pause()
+            assert scr._nf_enabled is True
+            assert scr._kind() == "maintenance"
+            # The maintenance status counter (status_text -> _size_mb) renders.
+            assert "MiB" in scr.status_text(False).plain
+            # The composed data region renders the maintenance rows without error.
+            bd = scr.query_one("#nf-body-data", _PickerBodyData)
+            assert bd.render().plain  # non-empty; no ValueError raised
+
+    asyncio.run(run())
+
+
 def test_build_body_split_recomposes_monolith():
     """NF3 (#88): _build_body_split's chrome + data rows recompose build_body
     byte-for-byte for every pivot -- the untangle is a pure decomposition, so the
