@@ -475,13 +475,58 @@ if ($plan.action -ne 'exec') {
     exit 1
 }
 
+# ── Fast re-attach: skip the update when JOINING an already-live session ──
+# Opening a worktree whose mux session is already running just re-attaches to
+# the Copilot already executing inside it. The plugin/runtime update is
+# irrelevant to that running process (it applies on the process's next fresh
+# start), so paying for the staged download + installer + pre-launch here only
+# delays the re-attach. When a live `wt-<id>` session exists, reap the staged
+# job and skip the apply for a fast jump-back-in. A fresh create/resume (no live
+# session) still updates normally. Self-contained probe (the psmux-bin resolver
+# + $noMux/$nested are defined later in the psmux-handoff block) so this stays a
+# surgical gate without reordering the rest of the launcher.
+function Test-AwJoiningLiveSession {
+    # No-mux launches always (re)start Copilot directly -- the update is relevant.
+    $noMuxNow = ($env:WORKTREE_NO_MUX -eq '1') -or ($env:APERTURE_NO_MUX -eq '1') -or [bool]$plan.no_mux
+    if ($noMuxNow) { return $false }
+    $cmd = Get-Command psmux -ErrorAction SilentlyContinue
+    if (-not $cmd) { return $false }
+    # Resolve the WinGet reparse-stub to the real exe (pwsh 7.4 can't launch the
+    # 0-byte App Execution Alias); mirrors Resolve-AwPsmuxBin below.
+    $bin = $cmd.Source
+    try {
+        $item = Get-Item -LiteralPath $bin -ErrorAction Stop
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $item.Length -eq 0) {
+            $real = Get-ChildItem -LiteralPath (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages') `
+                -Recurse -Filter 'psmux.exe' -ErrorAction SilentlyContinue |
+                Select-Object -First 1 -ExpandProperty FullName
+            if ($real) { $bin = $real }
+        }
+    } catch {}
+    $wtId = if ([string]::IsNullOrWhiteSpace($plan.worktree_id)) { 'base' } else { $plan.worktree_id }
+    try {
+        $null = & $bin has-session -t "wt-$wtId" 2>&1
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    }
+}
+
 # ── Join the background update + apply, before the psmux handoff (#1430) ──
 # The Picker has closed, so it is now safe to swap the runtime venv. This waits
 # for the staged marketplace download, runs the installer if it changed the
 # payload (no re-exec -- a launcher change applies next launch), then the
 # pre-launch self-update and plugin reconcile, so Copilot starts on the
 # finished update.
-Invoke-UpdateApply -StageJob $script:StageJob -WithReconcile -ShowStatus
+if (Test-AwJoiningLiveSession) {
+    Write-SetupLog 'Joining an already-live mux session; skipping pre-launch update for a fast re-attach (update applies on the process next fresh start).'
+    if ($script:StageJob) {
+        try { Remove-Job $script:StageJob -Force -ErrorAction SilentlyContinue } catch {}
+        $script:StageJob = $null
+    }
+} else {
+    Invoke-UpdateApply -StageJob $script:StageJob -WithReconcile -ShowStatus
+}
 
 # ── Execute the launch plan ──────────────────────────────────────────────
 
