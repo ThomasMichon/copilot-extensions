@@ -86,10 +86,11 @@ via local subprocess or SSH transport.
 
 ## Service Architecture
 
-Each machine runs its own agent-bridge instance. The default port is
-platform-specific: **9280 on Windows**, **9281 on Linux/WSL**. This avoids
-TCP port collisions when both environments share the same host (WSL2 shares
-the Windows TCP port space). The topology
+Each machine runs its own agent-bridge instance. By default it binds an
+**OS-assigned ephemeral** loopback port and advertises the actual port via its
+routing table (`active.json`), so nothing well-known is reserved and there is no
+Windows/WSL port collision to design around (dotfiles #694); clients discover
+the port (`agent-bridge status` prints it). The topology
 is a mesh -- each instance manages outbound connections to other machines
 via SSH. Sessions are persistent (SQLite-backed) and survive service
 restarts.

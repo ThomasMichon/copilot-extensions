@@ -1634,7 +1634,7 @@ class AgentResolver:
         cmd = elevated.relay_spawn_command(config.name, token=token)
         log.info(
             "Routing elevated agent '%s' via sub-daemon relay (port %d)",
-            config.name, elevated.ELEVATED_PORT,
+            config.name, elevated.discovered_port(),
         )
         return SpawnTarget(
             type="command", spawn_command=cmd, project=config.project,
