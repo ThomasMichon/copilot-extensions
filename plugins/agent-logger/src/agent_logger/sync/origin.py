@@ -86,13 +86,16 @@ def _payload(origin: dict) -> str:
     return json.dumps(origin, indent=2, sort_keys=True) + "\n"
 
 
-def effective_harness(allowlist: list[str], harness_repos: list[str]) -> list[str]:
-    """Union of the sync allowlist and the machine's harness repos, allowlist
-    first (so an allowlisted repo wins naming precedence). This is the set an
-    origin is derived against for both marking and the sync decision, so a
-    session that syncs is always marked with a recognized repo."""
+def effective_harness(allowlist: list[str], harness_repos: list[str],
+                      denylist: list[str] | None = None) -> list[str]:
+    """Union of the sync allowlist, denylist, and the machine's harness repos --
+    allowlist first (so an allowlisted repo wins naming precedence). This is the
+    set an origin is derived against for both marking and the sync decision, so
+    a session that syncs (or is explicitly denied) is always derivable to a
+    recognized repo. A denied repo MUST be in this set for the denylist to
+    match, so the denylist is folded in here."""
     out: dict[str, str] = {}
-    for repo in [*allowlist, *harness_repos]:
+    for repo in [*allowlist, *(denylist or []), *harness_repos]:
         if repo and repo.lower() not in out:
             out[repo.lower()] = repo
     return list(out.values())
@@ -100,24 +103,44 @@ def effective_harness(allowlist: list[str], harness_repos: list[str]) -> list[st
 
 def classify_for_sync(session_dir: Path, machine: str, allowlist: list[str],
                       effective: list[str], *,
-                      fail_closed: bool = False) -> tuple[bool, dict]:
+                      fail_closed: bool = False,
+                      denylist: list[str] | None = None) -> tuple[bool, dict]:
     """Origin-based per-repo sync decision. Returns ``(include, origin)``.
 
-    A session **syncs iff** its derived ``source_repo`` is in ``allowlist``.
-    A session whose recorded workspace path resolves to a repo **not** in the
-    allowlist (a known work repo, or any other path) is **excluded** -- it ran
-    somewhere, just not a synced repo. A session with **no** resolvable path at
-    all (no workspace / no cwd|git_root) follows ``fail_closed``: kept when
-    fail-open, dropped when fail-closed. This is exactly the prior flat-allowlist
-    semantics, re-expressed through the single origin classifier.
+    Precedence:
+
+    1. **Denylist wins.** A session whose derived ``source_repo`` is in
+       ``denylist`` is always **excluded** -- the complement primitive that lets
+       a target be "everything *except* these repos".
+    2. **Allowlist gates when present.** With a non-empty ``allowlist``, a
+       classified session **syncs iff** its ``source_repo`` is in it (exactly the
+       prior behavior). A path resolving to a non-allowlisted repo is excluded; a
+       session with no resolvable path follows ``fail_closed``.
+    3. **Catch-all when no allowlist.** With an **empty** ``allowlist`` (denylist
+       mode), every session that is not denied is **included** -- a classified
+       non-denied repo, and (fail-open) an unrecognized/metadata-less session --
+       unless ``fail_closed`` drops the truly unclassifiable ones. This is the
+       "everything else" sink.
     """
     origin = derive_origin(session_dir, machine, effective)
     allow = {a.lower() for a in allowlist if a}
+    deny = {d.lower() for d in (denylist or []) if d}
     src = origin["source_repo"]
     if src is not None:
-        return (src.lower() in allow), origin
+        low = src.lower()
+        if low in deny:
+            return False, origin
+        if allow:
+            return (low in allow), origin
+        return True, origin
+    # No derived source_repo (machine-only).
     if _read_workspace_paths(session_dir):
-        return False, origin
+        # A path that resolved to no recognized repo. With an allowlist this is a
+        # strict exclude; in catch-all (no allowlist) mode it is not denied, so
+        # it is kept unless fail_closed.
+        if allow:
+            return False, origin
+        return (not fail_closed), origin
     return (not fail_closed), origin
 
 

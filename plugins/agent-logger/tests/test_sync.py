@@ -8,6 +8,7 @@ import pytest
 
 from agent_logger.config import Config, load_config
 from agent_logger.sync import engine
+from agent_logger.sync.origin import effective_harness as origin_effective
 from agent_logger.sync.targets import TARGET_NAMES, build_target
 from agent_logger.sync.targets.filesystem import (
     LocalTarget,
@@ -321,6 +322,38 @@ def test_config_repo_allowlist_fail_closed_flag(tmp_path: Path) -> None:
     data = dict(base)
     data["sync"] = dict(data["sync"], repo_allowlist_fail_closed=True)
     assert Config(data, tmp_path).sync_repo_allowlist_fail_closed is True
+
+
+def test_denylist_catchall_is_complement_of_facility(tmp_path: Path) -> None:
+    """book2's work sink: no allowlist + deny facility repos = 'everything else'.
+    A facility session is excluded (goes to the NAS via the other pipeline); a
+    work / unknown / metadata-less session is caught for the work store."""
+    src = tmp_path / "copilot"
+    for name, ws in (
+        ("fac", "git_root: /home/u/src/aperture-labs\n"),
+        ("ce", "git_root: /home/u/src/copilot-extensions\n"),
+        ("work", "git_root: /home/u/work/dotfiles\n"),
+        ("mystery", "git_root: /home/u/work/some-employer-thing\n"),
+    ):
+        d = src / "session-state" / name
+        d.mkdir(parents=True)
+        (d / "workspace.yaml").write_text(ws, encoding="utf-8")
+    bare = src / "session-state" / "bare"
+    bare.mkdir(parents=True)
+    (bare / "events.jsonl").write_text("{}\n", encoding="utf-8")
+
+    deny = ["aperture-labs", "copilot-extensions"]
+    eff = origin_effective([], ["dotfiles"], deny)
+    included = engine._included_sessions(
+        src, [], effective=eff, machine="book2", denylist=deny)
+    assert included == {"work", "mystery", "bare"}   # everything NOT facility
+
+
+def test_no_filter_syncs_everything(tmp_path: Path) -> None:
+    """Empty allowlist AND empty denylist -> no filter (sync all)."""
+    src = tmp_path / "copilot"
+    (src / "session-state" / "a").mkdir(parents=True)
+    assert engine._included_sessions(src, [], denylist=[]) is None
 
 
 def _make_polluted_source(root: Path) -> Path:
