@@ -59,12 +59,14 @@ def _cmd_plan(args: argparse.Namespace) -> int:
         print(json.dumps(_reconcile.plan_to_dict(plan), indent=2))
         return 0
     print(f"plan for {machine}  (drift-key {plan.drift_key})")
-    if not plan.surfaces:
-        print("  no managed surfaces (no requirement packages apply)")
+    if not plan.surfaces and not plan.modules:
+        print("  no managed surfaces or modules (no requirement packages apply)")
         return 0
     for surface in plan.surfaces:
         owners = ", ".join(surface.contributing_packages)
-        print(f"  {surface.key}  [{surface.disposition}]  <- {owners}")
+        print(f"  surface {surface.key}  [{surface.disposition}]  <- {owners}")
+    for mod in plan.modules:
+        print(f"  module  {mod['name']}  <- {mod['source_repo']}")
     return 0
 
 
@@ -93,16 +95,24 @@ def _cmd_restore(args: argparse.Namespace) -> int:
             if f.level == "error":
                 print(f"  {f.code}: {f.message}", file=sys.stderr)
         return 1
-    try:
-        plan = _reconcile.restore(packages, machine, dry_run=args.dry_run)
-    except NotImplementedError as exc:
-        print(f"restore: {exc}", file=sys.stderr)
-        return 2
-    print(f"{'DRY-RUN ' if args.dry_run else ''}restore plan for {machine}  "
-          f"(drift-key {plan.drift_key}): {len(plan.surfaces)} surface(s)")
-    for surface in plan.surfaces:
-        print(f"  {surface.key}  [{surface.disposition}]")
-    return 0
+
+    result = _reconcile.restore(packages, machine, dry_run=args.dry_run)
+    prefix = "DRY-RUN " if args.dry_run else ""
+    print(f"{prefix}restore for {machine}  (drift-key {result.plan.drift_key})")
+    if result.plan.surfaces:
+        print(f"  surfaces: {len(result.plan.surfaces)} managed "
+              "(Copilot-settings apply pending, issue #4006)")
+    if not result.module_results:
+        print("  modules: none")
+    for r in result.module_results:
+        if r.ran:
+            status = "ok" if r.returncode == 0 else f"FAILED rc={r.returncode}"
+            print(f"  module {r.name} <- {r.source_repo}: {status}")
+            if r.returncode not in (0, None) and r.stderr_tail:
+                print(f"      {r.stderr_tail.strip().splitlines()[-1]}", file=sys.stderr)
+        else:
+            print(f"  module {r.name} <- {r.source_repo}: skipped ({r.skipped_reason})")
+    return 0 if result.ok else 2
 
 
 def _cmd_todo(args: argparse.Namespace) -> int:

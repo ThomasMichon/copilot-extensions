@@ -19,6 +19,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import modules as _modules
+from .discover import current_platform
 from .manifest import RequirementPackage, resolve_for_machine
 
 
@@ -39,6 +41,7 @@ class Plan:
     surfaces: list[ManagedSurface]
     drift_key: str
     package_names: list[str]
+    modules: list[dict[str, str]] = field(default_factory=list)
 
 
 def resolve_union(
@@ -61,8 +64,9 @@ def manifest_hash(resolved: list[RequirementPackage]) -> str:
     return hashlib.sha256(blob).hexdigest()[:16]
 
 
-def plan(packages: list[RequirementPackage], machine: str) -> Plan:
+def plan(packages: list[RequirementPackage], machine: str, plat: str | None = None) -> Plan:
     """Build a read-only restore plan for ``machine`` (no mutation)."""
+    plat = plat or current_platform()
     resolved = resolve_union(packages, machine)
     surfaces: dict[str, ManagedSurface] = {}
     for pkg in resolved:
@@ -73,11 +77,16 @@ def plan(packages: list[RequirementPackage], machine: str) -> Plan:
             # An enforced surface dominates the reported disposition.
             if disp == "enforce":
                 surface.disposition = "enforce"
+    module_list = [
+        {"name": str(mod.get("name")), "source_repo": pkg.source_repo}
+        for pkg, mod in _modules.resolve_modules(resolved, machine, plat)
+    ]
     return Plan(
         machine=machine,
         surfaces=sorted(surfaces.values(), key=lambda s: s.key),
         drift_key=manifest_hash(resolved),
         package_names=sorted(pkg.name for pkg in resolved),
+        modules=module_list,
     )
 
 
@@ -87,20 +96,38 @@ def plan_to_dict(p: Plan) -> dict[str, Any]:
         "drift_key": p.drift_key,
         "packages": p.package_names,
         "surfaces": [dataclasses.asdict(s) for s in p.surfaces],
+        "modules": p.modules,
     }
 
 
-def restore(packages: list[RequirementPackage], machine: str, dry_run: bool = True) -> Plan:
+@dataclass
+class RestoreResult:
+    """The outcome of a restore: the plan plus each module's result."""
+
+    plan: Plan
+    module_results: list[_modules.ModuleResult] = field(default_factory=list)
+    surfaces_applied: bool = False
+
+    @property
+    def ok(self) -> bool:
+        return all(r.ok for r in self.module_results)
+
+
+def restore(
+    packages: list[RequirementPackage],
+    machine: str,
+    dry_run: bool = True,
+    plat: str | None = None,
+) -> RestoreResult:
     """Converge ``machine`` to the package union.
 
-    The apply half (per-disposition mutation of ``~/.copilot/`` with
-    backup-before-write) is delivered by the ``surfaces`` modules (issue #4006);
-    until then only the dry-run plan is produced, and a non-dry-run call raises.
+    Runs the repo-local **modules** (the sensitive OS-mutating work, which lives
+    in each harness repo) -- respecting the dry-run safety rule. The Copilot
+    **surfaces** apply (settings/permissions/trustedFolders) is delivered by the
+    ``surfaces`` package (issue #4006) and is currently a no-op placeholder.
     """
-    p = plan(packages, machine)
-    if dry_run:
-        return p
-    raise NotImplementedError(
-        "surface apply is delivered by the surfaces package (issue #4006); "
-        "run with --dry-run for the plan"
-    )
+    plat = plat or current_platform()
+    p = plan(packages, machine, plat)
+    resolved = resolve_union(packages, machine)
+    results = _modules.run_modules(resolved, machine, plat, dry_run=dry_run)
+    return RestoreResult(plan=p, module_results=results, surfaces_applied=False)

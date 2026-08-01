@@ -58,6 +58,7 @@ class RequirementPackage:
     per_machine: dict[str, Any] = field(default_factory=dict)
     bootstrap_floor: dict[str, Any] = field(default_factory=dict)
     exclude: list[str] = field(default_factory=list)
+    modules: list[dict[str, Any]] = field(default_factory=list)
     source_repo: str = ""
     source_path: Path | None = None
 
@@ -66,6 +67,14 @@ class RequirementPackage:
         if not self.gate or "*" in self.gate:
             return True
         return machine in self.gate
+
+    def repo_root(self) -> Path | None:
+        """The repo checkout root, derived from ``<repo>/.github/machine-state/<f>``."""
+        if self.source_path is None:
+            return None
+        # <repo>/.github/machine-state/<file>.yaml -> parents[2] == <repo>
+        parents = self.source_path.resolve().parents
+        return parents[2] if len(parents) >= 3 else None
 
 
 def _require(mapping: dict[str, Any], key: str, path: Path) -> Any:
@@ -109,6 +118,13 @@ def load_package(path: Path, source_repo: str = "") -> RequirementPackage:
     if not isinstance(gate, list):
         raise ManifestError(f"{path}: 'gate' must be a list of machine names")
 
+    modules = raw.get("modules") or []
+    if not isinstance(modules, list):
+        raise ManifestError(f"{path}: 'modules' must be a list")
+    for mod in modules:
+        if not isinstance(mod, dict) or not mod.get("name"):
+            raise ManifestError(f"{path}: each module must be a mapping with a 'name'")
+
     return RequirementPackage(
         name=name,
         schema_version=schema,
@@ -118,6 +134,7 @@ def load_package(path: Path, source_repo: str = "") -> RequirementPackage:
         per_machine=raw.get("per-machine") or raw.get("per_machine") or {},
         bootstrap_floor=raw.get("bootstrap-floor") or raw.get("bootstrap_floor") or {},
         exclude=list(raw.get("exclude") or []),
+        modules=modules,
         source_repo=source_repo,
         source_path=path,
     )
@@ -158,6 +175,7 @@ def resolve_for_machine(pkg: RequirementPackage, machine: str) -> RequirementPac
         per_machine={},
         bootstrap_floor=copy.deepcopy(pkg.bootstrap_floor),
         exclude=list(pkg.exclude),
+        modules=copy.deepcopy(pkg.modules),
         source_repo=pkg.source_repo,
         source_path=pkg.source_path,
     )
