@@ -1030,7 +1030,7 @@ function Deploy-TerminalScripts {
        (or a restore flow) may run. Mirrors install.sh deploy_terminal_scripts. #>
     Ensure-InstallDir $BinDir
     $srcDir = Join-Path $PluginDir 'terminal'
-    foreach ($script in @('session-options.ps1', 'apply-mux-keybinds.ps1')) {
+    foreach ($script in @('session-options.ps1', 'apply-mux-keybinds.ps1', 'psmux-passthrough.conf')) {
         $src = Join-Path $srcDir $script
         if (-not (Test-Path $src)) {
             Write-ServiceWarn "terminal script not found at $src"
@@ -2378,7 +2378,7 @@ switch ($Action) {
         # left alone: agent-worktrees no longer owns it (sessions are configured
         # per-session at launch), so uninstall must not delete a file that may
         # now be the user's own (or an opt-in apply-mux-keybinds.ps1 block).
-        foreach ($script in @('session-options.ps1', 'apply-mux-keybinds.ps1')) {
+        foreach ($script in @('session-options.ps1', 'apply-mux-keybinds.ps1', 'psmux-passthrough.conf')) {
             $sp = Join-Path $BinDir $script
             if (Test-Path $sp) { Remove-Item $sp -Force; Write-ServiceChanged "Removed terminal script: $script" }
         }

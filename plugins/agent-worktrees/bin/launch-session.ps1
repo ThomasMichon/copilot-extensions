@@ -686,6 +686,18 @@ function Set-AwSessionOptionsSafe {
         catch { Write-SetupLog "psmux: session-options apply failed: $($_.Exception.Message)" 'WARN' }
     }
 }
+# Apply the psmux keystroke passthrough to this session's server via source-file
+# (per-session; the only primitive that reliably applies key-table directives on
+# psmux -- command-line bind-key/unbind-key no-op). Called at create + join so
+# every session gets PageUp/wheel/arrow passthrough when it starts, restoring the
+# per-session-at-launch model (#1453/#3946 mux thread; regression 25c41b7).
+function Invoke-AwPsmuxPassthroughSafe {
+    param([string]$Session)
+    if (Get-Command Invoke-AwPsmuxPassthrough -ErrorAction SilentlyContinue) {
+        try { Invoke-AwPsmuxPassthrough -Session $Session }
+        catch { Write-SetupLog "psmux: passthrough apply failed: $($_.Exception.Message)" 'WARN' }
+    }
+}
 if (-not $noMux -and $psmuxCmd) {
     $wtId = if ([string]::IsNullOrWhiteSpace($plan.worktree_id)) { 'base' } else { $plan.worktree_id }
     $sessName = "wt-$wtId"
@@ -715,6 +727,10 @@ if (-not $noMux -and $psmuxCmd) {
         # Re-stamp per-session options on (re)connect so a long-lived session
         # picks up the current bar without us owning the global config.
         Set-AwSessionOptionsSafe $sessName
+        # Apply the keystroke passthrough to this session's server (per-session
+        # source-file) so a rejoined long-lived session picks up PageUp/wheel/
+        # arrow passthrough.
+        Invoke-AwPsmuxPassthroughSafe $sessName
         # (Re)assert the updater on join: if the prior one died, this revives
         # the bar; if it's alive, the token guard makes the new one retire.
         Start-StatusUpdater $sessName $muxStatusPath
@@ -789,6 +805,9 @@ if (-not $noMux -and $psmuxCmd) {
         # updater (one per session, before any nested-create early-exit so the
         # bar populates either way).
         Set-AwSessionOptionsSafe $sessName
+        # Apply the keystroke passthrough to the new session's server
+        # (per-session source-file) so PageUp/wheel/arrows reach Copilot.
+        Invoke-AwPsmuxPassthroughSafe $sessName
         Start-StatusUpdater $sessName $muxStatusPath
         if ($nested) {
             Write-Host "Session created: $sessName (open a new terminal to join)"

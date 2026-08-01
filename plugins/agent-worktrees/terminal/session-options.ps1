@@ -64,3 +64,24 @@ function Set-AwPsmuxSessionOptions {
         try { & $muxBin set-option -t $Session $opt[0] $opt[1] 2>&1 | Out-Null } catch {}
     }
 }
+
+# Invoke-AwPsmuxPassthrough <session-name>
+#
+# Apply the psmux keystroke passthrough (root-table reset + wheel relay + prefix)
+# to ONE session's psmux server via `source-file`. psmux runs a separate server
+# per wt-<id> (key tables are per-server) and command-line `bind-key`/`unbind-key`
+# silently no-op there -- `source-file` is the only primitive that reliably
+# applies key-table directives, and `-t <session>` scopes it to that session's
+# server (isolated from siblings + any personal psmux session). This restores the
+# per-session-at-launch model that mux-config-decoupling's one-time global script
+# lost (regression 25c41b7). Best-effort: a failure never blocks the launch. The
+# fragment is deployed alongside this script as psmux-passthrough.conf.
+function Invoke-AwPsmuxPassthrough {
+    param([string]$Session)
+    if ([string]::IsNullOrWhiteSpace($Session)) { return }
+    if (-not (Get-Command psmux -ErrorAction SilentlyContinue)) { return }
+    $muxBin = if ($script:AwPsmuxBin) { $script:AwPsmuxBin } else { 'psmux' }
+    $fragment = Join-Path $PSScriptRoot 'psmux-passthrough.conf'
+    if (-not (Test-Path $fragment)) { return }
+    try { & $muxBin source-file -t $Session $fragment 2>&1 | Out-Null } catch {}
+}

@@ -128,3 +128,47 @@ def test_windows_launcher_passes_psmux_pane_verbatim():
     # The collapse helper must be gone, and new-session must launch @cmd raw.
     assert "ConvertTo-PsmuxPaneCommand" not in ps
     assert "new-session -d -s $sessName -c $plan.work_dir @envFlags @cmd" in ps
+
+
+_TERMINAL = Path(__file__).resolve().parents[1] / "terminal"
+
+
+def test_windows_launcher_applies_psmux_passthrough_per_session():
+    """psmux runs a SEPARATE server per wt-<id> and command-line
+    bind-key/unbind-key silently no-op there, so the launcher must `source-file`
+    the passthrough fragment per session at BOTH create and join -- restoring the
+    per-session-at-launch keybind model that mux-config-decoupling's one-time
+    global script lost (regression 25c41b7). psmux-only."""
+    ps = _LAUNCH_PS1.read_text()
+    assert "function Invoke-AwPsmuxPassthroughSafe" in ps
+    # Applied at create AND join (>= 2 call sites).
+    assert ps.count("Invoke-AwPsmuxPassthroughSafe $sessName") >= 2
+
+
+def test_session_options_source_files_passthrough_fragment():
+    so = (_TERMINAL / "session-options.ps1").read_text()
+    assert "function Invoke-AwPsmuxPassthrough" in so
+    assert "source-file -t $Session" in so
+    assert "psmux-passthrough.conf" in so
+
+
+def test_psmux_passthrough_fragment_carries_the_directives():
+    frag = (_TERMINAL / "psmux-passthrough.conf").read_text()
+    assert "unbind-key -a -T root" in frag
+    assert "WheelUpPane" in frag and "WheelDownPane" in frag
+    assert "paste-detection off" in frag
+
+
+def test_apply_mux_keybinds_source_files_every_session():
+    """The opt-in/restore script must apply per SERVER (source-file each live
+    session), not just the last_session server -- command-line binds no-op."""
+    amk = (_TERMINAL / "apply-mux-keybinds.ps1").read_text()
+    assert "source-file -t $name $fragment" in amk
+    assert "psmux-passthrough.conf" in amk
+
+
+def test_tmux_launcher_does_not_use_psmux_passthrough():
+    """psmux-only: tmux (one shared server) keeps the opt-in apply-mux-keybinds.sh
+    so worktree tuning never leaks onto a user's personal tmux sessions."""
+    sh = _LAUNCH_SCRIPT.read_text()
+    assert "psmux-passthrough.conf" not in sh
