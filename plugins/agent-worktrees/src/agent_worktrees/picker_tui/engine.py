@@ -411,12 +411,13 @@ def _resolve_mock_mode(explicit=None):
 
 
 def _nf_compose_enabled() -> bool:
-    """NF2 compose-skeleton toggle (#88). When ``AGENT_WORKTREES_PICKER_NF`` is a
-    truthy value, ``PickerScreen`` mounts its four child segment widgets instead
-    of rendering as a single leaf. Default OFF -- the monolithic ``render()`` path
-    (byte-identical, golden-guarded) stays authoritative until NF2+ retires it."""
-    val = os.environ.get("AGENT_WORKTREES_PICKER_NF", "0").strip().lower()
-    return val not in ("", "0", "false", "no", "off")
+    """NF (#88): the compose/native path is the **default** (NF5). ``PickerScreen``
+    mounts its child segment/region widgets and native focus drives the picker.
+    Set ``AGENT_WORKTREES_PICKER_NF`` to a falsey value (``0``/``false``/``no``/
+    ``off``) to force the legacy monolithic ``render()`` path -- a temporary
+    rollback escape hatch until NF5-3 retires the monolith."""
+    val = os.environ.get("AGENT_WORKTREES_PICKER_NF", "1").strip().lower()
+    return val not in ("0", "false", "no", "off")
 
 
 class _PickerSegment(Widget):
