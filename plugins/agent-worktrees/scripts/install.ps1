@@ -1121,6 +1121,24 @@ function Resolve-AwPsmuxBin {
     return $src
 }
 
+function Ensure-PsmuxPin {
+    <# Ensure a winget 'Gating' pin to psmux 3.3.5 exists so winget cannot
+       auto-upgrade into the 3.3.6 `attach-session -t` regression (psmux#408).
+       Idempotent: a no-op when the 3.3.5 pin is already present. Safe at any
+       installed version -- a gating pin blocks upgrades outside 3.3.5 even when
+       a below-target version (e.g. 3.3.3) is installed, which is why a
+       still-on-3.3.3 box can self-pin instead of waiting for a hand
+       `winget pin add`. #>
+    $pins = ''
+    try { $pins = & winget pin list 2>&1 | Out-String } catch {}
+    $hasPin = @($pins -split "`n" | Where-Object { $_ -match 'marlocarlo\.psmux' -and $_ -match '3\.3\.5' }).Count -gt 0
+    if ($hasPin) { return }
+    & winget pin add --id marlocarlo.psmux --version 3.3.5 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-ServiceChanged "psmux: added winget gating pin to 3.3.5 (blocks auto-upgrade into the 3.3.6 regression)"
+    }
+}
+
 function Ensure-Psmux {
     <# Install psmux 3.3.5 (pinned) when absent; if 3.3.6 is present -- the
        version with the `attach-session -t` regression (psmux#408, which makes
@@ -1150,6 +1168,9 @@ function Ensure-Psmux {
         $liveSessions = @()
         try { $liveSessions = @(& $muxBin ls 2>$null | Where-Object { $_ -match '\S' }) } catch {}
         if ($liveSessions.Count -gt 0) {
+            # Can't downgrade with live sessions, but still ensure the pin so the
+            # box can't drift further before the operator does a clean downgrade.
+            Ensure-PsmuxPin
             Write-ServiceWarn "psmux 3.3.6 has the attach -t regression (psmux#408); the launcher works around it. $($liveSessions.Count) live session(s) present -- not downgrading now (it would kill them). Close all worktree sessions and re-run 'update' to auto-pin 3.3.5."
         } else {
             Write-ServiceChanged "psmux 3.3.6 has the attach -t regression (psmux#408) -- downgrading to pinned 3.3.5"
@@ -1164,6 +1185,10 @@ function Ensure-Psmux {
             }
         }
     } else {
+        # Present at a non-3.3.6 version (e.g. 3.3.3 below target, or an
+        # unpinned 3.3.5). Ensure the 3.3.5 gating pin so the box self-pins and
+        # winget can't drift it up into the 3.3.6 regression.
+        Ensure-PsmuxPin
         Write-ServiceOk "psmux available ($psmuxVer)"
     }
     Ensure-PsmuxSshSafe
