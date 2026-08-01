@@ -197,3 +197,57 @@ def test_classify_no_metadata_follows_fail_closed(tmp_path: Path) -> None:
         d, "book2", ["aperture-labs"], eff, fail_closed=False)[0] is True
     assert origin.classify_for_sync(
         d, "book2", ["aperture-labs"], eff, fail_closed=True)[0] is False
+
+
+# -- denylist / catch-all "everything else" sink (book2 work OneDrive) --------
+
+def test_effective_harness_folds_in_denylist(tmp_path: Path) -> None:
+    # A denied repo must be derivable for the denylist to match, so it is folded
+    # into the derivation set.
+    eff = origin.effective_harness([], ["dotfiles"],
+                                   ["aperture-labs", "copilot-extensions"])
+    assert eff == ["aperture-labs", "copilot-extensions", "dotfiles"]
+
+
+def test_classify_denylist_excludes_facility_from_work_sink(tmp_path: Path) -> None:
+    # book2 work sink: allowlist empty (catch-all), deny facility repos.
+    deny = ["aperture-labs", "copilot-extensions"]
+    eff = origin.effective_harness([], ["dotfiles", "acme-webapp"], deny)
+    fac = _mk(tmp_path, "fac", "git_root: /home/u/src/aperture-labs\n")
+    inc, o = origin.classify_for_sync(fac, "book2", [], eff, denylist=deny)
+    assert inc is False              # facility session never goes to the work sink
+    assert o["source_repo"] == "aperture-labs"  # ...but is still truthfully tagged
+
+
+def test_classify_catchall_syncs_everything_not_denied(tmp_path: Path) -> None:
+    deny = ["aperture-labs", "copilot-extensions"]
+    eff = origin.effective_harness([], ["dotfiles", "acme-webapp"], deny)
+    # A recognized work repo -> synced to the catch-all (work) sink, tagged.
+    work = _mk(tmp_path, "work", "git_root: /home/u/work/dotfiles\n")
+    inc, o = origin.classify_for_sync(work, "book2", [], eff, denylist=deny)
+    assert inc is True
+    assert o["source_repo"] == "dotfiles"
+    # An UNRECOGNIZED employer repo -> still caught (not denied), tagged machine-only.
+    unknown = _mk(tmp_path, "unknown", "git_root: /home/u/work/secret-thing\n")
+    inc2, o2 = origin.classify_for_sync(unknown, "book2", [], eff, denylist=deny)
+    assert inc2 is True
+    assert o2["source_repo"] is None
+    # A metadata-less session -> catch-all keeps it (fail-open) for the work sink.
+    bare = _mk(tmp_path, "bare", None)
+    assert origin.classify_for_sync(bare, "book2", [], eff, denylist=deny)[0] is True
+
+
+def test_classify_denylist_beats_allowlist(tmp_path: Path) -> None:
+    # When both are set, an explicit deny wins over a matching allow.
+    d = _mk(tmp_path, "s", "git_root: /home/u/src/aperture-labs\n")
+    eff = origin.effective_harness(["aperture-labs"], [], ["aperture-labs"])
+    inc, _ = origin.classify_for_sync(
+        d, "book2", ["aperture-labs"], eff, denylist=["aperture-labs"])
+    assert inc is False
+
+
+def test_config_denylist_parsing(tmp_path: Path) -> None:
+    cfg = Config({"sync": {"repo_denylist": "aperture-labs, copilot-extensions"}},
+                 tmp_path)
+    assert cfg.sync_repo_denylist == ["aperture-labs", "copilot-extensions"]
+    assert Config({"sync": {}}, tmp_path).sync_repo_denylist == []

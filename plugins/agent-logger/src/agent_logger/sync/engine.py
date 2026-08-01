@@ -35,17 +35,18 @@ def _machine(cfg: Config) -> str:
 def _included_sessions(source, allowlist: list[str],
                        fail_closed: bool = False,
                        effective: list[str] | None = None,
-                       machine: str = "") -> set[str] | None:
+                       machine: str = "",
+                       denylist: list[str] | None = None) -> set[str] | None:
     """Resolve the per-repo sync policy to a set of included session ids.
 
-    Returns ``None`` when the allowlist is empty (sync everything). Otherwise a
-    session is included iff its **derived origin** (see
-    :func:`~agent_logger.sync.origin.classify_for_sync`) resolves to an
-    allowlisted repo -- the single origin classifier drives both the origin
-    mark and this decision. ``effective`` is the origin-derivation set (allowlist
-    plus harness repos); it defaults to the allowlist alone.
+    Returns ``None`` when there is **no** filter at all (empty allowlist *and*
+    empty denylist -- sync everything). Otherwise a session is included per
+    :func:`~agent_logger.sync.origin.classify_for_sync`: denylist excludes,
+    allowlist gates (when present), and an empty allowlist with a denylist is a
+    catch-all for everything not denied. ``effective`` is the origin-derivation
+    set (allowlist + denylist + harness repos).
     """
-    if not allowlist:
+    if not allowlist and not denylist:
         return None
     ss = source / "session-state"
     if not ss.is_dir():
@@ -56,7 +57,8 @@ def _included_sessions(source, allowlist: list[str],
         if not d.is_dir():
             continue
         include, _ = classify_for_sync(d, machine, allowlist, eff,
-                                       fail_closed=fail_closed)
+                                       fail_closed=fail_closed,
+                                       denylist=denylist)
         if include:
             included.add(d.name)
     return included
@@ -78,17 +80,19 @@ def run_sync(
     source = cfg.sync_source
     target = build_target(cfg.sync_target, cfg.target_options(cfg.sync_target))
     allowlist = cfg.sync_repo_allowlist
-    effective = effective_harness(allowlist, cfg.sync_harness_repos)
+    denylist = cfg.sync_repo_denylist
+    effective = effective_harness(allowlist, cfg.sync_harness_repos, denylist)
     include = _included_sessions(source, allowlist,
                                  cfg.sync_repo_allowlist_fail_closed,
-                                 effective, machine)
+                                 effective, machine, denylist)
 
     if verbose:
         print(f"machine:   {machine}")
         print(f"source:    {source}")
         print(f"target:    {target.describe()}")
         if include is not None:
-            print(f"allowlist: {allowlist} -> {len(include)} session(s) included")
+            scope = f"allowlist={allowlist} denylist={denylist}"
+            print(f"filter:    {scope} -> {len(include)} session(s) included")
 
     if not source.is_dir():
         print(f"session-sync: source not found: {source}", file=sys.stderr)

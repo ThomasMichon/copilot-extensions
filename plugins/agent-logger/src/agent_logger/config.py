@@ -46,6 +46,13 @@ DEFAULTS: dict[str, Any] = {
         # fail-open (keep metadata-less sessions). Only meaningful alongside
         # a non-empty repo_allowlist.
         "repo_allowlist_fail_closed": False,
+        # Repos to EXCLUDE from sync (complement of the allowlist). A session
+        # whose derived source_repo is in this list is never synced. With an
+        # empty repo_allowlist this makes the target a CATCH-ALL for everything
+        # not denied -- the "everything else" sink on a dual-use machine (e.g.
+        # book2's work store takes every non-facility session). Empty -> deny
+        # nothing.
+        "repo_denylist": [],
         # Known harness repos on this machine (names; case-insensitive
         # substring match against a session's git_root/cwd). Used to derive
         # each session's origin sidecar (origin.json). A session whose path
@@ -536,6 +543,20 @@ class Config:
         employer/work sessions leaking. Default false (fail-open)."""
         return bool(self._data.get("sync", {}).get(
             "repo_allowlist_fail_closed", False))
+
+    @property
+    def sync_repo_denylist(self) -> list[str]:
+        """Repo patterns to EXCLUDE from sync (the complement of the allowlist).
+
+        A session whose derived ``source_repo`` is in this list is never synced,
+        regardless of the allowlist. With an **empty** ``repo_allowlist`` this
+        turns the target into a **catch-all** for everything *not* denied -- the
+        "everything else" sink on a dual-use machine (e.g. book2's work store
+        takes every non-facility session). Empty list means "deny nothing"."""
+        raw = self._data.get("sync", {}).get("repo_denylist", [])
+        if isinstance(raw, str):
+            return [s.strip() for s in raw.split(",") if s.strip()]
+        return [str(s).strip() for s in raw if str(s).strip()]
 
     @property
     def sync_harness_repos(self) -> list[str]:
