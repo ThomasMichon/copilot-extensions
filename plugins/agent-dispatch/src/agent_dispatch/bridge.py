@@ -78,3 +78,37 @@ def spawn_worker(
         cmd, check=False, capture_output=True, text=True, timeout=timeout,
         **no_window_kwargs(),
     )
+
+
+def send_nudge(
+    worktree: str,
+    message: str,
+    *,
+    sender: str = "agent-dispatch-supervisor",
+    timeout: float | None = 20.0,
+) -> bool:
+    """Send a non-blocking **nudge** to a live embodied session via agent-bridge.
+
+    Shells ``agent-bridge send --no-wait --kind notify --sender <sender>
+    <worktree> <message>`` -- the ``worktree`` handle resolves to whichever
+    session is live now (and routes cross-machine through the bridge mesh). The
+    nudge is *notify*-kind: an out-of-band prod, never treated as new work.
+    Best-effort: returns ``True`` on a clean send, ``False`` if the bridge CLI is
+    absent or the send fails -- a failed nudge is never fatal (a genuinely-gone
+    worker is handled by liveness recovery, not the nudge).
+    """
+    exe = shutil.which("agent-bridge")
+    if exe is None:
+        return False
+    cmd = [
+        exe, "send", "--no-wait", "--kind", "notify", "--sender", sender,
+        worktree, message,
+    ]
+    try:
+        proc = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
+            cmd, check=False, capture_output=True, text=True, timeout=timeout,
+            **no_window_kwargs(),
+        )
+    except (subprocess.SubprocessError, OSError):
+        return False
+    return proc.returncode == 0

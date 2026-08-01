@@ -50,6 +50,15 @@ SpawnFn = Callable[[dict], "tuple[bool, dict]"]
 #: session is **confirmed alive**, else ``None`` (dead *or* unresolvable).
 LivenessFn = Callable[[str, "str | None"], "dict | None"]
 
+#: A liveness **verdict** resolver: ``(worktree, machine, owner_session_id) ->
+#: 'live' | 'gone' | 'unknown'`` (identity-keyed; ``unknown`` is never treated as
+#: death). Injectable so tests drive verdicts deterministically.
+VerdictFn = Callable[[str, "str | None", "str | None"], str]
+
+#: A nudge sender: ``(worktree, machine, task) -> sent?``. Delivers a non-blocking
+#: steering message to a stalled-but-live embodied session. Injectable for tests.
+NudgeFn = Callable[[str, "str | None", dict], bool]
+
 _TERMINAL = frozenset({Status.COMPLETED, Status.ABANDONED})
 _LEASED = frozenset({Status.CLAIMED, Status.STARTED})
 
@@ -66,6 +75,41 @@ def _default_liveness(worktree: str, machine: str | None) -> dict | None:
     from . import tracking
 
     return tracking.resolve_live_session(worktree, machine=machine)
+
+
+def _default_verdict(
+    worktree: str, machine: str | None, owner_session_id: str | None
+) -> str:
+    """Resolve an embodied session's liveness to a **tri-state verdict** via the
+    agent-bridge registry (shells the CLI, cross-machine over SSH). Delegates to
+    :func:`agent_dispatch.tracking.liveness_verdict`; every probe failure collapses
+    to ``unknown`` (never ``gone``), so recovery never fires on ignorance."""
+    from . import tracking
+
+    return tracking.liveness_verdict(
+        worktree, machine=machine, owner_session_id=owner_session_id
+    )
+
+
+def _default_nudge(worktree: str, machine: str | None, task: dict) -> bool:
+    """Deliver a non-blocking nudge to a stalled-but-live embodied session.
+
+    Builds a terse *notify*-kind steering message pointing the worker back at its
+    goal (or at recording a blocker) and shells it via
+    :func:`agent_dispatch.bridge.send_nudge`. Best-effort -- a failed send is not
+    fatal (recovery, not the nudge, handles a genuinely-gone worker)."""
+    from . import bridge
+
+    tid = task.get("id")
+    goal = task.get("goal") or task.get("title") or "your dispatched task"
+    message = (
+        f"[agent-dispatch] You appear stalled on task {tid} -- no progress "
+        f"recorded recently. Goal: {goal}. Continue toward it and record a "
+        f"progress beat (agent-dispatch progress {tid} --phase <p> --summary "
+        f"<line>), or record a blocker (--blocker <why>); if it is already done, "
+        f"complete it; if it is not yours, yield it."
+    )
+    return bridge.send_nudge(worktree, message)
 
 
 def _worktree_from_owner(owner: str | None) -> str | None:
@@ -222,7 +266,12 @@ class Supervisor:
         label_max_attempts: Mapping[str, int] | None = None,
         supervisor_id: str | None = None,
         heartbeat: bool = True,
+        recover: bool = True,
+        nudge: bool = True,
+        stall_seconds: float = 600.0,
         liveness_fn: LivenessFn | None = None,
+        verdict_fn: VerdictFn | None = None,
+        nudge_fn: NudgeFn | None = None,
         capacity_gate: Callable[[dict], bool] | None = None,
     ):
         self.client = client
@@ -241,7 +290,26 @@ class Supervisor:
         }
         self.supervisor_id = supervisor_id or f"supervisor-{uuid.uuid4().hex[:8]}"
         self.heartbeat = heartbeat
+        #: When True, release the spawn reservation of a *confirmed-gone* embody
+        #: so its task can be re-embodied (auto-recovery -- see
+        #: :meth:`recover_gone`). Liveness-gated: only a ``gone`` verdict releases;
+        #: ``unknown``/``live`` never do. Off restores the hold-for-a-human default.
+        self.recover = recover
+        #: When True, a confirmed-ALIVE worker that has recorded no progress for
+        #: ``stall_seconds`` is nudged (a non-blocking steering message), at most
+        #: once per stall window -- prod, don't kill (*nudge-before-recover*).
+        self.nudge = nudge
+        #: Quiet-but-live window before a nudge. 0 disables nudging.
+        self.stall_seconds = max(0.0, float(stall_seconds))
         self.liveness_fn = liveness_fn or _default_liveness
+        #: Tri-state verdict resolver used by :meth:`recover_gone`. Injectable so
+        #: tests drive ``gone``/``live``/``unknown`` deterministically.
+        self.verdict_fn = verdict_fn or _default_verdict
+        #: Nudge sender used by :meth:`nudge_stalled`. Injectable for tests.
+        self.nudge_fn = nudge_fn or _default_nudge
+        #: task_id -> last nudge ts (in-memory cooldown so a persistently-quiet
+        #: live worker is nudged at most once per stall window, not every cycle).
+        self._last_nudge: dict[str, float] = {}
         #: Optional pre-reservation capacity gate. When it returns False for a
         #: task, the task is **skipped this cycle without a reservation** -- so a
         #: transient "no capacity" (e.g. a fleet pool that is entirely asleep)
@@ -272,12 +340,46 @@ class Supervisor:
 
     # -- phases --------------------------------------------------------------
 
+    def _completion_detail(self, task: dict) -> str:
+        """Settle-detail for a terminal task, with completion-claim verification.
+
+        Implements *verify-the-completion-claim*: a **goal-bearing** task that
+        reaches ``completed`` is corroborated against what was recorded -- a
+        result reference, or at least one progress-log entry. A goal completed
+        with **neither** is not trusted at face value: it is flagged in the
+        reservation detail and logged, so an empty "done" is **held for review**
+        rather than silently accepted. A plain one-shot task (no goal) keeps the
+        simple deferred-completion contract.
+        """
+        status = task.get("status")
+        if status != Status.COMPLETED or not task.get("goal"):
+            return f"task {status}"
+        if task.get("result_ref"):
+            return "task completed (result-ref recorded)"
+        try:
+            has_progress = bool(self.client.progress_log(task["id"]))
+        except DispatchError:
+            has_progress = True  # can't read the log -> don't cry wolf
+        if has_progress:
+            return "task completed (progress recorded)"
+        log.warning(
+            "task %s completed as a GOAL with no result-ref and no recorded "
+            "progress -- completion unverified, flagged for review",
+            task["id"],
+        )
+        return (
+            "completion UNVERIFIED: goal-bearing task marked done with no "
+            "result-ref and no progress -- held for review"
+        )
+
     def reconcile(self) -> int:
         """Settle ``spawned`` reservations whose task reached a terminal state.
 
         This is the *only* automatic release of a reservation -- and only for a
         provably-finished task -- so it can never free a still-running spawn for a
-        double-launch. Returns the number settled.
+        double-launch. A completed **goal** is verified (*verify-the-completion-
+        claim*) as it settles: an empty "done" is flagged in the reservation
+        detail rather than silently accepted. Returns the number settled.
         """
         settled = 0
         for res in self.client.list_reservations(state=SpawnState.SPAWNED, limit=500):
@@ -287,7 +389,7 @@ class Supervisor:
                 continue  # task vanished; leave the reservation for a human
             if task.get("status") in _TERMINAL:
                 try:
-                    self.client.settle_spawn(res["key"], detail=f"task {task['status']}")
+                    self.client.settle_spawn(res["key"], detail=self._completion_detail(task))
                     settled += 1
                 except DispatchError:
                     pass
@@ -336,6 +438,125 @@ class Supervisor:
                 pass
         return held
 
+    def recover_gone(self) -> int:
+        """Release the spawn reservation of a **confirmed-gone** embody so its
+        task can be re-embodied -- the auto-recovery half of the liveness model.
+
+        For each ``spawned`` reservation, resolve the embodied session's liveness
+        to the tri-state verdict (identity-keyed on the task's captured
+        ``owner_session_id``) and act **only on a confirmed** result:
+
+        - ``gone``    -> the embody is provably absent (its worktree is empty, or a
+          different session reused it). Release the reservation (``fail_spawn``) so
+          the next :meth:`poll_once` can re-reserve and re-embody; the replacement
+          resumes from the task's ``progress_log``. A still-leased task is requeued
+          (fenced) by the coordinator's own liveness GC, so it becomes
+          spawn-eligible; a task whose embody died *before* it claimed is already
+          queued.
+        - ``live``    -> leave it (:meth:`hold_live_leases` heartbeats it).
+        - ``unknown`` -> leave it. A still-starting-up worker, or an unreachable
+          bridge, is **never** treated as death -- recovery never fires on
+          ignorance (the safety guarantee behind liveness-not-lease).
+
+        A terminal task is settled by :meth:`reconcile`; a dead-lettered one is
+        settled here (held, not re-spawned). Releasing via ``fail_spawn`` counts
+        toward the per-task dead-letter bound, so an embody that keeps dying is
+        eventually held for a human rather than re-embodied forever. Returns the
+        count recovered.
+        """
+        from . import tracking
+
+        recovered = 0
+        for res in self.client.list_reservations(state=SpawnState.SPAWNED, limit=500):
+            try:
+                task = self.client.get(res["task_id"])
+            except DispatchError:
+                continue  # task vanished; leave the reservation for a human
+            status = task.get("status")
+            if status in _TERMINAL:
+                continue  # reconcile() settles provably-finished tasks
+            if status == Status.DEAD_LETTER:
+                try:
+                    self.client.settle_spawn(res["key"], detail="task dead_lettered")
+                except DispatchError:
+                    pass
+                continue
+            owner = task.get("owner")
+            worktree = res.get("worktree") or _worktree_from_owner(owner)
+            if not worktree:
+                continue  # headless / no worktree handle -> not recoverable here
+            try:
+                verdict = self.verdict_fn(
+                    worktree, _machine_from_owner(owner), task.get("owner_session_id")
+                )
+            except Exception:  # liveness is best-effort -- never let a probe be fatal
+                verdict = tracking.UNKNOWN
+            if verdict != tracking.GONE:
+                continue  # live or unknown -> never recover on ignorance
+            try:
+                self.client.fail_spawn(
+                    res["key"], detail=f"owner confirmed gone ({worktree})"
+                )
+                recovered += 1
+                log.info(
+                    "recovered gone embody for task %s (%s); reservation released "
+                    "for re-embody",
+                    task["id"], res["key"],
+                )
+            except DispatchError:
+                log.exception("recovery release failed for reservation %s", res["key"])
+        return recovered
+
+    def nudge_stalled(self, *, now: float | None = None) -> int:
+        """Nudge a worker that is **confirmed alive but has gone quiet** -- no
+        progress within ``stall_seconds`` (*nudge-before-recover*).
+
+        A nudge is an attributed, non-blocking steering message; it is **not**
+        recovery (that is gated on a *gone* verdict, :meth:`recover_gone`). Only a
+        **confirmed-alive** worker is nudged (a ``None`` liveness result is left to
+        recovery, never nudged into the void), and at most **once per stall window**
+        per task -- so a slow-but-live worker is prodded, never spammed, and elapsed
+        quiet never escalates past a prod on its own. Returns the count nudged.
+        """
+        if not self.stall_seconds:
+            return 0
+        now = time.time() if now is None else now
+        nudged = 0
+        for res in self.client.list_reservations(state=SpawnState.SPAWNED, limit=500):
+            try:
+                task = self.client.get(res["task_id"])
+            except DispatchError:
+                continue
+            if task.get("status") not in _LEASED:
+                continue  # only a worker actively holding the task can be stalled
+            last = task.get("last_seen_at") or task.get("started_at") or 0
+            if (now - last) < self.stall_seconds:
+                continue  # recently active -> not stalled
+            if (now - self._last_nudge.get(task["id"], 0.0)) < self.stall_seconds:
+                continue  # cooldown -> already nudged this window
+            owner = task.get("owner")
+            worktree = res.get("worktree") or _worktree_from_owner(owner)
+            if not worktree:
+                continue
+            machine = _machine_from_owner(owner)
+            try:
+                alive = self.liveness_fn(worktree, machine)
+            except Exception:  # liveness is best-effort -- never let a probe be fatal
+                alive = None
+            if not alive:
+                continue  # not confirmed alive -> recovery's job, not a nudge
+            try:
+                if self.nudge_fn(worktree, machine, task):
+                    self._last_nudge[task["id"]] = now
+                    nudged += 1
+                    log.info(
+                        "nudged stalled-but-live worker for task %s (%s)",
+                        task["id"], worktree,
+                    )
+            except Exception:  # a failed nudge is never fatal
+                log.exception("nudge failed for task %s", task["id"])
+        return nudged
+
     def _effective_max_attempts(self, task: dict) -> int:
         """The dead-letter bound for ``task``: the most-permissive per-label
         override across its labels, else the global ``max_attempts`` (0 = no
@@ -377,6 +598,10 @@ class Supervisor:
         self.reconcile()
         if self.heartbeat:
             self.hold_live_leases()
+        if self.recover:
+            self.recover_gone()
+        if self.nudge:
+            self.nudge_stalled(now=now)
         failed_counts = self._failed_spawn_counts()
         active = len(self._active_reservations())
         spawned: list[str] = []
