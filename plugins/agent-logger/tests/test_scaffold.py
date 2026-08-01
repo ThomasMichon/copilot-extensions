@@ -241,6 +241,31 @@ def test_organization_defaults_to_repo_logs(tmp_path: Path, monkeypatch, capsys)
     assert result["manifest"]["closing_remark"] is None
 
 
+def test_origin_backfill_corpus_cli(tmp_path: Path, monkeypatch, capsys) -> None:
+    """The `origin backfill-corpus` CLI tags a multi-machine corpus (Phase 4)."""
+    monkeypatch.setenv("AGENT_LOGGER_HOME", str(tmp_path / "home"))
+    corpus = tmp_path / "nas"
+    sess = corpus / "book2" / "session-state" / "s1"
+    sess.mkdir(parents=True)
+    (sess / "events.jsonl").write_text("{}\n", encoding="utf-8")
+    (sess / "workspace.yaml").write_text(
+        "git_root: /home/u/src/aperture-labs\n", encoding="utf-8"
+    )
+
+    rc = cli_main(
+        ["origin", "backfill-corpus", "--root", str(corpus),
+         "--harness-repo", "aperture-labs"]
+    )
+    assert rc == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["mode"] == "corpus"
+    assert result["total"] == 1
+    assert result["marked"] == 1
+    stamped = json.loads((sess / "origin.json").read_text(encoding="utf-8"))
+    assert stamped["source_repo"] == "aperture-labs"
+    assert stamped["machine"] == "book2"
+
+
 def test_prepare_log_reports_repo_organization(tmp_path: Path, monkeypatch, capsys) -> None:
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)

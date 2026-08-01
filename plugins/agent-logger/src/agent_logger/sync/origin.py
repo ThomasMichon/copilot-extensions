@@ -121,6 +121,26 @@ def classify_for_sync(session_dir: Path, machine: str, allowlist: list[str],
     return (not fail_closed), origin
 
 
+def read_origin_sidecar(session_dir: Path) -> dict | None:
+    """Read a session's ``origin.json`` sidecar; return its dict or ``None``.
+
+    ``None`` means no resolvable *recorded* origin -- either the sidecar is
+    absent, unreadable, or malformed. A present sidecar whose ``source_repo`` is
+    ``null`` is a valid *machine-only* origin (derived, no harness matched) and
+    is returned as-is; the caller applies the machine-default fallback for it
+    (``derive-the-origin-never-guess``). Downstream logger daemons read this to
+    route a session without re-parsing ``workspace.yaml``.
+    """
+    path = session_dir / ORIGIN_SIDECAR
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def write_origin_sidecar(session_dir: Path, origin: dict) -> bool:
     """Write ``origin.json`` into ``session_dir``. Idempotent: returns ``False``
     when the file already holds the identical payload, ``True`` when written."""
@@ -161,4 +181,36 @@ def mark_all(source: Path, machine: str, harness_repos: list[str],
         summary["by_repo"][key] = summary["by_repo"].get(key, 0) + 1
         if not dry_run and write_origin_sidecar(entry, origin):
             summary["marked"] += 1
+    return summary
+
+
+def backfill_corpus(corpus_root: Path, harness_repos: list[str],
+                    *, dry_run: bool = False) -> dict:
+    """Backfill origin sidecars across a **multi-machine** synced corpus.
+
+    The corpus layout is ``<corpus_root>/<machine>/session-state/<sid>/`` (the
+    NAS/fleet-hub shape, distinct from :func:`mark_all`'s single-machine
+    ``<source>/session-state/`` local shape). Each session's ``machine`` is its
+    machine-directory name; every session is derived against the same
+    *harness_repos* (a union of the fleet's harness repos works because
+    :func:`derive_origin` matches by the session's own recorded path). Existing
+    correct sidecars are left untouched (idempotent), so this is safe to re-run.
+
+    This is the Phase-4 backfill of sessions that predate origin marking (e.g. a
+    machine still on the legacy syncer, whose sessions reached the corpus with
+    no ``origin.json``), so historical sessions become routable/filterable too.
+
+    Returns ``{total, marked, by_machine: {machine: mark_all-summary}}``.
+    """
+    summary: dict = {"total": 0, "marked": 0, "by_machine": {}}
+    if not corpus_root.is_dir():
+        return summary
+    for machine_dir in sorted(corpus_root.iterdir()):
+        if not machine_dir.is_dir() or not (machine_dir / "session-state").is_dir():
+            continue
+        machine = machine_dir.name
+        per = mark_all(machine_dir, machine, harness_repos, dry_run=dry_run)
+        summary["by_machine"][machine] = per
+        summary["total"] += per["total"]
+        summary["marked"] += per["marked"]
     return summary

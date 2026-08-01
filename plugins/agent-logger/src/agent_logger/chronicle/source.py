@@ -42,6 +42,7 @@ from enum import Enum
 from pathlib import Path
 
 from agent_logger.segmenter.collate import read_workspace
+from agent_logger.sync.origin import read_origin_sidecar
 
 # The settle window: never claim a session whose synced state changed within
 # this many seconds (it may be mid-sync). ~10 minutes matches permanent-record.
@@ -95,6 +96,17 @@ class DiscoveredSession:
     summary: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
+    #: The **recorded** origin repo (``origin.json`` ``source_repo``): the
+    #: harness repo this session was worked in, derived at sync time
+    #: (worktree-safe, config-driven). ``None`` means either no origin sidecar
+    #: was recorded or the sidecar is machine-only (no harness matched) -- both
+    #: cases route by the machine default (``derive-the-origin-never-guess``).
+    source_repo: str | None = None
+    #: Whether an origin sidecar was recorded for this session at all. Lets the
+    #: router distinguish "no recorded origin" (fall back to the raw
+    #: ``repository`` during the pre-backfill transition) from "recorded
+    #: machine-only origin" (authoritatively route by the machine default).
+    origin_recorded: bool = False
     #: The continuation-segment identity this unit will log. Single-segment
     #: sessions use index 0; a source that splits continuation sessions sets
     #: one DiscoveredSession per reserved segment.
@@ -378,6 +390,11 @@ class SyncedSessionSource(SessionSource):
         if not self.is_settled(mtime, now=now):
             return None
         ws = read_workspace(session_dir)
+        # Prefer the durable, worktree-safe recorded origin (origin.json) for
+        # routing (derive-the-origin-never-guess); the raw workspace repository
+        # remains as display metadata and a pre-backfill routing fallback.
+        origin = read_origin_sidecar(session_dir)
+        source_repo = origin.get("source_repo") if origin else None
         return DiscoveredSession(
             session_id=session_dir.name,
             machine=machine,
@@ -387,6 +404,8 @@ class SyncedSessionSource(SessionSource):
             summary=(ws.get("summary") or None),
             created_at=(ws.get("created_at") or None),
             updated_at=(ws.get("updated_at") or None),
+            source_repo=(source_repo or None),
+            origin_recorded=origin is not None,
             ref=ref,
         )
 

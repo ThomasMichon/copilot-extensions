@@ -69,6 +69,20 @@ def test_write_sidecar_idempotent(tmp_path: Path) -> None:
     assert written["schema_version"] == origin.SCHEMA_VERSION
 
 
+def test_read_sidecar_roundtrip_and_missing(tmp_path: Path) -> None:
+    d = _mk(tmp_path, "s6r", "git_root: /home/u/src/aperture-labs\n")
+    # No sidecar yet -> None (no resolvable recorded origin).
+    assert origin.read_origin_sidecar(d) is None
+    o = origin.derive_origin(d, "book2", HARNESSES)
+    origin.write_origin_sidecar(d, o)
+    back = origin.read_origin_sidecar(d)
+    assert back is not None
+    assert back["source_repo"] == "aperture-labs"
+    # A malformed sidecar reads as None (never raises).
+    (d / origin.ORIGIN_SIDECAR).write_text("not json", encoding="utf-8")
+    assert origin.read_origin_sidecar(d) is None
+
+
 def test_mark_all_writes_and_summarizes(tmp_path: Path) -> None:
     src = tmp_path / "copilot"
     _mk(src, "facility", "git_root: /home/u/src/aperture-labs\n")
@@ -99,6 +113,42 @@ def test_mark_all_dry_run_writes_nothing(tmp_path: Path) -> None:
     assert summary["total"] == 1
     assert summary["marked"] == 0
     assert not (src / "session-state" / "facility" / "origin.json").exists()
+
+
+def test_backfill_corpus_tags_every_machine(tmp_path: Path) -> None:
+    """Phase-4 backfill over the multi-machine <root>/<machine>/session-state
+    corpus shape (the NAS): each session's machine is its dir name."""
+    corpus = tmp_path / "nas"
+    _mk(corpus / "book2", "fac", "git_root: /home/u/src/aperture-labs\n")
+    _mk(corpus / "book2", "work", "git_root: /home/u/work/acme-webapp\n")
+    _mk(corpus / "lambda-core", "lc", "git_root: /home/u/src/aperture-labs\n")
+
+    summary = origin.backfill_corpus(corpus, HARNESSES)
+    assert summary["total"] == 3
+    assert summary["marked"] == 3
+    assert set(summary["by_machine"]) == {"book2", "lambda-core"}
+    # The book2 sessions are stamped with the right machine + derived source.
+    book2_fac = json.loads(
+        (corpus / "book2" / "session-state" / "fac" / "origin.json")
+        .read_text(encoding="utf-8")
+    )
+    assert book2_fac["machine"] == "book2"
+    assert book2_fac["source_repo"] == "aperture-labs"
+    book2_work = json.loads(
+        (corpus / "book2" / "session-state" / "work" / "origin.json")
+        .read_text(encoding="utf-8")
+    )
+    assert book2_work["source_repo"] is None  # work repo -> machine-only
+
+    # Idempotent re-run writes nothing new.
+    again = origin.backfill_corpus(corpus, HARNESSES)
+    assert again["marked"] == 0
+    assert again["total"] == 3
+
+
+def test_backfill_corpus_missing_root_is_empty(tmp_path: Path) -> None:
+    summary = origin.backfill_corpus(tmp_path / "nope", HARNESSES)
+    assert summary == {"total": 0, "marked": 0, "by_machine": {}}
 
 
 def test_config_harness_repos_parsing(tmp_path: Path) -> None:

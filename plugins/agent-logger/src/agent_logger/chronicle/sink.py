@@ -85,13 +85,25 @@ class Router(ABC):
 
 
 class OriginRepoRouter(Router):
-    """Route by recorded origin repo, with a machine-default fallback.
+    """Route by **recorded origin repo**, with a machine-default fallback.
 
-    Keys off ``session.repository`` (the ``workspace.yaml`` ``repository``).
-    Rules are tried in order; the first substring match decides the outcome --
-    a sink id, or **skip** (drop) when the matched rule's ``sink_id`` is None. A
-    session with no recorded repository, or no rule match, falls back to
-    *default_sink* -- the "this-machine's-own harness repo" default.
+    Keys off the session's recorded origin (``origin.json`` ``source_repo``,
+    surfaced as :attr:`DiscoveredSession.source_repo`) -- the durable,
+    worktree-safe repo derived at sync time -- realizing the vision behavior
+    ``derive-the-origin-never-guess``. Rules are tried in order; the first
+    substring match decides the outcome -- a sink id, or **skip** (drop) when
+    the matched rule's ``sink_id`` is None.
+
+    Fallbacks, in order:
+
+    * A session with a **recorded machine-only** origin (sidecar present,
+      ``source_repo`` null -- derived, no harness matched) has no repo to match,
+      so it authoritatively takes *default_sink* (the machine default).
+    * A session with **no recorded origin** at all (no sidecar -- e.g. a
+      pre-backfill session synced before origin marking) falls back to matching
+      the raw ``workspace.yaml`` ``repository``, then *default_sink*. This keeps
+      the router functioning during the transition; once Phase-4 backfill has
+      stamped every session, the recorded origin is always authoritative.
 
     The one hard job on the aperture-labs side: an aperture-labs-origin session
     must match a rule (a **skip** sentinel in v1) and **never** fall through to
@@ -105,10 +117,17 @@ class OriginRepoRouter(Router):
         self.default_sink = default_sink
 
     def route(self, session: DiscoveredSession) -> str | None:
-        repo = (session.repository or "").lower()
-        if repo:
+        # The routing key is the recorded origin (derive-the-origin-never-guess).
+        # A recorded machine-only origin (source_repo is None) yields no key and
+        # authoritatively takes the machine default. Only a session with NO
+        # recorded origin at all falls back to the raw repository string.
+        if session.origin_recorded:
+            key = (session.source_repo or "").lower()
+        else:
+            key = (session.repository or "").lower()
+        if key:
             for rule in self.rules:
-                if rule.repository.lower() in repo:
+                if rule.repository.lower() in key:
                     # A matched skip sentinel (sink_id is None) drops the
                     # session here -- it does NOT fall through to default_sink.
                     return rule.sink_id
