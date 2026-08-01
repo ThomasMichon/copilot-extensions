@@ -3304,6 +3304,7 @@ class PickerScreen(Widget):
 
                 from .. import config as _config
                 from .. import sessions as _sessions
+                from .. import tracking as _tracking
                 if (_config.tracking_dir() / f"{_wt_id}.yaml").exists():
                     _verdict = _sessions.verify_worktree_active(
                         _types.SimpleNamespace(worktree_id=_wt_id))
@@ -3311,6 +3312,9 @@ class PickerScreen(Widget):
                     rec["attached"] = _verdict.mux_clients > 0
                     rec["session_lock_live"] = bool(_verdict.live_session_ids)
                     rec["session_bare_orphan"] = _verdict.bare
+                    # #4057: warm the ground-layer cache from this authoritative
+                    # read so the next populate can prefer the hint.
+                    _tracking.stamp_mux_live(_wt_id, _verdict.mux_live)
             except Exception:
                 pass  # best-effort: fall back to the populate-derived signals
         # Primary verb tracks the session's liveness (#1343): a **live** mux ->

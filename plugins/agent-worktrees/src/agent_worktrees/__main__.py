@@ -285,12 +285,48 @@ def _build_active_paths(
             if rec.worktree_path and f"wt-{rec.worktree_id}" in mux_sessions:
                 active.add(_normalize_path(rec.worktree_path))
     else:
-        # Batch list unavailable (mux missing or blocked): degrade to the
-        # per-worktree has-session probe rather than lose mux liveness.
+        # Batch list unavailable (mux missing or blocked): prefer the #4057
+        # cached liveness hint on the record (a free read, stamped by the
+        # authoritative verify at the action moments) when it is FRESH, and only
+        # fall back to the slow per-worktree has-session probe when there is no
+        # usable hint. This keeps the populate cheap even when the live batch
+        # can't run, without trusting a stale stamp.
         for rec in records:
-            if rec.worktree_path and sessions.has_mux_session(rec.worktree_id):
+            if not rec.worktree_path:
+                continue
+            hint = _fresh_mux_live_hint(rec)
+            if hint is True:
+                active.add(_normalize_path(rec.worktree_path))
+            elif hint is None and sessions.has_mux_session(rec.worktree_id):
                 active.add(_normalize_path(rec.worktree_path))
     return active
+
+
+# #4057: how long a cached ``mux_live`` stamp is trusted as a populate hint.
+_MUX_LIVE_HINT_TTL_SECS = 600
+
+
+def _fresh_mux_live_hint(rec) -> bool | None:
+    """The record's cached mux-liveness, iff still fresh; else None.
+
+    Returns ``True``/``False`` when the record carries a ``mux_live`` stamp whose
+    ``mux_live_at`` is within :data:`_MUX_LIVE_HINT_TTL_SECS`, otherwise ``None``
+    (absent or stale -- caller should verify live). Never raises.
+    """
+    live = getattr(rec, "mux_live", None)
+    if live is None:
+        return None
+    stamped = getattr(rec, "mux_live_at", None)
+    if not stamped:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(stamped))
+    except (ValueError, TypeError):
+        return None
+    now = datetime.now(dt.tzinfo) if dt.tzinfo is not None else datetime.now()
+    if (now - dt).total_seconds() > _MUX_LIVE_HINT_TTL_SECS:
+        return None
+    return bool(live)
 
 
 def _apply_tracking_override(
