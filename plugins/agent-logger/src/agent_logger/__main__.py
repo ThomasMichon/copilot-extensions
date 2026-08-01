@@ -112,6 +112,43 @@ def _cmd_chronicle_tick(_args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_origin_backfill_local(args: argparse.Namespace) -> int:
+    """Backfill origin.json across the LOCAL session store (this machine)."""
+    from pathlib import Path
+
+    from agent_logger.sync.origin import mark_all
+
+    cfg = load_config()
+    harness = list(args.harness_repo) if args.harness_repo else cfg.sync_harness_repos
+    source = Path(args.source).expanduser() if args.source else cfg.sync_path
+    machine = args.machine or cfg.machine_name or "unknown"
+    summary = mark_all(source, machine, harness, dry_run=args.dry_run)
+    print(json.dumps(
+        {"mode": "local", "source": str(source), "machine": machine,
+         "harness_repos": harness, "dry_run": args.dry_run, **summary},
+        indent=2,
+    ))
+    return 0
+
+
+def _cmd_origin_backfill_corpus(args: argparse.Namespace) -> int:
+    """Backfill origin.json across a multi-machine synced corpus (e.g. the NAS)."""
+    from pathlib import Path
+
+    from agent_logger.sync.origin import backfill_corpus
+
+    cfg = load_config()
+    harness = list(args.harness_repo) if args.harness_repo else cfg.sync_harness_repos
+    root = Path(args.root).expanduser()
+    summary = backfill_corpus(root, harness, dry_run=args.dry_run)
+    print(json.dumps(
+        {"mode": "corpus", "root": str(root), "harness_repos": harness,
+         "dry_run": args.dry_run, **summary},
+        indent=2,
+    ))
+    return 0
+
+
 def _cmd_config_migrate(_args: argparse.Namespace) -> int:
     """Migrate the machine-local config.yaml schema in place (idempotent + atomic)."""
     from agent_logger import config_migrations
@@ -144,6 +181,40 @@ def build_parser() -> argparse.ArgumentParser:
         "config-migrate", help="migrate machine-local config.yaml schema (idempotent)"
     )
     p_migrate.set_defaults(func=_cmd_config_migrate)
+
+    p_origin = sub.add_parser(
+        "origin", help="session origin sidecars -- backfill/tag existing sessions"
+    )
+    o_sub = p_origin.add_subparsers(dest="origin_command", required=True)
+    o_local = o_sub.add_parser(
+        "backfill-local",
+        help="tag the LOCAL session store (~/.copilot) with derived origins",
+    )
+    o_local.add_argument(
+        "--source", help="session store root (default: configured sync source)"
+    )
+    o_local.add_argument("--machine", help="machine name (default: configured/auto)")
+    o_local.add_argument(
+        "--harness-repo", action="append", metavar="REPO",
+        help="harness repo name (repeatable; default: configured sync.harness_repos)",
+    )
+    o_local.add_argument(
+        "--dry-run", action="store_true", help="derive + count without writing"
+    )
+    o_local.set_defaults(func=_cmd_origin_backfill_local)
+    o_corpus = o_sub.add_parser(
+        "backfill-corpus",
+        help="tag a multi-machine synced corpus (<root>/<machine>/session-state/)",
+    )
+    o_corpus.add_argument("--root", required=True, help="corpus root (e.g. the NAS)")
+    o_corpus.add_argument(
+        "--harness-repo", action="append", metavar="REPO",
+        help="harness repo name (repeatable; default: configured sync.harness_repos)",
+    )
+    o_corpus.add_argument(
+        "--dry-run", action="store_true", help="derive + count without writing"
+    )
+    o_corpus.set_defaults(func=_cmd_origin_backfill_corpus)
 
     p_chronicle = sub.add_parser(
         "chronicle", help="background chronicling -- the orchestrator daemon"

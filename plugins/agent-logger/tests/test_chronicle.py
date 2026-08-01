@@ -127,6 +127,7 @@ def _write_session(
     repository: str = "owner/repo",
     created_at: str = "2026-07-28T10:00:00Z",
     age_seconds: float = DEFAULT_SETTLE_SECONDS + 60,
+    source_repo: str | None = "__unset__",
 ) -> Path:
     sess = corpus_root / machine / "session-state" / session_id
     sess.mkdir(parents=True)
@@ -136,6 +137,22 @@ def _write_session(
         f"branch: main\ncreated_at: {created_at}\n",
         encoding="utf-8",
     )
+    # source_repo="__unset__" -> no origin sidecar (pre-backfill session);
+    # source_repo=None -> a recorded machine-only origin; a string -> that repo.
+    if source_repo != "__unset__":
+        import json
+
+        (sess / "origin.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "machine": machine,
+                    "source_repo": source_repo,
+                    "basis": "machine-default" if source_repo is None else "cwd",
+                }
+            ),
+            encoding="utf-8",
+        )
     old = time.time() - age_seconds
     import os
 
@@ -171,6 +188,30 @@ def test_scan_reads_origin_repository(tmp_path: Path) -> None:
     assert sessions[0].repository == "org/aperture-labs"
     assert sessions[0].day == "2026-07-28"
     assert sessions[0].ref == SegmentRef("one", 0)
+    # No origin sidecar written -> no recorded origin.
+    assert sessions[0].origin_recorded is False
+    assert sessions[0].source_repo is None
+
+
+def test_scan_reads_recorded_origin_sidecar(tmp_path: Path) -> None:
+    """The source seam surfaces the recorded origin.json source_repo so the
+    router can key off it (derive-the-origin-never-guess)."""
+    corpus = tmp_path / "sessions"
+    _write_session(
+        corpus, "book2", "harnessed", repository="owner/fork",
+        source_repo="aperture-labs",
+    )
+    _write_session(
+        corpus, "book2", "machine-only", repository="owner/random",
+        source_repo=None,
+    )
+    src = SyncedSessionSource(corpus, ReservationStore(tmp_path / "c.db"))
+    by_id = {s.session_id: s for s in src.scan()}
+    assert by_id["harnessed"].origin_recorded is True
+    assert by_id["harnessed"].source_repo == "aperture-labs"
+    # A recorded machine-only origin: sidecar present, source_repo null.
+    assert by_id["machine-only"].origin_recorded is True
+    assert by_id["machine-only"].source_repo is None
 
 
 # --------------------------------------------------------------------------
@@ -178,14 +219,80 @@ def test_scan_reads_origin_repository(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------
 
 
-def _session(session_id: str, repository: str | None) -> DiscoveredSession:
+def _session(
+    session_id: str,
+    repository: str | None,
+    *,
+    source_repo: str | None = None,
+    origin_recorded: bool = False,
+) -> DiscoveredSession:
     return DiscoveredSession(
         session_id=session_id,
         machine="book2",
         session_path=Path("/x") / session_id,
         repository=repository,
+        source_repo=source_repo,
+        origin_recorded=origin_recorded,
         created_at="2026-07-28T10:00:00Z",
     )
+
+
+def test_router_routes_by_recorded_origin() -> None:
+    """A recorded origin (origin.json source_repo) is authoritative, not the
+    raw workspace repository -- derive-the-origin-never-guess."""
+    router = OriginRepoRouter(
+        [RouteRule("aperture-labs", None)], default_sink="dotfiles"
+    )
+    # Recorded aperture-labs origin -> skipped, regardless of raw repository.
+    assert (
+        router.route(
+            _session(
+                "a", "owner/some-fork", source_repo="aperture-labs",
+                origin_recorded=True,
+            )
+        )
+        is None
+    )
+    # Recorded work origin -> machine default (dotfiles), even if the raw
+    # repository happens to contain "aperture-labs" noise.
+    assert (
+        router.route(
+            _session(
+                "b", "aperture-labs-mirror", source_repo="acme-webapp",
+                origin_recorded=True,
+            )
+        )
+        == "dotfiles"
+    )
+
+
+def test_router_recorded_machine_only_takes_default() -> None:
+    """A recorded machine-only origin (sidecar present, source_repo null) has no
+    repo to match and authoritatively takes the machine default -- it does NOT
+    fall back to the raw repository string."""
+    router = OriginRepoRouter(
+        [RouteRule("aperture-labs", None)], default_sink="dotfiles"
+    )
+    # Raw repository names aperture-labs, but the RECORDED origin is machine-only
+    # -> machine default, never the aperture-labs skip rule.
+    assert (
+        router.route(
+            _session(
+                "a", "org/aperture-labs", source_repo=None, origin_recorded=True,
+            )
+        )
+        == "dotfiles"
+    )
+
+
+def test_router_no_sidecar_falls_back_to_raw_repository() -> None:
+    """Pre-backfill transition: with NO recorded origin, the router falls back
+    to matching the raw workspace repository (legacy behavior)."""
+    router = OriginRepoRouter(
+        [RouteRule("aperture-labs", None)], default_sink="dotfiles"
+    )
+    assert router.route(_session("a", "org/aperture-labs")) is None
+    assert router.route(_session("b", "owner/acme-webapp")) == "dotfiles"
 
 
 def test_router_routes_by_origin_with_default_fallback() -> None:
