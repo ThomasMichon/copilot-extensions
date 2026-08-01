@@ -19,6 +19,7 @@ from agent_logger.config import Config, load_config
 from agent_logger.segmenter.platform import detect_machine
 from agent_logger.sync.lock import sync_lock
 from agent_logger.sync.notify import post_notify
+from agent_logger.sync.origin import mark_all
 from agent_logger.sync.targets import build_target
 
 
@@ -111,6 +112,14 @@ def run_sync(
     if not source.is_dir():
         print(f"session-sync: source not found: {source}", file=sys.stderr)
         return 1
+
+    # Tag every local session with its origin (harness repo + machine) so the
+    # sidecar syncs with the session and downstream daemons can route by origin.
+    origin_summary = mark_all(source, machine, cfg.sync_harness_repos,
+                              dry_run=dry_run)
+    if verbose:
+        print(f"origin:    marked {origin_summary['marked']}/"
+              f"{origin_summary['total']} session(s) {origin_summary['by_repo']}")
 
     if dry_run:
         scope = "" if include is None else f", {len(include)} session(s) match"
