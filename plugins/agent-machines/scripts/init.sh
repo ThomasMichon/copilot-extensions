@@ -125,16 +125,31 @@ _ok 'Package installed: agent-machines'
 
 # === install-contract:v3 versioned-venv activate -- keep byte-identical across plugins ===
 if [[ "$VERSIONED_RUNTIME" -eq 1 ]]; then
+    VR_SCRIPT="$SCRIPT_DIR/versioned_runtime.py"
+    # Capture the currently-active version so gc can retain it as previous-good.
+    PREV_VERSION="$("$VENV_PYTHON" "$VR_SCRIPT" --root "$INSTALL_DIR" --link-name '.venv' current 2>/dev/null || echo "")"
+    # Health-gate: never swap the stable .venv link onto a slot whose package
+    # does not import -- a broken build must not become the live runtime.
+    if ! "$VENV_PYTHON" -c 'import agent_machines' 2>/dev/null; then
+        _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
+        exit 1
+    fi
     # Point the stable .venv link at this version's freshly-built slot, moving a
     # legacy real .venv aside on the first migration. Run via the slot's own
     # python (stdlib-only helper); a CLI plugin has no daemon holding the link.
-    VR_SCRIPT="$SCRIPT_DIR/versioned_runtime.py"
     if ! "$VENV_PYTHON" "$VR_SCRIPT" --root "$INSTALL_DIR" --link-name '.venv' \
             activate "$SRC_VERSION" --replace-nonlink >/dev/null 2>&1; then
         _fail "Failed to activate versioned venv (.venv -> versions/$SRC_VERSION)"
         exit 1
     fi
     _ok "Runtime version $SRC_VERSION active (.venv -> versions/$SRC_VERSION)"
+    # GC superseded version slots, keeping the current + previous-good and any
+    # slot with a live process (--protect-pids), so old versions do not pile up.
+    if [[ -n "$PREV_VERSION" ]]; then
+        "$LINK_DIR/bin/python" "$VR_SCRIPT" --root "$INSTALL_DIR" --link-name '.venv' gc --protect-pids --keep "$PREV_VERSION" 2>&1 | sed 's/^/  ...    gc: /' || true
+    else
+        "$LINK_DIR/bin/python" "$VR_SCRIPT" --root "$INSTALL_DIR" --link-name '.venv' gc --protect-pids 2>&1 | sed 's/^/  ...    gc: /' || true
+    fi
 fi
 # === end install-contract:v3 versioned-venv activate ===
 

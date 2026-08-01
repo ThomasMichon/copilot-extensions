@@ -266,12 +266,30 @@ if ($VersionedRuntime) {
     # python (stdlib-only helper); a CLI plugin has no daemon holding the link, so
     # the swap is immediately safe.
     $VrScript = Join-Path $PSScriptRoot 'versioned_runtime.py'
+    # Capture the currently-active version so gc can retain it as previous-good.
+    $PrevVersion = ("" + (& $VenvPython $VrScript --root $InstallDir --link-name '.venv' current 2>$null)).Trim()
+    # Health-gate: never swap the stable `.venv` link onto a slot whose package
+    # does not import -- a broken build must not become the live runtime.
+    & $VenvPython -c 'import agent_machines' 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
+        exit 1
+    }
     & $VenvPython $VrScript --root $InstallDir --link-name '.venv' activate $SrcVersion --replace-nonlink 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Fail "Failed to activate versioned venv (.venv -> versions/$SrcVersion)"
         exit 1
     }
     Write-Ok "Runtime version $SrcVersion active (.venv -> versions/$SrcVersion)"
+    # GC superseded version slots, keeping the current + previous-good and any
+    # slot with a live process (--protect-pids), so old versions do not pile up.
+    if ($PrevVersion) {
+        & $VenvPython $VrScript --root $InstallDir --link-name '.venv' gc --protect-pids --keep $PrevVersion 2>&1 |
+            ForEach-Object { Write-Host "  ...    gc: $_" -ForegroundColor DarkGray }
+    } else {
+        & $VenvPython $VrScript --root $InstallDir --link-name '.venv' gc --protect-pids 2>&1 |
+            ForEach-Object { Write-Host "  ...    gc: $_" -ForegroundColor DarkGray }
+    }
 }
 # === end install-contract:v3 versioned-venv activate ===
 
