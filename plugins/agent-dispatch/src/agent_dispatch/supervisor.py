@@ -59,6 +59,13 @@ VerdictFn = Callable[[str, "str | None", "str | None"], str]
 #: steering message to a stalled-but-live embodied session. Injectable for tests.
 NudgeFn = Callable[[str, "str | None", dict], bool]
 
+#: A turn-state resolver: ``(worktree, machine) -> 'running' | 'idle' | None``.
+#: Reads an embodied worker's coarse turn state (the derived turn boundary the
+#: coordination layer computes from its session events); ``None`` when the worker
+#: has no observable live session. Injectable so tests drive turn boundaries
+#: deterministically.
+TurnStateFn = Callable[[str, "str | None"], "str | None"]
+
 _TERMINAL = frozenset({Status.COMPLETED, Status.ABANDONED})
 _LEASED = frozenset({Status.CLAIMED, Status.STARTED})
 
@@ -110,6 +117,28 @@ def _default_nudge(worktree: str, machine: str | None, task: dict) -> bool:
         f"complete it; if it is not yours, yield it."
     )
     return bridge.send_nudge(worktree, message)
+
+
+def _default_turn_state(worktree: str, machine: str | None) -> str | None:
+    """Resolve an embodied worker's coarse **turn state** via the agent-bridge
+    registry (shells the CLI, cross-machine over SSH).
+
+    Reads the ``turn_state`` field of the worktree's live session -- the coarse
+    ``running``/``idle`` boundary the coordination layer *derives from its own
+    session events* (``assistant.turn_end``), so sampling it here reads the same
+    turn signal without agent-dispatch subscribing to a raw event stream or
+    importing agent-bridge. Every failure mode (no CLI/ssh, unreachable bridge,
+    no live session, no turn signal yet) collapses to ``None`` -- so ``None`` means
+    "no observable turn boundary", which the reactive wait treats as *no signal*
+    (falling back to the periodic poll), never as a turn-end.
+    """
+    from . import tracking
+
+    session = tracking.resolve_live_session(worktree, machine=machine)
+    if not session:
+        return None
+    state = session.get("turn_state")
+    return state if isinstance(state, str) and state else None
 
 
 def _worktree_from_owner(owner: str | None) -> str | None:
@@ -268,10 +297,13 @@ class Supervisor:
         heartbeat: bool = True,
         recover: bool = True,
         nudge: bool = True,
+        reactive: bool = True,
+        reactive_interval: float = 2.0,
         stall_seconds: float = 600.0,
         liveness_fn: LivenessFn | None = None,
         verdict_fn: VerdictFn | None = None,
         nudge_fn: NudgeFn | None = None,
+        turn_state_fn: TurnStateFn | None = None,
         capacity_gate: Callable[[dict], bool] | None = None,
     ):
         self.client = client
@@ -307,6 +339,18 @@ class Supervisor:
         self.verdict_fn = verdict_fn or _default_verdict
         #: Nudge sender used by :meth:`nudge_stalled`. Injectable for tests.
         self.nudge_fn = nudge_fn or _default_nudge
+        #: When True, the inter-cycle wait in :meth:`serve` is **interruptible by a
+        #: turn boundary**: it returns early when an embodied worker settles a turn
+        #: (goes idle), so a completed goal is reconciled and the next task embodied
+        #: promptly instead of only on the poll cadence (*react-to-turn-end*). The
+        #: periodic poll remains the correctness floor; off restores a plain sleep.
+        self.reactive = reactive
+        #: Sub-sampling cadence for the reactive wait -- how often
+        #: :meth:`wait_for_turn_end` re-checks embodied workers' turn state within a
+        #: single inter-cycle wait. Clamped to a sane floor so it never busy-loops.
+        self.reactive_interval = max(0.25, float(reactive_interval))
+        #: Turn-state resolver used by :meth:`wait_for_turn_end`. Injectable for tests.
+        self.turn_state_fn = turn_state_fn or _default_turn_state
         #: task_id -> last nudge ts (in-memory cooldown so a persistently-quiet
         #: live worker is nudged at most once per stall window, not every cycle).
         self._last_nudge: dict[str, float] = {}
@@ -557,6 +601,91 @@ class Supervisor:
                 log.exception("nudge failed for task %s", task["id"])
         return nudged
 
+    # -- reactive wait (react-to-turn-end) -----------------------------------
+
+    def _embodied_owners(self) -> list[tuple[str, str | None]]:
+        """``(worktree, machine)`` for each spawned reservation whose task is
+        currently **leased** -- the set of workers with a live turn to react to.
+
+        A headless reservation (no worktree handle) or a task not presently leased
+        (``claimed``/``started``) contributes nothing: there is no live turn
+        boundary to watch. Deduped, order-stable.
+        """
+        owners: list[tuple[str, str | None]] = []
+        seen: set[tuple[str, str | None]] = set()
+        for res in self.client.list_reservations(state=SpawnState.SPAWNED, limit=500):
+            try:
+                task = self.client.get(res["task_id"])
+            except DispatchError:
+                continue
+            if task.get("status") not in _LEASED:
+                continue
+            owner = task.get("owner")
+            worktree = res.get("worktree") or _worktree_from_owner(owner)
+            if not worktree:
+                continue
+            key = (worktree, _machine_from_owner(owner))
+            if key in seen:
+                continue
+            seen.add(key)
+            owners.append(key)
+        return owners
+
+    def _safe_turn_state(self, owner: tuple[str, str | None]) -> str | None:
+        """Resolve one worker's coarse turn state, swallowing any probe error.
+
+        A resolver failure is treated as *no signal* (``None``), never as a
+        turn-end -- so a flaky bridge only costs promptness, never correctness."""
+        worktree, machine = owner
+        try:
+            return self.turn_state_fn(worktree, machine)
+        except Exception:  # turn-state is best-effort -- never let a probe be fatal
+            return None
+
+    def wait_for_turn_end(
+        self,
+        timeout: float,
+        *,
+        sleep: Callable[[float], None] | None = None,
+        clock: Callable[[], float] | None = None,
+    ) -> bool:
+        """Block up to ``timeout`` seconds, returning early on a worker **turn-end**.
+
+        The interruptible inter-cycle wait behind *react-to-turn-end*. It baselines
+        each embodied worker's coarse turn state (:meth:`_embodied_owners`), then
+        re-samples every :attr:`reactive_interval` seconds and returns ``True`` as
+        soon as any worker is observed transitioning **running -> idle** (a turn just
+        settled), so the caller runs its next supervision pass immediately.
+
+        Returns ``False`` when ``timeout`` elapses with no turn-end observed -- the
+        periodic poll then fires as the correctness **floor**. Only a *transition* to
+        idle wakes it: a worker already idle at entry is not a fresh turn-end (that
+        would wake instantly every cycle), and a worker with no observable turn state
+        (``None``) contributes no signal -- so with no embodied workers, or no
+        reachable bridge, the wait degrades to exactly a plain sleep. ``sleep`` and
+        ``clock`` are injectable for deterministic tests.
+        """
+        sleep = sleep or time.sleep
+        clock = clock or time.monotonic
+        if timeout <= 0 or not self.reactive:
+            return False
+        owners = self._embodied_owners()
+        if not owners:
+            sleep(timeout)  # nothing to react to -> one plain sleep of the interval
+            return False
+        seen = {o: self._safe_turn_state(o) for o in owners}
+        deadline = clock() + timeout
+        while True:
+            remaining = deadline - clock()
+            if remaining <= 0:
+                return False
+            sleep(min(self.reactive_interval, remaining))
+            for o in owners:
+                state = self._safe_turn_state(o)
+                if state == "idle" and seen.get(o) == "running":
+                    return True  # a turn just settled -> supervise now
+                seen[o] = state
+
     def _effective_max_attempts(self, task: dict) -> int:
         """The dead-letter bound for ``task``: the most-permissive per-label
         override across its labels, else the global ``max_attempts`` (0 = no
@@ -653,7 +782,15 @@ class Supervisor:
         interval: float = 30.0,
         on_cycle: Callable[[list[str]], None] | None = None,
     ) -> None:
-        """Run :meth:`poll_once` every ``interval`` seconds until interrupted."""
+        """Run :meth:`poll_once` each cycle, waiting between cycles.
+
+        The inter-cycle wait is **interruptible by a worker turn-end** when
+        :attr:`reactive` is set (*react-to-turn-end*): it returns as soon as an
+        embodied worker settles a turn, so a completed goal is reconciled and the
+        next task embodied promptly instead of only on the ``interval`` cadence.
+        The full ``interval`` remains the floor (and the whole wait when nothing is
+        embodied); ``reactive=False`` restores a plain fixed sleep.
+        """
         while True:
             try:
                 spawned = self.poll_once()
@@ -664,6 +801,9 @@ class Supervisor:
             except Exception:  # pragma: no cover -- never let the loop die on a blip
                 log.exception("supervision cycle failed")
             try:
-                time.sleep(interval)
+                if self.reactive:
+                    self.wait_for_turn_end(interval)
+                else:
+                    time.sleep(interval)
             except KeyboardInterrupt:
                 return
