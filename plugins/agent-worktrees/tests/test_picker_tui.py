@@ -3716,22 +3716,30 @@ def test_escape_on_main_view_confirms_before_quit(monkeypatch):
     asyncio.run(run())
 
 
-def test_nf_compose_skeleton_disabled_by_default():
-    """NF2 (#88): the compose skeleton is OFF unless AGENT_WORKTREES_PICKER_NF is
-    set, so PickerScreen stays a render-leaf (no segment children) and the golden
-    render path is byte-identical."""
+def test_nf_compose_default_on_with_opt_out(monkeypatch):
+    """NF5 (#88): the compose/native path is now the **default**. With the env
+    unset PickerScreen composes its segment/region widgets; setting
+    ``AGENT_WORKTREES_PICKER_NF`` to a falsey value forces the legacy render()
+    monolith (the rollback escape hatch, until NF5-3 retires it)."""
     from agent_worktrees.picker_tui.engine import _PickerSegment
     src = _fixture_source()
 
-    async def run():
+    async def _mounts(expect_nf):
         app = PickerApp(src, live=False)
         async with app.run_test(size=(118, 36)) as pilot:
             await pilot.pause()
             scr = app.query_one(PickerScreen)
-            assert scr._nf_enabled is False
-            assert len(scr.query(_PickerSegment)) == 0
+            assert scr._nf_enabled is expect_nf
+            # OFF -> render-leaf (no segment children); ON -> composed widgets.
+            assert (len(scr.query(_PickerSegment)) > 0) is expect_nf
 
-    asyncio.run(run())
+    # Default (env unset): native path ON.
+    monkeypatch.delenv("AGENT_WORKTREES_PICKER_NF", raising=False)
+    asyncio.run(_mounts(True))
+    # Explicit opt-out: legacy render() monolith.
+    for off in ("0", "false", "off", "no"):
+        monkeypatch.setenv("AGENT_WORKTREES_PICKER_NF", off)
+        asyncio.run(_mounts(False))
 
 
 def test_nf_compose_skeleton_mounts_identical_segments(monkeypatch):

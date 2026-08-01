@@ -1218,5 +1218,21 @@ byte-identical). Guarded by `test_size_mb_handles_non_hex_id` (unit) and
 that fix, forced-ON is fully green except `test_nf_compose_skeleton_disabled_by_default`
 (which asserts OFF-is-default and is rewritten by the flip itself).
 
+**NF5 slice 2 -- flip the default to native.** `_nf_compose_enabled()` now defaults
+**ON**: with `AGENT_WORKTREES_PICKER_NF` unset, `PickerScreen` composes its segment/
+region widgets and native focus drives the picker. Setting the var to a falsey value
+(`0`/`false`/`no`/`off`) forces the legacy monolithic `render()` path -- a temporary
+**rollback escape hatch** kept until NF5-3 retires the monolith (mirroring the
+picker's own `AGENT_WORKTREES_LEGACY_PICKER` rollback switch). Because "env unset ->
+ON" is behaviourally identical to the forced-ON parity run from slice 1, the flip
+lands exactly that validated world: the full suite is green in the default (now ON)
+mode (1674 passed), and the opt-out (`=0`) still drives the golden/monolith path
+green. `test_nf_compose_skeleton_disabled_by_default` is replaced by
+`test_nf_compose_default_on_with_opt_out`, which asserts the default composes the
+widget tree and each falsey opt-out value forces the render-leaf. The `sel`/`stops`/
+`_dispatch_key` model remains as the internal navigation the native widgets drive, so
+the ~100 `sel`/`stops`-reading tests keep passing unchanged. Next: NF5-3 retires the
+now-dead `render()`/`_frame_segments` monolith + the byte-identical golden.
+
 
 
