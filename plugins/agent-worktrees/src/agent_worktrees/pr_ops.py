@@ -169,6 +169,30 @@ def _rev(ref: str, *, cwd: str) -> str:
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
+def _title_from_commits(worktree_path: str, upstream: str) -> str | None:
+    """Best-effort worktree title from its own commit history.
+
+    Returns the subject of the newest commit on ``{upstream}..HEAD`` -- the work
+    the worktree currently carries -- or ``None`` when the worktree has no commit
+    beyond ``upstream`` (nothing to describe) or git is unavailable.
+
+    Used as the ``create_pr`` title fallback so a worktree that never carried a
+    session summary still yields a meaningful PR title and Picker label instead
+    of the opaque ``worktree_id``.
+    """
+    try:
+        result = git_ops.git(
+            "log", "-1", "--format=%s", f"{upstream}..HEAD",
+            cwd=worktree_path, check=False,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    subject = (result.stdout or "").strip()
+    return subject or None
+
+
 def create_pr(
     worktree_id: str,
     config: Config,
@@ -251,7 +275,23 @@ def create_pr(
     if title and record:
         record.title = title.replace("\n", " ").strip()
 
-    eff_title = title or (record.title if record else None) or worktree_id
+    eff_title = title or (record.title if record else None)
+    if not eff_title:
+        # No explicit --title and no persisted worktree title. Derive a
+        # meaningful default from the worktree's own newest commit subject
+        # rather than degrading to the opaque worktree_id -- which yields a
+        # useless "<machine>-<ts>-<hash>" PR title, a "<id> changes" squash
+        # message, and leaves the worktree reading as "(untitled)" in the
+        # Picker forever (its session, if any, may never have registered).
+        derived = _title_from_commits(worktree_path, upstream)
+        if derived:
+            eff_title = derived
+            # Persist it so the worktree stops showing as untitled -- but only
+            # when the record has no curated title of its own (true here by
+            # construction), so an operator/PR title is never clobbered.
+            if record and not (record.title and record.title != "null"):
+                record.title = derived
+    eff_title = eff_title or worktree_id
 
     # Resolve the active PR and whether it is still live (can receive pushes).
     # A *terminal* active PR (merged/closed) must NOT have its branch reused --
