@@ -167,9 +167,19 @@ class StartSessionRequest(BaseModel):
 
 
 class SubmitPromptRequest(BaseModel):
-    """Request to submit a prompt to a session."""
+    """Request to submit a prompt to a session.
+
+    ``queue`` opts into durable send-or-queue (#4114): when the session is busy
+    the prompt is persisted to the bridge's ``pending_prompts`` table and
+    delivered FIFO on the next turn-settle -- surviving a caller remount, an NF
+    crash, and a bridge/host restart -- instead of being rejected with 409.
+    Default False preserves the legacy 409-on-busy contract. ``caller_id`` tags
+    the queued row with who submitted it (for display / attribution).
+    """
 
     prompt: str
+    queue: bool = False
+    caller_id: str | None = None
 
 
 class ResumeSessionRequest(BaseModel):
@@ -219,8 +229,36 @@ class StartSessionResponse(BaseModel):
 
 
 class SubmitPromptResponse(BaseModel):
-    turn_index: int
+    """Result of a prompt submission.
+
+    On the immediate-run path ``turn_index`` is the started turn. On the durable
+    send-or-queue path (``queued=True``, #4114) the prompt was persisted rather
+    than run: ``turn_index`` is None and ``queue_id`` / ``position`` describe its
+    place in the FIFO queue.
+    """
+
     status: SessionStatus
+    turn_index: int | None = None
+    queued: bool = False
+    queue_id: int | None = None
+    position: int | None = None
+
+
+class PendingPrompt(BaseModel):
+    """One durable queued follow-up awaiting delivery (#4114)."""
+
+    id: int
+    session_id: str
+    caller_id: str | None = None
+    prompt: str
+    created_at: float
+
+
+class PendingQueueResponse(BaseModel):
+    """Snapshot of a session's durable pending-prompt queue."""
+
+    session_id: str
+    pending: list[PendingPrompt]
 
 
 class ResyncSessionResponse(BaseModel):

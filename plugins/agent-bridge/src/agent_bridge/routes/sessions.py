@@ -8,13 +8,15 @@ import json
 import time
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
 from ..models import (
     AnswerAskUserRequest,
     CursorAckRequest,
     CursorInfo,
+    PendingPrompt,
+    PendingQueueResponse,
     ResyncSessionResponse,
     SessionInfo,
     SessionListResponse,
@@ -471,11 +473,28 @@ async def get_session_status(
 
 @router.post("/{session_id}/turns", response_model=SubmitPromptResponse)
 async def submit_prompt(
-    session_id: str, req: SubmitPromptRequest, request: Request
+    session_id: str,
+    req: SubmitPromptRequest,
+    request: Request,
+    response: Response,
 ):
+    """Submit a prompt to a session.
+
+    Default (``queue=false``) preserves the legacy contract: run now, or 409 if
+    the session is busy. With ``queue=true`` the prompt is durably queued when
+    the session is busy (persisted to ``pending_prompts``, delivered FIFO on
+    settle -- surviving remount/crash/restart); the response is 202 with
+    ``queued=true`` and the queue position.
+    """
     mgr: SessionManager = request.app.state.session_manager
     try:
-        turn_index = await mgr.submit_prompt(session_id, req.prompt)
+        if req.queue:
+            result = await mgr.submit_or_queue_prompt(
+                session_id, req.prompt, caller_id=req.caller_id
+            )
+        else:
+            turn_index = await mgr.submit_prompt(session_id, req.prompt)
+            result = {"queued": False, "turn_index": turn_index}
     except DaemonDrainingError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except KeyError:
@@ -486,10 +505,58 @@ async def submit_prompt(
         raise HTTPException(status_code=500, detail=str(exc))
 
     session = mgr.get_session(session_id)
+    status = session.status if session else SessionStatus.IDLE
+    if result.get("queued"):
+        response.status_code = 202
+        return SubmitPromptResponse(
+            status=status,
+            queued=True,
+            queue_id=result.get("queue_id"),
+            position=result.get("position"),
+        )
     return SubmitPromptResponse(
-        turn_index=turn_index,
-        status=session.status if session else SessionStatus.IDLE,
+        turn_index=result.get("turn_index"),
+        status=status,
     )
+
+
+@router.get("/{session_id}/queue", response_model=PendingQueueResponse)
+async def get_pending_queue(session_id: str, request: Request):
+    """Snapshot a session's durable pending-prompt queue (FIFO order)."""
+    mgr: SessionManager = request.app.state.session_manager
+    try:
+        rows = mgr.list_pending_queue(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    return PendingQueueResponse(
+        session_id=session_id,
+        pending=[PendingPrompt(**r) for r in rows],
+    )
+
+
+@router.delete("/{session_id}/queue/{queue_id}", status_code=204)
+async def remove_pending_prompt(session_id: str, queue_id: int, request: Request):
+    """Drop one queued follow-up by id (operator removes a chip)."""
+    mgr: SessionManager = request.app.state.session_manager
+    try:
+        hit = mgr.remove_pending_prompt(session_id, queue_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    if not hit:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Queued prompt {queue_id} not found for session {session_id}",
+        )
+
+
+@router.delete("/{session_id}/queue", status_code=204)
+async def clear_pending_queue(session_id: str, request: Request):
+    """Clear a session's whole durable pending-prompt queue."""
+    mgr: SessionManager = request.app.state.session_manager
+    try:
+        mgr.clear_pending_queue(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
 
 @router.post("/{session_id}/resync", response_model=ResyncSessionResponse)

@@ -15,7 +15,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 # A live interactive session is kept alive by the extension's 30s heartbeat
 # (HEARTBEAT_MS in extension.mjs). A row whose ``updated_at`` is older than this
@@ -183,11 +183,22 @@ CREATE TABLE IF NOT EXISTS worktree_ownership (
     updated_at REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS pending_prompts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    caller_id TEXT,
+    prompt TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
 CREATE INDEX IF NOT EXISTS idx_events_session_id ON events(session_id, event_id);
 CREATE INDEX IF NOT EXISTS idx_live_sessions_worktree ON live_sessions(worktree_id);
 CREATE INDEX IF NOT EXISTS idx_live_messages_pending
     ON live_messages(session_id, delivered_at, id);
+CREATE INDEX IF NOT EXISTS idx_pending_prompts_session
+    ON pending_prompts(session_id, id);
 """
 
 
@@ -613,6 +624,35 @@ class Database:
             conn.execute("UPDATE schema_version SET version=?", (13,))
             conn.commit()
             log.info("Schema migrated to version 13: worktree_ownership table")
+
+        if from_version < 14:
+            # v13 -> v14: add the `pending_prompts` durable queue table (#4114).
+            # A bridge-owned session that is mid-turn previously rejected a
+            # concurrent submit with a 409 and kept no queue -- the only queue
+            # lived in the caller (NF's browser tab), so a remount/reload/NF
+            # crash silently dropped queued follow-ups. This table makes the
+            # queue durable service state: a `queue`-flagged submit against a
+            # busy session is persisted here and drained FIFO on turn-settle,
+            # surviving a bridge/host restart and usable by host CLI agents too.
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS pending_prompts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    caller_id TEXT,
+                    prompt TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES sessions(id)
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_pending_prompts_session "
+                "ON pending_prompts(session_id, id)"
+            )
+            conn.execute("UPDATE schema_version SET version=?", (14,))
+            conn.commit()
+            log.info("Schema migrated to version 14: pending_prompts table")
 
     def execute_write(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
         """Execute a write query under the write lock."""
@@ -1586,6 +1626,83 @@ class Database:
                 "DELETE FROM delivery_cursors WHERE session_id=?", (session_id,)
             )
             conn.commit()
+
+    # -- Pending prompt queue (durable send-or-queue, #4114) -----------------
+
+    def enqueue_prompt(
+        self, session_id: str, prompt: str, now: float,
+        caller_id: str | None = None,
+    ) -> int:
+        """Append a prompt to a session's durable pending queue; return its id.
+
+        FIFO order is the autoincrement ``id``. The queue is drained on
+        turn-settle (and on resume), so a follow-up submitted while a turn runs
+        is delivered exactly once, in order -- surviving a caller remount, an NF
+        crash, and a bridge/host restart.
+        """
+        cur = self.execute_write(
+            "INSERT INTO pending_prompts (session_id, caller_id, prompt, "
+            "created_at) VALUES (?, ?, ?, ?)",
+            (session_id, caller_id, prompt, now),
+        )
+        return int(cur.lastrowid or 0)
+
+    def list_pending_prompts(self, session_id: str) -> list[dict[str, Any]]:
+        """Return a session's queued prompts in FIFO (send) order."""
+        rows = self.execute_read(
+            "SELECT id, session_id, caller_id, prompt, created_at "
+            "FROM pending_prompts WHERE session_id=? ORDER BY id ASC",
+            (session_id,),
+        )
+        return [dict(r) for r in rows]
+
+    def pop_pending_prompt(self, session_id: str) -> dict[str, Any] | None:
+        """Atomically remove and return the oldest queued prompt (or None).
+
+        The select-then-delete runs under the write lock so a concurrent drain
+        (or a second bridge process sharing the DB) can never pop the same row
+        twice.
+        """
+        with self._write_lock:
+            conn = self._get_conn()
+            row = conn.execute(
+                "SELECT id, session_id, caller_id, prompt, created_at "
+                "FROM pending_prompts WHERE session_id=? ORDER BY id ASC LIMIT 1",
+                (session_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            conn.execute("DELETE FROM pending_prompts WHERE id=?", (row["id"],))
+            conn.commit()
+            return dict(row)
+
+    def remove_pending_prompt(self, session_id: str, queue_id: int) -> bool:
+        """Remove one queued prompt by id (operator drops a chip). True if hit."""
+        cur = self.execute_write(
+            "DELETE FROM pending_prompts WHERE session_id=? AND id=?",
+            (session_id, queue_id),
+        )
+        return cur.rowcount > 0
+
+    def clear_pending_prompts(self, session_id: str) -> int:
+        """Drop all queued prompts for a session; return how many were removed.
+
+        Called when the session is stopped / interrupted / ended / deleted --
+        mirroring NF's "queue cleared if cancelled, ended, or rolled" so queued
+        follow-ups never resurface against a session the operator tore down.
+        """
+        cur = self.execute_write(
+            "DELETE FROM pending_prompts WHERE session_id=?", (session_id,)
+        )
+        return cur.rowcount
+
+    def count_pending_prompts(self, session_id: str) -> int:
+        """Return the number of queued prompts for a session."""
+        rows = self.execute_read(
+            "SELECT COUNT(*) AS n FROM pending_prompts WHERE session_id=?",
+            (session_id,),
+        )
+        return int(rows[0]["n"]) if rows else 0
 
     # -- Garbage collection / maintenance ------------------------------------
 
