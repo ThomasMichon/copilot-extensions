@@ -105,3 +105,45 @@ def test_config_harness_repos_parsing(tmp_path: Path) -> None:
     cfg = Config({"sync": {"harness_repos": "aperture-labs, dotfiles"}}, tmp_path)
     assert cfg.sync_harness_repos == ["aperture-labs", "dotfiles"]
     assert Config({"sync": {}}, tmp_path).sync_harness_repos == []
+
+
+def test_effective_harness_union_allowlist_first(tmp_path: Path) -> None:
+    eff = origin.effective_harness(
+        ["aperture-labs", "copilot-extensions"],
+        ["dotfiles", "aperture-labs"])  # aperture-labs is a dup
+    assert eff == ["aperture-labs", "copilot-extensions", "dotfiles"]
+
+
+def test_classify_allowlisted_repo_syncs(tmp_path: Path) -> None:
+    d = _mk(tmp_path, "s", "git_root: /home/u/src/aperture-labs\n")
+    eff = origin.effective_harness(["aperture-labs"], ["dotfiles"])
+    inc, o = origin.classify_for_sync(d, "book2", ["aperture-labs"], eff)
+    assert inc is True
+    assert o["source_repo"] == "aperture-labs"
+
+
+def test_classify_known_work_repo_excluded_but_marked(tmp_path: Path) -> None:
+    # dotfiles is a harness repo (so it's marked) but NOT in the allowlist -> no sync.
+    d = _mk(tmp_path, "s", "git_root: /home/u/src/dotfiles\n")
+    eff = origin.effective_harness(["aperture-labs"], ["dotfiles"])
+    inc, o = origin.classify_for_sync(d, "book2", ["aperture-labs"], eff)
+    assert inc is False
+    assert o["source_repo"] == "dotfiles"  # still classified for local visibility
+
+
+def test_classify_path_present_unmatched_excluded(tmp_path: Path) -> None:
+    # A path that resolves to no known repo is a strict exclude, even fail-open.
+    d = _mk(tmp_path, "s", "git_root: /home/u/work/mystery\n")
+    eff = origin.effective_harness(["aperture-labs"], ["dotfiles"])
+    inc, _ = origin.classify_for_sync(d, "book2", ["aperture-labs"], eff,
+                                      fail_closed=False)
+    assert inc is False
+
+
+def test_classify_no_metadata_follows_fail_closed(tmp_path: Path) -> None:
+    d = _mk(tmp_path, "s", None)  # no workspace.yaml
+    eff = origin.effective_harness(["aperture-labs"], ["dotfiles"])
+    assert origin.classify_for_sync(
+        d, "book2", ["aperture-labs"], eff, fail_closed=False)[0] is True
+    assert origin.classify_for_sync(
+        d, "book2", ["aperture-labs"], eff, fail_closed=True)[0] is False
