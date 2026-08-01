@@ -2379,6 +2379,18 @@ class SessionManager:
 
         # Update status
         session.status = SessionStatus.RUNNING
+        # Reset the live-stall clock at turn start. `last_output_at` only
+        # advances on an ACP frame, so after a long idle gap it still points at
+        # the *previous* turn's last frame. Without this reset, the live-stall
+        # watchdog (reconcile_wedged_running) sees the brand-new turn as
+        # "silent for <entire idle gap>", judges it stalled, and interrupts it
+        # (ACP session/cancel) before it can emit its first frame -- surfacing
+        # as a phantom "Operation cancelled by user" on the first resend after
+        # an idle gap > live_stall_interrupt_after_s (#4122). Silence must be
+        # measured within the current turn; a genuine stall is still caught,
+        # measured from turn-start. Synchronous (no await before the prompt task
+        # is scheduled), so it wins the race against the watchdog.
+        session.last_output_at = now
         self._db.update_session_status(session_id, SessionStatus.RUNNING.value, now)
 
         if session.event_log:

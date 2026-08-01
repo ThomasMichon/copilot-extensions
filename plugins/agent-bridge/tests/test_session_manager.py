@@ -10,7 +10,7 @@ import pytest
 
 from agent_bridge.db import Database
 from agent_bridge.models import SessionStatus
-from agent_bridge.session_manager import SessionManager, _default_cwd
+from agent_bridge.session_manager import SessionManager, _default_cwd, _STALL_AFTER_S
 from agent_bridge.transport import SpawnTarget
 
 
@@ -826,6 +826,63 @@ class TestReconcileWedged:
         assert healed == 0
         assert session.status == SessionStatus.RUNNING
         session.client.cancel_prompt.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_new_turn_after_idle_gap_not_interrupted(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        """Regression (bridge-resume-phantom-cancel, #4122): a fresh turn started
+        after a long idle gap must NOT be interrupted by the live-stall watchdog.
+
+        `last_output_at` only advances on an ACP frame, so after an idle gap it
+        still points at the *previous* turn's last frame. `submit_prompt` must
+        reset the stall clock at turn start; otherwise the watchdog sees the
+        brand-new turn as silent for the entire idle gap and cancels it before
+        it emits its first frame -- the phantom "Operation cancelled by user".
+        """
+        session = await session_manager.start_session(spawn_target)
+
+        cancelled = asyncio.Event()
+
+        async def _blocking_prompt(_text):
+            await cancelled.wait()
+            return {
+                "response_text": "", "thought_text": "", "tool_calls": [],
+                "stop_reason": "cancelled", "error": None,
+            }
+
+        session.client.send_prompt = AsyncMock(side_effect=_blocking_prompt)
+        session.client.cancel_prompt = AsyncMock(
+            side_effect=lambda: cancelled.set()
+        )
+
+        # A completed prior turn left the stall clock ancient; then a long idle
+        # gap (well past the 900s interrupt threshold).
+        session.last_output_at = time.time() - 10_000
+
+        # The operator's next message after the idle gap.
+        await session_manager.submit_prompt(session.session_id, "Yes, start")
+        try:
+            assert session.status == SessionStatus.RUNNING
+            assert (session._prompt_task is not None
+                    and not session._prompt_task.done())
+            # Turn start reset the silence clock so the new turn reads as active,
+            # not stalled-across-the-idle-gap.
+            assert session.last_output_at is not None
+            assert time.time() - session.last_output_at < _STALL_AFTER_S
+
+            # The watchdog must leave the fresh turn alone (pre-fix: interrupted).
+            healed = await session_manager.reconcile_wedged_running()
+            assert healed == 0
+            session.client.cancel_prompt.assert_not_awaited()
+            assert session.status == SessionStatus.RUNNING
+        finally:
+            cancelled.set()
+            session._prompt_task.cancel()
+            try:
+                await session._prompt_task
+            except BaseException:
+                pass
 
 
 class TestInterruptTurn:
