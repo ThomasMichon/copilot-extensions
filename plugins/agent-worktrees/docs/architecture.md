@@ -927,6 +927,24 @@ codified as a reusable tool -- `scripts/picker-snapshot/` (capture -> SVG ->
 `svg2png.mjs` with Fira Code @ 3x) -- so demos/A-B renders are reproducible and the
 choppy-substitute mistake isn't re-derivable.)
 
+**NF1 addendum 3 -- prominent focus highlight (operator soak feedback).**
+Addendum 2's move to a *subtle* `text-style: bold reverse` bar was the wrong call:
+an operator soak of the toggle-ON picker found the focused option in the action
+dialogs *too subtle to read at a glance* -- and `TaskMenuScreen` (slice 2) had never
+actually adopted the reverse idiom, so the modals were already inconsistent (amber in
+Task, faint-reverse everywhere else). Reversed here: every native menu's focused
+option now uses the **prominent amber bar** (`.option-list--option-highlighted {
+background: #ffaf00; color: black; text-style: bold }`, echoing `C_BTN_SEL` and the
+`+ New worktree...` accent), standardized across `SubMenuScreen`, `CfgMenuScreen`,
+`MaintMenuScreen`, and `ScopeDlgScreen` to match `TaskMenuScreen`. For
+`ScopeDlgScreen`'s `SelectionList`, the checkbox-gutter highlighted states
+(`selection-list--button-highlighted` / `--button-selected-highlighted`) are pinned
+to the same amber so the highlighted row renders as a single uniform bar rather than
+a surface-coloured patch inside the amber. Advances `visions/picker` Behaviors
+(keyboard-first -- "focus always visually clear"); A/B-confirmed via `capture_modal`
+before/after on `submenu`/`cfg`/`maint`/`clean`. The subtle-vs-loud tension is a
+genuine judgement call; live operator feedback on real data is the tie-breaker.
+
 **NF1 slice 3 -- the checkbox dialogs -> `SelectionList` + the `FocusGroup`
 primitive.** `ScopeDlgScreen` (shared by Clean/Sync scope and the New-worktree
 options `Bare`/`No Mux`/`Local model`/`Anchor repo`) was the picker's genuine
