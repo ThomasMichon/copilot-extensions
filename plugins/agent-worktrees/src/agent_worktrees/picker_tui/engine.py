@@ -3930,8 +3930,16 @@ class PickerScreen(Widget):
 
 
 def _size_mb(w):
-    # deterministic pseudo-size from id for the cleanup demo
-    return 120 + (int(w["id4"], 16) % 300)
+    # deterministic pseudo-size from id for the cleanup demo. id4 is normally a
+    # 4-hex-char worktree-id suffix; fall back to a char-sum for any non-hex id
+    # (e.g. test fixtures) so this pseudo-size never raises -- the compose/NF
+    # path renders the maintenance size counter eagerly, on any id.
+    id4 = w.get("id4", "") if hasattr(w, "get") else w["id4"]
+    try:
+        n = int(id4, 16)
+    except (ValueError, TypeError):
+        n = sum(ord(c) for c in str(id4))
+    return 120 + (n % 300)
 
 
 CLEAN_SPECS = [

@@ -1192,7 +1192,31 @@ over the data body moves the selection (`on_mouse_scroll_down`/`up` ->
 widget (rows as individual native options) and NF5's retirement of the manual model
 remain.
 
+**NF5 (the cutover, in progress) -- native the default.** NF5 makes the compose/
+native path the shipping default and retires the byte-identical `render()` fallback.
+A structural fact shapes it: the manual `sel`/`stops`/`_dispatch_key` navigation
+model is **shared** by both toggle states (OFF `render()` and ON `compose()` both
+read `sel` and route keys through `_dispatch_key`) -- it is *not* toggle-gated. So
+"inverting the bridge / retiring `sel`" is entangled with the default-flip; there is
+no byte-identical-safe way to invert a shared model. The chosen path (Strategy A) is
+a **pragmatic cutover**: flip the default, keep `sel`/`stops`/`_dispatch_key` as the
+*internal* nav model the native widgets drive (so the ~100 `sel`/`stops`-reading
+tests keep passing -- no mass rewrite), retire the dead `render()` monolith + golden,
+then let native widgets own keys and migrate tests as low-risk follow-up cleanup.
 
+**NF5 slice 1 -- parity-harden the toggle-ON path.** Before flipping, the whole
+suite was run with `AGENT_WORKTREES_PICKER_NF=1` forced on -- simulating the
+post-flip world. The result was near-total parity: the only real gap was the
+Maintenance pivot, where the "~N MiB" size counter (`status_text` -> `_size_mb`)
+crashed on the test fixtures' **non-hex ids** (`_size_mb` did `int(id4, 16)`). The
+compose/segment path renders that counter eagerly (on any id, during mount/refresh),
+where the monolith tests had wrapped their `build_body` calls in a `_size_mb`-
+neutralizing monkeypatch. Fixed by hardening `_size_mb` to fall back to a char-sum
+for any non-hex id (the hex path -- real/demo worktree suffixes -- stays
+byte-identical). Guarded by `test_size_mb_handles_non_hex_id` (unit) and
+`test_nf_maintenance_pivot_renders_under_toggle` (end-to-end under the toggle). With
+that fix, forced-ON is fully green except `test_nf_compose_skeleton_disabled_by_default`
+(which asserts OFF-is-default and is rewritten by the flip itself).
 
 
 
