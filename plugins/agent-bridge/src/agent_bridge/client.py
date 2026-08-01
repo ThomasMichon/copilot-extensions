@@ -80,7 +80,10 @@ class BridgeClient:
         if cfg_path.exists():
             try:
                 data = yaml.safe_load(cfg_path.read_text()) or {}
-                port = data.get("port", port)
+                # Port 0 is the dynamic sentinel (#694): treat as unset so the
+                # fallback stays default_port(); the routing table resolves the
+                # real (ephemeral) port below.
+                port = data.get("port") or port
                 bind = data.get("bind", bind)
             except Exception:
                 pass
