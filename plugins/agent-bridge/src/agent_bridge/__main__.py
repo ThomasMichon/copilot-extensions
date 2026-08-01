@@ -1437,7 +1437,28 @@ def _submit_and_stream(
     caller_id: str | None,
 ) -> None:
     """Submit *prompt* to *session_id* and stream the turn (shared by send/create)."""
-    result = client.submit_prompt(session_id, prompt)
+    queue = getattr(args, "queue", False)
+    result = client.submit_prompt(
+        session_id, prompt, queue=queue, caller_id=caller_id
+    )
+
+    # Durable send-or-queue: the session was busy, so the prompt was persisted
+    # for FIFO delivery on settle. There is no live turn to stream -- report the
+    # queue position and return.
+    if result.get("queued"):
+        ident = _connection_identity(client, session_id)
+        if args.json:
+            _json_out({"session_id": session_id, "connection": ident, **result})
+            return
+        pos = result.get("position")
+        qid = result.get("queue_id")
+        print(
+            f"[~] Session {session_id} busy -- prompt queued durably "
+            f"(id {qid}, position {pos}). It sends when the current turn settles."
+        )
+        _print_connection_identity(ident)
+        return
+
     turn_index = result.get("turn_index", 0)
 
     ident = _connection_identity(client, session_id)
@@ -3054,6 +3075,14 @@ def build_parser() -> argparse.ArgumentParser:
              "in-flight turn and start a fresh session to deliver this prompt "
              "(discards the in-flight turn's work). Without --force, a busy "
              "target is rejected with guidance to wait/observe or end it.",
+    )
+    send_p.add_argument(
+        "--queue", action="store_true",
+        help="If the target's session is busy, durably queue this prompt "
+             "server-side (in the bridge's pending_prompts table) for FIFO "
+             "delivery when the current turn settles -- surviving a caller "
+             "remount and a bridge/host restart -- instead of rejecting it. "
+             "The opposite of --force: it preserves the in-flight turn.",
     )
     _add_stream_args(send_p)
     send_p.set_defaults(func=_cmd_send)

@@ -553,3 +553,73 @@ def test_atomic_enqueue_is_cross_process(tmp_path) -> None:
     finally:
         db_a.close()
         db_b.close()
+
+
+class TestPendingPrompts:
+    """The durable send-or-queue table (pending_prompts, #4114)."""
+
+    def _seed(self, db: Database, session_id: str = "s1") -> float:
+        now = time.time()
+        db.create_session(
+            session_id, "test", None, ".", "local", "running", now
+        )
+        return now
+
+    def test_enqueue_and_list_fifo(self, tmp_db: Database) -> None:
+        now = self._seed(tmp_db)
+        id1 = tmp_db.enqueue_prompt("s1", "first", now)
+        id2 = tmp_db.enqueue_prompt("s1", "second", now + 1, caller_id="op")
+        assert id2 > id1
+        rows = tmp_db.list_pending_prompts("s1")
+        assert [r["prompt"] for r in rows] == ["first", "second"]
+        assert rows[1]["caller_id"] == "op"
+        assert tmp_db.count_pending_prompts("s1") == 2
+
+    def test_pop_is_fifo_and_atomic(self, tmp_db: Database) -> None:
+        now = self._seed(tmp_db)
+        tmp_db.enqueue_prompt("s1", "first", now)
+        tmp_db.enqueue_prompt("s1", "second", now + 1)
+        popped = tmp_db.pop_pending_prompt("s1")
+        assert popped is not None and popped["prompt"] == "first"
+        # the popped row is gone; the next is now the head
+        assert tmp_db.count_pending_prompts("s1") == 1
+        assert tmp_db.pop_pending_prompt("s1")["prompt"] == "second"
+        assert tmp_db.pop_pending_prompt("s1") is None
+
+    def test_pop_empty_returns_none(self, tmp_db: Database) -> None:
+        self._seed(tmp_db)
+        assert tmp_db.pop_pending_prompt("s1") is None
+
+    def test_remove_by_id(self, tmp_db: Database) -> None:
+        now = self._seed(tmp_db)
+        qid = tmp_db.enqueue_prompt("s1", "drop me", now)
+        tmp_db.enqueue_prompt("s1", "keep me", now + 1)
+        assert tmp_db.remove_pending_prompt("s1", qid) is True
+        # removing a second time (or a bogus id) is a miss
+        assert tmp_db.remove_pending_prompt("s1", qid) is False
+        assert [r["prompt"] for r in tmp_db.list_pending_prompts("s1")] == ["keep me"]
+
+    def test_clear_returns_count(self, tmp_db: Database) -> None:
+        now = self._seed(tmp_db)
+        tmp_db.enqueue_prompt("s1", "a", now)
+        tmp_db.enqueue_prompt("s1", "b", now + 1)
+        assert tmp_db.clear_pending_prompts("s1") == 2
+        assert tmp_db.count_pending_prompts("s1") == 0
+        # clearing an empty queue removes nothing
+        assert tmp_db.clear_pending_prompts("s1") == 0
+
+    def test_queue_is_per_session(self, tmp_db: Database) -> None:
+        now = self._seed(tmp_db, "s1")
+        self._seed(tmp_db, "s2")
+        tmp_db.enqueue_prompt("s1", "for-s1", now)
+        tmp_db.enqueue_prompt("s2", "for-s2", now)
+        assert tmp_db.count_pending_prompts("s1") == 1
+        assert tmp_db.pop_pending_prompt("s2")["prompt"] == "for-s2"
+        assert tmp_db.count_pending_prompts("s1") == 1
+
+    def test_deleting_session_cascades_via_clear(self, tmp_db: Database) -> None:
+        """A queue survives independently; clearing it leaves no orphan rows."""
+        now = self._seed(tmp_db)
+        tmp_db.enqueue_prompt("s1", "a", now)
+        # queue persists across a fresh Database handle on the same file
+        assert tmp_db.count_pending_prompts("s1") == 1

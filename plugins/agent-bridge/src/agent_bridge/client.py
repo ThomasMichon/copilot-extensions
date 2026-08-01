@@ -524,10 +524,28 @@ class BridgeClient:
         body["protocol_version"] = HTTP_PROTOCOL_VERSION
         return self._request("POST", "/api/v1/sessions", body) or {}
 
-    def submit_prompt(self, session_id: str, prompt: str) -> dict[str, Any]:
-        """POST /api/v1/sessions/{id}/turns"""
+    def submit_prompt(
+        self,
+        session_id: str,
+        prompt: str,
+        *,
+        queue: bool = False,
+        caller_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/sessions/{id}/turns.
+
+        ``queue=True`` opts into durable send-or-queue: if the session is busy
+        the prompt is persisted server-side and delivered FIFO on settle
+        (surviving a caller remount / bridge restart) rather than 409'd. The
+        response then carries ``queued: true`` with the queue position.
+        """
+        payload: dict[str, Any] = {"prompt": prompt}
+        if queue:
+            payload["queue"] = True
+            if caller_id:
+                payload["caller_id"] = caller_id
         return self._request(
-            "POST", f"/api/v1/sessions/{session_id}/turns", {"prompt": prompt}
+            "POST", f"/api/v1/sessions/{session_id}/turns", payload
         ) or {}
 
     def stop_session(

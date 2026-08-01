@@ -1153,3 +1153,115 @@ class TestCodespaceRequiresSessionHost:
         msgs = [e.data.get("message", "") for e in session.event_log.get_events()
                 if e.event == "error"]
         assert any("session-host mode" in m for m in msgs), msgs
+
+
+class TestDurablePromptQueue:
+    """Durable send-or-queue (pending_prompts) + drain-on-settle (#4114)."""
+
+    async def _settle_chain(self, mgr, session, sid, limit: int = 20) -> None:
+        """Await the chain of drained turns until IDLE with an empty queue.
+
+        Each settled turn's tail drains one queued prompt by scheduling a fresh
+        prompt task, so follow the reassigned ``_prompt_task`` until the queue
+        empties.
+        """
+        for _ in range(limit):
+            task = session._prompt_task
+            if task is not None and not task.done():
+                await task
+            if (session.status == SessionStatus.IDLE
+                    and mgr._db.count_pending_prompts(sid) == 0):
+                return
+        raise AssertionError("queue did not drain")
+
+    @pytest.mark.asyncio
+    async def test_runs_immediately_when_idle(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        result = await session_manager.submit_or_queue_prompt(
+            session.session_id, "Hello"
+        )
+        assert result["queued"] is False
+        assert result["turn_index"] == 0
+        assert session_manager._db.count_pending_prompts(session.session_id) == 0
+
+    @pytest.mark.asyncio
+    async def test_queues_when_running(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        session.status = SessionStatus.RUNNING  # simulate a live turn
+        r1 = await session_manager.submit_or_queue_prompt(
+            session.session_id, "one", caller_id="op"
+        )
+        r2 = await session_manager.submit_or_queue_prompt(session.session_id, "two")
+        assert r1["queued"] is True and r1["position"] == 1
+        assert r2["queued"] is True and r2["position"] == 2
+        rows = session_manager._db.list_pending_prompts(session.session_id)
+        assert [r["prompt"] for r in rows] == ["one", "two"]
+        assert rows[0]["caller_id"] == "op"
+
+    @pytest.mark.asyncio
+    async def test_drains_fifo_exactly_once_on_settle(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp, mock_acp_client
+    ) -> None:
+        """The core guarantee: follow-ups queued during a turn drain in FIFO
+        order, one per turn, each exactly once."""
+        session = await session_manager.start_session(spawn_target)
+        sid = session.session_id
+        # First prompt runs; two follow-ups queue behind it.
+        await session_manager.submit_or_queue_prompt(sid, "A")
+        assert session.status == SessionStatus.RUNNING
+        await session_manager.submit_or_queue_prompt(sid, "B")
+        await session_manager.submit_or_queue_prompt(sid, "C")
+        assert session_manager._db.count_pending_prompts(sid) == 2
+
+        await self._settle_chain(session_manager, session, sid)
+
+        sent = [c.args[0] for c in mock_acp_client.send_prompt.call_args_list]
+        assert sent == ["A", "B", "C"]
+        assert session.status == SessionStatus.IDLE
+        assert session_manager._db.count_pending_prompts(sid) == 0
+
+    @pytest.mark.asyncio
+    async def test_interrupt_clears_queue(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        sid = session.session_id
+        # A live turn with queued follow-ups.
+        await session_manager.submit_or_queue_prompt(sid, "A")
+        await session_manager.submit_or_queue_prompt(sid, "B")
+        assert session_manager._db.count_pending_prompts(sid) >= 1
+        await session_manager.interrupt_turn(sid)
+        assert session_manager._db.count_pending_prompts(sid) == 0
+        events = [e.event for e in session.event_log.get_events()]
+        assert "queue_cleared" in events
+
+    @pytest.mark.asyncio
+    async def test_end_clears_queue(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        sid = session.session_id
+        session.status = SessionStatus.RUNNING
+        await session_manager.submit_or_queue_prompt(sid, "A")
+        assert session_manager._db.count_pending_prompts(sid) == 1
+        await session_manager.end_session(sid, force=True)
+        assert session_manager._db.count_pending_prompts(sid) == 0
+
+    @pytest.mark.asyncio
+    async def test_stop_preserves_queue(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        """A plain stop (redeploy/idle-reap path) must NOT clear the queue --
+        the durable rows survive so a later resume delivers them."""
+        session = await session_manager.start_session(spawn_target)
+        sid = session.session_id
+        session.status = SessionStatus.RUNNING
+        await session_manager.submit_or_queue_prompt(sid, "A")
+        session.status = SessionStatus.IDLE  # stop refuses mid-turn; idle it
+        await session_manager.stop_session(sid)
+        assert session.status == SessionStatus.STOPPED
+        assert session_manager._db.count_pending_prompts(sid) == 1

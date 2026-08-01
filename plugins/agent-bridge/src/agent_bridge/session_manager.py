@@ -2101,11 +2101,20 @@ class SessionManager:
         self,
         session_id: str,
         permission_callback: Any | None = None,
+        *,
+        drain: bool = True,
     ) -> Session:
         """Resume a stopped session by spawning a new process.
 
         Uses AcpClient.load_session() to reattach to the persisted ACP
         session. The session is ready to receive prompts when this returns.
+
+        ``drain`` (default True): once the session lands IDLE, deliver any
+        durable ``pending_prompts`` queued for it -- this is how a queue that
+        outlived a bridge/host restart is delivered when the session comes back.
+        ``submit_prompt``'s auto-resume path passes ``drain=False`` because it
+        runs its own prompt next and that turn's settle drains the rest, so the
+        resume never starts a second concurrent turn.
         """
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
@@ -2199,6 +2208,11 @@ class SessionManager:
                 raise
 
         session.touch()
+        # Queue outlived the restart? Deliver it now that the session is IDLE.
+        # Outside the lifecycle lock (drain submits a fresh turn). Skipped by the
+        # auto-resume-from-submit path (drain=False) to avoid a double turn.
+        if drain and session.status == SessionStatus.IDLE:
+            await self._drain_pending_prompts(session)
         return session
 
     async def resync_session(self, session_id: str) -> int:
@@ -2353,7 +2367,7 @@ class SessionManager:
             )
             # Mark as STOPPED so resume_session accepts it
             session.status = SessionStatus.STOPPED
-            await self.resume_session(session_id)
+            await self.resume_session(session_id, drain=False)
             # resume_session sets status to IDLE and attaches a new client
 
         turn_index = session.turn_count
@@ -2418,6 +2432,187 @@ class SessionManager:
         session.touch()
         return turn_index
 
+    async def submit_or_queue_prompt(
+        self,
+        session_id: str,
+        prompt: str,
+        *,
+        caller_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Send a prompt now, or durably queue it if the session is busy.
+
+        The durable counterpart to :meth:`submit_prompt`. Where ``submit_prompt``
+        rejects a busy session (409), this persists the follow-up to the
+        ``pending_prompts`` table so it survives a caller remount, an NF crash,
+        and a bridge/host restart, then drains it -- FIFO, exactly once -- on the
+        next turn-settle (or on resume). This is the send-or-queue seam host CLI
+        agents and Neuron Forge both submit through.
+
+        Returns a dict describing the outcome:
+          - ran now:   ``{"queued": False, "turn_index": int, "status": str}``
+          - enqueued:  ``{"queued": True, "queue_id": int, "position": int,
+                          "status": str}``
+
+        A prompt is enqueued (rather than run) when the session is actively
+        running a turn, when the daemon is draining for redeploy, or when a
+        queue already exists (a new submit joins the back of the line -- never
+        jumps ahead of already-queued follow-ups). Otherwise it runs immediately
+        via ``submit_prompt`` (which auto-resumes a recoverable STOPPED session).
+        """
+        session_id = self._resolve_ref(session_id) or session_id
+        session = self._sessions.get(session_id)
+        if not session:
+            raise KeyError(f"Session {session_id} not found")
+
+        turn_live = (
+            session.status == SessionStatus.RUNNING
+            or (session._prompt_task is not None
+                and not session._prompt_task.done())
+        )
+        queue_nonempty = self._db.count_pending_prompts(session_id) > 0
+        # During a redeploy drain we must not start a new turn, but we can still
+        # persist the follow-up -- it delivers after the restart resumes.
+        must_queue = turn_live or queue_nonempty or self._draining
+
+        if not must_queue:
+            turn_index = await self.submit_prompt(session_id, prompt)
+            return {
+                "queued": False,
+                "turn_index": turn_index,
+                "status": session.status.value,
+            }
+
+        now = time.time()
+        queue_id = self._db.enqueue_prompt(
+            session_id, prompt, now, caller_id=caller_id
+        )
+        position = self._db.count_pending_prompts(session_id)
+        if session.event_log:
+            session.event_log.append("prompt_enqueued", {
+                "queue_id": queue_id,
+                "caller_id": caller_id,
+                "position": position,
+            })
+        log.info(
+            "Queued prompt %d for session %s (position %d, status=%s)",
+            queue_id, session_id, position, session.status.value,
+        )
+        # If no turn is live to drain the queue on settle -- and we are not
+        # mid-drain -- kick delivery now, resuming a recoverable STOPPED session
+        # if needed. A live turn's settle tail (or the post-restart resume) will
+        # drain otherwise.
+        if not turn_live and not self._draining:
+            await self._kick_pending_drain(session)
+        return {
+            "queued": True,
+            "queue_id": queue_id,
+            "position": position,
+            "status": session.status.value,
+        }
+
+    async def _kick_pending_drain(self, session: Session) -> None:
+        """Start draining a queue when no turn-settle will do it for us.
+
+        For an IDLE session with a live client, drain directly. For a
+        recoverable STOPPED session (queue outlived a restart, or a fresh submit
+        landed on a dormant session), resume it -- ``resume_session`` drains as
+        it lands IDLE. Best-effort: a failure here leaves the rows durably
+        queued for the next resume/settle, never lost.
+        """
+        try:
+            if (session.status == SessionStatus.IDLE
+                    and session.client and session.client.is_running):
+                await self._drain_pending_prompts(session)
+            elif (session.status == SessionStatus.STOPPED
+                    and session.acp_session_id):
+                await self.resume_session(session.session_id)
+        except Exception as exc:
+            log.warning(
+                "Kick-drain for session %s failed (queue preserved): %s",
+                session.session_id, exc,
+            )
+
+    async def _drain_pending_prompts(self, session: Session) -> None:
+        """Deliver the next durable queued prompt, if the session can run it.
+
+        Called from the turn-settle tail and the resume idle-tail. Atomically
+        pops one row and submits it; the follow-up's own settle re-invokes this,
+        so the queue drains one-per-turn in FIFO order. Only drains an IDLE
+        session with a live client -- if the process is dead, a later resume
+        drains instead, so a queued message is never lost to a dead process, and
+        pop-then-submit stays exactly-once (no loss, no dup).
+        """
+        if session.status != SessionStatus.IDLE:
+            return
+        if not (session.client and session.client.is_running):
+            return
+        row = self._db.pop_pending_prompt(session.session_id)
+        if row is None:
+            return
+        prompt = row["prompt"]
+        if session.event_log:
+            session.event_log.append("prompt_dequeued", {
+                "queue_id": row["id"],
+                "caller_id": row.get("caller_id"),
+            })
+        try:
+            await self.submit_prompt(session.session_id, prompt)
+        except Exception as exc:
+            # Defensive: an unexpected submit failure must not drop the message.
+            # Re-enqueue (at the tail -- a rare reorder is better than a loss);
+            # a later settle/resume retries delivery.
+            log.error(
+                "Dequeued prompt for session %s failed to submit: %s "
+                "-- re-enqueuing",
+                session.session_id, exc,
+            )
+            self._db.enqueue_prompt(
+                session.session_id, prompt, time.time(),
+                caller_id=row.get("caller_id"),
+            )
+
+    def _clear_pending_queue(self, session: Session, *, reason: str) -> int:
+        """Drop a session's whole durable queue; emit ``queue_cleared`` if any.
+
+        The shared teardown path for interrupt/end (and any future rollback):
+        mirrors NF's "queue cleared if cancelled, ended, or rolled" so queued
+        follow-ups never resurface against a session the operator tore down.
+        Returns how many rows were removed.
+        """
+        removed = self._db.clear_pending_prompts(session.session_id)
+        if removed and session.event_log:
+            session.event_log.append("queue_cleared", {
+                "removed": removed,
+                "reason": reason,
+            })
+        return removed
+
+    def list_pending_queue(self, session_id: str) -> list[dict[str, Any]]:
+        """Snapshot a session's durable queue in FIFO order (route/CLI read)."""
+        session_id = self._resolve_ref(session_id) or session_id
+        if session_id not in self._sessions:
+            raise KeyError(f"Session {session_id} not found")
+        return self._db.list_pending_prompts(session_id)
+
+    def remove_pending_prompt(self, session_id: str, queue_id: int) -> bool:
+        """Drop one queued prompt by id (operator drops a chip). True if hit."""
+        session_id = self._resolve_ref(session_id) or session_id
+        session = self._sessions.get(session_id)
+        if not session:
+            raise KeyError(f"Session {session_id} not found")
+        removed = self._db.remove_pending_prompt(session_id, queue_id)
+        if removed and session.event_log:
+            session.event_log.append("prompt_removed", {"queue_id": queue_id})
+        return removed
+
+    def clear_pending_queue(self, session_id: str) -> int:
+        """Clear a session's whole durable queue on operator request."""
+        session_id = self._resolve_ref(session_id) or session_id
+        session = self._sessions.get(session_id)
+        if not session:
+            raise KeyError(f"Session {session_id} not found")
+        return self._clear_pending_queue(session, reason="cleared")
+
     async def _run_prompt(
         self, session: Session, turn_index: int, prompt: str
     ) -> None:
@@ -2473,6 +2668,12 @@ class SessionManager:
         await self._notify_host_reapable(session)
 
         session.touch()
+
+        # Deliver the next durable queued follow-up now that the turn settled.
+        # One-per-turn FIFO: this drains a single row and submits it; that turn's
+        # own settle re-enters here for the next. Exactly-once (atomic pop), and
+        # a no-op when the queue is empty or the process has since died.
+        await self._drain_pending_prompts(session)
 
     def _handle_usage_update(
         self, session: Session, data: dict[str, Any]
@@ -2655,6 +2856,14 @@ class SessionManager:
             # Nothing live to interrupt -- return the session as-is.
             return session
 
+        # Operator explicitly cancelled this turn: retire its durable queue too,
+        # BEFORE the runner settles IDLE (whose tail would otherwise drain it).
+        # Auto-firing a batch of queued follow-ups right after a manual
+        # interrupt would surprise the operator -- mirror NF's "queue cleared if
+        # cancelled" (#4114). Cleared before the ACP cancel so the drain that
+        # runs on settle finds nothing.
+        self._clear_pending_queue(session, reason="interrupted")
+
         # Ask the agent to cancel the active turn (ACP session/cancel).
         if session.client is not None:
             with contextlib.suppress(Exception):
@@ -2791,6 +3000,8 @@ class SessionManager:
                 self._reap_host_record(rec, "session ended")
 
         session.status = SessionStatus.ENDED
+        with contextlib.suppress(Exception):
+            self._clear_pending_queue(session, reason="ended")
         with contextlib.suppress(Exception):
             self._db.update_session_status(
                 session_id, SessionStatus.ENDED.value, time.time()

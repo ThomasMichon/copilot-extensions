@@ -1318,3 +1318,88 @@ class TestBackgroundTaskTeardownGate:
         resp = client.get("/api/v1/sessions/bg-sess-1/status")
         assert resp.status_code == 200
         assert resp.json()["active_background_tasks"] == ["pr-daemon"]
+
+
+class TestPendingQueue:
+    """Durable send-or-queue routes (POST turns queue=true + queue CRUD, #4114)."""
+
+    def _seed_running(self, app, session_id: str = "s1") -> SessionManager:
+        import time as _t
+        mgr: SessionManager = app.state.session_manager
+        now = _t.time()
+        mgr.db.create_session(
+            session_id, "test", None, ".", "local", "running", now
+        )
+        target = SpawnTarget(type="local", cwd="/wt")
+        session = Session(session_id, "busy-brook", target, "test-agent")
+        session.status = SessionStatus.RUNNING
+        mgr._sessions[session_id] = session
+        return mgr
+
+    def test_queue_true_on_busy_returns_202_and_persists(self, client, app) -> None:
+        mgr = self._seed_running(app)
+        resp = client.post(
+            "/api/v1/sessions/s1/turns",
+            json={"prompt": "follow-up", "queue": True, "caller_id": "op"},
+        )
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["queued"] is True
+        assert body["queue_id"] is not None
+        assert body["position"] == 1
+        assert body["turn_index"] is None
+        # durably persisted
+        assert mgr.db.count_pending_prompts("s1") == 1
+
+    def test_default_busy_still_409(self, client, app) -> None:
+        """Without queue=true the legacy 409-on-busy contract is preserved."""
+        self._seed_running(app)
+        resp = client.post(
+            "/api/v1/sessions/s1/turns", json={"prompt": "follow-up"},
+        )
+        assert resp.status_code == 409
+
+    def test_get_queue_snapshot(self, client, app) -> None:
+        mgr = self._seed_running(app)
+        client.post(
+            "/api/v1/sessions/s1/turns",
+            json={"prompt": "one", "queue": True},
+        )
+        client.post(
+            "/api/v1/sessions/s1/turns",
+            json={"prompt": "two", "queue": True},
+        )
+        resp = client.get("/api/v1/sessions/s1/queue")
+        assert resp.status_code == 200
+        pending = resp.json()["pending"]
+        assert [p["prompt"] for p in pending] == ["one", "two"]
+
+    def test_delete_one_queued_prompt(self, client, app) -> None:
+        mgr = self._seed_running(app)
+        r = client.post(
+            "/api/v1/sessions/s1/turns",
+            json={"prompt": "drop me", "queue": True},
+        )
+        qid = r.json()["queue_id"]
+        resp = client.delete(f"/api/v1/sessions/s1/queue/{qid}")
+        assert resp.status_code == 204
+        assert mgr.db.count_pending_prompts("s1") == 0
+        # deleting again is a 404 miss
+        assert client.delete(f"/api/v1/sessions/s1/queue/{qid}").status_code == 404
+
+    def test_clear_whole_queue(self, client, app) -> None:
+        mgr = self._seed_running(app)
+        client.post(
+            "/api/v1/sessions/s1/turns", json={"prompt": "a", "queue": True},
+        )
+        client.post(
+            "/api/v1/sessions/s1/turns", json={"prompt": "b", "queue": True},
+        )
+        resp = client.delete("/api/v1/sessions/s1/queue")
+        assert resp.status_code == 204
+        assert mgr.db.count_pending_prompts("s1") == 0
+
+    def test_queue_routes_on_unknown_session_404(self, client) -> None:
+        assert client.get("/api/v1/sessions/nope/queue").status_code == 404
+        assert client.delete("/api/v1/sessions/nope/queue").status_code == 404
+        assert client.delete("/api/v1/sessions/nope/queue/1").status_code == 404

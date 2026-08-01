@@ -68,9 +68,14 @@ channels. It augments the ground layer with **granular, live state** and gives a
 agent the means to **call other agents**: create agents and worktrees, peer into
 another agent's status, send a message into an agent (whether one it controls or
 a peer), and get a sense of what others are doing — including answering *"is an
-agent already up and running to cover this worktree or repo?"*. The live state it
-surfaces is rich enough to bring **granular, live status into the worktree
-picker**.
+agent already up and running to cover this worktree or repo?"*. **A message sent
+into a busy agent is not lost or refused: it is durably queued in the
+coordination layer's own state and delivered — in order, exactly once — when the
+target next settles**, surviving the sender's remount, a UI's death, and a
+restart of the bridge or host on either side. Delivery is a property the fabric
+owns, not one each caller (a browser, a host CLI) must reinvent on top. The live
+state it surfaces is rich enough to bring **granular, live status into the
+worktree picker**.
 
 ### agent-ssh — the connectivity layer
 Owns the **SSH mesh** the fabric's cross-machine reach rides on. It
