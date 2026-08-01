@@ -186,6 +186,31 @@ class TestCreatePR:
         head = _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path)
         assert head == f"worktree/{wid}"
 
+    def test_untitled_derives_title_from_commit_subject(self, pr_repo):
+        """With no --title and an untitled record, create_pr derives the PR
+        title (and persists the worktree title) from the newest commit subject
+        instead of the opaque worktree_id -- so the worktree stops reading as
+        "(untitled)" and the PR gets a meaningful name."""
+        config, wid, _wt_path, _ = pr_repo
+        # Fixture's newest worktree commit is "work 2".
+        res = pr_ops.create_pr(wid, config)
+        assert res["success"] is True, res
+        # Branch slug comes from the derived title, not the worktree_id.
+        assert res["branch"] == "feature/work-2-aaaa"
+        assert wid not in res["branch"]
+        # The derived title is persisted onto the worktree record.
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec.title == "work 2"
+
+    def test_explicit_title_not_overridden_by_commit(self, pr_repo):
+        """An explicit --title always wins over the commit-subject fallback."""
+        config, wid, _wt_path, _ = pr_repo
+        res = pr_ops.create_pr(wid, config, title="Curated Title")
+        assert res["success"] is True, res
+        assert res["branch"] == "feature/curated-title-aaaa"
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec.title == "Curated Title"
+
 
 # ---------------------------------------------------------------------------
 # create_pr -- refspec head scheme (#1815)
