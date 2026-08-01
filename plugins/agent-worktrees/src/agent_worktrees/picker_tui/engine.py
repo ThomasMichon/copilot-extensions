@@ -410,16 +410,6 @@ def _resolve_mock_mode(explicit=None):
     return False
 
 
-def _nf_compose_enabled() -> bool:
-    """NF (#88): the compose/native path is the **default** (NF5). ``PickerScreen``
-    mounts its child segment/region widgets and native focus drives the picker.
-    Set ``AGENT_WORKTREES_PICKER_NF`` to a falsey value (``0``/``false``/``no``/
-    ``off``) to force the legacy monolithic ``render()`` path -- a temporary
-    rollback escape hatch until NF5-3 retires the monolith."""
-    val = os.environ.get("AGENT_WORKTREES_PICKER_NF", "1").strip().lower()
-    return val not in ("0", "false", "no", "off")
-
-
 class _PickerSegment(Widget):
     """One NF2 screen segment (or a row-slice of one) -- a leaf widget that
     renders its slice of ``PickerScreen._frame_segments()`` (#88 NF2/NF3).
@@ -636,10 +626,9 @@ class PickerScreen(Widget):
 
     def __init__(self, source, live=False, mock_mode=None):
         super().__init__()
-        # NF2 compose skeleton toggle (#88): when set, the screen mounts four
-        # child segment widgets instead of rendering as a single leaf. Read once
-        # here so it's stable for this screen's lifetime.
-        self._nf_enabled = _nf_compose_enabled()
+        # NF5 (#88): the native compose tree is the *sole display path* -- the
+        # env toggle and the render() fallback are retired. ``render()`` survives
+        # only as the deterministic capture seam (see ``compose``).
         # NF3 (#88): scroll offset for the compose tree's data body widget --
         # data-relative (indexes the scrolling data rows only, since the M/BTN
         # chrome is fixed above it), distinct from the monolith's ``top``.
@@ -967,13 +956,10 @@ class PickerScreen(Widget):
     def on_mount(self):
         self.setup()
         self.sel = self.default_sel()
-        if self._nf_enabled:
-            # NF3: focus the region widget that owns the default sel (deferred
-            # until the children are mounted). ``_nf_mounted`` stays False until
-            # then so the framework's mount-time auto-focus can't move sel.
-            self.call_after_refresh(self._nf_initial_focus)
-        else:
-            self.focus()
+        # NF: focus the region widget that owns the default sel (deferred until
+        # the children are mounted). ``_nf_mounted`` stays False until then so the
+        # framework's mount-time auto-focus can't move sel.
+        self.call_after_refresh(self._nf_initial_focus)
         # Update indicator (#1430): the launcher stages the marketplace update
         # in the background; the picker polls its status file to show a
         # spinner -> checkmark (current) / refresh (update available) next to
@@ -2087,8 +2073,6 @@ class PickerScreen(Widget):
         ``sel`` (the other half of the on_focus -> sel bridge), so Tab/arrow
         navigation through the manual model keeps the framework's focus in step
         (#88 NF3). Guarded so the resulting ``focus()`` can't recurse."""
-        if not self._nf_enabled:
-            return
         wid = self._widget_for_zone(self.sel[0])
         try:
             w = self.query_one(f"#{wid}")
@@ -2329,32 +2313,27 @@ class PickerScreen(Widget):
         return self._join_lines(lines, seg["W"])
 
     def compose(self) -> ComposeResult:
-        # NF2 compose skeleton (#88): when AGENT_WORKTREES_PICKER_NF is set, the
-        # screen becomes a *container* of four leaf segment widgets (header /
-        # chrome / body / footer), each emitting the identical lines from
-        # ``_frame_segments()`` -- the incremental replacement for the single
-        # ``render()`` leaf. Default OFF: yielding no children keeps PickerScreen
-        # a render-leaf, so ``render()``, the ``capture`` seams, the golden, and
-        # all 93 couplings are byte-identical and unaffected.
-        if self._nf_enabled:
-            # NF3 focusable-region compose tree: the title stays a passive view;
-            # the pivots, machine-scope, button, and data regions are real
-            # focusable widgets (native Tab moves between them, on_focus mirrors
-            # ``sel``). The body's machine-scope + button chrome renders fixed
-            # above the scrolling data region.
-            yield _PickerSegment(self, "header", slice(0, 1), id="nf-title")
-            yield _PickerPivots(self, id="nf-pivots")
-            yield _PickerSegment(self, "chrome", id="nf-chrome")
-            yield _PickerMachine(self, id="nf-machine")
-            yield _PickerButtons(self, id="nf-buttons")
-            yield _PickerBodyData(self, id="nf-body-data")
-            yield _PickerSegment(self, "footer", id="nf-footer")
+        # NF5 (#88): the native compose tree is the *sole display path*. The
+        # screen is a container of segment/region widgets -- a passive title +
+        # chrome + footer view, and the focusable pivots / machine-scope / button
+        # / data regions (native Tab moves between them; on_focus mirrors ``sel``;
+        # the machine + button chrome renders fixed above the scrolling data).
+        # ``render()`` is retained NOT as a display path but as the deterministic
+        # *capture* seam (capture.py, the golden, the picker-snapshot A/B tool,
+        # the picker vision's auditable-rendering); it and these widgets both
+        # derive from ``_frame_segments`` / ``_build_body_split``, so they cannot
+        # drift.
+        yield _PickerSegment(self, "header", slice(0, 1), id="nf-title")
+        yield _PickerPivots(self, id="nf-pivots")
+        yield _PickerSegment(self, "chrome", id="nf-chrome")
+        yield _PickerMachine(self, id="nf-machine")
+        yield _PickerButtons(self, id="nf-buttons")
+        yield _PickerBodyData(self, id="nf-body-data")
+        yield _PickerSegment(self, "footer", id="nf-footer")
 
     def _refresh_nf_segments(self) -> None:
-        """When the NF2 compose skeleton is live, propagate a state change to the
-        child segment widgets (their ``render()`` reads back off this screen)."""
-        if not getattr(self, "_nf_enabled", False):
-            return
+        """Propagate a screen state change to the child segment/region widgets
+        (their ``render()`` reads back off this screen)."""
         for seg_id in ("nf-title", "nf-pivots", "nf-chrome", "nf-machine",
                        "nf-buttons", "nf-body-data", "nf-footer"):
             try:
