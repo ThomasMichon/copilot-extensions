@@ -21,6 +21,7 @@ import pytest
 pytest.importorskip("textual", reason="textual not installed (optional TUI dep)")
 
 from agent_worktrees.picker_tui import derive, new_picker_enabled  # noqa: E402
+from agent_worktrees.picker_tui import capture as pcap  # noqa: E402
 from agent_worktrees.picker_tui.engine import (  # noqa: E402
     PickerApp,
     PickerScreen,
@@ -2557,7 +2558,7 @@ def test_tui_renders_local_worktrees():
         app = PickerApp(src, live=False)
         async with app.run_test(size=(118, 36)) as pilot:  # noqa: F841
             scr = app.query_one(PickerScreen)
-            out = str(scr.render())
+            out = pcap.screen_to_text(scr)
             assert "Agent Worktrees" in out
             # Canonical state vocabulary (aperture-labs #1290).
             assert "WIP" in out
@@ -2580,7 +2581,7 @@ def test_topbar_repo_branch_are_data_backed():
         app = PickerApp(src, live=False)
         async with app.run_test(size=(118, 36)) as pilot:  # noqa: F841
             scr = app.query_one(PickerScreen)
-            out = str(scr.render())
+            out = pcap.screen_to_text(scr)
             assert "copilot-extensions" in out
             assert "main" in out
             # The old hardcoded values must not leak in.
@@ -2599,7 +2600,7 @@ def test_topbar_drops_repo_branch_when_source_omits_them():
         app = PickerApp(src, live=False)
         async with app.run_test(size=(118, 36)) as pilot:  # noqa: F841
             scr = app.query_one(PickerScreen)
-            out = str(scr.render())
+            out = pcap.screen_to_text(scr)
             assert "Agent Worktrees" in out
             assert "aperture-labs" not in out
 
@@ -2682,7 +2683,7 @@ def test_tui_live_multi_machine():
             # Drive a render tick so live records stream in from the loader.
             scr._tick()
             await pilot.pause()
-            out = str(scr.render())
+            out = pcap.screen_to_text(scr)
             assert "Agent Worktrees" in out
             # Both ready machines' worktrees stream into the All view.
             assert "Local wip" in out
@@ -4388,7 +4389,7 @@ def test_registered_pivot_lists_and_navigates(tmp_path, monkeypatch):
             groups = dict((g, [i for i, _ in items]) for g, items in scr._task_groups())
             assert "wt-a" in groups
             # Body renders the task titles.
-            plain = scr.render().plain
+            plain = pcap.screen_to_text(scr)
             assert "First task" in plain
             assert "Second task" in plain
 
@@ -4449,8 +4450,8 @@ def test_tasks_view_component_renders_body(tmp_path, monkeypatch):
                 getattr(v, "stop", None) and v.stop[0] == "T"
                 and getattr(v, "pin_section", None) is not None
                 for v in vrows)
-            # Body renders the task titles (through the real render pipeline).
-            plain = scr.render().plain
+            # Body renders the task titles (through the composed display).
+            plain = pcap.screen_to_text(scr)
             assert "First task" in plain
             assert "Second task" in plain
 

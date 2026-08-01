@@ -1249,9 +1249,31 @@ path (the composed widgets are), but retained as the **capture** path. Display a
 capture both derive from `_frame_segments` / `_build_body_split`, so they cannot
 drift, and the golden still meaningfully guards that shared source. The `=0` opt-out
 test is replaced by `test_nf_compose_is_the_sole_path` (the tree always composes; the
-`_nf_enabled` attribute is gone). Full suite green (1674 passed). Remaining: **NF5-4**
--- let native region widgets own their keys and migrate tests off `sel`/`stops` as
-low-risk cleanup.
+`_nf_enabled` attribute is gone). Full suite green (1674 passed). Next: **NF5-4**
+migrates capture off `render()` so the monolith can be deleted for real.
 
+**NF5 slice 4 -- capture from the compositor; delete `render()`.** Slice 3 kept
+`render()` because the capture/audit stack rode on it. Slice 4 removes that last
+dependency: capture now sources the character grid from **Textual's live compositor**
+(the composed segment/region widget tree that actually paints), not a parallel
+whole-screen render. `capture.py` reads `scr.screen._compositor.render_strips()`,
+flattens the per-row strips into one newline-separated `Segment` stream, and feeds it
+to the *same* recording Rich `Console` as before -- so `text` / `ansi` / `svg` are
+byte-identical to the former `render()`-based seam (verified: ansi + svg identical,
+text differs only in blank-line trailing spaces that the golden's `_normalize`
+rstrips), and the `picker-snapshot` A/B tool is unaffected. Capturing what is
+*actually displayed* is also strictly more correct than a second renderer. With
+capture off `render()`, the last direct callers were six test sites (`str(scr.render())`
+/ `scr.render().plain` text dumps); those move to `capture.screen_to_text(scr)`, and
+**`PickerScreen.render()` is deleted**. The base `Widget.render()` blank layer sits
+harmlessly behind the children (which fill the screen), so the display is unchanged --
+proven by the golden staying byte-identical. `_frame_segments` / `_join_lines` /
+`_build_body_split` remain (the composed widgets derive from them). Full suite green
+(1686 passed). This completes the NF cutover: the native compose tree is the sole
+display path *and* the sole render path; the monolith is gone; the picker vision's
+auditable-rendering is preserved (now sourced from the real display). What remains is
+purely optional: excising the internal `sel`/`stops`/`_dispatch_key` model (which
+still works fine as the widgets' navigation backing) and migrating its ~100 tests --
+deferred as low-value churn under Strategy A.
 
 
