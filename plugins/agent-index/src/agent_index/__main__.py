@@ -84,6 +84,13 @@ def cmd_version(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_mcp(_args: argparse.Namespace) -> int:
+    from agent_index.mcp_app import serve_stdio
+
+    serve_stdio()
+    return 0
+
+
 def _routing_endpoint():
     try:
         from zdd.routing import read_active_endpoint
@@ -306,6 +313,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_status.set_defaults(func=cmd_status)
     p_version = sub.add_parser("version", help="print the running or local version")
     p_version.set_defaults(func=cmd_version)
+    p_mcp = sub.add_parser("mcp", help="run the discoverable MCP toolset over stdio")
+    p_mcp.set_defaults(func=cmd_mcp)
     p_stop = sub.add_parser("stop", help="stop the active service process")
     p_stop.set_defaults(func=cmd_stop)
 
