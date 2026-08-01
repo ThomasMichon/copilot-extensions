@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import sys
 from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
@@ -15,34 +13,18 @@ from .protocol import HTTP_PROTOCOL_MIN_SUPPORTED, HTTP_PROTOCOL_VERSION
 # -- Platform defaults -------------------------------------------------------
 
 
-def _is_wsl() -> bool:
-    """True when running as a WSL guest.
-
-    A WSL guest shares the Windows host's TCP port namespace, so it (and only
-    it) needs a distinct default port to avoid colliding with the host's own
-    daemon. Bare-metal Linux is **not** WSL and must not be treated as such --
-    the discriminator is "am I a WSL guest?", not "am I non-Windows?".
-    """
-    if sys.platform == "win32":
-        return False
-    if os.environ.get("WSL_DISTRO_NAME"):
-        return True
-    try:
-        with open("/proc/sys/kernel/osrelease", encoding="utf-8") as fh:
-            return "microsoft" in fh.read().lower()
-    except OSError:
-        return False
-
-
 def default_port() -> int:
-    """Return the platform-default listen port.
+    """The **legacy client-fallback** port constant (dotfiles #694).
 
-    A host exposes **9280**. Only a **WSL guest** -- which shares the Windows
-    host's TCP port namespace -- uses **9281**, to avoid colliding with the
-    host's own daemon. Bare-metal Linux (and macOS) are ordinary single-context
-    hosts on 9280.
+    No longer the daemon's *bind* default: a primary daemon now binds an
+    OS-assigned ephemeral port and advertises it through the routing table
+    (``active.json``), so nothing well-known is reserved. This constant survives
+    only as the client's **last-resort** fallback when no routing table exists
+    yet (e.g. talking to a not-yet-migrated daemon). The former WSL "+1" (9281)
+    is retired with the fixed bind -- an ephemeral bind cannot collide across the
+    Windows/WSL boundary, so both contexts share the single fallback.
     """
-    return 9281 if _is_wsl() else 9280
+    return 9280
 
 
 # -- Session status ----------------------------------------------------------
@@ -529,7 +511,11 @@ class ServiceConfig(BaseModel):
     # in sync with agent_bridge.config_migrations.CONFIG_VERSION.
     schema_version: int = 1
 
-    port: int = Field(default_factory=default_port)
+    # Port 0 is the "unset" sentinel: the daemon binds an OS-assigned ephemeral
+    # port and advertises it via active.json (dotfiles #694 -- no fixed 9280/9281
+    # reservation). A positive value pins a fixed port (config- or --port-set);
+    # clients still fall back to default_port() when no routing table exists.
+    port: int = 0
     bind: str = "127.0.0.1"
     db_path: str = "~/.agent-bridge/sessions.db"
     log_level: str = "info"

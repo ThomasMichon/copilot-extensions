@@ -118,10 +118,16 @@ bridge import, no resolver — agents invoke its binstub directly.
 
 ## Ports
 
+Steady-state, **a service adds zero fixed listening ports**: it binds an
+OS-assigned ephemeral port and advertises it through discovery, so the table
+below is a shrinking list of *legacy fixed* endpoints, not a contract to
+maintain (dotfiles #694).
+
 | Port | Owner | Purpose |
 |------|-------|---------|
-| **9280** (Windows) / **9281** (Linux/WSL) | agent-bridge | HTTP API the CLI talks to. Platform-split avoids a WSL2/Windows TCP collision. Use `agent-bridge status` to read the active port. |
-| **9857** | agent-codespaces credential relay | TCP server the CodeSpace reaches over an SSH reverse tunnel (`-R 9857`) to fetch git/GitHub/Azure credentials. Starts with the bridge service. |
+| **dynamic** (ephemeral) | agent-bridge daemon | HTTP API the CLI talks to. Binds an OS-assigned port and publishes it to the routing table (`active.json`); clients resolve it there — `agent-bridge status` reads the live port. The former fixed **9280/9281** (Windows/WSL) is retired as a default; a positive `port:` in `config.yaml` (or `--port`) still pins one, and `9280` remains only a last-resort client fallback. |
+| **9281** | agent-bridge elevated sub-daemon | Fixed loopback port for the Windows admin sub-daemon (`elevated.py` `ELEVATED_PORT`), reached via `acp-connect ws://127.0.0.1:9281/...`. Not yet migrated to discovery. |
+| **9857** | agent-codespaces credential relay | TCP server the CodeSpace reaches over an SSH reverse tunnel (`-R 9857`) to fetch git/GitHub/Azure credentials. Starts with the bridge service. Not yet migrated to discovery (the CodeSpace-side path already uses live-port discovery; the host bind still targets 9857). |
 
 ## Agent plugins vs harness plugins — and two senses of "harness"
 

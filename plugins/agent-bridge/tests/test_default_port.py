@@ -1,71 +1,33 @@
-"""Tests for the listen-port discriminator (`default_port` / `_is_wsl`).
+"""Tests for the legacy client-fallback port constant + the dynamic sentinel.
 
-The discriminator is "am I a WSL guest?" (a guest sharing the Windows host's TCP
-port namespace), **not** "am I non-Windows?" -- so bare-metal Linux is 9280, and
-only a WSL guest is 9281.
+After dotfiles #694, ``default_port()`` is no longer the daemon's *bind* default
+(a primary binds an OS-assigned ephemeral port advertised via ``active.json``).
+It survives only as the client's last-resort fallback, and the WSL "+1" (9281)
+is retired -- an ephemeral bind cannot collide across the Windows/WSL boundary,
+so both contexts share the single 9280 fallback. ``ServiceConfig.port`` defaults
+to the ``0`` sentinel meaning "unset -> bind dynamic".
 """
 
 from __future__ import annotations
 
-import builtins
-from io import StringIO
-
 import agent_bridge.models as models
+from agent_bridge.models import ServiceConfig
 
 
-def _patch(monkeypatch, *, platform, wsl_env=None, osrelease=""):
-    monkeypatch.setattr(models.sys, "platform", platform)
-    if wsl_env is None:
-        monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
-    else:
-        monkeypatch.setenv("WSL_DISTRO_NAME", wsl_env)
-
-    real_open = builtins.open
-
-    def fake_open(path, *args, **kwargs):
-        if str(path) == "/proc/sys/kernel/osrelease":
-            return StringIO(osrelease)
-        return real_open(path, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "open", fake_open)
-
-
-def test_windows_is_9280(monkeypatch):
-    _patch(monkeypatch, platform="win32")
-    assert models._is_wsl() is False
+def test_default_port_is_single_fallback_constant():
     assert models.default_port() == 9280
 
 
-def test_bare_metal_linux_is_9280(monkeypatch):
-    # A real Linux host (e.g. a Debian appliance) is an ordinary host on 9280.
-    _patch(monkeypatch, platform="linux", osrelease="5.15.0-25-generic\n")
-    assert models._is_wsl() is False
-    assert models.default_port() == 9280
+def test_wsl_plus_one_is_retired():
+    # _is_wsl and the platform split are gone; the fallback no longer branches.
+    assert not hasattr(models, "_is_wsl")
 
 
-def test_wsl_guest_via_env_is_9281(monkeypatch):
-    _patch(monkeypatch, platform="linux", wsl_env="Ubuntu",
-           osrelease="5.15.0-25-generic\n")
-    assert models._is_wsl() is True
-    assert models.default_port() == 9281
+def test_service_config_port_defaults_to_dynamic_sentinel():
+    # Port 0 signals "unset -> bind an OS-assigned ephemeral port".
+    assert ServiceConfig().port == 0
 
 
-def test_wsl_guest_via_osrelease_is_9281(monkeypatch):
-    # No env var (e.g. a systemd user service), but the kernel names WSL.
-    _patch(monkeypatch, platform="linux",
-           osrelease="5.15.153.1-microsoft-standard-WSL2\n")
-    assert models._is_wsl() is True
-    assert models.default_port() == 9281
+def test_service_config_pinned_port_round_trips():
+    assert ServiceConfig(port=9280).port == 9280
 
-
-def test_osrelease_unreadable_defaults_to_host(monkeypatch):
-    _patch(monkeypatch, platform="linux")
-
-    def boom(path, *args, **kwargs):
-        if str(path) == "/proc/sys/kernel/osrelease":
-            raise OSError("no /proc here")
-        return builtins.open(path, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "open", boom)
-    assert models._is_wsl() is False
-    assert models.default_port() == 9280

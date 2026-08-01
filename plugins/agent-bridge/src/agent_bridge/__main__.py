@@ -238,20 +238,24 @@ def _cmd_session_host_agent(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
-def _dynamic_bind_requested(explicit_port: bool) -> bool:
-    """True when the daemon should bind an OS-assigned ephemeral port.
+def _dynamic_bind_requested(cfg_port: int, explicit_port: bool) -> bool:
+    """Whether the daemon should bind an OS-assigned ephemeral port.
 
-    Opt-in via a truthy ``AGENT_BRIDGE_DYNAMIC_PORT`` and only when the operator
-    did not pin a port with ``--port`` -- an explicit pin always wins. This is
-    the dotfiles #694 dynamic-endpoint plumbing: it stays **off by default** so
-    the live daemon and the ZDD cutover protocol (which still assume a knowable
-    fixed port) are unchanged until the deferred live-cutover validation flips
-    the default to dynamic.
+    Dynamic bind is now the **default** (dotfiles #694): a primary daemon with no
+    pinned port binds ephemeral and advertises it via ``active.json``, so nothing
+    well-known (9280/9281) is reserved. A port is *pinned* -- and binds fixed --
+    when set via ``--port`` (``explicit_port``) or a positive ``port`` in
+    ``config.yaml`` (``cfg_port > 0``); an existing deployment that pins 9280
+    therefore keeps it until its config drops the port. ``AGENT_BRIDGE_DYNAMIC_PORT``
+    forces the decision either way (``0``/``false`` -> legacy fixed
+    ``default_port()`` for rollback; ``1``/``true`` -> dynamic even if pinned).
     """
-    if explicit_port:
+    env = os.environ.get("AGENT_BRIDGE_DYNAMIC_PORT", "").strip().lower()
+    if env in ("0", "false", "no", "off"):
         return False
-    val = os.environ.get("AGENT_BRIDGE_DYNAMIC_PORT", "").strip().lower()
-    return val in ("1", "true", "yes", "on")
+    if env in ("1", "true", "yes", "on"):
+        return True
+    return not (explicit_port or cfg_port > 0)
 
 
 def _bind_listen_socket(host: str, port: int) -> socket.socket:
@@ -361,33 +365,33 @@ def _cmd_start(args: argparse.Namespace) -> None:
     # orchestrator flips the table after a health check.
     app.state.publish_on_ready = not passive
 
-    # Dynamic-endpoint plumbing (dotfiles #694): when opt-in via
-    # AGENT_BRIDGE_DYNAMIC_PORT and no explicit --port pin, bind an OS-assigned
-    # ephemeral port instead of the fixed default (9280/9281). We pre-bind the
-    # listening socket ourselves so we can read the *actual* bound port back and
-    # advertise it in the routing table (active.json) before serving; clients
-    # already resolve the port from active.json, so an ephemeral daemon port is
-    # transparent to them. The DEFAULT path (flag unset) is unchanged: uvicorn
-    # binds cfg.port exactly as before -- so the live daemon + the ZDD cutover
-    # protocol (which still assumes a knowable port) are untouched until the
-    # deferred live-cutover validation flips the default. See the effort README.
-    dynamic_port = _dynamic_bind_requested(explicit_port)
+    # Dynamic-endpoint bind (dotfiles #694): a primary daemon with no pinned port
+    # binds an OS-assigned ephemeral port -- nothing well-known (9280/9281) is
+    # reserved -- and advertises the *actual* bound port via the routing table
+    # (active.json), which clients already resolve. We pre-bind the listening
+    # socket ourselves to read the bound port back before serving. A pinned port
+    # (--port, or a positive `port` in config.yaml) still binds fixed, so an
+    # existing deployment that pins 9280 is unchanged until its config drops the
+    # port; AGENT_BRIDGE_DYNAMIC_PORT=0 forces the legacy fixed default_port().
+    from .models import default_port
+
+    dynamic_port = _dynamic_bind_requested(cfg.port, explicit_port)
     listen_sock = None
-    bound_port = cfg.port
     if dynamic_port:
         try:
             listen_sock = _bind_listen_socket(cfg.bind, 0)
             bound_port = listen_sock.getsockname()[1]
         except OSError as exc:
             logging.getLogger("agent-bridge").warning(
-                "dynamic bind failed (%s); falling back to fixed port %s",
-                exc, cfg.port,
+                "dynamic bind failed (%s); falling back to fixed port", exc,
             )
             listen_sock = None
-            bound_port = cfg.port
-    # The port every downstream reader (routing-table publish, /status) should
-    # advertise -- the *actually bound* port, which equals cfg.port in the
-    # default (non-dynamic) path.
+    if listen_sock is None:
+        # Fixed bind: the pinned config/--port, or the legacy fallback when the
+        # port is the unset sentinel (0) but dynamic was forced off.
+        bound_port = cfg.port if cfg.port > 0 else default_port()
+    # The port every downstream reader (routing-table publish, /status) advertises
+    # -- the *actually bound* port (ephemeral or the pinned/fallback fixed port).
     app.state.bound_port = bound_port
 
     print(f"[agent-bridge] Starting on {cfg.bind}:{bound_port}")
@@ -399,7 +403,7 @@ def _cmd_start(args: argparse.Namespace) -> None:
     # Use an explicit Server (not uvicorn.run) so the idle-shutdown monitor in
     # the lifespan can request a graceful stop via server.should_exit. When we
     # pre-bound a socket (dynamic path) uvicorn serves it directly and ignores
-    # host/port; otherwise it binds host/port itself exactly as before.
+    # host/port; otherwise it binds host/bound_port itself.
     config_kwargs: dict[str, Any] = {
         "log_level": cfg.log_level,
         # Pure-Python WebSocket protocol (wsproto) for the ACP-over-WS
@@ -409,7 +413,7 @@ def _cmd_start(args: argparse.Namespace) -> None:
     }
     if listen_sock is None:
         config_kwargs["host"] = cfg.bind
-        config_kwargs["port"] = cfg.port
+        config_kwargs["port"] = bound_port
     config = uvicorn.Config(app, **config_kwargs)
     server = uvicorn.Server(config)
     app.state.uvicorn_server = server
@@ -571,7 +575,9 @@ def _service_port() -> int:
             import yaml
 
             data = yaml.safe_load(open(cfg_path, encoding="utf-8")) or {}
-            return int(data.get("port", default_port()))
+            # Port 0 (the dynamic sentinel) means "no fixed port" -> use the
+            # legacy fallback; the routing table is the real resolver (#694).
+            return int(data.get("port") or default_port())
         except Exception:
             pass
     return default_port()
