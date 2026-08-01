@@ -99,7 +99,13 @@ substrate for "is this already tracked?" and prior-art discovery.
 A **stable retrieval API** — meaning + lexical, with source/facet scoping and
 find-similar — that agents, tools, and other local services call directly. It is
 the plugin's public contract; presentation on top of it is a consumer's concern,
-not the engine's.
+not the engine's. Its **first-class, agent-facing form is a discoverable MCP
+toolset** (`search`, `find_similar`, `status`, `reindex`, `clusters`) so an agent
+finds semantic retrieval by tool discovery rather than by knowing an HTTP shape.
+The toolset is the stable *interface*; the *transport* that reaches the backing
+service is a per-consumer concern (direct local HTTP, an SSH-forwarded port, or a
+gateway URL) wired through a **configurable endpoint**, so the same toolset drops
+onto any consumer unchanged.
 
 ### The engine and product seam
 agent-index is intentionally an **engine, not an end-user product**. Its index
