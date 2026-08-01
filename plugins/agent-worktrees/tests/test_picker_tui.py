@@ -3716,30 +3716,30 @@ def test_escape_on_main_view_confirms_before_quit(monkeypatch):
     asyncio.run(run())
 
 
-def test_nf_compose_default_on_with_opt_out(monkeypatch):
-    """NF5 (#88): the compose/native path is now the **default**. With the env
-    unset PickerScreen composes its segment/region widgets; setting
-    ``AGENT_WORKTREES_PICKER_NF`` to a falsey value forces the legacy render()
-    monolith (the rollback escape hatch, until NF5-3 retires it)."""
+def test_nf_compose_is_the_sole_path(monkeypatch):
+    """NF5-3 (#88): the native compose tree is the *sole display path* -- the env
+    toggle (``AGENT_WORKTREES_PICKER_NF``) and the render() fallback are retired.
+    PickerScreen always composes its segment/region widgets, regardless of the
+    now-ignored env, and the ``_nf_enabled`` attribute is gone. (``render()``
+    survives only as the deterministic capture seam -- see capture.py.)"""
     from agent_worktrees.picker_tui.engine import _PickerSegment
     src = _fixture_source()
 
-    async def _mounts(expect_nf):
+    async def _composes():
         app = PickerApp(src, live=False)
         async with app.run_test(size=(118, 36)) as pilot:
             await pilot.pause()
             scr = app.query_one(PickerScreen)
-            assert scr._nf_enabled is expect_nf
-            # OFF -> render-leaf (no segment children); ON -> composed widgets.
-            assert (len(scr.query(_PickerSegment)) > 0) is expect_nf
+            assert not hasattr(scr, "_nf_enabled")   # toggle retired
+            assert len(scr.query(_PickerSegment)) > 0
 
-    # Default (env unset): native path ON.
+    # Env unset -> composed.
     monkeypatch.delenv("AGENT_WORKTREES_PICKER_NF", raising=False)
-    asyncio.run(_mounts(True))
-    # Explicit opt-out: legacy render() monolith.
-    for off in ("0", "false", "off", "no"):
-        monkeypatch.setenv("AGENT_WORKTREES_PICKER_NF", off)
-        asyncio.run(_mounts(False))
+    asyncio.run(_composes())
+    # The retired opt-out no longer forces the monolith: still composed.
+    for ignored in ("0", "false", "off", "no", "1"):
+        monkeypatch.setenv("AGENT_WORKTREES_PICKER_NF", ignored)
+        asyncio.run(_composes())
 
 
 def test_nf_compose_skeleton_mounts_identical_segments(monkeypatch):
@@ -3763,7 +3763,6 @@ def test_nf_compose_skeleton_mounts_identical_segments(monkeypatch):
         async with app.run_test(size=(118, 36)) as pilot:
             await pilot.pause()
             scr = app.query_one(PickerScreen)
-            assert scr._nf_enabled is True
             segs = {w.id: w for w in scr.query(_PickerSegment)}
             assert set(segs) == {"nf-title", "nf-chrome", "nf-footer"}
             machine = scr.query_one("#nf-machine", _PickerMachine)
@@ -3929,7 +3928,6 @@ def test_nf_maintenance_pivot_renders_under_toggle(monkeypatch):
             scr.sel = scr.default_sel()
             scr.refresh()
             await pilot.pause()
-            assert scr._nf_enabled is True
             assert scr._kind() == "maintenance"
             # The maintenance status counter (status_text -> _size_mb) renders.
             assert "MiB" in scr.status_text(False).plain

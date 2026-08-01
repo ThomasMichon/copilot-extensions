@@ -1201,8 +1201,9 @@ read `sel` and route keys through `_dispatch_key`) -- it is *not* toggle-gated. 
 no byte-identical-safe way to invert a shared model. The chosen path (Strategy A) is
 a **pragmatic cutover**: flip the default, keep `sel`/`stops`/`_dispatch_key` as the
 *internal* nav model the native widgets drive (so the ~100 `sel`/`stops`-reading
-tests keep passing -- no mass rewrite), retire the dead `render()` monolith + golden,
-then let native widgets own keys and migrate tests as low-risk follow-up cleanup.
+tests keep passing -- no mass rewrite), retire the env toggle + `render()` *display*
+fallback (keeping `render()` as the deterministic *capture* seam), then let native
+widgets own keys and migrate tests as low-risk follow-up cleanup.
 
 **NF5 slice 1 -- parity-harden the toggle-ON path.** Before flipping, the whole
 suite was run with `AGENT_WORKTREES_PICKER_NF=1` forced on -- simulating the
@@ -1231,8 +1232,26 @@ green. `test_nf_compose_skeleton_disabled_by_default` is replaced by
 `test_nf_compose_default_on_with_opt_out`, which asserts the default composes the
 widget tree and each falsey opt-out value forces the render-leaf. The `sel`/`stops`/
 `_dispatch_key` model remains as the internal navigation the native widgets drive, so
-the ~100 `sel`/`stops`-reading tests keep passing unchanged. Next: NF5-3 retires the
-now-dead `render()`/`_frame_segments` monolith + the byte-identical golden.
+the ~100 `sel`/`stops`-reading tests keep passing unchanged.
+
+**NF5 slice 3 -- retire the toggle; `render()` becomes the capture seam.** The env
+toggle and the OFF fallback are removed: `_nf_compose_enabled()` is gone,
+`PickerScreen._nf_enabled` is gone, `compose()` unconditionally yields the segment/
+region tree, and the `on_mount` / `_refresh_nf_segments` / `_sync_focus_to_sel`
+guards are dropped. **`render()` is deliberately NOT deleted** -- it is not dead
+code. It is the picker's *deterministic reference renderer*, on which the whole
+capture/audit stack rides: `capture.py`'s `screen_to_text` / `_ansi` / `_svg` -- and
+thus the golden tests, the `picker-snapshot` A/B tool, and the picker vision's
+`Features/auditable-testable-rendering` + `Behaviors/renderable-and-assertable-headless`
+-- all call `scr.render()`. Deleting it would break capture and regress a stated
+vision behaviour. So `render()` is *reframed*, not removed: no longer the **display**
+path (the composed widgets are), but retained as the **capture** path. Display and
+capture both derive from `_frame_segments` / `_build_body_split`, so they cannot
+drift, and the golden still meaningfully guards that shared source. The `=0` opt-out
+test is replaced by `test_nf_compose_is_the_sole_path` (the tree always composes; the
+`_nf_enabled` attribute is gone). Full suite green (1674 passed). Remaining: **NF5-4**
+-- let native region widgets own their keys and migrate tests off `sel`/`stops` as
+low-risk cleanup.
 
 
 
