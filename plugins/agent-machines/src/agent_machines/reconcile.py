@@ -22,6 +22,7 @@ from typing import Any
 from . import modules as _modules
 from .discover import current_platform
 from .manifest import RequirementPackage, resolve_for_machine
+from .surfaces import SurfaceResult, apply_surfaces
 
 
 @dataclass
@@ -102,11 +103,15 @@ def plan_to_dict(p: Plan) -> dict[str, Any]:
 
 @dataclass
 class RestoreResult:
-    """The outcome of a restore: the plan plus each module's result."""
+    """The outcome of a restore: the plan, surface results, and module results."""
 
     plan: Plan
+    surface_results: list[SurfaceResult] = field(default_factory=list)
     module_results: list[_modules.ModuleResult] = field(default_factory=list)
-    surfaces_applied: bool = False
+
+    @property
+    def surfaces_applied(self) -> bool:
+        return any(s.changed and not s.dry_run for s in self.surface_results)
 
     @property
     def ok(self) -> bool:
@@ -118,16 +123,17 @@ def restore(
     machine: str,
     dry_run: bool = True,
     plat: str | None = None,
+    home: Any = None,
 ) -> RestoreResult:
     """Converge ``machine`` to the package union.
 
-    Runs the repo-local **modules** (the sensitive OS-mutating work, which lives
-    in each harness repo) -- respecting the dry-run safety rule. The Copilot
-    **surfaces** apply (settings/permissions/trustedFolders) is delivered by the
-    ``surfaces`` package (issue #4006) and is currently a no-op placeholder.
+    Applies the implemented Copilot **surfaces** (settings.json, by disposition,
+    backup-before-write) and runs the repo-local **modules** (the sensitive
+    OS-mutating work), both honoring the dry-run safety rules.
     """
     plat = plat or current_platform()
     p = plan(packages, machine, plat)
     resolved = resolve_union(packages, machine)
+    surfaces = apply_surfaces(resolved, home=home, dry_run=dry_run)
     results = _modules.run_modules(resolved, machine, plat, dry_run=dry_run)
-    return RestoreResult(plan=p, module_results=results, surfaces_applied=False)
+    return RestoreResult(plan=p, surface_results=surfaces, module_results=results)

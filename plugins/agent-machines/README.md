@@ -65,10 +65,11 @@ framework: each section becomes a declared module.
 
 ## Status
 
-Engine core (discover / manifest + layering / locations / validator / plan) and
-the **repo-local module runner** are in place. The mutating Copilot-settings
-surface handlers (`copilot.settings` / `permissions` / `trustedFolders`) and the
-`capture` / `prune` verbs are the next slice.
+Engine core (discover / manifest + layering / locations / validator / plan), the
+**repo-local module runner**, and the **`copilot.settings` surface apply**
+(enforce scalars + ensure-present union, backup-before-write, dry-run) are in
+place. The `copilot.permissions` / `copilot.trustedFolders` surfaces (their
+location-class model) and the `capture` / `prune` verbs are the next slice.
 
 ## Install
 
