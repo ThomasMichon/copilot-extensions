@@ -32,6 +32,7 @@ Plugins, one marketplace. Install what you need; they compose.
 | [context-handoff](plugins/context-handoff/) | Extension + skill | Watch the context window via a session extension and, before it fills, compose a continuation prompt so a fresh session can resume the work. Payload-only — no runtime to install. |
 | [agent-dispatch](plugins/agent-dispatch/) | Task queue + coordinator | Coordinate multiple agents through a single-writer leased task queue (atomic claim, capability routing, lease recovery) instead of racing through `origin/master` pushes. Per-host coordinator, CLI, and MCP tools. |
 | [agent-index](plugins/agent-index/) | Index/search service | Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem. Phase 1 ships the service shell; indexing and retrieval arrive in later slices. |
+| [agent-machines](plugins/agent-machines/) | Machine-state reconciler | Portable restore-machinestate — converge a machine to desired state declared in in-repo requirement packages (Copilot settings first). Machine-scoped union restore, a seven-disposition model, and a detect-not-arbitrate conflict validator. The engine is generic; sensitive OS-mutating modules stay repo-local. |
 | [agent-vault](plugins/agent-vault/) | CLI + service | Local KeePassXC-backed secret store — a machine-local service caches the master password with a TTL and auto-prompts on lock; a CLI fetches API keys, SSH keys, and credentials on demand without hardcoding, committing, or env-exporting them. Ships a SUDO_ASKPASS helper for `sudo -A`. |
 | [customizing-copilot](plugins/customizing-copilot/) | Customizing the CLI | Teach an agent how to customize and extend the Copilot CLI — authoring skills, defining sub-agents, registering MCP servers, installing plugins, building a control-harness, reviewing customizations, and authoring `<repo>-harness` plugins. Seven focused skills. Payload-only — no runtime to install. |
 | [copilot-extensions-harness](plugins/copilot-extensions-harness/) | Operator harness | The portable, owner-authored skills to work *on* this suite — **contribute** changes and **diagnose** the deployed runtimes. Enable it in any control repo instead of hand-writing a per-repo narrative. Reference implementation of the `<repo>-harness` standard. Payload-only. |
@@ -43,7 +44,7 @@ All support **Windows** and **Linux/WSL** (macOS planned).
 
 ## Architecture at a glance
 
-Sixteen plugins, one marketplace. **Ten ship a runtime** (a `uv`-built venv under
+Seventeen plugins, one marketplace. **Eleven ship a runtime** (a `uv`-built venv under
 `~/.agent-*` + a `~/.local/bin` binstub, deployed by the plugin's own
 installer); **six are payload-only** — `efforts` (skills), `visions` (skills),
 `context-handoff` (a session extension), `customizing-copilot` (skills),
@@ -161,7 +162,7 @@ copilot plugin install customizing-copilot@copilot-extensions # optional — how
 ```
 
 Each `copilot plugin install` only vendors the plugin's **payload** (source,
-skills, hooks, extensions). The ten runtime plugins (every plugin except the
+skills, hooks, extensions). The eleven runtime plugins (every plugin except the
 payload-only `efforts`, `visions`, `context-handoff`, `customizing-copilot`,
 `copilot-extensions-harness`, and `wsl-setup`) then need their runtime deployed once — that's Step 2,
 which runs each installer to build a `uv` venv under `~/.agent-*` and drop a
