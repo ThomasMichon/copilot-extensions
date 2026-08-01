@@ -4218,7 +4218,7 @@ class SubMenuScreen(ModalScreen[tuple]):
     SubMenuScreen OptionList:focus { background-tint: $surface 0%; }
     SubMenuScreen OptionList > .option-list--option-highlighted,
     SubMenuScreen OptionList:focus > .option-list--option-highlighted {
-        background: $surface; color: $text; text-style: bold reverse;
+        background: #ffaf00; color: black; text-style: bold;
     }
     SubMenuScreen #sub-desc { color: grey; height: auto; padding: 1 0 0 0; }
     """
@@ -4449,19 +4449,19 @@ class ScopeDlgScreen(ModalScreen[bool]):
         height: auto; border: none; background: $surface; padding: 0;
     }
     ScopeDlgScreen SelectionList > .option-list--option-highlighted {
-        background: $surface; color: $text; text-style: bold reverse;
+        background: #ffaf00; color: black; text-style: bold;
     }
     ScopeDlgScreen SelectionList > .selection-list--button {
         background: $surface; color: #5f5f5f;
     }
     ScopeDlgScreen SelectionList > .selection-list--button-highlighted {
-        background: $surface; color: #5f5f5f;
+        background: #ffaf00; color: black;
     }
     ScopeDlgScreen SelectionList > .selection-list--button-selected {
         background: $surface; color: green;
     }
     ScopeDlgScreen SelectionList > .selection-list--button-selected-highlighted {
-        background: $surface; color: green;
+        background: #ffaf00; color: black;
     }
     ScopeDlgScreen #scope-prompt { height: auto; padding: 0 0 1 0; }
     ScopeDlgScreen #scope-impact { height: auto; padding: 1 0 0 0; }
@@ -4582,7 +4582,7 @@ class CfgMenuScreen(ModalScreen[int]):
     CfgMenuScreen OptionList:focus { background-tint: $surface 0%; }
     CfgMenuScreen OptionList > .option-list--option-highlighted,
     CfgMenuScreen OptionList:focus > .option-list--option-highlighted {
-        background: $surface; color: $text; text-style: bold reverse;
+        background: #ffaf00; color: black; text-style: bold;
     }
     CfgMenuScreen #cfg-hint { color: grey; height: auto; padding: 1 0 0 0; }
     """
@@ -4645,7 +4645,7 @@ class MaintMenuScreen(ModalScreen[int]):
     MaintMenuScreen OptionList:focus { background-tint: $surface 0%; }
     MaintMenuScreen OptionList > .option-list--option-highlighted,
     MaintMenuScreen OptionList:focus > .option-list--option-highlighted {
-        background: $surface; color: $text; text-style: bold reverse;
+        background: #ffaf00; color: black; text-style: bold;
     }
     MaintMenuScreen #maint-desc { color: grey; height: auto; padding: 1 0 0 0; }
     """
