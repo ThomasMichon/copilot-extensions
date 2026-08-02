@@ -734,11 +734,10 @@ def test_start_stop_filters_live_and_arms(monkeypatch):
     asyncio.run(run())
 
 
-def test_worktrees_checkbox_only_in_multiselect_mode():
-    """The selection checkbox gutter is hidden during ordinary single-select
-    navigation (visual pollution) and only appears once the operator is in a
-    multi-select state: a diverged single selection, or multiple selected
-    (#2258 follow-up)."""
+def test_worktrees_checkbox_always_shown():
+    """NF5-5 (#88): the per-row checkbox glyph is *always* shown (a
+    mouse-discoverable multi-select affordance) -- ``☑`` for selected rows and
+    ``☐`` otherwise -- rather than hidden until a multi-select set is held."""
     src = _maint_source()
 
     async def run():
@@ -751,36 +750,32 @@ def test_worktrees_checkbox_only_in_multiselect_mode():
             if len(recs) < 2:
                 return
 
-            def firstchars():
+            def boxes():
                 out = {}
                 for v in scr.build_body(118):
                     stop = getattr(v, "stop", None)
                     if stop and stop[0] == "L":
-                        out[v.data["id4"]] = v.text.plain[0]
+                        c = v.text.plain[0]
+                        if c in "☐☑":
+                            out[v.data["id4"]] = c
                 return out
 
-            def boxes():
-                return {k: c for k, c in firstchars().items() if c in "☐☑"}
-
-            # Nothing selected -> no checkbox gutter (leading char is not a box).
+            # Nothing selected -> every row still shows an (empty) checkbox.
             scr.sel = ("L", 0)
             scr.wt_sel.clear()
-            assert not boxes()
+            b = boxes()
+            assert len(b) == len(recs)
+            assert all(c == "☐" for c in b.values())
 
-            # Single selection tracking focus -> still no gutter.
-            scr.wt_sel.replace({recs[0]["id4"]})
-            scr.sel = ("L", 0)
-            assert not boxes()
-
-            # Focus diverges from the single selection (e.g. after Ctrl+Arrow)
-            # -> the gutter appears; the selected row shows ☑, others ☐.
+            # Select one -> that row shows ☑, the rest ☐.
             target = recs[0]["id4"]
+            scr.wt_sel.replace({target})
             scr.sel = ("L", 1)
             b = boxes()
             assert b.get(target) == "☑"
             assert all(b[k] == "☐" for k in b if k != target)
 
-            # Multiple selected -> gutter shown even with focus on a selected row.
+            # Multiple selected -> multiple ☑, still with focus on a selected row.
             scr.wt_sel.replace({recs[0]["id4"], recs[1]["id4"]})
             scr.sel = ("L", 0)
             b = boxes()
@@ -1111,10 +1106,10 @@ def test_machine_rotate_clears_and_resets_selection():
     asyncio.run(run())
 
 
-def test_worktrees_gutter_reserved_when_checkbox_hidden():
-    """#2258 follow-up: the 2-cell checkbox gutter stays reserved even when the
-    box glyph is hidden, so the table columns never shift when multi-select mode
-    toggles."""
+def test_worktrees_gutter_always_shows_checkbox():
+    """NF5-5 (#88): the 2-cell checkbox gutter always shows the box glyph (☐/☑)
+    at the start of each row, with a 1-space margin, and the columns stay aligned
+    whether or not the row is selected (no shift when toggling)."""
     src = _maint_source()
 
     async def run():
@@ -1134,18 +1129,19 @@ def test_worktrees_gutter_reserved_when_checkbox_hidden():
                         return v.text.plain
                 return ""
 
-            # Single-select (box hidden): the gutter is blank but reserved.
-            scr.sel = ("L", 0)
-            scr.wt_sel.replace({recs[0]["id4"]})
-            hidden = first_l_row()
-            assert hidden[:2] == "  "        # two-cell blank gutter
+            # Unselected: ☐ + margin.
+            scr.sel = ("L", 1)
+            scr.wt_sel.clear()
+            unsel = first_l_row()
+            assert unsel[0] == "☐"
+            assert unsel[1] == " "
 
-            # Multi-select (box shown): glyph in the gutter, columns unshifted.
-            scr.wt_sel.replace({recs[0]["id4"], recs[1]["id4"]})
+            # Selected: ☑ + margin, columns unshifted.
+            scr.wt_sel.replace({recs[0]["id4"]})
             shown = first_l_row()
-            assert shown[0] in "☐☑"
+            assert shown[0] == "☑"
             assert shown[1] == " "
-            assert shown[2:] == hidden[2:]   # identical columns -> no shift
+            assert shown[2:] == unsel[2:]   # identical columns -> no shift
 
     asyncio.run(run())
 
