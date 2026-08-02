@@ -3984,6 +3984,51 @@ def test_native_list_body_mounts_and_navigates(monkeypatch):
     asyncio.run(run())
 
 
+def test_native_list_multiselect_and_activation(monkeypatch):
+    """NF5-5 (#88): under the native OptionList body, the manual model still owns
+    multi-select + activation (routed through on_key for non-navigation keys):
+    Space toggles the focused row's multi-select, Shift+Down range-selects, and
+    Enter activates the row (opens its submenu)."""
+    from agent_worktrees.picker_tui.engine import SubMenuScreen
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "1")
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            nl = scr.query_one("#nf-body-data")
+            for _ in range(len(scr.region_heads()) + 1):
+                await pilot.press("tab")
+                await pilot.pause()
+                if app.focused is nl:
+                    break
+            assert scr.sel[0] == "L"
+            assert not scr.wt_sel
+            # Space toggles the focused row into the multi-select set.
+            await pilot.press("space")
+            await pilot.pause()
+            assert len(scr.wt_sel) == 1
+            # Shift+Down extends the range.
+            await pilot.press("shift+down")
+            await pilot.pause()
+            assert len(scr.wt_sel) == 2
+            # Enter activates the (single) focused row -> submenu.
+            scr.wt_sel.clear()
+            scr.sel = ("L", 0)
+            scr.refresh()
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert any(isinstance(s, SubMenuScreen) for s in app.screen_stack)
+
+    asyncio.run(run())
+
+
 def test_native_list_disabled_by_default():
     """NF5-5 (#88): the native OptionList body is opt-in -- without the env var,
     the data body stays the text-line `_PickerBodyData`."""

@@ -1322,6 +1322,10 @@ sized yet) and never rebuilt at the real width, so the full-width section rules 
 rebuilding `on_resize`. With that, native-ON and text-line-OFF render byte-for-byte
 the same grid (the cursor style differs -- amber vs reverse -- but that is style, not
 characters). The parity harness is the operator's requested guard: every later
-native-list slice re-runs it, so the swap stays a true drop-in.
+native-list slice re-runs it, so the swap stays a true drop-in. Multi-select
+(Space toggle, Shift+Down range) and activation (Enter -> submenu) work under the
+native list unchanged -- they route through the manual model via `on_key`, and the
+gutter renders in byte-identical parity (`test_native_list_multiselect_and_activation`,
+`test_native_list_multiselect_grid_parity`).
 
 
