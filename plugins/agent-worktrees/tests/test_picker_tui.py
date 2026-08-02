@@ -4045,6 +4045,32 @@ def test_native_list_disabled_by_default():
     asyncio.run(run())
 
 
+def test_native_list_maintenance_grid_parity(monkeypatch):
+    """NF5-5 (#88): the native list holds byte-identical grid parity on the
+    Maintenance pivot too (group sections + the select-all/data-row structure),
+    not just Worktrees -- both bodies derive from the same `_build_data_vrows`
+    source, so the swap stays a drop-in across pivots."""
+    from agent_worktrees.picker_tui import capture as _pcap
+
+    async def to_maint(scr, pilot):
+        scr.machine_idx = scr.local_index()
+        scr.htab = scr.htabs.index("Maintenance")
+        scr.sel = scr.default_sel()
+        scr.refresh()
+        await pilot.pause()
+
+    def grid(native):
+        if native:
+            monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "1")
+        else:
+            monkeypatch.delenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", raising=False)
+        lines = _pcap.capture(_maint_source(), live=False, size=(118, 30),
+                              prepare=to_maint)["text"].split("\n")
+        return [ln.rstrip() for ln in lines[1:]]   # drop the volatile topbar
+
+    assert grid(True) == grid(False)
+
+
 def test_build_body_split_recomposes_monolith():
     """NF3 (#88): _build_body_split's chrome + data rows recompose build_body
     byte-for-byte for every pivot -- the untangle is a pure decomposition, so the
