@@ -4121,6 +4121,49 @@ def test_native_list_sticky_header(monkeypatch):
     asyncio.run(run())
 
 
+def test_native_list_checkbox_click_toggles(monkeypatch):
+    """NF5-5 (#88): clicking the checkbox gutter (first cells) of a native-list
+    row toggles its multi-select *without* activating it; clicking the row body
+    activates (opens the submenu). The mouse multi-select the always-visible
+    checkbox affords."""
+    from agent_worktrees.picker_tui.engine import SubMenuScreen
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "1")
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            nl = scr.query_one("#nf-body-data")
+            li_opt = next(i for i, s in enumerate(nl._stops)
+                          if s and s[0] == "L")
+
+            def sub():
+                return any(isinstance(s, SubMenuScreen)
+                           for s in app.screen_stack)
+
+            # Gutter click toggles multi-select on, no activation.
+            await pilot.click(nl, offset=(0, li_opt))
+            await pilot.pause()
+            assert len(scr.wt_sel) == 1
+            assert not sub()
+            # Second gutter click toggles it back off, still no activation.
+            await pilot.click(nl, offset=(0, li_opt))
+            await pilot.pause()
+            assert len(scr.wt_sel) == 0
+            assert not sub()
+            # A click on the row body activates it.
+            await pilot.click(nl, offset=(14, li_opt))
+            await pilot.pause()
+            assert sub()
+
+    asyncio.run(run())
+
+
 def test_build_body_split_recomposes_monolith():
     """NF3 (#88): _build_body_split's chrome + data rows recompose build_body
     byte-for-byte for every pivot -- the untangle is a pure decomposition, so the

@@ -1337,6 +1337,6 @@ section's header while its own row is off-screen, tracked from the OptionList's
 hidden at the top, so the unscrolled grid parity is unchanged. The other deliberate
 native behaviours to weigh at the flip: single-click **activates**
 (native select) vs the text body's select-then-double-click, and arrow-up from the
-top data row stays in the list (Tab reaches the chrome) rather than crossing up. Per-row **checkboxes are now always shown** (`WorktreesView.build_data` no longer hides the glyph until multi-select is active) -- with mouse support the box is a discoverable, clickable multi-select affordance at rest; the golden was regenerated and parity holds (both bodies share `build_data`).
+top data row stays in the list (Tab reaches the chrome) rather than crossing up. Per-row **checkboxes are now always shown** (`WorktreesView.build_data` no longer hides the glyph until multi-select is active) -- with mouse support the box is a discoverable, clickable multi-select affordance at rest; the golden was regenerated and parity holds (both bodies share `build_data`). In the native list those checkboxes are also **clickable** (#88 NF5-5): a mouse press in the 2-cell gutter toggles that row's multi-select (`_on_mouse_down`) and suppresses the ensuing activation, while a click on the row body activates -- so single-click still opens a row, and the gutter is the mouse multi-select affordance (`test_native_list_checkbox_click_toggles`).
 
 
