@@ -8290,6 +8290,15 @@ def cmd_get(args: argparse.Namespace) -> int:
             print(f"{k:16s}  {desc}")
         return 0
 
+    # #4098 binding-first: activate the scoped bare-resume session binding BEFORE
+    # load_config, so a session launched with cwd=HOME (bare resume) still
+    # resolves its project from the AGENT_WORKTREES_BIND_* env the launcher set,
+    # rather than failing or defaulting. Best-effort: no binding -> no-op.
+    session_id = getattr(args, "session_id", None)
+    session_wt_id = None
+    if session_id:
+        session_wt_id = _activate_session_binding(session_id)
+
     try:
         config = cfg.load_config()
     except Exception as e:
@@ -8301,6 +8310,17 @@ def cmd_get(args: argparse.Namespace) -> int:
     # Current worktree root: resolve purely from CWD (git-like), via the dev107
     # resolver. Empty when the caller is at the anchor or outside any worktree.
     wt_id = _infer_worktree_id_from_cwd(config)
+    # Binding-first fallback: cwd is HOME under bare resume, so cwd inference
+    # finds nothing even though the session IS bound to a worktree. Resolve it
+    # from the session id -- the scoped binding first, then the session->worktree
+    # registry (now that a project is active) -- authoritative, not a cwd guess.
+    if not wt_id and session_id:
+        if not session_wt_id:
+            try:
+                session_wt_id = tracking.find_worktree_id_by_session(session_id)
+            except Exception:
+                session_wt_id = None
+        wt_id = session_wt_id
     current_worktree = str(Path(repo.worktree_root) / wt_id) if wt_id else ""
 
     values = {
@@ -10868,6 +10888,10 @@ def build_parser() -> argparse.ArgumentParser:
     # get (query project paths and config values)
     p = sub.add_parser("get", help="Query project paths and config values")
     p.add_argument("key", help="Key to query (use 'keys' to list available keys)")
+    p.add_argument("--session-id", dest="session_id", default=None,
+                   help="Resolve worktree-scoped keys (worktree-dir) from this "
+                        "session when cwd is HOME (bare resume) -- binding-first, "
+                        "not cwd inference")
 
     # services -- dispatched pre-argparse (see cmd_services_dispatch)
     # Stub entry for --help visibility only

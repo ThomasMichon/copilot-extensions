@@ -197,10 +197,15 @@ function runCli(bin, args, opts = {}) {
   return execFileSync(bin, args, { cwd, timeout, encoding: "utf-8" });
 }
 
-// Resolve an agent-worktrees identity value for the current CWD (null on miss).
-function agentWorktreesGet(key, cwd) {
+// Resolve an agent-worktrees identity value (null on miss). Resolves from the
+// current CWD; when a sessionId is given it is passed as a binding-first
+// fallback so a bare-resumed session (cwd=HOME) still resolves its worktree from
+// the session->worktree binding rather than the (HOME) cwd. See #4098.
+function agentWorktreesGet(key, cwd, sessionId) {
   try {
-    const out = runCli("agent-worktrees", ["get", key], {
+    const argv = ["get", key];
+    if (sessionId) argv.push("--session-id", sessionId);
+    const out = runCli("agent-worktrees", argv, {
       cwd,
       timeout: 5000,
     }).trim();
@@ -293,7 +298,7 @@ function retireCutoverPane(cwd, pane) {
 function concludeOldSessionHandedOff(cwd, sid) {
   if (!sid) return false;
   try {
-    const wtDir = agentWorktreesGet("worktree-dir", cwd);
+    const wtDir = agentWorktreesGet("worktree-dir", cwd, sid);
     const worktree = wtDir ? basename(wtDir) : null;
     if (!worktree) return false;
     runCli("agent-worktrees", [
@@ -315,8 +320,8 @@ function dispatchHandoff(promptText, sid, cwd, title) {
   const tmp = join(tmpdir(), `handoff-${sid}.md`);
   try {
     writeFileSync(tmp, promptText, "utf-8");
-    const machine = agentWorktreesGet("machine", cwd);
-    const wtDir = agentWorktreesGet("worktree-dir", cwd);
+    const machine = agentWorktreesGet("machine", cwd, sid);
+    const wtDir = agentWorktreesGet("worktree-dir", cwd, sid);
     const worktree = wtDir ? basename(wtDir) : null;
     // A handoff must land in *its own* worktree; if we can't resolve one, bail
     // to the file flow rather than file an unpinned, anyone-can-claim task.
@@ -906,7 +911,11 @@ const session = await joinSession({
 
         // Prefer an agent-dispatch handoff task pinned to this worktree.
         if (agentDispatchAvailable()) {
-          const wtDir = agentWorktreesGet("worktree-dir", cwd);
+          // Binding-first (#4098): pass the real session id (not the "unknown"
+          // sentinel) so a bare-resumed session (cwd=HOME) still resolves its
+          // worktree from the session binding.
+          const bindSid = sid && sid !== "unknown" ? sid : null;
+          const wtDir = agentWorktreesGet("worktree-dir", cwd, bindSid);
           const worktree = wtDir ? basename(wtDir) : null;
           if (worktree) {
             const task = findHandoffTask(cwd, worktree);

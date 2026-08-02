@@ -306,6 +306,60 @@ def test_get_worktree_dir_empty_outside_repo(adopted_repo, active_myproj, monkey
     assert out == ""
 
 
+def test_get_worktree_dir_binding_first_from_session(
+    adopted_repo, active_myproj, monkeypatch, tmp_path, capsys,
+):
+    """#4098 binding-first: cwd is outside any worktree (HOME under bare resume),
+    but --session-id resolves the worktree from the session->worktree registry."""
+    _anchor, _wt_root, wt_path, wt_id, _conf = adopted_repo
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.chdir(home)
+    # No scoped binding env in this test -> falls through to the registry scan.
+    monkeypatch.setattr(m, "_activate_session_binding", lambda sid: None)
+    monkeypatch.setattr(
+        m.tracking, "find_worktree_id_by_session",
+        lambda sid: wt_id if sid == "sess-1" else None)
+    rc = m.cmd_get(types.SimpleNamespace(key="worktree-dir", session_id="sess-1"))
+    out = capsys.readouterr().out.strip()
+    assert rc == 0
+    assert Path(out).resolve() == wt_path.resolve()
+
+
+def test_get_worktree_dir_scoped_binding_preferred(
+    adopted_repo, active_myproj, monkeypatch, tmp_path, capsys,
+):
+    """The scoped bare-resume binding wins before the registry scan runs."""
+    _anchor, _wt_root, wt_path, wt_id, _conf = adopted_repo
+    home = tmp_path / "home2"
+    home.mkdir()
+    monkeypatch.chdir(home)
+    monkeypatch.setattr(m, "_activate_session_binding", lambda sid: wt_id)
+
+    def _boom(sid):  # pragma: no cover - must not run when binding resolves
+        raise AssertionError("registry scan should not run")
+    monkeypatch.setattr(m.tracking, "find_worktree_id_by_session", _boom)
+    rc = m.cmd_get(types.SimpleNamespace(key="worktree-dir", session_id="sess-1"))
+    out = capsys.readouterr().out.strip()
+    assert rc == 0
+    assert Path(out).resolve() == wt_path.resolve()
+
+
+def test_get_worktree_dir_session_unresolvable_stays_empty(
+    adopted_repo, active_myproj, monkeypatch, tmp_path, capsys,
+):
+    """A --session-id that resolves no worktree leaves worktree-dir empty (no
+    guess), same as without the flag."""
+    home = tmp_path / "home3"
+    home.mkdir()
+    monkeypatch.chdir(home)
+    monkeypatch.setattr(m, "_activate_session_binding", lambda sid: None)
+    monkeypatch.setattr(m.tracking, "find_worktree_id_by_session",
+                        lambda sid: None)
+    rc = m.cmd_get(types.SimpleNamespace(key="worktree-dir", session_id="ghost"))
+    assert capsys.readouterr().out.strip() == "" and rc == 0
+
+
 def test_get_worktrees_root_is_parent(adopted_repo, active_myproj, monkeypatch, capsys):
     """`get worktrees-root` yields the parent dir that holds all worktrees --
     the OLD meaning of `worktree-dir` -- regardless of CWD."""
