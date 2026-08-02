@@ -119,7 +119,10 @@ class TestRemoteHelpers:
         cmd = claimant._remote_probe_cmd("bash", "aperture-labs",
                                          "m/aperture-labs/wt-A")
         assert cmd.startswith("bash -lc '")
-        assert "agent-worktrees claimant-liveness m/aperture-labs/wt-A --json" in cmd
+        assert "aperture-labs claimant-liveness m/aperture-labs/wt-A --json" in cmd
+        # The verb routes via the project binstub directly (no 'agent-worktrees'
+        # prefix, which the project binstub does not accept).
+        assert "agent-worktrees claimant-liveness" not in cmd
 
     def test_remote_probe_cmd_pwsh_encoded(self):
         import base64
@@ -128,7 +131,7 @@ class TestRemoteHelpers:
         assert "-EncodedCommand" in cmd
         b64 = cmd.rsplit(" ", 1)[1]
         decoded = base64.b64decode(b64).decode("utf-16-le")
-        assert "claimant-liveness m/aperture-labs/wt-A --json" in decoded
+        assert "aperture-labs claimant-liveness m/aperture-labs/wt-A --json" in decoded
 
     def test_remote_no_machine_or_project_none(self):
         assert claimant._remote_claimant_alive(None, "p", "ref") is None

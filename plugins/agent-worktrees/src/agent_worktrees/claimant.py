@@ -161,7 +161,7 @@ def _remote_probe_cmd(shell: str, project: str, owner_ref: str) -> str:
     for the remote shell (pwsh EncodedCommand on Windows -- robust against a
     cmd.exe default sshd shell; ``bash -lc`` elsewhere).
     """
-    inner = f"{project} agent-worktrees claimant-liveness {owner_ref} --json"
+    inner = f"{project} claimant-liveness {owner_ref} --json"
     if shell == "pwsh":
         enc = base64.b64encode(inner.encode("utf-16-le")).decode("ascii")
         return f"pwsh -NoProfile -WindowStyle Hidden -EncodedCommand {enc}"
