@@ -2546,6 +2546,82 @@ def _cmd_resume(args: argparse.Namespace) -> None:
     print(f"[OK] Worktree {target} {verb} as owned session {sid} ({status})")
 
 
+def _cmd_handoff(args: argparse.Namespace) -> None:
+    """Hand a session (or worktree) off to a fresh successor in place.
+
+    The positional accepts either a bridge-owned **ACP session id** or a
+    **worktree handle** (mirroring ``resume``): a session id is handed off
+    directly; a worktree handle resolves to that worktree's current session.
+    The retiring session authors a continuation brief, a successor is spawned
+    in the same worktree, a ``session_handoff`` event announces the changeover,
+    and the successor resumes seeded with the brief.
+    """
+    from .client import BridgeClientError, BridgeConnectionError
+
+    client = _get_client()
+    target = args.session_id
+    reason = getattr(args, "reason", None)
+    seed = not getattr(args, "no_seed", False)
+
+    def _report(result: dict, kind: str) -> None:
+        sid = result.get("session_id", "") or "(unknown)"
+        status = result.get("status", "")
+        print(
+            f"[OK] {kind} {target} handed off -> successor {sid} ({status})"
+        )
+
+    # 1. Try a bridge-owned-session handoff first. A worktree handle is not an
+    #    owned session id, so this 404s and we fall through.
+    try:
+        result = client.handoff_session(target, reason=reason, seed=seed)
+        _report(result, "Session")
+        return
+    except BridgeClientError as exc:
+        if exc.status == 404:
+            pass  # not an owned session; try worktree resolution below.
+        elif exc.status == 409:
+            print(f"[FAIL] Cannot hand off {target}: {exc.detail}", file=sys.stderr)
+            sys.exit(1)
+        else:
+            print(
+                f"[FAIL] Could not hand off session {target}: {exc.detail}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+    except BridgeConnectionError:
+        print(
+            f"[FAIL] agent-bridge is not reachable; could not hand off {target}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # 2. Treat the target as a worktree handle.
+    try:
+        result = client.handoff_worktree(target, reason=reason, seed=seed)
+    except BridgeClientError as exc:
+        if exc.status == 404:
+            print(
+                f"[FAIL] {target} is neither a bridge-owned session nor a "
+                "worktree with a current session to hand off.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if exc.status == 409:
+            print(f"[FAIL] Cannot hand off worktree {target}: {exc.detail}",
+                  file=sys.stderr)
+            sys.exit(1)
+        print(f"[FAIL] Could not hand off worktree {target}: {exc.detail}",
+              file=sys.stderr)
+        sys.exit(1)
+    except BridgeConnectionError:
+        print(
+            f"[FAIL] agent-bridge is not reachable; could not hand off {target}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    _report(result, "Worktree")
+
+
 def _cmd_session_usage(args: argparse.Namespace) -> None:
     """Show context window usage for a session."""
     client = _get_client()
@@ -3190,6 +3266,30 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     resume_p.set_defaults(func=_cmd_resume)
+
+    handoff_p = sub.add_parser(
+        "handoff",
+        help="Retire a session/worktree and continue in a fresh successor "
+             "in place",
+    )
+    handoff_p.add_argument(
+        "session_id",
+        metavar="target",
+        help="Session ID (owned ACP session) or worktree handle to hand off",
+    )
+    handoff_p.add_argument(
+        "--reason",
+        default=None,
+        help="Free-form reason carried on the session_handoff event "
+             "(default: context-pressure)",
+    )
+    handoff_p.add_argument(
+        "--no-seed",
+        action="store_true",
+        help="Do not seed the successor's opening turn with the brief "
+             "(the caller drives it instead)",
+    )
+    handoff_p.set_defaults(func=_cmd_handoff)
 
     usage_p = sub.add_parser(
         "session-usage", help="Show context window usage for a session"

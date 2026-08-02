@@ -789,6 +789,43 @@ async def resume_session(session_id: str, request: Request):
     return _session_info(session)
 
 
+@router.post("/{session_id}/handoff", response_model=SessionInfo)
+async def handoff_session(
+    session_id: str,
+    request: Request,
+    reason: str | None = None,
+    seed: bool = True,
+):
+    """Hand a hosted session off to a fresh successor in the SAME worktree.
+
+    The in-place, bridge-native analogue of the interactive context handoff:
+    the retiring child authors a continuation brief, a successor is spawned in
+    the same worktree/agent/caller, a ``session_handoff`` event announces the
+    changeover on both event streams, the successor is seeded with the brief,
+    and the predecessor is retired (STOPPED, resumable). Returns the
+    **successor** session so a caller can follow the baton in place.
+
+    ``reason`` is an optional free-form label carried on the event (defaults to
+    ``context-pressure``). ``seed=false`` skips seeding the successor's opening
+    turn (the caller drives it instead).
+
+    Errors: 404 (no such session), 409 (single-checkout agent or mid-turn),
+    502 (successor failed to spawn -- predecessor retained), 503 (draining).
+    """
+    mgr: SessionManager = request.app.state.session_manager
+    try:
+        successor = await mgr.handoff_session(session_id, reason=reason, seed=seed)
+    except DaemonDrainingError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return _session_info(successor)
+
+
 @router.delete("/{session_id}", status_code=204)
 async def end_session(session_id: str, request: Request, force: bool = False):
     mgr: SessionManager = request.app.state.session_manager

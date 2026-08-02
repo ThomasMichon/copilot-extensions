@@ -789,6 +789,49 @@ async def resume_worktree(
         return _session_info(fresh)
 
 
+@router.post("/api/v1/worktrees/{worktree_id}/handoff", response_model=SessionInfo)
+async def handoff_worktree(
+    worktree_id: str, request: Request, reason: str | None = None, seed: bool = True
+) -> SessionInfo:
+    """Hand a worktree's current session off to a fresh successor in place.
+
+    Worktree-level convenience verb -- the mobile-friendly path: a UI consumer
+    that only knows the worktree handle (no session id, and no ``/new`` or
+    ``/clear`` affordance) can request an in-place changeover. Resolves the
+    worktree's current (most-recently-updated) session and hands it off; the
+    returned successor is the worktree's new current session, so a consumer
+    following the worktree follows the baton automatically.
+
+    Errors: 404 (no session for the worktree), 409 (single-checkout agent or
+    mid-turn), 502 (successor failed to spawn -- predecessor retained), 503
+    (draining).
+    """
+    from .sessions import _session_info
+
+    mgr = getattr(request.app.state, "session_manager", None)
+    session = _latest_session_for_worktree(mgr, worktree_id)
+    if session is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No session found for worktree {worktree_id}",
+        )
+    try:
+        successor = await mgr.handoff_session(
+            session.session_id, reason=reason, seed=seed
+        )
+    except DaemonDrainingError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except KeyError:
+        raise HTTPException(
+            status_code=404, detail=f"Session {session.session_id} not found"
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return _session_info(successor)
+
+
 # -- Session reading (worktree-scoped) ----------------------------------------
 
 

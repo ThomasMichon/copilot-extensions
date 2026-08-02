@@ -130,6 +130,15 @@ class StreamRenderer:
             out = self._close_open() + self._reset_thinking()
             msg = data.get("message", "Unknown error")
             return out + f"\n[FAIL] {msg}\n"
+        if event_type == "session_handoff":
+            out = self._close_open() + self._reset_thinking()
+            rolled_to = data.get("rolled_to", "")
+            reason = data.get("reason", "")
+            tail = f" ({reason})" if reason else ""
+            return out + (
+                f"\n[~] Session handed off -> {rolled_to}{tail}; "
+                "continuing in place.\n"
+            )
         # session_state_changed, usage_update, session_info, permission_* are
         # not part of the default feed -- the streaming engine consumes them.
         return ""
