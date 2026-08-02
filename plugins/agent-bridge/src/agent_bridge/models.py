@@ -460,6 +460,31 @@ class ContextThresholds(BaseModel):
     critical: int = 90
 
 
+class AutoHandoffPolicy(BaseModel):
+    """Opt-in policy for context-pressure-driven in-place handoff.
+
+    A hosted session that fills its own context window is, absent this policy,
+    a dead end: the daemon *warns* "consider handoff" at the critical threshold
+    but can never act. When ``enabled``, that same threshold instead rolls the
+    worktree in place -- retire the saturated child, spawn a seeded successor,
+    announce the changeover -- so long-running work survives the ceiling.
+
+    Off by default: this is the fail-safe boundary the vision requires
+    (`context-pressure-drives-handoff`). Absent an explicit opt-in, context
+    pressure changes nothing.
+    """
+
+    enabled: bool = False
+    unwatched_only: bool = Field(
+        default=True,
+        description="Only fire the *proactive* (usage-driven) handoff for a "
+        "session with no attached watcher (zero event subscribers), so a human "
+        "streaming the session is never rolled out from under. A prompt "
+        "submitted into a saturated session always hands off first regardless "
+        "-- the sender is explicitly asking for the next turn (the phone case).",
+    )
+
+
 class PhasedTimeouts(BaseModel):
     """Separate timeouts (seconds) for the distinct phases of a ``send``.
 
@@ -559,6 +584,7 @@ class ServiceConfig(BaseModel):
     log_level: str = "info"
     topologies: dict[str, TopologyProfile] = Field(default_factory=dict)
     context_thresholds: ContextThresholds = Field(default_factory=ContextThresholds)
+    auto_handoff: AutoHandoffPolicy = Field(default_factory=AutoHandoffPolicy)
     timeouts: PhasedTimeouts = Field(default_factory=PhasedTimeouts)
     retention: RetentionConfig = Field(default_factory=RetentionConfig)
     worktree_discovery_interval: float = Field(
