@@ -181,14 +181,32 @@ custom-instruction files and auto-loads them. Reference docs with backtick code
 spans (`` `docs/tools.md` ``), not `[text](path)` links, so Copilot reads files
 on demand instead of loading them into every session.
 
-**Build `AGENTS.md` as a waypoint, not a manual.** The root `AGENTS.md` is the
-first thing an agent reads on entering a repo -- including an agent arriving from
-*another* repo (see the **`working-cross-repo`** skill). Keep it a lean **map**:
-orient the reader and link out (backtick faux-links) to the detailed homes --
-`docs/`, `visions/`, `CONTRIBUTING.md`, the connective-tissue skills -- rather
-than inlining the substance. A repo that greets agents with a navigable
-`AGENTS.md` is one they can work in without crawling it or balking at its size,
-so factor detail *out* into the linked files and let `AGENTS.md` point the way.
+**Build `AGENTS.md` as a waypoint, not a dumping ground.** The root `AGENTS.md`
+is the first thing an agent reads on entering a repo -- including one arriving
+from *another* repo (see the **`working-cross-repo`** skill) -- so it should read
+as a **map**: orient the reader and link out (backtick faux-links) to the
+detailed homes (`docs/`, `visions/`, `CONTRIBUTING.md`, the connective-tissue
+skills) rather than inlining reference detail that has a home elsewhere.
+
+**What stays inline vs links out depends on the repo's *purpose*** -- `AGENTS.md`
+is the always-on instruction file, so keep what the session genuinely needs
+*every turn* and link the rest:
+
+- A **control harness** (the agent *is* the operator) legitimately keeps its
+  **ambient guidance inline** -- persona/voice, safety discipline, standing
+  procedure -- because that must apply on every turn (see *Action-sequence vs
+  ambient-guidance skills* above). Such an `AGENTS.md` is part manual *and* map;
+  it still faux-links *reference* material (tool indexes, per-service docs)
+  instead of pasting it.
+- A **product / library / marketplace** repo (the agent is a *contributor*, not
+  a persona) carries little always-on guidance, so its `AGENTS.md` is a
+  mostly-navigational contributor guide -- a lean map with a few contribution
+  invariants.
+
+The shared failure mode is an `AGENTS.md` bloated with *reference* detail agents
+must crawl, or that auto-loads the tree every session. Factor *reference* detail
+out; keep *ambient* guidance in -- and don't gut a harness's persona/procedure in
+the name of "keeping it lean."
 
 ## Hooks
 
