@@ -507,3 +507,27 @@ def test_run_verb_single_string_form():
 def test_run_registered_in_command_map():
     assert m.COMMAND_MAP["run"] is m.cmd_run
     assert m._WORKTREE_VERBS.get("run") == "run"
+
+
+def test_claimant_liveness_parser_and_registration():
+    args = m.build_parser().parse_args(
+        ["claimant-liveness", "lambda-core/aperture-labs/wt-A#s1", "--json"])
+    assert args.command == "claimant-liveness"
+    assert args.owner_ref == "lambda-core/aperture-labs/wt-A#s1"
+    assert args.json is True
+    assert m.COMMAND_MAP["claimant-liveness"] is m.cmd_claimant_liveness
+    assert m._WORKTREE_VERBS.get("claimant-liveness") == "claimant-liveness"
+
+
+def test_claimant_liveness_json_output(monkeypatch, capfd):
+    import argparse
+
+    monkeypatch.setattr(m.claimant_mod, "local_claimant_alive",
+                        lambda ref: False)
+    rc = m.cmd_claimant_liveness(argparse.Namespace(
+        owner_ref="borealis/aperture-labs/wt-A", json=True))
+    assert rc == 0
+    import json as _json
+    out = _json.loads(capfd.readouterr().out)
+    assert out["alive"] is False
+    assert out["owner_ref"] == "borealis/aperture-labs/wt-A"
