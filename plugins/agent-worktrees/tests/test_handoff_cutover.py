@@ -181,8 +181,8 @@ class TestMuxRetirePane:
 
 # â”€â”€ cmd_handoff_cutover control flow â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def _ns(**kw):
-    base = dict(seed=None, worktree_id=None, old_pane=None, retire_pane=None,
-                dry_run=False, copilot_args=[], recovery=False)
+    base = dict(seed=None, worktree_id=None, session_id=None, old_pane=None,
+                retire_pane=None, dry_run=False, copilot_args=[], recovery=False)
     base.update(kw)
     return argparse.Namespace(**base)
 
@@ -214,6 +214,54 @@ class TestCmdHandoffCutover:
         rc = m.cmd_handoff_cutover(_ns(seed="go"))
         assert rc == 2
         assert "could not resolve" in capfd.readouterr().out
+
+    def test_spawn_bare_resume_resolves_worktree_from_session_id(
+        self, monkeypatch, capfd,
+    ):
+        """#4098: cwd is HOME (inference returns None), but the resumed session
+        id resolves the worktree authoritatively via the registry -- so the
+        cutover proceeds instead of failing with exit 2."""
+        monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: None)
+        monkeypatch.setattr(m, "_activate_session_binding", lambda sid: None)
+        monkeypatch.setattr(
+            m.tracking, "find_worktree_id_by_session",
+            lambda sid: "wtBARE" if sid == "sess-xyz" else None)
+        # Proceed far enough to prove the worktree resolved: a no-mux check now
+        # keys off the SESSION-resolved id, so exit 3 (not 2) proves resolution.
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
+        rc = m.cmd_handoff_cutover(_ns(seed="go", session_id="sess-xyz"))
+        out = capfd.readouterr().out
+        assert rc == 3
+        assert "wt-wtBARE" in out and "not under mux" in out
+
+    def test_spawn_bare_resume_prefers_scoped_binding(self, monkeypatch, capfd):
+        """The scoped bare-resume binding (AGENT_WORKTREES_BIND_*) wins as the
+        first authoritative fallback before the registry scan."""
+        monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: None)
+        monkeypatch.setattr(m, "_activate_session_binding",
+                            lambda sid: "wtBOUND")
+        # Registry scan must NOT be needed when the binding resolves.
+        def _boom(sid):  # pragma: no cover - must not be called
+            raise AssertionError("registry scan should not run")
+        monkeypatch.setattr(m.tracking, "find_worktree_id_by_session", _boom)
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
+        rc = m.cmd_handoff_cutover(_ns(seed="go", session_id="sess-xyz"))
+        out = capfd.readouterr().out
+        assert rc == 3 and "wt-wtBOUND" in out
+
+    def test_spawn_session_id_unresolvable_still_exits_2(
+        self, monkeypatch, capfd,
+    ):
+        """When neither cwd nor the session id resolves a worktree, still exit 2
+        -- and the message mentions the --session-id fallback."""
+        monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: None)
+        monkeypatch.setattr(m, "_activate_session_binding", lambda sid: None)
+        monkeypatch.setattr(m.tracking, "find_worktree_id_by_session",
+                            lambda sid: None)
+        rc = m.cmd_handoff_cutover(_ns(seed="go", session_id="ghost"))
+        out = capfd.readouterr().out
+        assert rc == 2
+        assert "could not resolve" in out and "session-id" in out
 
     def test_spawn_dry_run_reports_plan_and_old_pane(
         self, monkeypatch, capfd, tmp_path,
