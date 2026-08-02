@@ -414,15 +414,14 @@ def _resolve_mock_mode(explicit=None):
 
 
 def _native_list_enabled() -> bool:
-    """NF5-5 (#88): opt-in swappable *native* OptionList data body. When
-    ``AGENT_WORKTREES_PICKER_NATIVE_LIST`` is truthy, the pivot's data rows are
-    composed as a real Textual ``OptionList`` (native focus/cursor/scroll/click)
-    instead of the text-line ``_PickerBodyData`` painted from the manual ``sel``
-    cursor. Default OFF -- the text-line body stays authoritative until the
-    native list is soaked and validated, then this flips (the same swap-behind-a-
-    toggle playbook NF1-NF5 used)."""
-    val = os.environ.get("AGENT_WORKTREES_PICKER_NATIVE_LIST", "0").strip().lower()
-    return val not in ("", "0", "false", "no", "off")
+    """NF5-5 (#88): the native ``OptionList`` data body is now the **default**.
+    ``PickerScreen`` composes ``_PickerNativeData`` (native focus/cursor/scroll/
+    click, sticky section header, clickable checkbox gutter) for the data region.
+    Set ``AGENT_WORKTREES_PICKER_NATIVE_LIST`` to a falsey value
+    (``0``/``false``/``no``/``off``) to force the legacy text-line
+    ``_PickerBodyData`` -- a temporary rollback escape hatch until it is retired."""
+    val = os.environ.get("AGENT_WORKTREES_PICKER_NATIVE_LIST", "1").strip().lower()
+    return val not in ("0", "false", "no", "off")
 
 
 class _PickerSegment(Widget):
@@ -687,11 +686,20 @@ class _PickerNativeData(OptionList):
     def _signature(self):
         scr = self._screen
         wt = tuple(sorted(scr.wt_sel.ids)) if hasattr(scr, "wt_sel") else ()
+        kind = scr._kind()
+        # A cheap per-pivot data-size probe so the options rebuild when the
+        # active pivot's rows change (tasks load, maintenance candidates), not
+        # only when the worktrees list does.
         try:
-            nrows = len(scr.list_records())
+            if kind == "registered":
+                nrows = len(scr._task_rows())
+            elif kind == "maintenance":
+                nrows = len(scr.maint_records())
+            else:
+                nrows = len(scr.list_records())
         except Exception:
             nrows = -1
-        return (scr._kind(), scr.htab, scr.machine_idx, nrows, wt,
+        return (kind, scr.htab, scr.machine_idx, nrows, wt,
                 getattr(scr, "pulse", 0), getattr(scr, "update_state", None),
                 scr.size.width)
 
@@ -809,6 +817,12 @@ class _PickerNativeData(OptionList):
         if self._syncing:
             return
         scr = self._screen
+        # Only honor a highlight change when this list actually holds focus -- a
+        # highlight re-emitted while a modal is up or focus is elsewhere (e.g.
+        # right after a programmatic ``sel`` set) must not clobber ``sel``.
+        if scr.app.focused is not self:
+            self._update_sticky()
+            return
         i = event.option_index
         stop = self._stops[i] if 0 <= i < len(self._stops) else None
         if stop is not None and scr.sel != stop:

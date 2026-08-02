@@ -3746,7 +3746,7 @@ def test_nf_compose_skeleton_mounts_identical_segments(monkeypatch):
     byte-identical to ``render()``."""
     from agent_worktrees.picker_tui.engine import (
         _PickerBodyData, _PickerButtons, _PickerMachine, _PickerSegment)
-    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NF", "1")
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "0")
     src = _fixture_source()
 
     def _rstrip_blank(lines):
@@ -3827,7 +3827,7 @@ def test_nf_pointer_click_selects_data_row(monkeypatch):
     """NF4 (#88): clicking a data row in the compose tree points sel at that row
     (pointer parity the manual model never had), and focuses the data region."""
     from agent_worktrees.picker_tui.engine import _PickerBodyData
-    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NF", "1")
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "0")
     src = _fixture_source()
 
     async def run():
@@ -3863,7 +3863,7 @@ def test_nf_pointer_double_click_opens_row(monkeypatch):
     """NF4 (#88): double-clicking a worktree row activates it (opens the submenu)
     -- the pointer parallel to Enter."""
     from agent_worktrees.picker_tui.engine import _PickerBodyData, SubMenuScreen
-    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NF", "1")
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "0")
     src = _fixture_source()
 
     async def run():
@@ -3912,7 +3912,7 @@ def test_nf_maintenance_pivot_renders_under_toggle(monkeypatch):
     path that the flip makes the default. Guards the ``_size_mb`` hardening end
     to end (the fixture uses non-hex ids)."""
     from agent_worktrees.picker_tui.engine import _PickerBodyData
-    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NF", "1")
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "0")
     src = _maint_source()
 
     async def run():
@@ -4025,20 +4025,30 @@ def test_native_list_multiselect_and_activation(monkeypatch):
     asyncio.run(run())
 
 
-def test_native_list_disabled_by_default():
-    """NF5-5 (#88): the native OptionList body is opt-in -- without the env var,
-    the data body stays the text-line `_PickerBodyData`."""
-    from agent_worktrees.picker_tui.engine import _PickerBodyData
+def test_native_list_default_with_opt_out(monkeypatch):
+    """NF5-5 (#88): the native OptionList body is now the **default**; setting
+    ``AGENT_WORKTREES_PICKER_NATIVE_LIST`` to a falsey value opts back to the
+    text-line ``_PickerBodyData`` (the rollback hatch)."""
+    from agent_worktrees.picker_tui.engine import (
+        _PickerBodyData, _PickerNativeData)
     src = _fixture_source()
 
-    async def run():
+    async def _body_is(native):
         app = PickerApp(src, live=False)
         async with app.run_test(size=(118, 24)) as pilot:
             await pilot.pause()
             scr = app.query_one(PickerScreen)
-            assert isinstance(scr.query_one("#nf-body-data"), _PickerBodyData)
+            w = scr.query_one("#nf-body-data")
+            assert isinstance(
+                w, _PickerNativeData if native else _PickerBodyData)
 
-    asyncio.run(run())
+    # Default (env unset): native list.
+    monkeypatch.delenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", raising=False)
+    asyncio.run(_body_is(True))
+    # Opt-out: legacy text-line body.
+    for off in ("0", "false", "off", "no"):
+        monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", off)
+        asyncio.run(_body_is(False))
 
 
 def test_native_list_maintenance_grid_parity(monkeypatch):
@@ -4603,6 +4613,7 @@ def test_registered_pivot_lists_and_navigates(tmp_path, monkeypatch):
             _seed_fake_tasks(scr, rows)
             scr.htab = scr.htabs.index("Tasks")
             scr.sel = scr.default_sel()
+            scr.refresh()
             await pilot.pause()
 
             assert scr._task_rows() == rows
@@ -4654,6 +4665,7 @@ def test_tasks_view_component_renders_body(tmp_path, monkeypatch):
             _seed_fake_tasks(scr, rows)
             scr.htab = scr.htabs.index("Tasks")
             scr.sel = scr.default_sel()
+            scr.refresh()
             await pilot.pause()
 
             # (a) The component exists; the inline row-render helpers moved off

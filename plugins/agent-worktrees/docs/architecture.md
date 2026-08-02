@@ -1339,4 +1339,20 @@ native behaviours to weigh at the flip: single-click **activates**
 (native select) vs the text body's select-then-double-click, and arrow-up from the
 top data row stays in the list (Tab reaches the chrome) rather than crossing up. Per-row **checkboxes are now always shown** (`WorktreesView.build_data` no longer hides the glyph until multi-select is active) -- with mouse support the box is a discoverable, clickable multi-select affordance at rest; the golden was regenerated and parity holds (both bodies share `build_data`). In the native list those checkboxes are also **clickable** (#88 NF5-5): a mouse press in the 2-cell gutter toggles that row's multi-select (`_on_mouse_down`) and suppresses the ensuing activation, while a click on the row body activates -- so single-click still opens a row, and the gutter is the mouse multi-select affordance (`test_native_list_checkbox_click_toggles`).
 
+**NF5-5 flip -- native list is the default.** `_native_list_enabled()` now defaults
+**ON**: `PickerScreen` composes `_PickerNativeData` (native focus/cursor/scroll/click,
+sticky section header, clickable checkbox gutter) for the data region unless
+`AGENT_WORKTREES_PICKER_NATIVE_LIST` is falsey (the rollback hatch -> the legacy
+text-line `_PickerBodyData`). Because the native list was built to byte-identical grid
+parity, the flip is seamless: the full suite is green in the default (native) mode
+(1719). The forced-ON parity run surfaced the exact test migration -- eight tests: the
+text-line-specific NF3/NF4/compose tests pin `NATIVE_LIST=0` (they still validate the
+opt-out body), the tasks/registered tests gained an explicit `refresh()` (the native
+list rebuilds on refresh, where the text-line body always re-rendered) and the rebuild
+signature became pivot-aware (tasks/maintenance row counts), the "disabled by default"
+test became `test_native_list_default_with_opt_out`, and `on_option_list_option_highlighted`
+now ignores highlight events fired while the list isn't focused (so a modal close can't
+clobber a programmatic `sel`). The text-line body remains as the opt-out until it is
+retired.
+
 
