@@ -1073,13 +1073,30 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
         return _json_error("handoff-cutover requires --seed (or --retire-pane)")
 
     raw_id = getattr(args, "worktree_id", None)
+    session_id = getattr(args, "session_id", None)
     if raw_id:
         wt_id = _resolve_worktree_id(raw_id)
     else:
         wt_id = _infer_worktree_id_from_cwd()
+        # Bare-resume authoritative fallback (#4098): under a two-step "Bare
+        # resume" the pane's cwd is HOME (to dodge the worktree-cwd start bug),
+        # so cwd inference finds no worktree even though the session IS inside
+        # its wt-<id> mux. Resolve the worktree from the session id instead --
+        # the registry maps the resumed session to its worktree (the same
+        # binding the sessionStart hook uses), so this is authoritative, not a
+        # brittle guess. Activate the scoped bare-resume binding first (reads the
+        # AGENT_WORKTREES_BIND_* env the launcher set), then match by session id.
+        if not wt_id and session_id:
+            wt_id = _activate_session_binding(session_id)
+            if not wt_id:
+                try:
+                    wt_id = tracking.find_worktree_id_by_session(session_id)
+                except Exception:
+                    wt_id = None
         if not wt_id:
             return _json_error(
-                "could not resolve a worktree id from cwd; pass --worktree-id",
+                "could not resolve a worktree id from cwd; pass --worktree-id "
+                "(or --session-id for a bare-resumed session)",
                 exit_code=2,
             )
 
@@ -10436,6 +10453,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "turn (copilot -i). Required in spawn mode.")
     p.add_argument("--worktree-id", dest="worktree_id", default=None,
                    help="Target worktree (default: infer from cwd)")
+    p.add_argument("--session-id", dest="session_id", default=None,
+                   help="Resumed session id -- authoritative worktree fallback "
+                        "when cwd is HOME (bare resume); resolves the worktree "
+                        "from the session registry")
     p.add_argument("--old-pane", dest="old_pane", default=None,
                    help="Explicit pane id to report as the old pane "
                         "(default: the session's active pane)")

@@ -230,13 +230,18 @@ function agentWorktreesGet(key, cwd) {
 // worktree but it has no live mux session. The extension used to collapse both
 // (and every other error) into a single misleading "not under a mux session"
 // message; surfacing the host's own error text keeps the reason honest.
-function runHandoffCutover(cwd, seed) {
+function runHandoffCutover(cwd, seed, sessionId) {
   const argv = ["handoff-cutover", "--seed", seed];
   // The extension runs inside the OLD pane; $TMUX_PANE pins it precisely so the
   // retire step targets the right pane even after the cutover moves the active
   // pane to the successor. Falls back to the session's active pane in the CLI.
   const ownPane = process.env.TMUX_PANE || process.env.PSMUX_PANE || "";
   if (ownPane) argv.push("--old-pane", ownPane);
+  // #4098: pass the resumed session id so the host verb can resolve the worktree
+  // authoritatively when cwd is HOME (bare resume). Without it, the verb only
+  // has cwd -- which is HOME under bare resume -- and fails to identify the
+  // wt-<id> the session is already inside.
+  if (sessionId) argv.push("--session-id", sessionId);
   try {
     const out = runCli("agent-worktrees", argv, {
       cwd,
@@ -797,7 +802,8 @@ const session = await joinSession({
           );
         }
         const cwd = state.cwd || process.cwd();
-        const result = runHandoffCutover(cwd, seed);
+        const sid = state.sessionId || invocation?.sessionId || null;
+        const result = runHandoffCutover(cwd, seed, sid);
         if (!result || !result.ok) {
           const reason = result?.reason || "error";
           const tail =
