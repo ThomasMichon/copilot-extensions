@@ -181,6 +181,15 @@ custom-instruction files and auto-loads them. Reference docs with backtick code
 spans (`` `docs/tools.md` ``), not `[text](path)` links, so Copilot reads files
 on demand instead of loading them into every session.
 
+**Build `AGENTS.md` as a waypoint, not a manual.** The root `AGENTS.md` is the
+first thing an agent reads on entering a repo -- including an agent arriving from
+*another* repo (see the **`working-cross-repo`** skill). Keep it a lean **map**:
+orient the reader and link out (backtick faux-links) to the detailed homes --
+`docs/`, `visions/`, `CONTRIBUTING.md`, the connective-tissue skills -- rather
+than inlining the substance. A repo that greets agents with a navigable
+`AGENTS.md` is one they can work in without crawling it or balking at its size,
+so factor detail *out* into the linked files and let `AGENTS.md` point the way.
+
 ## Hooks
 
 Shell commands that run at agent lifecycle points. The `preToolUse` hook can

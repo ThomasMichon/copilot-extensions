@@ -2,12 +2,13 @@
 name: working-cross-repo
 description: >
   How to work on ANOTHER repo from the current (control-plane) repo as a good
-  citizen: resolve where and how to work via the related-repos index, honor the
+  citizen: orient at the target repo's root `AGENTS.md` waypoint before crawling
+  it, resolve where and how to work via the related-repos index, honor the
   target repo's management class and adoption status, honor its locus (local /
   another machine / a CodeSpace), and prefer delegating to the agent that owns
   the repo over reaching across machines yourself. Use whenever you are asked to
-  make a change in, build, test, or investigate a repo that is not the one you
-  are currently in. Trigger phrases include:
+  make a change in, build, test, investigate, or find your way around a repo
+  that is not the one you are currently in. Trigger phrases include:
   - 'work on another repo'
   - 'make a change in <repo>'
   - 'cross-repo'
@@ -17,6 +18,9 @@ description: >
   - 'change <repo>'
   - 'go work on <repo>'
   - 'dispatch to <repo>'
+  - 'where do I start in <repo>'
+  - 'this repo is huge'
+  - 'how do I navigate <repo>'
 ---
 
 # Working Cross-Repo (good-citizen guide)
@@ -40,6 +44,31 @@ its checkout **path**, the **locus** (where work happens), **availability**, the
 not linked yet, link it first via `agent-worktrees-related` (offer to, then
 proceed).
 
+## Orient before you crawl -- the root `AGENTS.md` is the map
+
+Before reading source, **read the target repo's root `AGENTS.md`** (and, if you
+are working in a subtree, the nearest `AGENTS.md` up the path). Treat it as the
+repo's **waypoint index**: a lean top-level map that orients you and links out to
+the detailed guidance -- `CONTRIBUTING.md`, `docs/` (architecture, patterns),
+`visions/`, and the connective-tissue skills. A well-built `AGENTS.md` names
+*where things are*, not *everything there is*.
+
+Navigate from those waypoints to the specific guidance you need, and **prefer
+this over crawling the tree**. A large repo is only overwhelming when you read it
+at random; entered through its `AGENTS.md`, even a huge repo is a short hop from
+"what am I looking at" to "the doc that answers my question." This is the
+antidote to balking at a repo's size.
+
+- **No root `AGENTS.md`?** Fall back to `README.md` / `CONTRIBUTING.md` as the
+  entry, then the repo's `docs/` index -- and consider adding an `AGENTS.md`
+  waypoint if you own or contribute to the repo (see the **`authoring-skills`**
+  skill for building one as a map rather than a manual).
+- **The target's `AGENTS.md` is *its* POV; the narrative is *ours*.** The related
+  narrative (`agent-worktrees related doc <name>`) is this control-plane's view
+  of the target and points at these same waypoints -- read both: the narrative
+  for how *we* relate to the repo, the target's `AGENTS.md` for how the repo
+  wants to be worked.
+
 ## The four rules
 
 ### 1. Honor the management CLASS (from the global registry)
@@ -57,7 +86,8 @@ proceed).
   **not adopted**, adopt it first (`agent-worktrees register <name>`).
 
 Always read the repo's `CONTRIBUTING.md` / `AGENTS.md` and its narrative
-(`agent-worktrees related doc <name>`) before changing it.
+(`agent-worktrees related doc <name>`) before changing it -- orient at the root
+`AGENTS.md` waypoint first (see *Orient before you crawl* above).
 
 ### 2. Honor the LOCUS (where work actually happens)
 
@@ -101,7 +131,9 @@ A repo's local path **varies by machine**. Always resolve it with
 ## End-to-end shape
 
 1. `related resolve <name>` (link it first if needed).
-2. Read its narrative + `CONTRIBUTING.md`/`AGENTS.md`.
+2. **Orient at the target's root `AGENTS.md`** (the map): follow its links to the
+   docs you actually need, then read its narrative + `CONTRIBUTING.md` for the
+   contribution flow. Don't crawl the tree to figure out the repo.
 3. Act on the plan:
    - local -> edit per class (worktree `agent-worktrees create` / singleton
      anchor / reference read-only);
@@ -119,6 +151,8 @@ A repo's local path **varies by machine**. Always resolve it with
 ## Anti-patterns (don't)
 
 - Editing a **reference** repo, or a **worktree** repo's anchor checkout.
+- Crawling a large repo's tree blind instead of entering through its root
+  `AGENTS.md` waypoint and following the links from there.
 - Cloning a repo locally to dodge delegating to the machine/CodeSpace that owns
   it.
 - Hardcoding a checkout path instead of `repos find`.
