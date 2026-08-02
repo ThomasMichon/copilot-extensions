@@ -1312,4 +1312,16 @@ soaked before it becomes the default.
   double-click, and up from the top row doesn't cross into chrome (Tab does). Once
   soaked, later slices port sections/multiselect/pulse and flip the default.
 
+**NF5-5 slice 2 -- byte-identical grid parity + width fix.** A parity pass
+(`test_native_list_grid_parity`) captures the home screen with the native list OFF
+(text-line) and ON (OptionList) and asserts the normalized character grids are
+**identical** -- and equal to the golden. It surfaced one real bug: the native
+options were first built at the `size.width or 100` *fallback* (the screen wasn't
+sized yet) and never rebuilt at the real width, so the full-width section rules were
+100 cols vs 118. Fixed by adding `size.width` to the rebuild **signature** and
+rebuilding `on_resize`. With that, native-ON and text-line-OFF render byte-for-byte
+the same grid (the cursor style differs -- amber vs reverse -- but that is style, not
+characters). The parity harness is the operator's requested guard: every later
+native-list slice re-runs it, so the swap stays a true drop-in.
+
 

@@ -655,7 +655,8 @@ class _PickerNativeData(OptionList):
         except Exception:
             nrows = -1
         return (scr._kind(), scr.htab, scr.machine_idx, nrows, wt,
-                getattr(scr, "pulse", 0), getattr(scr, "update_state", None))
+                getattr(scr, "pulse", 0), getattr(scr, "update_state", None),
+                scr.size.width)
 
     def _rebuild(self):
         scr = self._screen
@@ -712,6 +713,12 @@ class _PickerNativeData(OptionList):
 
     def on_mount(self) -> None:
         self._rebuild()
+
+    def on_resize(self, event) -> None:
+        # Rebuild at the real width once layout assigns it (the first rebuild may
+        # run at the size fallback before the screen is sized) -- keeps the
+        # full-width section rules in parity with the text-line body.
+        self.refresh_data()
 
     # ---- native events -> engine model -----------------------------------
     def on_focus(self) -> None:
