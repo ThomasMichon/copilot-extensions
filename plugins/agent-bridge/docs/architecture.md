@@ -334,6 +334,28 @@ The installer `update` path on **both** Linux/WSL (`install.sh`) and Windows
   outside the service manager until service-manager reconciliation lands, so
   validate before relying on it; it falls back to stop/start on any failure.
 
+**Redeploying the daemon that hosts your own driving session — run the installer
+detached.** When the update is invoked *from a Copilot session that is itself
+hosted by this bridge* (common: an agent working in a bridge-managed worktree
+redeploys the bridge), the install script is a **child of that session**. Its
+drain-then-swap stops the daemon mid-run, which tears down the session — and
+takes the still-running install script with it, aborting the update with nothing
+landed (no new version, no partial venv). Run the installer **detached** so the
+cutover cannot sever it, and read progress from a logfile:
+
+```bash
+setsid bash -c 'bash plugins/agent-bridge/scripts/install.sh update \
+  > ~/.agent-bridge/deploy.log 2>&1; echo "EXIT=$?" >> ~/.agent-bridge/deploy.log' \
+  < /dev/null > /dev/null 2>&1 &
+# then poll ~/.agent-bridge/deploy.log; the hosted session survives the cutover
+# (Session-Host keeps the child alive) and the manifest shows the new version.
+```
+
+Sessions themselves survive the restart (the session host keeps the `copilot`
+child alive across the daemon swap — see
+[Restart Behavior](#restart-behavior-and-what-survives)); the detach only
+protects the *installer* from being killed by the very drain it triggers.
+
 ### Still future: seamless mid-stream migration
 
 Cutover **drains** in-flight turns (waits for them to finish on the old daemon)

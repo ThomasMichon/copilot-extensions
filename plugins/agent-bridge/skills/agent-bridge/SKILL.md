@@ -373,6 +373,19 @@ agent-bridge end <sid>          # a daemon restart can also resurrect an old ses
 agent-bridge create <agent> "<same idempotent prompt>"
 ```
 
+> **Fixed in 0.4.0-dev206 — the idle-gap variant.** A distinct root cause used to
+> produce this exact symptom *without any stop, reattach, or redeploy*: the first
+> resend on a session that had simply **been idle longer than
+> `live_stall_interrupt_after_s`** (default 900s) phantom-cancelled, and every
+> resend re-cancelled until one happened to land. The live-stall watchdog
+> (`reconcile_wedged_running`) measured the brand-new turn's silence from the
+> *previous* turn's last frame — the whole idle gap — and interrupted it before
+> it emitted anything. `submit_prompt` now resets the stall clock at turn start,
+> so a fresh turn is measured from its own start. If you are on **dev206 or
+> later**, a resend after a long idle gap just runs; the "send again" dance below
+> is only for the genuine mid-turn reattach-drain case above.
+> (aperture-labs #4122 / #2817.)
+
 > A **distinct** cause of the same `Operation cancelled by user` string is a
 > permission/`ask_user` request the headless client can't get answered: the
 > parked request resolves to `cancelled` at teardown. That path shows a
