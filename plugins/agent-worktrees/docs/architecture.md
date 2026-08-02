@@ -1328,12 +1328,14 @@ native list unchanged -- they route through the manual model via `on_key`, and t
 gutter renders in byte-identical parity (`test_native_list_multiselect_and_activation`,
 `test_native_list_multiselect_grid_parity`). Parity holds across pivots -- the
 Maintenance pivot (group sections + select-all) is byte-identical too
-(`test_native_list_maintenance_grid_parity`). The **one** remaining divergence is
-scrolled state: the text-line body pins the current **section header** at the top
-(sticky) and the native `OptionList` scrolls it away (a 1-row offset from that pin --
-the same data rows, just no sticky pin). Sticky-header support in a native OptionList
-needs a separate pinned widget; it's the last item before the default can flip. The
-other deliberate native behaviours to weigh at the flip: single-click **activates**
+(`test_native_list_maintenance_grid_parity`). The scrolled-state divergence --
+the text-line body pins the current **section header** at the top and a native
+`OptionList` scrolls it away -- is **resolved** by `_PickerStickyHeader`: a 1-row
+widget above the list (`display: none` until scrolled) that pins the current
+section's header while its own row is off-screen, tracked from the OptionList's
+`scroll_offset` on refresh/highlight (`test_native_list_sticky_header`). It is
+hidden at the top, so the unscrolled grid parity is unchanged. The other deliberate
+native behaviours to weigh at the flip: single-click **activates**
 (native select) vs the text body's select-then-double-click, and arrow-up from the
 top data row stays in the list (Tab reaches the chrome) rather than crossing up. Per-row **checkboxes are now always shown** (`WorktreesView.build_data` no longer hides the glyph until multi-select is active) -- with mouse support the box is a discoverable, clickable multi-select affordance at rest; the golden was regenerated and parity holds (both bodies share `build_data`).
 

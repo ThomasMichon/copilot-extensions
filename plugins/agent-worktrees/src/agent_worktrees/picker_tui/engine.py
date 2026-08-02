@@ -617,6 +617,37 @@ class _PickerBodyData(_FocusRegion):
         scr.refresh()
 
 
+class _PickerStickyHeader(Widget):
+    """NF5-5 (#88): the pinned section header for the native OptionList body.
+
+    A native ``OptionList`` scrolls all options uniformly, so a section header
+    (Active / Recent / Completed, or a maintenance group) scrolls off the top --
+    unlike the text-line body, which pins the current section. This 1-row widget
+    sits just above the list and shows the current top section's header while
+    that section's own header row is scrolled out of view; it is hidden
+    (``display = False``, taking no space) at the top of the list or when the
+    header itself is visible, so the unscrolled layout is unchanged."""
+
+    can_focus = False
+
+    def __init__(self, **kw) -> None:
+        super().__init__(**kw)
+        self._line = None
+        self.display = False
+
+    def set_line(self, line) -> None:
+        cur = self._line.plain if self._line is not None else None
+        new = line.plain if line is not None else None
+        if cur == new:
+            return
+        self._line = line
+        self.display = line is not None
+        self.refresh()
+
+    def render(self):
+        return self._line if self._line is not None else Text("")
+
+
 class _PickerNativeData(OptionList):
     """NF5-5 (#88): swappable *native* data body -- the pivot's data rows as real
     ``OptionList`` options (native focus, cursor, up/down, click, scroll, a11y)
@@ -645,6 +676,9 @@ class _PickerNativeData(OptionList):
         super().__init__(**kw)
         self._screen = screen
         self._stops = []          # option index -> sel stop (None = header row)
+        self._sections = []       # option index -> section label active there
+        self._section_texts = {}  # section label -> its header Text (for sticky)
+        self._kinds = []          # option index -> VRow kind ('section' etc.)
         self._sig = None          # last data signature (rebuild only on change)
         self._syncing = False
 
@@ -673,18 +707,30 @@ class _PickerNativeData(OptionList):
         try:
             self.clear_options()
             self._stops = []
+            self._sections = []
+            self._kinds = []
+            self._section_texts = {}
+            cur_label = None
             opts = []
             for vr in data:
                 stop = getattr(vr, "stop", None)
                 text = vr.text if isinstance(vr.text, Text) else Text(str(vr.text))
+                kind = getattr(vr, "kind", None)
+                ps = getattr(vr, "pin_section", None)
+                cur_label = ps[0] if ps else cur_label
+                if kind == "section" and cur_label is not None:
+                    self._section_texts[cur_label] = text
                 opts.append(Option(text, disabled=stop is None))
                 self._stops.append(stop)
+                self._sections.append(cur_label)
+                self._kinds.append(kind)
             if opts:
                 self.add_options(opts)
         finally:
             self._syncing = False
         self._sig = self._signature()
         self._sync_from_sel()
+        self._update_sticky()
 
     def _index_for_stop(self, stop):
         for i, s in enumerate(self._stops):
@@ -703,15 +749,38 @@ class _PickerNativeData(OptionList):
         finally:
             self._syncing = False
 
+    def _update_sticky(self):
+        """Pin the current section header above the list when its own header row
+        has scrolled out of view (#88 NF5-5). Hidden at the top of the list or
+        when the section header is itself visible, so the unscrolled layout is
+        unchanged."""
+        scr = self._screen
+        try:
+            sticky = scr.query_one("#nf-body-sticky", _PickerStickyHeader)
+        except Exception:
+            return
+        y = int(getattr(self.scroll_offset, "y", 0) or 0)
+        if y <= 0 or y >= len(self._sections):
+            sticky.set_line(None)
+            return
+        # If the top visible option is itself a section header, no pin needed.
+        if y < len(self._kinds) and self._kinds[y] == "section":
+            sticky.set_line(None)
+            return
+        label = self._sections[y] if y < len(self._sections) else None
+        sticky.set_line(self._section_texts.get(label) if label else None)
+
     def refresh_data(self):
         """Called by the screen on a state change (in place of a plain
         ``refresh()``): rebuild the options only when the data signature changed
         -- so plain cursor moves stay smooth and native -- else just mirror
-        ``sel`` onto the native highlight."""
+        ``sel`` onto the native highlight. Always re-pins the sticky header
+        (cheap) so a mouse-wheel scroll (no highlight change) tracks too."""
         if self._signature() != self._sig:
             self._rebuild()
         else:
             self._sync_from_sel()
+            self._update_sticky()
 
     def on_mount(self) -> None:
         self._rebuild()
@@ -745,6 +814,7 @@ class _PickerNativeData(OptionList):
             scr.sel = stop
             scr._wt_track_focus()
             scr.refresh()
+        self._update_sticky()
 
     def on_option_list_option_selected(self, event) -> None:
         # Enter / click on a row -> activate (open its submenu etc.), the native
@@ -2522,7 +2592,9 @@ class PickerScreen(Widget):
         yield _PickerMachine(self, id="nf-machine")
         yield _PickerButtons(self, id="nf-buttons")
         if _native_list_enabled():
-            # NF5-5 (#88): swappable native OptionList data body (opt-in).
+            # NF5-5 (#88): swappable native OptionList data body (opt-in), with a
+            # pinned section header above it (hidden until scrolled).
+            yield _PickerStickyHeader(id="nf-body-sticky")
             yield _PickerNativeData(self, id="nf-body-data")
         else:
             yield _PickerBodyData(self, id="nf-body-data")
@@ -6176,6 +6248,8 @@ class PickerApp(App):
         > .option-list--option-highlighted {
         background: #ffaf00; color: black; text-style: bold;
     }
+    /* NF5-5 pinned section header (hidden -> takes no space until scrolled). */
+    PickerScreen > #nf-body-sticky { width: 100%; height: 1; }
     """
 
     def __init__(self, source, live=False, mock_mode=None):
