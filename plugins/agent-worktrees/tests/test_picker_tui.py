@@ -4067,6 +4067,60 @@ def test_native_list_maintenance_grid_parity(monkeypatch):
     assert grid(True) == grid(False)
 
 
+def test_native_list_sticky_header(monkeypatch):
+    """NF5-5 (#88): the native list pins the current section header above the list
+    once that section's own header row has scrolled off the top; it is hidden at
+    the top of the list, so the unscrolled layout (and grid parity) is unchanged."""
+    import datetime
+    import types
+
+    from agent_worktrees.picker_tui import derive
+    from agent_worktrees.picker_tui.engine import _PickerStickyHeader
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "1")
+
+    def _tall_src():
+        derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+        local = ("lambda-core", "Win")
+        raws = [{"id": f"lambda-core-win-2026062{i % 9}-r{i:02d}",
+                 "title": f"Row {i}", "status": "active",
+                 "started_at": "2026-06-27T17:00:00", "turn_count": i,
+                 "state": "active" if i % 2 else "wip"} for i in range(20)]
+        s = types.SimpleNamespace()
+        s.LOCAL = local
+        s.LOCAL_LABEL = "lc"
+        s.machines = lambda: [("lambda-core Win", "lambda-core", "Win", True)]
+        s.bucket = derive.bucket
+        s.for_machine = derive.for_machine
+        s.load = lambda: [derive.norm(w, *local) for w in raws]
+        return s
+
+    async def run():
+        app = PickerApp(_tall_src(), live=False)
+        async with app.run_test(size=(118, 16)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            scr.sel = ("L", 0)
+            scr.refresh()
+            await pilot.pause()
+            st = scr.query_one("#nf-body-sticky", _PickerStickyHeader)
+            nl = scr.query_one("#nf-body-data")
+            # At the top: the sticky header is hidden (no extra row).
+            assert st.display is False
+            # Scroll down into the section's rows; the header pins.
+            nl.focus()
+            await pilot.pause()
+            for _ in range(10):
+                await pilot.press("down")
+            await pilot.pause()
+            assert int(nl.scroll_offset.y) > 0
+            assert st.display is True
+            assert "──" in st._line.plain   # a section rule is pinned
+
+    asyncio.run(run())
+
+
 def test_build_body_split_recomposes_monolith():
     """NF3 (#88): _build_body_split's chrome + data rows recompose build_body
     byte-for-byte for every pivot -- the untangle is a pure decomposition, so the
