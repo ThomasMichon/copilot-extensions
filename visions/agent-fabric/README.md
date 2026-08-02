@@ -219,6 +219,21 @@ An agent's session output is **recoverable and digestible** after the fact —
 including from short-lived remote venues — so a successor agent can catch up on
 what a prior one did without the original conversation.
 
+### handoff-under-context-pressure
+A session approaching the **limit of its own context window** is a first-class
+**reason to hand off**, not merely a condition a caller happens to notice. The
+fabric treats context saturation as a continuity signal: long-running work
+**survives the context ceiling** by rolling in place to a fresh successor —
+seeded with the predecessor's continuation — rather than degrading, stalling, or
+silently losing the thread as the window fills. This makes the handoff a
+*proactive* act the fabric can initiate on the work's behalf, complementing the
+caller-initiated handoff of *single-current-session-per-worktree*. It is
+**especially essential where there is no manual session-creation affordance** —
+a phone or other minimal consumer with no "new session" / "clear" control — for
+which continuing simply by **sending the next message** is the only path forward;
+there, an automatic in-place roll under pressure is the difference between work
+that continues and work that dead-ends at the ceiling.
+
 ### no-account-per-agent
 A whole fleet of agents cooperates through the fabric **without** provisioning a
 separate identity / account per agent and without agents racing each other
@@ -360,6 +375,24 @@ layer), never absorbed into the ground layer. The ground layer offers the
 **mechanism**; a higher layer owns the **policy** — and a mux-less environment
 degrades to the same claimable record, not to a silent no-op.
 
+### context-pressure-drives-handoff
+Context saturation is a legitimate **driver** of a handoff, but a driver held
+under **explicit policy**, never a reflex. Automatic in-place roll on pressure is
+**opt-in and off by default**: a hosted session hands itself off as its context
+window nears exhaustion **only** when its owner has opted in, and preferentially
+when **no interactive human is actively watching** that session (an operator at a
+live console is the one who should choose reuse/handoff/sunset themselves). A
+prompt submitted **into an already-saturated session** is continued by **handing
+off first and delivering that prompt to the successor**, rather than spending the
+last of the window on a degraded turn — so a minimal consumer that can only
+*send the next message* still advances. Like every other handoff this is
+**orchestrated above the primitive** (*handoff-orchestrated-above-primitives*):
+the ground layer never auto-rolls a session on its own, the policy and the
+pressure-reading live in the layers above, and the succession chain and
+current-session pointer it produces remain **owned by the ground layer**
+(*single-current-session-per-worktree*). The signal is **fail-safe**: absent an
+opt-in, pressure changes nothing and the session behaves exactly as before.
+
 ## Non-Goals / Boundaries
 
 - **Not the per-host service model.** *How* each layer's runtime is deployed,
@@ -456,3 +489,21 @@ degrades to the same claimable record, not to a silent no-op.
   existing same-repo bridge caller-link into a directional, cross-repo claim
   model, and states the safety rule (absence of a *local* owner is not proof of
   no owner) that a reaper must honor.
+- **2026-08-02** — Added §Features/`handoff-under-context-pressure` and
+  §Behaviors/`context-pressure-drives-handoff`: a session nearing the limit of
+  its **own context window** is a first-class *reason to hand off*, so
+  long-running work **survives the context ceiling** by rolling in place to a
+  seeded successor rather than degrading — a *proactive* handoff the fabric can
+  initiate, complementing the caller-initiated handoff of
+  *single-current-session-per-worktree*. Held under **explicit opt-in policy**
+  (off by default; preferring sessions no interactive human is watching), with a
+  prompt submitted into an already-saturated session continued by **handing off
+  first, then delivering the prompt to the successor** — the only path forward
+  for a minimal consumer (a phone) that can *only* send the next message and has
+  no manual session-creation affordance. Orchestrated above the primitive like
+  every other handoff; the signal is fail-safe (absent an opt-in, pressure
+  changes nothing). Mined from the concrete seam that the coordination layer
+  already *tracks* context usage and even warns "consider handoff" but could
+  never *act* on it, so a bridge-hosted headless session at the ceiling simply
+  dead-ended — the exact "silent no-op" that
+  *handoff-orchestrated-above-primitives* names as the failure to avoid.
