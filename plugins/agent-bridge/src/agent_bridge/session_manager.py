@@ -27,6 +27,7 @@ from .connect import ConnectError, ConnectStage, ConnectTracker
 from .db import Database
 from .events import EventLog
 from .models import (
+    AutoHandoffPolicy,
     ContextThresholds,
     PhasedTimeouts,
     RetentionConfig,
@@ -300,6 +301,10 @@ class Session:
         self.progress: dict[str, str] = {}
         self._prompt_task: asyncio.Task | None = None
         self._lifecycle_lock = asyncio.Lock()
+        # Set when a context-pressure handoff is owed but the session is not yet
+        # idle (usage crosses critical mid-turn). The turn-settle path fires the
+        # deferred handoff once the session is idle. In-memory only.
+        self._handoff_pending = False
 
     @property
     def pid(self) -> int | None:
@@ -383,6 +388,7 @@ class SessionManager:
         db: Database,
         *,
         context_thresholds: ContextThresholds | None = None,
+        auto_handoff: AutoHandoffPolicy | None = None,
         timeouts: PhasedTimeouts | None = None,
         retention: RetentionConfig | None = None,
         drain_auto_release_s: float | None = None,
@@ -447,6 +453,12 @@ class SessionManager:
             sd.mkdir(parents=True, exist_ok=True)
             self._host_index = HostIndex(sd / "index.json")
         self._thresholds = context_thresholds or ContextThresholds()
+        # Context-pressure handoff policy (off by default). When enabled, a
+        # session crossing the critical threshold rolls the worktree in place
+        # instead of dead-ending. Strong refs to in-flight auto-handoff tasks so
+        # they are not GC'd mid-cutover (each removes itself on completion).
+        self._auto_handoff = auto_handoff or AutoHandoffPolicy()
+        self._auto_handoff_tasks: set[asyncio.Task[None]] = set()
         self._timeouts = timeouts or PhasedTimeouts()
         self._retention = retention or RetentionConfig()
         # Drain gate: when True the daemon refuses *new* sessions and *new*
@@ -2464,6 +2476,26 @@ class SessionManager:
         if not session:
             raise KeyError(f"Session {session_id} not found")
 
+        # Context-pressure handoff (opt-in, prompt-triggered): a prompt into an
+        # already-saturated session that is idle rolls the worktree to a fresh
+        # successor FIRST, then delivers this prompt to it. This is the only way
+        # forward for a minimal consumer -- a phone -- that can *only* send the
+        # next message and has no manual session-creation affordance. Unlike the
+        # proactive path this ignores `unwatched_only`: the sender is explicitly
+        # asking for the next turn. A live turn is left to the proactive
+        # turn-settle path (it would be handed off mid-turn otherwise); the
+        # successor is fresh, so this never recurses.
+        if (session.status in (SessionStatus.IDLE, SessionStatus.STOPPED)
+                and self._is_over_critical(session)
+                and self._auto_handoff_eligible(session)):
+            session._handoff_pending = False
+            successor = await self.handoff_session(
+                session_id, reason="context-pressure-prompt"
+            )
+            return await self.submit_or_queue_prompt(
+                successor.session_id, prompt, caller_id=caller_id
+            )
+
         turn_live = (
             session.status == SessionStatus.RUNNING
             or (session._prompt_task is not None
@@ -2675,6 +2707,12 @@ class SessionManager:
         # a no-op when the queue is empty or the process has since died.
         await self._drain_pending_prompts(session)
 
+        # If a context-pressure handoff came due mid-turn and the queue is now
+        # drained (session still idle), roll the worktree to a fresh successor.
+        # A pending drained-prompt above leaves the session RUNNING, so this
+        # no-ops until the queue empties -- the handoff then carries no work.
+        self._schedule_auto_handoff_if_pending(session)
+
     def _handle_usage_update(
         self, session: Session, data: dict[str, Any]
     ) -> None:
@@ -2712,6 +2750,14 @@ class SessionManager:
                         "threshold": thresholds.critical,
                         "message": "Context window usage critical -- consider handoff",
                     })
+                # Context-pressure handoff (opt-in): mark a handoff owed, then
+                # fire it once the session is idle. Usage typically crosses
+                # critical mid-turn, so the turn-settle path (_run_prompt) drives
+                # the deferred cutover; if we are already idle (usage arrived out
+                # of turn), _schedule_auto_handoff_if_pending fires it now.
+                if self._auto_handoff_eligible(session):
+                    session._handoff_pending = True
+                    self._schedule_auto_handoff_if_pending(session)
 
             elif pct >= thresholds.warning and "warning" not in session._crossed_thresholds:
                 session._crossed_thresholds.add("warning")
@@ -3015,6 +3061,81 @@ class SessionManager:
 
     # -- Context-aware in-place handoff --------------------------------------
 
+    def _auto_handoff_eligible(self, session: Session) -> bool:
+        """Is this session a candidate for policy-driven in-place handoff?
+
+        False unless the operator opted in (`auto_handoff.enabled`), and never
+        for a single-checkout (command/CodeSpace) agent -- those cannot host
+        predecessor and successor at once, so the spawn-then-retire cutover does
+        not apply (their retire-before-spawn variant is deferred, mirroring the
+        guard in ``handoff_session``)."""
+        if not self._auto_handoff.enabled:
+            return False
+        if _workspace_key(session.agent_name, session.target, session.caller_id):
+            return False
+        return True
+
+    @staticmethod
+    def _is_over_critical(session: Session) -> bool:
+        """True once the session has crossed the critical context threshold."""
+        return "critical" in session._crossed_thresholds
+
+    def _schedule_auto_handoff_if_pending(self, session: Session) -> None:
+        """Fire a deferred context-pressure handoff if one is owed and the
+        session has settled to idle. Called at turn-settle (and after an
+        out-of-turn usage update). No-op unless a handoff is pending, the
+        session is idle, and the policy still permits it.
+
+        The ``unwatched_only`` preference is honored here (proactive path): a
+        session a human is streaming is left pending -- not rolled out from
+        under -- and re-evaluated on its next settle. The prompt-triggered path
+        (`submit_or_queue_prompt`) bypasses this and hands off directly, because
+        the sender is explicitly asking for the next turn."""
+        if not session._handoff_pending:
+            return
+        if session.status != SessionStatus.IDLE:
+            return
+        if not self._auto_handoff_eligible(session):
+            session._handoff_pending = False
+            return
+        if self._auto_handoff.unwatched_only and session.subscriber_count > 0:
+            return  # a human is attached; defer until unwatched
+        session._handoff_pending = False
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        task = loop.create_task(self._run_auto_handoff(session.session_id))
+        self._auto_handoff_tasks.add(task)
+        task.add_done_callback(self._auto_handoff_tasks.discard)
+
+    async def _run_auto_handoff(self, session_id: str) -> None:
+        """Perform a policy-driven handoff and migrate any durably-queued
+        follow-ups onto the successor, so no prompt is stranded on the retired
+        predecessor. Best-effort: a failed handoff logs and leaves the
+        predecessor current (``handoff_session`` never orphans the worktree)."""
+        try:
+            pending = self._db.list_pending_prompts(session_id)
+        except Exception:
+            pending = []
+        try:
+            successor = await self.handoff_session(
+                session_id, reason="context-pressure"
+            )
+        except Exception as exc:
+            log.warning("Auto-handoff of %s failed: %s", session_id, exc)
+            return
+        for row in pending:
+            with contextlib.suppress(Exception):
+                await self.submit_or_queue_prompt(
+                    successor.session_id,
+                    row["prompt"],
+                    caller_id=row.get("caller_id"),
+                )
+        if pending:
+            with contextlib.suppress(Exception):
+                self._db.clear_pending_prompts(session_id)
+
     @staticmethod
     def _build_handoff_prompt(session: Session) -> str:
         """The self-contained instruction that asks a retiring child to author
@@ -3294,6 +3415,7 @@ def session_manager_from_config(db: Database, cfg: ServiceConfig) -> SessionMana
     return SessionManager(
         db,
         context_thresholds=cfg.context_thresholds,
+        auto_handoff=cfg.auto_handoff,
         timeouts=cfg.timeouts,
         retention=cfg.retention,
         session_host_enabled=cfg.session_host_enabled,
