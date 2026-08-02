@@ -64,6 +64,7 @@ from pathlib import Path
 import yaml
 
 from . import activity, git_ops, output, permissions, pr_ops, procs, prune, reclaim, sessions, tracking
+from . import claimant as claimant_mod
 from . import config as cfg
 from . import finalize as fin
 from . import installer as inst
@@ -4724,6 +4725,65 @@ def _inbound_claims(machine: str, worktree_id: str, cwd: str) -> dict:
 
 
 def cmd_claims(args: argparse.Namespace) -> int:
+    """Dispatch the claims verb: ``claims [worktree_id]`` renders a worktree's
+    ledger; ``claims release <ref>`` retires one outbound claim.
+
+    The first positional selects the mode: the literal ``release`` routes to
+    :func:`_claims_release` (the rest are its ref); anything else is a
+    worktree id for :func:`_claims_show`.
+    """
+    target = list(getattr(args, "target", None) or [])
+    if target and target[0] == "release":
+        if len(target) < 2:
+            if args.json:
+                return _json_error("claims release: missing <ref>", 2)
+            output.err('claims release: missing <ref>. '
+                       'Usage: claims release <ref> [--remove]')
+            return 2
+        return _claims_release(args, target[1])
+    worktree_id = target[0] if target else None
+    return _claims_show(args, worktree_id)
+
+
+def _claims_release(args: argparse.Namespace, ref: str) -> int:
+    """Retire a single outbound resource claim by ref from a worktree's record.
+
+    Default marks the matching claim ``released`` (kept for history; excluded
+    from the live ledger and from reap-safety's live-claimant check);
+    ``--remove`` drops the entry entirely. The owner worktree is the current one
+    unless ``--worktree`` names another.
+    """
+    config = cfg.load_config()
+    wt_id = _infer_worktree_id(getattr(args, "release_worktree", None), config)
+    rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+    if not rec_path.exists():
+        if args.json:
+            return _json_error(f"worktree not found: {wt_id}")
+        output.err(f"worktree not found: {wt_id}")
+        return 1
+    rec = tracking.load_record(rec_path)
+    match = next((c for c in rec.resources if c.ref == ref), None)
+    if match is None:
+        if args.json:
+            return _json_error(f"no outbound claim with ref: {ref}")
+        output.err(f"no outbound claim with ref: {ref} on {wt_id}")
+        return 1
+    remove = getattr(args, "remove", False)
+    if remove:
+        rec.resources = [c for c in rec.resources if c.ref != ref]
+        action = "removed"
+    else:
+        match.state = "released"
+        action = "released"
+    tracking.save_record(rec, rec_path)
+    if args.json:
+        _json_output({"worktree_id": wt_id, "ref": ref, "action": action})
+        return 0
+    print(f"{action} outbound claim {ref} on {wt_id}")
+    return 0
+
+
+def _claims_show(args: argparse.Namespace, worktree_id: str | None) -> int:
     """Render a worktree's full claim ledger (agent-fabric resource-claims).
 
     Outbound (authoritative, from this worktree's own record):
@@ -4735,7 +4795,7 @@ def cmd_claims(args: argparse.Namespace) -> int:
     The worktree is the current one (inferred from CWD) unless an id is given.
     """
     config = cfg.load_config()
-    wt_id = _infer_worktree_id(getattr(args, "worktree_id", None), config)
+    wt_id = _infer_worktree_id(worktree_id, config)
     rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
     if not rec_path.exists():
         if args.json:
@@ -5042,57 +5102,36 @@ def cmd_run(args: argparse.Namespace) -> int:
     return proc.returncode
 
 
+def cmd_claimant_liveness(args: argparse.Namespace) -> int:
+    """Report SAME-MACHINE claimant liveness for an owner_ref (resource-claims).
+
+    The SSH endpoint that :func:`claimant.resolve_claimant_alive` invokes on an
+    owner's machine: it resolves the owner locally there and emits a tri-state
+    ``alive`` (``true`` alive / ``false`` gone / ``null`` unknown). Uses the
+    local-only resolver -- never a further remote hop -- so it always terminates.
+    """
+    alive = claimant_mod.local_claimant_alive(args.owner_ref)
+    if getattr(args, "json", False):
+        _json_output({"owner_ref": args.owner_ref, "alive": alive})
+        return 0
+    label = {True: "alive", False: "gone", None: "unknown"}[alive]
+    print(f"{args.owner_ref}: {label}")
+    return 0
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # cleanup
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _local_claimant_alive(owner_ref: str) -> bool | None:
-    """Same-machine claimant-liveness probe for prune-safety (resource-claims).
+    """Same-machine claimant-liveness probe (thin alias, resource-claims).
 
-    Resolve the owning worktree named by ``owner_ref`` and report whether it is
-    still alive, honoring `claimed-resource-not-reclaimed`:
-
-      * ``False`` -- the owner is on THIS machine and its worktree is gone (its
-        tracking record is missing, or its recorded dir was removed) -> the
-        claim is stale and the resource may be reclaimed.
-      * ``True``  -- the owner is on this machine and still present -> spare.
-      * ``None``  -- the owner is on a DIFFERENT machine (cross-fabric liveness
-        is not yet wired) or the ref can't be resolved -> UNCONFIRMED; spare,
-        because absence of a *local* owner is never proof of no owner.
-
-    Bias is deliberately toward sparing: only a *positively resolved, gone*
-    same-machine owner returns ``False``.
+    Delegates to :func:`claimant.local_claimant_alive`. Kept as a module-level
+    name for the fast, no-SSH display paths (list bucket, cleanup print line).
+    The reap *decision* uses the remote-capable
+    :func:`claimant.resolve_claimant_alive` instead.
     """
-    parsed = tracking.parse_claim_ref(owner_ref)
-    if parsed is None:
-        return None
-    try:
-        this_machine = cfg.load_config().machine
-    except Exception:
-        this_machine = None
-    # Cross-machine (or an unknown local machine) -> liveness unconfirmed here.
-    if parsed.machine and this_machine and parsed.machine != this_machine:
-        return None
-    project = parsed.project
-    if not project:
-        # A bare (legacy same-repo) ref -> assume the active project.
-        try:
-            project = cfg.project_name()
-        except Exception:
-            return None
-    try:
-        rec_path = cfg.project_dir(project) / "worktrees" / f"{parsed.worktree_id}.yaml"
-    except Exception:
-        return None
-    if not rec_path.exists():
-        return False  # owner record gone -> claim is stale
-    try:
-        owner_rec = tracking.load_record(rec_path)
-    except Exception:
-        return True  # record present but unreadable -> bias to sparing
-    if owner_rec.worktree_path and not Path(owner_rec.worktree_path).exists():
-        return False  # owner's worktree dir removed -> gone
-    return True  # owner still present -> spare
+    return claimant_mod.local_claimant_alive(owner_ref)
 
 
 def _reap_worktree(
@@ -5252,7 +5291,7 @@ def reap_one(
                 rec, info, turn_count=turns,
                 include_unused=include_unused,
                 include_conversations=include_conversations,
-                claimant_alive=_local_claimant_alive,
+                claimant_alive=claimant_mod.resolve_claimant_alive,
             )
             if not disp.cleanable:
                 return _result({"ok": False, "removed": False, "skipped": True,
@@ -6212,7 +6251,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
                 rec, info, turn_count=turns,
                 include_unused=args.include_unused,
                 include_conversations=include_conversations,
-                claimant_alive=_local_claimant_alive,
+                claimant_alive=claimant_mod.resolve_claimant_alive,
             )
             cleanable = disp.cleanable
             if disp.bucket == "active":
@@ -8528,6 +8567,7 @@ _WORKTREE_VERBS = {
     "create": "create",
     "run": "run",
     "claims": "claims",
+    "claimant-liveness": "claimant-liveness",
     "remove-system": "remove-system",
     "list": "list",
     "status": "status",
@@ -10664,12 +10704,33 @@ def build_parser() -> argparse.ArgumentParser:
     # claims (a worktree's full claim ledger: outbound resources + inbound tasks)
     p = sub.add_parser(
         "claims",
-        help="Show a worktree's full claim ledger: outbound resources it owns "
-             "(+ its owner, if it is itself a resource) and inbound tasks it "
-             "claims (best-effort via agent-dispatch). Defaults to the current "
-             "worktree; pass an id for another.",
+        help="Show a worktree's full claim ledger (outbound resources + its "
+             "owner + inbound tasks; best-effort via agent-dispatch). Defaults "
+             "to the current worktree; pass an id for another. "
+             "`claims release <ref>` retires one outbound claim.",
     )
-    p.add_argument("worktree_id", nargs="?", default=None)
+    p.add_argument("target", nargs="*", default=None,
+                   help="[worktree_id] to show, OR 'release <ref>' to retire an "
+                        "outbound claim by ref")
+    p.add_argument("--remove", action="store_true",
+                   help="with release: drop the claim entry entirely instead of "
+                        "marking it released")
+    p.add_argument("--worktree", default=None, dest="release_worktree",
+                   help="with release: the owner worktree (default: current)")
+    p.add_argument("--json", action="store_true",
+                   help="JSON output mode (stdout is JSON only)")
+
+    # claimant-liveness (SSH endpoint for cross-machine reap-safety: report
+    # whether an owner_ref's worktree is alive ON THIS machine)
+    p = sub.add_parser(
+        "claimant-liveness",
+        help="Report same-machine liveness of an owner_ref "
+             "(machine/project/worktree_id) as a tri-state alive/gone/unknown. "
+             "The endpoint the reaper's cross-machine claimant probe calls over "
+             "SSH; not typically run by hand.",
+    )
+    p.add_argument("owner_ref",
+                   help="Qualified owner ref (machine/project/worktree_id[#session])")
     p.add_argument("--json", action="store_true",
                    help="JSON output mode (stdout is JSON only)")
 
@@ -12221,6 +12282,7 @@ COMMAND_MAP = {
     "embody": cmd_embody,
     "list": cmd_list,
     "claims": cmd_claims,
+    "claimant-liveness": cmd_claimant_liveness,
     "create": cmd_create,
     "run": cmd_run,
     "remove-system": cmd_remove_system,

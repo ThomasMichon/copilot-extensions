@@ -16,9 +16,16 @@ from agent_worktrees import tracking
 def test_claims_parser_optional_id():
     args = m.build_parser().parse_args(["claims"])
     assert args.command == "claims"
-    assert args.worktree_id is None
+    assert args.target == []
     args2 = m.build_parser().parse_args(["claims", "wt-x", "--json"])
-    assert args2.worktree_id == "wt-x" and args2.json is True
+    assert args2.target == ["wt-x"] and args2.json is True
+
+
+def test_claims_release_parser():
+    args = m.build_parser().parse_args(
+        ["claims", "release", "m/p/wt-B", "--remove"])
+    assert args.target == ["release", "m/p/wt-B"]
+    assert args.remove is True
 
 
 def test_claims_registered():
@@ -110,7 +117,7 @@ def test_claims_json_outbound_and_owner(monkeypatch, tmp_path, capfd):
     _seed(tmp_path, monkeypatch,
           owner_ref="lambda-core/aperture-labs/wt-owner#s1",
           resources=[claim])
-    rc = m.cmd_claims(argparse.Namespace(worktree_id="wt-A", json=True))
+    rc = m.cmd_claims(argparse.Namespace(target=["wt-A"], json=True))
     assert rc == 0
     out = json.loads(capfd.readouterr().out)
     assert out["worktree_id"] == "wt-A"
@@ -122,7 +129,7 @@ def test_claims_json_outbound_and_owner(monkeypatch, tmp_path, capfd):
 
 def test_claims_empty_ledger_json(monkeypatch, tmp_path, capfd):
     _seed(tmp_path, monkeypatch)
-    rc = m.cmd_claims(argparse.Namespace(worktree_id="wt-A", json=True))
+    rc = m.cmd_claims(argparse.Namespace(target=[], json=True))
     assert rc == 0
     out = json.loads(capfd.readouterr().out)
     assert out["outbound"] == [] and out["owner_ref"] is None
@@ -136,7 +143,7 @@ def test_claims_missing_worktree(monkeypatch, tmp_path):
     monkeypatch.setattr("agent_worktrees.config.load_config",
                         lambda *a, **k: types.SimpleNamespace(machine="m"))
     monkeypatch.setattr(m, "_infer_worktree_id", lambda wid, cfg_: "ghost")
-    rc = m.cmd_claims(argparse.Namespace(worktree_id="ghost", json=True))
+    rc = m.cmd_claims(argparse.Namespace(target=["ghost"], json=True))
     assert rc == 1
 
 
@@ -146,9 +153,59 @@ def test_claims_human_output(monkeypatch, tmp_path):
     _seed(tmp_path, monkeypatch, resources=[claim])
     buf = io.StringIO()
     with redirect_stdout(buf):
-        rc = m.cmd_claims(argparse.Namespace(worktree_id="wt-A", json=False))
+        rc = m.cmd_claims(argparse.Namespace(target=["wt-A"], json=False))
     assert rc == 0
     text = buf.getvalue()
     assert "Claim ledger for wt-A" in text
     assert "lambda-core/copilot-extensions/wt-B" in text
     assert "Inbound" in text
+
+
+# --- claims release ---------------------------------------------------------
+
+def _release_args(ref, *, remove=False, json_=True):
+    return argparse.Namespace(
+        target=["release", ref], remove=remove, release_worktree=None,
+        json=json_)
+
+
+def test_claims_release_marks_released(monkeypatch, tmp_path, capfd):
+    ref = "lambda-core/copilot-extensions/wt-B"
+    _seed(tmp_path, monkeypatch,
+          resources=[tracking.ResourceClaim(kind="worktree", ref=ref)])
+    rc = m.cmd_claims(_release_args(ref))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["action"] == "released" and out["ref"] == ref
+    # Reload: the claim persists but is no longer live.
+    rec = tracking.load_record(tmp_path / "worktrees" / "wt-A.yaml")
+    assert len(rec.resources) == 1
+    assert rec.resources[0].state == "released"
+    assert rec.live_resources == []
+
+
+def test_claims_release_remove_drops_entry(monkeypatch, tmp_path, capfd):
+    ref = "lambda-core/copilot-extensions/wt-B"
+    _seed(tmp_path, monkeypatch,
+          resources=[tracking.ResourceClaim(kind="worktree", ref=ref)])
+    rc = m.cmd_claims(_release_args(ref, remove=True))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["action"] == "removed"
+    rec = tracking.load_record(tmp_path / "worktrees" / "wt-A.yaml")
+    assert rec.resources == []
+
+
+def test_claims_release_unknown_ref(monkeypatch, tmp_path):
+    _seed(tmp_path, monkeypatch,
+          resources=[tracking.ResourceClaim(
+              kind="worktree", ref="lambda-core/copilot-extensions/wt-B")])
+    rc = m.cmd_claims(_release_args("lambda-core/copilot-extensions/wt-Z"))
+    assert rc == 1
+
+
+def test_claims_release_missing_ref(monkeypatch, tmp_path):
+    _seed(tmp_path, monkeypatch)
+    rc = m.cmd_claims(argparse.Namespace(
+        target=["release"], remove=False, release_worktree=None, json=True))
+    assert rc == 2
