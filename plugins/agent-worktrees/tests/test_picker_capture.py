@@ -93,6 +93,23 @@ def test_worktrees_list_grid_matches_golden(monkeypatch, tmp_path):
     assert grid == _golden("worktrees_list.txt", grid)
 
 
+def test_native_list_grid_parity(monkeypatch, tmp_path):
+    """NF5-5 (#88): the swappable native ``OptionList`` data body renders the
+    *same* character grid as the text-line body -- the whole point of a drop-in
+    swap. Capture the home screen with ``AGENT_WORKTREES_PICKER_NATIVE_LIST`` OFF
+    (text-line body) and ON (native OptionList) and assert the normalized grids
+    are identical (styles differ -- the native cursor is amber vs the text
+    body's reverse -- but the character grid is byte-for-byte the same). Also
+    pins the native grid to the same golden."""
+    _isolate_pivots(monkeypatch, tmp_path)
+    monkeypatch.delenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", raising=False)
+    off = _normalize(pcap.capture(_fixture_source(), live=False)["text"])
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "1")
+    on = _normalize(pcap.capture(_fixture_source(), live=False)["text"])
+    assert on == off
+    assert on == _golden("worktrees_list.txt", on)
+
+
 def test_grid_renders_state_vocabulary(monkeypatch, tmp_path):
     _isolate_pivots(monkeypatch, tmp_path)
     text = pcap.capture(_fixture_source(), live=False)["text"]
