@@ -1335,6 +1335,6 @@ the same data rows, just no sticky pin). Sticky-header support in a native Optio
 needs a separate pinned widget; it's the last item before the default can flip. The
 other deliberate native behaviours to weigh at the flip: single-click **activates**
 (native select) vs the text body's select-then-double-click, and arrow-up from the
-top data row stays in the list (Tab reaches the chrome) rather than crossing up.
+top data row stays in the list (Tab reaches the chrome) rather than crossing up. Per-row **checkboxes are now always shown** (`WorktreesView.build_data` no longer hides the glyph until multi-select is active) -- with mouse support the box is a discoverable, clickable multi-select affordance at rest; the golden was regenerated and parity holds (both bodies share `build_data`).
 
 

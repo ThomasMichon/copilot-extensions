@@ -5441,10 +5441,10 @@ class WorktreesView:
         btn_focus = sel == ("BTN", 0)
         cols, sections = eng.current_list()
         # The checkbox gutter's two left cells (box + margin) are ALWAYS
-        # reserved so the table never shifts when multi-select mode toggles
-        # (#2258 follow-up); only the box GLYPH is withheld until a
-        # multi-select state is active -- until then the gutter renders blank.
-        ms = eng._wt_multiselect_active()
+        # reserved so the table never shifts. Since #88 NF5-5 (mouse support in
+        # the native list) the box GLYPH is also always shown per row, so
+        # multi-select is discoverable/clickable at rest (not only once a set is
+        # being held).
         lcols = fit(cols, width - 2, "title", 14)
         add(header_text(lcols, width, indent=2), kind="colhdr")
         # Preview which worktrees an action targets, directly on the list:
@@ -5467,10 +5467,11 @@ class WorktreesView:
             for rec in rows:
                 focused = sel == ("L", li)
                 is_sel = rec["id4"] in eng.wt_sel
-                # The box glyph renders only in multi-select mode; otherwise
-                # a blank 2-cell gutter holds the column alignment steady
-                # (#2258 follow-up).
-                box = eng._checkbox(is_sel) if ms else (" ", "")
+                # Always show the per-row checkbox glyph (#88 NF5-5): with mouse
+                # support the box is a discoverable, clickable multi-select
+                # affordance, so it renders at rest rather than only when a set
+                # is already held.
+                box = eng._checkbox(is_sel)
                 vr = add(row_text(rec, lcols, width, False,
                                   pulse=eng.pulse, mark=box),
                          stop=("L", li), data=rec)
