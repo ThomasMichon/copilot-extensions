@@ -370,6 +370,8 @@ MAINT_ACTION_DESC = {
                 "(verify nothing unpushed, then remove).",
     "Stop": "Stop the Mux/Copilot wrapper of the live selected worktrees "
             "(graceful double-Ctrl-C, then a hard mux kill).",
+    "Reclaim": "Reap the bare (un-muxed) orphan Copilots bound to the selected "
+               "worktrees (the ones a mux Stop cannot reach).",
 }
 
 
@@ -1739,6 +1741,9 @@ class PickerScreen(Widget):
         elif act == "Stop":
             self._start_stop(
                 [r for r in self.list_records() if r["id4"] in ids])
+        elif act == "Reclaim":
+            self._start_reclaim(
+                [r for r in self.list_records() if r["id4"] in ids])
 
     # ---- Worktrees list multi-select (#2228 Phase 2b, #2258 Phase 3) ----
     def _l_ids(self):
@@ -1944,6 +1949,10 @@ class PickerScreen(Widget):
             acts.append("Finalize")
         if any(r.get("mux_live") for r in chosen):
             acts.append("Stop")
+        if any(r.get("session_bare_orphan") for r in chosen):
+            # Bulk parity with the per-row menu: reap the bare (un-muxed) orphan
+            # Copilots across the selection -- the ones Stop cannot reach (#4058).
+            acts.append("Reclaim")
         if not acts:
             self.debug = (f"no bulk action for {len(chosen)} "
                           f"selected worktree(s)")
@@ -3211,16 +3220,19 @@ class PickerScreen(Widget):
 
         Runs the same maintenance progress path as Stop, but drives the
         ``reclaim`` op (kill the exact Copilot process holding the session's
-        ``inuse.<pid>.lock``, bare orphans only) instead of a mux quit. Offered
-        whenever a live lock exists -- including a **bare** Copilot with no mux
-        session, which Stop cannot touch. After it finishes the touched machines
-        reload, so the row re-renders without the stale bound process -- ready
-        for a fresh Open / Bare resume.
+        ``inuse.<pid>.lock``, **bare orphans only**) instead of a mux quit.
+        Offered -- and here filtered -- on ``session_bare_orphan``: a **bare**
+        Copilot with no mux session, which Stop cannot touch. Filtering on the
+        same predicate the executor acts on (bare-only) keeps the verb honest --
+        a healthy muxed session is left to Stop, and a bare orphan the cwd-keyed
+        lock-scan never registered (#662/#1416) still reaps. After it finishes
+        the touched machines reload, so the row re-renders without the stale
+        bound process -- ready for a fresh Open / Bare resume.
         """
         recs = [recs] if isinstance(recs, dict) else list(recs)
-        live = [r for r in recs if r.get("session_lock_live")]
+        live = [r for r in recs if r.get("session_bare_orphan")]
         if not live:
-            self.debug = "no bound session process to reclaim"
+            self.debug = "no bare orphan process to reclaim"
             return
         self._run_op_progress("Reclaim", "reclaim", live, armed=True)
 
@@ -3445,6 +3457,66 @@ class PickerScreen(Widget):
         return rec.get("cleanup_bucket") in (
             "clean", "unused", "conversation", "gone")
 
+    @staticmethod
+    def _session_action_verbs(rec) -> list[str]:
+        """The session-lifecycle verbs a worktree's Actions menu offers, from its
+        (freshly menu-verified) liveness signals -- extracted as a pure,
+        record-driven helper so the Stop/Reclaim gates are unit-testable and
+        light up *when and only when* they apply (#4058). The caller appends the
+        bridge/system navigation + cross-plugin verbs, which need engine state.
+
+        Primary verb tracks liveness (#1343): a **live** mux -> "Open" (attach);
+        a **stopped** session with history -> "Resume" (relaunch + resume last
+        conversation); a **sessionless** worktree -> "Open" (cold start --
+        resuming nothing would silently blank-start, #1026).
+
+        Stop/Reclaim are deliberately disjoint against the operator's intent so
+        neither is a dead verb:
+
+        * **Stop** -- only with a live mux to stop. Its executor gracefully quits
+          the ``wt-<id>`` mux (double->triple Ctrl-C, Copilot's native clean
+          exit) and hard-kills only as a fallback.
+        * **Reclaim** -- only when a **bare orphan** is bound
+          (``session_bare_orphan``): a Copilot launched *outside* the mux (e.g. a
+          Bridge-owned one, or a bare ``/resume``) that Stop cannot reach. The
+          executor reaps **bare** bindings only (``reclaim_one`` /
+          ``reclaim --bare-only``), leaving a healthy muxed session to Stop -- so
+          gating on the live-lock alone would both (a) offer a **no-op** Reclaim
+          on a healthy muxed worktree and (b) **miss** a bare orphan the
+          cwd-keyed lock-scan never registered (the #662/#1416 bare-session blind
+          spot). ``bare`` implies a live lock, so this is the precise predicate.
+        """
+        if rec.get("sessionless") or rec.get("mux_live"):
+            acts = ["Open"]
+        else:
+            acts = ["Resume"]
+        # two-step-restore "Bare resume": offered when there is a session to
+        # restore. Creates the worktree's mux but launches Copilot in HOME with
+        # no --resume (dodges a CLI bug that fails to start inside a repo/
+        # worktree cwd); the operator finishes with a manual ``/resume <id>``
+        # (the id is shown in this menu's header).
+        if rec.get("last_session_id"):
+            acts.append("Bare resume")
+        # A worktree we don't positively know to be sessionless can show its
+        # latest session's recent messages -- a read-only peek at what it was
+        # doing, independent of whether the disposition summary ever accumulated.
+        if not rec.get("sessionless"):
+            acts.append("Messages")
+        if rec.get("ff_eligible"):
+            acts.append("Sync")
+        if PickerScreen._cleanable(rec):
+            acts.append("Cleanup")
+        if rec.get("cleanup_bucket") in ("conversation", "unused"):
+            # A conversation-only / unused worktree (no commits) can be wrapped
+            # up directly -- finalize validates nothing is unpushed (there is
+            # nothing) and removes it (#2258 follow-up).
+            acts.append("Finalize")
+        if rec.get("mux_live"):
+            acts.append("Stop")
+        if rec.get("session_bare_orphan"):
+            acts.append("Reclaim")
+        return acts
+
     def _submenu_target(self):
         """The record the per-row sub-menu acts on: the single selected row when
         exactly one is selected (so Enter opens/resumes *it* even if the cursor
@@ -3489,46 +3561,10 @@ class PickerScreen(Widget):
                     _tracking.stamp_mux_live(_wt_id, _verdict.mux_live)
             except Exception:
                 pass  # best-effort: fall back to the populate-derived signals
-        # Primary verb tracks the session's liveness (#1343): a **live** mux ->
-        # "Open" (attach to the running session); a **stopped** session (history
-        # but no live mux) -> "Resume" (relaunch, resuming the last
-        # conversation); a **sessionless** worktree -> "Open" (cold start --
-        # nothing to resume would silently blank-start, #1026). Sync only when
-        # FF-eligible; Cleanup only when the bucket is cleanable; Stop only when
-        # there is a live mux to stop.
-        if rec.get("sessionless") or rec.get("mux_live"):
-            acts = ["Open"]
-        else:
-            acts = ["Resume"]
-        # two-step-restore "Bare resume": offered when there is a session to
-        # restore. Creates the worktree's mux but launches Copilot in HOME with
-        # no --resume (dodges a CLI bug that fails to start inside a repo/
-        # worktree cwd); the operator finishes with a manual ``/resume <id>``
-        # (the id is shown in this menu's header).
-        if rec.get("last_session_id"):
-            acts.append("Bare resume")
-        # A worktree we don't positively know to be sessionless can show its
-        # latest session's recent messages -- a read-only peek at what it was
-        # doing, independent of whether the disposition summary ever accumulated.
-        if not rec.get("sessionless"):
-            acts.append("Messages")
-        if rec.get("ff_eligible"):
-            acts.append("Sync")
-        if self._cleanable(rec):
-            acts.append("Cleanup")
-        if rec.get("cleanup_bucket") in ("conversation", "unused"):
-            # A conversation-only / unused worktree (no commits) can be wrapped
-            # up directly -- finalize validates nothing is unpushed (there is
-            # nothing) and removes it (#2258 follow-up).
-            acts.append("Finalize")
-        if rec.get("mux_live"):
-            acts.append("Stop")
-        # two-step-restore "Reclaim": offered whenever a live ``inuse.<pid>.lock``
-        # binds a Copilot process -- including a **bare** Copilot with no mux
-        # session, which Stop cannot reach. Kills the exact bound process so the
-        # session can be re-Opened / Bare-resumed cleanly.
-        if rec.get("session_lock_live"):
-            acts.append("Reclaim")
+        # Primary verb + Stop/Reclaim gating is the pure, record-driven
+        # ``_session_action_verbs`` (unit-tested #4058); the bridge/system nav +
+        # cross-plugin verbs below need engine state, so they are appended here.
+        acts = self._session_action_verbs(rec)
         # #1424/#2178: a bridge/system worktree is host-owned. Prefer jumping to
         # the *caller* worktree that requested it (the "caller-id"), when that
         # worktree is loaded; otherwise fall back to jumping to its own host tab.
