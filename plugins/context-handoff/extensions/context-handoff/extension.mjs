@@ -474,6 +474,14 @@ function persistState() {
       currentTokens: state.currentTokens,
       tokenLimit: state.tokenLimit,
       utilizationPct: pct,
+      // Numerator breakdown, straight from the session.usage_info event. Lets a
+      // consumer see whether currentTokens is dominated by the fixed
+      // system-prompt + tool/skill-definition overhead vs. live conversation --
+      // i.e. why this utilization% can differ from a narrower conversation-only
+      // display elsewhere.
+      conversationTokens: state.conversationTokens,
+      systemTokens: state.systemTokens,
+      toolDefinitionsTokens: state.toolDefinitionsTokens,
       turnCount: state.turnCount,
       updatedAt: new Date().toISOString(),
     };
@@ -1141,7 +1149,10 @@ session.on("session.usage_info", (event) => {
     state.softLogShown = true;
     session.log(
       `[Context Handoff] Context utilization at ${pct}% ` +
-      `(${d.currentTokens.toLocaleString()} / ${d.tokenLimit.toLocaleString()} tokens). ` +
+      `(${d.currentTokens.toLocaleString()} / ${d.tokenLimit.toLocaleString()} tokens; ` +
+      `conversation ${(d.conversationTokens ?? 0).toLocaleString()}, ` +
+      `system ${(d.systemTokens ?? 0).toLocaleString()}, ` +
+      `tool-defs ${(d.toolDefinitionsTokens ?? 0).toLocaleString()}). ` +
       `Consider handing off soon (invoke the context-handoff skill).`,
       { level: "warning" }
     );
@@ -1154,7 +1165,10 @@ session.on("session.usage_info", (event) => {
     state.softLogShown = true;  // hard implies soft
     session.log(
       `[Context Handoff] ⚠️ Context utilization at ${pct}% ` +
-      `(${d.currentTokens.toLocaleString()} / ${d.tokenLimit.toLocaleString()} tokens). ` +
+      `(${d.currentTokens.toLocaleString()} / ${d.tokenLimit.toLocaleString()} tokens; ` +
+      `conversation ${(d.conversationTokens ?? 0).toLocaleString()}, ` +
+      `system ${(d.systemTokens ?? 0).toLocaleString()}, ` +
+      `tool-defs ${(d.toolDefinitionsTokens ?? 0).toLocaleString()}). ` +
       `Auto-compaction triggers at ~80%. Hand off NOW -- invoke the context-handoff skill.`,
       { level: "warning" }
     );
