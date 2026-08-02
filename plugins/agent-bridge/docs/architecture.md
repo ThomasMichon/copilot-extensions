@@ -356,6 +356,19 @@ child alive across the daemon swap — see
 [Restart Behavior](#restart-behavior-and-what-survives)); the detach only
 protects the *installer* from being killed by the very drain it triggers.
 
+**Verifying a redeploy: the manifest version is not proof the daemon runs it.**
+The deploy manifest (`~/.agent-bridge/deploy-manifest.json`) and the versioned
+runtime slot (`versions/<v>/`, with the venv symlinked to it) are written when
+the *files* land — which can happen without the running **process** being
+restarted (e.g. a marketplace auto-sync that swaps files but defers the
+restart, or a `stop`/`start` where the old process had already exited). A daemon
+launched *before* the file swap keeps executing the old binary while the manifest
+already advertises the new version. To confirm a redeploy actually took effect,
+check that the **process start time is later than the manifest `deployed_at`** —
+not just that the manifest names the new version. If the running process predates
+the deploy, restart it (`install.sh stop`/`start`, or the platform service verb)
+so it re-execs the current venv slot.
+
 ### Still future: seamless mid-stream migration
 
 Cutover **drains** in-flight turns (waits for them to finish on the old daemon)
