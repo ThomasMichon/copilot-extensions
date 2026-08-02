@@ -391,13 +391,46 @@ if [[ "$ACTION" == "refresh" ]]; then
     exit 1
 fi
 
+# ── Fast re-attach: skip the update when JOINING an already-live session ──
+# Opening a worktree whose tmux session is already running just re-attaches to
+# the Copilot already executing inside it. The plugin/runtime update is
+# irrelevant to that running process (it applies on the process's next fresh
+# start), so paying for the staged download join + installer + pre-launch here
+# only delays the re-attach. When a live `wt-<id>` session exists, skip the
+# apply for a fast jump-back-in; a fresh create/resume (no live session) still
+# updates normally. Self-contained probe (mirrors the Windows launcher's
+# Test-AwJoiningLiveSession, dev329) so it stays a surgical gate without
+# reordering the rest of the launcher. The staged background download started
+# earlier is harmless if left running -- it primes the cache for the next fresh
+# start and never blocks this re-attach.
+aw_joining_live_session() {
+    # No-mux launches always (re)start Copilot directly -- the update is relevant.
+    local _nomux_env="${WORKTREE_NO_MUX:-${APERTURE_NO_MUX:-}}"
+    local _nomux_plan
+    _nomux_plan=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print('1' if d.get('no_mux') else '0')" 2>/dev/null) || _nomux_plan=0
+    if [[ "$_nomux_env" == "1" || "$_nomux_plan" == "1" ]]; then
+        return 1
+    fi
+    command -v tmux &>/dev/null || return 1
+    local _wtid
+    _wtid=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('worktree_id') or 'base')" 2>/dev/null) || _wtid=base
+    [[ -z "$_wtid" ]] && _wtid=base
+    # `=`-prefix forces an exact session-name match (mirrors the join probe below).
+    tmux has-session -t "=wt-${_wtid}" 2>/dev/null
+}
+
 if [[ "$ACTION" == "exec" ]]; then
     # ── Join the background update + apply, before the tmux handoff (#1430) ──
     # The Picker has closed, so it is now safe to swap the runtime venv. This
     # waits for the staged marketplace download, runs the installer if it
     # changed the payload (no re-exec -- a launcher change applies next launch),
-    # then the pre-launch self-update and plugin reconcile.
-    invoke_update_apply 1 1
+    # then the pre-launch self-update and plugin reconcile. Skipped entirely on
+    # a fast re-attach to an already-live session (see above).
+    if aw_joining_live_session; then
+        setup_log INFO 'Joining an already-live mux session; skipping pre-launch update for a fast re-attach (update applies on the process next fresh start).'
+    else
+        invoke_update_apply 1 1
+    fi
 
     WORK_DIR=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('work_dir',''))")
     # Path the status-bar updater renders from. Normally the pane cwd (work_dir),
