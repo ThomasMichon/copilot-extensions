@@ -172,3 +172,26 @@ def test_tmux_launcher_does_not_use_psmux_passthrough():
     so worktree tuning never leaks onto a user's personal tmux sessions."""
     sh = _LAUNCH_SCRIPT.read_text()
     assert "psmux-passthrough.conf" not in sh
+
+
+def test_launchers_fast_reattach_skips_update_on_live_session():
+    """Both launchers must skip the pre-launch update when JOINING an
+    already-live `wt-<id>` mux session -- a pure re-attach to the running
+    Copilot, for which the runtime/plugin update is irrelevant (it applies on
+    that process's next fresh start). The Windows path landed in Slice 1
+    (dev329); the bash path is Slice 5 (#4059) parity. Drift guard on both."""
+    ps = _LAUNCH_PS1.read_text()
+    sh = _LAUNCH_SCRIPT.read_text()
+    _skip_log = ("Joining an already-live mux session; skipping pre-launch "
+                 "update")
+    # Windows: the self-contained probe gates Invoke-UpdateApply.
+    assert "function Test-AwJoiningLiveSession" in ps
+    assert "if (Test-AwJoiningLiveSession) {" in ps
+    assert _skip_log in ps
+    # bash: the mirror probe gates invoke_update_apply.
+    assert "aw_joining_live_session() {" in sh
+    assert "if aw_joining_live_session; then" in sh
+    assert _skip_log in sh
+    # The bash probe must key off the tmux session name and honor no-mux.
+    assert 'tmux has-session -t "=wt-${_wtid}"' in sh
+    assert 'WORKTREE_NO_MUX' in sh and 'APERTURE_NO_MUX' in sh
