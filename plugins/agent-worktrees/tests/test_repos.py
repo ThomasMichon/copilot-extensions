@@ -152,6 +152,28 @@ def test_add_repo_preserves_deliberate_class(home: Path):
     assert e.local_path("wsl") == "/home/u/r"
 
 
+def test_local_path_expands_home_relative(home: Path, monkeypatch):
+    """A home-relative registry path (``~/src/...``) must resolve to an absolute
+    path, not the literal tilde (#4190): ``pathlib.Path`` does not expand ``~``,
+    so a raw return breaks every ``Path(local_path()).is_dir()`` consumer and
+    CWD->project discovery fails for that repo. Absolute entries are unchanged."""
+    import os
+
+    fake_home = "/home/tester"
+    monkeypatch.setattr(os.path, "expanduser",
+                        lambda p: p.replace("~", fake_home, 1)
+                        if p.startswith("~") else p)
+    e = repos.RepoEntry(name="r", paths={
+        "wsl": "~/src/aperture-labs",          # home-relative (the #4190 case)
+        "linux": "/home/tester/src/aperture-labs",  # already absolute
+    })
+    assert e.local_path("wsl") == "/home/tester/src/aperture-labs"
+    # expanduser is a no-op on an already-absolute path.
+    assert e.local_path("linux") == "/home/tester/src/aperture-labs"
+    # No tilde ever leaks through to a consumer.
+    assert "~" not in e.local_path("wsl")
+
+
 def test_list_filter_by_class(home: Path):
     repos.add_repo("a", "D:/a", repo_class="worktree", plat="windows")
     repos.add_repo("b", "D:/b", repo_class="reference", plat="windows")

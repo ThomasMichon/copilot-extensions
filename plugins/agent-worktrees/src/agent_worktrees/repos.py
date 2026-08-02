@@ -93,9 +93,20 @@ class RepoEntry:
     # paths keys: "windows", "wsl", "linux"
 
     def local_path(self, plat: str | None = None) -> str | None:
-        """Return the path for the given (or current) platform."""
+        """Return the path for the given (or current) platform.
+
+        Expands a leading ``~`` so every consumer gets a usable absolute path.
+        Registry entries may store a home-relative path (e.g. the WSL
+        ``~/src/aperture-labs``); ``pathlib.Path`` does NOT treat ``~`` as
+        special, so a raw return breaks every ``Path(local_path()).is_dir()`` /
+        normalize consumer -- ``_anchor_for_project``,
+        ``cfg._resolve_anchor_from_registry``, and ``_reverse_lookup_project``'s
+        repos fallback -- making CWD->project discovery fail for that repo
+        (#4190). ``expanduser`` is a no-op on already-absolute entries.
+        """
         plat = plat or _current_platform()
-        return self.paths.get(plat)
+        p = self.paths.get(plat)
+        return os.path.expanduser(p) if p else p
 
 
 @dataclass
