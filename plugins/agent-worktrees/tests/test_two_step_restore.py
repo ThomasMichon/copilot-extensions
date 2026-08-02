@@ -188,3 +188,88 @@ class TestMaintenanceReclaimOp:
             "reclaim", "wtX", "lambda-core", "win", True,
             include_unused=False, include_conversations=False)
         assert task() == {"ok": True, "worktree_id": "wtX"}
+
+
+# ── Actions-menu verb gating: Stop vs Reclaim light up when (and only when)
+#    they apply (#4058 Slice 4) ──────────────────────────────────────────────
+class TestSessionActionVerbs:
+    """``PickerScreen._session_action_verbs`` -- the pure, record-driven gate
+    for the per-row Actions menu. Reclaim is gated on ``session_bare_orphan``
+    (the bare-only executor's exact predicate), NOT the live-lock, so it never
+    (a) no-ops on a healthy muxed session or (b) misses a bare orphan the
+    cwd-keyed lock-scan never registered."""
+
+    from agent_worktrees.picker_tui.engine import PickerScreen as _PS
+
+    def _verbs(self, **rec):
+        return type(self)._PS._session_action_verbs(rec)
+
+    def test_healthy_muxed_offers_stop_not_reclaim(self):
+        # A live mux + live lock, no bare orphan -> Stop (graceful) is the verb;
+        # Reclaim (bare-only) would no-op, so it must NOT appear.
+        verbs = self._verbs(mux_live=True, session_lock_live=True,
+                            session_bare_orphan=False, last_session_id="s1")
+        assert "Stop" in verbs
+        assert "Reclaim" not in verbs
+        assert verbs[0] == "Open"  # live mux -> attach
+
+    def test_bare_orphan_offers_reclaim_not_stop(self):
+        # A bare (un-muxed) bound Copilot -> Reclaim; no mux for Stop to reach.
+        verbs = self._verbs(mux_live=False, session_lock_live=True,
+                            session_bare_orphan=True, last_session_id="s1")
+        assert "Reclaim" in verbs
+        assert "Stop" not in verbs
+        assert verbs[0] == "Resume"  # stopped mux, history -> resume
+
+    def test_bare_orphan_reclaims_even_when_lock_scan_missed_it(self):
+        # #662/#1416 blind spot: the cwd-keyed lock-scan never registered the
+        # bare session (session_lock_live False), but the machine-wide bare
+        # scan found it -> Reclaim must still be offered.
+        verbs = self._verbs(mux_live=False, session_lock_live=False,
+                            session_bare_orphan=True, last_session_id="s1")
+        assert "Reclaim" in verbs
+
+    def test_muxed_plus_bare_offers_both(self):
+        verbs = self._verbs(mux_live=True, session_lock_live=True,
+                            session_bare_orphan=True, last_session_id="s1")
+        assert "Stop" in verbs and "Reclaim" in verbs
+
+    def test_sessionless_offers_neither(self):
+        verbs = self._verbs(sessionless=True)
+        assert verbs == ["Open"]
+        assert "Stop" not in verbs and "Reclaim" not in verbs
+
+
+class TestStartReclaimFilter:
+    """``_start_reclaim`` filters targets on ``session_bare_orphan`` -- the same
+    predicate the bare-only executor acts on -- so it never dispatches a no-op
+    reclaim (and the debug line is honest when nothing qualifies)."""
+
+    from agent_worktrees.picker_tui.engine import PickerScreen as _PS
+
+    def _stub(self):
+        import types
+        calls = []
+        stub = types.SimpleNamespace(
+            debug="",
+            _run_op_progress=lambda *a, **k: calls.append((a, k)),
+        )
+        return stub, calls
+
+    def test_bare_orphan_dispatches(self):
+        stub, calls = self._stub()
+        rec = {"id4": "wtX", "session_bare_orphan": True,
+               "session_lock_live": True}
+        type(self)._PS._start_reclaim(stub, rec)
+        assert len(calls) == 1
+        assert calls[0][0][:3] == ("Reclaim", "reclaim", [rec])
+
+    def test_muxed_only_lock_is_no_op(self):
+        # Live lock but no bare orphan (a healthy muxed session) -> filtered out,
+        # nothing dispatched, honest debug line.
+        stub, calls = self._stub()
+        rec = {"id4": "wtX", "session_bare_orphan": False,
+               "session_lock_live": True}
+        type(self)._PS._start_reclaim(stub, rec)
+        assert calls == []
+        assert "no bare orphan" in stub.debug
