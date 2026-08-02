@@ -1,10 +1,36 @@
 # Copilot Extensions -- Development Guide
 
 Source of truth for the copilot-extensions Copilot CLI plugins. The **canonical
-plugin roster** lives in [`.github/plugin/marketplace.json`](.github/plugin/marketplace.json)
-(mirrored, with descriptions, in the [README](README.md) and
-[`docs/architecture.md`](docs/architecture.md)). All ship from this repo via the
-Copilot CLI marketplace.
+plugin roster** lives in `.github/plugin/marketplace.json` (mirrored, with
+descriptions, in `README.md` and `docs/architecture.md`). All ship from this
+repo via the Copilot CLI marketplace.
+
+> **This file is the map, not the manual.** It orients you and links out to the
+> homes that hold the substance -- read the waypoint you need instead of crawling
+> the tree, which is how a large repo stays navigable. It deliberately uses
+> **backtick faux-links** (`` `docs/architecture.md` ``) rather than
+> `[text](path)` links: Copilot auto-loads real Markdown links from an always-on
+> `AGENTS.md` into *every* session, so faux-links keep this a lean map read on
+> demand (see the `authoring-skills` skill). Don't "fix" them into clickable
+> links.
+
+---
+
+## Finding your way around -- start here
+
+| To... | Go to |
+|-------|-------|
+| Know **which plugins exist** (+ versions) | `.github/plugin/marketplace.json` (source of truth), rendered in `README.md` and `docs/architecture.md` |
+| Understand **how the suite works today** (as-is) | `docs/architecture.md` |
+| See **how we build plugins here** (reusable design) | `docs/patterns/README.md` |
+| See **what a subject should ultimately be** (intent) | `visions/README.md` |
+| **Make a change and land it correctly** | the **`contributing-to-copilot-extensions`** skill (+ *Contribution Rules* below) |
+| **Test** a plugin | `TESTING.md` |
+| Decide **where config lives** (repo vs machine) | `docs/configuration.md` |
+| Turn a repo into an **agent harness** | `docs/harness-runbook.md` + the **`building-harnesses`** skill |
+| Author a **skill / sub-agent / harness plugin** | the **`authoring-skills`** / **`defining-subagents`** / **`authoring-harness-plugins`** skills |
+| **Diagnose** a broken plugin or deploy | the **`diagnosing-copilot-extensions`** skill |
+| The **deploy / install contract** | `docs/install-contract.md` |
 
 ---
 
@@ -21,7 +47,7 @@ copilot-extensions/
     tests/                     # runtime plugins with a suite
     hooks.json | extensions/   # optional: session-start hook / session extension
     docs/                      # plugin docs
-  libs/<lib>/                  # shared libs vendored into consuming venvs: ssh-manager, credential-relay, zdd
+  libs/<lib>/                  # shared libs vendored into consuming venvs (ssh-manager, credential-relay, config-migrate, endpoint-rendezvous, versioned-runtime, zdd)
   docs/                        # repo architecture (architecture.md), patterns/, plans/
   visions/                     # standing north-star visions (should-be)
   .github/plugin/marketplace.json   # marketplace catalog — the SINGLE SOURCE OF TRUTH for the plugin roster + versions
@@ -29,11 +55,9 @@ copilot-extensions/
 ```
 
 > **The roster is deliberately not enumerated here.** The canonical plugin list
-> (and every version) lives in
-> [`.github/plugin/marketplace.json`](.github/plugin/marketplace.json), rendered
-> for humans in [`docs/architecture.md`](docs/architecture.md) and the
-> [README](README.md) table. Read those for *which* plugins exist; this tree
-> shows only the *shape* of a plugin dir.
+> (and every version) lives in `.github/plugin/marketplace.json`, rendered
+> for humans in `docs/architecture.md` and the `README.md` table. Read those for
+> *which* plugins exist; this tree shows only the *shape* of a plugin dir.
 
 ---
 
@@ -41,11 +65,10 @@ copilot-extensions/
 
 The suite spans many plugins. The **canonical plugin list, the runtime-vs-
 payload split, and the per-plugin lifecycle tables** live in
-[`docs/architecture.md`](docs/architecture.md) (and the
-[README](README.md) plugin table) — derived from
-[`.github/plugin/marketplace.json`](.github/plugin/marketplace.json), which is
-the single source of truth. **Don't re-enumerate the plugin roster here** — that
-duplicate is exactly what drifts. All binstubs live in `~/.local/bin/`.
+`docs/architecture.md` (and the `README.md` plugin table) — derived from
+`.github/plugin/marketplace.json`, which is the single source of truth.
+**Don't re-enumerate the plugin roster here** — that duplicate is exactly what
+drifts. All binstubs live in `~/.local/bin/`.
 
 > The agent-bridge installer also imports the `agent_codespaces` **and**
 > `agent_containers` packages into its venv (for the `codespace:` / `container:`
@@ -58,7 +81,7 @@ duplicate is exactly what drifts. All binstubs live in `~/.local/bin/`.
 
 ## Visions — the standing north star
 
-This repo carries **visions** under [`visions/`](visions/README.md): the durable
+This repo carries **visions** under `visions/README.md`: the durable
 *what-should-be* for its plugins, services, and shared systems. A vision is
 **pure should-be**, **intent-level** (not a spec), and **revised in place** (Git
 is the history) — it never lists gaps or status.
@@ -78,16 +101,15 @@ to-do.
 - **Don't edit a vision to record progress.** It changes only when the *intent*
   changes; delta-closure state lives in the issues/efforts.
 
-See [`visions/README.md`](visions/README.md) for the local conventions
-(organization, issue/effort linkage) and the `envisioning` /
-`carve-vision-effort` skills for the workflow.
+See `visions/README.md` for the local conventions (organization, issue/effort
+linkage) and the `envisioning` / `carve-vision-effort` skills for the workflow.
 
 ### Architecture patterns — how we build it
 
 Between the vision (*what should be*) and the code (*what is*) sits the
-**patterns** layer: [`docs/patterns/`](docs/patterns/README.md) — the prescriptive,
-reusable design conventions for building plugins and plugin services here (plugin
-shapes, numbered **design principles**, binding **design invariants**, and focused
+**patterns** layer: `docs/patterns/README.md` — the prescriptive, reusable design
+conventions for building plugins and plugin services here (plugin shapes,
+numbered **design principles**, binding **design invariants**, and focused
 pattern docs: endpoint discovery, service supervision, à-la-carte independence,
 cross-platform parity). `docs/patterns/` is the **map**; `docs/install-contract.md`
 is the established deploy-contract pattern it links.
@@ -105,6 +127,13 @@ as-is) → **contribution** (this file + the harness skills, how-to-land).
 ---
 
 ## Contribution Rules
+
+> **The full landing procedure is the `contributing-to-copilot-extensions`
+> skill** — repo layout, the worktree contribution flow, the mandatory version
+> bump, the test + install-contract gates, deploy-after-push, and the
+> source-of-truth rules. This section is the always-on summary; that skill is the
+> step-by-step, and `diagnosing-copilot-extensions` covers a broken plugin or
+> deploy.
 
 ### Branch and Push
 
@@ -157,7 +186,7 @@ docs honest; run it before pushing doc changes.)
 
 ### Test Before Push
 
-> **Full testing guide: [`TESTING.md`](TESTING.md)** — the runner reference, the
+> **Full testing guide: `TESTING.md`** — the runner reference, the
 > lint/contract gates, and the **opt-in end-to-end smoke tests** (real-infra,
 > caller-supplied targets, skipped by default).
 
@@ -179,22 +208,21 @@ canonicalization, F3 binding invariants) so `--guards` runs them in
 sub-second-per-plugin. There is intentionally **no** automatic push/PR gate yet
 — run the suite yourself before pushing a runtime change.
 
-Per-plugin coverage notes:
-
-- **agent-bridge:** transport, sessions, config, and CLI.
-- **agent-codespaces:** config, lifecycle, resolver, and the credential relay.
-- **agent-containers:** config, lifecycle, the lease broker, and the resolver.
-- **agent-mcp:** config loading, auth injectors, transports, bridge framing, the
-  decorator pipeline (filter/rename/defer/code-mode/storage), and an end-to-end
-  stdio bridge run. The code-mode Node tests skip automatically when `node` is
-  absent.
-- **agent-worktrees:** a large suite (~1400 tests) covering worktree lifecycle,
-  the status/tracking model, PR flow, and the Textual **Picker** (including a
-  real-framework `pilot.press` keyboard harness).
+**Per-plugin coverage** — what each plugin's suite exercises — lives in
+`TESTING.md` § *Per-plugin coverage*, not here (that enumeration drifts as
+plugins are added). The largest is **agent-worktrees**: a ~1400-test suite
+covering worktree lifecycle, the status/tracking model, PR flow, and the Textual
+**Picker** (with a real-framework `pilot.press` keyboard harness).
 
 ### Deploy After Push
 
-After pushing to `main`, update on each target machine:
+After pushing to `main`, deploy on each target machine. **Payload-only plugins**
+(skills / hooks / extensions — e.g. efforts, visions, context-handoff, agent-ssh,
+customizing-copilot, copilot-extensions-harness) need only `copilot plugin
+update` — no runtime installer. **Runtime plugins** additionally run their own
+installer; the examples below are illustrative, with the
+`contributing-to-copilot-extensions` skill and each plugin's `scripts/` as the
+authority:
 
 ```bash
 # agent-worktrees -- via the update subcommand
@@ -275,28 +303,21 @@ cd plugins/agent-bridge
 
 ## Key Files
 
+Global entry points. **Per-plugin files follow the shape shown, for any plugin
+`<p>` in the marketplace roster** — that roster is the source of truth, so this
+table is deliberately not enumerated per plugin (the enumeration is exactly what
+drifted as the suite grew):
+
 | What | Where |
 |------|-------|
-| Marketplace catalog | `.github/plugin/marketplace.json` |
-| agent-worktrees manifest | `plugins/agent-worktrees/plugin.json` |
-| agent-bridge manifest | `plugins/agent-bridge/plugin.json` |
-| agent-codespaces manifest | `plugins/agent-codespaces/plugin.json` |
-| agent-containers manifest | `plugins/agent-containers/plugin.json` |
-| agent-mcp manifest | `plugins/agent-mcp/plugin.json` |
-| agent-worktrees Python source | `plugins/agent-worktrees/src/agent_worktrees/` |
-| agent-bridge Python source | `plugins/agent-bridge/src/agent_bridge/` |
-| agent-codespaces Python source | `plugins/agent-codespaces/src/agent_codespaces/` |
-| agent-containers Python source | `plugins/agent-containers/src/agent_containers/` |
-| agent-mcp Python source | `plugins/agent-mcp/src/agent_mcp/` |
-| agent-bridge tests | `plugins/agent-bridge/tests/` |
-| agent-codespaces tests | `plugins/agent-codespaces/tests/` |
-| agent-containers tests | `plugins/agent-containers/tests/` |
-| agent-mcp tests | `plugins/agent-mcp/tests/` |
-| Skills (agent-worktrees) | `plugins/agent-worktrees/skills/` |
-| Skills (agent-bridge) | `plugins/agent-bridge/skills/` |
-| Skills (agent-codespaces) | `plugins/agent-codespaces/skills/` |
-| Skills (agent-containers) | `plugins/agent-containers/skills/` |
-| Skills (agent-mcp) | `plugins/agent-mcp/skills/` |
-| Hooks | `plugins/agent-worktrees/hooks.json` |
-| Installers | `agent-worktrees`/`agent-codespaces`: `scripts/init.*` + `scripts/install.*`; `agent-bridge`: `scripts/install.*`; `agent-containers`/`agent-mcp`: `scripts/init.*` only |
+| Marketplace catalog (roster + versions) | `.github/plugin/marketplace.json` |
 | Repo architecture overview | `docs/architecture.md` |
+| Design patterns / invariants | `docs/patterns/README.md` |
+| Visions (intent) | `visions/README.md` |
+| Per-plugin manifest | `plugins/<p>/plugin.json` |
+| Per-plugin Python source (runtime plugins) | `plugins/<p>/src/<pkg>/` |
+| Per-plugin tests | `plugins/<p>/tests/` |
+| Per-plugin skills | `plugins/<p>/skills/` |
+| Per-plugin installers | `plugins/<p>/scripts/` (`init.*` and/or `install.*`; payload-only plugins may have none) |
+| Session-start hooks | `plugins/<p>/hooks.json` (e.g. `agent-worktrees`) |
+| Shared libs (vendored into venvs) | `libs/<lib>/` |
