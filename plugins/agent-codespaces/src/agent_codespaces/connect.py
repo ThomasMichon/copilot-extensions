@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import shlex
+import sys
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -102,8 +103,10 @@ class ConnectTracker:
         emit: Callable[[str, dict[str, Any]], Any] | None = None,
         *,
         session_id: str = "",
+        emit_stderr: bool = False,
     ) -> None:
         self._emit = emit
+        self._emit_stderr = emit_stderr
         self.session_id = session_id
         self._started_at: dict[ConnectStage, float] = {}
 
@@ -152,6 +155,15 @@ class ConnectTracker:
             level, "connect[%s] stage %d/%s %s%s%s",
             self.session_id or "-", int(stage), stage.name, status, elapsed, suffix,
         )
+        if self._emit_stderr:
+            policy = STAGE_POLICIES.get(stage)
+            label = policy.label if policy is not None else stage.name.lower()
+            progress = f"[stage {int(stage)}/{label}] {status}"
+            if elapsed_ms is not None:
+                progress += f" ({elapsed_ms}ms)"
+            if detail:
+                progress += f": {detail}"
+            print(progress, file=sys.stderr)
         if self._emit is not None:
             try:
                 self._emit("connect_checkpoint", data)

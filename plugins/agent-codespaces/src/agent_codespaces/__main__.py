@@ -103,7 +103,23 @@ def main(argv: list[str] | None = None) -> int:
     ssh_parser.add_argument(
         "--timeout", dest="timeout", type=float, default=60.0, metavar="SECS",
         help="Timeout in seconds for --remote-cmd execution (default: 60). On "
-             "expiry the command is terminated and the CLI exits 124.",
+             "expiry the command is terminated and the CLI exits 124. For a "
+             "non-stdio --remote-cmd this also defaults the whole "
+             "connect+command budget unless --connect-timeout is set.",
+    )
+    ssh_parser.add_argument(
+        "--connect-timeout", dest="connect_timeout", type=float, default=None,
+        metavar="SECS",
+        help="Overall timeout in seconds for SSH connect/provisioning and the "
+             "requested operation. Defaults to --timeout for a non-stdio "
+             "--remote-cmd; otherwise no additional whole-operation deadline.",
+    )
+    ssh_parser.add_argument(
+        "--no-provision", "--minimal", dest="no_provision", action="store_true",
+        help="Skip heavyweight dotfiles/harness/plugin/repo provisioning. "
+             "Non-stdio --remote-cmd uses this minimal diagnostic path by "
+             "default; --stdio and interactive keep full provisioning unless "
+             "this flag is supplied.",
     )
     ssh_parser.add_argument(
         "--no-relay", action="store_true",
@@ -599,7 +615,16 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     # any --stage-plugin payloads are staged -- so their on-CodeSpace
     # --plugin-dir paths can be folded into the copilot invocation. See
     # _finalize_remote_cmd below.
-    tracker = ConnectTracker(session_id=args.name)
+    diagnostic_remote_cmd = bool(args.remote_cmd and not args.stdio)
+    minimal_provision = bool(getattr(args, "no_provision", False) or diagnostic_remote_cmd)
+    overall_timeout = getattr(args, "connect_timeout", None)
+    if overall_timeout is None and diagnostic_remote_cmd:
+        overall_timeout = args.timeout
+
+    tracker = ConnectTracker(
+        session_id=args.name,
+        emit_stderr=diagnostic_remote_cmd,
+    )
 
     def _finalize_remote_cmd(plugin_dirs: list[str]) -> str | None:
         """Wrap args.remote_cmd in a login shell (see _build_launch_command).
@@ -648,41 +673,54 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 1.5, 20.0)
 
-        # Stage 4 (target-auth-env): deploy the CodeSpace-side relay helpers so
-        # ADO auth resolves over the tunnel. Idempotent; best-effort -- a
-        # failure here shouldn't block the SSH command.
         if not args.no_relay:
+            # Stage 4 (target-auth-env): deploy the CodeSpace-side relay helpers
+            # so remote auth resolves over the tunnel. Auth verification later
+            # in this same stage catches missing local credentials up front.
             tracker.started(ConnectStage.TARGET_AUTH_ENV, "credential relay")
             await _provision_relay_helpers(manager, args.name)
-            tracker.reached(ConnectStage.TARGET_AUTH_ENV)
 
-        # Ensure the account dotfiles repo is cloned + current (universal
-        # bootstrap, gated on `dotfiles_repo`). Heals a CodeSpace whose
-        # post-start dotfiles clone hasn't run (e.g. first agent-bridge connect)
-        # and syncs it forward on reconnect. Needs the relay up for git auth.
-        if not args.no_relay:
-            await _provision_dotfiles(manager, args.name, config)
-            await _provision_harness(manager, args.name, config)
-
-        # Register CodeSpace-scoped plugins (the CodeSpace-scoped axis) via BOTH
-        # lanes: (1) the CodeSpace user settings so they load for interactive /
-        # `copilot -p` launches (incl. a human opening the CodeSpace in VS Code,
-        # where there's no agent-bridge to pass --plugin-dir); and (2) their
-        # on-CodeSpace payload dirs, folded into the acp launch below as
-        # --plugin-dir -- because `copilot --acp` (the dispatch) ignores
-        # enabledPlugins and only surfaces plugin skills via --plugin-dir.
-        # Best-effort; needs the relay up for the payload pre-install.
         cs_plugin_dirs: list[str] = []
-        if not args.no_relay:
-            cs_plugin_dirs = await _register_codespace_plugins(
-                manager, args.name, getattr(args, "repo", None), config,
+        if minimal_provision:
+            tracker.started(
+                ConnectStage.TARGET_BINSTUB,
+                "heavy provisioning skipped (minimal diagnostic path)",
             )
+            tracker.reached(
+                ConnectStage.TARGET_BINSTUB,
+                "heavy provisioning skipped",
+            )
+        else:
+            tracker.started(ConnectStage.TARGET_BINSTUB, "provisioning")
+            # Ensure the account dotfiles repo is cloned + current (universal
+            # bootstrap, gated on `dotfiles_repo`). Heals a CodeSpace whose
+            # post-start dotfiles clone hasn't run (e.g. first agent-bridge
+            # connect) and syncs it forward on reconnect. Needs the relay up for
+            # git auth.
+            if not args.no_relay:
+                await _provision_dotfiles(manager, args.name, config)
+                await _provision_harness(manager, args.name, config)
 
-        # Run repo-declared provision hooks (by-convention extras from the
-        # adopted repo's codespaces.yaml). Best-effort, idempotent.
-        await _provision_repo_hooks(
-            manager, args.name, config, getattr(args, "repo", None),
-        )
+            # Register CodeSpace-scoped plugins (the CodeSpace-scoped axis) via
+            # BOTH lanes: (1) the CodeSpace user settings so they load for
+            # interactive / `copilot -p` launches (incl. a human opening the
+            # CodeSpace in VS Code, where there's no agent-bridge to pass
+            # --plugin-dir); and (2) their on-CodeSpace payload dirs, folded into
+            # the acp launch below as --plugin-dir -- because `copilot --acp`
+            # (the dispatch) ignores enabledPlugins and only surfaces plugin
+            # skills via --plugin-dir. Best-effort; needs the relay up for the
+            # payload pre-install.
+            if not args.no_relay:
+                cs_plugin_dirs = await _register_codespace_plugins(
+                    manager, args.name, getattr(args, "repo", None), config,
+                )
+
+            # Run repo-declared provision hooks (by-convention extras from the
+            # adopted repo's codespaces.yaml). Best-effort, idempotent.
+            await _provision_repo_hooks(
+                manager, args.name, config, getattr(args, "repo", None),
+            )
+            tracker.reached(ConnectStage.TARGET_BINSTUB)
 
         # Verify the host has local auth for every domain the session's git
         # remotes use -- the workspace (ADO) AND the dotfiles repo (GitHub).
@@ -698,12 +736,13 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
                 print(f"[ERROR] {exc}", file=sys.stderr)
                 await manager.disconnect(args.name)
                 return _ADO_AUTH_EXIT
+            tracker.reached(ConnectStage.TARGET_AUTH_ENV)
 
         # Stage related-repo plugins (repo-targeted lane) onto the CodeSpace and
         # fold their --plugin-dir paths into the launch. Best-effort: a staging
         # failure drops that plugin but never blocks the dispatch.
         plugin_dirs: list[str] = list(cs_plugin_dirs)
-        if not args.no_relay:
+        if not args.no_relay and not minimal_provision:
             plugin_dirs += await _stage_plugins(
                 manager, args.name, getattr(args, "stage_plugins", []),
             )
@@ -711,16 +750,20 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
 
         if args.stdio and remote_cmd:
             # Structured stdio mode for agent-bridge
+            tracker.started(ConnectStage.LAUNCH_ACP, "stdio channel")
             proc = await manager.open_stdio_channel(args.name, remote_cmd)
             # Pipe through to our own stdio
             await _pipe_stdio(proc)
+            tracker.reached(ConnectStage.LAUNCH_ACP)
             return proc.returncode if proc.returncode is not None else 1
 
         if remote_cmd:
             # Non-interactive command execution
+            tracker.started(ConnectStage.LAUNCH_ACP, "remote command")
             result = await manager.exec_command(
                 args.name, remote_cmd, timeout=args.timeout
             )
+            tracker.reached(ConnectStage.LAUNCH_ACP)
             return _emit_remote_cmd_result(result, args.timeout)
 
         # Interactive SSH -- fall through to gh codespace ssh
@@ -745,8 +788,30 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         print(busy.user_message(), file=sys.stderr)
         return _BUSY_EXIT
 
+    async def _run_with_cleanup() -> int:
+        try:
+            if overall_timeout is not None and overall_timeout > 0:
+                return await asyncio.wait_for(_run(), timeout=overall_timeout)
+            return await _run()
+        except TimeoutError:
+            print(
+                f"[FAIL] SSH operation for CodeSpace '{args.name}' exceeded "
+                f"{overall_timeout:g}s; disconnected and cleaned up.",
+                file=sys.stderr,
+            )
+            return 124
+        except asyncio.CancelledError:
+            print(
+                f"[CANCEL] SSH operation for CodeSpace '{args.name}' was "
+                "interrupted; disconnecting and cleaning up.",
+                file=sys.stderr,
+            )
+            raise
+        finally:
+            await manager.disconnect(args.name)
+
     try:
-        return asyncio.run(_run())
+        return asyncio.run(_run_with_cleanup())
     finally:
         target_lock.release()
 

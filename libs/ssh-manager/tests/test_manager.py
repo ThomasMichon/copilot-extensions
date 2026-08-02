@@ -239,6 +239,25 @@ class TestConnectionManagerExec:
         assert "uname -a" in call_args
         assert "BatchMode=yes" in call_args
 
+    @pytest.mark.asyncio
+    async def test_disconnect_terminates_active_child_tree(self, win_platform, source):
+        """Disconnect must reap in-flight direct SSH children."""
+        manager = ConnectionManager(platform=win_platform)
+        info = await manager.ensure_connected("test-host", source)
+        child = AsyncMock()
+        child.returncode = None
+        child.pid = 12345
+        info.child_processes.append(child)
+
+        with patch(
+            "ssh_manager.manager._terminate_process_tree",
+            new=AsyncMock(),
+        ) as terminate:
+            await manager.disconnect("test-host")
+
+        terminate.assert_awaited_once_with(child)
+        assert child not in info.child_processes
+
 
 class TestGetDefaultManager:
     """Tests for the convenience singleton."""
