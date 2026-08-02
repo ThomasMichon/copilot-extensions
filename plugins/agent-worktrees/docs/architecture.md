@@ -1276,4 +1276,40 @@ purely optional: excising the internal `sel`/`stops`/`_dispatch_key` model (whic
 still works fine as the widgets' navigation backing) and migrating its ~100 tests --
 deferred as low-value churn under Strategy A.
 
+**NF5-5 -- swappable native `OptionList` data body (in progress, opt-in).** The
+operator's call for the "native furniture": the composed widgets gave native focus/
+Tab/click/scroll/modals, but the data body still *painted styled text lines* and
+tracked the manual `sel` cursor. NF5-5 replaces it with a genuine native
+`OptionList` -- built the same swap-behind-a-toggle way NF1-NF5 were, so it can be
+soaked before it becomes the default.
+
+- **Toggle.** `AGENT_WORKTREES_PICKER_NATIVE_LIST` (default OFF). `compose()` yields
+  `_PickerNativeData` (an `OptionList` subclass) in place of the text-line
+  `_PickerBodyData` for the `nf-body-data` region; default OFF keeps the text-line
+  body authoritative (golden byte-identical, full suite green).
+- **Options from the same rows.** `_PickerNativeData` builds its options from a new
+  `_build_data_vrows(width, sel)` (data-only -- it renders no chrome, so it never
+  drives `build_chrome`/`tab_bar` before `setup()`), passing a *sentinel* sel so the
+  focus-cursor highlight is **not** baked into the row text (the native widget owns
+  the cursor via `.option-list--option-highlighted`, styled amber to match the
+  modals). `wt_sel` background + dimming stay baked. Non-selectable rows (column
+  header, section headers, live-pulse sublines) become **disabled** options -- the
+  native cursor skips them, exactly as the manual `stops` did.
+- **Bridged to `sel` both ways.** `OptionHighlighted` mirrors the native cursor into
+  `sel`; external `sel` changes mirror onto `.highlighted`. Options rebuild only when
+  a coarse data **signature** changes (kind/machine/records/`wt_sel`/pulse), so plain
+  cursor moves stay smooth and native. `on_key` lets `OptionList` own up/down/enter/
+  home/end/page and routes everything else (Tab region cycle, `[`/`]`, machine/pivot
+  shortcuts) through the manual model, so region navigation is unchanged. Enter/click
+  -> `_activate()`.
+- **Slice 1 status.** Mounts, renders every pivot's rows as native options, Tab in/
+  out works, native up/down navigate and mirror into `sel`; validated by
+  `test_native_list_body_mounts_and_navigates` (+ `_disabled_by_default`), full suite
+  green (1690), A/B render clean. Known rough edges for the soak (later slices):
+  section headers render as plain disabled rows (no sticky-pin yet), the multi-select
+  gutter + shift-range and the live-pulse sublines are baked-text best-effort (not yet
+  native), single-click activates (native `OptionList` select) rather than select-then-
+  double-click, and up from the top row doesn't cross into chrome (Tab does). Once
+  soaked, later slices port sections/multiselect/pulse and flip the default.
+
 

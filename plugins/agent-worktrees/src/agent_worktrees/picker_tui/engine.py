@@ -27,6 +27,7 @@ from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widget import Widget
 from textual.widgets import OptionList, SelectionList, Static
+from textual.widgets.option_list import Option
 
 from .. import profiles as profiles_mod
 from ..update_stage import indicator_state
@@ -410,6 +411,18 @@ def _resolve_mock_mode(explicit=None):
     return False
 
 
+def _native_list_enabled() -> bool:
+    """NF5-5 (#88): opt-in swappable *native* OptionList data body. When
+    ``AGENT_WORKTREES_PICKER_NATIVE_LIST`` is truthy, the pivot's data rows are
+    composed as a real Textual ``OptionList`` (native focus/cursor/scroll/click)
+    instead of the text-line ``_PickerBodyData`` painted from the manual ``sel``
+    cursor. Default OFF -- the text-line body stays authoritative until the
+    native list is soaked and validated, then this flips (the same swap-behind-a-
+    toggle playbook NF1-NF5 used)."""
+    val = os.environ.get("AGENT_WORKTREES_PICKER_NATIVE_LIST", "0").strip().lower()
+    return val not in ("", "0", "false", "no", "off")
+
+
 class _PickerSegment(Widget):
     """One NF2 screen segment (or a row-slice of one) -- a leaf widget that
     renders its slice of ``PickerScreen._frame_segments()`` (#88 NF2/NF3).
@@ -598,6 +611,154 @@ class _PickerBodyData(_FocusRegion):
         scr = self._screen
         event.stop()
         scr._dispatch_key("up")
+        scr._sync_focus_to_sel()
+        scr.refresh()
+
+
+class _PickerNativeData(OptionList):
+    """NF5-5 (#88): swappable *native* data body -- the pivot's data rows as real
+    ``OptionList`` options (native focus, cursor, up/down, click, scroll, a11y)
+    instead of painted text lines driven by the manual ``sel`` cursor. Opt-in via
+    ``AGENT_WORKTREES_PICKER_NATIVE_LIST`` (default OFF) so it can be soaked before
+    it becomes the default -- the same swap-behind-a-toggle playbook NF1-NF5 used.
+
+    Bridged to the engine ``sel`` model both ways so the rest of the picker
+    (chrome, activation, tests) is unchanged: native cursor moves mirror into
+    ``sel`` (``OptionHighlighted``), and external ``sel`` changes mirror onto the
+    native highlight. Non-selectable rows (column header, section headers,
+    live-pulse sublines) become *disabled* options -- the native cursor skips
+    them, exactly as the manual ``stops`` list did. Options are rebuilt only when
+    the data signature changes, so plain cursor navigation stays smooth/native.
+    """
+
+    can_focus = True
+    _SENTINEL_SEL = ("__native__", -1)
+    #: Keys OptionList owns natively (its own BINDINGS handle these); everything
+    #: else routes through the manual model so Tab/pivot/machine behave as
+    #: elsewhere.
+    _NATIVE_KEYS = frozenset({"up", "down", "home", "end", "pageup", "pagedown",
+                              "enter"})
+
+    def __init__(self, screen, **kw) -> None:
+        super().__init__(**kw)
+        self._screen = screen
+        self._stops = []          # option index -> sel stop (None = header row)
+        self._sig = None          # last data signature (rebuild only on change)
+        self._syncing = False
+
+    # ---- data <-> options -------------------------------------------------
+    def _signature(self):
+        scr = self._screen
+        wt = tuple(sorted(scr.wt_sel.ids)) if hasattr(scr, "wt_sel") else ()
+        try:
+            nrows = len(scr.list_records())
+        except Exception:
+            nrows = -1
+        return (scr._kind(), scr.htab, scr.machine_idx, nrows, wt,
+                getattr(scr, "pulse", 0), getattr(scr, "update_state", None))
+
+    def _rebuild(self):
+        scr = self._screen
+        W = scr.size.width or 100
+        # Data-only build (the native widget renders no chrome); resilient to an
+        # early mount before the screen's setup() has populated records.
+        try:
+            data = scr._build_data_vrows(W, sel=self._SENTINEL_SEL)
+        except Exception:
+            data = []
+        self._syncing = True
+        try:
+            self.clear_options()
+            self._stops = []
+            opts = []
+            for vr in data:
+                stop = getattr(vr, "stop", None)
+                text = vr.text if isinstance(vr.text, Text) else Text(str(vr.text))
+                opts.append(Option(text, disabled=stop is None))
+                self._stops.append(stop)
+            if opts:
+                self.add_options(opts)
+        finally:
+            self._syncing = False
+        self._sig = self._signature()
+        self._sync_from_sel()
+
+    def _index_for_stop(self, stop):
+        for i, s in enumerate(self._stops):
+            if s == stop:
+                return i
+        return None
+
+    def _sync_from_sel(self):
+        """Point the native cursor at the option owning the engine's ``sel``."""
+        idx = self._index_for_stop(self._screen.sel)
+        if idx is None or self.highlighted == idx:
+            return
+        self._syncing = True
+        try:
+            self.highlighted = idx
+        finally:
+            self._syncing = False
+
+    def refresh_data(self):
+        """Called by the screen on a state change (in place of a plain
+        ``refresh()``): rebuild the options only when the data signature changed
+        -- so plain cursor moves stay smooth and native -- else just mirror
+        ``sel`` onto the native highlight."""
+        if self._signature() != self._sig:
+            self._rebuild()
+        else:
+            self._sync_from_sel()
+
+    def on_mount(self) -> None:
+        self._rebuild()
+
+    # ---- native events -> engine model -----------------------------------
+    def on_focus(self) -> None:
+        scr = self._screen
+        if scr._nf_syncing or not scr._nf_mounted:
+            return
+        if scr._widget_for_zone(scr.sel[0]) != "nf-body-data":
+            # Land on the first data row (not the button default_sel), so
+            # focusing the list selects a row.
+            head = next((s for s in self._stops if s is not None), None)
+            scr.sel = head if head is not None else scr.default_sel()
+            scr.refresh()
+        self._sync_from_sel()
+
+    def on_option_list_option_highlighted(self, event) -> None:
+        if self._syncing:
+            return
+        scr = self._screen
+        i = event.option_index
+        stop = self._stops[i] if 0 <= i < len(self._stops) else None
+        if stop is not None and scr.sel != stop:
+            scr.sel = stop
+            scr._wt_track_focus()
+            scr.refresh()
+
+    def on_option_list_option_selected(self, event) -> None:
+        # Enter / click on a row -> activate (open its submenu etc.), the native
+        # parallel to the manual Enter path.
+        self._screen._activate()
+
+    def on_key(self, event) -> None:
+        scr = self._screen
+        key = event.key
+        # Global pivot/machine shortcuts stay owned by the picker's BINDINGS.
+        if key in scr.BINDING_KEYS:
+            return
+        # Let OptionList's own bindings own list navigation + select.
+        if key in self._NATIVE_KEYS:
+            return
+        # Everything else (Tab region cycle, [ ] pivots, ←/→, etc.) routes
+        # through the manual model, then focus is mirrored back onto whatever
+        # region sel now names -- exactly like the text-line region bridge.
+        event.stop()
+        event.prevent_default()
+        if event.character in ("[", "]"):
+            key = event.character
+        scr._dispatch_key(key)
         scr._sync_focus_to_sel()
         scr.refresh()
 
@@ -1943,15 +2104,18 @@ class PickerScreen(Widget):
             "registered": self.tasks_view,
         }.get(self._kind(), self.profiles_view)
 
-    def _build_body_split(self, width):
+    def _build_body_split(self, width, sel=None):
         """Return ``(chrome_vrows, data_vrows)`` for the current pivot -- the
         fixed machine-scope + button chrome vs the scrolling data -- by driving
         the view's ``build_chrome`` / ``build_data`` emitters into two separate
         VRow sinks (#88 NF3). Concatenated, the rendered rows equal
         ``build_body(width)`` byte-for-byte; the split lets the compose tree
-        render the chrome fixed and scroll only the data. (The monolithic
-        ``build_body`` / ``render`` path is untouched and stays authoritative
-        while the toggle is off.)"""
+        render the chrome fixed and scroll only the data. ``sel`` defaults to the
+        live ``self.sel``; the native OptionList body (#88 NF5-5) passes a
+        sentinel sel so no focus-cursor highlight is baked into the row text (the
+        native widget owns the cursor)."""
+        use_sel = self.sel if sel is None else sel
+
         def make_sink():
             vrows = []
             section = {"cur": None}
@@ -1967,10 +2131,31 @@ class PickerScreen(Widget):
 
         view = self._current_view()
         chrome, add_c = make_sink()
-        view.build_chrome(add_c, width, self.sel)
+        view.build_chrome(add_c, width, use_sel)
         data, add_d = make_sink()
-        view.build_data(add_d, width, self.sel)
+        view.build_data(add_d, width, use_sel)
         return chrome, data
+
+    def _build_data_vrows(self, width, sel=None):
+        """Data-only VRows for the current pivot (no chrome) -- used by the
+        native OptionList body (#88 NF5-5), which renders the chrome separately
+        and must not drive ``build_chrome`` (e.g. ``tab_bar``) before the screen
+        is set up. ``sel`` defaults to ``self.sel``; a sentinel suppresses the
+        focus-cursor highlight so the native widget owns the cursor."""
+        use_sel = self.sel if sel is None else sel
+        vrows = []
+        section = {"cur": None}
+
+        def add(text, stop=None, kind=None, data=None, new_section=None):
+            if new_section is not None:
+                section["cur"] = (new_section, len(vrows))
+            vr = VRow(text, stop, kind, data)
+            vr.pin_section = section["cur"]
+            vrows.append(vr)
+            return vr
+
+        self._current_view().build_data(add, width, use_sel)
+        return vrows
 
     def _ensure_data_visible(self, data_vrows, data_h):
         """Scroll the data-body (compose tree) so the selected data row is
@@ -2320,16 +2505,25 @@ class PickerScreen(Widget):
         yield _PickerSegment(self, "chrome", id="nf-chrome")
         yield _PickerMachine(self, id="nf-machine")
         yield _PickerButtons(self, id="nf-buttons")
-        yield _PickerBodyData(self, id="nf-body-data")
+        if _native_list_enabled():
+            # NF5-5 (#88): swappable native OptionList data body (opt-in).
+            yield _PickerNativeData(self, id="nf-body-data")
+        else:
+            yield _PickerBodyData(self, id="nf-body-data")
         yield _PickerSegment(self, "footer", id="nf-footer")
 
     def _refresh_nf_segments(self) -> None:
         """Propagate a screen state change to the child segment/region widgets
-        (their ``render()`` reads back off this screen)."""
+        (their ``render()`` reads back off this screen). The native OptionList
+        data body (#88 NF5-5) rebuilds its options on demand instead."""
         for seg_id in ("nf-title", "nf-pivots", "nf-chrome", "nf-machine",
                        "nf-buttons", "nf-body-data", "nf-footer"):
             try:
-                self.query_one(f"#{seg_id}").refresh()
+                w = self.query_one(f"#{seg_id}")
+                if isinstance(w, _PickerNativeData):
+                    w.refresh_data()
+                else:
+                    w.refresh()
             except Exception:
                 pass
 
@@ -5915,8 +6109,7 @@ class PickerApp(App):
     CSS = """
     Screen { background: $surface; }
     PickerScreen { width: 100%; height: 100%; }
-    /* NF2/NF3 compose skeleton (#88): fixed-height chrome, body fills the rest.
-       Inert unless AGENT_WORKTREES_PICKER_NF mounts the segment widgets. */
+    /* NF compose tree (#88): fixed-height chrome, body fills the rest. */
     PickerScreen > #nf-title  { width: 100%; height: 1; }
     PickerScreen > #nf-pivots { width: 100%; height: 1; }
     PickerScreen > #nf-chrome { width: 100%; height: 2; }
@@ -5924,6 +6117,21 @@ class PickerApp(App):
     PickerScreen > #nf-buttons { width: 100%; height: auto; }
     PickerScreen > #nf-body-data   { width: 100%; height: 1fr; }
     PickerScreen > #nf-footer { width: 100%; height: 2; }
+    /* NF5-5 native OptionList data body (opt-in via
+       AGENT_WORKTREES_PICKER_NATIVE_LIST): picker palette + the amber cursor
+       used by the native modals; matches the base type so it targets the
+       _PickerNativeData subclass. */
+    PickerScreen > OptionList#nf-body-data {
+        border: none; background: $surface; padding: 0;
+    }
+    PickerScreen > OptionList#nf-body-data:focus {
+        background-tint: $surface 0%;
+    }
+    PickerScreen > OptionList#nf-body-data > .option-list--option-highlighted,
+    PickerScreen > OptionList#nf-body-data:focus
+        > .option-list--option-highlighted {
+        background: #ffaf00; color: black; text-style: bold;
+    }
     """
 
     def __init__(self, source, live=False, mock_mode=None):

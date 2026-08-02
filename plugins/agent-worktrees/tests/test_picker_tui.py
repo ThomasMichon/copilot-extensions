@@ -3939,6 +3939,67 @@ def test_nf_maintenance_pivot_renders_under_toggle(monkeypatch):
     asyncio.run(run())
 
 
+def test_native_list_body_mounts_and_navigates(monkeypatch):
+    """NF5-5 (#88): with AGENT_WORKTREES_PICKER_NATIVE_LIST=1, the data body is a
+    native OptionList (`_PickerNativeData`) instead of the text-line body. Its
+    data rows are selectable options (column/section header rows are disabled),
+    Tab lands focus on it, and native up/down move the cursor -- mirrored into the
+    engine's `sel` (the swappable native-list slice; default OFF keeps the
+    text-line body)."""
+    from agent_worktrees.picker_tui.engine import _PickerNativeData
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "1")
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            nl = scr.query_one("#nf-body-data")
+            assert isinstance(nl, _PickerNativeData)
+            # Data rows are selectable options; header/section rows are disabled.
+            l_stops = [s for s in nl._stops if s and s[0] == "L"]
+            assert l_stops
+            # Tab into the data region focuses the native list, landing sel on a
+            # data row.
+            for _ in range(len(scr.region_heads()) + 1):
+                await pilot.press("tab")
+                await pilot.pause()
+                if app.focused is nl:
+                    break
+            assert app.focused is nl
+            assert scr.sel[0] == "L"
+            base = scr.sel[1]
+            # Native down/up move the OptionList cursor + mirror into sel.
+            await pilot.press("down")
+            await pilot.pause()
+            assert scr.sel == ("L", base + 1)
+            await pilot.press("up")
+            await pilot.pause()
+            assert scr.sel == ("L", base)
+
+    asyncio.run(run())
+
+
+def test_native_list_disabled_by_default():
+    """NF5-5 (#88): the native OptionList body is opt-in -- without the env var,
+    the data body stays the text-line `_PickerBodyData`."""
+    from agent_worktrees.picker_tui.engine import _PickerBodyData
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            assert isinstance(scr.query_one("#nf-body-data"), _PickerBodyData)
+
+    asyncio.run(run())
+
+
 def test_build_body_split_recomposes_monolith():
     """NF3 (#88): _build_body_split's chrome + data rows recompose build_body
     byte-for-byte for every pivot -- the untangle is a pure decomposition, so the
