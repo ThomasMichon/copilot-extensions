@@ -688,6 +688,56 @@ def _cmd_show(args: argparse.Namespace) -> int:
     return _emit(tracking.enrich_task(_enrich(task)))
 
 
+def _split_owner(owner: str | None) -> tuple[str | None, str | None]:
+    """Split a ``machine/worktree`` worker id into its parts.
+
+    The inverse of ``queue.worker_id_for``. A malformed or missing value yields
+    ``(None, None)`` (or ``(value, None)`` when it has no ``/``), never raising,
+    so a reverse-lookup read can't crash on a stray owner string.
+    """
+    if not owner:
+        return (None, None)
+    machine, sep, worktree = owner.partition("/")
+    if not sep:
+        return (owner or None, None)
+    return (machine or None, worktree or None)
+
+
+def _cmd_claimant(args: argparse.Namespace) -> int:
+    """task -> claiming worktree: resolve which worktree owns a task.
+
+    The inbound-ledger reverse of ``worktree-status`` (worktree -> its tasks).
+    Returns a focused record: the actual claimant (``owner`` = machine/worktree,
+    once the task is claimed/started), or -- for a not-yet-claimed task -- the
+    pinned ``target`` worktree, with ``claimed`` distinguishing the two.
+    """
+    with _client(args) as c:
+        task = c.get(args.task_id)
+    status = task.get("status")
+    owner = task.get("owner")
+    claimed = bool(owner) and status in ("claimed", "started", "completed")
+    if claimed:
+        machine, worktree = _split_owner(owner)
+        source = "owner"
+    else:
+        # Not yet claimed -- surface the pin (intended claimant), if any.
+        machine = task.get("target_machine")
+        worktree = task.get("target_worktree")
+        source = "target" if worktree else None
+    result = {
+        "task_id": args.task_id,
+        "status": status,
+        "claimed": claimed,
+        "worker_id": owner if claimed else None,
+        "machine": machine,
+        "worktree": worktree,
+        "resolved_from": source,
+        "owner_session_id": task.get("owner_session_id"),
+        "repo": task.get("repo"),
+    }
+    return _emit(_enrich(result))
+
+
 def _simple(method: str, *arg_names: str):
     """Build a handler that forwards positional args to a client method."""
 
@@ -1712,6 +1762,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("show", help="show one task")
     p.add_argument("task_id")
     p.set_defaults(func=_cmd_show)
+
+    p = sub.add_parser(
+        "claimant",
+        help="task -> claiming worktree: which worktree owns a task (the inbound "
+             "reverse of worktree-status). Reports the actual owner once claimed, "
+             "else the pinned target worktree.",
+    )
+    p.add_argument("task_id")
+    p.set_defaults(func=_cmd_claimant)
 
     p = sub.add_parser("events", help="show a task's audit trail")
     p.add_argument("task_id")

@@ -141,6 +141,90 @@ def test_parser_worktree_status():
     assert args.command == "worktree-status"
 
 
+def test_parser_claimant():
+    args = build_parser().parse_args(["claimant", "task-123"])
+    assert args.command == "claimant"
+    assert args.task_id == "task-123"
+
+
+def test_split_owner():
+    from agent_dispatch.__main__ import _split_owner
+
+    assert _split_owner("lambda-core/wt-abc") == ("lambda-core", "wt-abc")
+    assert _split_owner(None) == (None, None)
+    assert _split_owner("") == (None, None)
+    # No slash -> treat the whole value as the machine, worktree unknown.
+    assert _split_owner("bare") == ("bare", None)
+    # A worktree id may itself contain slashes; only the first split is the
+    # machine boundary.
+    assert _split_owner("m/a/b") == ("m", "a/b")
+
+
+def test_claimant_reports_owner_when_claimed(monkeypatch):
+    import argparse
+    import contextlib
+    import io
+    import json
+
+    from agent_dispatch import __main__
+
+    class _FakeClient:
+        def get(self, task_id):
+            return {
+                "id": task_id, "status": "started",
+                "owner": "lambda-core/wt-abc",
+                "owner_session_id": "sess-9", "repo": "r",
+                "target_worktree": "wt-pin", "target_machine": "m2",
+            }
+
+    @contextlib.contextmanager
+    def _fake_client(args, **kw):
+        yield _FakeClient()
+
+    monkeypatch.setattr(__main__, "_client", _fake_client)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = __main__._cmd_claimant(argparse.Namespace(task_id="t1"))
+    assert rc == 0
+    out = json.loads(buf.getvalue())
+    assert out["claimed"] is True
+    assert out["machine"] == "lambda-core" and out["worktree"] == "wt-abc"
+    assert out["worker_id"] == "lambda-core/wt-abc"
+    assert out["resolved_from"] == "owner"
+    assert out["owner_session_id"] == "sess-9"
+
+
+def test_claimant_falls_back_to_target_when_unclaimed(monkeypatch):
+    import argparse
+    import contextlib
+    import io
+    import json
+
+    from agent_dispatch import __main__
+
+    class _FakeClient:
+        def get(self, task_id):
+            return {
+                "id": task_id, "status": "queued", "owner": None,
+                "target_worktree": "wt-pin", "target_machine": "m2", "repo": "r",
+            }
+
+    @contextlib.contextmanager
+    def _fake_client(args, **kw):
+        yield _FakeClient()
+
+    monkeypatch.setattr(__main__, "_client", _fake_client)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = __main__._cmd_claimant(argparse.Namespace(task_id="t2"))
+    assert rc == 0
+    out = json.loads(buf.getvalue())
+    assert out["claimed"] is False
+    assert out["machine"] == "m2" and out["worktree"] == "wt-pin"
+    assert out["resolved_from"] == "target"
+    assert out["worker_id"] is None
+
+
 def test_identity_flags_take_precedence(monkeypatch):
     import argparse
 
