@@ -81,3 +81,11 @@ class TestConnectTracker:
         t = ConnectTracker(None)
         t.started(ConnectStage.SSH_TO_TARGET)
         t.reached(ConnectStage.SSH_TO_TARGET)
+
+    def test_can_emit_progress_to_stderr(self, capsys) -> None:
+        t = ConnectTracker(None, session_id="cs1", emit_stderr=True)
+        t.started(ConnectStage.SSH_TO_TARGET, "codespace=cs1")
+        t.reached(ConnectStage.SSH_TO_TARGET, "codespace=cs1")
+        err = capsys.readouterr().err
+        assert "[stage 3/ssh-to-target] started: codespace=cs1" in err
+        assert "[stage 3/ssh-to-target] reached" in err

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import signal
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -53,6 +55,57 @@ def _creation_flags() -> int:
     return 0
 
 
+def _subprocess_kwargs(**kwargs):  # noqa: ANN003, ANN202
+    """Common subprocess isolation kwargs for SSH children."""
+    kwargs["creationflags"] = _creation_flags()
+    if sys.platform != "win32":
+        kwargs["start_new_session"] = True
+    return kwargs
+
+
+async def _terminate_process_tree(
+    proc: asyncio.subprocess.Process,
+    *,
+    grace: float = 5.0,
+) -> None:
+    """Terminate an SSH child and any children it spawned."""
+    if proc.returncode is not None:
+        return
+    if sys.platform == "win32":
+        try:
+            subprocess.run(  # noqa: S603, S607
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                creationflags=_creation_flags(),
+            )
+        except OSError:
+            proc.kill()
+    else:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        except OSError:
+            proc.kill()
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=grace)
+        return
+    except TimeoutError:
+        pass
+    if sys.platform != "win32":
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except OSError:
+            proc.kill()
+    else:
+        proc.kill()
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=2.0)
+    except TimeoutError:
+        log.warning("Process tree rooted at pid %s did not exit", proc.pid)
+
+
 @dataclass
 class CommandResult:
     """Result of a remote command execution."""
@@ -89,6 +142,7 @@ class ConnectionInfo:
     platform: PlatformInfo
     port_forwards: list[str] = field(default_factory=list)
     connection_identity: str = ""
+    child_processes: list[asyncio.subprocess.Process] = field(default_factory=list)
 
     @property
     def multiplexed(self) -> bool:
@@ -240,12 +294,15 @@ class ConnectionManager:
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            creationflags=_creation_flags(),
+            **_subprocess_kwargs(),
         )
 
         # Wait briefly for connection to establish or fail
         try:
             await asyncio.wait_for(self._wait_for_socket(socket), timeout=15.0)
+        except asyncio.CancelledError:
+            await _terminate_process_tree(proc)
+            raise
         except TimeoutError:
             stderr = ""
             if proc.stderr:
@@ -254,7 +311,7 @@ class ConnectionManager:
                     stderr = raw.decode(errors="replace")
                 except (TimeoutError, Exception):  # noqa: S110
                     pass  # best-effort stderr capture
-            proc.kill()
+            await _terminate_process_tree(proc)
             raise ConnectionError(
                 f"ControlMaster failed to establish for {config.ssh_target}: {stderr}"
             ) from None
@@ -343,18 +400,30 @@ class ConnectionManager:
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            creationflags=_creation_flags(),
+            **_subprocess_kwargs(),
         )
 
         timed_out = False
         try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout
-            )
+            info.child_processes.append(proc)
+            try:
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                    proc.communicate(), timeout=timeout
+                )
+            finally:
+                if proc in info.child_processes and proc.returncode is not None:
+                    info.child_processes.remove(proc)
         except TimeoutError:
-            proc.kill()
+            await _terminate_process_tree(proc)
             stdout_bytes, stderr_bytes = await proc.communicate()
             timed_out = True
+            if proc in info.child_processes:
+                info.child_processes.remove(proc)
+        except asyncio.CancelledError:
+            await _terminate_process_tree(proc)
+            if proc in info.child_processes:
+                info.child_processes.remove(proc)
+            raise
 
         return CommandResult(
             stdout=stdout_bytes.decode(errors="replace").rstrip(),
@@ -391,17 +460,13 @@ class ConnectionManager:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            creationflags=_creation_flags(),
-            # POSIX: give the ssh child its own session/process group so a
-            # caller that tears it down with os.killpg(os.getpgid(pid), ...)
-            # signals only the ssh process tree -- never the parent's group.
-            # Without this the ssh child inherits the bridge's process group,
-            # and tearing down a remote session SIGTERMs the bridge itself
-            # (uvicorn "Shutting down"). See agent-bridge #1001.
-            start_new_session=(sys.platform != "win32"),
-            limit=_STDIO_CHANNEL_LIMIT_BYTES,
+            # POSIX: give the ssh child its own session/process group so
+            # teardown signals only the ssh process tree -- never the parent's
+            # group. Windows uses taskkill /T against the root pid.
+            **_subprocess_kwargs(limit=_STDIO_CHANNEL_LIMIT_BYTES),
         )
 
+        info.child_processes.append(proc)
         return proc
 
     async def disconnect(self, host: str) -> None:
@@ -417,6 +482,12 @@ class ConnectionManager:
 
         info = self._connections.pop(host)
 
+        for child in list(info.child_processes):
+            if child.returncode is None:
+                await _terminate_process_tree(child)
+            if child in info.child_processes:
+                info.child_processes.remove(child)
+
         if info.multiplexed and info.socket_path.exists():
             # Gracefully close the ControlMaster via -O exit
             args = self._base_ssh_args(info.config)
@@ -431,7 +502,7 @@ class ConnectionManager:
                     stdin=asyncio.subprocess.DEVNULL,
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.PIPE,
-                    creationflags=_creation_flags(),
+                    **_subprocess_kwargs(),
                 )
                 await asyncio.wait_for(proc.wait(), timeout=5.0)
             except (TimeoutError, OSError) as e:
@@ -439,11 +510,7 @@ class ConnectionManager:
 
         # Kill master process if still running
         if info.master_process and info.master_process.returncode is None:
-            info.master_process.kill()
-            try:
-                await asyncio.wait_for(info.master_process.wait(), timeout=5.0)
-            except TimeoutError:
-                log.warning("Master process for %s did not exit after kill", host)
+            await _terminate_process_tree(info.master_process)
 
         # Clean up stale socket
         if info.socket_path.exists():
