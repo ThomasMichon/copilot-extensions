@@ -4687,6 +4687,119 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# claims -- a worktree's full claim ledger (resource-claims legibility surface)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _inbound_claims(machine: str, worktree_id: str, cwd: str) -> dict:
+    """Best-effort inbound tasks a worktree claims, via agent-dispatch.
+
+    agent-worktrees does NOT depend on agent-dispatch (a-la-carte independence):
+    this shells out to the ``agent-dispatch`` binstub only when present and
+    degrades to ``{"available": False}`` on absence, error, or timeout. The
+    dispatch call is scoped by running it in the worktree's own directory so its
+    repo lane auto-resolves.
+    """
+    exe = shutil.which("agent-dispatch")
+    if not exe:
+        return {"available": False, "reason": "agent-dispatch not installed"}
+    try:
+        proc = subprocess.run(
+            [exe, "worktree-status", "--machine", machine,
+             "--worktree", worktree_id, "--json"],
+            cwd=cwd if cwd and Path(cwd).exists() else None,
+            capture_output=True, text=True, timeout=15,
+        )
+    except (subprocess.SubprocessError, OSError) as e:
+        return {"available": False, "reason": f"agent-dispatch call failed: {e}"}
+    if proc.returncode != 0:
+        return {"available": False,
+                "reason": (proc.stderr or "").strip() or "agent-dispatch error"}
+    try:
+        data = json.loads(proc.stdout)
+    except (ValueError, TypeError):
+        return {"available": False, "reason": "unparseable agent-dispatch output"}
+    assigned = data.get("assigned") or []
+    owned = data.get("owned") or []
+    return {"available": True, "assigned": assigned, "owned": owned}
+
+
+def cmd_claims(args: argparse.Namespace) -> int:
+    """Render a worktree's full claim ledger (agent-fabric resource-claims).
+
+    Outbound (authoritative, from this worktree's own record):
+      * ``owner_ref`` -- this worktree is itself owned as a resource by another.
+      * ``resources`` -- the outbound resources this worktree produced and owns.
+    Inbound (best-effort, via agent-dispatch when installed): the tasks this
+    worktree claims (assigned + owned).
+
+    The worktree is the current one (inferred from CWD) unless an id is given.
+    """
+    config = cfg.load_config()
+    wt_id = _infer_worktree_id(getattr(args, "worktree_id", None), config)
+    rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+    if not rec_path.exists():
+        if args.json:
+            return _json_error(f"worktree not found: {wt_id}")
+        output.err(f"worktree not found: {wt_id}")
+        return 1
+    rec = tracking.load_record(rec_path)
+
+    outbound = [
+        {
+            "kind": c.kind,
+            "ref": c.ref,
+            "state": c.state,
+            "created_at": c.created_at,
+            **({"note": c.note} if c.note else {}),
+        }
+        for c in rec.resources
+    ]
+    inbound = _inbound_claims(rec.machine or config.machine, wt_id,
+                              rec.worktree_path)
+
+    ledger = {
+        "worktree_id": wt_id,
+        "repo": rec.repo,
+        "machine": rec.machine,
+        "owner_ref": rec.owner_ref,
+        "outbound": outbound,
+        "inbound": inbound,
+    }
+
+    if args.json:
+        _json_output(ledger)
+        return 0
+
+    # Human-facing ledger.
+    print(f"Claim ledger for {wt_id}  ({rec.repo} @ {rec.machine})")
+    if rec.owner_ref:
+        print(f"  owned as a resource by: {rec.owner_ref}")
+    print("  Outbound (resources this worktree owns):")
+    if outbound:
+        for c in outbound:
+            state = "" if c["state"] == "active" else f" [{c['state']}]"
+            note = f"  -- {c['note']}" if c.get("note") else ""
+            print(f"    - {c['kind']}: {c['ref']}{state}{note}")
+    else:
+        print("    (none)")
+    print("  Inbound (tasks this worktree claims):")
+    if not inbound.get("available"):
+        print(f"    (unavailable: {inbound.get('reason', 'n/a')})")
+    else:
+        rows = [("assigned", t) for t in inbound.get("assigned", [])] + \
+               [("owned", t) for t in inbound.get("owned", [])]
+        if rows:
+            for kind, t in rows:
+                tid = t.get("id", "?") if isinstance(t, dict) else str(t)
+                title = t.get("title", "") if isinstance(t, dict) else ""
+                st = t.get("status", "") if isinstance(t, dict) else ""
+                print(f"    - [{kind}] {tid} {st}  {title}".rstrip())
+        else:
+            print("    (none)")
+    return 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # create -- non-interactive worktree creation
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -8414,6 +8527,7 @@ def _service_is_installed(service: svc.ServiceInfo) -> bool:
 _WORKTREE_VERBS = {
     "create": "create",
     "run": "run",
+    "claims": "claims",
     "remove-system": "remove-system",
     "list": "list",
     "status": "status",
@@ -10547,6 +10661,18 @@ def build_parser() -> argparse.ArgumentParser:
                         "rows (with --classify), then a done frame. Implies "
                         "--json.")
 
+    # claims (a worktree's full claim ledger: outbound resources + inbound tasks)
+    p = sub.add_parser(
+        "claims",
+        help="Show a worktree's full claim ledger: outbound resources it owns "
+             "(+ its owner, if it is itself a resource) and inbound tasks it "
+             "claims (best-effort via agent-dispatch). Defaults to the current "
+             "worktree; pass an id for another.",
+    )
+    p.add_argument("worktree_id", nargs="?", default=None)
+    p.add_argument("--json", action="store_true",
+                   help="JSON output mode (stdout is JSON only)")
+
     # create (non-interactive worktree creation; --system for daemon-owned)
     p = sub.add_parser(
         "create",
@@ -12094,6 +12220,7 @@ COMMAND_MAP = {
     "handoff-cutover": cmd_handoff_cutover,
     "embody": cmd_embody,
     "list": cmd_list,
+    "claims": cmd_claims,
     "create": cmd_create,
     "run": cmd_run,
     "remove-system": cmd_remove_system,
