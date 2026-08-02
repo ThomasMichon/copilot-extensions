@@ -681,6 +681,7 @@ class _PickerNativeData(OptionList):
         self._kinds = []          # option index -> VRow kind ('section' etc.)
         self._sig = None          # last data signature (rebuild only on change)
         self._syncing = False
+        self._suppress_activate = False   # one-shot: gutter click toggled, don't open
 
     # ---- data <-> options -------------------------------------------------
     def _signature(self):
@@ -818,8 +819,33 @@ class _PickerNativeData(OptionList):
 
     def on_option_list_option_selected(self, event) -> None:
         # Enter / click on a row -> activate (open its submenu etc.), the native
-        # parallel to the manual Enter path.
+        # parallel to the manual Enter path -- unless the press was a checkbox
+        # gutter toggle (mouse multi-select), which suppresses this one open.
+        if self._suppress_activate:
+            self._suppress_activate = False
+            return
         self._screen._activate()
+
+    async def _on_mouse_down(self, event) -> None:
+        # Mouse multi-select (#88 NF5-5): a press in the checkbox gutter (the
+        # first two cells) toggles that row's multi-select; the resulting
+        # OptionList selection is then suppressed (see above) so the row does not
+        # also activate. A press anywhere else is a normal click-to-activate.
+        self._suppress_activate = False
+        scr = self._screen
+        if getattr(event, "x", 99) <= 1 and scr._kind() == "worktrees":
+            y = (int(getattr(self.scroll_offset, "y", 0) or 0)
+                 + int(getattr(event, "y", 0)))
+            stop = self._stops[y] if 0 <= y < len(self._stops) else None
+            if stop and stop[0] == "L":
+                ids = scr._l_ids()
+                li = stop[1]
+                if 0 <= li < len(ids):
+                    scr.wt_sel.toggle(ids[li])
+                    scr.sel = stop
+                    self._suppress_activate = True
+                    scr.refresh()
+        await super()._on_mouse_down(event)
 
     def on_key(self, event) -> None:
         scr = self._screen
