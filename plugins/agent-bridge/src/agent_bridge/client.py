@@ -609,6 +609,40 @@ class BridgeClient:
         params = {"force": "true"} if force else None
         self._request("DELETE", f"/api/v1/sessions/{session_id}", params=params)
 
+    def handoff_session(
+        self, session_id: str, *, reason: str | None = None, seed: bool = True
+    ) -> dict[str, Any]:
+        """POST /api/v1/sessions/{id}/handoff -- retire a session and continue
+        in a fresh successor in the SAME worktree. Returns the successor's
+        SessionInfo."""
+        params: dict[str, str] = {}
+        if reason:
+            params["reason"] = reason
+        if not seed:
+            params["seed"] = "false"
+        return self._request(
+            "POST",
+            f"/api/v1/sessions/{session_id}/handoff",
+            params=params or None,
+        ) or {}
+
+    def handoff_worktree(
+        self, worktree_id: str, *, reason: str | None = None, seed: bool = True
+    ) -> dict[str, Any]:
+        """POST /api/v1/worktrees/{id}/handoff -- hand a worktree's current
+        session off to a fresh successor in place (the worktree-handle path for
+        UI consumers with no session id). Returns the successor's SessionInfo."""
+        params: dict[str, str] = {}
+        if reason:
+            params["reason"] = reason
+        if not seed:
+            params["seed"] = "false"
+        return self._request(
+            "POST",
+            f"/api/v1/worktrees/{worktree_id}/handoff",
+            params=params or None,
+        ) or {}
+
     def gc(self) -> dict[str, Any]:
         """POST /api/v1/gc -- prune aged terminal sessions and compact the DB."""
         return self._request("POST", "/api/v1/gc") or {}
