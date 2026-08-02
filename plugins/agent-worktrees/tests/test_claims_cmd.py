@@ -38,6 +38,8 @@ def test_inbound_unavailable_without_dispatch(monkeypatch):
 def test_inbound_parses_dispatch_output(monkeypatch, tmp_path):
     monkeypatch.setattr(m.shutil, "which", lambda name: "agent-dispatch")
 
+    captured = {}
+
     class _Proc:
         returncode = 0
         stdout = json.dumps({
@@ -46,11 +48,19 @@ def test_inbound_parses_dispatch_output(monkeypatch, tmp_path):
         })
         stderr = ""
 
-    monkeypatch.setattr(m.subprocess, "run", lambda *a, **k: _Proc())
+    def _run(cmd, **kw):
+        captured["cmd"] = cmd
+        return _Proc()
+
+    monkeypatch.setattr(m.subprocess, "run", _run)
     res = m._inbound_claims("lambda-core", "wt-a", str(tmp_path))
     assert res["available"] is True
     assert [t["id"] for t in res["assigned"]] == ["t1"]
     assert [t["id"] for t in res["owned"]] == ["t2"]
+    # Regression: agent-dispatch emits JSON by default and rejects a --json flag,
+    # so the command must NOT pass one (worktree-status has no --json).
+    assert "--json" not in captured["cmd"]
+    assert "worktree-status" in captured["cmd"]
 
 
 def test_inbound_handles_dispatch_error(monkeypatch):

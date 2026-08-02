@@ -4705,7 +4705,7 @@ def _inbound_claims(machine: str, worktree_id: str, cwd: str) -> dict:
     try:
         proc = subprocess.run(
             [exe, "worktree-status", "--machine", machine,
-             "--worktree", worktree_id, "--json"],
+             "--worktree", worktree_id],
             cwd=cwd if cwd and Path(cwd).exists() else None,
             capture_output=True, text=True, timeout=15,
         )
