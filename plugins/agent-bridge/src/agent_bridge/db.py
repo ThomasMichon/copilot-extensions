@@ -15,7 +15,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 # A live interactive session is kept alive by the extension's 30s heartbeat
 # (HEARTBEAT_MS in extension.mjs). A row whose ``updated_at`` is older than this
@@ -110,6 +110,13 @@ CREATE TABLE IF NOT EXISTS sessions (
     pid INTEGER,
     acp_session_id TEXT,
     config_json TEXT,
+    context_size INTEGER,
+    context_used INTEGER,
+    usage_model TEXT,
+    last_usage_at REAL,
+    predecessor_id TEXT,
+    successor_id TEXT,
+    handoff_at REAL,
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL
 );
@@ -654,6 +661,26 @@ class Database:
             conn.commit()
             log.info("Schema migrated to version 14: pending_prompts table")
 
+        if from_version < 15:
+            # v14 -> v15: two-way session succession links for in-place handoff.
+            # A handed-off predecessor records ``successor_id``; its successor
+            # records ``predecessor_id`` -- so the lineage of work in a worktree
+            # is traversable in either direction (single-current-session-per-
+            # worktree), not reconstructed from timestamps. ``handoff_at`` stamps
+            # when the predecessor was retired in favor of the successor.
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()]
+            for col, col_type in [
+                ("predecessor_id", "TEXT"),
+                ("successor_id", "TEXT"),
+                ("handoff_at", "REAL"),
+            ]:
+                if col not in cols:
+                    conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {col_type}")
+                    log.info("Migration v14->v15: added %s column to sessions", col)
+            conn.execute("UPDATE schema_version SET version=?", (15,))
+            conn.commit()
+            log.info("Schema migrated to version 15: session succession links")
+
     def execute_write(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
         """Execute a write query under the write lock."""
         conn = self._get_conn()
@@ -734,6 +761,26 @@ class Database:
             "UPDATE sessions SET context_size=?, context_used=?, "
             "usage_model=?, last_usage_at=?, updated_at=? WHERE id=?",
             (context_size, context_used, usage_model, now, now, session_id),
+        )
+
+    def link_succession(
+        self, predecessor_id: str, successor_id: str, now: float
+    ) -> None:
+        """Record a two-way handoff link between a predecessor and its successor.
+
+        Stamps ``successor_id``/``handoff_at`` on the retiring predecessor and
+        ``predecessor_id`` on the fresh successor, so the worktree's session
+        lineage is traversable in either direction after the changeover (and
+        survives a daemon restart).
+        """
+        self.execute_write(
+            "UPDATE sessions SET successor_id=?, handoff_at=?, updated_at=? "
+            "WHERE id=?",
+            (successor_id, now, now, predecessor_id),
+        )
+        self.execute_write(
+            "UPDATE sessions SET predecessor_id=?, updated_at=? WHERE id=?",
+            (predecessor_id, now, successor_id),
         )
 
     def get_session(self, session_id: str) -> dict[str, Any] | None:
