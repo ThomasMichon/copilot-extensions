@@ -162,6 +162,36 @@ def test_settings_diff_records_before_after(tmp_path):
     assert change["after"] == "opus"
 
 
+def test_settings_enforce_preserves_unmanaged_keys(tmp_path):
+    # Restore enforces ONLY the declared managed keys; every unmanaged key in
+    # settings.json passes through untouched -- the surface merges a small subset,
+    # it never rewrites/replaces the whole file. Guards the operator invariant
+    # ("enforce a small subset we care about, not put back the whole settings.json")
+    # and the subagents over-management regression: a stray subagents.agents.*
+    # block is neither added nor removed here (it is simply not a managed key).
+    home = _settings(tmp_path)
+    (home / "settings.json").write_text(
+        json.dumps(
+            {
+                "model": "stale",
+                "logLevel": "all",
+                "footer": {"showBranch": True},
+                "subagents": {"agents": {"gitea": {"model": "claude-opus-4.8"}}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    settings.apply([("enforce", {"model": "opus"})], home=home, dry_run=False)
+    data = json.loads((home / "settings.json").read_text())
+    assert data["model"] == "opus"  # managed key enforced
+    assert data["logLevel"] == "all"  # unmanaged scalar preserved
+    assert data["footer"] == {"showBranch": True}  # unmanaged object preserved
+    # stray subagents block untouched -- not removed, not modified
+    assert data["subagents"] == {"agents": {"gitea": {"model": "claude-opus-4.8"}}}
+    # nothing added or removed beyond the single managed key
+    assert set(data) == {"model", "logLevel", "footer", "subagents"}
+
+
 def test_collect_contributions_prefix_scoping(tmp_path):
     data = base_package("a/x", gate=["*"])
     data["manage"] = {
