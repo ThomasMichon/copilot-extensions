@@ -2865,6 +2865,66 @@ def test_submenu_verbs_track_session_liveness():
     asyncio.run(run())
 
 
+def test_submenu_nomux_offered_for_resume_and_open():
+    """No-Mux rides the primary launch verb -- Open OR Resume (#4043) -- so the
+    toggle row is offered for a stopped worktree's Resume, not just Open. A menu
+    with no launch verb (or only Bare resume, which implies a mux-in-HOME) does
+    not carry it. Construction-only, so it is deterministic (no pilot)."""
+    from agent_worktrees.picker_tui.engine import SubMenuScreen
+
+    rec = {"raw": {"id": "wtX"}, "id4": "wtX", "title": "t"}
+    # Open present -> offered (unchanged behaviour).
+    assert SubMenuScreen(rec, ["Open", "Messages"])._has_nomux is True
+    # Resume present -> now offered (the #4043 fix), appended after the verbs.
+    m = SubMenuScreen(rec, ["Resume", "Messages", "Stop"])
+    assert m._has_nomux is True
+    assert m._nomux_index == 3
+    # No launch verb -> not offered.
+    assert SubMenuScreen(rec, ["Messages", "Sync"])._has_nomux is False
+    # Bare resume WITHOUT Open/Resume -> not offered (it already makes a mux).
+    assert SubMenuScreen(rec, ["Bare resume", "Messages"])._has_nomux is False
+
+
+def test_open_submenu_no_mux_toggle_on_resume():
+    """#4043: a STOPPED worktree (verb = Resume, no live mux) now offers the
+    arrow-reachable No Mux row, and toggling it threads ``no_mux`` into the
+    resume decision -- previously the toggle rode Open only, so a stopped
+    worktree could not be resumed without the mux wrapper."""
+    src = _verb_fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            recs = scr.list_records()
+            by_id4 = {w["id4"]: i for i, w in enumerate(recs)}
+
+            scr.sel = ("L", by_id4["stop"])
+            scr._open_submenu()
+            await pilot.pause()
+            menu = _sub_menu(scr)
+            assert menu is not None
+            assert menu._actions[0] == "Resume"      # stopped -> Resume verb
+            assert menu._nomux_index is not None      # No Mux row now present
+            # Arrow down onto the No Mux row and toggle it (arrows alone).
+            for _ in range(menu._nomux_index):
+                await pilot.press("down")
+            await pilot.press("space")
+            await pilot.pause()
+            assert menu.no_mux is True
+            # Arrow back up to Resume and launch.
+            for _ in range(menu._nomux_index):
+                await pilot.press("up")
+            await pilot.press("enter")
+            await pilot.pause()
+        assert app.result["action"] == "resume"
+        assert app.result["options"]["no_mux"] is True
+
+    asyncio.run(run())
+
+
 def test_submenu_offers_messages_only_with_a_session():
     """The read-only 'Messages' peek is offered for any worktree that could have
     a session (live or stopped), but not for a positively-sessionless one."""
