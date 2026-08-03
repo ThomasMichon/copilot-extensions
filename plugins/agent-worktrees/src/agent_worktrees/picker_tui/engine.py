@@ -3942,7 +3942,11 @@ class PickerScreen(Widget):
                 self.htab = i
                 break
         self.machine_idx = idx
-        if (row.get("kind") or "session") in ("system", "bridge"):
+        # Reveal the hidden set only if the jump target is itself hidden
+        # (origin-based, #2668): a User-origin bridge/ACP worktree is already
+        # visible, so jumping to it must not force the whole automation set open.
+        if row.get("hidden") if "hidden" in row else (
+                (row.get("kind") or "session") in ("system", "bridge")):
             self.show_hidden = True
         records = self.list_records()
         target_i = next(
