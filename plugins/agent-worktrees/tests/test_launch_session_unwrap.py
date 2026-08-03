@@ -80,6 +80,16 @@ def test_launch_script_contains_unwrap_snippet():
     assert "d['launch'] if isinstance(d, dict) and 'launch' in d else d" in text
 
 
+def test_bash_launcher_avoids_bash4_mapfile():
+    """macOS ships Bash 3.2, so both update argv paths must use portable reads."""
+    text = _LAUNCH_SCRIPT.read_text()
+    assert "mapfile" not in text
+    assert "UPDATE_ARGV=()" in text
+    assert 'UPDATE_ARGV[${#UPDATE_ARGV[@]}]="$_update_arg"' in text
+    assert "_RARGV=()" in text
+    assert '_RARGV[${#_RARGV[@]}]="$_reconcile_arg"' in text
+
+
 def test_powershell_launcher_contains_unwrap():
     """The Windows launcher must unwrap the nested plan too, else `--json`
     ACP launches to Windows targets fail ($plan.action is null)."""
