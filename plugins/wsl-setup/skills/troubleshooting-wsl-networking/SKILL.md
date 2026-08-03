@@ -16,18 +16,22 @@ description: >
   - 'WSL service unreachable'
   - 'WSL loopback broken'
   - 'WSL distro keeps stopping'
+  - 'WSL port shadowed by Windows'
+  - 'WSL sshd unreachable on 22'
 ---
 
 # Troubleshooting WSL2 networking
 
-**Diagnose before you change anything.** These three failures look alike (a
-timeout) but have different causes. Identify which one you have first.
+**Diagnose before you change anything.** These failures look alike (a
+timeout or a wrong/refused response) but have different causes. Identify which one
+you have first.
 
 | Symptom | Likely cause | Go to |
 |---------|--------------|-------|
 | `apt`/`curl` from WSL time out; host is fine | Corp host-vNIC filter blocks the WSL adapter's **egress** | § A |
 | `Windows localhost:PORT` (or in-WSL `127.0.0.1:PORT`) times out, service is listening | **mirrored** networking loopback redirect | § B |
 | Service was reachable, now **refused**; distro shows `Stopped` | Distro **idled out** (service died) | § C |
+| `Windows localhost:PORT` reaches the **wrong** service / unexpected auth failure (esp. `:22`) | A **Windows** process binds the port and shadows the WSL forward | § D |
 
 Quick triage:
 
@@ -150,6 +154,32 @@ Start-Process -WindowStyle Hidden wsl.exe -ArgumentList '-d','<distro>','-u','ro
 Start-Sleep 5; wsl -l -v            # distro -> Running
 1..3 | % { Start-Sleep 3; Test-NetConnection localhost -Port <PORT> | Select -Expand TcpTestSucceeded }
 ```
+
+---
+
+## § D. A Windows listener shadows the WSL port (localhostForwarding no-op)
+
+**Signature:** the WSL service is listening (`ss -tlnp` inside WSL shows
+`0.0.0.0:PORT`) and the distro is up, yet `Windows localhost:PORT` reaches the
+**wrong** service (or auth fails with keys that only the WSL service should
+accept) — intermittently or after a Windows service starts. Classic case: **port
+22**, where a Windows OpenSSH `sshd` binds `:22`.
+
+**Cause:** `localhostForwarding` only forwards a Windows loopback port to WSL when
+**nothing on Windows is already bound to it**. If a Windows process binds the same
+port, the Windows binding wins and WSL is silently shadowed.
+
+**Confirm:**
+```powershell
+Get-NetTCPConnection -State Listen -LocalPort <PORT> |
+  ForEach-Object { $_.OwningProcess } | ForEach-Object { (Get-Process -Id $_).Path }
+```
+If a Windows process (not the WSL relay) owns it, that's the shadow.
+
+**Fix — give the WSL service its own port.** Run the WSL listener on an unused
+port (e.g. sshd on `2200` via `/etc/ssh/sshd_config.d/*.conf` → `Port 2200`) and
+reference that port everywhere. Never co-locate a WSL service on a port a Windows
+service also uses.
 
 ---
 

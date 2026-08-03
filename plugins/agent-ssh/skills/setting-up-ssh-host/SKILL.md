@@ -1,6 +1,6 @@
 ---
 name: setting-up-ssh-host
-description: Set up inbound SSH on a Windows host through Microsoft Dev Tunnels as the real interactive user, using dtssh. Use when asked to "set up an SSH host", "set up a dtssh host", "host SSH through Dev Tunnel", "configure inbound SSH", "host interactive sessions over SSH", or "fix ga_init unable to resolve user".
+description: Set up inbound SSH on a Windows host through Microsoft Dev Tunnels as the real interactive user, using dtssh; and reach a WSL distro (or any behind-the-host loopback listener) as its own SSH target via ProxyJump through that dtssh host. Use when asked to "set up an SSH host", "set up a dtssh host", "host SSH through Dev Tunnel", "configure inbound SSH", "host interactive sessions over SSH", "reach WSL over SSH", "make WSL its own SSH target", "SSH into WSL through dtssh", or "fix ga_init unable to resolve user".
 ---
 
 # Setting Up an SSH Host (dtssh)
@@ -92,6 +92,64 @@ Get-Process dtssh
 
 From a client, configure `setting-up-ssh-client` and run `ssh dt-<host>` — you
 should land as the real Entra user.
+
+## Reaching WSL (or another behind-the-host listener) as its own SSH target
+
+To reach a **WSL** distro — or any service that only listens on the host's
+loopback — as its *own* first-class SSH alias, **do not** stand up a second dtssh
+host, and **do not** run dtssh *inside* WSL. Instead **ProxyJump through the
+machine's existing dtssh host** to the loopback listener:
+
+```
+# ~/.ssh/config (or a config.d/ fragment)
+Host dt-<host>-wsl
+    HostName localhost          # resolved on the jump host = the Windows box
+    Port 2200                   # the WSL sshd's dedicated loopback port
+    User <linux-user>
+    ProxyJump dt-<host>         # the machine's existing dtssh host
+    IdentityFile ~/.ssh/id_ed25519
+    StrictHostKeyChecking accept-new
+    ServerAliveInterval 30
+```
+
+`ssh dt-<host>-wsl` then lands inside WSL as the Linux user. Why this is the
+**preferred** manner:
+
+- **Zero extra tunnels.** It rides the machine's existing `dt-<host>` Dev Tunnel —
+  no second tunnel to create, renew, or ACL, and the mesh stays at one tunnel per
+  machine no matter how many WSL targets exist. (dtssh *inside* WSL would add a
+  tunnel per machine.)
+- **No WSL egress and no WSL devtunnel login required.** The tunnel is hosted on
+  the Windows box (which has egress and is already signed in); WSL is reached over
+  local loopback. This matters because dtssh-*in*-WSL is unworkable on two common
+  walls: WSL with **no outbound egress** can't host a tunnel at all, and WSL has
+  **no OS keyring** so an in-WSL `devtunnel` login can't persist its token (the
+  host loops on "Login required"; the device-code fallback is separately
+  Conditional-Access-blocked).
+- **Works for any loopback listener** behind the host, not just WSL.
+
+> **Note on `HostName localhost` + `ProxyJump`.** `localhost:2200` is resolved on
+> the **jump host** (the Windows box), where WSL `localhostForwarding` maps it to
+> the WSL sshd. The `-W` forward the jump performs requires the dtssh host's sshd
+> to permit TCP forwarding (it does by default).
+
+### Provisioning WSL itself — bring your own, or use `wsl-setup`
+
+This ProxyJump wiring only needs an sshd **listening on a known loopback port
+with your client key authorized** — it is agnostic to *how* WSL got there.
+Provision WSL however you prefer; the **`wsl-setup`** plugin's `setting-up-wsl`
+skill is one turn-key path (distro + NAT networking + a dedicated-port sshd + a
+windowless keepalive). Whatever mechanism you bring, the target must meet three
+requirements:
+
+- **sshd on a dedicated loopback port (e.g. 2200), not `:22`** — a Windows sshd
+  commonly binds `:22` and shadows the WSL `localhostForwarding` relay,
+  intermittently breaking the target.
+- **A keepalive** so the distro doesn't idle-terminate — an idle WSL distro stops
+  in ~2 minutes and silently kills the listener. Use `wsl-setup`'s keepalive or
+  your own.
+- **Your client public key in the WSL user's `authorized_keys`** (the tunnel owner
+  is the identity gate; the SSH key is the second factor, as everywhere in dtssh).
 
 ## Gotchas
 

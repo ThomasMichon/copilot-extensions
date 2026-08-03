@@ -42,7 +42,7 @@
     {
       "name": "agent-ssh",
       "description": "SSH connectivity layer for the agent fabric: emit and verify machine-name SSH profiles from a normalized registry, and define the public transport-provider contract for pluggable direct or tunnel transports.",
-      "version": "0.1.0-dev9",
+      "version": "0.1.0-dev10",
       "source": "plugins/agent-ssh"
     },
     {
@@ -96,7 +96,7 @@
     {
       "name": "wsl-setup",
       "description": "Set up and troubleshoot WSL2 as a first-class development and service-hosting environment - install a distro, choose the networking mode (NAT + localhostForwarding vs mirrored + dnsTunneling), keep the distro alive for hosted services, and diagnose corp-network egress and host<->WSL loopback failures. Composes with agent-worktrees' agent-worktrees-wsl-provision; ships the setting-up-wsl and troubleshooting-wsl-networking skills",
-      "version": "0.1.0-dev1",
+      "version": "0.1.0-dev2",
       "source": "plugins/wsl-setup"
     },
     {

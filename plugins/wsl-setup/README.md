@@ -39,10 +39,14 @@ wiring Windows Terminal profiles, use `agent-worktrees`'
 `agent-worktrees-wsl-provision` skill — the two compose: provision the repo with
 agent-worktrees, ready the environment with wsl-setup.
 
-To expose a WSL-hosted SSH server through a Dev Tunnel in an Entra-compliant way,
-pair this with the **`devtunnel-ssh`** plugin (example-marketplace marketplace): wsl-setup
-readies the WSL environment and the `localhost:PORT` hop; devtunnel-ssh sets up
-sshd + the tunnel and targets WSL as the host.
+To reach a WSL-hosted sshd as its **own SSH target** in an Entra-compliant way,
+pair this with the **`agent-ssh`** plugin: wsl-setup provisions the WSL
+environment + a dedicated-port sshd + a keepalive, and `agent-ssh`'s
+`setting-up-ssh-host` skill (§ "Reaching WSL … as its own SSH target") wires
+`ssh <host>-wsl` as a **ProxyJump through the host's existing dtssh host** —
+adding no extra Dev Tunnel and needing nothing dtssh/devtunnel-side inside WSL.
+The reach wiring is agnostic to how WSL was provisioned, so you can bring your own
+provisioning instead of wsl-setup.
 
 ## Shipped keepalive helper
 
