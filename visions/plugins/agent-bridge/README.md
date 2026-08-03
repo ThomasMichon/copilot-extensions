@@ -1,0 +1,376 @@
+# agent-bridge — Vision
+
+- **Subject:** The **coordination layer** of the agent fabric — the plugin that
+  gives agents, CLIs, and UI/fronts a durable way to create, address, observe,
+  message, resume, and hand off live Copilot sessions across projects, worktrees,
+  machines, and venue providers.
+- **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
+- **Status:** Draft
+- **Last revised:** 2026-08-03
+- **Reality docs:** [`plugins/agent-bridge/README.md`](../../../plugins/agent-bridge/README.md) ·
+  [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md)
+
+## Purpose & Intent
+
+The fabric's ground layer gives an agent an isolated worktree and a local
+session body. The delegation layer gives work a durable task record when an
+agent should let go of it. Between those sits **agent-bridge**: the live
+coordination layer that lets a participant **call another agent**, inspect what
+is happening now, deliver an attributed message to an existing session, and keep
+that session alive across the churn of clients, UI/fronts, transports, and
+deployments.
+
+Its central promise is **ownership clarity**. The bridge owns the lifetime and
+event stream of sessions it hosts; clients attach and detach. A target-local
+bridge owns the processes that must live on a target machine; the caller owns
+only the relationship. Interactive sessions that the bridge does not own are
+represented honestly rather than forged into a false replica. Remote links may
+blink, fronts may restart, and callers may disappear without making the target
+session collateral damage.
+
+The north star is a coordination substrate that feels boring in the way good
+infrastructure should: any participant can name a project, resolve an agent or
+session, choose the right control pattern, send work or a side message, reconnect
+by cursor, see who owns what, and recover from interruptions without inventing a
+private tunnel or a private session ledger.
+
+## Concepts & Components
+
+### bridge daemon
+
+The **bridge daemon** is the per-machine runtime that exposes the local control
+plane, hosts or represents sessions, streams session events, and participates in
+the wider mesh. Each machine may run its own bridge; together they make local
+and remote sessions visible through one coordination surface.
+
+### bridge CLI
+
+The **bridge CLI** is the agent-facing and operator-facing headless console for
+the mesh. It lets a caller start, send to, wait on, inspect, interrupt, stop,
+resume, and observe sessions without choosing a different tool for each venue or
+transport.
+
+### authenticated local control plane
+
+The bridge exposes authenticated local control and reconnectable event delivery
+for tools, UI/fronts, and other agents. Prompt submission and event consumption
+are separate concerns so a consumer can reconnect to the same session history
+instead of making a long turn depend on a single live socket.
+
+### session host
+
+The **Session Host** is the stable kernel that owns a hosted Copilot child and
+its protocol pipes. Fronts may update or disconnect; the host keeps the child and
+its session identity alive until the bridge deliberately drains, hands off, stops,
+or ends it.
+
+### session and event ledger
+
+The bridge's session ledger records session identity, status, events, turn
+boundaries, context usage, delivery cursors, target linkage, and terminal
+outcomes. It is the source that CLIs, UI/fronts, other agents, and recovery
+flows read when they need to know what happened.
+
+### topology and resolver layer
+
+The resolver layer turns a caller's target into a reachable session or agent by
+combining project context, worktree context, machine topology, agent profiles,
+namespace providers, and capability hints. The caller names the target; the
+bridge determines which route can honestly serve it.
+
+### peer bridges
+
+Bridge instances can cooperate as peers. A local bridge may delegate ownership of
+a remote session to the bridge on the target machine, or deliver a message
+through that peer, so the environment that can keep the target alive owns the
+target's process.
+
+### live-session registry
+
+Interactive sessions may register themselves with a bridge and receive an
+attributed inbox. A registered interactive session becomes visible through the
+ordinary session/event surface, while the bridge remains honest that it does not
+own that process or the permissions mediated by its human-facing terminal.
+
+### mesh federation
+
+A fleet of bridges forms a discoverable mesh: sessions owned by one machine can
+be seen and reached from another through peer links, a gateway, or a
+reverse-tunnel-exposed satellite. Reachability may be asymmetric or gated; the
+mesh represents what is reachable under the participant's policy rather than
+pretending every node is equally open.
+
+## Features
+
+### durable-reattachable-session-hosting
+
+A hosted session can outlive the bridge frontend, any watching client, and a
+transport reconnect. The Session Host keeps the child and its pipes alive while
+the bridge reconciles back to durable session state and consumers reattach by
+cursor.
+
+### cli-and-api-control-plane
+
+The same coordination fabric is drivable from a CLI and from authenticated local
+control surfaces: start or resume sessions, submit turns, stream events, inspect
+state and context usage, interrupt the current turn without ending the session,
+and intentionally stop or end the session.
+
+### cursor-stable-event-replay
+
+Session events form an ordered, reconnect-safe stream with stable identities and
+delivery cursors. A consumer that disconnects can resume without losing a turn,
+duplicating delivery, or waiting forever past a rebuilt authoritative log.
+
+### topology-aware-agent-resolution
+
+Named agents and sessions resolve through project context, worktree state,
+machine topology, namespace providers, and capability probes. A target may be
+local, remote, elevated, dynamic, or venue-provided, while the caller sees one
+catalog and one resolution contract.
+
+### bridge-as-agent-delegation
+
+The bridge can present itself upstream as an agent that routes work to a named
+downstream agent. Host-to-sub-agent delegation reuses the same session manager,
+event ledger, and resolver layer rather than inventing a second protocol.
+
+### peer-bridge-session-ownership
+
+Remote sessions are owned by the bridge closest to the environment where they
+run. The host bridge becomes a peer client; target processes and state survive
+host-link churn because the target-local bridge owns their lifetime.
+
+### live-session-messaging
+
+The bridge can deliver attributed messages to sessions that already exist:
+bridge-owned sessions, peer-owned sessions, and registered interactive sessions.
+Prompts, notifications, requests, replies, and broadcasts preserve sender
+identity so agent-to-agent traffic never masquerades as operator input.
+
+### three-control-patterns
+
+The bridge supports three honest ways to reach a target over one substrate:
+**full headless control** of a bridge-hosted agent, **side-exchange or broadcast**
+with an already-running session, and **takeover** by stopping a headed session
+and resuming its context headlessly. A caller chooses by desired ownership, not
+by wiring a bespoke transport.
+
+### interactive-session-representation
+
+An interactive session can be represented through the bridge's ordinary session
+surface even when the bridge does not own its process. That representation is
+best-effort and fidelity-honest: it exposes what can be known and mediated
+safely, and leaves human-terminal permission decisions with the surface that
+actually owns them.
+
+### observable-mesh-status
+
+The mesh is inspectable: sessions, subscribers, context use, turn status,
+delivery progress, topology, capability resolution, peer reachability, drain
+state, current heads, and stranded hosts are visible from logs, CLI output, and
+event streams before a caller needs to guess.
+
+### graceful-deployment-and-version-survival
+
+Bridge updates cooperate with live sessions. Frontends reattach where compatible;
+in-flight work is drained, cancelled-and-resumed, or handed off deliberately; and
+older hosts remain bounded but alive long enough for their children to reach a
+safe stop.
+
+### reach-active-worktrees-and-configured-repos
+
+A caller can address agents in active worktrees and in configured projects the
+fabric knows how to resolve, including projects whose working body lives on
+another machine or venue provider. The reachable set is a catalog, not a
+collection of one-off connection recipes.
+
+### satellite-exposure-and-federation
+
+A field or otherwise one-way-reachable machine can expose its local bridge to
+the mesh through a reverse tunnel or gateway while it is online. It participates
+as a provider on the terms its reachability and policy allow, rather than being
+limited to a tunnel-only client.
+
+### context-aware-in-place-handoff
+
+A hosted session can roll itself to a successor in the same worktree when asked
+or when context pressure requires it under policy. The retiring session's
+continuation seeds the successor, the head moves deliberately, and watchers are
+told that the work continues under the successor identity.
+
+## Behaviors
+
+### own-the-lifetime
+
+If the bridge starts or adopts a hosted session, the bridge owns that session's
+lifetime. Clients, UI/fronts, and other agents attach as consumers or callers;
+watching a session does not make the watcher its process owner.
+
+### reattach-never-kill
+
+A bridge frontend restart, client disconnect, or UI/front remount reconciles to
+live Session Hosts and durable state. It does not kill an active child merely
+because the observing process changed versions or lost its connection.
+
+### drain-before-letting-go
+
+Stopping, updating, cutting over, or retiring a session first seeks a safe
+state: finish the turn, cancel gracefully, mark for resume, carry context
+forward, and only then let go. A hard kill is an explicit last resort, never the
+normal maintenance path.
+
+### one-owner-many-callers
+
+A hosted session has one controller for turn submission, while many consumers may
+read or request work through that controller. The bridge serializes competing
+turns into one transcript so callers converge on shared state instead of staging
+a custody fight.
+
+### any-agent-delivery
+
+The bridge delivers by the path that matches ownership and reachability: local
+hosted session, peer bridge, bridge-as-agent route, namespace provider, or
+registered interactive inbox. The caller asks for the agent or session; the
+fabric chooses the route it can guarantee.
+
+### project-addressed-invocation
+
+The bridge is addressable against an explicitly named project — `--project`, or
+the per-project `<repo>` binstub that supplies it — with the same result as
+being CWD-anchored inside that project. Starting, sending to, waiting on, or
+inspecting an agent/session for a project therefore works as `<repo> bridge …` as
+readily as `agent-bridge --project <repo> …`, so a CWD-neutral front drives the
+mesh for a specific project without standing in its checkout. This is the
+coordination layer's concretization of the parent fabric's
+§Features/address-any-project and §Behaviors/project-addressed-not-cwd-bound.
+
+### capability-probe-then-fallback
+
+A richer route is chosen only after the specific machine, namespace, worktree,
+agent, and session combination proves serviceable. If a peer path, live
+injection, or namespace route is unavailable, the bridge falls back to a safe
+simpler path or refuses clearly.
+
+### transparent-acp-passthrough
+
+The bridge routes and multiplexes agent protocol traffic without inventing a
+competing dialogue. Protocol interpretation belongs at the protocol edge; the
+bridge preserves the downstream agent's semantics while adding routing,
+ownership, and recovery.
+
+### represent-at-honest-fidelity
+
+When representing a session it does not own, the bridge reports the fidelity it
+can actually guarantee. A lower-fidelity truthful view is preferred over a
+high-fidelity illusion, and control that cannot be mediated safely is left with
+the surface that genuinely owns it.
+
+### cursor-stable-replay
+
+Event IDs and delivery cursors remain stable across frontend cycles and
+reattach. If recovery must rebuild a stream, consumers converge on the rebuilt
+authoritative log rather than silently diverging.
+
+### eventual-terminal-reconciliation
+
+A session never remains indefinitely "running" after its turn has actually
+ended. Clean finish, child death, interrupted stream, and frontend loss all
+eventually reconcile to a persisted terminal turn state.
+
+### local-first-peer-mesh
+
+Every participating bridge can host local sessions and initiate outbound reach.
+The mesh does not require a single central bridge to become the only neck the
+whole fabric depends on.
+
+### attributed-prompt-injection
+
+Every injected message is attributed to its sender and kind. Agent-to-agent and
+system-to-agent traffic is distinguishable from operator input, so live-session
+messaging remains collaboration rather than impersonation.
+
+### authenticated-local-control
+
+Control surfaces are local, tunnel-bound, or otherwise explicitly secured and
+authenticated. The bridge is a coordination control plane, not a public prompt
+socket.
+
+### connection-loss-never-destroys-the-target
+
+Losing the relationship between a caller and a target never destroys the target.
+The target's owning bridge keeps the session alive until the connection can be
+re-established, the session reaches a safe stop, or an explicit policy action
+retires it.
+
+### deliberate-creation-prefer-owned
+
+Creating a new worktree or session is deliberate. A caller prefers to reuse a
+worktree's current head or a worktree it already created for delegated use, and
+is steered to reuse, hand off, or sunset an incumbent before starting another
+session where a head already exists.
+
+### handoff-carries-context-and-announces-the-changeover
+
+When the bridge rolls a hosted session to a successor, it carries a continuation
+brief into the successor's opening context and announces the changeover on the
+session event surface. Watchers follow the baton instead of mistaking a
+deliberate handoff for a death.
+
+### federate-over-mesh-or-gateway
+
+Bridges default to federation. A bridge can discover peers and present the union
+of reachable bridges and sessions from any seat, over a peer mesh, gateway, or
+other secured rendezvous, without requiring hand-wired connections to every
+participant.
+
+### reachability-may-be-one-way-and-gated
+
+Reachability may be asymmetric. A satellite or field machine may join by
+initiating outbound registration and exposing its agents while online, and a
+machine may deliberately gate outbound reach until policy allows it.
+
+## Non-Goals / Boundaries
+
+- **Not the task queue.** Durable, claimable, fire-and-forget work belongs to
+  agent-dispatch. The bridge may embody or message workers, but queue state and
+  scheduling are sibling-layer concerns.
+- **Not the git worktree manager.** agent-worktrees owns worktree creation,
+  finalization, picker pool state, and the passive ground-layer session
+  primitives the bridge coordinates over.
+- **Not the connectivity provisioner.** SSH keys, host adoption, tunnel setup,
+  and reachability verification belong to the connectivity layer; the bridge
+  routes over declared reachability.
+- **Not a web UX.** A rich UI/front may consume the bridge, but the bridge is the
+  runtime and headless control plane underneath it.
+- **Not a credential broker.** The bridge launches sessions in environments that
+  may carry credentials; credential storage, ceremonies, and policy live in the
+  trust layer or host environment.
+- **Not an account-per-agent model.** The mesh coordinates sessions and
+  worktrees under existing identities rather than minting a separate account for
+  every agent.
+- **Not a specification.** This vision fixes role, guarantees, and behaviors. It
+  does not pin endpoints, ports, database schemas, command grammar, token
+  formats, process managers, or on-disk formats.
+
+## See Also
+
+- Parent vision: [agent-fabric](../../agent-fabric/README.md) — §Concepts/
+  *agent-bridge — the coordination layer*.
+- Sibling leaf: [agent-dispatch](../agent-dispatch/README.md) — the delegation
+  layer that records claimable work and may embody workers through this runtime.
+- Sibling leaf: [agent-ssh](../agent-ssh/README.md) — the connectivity layer the
+  bridge's cross-machine reach rides on.
+- Venue provider: [agent-codespaces](../agent-codespaces/README.md) — a remote
+  venue presented through the bridge's coordination contract.
+- Reality docs: [`plugins/agent-bridge/README.md`](../../../plugins/agent-bridge/README.md) ·
+  [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md).
+
+## Provenance
+
+- **2026-08-03** — Authored to give agent-bridge its own canonical plugin vision
+  (the coordination-layer sibling of the agent-dispatch leaf), distilled and
+  portabilized from a downstream facility's agent-bridge vision, surfaced while
+  binding the fabric's address-any-project guidance at the agent-* leaves. Closes
+  the structural gap that agent-bridge had no canonical per-plugin vision leaf
+  alongside its siblings.
