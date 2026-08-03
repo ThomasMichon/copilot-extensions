@@ -4790,6 +4790,15 @@ class FocusGroup(Widget):
         self._refresh_row()
 
 
+class _ScopeSelectionList(SelectionList):
+    """SelectionList that toggles the highlighted option directly."""
+
+    def action_select(self) -> None:
+        highlighted = self.highlighted
+        if highlighted is not None:
+            self.toggle(self.get_option_at_index(highlighted))
+
+
 class ScopeDlgScreen(ModalScreen[bool]):
     """Native modal scope dialog for Clean/Sync and New-worktree options (#88 F4;
     native-focus internals #88 NF1).
@@ -4831,10 +4840,10 @@ class ScopeDlgScreen(ModalScreen[bool]):
         background: #ffaf00; color: black;
     }
     ScopeDlgScreen SelectionList > .selection-list--button-selected {
-        background: $surface; color: green;
+        background: green; color: white; text-style: bold;
     }
     ScopeDlgScreen SelectionList > .selection-list--button-selected-highlighted {
-        background: #ffaf00; color: black;
+        background: green; color: white; text-style: bold;
     }
     ScopeDlgScreen #scope-prompt { height: auto; padding: 0 0 1 0; }
     ScopeDlgScreen #scope-impact { height: auto; padding: 1 0 0 0; }
@@ -4869,7 +4878,7 @@ class ScopeDlgScreen(ModalScreen[bool]):
         with Vertical(id="scope-frame"):
             yield Static(Text(dlg.get("prompt", "Select:"), style=C_HEADER),
                          id="scope-prompt")
-            yield SelectionList[int](
+            yield _ScopeSelectionList(
                 *[(self._opt_prompt(o), i, o["on"]) for i, o in enumerate(opts)],
                 id="scope-opts")
             if self._impact_fn is not None:
@@ -4898,6 +4907,14 @@ class ScopeDlgScreen(ModalScreen[bool]):
         chosen = set(self.query_one("#scope-opts", SelectionList).selected)
         for i, o in enumerate(self._dlg["opts"]):
             o["on"] = i in chosen
+        if "target" in self._dlg:
+            selected = [o["label"] for o in self._dlg["opts"] if o["on"]]
+            prompt = Text(self._dlg.get("prompt", "Select:"), style=C_HEADER)
+            prompt.append(
+                "\nSelected: " + (", ".join(selected) if selected else "none"),
+                style=C_READY if selected else C_MUTED,
+            )
+            self.query_one("#scope-prompt", Static).update(prompt)
         if self._impact_fn is not None:
             self._update_impact()
 
