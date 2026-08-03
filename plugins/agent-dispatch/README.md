@@ -13,7 +13,10 @@ account per agent.
 > `scripts/install.sh` / `scripts/install.ps1` --
 > `install|update|status|start|stop|uninstall` -- deploy a venv + binstub +
 > deploy manifest), an **SSE event stream** (`GET /events` /
-> `agent-dispatch watch`), and **agent-bridge spawn** (`create --spawn`). On its
+> `agent-dispatch watch`), **agent-bridge spawn** (`create --spawn`), and a
+> label-gated **embody supervisor** that can run locally or fan bodies out to a
+> remote host pool (`supervise --pool`, with `--headless` for headless
+> agent-bridge ACP fleet bodies). On its
 > deploy machines the coordinator installs by default and auto-starts as a
 > service on both platforms: a **systemd user unit** (Linux) and a **Windows
 > Scheduled Task**.
@@ -42,6 +45,20 @@ an `agent-dispatch` binstub in `~/.local/bin`, a schema-3 deploy manifest, the
 -- the coordinator service (a per-host local coordinator, matching agent-bridge).
 `update` is downgrade-guarded (a stale checkout won't silently roll back a newer
 deployed runtime; override with `--force`).
+
+The installer also manages optional, label-gated **embody supervisor** services.
+The primary supervisor reads `~/.agent-dispatch/supervisor.env` and installs as
+`agent-dispatch-supervisor.service` on Linux or Scheduled Task
+`agent-dispatch-supervisor` on Windows. Add named profiles under
+`~/.agent-dispatch/supervisors/<name>.env` (safe names: letters, digits, `_`,
+`-`) to get independent
+`agent-dispatch-supervisor-<name>` units/tasks with the same env schema; deleted
+profile env files are reconciled by removing their orphaned unit/task, and
+`--no-service` / `--no-supervisor` removes all supervisors. Put advanced flags
+such as `--pool host-a,host-b --origin origin --headless` in
+`AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS`. See
+[`docs/spawn-supervisor.md`](docs/spawn-supervisor.md#running-as-a-persistent-service-the-always-on-last-mile)
+for the full supervisor/profile contract.
 
 ### Worktree-picker "Tasks" pivot
 
@@ -344,6 +361,7 @@ agent-dispatch supervise --once                       # one cycle (this repo's l
 agent-dispatch supervise --label autopilot            # loop; only spawn opted-in tasks
 agent-dispatch supervise --all-repos --max-concurrent 3
 agent-dispatch supervise --label sweep --headless-label sweep   # embody 'sweep' headless-ACP
+agent-dispatch supervise --pool host-a,host-b --origin origin --headless --label sweep
 agent-dispatch reservations list --state spawned      # what's in flight
 agent-dispatch reservations fail <key>                # release a confirmed-dead spawn
 ```
@@ -360,6 +378,14 @@ sweep** labels with `--headless-label L` (repeatable, `--headless-agent` to name
 agent-bridge agent) to embody *those* labels as a **headless agent-bridge ACP** body
 instead — no human attach, no CLI-start-prompt race — while other labels stay
 CLI-first. See the design doc's "Per-label embody body" section.
+
+For a remote host pool, `--pool host-a,host-b [--origin <alias>]` dispatches the
+body to the first live pool host. The default body is still CLI/mux embody on
+that host; add `--headless` to make **every** fleet body a headless agent-bridge
+ACP session there (`ssh <host> agent-bridge create <agent> "<fleet seed>"
+--no-wait`). Fleet headless mode uses the same Model-C seed and synthetic owner
+as CLI fleet mode, records no worktree handle, and ignores `--headless-label`.
+See the design doc's "Headless-fleet body" section.
 
 ## MCP tools (`agent-dispatch mcp`)
 

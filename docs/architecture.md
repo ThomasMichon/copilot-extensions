@@ -22,7 +22,7 @@ internals, follow the links in each section.
 | [agent-mcp](../plugins/agent-mcp/) | Standalone MCP bridge (stdio) | `~/.agent-mcp/` | `~/.local/bin/agent-mcp` | Spawned per-call by an agent's `mcp-servers` entry; no bridge integration |
 | [agent-ssh](../plugins/agent-ssh/) | SSH profile emitter + verifier | `~/.agent-ssh/` | `~/.local/bin/agent-ssh` | On-demand CLI; owns the transport-provider contract for SSH profile modules |
 | [agent-logger](../plugins/agent-logger/) | Session-logging CLI + writer agent + sync task | `~/.agent-logger/` | `~/.local/bin/agent-logger` | On-demand CLI + a scheduled `session-sync` (Windows task / Linux systemd timer) |
-| [agent-dispatch](../plugins/agent-dispatch/) | Task-queue engine + per-host coordinator + CLI/MCP | `~/.agent-dispatch/` | `~/.local/bin/agent-dispatch` | On-demand CLI + optional always-on coordinator (Windows task / Linux systemd unit) |
+| [agent-dispatch](../plugins/agent-dispatch/) | Task-queue engine + per-host coordinator + CLI/MCP | `~/.agent-dispatch/` | `~/.local/bin/agent-dispatch` | On-demand CLI + optional always-on coordinator and label-gated embody supervisor(s) (Windows tasks / Linux systemd units) |
 | [agent-index](../plugins/agent-index/) | Indexing/search service shell | `~/.agent-index/` | `~/.local/bin/agent-index` | Phase 1 always-on service shell (Windows task / Linux systemd user unit); indexing engine arrives in later slices |
 | [agent-machines](../plugins/agent-machines/) | Machine-state reconciler CLI | `~/.agent-machines/` | `~/.local/bin/agent-machines` | On-demand CLI (no daemon); reconciled at session launch on its gated machines |
 | [agent-vault](../plugins/agent-vault/) | Local secret store: CLI + vault service | `~/.agent-vault/` | `~/.local/bin/agent-vault` | On-demand CLI + a persistent vault daemon (Windows scheduled task / Linux systemd user unit); ships a `vault-askpass` SUDO_ASKPASS helper |
@@ -77,7 +77,7 @@ flowchart TB
       RM["~/.agent-mcp/<br/>.venv • deploy-manifest.json"]
       RS["~/.agent-ssh/<br/>.venv • deploy-manifest.json"]
       RL["~/.agent-logger/<br/>.venv • digests • sync task"]
-      RD["~/.agent-dispatch/<br/>.venv • queue db • coordinator"]
+      RD["~/.agent-dispatch/<br/>.venv • queue db • coordinator • supervisor profiles"]
       RV["~/.agent-vault/<br/>.venv • secret store service"]
     end
     BIN["~/.local/bin/<br/>agent-worktrees • agent-bridge • agent-codespaces • agent-containers • agent-mcp • agent-ssh • agent-logger • agent-dispatch • agent-vault"]
@@ -247,6 +247,29 @@ flowchart TB
 > **Note:** agent-mcp has no `agent-bridge send` path — it is not an inter-agent
 > transport. It is wrapped directly by an agent's `mcp-servers` config to expose
 > an authenticated upstream MCP server over local stdio.
+
+## Agent-dispatch queue + supervisors
+
+`agent-dispatch` supplies the portable queue/lease authority agents coordinate
+through: a per-host loopback coordinator (`agent-dispatch serve`), a CLI and MCP
+surface, SSE events, and optional always-on **embody supervisors** that turn
+queued, label-gated tasks into autonomous bodies. The primary supervisor reads
+`~/.agent-dispatch/supervisor.env`; additional named profiles under
+`~/.agent-dispatch/supervisors/<name>.env` install as independent
+`agent-dispatch-supervisor-<name>` units/tasks using the same env schema, while
+the primary `agent-dispatch-supervisor` remains unchanged.
+
+By default a supervisor body is a CLI/mux `agent-worktrees embody` session on
+the supervisor host. `--headless-label L` routes selected local labels to a
+headless agent-bridge ACP body instead. In fleet mode,
+`agent-dispatch supervise --pool host-a,host-b [--origin <alias>]` keeps the
+reservation and task lease on the origin coordinator while spawning only the body
+on the first live pool host; the default fleet body is still CLI/mux, and
+`--headless` switches the whole fleet to headless agent-bridge ACP sessions on
+the pool host (`agent-bridge create <agent> "<fleet seed>" --no-wait`). Headless
+fleet bodies record no worktree handle; bounded sweeps settle their reservation
+when the task reaches a terminal state. Details live in
+[agent-dispatch spawn supervisor](../plugins/agent-dispatch/docs/spawn-supervisor.md).
 
 ## Where to go next
 
