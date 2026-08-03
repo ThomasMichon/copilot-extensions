@@ -232,3 +232,24 @@ engine subprocess and stores them in the durable index under `~/.agent-index/dat
 Full end-to-end runtime validation of the optional stack (`torch`, GPU access,
 LanceDB) is therefore performed on a deployment host that has those dependencies,
 while development tests mock the store and embedder surfaces.
+
+### Indexing defaults (good-citizen, capability-aware)
+
+Per the engine vision's good-citizen ingestion, indexing is **incremental by
+default**: `run_reindex(full=False)` and every surface that triggers it
+(`agent-index index`, `POST /reindex`, `agent_index_reindex`) default to reading
+only what changed since the last commit marker. A **full** reindex is explicit
+opt-in (`--full` / `full=true`).
+
+- **Source GC is connector-derived.** The full-reindex source GC keeps every
+  source whose scheme a **registered connector** owns (`git:*`, `github:*`,
+  `ado:*`, ...), so it never purges a live index generation as connectors are
+  added (#116). Disable with `AGENT_INDEX_REINDEX_GC=0`; extra keeps via
+  `AGENT_INDEX_GC_KEEP_SOURCES`.
+- **Embed batch size is capability-aware** (`AGENT_INDEX_STREAM_BATCH_SIZE`,
+  else device-derived): GPU hosts keep the high-throughput 500; CPU hosts use a
+  small 64 so each `/embed/batch` completes within the read timeout instead of
+  tripping it and emptying the index (#115).
+- **Embed read timeout is generous + configurable** (`AGENT_INDEX_EMBED_READ_TIMEOUT`,
+  default 300s) — a slow CPU embed must not abort mid-batch; a longer timeout
+  never slows a fast GPU embed.
