@@ -239,7 +239,7 @@ print('\t'.join([
                 SVC_NAME=$("$PYTHON" -c "import sys,json; print(json.load(sys.stdin)['updates'][$i]['service'])" <<< "$PRE_JSON" 2>/dev/null) || SVC_NAME="unknown"
                 UPDATE_ARGV=()
                 while IFS= read -r _update_arg; do
-                    UPDATE_ARGV[${#UPDATE_ARGV[@]}]="$_update_arg"
+                    UPDATE_ARGV+=("$_update_arg")
                 done < <("$PYTHON" -c "
 import sys, json
 for a in json.load(sys.stdin)['updates'][$i].get('argv', []):
@@ -282,7 +282,7 @@ for a in json.load(sys.stdin)['updates'][$i].get('argv', []):
                 _RSVC=$("$PYTHON" -c "import sys,json; print(json.load(sys.stdin)['updates'][$_ri].get('service','?'))" <<< "$REC_JSON" 2>/dev/null) || _RSVC="?"
                 _RARGV=()
                 while IFS= read -r _reconcile_arg; do
-                    _RARGV[${#_RARGV[@]}]="$_reconcile_arg"
+                    _RARGV+=("$_reconcile_arg")
                 done < <("$PYTHON" -c "
 import sys, json
 for a in json.load(sys.stdin)['updates'][$_ri].get('argv', []):
