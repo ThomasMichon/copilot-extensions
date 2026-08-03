@@ -378,3 +378,61 @@ def spawn_fleet_embodied_worker(
         cmd, check=False, capture_output=True, text=True, timeout=timeout,
         **no_window_kwargs(),
     )
+
+
+DEFAULT_HEADLESS_AGENT = "task-worker"
+
+
+def spawn_fleet_headless_worker(
+    host: str,
+    task_id: str,
+    *,
+    origin: str,
+    owner: str,
+    worker_id: str,
+    agent: str = DEFAULT_HEADLESS_AGENT,
+    timeout: float | None = None,
+) -> subprocess.CompletedProcess:
+    """Spawn a **headless agent-bridge ACP** body on a remote pool ``host`` via SSH.
+
+    The headless-fleet embodiment (Model C, headless variant). Runs
+    ``agent-bridge create <agent> "<fleet seed>" --no-wait`` **on** ``host`` (its
+    facility SSH alias) over the SSH mesh -- spawning a headless ACP session in
+    that host's own persistent agent-bridge service, seeded
+    (:func:`fleet_autopilot_worker_prompt`) to drive the ``task_id`` lease back to
+    the ``origin`` coordinator over SSH under the supervisor-assigned synthetic
+    ``owner``. The seed is **identical** to the CLI fleet body's
+    (:func:`spawn_fleet_embodied_worker`); only the *body* differs -- so a
+    headless-fleet task is driven exactly like a CLI-fleet one.
+
+    Why headless for the fleet: a seeded CLI/mux session can race the input caret
+    and never deliver its startup seed (the documented "Loading..." hang), so a
+    kicked CLI body may never claim its task. A headless ACP body sidesteps the
+    CLI-start-prompt path entirely, so a fleet body embodies reliably on the pool
+    host without a human attach -- the right body for bounded, self-contained
+    sweeps (the Adjudication Boards).
+
+    Unlike the CLI body, a headless body is **not a parallel worktree**, so no
+    worktree handle is recovered (the caller records ``worktree=None``); the
+    ``--no-wait`` create returns once the ACP session is spawned into the host's
+    bridge daemon, which owns it independently of this SSH invocation.
+
+    Raises :class:`EmbodyUnavailable` if ``ssh`` is not on PATH here; a remote host
+    lacking ``agent-bridge`` surfaces as a non-zero exit (the caller fails the
+    reservation).
+    """
+    exe = shutil.which("ssh")
+    if exe is None:
+        raise EmbodyUnavailable("ssh CLI not found on PATH (needed for fleet dispatch)")
+    seed = fleet_autopilot_worker_prompt(
+        task_id, origin=origin, owner=owner, worker_id=worker_id
+    )
+    remote_argv = ["agent-bridge", "create", agent, seed, "--no-wait"]
+    remote_cmd = " ".join(shlex.quote(a) for a in remote_argv)
+    # `host` is the facility SSH alias (never a raw IP). BatchMode so a missing key
+    # fails fast instead of hanging on a password prompt.
+    cmd = [exe, "-o", "BatchMode=yes", host.strip().lower(), remote_cmd]
+    return subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
+        cmd, check=False, capture_output=True, text=True, timeout=timeout,
+        **no_window_kwargs(),
+    )

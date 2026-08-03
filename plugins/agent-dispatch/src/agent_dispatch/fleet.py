@@ -15,8 +15,9 @@ The design (Model C) keeps the strong guarantee where it belongs:
   :func:`agent_dispatch.embody.spawn_fleet_embodied_worker`). No new network bind
   is introduced on the origin.
 - **Liveness-gated selection.** A pool host is a candidate only when it is
-  reachable over SSH **and** has ``agent-worktrees`` (so it can actually embody).
-  The first live candidate by policy (config order) is chosen.
+  reachable over SSH **and** has ``agent-worktrees`` (or ``agent-bridge`` in
+  headless-fleet mode) -- so it can actually embody. The first live candidate by
+  policy (config order) is chosen.
 - **Defer, don't fail, when the pool is asleep.** :meth:`FleetSpawner.can_spawn`
   is the supervisor's **capacity gate**: when no host is live, the task is skipped
   for this cycle **without a reservation**, so an all-asleep pool never burns
@@ -62,12 +63,34 @@ def host_can_embody(host: str, *, timeout: float = 8.0) -> bool:
     unreachable host, timeout, or no ``agent-worktrees`` -- returns False, so an
     asleep or unprovisioned host is simply not a candidate.
     """
+    return _host_has_command(host, "agent-worktrees", timeout=timeout)
+
+
+def host_can_bridge(host: str, *, timeout: float = 8.0) -> bool:
+    """True when ``host`` is reachable over SSH **and** has ``agent-bridge``.
+
+    The **headless-fleet** liveness probe -- a headless fleet body embodies via
+    the pool host's ``agent-bridge`` (``agent-bridge create``), not
+    ``agent-worktrees``, so this checks for that binary instead. Same fail-closed
+    semantics as :func:`host_can_embody`: any failure returns False so an asleep
+    or unprovisioned host is not a candidate.
+    """
+    return _host_has_command(host, "agent-bridge", timeout=timeout)
+
+
+def _host_has_command(host: str, command: str, *, timeout: float = 8.0) -> bool:
+    """SSH to ``host`` (facility alias) and check ``command -v <command>``.
+
+    The shared reachability + capability probe behind :func:`host_can_embody` and
+    :func:`host_can_bridge`. ``BatchMode`` so a missing key fails fast; any
+    failure (ssh absent, unreachable, timeout, or missing binary) returns False.
+    """
     exe = shutil.which("ssh")
     if exe is None:
         return False
     cmd = [
         exe, "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-        _ssh_alias(host), "command -v agent-worktrees",
+        _ssh_alias(host), f"command -v {command}",
     ]
     try:
         result = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
@@ -91,7 +114,16 @@ class FleetSpawner:
     ``pool`` is the ordered candidate list (first live host wins). ``origin`` is
     the supervisor machine's own SSH alias, which each dispatched body uses to
     report its lease back (Model C). ``liveness`` is injectable for testing;
-    it defaults to :func:`host_can_embody`.
+    it defaults to :func:`host_can_embody` (or :func:`host_can_bridge` in headless
+    mode).
+
+    ``headless`` selects the **headless-fleet** body: instead of a CLI/mux embody
+    on the pool host (which can hit the "Loading..." startup-seed hang), the body
+    is a headless agent-bridge ACP session
+    (:func:`agent_dispatch.embody.spawn_fleet_headless_worker`). It is driven by
+    the *same* fleet seed, so a headless-fleet task claims + loops + completes
+    identically; only the body differs. ``agent`` names the agent-bridge agent used
+    for a headless body (default ``task-worker``).
     """
 
     def __init__(
@@ -100,6 +132,8 @@ class FleetSpawner:
         *,
         origin: str,
         driver: str = embody.DEFAULT_DRIVER,
+        headless: bool = False,
+        agent: str = embody.DEFAULT_HEADLESS_AGENT,
         verify_timeout: int = 0,
         liveness: LivenessFn | None = None,
         spawn_fn: Callable[..., subprocess.CompletedProcess] | None = None,
@@ -112,9 +146,17 @@ class FleetSpawner:
         if not self.origin:
             raise ValueError("FleetSpawner requires a non-empty origin alias")
         self.driver = driver
+        self.headless = bool(headless)
+        self.agent = agent
         self.verify_timeout = verify_timeout
-        self._liveness = liveness or host_can_embody
-        self._spawn = spawn_fn or embody.spawn_fleet_embodied_worker
+        default_liveness = host_can_bridge if self.headless else host_can_embody
+        self._liveness = liveness or default_liveness
+        default_spawn = (
+            embody.spawn_fleet_headless_worker
+            if self.headless
+            else embody.spawn_fleet_embodied_worker
+        )
+        self._spawn = spawn_fn or default_spawn
         self._now = now
         #: task_id -> chosen host, so can_spawn() and __call__() agree per cycle.
         self._selection: dict[str, str] = {}
@@ -185,22 +227,41 @@ class FleetSpawner:
         # cannot identify it to the origin). Stable for this spawn attempt.
         owner = f"fleet-{tid}-{uuid.uuid4().hex[:6]}"
         try:
-            result = self._spawn(
-                host,
-                tid,
-                origin=self.origin,
-                owner=owner,
-                worker_id=owner,
-                driver=self.driver,
-                project=embody.project_for_task(task),
-                verify_timeout=self.verify_timeout,
-            )
+            if self.headless:
+                # Headless-fleet body: an agent-bridge ACP session on the pool
+                # host (no worktree, no CLI-start-prompt hang). No driver/
+                # verify_timeout (those are CLI/mux concepts); it takes an agent.
+                result = self._spawn(
+                    host,
+                    tid,
+                    origin=self.origin,
+                    owner=owner,
+                    worker_id=owner,
+                    agent=self.agent,
+                )
+            else:
+                result = self._spawn(
+                    host,
+                    tid,
+                    origin=self.origin,
+                    owner=owner,
+                    worker_id=owner,
+                    driver=self.driver,
+                    project=embody.project_for_task(task),
+                    verify_timeout=self.verify_timeout,
+                )
         except embody.EmbodyUnavailable as exc:
             return False, {"error": str(exc)}
         if result.returncode != 0:
             detail = (result.stderr or "").strip()[:200] or "nonzero exit"
             return False, {"error": f"embody on {host!r} failed: {detail}"}
-        handle = embody.parse_handle(result)
+        if self.headless:
+            # A headless body is not a parallel worktree, so there is no worktree
+            # handle to recover; the reservation is settled on the task's terminal
+            # state (bounded sweeps drive their own lifecycle to completion).
+            handle: dict[str, str | None] = {"session": owner, "worktree": None}
+        else:
+            handle = embody.parse_handle(result)
         handle["machine"] = host
         handle["owner"] = owner
         # The reservation now holds this task's state; the per-cycle selection

@@ -337,6 +337,32 @@ def test_cli_supervise_once(monkeypatch, q, client):
     assert q.latest_reservation(t.id).state == SpawnState.SPAWNED
 
 
+def test_make_embody_spawn_records_handle_on_success(monkeypatch):
+    """The CLI embody backend returns success + a parsed session/worktree handle
+    when embody exits 0 (regression: it previously fell through to None, breaking
+    record_spawn on the happy path)."""
+    import subprocess
+
+    from agent_dispatch import embody
+    from agent_dispatch.supervisor import make_embody_spawn
+
+    def fake_spawn_embodied_worker(
+        task_id, *, coordinator_url, worker_id, driver, project=None, verify_timeout=0
+    ):
+        return subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout='{"worktree_id": "wt-9", "session_id": "sess-9"}', stderr="",
+        )
+
+    monkeypatch.setattr(embody, "spawn_embodied_worker", fake_spawn_embodied_worker)
+    ok, handle = make_embody_spawn("http://coord")(
+        {"id": "t", "repo": "gitea.example/org/widgets"}
+    )
+    assert ok is True
+    assert handle["worktree"] == "wt-9"
+    assert handle["session"] == "sess-9"
+
+
 # -- headless-ACP embody backend ---------------------------------------------
 
 
@@ -471,6 +497,56 @@ def test_cli_supervise_headless_label_routes(monkeypatch, q, client):
     assert headless_calls == [marked.id]
     assert plain.id in embody_calls
     assert marked.id not in embody_calls
+
+
+def test_cli_supervise_pool_headless_builds_headless_fleet(monkeypatch, q, client):
+    """--pool --headless constructs a headless FleetSpawner with the configured
+    --headless-agent (the headless-fleet embodiment for a remote pool host)."""
+    import types
+
+    from agent_dispatch import __main__ as m
+    from agent_dispatch import fleet as fleet_mod
+    from agent_dispatch import remote_dispatch
+
+    q.create("work")
+    captured: dict = {}
+
+    class FakeFleet:
+        def __init__(
+            self, pool, *, origin, headless=False, agent="task-worker",
+            verify_timeout=0,
+        ):
+            self.pool = list(pool)
+            captured.update(
+                pool=pool, origin=origin, headless=headless, agent=agent
+            )
+
+        def __call__(self, task):
+            return True, {
+                "session": "s", "worktree": None, "machine": "lc", "owner": "o",
+            }
+
+        def can_spawn(self, task):
+            return True
+
+    monkeypatch.setattr(m, "_client", lambda _args, **_kw: client)
+    monkeypatch.setattr(m, "client_url", lambda: "http://coord")
+    monkeypatch.setattr(m, "_scope_repo", lambda _args: TEST_REPO)
+    monkeypatch.setattr(fleet_mod, "FleetSpawner", FakeFleet)
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "wheatley")
+
+    args = types.SimpleNamespace(
+        all_repos=False, repo=None, url=None, token=None, label=["cab"],
+        max_concurrent=5, verify_timeout=0, once=True, interval=30.0,
+        no_heartbeat=False, max_attempts=3,
+        pool="lambda-core-wsl", origin=None, headless=True,
+        headless_label=None, headless_agent="board-worker",
+    )
+    assert m._cmd_supervise(args) == 0
+    assert captured["headless"] is True
+    assert captured["agent"] == "board-worker"
+    assert captured["pool"] == ["lambda-core-wsl"]
+    assert captured["origin"] == "wheatley"
 
 
 

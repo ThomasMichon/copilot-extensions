@@ -151,8 +151,10 @@ a headless-embodied task is *driven* identically; only its body differs. A
 headless body is not a worktree, so the worktree-keyed lease heartbeat does not
 apply to it (bounded sweeps drive their own lifecycle to completion);
 reconciliation still settles its reservation on the task's terminal state.
-`--headless-label` applies to **local** (non-pool) spawn — fleet bodies are
-always CLI-embodied on the pool host.
+`--headless-label` is **per-label** and applies to **local** (non-pool) spawn.
+In fleet (`--pool`) mode the body choice is **fleet-wide** instead: `--headless`
+makes *every* fleet body a headless agent-bridge ACP session on the pool host
+(see *Fleet dispatch* below), and `--headless-label` is ignored.
 
 ### Lease heartbeat (built) — the live-worker safety net
 
@@ -232,23 +234,52 @@ Three properties define it:
   pool host, so an SSH blip after launch never kills a running job.
 - **Liveness-gated selection.** A pool host is a candidate only when it is
   reachable over SSH **and** has `agent-worktrees` (a single cheap
-  `command -v agent-worktrees` probe, cached briefly). The first live candidate by
-  policy (config order; a task's `target_machine`, if in the pool, is tried first)
-  is chosen.
+  `command -v agent-worktrees` probe, cached briefly) — or, in **headless-fleet**
+  mode, `agent-bridge` (the binary a headless body embodies through). The first
+  live candidate by policy (config order; a task's `target_machine`, if in the
+  pool, is tried first) is chosen.
 - **Defer, don't fail, when the pool is asleep.** `FleetSpawner.can_spawn` is wired
   as the supervisor's **`capacity_gate`** — an optional pre-reservation check
   (default no-op → the local path is unchanged). When no host is live, the task is
   skipped for the cycle **without a reservation**, so an all-asleep pool never
   burns spawn attempts toward the dead-letter bound.
 
+### Headless-fleet body (`--headless`) — the reliable remote embodiment
+
+By default a fleet body is a **CLI/mux embody** on the pool host
+(`agent-worktrees embody`). But a seeded CLI session can *race the input caret and
+never deliver its startup seed* (the documented "Loading…" hang,
+github/copilot-agent-runtime#13492) — so a kicked fleet body may never claim its
+task, exactly the failure the boards hit on lambda-core-wsl. `--headless`
+(fleet-wide) instead embodies each fleet body as a **headless agent-bridge ACP
+session** on the pool host — `ssh <host> agent-bridge create <agent> "<fleet
+seed>" --no-wait` (`fleet.py` → `embody.spawn_fleet_headless_worker`) — spawning
+the body in that host's own persistent agent-bridge daemon, which owns it
+independently of the launching SSH invocation. It sidesteps the
+CLI-start-prompt path entirely, so a bounded sweep embodies reliably on a remote
+pool host with **no human attach**.
+
+The seed is the **same** Model-C fleet seed as the CLI body
+(`fleet_autopilot_worker_prompt` — drive the origin lease over `ssh <origin>`
+under the synthetic owner), so a headless-fleet task claims + loops + progresses +
+completes identically; only the *body* differs. Like the local headless backend, a
+headless-fleet body is **not a worktree**, so no worktree handle is recorded and
+the worktree-keyed lease heartbeat / gone-recovery does not apply — a bounded
+sweep drives its own lifecycle to completion, and its reservation is settled on
+the task's terminal state. `--headless-agent AGENT` names the agent-bridge agent
+(default `task-worker`).
+
 CLI:
 
 ```
-agent-dispatch supervise --pool host-a,host-b [--origin <alias>] [--label L …]
+agent-dispatch supervise --pool host-a,host-b [--origin <alias>] \
+    [--headless [--headless-agent AGENT]] [--label L …]
 ```
 
 `--origin` is the supervisor machine's own SSH alias that bodies report back to
-(defaults to the resolved local machine). Omit `--pool` for local spawn.
+(defaults to the resolved local machine). Omit `--pool` for local spawn. Add
+`--headless` for a headless agent-bridge ACP body on the pool host instead of a
+CLI/mux one.
 
 **Deliberately deferred:** a fleet body uses a *synthetic* owner, so it is not
 auto-joined to the agent-bridge live-session registry the way a local embody is
@@ -284,7 +315,7 @@ AGENT_DISPATCH_SUPERVISE_MAX_CONCURRENT=1   # max-one-active by default
 AGENT_DISPATCH_SUPERVISE_MAX_ATTEMPTS=3     # dead-letter after N failed spawns
 AGENT_DISPATCH_SUPERVISE_HEADLESS_LABELS=   # labels embodied headless-ACP (subset of LABELS)
 AGENT_DISPATCH_SUPERVISE_HEADLESS_AGENT=    # agent-bridge agent for headless bodies (default task-worker)
-AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=        # advanced, e.g. --pool a,b --origin host
+AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=        # advanced, e.g. --pool a,b --origin host [--headless]
 ```
 
 A generated launcher (`supervise-service.sh`) turns the label list into repeated
