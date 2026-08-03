@@ -291,38 +291,74 @@ config order.
 
 `agent-dispatch supervise` is only useful when something keeps it running: a
 dispatched task queues forever until a supervise cycle observes it. On a
-standalone Linux deploy host the plugin installer (`scripts/install.sh`)
-therefore installs a **second systemd user unit**, `agent-dispatch-supervisor.service`,
-alongside the coordinator unit — same `install|update|status|start|stop|uninstall`
-verbs — so the serve loop runs unattended and restart-safe (`Restart=on-failure`).
+standalone deploy host the plugin installer therefore manages persistent
+supervisors alongside the coordinator — systemd user units on Linux, Scheduled
+Tasks on Windows — using the same `install|update|status|start|stop|uninstall`
+verbs.
+
+The legacy primary supervisor is unchanged: Linux installs
+`agent-dispatch-supervisor.service`, Windows installs the Scheduled Task
+`agent-dispatch-supervisor`, and both read `~/.agent-dispatch/supervisor.env`.
+Existing hosts that use only the primary env keep the same behavior.
+
+A host that needs more than one supervisor can add named profiles under
+`~/.agent-dispatch/supervisors/<name>.env` (Windows:
+`$HOME\.agent-dispatch\supervisors\<name>.env`). Profile names must contain only
+letters, digits, `_`, or `-`. Each profile uses the same env-var schema as
+`supervisor.env`; the installer maps it to its own supervisor:
+
+- Linux: `agent-dispatch-supervisor-<name>.service`
+- Windows: Scheduled Task `agent-dispatch-supervisor-<name>`
+
+All supervisors share the generated launcher (`supervise-service.sh` on Linux,
+`supervise-service.ps1` on Windows). The unit/task supplies the env file, so the
+launcher stays generic and turns that env's label list into repeated `--label`
+flags before running `supervise --all-repos`.
 
 It is just the existing `Supervisor.serve` loop hosted persistently, so the
 spawn-reservation guarantee (one embody per (task, attempt), across restarts and
 multiple loops) is unchanged.
 
-**Safety: the service is label-gated.** The unit runs `supervise --all-repos` —
-`--all-repos` avoids the lane-scoping gotcha where a short `--repo owner/name`
-form silently filters *every* task out — which makes the **label opt-in the only
-thing between the supervisor and embodying every queued task** (handoffs,
-interactive worktree-pinned tasks, …). So the service is **enabled only when at
-least one label is configured**; with none set the unit is installed but left
-inert. Configuration lives in `~/.agent-dispatch/supervisor.env`:
+**Safety: every supervisor is label-gated independently.** `--all-repos` avoids
+the lane-scoping gotcha where a short `--repo owner/name` form silently filters
+*every* task out, which makes the **label opt-in the only thing between a
+supervisor and embodying every queued task** (handoffs, interactive
+worktree-pinned tasks, …). A primary or profile supervisor is enabled and
+started only when its own env file sets at least one label; with no labels set
+it is installed but left inert. The generated launcher also hard-refuses to run
+label-less as a defense-in-depth guard.
 
 ```
 AGENT_DISPATCH_SUPERVISE_LABELS=            # comma/space list; REQUIRED to enable
 AGENT_DISPATCH_SUPERVISE_INTERVAL=30        # poll seconds
 AGENT_DISPATCH_SUPERVISE_MAX_CONCURRENT=1   # max-one-active by default
 AGENT_DISPATCH_SUPERVISE_MAX_ATTEMPTS=3     # dead-letter after N failed spawns
+AGENT_DISPATCH_SUPERVISE_LABEL_MAX_ATTEMPTS= # optional LABEL=N overrides
 AGENT_DISPATCH_SUPERVISE_HEADLESS_LABELS=   # labels embodied headless-ACP (subset of LABELS)
 AGENT_DISPATCH_SUPERVISE_HEADLESS_AGENT=    # agent-bridge agent for headless bodies (default task-worker)
 AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=        # advanced, e.g. --pool a,b --origin host [--headless]
 ```
 
-A generated launcher (`supervise-service.sh`) turns the label list into repeated
-`--label` flags and **hard-refuses to run label-less** (a defense-in-depth guard,
-in case the unit is hand-enabled). The supervisor installs only on a full
-coordinator host — a WSL guest / client-only host (`--no-service`) is skipped, and
-`--no-supervisor` opts a full host out.
+Profile reconciliation is idempotent: `install`/`update` writes the primary
+supervisor, writes every valid profile whose env file exists, and removes any
+`agent-dispatch-supervisor-<name>` unit/task whose `supervisors/<name>.env` has
+been deleted. Reconcile never touches the primary. `start`, `stop`, `status`,
+and `uninstall` iterate the primary plus every present profile; status prints
+whether each supervisor is active/enabled or inert because labels are absent. A
+WSL guest or client-only host (`--no-service`) installs none and removes stale
+supervisors; `--no-supervisor` opts a full host out of all supervisors while
+leaving the coordinator installed.
+
+Example board-fleet profile (`~/.agent-dispatch/supervisors/boards.env`):
+
+```
+AGENT_DISPATCH_SUPERVISE_LABELS=coherence-adjudication-board,reality-adjudication-board,efficiency-adjudication-board
+AGENT_DISPATCH_SUPERVISE_INTERVAL=30
+AGENT_DISPATCH_SUPERVISE_MAX_CONCURRENT=1
+AGENT_DISPATCH_SUPERVISE_MAX_ATTEMPTS=3
+AGENT_DISPATCH_SUPERVISE_HEADLESS_AGENT=lambda-core-wsl
+AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=--pool lambda-core-wsl --origin wheatley --headless
+```
 
 ## Genericity
 

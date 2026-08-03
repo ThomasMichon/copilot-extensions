@@ -60,7 +60,7 @@ def test_supervisor_unit_and_launcher_put_local_bin_on_path():
     assert ".local/bin" in text and ".bun/bin" in text
     # ...before the EnvironmentFile, so supervisor.env can still override it.
     svc = text.index("Environment=PATH=$SUPERVISOR_PATH")
-    envfile = text.index("EnvironmentFile=-$SUPERVISOR_ENV_FILE")
+    envfile = text.index("EnvironmentFile=-$env_file")
     assert svc < envfile, (
         "Environment=PATH must precede EnvironmentFile so supervisor.env can "
         "override PATH"
@@ -95,21 +95,18 @@ def test_launcher_refuses_label_less_run():
 
 
 def test_service_enabled_only_when_labels_configured():
-    """`_install_supervisor_service` must gate `enable`/`restart` behind
-    `_supervisor_labels_configured`, and disable/stop otherwise."""
+    """`_install_supervisor_unit` must gate `enable`/`restart` behind
+    `_supervisor_labels_configured <env-file>`, and disable/stop otherwise."""
     text = _text()
     assert "_supervisor_labels_configured" in text
-    # The enable path is guarded by the label check.
-    idx = text.index("_install_supervisor_service()")
+    idx = text.index("_install_supervisor_unit()")
     body = text[idx:]
-    guard = body.index("if _supervisor_labels_configured; then")
-    enable = body.index('systemctl --user enable "$SUPERVISOR_UNIT"')
-    disable = body.index('systemctl --user disable "$SUPERVISOR_UNIT"')
-    # enable comes inside the positive branch (after the guard);
-    # a disable/stop lives in the else branch (after enable).
+    guard = body.index('if _supervisor_labels_configured "$env_file"; then')
+    enable = body.index('systemctl --user enable "$unit"')
+    disable = body.index('systemctl --user disable "$unit"')
     assert guard < enable < disable, (
-        "enable must be gated by _supervisor_labels_configured, with "
-        "disable/stop in the inert (no-label) branch"
+        "enable must be gated by _supervisor_labels_configured for that env "
+        "file, with disable/stop in the inert (no-label) branch"
     )
 
 
@@ -131,6 +128,50 @@ def test_supervisor_gated_off_on_wsl_and_client_hosts():
         "the supervisor install must skip WSL / client-only hosts"
     )
     assert "NO_SUPERVISOR" in body, "must honor --no-supervisor"
+    assert "_remove_all_supervisor_units" in body, (
+        "client-only / WSL / --no-supervisor must remove primary and profile supervisors"
+    )
+
+
+def test_supervisor_profile_directory_referenced():
+    text = _text()
+    assert 'SUPERVISOR_PROFILE_DIR="$INSTALL_DIR/supervisors"' in text
+    assert 'mkdir -p "$UNIT_DIR" "$SUPERVISOR_PROFILE_DIR"' in text
+
+
+def test_profile_units_are_named_from_safe_profile_stems_and_share_launcher():
+    text = _text()
+    assert '[[ "$1" =~ ^[A-Za-z0-9_-]+$ ]]' in text
+    assert "printf 'agent-dispatch-supervisor-%s.service'" in text
+    assert "EnvironmentFile=-$env_file" in text
+    assert "ExecStart=$SUPERVISOR_LAUNCHER" in text
+    assert '_install_supervisor_unit "$SUPERVISOR_UNIT" "$SUPERVISOR_ENV_FILE"' in text
+
+
+def test_profile_label_gating_uses_profile_env_file():
+    text = _text()
+    idx = text.index("_install_supervisor_unit()")
+    body = text[idx:]
+    assert 'if _supervisor_labels_configured "$env_file"; then' in body
+    assert 'systemctl --user enable "$unit"' in body
+    assert 'systemctl --user disable "$unit"' in body
+
+
+def test_profile_reconcile_removes_orphan_units():
+    text = _text()
+    idx = text.index("_reconcile_supervisor_profiles()")
+    body = text[idx:]
+    assert '"$UNIT_DIR"/agent-dispatch-supervisor-*.service' in body
+    assert 'env_file="$SUPERVISOR_PROFILE_DIR/$name.env"' in body
+    assert '[[ ! -f "$env_file" ]]' in body
+    assert '_remove_supervisor_unit "$unit"' in body
+
+
+def test_primary_supervisor_unit_and_env_remain_legacy_names():
+    text = _text()
+    assert 'SUPERVISOR_UNIT="agent-dispatch-supervisor.service"' in text
+    assert 'SUPERVISOR_ENV_FILE="$INSTALL_DIR/supervisor.env"' in text
+    assert '_install_supervisor_unit "$SUPERVISOR_UNIT" "$SUPERVISOR_ENV_FILE"' in text
 
 
 # -- Windows (install.ps1) parity --------------------------------------------
@@ -168,16 +209,16 @@ class TestWindowsSupervisorInstall:
 
     def test_task_enabled_only_when_labels_configured(self):
         text = _ps1_text()
-        idx = text.index("function Install-SupervisorTask")
+        idx = text.index("function Install-SupervisorTaskInstance")
         body = text[idx:]
-        gate = body.index("if (Test-SupervisorLabelsConfigured)")
-        start = body.index("Start-ScheduledTask -TaskName $SupervisorTaskName")
-        disable = body.index("Disable-ScheduledTask -TaskName $SupervisorTaskName")
+        gate = body.index("if (Test-SupervisorLabelsConfigured -EnvFile $EnvFile)")
+        start = body.index("Start-ScheduledTask -TaskName $Name")
+        disable = body.index("Disable-ScheduledTask -TaskName $Name")
         # enable/start in the positive branch (after the gate); disable in the
         # inert (no-label) else branch (after start).
         assert gate < start < disable, (
-            "enable/start must be gated by Test-SupervisorLabelsConfigured, with "
-            "Disable-ScheduledTask in the inert (no-label) branch"
+            "enable/start must be gated by Test-SupervisorLabelsConfigured for "
+            "that env file, with Disable-ScheduledTask in the inert branch"
         )
 
     def test_shipped_env_defaults_to_no_labels(self):
@@ -188,17 +229,55 @@ class TestWindowsSupervisorInstall:
 
     def test_supervisor_gated_off_on_client_hosts(self):
         text = _ps1_text()
-        idx = text.index("function Install-SupervisorTask")
+        idx = text.index("function Install-SupervisorTask {")
         body = text[idx : text.index("\n}\n", idx)]
         assert "$NoSupervisor" in body and "$NoService" in body, (
             "the supervisor install must skip client-only / -NoSupervisor hosts"
         )
+        assert "Remove-AllSupervisorTasks" in body, (
+            "client-only / -NoSupervisor must remove primary and profile supervisors"
+        )
 
     def test_supervisor_wired_into_actions(self):
         text = _ps1_text()
-        # install + update call Install-SupervisorTask; uninstall removes it.
+        # install + update call Install-SupervisorTask; uninstall removes all supervisors.
         assert text.count("Install-SupervisorTask") >= 3  # def + install + update
-        assert "Unregister-ScheduledTask -TaskName $SupervisorTaskName" in text
+        assert "Remove-AllSupervisorTasks" in text
+
+    def test_supervisor_profile_directory_referenced(self):
+        text = _ps1_text()
+        assert "$SupervisorProfileDir = Join-Path $InstallDir 'supervisors'" in text
+        assert "Get-SupervisorProfileFiles" in text
+
+    def test_profile_tasks_are_named_from_safe_profile_stems_and_share_launcher(self):
+        text = _ps1_text()
+        assert "return ($Name -match '^[A-Za-z0-9_-]+$')" in text
+        assert 'return "$SupervisorTaskName-$ProfileName"' in text
+        assert "Write-SupervisorLauncher" in text
+        assert '-File `"$Launcher`" -EnvFile `"$EnvFile`"' in text
+
+    def test_profile_label_gating_uses_profile_env_file(self):
+        text = _ps1_text()
+        idx = text.index("function Install-SupervisorTaskInstance")
+        body = text[idx:]
+        assert "if (Test-SupervisorLabelsConfigured -EnvFile $EnvFile)" in body
+        assert "Enable-ScheduledTask -TaskName $Name" in body
+        assert "Disable-ScheduledTask -TaskName $Name" in body
+
+    def test_profile_reconcile_removes_orphan_tasks(self):
+        text = _ps1_text()
+        idx = text.index("function Remove-OrphanSupervisorProfiles")
+        body = text[idx:]
+        assert 'Get-ScheduledTask -TaskName "$SupervisorTaskName-*"' in body
+        assert "Get-SupervisorProfileEnvFile -ProfileName $profile" in body
+        assert "(-not (Test-Path $envFile))" in body
+        assert "Remove-SupervisorTask -Name $name" in body
+
+    def test_primary_supervisor_task_and_env_remain_legacy_names(self):
+        text = _ps1_text()
+        assert "$SupervisorTaskName = 'agent-dispatch-supervisor'" in text
+        assert "Join-Path $InstallDir 'supervisor.env'" in text
+        assert "Install-SupervisorTaskInstance -Name $SupervisorTaskName -EnvFile $envFile" in text
 
     def test_launchers_survive_a_locked_log(self):
         """A busy/locked ``*-service.log`` must never block startup.

@@ -93,6 +93,7 @@ if ($env:OS -eq 'Windows_NT') {
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 $TaskName = 'agent-dispatch'
 $SupervisorTaskName = 'agent-dispatch-supervisor'
+$SupervisorProfileDir = Join-Path $InstallDir 'supervisors'
 $DefaultPort = 9847
 
 # === install-contract:v3 versioned-venv (agent-dispatch: .venv-as-junction) ===
@@ -1047,10 +1048,10 @@ try {
 # See #2869.
 
 function Test-SupervisorLabelsConfigured {
-    # True when supervisor.env declares a non-empty AGENT_DISPATCH_SUPERVISE_LABELS.
-    $envFile = Join-Path $InstallDir 'supervisor.env'
-    if (-not (Test-Path $envFile)) { return $false }
-    foreach ($line in Get-Content $envFile) {
+    param([string]$EnvFile = (Join-Path $InstallDir 'supervisor.env'))
+    # True when the env file declares a non-empty AGENT_DISPATCH_SUPERVISE_LABELS.
+    if (-not (Test-Path $EnvFile)) { return $false }
+    foreach ($line in Get-Content $EnvFile) {
         if ($line -match '^\s*AGENT_DISPATCH_SUPERVISE_LABELS\s*=\s*(.+?)\s*$') {
             $val = $Matches[1].Trim().Trim('"').Trim("'")
             $val = ($val -replace '[\s,]', '')
@@ -1060,29 +1061,124 @@ function Test-SupervisorLabelsConfigured {
     return $false
 }
 
+function Test-SupervisorProfileName {
+    param([Parameter(Mandatory)][string]$Name)
+    return ($Name -match '^[A-Za-z0-9_-]+$')
+}
+
+function Get-SupervisorTaskName {
+    param([string]$ProfileName)
+    if ([string]::IsNullOrEmpty($ProfileName)) { return $SupervisorTaskName }
+    return "$SupervisorTaskName-$ProfileName"
+}
+
+function Get-SupervisorProfileEnvFile {
+    param([Parameter(Mandatory)][string]$ProfileName)
+    return (Join-Path $SupervisorProfileDir "$ProfileName.env")
+}
+
+function Get-SupervisorProfileFiles {
+    if (-not (Test-Path $SupervisorProfileDir)) { return @() }
+    $files = @(Get-ChildItem -Path $SupervisorProfileDir -Filter '*.env' -File -ErrorAction SilentlyContinue)
+    foreach ($f in $files) {
+        if (Test-SupervisorProfileName -Name $f.BaseName) {
+            $f
+        } else {
+            Write-Warn "Skipping unsafe supervisor profile name: $($f.BaseName)"
+        }
+    }
+}
+
 function Remove-SupervisorTask {
+    param([string]$Name = $SupervisorTaskName)
     # Returns 'removed' | 'blocked' | 'absent'. Mirrors Remove-CoordinatorTask.
-    if (-not (Get-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue)) {
+    if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) { return 'absent' }
+    if (-not (Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue)) {
         return 'absent'
     }
-    Stop-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue
-    Unregister-ScheduledTask -TaskName $SupervisorTaskName -Confirm:$false -ErrorAction SilentlyContinue
-    if (Get-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue) {
+    Stop-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName $Name -Confirm:$false -ErrorAction SilentlyContinue
+    if (Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue) {
         return 'blocked'
     }
     return 'removed'
 }
 
 function Remove-SupervisorAutostart {
+    param([string]$Name = $SupervisorTaskName)
     # Remove the supervisor's non-elevated logon auto-start (HKCU Run) if present.
     $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
     try {
-        if (Get-ItemProperty -Path $runKey -Name $SupervisorTaskName -ErrorAction SilentlyContinue) {
-            Remove-ItemProperty -Path $runKey -Name $SupervisorTaskName -ErrorAction SilentlyContinue
+        if (Get-ItemProperty -Path $runKey -Name $Name -ErrorAction SilentlyContinue) {
+            Remove-ItemProperty -Path $runKey -Name $Name -ErrorAction SilentlyContinue
             return $true
         }
     } catch { }
     return $false
+}
+
+function Remove-AllSupervisorTasks {
+    switch (Remove-SupervisorTask -Name $SupervisorTaskName) {
+        'removed' { Write-Step "Removed supervisor task '$SupervisorTaskName'" }
+        default   { }
+    }
+    [void](Remove-SupervisorAutostart -Name $SupervisorTaskName)
+    if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
+        $tasks = @(Get-ScheduledTask -TaskName "$SupervisorTaskName-*" -ErrorAction SilentlyContinue)
+        foreach ($task in $tasks) {
+            $name = $task.TaskName
+            switch (Remove-SupervisorTask -Name $name) {
+                'removed' { Write-Step "Removed supervisor profile task '$name'" }
+                'blocked' { Write-Skip "Supervisor profile task '$name' present but not removable without elevation -- run elevated to remove it" }
+                default   { }
+            }
+        }
+    }
+    $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    try {
+        $props = Get-ItemProperty -Path $runKey -ErrorAction SilentlyContinue
+        if ($props) {
+            foreach ($p in $props.PSObject.Properties) {
+                if ($p.Name -like "$SupervisorTaskName-*") {
+                    Remove-ItemProperty -Path $runKey -Name $p.Name -ErrorAction SilentlyContinue
+                    Write-Step "Removed supervisor profile logon auto-start '$($p.Name)'"
+                }
+            }
+        }
+    } catch { }
+}
+
+function Remove-OrphanSupervisorProfiles {
+    if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) { return }
+    $tasks = @(Get-ScheduledTask -TaskName "$SupervisorTaskName-*" -ErrorAction SilentlyContinue)
+    foreach ($task in $tasks) {
+        $name = $task.TaskName
+        $profile = $name.Substring($SupervisorTaskName.Length + 1)
+        $envFile = Get-SupervisorProfileEnvFile -ProfileName $profile
+        if ((-not (Test-SupervisorProfileName -Name $profile)) -or (-not (Test-Path $envFile))) {
+            switch (Remove-SupervisorTask -Name $name) {
+                'removed' { Write-Ok "Removed orphan supervisor profile task: $name" }
+                'blocked' { Write-Skip "Orphan supervisor profile task '$name' present but not removable without elevation" }
+                default   { }
+            }
+        }
+    }
+    $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    try {
+        $props = Get-ItemProperty -Path $runKey -ErrorAction SilentlyContinue
+        if ($props) {
+            foreach ($p in $props.PSObject.Properties) {
+                if ($p.Name -like "$SupervisorTaskName-*") {
+                    $profile = $p.Name.Substring($SupervisorTaskName.Length + 1)
+                    $envFile = Get-SupervisorProfileEnvFile -ProfileName $profile
+                    if ((-not (Test-SupervisorProfileName -Name $profile)) -or (-not (Test-Path $envFile))) {
+                        Remove-ItemProperty -Path $runKey -Name $p.Name -ErrorAction SilentlyContinue
+                        Write-Ok "Removed orphan supervisor profile logon auto-start: $($p.Name)"
+                    }
+                }
+            }
+        }
+    } catch { }
 }
 
 function Install-SupervisorLogonAutostart {
@@ -1090,43 +1186,28 @@ function Install-SupervisorLogonAutostart {
     # Run key so it (re)starts at each interactive logon. An interactive logon
     # station is actually the RIGHT fit for the supervisor (it spawns embody CLI
     # sessions that need one), so this is a clean first-class path, not a fallback.
-    param([Parameter(Mandatory)][string]$Launcher)
-    $taskArgs = "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Launcher`""
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Launcher,
+        [Parameter(Mandatory)][string]$EnvFile
+    )
+    $taskArgs = "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Launcher`" -EnvFile `"$EnvFile`""
     try {
         Start-Process -FilePath 'conhost.exe' -ArgumentList $taskArgs -WindowStyle Hidden | Out-Null
     } catch {
-        Write-Warn "Could not start supervisor process: $($_.Exception.Message)"
+        Write-Warn "Could not start supervisor process '$Name': $($_.Exception.Message)"
     }
     try {
         $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-        New-ItemProperty -Path $runKey -Name $SupervisorTaskName -Value "conhost.exe $taskArgs" `
+        New-ItemProperty -Path $runKey -Name $Name -Value "conhost.exe $taskArgs" `
             -PropertyType String -Force | Out-Null
-        Write-Ok "Embody supervisor installed as an interactive logon service (HKCU Run '$SupervisorTaskName'; no elevation)"
+        Write-Ok "Embody supervisor installed as an interactive logon service (HKCU Run '$Name'; no elevation)"
     } catch {
-        Write-Warn "Could not register supervisor logon auto-start (HKCU Run): $($_.Exception.Message)"
+        Write-Warn "Could not register supervisor logon auto-start '$Name' (HKCU Run): $($_.Exception.Message)"
     }
 }
 
-function Install-SupervisorTask {
-    # Install only where the full coordinator lives (a client-only host has no
-    # local coordinator for the supervisor to talk to). -NoSupervisor opts a full
-    # host out; -NoService (client-only) skips it too. Remove a stale task in
-    # either case so a host that became client-only stops supervising.
-    if ($NoSupervisor -or $NoService) {
-        switch (Remove-SupervisorTask) {
-            'removed' { Write-Ok   'Removed embody supervisor task (client-only / -NoSupervisor)' }
-            'blocked' { Write-Skip 'Supervisor task present but not removable without elevation -- run elevated to remove it' }
-            default   { Write-Skip 'Embody supervisor skipped (client-only / -NoSupervisor)' }
-        }
-        if (Remove-SupervisorAutostart) { Write-Ok 'Removed supervisor logon auto-start (HKCU Run)' }
-        return
-    }
-    if ($env:OS -ne 'Windows_NT') { return }
-    if (-not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)) {
-        Write-Skip 'ScheduledTasks module unavailable -- run "agent-dispatch supervise --all-repos --label <L>" manually'
-        return
-    }
-
+function Write-SupervisorDefaultEnv {
     $envFile = Join-Path $InstallDir 'supervisor.env'
     if (-not (Test-Path $envFile)) {
         $envDefault = @"
@@ -1147,6 +1228,10 @@ AGENT_DISPATCH_SUPERVISE_INTERVAL=30
 AGENT_DISPATCH_SUPERVISE_MAX_CONCURRENT=1
 # Max failed spawn attempts before a task is dead-lettered (default 3; 0=disable):
 AGENT_DISPATCH_SUPERVISE_MAX_ATTEMPTS=3
+# Per-label overrides of MAX_ATTEMPTS (space- or comma-separated LABEL=N pairs),
+# e.g. "intelligence-dampener=3 coherence-adjudication-board=1" so raising one
+# label's bound never revives another label's stale tasks (N=0 = retry forever):
+AGENT_DISPATCH_SUPERVISE_LABEL_MAX_ATTEMPTS=
 # Labels whose tasks embody as a HEADLESS agent-bridge ACP session (no mux, no
 # CLI-start-prompt) instead of a CLI autopilot -- comma- or space-separated. For
 # self-contained, bounded sweeps that need no human attach; unlisted labels stay
@@ -1163,7 +1248,10 @@ AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=
     } else {
         Write-Skip "Supervisor env already exists: $envFile"
     }
+    return $envFile
+}
 
+function Write-SupervisorLauncher {
     # Launcher: loads supervisor.env, builds the supervise argv (labels -> repeated
     # --label flags), and hard-refuses a label-less run (defense-in-depth: the
     # registration below leaves it disabled without labels, but a hand-enable must
@@ -1172,15 +1260,17 @@ AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=
     # stderr is captured, not a terminating NativeCommandError.
     $launcher = Join-Path $InstallDir 'supervise-service.ps1'
     $launcherBody = @"
+param([string]`$EnvFile = (Join-Path `$PSScriptRoot 'supervisor.env'))
 # agent-dispatch embody supervisor launcher (generated by install.ps1; #2869).
-# Do not edit; edit supervisor.env instead.
+# Do not edit; edit supervisor.env or supervisors/<name>.env instead.
 `$ErrorActionPreference = 'Stop'
 `$env:PYTHONUTF8 = '1'
-`$envFile = Join-Path `$PSScriptRoot 'supervisor.env'
+`$envFile = `$EnvFile
 `$labels = ''
 `$interval = '30'
 `$maxConcurrent = '1'
 `$maxAttempts = '3'
+`$labelMaxAttempts = ''
 `$headlessLabels = ''
 `$headlessAgent = ''
 `$extra = ''
@@ -1196,6 +1286,7 @@ if (Test-Path `$envFile) {
             'AGENT_DISPATCH_SUPERVISE_INTERVAL'       { if (`$v) { `$interval = `$v } }
             'AGENT_DISPATCH_SUPERVISE_MAX_CONCURRENT' { if (`$v) { `$maxConcurrent = `$v } }
             'AGENT_DISPATCH_SUPERVISE_MAX_ATTEMPTS'   { if (`$v) { `$maxAttempts = `$v } }
+            'AGENT_DISPATCH_SUPERVISE_LABEL_MAX_ATTEMPTS' { `$labelMaxAttempts = `$v }
             'AGENT_DISPATCH_SUPERVISE_HEADLESS_LABELS' { `$headlessLabels = `$v }
             'AGENT_DISPATCH_SUPERVISE_HEADLESS_AGENT'  { `$headlessAgent = `$v }
             'AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS'     { `$extra = `$v }
@@ -1209,8 +1300,11 @@ foreach (`$l in (`$labels -split '[\s,]+')) {
     if (`$l) { `$argsList += @('--label', `$l); `$haveLabel = `$true }
 }
 if (-not `$haveLabel) {
-    Write-Error 'agent-dispatch-supervisor: refusing to run with no opt-in label. A label-less supervisor would embody EVERY queued task. Set AGENT_DISPATCH_SUPERVISE_LABELS in supervisor.env.'
+    Write-Error "agent-dispatch-supervisor: refusing to run with no opt-in label. A label-less supervisor would embody EVERY queued task. Set AGENT_DISPATCH_SUPERVISE_LABELS in `$envFile."
     exit 78  # EX_CONFIG
+}
+foreach (`$lm in (`$labelMaxAttempts -split '[\s,]+')) {
+    if (`$lm) { `$argsList += @('--label-max-attempts', `$lm) }
 }
 foreach (`$hl in (`$headlessLabels -split '[\s,]+')) {
     if (`$hl) { `$argsList += @('--headless-label', `$hl) }
@@ -1241,7 +1335,7 @@ try {
     }
 } catch { }
 try {
-    "[`$(Get-Date -Format o)] agent-dispatch supervisor launch (labels=`$labels interval=`$interval log=`$logFile)" |
+    "[`$(Get-Date -Format o)] agent-dispatch supervisor launch (env=`$envFile labels=`$labels interval=`$interval log=`$logFile)" |
         Out-File -FilePath `$logFile -Append -Encoding utf8
 } catch { }
 `$ErrorActionPreference = 'Continue'
@@ -1253,27 +1347,37 @@ try {
 }
 "@
     [System.IO.File]::WriteAllText($launcher, $launcherBody, $utf8NoBom)
+    return $launcher
+}
+
+function Install-SupervisorTaskInstance {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$EnvFile,
+        [Parameter(Mandatory)][string]$Launcher,
+        [Parameter(Mandatory)][string]$DisplayName
+    )
 
     # Interactive-required host: use the non-elevated logon auto-start (HKCU Run)
     # instead of a Scheduled Task -- registration is admin-gated here, and an
     # interactive station is the right fit for the supervisor anyway. Only when a
     # label opt-in is configured (else stay inert, like the disabled-task case).
     if ((Get-ServiceMode) -eq 'interactive') {
-        switch (Remove-SupervisorTask) {
-            'removed' { Write-Step 'Removed prior supervisor Scheduled Task (interactive mode)' }
+        switch (Remove-SupervisorTask -Name $Name) {
+            'removed' { Write-Step "Removed prior supervisor Scheduled Task '$Name' (interactive mode)" }
             default   { }
         }
-        if (Test-SupervisorLabelsConfigured) {
-            Install-SupervisorLogonAutostart -Launcher $launcher
+        if (Test-SupervisorLabelsConfigured -EnvFile $EnvFile) {
+            Install-SupervisorLogonAutostart -Name $Name -Launcher $Launcher -EnvFile $EnvFile
         } else {
-            if (Remove-SupervisorAutostart) { Write-Step 'Removed supervisor logon auto-start (no opt-in label)' }
-            Write-Ok "Embody supervisor INERT (no opt-in label). Set AGENT_DISPATCH_SUPERVISE_LABELS in $envFile + re-run update to enable."
+            if (Remove-SupervisorAutostart -Name $Name) { Write-Step "Removed supervisor logon auto-start '$Name' (no opt-in label)" }
+            Write-Ok "$DisplayName INERT (no opt-in label). Set AGENT_DISPATCH_SUPERVISE_LABELS in $EnvFile + re-run update to enable."
         }
         return
     }
 
     $action = New-ScheduledTaskAction -Execute 'conhost.exe' `
-        -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$launcher`""
+        -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Launcher`" -EnvFile `"$EnvFile`""
     $trigger = New-ScheduledTaskTrigger -AtLogOn
     $settings = New-ScheduledTaskSettingsSet `
         -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
@@ -1286,7 +1390,7 @@ try {
     $ErrorActionPreference = 'Continue'
     $regOk = $false
     try {
-        Register-ScheduledTask -TaskName $SupervisorTaskName -Action $action -Trigger $trigger `
+        Register-ScheduledTask -TaskName $Name -Action $action -Trigger $trigger `
             -Settings $settings -Principal $principal -Force `
             -Description 'agent-dispatch -- embody spawn supervisor (labeled queued tasks -> host embody autopilots)' | Out-Null
         $regOk = $?
@@ -1295,23 +1399,133 @@ try {
     }
     if (-not $regOk) {
         $ErrorActionPreference = $prevEAP
-        Write-Warn "Embody supervisor not registered (needs elevation) -- coordinator is installed; run elevated to add it"
+        Write-Warn "$DisplayName not registered (needs elevation) -- coordinator is installed; run elevated to add it"
         return
     }
 
-    if (Test-SupervisorLabelsConfigured) {
-        Enable-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue | Out-Null
-        Start-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue
+    if (Test-SupervisorLabelsConfigured -EnvFile $EnvFile) {
+        Enable-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue | Out-Null
+        Start-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
         $ErrorActionPreference = $prevEAP
-        Write-Ok "Embody supervisor installed + started (Scheduled Task '$SupervisorTaskName')"
+        Write-Ok "$DisplayName installed + started (Scheduled Task '$Name')"
     } else {
         # No opt-in label -> leave the task registered but DISABLED (inert), the
         # Windows analogue of an installed-but-not-enabled systemd unit.
-        Disable-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue | Out-Null
+        Disable-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue | Out-Null
         $ErrorActionPreference = $prevEAP
-        Write-Ok "Embody supervisor installed (INERT: no opt-in label; task disabled). To enable: set"
-        Write-Step "AGENT_DISPATCH_SUPERVISE_LABELS in $envFile, then re-run update"
-        Write-Step "(or: Enable-ScheduledTask -TaskName $SupervisorTaskName; Start-ScheduledTask -TaskName $SupervisorTaskName)"
+        Write-Ok "$DisplayName installed (INERT: no opt-in label; task disabled). To enable: set"
+        Write-Step "AGENT_DISPATCH_SUPERVISE_LABELS in $EnvFile, then re-run update"
+        Write-Step "(or: Enable-ScheduledTask -TaskName $Name; Start-ScheduledTask -TaskName $Name)"
+    }
+}
+
+function Install-SupervisorTask {
+    # Install only where the full coordinator lives (a client-only host has no
+    # local coordinator for the supervisor to talk to). -NoSupervisor opts a full
+    # host out; -NoService (client-only) skips it too. Remove stale primary and
+    # profile tasks in either case so a host that became client-only stops supervising.
+    if ($NoSupervisor -or $NoService) {
+        Remove-AllSupervisorTasks
+        Write-Skip 'Embody supervisor skipped (client-only / -NoSupervisor)'
+        return
+    }
+    if ($env:OS -ne 'Windows_NT') { return }
+    if (-not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)) {
+        Write-Skip 'ScheduledTasks module unavailable -- run "agent-dispatch supervise --all-repos --label <L>" manually'
+        return
+    }
+
+    if (-not (Test-Path $SupervisorProfileDir)) {
+        New-Item -ItemType Directory -Force -Path $SupervisorProfileDir | Out-Null
+    }
+    $envFile = Write-SupervisorDefaultEnv
+    $launcher = Write-SupervisorLauncher
+
+    Install-SupervisorTaskInstance -Name $SupervisorTaskName -EnvFile $envFile `
+        -Launcher $launcher -DisplayName 'Embody supervisor'
+
+    foreach ($profile in @(Get-SupervisorProfileFiles)) {
+        $name = Get-SupervisorTaskName -ProfileName $profile.BaseName
+        Install-SupervisorTaskInstance -Name $name -EnvFile $profile.FullName `
+            -Launcher $launcher -DisplayName "Embody supervisor profile '$($profile.BaseName)'"
+    }
+    Remove-OrphanSupervisorProfiles
+}
+
+function Invoke-SupervisorStart {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$EnvFile,
+        [Parameter(Mandatory)][string]$Label
+    )
+    $task = Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
+    if ($task -and $task.State -ne 'Disabled') {
+        Start-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
+        Write-Ok "$Label started"
+        return
+    }
+    $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    $auto = Get-ItemProperty -Path $runKey -Name $Name -ErrorAction SilentlyContinue
+    $launcher = Join-Path $InstallDir 'supervise-service.ps1'
+    if ($auto -and (Test-Path $launcher) -and (Test-SupervisorLabelsConfigured -EnvFile $EnvFile)) {
+        Install-SupervisorLogonAutostart -Name $Name -Launcher $launcher -EnvFile $EnvFile
+    }
+}
+
+function Invoke-SupervisorsStart {
+    Invoke-SupervisorStart -Name $SupervisorTaskName -EnvFile (Join-Path $InstallDir 'supervisor.env') -Label 'Embody supervisor'
+    foreach ($profile in @(Get-SupervisorProfileFiles)) {
+        $name = Get-SupervisorTaskName -ProfileName $profile.BaseName
+        Invoke-SupervisorStart -Name $name -EnvFile $profile.FullName -Label "Embody supervisor profile '$($profile.BaseName)'"
+    }
+}
+
+function Invoke-SupervisorsStop {
+    if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) { return }
+    if (Get-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue) {
+        Stop-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue
+    }
+    foreach ($profile in @(Get-SupervisorProfileFiles)) {
+        $name = Get-SupervisorTaskName -ProfileName $profile.BaseName
+        if (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue) {
+            Stop-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Write-SupervisorStatus {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$EnvFile,
+        [Parameter(Mandatory)][string]$Label
+    )
+    $task = Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
+    if ($task) {
+        if (Test-SupervisorLabelsConfigured -EnvFile $EnvFile) {
+            Write-Ok "$Label task: $Name $($task.State)"
+        } else {
+            Write-Ok "$Label task: $Name $($task.State) (INERT: no opt-in label set)"
+        }
+    } else {
+        $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+        $auto = Get-ItemProperty -Path $runKey -Name $Name -ErrorAction SilentlyContinue
+        if ($auto) {
+            if (Test-SupervisorLabelsConfigured -EnvFile $EnvFile) {
+                Write-Ok "${Label}: $Name interactive logon auto-start (HKCU Run)"
+            } else {
+                Write-Ok "${Label}: $Name interactive logon auto-start (HKCU Run -- INERT: no opt-in label set)"
+            }
+        } else {
+            Write-Skip "No $Label task: $Name"
+        }
+    }
+}
+
+function Write-SupervisorsStatus {
+    Write-SupervisorStatus -Name $SupervisorTaskName -EnvFile (Join-Path $InstallDir 'supervisor.env') -Label 'Embody supervisor'
+    foreach ($profile in @(Get-SupervisorProfileFiles)) {
+        $name = Get-SupervisorTaskName -ProfileName $profile.BaseName
+        Write-SupervisorStatus -Name $name -EnvFile $profile.FullName -Label "Embody supervisor profile '$($profile.BaseName)'"
     }
 }
 
@@ -1415,13 +1629,9 @@ function Invoke-Start {
             Write-Fail "No coordinator task or launcher installed -- run: install.ps1 -Action install"; exit 1
         }
     }
-    # Start the supervisor too, but only if it is enabled (label-gated). A
-    # disabled/inert supervisor is left alone.
-    $sup = Get-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue
-    if ($sup -and $sup.State -ne 'Disabled') {
-        Start-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue
-        Write-Ok 'Embody supervisor started'
-    }
+    # Start every supervisor that is enabled (label-gated). Disabled/inert
+    # primary/profile supervisors are left alone.
+    Invoke-SupervisorsStart
     Confirm-CoordinatorRunning
 }
 
@@ -1429,9 +1639,7 @@ function Invoke-Stop {
     # Supervisor first (it spawns work), then the coordinator. Stop the Scheduled
     # Task AND terminate the detached process -- Stop-ScheduledTask alone leaves the
     # `conhost --headless`-detached python alive (#3602).
-    if (Get-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue) {
-        Stop-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue
-    }
+    Invoke-SupervisorsStop
     $killedSup = Stop-DispatchProcess -Subcommand supervise
     if ($killedSup -gt 0) { Write-Ok "Embody supervisor stopped ($killedSup process(es))" }
 
@@ -1470,38 +1678,19 @@ function Invoke-Status {
             Write-Skip 'No coordinator task (client-only host)'
         }
     }
-    $sup = Get-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue
-    if ($sup) {
-        if (Test-SupervisorLabelsConfigured) {
-            Write-Ok "Embody supervisor task: $($sup.State)"
-        } else {
-            Write-Ok "Embody supervisor task: $($sup.State) (INERT: no opt-in label set)"
-        }
-    } else {
-        $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-        $supAuto = Get-ItemProperty -Path $runKey -Name $SupervisorTaskName -ErrorAction SilentlyContinue
-        if ($supAuto) {
-            Write-Ok 'Embody supervisor: interactive logon auto-start (HKCU Run)'
-        } else {
-            Write-Skip 'No embody supervisor task (client-only host, -NoSupervisor, inert, or unavailable)'
-        }
-    }
+    Write-SupervisorsStatus
 }
 
 function Invoke-Uninstall {
     Write-Host ''; Write-Host '=== agent-dispatch uninstall ===' -ForegroundColor Cyan; Write-Host ''
-    if (Get-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue) {
-        Stop-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue
-        Unregister-ScheduledTask -TaskName $SupervisorTaskName -Confirm:$false -ErrorAction SilentlyContinue
-        Write-Ok 'Embody supervisor task removed'
-    }
+    Remove-AllSupervisorTasks
+    Write-Ok 'Embody supervisor tasks removed'
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
         Write-Ok 'Coordinator task removed'
     }
     if (Remove-CoordinatorAutostart) { Write-Ok 'Coordinator logon auto-start (HKCU Run) removed' }
-    if (Remove-SupervisorAutostart) { Write-Ok 'Embody supervisor logon auto-start (HKCU Run) removed' }
     if (Get-Command Get-NetFirewallRule -ErrorAction SilentlyContinue) {
         $fwRule = 'agent-dispatch coordinator (WSL)'
         if (Get-NetFirewallRule -DisplayName $fwRule -ErrorAction SilentlyContinue) {
