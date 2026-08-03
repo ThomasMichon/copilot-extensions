@@ -818,3 +818,113 @@ def test_wait_for_turn_end_disabled_returns_immediately(q, client):
     slept: list[float] = []
     assert sup.wait_for_turn_end(30.0, sleep=slept.append, clock=lambda: 0.0) is False
     assert slept == []
+
+
+# -- Slice 5: headless fleet-body recovery (confirmed-gone over SSH) ----------
+
+
+def _fleet_spawn(handle_session):
+    calls = []
+
+    def spawn(task):
+        calls.append(task["id"])
+        return True, {"session": handle_session, "worktree": None}
+
+    spawn.calls = calls  # type: ignore[attr-defined]
+    return spawn
+
+
+def test_parse_fleet_body_handle_decodes_host_and_session():
+    from agent_dispatch.supervisor import _parse_fleet_body_handle
+
+    assert _parse_fleet_body_handle("fleet-body:lambda-core-wsl:brg-9") == (
+        "lambda-core-wsl", "brg-9",
+    )
+    # non-fleet handles (worktree embody, synthetic owner, empty) -> None
+    assert _parse_fleet_body_handle("wt-1") is None
+    assert _parse_fleet_body_handle("fleet-t1-abc123") is None
+    assert _parse_fleet_body_handle(None) is None
+    assert _parse_fleet_body_handle("fleet-body:onlyhost") is None
+
+
+def test_recover_gone_fleet_body_releases_for_reembody(q, client):
+    """A *confirmed-gone* headless fleet body (no worktree; a bridge-session
+    recovery handle) is recovered via the fleet verdict probe: its reservation is
+    released so the next cycle re-embodies it (resuming from progress_log)."""
+    t = q.create("work")
+    spawn = _fleet_spawn("fleet-body:lambda-core-wsl:brg-1")
+    sup = Supervisor(
+        client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5,
+        fleet_verdict_fn=lambda host, sid: "gone",
+        # the worktree verdict path must NOT be consulted for a fleet handle:
+        verdict_fn=lambda *a: "live",
+        nudge=False,
+    )
+    assert sup.poll_once() == [t.id]  # spawn #1 -> SPAWNED w/ fleet-body handle
+    assert q.latest_reservation(t.id).state == SpawnState.SPAWNED
+    assert q.latest_reservation(t.id).session_handle == "fleet-body:lambda-core-wsl:brg-1"
+
+    # next cycle: recover_gone sees the fleet body GONE -> releases -> re-embodies
+    assert sup.poll_once() == [t.id]
+    assert spawn.calls == [t.id, t.id]
+    assert q.latest_reservation(t.id).attempt == 2
+
+
+@pytest.mark.parametrize("verdict", ["live", "unknown"])
+def test_recover_fleet_body_leaves_live_or_unknown(q, client, verdict):
+    """A fleet body that is live or can't-tell is never recovered (no double-spawn
+    of an alive body): the reservation is held, no re-spawn."""
+    t = q.create("work")
+    spawn = _fleet_spawn("fleet-body:h:brg-2")
+    sup = Supervisor(
+        client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5,
+        fleet_verdict_fn=lambda host, sid: verdict, nudge=False,
+    )
+    assert sup.poll_once() == [t.id]
+    assert sup.poll_once() == []  # held -> not re-spawned
+    assert spawn.calls == [t.id]
+    assert q.latest_reservation(t.id).state == SpawnState.SPAWNED
+    assert q.latest_reservation(t.id).attempt == 1
+
+
+def test_hold_live_leases_heartbeats_confirmed_live_fleet_body(q, client, monkeypatch):
+    """A confirmed-live fleet body's origin lease is heartbeated so a live-but-quiet
+    body isn't wrongly re-embodied (its lease can't expire under it)."""
+    t = q.create("work")
+    spawn = _fleet_spawn("fleet-body:h:brg-3")
+    sup = Supervisor(
+        client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5,
+        fleet_verdict_fn=lambda host, sid: "live", recover=False, nudge=False,
+    )
+    assert sup.poll_once() == [t.id]
+    # the fleet body claimed + started the task under its synthetic owner
+    q.claim_one("fleet-o", task_id=t.id)
+    q.start(t.id, "fleet-o")
+
+    beats: list[tuple[str, str]] = []
+    real_hb = client.heartbeat
+    monkeypatch.setattr(
+        client, "heartbeat",
+        lambda tid, wid: beats.append((tid, wid)) or real_hb(tid, wid),
+    )
+    assert sup.hold_live_leases() == 1
+    assert beats == [(t.id, "fleet-o")]
+
+
+def test_hold_live_leases_skips_unknown_fleet_body(q, client, monkeypatch):
+    """A can't-tell fleet body is NOT heartbeated (its lease rides its course; a
+    genuinely-dead body's lease then expires for recovery)."""
+    t = q.create("work")
+    spawn = _fleet_spawn("fleet-body:h:brg-4")
+    sup = Supervisor(
+        client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5,
+        fleet_verdict_fn=lambda host, sid: "unknown", recover=False, nudge=False,
+    )
+    assert sup.poll_once() == [t.id]
+    q.claim_one("fleet-o", task_id=t.id)
+    q.start(t.id, "fleet-o")
+
+    beats: list = []
+    monkeypatch.setattr(client, "heartbeat", lambda tid, wid: beats.append((tid, wid)))
+    assert sup.hold_live_leases() == 0
+    assert beats == []

@@ -262,11 +262,19 @@ pool host with **no human attach**.
 The seed is the **same** Model-C fleet seed as the CLI body
 (`fleet_autopilot_worker_prompt` — drive the origin lease over `ssh <origin>`
 under the synthetic owner), so a headless-fleet task claims + loops + progresses +
-completes identically; only the *body* differs. Like the local headless backend, a
-headless-fleet body is **not a worktree**, so no worktree handle is recorded and
-the worktree-keyed lease heartbeat / gone-recovery does not apply — a bounded
-sweep drives its own lifecycle to completion, and its reservation is settled on
-the task's terminal state. `--headless-agent AGENT` names the agent-bridge agent
+completes identically; only the *body* differs. A headless-fleet body is **not a
+worktree**, so the *worktree-keyed* liveness probe doesn't apply — instead its
+recovery handle is the **pool host's agent-bridge session id** (captured from
+`create --no-wait --json` and stamped on the reservation as
+`fleet-body:<host>:<session-id>`). The supervisor probes *that* over SSH
+(`ssh <host> agent-bridge --json status <session-id>`, `embody.fleet_body_verdict`)
+for the same tri-state verdict: a **confirmed-live** body is heartbeated
+(`hold_live_leases`) so a quiet-but-alive sweep isn't wrongly recovered, and a
+**confirmed-gone** body (its ACP session terminal or absent) has its reservation
+released (`recover_gone`) so the next cycle re-embodies it — resuming from the
+task's `progress_log`. As always, an `unknown` probe (ssh/bridge unreachable,
+lagging reconcile) is never treated as death, so recovery cannot double-spawn a
+live body. `--headless-agent AGENT` names the agent-bridge agent
 (default `task-worker`).
 
 CLI:
@@ -281,10 +289,16 @@ agent-dispatch supervise --pool host-a,host-b [--origin <alias>] \
 `--headless` for a headless agent-bridge ACP body on the pool host instead of a
 CLI/mux one.
 
-**Deliberately deferred:** a fleet body uses a *synthetic* owner, so it is not
-auto-joined to the agent-bridge live-session registry the way a local embody is
-(cross-machine liveness still works via the SSH probe); per-host concurrency caps
-(the global `--max-concurrent` still applies); and load-aware selection beyond
+**Recovery-on-kill (headless fleet):** because the recovery handle is the pool
+host's bridge session, a killed headless-fleet body is auto-recovered
+(confirmed-gone → re-embody from progress), closing the fleet gap in the
+liveness model. A **CLI/mux fleet body** still records a worktree handle but under
+a synthetic owner it is not auto-joined to the *origin's* live-session registry,
+so its auto-recovery remains deferred (the headless body is the recoverable fleet
+path today).
+
+**Deliberately deferred:** per-host concurrency caps (the global
+`--max-concurrent` still applies fleet-wide); and load-aware pool selection beyond
 config order.
 
 ## Running as a persistent service (the always-on last mile)

@@ -257,9 +257,17 @@ class FleetSpawner:
             return False, {"error": f"embody on {host!r} failed: {detail}"}
         if self.headless:
             # A headless body is not a parallel worktree, so there is no worktree
-            # handle to recover; the reservation is settled on the task's terminal
-            # state (bounded sweeps drive their own lifecycle to completion).
-            handle: dict[str, str | None] = {"session": owner, "worktree": None}
+            # handle to recover; its recovery handle is instead the pool host's
+            # agent-bridge session. Encode `fleet-body:<host>:<bridge-session-id>`
+            # as the session_handle so the supervisor can liveness-probe the body
+            # over SSH and re-embody a *confirmed-gone* one (resuming from the
+            # task's progress_log). If the session id can't be parsed, fall back to
+            # the synthetic owner -- the body still runs, it just isn't
+            # auto-recovered (degrade safe). The reservation is otherwise settled
+            # on the task's terminal state (bounded sweeps drive their own loop).
+            bridge_sid = embody.parse_fleet_body_session(result)
+            session_token = f"fleet-body:{host}:{bridge_sid}" if bridge_sid else owner
+            handle: dict[str, str | None] = {"session": session_token, "worktree": None}
         else:
             handle = embody.parse_handle(result)
         handle["machine"] = host
