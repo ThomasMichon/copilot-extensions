@@ -126,6 +126,19 @@ def _state(w):
         return _STATE_LABEL.get(st, st.upper()[:6])
     pr = w.get("pr") or {}
     status = w.get("status")
+    # Classification absent (the fast Phase-1 populate pass). A live session ->
+    # ACTIVE, PERIOD -- checked before PR/finalized, mirroring
+    # ``git_ops.classify_worktree``'s active_paths precedence (it returns ACTIVE
+    # before any git status/PR consideration). A live mux OR a live
+    # ``inuse.<pid>.lock`` binding means a live Copilot session, so surface it in
+    # the Active section IMMEDIATELY instead of waiting for the per-worktree git
+    # classify -- the ONLY other path to ACTIVE, seconds across the fleet. Doing
+    # this FIRST is what avoids flicker: a live worktree that ALSO has a merged
+    # PR (just-merged, session still running) must not render FINAL here and
+    # ACTIVE after Phase 2.
+    if (w.get("mux_session") or w.get("mux_attached")
+            or w.get("session_lock_live")):
+        return "ACTIVE"
     if pr.get("state") == "merged":
         return "FINAL"
     if status == "finalized":
