@@ -106,6 +106,23 @@ def _default_model_profiles() -> dict[str, ModelProfile]:
     }
 
 
+def _default_stream_batch_size() -> int:
+    """Chunks per embed+store batch, capability-aware (#115).
+
+    An explicit ``AGENT_INDEX_STREAM_BATCH_SIZE`` always wins. Otherwise the
+    default keys off the indexing ``AGENT_INDEX_DEVICE``: a GPU host embeds a
+    large batch in well under the read timeout, so it keeps the high-throughput
+    500; a CPU host uses a small batch so each ``/embed/batch`` completes within
+    the embed read timeout instead of tripping it and emptying the index. Only
+    the *less-capable* (CPU) path is downgraded; GPU hosts keep full throughput.
+    """
+    explicit = os.environ.get("AGENT_INDEX_STREAM_BATCH_SIZE")
+    if explicit:
+        return max(1, int(explicit))
+    device = os.environ.get("AGENT_INDEX_DEVICE", "cuda").strip().lower()
+    return 500 if device.startswith("cuda") else 64
+
+
 # -- Main config -------------------------------------------------------------
 
 
@@ -128,6 +145,11 @@ class IndexConfig:
     batch_size: int = int(os.environ.get("AGENT_INDEX_BATCH_SIZE", "16"))
     device: str = os.environ.get("AGENT_INDEX_DEVICE", "cuda")
     max_seq_length: int = int(os.environ.get("AGENT_INDEX_MAX_SEQ_LENGTH", "1024"))
+
+    # Streaming embed batch size (chunks per embed+store batch) -- caps peak RAM
+    # and bounds per-batch embed time. Capability-aware default (#115): 500 on
+    # GPU, 64 on CPU; override with AGENT_INDEX_STREAM_BATCH_SIZE.
+    stream_batch_size: int = field(default_factory=_default_stream_batch_size)
 
     # Query-time embedding. The search/read path embeds queries in-process on
     # CPU by default so search stays responsive and never waits on a cold GPU

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-index"
-version = "0.1.0-dev12"
+version = "0.1.0-dev13"
 description = "Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem."
 readme = "README.md"
 license = "MIT"
@@ -36,7 +36,10 @@ dev = [
 ]
 engine = [
     "torch",
-    "transformers",
+    # jina-v2-base-code loads via trust_remote_code; transformers 5.x broke that
+    # custom modeling path (#114). Pin below 5 so every host gets the newest
+    # working 4.x -- a compat ceiling, not a capability downgrade.
+    "transformers>=4.40,<5",
     "sentence-transformers",
     "lancedb",
 ]

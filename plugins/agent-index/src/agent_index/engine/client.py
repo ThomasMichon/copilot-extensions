@@ -17,8 +17,13 @@ logger = logging.getLogger(__name__)
 DEFAULT_ENGINE_URL = "http://127.0.0.1:8421"
 
 # Generous timeout for embedding — model loading can take 20+ seconds on
-# first call, and large batches take time on GTX 1080.
-DEFAULT_TIMEOUT = httpx.Timeout(connect=5.0, read=120.0, write=10.0, pool=5.0)
+# first call, and a full batch takes time on a slow/CPU embed path. The read
+# timeout is configurable (#115): a large CPU batch legitimately exceeds a short
+# timeout, and aborting mid-embed silently empties the index. A longer read
+# timeout never slows a fast GPU embed -- it only avoids a premature abort -- so
+# the generous default is universal; override with AGENT_INDEX_EMBED_READ_TIMEOUT.
+_READ_TIMEOUT_S = float(os.environ.get("AGENT_INDEX_EMBED_READ_TIMEOUT", "300"))
+DEFAULT_TIMEOUT = httpx.Timeout(connect=5.0, read=_READ_TIMEOUT_S, write=10.0, pool=5.0)
 
 # Transient errors worth one retry: a socket-activated engine that idle-exited
 # leaves a stale pooled keep-alive connection, so the first request on it fails

@@ -14,13 +14,23 @@ caller. It is safe to run on every full reindex: it keys off the *naming
 pattern*, not off whether a source produced rows this run, so a live
 per-repo source that happens to be empty right now is never purged.
 
-Live source values (current scheme):
-  - ``forge:{code|issues|pulls|commits}:{owner}/{repo}``
-  - ``service-feed:clips``
-  - ``analysis-feed:videos``
+Live source values (current scheme) -- a source is live iff a currently
+**registered connector** owns its scheme (``agent_index.sources``):
+  - ``git:{repo}`` and ``git:{repo}:commits`` (GitRepoConnector)
+  - ``github:{owner}/{repo}`` and its ``:issues`` / ``:pulls`` (GitHubConnector)
+  - ``ado:*`` / ``azure-devops:*`` (AzureDevOpsConnector)
+  - the bare crawl-marker name of any connector (e.g. ``git``)
+  - ``service-feed:clips``, ``analysis-feed:videos``
+  - the legacy repo-qualified ``forge:{code|issues|pulls|commits}:{owner}/{repo}``
+    (VEI-era generations kept live for back-compat)
   - any exact name in ``$AGENT_INDEX_GC_KEEP_SOURCES`` (comma-separated) -- an
     escape hatch for reviving remote-ingest sources (e.g. a push daemon
     pushing ``host:worktree``) without code changes.
+
+Deriving the live set from the connector registry (rather than a hardcoded
+scheme list) is the fix for #116: the extracted engine's GC previously knew
+only VEI's ``forge:*`` and purged the generic ``git:*`` index on every full
+reindex.
 """
 
 from __future__ import annotations
@@ -68,6 +78,14 @@ def _extra_keep_sources() -> frozenset[str]:
 def is_live_source(source: str, *, extra_keep: frozenset[str] | None = None) -> bool:
     """True if *source* matches the current ("live") naming scheme.
 
+    A source is live iff a currently-registered connector owns its scheme -- the
+    bare crawl-marker name (``git``) or any hierarchical source it emits
+    (``git:<repo>``, ``git:<repo>:commits``, ``github:<owner>/<repo>:issues``,
+    ``ado:<proj>:workitems``, ...). Deriving the live set from the connector
+    registry keeps GC correct as connectors are added, rather than hardcoding
+    each scheme -- the #116 gap, where GC knew only VEI's ``forge:*`` and so
+    purged the generic ``git:*`` index on every full reindex.
+
     Anything that returns False is a stale generation eligible for GC.
     """
     if not source:
@@ -76,9 +94,16 @@ def is_live_source(source: str, *, extra_keep: frozenset[str] | None = None) -> 
         return True
     if extra_keep and source in extra_keep:
         return True
+    # Registered connector schemes (git, github, ado, ...) -- the generic engine.
+    from agent_index.sources import registered_source_prefixes
+
+    for prefix in registered_source_prefixes():
+        if source == prefix or source.startswith(f"{prefix}:"):
+            return True
+    # Legacy Forge scheme (VEI-era generations): live Forge sources are
+    # subtype-first AND repo-qualified (forge:<subtype>:<owner>/<repo>); the old
+    # bare forge:<subtype> generation stays purgeable.
     if source.startswith("forge:"):
-        # Live Forge sources are subtype-first AND repo-qualified:
-        #   forge:<subtype>:<owner>/<repo>
         parts = source.split(":", 2)
         return (
             len(parts) == 3

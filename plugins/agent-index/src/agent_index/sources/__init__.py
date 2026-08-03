@@ -19,6 +19,7 @@ __all__ = [
     "SourceConnector",
     "get_connector",
     "register_connector",
+    "registered_source_prefixes",
 ]
 
 
@@ -27,6 +28,20 @@ def register_connector(name: str, factory: ConnectorFactory) -> None:
     if not name:
         raise ValueError("Connector name must be non-empty")
     _CONNECTORS[name] = factory
+
+
+def registered_source_prefixes() -> frozenset[str]:
+    """Source-name prefixes owned by a registered connector.
+
+    A stored chunk source is "live" iff a currently-registered connector owns
+    its scheme -- the bare crawl-marker name (``git``) or any hierarchical
+    source it emits (``git:<repo>``, ``git:<repo>:commits``,
+    ``github:<owner>/<repo>:issues``, ...). Source GC derives its live set from
+    this so it stays correct as connectors are added, instead of hardcoding
+    each scheme (the #116 extraction gap, where GC knew only VEI's ``forge:*``
+    and purged the generic ``git:*`` index on every full reindex).
+    """
+    return frozenset(_CONNECTORS)
 
 
 def get_connector(source: str, **kwargs: Any) -> SourceConnector:

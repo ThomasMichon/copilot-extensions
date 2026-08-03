@@ -40,7 +40,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-STREAM_BATCH_SIZE = 500  # chunks per embed+store batch - caps peak RAM
+STREAM_BATCH_SIZE = 500  # fallback default; the live value is config.stream_batch_size (#115)
 
 
 def configured_sources() -> list[str]:
@@ -339,6 +339,7 @@ def _index_source(
             multi_clients=multi_clients,
             model_profiles=config.model_profiles,
             path_index=path_index,
+            stream_batch_size=config.stream_batch_size,
             progress_cb=progress_cb,
         )
 
@@ -481,6 +482,7 @@ def _embed_and_store_files(
     multi_clients: dict[str, EngineClient],
     model_profiles: dict[str, ModelProfile] | None = None,
     path_index: PathIndex,
+    stream_batch_size: int = STREAM_BATCH_SIZE,
     progress_cb: ProgressCallback | None = None,
 ) -> int:
     """Phase 2: Chunk files, embed via GPU, upsert to stores.
@@ -513,12 +515,13 @@ def _embed_and_store_files(
         total_chunks += len(chunks)
         file_chunk_counts[(entry.source, entry.path)] = len(chunks)
 
-        if len(batch) >= STREAM_BATCH_SIZE:
+        if len(batch) >= stream_batch_size:
             if progress_cb:
                 progress_cb.check_cancelled()
             total_stored += _embed_and_store_batch(
                 batch, multi_store, multi_clients,
                 model_profiles,
+                stream_batch_size=stream_batch_size,
             )
             if progress_cb:
                 progress_cb.batch_complete(total_stored, total_chunks)
@@ -531,6 +534,7 @@ def _embed_and_store_files(
         total_stored += _embed_and_store_batch(
             batch, multi_store, multi_clients,
             model_profiles,
+            stream_batch_size=stream_batch_size,
         )
         if progress_cb:
             progress_cb.batch_complete(total_stored, total_chunks)
@@ -551,6 +555,8 @@ def _embed_and_store_batch(
     multi_store: MultiModelStore,
     multi_clients: dict[str, EngineClient],
     model_profiles: dict[str, ModelProfile] | None = None,
+    *,
+    stream_batch_size: int = STREAM_BATCH_SIZE,
 ) -> int:
     """Embed a batch of chunks via the engine(s) and upsert into stores.
 
@@ -569,8 +575,8 @@ def _embed_and_store_batch(
         )
 
     total = 0
-    for i in range(0, len(chunks), STREAM_BATCH_SIZE):
-        sub = chunks[i : i + STREAM_BATCH_SIZE]
+    for i in range(0, len(chunks), stream_batch_size):
+        sub = chunks[i : i + stream_batch_size]
 
         # Store content once (canonical chunk count)
         content_count = multi_store.upsert_content(sub)
