@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (plugin home; direct-push `main`)
 - **Branch(es):** `main`
 - **Created:** 2026-08-03
-- **Status:** Draft <!-- Draft | Active | Blocked | Done -->
+- **Status:** Active <!-- Draft | Active | Blocked | Done -->
 - **Vision:** extends [`visions/plugins/agent-index`](../../../visions/plugins/agent-index/README.md)
   (§*The embedding engine*, §self-contained-service, §local-first-standalone) —
   **vision-extending**: the durable-daemon intent is new and must be written into
@@ -48,14 +48,19 @@ Locked design decisions (operator):
 ## Plan
 
 ### Phase 1 — Intent (vision + patterns)
-- [ ] Revise the agent-index **vision** (vision-extending): the embedding engine is
+- [x] Revise the agent-index **vision** (vision-extending): the embedding engine is
       a durable, persistent warm daemon decoupled from the versioned service
       runtime; heavy stack lives on the host only; all embedding flows through the
       daemon; role is config-resolved. Touch `§The embedding engine`,
-      `§self-contained-service`, `§local-first-standalone`.
+      `§self-contained-service`, `§local-first-standalone`. **Done** — extended
+      `§The embedding engine`, added the **warm-durable-engine** behavior, sharpened
+      `§self-contained-service` + `§local-first-standalone`, and logged a Provenance
+      entry (2026-08-03).
 - [ ] Add/adjust a `docs/patterns/` entry for the **durable-runtime vs
       versioned-runtime** split (heavy, persistent state outside the swappable
-      runtime), if the existing patterns don't already cover it.
+      runtime), if the existing patterns don't already cover it. **Deferred** to
+      when the implementation (Phase 3) establishes the pattern — `docs/patterns/`
+      documents *established* practice, not aspiration.
 
 ### Phase 2 — Dependency partition
 - [ ] Split deps into a **light service set** (versioned runtime; no torch) and a

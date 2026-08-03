@@ -66,6 +66,17 @@ is present for bulk indexing throughput, and falls back to a slower CPU path
 otherwise — but it **never holds search hostage**, so a query is answerable
 whether or not an accelerator is warm.
 
+The engine is a **durable, persistent, warm runtime kept separate from the
+plugin's versioned service runtime** — the same durable-vs-versioned split the
+index & store use. Its model stack is expensive to install and slow to load, so
+it lives **outside the swappable runtime** and is **provisioned only where
+indexing is hosted**; a version cutover of the light service **never rebuilds the
+model stack or restarts the warm engine**. **All embedding — index time and query
+time — is served by this one engine**, so the service runtime it fronts stays
+light and model-free and simply talks to it. A deployment that only *consumes*
+search carries **no model stack at all** and reaches a hosted engine over the
+trusted transport.
+
 ### Source connectors & ingest
 The pluggable adapters that pull a repo's corpus into the index:
 
@@ -169,7 +180,12 @@ agent-index is a complete, standalone plugin: a user installs it and it works on
 its own, with no sibling plugin, shared broker, or hand-wired infrastructure
 assumed. It honors the suite's [plugin-services](../../plugin-services/README.md)
 model — self-contained runtime, discoverable local endpoint, platform-native
-lifecycle, à-la-carte install.
+lifecycle, à-la-carte install. The plugin provisions **both** of its runtimes
+itself — the light, versioned service and the durable engine — as **platform-native
+lifecycles**, so nothing is hand-wired per host. **Which role a machine takes** —
+hosting the engine versus only consuming search — is resolved from
+**configuration** (machine-local, or a source repo's own `.agent-index` config),
+never a machine list baked into the plugin.
 
 ### reusable-engine-extension-seam
 The connector interface and query API are a **stable extension surface**: a
@@ -234,6 +250,17 @@ the old version retires (reversible up to a commit point). The **durable index i
 untouched** by the swap (it lives outside the versioned runtime), so an upgrade or
 rollback never rebuilds it or interrupts search.
 
+### warm-durable-engine
+The embedding engine is a **durable, persistent, warm** runtime, decoupled from
+the versioned service so the two evolve on **separate lifecycles**. A routine
+service version cutover swaps only the light service and **leaves the engine — and
+its loaded model — untouched**: no model-stack rebuild, no cold reload. The
+engine's own runtime is updated **only by its own explicit path**, when the model
+stack itself changes; its durable environment survives service updates and
+rollbacks just as the durable index does. Because the model stack is provisioned
+only where the engine is hosted, the cost of that stack is paid **once, on one
+host**, not re-paid on every service update or by every consumer.
+
 ### local-first-standalone
 The service is machine-local by default and reachable using only what its own
 installer deployed — no external proxy, mesh, or registry required. When a client
@@ -242,7 +269,10 @@ transport** — an **SSH port-forward** of the service's own local endpoint (the
 [`plugin-services`](../../plugin-services/README.md) minimal-network-exposure
 posture, rung 4 of the service-transport ladder) — so the service still opens no
 new inbound port of its own. Fronting it with shared routing is likewise an
-explicit **consumer** choice, never a prerequisite the plugin bakes in.
+explicit **consumer** choice, never a prerequisite the plugin bakes in. A machine
+that only consumes search installs **no model stack** and reaches the
+engine-hosting service over that transport, so the heavy runtime lives on **one
+host**, not on every consumer.
 
 ### engine-stays-generic
 The engine does not grow product opinions. Branding, a house web experience,
@@ -316,3 +346,19 @@ generic is what lets many different products reuse it.
   query, rather than defaulting to a whole-project crawl. Mined from an operator
   clarification that they will supply the exact PR/work-item subsets to index.
   Reinforces good-citizen ingestion and "never a firehose."
+
+- **2026-08-03** — Extended **The embedding engine** into a **durable, persistent,
+  warm runtime decoupled from the versioned service** (the same durable-vs-versioned
+  split as the index & store), added the **warm-durable-engine** behavior, and
+  sharpened **self-contained-service** / **local-first-standalone**: the model
+  stack is expensive, so it is provisioned **only where indexing is hosted** and
+  outside the swappable runtime — a routine service cutover **never rebuilds the
+  model stack or restarts the warm engine**; **all embedding (index + query)** is
+  served by that one engine so the service runtime stays light and model-free; a
+  search-only consumer carries **no model stack** and reaches the host over the
+  trusted transport; and a machine's **role** (engine host vs consumer) is resolved
+  from **configuration** (machine-local or a source repo's `.agent-index`), never a
+  machine list baked into the plugin. Mined from an operator directive that torch
+  belongs only on the indexing host, as a persistent daemon (a session-host
+  analogue) that survives plugin updates. Drives the `agent-index-engine-daemon`
+  effort; `dev16`'s configurable engine-separation modes are the foundation.
