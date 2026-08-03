@@ -76,6 +76,10 @@ restart of the bridge or host on either side. Delivery is a property the fabric
 owns, not one each caller (a browser, a host CLI) must reinvent on top. The live
 state it surfaces is rich enough to bring **granular, live status into the
 worktree picker**.
+A per-plugin child vision refines it at
+[`visions/plugins/agent-bridge/`](../plugins/agent-bridge/README.md) — durable
+session hosting, live-session messaging, peer bridge ownership, and
+project-addressed mesh control.
 
 ### agent-ssh — the connectivity layer
 Owns the **SSH mesh** the fabric's cross-machine reach rides on. It
