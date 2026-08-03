@@ -614,6 +614,22 @@ class Supervisor:
                 except Exception:  # liveness is best-effort -- never fatal
                     fverdict = tracking.UNKNOWN
                 if fverdict == tracking.GONE:
+                    # Requeue the task if the dead body still holds its lease --
+                    # yield on its behalf (preserving goal + progress_log) so
+                    # re-embody is PROMPT instead of waiting out the 15-min lease
+                    # (the origin can't liveness-probe a synthetic owner, so its
+                    # own GC would only requeue on expiry). Then release the
+                    # reservation so poll_once re-embodies from the recorded
+                    # progress. A queued task (body died before claiming) needs no
+                    # yield -- just the release.
+                    if status in _LEASED and owner:
+                        try:
+                            self.client.yield_task(
+                                task["id"], owner,
+                                note="fleet body confirmed gone; requeued for re-embody",
+                            )
+                        except DispatchError:
+                            pass  # lease-expiry GC is the backstop requeue
                     try:
                         self.client.fail_spawn(
                             res["key"],

@@ -62,6 +62,9 @@ class QueueBackedClient:
     def heartbeat(self, task_id, worker_id):
         return asdict(self._q.heartbeat(task_id, worker_id))
 
+    def yield_task(self, task_id, worker_id, *, note=None, exclude=None):
+        return asdict(self._q.yield_task(task_id, worker_id, note=note, exclude=exclude))
+
     def progress_log(self, task_id):
         return self._q.progress_log(task_id)
 
@@ -865,6 +868,27 @@ def test_recover_gone_fleet_body_releases_for_reembody(q, client):
     assert q.latest_reservation(t.id).session_handle == "fleet-body:lambda-core-wsl:brg-1"
 
     # next cycle: recover_gone sees the fleet body GONE -> releases -> re-embodies
+    assert sup.poll_once() == [t.id]
+    assert spawn.calls == [t.id, t.id]
+    assert q.latest_reservation(t.id).attempt == 2
+
+
+def test_recover_gone_fleet_body_started_requeues_then_reembodies(q, client):
+    """A fleet body that died *while holding the task started* is requeued (yield
+    on the dead owner's behalf, preserving goal + progress_log) AND its reservation
+    released -- so re-embody is prompt, not lease-bound."""
+    t = q.create("work")
+    spawn = _fleet_spawn("fleet-body:h:brg-5")
+    sup = Supervisor(
+        client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5,
+        fleet_verdict_fn=lambda host, sid: "gone", nudge=False,
+    )
+    assert sup.poll_once() == [t.id]                 # spawn #1
+    q.claim_one("fleet-o", task_id=t.id)             # body claimed + started it
+    q.start(t.id, "fleet-o")
+    assert q.get(t.id).status == Status.STARTED
+
+    # recover_gone: GONE -> yield (requeue) + release reservation -> re-embody
     assert sup.poll_once() == [t.id]
     assert spawn.calls == [t.id, t.id]
     assert q.latest_reservation(t.id).attempt == 2
