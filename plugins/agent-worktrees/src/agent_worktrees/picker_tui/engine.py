@@ -4830,15 +4830,29 @@ class ScopeDlgScreen(ModalScreen[bool]):
     ScopeDlgScreen SelectionList {
         height: auto; border: none; background: $surface; padding: 0;
     }
-    ScopeDlgScreen SelectionList > .option-list--option-highlighted {
+    /* Cursor highlight (row + checkbox) paints only while the list actually
+       holds focus. An unfocused options list must not highlight its "current
+       target" at all, or a mere cursor position reads as a selection -- the
+       root of #121 (operator mistakes the highlighted Anchor-repo row for a
+       checked one). :blur explicitly neutralizes the framework's dimmed
+       block-cursor so nothing lingers. */
+    ScopeDlgScreen SelectionList:focus > .option-list--option-highlighted {
         background: #ffaf00; color: black; text-style: bold;
+    }
+    ScopeDlgScreen SelectionList:blur > .option-list--option-highlighted {
+        background: $surface; color: $foreground; text-style: none;
     }
     ScopeDlgScreen SelectionList > .selection-list--button {
         background: $surface; color: #5f5f5f;
     }
-    ScopeDlgScreen SelectionList > .selection-list--button-highlighted {
+    ScopeDlgScreen SelectionList:focus > .selection-list--button-highlighted {
         background: #ffaf00; color: black;
     }
+    ScopeDlgScreen SelectionList:blur > .selection-list--button-highlighted {
+        background: $surface; color: #5f5f5f;
+    }
+    /* Checked state stays visible regardless of focus -- it is real selection,
+       not cursor position, so it must survive blur. */
     ScopeDlgScreen SelectionList > .selection-list--button-selected {
         background: green; color: white; text-style: bold;
     }
