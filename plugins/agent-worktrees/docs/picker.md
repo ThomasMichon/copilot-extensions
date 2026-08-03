@@ -144,6 +144,35 @@ session's `events.jsonl` even when the agent-asserted summary never accumulated.
 `↑`/`↓` scroll; `Esc` closes. Local worktrees load in-process; a remote worktree's
 messages are fetched over SSH. (Backed by the `recent-messages` CLI verb.)
 
+### Worktree types & visibility (origin × interface)
+
+Every worktree carries two orthogonal marks (see
+[architecture.md § The Worktree Record](architecture.md#the-worktree-record----single-writer-contract-invariant)):
+
+- **Interface** — how it's *driven now*: an interactive terminal Copilot
+  (**CLI**) or a programmatically driven session (**ACP** — a Neuron Forge /
+  agent-bridge session). Derived from `kind` (a `bridge` worktree is ACP) unless
+  explicitly stamped.
+- **Origin** — *who kicked it off*: the operator via the Picker or Neuron Forge
+  (**User**), a background/scheduled process (**System**), or one agent spawning
+  another (**Delegate**). Derived from `kind` + the caller heuristic (a bridge
+  worktree with no `caller_worktree` is the operator's — User; with one, a
+  Delegate) unless explicitly stamped.
+
+Rows are prefixed with the type in brackets — `[acp]`, `[system]`, `[delegate]`
+— so an operator-owned Neuron Forge session reads distinctly from the machine's
+own automation. A plain interactive CLI session carries no prefix (the common
+case stays uncluttered).
+
+**Visibility keys on _origin_, not kind.** The Picker foregrounds the operator's
+own work — **User** on *either* interface, so an ACP session you started in
+Neuron Forge is shown here by default, symmetric with the NF cockpit. **System +
+Delegate** worktrees are tucked behind the **Toggle-hidden** button (they stay
+synced, recoverable, and cleanup-exempt — visibility is decoupled from
+lifecycle). This is why a bridge/ACP worktree is *shown* yet still lifecycle-
+managed: `is_picker_hidden` (origin ∈ {system, delegate}) drives the row's
+`hidden` flag, independent of the kind-based cleanup exemption.
+
 ### Two-step restore (Bare resume + Reclaim)
 A workaround for a Copilot-CLI outage in which starting Copilot **inside a
 repo/worktree directory** fails, and the only way in is to launch from the home

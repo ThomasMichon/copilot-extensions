@@ -285,9 +285,21 @@ def norm(w, machine, env):
     """Normalize one raw worktree dict into the engine's record shape."""
     kind = w.get("kind") or "session"
     title = (w.get("title") or "").strip() or "(untitled)"
-    if kind in ("system", "bridge"):
-        # Mark managed worktrees distinctly so bridge != system at a glance.
-        title = f"[{kind}] {title}"
+    # Type marker (#2668). Prefer the two-axis interface/origin marks the
+    # ``list`` JSON now emits so an operator can tell an ACP (Neuron Forge)
+    # session, a delegate, and a system worktree apart at a glance; fall back to
+    # the legacy kind label for an older data source that predates the marks.
+    _iface = w.get("interface")
+    _origin = w.get("origin")
+    _tag = None
+    if _origin in ("system", "delegate"):
+        _tag = _origin
+    elif _iface == "acp":
+        _tag = "acp"
+    elif _iface != "cli" and kind in ("system", "bridge"):
+        _tag = kind
+    if _tag:
+        title = f"[{_tag}] {title}"
     # worktree-status-core: the agent-asserted disposition overlay. A flagged
     # worktree gets a follow-up glyph prefixed on its title (scannable
     # regardless of the narrow state column), and its one-line summary rides
@@ -345,7 +357,15 @@ def norm(w, machine, env):
         "session_lock_live": bool(w.get("session_lock_live")),
         # #93: worktree hosts a bare (un-muxed) bound Copilot -> orphan marker.
         "session_bare_orphan": bare_orphan,
-        "hidden": bool(kind in ("system", "bridge")),
+        # Picker default-visibility. Keys on the origin-based ``picker_hidden``
+        # mark the ``list`` JSON now emits (origin in {system, delegate}) so an
+        # operator-owned bridge/ACP worktree -- a Neuron Forge session -- is
+        # SHOWN by default, symmetric with the NF cockpit (#2668). Falls back to
+        # the legacy kind test for an older data source (a remote/runtime that
+        # predates the mark) so nothing regresses. Note: this is *visibility*,
+        # decoupled from *lifecycle* -- a shown bridge worktree stays
+        # cleanup-exempt (that keys on kind via MANAGED_KINDS).
+        "hidden": bool(w.get("picker_hidden", kind in ("system", "bridge"))),
         "raw": w,
     }
 

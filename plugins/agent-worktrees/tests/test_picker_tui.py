@@ -4307,6 +4307,74 @@ def test_bridge_and_system_hidden_and_marked_distinctly():
     asyncio.run(run())
 
 
+def test_origin_marks_drive_visibility_and_labels():
+    """The two-axis interface/origin marks (#2668) drive Picker visibility and
+    the type label, decoupled from ``kind``:
+
+    - a bridge worktree an operator started via Neuron Forge (origin=user,
+      interface=acp) is SHOWN by default and labelled ``[acp]`` -- symmetric
+      with the NF cockpit, no longer hidden just for being a bridge;
+    - a delegate bridge worktree (origin=delegate) stays hidden and is
+      labelled ``[delegate]``;
+    - a system worktree (origin=system) stays hidden and is labelled
+      ``[system]``.
+    """
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("lambda-core", "Win")
+    raws = [
+        # Operator-owned ACP session (Neuron Forge) -- bridge kind, but user
+        # origin, so picker_hidden is False -> shown.
+        {"id": "lambda-core-win-nfnf", "title": "forge work", "status": "active",
+         "started_at": "2026-06-27T17:00:00", "turn_count": 2, "state": "wip",
+         "kind": "bridge", "interface": "acp", "origin": "user",
+         "picker_hidden": False},
+        # Delegate ACP session -- bridge kind, delegate origin -> hidden.
+        {"id": "lambda-core-win-dldl", "title": "delegated", "status": "active",
+         "started_at": "2026-06-27T17:00:00", "turn_count": 0, "state": "wip",
+         "kind": "bridge", "interface": "acp", "origin": "delegate",
+         "picker_hidden": True},
+        # System worktree -> hidden.
+        {"id": "lambda-core-win-syst", "title": "daemon", "status": "active",
+         "started_at": "2026-06-27T17:00:00", "turn_count": 0, "state": "wip",
+         "kind": "system", "interface": "cli", "origin": "system",
+         "picker_hidden": True},
+    ]
+    recs = {w["id"][-4:]: derive.norm(w, *local) for w in raws}
+    # Visibility keys on origin (picker_hidden), not kind.
+    assert recs["nfnf"]["hidden"] is False
+    assert recs["dldl"]["hidden"] is True
+    assert recs["syst"]["hidden"] is True
+    # Labels name the type from the marks.
+    assert recs["nfnf"]["title"].startswith("[acp] ")
+    assert recs["dldl"]["title"].startswith("[delegate] ")
+    assert recs["syst"]["title"].startswith("[system] ")
+
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "lambda-core · win"
+    src.machines = lambda: [("lambda-core Win", "lambda-core", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)):
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            # Default: the NF (user-origin) bridge worktree is visible; the
+            # delegate + system ones are hidden behind Toggle-hidden.
+            ids = {r["id4"] for r in scr.list_records()}
+            assert "nfnf" in ids
+            assert "dldl" not in ids and "syst" not in ids
+            assert scr._hidden_count() == 2          # delegate + system
+            scr.show_hidden = True
+            ids = {r["id4"] for r in scr.list_records()}
+            assert "dldl" in ids and "syst" in ids
+
+    asyncio.run(run())
+
+
 def test_banner_version_tracks_build_info(monkeypatch):
     """The picker banner version is derived from the real package version
     (``_build_info`` -> package metadata), never a hand-maintained literal.
