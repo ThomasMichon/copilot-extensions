@@ -22,8 +22,11 @@ description: >
 Provision WSL2 so it can run a reachable, persistent service — not just an
 interactive shell. This is the **environment** setup. To clone a *repo* into WSL
 and wire Windows Terminal profiles, use `agent-worktrees`'
-`agent-worktrees-wsl-provision` skill (they compose). To expose a WSL-hosted SSH
-server through a Dev Tunnel, pair with the **`devtunnel-ssh`** plugin.
+`agent-worktrees-wsl-provision` skill (they compose). To reach a WSL-hosted sshd
+as its **own SSH target** from other machines, the preferred path is the
+**`agent-ssh`** plugin's `setting-up-ssh-host` skill (§ "Reaching WSL … as its own
+SSH target") — a ProxyJump through the host's existing dtssh host, which needs no
+extra tunnel and no dtssh/devtunnel inside WSL.
 
 ## 1. Install WSL + a distro
 
@@ -108,6 +111,12 @@ You do **not** need a Windows firewall / Hyper-V inbound rule for the
 inbound rules if exposing WSL directly on an external interface (usually
 unnecessary — front it with a tunnel instead).
 
+> **For sshd, pick a dedicated port (e.g. 2200), not `:22`.** A Windows OpenSSH
+> `sshd` commonly binds `:22`; when it does, `localhostForwarding` does **not**
+> forward `Windows localhost:22` to WSL (the Windows binding wins), so the WSL
+> sshd is silently shadowed. Run the WSL sshd on an unused port
+> (`/etc/ssh/sshd_config.d/*.conf` → `Port 2200`) and use that everywhere.
+
 ## 6. Keep the distro alive (critical for hosted services)
 
 An **idle WSL distro terminates**, killing your service (and any tunnel's local
@@ -134,6 +143,19 @@ trigger re-establishes it after each reboot.
 > `CreateObject("WScript.Shell").Run "wsl.exe -d <distro> -u root --exec /bin/sh -c ""systemctl start <svc>; exec sleep infinity""", 0, False`
 > — and register a logon Scheduled Task whose action is `wscript.exe "<that.vbs>"`.
 > Never register a task that executes `wsl.exe` directly (visible window).
+
+## 7. Expose WSL as its own SSH target (preferred: ProxyJump via agent-ssh)
+
+Once WSL runs sshd on a dedicated port (step 5) and stays up (step 6), reach it
+as its **own** SSH alias (`ssh <host>-wsl`, landing as the Linux user) by
+**ProxyJump through the host's existing dtssh host** to `localhost:<port>`. This
+is the preferred manner — it adds **no new Dev Tunnel** (it rides the machine's
+existing one), needs **no WSL egress and no devtunnel login inside WSL**, and so
+works even where WSL has no outbound egress. The full wiring (and why running
+dtssh *inside* WSL is the wrong path — no WSL keyring to persist the token) lives
+in the **`agent-ssh`** plugin's `setting-up-ssh-host` skill, § "Reaching WSL …
+as its own SSH target". This plugin owns *provisioning* WSL; `agent-ssh` owns the
+SSH-target wiring.
 
 ## Edge cases
 

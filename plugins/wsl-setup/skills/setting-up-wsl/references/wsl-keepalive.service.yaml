@@ -47,5 +47,5 @@ data:
 maturity: alpha
 
 consumers:
-  - "devtunnel-ssh (example-marketplace): the tunnel's Windows->WSL localhost hop needs the WSL sshd up"
+  - "agent-ssh: reaching WSL as its own SSH target (ProxyJump through the host's dtssh host) needs the WSL sshd up"
   - "any WSL-hosted service that must survive idle-termination + reboot"
