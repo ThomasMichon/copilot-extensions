@@ -6,6 +6,13 @@ first (union, never clobbering session-accreted state), then ``enforce`` scalars
 (authoritative). The values of a managed key are the settings.json top-level keys
 (``model``, ``effortLevel``, ``enabledPlugins``, ...). Idempotent, backed up
 before write, dry-run-safe.
+
+Invariant (do not regress): this surface enforces **only the declared managed
+keys** and merges them into the live file -- it **never rewrites or replaces the
+whole ``settings.json``**. Every unmanaged key (``footer``, ``logLevel``, a stray
+``subagents`` block, anything session-accreted) passes through untouched. Restore
+is a targeted merge of the small subset the manifest declares, not a snapshot
+put-back. Locked by ``tests/test_surfaces.py::test_settings_enforce_preserves_unmanaged_keys``.
 """
 
 from __future__ import annotations
