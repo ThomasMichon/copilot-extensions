@@ -448,11 +448,18 @@ def parse_fleet_body_session(result: subprocess.CompletedProcess) -> str | None:
     The headless-fleet body is a bridge-hosted ACP session on the pool host; its
     session id (rides the SSH stdout as JSON) is the correlator a later liveness
     probe (:func:`fleet_body_verdict`) uses to decide whether the body is still
-    alive. Returns ``None`` on any parse miss (the caller then records no recovery
-    handle and the body simply isn't auto-recovered -- degrade safe, never fatal).
+    alive. ``agent-bridge create`` prints a couple of human preamble lines
+    (``[>] Starting session…``) *before* the JSON object, so we locate the first
+    ``{`` and ``raw_decode`` from there (ignoring any trailing output). Returns
+    ``None`` on any parse miss (the caller then records no recovery handle and the
+    body simply isn't auto-recovered -- degrade safe, never fatal).
     """
+    out = result.stdout or ""
+    start = out.find("{")
+    if start == -1:
+        return None
     try:
-        data = json.loads(result.stdout or "{}")
+        data, _end = json.JSONDecoder().raw_decode(out[start:])
     except (ValueError, TypeError):
         return None
     if not isinstance(data, dict):

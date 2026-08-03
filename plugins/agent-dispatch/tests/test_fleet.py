@@ -310,13 +310,21 @@ def test_spawn_fleet_headless_worker_requires_ssh(monkeypatch):
 
 def test_parse_fleet_body_session_reads_session_id():
     import subprocess
-    cp = subprocess.CompletedProcess(
-        args=[], returncode=0,
-        stdout='{"session_id": "abc-123", "connection": {}}', stderr="",
+    # the real `create --json` output has human preamble before the JSON object
+    real = (
+        "[>] Starting session for agent 'lambda-core-wsl'...\n"
+        "[>] Session f0c4c81e-351 (bold-flame) created\n"
+        '{\n  "session_id": "f0c4c81e-351",\n  "status": "running"\n}\n'
     )
-    assert embody.parse_fleet_body_session(cp) == "abc-123"
+    cp = subprocess.CompletedProcess(args=[], returncode=0, stdout=real, stderr="")
+    assert embody.parse_fleet_body_session(cp) == "f0c4c81e-351"
+    # clean JSON (no preamble) still works
+    clean = subprocess.CompletedProcess(
+        args=[], returncode=0, stdout='{"session_id": "abc-123"}', stderr="",
+    )
+    assert embody.parse_fleet_body_session(clean) == "abc-123"
     # a miss (no json / no id) degrades to None (no recovery handle recorded)
-    bad = subprocess.CompletedProcess(args=[], returncode=0, stdout="not json", stderr="")
+    bad = subprocess.CompletedProcess(args=[], returncode=0, stdout="[>] no json here", stderr="")
     assert embody.parse_fleet_body_session(bad) is None
     empty = subprocess.CompletedProcess(args=[], returncode=0, stdout="{}", stderr="")
     assert embody.parse_fleet_body_session(empty) is None
