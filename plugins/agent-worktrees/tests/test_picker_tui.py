@@ -5131,7 +5131,32 @@ def test_ctrl_space_alias_toggles_like_space():
 # current keyboard behavior through the real dispatch so the native-focus rewires
 # (moving global keys to Textual BINDINGS in F3, overlays to ModalScreen in F4)
 # can be validated against genuine key events, not a bypass (#88).
+#
+# Focus barrier (#4217): the picker arms its initial region focus via
+# ``call_after_refresh(_nf_initial_focus)`` -- so ``_nf_mounted`` flips (and the
+# native data list gains focus) only AFTER a refresh, not synchronously on mount.
+# A single ``pilot.pause()`` is not a reliable barrier for that deferred focus:
+# under cross-module timing (the full suite) ``pilot.press`` could fire before
+# the target region widget is focused and the key would be dropped -- so these
+# tests failed only in cross-module runs, never in isolation. ``_nf_settle``
+# pumps refreshes until the NF focus is armed, then mirrors framework focus onto
+# the current ``sel`` so the key routes to the right region widget deterministically.
 # ---------------------------------------------------------------------------
+
+async def _nf_settle(pilot, scr):
+    """Deterministic focus/mount barrier before driving real key events (#4217).
+
+    Wait (bounded) for the deferred ``_nf_initial_focus`` to arm ``_nf_mounted``,
+    then sync the framework focus to the test's target ``sel`` so ``pilot.press``
+    reaches the intended region widget regardless of cross-module timing. Call it
+    AFTER setting the target ``sel`` and BEFORE the first ``pilot.press``."""
+    for _ in range(20):
+        if getattr(scr, "_nf_mounted", False):
+            break
+        await pilot.pause()
+    scr._sync_focus_to_sel()
+    await pilot.pause()
+
 
 def test_kbd_real_pipeline_space_toggles_row():
     """Space through the real pipeline toggles the focused worktree row."""
@@ -5146,6 +5171,7 @@ def test_kbd_real_pipeline_space_toggles_row():
             assert scr._kind() == "worktrees" and scr.list_records()
             scr.wt_sel.clear()
             scr.sel = ("L", 0)
+            await _nf_settle(pilot, scr)
             await pilot.press("space")
             await pilot.pause()
             assert len(scr.wt_sel) == 1          # real event toggled it ON
@@ -5169,6 +5195,7 @@ def test_kbd_real_pipeline_down_up_moves_within_list():
             if len(scr.list_records()) < 2:
                 return
             scr.sel = ("L", 0)
+            await _nf_settle(pilot, scr)
             await pilot.press("down")
             await pilot.pause()
             assert scr.sel == ("L", 1)
@@ -5192,6 +5219,7 @@ def test_kbd_real_pipeline_bracket_pivot_roundtrip():
             scr.machine_idx = scr.local_index()
             await pilot.pause()
             start = scr.htab
+            await _nf_settle(pilot, scr)
             await pilot.press("]")
             await pilot.pause()
             await pilot.press("[")
@@ -5216,6 +5244,7 @@ def test_kbd_real_pipeline_enter_opens_submenu_escape_closes():
             assert scr.list_records()
             scr.wt_sel.clear()
             scr.sel = ("L", 0)
+            await _nf_settle(pilot, scr)
             await pilot.press("enter")
             await pilot.pause()
             assert _sub_menu_open(scr)            # modal opened via real event
@@ -5241,6 +5270,7 @@ def test_kbd_real_pipeline_escape_opens_quit_confirm_and_n_cancels():
             await pilot.pause()
             scr.wt_sel.clear()
             scr.sel = ("BTN", 0)
+            await _nf_settle(pilot, scr)
             await pilot.press("escape")
             await pilot.pause()
             assert _quit_modal_open(scr)          # modal pushed via real event
@@ -5267,6 +5297,7 @@ def test_kbd_real_pipeline_ctrl_shift_rotates_pivot_via_binding():
             if len(scr._left_pivots()) < 2:
                 return                            # nothing to rotate between
             start = scr.htab
+            await _nf_settle(pilot, scr)
             await pilot.press("ctrl+shift+right")
             await pilot.pause()
             assert scr.htab != start              # the binding action fired
@@ -5298,6 +5329,7 @@ def test_kbd_real_pipeline_binding_gated_by_overlay():
                 return
             scr.wt_sel.clear()
             scr.sel = ("L", 0)
+            await _nf_settle(pilot, scr)
             await pilot.press("enter")            # open the worktree overlay (modal)
             await pilot.pause()
             assert _sub_menu_open(scr)
