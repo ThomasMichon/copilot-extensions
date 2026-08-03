@@ -42,10 +42,10 @@ credentials:
       enabled: true
       allowed_hosts:
         - "github.com"
-    # az-login:                           # Azure token relay (DISABLED by default)
-    #   enabled: false
-    #   allowed_resources:
-    #     - "https://management.azure.com/"
+    # az-login:                           # Optional extra Azure token resources.
+    #   enabled: true                     # ADO REST + Storage are allowed by default.
+    #   allowed_resources:                # Add only exact public resources you need.
+    #     - "https://graph.microsoft.com/"
 
 # Per-target-repo overrides. Keys are the CodeSpaces repository (owner/name).
 repos:

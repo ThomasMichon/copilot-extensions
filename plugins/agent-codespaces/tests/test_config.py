@@ -194,6 +194,39 @@ class TestMergedConfig:
         # Unique repos added
         assert "org/unique" in config.repos
 
+    def test_multi_repo_merge_unions_allowed_resources(self, config_dir):
+        repo1 = config_dir / "repo1"
+        repo2 = config_dir / "repo2"
+        _write_codespaces_yaml(repo1, {
+            "credentials": {
+                "sources": {
+                    "az-login": {
+                        "enabled": True,
+                        "allowed_resources": ["499b84ac-1321-427f-aa17-267ca6975798"],
+                    },
+                },
+            },
+        })
+        _write_codespaces_yaml(repo2, {
+            "credentials": {
+                "sources": {
+                    "az-login": {
+                        "enabled": True,
+                        "allowed_resources": ["https://storage.azure.com/"],
+                    },
+                },
+            },
+        })
+        save_adopted_repos([
+            AdoptedRepo(path=repo1),
+            AdoptedRepo(path=repo2),
+        ])
+
+        config = load_merged_config()
+        resources = config.credentials.sources["az-login"].allowed_resources
+        assert "499b84ac-1321-427f-aa17-267ca6975798" in resources
+        assert "https://storage.azure.com/" in resources
+
 
 class TestValidation:
     def test_valid_config(self):
@@ -219,6 +252,30 @@ class TestValidation:
         )
         issues = validate_config(config)
         assert any("no allowed_hosts" in i for i in issues)
+
+    def test_enabled_az_login_requires_resources_not_hosts(self):
+        config = CodespacesConfig(
+            source_paths=[Path("/repo")],
+            credentials=CredentialsConfig(
+                sources={
+                    "az-login": CredentialSourceConfig(
+                        enabled=True,
+                        allowed_resources=["499b84ac-1321-427f-aa17-267ca6975798"],
+                    ),
+                },
+            ),
+        )
+        assert validate_config(config) == []
+
+    def test_enabled_az_login_no_resources(self):
+        config = CodespacesConfig(
+            source_paths=[Path("/repo")],
+            credentials=CredentialsConfig(
+                sources={"az-login": CredentialSourceConfig(enabled=True)},
+            ),
+        )
+        issues = validate_config(config)
+        assert any("no allowed_resources" in i for i in issues)
 
 
 class TestEffectiveAcpCommand:

@@ -98,6 +98,8 @@ def test_launch_prelude_scrubs_injected_ms_ado_pat():
     from agent_codespaces.__main__ import _SCRUB_ENV_VARS
 
     assert "MS_ADO_PAT" in _SCRUB_ENV_VARS
+    assert "AZURE_ARTIFACTS_ENV_ACCESS_TOKEN" in _SCRUB_ENV_VARS
+    assert "VSS_NUGET_ACCESSTOKEN" in _SCRUB_ENV_VARS
     scrub = "".join(f"unset {v}; " for v in _SCRUB_ENV_VARS)
     cmd = _build_launch_command(
         "copilot --acp --stdio --allow-all-tools", [],

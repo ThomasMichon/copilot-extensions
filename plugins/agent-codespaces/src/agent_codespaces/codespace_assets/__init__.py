@@ -84,6 +84,33 @@ _ENV_PROBE_CACHE = (
     "env-loginInteractiveShell.json"
 )
 
+# User-level npm config in a CodeSpace may contain a literal Azure Artifacts
+# token baked during create/start. Remove only those token lines on connect so
+# package tooling re-borrows through ado-auth-helper instead of trusting a stale
+# file after resume. Registry/feed declarations stay intact.
+_STALE_NPM_TOKEN_SCRUB = r"""
+from pathlib import Path
+
+p = Path.home() / ".npmrc"
+try:
+    lines = p.read_text(encoding="utf-8").splitlines(keepends=True)
+except OSError:
+    raise SystemExit(0)
+
+hosts = ("pkgs.dev.azure.com", ".visualstudio.com")
+kept = []
+changed = False
+for line in lines:
+    low = line.lower()
+    if "_authtoken" in low and any(h in low for h in hosts):
+        changed = True
+        continue
+    kept.append(line)
+
+if changed:
+    p.write_text("".join(kept), encoding="utf-8")
+"""
+
 
 def asset_text(name: str) -> str:
     """Return the text of a packaged CodeSpace asset."""
@@ -123,12 +150,20 @@ def build_provision_command() -> str:
     profile_b64 = base64.b64encode(
         _NONINTERACTIVE_GIT_PROFILE.encode("utf-8")
     ).decode("ascii")
+    npm_scrub_b64 = base64.b64encode(
+        _STALE_NPM_TOKEN_SCRUB.encode("utf-8")
+    ).decode("ascii")
     return (
         "set -e; "
         'mkdir -p "$HOME/.local/bin"; '
         # Relay client
         f"printf %s {relay_b64} | base64 -d > \"$HOME/.local/bin/ado-auth-helper-relay\"; "
         'chmod +x "$HOME/.local/bin/ado-auth-helper-relay"; '
+        # Remove stale Azure Artifacts npm tokens from the CodeSpace user's
+        # config. Best-effort: a missing Python/npmrc must not block connect.
+        "( "
+        f"printf %s {npm_scrub_b64} | base64 -d | python3 - "
+        ") || true; "
         # Decode the smart wrapper once to a staging file
         f"printf %s {wrapper_b64} | base64 -d > \"$HOME/.agent-codespaces-auth-wrapper\"; "
         # Install for both ado-auth-helper and azure-auth-helper

@@ -613,12 +613,16 @@ def load_merged_config() -> CodespacesConfig:
                         source_raw
                     )
                 else:
-                    # Union allowed hosts
+                    # Union allowlists across adopted repos.
                     existing = merged.credentials.sources[source_name]
                     new_hosts = set(existing.allowed_hosts) | set(
                         source_raw.get("allowed_hosts", [])
                     )
                     existing.allowed_hosts = sorted(new_hosts)
+                    new_resources = set(existing.allowed_resources) | set(
+                        source_raw.get("allowed_resources", [])
+                    )
+                    existing.allowed_resources = sorted(new_resources)
 
         # Repos (first wins on conflicts)
         for repo_key, repo_raw in raw.get("repos", {}).items():
@@ -651,7 +655,20 @@ def validate_config(config: CodespacesConfig) -> list[str]:
         issues.append("No adopted repos with codespaces.yaml found")
 
     for source_name, source_cfg in config.credentials.sources.items():
-        if source_cfg.enabled and not source_cfg.allowed_hosts:
+        if (
+            source_cfg.enabled
+            and source_name == "az-login"
+            and not source_cfg.allowed_resources
+        ):
+            issues.append(
+                f"Credential source '{source_name}' is enabled but has no "
+                "allowed_resources"
+            )
+        elif (
+            source_cfg.enabled
+            and source_name != "az-login"
+            and not source_cfg.allowed_hosts
+        ):
             issues.append(
                 f"Credential source '{source_name}' is enabled but has no allowed_hosts"
             )

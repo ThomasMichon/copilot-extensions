@@ -92,12 +92,13 @@ class TestProvisionCommand:
     def test_embedded_payload_roundtrips(self) -> None:
         cmd = build_provision_command()
         # Extract base64 blobs and confirm they decode to the asset text. There
-        # are three: the relay client, the wrapper, and the #18 profile.d
-        # snippet (piped via `sudo tee` rather than `> file`).
+        # are four: the relay client, the wrapper, the stale-npm-token scrub,
+        # and the #18 profile.d snippet (piped via `sudo tee` rather than `> file`).
         blobs = re.findall(r"printf %s (\S+) \| base64 -d", cmd)
-        assert len(blobs) == 3
+        assert len(blobs) == 4
         decoded = {base64.b64decode(b).decode("utf-8") for b in blobs}
         assert asset_text("ado-auth-helper-relay") in decoded
         assert asset_text("ado-auth-helper-wrapper") in decoded
-        # The third blob is the login-shell git hardening export.
+        assert any(".npmrc" in d and "_authtoken" in d for d in decoded)
+        # One blob is the login-shell git hardening export.
         assert any("GIT_TERMINAL_PROMPT=0" in d for d in decoded)

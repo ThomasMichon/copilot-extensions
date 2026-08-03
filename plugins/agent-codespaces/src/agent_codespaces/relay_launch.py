@@ -13,11 +13,18 @@ stay in lockstep.
 from __future__ import annotations
 
 import os
+import shlex
 from pathlib import Path
 
 # Static PATs a CodeSpace injects that must be neutralized so a dispatched agent
 # never relies on a stale/expired token instead of the credential relay.
-SCRUB_ENV_VARS: tuple[str, ...] = ("MS_ADO_PAT",)
+SCRUB_ENV_VARS: tuple[str, ...] = (
+    "MS_ADO_PAT",
+    "AZURE_ARTIFACTS_ENV_ACCESS_TOKEN",
+    "VSS_NUGET_ACCESSTOKEN",
+    "VSS_NUGET_EXTERNAL_FEED_ENDPOINTS",
+    "ARTIFACTS_CREDENTIALPROVIDER_FEED_ENDPOINTS",
+)
 
 # Directory on the CodeSpace where the launch prelude publishes credential-relay
 # port-mapping files (one JSON per live relay port). The ADO auth helpers
@@ -32,25 +39,32 @@ RELAY_PORTMAP_DIR = "$HOME/.agent-bridge/relay-ports"
 def build_relay_portmap_write(relay_port: int) -> str:
     """POSIX snippet that publishes a relay port-mapping file (best-effort).
 
-    Writes ``<RELAY_PORTMAP_DIR>/<port>.json`` = ``{"port","token","ts"}`` with a
-    restrictive umask, reading the secret from the just-exported
-    ``LC_GIT_CREDENTIAL_RELAY_TOKEN`` (never re-interpolated). Never aborts the
-    prelude (``|| true``). Keyed by port so repeat launches to the same relay are
-    idempotent; a stale file whose channel later dies is pruned by the auth
-    helpers' liveness probe (the discovery reader), not here.
+    Writes ``<RELAY_PORTMAP_DIR>/<port>.json`` =
+    ``{"port","token","ado_host","ts"}`` with a restrictive umask, reading the
+    secret from the just-exported ``LC_GIT_CREDENTIAL_RELAY_TOKEN`` (never
+    re-interpolated) and the non-secret ADO host from
+    ``LC_GIT_CREDENTIAL_RELAY_ADO_HOST``. Never aborts the prelude (``|| true``).
+    Keyed by port so repeat launches to the same relay are idempotent; a stale
+    file whose channel later dies is pruned by the auth helpers' liveness probe
+    (the discovery reader), not here.
     """
     d = RELAY_PORTMAP_DIR
     return (
         f'mkdir -p "{d}" 2>/dev/null; '
-        '( umask 177; printf \'{"port":%s,"token":"%s","ts":%s}\\n\' '
+        '( umask 177; printf \'{"port":%s,"token":"%s","ado_host":"%s","ts":%s}\\n\' '
         f'{relay_port} "$LC_GIT_CREDENTIAL_RELAY_TOKEN" '
+        '"${LC_GIT_CREDENTIAL_RELAY_ADO_HOST:-}" '
         '"$(date +%s 2>/dev/null || echo 0)" '
         f'> "{d}/{relay_port}.json" ) 2>/dev/null || true; '
     )
 
 
 def build_relay_env(
-    relay_port: int, relay_token: str | None, *, use_relay: bool
+    relay_port: int,
+    relay_token: str | None,
+    *,
+    use_relay: bool,
+    ado_host: str | None = None,
 ) -> str:
     """Build the CodeSpace launch-prelude env string.
 
@@ -68,6 +82,11 @@ def build_relay_env(
             f"export LC_GIT_CREDENTIAL_RELAY_TOKEN={relay_token}; "
             "export GIT_TERMINAL_PROMPT=0; "
         )
+        if ado_host:
+            env += (
+                "export LC_GIT_CREDENTIAL_RELAY_ADO_HOST="
+                f"{shlex.quote(ado_host)}; "
+            )
         env += build_relay_portmap_write(relay_port)
     return env
 
@@ -96,6 +115,7 @@ def build_relay_launch_env(
     from .config import load_merged_config
     from .relay_token import token_for
 
+    cfg = load_merged_config()
     if relay_port is not None:
         port = int(relay_port)
     else:
@@ -103,10 +123,17 @@ def build_relay_launch_env(
         if published is not None:
             port = published
         else:
-            cfg = load_merged_config()
             port = int(cfg.credentials.relay_port)
     token = token_for(codespace_name)
-    return build_relay_env(port, token, use_relay=True), port
+    return (
+        build_relay_env(
+            port,
+            token,
+            use_relay=True,
+            ado_host=getattr(cfg.credentials, "ado_host", None),
+        ),
+        port,
+    )
 
 
 def _published_live_relay_port() -> int | None:
