@@ -12477,6 +12477,59 @@ def _extract_project_flag(args_list: list[str]) -> tuple[list[str], str | None]:
     return out, (project.strip() if project else None)
 
 
+# ── `<repo> <slug>` command-surface router ───────────────────────────────────
+# Core agent-* plugin slugs reserved by the command surface (command-surface
+# effort). A leading token matching one of these is a *plugin namespace*, never
+# a worktrees verb -- a collision guard test enforces that none is also a
+# registered subcommand. `worktrees` folds back into this binstub so
+# `<repo> worktrees <verb>` == the bare `<repo> <verb>` alias.
+_CORE_SLUGS = frozenset({
+    "worktrees", "bridge", "ssh", "dispatch",
+    "codespaces", "containers", "logger", "vault", "mcp",
+})
+
+# Slugs whose sibling plugin accepts a top-level ``--project`` today, so the
+# router can project-pin the dispatch. Others in _CORE_SLUGS stay reserved but
+# unrouted (they fall through to the normal unknown-subcommand path) until their
+# ``--project`` support lands per the command-surface effort.
+_PROJECT_ROUTED_SLUGS = frozenset({"bridge"})
+
+
+def _sibling_binstub(slug: str) -> Path | None:
+    """Locate the ``agent-<slug>`` binstub in ~/.local/bin (it runs in its own
+    venv, so the router shells out to it rather than importing it)."""
+    lb = inst.local_bin()
+    cand = lb / (f"agent-{slug}.ps1" if platform.system() == "Windows"
+                 else f"agent-{slug}")
+    return cand if cand.exists() else None
+
+
+def _route_to_sibling_plugin(slug: str, project: str | None,
+                             rest: list[str]) -> int:
+    """Re-dispatch ``<repo> <slug> …`` to the ``agent-<slug>`` binstub,
+    project-pinned when a project is known. Returns the child's exit code."""
+    stub = _sibling_binstub(slug)
+    if stub is None:
+        print(
+            f"  \u2717 '{slug}' needs the agent-{slug} command, which is not "
+            f"installed here.\n"
+            f"  \u2717 Install its plugin, or run 'agent-worktrees --help' for "
+            f"local commands.",
+            file=sys.stderr,
+        )
+        return 1
+    forwarded: list[str] = []
+    if project:
+        forwarded += ["--project", project]
+    forwarded += list(rest)
+    if platform.system() == "Windows":
+        pwsh = shutil.which("pwsh") or shutil.which("powershell") or "pwsh"
+        cmd = [pwsh, "-NoProfile", "-NoLogo", "-File", str(stub), *forwarded]
+    else:
+        cmd = [str(stub), *forwarded]
+    return subprocess.run(cmd).returncode
+
+
 def _git_toplevel(path: Path) -> Path | None:
     """Return the git toplevel of ``path`` resolved to its anchor, or None."""
     try:
@@ -13357,6 +13410,20 @@ def main(argv: list[str] | None = None) -> int:
     # Ambient $WORKTREE_PROJECT / $WORKTREE_ID are NOT trusted for identity --
     # resolution is a pure function of where you are, not inherited session env.
     args_list, _proj = _extract_project_flag(args_list)
+
+    # ── `<repo> <slug>` command-surface router ───────────────────────────
+    # A leading core agent-* slug is a plugin namespace: `<repo> bridge send …`
+    # (the binstub passes `--project <repo>`) re-dispatches to
+    # `agent-bridge --project <repo> send …`. `worktrees` folds back into this
+    # binstub (`<repo> worktrees <verb>` == the bare `<repo> <verb>` alias).
+    # Reserved-but-unrouted slugs fall through unchanged. See the
+    # command-surface effort.
+    if args_list and args_list[0] in _CORE_SLUGS:
+        _slug = args_list[0]
+        if _slug == "worktrees":
+            args_list = args_list[1:]
+        elif _slug in _PROJECT_ROUTED_SLUGS:
+            return _route_to_sibling_plugin(_slug, _proj, args_list[1:])
 
     # Only auto-derive from CWD for project-requiring commands (skip the git
     # subprocess for global no-project commands and bare flags).

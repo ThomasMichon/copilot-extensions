@@ -113,6 +113,135 @@ def test_project_flag_sets_env_and_bypasses_help(monkeypatch):
     assert os.environ.get("WORKTREE_PROJECT") == "demo"
 
 
+# ── `<repo> <slug>` command-surface router ───────────────────────────────────
+
+
+def test_core_slugs_no_subcommand_collision():
+    """A leading core slug must be a plugin namespace, never a worktrees verb --
+    otherwise the router would shadow (or be shadowed by) a real subcommand."""
+    import argparse
+
+    parser = m.build_parser()
+    subs = [a for a in parser._actions
+            if isinstance(a, argparse._SubParsersAction)]
+    names = set(subs[0].choices) if subs else set()
+    assert names, "expected registered subcommands"
+    collisions = m._CORE_SLUGS & names
+    assert not collisions, f"core slug(s) collide with subcommands: {collisions}"
+
+
+def test_router_dispatches_bridge_project_pinned(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        m, "_route_to_sibling_plugin",
+        lambda slug, project, rest: captured.update(
+            slug=slug, project=project, rest=rest) or 0,
+    )
+    rc = m.main(["--project", "demo", "bridge", "send", "cloud1", "hi"])
+    assert rc == 0
+    assert captured == {"slug": "bridge", "project": "demo",
+                        "rest": ["send", "cloud1", "hi"]}
+
+
+def test_router_bridge_cwd_addressed_forwards_no_project(monkeypatch):
+    # Bare `agent-worktrees bridge …` (cwd-addressed): no --project injected.
+    captured = {}
+    monkeypatch.setattr(
+        m, "_route_to_sibling_plugin",
+        lambda slug, project, rest: captured.update(
+            slug=slug, project=project, rest=rest) or 0,
+    )
+    rc = m.main(["bridge", "sessions"])
+    assert rc == 0
+    assert captured == {"slug": "bridge", "project": None, "rest": ["sessions"]}
+
+
+def test_router_worktrees_folds_back_to_launch(monkeypatch):
+    """`worktrees` strips + continues (== the bare `<repo> <verb>` alias); it
+    must never dispatch to a sibling plugin."""
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(
+        m, "_route_to_sibling_plugin",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("worktrees must not route to a sibling")),
+    )
+    called = {}
+    monkeypatch.setattr(m, "cmd_launch",
+                        lambda argv: called.__setitem__("launched", True) or 0)
+    # `--project demo worktrees` strips to a bare launch, exactly like
+    # `--project demo` with no subcommand.
+    rc = m.main(["--project", "demo", "worktrees"])
+    assert rc == 0
+    assert called.get("launched") is True
+
+
+def test_router_reserved_but_unrouted_slug_falls_through(monkeypatch, capsys):
+    """A reserved core slug without --project routing yet (e.g. codespaces) is
+    NOT dispatched to a sibling -- it falls through to the normal path."""
+    assert "codespaces" in m._CORE_SLUGS
+    assert "codespaces" not in m._PROJECT_ROUTED_SLUGS
+    monkeypatch.setattr(
+        m, "_route_to_sibling_plugin",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("unrouted slug must not dispatch")),
+    )
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m.inst, "read_projects_registry", lambda: {"projects": {}})
+    monkeypatch.setattr(m, "_git_toplevel", lambda p: None)
+    # Falls through to project resolution, which balks (no project) -- proving
+    # it did not route to the sibling.
+    rc = m.main(["codespaces", "list"])
+    assert rc == 1
+
+
+def test_route_to_sibling_missing_binstub(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(m.inst, "local_bin", lambda: tmp_path)
+    rc = m._route_to_sibling_plugin("bridge", "demo", ["sessions"])
+    assert rc == 1
+    assert "not installed" in capsys.readouterr().err
+
+
+def _write_stub(tmp_path):
+    import platform
+    name = ("agent-bridge.ps1" if platform.system() == "Windows"
+            else "agent-bridge")
+    (tmp_path / name).write_text("stub")
+    return name
+
+
+def test_route_to_sibling_forwards_project(monkeypatch, tmp_path):
+    name = _write_stub(tmp_path)
+    monkeypatch.setattr(m.inst, "local_bin", lambda: tmp_path)
+    captured = {}
+
+    class _R:
+        returncode = 0
+
+    monkeypatch.setattr(m.subprocess, "run",
+                        lambda cmd, *a, **k: captured.update(cmd=cmd) or _R())
+    rc = m._route_to_sibling_plugin("bridge", "demo", ["send", "cloud1", "hi"])
+    assert rc == 0
+    cmd = [str(c) for c in captured["cmd"]]
+    assert "--project" in cmd and "demo" in cmd
+    assert cmd[-3:] == ["send", "cloud1", "hi"]
+    assert any(name in c for c in cmd)
+
+
+def test_route_to_sibling_no_project_omits_flag(monkeypatch, tmp_path):
+    _write_stub(tmp_path)
+    monkeypatch.setattr(m.inst, "local_bin", lambda: tmp_path)
+    captured = {}
+
+    class _R:
+        returncode = 0
+
+    monkeypatch.setattr(m.subprocess, "run",
+                        lambda cmd, *a, **k: captured.update(cmd=cmd) or _R())
+    rc = m._route_to_sibling_plugin("bridge", None, ["sessions"])
+    assert rc == 0
+    assert "--project" not in [str(c) for c in captured["cmd"]]
+
+
 def test_profiles_get_emits_self_diagonal(monkeypatch, capfd, tmp_path):
     """`profiles get --json` emits this host's column incl. the locked self."""
     import argparse
