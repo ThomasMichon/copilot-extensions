@@ -237,7 +237,10 @@ print('\t'.join([
             UPDATE_COUNT=$("$PYTHON" -c "import sys,json; print(len(json.load(sys.stdin).get('updates',[])))" <<< "$PRE_JSON" 2>/dev/null) || UPDATE_COUNT=0
             for (( i=0; i<UPDATE_COUNT; i++ )); do
                 SVC_NAME=$("$PYTHON" -c "import sys,json; print(json.load(sys.stdin)['updates'][$i]['service'])" <<< "$PRE_JSON" 2>/dev/null) || SVC_NAME="unknown"
-                mapfile -t UPDATE_ARGV < <("$PYTHON" -c "
+                UPDATE_ARGV=()
+                while IFS= read -r _update_arg; do
+                    UPDATE_ARGV+=("$_update_arg")
+                done < <("$PYTHON" -c "
 import sys, json
 for a in json.load(sys.stdin)['updates'][$i].get('argv', []):
     print(a)
@@ -277,7 +280,10 @@ for a in json.load(sys.stdin)['updates'][$i].get('argv', []):
             setup_status INFO "Reconciling plugins (pass $_rpass): $REC_COUNT action(s)..."
             for (( _ri=0; _ri<REC_COUNT; _ri++ )); do
                 _RSVC=$("$PYTHON" -c "import sys,json; print(json.load(sys.stdin)['updates'][$_ri].get('service','?'))" <<< "$REC_JSON" 2>/dev/null) || _RSVC="?"
-                mapfile -t _RARGV < <("$PYTHON" -c "
+                _RARGV=()
+                while IFS= read -r _reconcile_arg; do
+                    _RARGV+=("$_reconcile_arg")
+                done < <("$PYTHON" -c "
 import sys, json
 for a in json.load(sys.stdin)['updates'][$_ri].get('argv', []):
     print(a)
