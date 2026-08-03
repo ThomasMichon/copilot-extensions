@@ -979,16 +979,30 @@ def mark_resumed(record: WorktreeRecord) -> None:
     save_record(record)
 
 
-def stamp_mux_live(worktree_id: str, live: bool) -> None:
+def stamp_mux_live(
+    worktree_id: str, live: bool, *,
+    refresh: bool = False, throttle_secs: float = 60.0,
+) -> None:
     """Cache the last-known multiplexer liveness on a worktree's record (#4057).
 
     A best-effort, locked read-modify-write that persists ``mux_live`` +
     ``mux_live_at`` so a follow-up picker populate can prefer this cached hint
     over a live probe. Called by the authoritative single-worktree verify at the
-    action moments (Actions-menu / Enter -> ``live=True``/``False``) and by Stop
-    (``live=False``). It is a *hint*, always reconciled by the batched live scan;
+    action moments (Actions-menu / Enter -> ``live=True``/``False``), by Stop
+    (``live=False``), and at confirmed mux teardown (the idle-gated reaper ->
+    ``live=False``). It is a *hint*, always reconciled by the batched live scan;
     never raises, and no-ops when the record is absent or unchanged (so it adds
     no YAML churn when the liveness has not moved).
+
+    ``refresh`` (default False) additionally renews the freshness timestamp when
+    the value is UNCHANGED, so a steadily-live worktree observed authoritatively
+    (e.g. a repeat Actions-menu verify) keeps a fresh stamp instead of aging past
+    the populate-hint TTL while genuinely live -- without which the same-value
+    no-op below means the hint can never stay fresh for a long-lived session. To
+    bound YAML churn the same-value renewal is **throttled**: it rewrites only
+    when the existing stamp is older than ``throttle_secs``. A value CHANGE always
+    writes (it records the transition). ``refresh`` is for low-frequency
+    authoritative observation points only -- never the populate hot path.
     """
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     if not yaml_path.exists():
@@ -997,12 +1011,32 @@ def stamp_mux_live(worktree_id: str, live: bool) -> None:
         with _RecordLock(yaml_path):
             record = load_record(yaml_path)
             if record.mux_live is live and record.mux_live_at:
-                return  # unchanged -- skip a pointless rewrite
+                if not refresh:
+                    return  # unchanged, no refresh requested -- skip
+                # Same value: renew freshness only once the stamp has aged past
+                # the throttle, so a repeat authoritative observation keeps the
+                # hint fresh without rewriting the YAML on every call.
+                if not _stamp_older_than(record.mux_live_at, throttle_secs):
+                    return
             record.mux_live = live
             record.mux_live_at = _now_iso()
             save_record(record)
     except Exception:
         pass
+
+
+def _stamp_older_than(stamped: str, secs: float) -> bool:
+    """True when the ISO ``stamped`` time is older than ``secs`` ago.
+
+    Best-effort: an unparseable stamp counts as stale (allow the refresh), so a
+    malformed value self-heals on the next authoritative observation.
+    """
+    try:
+        dt = datetime.fromisoformat(str(stamped))
+    except (ValueError, TypeError):
+        return True
+    now = datetime.now(dt.tzinfo) if dt.tzinfo is not None else datetime.now()
+    return (now - dt).total_seconds() > secs
 
 
 # ---------------------------------------------------------------------------

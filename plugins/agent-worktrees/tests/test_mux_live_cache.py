@@ -83,6 +83,98 @@ def test_stamp_mux_live_noop_when_record_absent(tmp_path):
     assert not (tmp_path / "ghost.yaml").exists()
 
 
+# ── stamp_mux_live: freshness-refresh + throttle (#4057 write-points slice) ──
+
+def test_stamp_no_refresh_keeps_noop_on_unchanged(tmp_path):
+    """Default (refresh=False): an unchanged value never rewrites, so a
+    steadily-live worktree's stamp is NOT renewed -- the legacy behaviour that
+    made the hint age out. mux_live_at stays put."""
+    old = (datetime.now() - timedelta(seconds=300)).isoformat()
+    p = tmp_path / "aaaa.yaml"
+    tracking.save_record(_rec(mux_live=True, mux_live_at=old), p)
+    with patch("agent_worktrees.config.tracking_dir", return_value=tmp_path):
+        tracking.stamp_mux_live("aaaa", True)  # unchanged, no refresh
+    assert tracking.load_record(p).mux_live_at == old
+
+
+def test_stamp_refresh_renews_aged_timestamp(tmp_path):
+    """refresh=True renews mux_live_at for an unchanged value once the stamp has
+    aged past the throttle -- so an authoritative re-observation of a still-live
+    worktree keeps the populate hint fresh."""
+    old = (datetime.now() - timedelta(seconds=300)).isoformat()
+    p = tmp_path / "aaaa.yaml"
+    tracking.save_record(_rec(mux_live=True, mux_live_at=old), p)
+    with patch("agent_worktrees.config.tracking_dir", return_value=tmp_path):
+        tracking.stamp_mux_live("aaaa", True, refresh=True, throttle_secs=60)
+    back = tracking.load_record(p)
+    assert back.mux_live is True and back.mux_live_at != old
+
+
+def test_stamp_refresh_throttled_within_window(tmp_path):
+    """refresh=True does NOT rewrite when the stamp is still within the throttle
+    window -- bounding YAML churn for a hot re-observation."""
+    recent = (datetime.now() - timedelta(seconds=5)).isoformat()
+    p = tmp_path / "aaaa.yaml"
+    tracking.save_record(_rec(mux_live=True, mux_live_at=recent), p)
+    with patch("agent_worktrees.config.tracking_dir", return_value=tmp_path):
+        tracking.stamp_mux_live("aaaa", True, refresh=True, throttle_secs=60)
+    assert tracking.load_record(p).mux_live_at == recent
+
+
+def test_stamp_value_change_always_writes(tmp_path):
+    """A liveness CHANGE (True->False) always persists, regardless of refresh or
+    how recent the prior stamp was -- the transition must be recorded."""
+    recent = (datetime.now() - timedelta(seconds=5)).isoformat()
+    p = tmp_path / "aaaa.yaml"
+    tracking.save_record(_rec(mux_live=True, mux_live_at=recent), p)
+    with patch("agent_worktrees.config.tracking_dir", return_value=tmp_path):
+        tracking.stamp_mux_live("aaaa", False)
+    back = tracking.load_record(p)
+    assert back.mux_live is False and back.mux_live_at != recent
+
+
+# ── Confirmed-teardown write-point: the idle-gated reaper clears the hint ──
+
+def test_reaper_clears_hint_on_successful_kill(tmp_path):
+    """#4057: a successful, idle-gated mux reap is a CONFIRMED teardown, so the
+    reaper stamps mux_live=False. This is the shared sweep run at both lifecycle
+    boundaries (picker-launch + session-end), so it also covers post-exit."""
+    rec = _rec("aaaa", path=str(tmp_path / "wt"))
+    rec.status = "finalized"          # a reap-eligible orphan
+    calls = []
+    with patch("agent_worktrees.sessions._list_mux_sessions",
+               return_value={"wt-aaaa": 0}), \
+         patch("agent_worktrees.sessions._mux_session_activity",
+               return_value={"wt-aaaa": 0.0}), \
+         patch("agent_worktrees.tracking.list_records", return_value=[rec]), \
+         patch("agent_worktrees.config.tracking_dir", return_value=tmp_path), \
+         patch("agent_worktrees.sessions.kill_tmux_session", return_value=True), \
+         patch("agent_worktrees.tracking.stamp_mux_live",
+               side_effect=lambda wt, live: calls.append((wt, live))):
+        res = cli.reap_orphan_mux_sessions(now=1e9)
+    assert "aaaa" in res["reaped"]
+    assert ("aaaa", False) in calls
+
+
+def test_reaper_does_not_clear_hint_when_kill_fails(tmp_path):
+    """A failed kill is NOT a confirmed teardown -- no False stamp (the mux may
+    still be live)."""
+    rec = _rec("aaaa", path=str(tmp_path / "wt"))
+    rec.status = "finalized"
+    calls = []
+    with patch("agent_worktrees.sessions._list_mux_sessions",
+               return_value={"wt-aaaa": 0}), \
+         patch("agent_worktrees.sessions._mux_session_activity",
+               return_value={"wt-aaaa": 0.0}), \
+         patch("agent_worktrees.tracking.list_records", return_value=[rec]), \
+         patch("agent_worktrees.config.tracking_dir", return_value=tmp_path), \
+         patch("agent_worktrees.sessions.kill_tmux_session", return_value=False), \
+         patch("agent_worktrees.tracking.stamp_mux_live",
+               side_effect=lambda wt, live: calls.append((wt, live))):
+        cli.reap_orphan_mux_sessions(now=1e9)
+    assert calls == []
+
+
 # ── Stop clears the cached hint ──
 
 def test_restart_copilot_clears_hint_on_graceful_stop():

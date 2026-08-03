@@ -3669,8 +3669,12 @@ class PickerScreen(Widget):
                     rec["session_lock_live"] = bool(_verdict.live_session_ids)
                     rec["session_bare_orphan"] = _verdict.bare
                     # #4057: warm the ground-layer cache from this authoritative
-                    # read so the next populate can prefer the hint.
-                    _tracking.stamp_mux_live(_wt_id, _verdict.mux_live)
+                    # read so the next populate can prefer the hint. refresh=True
+                    # renews the freshness stamp even when the liveness is
+                    # unchanged (throttled), so a steadily-live worktree the
+                    # operator keeps opening doesn't age past the hint TTL.
+                    _tracking.stamp_mux_live(
+                        _wt_id, _verdict.mux_live, refresh=True)
             except Exception:
                 pass  # best-effort: fall back to the populate-derived signals
         # Primary verb + Stop/Reclaim gating is the pure, record-driven
