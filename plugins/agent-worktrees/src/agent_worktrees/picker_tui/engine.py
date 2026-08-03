@@ -3720,7 +3720,10 @@ class PickerScreen(Widget):
             if cur == "Open":
                 self._decide(self._resume_decision(rec, no_mux=no_mux))
             elif cur == "Resume":
-                self._decide(self._resume_decision(rec))
+                # #4043: No-Mux now rides Resume too (a stopped worktree can be
+                # resumed without the mux wrapper for troubleshooting), not just
+                # Open. no_mux is inert unless the toggle was flipped.
+                self._decide(self._resume_decision(rec, no_mux=no_mux))
             elif cur == "Bare resume":
                 # Two-step restore: mux + Copilot in HOME, no --resume (#outage).
                 self._decide(self._resume_decision(rec, bare_resume=True))
@@ -4556,8 +4559,9 @@ class SubMenuScreen(ModalScreen[tuple]):
     ``OptionList`` -- the framework owns focus, up/down, and Enter-to-select --
     below a header (title + meta + session id) and above a description pane that
     tracks the highlight (via ``OptionHighlighted``). **No-mux** is an
-    arrow-reachable **toggle row** at the bottom of that same list (shown only
-    when *Open* is offered, since it modifies only Open): the operator's "no
+    arrow-reachable **toggle row** at the bottom of that same list (shown when a
+    primary launch verb -- *Open* or *Resume* -- is offered, since it modifies
+    the launch, #4043): the operator's "no
     special keyboarding" steer, made reachable purely by the arrow keys -- ↓ onto
     the ``☐ No Mux`` row, Enter/Space flips it to ``☑`` and stays open; Enter on a
     verb dismisses. (An earlier take used a separate ``Checkbox`` only reachable
@@ -4590,7 +4594,7 @@ class SubMenuScreen(ModalScreen[tuple]):
         Binding("space", "toggle_nomux", show=False),
     ]
 
-    _NOMUX_DESC = ("Launch Open WITHOUT the PSMux/TMux wrapper (for "
+    _NOMUX_DESC = ("Launch (Open/Resume) WITHOUT the PSMux/TMux wrapper (for "
                    "troubleshooting). Enter/Space toggles this row.")
 
     def __init__(self, rec, actions) -> None:
@@ -4598,9 +4602,12 @@ class SubMenuScreen(ModalScreen[tuple]):
         self._rec = rec
         self._actions = actions
         self._no_mux = False
-        # The No-mux modifier rides the Open verb, so the toggle row is offered
-        # only when Open is available. It sits at the end of the OptionList.
-        self._has_nomux = "Open" in actions
+        # The No-mux modifier rides the primary launch verb -- Open (live mux /
+        # sessionless) OR Resume (stopped session) -- so the toggle row is offered
+        # whenever either is available (#4043). It sits at the end of the
+        # OptionList. Bare resume is deliberately excluded (it already implies a
+        # mux-in-HOME, which no-mux would contradict).
+        self._has_nomux = ("Open" in actions) or ("Resume" in actions)
         self._nomux_index = len(actions) if self._has_nomux else None
 
     @property
