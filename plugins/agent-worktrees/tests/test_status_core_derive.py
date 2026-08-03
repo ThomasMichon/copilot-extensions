@@ -42,6 +42,62 @@ class TestDispositionGlyph:
         assert n["state"] == "FINAL"
 
 
+class TestFastPassActive:
+    """The classification-absent (fast Phase-1 populate) heuristic must mark a
+    live worktree ACTIVE from the CHEAP mux/lock signals, so the picker's Active
+    section paints at once instead of waiting seconds for the per-worktree git
+    classify -- and it must agree with the git pass to avoid flicker.
+
+    All fixtures omit ``state`` (classification absent). ``status='active'`` is
+    the tracking status; the live signals are ``mux_session`` / ``mux_attached``
+    (from the batched mux read) and ``session_lock_live`` (from the lock scan)."""
+
+    def _raw_active(self, **kw):
+        base = dict(id="lambda-core-win-20260803-0000-abcd",
+                    machine="lambda-core", title="Live", status="active")
+        base.update(kw)
+        return base
+
+    def test_mux_session_marks_active_without_git(self):
+        n = derive.norm(self._raw_active(mux_session=True), "m", "e")
+        assert n["state"] == "ACTIVE"
+
+    def test_mux_attached_marks_active_without_git(self):
+        n = derive.norm(self._raw_active(mux_attached=True), "m", "e")
+        assert n["state"] == "ACTIVE"
+
+    def test_lock_live_marks_active_without_git(self):
+        n = derive.norm(self._raw_active(session_lock_live=True), "m", "e")
+        assert n["state"] == "ACTIVE"
+
+    def test_live_session_beats_merged_pr(self):
+        # A just-merged PR with the session still running must render ACTIVE, not
+        # FINAL -- the git pass returns ACTIVE (active_paths precedence), so the
+        # fast pass must too, or the row flickers FINAL -> ACTIVE after ~5 s.
+        n = derive.norm(
+            self._raw_active(mux_session=True, pr={"state": "merged"}), "m", "e")
+        assert n["state"] == "ACTIVE"
+
+    def test_live_session_beats_finalized_status(self):
+        n = derive.norm(
+            self._raw_active(status="finalized", mux_session=True), "m", "e")
+        assert n["state"] == "ACTIVE"
+
+    def test_no_live_signal_falls_back_to_wip_unused(self):
+        # No mux, no lock: unchanged legacy behaviour (turns -> WIP, else UNUSED).
+        assert derive.norm(
+            self._raw_active(turn_count=3), "m", "e")["state"] == "WIP"
+        assert derive.norm(
+            self._raw_active(turn_count=0), "m", "e")["state"] == "UNUSED"
+
+    def test_classified_state_still_wins_when_present(self):
+        # When git classification IS present, its ``state`` is authoritative and
+        # the fast-pass heuristic does not run (no regression to Phase 2).
+        n = derive.norm(
+            self._raw_active(state="dirty", mux_session=False), "m", "e")
+        assert n["state"] == derive._STATE_LABEL.get("dirty", "DIRTY")
+
+
 class TestFollowUpBucket:
     def test_bucket_dispo_review(self):
         assert derive.BUCKET_DISPO["follow-up"] == "REVIEW"
