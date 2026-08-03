@@ -5421,6 +5421,13 @@ def reap_orphan_mux_sessions(*, dry_run: bool = False,
             continue
         if sessions.kill_tmux_session(wt_id):
             reaped.append(wt_id)
+            # #4057: the wt-<id> mux is confirmably gone now (a successful,
+            # idle-gated kill), so clear the cached liveness -- the "inactive at
+            # reap/post-exit" write-point. This reaper is the shared sweep run at
+            # BOTH lifecycle boundaries (session-end via _sweep_orphans_on_exit
+            # and picker-launch), so it also covers post-exit transitively. A
+            # value change, so it always persists (no throttle needed).
+            tracking.stamp_mux_live(wt_id, False)
             try:
                 activity.log_event(
                     "mux_session_reaped", worktree_id=wt_id, reason=reason)
