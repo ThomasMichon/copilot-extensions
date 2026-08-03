@@ -3149,7 +3149,8 @@ def test_new_worktree_no_mux_option():
             assert "No Mux" in labels
             nm = labels.index("No Mux")
             await pilot.press("tab")            # Create button group -> options
-            assert dlg.query_one("#scope-opts", SelectionList).has_focus
+            options = dlg.query_one("#scope-opts", SelectionList)
+            assert options.has_focus
             for _ in range(nm):
                 await pilot.press("down")
             await pilot.press("space")          # toggle No Mux on
@@ -3159,6 +3160,80 @@ def test_new_worktree_no_mux_option():
             await pilot.pause()
         assert app.result["action"] == "new"
         assert app.result["options"]["no_mux"] is True
+
+    asyncio.run(run())
+
+
+def test_new_worktree_anchor_option_shows_selected_state():
+    """Space toggles Anchor repo and makes its selected state explicit."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.htab = 0
+            scr.btn_idx = 0
+            scr.sel = ("BTN", 0)
+            scr._activate()
+            await pilot.pause()
+            dlg = _scope_dlg(scr)
+            assert dlg is not None
+            from textual.widgets import Static
+            prompt = dlg.query_one("#scope-prompt", Static)
+            assert "Selected: none" in prompt.render().plain
+            await pilot.press("tab")
+            await pilot.press("space")
+            await pilot.pause()
+            assert dlg._dlg["opts"][0]["label"] == "Anchor repo"
+            assert dlg._dlg["opts"][0]["on"] is True
+            assert "Selected: Anchor repo" in prompt.render().plain
+            await pilot.press("tab")
+            await pilot.press("enter")
+            await pilot.pause()
+        assert app.result["action"] == "new"
+        assert app.result["options"]["anchor"] is True
+
+    asyncio.run(run())
+
+
+def test_scope_dialog_highlight_is_focus_gated():
+    """#121: an unfocused options list must not paint its cursor highlight -- a
+    mere highlighted (not-yet-toggled) Anchor-repo row otherwise reads as a
+    selection. The amber block-cursor may only appear while the list holds
+    focus; on blur it collapses to the neutral surface colour."""
+    src = _fixture_source()
+    AMBER = (255, 175, 0)
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.htab = 0
+            scr.btn_idx = 0
+            scr.sel = ("BTN", 0)
+            scr._activate()
+            await pilot.pause()
+            dlg = _scope_dlg(scr)
+            assert dlg is not None
+            from textual.widgets import SelectionList
+            sl = dlg.query_one("#scope-opts", SelectionList)
+
+            def highlight_rgb():
+                c = sl.get_component_styles(
+                    "option-list--option-highlighted").background
+                return (c.r, c.g, c.b)
+
+            # At open the Create button holds focus; the options list is blurred,
+            # so its highlighted row must NOT be amber.
+            assert sl.has_focus is False
+            assert highlight_rgb() != AMBER
+
+            # Tab into the list: focus arrives, the cursor highlight lights up.
+            await pilot.press("tab")
+            await pilot.pause()
+            assert sl.has_focus is True
+            assert highlight_rgb() == AMBER
 
     asyncio.run(run())
 
