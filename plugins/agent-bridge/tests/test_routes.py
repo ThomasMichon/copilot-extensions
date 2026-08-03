@@ -1360,7 +1360,7 @@ class TestPendingQueue:
         assert resp.status_code == 409
 
     def test_get_queue_snapshot(self, client, app) -> None:
-        mgr = self._seed_running(app)
+        self._seed_running(app)
         client.post(
             "/api/v1/sessions/s1/turns",
             json={"prompt": "one", "queue": True},
