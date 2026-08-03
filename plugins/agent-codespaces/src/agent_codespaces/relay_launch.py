@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import os
 import shlex
+import socket
+import sys
 from pathlib import Path
 
 # Static PATs a CodeSpace injects that must be neutralized so a dispatched agent
@@ -34,6 +36,36 @@ SCRUB_ENV_VARS: tuple[str, ...] = (
 # find an active channel back to the caller (dotfiles #489/#187/#19). Kept under
 # the same ``~/.agent-bridge`` dir the connect breadcrumb uses.
 RELAY_PORTMAP_DIR = "$HOME/.agent-bridge/relay-ports"
+
+
+def relay_listening(port: int, timeout: float = 0.5) -> bool:
+    """True if the host credential relay accepts TCP on 127.0.0.1:*port*."""
+    try:
+        with socket.create_connection(("127.0.0.1", int(port)), timeout=timeout):
+            return True
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def warn_if_relay_unavailable(
+    relay_port: int,
+    codespace_name: str,
+    *,
+    context: str = "CodeSpace connect",
+) -> bool:
+    """Warn loudly when the host relay is down before an SSH ``-R`` is built."""
+    if relay_listening(relay_port):
+        return True
+    print(
+        f"[WARN] Host credential relay is NOT listening on "
+        f"127.0.0.1:{relay_port} -- the SSH -R forward will dead-end and "
+        f"git auth over the relay (ADO push, GitHub push, headless PR/REST) "
+        f"will FAIL on CodeSpace '{codespace_name}' during {context}. The relay "
+        f"is owned by the agent-bridge daemon; start/repair it with "
+        f"`agent-bridge service restart`, then reconnect. (#560)",
+        file=sys.stderr,
+    )
+    return False
 
 
 def build_relay_portmap_write(relay_port: int) -> str:
@@ -125,6 +157,9 @@ def build_relay_launch_env(
         else:
             port = int(cfg.credentials.relay_port)
     token = token_for(codespace_name)
+    warn_if_relay_unavailable(
+        port, codespace_name, context="Session Host dispatch",
+    )
     return (
         build_relay_env(
             port,
