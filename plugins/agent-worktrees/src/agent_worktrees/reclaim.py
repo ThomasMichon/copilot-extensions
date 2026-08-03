@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import os
 import platform
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from . import sessions, tracking
 
@@ -242,7 +242,14 @@ def _worktree_id_from_path(cwd: str) -> str | None:
     """
     if not cwd:
         return None
-    parts = Path(cwd).parts
+    # Parse with the flavor the *string* implies, not the host's -- a Windows
+    # checkout path (drive letter or backslash) must split into segments even
+    # when this runs on Linux (and vice versa), so the reaper is host-portable
+    # and the pure logic is testable on any OS.
+    if "\\" in cwd or (len(cwd) >= 2 and cwd[1] == ":" and cwd[0].isalpha()):
+        parts = PureWindowsPath(cwd).parts
+    else:
+        parts = PurePosixPath(cwd).parts
     for i, seg in enumerate(parts):
         if seg.endswith(".worktrees") or seg == ".worktrees":
             # leaf under the .worktrees container is the worktree id
