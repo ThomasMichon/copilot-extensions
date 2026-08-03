@@ -9,6 +9,8 @@ import sys
 import time
 from types import SimpleNamespace
 
+import pytest
+
 from agent_codespaces import __main__ as cli
 from agent_codespaces.__main__ import _BUSY_EXIT, main
 from agent_codespaces.resolver import _build_spawn_command
@@ -118,8 +120,17 @@ class _FakeManager:
         self.calls.append("exec_command")
         return _FakeCommandResult()
 
+    async def open_stdio_channel(self, *_args, **_kwargs):
+        self.calls.append("open_stdio_channel")
+        return SimpleNamespace(returncode=0)
+
     async def disconnect(self, *_args, **_kwargs):
         self.calls.append("disconnect")
+
+
+class _FailingExecManager:
+    async def exec_command(self, *_args, **_kwargs):
+        raise RuntimeError("network down")
 
 
 def _fake_config():
@@ -176,6 +187,7 @@ class TestDiagnosticRemoteCmd:
         )
         monkeypatch.setattr(cli, "_provision_repo_hooks", lambda *_a: record("hooks"))
         monkeypatch.setattr(cli, "_stage_plugins", lambda *_a: record("stage"))
+        monkeypatch.setattr(cli, "_warm_remote_auth_cache", lambda *_a, **_kw: record("warm"))
 
         rc = main(["ssh", "cs-diag", "--remote-cmd", "echo ok", "--timeout", "5"])
 
@@ -188,10 +200,84 @@ class TestDiagnosticRemoteCmd:
         assert "register" not in calls
         assert "hooks" not in calls
         assert "stage" not in calls
+        assert "warm" not in calls
         err = capsys.readouterr().err
         assert "[stage 3/ssh-to-target] started" in err
         assert "heavy provisioning skipped" in err
         assert "[stage 7/launch-acp] started: remote command" in err
+
+    def test_auth_cache_warmup_runs_for_stdio_dispatch(
+        self, tmp_path, monkeypatch
+    ):
+        calls: list[str] = []
+        manager = _FakeManager(calls)
+        _patch_ssh_dependencies(monkeypatch, tmp_path, manager)
+
+        async def record(name):
+            calls.append(name)
+
+        async def empty_list(*_a):
+            return []
+
+        monkeypatch.setattr(cli, "_provision_relay_helpers", lambda *_a: record("relay"))
+        monkeypatch.setattr(cli, "_verify_remote_auth", lambda *_a: record("auth"))
+        monkeypatch.setattr(cli, "_provision_dotfiles", lambda *_a: record("dotfiles"))
+        monkeypatch.setattr(cli, "_provision_harness", lambda *_a: record("harness"))
+        monkeypatch.setattr(cli, "_register_codespace_plugins", empty_list)
+        monkeypatch.setattr(cli, "_provision_repo_hooks", lambda *_a: record("hooks"))
+        monkeypatch.setattr(cli, "_stage_plugins", empty_list)
+        monkeypatch.setattr(cli, "_warm_remote_auth_cache", lambda *_a, **_kw: record("warm"))
+        monkeypatch.setattr(cli, "_pipe_stdio", lambda *_a: record("pipe"))
+
+        rc = main([
+            "ssh",
+            "cs-dispatch",
+            "--stdio",
+            "--remote-cmd",
+            "copilot --acp --stdio",
+        ])
+
+        assert rc == 0
+        assert "warm" in calls
+        assert calls.index("auth") < calls.index("warm") < calls.index("open_stdio_channel")
+
+
+class TestAuthCacheWarmup:
+    @pytest.mark.asyncio
+    async def test_warmup_is_best_effort(self):
+        await cli._warm_remote_auth_cache(
+            _FailingExecManager(),
+            "cs-offline",
+            _fake_config(),
+            relay_env="export LC_GIT_CREDENTIAL_RELAY=9857;",
+        )
+
+    def test_auth_cache_warmup_can_be_requested_for_diagnostic_remote_cmd(
+        self, tmp_path, monkeypatch
+    ):
+        calls: list[str] = []
+        manager = _FakeManager(calls)
+        _patch_ssh_dependencies(monkeypatch, tmp_path, manager)
+
+        async def record(name):
+            calls.append(name)
+
+        monkeypatch.setattr(cli, "_provision_relay_helpers", lambda *_a: record("relay"))
+        monkeypatch.setattr(cli, "_verify_remote_auth", lambda *_a: record("auth"))
+        monkeypatch.setattr(cli, "_warm_remote_auth_cache", lambda *_a, **_kw: record("warm"))
+
+        rc = main([
+            "ssh",
+            "cs-diag",
+            "--remote-cmd",
+            "echo ok",
+            "--auth-cache-warmup",
+            "--timeout",
+            "5",
+        ])
+
+        assert rc == 0
+        assert "warm" in calls
 
     def test_overall_timeout_disconnects_and_releases_lock(
         self, tmp_path, monkeypatch, capsys

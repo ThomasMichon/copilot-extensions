@@ -126,6 +126,17 @@ def main(argv: list[str] | None = None) -> int:
         help="Skip credential relay tunnel setup",
     )
     ssh_parser.add_argument(
+        "--auth-cache-warmup", dest="auth_cache_warmup", action="store_true",
+        default=None,
+        help="Warm the CodeSpace's short-TTL auth cache after connect. "
+             "Defaults on for --stdio dispatch and interactive SSH; defaults "
+             "off for minimal diagnostic --remote-cmd.",
+    )
+    ssh_parser.add_argument(
+        "--no-auth-cache-warmup", dest="auth_cache_warmup", action="store_false",
+        help="Skip the best-effort CodeSpace auth-cache warm-up.",
+    )
+    ssh_parser.add_argument(
         "--repo", dest="repo", default=None,
         help="CodeSpace repository (owner/name) -- selects per-repo "
              "provision hooks without an extra lookup",
@@ -740,6 +751,10 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
                 await manager.disconnect(args.name)
                 return _ADO_AUTH_EXIT
             tracker.reached(ConnectStage.TARGET_AUTH_ENV)
+            if _should_warm_auth_cache(args, minimal_provision):
+                await _warm_remote_auth_cache(
+                    manager, args.name, config, relay_env=relay_env,
+                )
 
         # Stage related-repo plugins (repo-targeted lane) onto the CodeSpace and
         # fold their --plugin-dir paths into the launch. Best-effort: a staging
@@ -1163,6 +1178,77 @@ async def _preflight_ado_rest_token(name: str, config) -> None:
         raise AdoRestAuthError(msg)
     log.warning(msg)
     print(f"[WARN] {msg}", file=sys.stderr)
+
+
+def _should_warm_auth_cache(args: argparse.Namespace, minimal_provision: bool) -> bool:
+    """Whether this SSH connect should warm the CodeSpace auth cache."""
+    _ = minimal_provision  # the default gate is transport-shaped, not provision-shaped
+    explicit = getattr(args, "auth_cache_warmup", None)
+    if explicit is not None:
+        return bool(explicit)
+    # Keep the minimal diagnostic --remote-cmd path fast unless explicitly
+    # requested. Dispatch (--stdio) and interactive connects warm by default.
+    return not (getattr(args, "remote_cmd", None) and not getattr(args, "stdio", False))
+
+
+async def _warm_remote_auth_cache(
+    manager,
+    name: str,
+    config,
+    *,
+    relay_env: str,
+    timeout: float = 20.0,
+) -> None:
+    """Best-effort connect-time warm-up for the on-CodeSpace auth cache.
+
+    Warms the cache entries that a headless agent most often needs after the SSH
+    reverse-forward drops: git credentials for the workspace/dotfiles remote
+    hosts plus the ADO REST/feed bare-token helpers. Failures are debug-only and
+    never block the connect.
+    """
+    from .auth_preflight import REMOTE_LIST_COMMAND, host_from_url, parse_remote_hosts
+
+    async def _run_remote(cmd: str, *, command_timeout: float) -> str:
+        wrapped = f"bash -l -c {shlex.quote(cmd)}"
+        result = await manager.exec_command(name, wrapped, timeout=command_timeout)
+        if getattr(result, "exit_code", 1) != 0:
+            return ""
+        return getattr(result, "stdout", "") or ""
+
+    hosts: list[str] = []
+    try:
+        remote_output = await _run_remote(REMOTE_LIST_COMMAND, command_timeout=10.0)
+        hosts.extend(parse_remote_hosts(remote_output))
+    except Exception as exc:
+        log.debug("Auth-cache warm-up remote host discovery on %s failed: %s", name, exc)
+
+    if config.dotfiles_repo:
+        dotfiles_host = host_from_url(f"https://github.com/{config.dotfiles_repo}")
+        if dotfiles_host:
+            hosts.append(dotfiles_host)
+
+    deduped_hosts = list(dict.fromkeys(h for h in hosts if h))
+    commands = ["set +e"]
+    for host in deduped_hosts:
+        commands.append(
+            "printf '%s\\n%s\\n\\n' "
+            f"{shlex.quote('protocol=https')} {shlex.quote('host=' + host)} "
+            "| ado-auth-helper get >/dev/null 2>/dev/null || true"
+        )
+    commands.extend([
+        "azure-auth-helper get-access-token >/dev/null 2>/dev/null || true",
+        "ado-auth-helper get-access-token >/dev/null 2>/dev/null || true",
+    ])
+    command = relay_env + " " + "; ".join(commands)
+
+    try:
+        await _run_remote(command, command_timeout=timeout)
+        log.debug(
+            "Auth-cache warm-up attempted on %s for hosts: %s",
+            name, ", ".join(deduped_hosts) if deduped_hosts else "(none)",
+        )
+    except Exception as exc:
+        log.debug("Auth-cache warm-up on %s failed: %s", name, exc)
 
 
 def _lookup_codespace_repo(name: str) -> str | None:

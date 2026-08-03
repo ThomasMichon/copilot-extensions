@@ -32,6 +32,8 @@ agent-bridge; sources injected by agent-codespaces ``relay_provider``).
 from __future__ import annotations
 
 import base64
+import gzip
+import shlex
 from importlib import resources
 
 __all__ = ["asset_text", "build_provision_command"]
@@ -39,6 +41,11 @@ __all__ = ["asset_text", "build_provision_command"]
 # Asset filename -> remote install path (relative to $HOME)
 _RELAY_CLIENT = "ado-auth-helper-relay"
 _WRAPPER = "ado-auth-helper-wrapper"
+_B64_CHUNK_SIZE = 6000
+_GZIP_DECODE_PY = (
+    "import gzip,sys; "
+    "sys.stdout.buffer.write(gzip.decompress(sys.stdin.buffer.read()))"
+)
 
 # Headless-boot git hardening (#18). On a cold start-from-stopped, the
 # devcontainer's postStart runs before the agent connects (so before the
@@ -123,6 +130,30 @@ def _b64(name: str) -> str:
     return base64.b64encode(raw).decode("ascii")
 
 
+def _compressed_b64(text: str) -> str:
+    raw = gzip.compress(text.encode("utf-8"))
+    return base64.b64encode(raw).decode("ascii")
+
+
+def _chunked_payload_pipeline(payload_b64: str, tmp_name: str, sink: str) -> str:
+    """Build a shell snippet that reconstructs a compressed base64 payload.
+
+    Keep each literal chunk well below Windows' command-line/token limits. The
+    overall command stays compact because the transported payload is gzip'd
+    before base64 encoding.
+    """
+    lines = [f'_f="$HOME/{tmp_name}.$$"; : > "$_f"']
+    for i in range(0, len(payload_b64), _B64_CHUNK_SIZE):
+        chunk = payload_b64[i : i + _B64_CHUNK_SIZE]
+        lines.append(f"printf %s '{chunk}' >> \"$_f\"")
+    lines.append(
+        'base64 -d "$_f" '
+        f"| python3 -c {shlex.quote(_GZIP_DECODE_PY)} {sink}; "
+        'rm -f "$_f"'
+    )
+    return ";\n".join(lines)
+
+
 def build_provision_command() -> str:
     """Build an idempotent bash command that installs the relay helpers.
 
@@ -142,30 +173,38 @@ def build_provision_command() -> str:
     REAL extension ``auth-helper.js`` discovered at runtime -- so VS Code auth
     keeps working after an SSH disconnect (no stale static backup).
 
-    Assets are transported base64-encoded so arbitrary script content
-    survives the SSH command line intact.
+    Assets are transported as gzip-compressed base64 chunks so arbitrary script
+    content survives the SSH command line without one oversized argv token.
     """
-    relay_b64 = _b64(_RELAY_CLIENT)
-    wrapper_b64 = _b64(_WRAPPER)
-    profile_b64 = base64.b64encode(
-        _NONINTERACTIVE_GIT_PROFILE.encode("utf-8")
-    ).decode("ascii")
-    npm_scrub_b64 = base64.b64encode(
-        _STALE_NPM_TOKEN_SCRUB.encode("utf-8")
-    ).decode("ascii")
-    return (
-        "set -e; "
-        'mkdir -p "$HOME/.local/bin"; '
+    relay_b64 = _compressed_b64(asset_text(_RELAY_CLIENT))
+    wrapper_b64 = _compressed_b64(asset_text(_WRAPPER))
+    profile_b64 = _compressed_b64(_NONINTERACTIVE_GIT_PROFILE)
+    npm_scrub_b64 = _compressed_b64(_STALE_NPM_TOKEN_SCRUB)
+    parts = [
+        "set -e",
+        'mkdir -p "$HOME/.local/bin"',
         # Relay client
-        f"printf %s {relay_b64} | base64 -d > \"$HOME/.local/bin/ado-auth-helper-relay\"; "
-        'chmod +x "$HOME/.local/bin/ado-auth-helper-relay"; '
+        _chunked_payload_pipeline(
+            relay_b64,
+            ".agent-codespaces-relay-client.b64",
+            '> "$HOME/.local/bin/ado-auth-helper-relay"',
+        ),
+        'chmod +x "$HOME/.local/bin/ado-auth-helper-relay"',
         # Remove stale Azure Artifacts npm tokens from the CodeSpace user's
         # config. Best-effort: a missing Python/npmrc must not block connect.
-        "( "
-        f"printf %s {npm_scrub_b64} | base64 -d | python3 - "
-        ") || true; "
+        "(\n"
+        + _chunked_payload_pipeline(
+            npm_scrub_b64,
+            ".agent-codespaces-npm-scrub.b64",
+            "| python3 -",
+        )
+        + "\n) || true",
         # Decode the smart wrapper once to a staging file
-        f"printf %s {wrapper_b64} | base64 -d > \"$HOME/.agent-codespaces-auth-wrapper\"; "
+        _chunked_payload_pipeline(
+            wrapper_b64,
+            ".agent-codespaces-auth-wrapper.b64",
+            '> "$HOME/.agent-codespaces-auth-wrapper"',
+        ),
         # Install for both ado-auth-helper and azure-auth-helper
         'for _n in ado-auth-helper azure-auth-helper; do '
         # Back up the native helper once (skip if it is already our wrapper)
@@ -184,7 +223,7 @@ def build_provision_command() -> str:
         # ~/<name> alone is unreachable by `Executable.spawnSync('<name>')`.
         'ln -sf "$HOME/$_n" "$HOME/.local/bin/$_n"; '
         'done; '
-        'rm -f "$HOME/.agent-codespaces-auth-wrapper"; '
+        'rm -f "$HOME/.agent-codespaces-auth-wrapper"',
         # --- #133/#112/#159: pin the relay-first git credential helper --------
         # The native git config points ADO (your-org.visualstudio.com /
         # dev.azure.com) at the VS Code broker (`external-git ado-helper`), which
@@ -205,7 +244,7 @@ def build_provision_command() -> str:
         'git config --global --add "credential.${_h}.helper" ""; '
         'git config --global --add "credential.${_h}.helper" "$HOME/ado-auth-helper"; '
         "done "
-        ") || true; "
+        ") || true",
         # --- #18: headless-boot git hardening ---------------------------------
         # Persist GIT_TERMINAL_PROMPT=0 for ALL login shells so a cold
         # start-from-stopped boot step (e.g. setup-agency calling
@@ -213,14 +252,14 @@ def build_provision_command() -> str:
         # hanging on an interactive `Username:` prompt in the start-waiter path.
         # Best-effort: sudo may be unavailable on some targets, so never fail
         # the whole provision command if this part can't run.
-        "( "
-        f"printf %s {profile_b64} | base64 -d "
-        f"| sudo tee {_PROFILE_SNIPPET_PATH} >/dev/null "
-        f"&& sudo chmod 0644 {_PROFILE_SNIPPET_PATH} "
-        # The devcontainer userEnvProbe env is computed once at create and is
-        # NOT refreshed on restart, so the export above would never reach
-        # postStart without re-probing. Invalidate the cache so the next
-        # `devcontainer up` re-probes with the snippet present.
-        f"&& rm -f {_ENV_PROBE_CACHE} "
-        ") || true"
-    )
+        "(\n"
+        + _chunked_payload_pipeline(
+            profile_b64,
+            ".agent-codespaces-git-profile.b64",
+            f"| sudo tee {_PROFILE_SNIPPET_PATH} >/dev/null "
+            f"&& sudo chmod 0644 {_PROFILE_SNIPPET_PATH} "
+            f"&& rm -f {_ENV_PROBE_CACHE}",
+        )
+        + "\n) || true",
+    ]
+    return ";\n".join(parts)
