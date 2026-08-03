@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import gzip
 import re
 
 from agent_codespaces.codespace_assets import (
@@ -91,14 +92,34 @@ class TestProvisionCommand:
 
     def test_embedded_payload_roundtrips(self) -> None:
         cmd = build_provision_command()
-        # Extract base64 blobs and confirm they decode to the asset text. There
-        # are four: the relay client, the wrapper, the stale-npm-token scrub,
-        # and the #18 profile.d snippet (piped via `sudo tee` rather than `> file`).
-        blobs = re.findall(r"printf %s (\S+) \| base64 -d", cmd)
-        assert len(blobs) == 4
-        decoded = {base64.b64decode(b).decode("utf-8") for b in blobs}
+        # Extract chunked gzip+base64 blobs and confirm they decode to the
+        # original asset text. There are four: the relay client, the wrapper,
+        # stale-npm-token scrub, and the #18 profile.d snippet.
+        decoded = set(_decoded_chunked_payloads(cmd))
+        assert len(decoded) == 4
         assert asset_text("ado-auth-helper-relay") in decoded
         assert asset_text("ado-auth-helper-wrapper") in decoded
         assert any(".npmrc" in d and "_authtoken" in d for d in decoded)
         # One blob is the login-shell git hardening export.
         assert any("GIT_TERMINAL_PROMPT=0" in d for d in decoded)
+
+    def test_payload_transport_is_chunked_under_windows_argv_limits(self) -> None:
+        """No generated line/token should reintroduce the WinError 206 connect
+        failure caused by one oversized SSH command argument."""
+        cmd = build_provision_command()
+        assert len(cmd) < 30_000
+        assert max(len(line) for line in cmd.splitlines()) < 8_000
+        assert max(len(c) for c in re.findall(r"printf %s '([^']+)'", cmd)) < 8_000
+
+
+def _decoded_chunked_payloads(cmd: str) -> list[str]:
+    payloads = []
+    block_re = re.compile(
+        r'_f="\$HOME/[^"]+"; : > "\$_f";\n(?P<body>.*?)\nbase64 -d "\$_f"',
+        re.S,
+    )
+    for block in block_re.finditer(cmd):
+        chunks = re.findall(r"printf %s '([^']+)' >> \"\$_f\"", block.group("body"))
+        raw = base64.b64decode("".join(chunks))
+        payloads.append(gzip.decompress(raw).decode("utf-8"))
+    return payloads

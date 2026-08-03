@@ -82,6 +82,11 @@ function isLive(port) {
   return probe.status === 0;
 }
 
+function isCacheBackedAction() {
+  const action = process.argv[2] || "";
+  return action === "get" || action === "get-access-token";
+}
+
 // Discover a working relay from the port-mapping files the launch prelude
 // publishes under RELAY_PORTS_DIR: newest first, probe each for a live channel,
 // adopt the first that accepts, and prune a dead channel's stale mapping.
@@ -134,6 +139,14 @@ function resolveRelay() {
   if (disc) return disc;
   if (isLive(DEFAULT_RELAY_PORT)) {
     return { port: String(DEFAULT_RELAY_PORT), token: "", adoHost: "" };
+  }
+  // A relay-launched headless process keeps LC_GIT_CREDENTIAL_RELAY in its
+  // environment even after the SSH -R channel drops. For cache-backed actions,
+  // still invoke the relay client with an empty live port so it can serve the
+  // short-TTL on-CodeSpace cache. Plain VS Code shells with no relay env keep
+  // falling through to the extension helper below.
+  if (env && isCacheBackedAction() && isExecutable(RELAY_CLIENT)) {
+    return { port: "", token: "", adoHost: "" };
   }
   return null;
 }

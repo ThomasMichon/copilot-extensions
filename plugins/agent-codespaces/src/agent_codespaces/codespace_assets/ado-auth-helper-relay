@@ -30,15 +30,14 @@ RELAY_PORTS_DIR="$HOME/.agent-bridge/relay-ports"
 RELAY_PORT="${LC_GIT_CREDENTIAL_RELAY:-}"
 RELAY_TOKEN="${LC_GIT_CREDENTIAL_RELAY_TOKEN:-}"
 
-# On-device token cache (#145/#617). A recently-served BARE token
-# (get-access-token, scoped or direct) is cached under RELAY_TOKEN_CACHE_DIR so a
-# brief relay outage does not fail an in-flight `rush update` / npm / nuget
-# fetch: the credential relay lives on the caller's host, which may sleep (a
-# laptop) or briefly drop its -R tunnel. The cache is a FALLBACK only -- a live
-# relay is always preferred and refreshes the cache, and a cached token is served
-# only while within RELAY_TOKEN_CACHE_TTL seconds (default 1500 = 25 min, well
-# under an ADO token's lifetime). Files are written 0600. Git username/password
-# `get` is never cached (it relays to GCM cheaply and caching secrets is worse).
+# On-device short-TTL cache (#145/#617/#733). Recently-served borrowed
+# credentials are cached under RELAY_TOKEN_CACHE_DIR so a brief relay outage does
+# not fail an in-flight `rush update` / npm / nuget fetch or a headless `git
+# fetch`/`git push`: the credential relay lives on the caller's host, which may
+# sleep or briefly drop its -R tunnel. The cache is a FALLBACK only -- a live
+# relay is always preferred and refreshes the cache, and a cached credential is
+# served only while within RELAY_TOKEN_CACHE_TTL seconds (default 1500 = 25 min).
+# Files are written 0600.
 RELAY_TOKEN_CACHE_DIR="$HOME/.agent-bridge/token-cache"
 RELAY_TOKEN_CACHE_TTL="${LC_GIT_CREDENTIAL_RELAY_CACHE_TTL:-1500}"
 
@@ -98,11 +97,11 @@ fi
 if [ -z "$RELAY_PORT" ]; then
     if _relay_live "$DEFAULT_RELAY_PORT"; then
         RELAY_PORT="$DEFAULT_RELAY_PORT"
-    elif [ "$ACTION" = "get-access-token" ]; then
-        # No live relay reachable. For a BARE-token request, fall through with an
-        # empty port so the on-device cache fallback below can serve a recently
-        # cached token across a brief relay outage (the relay host may be asleep
-        # or its tunnel briefly down). Git `get` keeps failing fast (exit 1).
+    elif [ "$ACTION" = "get-access-token" ] || [ "$ACTION" = "get" ]; then
+        # No live relay reachable. For a cache-backed request, fall through with
+        # an empty port so the on-device cache fallback below can serve a
+        # recently cached credential across a brief relay outage (the relay host
+        # may be asleep or its tunnel briefly down).
         RELAY_PORT=""
     else
         exit 1
@@ -111,50 +110,128 @@ fi
 
 case "$ACTION" in
     get)
-        # Git credential helper mode — read stdin, proxy through relay
-        exec python3 -c "
-import socket, sys
+        # Git credential helper mode -- relay always preferred. On a successful
+        # live relay fetch, refresh the short-TTL cache keyed by
+        # protocol|host|username and return the relay response. Only when the
+        # relay is unreachable do we serve a fresh-enough cached response.
+        python3 -c '
+import hashlib, os, socket, sys, time
 
-port = int(sys.argv[1])
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.settimeout(10)
+port_s, cache_dir, ttl_s = sys.argv[1:4]
+port = int(port_s) if port_s.strip().isdigit() else 0
+ttl = float(ttl_s) if ttl_s else 0.0
 
-try:
-    s.connect(('localhost', port))
 
-    # Read stdin until blank line (git credential protocol terminator)
+def _read_stdin():
     lines = []
     for line in sys.stdin:
         lines.append(line)
-        if line.strip() == '':
+        if line.strip() == "":
             break
-    stdin_data = ''.join(lines)
+    data = "".join(lines)
+    if not data.endswith("\n\n"):
+        data = data.rstrip("\n") + "\n\n"
+    return data
 
-    # Send through relay (no action prefix — server defaults to 'get')
-    request = stdin_data
-    if not request.endswith('\n\n'):
-        request = request.rstrip('\n') + '\n\n'
 
-    s.sendall(request.encode('utf-8'))
+stdin_data = _read_stdin()
 
-    # Read response until blank line or EOF
-    s.settimeout(30)
-    response = b''
-    while True:
-        chunk = s.recv(4096)
-        if not chunk:
+
+def _request_fields(data):
+    fields = {}
+    for line in data.splitlines():
+        if not line.strip():
             break
-        response += chunk
-        if b'\n\n' in response:
-            break
+        if "=" in line:
+            k, v = line.split("=", 1)
+            fields[k] = v
+    return fields
 
-    sys.stdout.buffer.write(response)
-    sys.stdout.buffer.flush()
-except Exception:
-    sys.exit(1)
-finally:
-    s.close()
-" "$RELAY_PORT"
+
+fields = _request_fields(stdin_data)
+
+
+def _cache_file():
+    keymat = "%s|%s|%s" % (
+        fields.get("protocol", ""),
+        fields.get("host", ""),
+        fields.get("username", ""),
+    )
+    key = hashlib.sha256(("git|" + keymat).encode()).hexdigest()[:32]
+    return os.path.join(cache_dir, key + ".gitcred")
+
+
+def _read_cache():
+    try:
+        with open(_cache_file()) as fh:
+            ts = float(fh.readline().strip())
+            response = fh.read()
+    except (OSError, ValueError):
+        return ""
+    if ttl > 0 and (time.time() - ts) > ttl:
+        return ""  # expired: never serve a stale credential past the TTL
+    return response
+
+
+def _write_cache(response):
+    if ttl <= 0 or not response:
+        return
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        prev = os.umask(0o177)  # 0600 -- the credential response is a secret
+        try:
+            with open(_cache_file(), "w") as fh:
+                fh.write("%d\n" % int(time.time()))
+                fh.write(response)
+        finally:
+            os.umask(prev)
+    except OSError:
+        pass
+
+
+def _fetch():
+    if not port:
+        return ""  # no live relay -- go straight to the cache fallback
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(10)
+    try:
+        s.connect(("localhost", port))
+        s.sendall(stdin_data.encode("utf-8"))
+        s.settimeout(30)
+        response = b""
+        while True:
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            response += chunk
+            if b"\n\n" in response:
+                break
+    except OSError:
+        return ""
+    finally:
+        s.close()
+    text = response.decode("utf-8", "replace")
+    if not text.strip() or "quit=1" in text.splitlines():
+        return ""
+    return text
+
+
+resp = _fetch()
+if resp:
+    _write_cache(resp)          # refresh the cache on every live success
+    sys.stdout.write(resp)
+    sys.exit(0)
+cached = _read_cache()          # relay unreachable -> fresh-enough cache only
+if cached:
+    print(
+        "ado-auth-helper: relay unreachable; served git credential from short-TTL cache",
+        file=sys.stderr,
+    )
+    sys.stdout.write(cached)
+    sys.exit(0)
+sys.exit(1)
+' "$RELAY_PORT" "$RELAY_TOKEN_CACHE_DIR" "$RELAY_TOKEN_CACHE_TTL"
+        exit $?
         ;;
 
     get-access-token)
