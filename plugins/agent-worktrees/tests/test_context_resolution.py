@@ -19,6 +19,7 @@ from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
 from agent_worktrees import git_ops
 from agent_worktrees import installer as inst
+from agent_worktrees import repos
 
 
 def _git(*args: str, cwd) -> str:
@@ -84,6 +85,59 @@ def adopted_repo(tmp_path: Path, monkeypatch):
 def test_reverse_lookup_from_anchor(adopted_repo):
     anchor, *_ = adopted_repo
     assert m._reverse_lookup_project(anchor) == "myproj"
+
+
+def test_reverse_lookup_via_home_relative_repos_entry(tmp_path, monkeypatch):
+    """#4190: a repos-registry entry stored home-relative (``~/repo``) must still
+    reverse-lookup to its project. The WSL aperture-labs anchor is registered as
+    ``~/src/aperture-labs``; before the ``RepoEntry.local_path`` expanduser fix,
+    ``_reverse_lookup_project``'s repos fallback normalized the literal ``~``
+    onto CWD and never matched, so CWD->project discovery failed for that repo.
+
+    This drives the *repos-registry fallback* specifically: the projects
+    registry is empty, so the only path to a match is the repos entry -- exactly
+    the path that was broken."""
+    fake_home = tmp_path / "home"
+    (fake_home / "src" / "aperture-labs").mkdir(parents=True)
+    # expanduser reads these at call time (posix: HOME; nt: USERPROFILE).
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("USERPROFILE", str(fake_home))
+
+    plat = cfg.detect_platform()
+    entry = repos.RepoEntry(
+        name="aperture-labs", paths={plat: "~/src/aperture-labs"})
+    monkeypatch.setattr(
+        inst, "read_projects_registry", lambda: {"projects": {}})
+    monkeypatch.setattr(
+        "agent_worktrees.repos.read_registry",
+        lambda: types.SimpleNamespace(repos={"aperture-labs": entry}))
+
+    anchor = fake_home / "src" / "aperture-labs"
+    assert m._reverse_lookup_project(anchor) == "aperture-labs"
+
+
+def test_anchor_for_project_via_home_relative_repos_entry(tmp_path, monkeypatch):
+    """#4190 companion: ``_anchor_for_project`` (which realizes ``--project X``
+    and backs the reverse lookup) must resolve a home-relative repos entry to
+    the real absolute anchor dir -- its ``.is_dir()`` gate fails on a literal
+    ``~`` path, so before the fix ``--project`` fell back to a broken path."""
+    fake_home = tmp_path / "home"
+    (fake_home / "src" / "aperture-labs").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("USERPROFILE", str(fake_home))
+
+    plat = cfg.detect_platform()
+    entry = repos.RepoEntry(
+        name="aperture-labs", paths={plat: "~/src/aperture-labs"})
+    monkeypatch.setattr(
+        inst, "read_projects_registry", lambda: {"projects": {}})
+    monkeypatch.setattr(
+        "agent_worktrees.repos.read_registry",
+        lambda: types.SimpleNamespace(repos={"aperture-labs": entry}))
+
+    resolved = m._anchor_for_project("aperture-labs")
+    assert resolved is not None
+    assert resolved == (fake_home / "src" / "aperture-labs").resolve()
 
 
 def test_resolve_from_anchor_cwd(adopted_repo, monkeypatch):
