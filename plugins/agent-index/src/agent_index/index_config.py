@@ -57,6 +57,20 @@ class ModelProfile:
     max_seq_length: int = 1024
     # Optional service unit that runs this model's engine subprocess.
     systemd_unit: str | None = None
+    # How the indexer brings this model's engine up when it isn't already
+    # reachable:
+    #   "subprocess" -- spawn ``python -m agent_index.engine.app`` as a detached
+    #                   child process (cross-platform; the easy default for
+    #                   local / user-side installs, e.g. Windows without systemd),
+    #   "systemd"    -- start a systemd unit (Linux system deployments),
+    #   "external"   -- never manage it; a container or externally-managed task
+    #                   owns the engine, so just require it to be reachable
+    #                   (the VEI-style containerized split), and
+    #   "auto"       -- systemd when a unit is configured and ``systemctl`` is
+    #                   available, otherwise subprocess.
+    engine_mode: str = field(
+        default_factory=lambda: os.environ.get("AGENT_INDEX_ENGINE_MODE", "auto")
+    )
 
     @property
     def engine_url(self) -> str:
