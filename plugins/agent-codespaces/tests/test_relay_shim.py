@@ -36,7 +36,7 @@ class TestRelayToken:
 
 
 class TestRegisterRelay:
-    def test_enables_any_scope_azure_gated_by_codespace_token(self, isolated_tokens):
+    def test_enables_ado_rest_azure_gated_by_codespace_token(self, isolated_tokens):
         from agent_codespaces.relay_provider import register_relay
         from credential_relay import RelayBuilder
 
@@ -44,10 +44,17 @@ class TestRegisterRelay:
         register_relay(b)
         srv = b.build()
 
-        # An az-login source is present and any-scope is allowed.
+        # An az-login source is present, but the default allowlist is just the
+        # public ADO REST + Azure Storage resources -- not a wildcard broker.
         az = [s for s in srv.sources if s.name == "az-login"]
         assert len(az) == 1
+        assert az[0]._is_allowed("499b84ac-1321-427f-aa17-267ca6975798") is True
+        assert (
+            az[0]._is_allowed("499b84ac-1321-427f-aa17-267ca6975798/.default")
+            is True
+        )
         assert az[0]._is_allowed("https://storage.azure.com/.default") is True
+        assert az[0]._is_allowed("https://graph.microsoft.com/.default") is False
 
         # get-azure-token is gated, and a minted per-codespace token passes.
         assert "get-azure-token" in srv.token_required_actions
@@ -86,6 +93,30 @@ class TestRegisterRelay:
         srv = b.build()
 
         assert srv.ado_host == "example.visualstudio.com"
+
+    def test_additional_azure_resources_are_config_opt_in(
+        self, isolated_tokens, monkeypatch
+    ):
+        """Config may add exact Azure resources; defaults stay allowed."""
+        from agent_codespaces import config as cfg
+        from agent_codespaces.relay_provider import register_relay
+        from credential_relay import RelayBuilder
+
+        merged = cfg.CodespacesConfig()
+        merged.credentials.sources["az-login"] = cfg.CredentialSourceConfig(
+            enabled=True,
+            allowed_resources=["https://graph.microsoft.com/"],
+        )
+        monkeypatch.setattr(cfg, "load_merged_config", lambda: merged)
+
+        b = RelayBuilder()
+        register_relay(b)
+        srv = b.build()
+        az = [s for s in srv.sources if s.name == "az-login"][0]
+
+        assert az._is_allowed("499b84ac-1321-427f-aa17-267ca6975798") is True
+        assert az._is_allowed("https://storage.azure.com/.default") is True
+        assert az._is_allowed("https://graph.microsoft.com/.default") is True
 
     def test_no_ado_host_when_unconfigured(self, isolated_tokens, monkeypatch):
         """Unset ado_host leaves the relay default (None) -- never hardcoded."""
@@ -129,14 +160,36 @@ class TestProvisioningAndClient:
             for b in blobs
         )
 
+    def test_provision_scrubs_stale_azure_artifacts_npm_tokens(self):
+        """A baked ~/.npmrc token for an Azure Artifacts feed is removed so npm
+        flows re-borrow instead of trusting a stale file after resume (#184)."""
+        import base64 as _b64m
+        import re as _re
+
+        cmd = build_provision_command()
+        blobs = _re.findall(r"printf %s (\S+) \| base64 -d", cmd)
+        decoded = "\n".join(_b64m.b64decode(b).decode("utf-8") for b in blobs)
+
+        assert ".npmrc" in decoded
+        assert "_authtoken" in decoded
+        assert "pkgs.dev.azure.com" in decoded
+        assert ".visualstudio.com" in decoded
+
     def test_relay_client_has_scoped_azure_branch(self):
         client = asset_text("ado-auth-helper-relay")
         assert 'SCOPE="${2:-}"' in client
+        assert 'HELPER_NAME="${LC_GIT_CREDENTIAL_RELAY_HELPER:-}"' in client
         assert 'RELAY_TOKEN="${LC_GIT_CREDENTIAL_RELAY_TOKEN:-}"' in client
         # Scoped get-access-token routes to the gated get-azure-token action.
         assert "get-azure-token" in client
         assert "scope=" in client
         assert "auth=" in client
+
+    def test_relay_client_defaults_unscoped_azure_helper_to_ado_resource(self):
+        client = asset_text("ado-auth-helper-relay")
+        assert 'ADO_REST_RESOURCE="499b84ac-1321-427f-aa17-267ca6975798"' in client
+        assert '[ "$HELPER_NAME" = "azure-auth-helper" ]' in client
+        assert 'SCOPE="$ADO_REST_RESOURCE"' in client
 
     def test_relay_client_discovers_ado_host_for_bare_token(self):
         """The host-less get-access-token path supplies an ADO host so the
@@ -205,3 +258,6 @@ class TestProvisioningAndClient:
         assert "unlinkSync" in wrapper  # prune a dead channel's stale mapping
         # A discovered token/host is restored into the relay client's env.
         assert "LC_GIT_CREDENTIAL_RELAY_TOKEN" in wrapper
+        # The relay client can distinguish ado-auth-helper from azure-auth-helper.
+        assert "LC_GIT_CREDENTIAL_RELAY_HELPER" in wrapper
+        assert "path.basename(process.argv[1]" in wrapper

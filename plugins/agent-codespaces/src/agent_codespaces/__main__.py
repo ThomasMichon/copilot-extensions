@@ -606,7 +606,10 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     # exports only when the relay is in use. Built here (after the token mint)
     # so the PAT scrub can NEVER be clobbered by the relay exports.
     relay_env = _build_relay_env(
-        relay_port, relay_token, use_relay=not args.no_relay
+        relay_port,
+        relay_token,
+        use_relay=not args.no_relay,
+        ado_host=getattr(config.credentials, "ado_host", None),
     )
 
     manager = ConnectionManager()
@@ -1647,6 +1650,10 @@ def _render_codespaces_yaml(defaults: dict | None) -> str:
         "      enabled: true\n"
         "      allowed_hosts:\n"
         '        - "github.com"\n'
+        "    # az-login:\n"
+        "    #   enabled: true                    # ADO REST + Storage are defaults\n"
+        "    #   allowed_resources:               # add exact extra resources only\n"
+        '    #     - "https://graph.microsoft.com/"\n'
         f"{repo_block}"
     )
 

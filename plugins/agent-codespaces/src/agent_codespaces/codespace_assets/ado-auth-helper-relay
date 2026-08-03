@@ -23,6 +23,8 @@
 
 ACTION="${1:-}"
 SCOPE="${2:-}"
+HELPER_NAME="${LC_GIT_CREDENTIAL_RELAY_HELPER:-}"
+ADO_REST_RESOURCE="499b84ac-1321-427f-aa17-267ca6975798"
 DEFAULT_RELAY_PORT=9857
 RELAY_PORTS_DIR="$HOME/.agent-bridge/relay-ports"
 RELAY_PORT="${LC_GIT_CREDENTIAL_RELAY:-}"
@@ -156,6 +158,16 @@ finally:
         ;;
 
     get-access-token)
+        # The relay wrapper is installed as both ado-auth-helper and
+        # azure-auth-helper. Preserve the historical ADO helper behavior for
+        # package/feed clients (no scope -> direct ADO host token), but make an
+        # unscoped azure-auth-helper request useful for ADO REST clients by
+        # defaulting it to the public ADO resource. Explicit scopes/resources
+        # still win and are checked by the host-side allowlist.
+        if [ -z "$SCOPE" ] && [ "$HELPER_NAME" = "azure-auth-helper" ]; then
+            SCOPE="$ADO_REST_RESOURCE"
+        fi
+
         # ADO host discovery for the DIRECT (non-scoped) token (never hardcoded):
         #   1. LC_GIT_CREDENTIAL_RELAY_ADO_HOST (explicit, plumbed by connect)
         #   2. the workspace's git remotes (the ADO host of the checked-out repo)

@@ -143,7 +143,10 @@ function resolveRelay() {
 // them, so a discovered mapping restores the secret the gated get-azure-token
 // path needs even when the env was not inherited.
 function useRelay(r) {
-  const env = Object.assign({}, process.env, { LC_GIT_CREDENTIAL_RELAY: r.port });
+  const env = Object.assign({}, process.env, {
+    LC_GIT_CREDENTIAL_RELAY: r.port,
+    LC_GIT_CREDENTIAL_RELAY_HELPER: path.basename(process.argv[1] || ""),
+  });
   if (r.token && !env.LC_GIT_CREDENTIAL_RELAY_TOKEN) {
     env.LC_GIT_CREDENTIAL_RELAY_TOKEN = r.token;
   }

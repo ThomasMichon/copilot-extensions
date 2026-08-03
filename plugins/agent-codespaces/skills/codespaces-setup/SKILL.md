@@ -276,14 +276,16 @@ gh-auth:
 #### `az-login`
 
 Returns Azure access tokens via `az account get-access-token`. Handles
-the `get-azure-token` action only. **Disabled by default** -- this is a
-high-trust operation.
+the `get-azure-token` action only. The CodeSpace relay allows the public
+Azure DevOps REST resource (`499b84ac-1321-427f-aa17-267ca6975798`) and
+Azure Storage (`https://storage.azure.com/`) by default so a headless
+agent can mint ADO REST and dev-deploy blob-upload tokens through the
+gated helper path. Add any other Azure resources explicitly and narrowly.
 
 ```yaml
 az-login:
-  enabled: false          # Must be explicitly enabled
-  allowed_resources:      # Exact-match allowlist (required when enabled)
-    - "https://management.azure.com/"
+  enabled: true
+  allowed_resources:      # Exact-match allowlist for additional resources
     - "https://graph.microsoft.com/"
 ```
 

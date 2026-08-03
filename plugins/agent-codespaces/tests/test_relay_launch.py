@@ -9,12 +9,18 @@ from agent_codespaces.relay_launch import (
 
 
 def test_build_relay_env_scrubs_and_exports():
-    env = build_relay_env(9857, "tok123", use_relay=True)
+    env = build_relay_env(
+        9857, "tok123", use_relay=True, ado_host="example.visualstudio.com"
+    )
     # PAT scrub always prepended
     for v in SCRUB_ENV_VARS:
         assert f"unset {v};" in env
     assert "export LC_GIT_CREDENTIAL_RELAY=9857;" in env
     assert "export LC_GIT_CREDENTIAL_RELAY_TOKEN=tok123;" in env
+    assert (
+        "export LC_GIT_CREDENTIAL_RELAY_ADO_HOST=example.visualstudio.com;"
+        in env
+    )
     assert "GIT_TERMINAL_PROMPT=0" in env
     # scrub comes before the relay exports (never clobbered)
     assert env.index("unset") < env.index("LC_GIT_CREDENTIAL_RELAY")
@@ -23,6 +29,8 @@ def test_build_relay_env_scrubs_and_exports():
 def test_build_relay_env_no_relay_still_scrubs():
     env = build_relay_env(9857, "tok", use_relay=False)
     assert "unset MS_ADO_PAT;" in env
+    assert "unset AZURE_ARTIFACTS_ENV_ACCESS_TOKEN;" in env
+    assert "unset VSS_NUGET_ACCESSTOKEN;" in env
     assert "LC_GIT_CREDENTIAL_RELAY" not in env
 
 
@@ -31,6 +39,7 @@ def test_build_relay_launch_env(monkeypatch, tmp_path):
 
     class _Creds:
         relay_port = 9999
+        ado_host = "example.visualstudio.com"
 
     class _Cfg:
         credentials = _Creds()
@@ -45,6 +54,7 @@ def test_build_relay_launch_env(monkeypatch, tmp_path):
     assert port == 9999
     assert "export LC_GIT_CREDENTIAL_RELAY=9999;" in env
     assert "minted-tok" in env
+    assert "LC_GIT_CREDENTIAL_RELAY_ADO_HOST=example.visualstudio.com" in env
 
 
 def test_build_relay_launch_env_live_port_override(monkeypatch):
@@ -137,6 +147,8 @@ def test_prelude_publishes_port_mapping_file():
     assert RELAY_PORTMAP_DIR in env
     assert "relay-ports/51234.json" in env
     assert "|| true" in env  # best-effort; never aborts the prelude
+    assert '"ado_host":"%s"' in env
+    assert "LC_GIT_CREDENTIAL_RELAY_ADO_HOST" in env
     # Not published when the relay is disabled.
     assert "relay-ports" not in build_relay_env(51234, "tok", use_relay=False)
 
@@ -149,6 +161,8 @@ def test_build_relay_portmap_write_shape():
     assert "umask 177" in snip                       # 600 perms on the CS
     assert '"port":%s' in snip
     assert "$LC_GIT_CREDENTIAL_RELAY_TOKEN" in snip   # token not re-interpolated
+    assert '"ado_host":"%s"' in snip
+    assert "LC_GIT_CREDENTIAL_RELAY_ADO_HOST" in snip
     assert snip.rstrip().endswith("|| true;") or "|| true" in snip
 
 
