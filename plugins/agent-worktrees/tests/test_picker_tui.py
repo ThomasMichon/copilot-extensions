@@ -3144,12 +3144,12 @@ def test_new_worktree_no_mux_option():
             await pilot.pause()
             dlg = _scope_dlg(scr)
             assert dlg is not None
-            from agent_worktrees.picker_tui.engine import _ScopeSelectionList
+            from textual.widgets import SelectionList
             labels = [o["label"] for o in dlg._dlg["opts"]]
             assert "No Mux" in labels
             nm = labels.index("No Mux")
             await pilot.press("tab")            # Create button group -> options
-            options = dlg.query_one("#scope-opts", _ScopeSelectionList)
+            options = dlg.query_one("#scope-opts", SelectionList)
             assert options.has_focus
             for _ in range(nm):
                 await pilot.press("down")
@@ -3184,6 +3184,7 @@ def test_new_worktree_anchor_option_shows_selected_state():
             assert "Selected: none" in prompt.render().plain
             await pilot.press("tab")
             await pilot.press("space")
+            await pilot.pause()
             assert dlg._dlg["opts"][0]["label"] == "Anchor repo"
             assert dlg._dlg["opts"][0]["on"] is True
             assert "Selected: Anchor repo" in prompt.render().plain
