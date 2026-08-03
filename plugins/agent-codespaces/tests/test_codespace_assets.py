@@ -7,7 +7,10 @@ import gzip
 import re
 
 from agent_codespaces.codespace_assets import (
+    AUTH_ERROR_POLICY_INSTRUCTIONS_ROOT,
+    AUTH_ERROR_POLICY_REMOTE_PATH,
     asset_text,
+    build_auth_error_policy_command,
     build_provision_command,
 )
 
@@ -50,6 +53,18 @@ class TestAssets:
         text = asset_text("ado-auth-helper-wrapper")
         assert "quit=1" in text
         assert 'action === "get"' in text
+
+    def test_auth_error_policy_contains_mandatory_rules(self) -> None:
+        text = asset_text("auth-error-policy.instructions.md")
+        assert "\r" not in text
+        assert "Stop immediately" in text
+        assert "Report the exact error" in text
+        assert "Never run `git push --no-verify`" in text
+        assert "Do not run `az login`" in text
+        assert "device-code login" in text
+        assert "`gh auth login`" in text
+        assert "credential relay is" in text and "host-owned" in text
+        assert "stdio/ACP channel" in text
 
 
 class TestProvisionCommand:
@@ -108,6 +123,27 @@ class TestProvisionCommand:
         failure caused by one oversized SSH command argument."""
         cmd = build_provision_command()
         assert len(cmd) < 30_000
+        assert max(len(line) for line in cmd.splitlines()) < 8_000
+        assert max(len(c) for c in re.findall(r"printf %s '([^']+)'", cmd)) < 8_000
+
+
+class TestAuthErrorPolicyCommand:
+    def test_command_deploys_policy_to_custom_instructions_root(self) -> None:
+        cmd = build_auth_error_policy_command()
+        assert AUTH_ERROR_POLICY_INSTRUCTIONS_ROOT in cmd
+        assert AUTH_ERROR_POLICY_REMOTE_PATH in cmd
+        assert 'mkdir -p "$(dirname "' in cmd
+        assert "auth-error-policy.instructions.md" in cmd
+        assert "COPILOT_CUSTOM_INSTRUCTIONS_DIRS" in cmd
+        assert "|| true" in cmd  # best-effort: instruction write never blocks connect
+
+    def test_command_embeds_policy_payload(self) -> None:
+        cmd = build_auth_error_policy_command()
+        decoded = _decoded_chunked_payloads(cmd)
+        assert decoded == [asset_text("auth-error-policy.instructions.md")]
+
+    def test_command_transport_stays_small_and_chunked(self) -> None:
+        cmd = build_auth_error_policy_command()
         assert max(len(line) for line in cmd.splitlines()) < 8_000
         assert max(len(c) for c in re.findall(r"printf %s '([^']+)'", cmd)) < 8_000
 

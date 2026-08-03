@@ -122,6 +122,7 @@ def test_build_relay_env_scrub_survives_relay_exports():
     with_relay = _build_relay_env(9857, "tok", use_relay=True)
     assert "unset MS_ADO_PAT" in with_relay
     assert "LC_GIT_CREDENTIAL_RELAY=9857" in with_relay
+    assert "GCM_INTERACTIVE=never" in with_relay
     assert with_relay.index("unset MS_ADO_PAT") < with_relay.index(
         "export LC_GIT_CREDENTIAL_RELAY"
     )

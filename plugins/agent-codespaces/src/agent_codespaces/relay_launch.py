@@ -2,18 +2,20 @@
 
 agent-bridge's ``CodeSpaceSpawner`` launches copilot **detached** on the
 CodeSpace (``setsid nohup``), not via ``agent-codespaces ssh``, so it must
-reproduce the relay env prelude the ssh path injects: neutralize injected static
+reproduce the launch prelude the ssh path injects: neutralize injected static
 PATs (#160/#77) so a dispatched agent never relies on a stale token instead of
-the credential relay, export ``LC_GIT_CREDENTIAL_RELAY`` + the per-codespace
-token, and disable interactive git prompts. This is the **public seam**
-agent-bridge calls (guarded import) so the ssh path and the Session-Host path
-stay in lockstep.
+the credential relay, publish the agent-codespaces custom-instructions root,
+export ``LC_GIT_CREDENTIAL_RELAY`` + the per-codespace token, and disable
+interactive git/GCM prompts. This is the **public seam** agent-bridge calls
+(guarded import) so the ssh path and the Session-Host path stay in lockstep.
 """
 
 from __future__ import annotations
 
 import os
 import shlex
+import socket
+import sys
 from pathlib import Path
 
 # Static PATs a CodeSpace injects that must be neutralized so a dispatched agent
@@ -34,6 +36,36 @@ SCRUB_ENV_VARS: tuple[str, ...] = (
 # find an active channel back to the caller (dotfiles #489/#187/#19). Kept under
 # the same ``~/.agent-bridge`` dir the connect breadcrumb uses.
 RELAY_PORTMAP_DIR = "$HOME/.agent-bridge/relay-ports"
+
+
+def relay_listening(port: int, timeout: float = 0.5) -> bool:
+    """True if the host credential relay accepts TCP on 127.0.0.1:*port*."""
+    try:
+        with socket.create_connection(("127.0.0.1", int(port)), timeout=timeout):
+            return True
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def warn_if_relay_unavailable(
+    relay_port: int,
+    codespace_name: str,
+    *,
+    context: str = "CodeSpace connect",
+) -> bool:
+    """Warn loudly when the host relay is down before an SSH ``-R`` is built."""
+    if relay_listening(relay_port):
+        return True
+    print(
+        f"[WARN] Host credential relay is NOT listening on "
+        f"127.0.0.1:{relay_port} -- the SSH -R forward will dead-end and "
+        f"git auth over the relay (ADO push, GitHub push, headless PR/REST) "
+        f"will FAIL on CodeSpace '{codespace_name}' during {context}. The relay "
+        f"is owned by the agent-bridge daemon; start/repair it with "
+        f"`agent-bridge service restart`, then reconnect. (#560)",
+        file=sys.stderr,
+    )
+    return False
 
 
 def build_relay_portmap_write(relay_port: int) -> str:
@@ -69,18 +101,25 @@ def build_relay_env(
     """Build the CodeSpace launch-prelude env string.
 
     ALWAYS prepends the PAT scrub (so it can never be clobbered by the relay
-    exports); appends the relay exports when ``use_relay``. ``GIT_TERMINAL_PROMPT=0``
+    exports), then deploys/exports the agent-codespaces custom-instructions root,
+    and appends the relay exports when ``use_relay``. ``GIT_TERMINAL_PROMPT=0``
     keeps git from blocking on an interactive prompt when a credential can't be
-    resolved. When ``use_relay``, also publishes a port-mapping file so the auth
-    helpers can rediscover this relay channel by liveness probe even if the env
-    is not inherited by a later tool shell (see :func:`build_relay_portmap_write`).
+    resolved; ``GCM_INTERACTIVE=never`` makes Git Credential Manager fail fast
+    rather than starting an interactive broker in a headless ACP session. When
+    ``use_relay``, also publishes a port-mapping file so the auth helpers can
+    rediscover this relay channel by liveness probe even if the env is not
+    inherited by a later tool shell (see :func:`build_relay_portmap_write`).
     """
+    from .codespace_assets import build_auth_error_policy_command
+
     env = "".join(f"unset {v}; " for v in SCRUB_ENV_VARS)
+    env += build_auth_error_policy_command()
     if use_relay:
         env += (
             f"export LC_GIT_CREDENTIAL_RELAY={relay_port}; "
             f"export LC_GIT_CREDENTIAL_RELAY_TOKEN={relay_token}; "
             "export GIT_TERMINAL_PROMPT=0; "
+            "export GCM_INTERACTIVE=never; "
         )
         if ado_host:
             env += (
@@ -125,6 +164,9 @@ def build_relay_launch_env(
         else:
             port = int(cfg.credentials.relay_port)
     token = token_for(codespace_name)
+    warn_if_relay_unavailable(
+        port, codespace_name, context="Session Host dispatch",
+    )
     return (
         build_relay_env(
             port,

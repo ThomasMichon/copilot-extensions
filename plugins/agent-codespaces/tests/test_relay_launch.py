@@ -22,6 +22,9 @@ def test_build_relay_env_scrubs_and_exports():
         in env
     )
     assert "GIT_TERMINAL_PROMPT=0" in env
+    assert "GCM_INTERACTIVE=never" in env
+    assert "auth-error-policy.instructions.md" in env
+    assert "COPILOT_CUSTOM_INSTRUCTIONS_DIRS" in env
     # scrub comes before the relay exports (never clobbered)
     assert env.index("unset") < env.index("LC_GIT_CREDENTIAL_RELAY")
 
@@ -32,6 +35,8 @@ def test_build_relay_env_no_relay_still_scrubs():
     assert "unset AZURE_ARTIFACTS_ENV_ACCESS_TOKEN;" in env
     assert "unset VSS_NUGET_ACCESSTOKEN;" in env
     assert "LC_GIT_CREDENTIAL_RELAY" not in env
+    assert "auth-error-policy.instructions.md" in env
+    assert "COPILOT_CUSTOM_INSTRUCTIONS_DIRS" in env
 
 
 def test_build_relay_launch_env(monkeypatch, tmp_path):
@@ -76,6 +81,54 @@ def test_build_relay_launch_env_live_port_override(monkeypatch):
     assert "export LC_GIT_CREDENTIAL_RELAY=51234;" in env
     # config port is not consulted / not present
     assert "9999" not in env
+
+
+def test_build_relay_launch_env_preflights_dispatch_relay(monkeypatch):
+    """The agent-bridge Session Host dispatch path calls this seam before
+    establishing the CodeSpace ``-R`` forward, so the host relay is preflighted
+    here rather than only in direct ``agent-codespaces ssh``."""
+    import agent_codespaces.relay_launch as rl
+
+    class _Creds:
+        relay_port = 9999
+
+    class _Cfg:
+        credentials = _Creds()
+
+    calls = []
+    monkeypatch.setattr("agent_codespaces.config.load_merged_config",
+                        lambda: _Cfg())
+    monkeypatch.setattr("agent_codespaces.relay_token.token_for",
+                        lambda name: "minted-tok")
+    monkeypatch.setattr(
+        rl,
+        "warn_if_relay_unavailable",
+        lambda port, name, *, context: calls.append((port, name, context)) or False,
+    )
+
+    _env, port = rl.build_relay_launch_env("cs-foo", relay_port=51234)
+
+    assert port == 51234
+    assert calls == [(51234, "cs-foo", "Session Host dispatch")]
+
+
+def test_warn_if_relay_unavailable_prints_restart_remediation(capsys):
+    import socket
+
+    from agent_codespaces.relay_launch import warn_if_relay_unavailable
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+
+    assert warn_if_relay_unavailable(
+        port, "cs-foo", context="Session Host dispatch",
+    ) is False
+    err = capsys.readouterr().err
+    assert "Host credential relay is NOT listening" in err
+    assert "agent-bridge service restart" in err
+    assert "Session Host dispatch" in err
 
 
 def test_build_relay_launch_env_none_falls_back_to_config(monkeypatch, tmp_path):

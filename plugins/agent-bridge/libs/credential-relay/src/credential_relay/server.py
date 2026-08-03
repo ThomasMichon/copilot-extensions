@@ -127,6 +127,7 @@ _KNOWN_ACTIONS = frozenset({
     "get-github-token",
     "get-azure-token",
     "get-access-token",
+    "ping",
 })
 
 # git-credential "get" semantics -- a request asking for a username/password.
@@ -349,6 +350,11 @@ class CredentialRelayServer:
                 "[%s] action=%s host=%s",
                 addr, action, fields.get("host", "?"),
             )
+
+            if action == "ping":
+                writer.write(b"pong\n\n")
+                await writer.drain()
+                return
 
             # Policy check
             rejection = self.policy.check(action, fields)
