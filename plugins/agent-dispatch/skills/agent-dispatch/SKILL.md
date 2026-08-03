@@ -512,6 +512,19 @@ embodiment (a kicked CLI/mux body can hit the "Loading…" startup-seed hang and
 never claim). `--headless-label` is ignored in fleet mode. See the design doc's
 "Headless-fleet body" section.
 
+**Persistent supervisor profiles.** The installer manages a primary supervisor
+from `~/.agent-dispatch/supervisor.env` plus named profiles in
+`~/.agent-dispatch/supervisors/<name>.env` (safe names: letters, digits, `_`,
+`-`). Each profile uses the same `AGENT_DISPATCH_SUPERVISE_*` schema and becomes
+its own `agent-dispatch-supervisor-<name>` unit/task; `status`/`start`/`stop` and
+`uninstall` iterate them, deleted env files remove orphaned profiles, and
+`--no-supervisor` / client-only installs remove all supervisors. To run a fleet
+headless supervisor persistently, put the watched labels in
+`AGENT_DISPATCH_SUPERVISE_LABELS`, set any bridge agent with
+`AGENT_DISPATCH_SUPERVISE_HEADLESS_AGENT`, and put
+`--pool a,b --origin <alias> --headless` in
+`AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS`. See `docs/spawn-supervisor.md` for depth.
+
 > **Cross-machine dispatch (Phase 8, SSH-push).** Add `--target-machine <Y>` to an
 > `embody` spawn to dispatch **on another machine**: `agent-dispatch create <task>
 > --target-machine borealis --spawn --spawn-backend embody`. Because
