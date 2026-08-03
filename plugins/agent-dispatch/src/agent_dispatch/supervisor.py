@@ -153,6 +153,51 @@ def _machine_from_owner(owner: str | None) -> str | None:
     return tracking.machine_from_owner(owner)
 
 
+#: A **fleet-body** liveness verdict resolver: ``(host, bridge_session_id) ->
+#: 'live' | 'gone' | 'unknown'``. Probes a headless fleet body's agent-bridge
+#: session on its pool host over SSH; ``unknown`` is never treated as death.
+#: Injectable so tests drive verdicts deterministically.
+FleetVerdictFn = Callable[[str, str], str]
+
+#: Prefix stamped on the reservation ``session_handle`` of a headless fleet body,
+#: encoding its recovery handle as ``fleet-body:<host>:<bridge-session-id>`` (see
+#: :meth:`agent_dispatch.fleet.FleetSpawner.__call__`).
+_FLEET_BODY_PREFIX = "fleet-body:"
+
+
+def _parse_fleet_body_handle(session_handle: str | None) -> tuple[str, str] | None:
+    """Decode a ``fleet-body:<host>:<bridge-session-id>`` reservation handle.
+
+    Returns ``(host, bridge_session_id)`` for a headless fleet body whose recovery
+    handle was captured at spawn, else ``None`` (a worktree-backed embody, a
+    fleet body whose session id could not be captured, or any other handle).
+    """
+    if not session_handle or not session_handle.startswith(_FLEET_BODY_PREFIX):
+        return None
+    rest = session_handle[len(_FLEET_BODY_PREFIX):]
+    host, _sep, sid = rest.partition(":")
+    if not host or not sid:
+        return None
+    return host, sid
+
+
+def _default_fleet_verdict(host: str, bridge_session_id: str) -> str:
+    """Resolve a headless fleet body's liveness to a tri-state verdict by probing
+    its agent-bridge session on the pool ``host`` over SSH. Delegates to
+    :func:`agent_dispatch.embody.fleet_body_verdict`; every probe failure collapses
+    to ``unknown`` (never ``gone``), so recovery never fires on ignorance."""
+    from . import embody
+
+    return embody.fleet_body_verdict(host, bridge_session_id)
+
+
+def _tracking():
+    """Lazy accessor for the ``tracking`` module (its verdict constants)."""
+    from . import tracking
+
+    return tracking
+
+
 def make_embody_spawn(
     coordinator_url: str, *, driver: str = "agent-dispatch", verify_timeout: int = 0
 ) -> SpawnFn:
@@ -304,6 +349,7 @@ class Supervisor:
         stall_seconds: float = 600.0,
         liveness_fn: LivenessFn | None = None,
         verdict_fn: VerdictFn | None = None,
+        fleet_verdict_fn: FleetVerdictFn | None = None,
         nudge_fn: NudgeFn | None = None,
         turn_state_fn: TurnStateFn | None = None,
         capacity_gate: Callable[[dict], bool] | None = None,
@@ -339,6 +385,12 @@ class Supervisor:
         #: Tri-state verdict resolver used by :meth:`recover_gone`. Injectable so
         #: tests drive ``gone``/``live``/``unknown`` deterministically.
         self.verdict_fn = verdict_fn or _default_verdict
+        #: Tri-state verdict resolver for **headless fleet bodies** (probes the
+        #: body's agent-bridge session on its pool host over SSH). Used by
+        #: :meth:`recover_gone` (re-embody a confirmed-gone body) and
+        #: :meth:`hold_live_leases` (heartbeat a confirmed-live one). Injectable
+        #: for tests; ``unknown`` is never treated as death.
+        self.fleet_verdict_fn = fleet_verdict_fn or _default_fleet_verdict
         #: Nudge sender used by :meth:`nudge_stalled`. Injectable for tests.
         self.nudge_fn = nudge_fn or _default_nudge
         #: When True, the inter-cycle wait in :meth:`serve` is **interruptible by a
@@ -468,6 +520,27 @@ class Supervisor:
             if task.get("status") not in _LEASED:
                 continue
             owner = task.get("owner")
+            # Headless fleet body: probe its agent-bridge session on the pool host;
+            # heartbeat the origin lease only on a *confirmed-live* verdict, so a
+            # live-but-quiet body (no progress between beats) doesn't have its lease
+            # expire and get wrongly re-embodied. unknown/gone -> no heartbeat (the
+            # lease rides its course; recover_gone handles a confirmed-gone body).
+            fleet = _parse_fleet_body_handle(res.get("session_handle"))
+            if fleet is not None:
+                if not owner:
+                    continue
+                host, bridge_sid = fleet
+                try:
+                    fverdict = self.fleet_verdict_fn(host, bridge_sid)
+                except Exception:  # liveness is best-effort -- never fatal
+                    fverdict = _tracking().UNKNOWN
+                if fverdict == _tracking().LIVE:
+                    try:
+                        self.client.heartbeat(task["id"], owner)
+                        held += 1
+                    except DispatchError:
+                        pass
+                continue
             probe_worktree = worktree or _worktree_from_owner(owner)
             if not probe_worktree or not owner:
                 continue
@@ -528,6 +601,35 @@ class Supervisor:
                     pass
                 continue
             owner = task.get("owner")
+            # Headless fleet body: no worktree handle, but its recovery handle is
+            # the pool host's agent-bridge session -- probe THAT for liveness and
+            # release a *confirmed-gone* body so poll_once re-embodies it (the
+            # replacement resumes from the task's progress_log). Same tri-state
+            # safety as the worktree path: only GONE releases; live/unknown never.
+            fleet = _parse_fleet_body_handle(res.get("session_handle"))
+            if fleet is not None:
+                host, bridge_sid = fleet
+                try:
+                    fverdict = self.fleet_verdict_fn(host, bridge_sid)
+                except Exception:  # liveness is best-effort -- never fatal
+                    fverdict = tracking.UNKNOWN
+                if fverdict == tracking.GONE:
+                    try:
+                        self.client.fail_spawn(
+                            res["key"],
+                            detail=f"fleet body confirmed gone ({host}:{bridge_sid})",
+                        )
+                        recovered += 1
+                        log.info(
+                            "recovered gone fleet body for task %s (%s); reservation "
+                            "released for re-embody",
+                            task["id"], res["key"],
+                        )
+                    except DispatchError:
+                        log.exception(
+                            "recovery release failed for reservation %s", res["key"]
+                        )
+                continue  # fleet body handled -> don't fall to the worktree path
             worktree = res.get("worktree") or _worktree_from_owner(owner)
             if not worktree:
                 continue  # headless / no worktree handle -> not recoverable here

@@ -288,8 +288,9 @@ def test_spawn_fleet_headless_worker_builds_ssh_agent_bridge_argv(monkeypatch):
     assert "BatchMode=yes" in cmd
     assert cmd[3] == "host-b"  # alias lowercased
     remote = cmd[4]
-    # a headless ACP body via the pool host's agent-bridge, fire-and-forget
-    assert remote.startswith("agent-bridge create board-worker ")
+    # a headless ACP body via the pool host's agent-bridge, fire-and-forget, with
+    # --json (global) so the created session_id rides stdout for the recovery handle
+    assert remote.startswith("agent-bridge --json create board-worker ")
     assert "--no-wait" in remote
     # the SAME fleet seed as the CLI body rides inside the remote command
     assert "ssh brain agent-dispatch claim --task t7 fleet-t7-xyz" in remote
@@ -302,6 +303,95 @@ def test_spawn_fleet_headless_worker_requires_ssh(monkeypatch):
         embody.spawn_fleet_headless_worker(
             "a", "t1", origin="brain", owner="o", worker_id="o"
         )
+
+
+# -- headless-fleet recovery handle + liveness verdict -----------------------
+
+
+def test_parse_fleet_body_session_reads_session_id():
+    import subprocess
+    cp = subprocess.CompletedProcess(
+        args=[], returncode=0,
+        stdout='{"session_id": "abc-123", "connection": {}}', stderr="",
+    )
+    assert embody.parse_fleet_body_session(cp) == "abc-123"
+    # a miss (no json / no id) degrades to None (no recovery handle recorded)
+    bad = subprocess.CompletedProcess(args=[], returncode=0, stdout="not json", stderr="")
+    assert embody.parse_fleet_body_session(bad) is None
+    empty = subprocess.CompletedProcess(args=[], returncode=0, stdout="{}", stderr="")
+    assert embody.parse_fleet_body_session(empty) is None
+
+
+def _fake_status_run(rc, stdout, stderr=""):
+    import subprocess
+
+    def run(cmd, **kw):
+        return subprocess.CompletedProcess(cmd, rc, stdout=stdout, stderr=stderr)
+
+    return run
+
+
+@pytest.mark.parametrize(
+    "rc,stdout,stderr,expected",
+    [
+        (0, '{"status": "running"}', "", "live"),
+        (0, '{"status": "idle"}', "", "live"),          # idle == alive between turns
+        (0, '{"status": "stopped"}', "", "gone"),
+        (0, '{"status": "completed"}', "", "gone"),
+        (0, '{"status": "running", "liveness": "dead"}', "", "gone"),  # liveness wins
+        (1, "", "[FAIL] Session x not found", "gone"),   # absent -> gone
+        (1, "", "ssh: connect: Connection refused", "unknown"),  # transport -> unknown
+        (0, "not json", "", "unknown"),
+        (0, '{"status": "mystery"}', "", "unknown"),     # unrecognized -> unknown
+    ],
+)
+def test_fleet_body_verdict_classifies(monkeypatch, rc, stdout, stderr, expected):
+    monkeypatch.setattr(embody.shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(embody.subprocess, "run", _fake_status_run(rc, stdout, stderr))
+    assert embody.fleet_body_verdict("Host-B", "sid-1") == expected
+
+
+def test_fleet_body_verdict_unknown_without_ssh(monkeypatch):
+    monkeypatch.setattr(embody.shutil, "which", lambda _n: None)
+    assert embody.fleet_body_verdict("h", "sid") == "unknown"
+
+
+def test_headless_call_encodes_fleet_body_recovery_handle():
+    """A headless spawn whose create returned a session_id records a
+    `fleet-body:<host>:<sid>` recovery handle (so the body is auto-recoverable)."""
+    import subprocess
+
+    def spawn(host, task_id, *, origin, owner, worker_id, agent):
+        return subprocess.CompletedProcess(
+            args=["ssh"], returncode=0,
+            stdout='{"session_id": "brg-77"}', stderr="",
+        )
+
+    f = fleet.FleetSpawner(
+        ["lambda-core-wsl"], origin="orig", headless=True, agent="board-worker",
+        liveness=lambda h: True, spawn_fn=spawn,
+    )
+    ok, handle = f({"id": "t1"})
+    assert ok is True
+    assert handle["worktree"] is None
+    assert handle["session"] == "fleet-body:lambda-core-wsl:brg-77"
+
+
+def test_headless_call_without_session_id_falls_back_to_owner():
+    """If the create output has no session_id, the handle degrades to the synthetic
+    owner (the body still runs; it just isn't auto-recovered)."""
+    import subprocess
+
+    def spawn(host, task_id, *, origin, owner, worker_id, agent):
+        return subprocess.CompletedProcess(args=["ssh"], returncode=0, stdout="", stderr="")
+
+    f = fleet.FleetSpawner(
+        ["h"], origin="orig", headless=True, liveness=lambda h: True, spawn_fn=spawn,
+    )
+    ok, handle = f({"id": "t1"})
+    assert ok is True
+    assert handle["session"] == handle["owner"]
+    assert not handle["session"].startswith("fleet-body:")
 
 
 def test_headless_fleetspawner_defaults_to_bridge_liveness_and_headless_body(monkeypatch):

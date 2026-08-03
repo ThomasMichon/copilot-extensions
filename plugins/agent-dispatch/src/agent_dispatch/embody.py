@@ -427,7 +427,11 @@ def spawn_fleet_headless_worker(
     seed = fleet_autopilot_worker_prompt(
         task_id, origin=origin, owner=owner, worker_id=worker_id
     )
-    remote_argv = ["agent-bridge", "create", agent, seed, "--no-wait"]
+    # `--json` (a global flag, before the subcommand) makes `create --no-wait`
+    # emit the created session_id as JSON, so the caller can record a recovery
+    # handle (the pool host's agent-bridge session id) for liveness-gated
+    # re-embody -- see parse_fleet_body_session / fleet_body_verdict.
+    remote_argv = ["agent-bridge", "--json", "create", agent, seed, "--no-wait"]
     remote_cmd = " ".join(shlex.quote(a) for a in remote_argv)
     # `host` is the facility SSH alias (never a raw IP). BatchMode so a missing key
     # fails fast instead of hanging on a password prompt.
@@ -436,3 +440,103 @@ def spawn_fleet_headless_worker(
         cmd, check=False, capture_output=True, text=True, timeout=timeout,
         **no_window_kwargs(),
     )
+
+
+def parse_fleet_body_session(result: subprocess.CompletedProcess) -> str | None:
+    """Extract the agent-bridge **session id** from ``create --no-wait --json``.
+
+    The headless-fleet body is a bridge-hosted ACP session on the pool host; its
+    session id (rides the SSH stdout as JSON) is the correlator a later liveness
+    probe (:func:`fleet_body_verdict`) uses to decide whether the body is still
+    alive. Returns ``None`` on any parse miss (the caller then records no recovery
+    handle and the body simply isn't auto-recovered -- degrade safe, never fatal).
+    """
+    try:
+        data = json.loads(result.stdout or "{}")
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    sid = data.get("session_id") or data.get("session")
+    return str(sid) if sid else None
+
+
+#: agent-bridge session statuses that mean the body's ACP session has ended --
+#: a **positive** "the body is gone" signal (the vision's
+#: eventual-terminal-reconciliation lands a killed/finished child here).
+_FLEET_BODY_TERMINAL = frozenset({
+    "stopped", "completed", "failed", "ended", "error",
+    "cancelled", "canceled", "closed", "gone", "dead",
+})
+#: statuses that mean the body's session is still alive (working or idle between
+#: turns). An idle body is ALIVE -- never recovered.
+_FLEET_BODY_ALIVE = frozenset({
+    "running", "starting", "connecting", "idle", "active", "ready",
+    "live", "working", "busy",
+})
+
+
+def fleet_body_verdict(
+    host: str, session_id: str, *, timeout: float | None = None
+) -> str:
+    """Tri-state liveness of a **headless fleet body** via the pool host's bridge.
+
+    Runs ``ssh <host> agent-bridge --json status <session_id>`` and classifies,
+    mirroring :func:`agent_dispatch.tracking.liveness_verdict`'s safety contract
+    (only a *positive* answer yields GONE; anything ambiguous is UNKNOWN, so
+    recovery never fires on ignorance and cannot double-spawn a live body):
+
+    - **GONE** -- the bridge answers that the session is **absent** (not found,
+      non-zero exit) or in a **terminal** status (:data:`_FLEET_BODY_TERMINAL`),
+      or reports ``liveness`` dead/gone. The body's ACP session has ended, so a
+      non-terminal origin task means it died before completing -> re-embody.
+    - **LIVE** -- the session is present in a known-alive status
+      (:data:`_FLEET_BODY_ALIVE`).
+    - **UNKNOWN** -- ssh/bridge unreachable, timeout, unparseable output, or an
+      unrecognized status (a possibly-lagging reconcile). Left alone.
+
+    Returns the string verdict (values match ``tracking.LIVE/GONE/UNKNOWN``).
+    Never raises.
+    """
+    from . import tracking
+
+    ssh = shutil.which("ssh")
+    if ssh is None or not host or not session_id:
+        return tracking.UNKNOWN
+    remote = f"agent-bridge --json status {shlex.quote(session_id)}"
+    cmd = [
+        ssh, "-o", "BatchMode=yes", "-o", "ConnectTimeout=3",
+        host.strip().lower(), remote,
+    ]
+    try:
+        proc = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
+            cmd, check=False, capture_output=True, text=True,
+            timeout=timeout if timeout is not None else 8.0,
+            **no_window_kwargs(),
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return tracking.UNKNOWN
+    if proc.returncode != 0:
+        # A missing session exits non-zero ("[FAIL] Session <id> not found") --
+        # but so could an ssh/transport failure. Distinguish: a genuine
+        # not-found is GONE; any other non-zero (unreachable, auth) is UNKNOWN.
+        err = (proc.stderr or "") + (proc.stdout or "")
+        return tracking.GONE if "not found" in err.lower() else tracking.UNKNOWN
+    out = (proc.stdout or "").strip()
+    if not out:
+        return tracking.UNKNOWN
+    try:
+        data = json.loads(out)
+    except json.JSONDecodeError:
+        return tracking.UNKNOWN
+    if not isinstance(data, dict):
+        return tracking.UNKNOWN
+    liveness = str(data.get("liveness") or "").strip().lower()
+    if liveness in {"dead", "gone"}:
+        return tracking.GONE
+    status = str(data.get("status") or "").strip().lower()
+    if status in _FLEET_BODY_TERMINAL:
+        return tracking.GONE
+    if status in _FLEET_BODY_ALIVE:
+        return tracking.LIVE
+    return tracking.UNKNOWN  # unrecognized/lagging -> never recover on ignorance
