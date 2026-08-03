@@ -1283,6 +1283,26 @@ function Build-TerminalFragment {
     }
     $RepoAnchorMap = Get-RepoAnchorMap
 
+    # Name -> agent-exposure map, resolved from repos.yaml through the SAME
+    # source of truth the Python side uses (``repos.RepoEntry.agent``: ON for
+    # worktree/singleton, OFF for reference, explicit ``agent:`` wins). Used to
+    # lock the local self.agent launcher profile for agent-exposed projects (see
+    # the diagonal lock in the per-project loop below). Projects absent from the
+    # registry default to exposed -- an adopted project normally launches itself.
+    function Get-RepoAgentMap {
+        $map = @{}
+        if (-not (Test-Path $VenvPython)) { return $map }
+        try {
+            $json = & $VenvPython -c "import json; from agent_worktrees import repos; reg = repos.read_registry(); print(json.dumps({n: bool(e.agent) for n, e in reg.repos.items()}))" 2>$null
+            if ($json) {
+                $obj = $json | ConvertFrom-Json
+                foreach ($p in $obj.PSObject.Properties) { $map[$p.Name] = [bool]$p.Value }
+            }
+        } catch { }
+        return $map
+    }
+    $RepoAgentMap = Get-RepoAgentMap
+
     # Anchor for a project name: repos.yaml wins; fall back to a residual
     # projects.yaml 'anchor' (pre-migration file) or an explicit override.
     function Resolve-ProjectAnchor {
@@ -1528,6 +1548,23 @@ function Build-TerminalFragment {
         # empty '[]') is honored as-is.
         if ($null -eq $pSel) {
             $pSel = Get-DefaultSelection $rosterData $Machine $localDisplay
+        }
+
+        # Lock the self.agent diagonal for an agent-exposed project, mirroring
+        # profiles.normalize_selection ("a host always launches itself"): the
+        # local agent launcher is ALWAYS emitted -- even when the persisted
+        # selection is an explicit empty '[]' that predates or contradicts the
+        # project's agent exposure (a stale ``--no-agent`` seed left on a project
+        # that is in fact agent-exposed). Without this, the generator honored the
+        # empty list literally and dropped even the mandatory local launcher, so
+        # the whole project vanished from the Terminal dropdown despite
+        # ``expose_agent: true``; ``update`` could never put it back because the
+        # empty selection was faithfully reproduced. A genuine ``--no-agent``
+        # project (``agent: false``) keeps its empty selection and emits no
+        # launcher. Idempotent: the default column already carries this diagonal.
+        $pExposeAgent = if ($RepoAgentMap.ContainsKey($pName)) { [bool]$RepoAgentMap[$pName] } else { $true }
+        if ($pExposeAgent) {
+            $pSel["$localDisplay|Win|agent"] = $true
         }
 
         # Icon: prefer project-specific, fall back to agent-worktrees default
