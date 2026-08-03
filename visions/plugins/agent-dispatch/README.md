@@ -282,6 +282,23 @@ in the **producing** lane (tagged with the code target), done by a same-lane
 worker; a task is never filed into a foreign lane to "send" it there. This keeps
 one shared coordinator serving many repos without their work bleeding together.
 
+### project-addressed-invocation
+Every command of the delegation layer resolves its **target lane from an
+explicitly named project** — `--project <name>`, or the per-project `<repo>`
+binstub that supplies it — with the *same* result as being CWD-anchored inside
+that repo. So a **CWD-neutral caller** (a supervisor/daemon whose working
+directory is its own runtime dir, a script operating across several repos, a
+caller reaching in across the SSH boundary) can create, claim, embody, and browse
+a specific lane **without standing in its checkout**, and the layer is reachable
+as `<repo> dispatch …` as readily as `agent-dispatch --project <repo> …` — one
+consistent shape, whichever way in. The cross-lane escape hatch is
+*repo-lane-isolation*'s own `--all-repos` / peer-queue browse, so naming a project
+never walls off the deliberate cross-repo view. This is the delegation layer's
+concretization of the parent fabric's §Features/*address-any-project* +
+§Behaviors/*project-addressed-not-cwd-bound* — and it is the layer those fabric
+items were **mined from** (the embody supervisor that could not resolve *which*
+project to embody a queued task for from a neutral working directory).
+
 ### no-second-store
 The delegation layer **coordinates over** state the layers below own; it does not
 keep a private copy. Worker liveness and worktree identity come from the
@@ -388,3 +405,15 @@ this layer.)
   Mined from an operator design conversation refining the recovery flow (heartbeat +
   state payloads → verify-or-mitigate on a bad "done" → nudge/re-embody on a stalled
   or gone worker).
+- **2026-08-03** — Added §Behaviors/*project-addressed-invocation*: every command
+  of the layer resolves its target lane from an explicitly named project
+  (`--project`, or the `<repo>` binstub that supplies it) identically to
+  CWD-anchoring, so a CWD-neutral caller drives a specific lane without standing in
+  it and the layer is reachable as `<repo> dispatch …` as readily as `agent-dispatch
+  --project <repo> …`. Makes explicit at the leaf what the parent already owns
+  fabric-wide (§Features/*address-any-project* + §Behaviors/
+  *project-addressed-not-cwd-bound*) — and closes the loop on where those items were
+  mined from: this layer's embody supervisor (`Could not resolve a project for
+  'embody'`). Its realization (the CWD-neutral `--project`-named embody spawn) had
+  shipped without the leaf vision claiming the intent; this binds it so any effort
+  carved from the agent-dispatch delta inherits it.
