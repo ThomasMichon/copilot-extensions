@@ -22,6 +22,9 @@ def test_build_relay_env_scrubs_and_exports():
         in env
     )
     assert "GIT_TERMINAL_PROMPT=0" in env
+    assert "GCM_INTERACTIVE=never" in env
+    assert "auth-error-policy.instructions.md" in env
+    assert "COPILOT_CUSTOM_INSTRUCTIONS_DIRS" in env
     # scrub comes before the relay exports (never clobbered)
     assert env.index("unset") < env.index("LC_GIT_CREDENTIAL_RELAY")
 
@@ -32,6 +35,8 @@ def test_build_relay_env_no_relay_still_scrubs():
     assert "unset AZURE_ARTIFACTS_ENV_ACCESS_TOKEN;" in env
     assert "unset VSS_NUGET_ACCESSTOKEN;" in env
     assert "LC_GIT_CREDENTIAL_RELAY" not in env
+    assert "auth-error-policy.instructions.md" in env
+    assert "COPILOT_CUSTOM_INSTRUCTIONS_DIRS" in env
 
 
 def test_build_relay_launch_env(monkeypatch, tmp_path):

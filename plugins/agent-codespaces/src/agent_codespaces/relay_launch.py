@@ -2,12 +2,12 @@
 
 agent-bridge's ``CodeSpaceSpawner`` launches copilot **detached** on the
 CodeSpace (``setsid nohup``), not via ``agent-codespaces ssh``, so it must
-reproduce the relay env prelude the ssh path injects: neutralize injected static
+reproduce the launch prelude the ssh path injects: neutralize injected static
 PATs (#160/#77) so a dispatched agent never relies on a stale token instead of
-the credential relay, export ``LC_GIT_CREDENTIAL_RELAY`` + the per-codespace
-token, and disable interactive git prompts. This is the **public seam**
-agent-bridge calls (guarded import) so the ssh path and the Session-Host path
-stay in lockstep.
+the credential relay, publish the agent-codespaces custom-instructions root,
+export ``LC_GIT_CREDENTIAL_RELAY`` + the per-codespace token, and disable
+interactive git/GCM prompts. This is the **public seam** agent-bridge calls
+(guarded import) so the ssh path and the Session-Host path stay in lockstep.
 """
 
 from __future__ import annotations
@@ -101,18 +101,25 @@ def build_relay_env(
     """Build the CodeSpace launch-prelude env string.
 
     ALWAYS prepends the PAT scrub (so it can never be clobbered by the relay
-    exports); appends the relay exports when ``use_relay``. ``GIT_TERMINAL_PROMPT=0``
+    exports), then deploys/exports the agent-codespaces custom-instructions root,
+    and appends the relay exports when ``use_relay``. ``GIT_TERMINAL_PROMPT=0``
     keeps git from blocking on an interactive prompt when a credential can't be
-    resolved. When ``use_relay``, also publishes a port-mapping file so the auth
-    helpers can rediscover this relay channel by liveness probe even if the env
-    is not inherited by a later tool shell (see :func:`build_relay_portmap_write`).
+    resolved; ``GCM_INTERACTIVE=never`` makes Git Credential Manager fail fast
+    rather than starting an interactive broker in a headless ACP session. When
+    ``use_relay``, also publishes a port-mapping file so the auth helpers can
+    rediscover this relay channel by liveness probe even if the env is not
+    inherited by a later tool shell (see :func:`build_relay_portmap_write`).
     """
+    from .codespace_assets import build_auth_error_policy_command
+
     env = "".join(f"unset {v}; " for v in SCRUB_ENV_VARS)
+    env += build_auth_error_policy_command()
     if use_relay:
         env += (
             f"export LC_GIT_CREDENTIAL_RELAY={relay_port}; "
             f"export LC_GIT_CREDENTIAL_RELAY_TOKEN={relay_token}; "
             "export GIT_TERMINAL_PROMPT=0; "
+            "export GCM_INTERACTIVE=never; "
         )
         if ado_host:
             env += (

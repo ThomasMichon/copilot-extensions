@@ -36,11 +36,22 @@ import gzip
 import shlex
 from importlib import resources
 
-__all__ = ["asset_text", "build_provision_command"]
+__all__ = [
+    "AUTH_ERROR_POLICY_INSTRUCTIONS_ROOT",
+    "AUTH_ERROR_POLICY_REMOTE_PATH",
+    "asset_text",
+    "build_auth_error_policy_command",
+    "build_provision_command",
+]
 
 # Asset filename -> remote install path (relative to $HOME)
 _RELAY_CLIENT = "ado-auth-helper-relay"
 _WRAPPER = "ado-auth-helper-wrapper"
+_AUTH_ERROR_POLICY = "auth-error-policy.instructions.md"
+AUTH_ERROR_POLICY_INSTRUCTIONS_ROOT = "$HOME/.agent-codespaces/custom-instructions"
+AUTH_ERROR_POLICY_REMOTE_PATH = (
+    f"{AUTH_ERROR_POLICY_INSTRUCTIONS_ROOT}/.github/instructions/{_AUTH_ERROR_POLICY}"
+)
 _B64_CHUNK_SIZE = 6000
 _GZIP_DECODE_PY = (
     "import gzip,sys; "
@@ -152,6 +163,40 @@ def _chunked_payload_pipeline(payload_b64: str, tmp_name: str, sink: str) -> str
         'rm -f "$_f"'
     )
     return ";\n".join(lines)
+
+
+def build_auth_error_policy_command() -> str:
+    """Build a best-effort command that deploys the CodeSpace auth policy.
+
+    Copilot CLI auto-loads marked ``*.instructions.md`` files from
+    ``.github/instructions`` under each path in ``COPILOT_CUSTOM_INSTRUCTIONS_DIRS``.
+    The dispatch launch prelude exports a stable agent-codespaces-owned root and
+    writes the policy underneath it, so both ``agent-codespaces ssh --stdio`` and
+    agent-bridge's detached Session Host path see the same behavior-mod.
+
+    The command is idempotent (overwrite with identical content on every launch)
+    and best-effort (deployment failures are swallowed so connect is never
+    blocked by an instruction-file write).
+    """
+    policy_b64 = _compressed_b64(asset_text(_AUTH_ERROR_POLICY))
+    deploy = _chunked_payload_pipeline(
+        policy_b64,
+        ".agent-codespaces-auth-error-policy.b64",
+        f'> "{AUTH_ERROR_POLICY_REMOTE_PATH}"',
+    )
+    return (
+        "( "
+        f'mkdir -p "$(dirname "{AUTH_ERROR_POLICY_REMOTE_PATH}")";\n'
+        f"{deploy};\n"
+        f'chmod 0644 "{AUTH_ERROR_POLICY_REMOTE_PATH}" '
+        ") || true; "
+        'case ":${COPILOT_CUSTOM_INSTRUCTIONS_DIRS:-}:" in '
+        f'*":{AUTH_ERROR_POLICY_INSTRUCTIONS_ROOT}:"*) ;; '
+        '*) export COPILOT_CUSTOM_INSTRUCTIONS_DIRS='
+        '"${COPILOT_CUSTOM_INSTRUCTIONS_DIRS:+${COPILOT_CUSTOM_INSTRUCTIONS_DIRS}:}'
+        f'{AUTH_ERROR_POLICY_INSTRUCTIONS_ROOT}" ;; '
+        "esac; "
+    )
 
 
 def build_provision_command() -> str:
