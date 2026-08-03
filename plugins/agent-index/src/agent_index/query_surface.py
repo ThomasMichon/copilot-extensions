@@ -1,8 +1,72 @@
-"""Shared JSON helpers for the agent-index query surface."""
+"""Shared JSON + text helpers for the agent-index query surface.
+
+The ``*_to_dict`` helpers normalize engine result objects (or mappings) into the
+public JSON shapes; the ``format_*`` helpers render those shapes into the plain
+text the MCP tools return. Both agent-index's own tools and VEI's ``vei_*``
+tool-shim import these so hit/cluster rendering lives in exactly one place.
+"""
 
 from __future__ import annotations
 
 from typing import Any
+
+
+def clip(text: str, limit: int = 500) -> str:
+    """Truncate ``text`` to ``limit`` chars, appending an ellipsis when clipped."""
+    return text if len(text) <= limit else text[:limit] + "..."
+
+
+def format_hits(
+    hits: list[dict[str, Any]], header: str, *, show_ids: bool = False
+) -> str:
+    """Render search/find-similar hits as plain text.
+
+    ``show_ids`` appends ``id=`` / ``src=`` fields (agent-index's richer form);
+    VEI's tools leave it off to preserve their historical output byte-for-byte.
+    The caller supplies ``header`` (e.g. "Found N results for: ..."), which is
+    followed by a blank line before the hit list.
+    """
+    lines = [header, ""]
+    for i, hit in enumerate(hits, 1):
+        loc = ""
+        if hit.get("line_start") is not None:
+            loc = f" (L{hit.get('line_start')}-{hit.get('line_end')})"
+        suffix = ""
+        if show_ids:
+            suffix = (
+                f"  id={hit.get('chunk_id') or hit.get('id', '')}  "
+                f"src={hit.get('source', '')}"
+            )
+        lines.append(
+            f"[{i}] {hit.get('file_path', '')}{loc} "
+            f"[{hit.get('language', '')}/{hit.get('chunk_type', '')}] "
+            f"score={float(hit.get('score', 0.0)):.3f}{suffix}"
+        )
+        lines.append(clip(hit.get("content", "")))
+        lines.append("")
+    return "\n".join(lines)
+
+
+def format_clusters(clusters: list[dict[str, Any]], count: int) -> str:
+    """Render near-duplicate clusters as plain text (largest/tightest first)."""
+    lines = [f"Found {count} cluster(s)", ""]
+    for i, cluster in enumerate(clusters, 1):
+        rep = cluster.get("representative") or {}
+        dupe = " [has exact dupes]" if cluster.get("has_exact_dupes") else ""
+        lines.append(
+            f"[{i}] {cluster.get('bucket', '')} / {cluster.get('model_id', '')} -- "
+            f"{cluster.get('size', 0)} items, "
+            f"avg={float(cluster.get('avg_score', 0.0)):.3f}{dupe}"
+        )
+        lines.append(f"    rep: {rep.get('source', '')} :: {rep.get('file_path', '')}")
+        for member in cluster.get("members", []):
+            tag = " (exact)" if member.get("is_exact_dupe") else ""
+            lines.append(
+                f"      - {member.get('source', '')} :: {member.get('file_path', '')} "
+                f"(score={float(member.get('score', 0.0)):.3f}){tag}"
+            )
+        lines.append("")
+    return "\n".join(lines)
 
 
 def format_error(exc: BaseException) -> str:

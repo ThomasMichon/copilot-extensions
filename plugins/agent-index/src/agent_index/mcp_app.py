@@ -25,6 +25,7 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 
 from agent_index.config import ENDPOINT_ENV, client_url
+from agent_index.query_surface import format_clusters, format_hits
 
 _TIMEOUT = 30.0
 
@@ -67,49 +68,6 @@ async def _post(path: str, body: dict[str, Any]) -> dict[str, Any]:
         return resp.json()
 
 
-def _clip(text: str, limit: int = 500) -> str:
-    return text if len(text) <= limit else text[:limit] + "..."
-
-
-def _format_hits(hits: list[dict[str, Any]], header: str) -> str:
-    lines = [header, ""]
-    for i, hit in enumerate(hits, 1):
-        loc = ""
-        if hit.get("line_start") is not None:
-            loc = f" (L{hit.get('line_start')}-{hit.get('line_end')})"
-        lines.append(
-            f"[{i}] {hit.get('file_path', '')}{loc} "
-            f"[{hit.get('language', '')}/{hit.get('chunk_type', '')}] "
-            f"score={float(hit.get('score', 0.0)):.3f}  "
-            f"id={hit.get('chunk_id') or hit.get('id', '')}  "
-            f"src={hit.get('source', '')}"
-        )
-        lines.append(_clip(hit.get("content", "")))
-        lines.append("")
-    return "\n".join(lines)
-
-
-def _format_clusters(clusters: list[dict[str, Any]], count: int) -> str:
-    lines = [f"Found {count} cluster(s)", ""]
-    for i, cluster in enumerate(clusters, 1):
-        rep = cluster.get("representative") or {}
-        dupe = " [has exact dupes]" if cluster.get("has_exact_dupes") else ""
-        lines.append(
-            f"[{i}] {cluster.get('bucket', '')} / {cluster.get('model_id', '')} -- "
-            f"{cluster.get('size', 0)} items, "
-            f"avg={float(cluster.get('avg_score', 0.0)):.3f}{dupe}"
-        )
-        lines.append(f"    rep: {rep.get('source', '')} :: {rep.get('file_path', '')}")
-        for member in cluster.get("members", []):
-            tag = " (exact)" if member.get("is_exact_dupe") else ""
-            lines.append(
-                f"      - {member.get('source', '')} :: {member.get('file_path', '')} "
-                f"(score={float(member.get('score', 0.0)):.3f}){tag}"
-            )
-        lines.append("")
-    return "\n".join(lines)
-
-
 @mcp.tool()
 async def agent_index_search(
     query: str,
@@ -140,7 +98,7 @@ async def agent_index_search(
     hits = data.get("hits", [])
     if not hits:
         return f"No results for: {query}"
-    return _format_hits(hits, f"Found {len(hits)} result(s) for: {query}")
+    return format_hits(hits, f"Found {len(hits)} result(s) for: {query}", show_ids=True)
 
 
 @mcp.tool()
@@ -165,7 +123,9 @@ async def agent_index_find_similar(
     hits = data.get("hits", [])
     if not hits:
         return f"No similar items for chunk {chunk_id}"
-    return _format_hits(hits, f"Found {len(hits)} similar item(s) for chunk {chunk_id}")
+    return format_hits(
+        hits, f"Found {len(hits)} similar item(s) for chunk {chunk_id}", show_ids=True
+    )
 
 
 @mcp.tool()
@@ -202,7 +162,7 @@ async def agent_index_clusters(
     clusters = data.get("clusters", [])
     if not clusters:
         return "No clusters found for the given filters."
-    return _format_clusters(clusters, data.get("count", len(clusters)))
+    return format_clusters(clusters, data.get("count", len(clusters)))
 
 
 @mcp.tool()
