@@ -1840,6 +1840,19 @@ def _worktrees_get(key: str) -> str | None:
     return val or None
 
 
+# Explicit target project set by a top-level ``--project``/`-p` (e.g. injected by
+# the `<repo> <slug>` router). Overrides the caller-cwd-derived project in
+# ``_sender_repo()`` for the project-addressed verbs (send/create); left None for
+# a bare cwd-addressed invocation. Fleet-global verbs ignore it.
+_PROJECT_OVERRIDE: str | None = None
+
+
+def _set_project_override(project: str | None) -> None:
+    """Record the top-level ``--project`` override (see ``_sender_repo``)."""
+    global _PROJECT_OVERRIDE
+    _PROJECT_OVERRIDE = project.strip() if project and project.strip() else None
+
+
 def _get_caller_id() -> str | None:
     """Read caller identity from the current worktree (CWD).
 
@@ -1852,8 +1865,17 @@ def _get_caller_id() -> str | None:
 
 
 def _sender_repo() -> str | None:
-    """The repo the caller is dispatching *from* (``agent-worktrees get project``
-    in the CWD). Supplies the bare-venue default for machine venues."""
+    """The repo the caller is dispatching *from* -- an explicit top-level
+    ``--project`` when given, else ``agent-worktrees get project`` in the CWD.
+
+    This is the project fed into the remote worktree resolve on a machine venue
+    (``ConnectStage.WORKTREE``). The ``<repo> <slug>`` router injects
+    ``--project <repo>`` so a cross-repo dispatch (e.g. ``<repo> bridge send
+    <machine>``) is pinned to the named repo instead of the caller's cwd project
+    -- which otherwise resolves the *wrong* project's worktree on the target
+    when the caller is inside an unrelated repo's worktree."""
+    if _PROJECT_OVERRIDE:
+        return _PROJECT_OVERRIDE
     return _worktrees_get("project")
 
 
@@ -2832,6 +2854,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--json", action="store_true", default=False,
         help="Output in JSON format",
     )
+    parser.add_argument(
+        "--project", "-p", dest="project", default=None, metavar="REPO",
+        help="Scope project-addressed verbs (send/create) to REPO instead of "
+             "the caller's cwd project: the remote worktree resolve targets "
+             "REPO. Injected by the `<repo> <slug>` router (e.g. `<repo> "
+             "bridge send <machine>`). A harmless no-op for fleet-global verbs "
+             "(agents/machines/sessions).",
+    )
 
     sub = parser.add_subparsers(dest="command")
 
@@ -3362,6 +3392,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    # A top-level --project (e.g. injected by the `<repo> <slug>` router) pins
+    # the target project for the project-addressed verbs; see _sender_repo().
+    _set_project_override(getattr(args, "project", None))
 
     logging.basicConfig(
         level=logging.INFO,
