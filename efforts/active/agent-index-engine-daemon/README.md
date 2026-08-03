@@ -63,12 +63,21 @@ Locked design decisions (operator):
       documents *established* practice, not aspiration.
 
 ### Phase 2 — Dependency partition
-- [ ] Split deps into a **light service set** (versioned runtime; no torch) and a
+- [x] Split deps into a **light service set** (versioned runtime; no torch) and a
       **heavy engine set** (torch + transformers + sentence-transformers). Decide
       placement of the store (`lancedb`) and chunking (`tree-sitter`) — service
       needs the store to answer search; chunking runs where indexing runs.
+      **Done (dev17):** `lancedb` + the tree-sitter grammars
+      (`python`/`javascript`/`typescript`/`bash`) moved into base `dependencies`
+      (the light, torch-free service runtime chunks + stores); the `engine` extra is
+      now **only** torch + transformers + sentence-transformers. `pip install
+      agent-index` is a functional torch-free service; `[engine]` adds the heavy
+      stack for the durable engine venv.
 - [ ] Default query embedding to the daemon (`AGENT_INDEX_SEARCH_IN_PROCESS=0`);
-      confirm search stays responsive-when-cold via the daemon path.
+      confirm search stays responsive-when-cold via the daemon path. **Moved to
+      Phase 5** — flipping this default only makes sense once a standing engine
+      daemon exists (external mode); flipping it before the daemon lands would
+      regress a single-venv install. Kept default `1` until Phase 5.
 
 ### Phase 3 — Durable engine runtime + persistent daemon
 - [ ] Installer provisions a **durable engine venv outside the versioned runtime**

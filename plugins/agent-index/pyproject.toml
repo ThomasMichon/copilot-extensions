@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-index"
-version = "0.1.0-dev16"
+version = "0.1.0-dev17"
 description = "Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem."
 readme = "README.md"
 license = "MIT"
@@ -21,6 +21,18 @@ dependencies = [
     "pyarrow>=15.0",
     "mcp>=1.9,<2.0",
     "agent-zdd",
+    # Store + chunking belong to the light, torch-free SERVICE runtime: it
+    # reads/writes the LanceDB store and chunks source with tree-sitter (falling
+    # back to line-based chunking when a grammar is absent). The heavy embedding
+    # stack (torch + ...) is the separate ``engine`` extra, provisioned only on
+    # the engine host so a routine service update never rebuilds it (effort
+    # agent-index-engine-daemon).
+    "lancedb",
+    "tree-sitter>=0.23,<1.0",
+    "tree-sitter-python>=0.23,<1.0",
+    "tree-sitter-javascript>=0.23,<1.0",
+    "tree-sitter-typescript>=0.23,<1.0",
+    "tree-sitter-bash>=0.23,<1.0",
 ]
 
 [tool.uv.sources]
@@ -35,13 +47,17 @@ dev = [
     "fastapi",
 ]
 engine = [
+    # The heavy embedding stack -- the durable, persistent ENGINE runtime only,
+    # provisioned on the engine host (in a durable venv outside the versioned
+    # service runtime). Kept OUT of the service deps so a routine service version
+    # cutover never rebuilds torch or reloads the model (effort
+    # agent-index-engine-daemon; §warm-durable-engine).
     "torch",
     # jina-v2-base-code loads via trust_remote_code; transformers 5.x broke that
     # custom modeling path (#114). Pin below 5 so every host gets the newest
     # working 4.x -- a compat ceiling, not a capability downgrade.
     "transformers>=4.40,<5",
     "sentence-transformers",
-    "lancedb",
 ]
 
 [project.scripts]
