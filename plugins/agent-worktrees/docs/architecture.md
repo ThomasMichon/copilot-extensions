@@ -51,6 +51,28 @@ After full installation and project registration:
   cleanup-worktrees{.cmd}           #   Bulk worktree cleanup
 ```
 
+### Registry paths -- home-relative resolution (invariant)
+
+Anchor paths in `repos.yaml` are stored **per-platform** (`windows` / `wsl` /
+`linux`) and **may be home-relative** -- the WSL aperture-labs anchor, for
+instance, is registered as `~/src/aperture-labs`. Because `pathlib.Path` does
+**not** treat a leading `~` as special, every consumer **must** read a registry
+path through **`RepoEntry.local_path(plat)`**, which calls `os.path.expanduser`
+(a no-op on already-absolute entries) -- never `entry.paths[plat]` raw.
+
+This is load-bearing for **CWD->project discovery**: `_anchor_for_project`,
+`config._resolve_anchor_from_registry`, and `_reverse_lookup_project`'s repos
+fallback all compare a candidate anchor against the git top-level of CWD. A raw
+`~/…` value fails `Path(...).is_dir()` and, once normalized, joins the literal
+`~` onto CWD -- so the repo silently fails to resolve from its own checkout and
+every command demands `--project`. Regression once shipped this way (#4190,
+fixed in 1.5.3-dev352); guarded by `test_local_path_expands_home_relative`
+(repos) and the home-relative reverse-lookup / anchor tests (context
+resolution). Corollary: general `agent-*` commands resolve context **only** from
+CWD / `--project`, never from environment variables -- only session
+hooks/extensions consult the session-binding env (see
+`project-scoped-invocation` pattern).
+
 ## The Worktree Record -- Single-Writer Contract (invariant)
 
 The per-worktree tracking YAML (`~/.{project}/worktrees/{id}.yaml`) is the
