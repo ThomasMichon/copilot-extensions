@@ -1349,9 +1349,12 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 2
+        fleet_headless = bool(getattr(args, "headless", False))
         fleet = FleetSpawner(
             pool,
             origin=origin,
+            headless=fleet_headless,
+            agent=getattr(args, "headless_agent", None) or "task-worker",
             verify_timeout=getattr(args, "verify_timeout", 0) or 0,
         )
         spawn_fn = fleet
@@ -1359,13 +1362,13 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
         if headless_labels:
             print(
                 "agent-dispatch supervise: --headless-label is ignored in fleet "
-                "(--pool) mode; fleet bodies are always CLI-embodied on the pool "
-                "host.",
+                "(--pool) mode; use --headless to make all fleet bodies headless.",
                 file=sys.stderr,
             )
+        body = "headless agent-bridge ACP" if fleet_headless else "CLI-embodied"
         print(
             f"agent-dispatch supervise: fleet mode -- pool={','.join(fleet.pool)} "
-            f"origin={origin}",
+            f"origin={origin} body={body}",
             file=sys.stderr,
         )
     else:
@@ -2011,6 +2014,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="fleet mode: this coordinator's own SSH alias, which dispatched "
              "bodies report their lease back to (default: the resolved local "
              "machine). Required when the local machine can't be resolved.",
+    )
+    p.add_argument(
+        "--headless", action="store_true",
+        help="fleet (--pool) mode: embody fleet bodies as HEADLESS agent-bridge "
+             "ACP sessions on the pool host (via --headless-agent) instead of "
+             "CLI/mux embody -- sidesteps the CLI startup-seed 'Loading...' hang, "
+             "so bounded sweeps embody reliably on a remote pool host with no "
+             "human attach. Ignored outside --pool mode.",
     )
     p.set_defaults(func=_cmd_supervise)
 

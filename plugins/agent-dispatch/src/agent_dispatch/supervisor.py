@@ -185,6 +185,8 @@ def make_embody_spawn(
             return False, {"error": str(exc)}
         if result.returncode != 0:
             return False, {"error": (result.stderr or "").strip()[:200] or "nonzero exit"}
+        handle = embody.parse_handle(result)
+        return True, handle
     return spawn
 
 

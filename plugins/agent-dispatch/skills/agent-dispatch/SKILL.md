@@ -503,6 +503,15 @@ listed labels go headless; the rest stay CLI-first. Service knobs:
 `AGENT_DISPATCH_SUPERVISE_HEADLESS_LABELS` / `_HEADLESS_AGENT` in
 `supervisor.env`. See the design doc's "Per-label embody body" section.
 
+**Fleet mode (`--pool`) is fleet-wide, not per-label.** When the supervisor fans
+bodies out across a **pool of remote hosts** (`--pool a,b [--origin <alias>]`), the
+body choice is a single fleet-wide switch: default CLI/mux embody on the pool
+host, or `--headless` (with `--headless-agent`) to embody **every** fleet body as
+a headless agent-bridge ACP session there instead -- the reliable remote
+embodiment (a kicked CLI/mux body can hit the "Loading…" startup-seed hang and
+never claim). `--headless-label` is ignored in fleet mode. See the design doc's
+"Headless-fleet body" section.
+
 > **Cross-machine dispatch (Phase 8, SSH-push).** Add `--target-machine <Y>` to an
 > `embody` spawn to dispatch **on another machine**: `agent-dispatch create <task>
 > --target-machine borealis --spawn --spawn-backend embody`. Because

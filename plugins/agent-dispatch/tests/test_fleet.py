@@ -47,6 +47,28 @@ def _fake_spawn(record: list | None = None, *, ok: bool = True, rc: int = 0):
     return spawn
 
 
+def _fake_headless_spawn(record: list | None = None, *, ok: bool = True, rc: int = 0):
+    """A fake `spawn_fleet_headless_worker` returning a CompletedProcess-like.
+
+    Mirrors the headless-fleet spawn signature (an ``agent``, no ``driver`` /
+    ``verify_timeout`` / ``project``), so a test can assert the FleetSpawner
+    routes a headless body through it with the configured agent.
+    """
+    import subprocess
+
+    def spawn(host, task_id, *, origin, owner, worker_id, agent):
+        if record is not None:
+            record.append(
+                {"host": host, "task_id": task_id, "origin": origin, "owner": owner,
+                 "agent": agent}
+            )
+        return subprocess.CompletedProcess(
+            args=["ssh"], returncode=rc, stdout="", stderr="" if ok else "boom"
+        )
+
+    return spawn
+
+
 # -- host selection + liveness gate ------------------------------------------
 
 
@@ -221,6 +243,104 @@ def test_spawn_fleet_embodied_worker_requires_ssh(monkeypatch):
         embody.spawn_fleet_embodied_worker(
             "a", "t1", origin="brain", owner="o", worker_id="o"
         )
+
+
+# -- headless-fleet: agent-bridge ACP body on the pool host ------------------
+
+
+def test_host_can_bridge_probes_agent_bridge(monkeypatch):
+    """The headless-fleet liveness probe checks for `agent-bridge`, not
+    `agent-worktrees` (a headless body embodies via the pool host's bridge)."""
+    captured = {}
+
+    def fake_run(cmd, **kw):
+        import subprocess
+
+        captured["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, stdout="/usr/bin/agent-bridge", stderr="")
+
+    monkeypatch.setattr(fleet.shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(fleet.subprocess, "run", fake_run)
+    assert fleet.host_can_bridge("Host-B") is True
+    cmd = captured["cmd"]
+    assert cmd[-1] == "command -v agent-bridge"
+    assert cmd[-2] == "host-b"  # alias lowercased
+
+
+def test_spawn_fleet_headless_worker_builds_ssh_agent_bridge_argv(monkeypatch):
+    captured = {}
+
+    def fake_run(cmd, **kw):
+        import subprocess
+
+        captured["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(embody.shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(embody.subprocess, "run", fake_run)
+
+    embody.spawn_fleet_headless_worker(
+        "Host-B", "t7", origin="brain", owner="fleet-t7-xyz", worker_id="fleet-t7-xyz",
+        agent="board-worker",
+    )
+    cmd = captured["cmd"]
+    assert cmd[0] == "/usr/bin/ssh"
+    assert "BatchMode=yes" in cmd
+    assert cmd[3] == "host-b"  # alias lowercased
+    remote = cmd[4]
+    # a headless ACP body via the pool host's agent-bridge, fire-and-forget
+    assert remote.startswith("agent-bridge create board-worker ")
+    assert "--no-wait" in remote
+    # the SAME fleet seed as the CLI body rides inside the remote command
+    assert "ssh brain agent-dispatch claim --task t7 fleet-t7-xyz" in remote
+    assert "ssh brain agent-dispatch complete t7 fleet-t7-xyz --result-ref" in remote
+
+
+def test_spawn_fleet_headless_worker_requires_ssh(monkeypatch):
+    monkeypatch.setattr(embody.shutil, "which", lambda _n: None)
+    with pytest.raises(embody.EmbodyUnavailable):
+        embody.spawn_fleet_headless_worker(
+            "a", "t1", origin="brain", owner="o", worker_id="o"
+        )
+
+
+def test_headless_fleetspawner_defaults_to_bridge_liveness_and_headless_body(monkeypatch):
+    """A headless FleetSpawner defaults its liveness to host_can_bridge and its
+    body to spawn_fleet_headless_worker (no injection)."""
+    monkeypatch.setattr(fleet, "host_can_bridge", lambda _h, **_kw: True)
+    f = fleet.FleetSpawner(["a"], origin="orig", headless=True)
+    assert f.headless is True
+    assert f._spawn is embody.spawn_fleet_headless_worker
+    assert f.select({"id": "t1"}) == "a"  # bridge-liveness default admits it
+
+
+def test_headless_call_routes_agent_and_records_no_worktree():
+    """A headless spawn is driven through the headless body with the configured
+    agent, and its handle carries NO worktree (a headless body is not a worktree)."""
+    rec: list = []
+    f = fleet.FleetSpawner(
+        ["a"], origin="orig", headless=True, agent="board-worker",
+        liveness=lambda h: True, spawn_fn=_fake_headless_spawn(rec),
+    )
+    ok, handle = f({"id": "t1", "repo": "gitea.example/org/widgets"})
+    assert ok is True
+    assert handle["machine"] == "a"
+    assert handle["worktree"] is None  # headless body is not a worktree
+    assert handle["session"] == handle["owner"]
+    assert handle["owner"].startswith("fleet-t1-")
+    # the configured agent-bridge agent was handed to the headless body
+    assert rec[0]["agent"] == "board-worker"
+    assert rec[0]["owner"] == handle["owner"]
+
+
+def test_headless_call_reports_remote_failure():
+    f = fleet.FleetSpawner(
+        ["a"], origin="orig", headless=True, liveness=lambda h: True,
+        spawn_fn=_fake_headless_spawn(ok=False, rc=127),
+    )
+    ok, handle = f({"id": "t1"})
+    assert ok is False
+    assert "failed" in handle["error"]
 
 
 # -- Supervisor capacity_gate integration ------------------------------------
