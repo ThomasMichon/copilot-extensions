@@ -69,17 +69,41 @@ function sleepMs(ms) {
   }
 }
 
-// True if a credential-relay channel accepts on 127.0.0.1:<port>. The tunnel
+// Probe a credential-relay channel on 127.0.0.1:<port>. "pong" means a modern
+// serving relay answered ping; "connect" means TCP accepted but ping did not
+// answer (older relays, slow relays, or dead reverse-forward far ends); "dead"
+// means TCP connect itself failed.
 // may be up without this shell inheriting the env var (postCreateCommand / cron
 // / a dispatched tool shell), and an inherited port may be a since-torn-down
 // forward -- so liveness, not mere presence, is the signal.
-function isLive(port) {
-  if (!port) return false;
+function probeRelay(port) {
+  if (!port) return "dead";
+  const timeout = String(process.env.LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT || "1.5");
+  const timeoutMs = Math.ceil((Number(timeout) || 1.5) * 1000) + 500;
+  const script = [
+    'p="$1"',
+    't="$2"',
+    '[[ "$p" =~ ^[0-9]+$ ]] || exit 1',
+    '{ exec 3<>"/dev/tcp/127.0.0.1/$p"; } 2>/dev/null || exit 1',
+    "printf 'ping\\n\\n' >&3 || exit 2",
+    'IFS= read -r -t "$t" resp <&3 || exit 2',
+    '[ "$resp" = "pong" ] || exit 2',
+  ].join("\n");
   const probe = cp.spawnSync(
-    "bash", ["-c", "exec 3<>/dev/tcp/127.0.0.1/" + port],
-    { stdio: "ignore" }
+    "bash", ["-c", script, "bash", String(port), timeout],
+    { stdio: "ignore", timeout: timeoutMs }
   );
-  return probe.status === 0;
+  if (probe.status === 0) return "pong";
+  if (probe.status === 2) return "connect";
+  return "dead";
+}
+
+function isLive(port) {
+  return probeRelay(port) === "pong";
+}
+
+function canConnect(port) {
+  return probeRelay(port) !== "dead";
 }
 
 function isCacheBackedAction() {
@@ -88,8 +112,9 @@ function isCacheBackedAction() {
 }
 
 // Discover a working relay from the port-mapping files the launch prelude
-// publishes under RELAY_PORTS_DIR: newest first, probe each for a live channel,
-// adopt the first that accepts, and prune a dead channel's stale mapping.
+// publishes under RELAY_PORTS_DIR: newest first, prefer a serving relay that
+// answers ping, otherwise adopt the first TCP-connectable candidate (older
+// relays do not answer ping), and prune only a dead channel's stale mapping.
 // Returns { port, token, adoHost } or null. Mirrors ado-auth-helper-relay so
 // the wrapper picks the relay path (vs the VS Code helper) whenever a live
 // channel exists even if this shell never inherited LC_GIT_CREDENTIAL_RELAY
@@ -109,26 +134,31 @@ function discoverFromMappings() {
   } catch (e) {
     return null; // dir absent -- no mappings published
   }
+  let fallback = null;
   for (const e of entries) {
     let m;
     try { m = JSON.parse(fs.readFileSync(e.p, "utf8")); } catch (err) { continue; }
     const port = m && m.port ? String(m.port) : "";
     if (!port) continue;
-    if (!isLive(port)) {
+    const state = probeRelay(port);
+    if (state === "dead") {
       try { fs.unlinkSync(e.p); } catch (err) { /* best-effort prune */ }
       continue;
     }
-    return { port: port, token: m.token || "", adoHost: m.ado_host || "" };
+    const found = { port: port, token: m.token || "", adoHost: m.ado_host || "" };
+    if (state === "pong") return found;
+    if (!fallback) fallback = found;
   }
-  return null;
+  return fallback;
 }
 
-// Resolve a live relay: the inherited env port (if its channel is live), else a
+// Resolve a relay to try: the inherited env port for cache-backed actions (do
+// not ping-gate the real fetch; older relays do not answer ping), else a
 // discovered port-mapping, else the legacy default port. Returns
 // { port, token, adoHost } or null when no relay channel is reachable.
 function resolveRelay() {
   const env = process.env.LC_GIT_CREDENTIAL_RELAY;
-  if (env && isLive(env)) {
+  if (env && (isCacheBackedAction() || canConnect(env))) {
     return {
       port: env,
       token: process.env.LC_GIT_CREDENTIAL_RELAY_TOKEN || "",
@@ -137,7 +167,7 @@ function resolveRelay() {
   }
   const disc = discoverFromMappings();
   if (disc) return disc;
-  if (isLive(DEFAULT_RELAY_PORT)) {
+  if (canConnect(DEFAULT_RELAY_PORT)) {
     return { port: String(DEFAULT_RELAY_PORT), token: "", adoHost: "" };
   }
   // A relay-launched headless process keeps LC_GIT_CREDENTIAL_RELAY in its

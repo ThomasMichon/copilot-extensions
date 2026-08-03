@@ -501,13 +501,7 @@ def _relay_listening(port: int, timeout: float = 0.5) -> bool:
     the tunnel silently returns nothing (#122/#112). A quick pre-connect probe
     lets us warn loudly instead of failing silently.
     """
-    import socket
-
-    try:
-        with socket.create_connection(("127.0.0.1", port), timeout=timeout):
-            return True
-    except OSError:
-        return False
+    return relay_launch.relay_listening(port, timeout=timeout)
 
 
 def _build_launch_command(
@@ -595,14 +589,8 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
                 "to %s -- git auth over the relay will fail (#122)",
                 relay_port, args.name,
             )
-            print(
-                f"[WARN] Host credential relay is NOT listening on "
-                f"127.0.0.1:{relay_port} -- the SSH -R forward will dead-end and "
-                f"git auth over the relay (ADO push, GitHub/dotfiles push, headless "
-                f"PR/REST) will FAIL on CodeSpace '{args.name}'. The relay is owned "
-                f"by the agent-bridge daemon; start/repair it with "
-                f"`agent-bridge service restart`, then reconnect. (#122)",
-                file=sys.stderr,
+            relay_launch.warn_if_relay_unavailable(
+                relay_port, args.name, context="CodeSpace connect",
             )
         # Per-codespace relay token: the shared relay gates get-azure-token
         # (it also serves network-reachable containers), so the codespace path

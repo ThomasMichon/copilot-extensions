@@ -78,6 +78,54 @@ def test_build_relay_launch_env_live_port_override(monkeypatch):
     assert "9999" not in env
 
 
+def test_build_relay_launch_env_preflights_dispatch_relay(monkeypatch):
+    """The agent-bridge Session Host dispatch path calls this seam before
+    establishing the CodeSpace ``-R`` forward, so the host relay is preflighted
+    here rather than only in direct ``agent-codespaces ssh``."""
+    import agent_codespaces.relay_launch as rl
+
+    class _Creds:
+        relay_port = 9999
+
+    class _Cfg:
+        credentials = _Creds()
+
+    calls = []
+    monkeypatch.setattr("agent_codespaces.config.load_merged_config",
+                        lambda: _Cfg())
+    monkeypatch.setattr("agent_codespaces.relay_token.token_for",
+                        lambda name: "minted-tok")
+    monkeypatch.setattr(
+        rl,
+        "warn_if_relay_unavailable",
+        lambda port, name, *, context: calls.append((port, name, context)) or False,
+    )
+
+    _env, port = rl.build_relay_launch_env("cs-foo", relay_port=51234)
+
+    assert port == 51234
+    assert calls == [(51234, "cs-foo", "Session Host dispatch")]
+
+
+def test_warn_if_relay_unavailable_prints_restart_remediation(capsys):
+    import socket
+
+    from agent_codespaces.relay_launch import warn_if_relay_unavailable
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+
+    assert warn_if_relay_unavailable(
+        port, "cs-foo", context="Session Host dispatch",
+    ) is False
+    err = capsys.readouterr().err
+    assert "Host credential relay is NOT listening" in err
+    assert "agent-bridge service restart" in err
+    assert "Session Host dispatch" in err
+
+
 def test_build_relay_launch_env_none_falls_back_to_config(monkeypatch, tmp_path):
     """``relay_port=None`` falls back to the configured relay port when no live
     port has been published."""

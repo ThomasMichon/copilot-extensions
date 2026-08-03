@@ -41,23 +41,51 @@ RELAY_TOKEN="${LC_GIT_CREDENTIAL_RELAY_TOKEN:-}"
 RELAY_TOKEN_CACHE_DIR="$HOME/.agent-bridge/token-cache"
 RELAY_TOKEN_CACHE_TTL="${LC_GIT_CREDENTIAL_RELAY_CACHE_TTL:-1500}"
 
-# True (0) if a credential-relay channel is accepting on 127.0.0.1:<port>.
-_relay_live() { (echo >"/dev/tcp/127.0.0.1/${1:-0}") 2>/dev/null; }
+# True (0) if a credential-relay channel accepts TCP on 127.0.0.1:<port>.
+_relay_connects() {
+    local _p="${1:-0}"
+    [[ "$_p" =~ ^[0-9]+$ ]] || return 1
+    { exec 9<>"/dev/tcp/127.0.0.1/${_p}"; } 2>/dev/null || return 1
+    exec 9<&- 9>&- 2>/dev/null || true
+}
 
 # Port-discovery: if this shell never inherited LC_GIT_CREDENTIAL_RELAY, or the
 # inherited port's channel is dead (a since-torn-down forward), find a working
 # relay from the port-mapping files the launch prelude publishes under
-# RELAY_PORTS_DIR. Probe each recorded port for a live channel, adopt the first
-# that accepts (plus its token/host), and prune a dead channel's stale mapping.
+# RELAY_PORTS_DIR. Prefer a serving relay that answers ping, otherwise adopt the
+# first TCP-connectable candidate (older relays do not answer ping), and prune
+# only a genuinely dead channel's stale mapping.
 # This is how a dispatched tool shell finds an active channel back to the caller
 # (dotfiles #489/#187/#19). Falls through to the legacy default-port probe.
-if [ -z "$RELAY_PORT" ] || ! _relay_live "$RELAY_PORT"; then
+if [ -z "$RELAY_PORT" ] || ! _relay_connects "$RELAY_PORT"; then
     _disc="$(python3 - "$RELAY_PORTS_DIR" <<'PY'
 import glob, json, os, socket, sys
+
+PING_TIMEOUT = float(os.environ.get("LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT", "1.5"))
+
+
+def relay_probe(port):
+    s = socket.socket()
+    s.settimeout(PING_TIMEOUT)
+    try:
+        s.connect(("127.0.0.1", port))
+        s.sendall(b"ping\n\n")
+        data = b""
+        while b"\n\n" not in data and len(data) < 64:
+            chunk = s.recv(64)
+            if not chunk:
+                break
+            data += chunk
+        return "pong" if data.splitlines()[0:1] == [b"pong"] else "connect"
+    except OSError:
+        return "dead"
+    finally:
+        s.close()
 
 d = sys.argv[1]
 files = sorted(glob.glob(os.path.join(d, "*.json")),
                key=os.path.getmtime, reverse=True)
+fallback = None
 for f in files:
     try:
         with open(f) as fh:
@@ -65,19 +93,21 @@ for f in files:
         port = int(m["port"])
     except Exception:
         continue
-    s = socket.socket()
-    s.settimeout(0.5)
-    try:
-        s.connect(("127.0.0.1", port))
-    except OSError:
+    state = relay_probe(port)
+    if state == "dead":
         try:
             os.unlink(f)  # prune a dead channel's stale mapping
         except OSError:
             pass
         continue
-    finally:
-        s.close()
-    print("%d\t%s\t%s" % (port, m.get("token", ""), m.get("ado_host", "")))
+    line = "%d\t%s\t%s" % (port, m.get("token", ""), m.get("ado_host", ""))
+    if state == "pong":
+        print(line)
+        sys.exit(0)
+    if fallback is None:
+        fallback = line
+if fallback is not None:
+    print(fallback)
     sys.exit(0)
 sys.exit(1)
 PY
@@ -95,7 +125,7 @@ fi
 # Final fallback: probe the legacy default port (a codespace-ssh session may
 # have a RemoteForward active even without an env var or mapping file).
 if [ -z "$RELAY_PORT" ]; then
-    if _relay_live "$DEFAULT_RELAY_PORT"; then
+    if _relay_connects "$DEFAULT_RELAY_PORT"; then
         RELAY_PORT="$DEFAULT_RELAY_PORT"
     elif [ "$ACTION" = "get-access-token" ] || [ "$ACTION" = "get" ]; then
         # No live relay reachable. For a cache-backed request, fall through with

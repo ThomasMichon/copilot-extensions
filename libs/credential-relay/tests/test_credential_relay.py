@@ -131,6 +131,40 @@ class TestRequestParsing:
 
 
 # ---------------------------------------------------------------------------
+# Ping / Serving-Liveness Tests
+# ---------------------------------------------------------------------------
+class TestPingAction:
+
+    @pytest.mark.asyncio
+    async def test_ping_returns_pong_without_policy_token_or_sources(self):
+        source = MagicMock(spec=CredentialSource)
+        source.name = "source"
+        source.supports.return_value = True
+        token_validator = MagicMock(return_value=False)
+        server = CredentialRelayServer(
+            port=0,
+            sources=[source],
+            policy=RelayPolicy(allowed_actions=frozenset({"get"})),
+            token_validator=token_validator,
+            token_required_actions=frozenset({"ping"}),
+        )
+        await server.start()
+        try:
+            reader, writer = await asyncio.open_connection("127.0.0.1", server.port)
+            writer.write(b"ping\n\n")
+            await writer.drain()
+            response = await asyncio.wait_for(reader.readuntil(b"\n\n"), timeout=1)
+            writer.close()
+            await writer.wait_closed()
+        finally:
+            await server.stop()
+
+        assert response == b"pong\n\n"
+        source.supports.assert_not_called()
+        token_validator.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # Source Routing Tests
 # ---------------------------------------------------------------------------
 class TestSourceRouting:
@@ -739,4 +773,3 @@ class TestFailFast:
             assert server.stats.failfast_responses == 0
         finally:
             await server.stop()
-

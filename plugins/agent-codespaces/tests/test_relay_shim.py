@@ -7,10 +7,12 @@ import stat
 import os
 import base64
 import gzip
+import json
 import subprocess
 import sys
 import threading
 import re
+import shutil
 
 import pytest
 
@@ -265,10 +267,13 @@ class TestProvisioningAndClient:
         an active channel back to the caller (dotfiles #489/#187/#19)."""
         client = asset_text("ado-auth-helper-relay")
         assert 'RELAY_PORTS_DIR="$HOME/.agent-bridge/relay-ports"' in client
-        assert "_relay_live()" in client
-        # The inherited env port is re-validated for liveness, not trusted.
-        assert '! _relay_live "$RELAY_PORT"' in client
-        # Discovery enumerates mappings and prunes a dead channel's stale file.
+        assert "_relay_connects()" in client
+        assert "ping\\n\\n" in client
+        assert "pong" in client
+        # The inherited env port is checked only for TCP reachability; ping is
+        # not allowed to gate the real fetch (old relays do not answer ping).
+        assert '! _relay_connects "$RELAY_PORT"' in client
+        # Discovery enumerates mappings, prefers pong, and prunes only a dead channel.
         assert "glob.glob" in client
         assert "os.unlink" in client
         # Legacy default-port probe remains as the final fallback.
@@ -280,6 +285,9 @@ class TestProvisioningAndClient:
         wrapper = asset_text("ado-auth-helper-wrapper")
         assert "RELAY_PORTS_DIR" in wrapper
         assert "discoverFromMappings" in wrapper
+        assert "probeRelay" in wrapper
+        assert "ping\\\\n\\\\n" in wrapper
+        assert "pong" in wrapper
         assert "resolveRelay" in wrapper
         assert "unlinkSync" in wrapper  # prune a dead channel's stale mapping
         # A discovered token/host is restored into the relay client's env.
@@ -344,6 +352,39 @@ class _OneShotRelay:
                 conn.sendall(self.response)
 
 
+class _SilentRelay:
+    def __init__(self) -> None:
+        self.request = b""
+        self._ready = threading.Event()
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self.port = 0
+
+    def __enter__(self):
+        self._thread.start()
+        if not self._ready.wait(timeout=5):  # pragma: no cover
+            raise RuntimeError("relay did not start")
+        return self
+
+    def __exit__(self, *_exc):
+        self._thread.join(timeout=5)
+
+    def _serve(self) -> None:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            sock.listen(1)
+            self.port = sock.getsockname()[1]
+            self._ready.set()
+            conn, _addr = sock.accept()
+            with conn:
+                try:
+                    conn.settimeout(0.3)
+                    self.request = conn.recv(4096)
+                    while conn.recv(4096):
+                        pass
+                except OSError:
+                    pass
+
+
 def _run_git_cache(cache_dir, port: int, ttl: int, request: str):
     return subprocess.run(
         [sys.executable, "-c", _git_cache_python(), str(port), str(cache_dir), str(ttl)],
@@ -353,6 +394,333 @@ def _run_git_cache(cache_dir, port: int, ttl: int, request: str):
         timeout=10,
         check=False,
     )
+
+
+def _require_bash():
+    candidates = []
+    found = shutil.which("bash")
+    if found:
+        candidates.append(found)
+    if os.name == "nt":
+        candidates.extend([
+            r"C:\Program Files\Git\bin\bash.exe",
+            r"C:\Program Files\Git\usr\bin\bash.exe",
+        ])
+    for bash in candidates:
+        if not bash or not os.path.exists(bash):
+            continue
+        try:
+            result = subprocess.run(
+                [bash, "-lc", "echo ok"],
+                text=True,
+                capture_output=True,
+                timeout=5,
+                check=False,
+            )
+        except OSError:
+            continue
+        if result.returncode == 0 and "ok" in result.stdout:
+            return bash
+    pytest.skip("bash is required for /dev/tcp relay-helper probes")
+
+
+def _require_node():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is required for wrapper probe tests")
+    return node
+
+
+def _extract_bash_relay_connects() -> str:
+    client = asset_text("ado-auth-helper-relay")
+    start = client.index("_relay_connects() {")
+    end = client.index("\n}\n\n# Port-discovery", start) + len("\n}")
+    return client[start:end]
+
+
+def _extract_discovery_python() -> str:
+    client = asset_text("ado-auth-helper-relay")
+    start = client.index("<<'PY'\n") + len("<<'PY'\n")
+    end = client.index("\nPY\n)\"", start)
+    return client[start:end]
+
+
+def _extract_js_function(src: str, name: str) -> str:
+    marker = f"function {name}("
+    start = src.index(marker)
+    brace = src.index("{", start)
+    depth = 0
+    for idx in range(brace, len(src)):
+        if src[idx] == "{":
+            depth += 1
+        elif src[idx] == "}":
+            depth -= 1
+            if depth == 0:
+                return src[start:idx + 1]
+    raise AssertionError(f"could not extract {name}")
+
+
+def _write_mapping(path, port: int, token: str = "", ado_host: str = "") -> None:
+    path.write_text(
+        json.dumps({"port": port, "token": token, "ado_host": ado_host}),
+        encoding="utf-8",
+    )
+
+
+def _unused_closed_port() -> int:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+    finally:
+        sock.close()
+
+
+class TestRelayServingLiveness:
+    def test_bash_env_liveness_is_connect_not_ping_gated(self):
+        bash = _require_bash()
+        probe = _extract_bash_relay_connects() + '\n_relay_connects "$1"\n'
+        env = {**os.environ, "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.1"}
+
+        with _OneShotRelay("pong\n\n") as relay:
+            live = subprocess.run(
+                [bash, "-c", probe, "bash", str(relay.port)],
+                env=env,
+                timeout=5,
+                check=False,
+            )
+        assert live.returncode == 0
+
+        with _SilentRelay() as relay:
+            accepted = subprocess.run(
+                [bash, "-c", probe, "bash", str(relay.port)],
+                env=env,
+                timeout=5,
+                check=False,
+            )
+        assert accepted.returncode == 0
+
+    def test_python_discovery_adopts_only_serving_and_prunes_silent(
+        self, tmp_path
+    ):
+        code = _extract_discovery_python()
+        ports_dir = tmp_path / "relay-ports"
+        ports_dir.mkdir()
+        env = {**os.environ, "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.1"}
+
+        closed = _unused_closed_port()
+        with _OneShotRelay("pong\n\n") as serving, _OneShotRelay("not-pong\n\n") as old_relay:
+            serving_file = ports_dir / "serving.json"
+            old_file = ports_dir / "old.json"
+            closed_file = ports_dir / "closed.json"
+            _write_mapping(serving_file, serving.port, token="tok", ado_host="host")
+            _write_mapping(old_file, old_relay.port, token="bad")
+            _write_mapping(closed_file, closed, token="closed")
+            os.utime(serving_file, (100, 100))
+            os.utime(old_file, (200, 200))  # newest is old/no-ping
+            os.utime(closed_file, (300, 300))
+
+            result = subprocess.run(
+                [sys.executable, "-c", code, str(ports_dir)],
+                env=env,
+                text=True,
+                capture_output=True,
+                timeout=5,
+                check=False,
+            )
+
+        assert result.returncode == 0
+        assert result.stdout.strip() == f"{serving.port}\ttok\thost"
+        assert serving_file.exists()
+        assert old_file.exists()
+        assert not closed_file.exists()
+
+    def test_python_discovery_falls_back_to_connectable_without_pong(self, tmp_path):
+        code = _extract_discovery_python()
+        ports_dir = tmp_path / "relay-ports"
+        ports_dir.mkdir()
+        env = {**os.environ, "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.1"}
+
+        with _OneShotRelay("not-pong\n\n") as old_relay:
+            mapping = ports_dir / "old.json"
+            _write_mapping(mapping, old_relay.port, token="tok", ado_host="host")
+
+            result = subprocess.run(
+                [sys.executable, "-c", code, str(ports_dir)],
+                env=env,
+                text=True,
+                capture_output=True,
+                timeout=5,
+                check=False,
+            )
+
+        assert result.returncode == 0
+        assert result.stdout.strip() == f"{old_relay.port}\ttok\thost"
+        assert mapping.exists()
+
+    def test_wrapper_probe_distinguishes_pong_connect_dead(self, tmp_path):
+        bash = _require_bash()
+        node = _require_node()
+        wrapper = asset_text("ado-auth-helper-wrapper")
+        script = (
+            'const cp = require("child_process");\n'
+            + _extract_js_function(wrapper, "probeRelay")
+            + '\nconsole.log(probeRelay(process.argv[2]));\n'
+        )
+        probe = tmp_path / "probe-is-live.js"
+        probe.write_text(script, encoding="utf-8")
+        env = {
+            **os.environ,
+            "PATH": os.path.dirname(bash) + os.pathsep + os.environ.get("PATH", ""),
+            "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.1",
+        }
+
+        with _OneShotRelay("pong\n\n") as relay:
+            live = subprocess.run(
+                [node, str(probe), str(relay.port)],
+                env=env,
+                text=True,
+                capture_output=True,
+                timeout=5,
+                check=False,
+            )
+        assert live.stdout.strip() == "pong"
+
+        with _SilentRelay() as relay:
+            accepted = subprocess.run(
+                [node, str(probe), str(relay.port)],
+                env=env,
+                text=True,
+                capture_output=True,
+                timeout=5,
+                check=False,
+            )
+        assert accepted.stdout.strip() == "connect"
+
+        dead = subprocess.run(
+            [node, str(probe), str(_unused_closed_port())],
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+        assert dead.stdout.strip() == "dead"
+
+    def test_wrapper_discovery_adopts_only_serving_and_prunes_silent(
+        self, tmp_path
+    ):
+        bash = _require_bash()
+        node = _require_node()
+        wrapper = asset_text("ado-auth-helper-wrapper")
+        ports_dir = tmp_path / "relay-ports"
+        ports_dir.mkdir()
+        script = (
+            'const cp = require("child_process");\n'
+            'const fs = require("fs");\n'
+            'const path = require("path");\n'
+            f'const RELAY_PORTS_DIR = {json.dumps(str(ports_dir))};\n'
+            + _extract_js_function(wrapper, "probeRelay")
+            + "\n"
+            + _extract_js_function(wrapper, "discoverFromMappings")
+            + "\nconst r = discoverFromMappings();\n"
+            + "console.log(JSON.stringify(r));\n"
+            + "process.exit(r ? 0 : 1);\n"
+        )
+        probe = tmp_path / "probe-discovery.js"
+        probe.write_text(script, encoding="utf-8")
+        env = {
+            **os.environ,
+            "PATH": os.path.dirname(bash) + os.pathsep + os.environ.get("PATH", ""),
+            "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.1",
+        }
+
+        closed = _unused_closed_port()
+        with _OneShotRelay("pong\n\n") as serving, _OneShotRelay("not-pong\n\n") as old_relay:
+            serving_file = ports_dir / "serving.json"
+            old_file = ports_dir / "old.json"
+            closed_file = ports_dir / "closed.json"
+            _write_mapping(serving_file, serving.port, token="tok", ado_host="host")
+            _write_mapping(old_file, old_relay.port, token="bad")
+            _write_mapping(closed_file, closed, token="closed")
+            os.utime(serving_file, (100, 100))
+            os.utime(old_file, (200, 200))
+            os.utime(closed_file, (300, 300))
+
+            result = subprocess.run(
+                [node, str(probe)],
+                env=env,
+                text=True,
+                capture_output=True,
+                timeout=5,
+                check=False,
+            )
+
+        assert result.returncode == 0
+        assert json.loads(result.stdout) == {
+            "port": str(serving.port),
+            "token": "tok",
+            "adoHost": "host",
+        }
+        assert serving_file.exists()
+        assert old_file.exists()
+        assert not closed_file.exists()
+
+    def test_wrapper_env_port_without_ping_routes_to_relay_client(self, tmp_path):
+        """Version skew: a new wrapper must still use an env relay port when an
+        older server accepts real requests but does not implement ping. The
+        previous ping-gated resolveRelay returned an empty cache-only port here."""
+        bash = _require_bash()
+        node = _require_node()
+        wrapper = asset_text("ado-auth-helper-wrapper")
+        script = (
+            'const cp = require("child_process");\n'
+            'const fs = require("fs");\n'
+            'const path = require("path");\n'
+            'const DEFAULT_RELAY_PORT = 1;\n'
+            'const RELAY_PORTS_DIR = "__absent__";\n'
+            'const RELAY_CLIENT = "__relay_client__";\n'
+            'function isExecutable(_p) { return true; }\n'
+            + _extract_js_function(wrapper, "probeRelay")
+            + "\n"
+            + _extract_js_function(wrapper, "isLive")
+            + "\n"
+            + _extract_js_function(wrapper, "canConnect")
+            + "\n"
+            + _extract_js_function(wrapper, "isCacheBackedAction")
+            + "\n"
+            + _extract_js_function(wrapper, "discoverFromMappings")
+            + "\n"
+            + _extract_js_function(wrapper, "resolveRelay")
+            + "\nconst r = resolveRelay();\n"
+            + "console.log(JSON.stringify(r));\n"
+        )
+        probe = tmp_path / "probe-resolve-env.js"
+        probe.write_text(script, encoding="utf-8")
+        env = {
+            **os.environ,
+            "PATH": os.path.dirname(bash) + os.pathsep + os.environ.get("PATH", ""),
+            "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.1",
+            "LC_GIT_CREDENTIAL_RELAY_TOKEN": "tok",
+        }
+
+        with _OneShotRelay("not-pong\n\n") as old_relay:
+            env["LC_GIT_CREDENTIAL_RELAY"] = str(old_relay.port)
+            result = subprocess.run(
+                [node, str(probe), "get"],
+                env=env,
+                text=True,
+                capture_output=True,
+                timeout=5,
+                check=False,
+            )
+
+        assert result.returncode == 0
+        assert json.loads(result.stdout) == {
+            "port": str(old_relay.port),
+            "token": "tok",
+            "adoHost": "",
+        }
 
 
 class TestGitCredentialCache:
@@ -390,6 +758,22 @@ class TestGitCredentialCache:
             assert _run_git_cache(cache_dir, relay.port, 1500, self.REQUEST).returncode == 0
 
         result = _run_git_cache(cache_dir, 0, 1500, self.REQUEST)
+
+        assert result.returncode == 0
+        assert result.stdout == self.RESPONSE
+        assert "served git credential from short-TTL cache" in result.stderr
+
+    def test_serves_from_cache_when_endpoint_accepts_but_fetch_returns_empty(
+        self, tmp_path
+    ):
+        """A dead reverse-forward far end can accept TCP and then serve no
+        credential; cache fallback is driven by fetch failure, not ping."""
+        cache_dir = tmp_path / "cache"
+        with _OneShotRelay(self.RESPONSE) as relay:
+            assert _run_git_cache(cache_dir, relay.port, 1500, self.REQUEST).returncode == 0
+
+        with _SilentRelay() as relay:
+            result = _run_git_cache(cache_dir, relay.port, 1500, self.REQUEST)
 
         assert result.returncode == 0
         assert result.stdout == self.RESPONSE
