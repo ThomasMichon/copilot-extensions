@@ -135,9 +135,53 @@ Locked design decisions (operator):
       config resolved `search_in_process=False`/`engine_mode=external`,
       `engine-update` restarted the daemon (pid changed). Full suite **120 green**.
 
-### Phase 6 — Validation, parity, tests
+### Phase 6 — Adoption & onboarding (designate the indexer)
+- [ ] An explicit adoption/setup flow designates **one machine as the indexer**
+      and writes role config; a **single-machine** repo is offered the full local
+      stack. Running setup **on the designated machine** configures + (re)starts the
+      local service+engine; running it elsewhere installs the client. Realizes
+      vision §adoption-designates-one-indexer. (Home: an `agent-index setup`/`adopt`
+      command and/or installer prompts — see Open Design Questions.)
+
+### Phase 7 — Capability-matched engine device
+- [ ] Detect **CUDA compatibility + machine specs** (compute, memory) and select
+      the engine **device** — GPU when compatible, CPU only above a capability
+      floor, flagging an underpowered host. Fold in the **engine CPU-fallback fix**
+      (engine defaults `device=cuda` and 500s instead of falling back when CUDA is
+      absent — observed on Borealis WSL, Phase 5). Realizes vision
+      §capability-matched-engine-runtime.
+
+### Phase 8 — Client routing to the designated indexer
+- [ ] Adoption **generates each client's routing config** (endpoint pointing at the
+      designated indexer) reaching it over the **SSH port-forward** trusted
+      transport; clients carry no model stack. Ensure the search path **degrades
+      lexical-first** when the remote daemon is unreachable (honor
+      §responsive-when-cold cross-host). Realizes vision §local-first-standalone
+      (routing) + §adoption-designates-one-indexer (client side).
+
+### Phase 9 — Validation, parity, tests
 - [ ] Cross-platform parity (daemon + role model work without systemd); unit tests;
-      installer/lifecycle coverage; docs.
+      installer/lifecycle/adoption coverage; docs; the deferred `docs/patterns/`
+      durable-vs-versioned-runtime entry. Then the single dev17->dev18 bump and land
+      the branch to `main`.
+
+## Open Design Questions (Phases 6-8 — confirm before building)
+
+1. **Where the adoption flow lives:** a new interactive `agent-index setup`/`adopt`
+   command, vs. prompts inside `install.{ps1,sh}`, vs. purely reading an
+   operator-authored `<repo>/.agent-index/config.yaml`. (Leaning: a `setup` command
+   that writes config, with the installer staying non-interactive/idempotent.)
+2. **How the indexer is designated + discovered by clients:** repo-committed
+   `<repo>/.agent-index/config.yaml` naming the indexer host + its SSH target
+   (shared, version-controlled), vs. machine-local only. (Leaning: repo config names
+   the indexer + SSH alias; machine-local overrides.)
+3. **SSH port-forward ownership:** does the plugin *establish* a persistent tunnel
+   (a client-side systemd/scheduled task), or only point `AGENT_INDEX_ENDPOINT` at a
+   forward the operator's SSH mesh already provides? (Leaning: point + document;
+   optional managed tunnel later.)
+4. **Capability floor:** the CPU-fallback threshold (min cores / RAM) and whether an
+   underpowered host is a hard block or a warning. (Leaning: warn + proceed, with a
+   sane default floor, e.g. >=8 GB RAM / >=4 cores.)
 
 ## Validation Plan
 
@@ -154,6 +198,22 @@ Locked design decisions (operator):
       untouched by either runtime swap.
 
 ## Journal
+
+### 2026-08-03 — Scope extension: adoption / capability / routing (operator directive)
+- Operator clarified the intended **onboarding model**: adopting agent-index into a
+  harness repo **designates one machine as the indexer**; a single-machine repo is
+  offered the full local stack; adoption **detects CUDA + specs** and picks the
+  engine device (CPU fallback above a capability floor); the designated machine's
+  setup (re)starts the local service+engine, while **every other machine** installs
+  the client with **routing** to reach the designated host.
+- Vision revised (vision-extending): added **adoption-designates-one-indexer** and
+  **capability-matched-engine-runtime**, and sharpened **local-first-standalone** so
+  adoption generates each client's routing. Provenance entry added.
+- Effort plan reshaped: new **Phase 6** (adoption/onboarding), **Phase 7**
+  (capability-matched device — folds in the Phase-5 engine CPU-fallback fix),
+  **Phase 8** (client routing), and validation moves to **Phase 9**. Recorded four
+  **Open Design Questions** (flow home, indexer designation/discovery, SSH-forward
+  ownership, capability floor) to confirm with the operator before building.
 
 ### 2026-08-03 — Phase 5: service defaults to the external daemon seam
 - Flipped the two standing defaults so the torch-free service routes **all**
