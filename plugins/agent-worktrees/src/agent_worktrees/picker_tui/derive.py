@@ -130,15 +130,17 @@ def _state(w):
     # ACTIVE, PERIOD -- checked before PR/finalized, mirroring
     # ``git_ops.classify_worktree``'s active_paths precedence (it returns ACTIVE
     # before any git status/PR consideration). A live mux, a live
-    # ``inuse.<pid>.lock`` binding, OR the cached bound-Copilot hint (#1416: a
-    # bare-resumed session, cwd=home, that the mux/lock scans miss) means a live
-    # Copilot session, so surface it in the Active section IMMEDIATELY instead of
+    # ``inuse.<pid>.lock`` binding, the cached bound-Copilot hint, OR a live
+    # bridge-lock (#1416: a bare-resumed / bridge-owned session, cwd=home, that
+    # the mux/lock scans miss) means a live Copilot session, so surface it in the
+    # Active section IMMEDIATELY instead of
     # waiting for the per-worktree git classify -- the ONLY other path to ACTIVE,
     # seconds across the fleet. Doing this FIRST is what avoids flicker: a live
     # worktree that ALSO has a merged PR (just-merged, session still running)
     # must not render FINAL here and ACTIVE after Phase 2.
     if (w.get("mux_session") or w.get("mux_attached")
-            or w.get("session_lock_live") or w.get("session_bound_live")):
+            or w.get("session_lock_live") or w.get("session_bound_live")
+            or w.get("session_bridge_live")):
         return "ACTIVE"
     if pr.get("state") == "merged":
         return "FINAL"
@@ -374,6 +376,10 @@ def norm(w, machine, env):
         # bare-resumed session (cwd=home) in the Active section. Distinct from
         # mux_live; drives the classification-absent fast-pass ACTIVE.
         "session_bound_live": bool(w.get("session_bound_live")),
+        # #4272 bridge-lock: worktree hosts a live bridge-owned Copilot per the
+        # file-first bridge.lock read. Distinct from mux_live/bound_live; drives
+        # the classification-absent fast-pass ACTIVE for a bare/bridge session.
+        "session_bridge_live": bool(w.get("session_bridge_live")),
         # #93: worktree hosts a bare (un-muxed) bound Copilot -> orphan marker.
         "session_bare_orphan": bare_orphan,
         # Picker default-visibility. Keys on the origin-based ``picker_hidden``

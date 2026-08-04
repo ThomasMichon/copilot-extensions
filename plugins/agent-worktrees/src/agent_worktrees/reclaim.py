@@ -30,7 +30,7 @@ import os
 import platform
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
-from . import sessions, tracking
+from . import locks, sessions, tracking
 
 __all__ = [
     "build_process_table",
@@ -39,6 +39,7 @@ __all__ = [
     "resolve_bound_copilots",
     "find_bare_orphans",
     "bare_orphan_worktree_ids",
+    "live_bridge_worktrees",
     "reap_bound_copilots",
 ]
 
@@ -431,6 +432,43 @@ def bare_orphan_worktree_ids(
         for o in find_bare_orphans(table=table, self_pid=self_pid)
         if o.get("worktree_id")
     }
+
+
+# ---------------------------------------------------------------------------
+# Session-state lattice -- the bridge-lock layer (#4272)
+# ---------------------------------------------------------------------------
+
+def live_bridge_worktrees() -> set[str]:
+    """Worktree ids that currently host a **live bridge-owned Copilot session**.
+
+    The bridge-lock layer of the session-state lattice (#4272): agent-bridge
+    writes a provable-liveness ``bridge.lock`` (see :mod:`agent_worktrees.locks`)
+    into each Copilot session-state dir it owns, carrying the bound worktree id.
+    This reads them **file-first** -- a cheap ``stat`` sweep of
+    ``<session-state>/*/bridge.lock`` -- and returns the worktree ids whose lock
+    is provably live (owner pid alive AND start-time matches; a crashed owner
+    leaves a detectably stale lock that is skipped).
+
+    This is the cwd-independent, cheap replacement for the off-hot-path
+    ``bound_live`` reconciler at surfacing a **bare-resumed / bridge-owned**
+    session (cwd=home, invisible to the mux + registered-session scans -- #1416):
+    the lock *carries* the worktree id, so no attribution guess is needed.
+    Best-effort: an enumeration hiccup yields an empty set, never an exception.
+    """
+    out: set[str] = set()
+    try:
+        state_dir = sessions._session_state_dir()
+        if not state_dir.exists():
+            return out
+        for lock_path in state_dir.glob("*/bridge.lock"):
+            data = locks.read_lock(lock_path)
+            if data and locks.lock_is_live(data):
+                wt = data.get("worktree_id")
+                if wt:
+                    out.add(str(wt))
+    except OSError:
+        return out
+    return out
 
 
 # ---------------------------------------------------------------------------

@@ -312,6 +312,19 @@ def _build_active_paths(
     for rec in records:
         if rec.worktree_path and _fresh_bound_live_hint(rec) is True:
             active.add(_normalize_path(rec.worktree_path))
+    # #4272 bridge-lock layer: a bridge-owned Copilot writes a provable-liveness
+    # ``bridge.lock`` carrying its worktree id, so union in every worktree with a
+    # live one -- the cheap, cwd-independent, file-first successor to the
+    # off-hot-path bound_live reconciler for the #1416 bare-session case. Additive
+    # + best-effort (an empty set on any hiccup).
+    try:
+        bridge_live = reclaim.live_bridge_worktrees()
+    except Exception:
+        bridge_live = set()
+    if bridge_live:
+        for rec in records:
+            if rec.worktree_path and rec.worktree_id in bridge_live:
+                active.add(_normalize_path(rec.worktree_path))
     return active
 
 
@@ -549,6 +562,7 @@ def _worktree_to_dict(
     mux_info: sessions.MuxInfo | None = None,
     session_ctx: sessions.SessionContext | None = None,
     bare_orphan_wts: set[str] | None = None,
+    bridge_live_wts: set[str] | None = None,
 ) -> dict:
     """Serialize a WorktreeRecord to a JSON-friendly dict.
 
@@ -704,6 +718,13 @@ def _worktree_to_dict(
     # from ``mux_session``; emitted only when fresh+True to keep the dict lean.
     if _fresh_bound_live_hint(rec) is True:
         d["session_bound_live"] = True
+    # #4272 bridge-lock: a live bridge-owned Copilot for this worktree (read
+    # file-first from its bridge.lock). Surfaced so the fast (classification-
+    # absent) pass marks a bare/bridge session ACTIVE from the cheap file read,
+    # matching what _build_active_paths feeds the git-classify pass. Set only
+    # when true, to keep the dict lean.
+    if bridge_live_wts and rec.worktree_id in bridge_live_wts:
+        d["session_bridge_live"] = True
     return d
 
 
@@ -10482,6 +10503,26 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("post-exit", help="Post-exit worktree checks (idempotent)")
     p.add_argument("worktree_id", nargs="?", default=None)
 
+    # session-lock (session-state lattice: bridge/mux liveness marker, #4272)
+    p = sub.add_parser(
+        "session-lock",
+        help="Write/remove a session-state lattice lock -- a provable-liveness "
+             "marker beside Copilot's inuse lock, so the picker reads a "
+             "bridge/mux session's liveness file-first",
+    )
+    p.add_argument("action", choices=["write", "remove"])
+    p.add_argument("--session", required=True,
+                   help="Copilot session id (the session-state dir name)")
+    p.add_argument("--worktree", default=None,
+                   help="Worktree id this session is bound to (recorded in the "
+                        "lock for cwd-independent attribution)")
+    p.add_argument("--pid", type=int, default=None,
+                   help="Owner process pid whose liveness the lock proves "
+                        "(e.g. the bridge-owned Copilot child); default: caller")
+    p.add_argument("--kind", default="bridge", choices=["bridge"],
+                   help="Lattice layer (default: bridge)")
+    p.add_argument("--json", action="store_true", help="JSON output mode")
+
     # finalize
     p = sub.add_parser(
         "finalize",
@@ -12318,9 +12359,49 @@ def cmd_config_migrate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_session_lock(args: argparse.Namespace) -> int:
+    """Write or remove a session-state lattice lock (#4272).
+
+    The producer-facing CLI for a per-session provable-liveness lock, so an
+    out-of-process owner (agent-bridge, which already shells to
+    ``agent-worktrees resolve``) can mark/unmark a Copilot session's liveness
+    without importing this package. The lock lives beside Copilot's own
+    ``inuse.<pid>.lock`` in ``<session-state>/<session>/<kind>.lock`` -- the
+    lattice-in-one-dir shape the picker reads file-first.
+
+    ``write`` records the OWNER process (``--pid``, e.g. the bridge-owned Copilot
+    child) plus its start-time and the bound ``--worktree`` id, so a reader can
+    both prove liveness and attribute the session cwd-independently (the #1416
+    bare-session fix). ``remove`` clears it at clean teardown. Best-effort:
+    never raises; a write failure returns nonzero.
+    """
+    from . import locks, sessions
+
+    state_dir = sessions._session_state_dir()
+    lock_path = state_dir / args.session / f"{args.kind}.lock"
+    if args.action == "remove":
+        locks.remove_lock(lock_path)
+        if getattr(args, "json", False):
+            print(json.dumps({"ok": True, "action": "remove",
+                              "path": str(lock_path)}))
+        return 0
+    # write
+    extra: dict = {"kind": args.kind, "session_id": args.session}
+    if args.worktree:
+        extra["worktree_id"] = args.worktree
+    ok = locks.write_lock(lock_path, pid=args.pid, extra=extra)
+    if getattr(args, "json", False):
+        print(json.dumps({"ok": ok, "action": "write", "path": str(lock_path),
+                          "worktree_id": args.worktree, "pid": args.pid}))
+    elif not ok:
+        print(f"session-lock: failed to write {lock_path}", file=sys.stderr)
+    return 0 if ok else 1
+
+
 COMMAND_MAP = {
     "resolve": cmd_resolve,
     "post-exit": cmd_post_exit,
+    "session-lock": cmd_session_lock,
     "finalize": cmd_finalize,
     "push-changes": cmd_push_changes,
     "create-pr": cmd_create_pr,
@@ -12672,6 +12753,7 @@ _NO_PROJECT_COMMANDS = {
     "--version", "-V", "--help", "-h", "repos", "accounts", "install", "register", "hook",
     "picker", "reap-shells", "status-updater", "restart", "register-session",
     "head-session", "conclude-session", "link-succession", "config-migrate",
+    "session-lock",
 }
 
 
