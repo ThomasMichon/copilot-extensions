@@ -144,17 +144,40 @@ def cmd_setup(args: argparse.Namespace) -> int:
     designated = (indexer or this).strip()
     role = "host" if designated.lower() == this.lower() else "client"
 
+    # Capability match for a host designation: hard-block an underpowered CPU-only
+    # indexer candidate; record the chosen device (Phase 7; §capability-matched).
+    device = None
+    if role == "host":
+        from agent_index import capability
+
+        decision = capability.decide_device()
+        device = decision["device"]
+        if not decision["ok"] and not getattr(args, "force", False):
+            msg = (
+                f"[FAIL] '{this}' is an underpowered indexer: {decision['reason']}.\n"
+                f"       Designate a stronger machine, or re-run with --force to override."
+            )
+            if getattr(args, "json", False):
+                _emit({"machine": this, "role": role, "blocked": True, **decision})
+            else:
+                print(msg, file=sys.stderr)
+            return 1
+
     written: dict[str, str] = {}
     if root is not None:
         p = cfg.write_indexer_designation(root, designated, ssh=ssh, endpoint=endpoint)
         written["repo_config"] = str(p)
-    role_path = cfg.write_machine_role(role)
+    machine_updates: dict = {"role": role}
+    if device:
+        machine_updates["device"] = device
+    role_path = cfg.set_machine_config(machine_updates)
     written["machine_config"] = str(role_path)
 
     result = {
         "machine": this,
         "indexer": designated,
         "role": role,
+        "device": device,
         "single_machine": single,
         "ssh": ssh,
         "endpoint": endpoint,
@@ -166,6 +189,8 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
     print(f"agent-index adoption: this machine '{this}' -> role: {role}")
     print(f"  designated indexer: {designated}" + (f" (ssh: {ssh})" if ssh else ""))
+    if device:
+        print(f"  engine device: {device}")
     if root is None:
         print("  note: no repo detected (--repo / AGENT_INDEX_REPO / git cwd) -- "
               "wrote machine-local role only; the shared designation was not recorded")
@@ -179,6 +204,20 @@ def cmd_setup(args: argparse.Namespace) -> int:
         print(f"  next: run the installer here for the client; it will reach '{designated}'"
               + (f" over ssh:{ssh}" if ssh else " (configure the endpoint / SSH forward)"))
     return 0
+
+
+def cmd_capability(args: argparse.Namespace) -> int:
+    """Detect this host's capabilities and the engine device it would use."""
+    from agent_index import capability
+
+    decision = capability.decide_device()
+    if getattr(args, "json", False):
+        return _emit(decision)
+    verdict = "OK" if decision["ok"] else "UNDERPOWERED (CPU-only indexer would be blocked)"
+    print(f"agent-index capability: {verdict}")
+    print(f"  cores: {decision['cores']}  ram_gb: {decision['ram_gb']}  cuda: {decision['cuda']}")
+    print(f"  device: {decision['device']}  ({decision['reason']})")
+    return 0 if decision["ok"] else 1
 
 
 def cmd_engine(args: argparse.Namespace) -> int:
@@ -529,9 +568,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_setup.add_argument("--ssh", help="SSH alias clients use to reach the indexer")
     p_setup.add_argument("--endpoint", help="explicit service endpoint URL for clients")
     p_setup.add_argument("--repo", help="harness repo root (default: AGENT_INDEX_REPO or git cwd)")
+    p_setup.add_argument("--force", action="store_true", help="override the underpowered-indexer hard block")
     p_setup.add_argument("--yes", action="store_true", help="non-interactive (no prompts)")
     p_setup.add_argument("--json", action="store_true", help="emit the outcome as JSON")
     p_setup.set_defaults(func=cmd_setup)
+
+    p_cap = sub.add_parser(
+        "capability", help="report this host's capabilities + the engine device it would use"
+    )
+    p_cap.add_argument("--json", action="store_true", help="emit the decision as JSON")
+    p_cap.set_defaults(func=cmd_capability)
     return parser
 
 

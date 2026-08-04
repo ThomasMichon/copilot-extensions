@@ -153,12 +153,22 @@ Locked design decisions (operator):
       (single→host, remote-indexer→client, designation + role written).
 
 ### Phase 7 — Capability-matched engine device
-- [ ] Detect **CUDA compatibility + machine specs** (compute, memory) and select
+- [x] Detect **CUDA compatibility + machine specs** (compute, memory) and select
       the engine **device** — GPU when compatible, CPU only above a capability
       floor, flagging an underpowered host. Fold in the **engine CPU-fallback fix**
       (engine defaults `device=cuda` and 500s instead of falling back when CUDA is
       absent — observed on Borealis WSL, Phase 5). Realizes vision
-      §capability-matched-engine-runtime.
+      §capability-matched-engine-runtime. **Done** — new `capability.py`
+      (`detect`, `decide_device`, `effective_device`; floor **4 cores / 8 GB**, a
+      GPU host bypasses it; overridable via `AGENT_INDEX_MIN_CORES`/`_MIN_RAM_GB`)
+      + `agent-index capability [--json]`. `setup` **hard-blocks** an underpowered
+      CPU-only indexer designation (`--force` overrides) and **records the chosen
+      device** into machine-local config; `IndexConfig.device` reads it. The engine
+      pipeline now **downgrades a configured `cuda`→`cpu` at load** when CUDA is
+      unavailable. 13 tests; full suite **138 green**; live-validated on Borealis
+      (hard-block fired on the real 2c/7.8GB box; the cuda→cpu fallback made a
+      previously-500ing search return cleanly, log: "Requested device 'cuda'
+      unavailable; loading model on 'cpu' instead").
 
 ### Phase 8 — Client routing to the designated indexer
 - [ ] Adoption **generates each client's routing config** (endpoint pointing at the
@@ -207,6 +217,26 @@ Locked design decisions (operator):
       untouched by either runtime swap.
 
 ## Journal
+
+### 2026-08-03 — Phase 7: capability-matched device + engine CPU fallback
+- New `capability.py`: `detect()` (cores / RAM / CUDA), `decide_device()` (GPU
+  bypasses the floor; CPU only above **4 cores / 8 GB**, else an underpowered
+  CPU-only host is flagged), `effective_device()` (downgrade cuda→cpu when CUDA is
+  absent). Floor overridable via `AGENT_INDEX_MIN_CORES` / `AGENT_INDEX_MIN_RAM_GB`.
+  Exposed as `agent-index capability [--json]`.
+- `setup` now **hard-blocks** an underpowered CPU-only indexer designation
+  (`--force` overrides) and **records the chosen device** into machine-local config;
+  `IndexConfig.device` resolves env → recorded device → `cuda`.
+- **Engine CPU-fallback fix** (the Phase-5 observation): the embedding pipeline
+  downgrades a configured `cuda`→`cpu` at model load when CUDA isn't available, so
+  the engine never 500s on a mismatched host. Fixed a `setup` bug where the
+  JSON-blocked path returned 0; mocked capability in the adoption test fixture so
+  designation tests are host-independent.
+- 13 tests; full suite **138 green**; live-validated on Borealis: the real 2c/7.8GB
+  box was hard-blocked; with no device configured (default cuda) a search returned
+  cleanly and the log showed the cuda→cpu fallback. No version bump (batched).
+- Next (Phase 8): client routing to the designated indexer over the SSH
+  port-forward + lexical-first degrade when the daemon is unreachable.
 
 ### 2026-08-03 — Phase 6: adoption/onboarding (`agent-index setup`)
 - Design confirmed with operator: dedicated `setup` command (installer stays

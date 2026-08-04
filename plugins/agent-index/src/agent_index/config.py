@@ -157,11 +157,23 @@ def write_machine_role(role: str) -> Path:
     keys). Returns the config path."""
     if role not in VALID_ROLES:
         raise ValueError(f"invalid role {role!r} (expected one of {VALID_ROLES})")
+    return set_machine_config({"role": role})
+
+
+def set_machine_config(updates: dict) -> Path:
+    """Merge *updates* into the machine-local config file. Returns its path."""
     path = config_path()
     data = _load_yaml(path)
-    data["role"] = role
+    data.update(updates)
     _dump_yaml(path, data)
     return path
+
+
+def machine_device() -> str | None:
+    """The engine device recorded in the machine-local config (``cpu``/``cuda``),
+    or ``None`` when unset. Written by adoption's capability match."""
+    val = _load_yaml(config_path()).get("device")
+    return val.strip().lower() if isinstance(val, str) and val.strip() else None
 
 
 def write_indexer_designation(
