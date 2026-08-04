@@ -114,6 +114,10 @@ q = TaskQueue("~/.agent-dispatch/tasks.db")
 # Producer: enqueue a task (or propose a draft that isn't claimable yet)
 t = q.create("Add narration track", prompt="segment 42", requires=["logger"])
 
+# ...or a durable GOAL a worker loops toward and resumes rather than restarts:
+g = q.create("Drive PR #128 to ready", goal="PR #128 is approved and merged",
+             done_criteria="review approved, CI green, merged")
+
 # Consumer: a worker advertises capabilities and atomically leases one task
 task = q.claim_one("worker-1", capabilities=["logger"])
 if task:
@@ -151,6 +155,22 @@ proposed -> queued -> claimed -> started -> completed        (terminal)
   reused worktree or a resuming stale worker can't corrupt recovery. The
   coordinator runs GC automatically every `AGENT_DISPATCH_GC_INTERVAL` seconds
   (default 60; `0` disables); `recover` forces a pass on demand.
+
+### Goal-bearing tasks -- a durable goal, not a fire-once prompt
+
+A task may carry a durable **`goal`** (objective) + **`done_criteria`** (the test
+for *done*) plus an append-only **`progress_log`**. A worker treats it as
+something to **loop toward**: work a unit -> append a progress beat -> re-check
+the done-criteria -> repeat, completing only once it judges them met (**deferred,
+self-judged completion**, corroborated against a recorded result + progress for a
+goal-bearing task). Because the goal *and* its accumulated progress are durable,
+a worker confirmed gone mid-goal is replaced by one that **resumes from the
+recorded `progress_log`** rather than restarting -- the fabric loses only the
+*remainder*. Both fields are nullable: omit them and it is a plain one-shot task.
+The supervisor re-embodies a confirmed-gone goal to resume it, and nudges an
+alive-but-quiet worker rather than yanking its goal. See the **`agent-dispatch`**
+skill § *Goal-loop tasks* and the vision leaf (*resumable-goal*,
+*resume-the-goal-not-restart-it*) for the full contract.
 
 ### Routing: `requires` (hard) vs `affinity` (soft)
 
