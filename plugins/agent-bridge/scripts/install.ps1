@@ -398,15 +398,22 @@ function Get-RunningProcess {
             Remove-Item -Force $PidFile -ErrorAction SilentlyContinue
         }
     }
-    # Fallback: find by executable path. The service now runs as the venv's
-    # python.exe (`-m agent_bridge`); match that. In the versioned layout the
-    # daemon is launched via the `venv` junction, so its image path may resolve
-    # to either the junction ($LinkPython) or the slot ($VenvPython) -- match
-    # both. Legacy installs that still ran the agent-bridge.exe trampoline are
-    # also matched for clean migration. (Any miss here is caught by the port
-    # fallback below, which finds the live daemon regardless of image path -- key
-    # during an update where the old daemon runs a *different* slot.)
-    $matchExes = @($VenvPython, $LinkPython, (Join-Path $VenvDir 'Scripts\agent-bridge.exe')) | Select-Object -Unique
+    # Fallback: find by executable path. The service runs as the venv's
+    # python.exe -- or, when spawned detached by the ZDD cutover, pythonw.exe
+    # (GUI-subsystem, so a DefTerm handoff can't surface it as a window). In the
+    # versioned layout the daemon is launched via the `venv` junction, so its
+    # image path may resolve to either the junction ($LinkPython) or the slot
+    # ($VenvPython) -- match both, and their pythonw siblings. Legacy installs
+    # that still ran the agent-bridge.exe trampoline are also matched for clean
+    # migration. (Any miss here is caught by the port fallback below, which finds
+    # the live daemon regardless of image path -- key during an update where the
+    # old daemon runs a *different* slot.)
+    $matchExes = @(
+        $VenvPython, $LinkPython,
+        ($VenvPython -replace 'python\.exe$', 'pythonw.exe'),
+        ($LinkPython -replace 'python\.exe$', 'pythonw.exe'),
+        (Join-Path $VenvDir 'Scripts\agent-bridge.exe')
+    ) | Select-Object -Unique
     foreach ($exe in $matchExes) {
         if ($exe -and (Test-Path $exe)) {
             $proc = Get-Process | Where-Object { $_.Path -eq $exe } | Select-Object -First 1
