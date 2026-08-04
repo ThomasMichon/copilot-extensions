@@ -17,6 +17,24 @@ log = logging.getLogger("agent-bridge")
 
 SCHEMA_VERSION = 15
 
+# Post-base ``sessions`` columns ensured idempotently on every init, independent
+# of ``schema_version``. Version-gated ``ALTER TABLE ... ADD COLUMN`` migrations
+# (``if from_version < N: ...``) are skipped for a DB already stamped at/after N,
+# so a table that never received a column (created/copied at a higher version, or
+# a partial migration) would stay permanently missing it -- which broke the
+# elevated daemon's DB and failed every ``usage_update`` (dotfiles #815). All are
+# nullable so ``ADD COLUMN`` is always safe.
+_SESSIONS_ENSURE_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("caller_id", "TEXT"),
+    ("context_size", "INTEGER"),
+    ("context_used", "INTEGER"),
+    ("usage_model", "TEXT"),
+    ("last_usage_at", "REAL"),
+    ("predecessor_id", "TEXT"),
+    ("successor_id", "TEXT"),
+    ("handoff_at", "REAL"),
+)
+
 # A live interactive session is kept alive by the extension's 30s heartbeat
 # (HEARTBEAT_MS in extension.mjs). A row whose ``updated_at`` is older than this
 # window has missed several heartbeats and is treated as dead when *resolving* a
@@ -389,6 +407,34 @@ class Database:
                 current = row["version"]
                 if current < SCHEMA_VERSION:
                     self._migrate(conn, current)
+            # Safety net: ensure post-base columns exist regardless of
+            # schema_version, so a DB stamped past a version-gated ADD COLUMN
+            # migration (or a table created without a column) self-heals rather
+            # than failing every write to that column (dotfiles #815).
+            self._ensure_columns(conn)
+
+    def _ensure_columns(self, conn: sqlite3.Connection) -> None:
+        """Idempotently add any missing post-base ``sessions`` columns.
+
+        Independent of ``schema_version`` (that is the whole point): the
+        version-gated migrations below only run when the DB is *below* their
+        target version, so a table already stamped at/after that version but
+        missing the column would never receive it. This ensures the canonical
+        nullable column set on every init.
+        """
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(sessions)")}
+        added: list[str] = []
+        for col, col_type in _SESSIONS_ENSURE_COLUMNS:
+            if col not in existing:
+                conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {col_type}")
+                added.append(col)
+        if added:
+            conn.commit()
+            log.warning(
+                "Ensured missing sessions column(s) via safety net: %s "
+                "(schema was stamped past their migration gate; see #815)",
+                ", ".join(added),
+            )
 
     def _migrate(self, conn: sqlite3.Connection, from_version: int) -> None:
         """Run schema migrations from from_version to SCHEMA_VERSION."""

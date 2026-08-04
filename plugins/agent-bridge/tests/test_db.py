@@ -623,3 +623,56 @@ class TestPendingPrompts:
         tmp_db.enqueue_prompt("s1", "a", now)
         # queue persists across a fresh Database handle on the same file
         assert tmp_db.count_pending_prompts("s1") == 1
+
+
+def test_ensure_columns_backfills_usage_cols_stamped_past_gate(tmp_path) -> None:
+    """A sessions table stamped at the current schema_version but missing the
+    v4 usage columns (the #815 elevated-DB shape) is self-healed on open.
+
+    Reproduces the version-gated-migration gap: the DB is at SCHEMA_VERSION, so
+    ``_migrate`` runs nothing, yet the table lacks ``context_size`` etc. The
+    idempotent ensure-columns pass must add them so ``usage_update`` works.
+    """
+    import sqlite3
+
+    from agent_bridge.db import SCHEMA_VERSION, Database, _SESSIONS_ENSURE_COLUMNS
+
+    path = tmp_path / "legacy.db"
+    conn = sqlite3.connect(str(path))
+    conn.executescript(
+        f"""
+        CREATE TABLE schema_version (version INTEGER NOT NULL);
+        INSERT INTO schema_version (version) VALUES ({SCHEMA_VERSION});
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            agent_name TEXT,
+            caller_id TEXT,
+            target_dir TEXT,
+            target_type TEXT NOT NULL DEFAULT 'local',
+            target_json TEXT,
+            status TEXT NOT NULL DEFAULT 'created',
+            pid INTEGER,
+            acp_session_id TEXT,
+            config_json TEXT,
+            predecessor_id TEXT,
+            successor_id TEXT,
+            handoff_at REAL,
+            created_at REAL NOT NULL DEFAULT 0,
+            updated_at REAL NOT NULL DEFAULT 0
+        );
+        """
+    )
+    conn.commit()
+    before = {r[1] for r in conn.execute("PRAGMA table_info(sessions)")}
+    conn.close()
+    assert "context_size" not in before  # precondition: the #815 shape
+
+    # Opening the Database runs _init_schema -> _ensure_columns.
+    Database(str(path))
+
+    check = sqlite3.connect(str(path))
+    after = {r[1] for r in check.execute("PRAGMA table_info(sessions)")}
+    check.close()
+    for col, _type in _SESSIONS_ENSURE_COLUMNS:
+        assert col in after, f"ensure-columns did not backfill {col}"
