@@ -300,6 +300,19 @@ class CodespaceResolver:
         try:
             cs = _find_codespace(codespaces, name)
         except KeyError:
+            bound = None
+            try:
+                from . import account_binding
+
+                bound = account_binding.bound_account(name)
+            except Exception:
+                pass
+            if bound:
+                raise RuntimeError(
+                    f"Codespace '{name}' not found under available gh accounts. "
+                    f"It is bound to gh account '{bound}'; ensure that account "
+                    "is logged in (gh auth status) and has the 'codespace' scope."
+                ) from None
             raise RuntimeError(f"Codespace '{name}' not found") from None
         if cs.state in ("Available", "Shutdown"):
             return

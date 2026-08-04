@@ -73,28 +73,37 @@ def _creation_flags() -> int:
 
 
 def list_codespaces() -> list[CodespaceInfo]:
-    """List CodeSpaces across all mapped gh accounts, merged by name.
+    """List CodeSpaces across all candidate gh accounts, merged by name.
 
     ``gh codespace list`` only returns the *active* account's CodeSpaces, so a
-    CodeSpace owned by another account (e.g. an ``odsp-microsoft`` CodeSpace
-    while ``ThomasMichon`` is active) is invisible. To discover + operate them
+    CodeSpace owned by another account is invisible. To discover + operate them
     (#195/#190) we list under each account in the agent-worktrees
-    ``account_map`` -- pinning ``gh`` via ``GH_TOKEN`` -- plus the ambient
-    account, tagging each entry with the account it came from and de-duping by
-    name.
+    ``account_map`` and each persisted account binding -- pinning ``gh`` via
+    ``GH_TOKEN`` -- plus the ambient account, tagging each entry with the account
+    it came from and de-duping by name.
 
-    When no ``account_map`` exists this collapses to a single ambient
+    When no candidate accounts exist this collapses to a single ambient
     ``gh codespace list`` (today's behavior) -- additive and safe.
     """
     from . import gh_account
 
-    accounts = gh_account.mapped_accounts()
+    try:
+        from . import account_binding
+
+        bound_accounts = account_binding.bound_accounts()
+    except Exception:
+        bound_accounts = ()
+    accounts_seen: list[str] = []
+    for login in (*gh_account.mapped_accounts(), *bound_accounts):
+        if login and login not in accounts_seen:
+            accounts_seen.append(login)
+    accounts = tuple(accounts_seen)
     if not accounts:
         return _list_codespaces_under(None)
 
     merged: dict[str, CodespaceInfo] = {}
     errors: list[str] = []
-    # Each mapped account, then the ambient active account (which may own
+    # Each candidate account, then the ambient active account (which may own
     # CodeSpaces under an owner that isn't in the map).
     for login in (*accounts, None):
         try:
@@ -158,13 +167,24 @@ def _list_codespaces_under(login: str | None) -> list[CodespaceInfo]:
 def account_for_codespace(name: str) -> str | None:
     """Return the gh account that owns CodeSpace ``name``, or None.
 
-    Resolved from the cross-account listing so per-name ops (stop/delete/ssh)
-    can pin ``gh`` to the owning account. None => use ambient auth. Any listing
-    failure degrades to ambient rather than propagating.
+    Resolved first from the persisted account binding, then from the
+    cross-account listing so per-name ops (stop/delete/ssh) can pin ``gh`` to the
+    owning account. None => use ambient auth. Any failure degrades to ambient
+    rather than propagating.
     """
     try:
+        from . import account_binding
+
+        bound = account_binding.bound_account(name)
+        if bound:
+            return bound
         for cs in list_codespaces():
             if cs.name == name:
+                if cs.account:
+                    try:
+                        account_binding.bind(name, cs.account, cs.repository)
+                    except Exception:
+                        pass
                 return cs.account or None
     except Exception:
         return None
@@ -299,9 +319,12 @@ def create_codespace(
     log.info("Creating codespace: %s", " ".join(args))
 
     from . import gh_account
+
+    account = gh_account.account_for_repo(repo)
     result = subprocess.run(
         args, capture_output=True, text=True, timeout=300,
-        creationflags=_creation_flags(), env=gh_account.env_for_repo(repo),
+        creationflags=_creation_flags(),
+        env=gh_account.env_for_account(account) if account else None,
     )
 
     if result.returncode != 0:
@@ -309,6 +332,13 @@ def create_codespace(
 
     # gh codespace create prints the name on stdout
     name = result.stdout.strip()
+    if account:
+        try:
+            from . import account_binding
+
+            account_binding.bind(name, account, repo)
+        except Exception:
+            pass
     return CodespaceInfo(
         name=name,
         display_name=display_name or name,
@@ -316,6 +346,7 @@ def create_codespace(
         branch=branch or "",
         state="Available",
         machine=machine_type,
+        account=account or "",
     )
 
 
@@ -403,6 +434,12 @@ def delete_codespace(name: str, force: bool = False, account: str | None = None)
 
     if result.returncode != 0:
         raise RuntimeError(f"gh codespace delete failed: {result.stderr.strip()}")
+    try:
+        from . import account_binding
+
+        account_binding.unbind(name)
+    except Exception:
+        pass
 
 
 def stop_codespace(name: str, account: str | None = None) -> bool:

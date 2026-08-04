@@ -10,8 +10,15 @@ from agent_codespaces import gh_account, lifecycle
 
 
 @pytest.fixture(autouse=True)
-def _clear_caches():
+def _clear_caches(monkeypatch):
     gh_account.clear_caches()
+    monkeypatch.setattr(
+        "agent_codespaces.account_binding.bound_account", lambda name: None,
+    )
+    monkeypatch.setattr("agent_codespaces.account_binding.bound_accounts", lambda: ())
+    monkeypatch.setattr(
+        "agent_codespaces.account_binding.bind", lambda *args, **kwargs: None,
+    )
     yield
     gh_account.clear_caches()
 
