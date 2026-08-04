@@ -268,11 +268,37 @@ is on **another host**, it reaches the service over an explicit, opt-in **truste
 transport** — an **SSH port-forward** of the service's own local endpoint (the
 [`plugin-services`](../../plugin-services/README.md) minimal-network-exposure
 posture, rung 4 of the service-transport ladder) — so the service still opens no
-new inbound port of its own. Fronting it with shared routing is likewise an
-explicit **consumer** choice, never a prerequisite the plugin bakes in. A machine
-that only consumes search installs **no model stack** and reaches the
-engine-hosting service over that transport, so the heavy runtime lives on **one
-host**, not on every consumer.
+new inbound port of its own. **Adoption generates each client's routing
+configuration** pointing at the designated indexer and reaching it over that
+transport, so a client is *configured* to reach the one host, never hand-wired.
+Fronting it with shared routing is likewise an explicit **consumer** choice, never
+a prerequisite the plugin bakes in. A machine that only consumes search installs
+**no model stack** and reaches the engine-hosting service over that transport, so
+the heavy runtime lives on **one host**, not on every consumer.
+
+### adoption-designates-one-indexer
+Adopting agent-index into a harness repo is an explicit **onboarding act**, not an
+implicit per-machine guess: it designates **exactly one machine** as the indexer
+that hosts the service and engine, and every other machine installs as a **search
+client** that reaches out to it. A **single-machine** repo is offered the **full
+local stack** (host and client on one box). The designation and each machine's role
+are written to **configuration** (the source repo's `.agent-index` and/or
+machine-local), so role stays config-resolved with **no machine names baked into
+the plugin** — adoption is simply what *writes* that configuration. Running
+install/setup **on the designated machine** configures and starts (or restarts) the
+local service and engine; running it **elsewhere** installs the client and its
+routing to the designated host.
+
+### capability-matched-engine-runtime
+The indexer's engine is matched to the host's **real capabilities** rather than
+assuming an accelerator. Adoption **detects accelerator (CUDA) compatibility and
+machine specs** (compute, memory) and selects the embedding **device** accordingly:
+a compatible GPU when present, **CPU only when the host has enough compute and
+memory** to serve embeddings acceptably. An underpowered indexer candidate is
+**flagged** — not silently accepted — so the operator can pick a better host; and
+the engine never wedges by insisting on an accelerator that isn't present, falling
+back within its capability floor. Capability, like role, is resolved into
+**configuration** at adoption, not hardcoded per machine.
 
 ### engine-stays-generic
 The engine does not grow product opinions. Branding, a house web experience,
@@ -359,6 +385,20 @@ generic is what lets many different products reuse it.
   trusted transport; and a machine's **role** (engine host vs consumer) is resolved
   from **configuration** (machine-local or a source repo's `.agent-index`), never a
   machine list baked into the plugin. Mined from an operator directive that torch
-  belongs only on the indexing host, as a persistent daemon (a session-host
-  analogue) that survives plugin updates. Drives the `agent-index-engine-daemon`
+  belongs only on the indexing host, as a persistent daemon (a session-host  analogue) that survives plugin updates. Drives the `agent-index-engine-daemon`
   effort; `dev16`'s configurable engine-separation modes are the foundation.
+
+- **2026-08-03** — Added **adoption-designates-one-indexer** and
+  **capability-matched-engine-runtime**, and sharpened **local-first-standalone**
+  so **adoption generates each client's routing** to the designated host. Mined
+  from an operator directive on the intended onboarding model: adopting agent-index
+  into a harness repo **designates exactly one machine as the indexer** (a
+  single-machine repo is offered the full local stack); adoption **detects CUDA
+  compatibility and machine specs** and selects the engine **device** — GPU when
+  compatible, CPU only above a capability floor, flagging an underpowered host
+  rather than degrading silently; running install/setup **on the designated
+  machine** configures and (re)starts the local service+engine, while **every other
+  machine** installs the client with routing to reach the designated host. Role and
+  capability both resolve into **configuration** at adoption — still no machine
+  names in the plugin. Extends the `agent-index-engine-daemon` effort (its
+  role-aware install and external-seam defaults are the foundation this builds on).
