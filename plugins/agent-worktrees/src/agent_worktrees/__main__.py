@@ -12541,7 +12541,7 @@ _CORE_SLUGS = frozenset({
 # router can project-pin the dispatch. Others in _CORE_SLUGS stay reserved but
 # unrouted (they fall through to the normal unknown-subcommand path) until their
 # ``--project`` support lands per the command-surface effort.
-_PROJECT_ROUTED_SLUGS = frozenset({"bridge"})
+_PROJECT_ROUTED_SLUGS = frozenset({"bridge", "codespaces"})
 
 
 def _sibling_binstub(slug: str) -> Path | None:
