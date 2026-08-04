@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from agent_codespaces import lifecycle
 from agent_codespaces.lifecycle import (
     CodespaceInfo,
     cleanup_stale,
@@ -18,6 +19,20 @@ from agent_codespaces.lifecycle import (
     stop_codespace,
 )
 from agent_codespaces.config import CodespacesConfig, RepoConfig
+
+
+@pytest.fixture(autouse=True)
+def _isolate_account_binding(monkeypatch):
+    """Keep lifecycle tests off real account maps/binding state by default."""
+    monkeypatch.setattr("agent_codespaces.gh_account.account_for_repo", lambda repo: None)
+    monkeypatch.setattr(
+        "agent_codespaces.account_binding.bound_account", lambda name: None,
+    )
+    monkeypatch.setattr("agent_codespaces.account_binding.bound_accounts", lambda: ())
+    monkeypatch.setattr(
+        "agent_codespaces.account_binding.bind", lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr("agent_codespaces.account_binding.unbind", lambda name: False)
 
 
 class TestListCodespaces:
@@ -51,6 +66,22 @@ class TestListCodespaces:
         mock_run.return_value = MagicMock(returncode=1, stderr="auth failed")
         with pytest.raises(RuntimeError, match="auth failed"):
             list_codespaces()
+
+    def test_includes_bound_accounts_not_in_mapped_set(self, monkeypatch):
+        seen = []
+
+        def fake_under(login):
+            seen.append(login)
+            return []
+
+        monkeypatch.setattr("agent_codespaces.gh_account.mapped_accounts", lambda: ())
+        monkeypatch.setattr(
+            "agent_codespaces.account_binding.bound_accounts", lambda: ("acct-x",),
+        )
+        monkeypatch.setattr(lifecycle, "_list_codespaces_under", fake_under)
+
+        assert lifecycle.list_codespaces() == []
+        assert seen == ["acct-x", None]
 
 
 class TestCreateCodespace:
@@ -98,6 +129,39 @@ class TestCreateCodespace:
         assert "--default-permissions" in call_args
         idx = call_args.index("--display-name")
         assert call_args[idx + 1] == "my-cs"
+
+    @patch("agent_codespaces.lifecycle.subprocess.run")
+    def test_persists_binding_and_sets_account(self, mock_run, monkeypatch):
+        mock_run.return_value = MagicMock(returncode=0, stdout="cs-name\n")
+        bind = MagicMock()
+        monkeypatch.setattr(
+            "agent_codespaces.gh_account.account_for_repo", lambda repo: "acct-a",
+        )
+        monkeypatch.setattr(
+            "agent_codespaces.gh_account.env_for_account",
+            lambda account, base=None: {},
+        )
+        monkeypatch.setattr("agent_codespaces.account_binding.bind", bind)
+
+        info = create_codespace("owner/repo", CodespacesConfig())
+
+        assert info.account == "acct-a"
+        bind.assert_called_once_with("cs-name", "acct-a", "owner/repo")
+
+    @patch("agent_codespaces.lifecycle.subprocess.run")
+    def test_create_does_not_bind_without_account(self, mock_run, monkeypatch):
+        mock_run.return_value = MagicMock(returncode=0, stdout="cs-name\n")
+        bind = MagicMock()
+        monkeypatch.setattr(
+            "agent_codespaces.gh_account.account_for_repo", lambda repo: None,
+        )
+        monkeypatch.setattr("agent_codespaces.account_binding.bind", bind)
+
+        info = create_codespace("owner/repo", CodespacesConfig())
+
+        assert info.account == ""
+        bind.assert_not_called()
+
     @patch("agent_codespaces.lifecycle.subprocess.run")
     def test_delete_success(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0)
@@ -109,6 +173,58 @@ class TestCreateCodespace:
         delete_codespace("my-cs", force=True)
         call_args = mock_run.call_args[0][0]
         assert "--force" in call_args
+
+    @patch("agent_codespaces.lifecycle.subprocess.run")
+    def test_delete_unbinds_on_success(self, mock_run, monkeypatch):
+        mock_run.return_value = MagicMock(returncode=0)
+        unbind = MagicMock()
+        monkeypatch.setattr(
+            "agent_codespaces.lifecycle.account_for_codespace", lambda name: "acct-a",
+        )
+        monkeypatch.setattr(
+            "agent_codespaces.gh_account.env_for_account",
+            lambda account, base=None: {},
+        )
+        monkeypatch.setattr("agent_codespaces.account_binding.unbind", unbind)
+
+        delete_codespace("my-cs")
+
+        unbind.assert_called_once_with("my-cs")
+
+
+class TestAccountForCodespace:
+    def test_returns_bound_account_without_listing(self, monkeypatch):
+        listing = MagicMock(side_effect=AssertionError("should not list"))
+        monkeypatch.setattr(
+            "agent_codespaces.account_binding.bound_account", lambda name: "acct-a",
+        )
+        monkeypatch.setattr(lifecycle, "list_codespaces", listing)
+
+        assert lifecycle.account_for_codespace("cs-one") == "acct-a"
+        listing.assert_not_called()
+
+    def test_backfills_from_listing(self, monkeypatch):
+        bind = MagicMock()
+        monkeypatch.setattr("agent_codespaces.account_binding.bound_account", lambda name: None)
+        monkeypatch.setattr("agent_codespaces.account_binding.bind", bind)
+        monkeypatch.setattr(
+            lifecycle,
+            "list_codespaces",
+            lambda: [
+                CodespaceInfo(
+                    name="cs-one",
+                    display_name="cs-one",
+                    repository="owner/repo",
+                    branch="main",
+                    state="Available",
+                    machine="large",
+                    account="acct-a",
+                ),
+            ],
+        )
+
+        assert lifecycle.account_for_codespace("cs-one") == "acct-a"
+        bind.assert_called_once_with("cs-one", "acct-a", "owner/repo")
 
 
 class TestCleanupStale:
