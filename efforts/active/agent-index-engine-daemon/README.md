@@ -2,9 +2,9 @@
 
 - **Slug:** `agent-index-engine-daemon`
 - **Repo:** copilot-extensions (plugin home; direct-push `main`)
-- **Branch(es):** `main`
+- **Branch(es):** `agent-index-engine-daemon` (batched) → landed to `main`
 - **Created:** 2026-08-03
-- **Status:** Active <!-- Draft | Active | Blocked | Done -->
+- **Status:** Done <!-- Draft | Active | Blocked | Done -->
 - **Vision:** extends [`visions/plugins/agent-index`](../../../visions/plugins/agent-index/README.md)
   (§*The embedding engine*, §self-contained-service, §local-first-standalone) —
   **vision-extending**: the durable-daemon intent is new and must be written into
@@ -56,11 +56,12 @@ Locked design decisions (operator):
       `§The embedding engine`, added the **warm-durable-engine** behavior, sharpened
       `§self-contained-service` + `§local-first-standalone`, and logged a Provenance
       entry (2026-08-03).
-- [ ] Add/adjust a `docs/patterns/` entry for the **durable-runtime vs
+- [x] Add/adjust a `docs/patterns/` entry for the **durable-runtime vs
       versioned-runtime** split (heavy, persistent state outside the swappable
-      runtime), if the existing patterns don't already cover it. **Deferred** to
-      when the implementation (Phase 3) establishes the pattern — `docs/patterns/`
-      documents *established* practice, not aspiration.
+      runtime), if the existing patterns don't already cover it. **Done (Phase 9)**
+      — added `docs/patterns/durable-vs-versioned-runtime.md` (exemplar: the
+      agent-index engine daemon) and linked it in the patterns hub, now that Phases
+      3-8 established the practice.
 
 ### Phase 2 — Dependency partition
 - [x] Split deps into a **light service set** (versioned runtime; no torch) and a
@@ -188,10 +189,12 @@ Locked design decisions (operator):
       indexer).
 
 ### Phase 9 — Validation, parity, tests
-- [ ] Cross-platform parity (daemon + role model work without systemd); unit tests;
+- [x] Cross-platform parity (daemon + role model work without systemd); unit tests;
       installer/lifecycle/adoption coverage; docs; the deferred `docs/patterns/`
       durable-vs-versioned-runtime entry. Then the single dev17->dev18 bump and land
-      the branch to `main`.
+      the branch to `main`. **Done** — added the pattern doc; bumped the version
+      triplet dev17->dev18 (plugin.json + pyproject + marketplace); version
+      consistency + full suite green; branch landed to `main`.
 
 ## Open Design Questions (Phases 6-8 — confirm before building)
 
@@ -226,6 +229,19 @@ Locked design decisions (operator):
       untouched by either runtime swap.
 
 ## Journal
+
+### 2026-08-03 — Phase 9: docs pattern, version bump, land
+- Added `docs/patterns/durable-vs-versioned-runtime.md` (exemplar: the agent-index
+  engine daemon) and linked it in the patterns hub — the established practice this
+  effort created: a durable, warm, heavy runtime on its own lifecycle, decoupled
+  from the swappable versioned runtime, config-resolved + capability-matched.
+- Bumped the version triplet **dev17 → dev18** (plugin.json + pyproject +
+  marketplace); `tools/check-version-consistency.py` green. Final full suite green.
+- Landed the batched `agent-index-engine-daemon` branch to `main` (copilot-extensions
+  is direct-push `owner`) — a single version bump for the whole batch, per the
+  anchor discipline. Effort **Done**.
+- Deferred follow-up (tracked separately): migrate cloud1 from its hand-rolled
+  dev12 service to the canonical durable-daemon architecture now that it has landed.
 
 ### 2026-08-03 — Phase 8: client routing + lexical-first degrade
 - `config.configured_endpoint()` reads the machine-local `endpoint:` a client

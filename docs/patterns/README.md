@@ -161,6 +161,7 @@ the exemplars, and the vision it serves):
 | [a-la-carte-independence](a-la-carte-independence.md) | Standalone-first plugins that compose gracefully, incl. the resolver-import pattern |
 | [cross-platform-parity](cross-platform-parity.md) | One behavior across Windows and Linux/WSL: shells, UTF-8, the WSL/Windows boundary, binstubs |
 | [project-scoped-invocation](project-scoped-invocation.md) | Reach any layer against an explicitly named project (`--project`), CWD-independently, and the per-project `<repo>` binstub as a uniform `<repo> <layer> …` dispatcher over the agent-* fleet |
+| [durable-vs-versioned-runtime](durable-vs-versioned-runtime.md) | When a plugin carries an expensive, warm, stateful runtime (heavy stack + loaded model) that must outlive routine service cutovers: a durable runtime + warm daemon on its own lifecycle, decoupled from the swappable versioned runtime, config-resolved + capability-matched per host |
 
 The **runtime deploy contract** (venv + binstub + manifest, `uv`, marketplace-vs-
 runtime split) is its own established pattern doc:
