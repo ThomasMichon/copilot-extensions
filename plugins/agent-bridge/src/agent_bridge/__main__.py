@@ -1085,6 +1085,28 @@ def _cmd_undrain(args: argparse.Namespace) -> None:
     print("Drain gate released; accepting new work.")
 
 
+def _windowless_daemon_executable() -> str:
+    """Interpreter to launch a *detached* daemon with, chosen to allocate NO
+    console -- so a DefTerm handoff (Windows Terminal set as the default terminal
+    app) cannot capture the daemon as a visible window/tab.
+
+    On Windows, prefer ``pythonw.exe`` (a GUI-subsystem binary: it never gets a
+    console, so DefTerm has nothing to grab) beside the active ``python.exe``.
+    ``python.exe`` + ``CREATE_NO_WINDOW`` is NOT enough under DefTerm -- which is
+    exactly why the installer's direct-start wraps its spawn in
+    ``conhost --headless``. The cutover spawns the passive daemon straight from
+    Python (no conhost wrapper), so it needs this console-free interpreter to stay
+    invisible. Falls back to ``sys.executable`` off Windows or when pythonw is not
+    beside it.
+    """
+    exe = sys.executable
+    if sys.platform == "win32":
+        cand = os.path.join(os.path.dirname(exe), "pythonw.exe")
+        if os.path.exists(cand):
+            return cand
+    return exe
+
+
 def _cmd_deploy(args: argparse.Namespace) -> None:
     """Active/passive zero-downtime cutover.
 
@@ -1116,8 +1138,11 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
 
     def spawn_passive(port: int):
         # Launch the *currently installed* code (this interpreter's venv) as a
-        # passive instance, detached so it outlives this deploy process.
-        cmd = [sys.executable, "-m", "agent_bridge", "start",
+        # passive instance, detached so it outlives this deploy process. Use the
+        # console-free interpreter (pythonw.exe on Windows) so a DefTerm handoff
+        # cannot surface the detached daemon as a visible window (the headed
+        # console bug); CREATE_NO_WINDOW alone is ignored under DefTerm.
+        cmd = [_windowless_daemon_executable(), "-m", "agent_bridge", "start",
                "--port", str(port), "--passive"]
         kwargs: dict = {}
         if sys.platform == "win32":
