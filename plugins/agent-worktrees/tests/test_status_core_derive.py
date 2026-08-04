@@ -76,6 +76,12 @@ class TestFastPassActive:
         n = derive.norm(self._raw_active(session_bound_live=True), "m", "e")
         assert n["state"] == "ACTIVE"
 
+    def test_bridge_live_marks_active_without_git(self):
+        # #4272 bridge-lock: no mux, no lock, no bound hint -- only a live
+        # bridge.lock (a bridge-owned bare session) marks the worktree ACTIVE.
+        n = derive.norm(self._raw_active(session_bridge_live=True), "m", "e")
+        assert n["state"] == "ACTIVE"
+
     def test_live_session_beats_merged_pr(self):
         # A just-merged PR with the session still running must render ACTIVE, not
         # FINAL -- the git pass returns ACTIVE (active_paths precedence), so the

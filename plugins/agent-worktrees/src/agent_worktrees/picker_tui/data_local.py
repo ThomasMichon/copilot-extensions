@@ -222,6 +222,13 @@ def load(machine: str | None = None, env: str | None = None,
         bare_orphan_wts = reclaim.bare_orphan_worktree_ids()
     except Exception:
         bare_orphan_wts = set()
+    # #4272 bridge-lock: worktrees with a live bridge-owned Copilot, read
+    # file-first from bridge.lock (the cheap, cwd-independent bare-session
+    # signal). Best-effort: a scan hiccup must never break the render.
+    try:
+        bridge_live_wts = reclaim.live_bridge_worktrees()
+    except Exception:
+        bridge_live_wts = set()
     mux_map = sessions.mux_status_many([r.worktree_id for r in records])
     state_map = _classify_records(records, session_ctx) if classify else {}
     machine = machine if machine is not None else LOCAL[0]
@@ -232,6 +239,7 @@ def load(machine: str | None = None, env: str | None = None,
             rec, mux_info=mux_map.get(rec.worktree_id),
             session_ctx=session_ctx, state_info=state_map.get(rec.worktree_id),
             bare_orphan_wts=bare_orphan_wts,
+            bridge_live_wts=bridge_live_wts,
         )
         out.append(derive.norm(raw, machine, env))
     return out
