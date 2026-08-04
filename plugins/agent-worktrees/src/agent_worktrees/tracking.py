@@ -317,6 +317,19 @@ class WorktreeRecord:
     # legacy YAML stays byte-identical.
     mux_live: bool | None = None
     mux_live_at: str | None = None
+    # #4057/#1416 cached bound-Copilot liveness (tri-state, cwd-independent):
+    # whether a live bound Copilot (mux OR bare) is attributed to this worktree
+    # per the authoritative machine-wide ``reclaim.resolve_bound_copilots`` scan,
+    # stamped by an OFF-HOT-PATH reconciler (never the populate path). Distinct
+    # from ``mux_live``: a *bare* (un-muxed) Copilot has no mux to attach, so
+    # folding it into ``mux_live`` would corrupt Open/Resume/Stop gating -- this
+    # signal exists solely to surface a bare-resumed session (cwd=home, invisible
+    # to the registered-session + mux scans) in the picker's Active section.
+    # ``bound_live_at`` bounds its freshness. None (absent) = Unknown / never
+    # reconciled -- Unknown is NEVER persisted, so a legacy YAML stays
+    # byte-identical.
+    bound_live: bool | None = None
+    bound_live_at: str | None = None
 
     @property
     def owner_claim_ref(self) -> ClaimRef | None:
@@ -588,6 +601,14 @@ def load_record(path: Path) -> WorktreeRecord:
     elif mux_live_at_raw in (None, "", "null"):
         mux_live_at_raw = None
 
+    # #4057/#1416: same datetime->isoformat normalization for the bound-Copilot
+    # liveness stamp so it round-trips as text.
+    bound_live_at_raw = data.get("bound_live_at")
+    if hasattr(bound_live_at_raw, "isoformat"):
+        bound_live_at_raw = bound_live_at_raw.isoformat()
+    elif bound_live_at_raw in (None, "", "null"):
+        bound_live_at_raw = None
+
     # Parse sessions list -- None means "not yet indexed" (pre-registry),
     # [] means "indexed, no sessions recorded".  This distinction drives
     # fallback: None -> full scan, [] -> skip scan.
@@ -700,6 +721,9 @@ def load_record(path: Path) -> WorktreeRecord:
         mux_live=(bool(data["mux_live"])
                   if data.get("mux_live") is not None else None),
         mux_live_at=(str(mux_live_at_raw) if mux_live_at_raw else None),
+        bound_live=(bool(data["bound_live"])
+                    if data.get("bound_live") is not None else None),
+        bound_live_at=(str(bound_live_at_raw) if bound_live_at_raw else None),
     )
 
 
@@ -791,6 +815,13 @@ def save_record(record: WorktreeRecord, path: Path | None = None) -> None:
         content += f"mux_live: {'true' if record.mux_live else 'false'}\n"
         if record.mux_live_at:
             content += f"mux_live_at: {record.mux_live_at}\n"
+    # #4057/#1416 cached bound-Copilot liveness -- emitted only when reconciled
+    # (None absent, never persisted as Unknown), so an un-reconciled worktree's
+    # YAML stays byte-identical.
+    if record.bound_live is not None:
+        content += f"bound_live: {'true' if record.bound_live else 'false'}\n"
+        if record.bound_live_at:
+            content += f"bound_live_at: {record.bound_live_at}\n"
 
     # #1029: originating-session pointer. Emitted only when set, so the
     # common-case session-record YAML stays byte-identical (no churn).
@@ -979,6 +1010,40 @@ def mark_resumed(record: WorktreeRecord) -> None:
     save_record(record)
 
 
+def _stamp_liveness(
+    worktree_id: str, live: bool, *,
+    live_attr: str, at_attr: str, refresh: bool, throttle_secs: float,
+) -> None:
+    """Shared read-modify-write for a cached liveness stamp (#4057).
+
+    Backs both :func:`stamp_mux_live` (``mux_live``) and :func:`stamp_bound_live`
+    (``bound_live``): a best-effort, locked persist of ``<live_attr>`` +
+    ``<at_attr>``. Never raises; no-ops when the record is absent, and skips the
+    write when the value is unchanged unless ``refresh`` is set AND the existing
+    stamp has aged past ``throttle_secs`` (a value CHANGE always writes). See the
+    public wrappers for the semantics.
+    """
+    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+    if not yaml_path.exists():
+        return
+    try:
+        with _RecordLock(yaml_path):
+            record = load_record(yaml_path)
+            if getattr(record, live_attr) is live and getattr(record, at_attr):
+                if not refresh:
+                    return  # unchanged, no refresh requested -- skip
+                # Same value: renew freshness only once the stamp has aged past
+                # the throttle, so a repeat authoritative observation keeps the
+                # hint fresh without rewriting the YAML on every call.
+                if not _stamp_older_than(getattr(record, at_attr), throttle_secs):
+                    return
+            setattr(record, live_attr, live)
+            setattr(record, at_attr, _now_iso())
+            save_record(record)
+    except Exception:
+        pass
+
+
 def stamp_mux_live(
     worktree_id: str, live: bool, *,
     refresh: bool = False, throttle_secs: float = 60.0,
@@ -998,31 +1063,37 @@ def stamp_mux_live(
     the value is UNCHANGED, so a steadily-live worktree observed authoritatively
     (e.g. a repeat Actions-menu verify) keeps a fresh stamp instead of aging past
     the populate-hint TTL while genuinely live -- without which the same-value
-    no-op below means the hint can never stay fresh for a long-lived session. To
-    bound YAML churn the same-value renewal is **throttled**: it rewrites only
-    when the existing stamp is older than ``throttle_secs``. A value CHANGE always
-    writes (it records the transition). ``refresh`` is for low-frequency
-    authoritative observation points only -- never the populate hot path.
+    no-op means the hint can never stay fresh for a long-lived session. To bound
+    YAML churn the same-value renewal is **throttled**: it rewrites only when the
+    existing stamp is older than ``throttle_secs``. A value CHANGE always writes
+    (it records the transition). ``refresh`` is for low-frequency authoritative
+    observation points only -- never the populate hot path.
     """
-    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
-    if not yaml_path.exists():
-        return
-    try:
-        with _RecordLock(yaml_path):
-            record = load_record(yaml_path)
-            if record.mux_live is live and record.mux_live_at:
-                if not refresh:
-                    return  # unchanged, no refresh requested -- skip
-                # Same value: renew freshness only once the stamp has aged past
-                # the throttle, so a repeat authoritative observation keeps the
-                # hint fresh without rewriting the YAML on every call.
-                if not _stamp_older_than(record.mux_live_at, throttle_secs):
-                    return
-            record.mux_live = live
-            record.mux_live_at = _now_iso()
-            save_record(record)
-    except Exception:
-        pass
+    _stamp_liveness(
+        worktree_id, live, live_attr="mux_live", at_attr="mux_live_at",
+        refresh=refresh, throttle_secs=throttle_secs,
+    )
+
+
+def stamp_bound_live(
+    worktree_id: str, live: bool, *,
+    refresh: bool = False, throttle_secs: float = 60.0,
+) -> None:
+    """Cache the last-known bound-Copilot liveness on a worktree's record (#4057).
+
+    The bare-resume counterpart of :func:`stamp_mux_live`: persists ``bound_live``
+    + ``bound_live_at`` (see :class:`WorktreeRecord`). Stamped exclusively by the
+    OFF-HOT-PATH reconciler (:func:`picker_tui.data_local.reconcile_bound_live`),
+    which resolves every live bound Copilot on the machine via the authoritative
+    ``reclaim.resolve_bound_copilots`` scan, so a bare-resumed session (cwd=home,
+    invisible to the registered-session + mux scans) still surfaces in the Active
+    section from cache alone (#1416). Same best-effort / refresh / throttle
+    semantics as :func:`stamp_mux_live`; never the populate hot path.
+    """
+    _stamp_liveness(
+        worktree_id, live, live_attr="bound_live", at_attr="bound_live_at",
+        refresh=refresh, throttle_secs=throttle_secs,
+    )
 
 
 def _stamp_older_than(stamped: str, secs: float) -> bool:
