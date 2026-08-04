@@ -68,6 +68,7 @@ class SearchEngine:
         target_models = [model] if model else list(self._engine_clients)
 
         vectors = {}
+        engine_down = False
         for model_id in target_models:
             client = self._engine_clients.get(model_id)
             if client is None:
@@ -76,8 +77,22 @@ class SearchEngine:
                 vectors[model_id] = client.embed_query(query)
             except EngineUnavailableError:
                 logger.warning("Engine for model '%s' unavailable", model_id)
+                engine_down = True
 
         if not vectors:
+            if engine_down:
+                # Lexical-first degrade: the engine is unreachable, but full-text
+                # search needs no embedding -- return BM25 hits so a client whose
+                # remote engine is cold/down still gets results rather than nothing
+                # (vision §responsive-when-cold, §local-first-standalone).
+                try:
+                    lexical = self._store.fts_search(query, limit=limit, **filter_kwargs)
+                except Exception:
+                    logger.warning("Lexical fallback failed", exc_info=True)
+                    lexical = []
+                if lexical:
+                    logger.info("Engine down -- returned %d lexical (BM25) hits", len(lexical))
+                return lexical
             return []
 
         return self._store.search_all(
