@@ -437,13 +437,15 @@ a `sessionStart` hook that re-runs its own installer **only when the deployed
 version drifts** from the payload.
 
 - `plugin.json` sets `"hooks": "hooks.json"`.
-- `hooks.json` `hooks.sessionStart` runs `~/.<plugin>/bin/bootstrap-check.{ps1,sh}`.
+- `hooks.json` `hooks.sessionStart` runs the plugin's `scripts/bootstrap-check.{ps1,sh}`
+  — either the copy the installer deploys to `~/.<plugin>/bin/`, or (the
+  self-locating variant) the one shipped in the plugin payload's `scripts/` dir.
 - `scripts/bootstrap-check.{ps1,sh}` is a **version-gated reconcile**: it compares
-  the deployed version (`deploy-manifest.json` → `source.version`) to the payload
-  (`pyproject.toml`) and, on drift (or a missing venv), re-runs the canonical
-  installer **in the background** — the atomic versioned-venv swap keeps concurrent
-  use safe, and backgrounding keeps session start non-blocking.
-- The canonical installer deploys those scripts to `~/.<plugin>/bin/`.
+  the deployed version (`~/.<plugin>/deploy-manifest.json` → `source.version`) to
+  the payload (`pyproject.toml`) and, on drift (or a missing venv), re-runs the
+  plugin's canonical installer (`init.*`, or `install.* install`) **in the
+  background** — the atomic versioned-venv swap keeps concurrent use safe, and
+  backgrounding keeps session start non-blocking.
 
 This reconciles the **tool**, never machine state or config. First install remains
 the one-time setup step; the hook only keeps an installed runtime current.
