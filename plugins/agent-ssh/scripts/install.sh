@@ -143,6 +143,16 @@ if command -v uv >/dev/null 2>&1; then HAVE_UV=1; fi
 mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
 _ok "Directories: $INSTALL_DIR"
 
+# -- Deploy the session-start hook (version-gated runtime reconcile) --
+# hooks.json runs ~/.agent-ssh/bin/bootstrap-check.sh at session start; it
+# re-runs this installer only when the deployed version drifts from the payload.
+BIN_HOOK_DIR="$INSTALL_DIR/bin"
+mkdir -p "$BIN_HOOK_DIR"
+for h in bootstrap-check.ps1 bootstrap-check.sh; do
+    [ -f "$SCRIPT_DIR/$h" ] && cp -f "$SCRIPT_DIR/$h" "$BIN_HOOK_DIR/$h"
+done
+_ok "Session-start hook: $BIN_HOOK_DIR/bootstrap-check.sh"
+
 if [[ "$FORCE" -eq 1 || ! -x "$VENV_PYTHON" ]]; then
     if [[ "$HAVE_UV" -eq 1 ]]; then
         _step 'Creating venv via uv...'
