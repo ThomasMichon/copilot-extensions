@@ -91,6 +91,29 @@ def cmd_mcp(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_engine(args: argparse.Namespace) -> int:
+    """Manage the durable, persistent embedding-engine daemon."""
+    from agent_index.engine import daemon
+
+    action = args.engine_action
+    if action == "status":
+        return _emit(daemon.status())
+    if action == "start":
+        try:
+            print(daemon.start())
+        except (FileNotFoundError, RuntimeError, TimeoutError) as exc:
+            print(f"[FAIL] {exc}", file=sys.stderr)
+            return 1
+        return 0
+    if action == "stop":
+        print(daemon.stop())
+        return 0
+    if action == "run":
+        return daemon.run_foreground()
+    print(f"[FAIL] unknown engine action: {action}", file=sys.stderr)
+    return 2
+
+
 def _routing_endpoint():
     try:
         from zdd.routing import read_active_endpoint
@@ -389,6 +412,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_clusters.add_argument("--limit", type=int, default=50, help="maximum clusters to return")
     p_clusters.set_defaults(func=cmd_clusters)
+
+    p_engine = sub.add_parser(
+        "engine", help="manage the durable, persistent embedding-engine daemon"
+    )
+    p_engine.add_argument(
+        "engine_action",
+        choices=["start", "stop", "status", "run"],
+        help="start/stop/status the daemon, or run it in the foreground (task entry)",
+    )
+    p_engine.set_defaults(func=cmd_engine)
     return parser
 
 
