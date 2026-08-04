@@ -151,3 +151,17 @@ def _want_modules(only: list[str] | None) -> bool:
     surface_names = {"copilot.settings", "copilot.permissions", "copilot.trustedFolders",
                      "settings", "permissions", "trustedFolders"}
     return any(name not in surface_names for name in only)
+
+
+def restore_result_to_dict(result: RestoreResult) -> dict[str, Any]:
+    """Serialize a ``RestoreResult`` (plan + surface & module results) for ``--json``.
+
+    Module results include their captured ``stdout_tail``/``stderr_tail`` so a
+    dry-run preview is fully machine-readable, not just a one-word status.
+    """
+    return {
+        "plan": plan_to_dict(result.plan),
+        "surfaces": [dataclasses.asdict(s) for s in result.surface_results],
+        "modules": [dataclasses.asdict(m) for m in result.module_results],
+        "ok": result.ok,
+    }

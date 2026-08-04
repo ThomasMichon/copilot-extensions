@@ -103,6 +103,9 @@ def _cmd_restore(args: argparse.Namespace) -> int:
         return 1
 
     result = _reconcile.restore(packages, machine, dry_run=dry_run, only=args.only)
+    if args.json:
+        print(json.dumps(_reconcile.restore_result_to_dict(result), indent=2))
+        return 0 if result.ok else 2
     header = "DRY-RUN (preview only; re-run with --apply to make changes)" if dry_run else "APPLY"
     print(f"restore [{header}] for {machine}  (drift-key {result.plan.drift_key})")
 
@@ -127,10 +130,16 @@ def _cmd_restore(args: argparse.Namespace) -> int:
 
     if not result.module_results:
         print("  modules: none")
+    # A dry-run *is* a preview, so surface each module's captured output by
+    # default; for --apply keep it terse unless --verbose (or a failure).
+    show_output = getattr(args, "verbose", False) or dry_run
     for r in result.module_results:
         if r.ran:
             status = "ok" if r.returncode == 0 else f"FAILED rc={r.returncode}"
             print(f"  module {r.name} <- {r.source_repo}: {status}")
+            if show_output and r.stdout_tail:
+                for line in r.stdout_tail.rstrip().splitlines():
+                    print(f"      {line}")
             if r.returncode not in (0, None) and r.stderr_tail:
                 print(f"      {r.stderr_tail.strip().splitlines()[-1]}", file=sys.stderr)
         else:
@@ -164,6 +173,8 @@ def _build_parser() -> argparse.ArgumentParser:
                          help="make changes (default is a dry-run preview)")
     restore.add_argument("--only", action="append", metavar="NAME",
                          help="restrict to named surfaces/modules (repeatable)")
+    restore.add_argument("--verbose", "-v", action="store_true",
+                         help="show each module's captured output (shown by default in a dry-run)")
     for verb in ("capture", "prune"):
         p = add(verb, _cmd_todo)
         p.set_defaults(verb=verb)
