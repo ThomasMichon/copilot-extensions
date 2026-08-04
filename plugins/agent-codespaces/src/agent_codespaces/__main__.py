@@ -83,6 +83,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--verbose", "-v", action="store_true", help="Enable debug logging"
     )
+    parser.add_argument(
+        "--project", "-p", dest="project", default=None, metavar="REPO",
+        help="Resolve as if the cwd were inside REPO's checkout: repo-root "
+             "discovery (e.g. codespaces.yaml) targets REPO instead of the "
+             "actual cwd. Injected by the `<repo> <slug>` router (e.g. `<repo> "
+             "codespaces …`). A harmless no-op for verbs that take an explicit "
+             "CodeSpace name or repo.",
+    )
     sub = parser.add_subparsers(dest="command")
 
     # --- ssh ---
@@ -432,6 +440,15 @@ def main(argv: list[str] | None = None) -> int:
         level=level,
         format="%(levelname)s: %(message)s",
     )
+
+    # A top-level --project (e.g. injected by the `<repo> <slug>` router) means
+    # "resolve as if the cwd were inside REPO's checkout" -- chdir to REPO's
+    # checkout so repo-root discovery (_resolve_repo_root / codespaces.yaml)
+    # targets it. Best-effort: an unresolvable project warns but never blocks a
+    # name/CodeSpace-addressed verb (accept-and-ignore for project-irrelevant
+    # commands).
+    if getattr(args, "project", None):
+        _chdir_to_project(args.project)
 
     if not args.command:
         parser.print_help()
@@ -1495,6 +1512,43 @@ def _cmd_config(args: argparse.Namespace) -> int:
         file=sys.stderr,
     )
     return 1
+
+
+def _chdir_to_project(project: str) -> bool:
+    """Chdir to ``project``'s checkout so cwd-based repo-root discovery targets
+    it (the project-addressed `<repo> codespaces …` surface). Resolves the path
+    via ``agent-worktrees repos find`` (agent-codespaces runs in its own venv, so
+    it shells out rather than importing agent_worktrees). Best-effort: on any
+    failure it warns and leaves the cwd unchanged, so a name-addressed verb still
+    runs. Returns True iff the cwd was changed."""
+    import subprocess as sp
+
+    name = (project or "").strip()
+    if not name:
+        return False
+    try:
+        result = sp.run(
+            ["agent-worktrees", "repos", "find", name],
+            capture_output=True, text=True, timeout=15,
+        )
+    except Exception as exc:  # pragma: no cover - environment-dependent
+        print(f"WARNING: --project {name}: could not resolve checkout ({exc}); "
+              f"using current directory", file=sys.stderr)
+        return False
+    path = (result.stdout or "").strip().splitlines()
+    checkout = path[0].strip() if path else ""
+    if result.returncode != 0 or not checkout or not Path(checkout).is_dir():
+        print(f"WARNING: --project {name}: no checkout found "
+              f"(agent-worktrees repos find returned {result.returncode}); "
+              f"using current directory", file=sys.stderr)
+        return False
+    try:
+        os.chdir(checkout)
+        return True
+    except OSError as exc:
+        print(f"WARNING: --project {name}: cannot chdir to {checkout} ({exc}); "
+              f"using current directory", file=sys.stderr)
+        return False
 
 
 def _resolve_repo_root() -> Path:

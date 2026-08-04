@@ -175,11 +175,24 @@ def test_router_worktrees_folds_back_to_launch(monkeypatch):
     assert called.get("launched") is True
 
 
+def test_router_dispatches_codespaces_project_pinned(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        m, "_route_to_sibling_plugin",
+        lambda slug, project, rest: captured.update(
+            slug=slug, project=project, rest=rest) or 0,
+    )
+    rc = m.main(["--project", "demo", "codespaces", "list"])
+    assert rc == 0
+    assert captured == {"slug": "codespaces", "project": "demo",
+                        "rest": ["list"]}
+
+
 def test_router_reserved_but_unrouted_slug_falls_through(monkeypatch, capsys):
-    """A reserved core slug without --project routing yet (e.g. codespaces) is
-    NOT dispatched to a sibling -- it falls through to the normal path."""
-    assert "codespaces" in m._CORE_SLUGS
-    assert "codespaces" not in m._PROJECT_ROUTED_SLUGS
+    """A reserved core slug without --project routing yet (e.g. mcp) is NOT
+    dispatched to a sibling -- it falls through to the normal path."""
+    assert "mcp" in m._CORE_SLUGS
+    assert "mcp" not in m._PROJECT_ROUTED_SLUGS
     monkeypatch.setattr(
         m, "_route_to_sibling_plugin",
         lambda *a, **k: (_ for _ in ()).throw(
@@ -190,7 +203,7 @@ def test_router_reserved_but_unrouted_slug_falls_through(monkeypatch, capsys):
     monkeypatch.setattr(m, "_git_toplevel", lambda p: None)
     # Falls through to project resolution, which balks (no project) -- proving
     # it did not route to the sibling.
-    rc = m.main(["codespaces", "list"])
+    rc = m.main(["mcp", "list"])
     assert rc == 1
 
 

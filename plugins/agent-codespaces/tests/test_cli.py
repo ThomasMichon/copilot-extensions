@@ -143,3 +143,67 @@ class TestFinalize:
             rc = main(["finalize", "cs-1", "--delete", "--force"])
         assert rc == 1  # sync failed, but delete still forced
         delete.assert_called_once_with("cs-1", force=True)
+
+
+# --- Top-level --project (command-surface <repo> <slug> surface) ---
+
+
+class TestProjectFlag:
+    def test_project_flag_triggers_chdir(self, monkeypatch):
+        import agent_codespaces.__main__ as cm
+
+        seen = {}
+        monkeypatch.setattr(
+            cm, "_chdir_to_project",
+            lambda p: seen.setdefault("project", p) or True,
+        )
+        rc = cm.main(["--project", "demo", "version"])
+        assert rc == 0
+        assert seen["project"] == "demo"
+
+    def test_no_project_flag_no_chdir(self, monkeypatch):
+        import agent_codespaces.__main__ as cm
+
+        calls = {"n": 0}
+        monkeypatch.setattr(
+            cm, "_chdir_to_project",
+            lambda p: calls.__setitem__("n", calls["n"] + 1) or True,
+        )
+        rc = cm.main(["version"])
+        assert rc == 0
+        assert calls["n"] == 0
+
+    def test_chdir_to_project_success(self, monkeypatch, tmp_path):
+        import os
+        import subprocess
+        from pathlib import Path
+
+        import agent_codespaces.__main__ as cm
+
+        class _R:
+            returncode = 0
+            stdout = str(tmp_path) + "\n"
+
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: _R())
+        orig = os.getcwd()
+        try:
+            assert cm._chdir_to_project("demo") is True
+            assert Path(os.getcwd()).resolve() == tmp_path.resolve()
+        finally:
+            os.chdir(orig)
+
+    def test_chdir_to_project_unresolvable_warns(self, monkeypatch, capsys):
+        import os
+        import subprocess
+
+        import agent_codespaces.__main__ as cm
+
+        class _R:
+            returncode = 1
+            stdout = ""
+
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: _R())
+        orig = os.getcwd()
+        assert cm._chdir_to_project("nope") is False
+        assert os.getcwd() == orig
+        assert "nope" in capsys.readouterr().err
