@@ -175,6 +175,7 @@ class TestProjectFlag:
 
     def test_chdir_to_project_success(self, monkeypatch, tmp_path):
         import os
+        import shutil
         import subprocess
         from pathlib import Path
 
@@ -184,6 +185,7 @@ class TestProjectFlag:
             returncode = 0
             stdout = str(tmp_path) + "\n"
 
+        monkeypatch.setattr(shutil, "which", lambda name: "agent-worktrees")
         monkeypatch.setattr(subprocess, "run", lambda *a, **k: _R())
         orig = os.getcwd()
         try:
@@ -194,6 +196,7 @@ class TestProjectFlag:
 
     def test_chdir_to_project_unresolvable_warns(self, monkeypatch, capsys):
         import os
+        import shutil
         import subprocess
 
         import agent_codespaces.__main__ as cm
@@ -202,8 +205,21 @@ class TestProjectFlag:
             returncode = 1
             stdout = ""
 
+        monkeypatch.setattr(shutil, "which", lambda name: "agent-worktrees")
         monkeypatch.setattr(subprocess, "run", lambda *a, **k: _R())
         orig = os.getcwd()
         assert cm._chdir_to_project("nope") is False
         assert os.getcwd() == orig
         assert "nope" in capsys.readouterr().err
+
+    def test_chdir_to_project_no_binstub_warns(self, monkeypatch, capsys):
+        import os
+        import shutil
+
+        import agent_codespaces.__main__ as cm
+
+        monkeypatch.setattr(shutil, "which", lambda name: None)
+        orig = os.getcwd()
+        assert cm._chdir_to_project("demo") is False
+        assert os.getcwd() == orig
+        assert "not found on PATH" in capsys.readouterr().err
