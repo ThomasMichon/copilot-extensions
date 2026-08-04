@@ -80,12 +80,20 @@ Locked design decisions (operator):
       regress a single-venv install. Kept default `1` until Phase 5.
 
 ### Phase 3 — Durable engine runtime + persistent daemon
-- [ ] Installer provisions a **durable engine venv outside the versioned runtime**
-      (alongside the durable index data), installed **once** and **preserved across
-      service updates**; rebuilt only when the embedding stack itself changes.
-- [ ] A **persistent, platform-native engine daemon** runs from that venv and stays
-      **warm** (model loaded). `update` swaps only the versioned service runtime and
-      leaves the daemon + its venv untouched (no torch rebuild, no restart).
+- [x] **3a — daemon manager:** `agent_index/engine/daemon.py` — cross-platform
+      management of the persistent engine daemon from a **durable venv**
+      (`AGENT_INDEX_ENGINE_HOME`, default `~/.agent-index/engine`, outside the
+      versioned runtime): resolve the durable interpreter, start detached +
+      persistent, health-probe, PID-track, stop; `run` foreground entry for a
+      platform-native task. `agent-index engine {start,stop,status,run}` CLI. The
+      daemon serves the stable engine HTTP API, so a service of any code version
+      talks to it over `external` mode. 13 tests.
+- [ ] **3b — installer provisioning (next):** installer builds the **durable engine
+      venv** (`agent-index[engine]`) at `AGENT_INDEX_ENGINE_HOME`, **once** and
+      **preserved across service updates** (rebuilt only when the embedding stack
+      changes); registers a **persistent platform-native daemon task** running
+      `agent-index engine run`. `update` swaps only the versioned service runtime
+      and leaves the daemon + venv untouched. Live-validated on a torch host.
 
 ### Phase 4 — Role-aware install
 - [ ] `host` role installs the engine daemon + heavy stack; `client` role installs
@@ -117,6 +125,14 @@ Locked design decisions (operator):
       untouched by either runtime swap.
 
 ## Journal
+
+### 2026-08-03 — Batched onto an effort branch
+- Per operator direction, the plugin (host) work moves off per-phase direct-pushes
+  to `main` onto a dedicated **effort branch** (`agent-index-engine-daemon`, its own
+  worktree) to stop churning the marketplace version anchor. The version stays at
+  the last released `0.1.0-dev17` while phases accumulate; the batch lands with a
+  **single** version bump at merge. Phases 1–2 already landed on `main` (vision
+  revision; dependency partition) before this switch.
 
 ### 2026-08-03 — Kickoff
 - Effort created from the operator's clarified intent: the embedding engine must be
