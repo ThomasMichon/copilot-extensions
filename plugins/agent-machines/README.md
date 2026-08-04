@@ -86,8 +86,13 @@ verbs are the next slice.
 
 ## Install
 
-Runtime CLI (venv + `~/.local/bin/agent-machines` binstub); reconciled at session
-launch on its gated machines like the other runtime plugins. Manual bootstrap:
+Runtime CLI (venv + `~/.local/bin/agent-machines` binstub). After a one-time
+bootstrap, a **session-start hook** (`hooks.json` → `~/.agent-machines/bin/bootstrap-check`)
+keeps the runtime current: it compares the deployed version to the plugin payload
+and re-runs the installer **only when they drift** (e.g. after `copilot plugin
+update`), in the background so session start never blocks. This reconciles the
+**tool**, never machine state — it never runs `restore` (that stays on-demand, per
+*Status* above). One-time / manual bootstrap:
 
 ```
 scripts/init.sh        # Linux / WSL / macOS
