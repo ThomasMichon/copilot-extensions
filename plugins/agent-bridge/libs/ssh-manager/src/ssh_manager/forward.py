@@ -59,20 +59,24 @@ def pick_free_local_port() -> int:
 
 def build_forward_ssh_args(
     config: SSHConfig,
-    local_port: int,
-    remote_port: int,
+    local_port: int | None,
+    remote_port: int | None,
     *,
     remote_host: str = "127.0.0.1",
     reverse_forwards: list[str] | None = None,
     extra_options: dict[str, str] | None = None,
 ) -> list[str]:
-    """Build the ``ssh -N -L`` argv for a dedicated local-forward process.
+    """Build the ``ssh -N`` argv for a dedicated forward process.
 
     Mirrors :meth:`ConnectionManager._base_ssh_args` (``-F``/``-p``/``-i`` +
-    keepalive/batch options) and appends a loopback ``-L`` forward plus ``-N``
-    (no remote command -- just hold the forward). ``ExitOnForwardFailure=yes``
-    makes ssh exit immediately if the local port cannot be bound, so the caller
-    can retry with a fresh port instead of hanging on a half-open forward.
+    keepalive/batch options) and appends ``-N`` (no remote command -- just hold
+    the forward). When ``local_port`` is set, appends a loopback ``-L`` forward.
+    When ``local_port`` is ``None``, builds a reverse-only argv from
+    ``reverse_forwards``.
+
+    ``ExitOnForwardFailure=yes`` makes ssh exit immediately if a local port
+    cannot be bound, so the caller can retry with a fresh port instead of
+    hanging on a half-open forward.
 
     ``reverse_forwards`` are additional ``-R`` specs (e.g. the credential-relay
     port ``"51234:127.0.0.1:51234"``) carried on the *same* persistent process,
@@ -80,6 +84,11 @@ def build_forward_ssh_args(
     live relay for the whole session -- and a ``refresh()`` brings both the ``-L``
     endpoint and the ``-R`` relay back together after a transport drop.
     """
+    if local_port is None and not reverse_forwards:
+        raise ValueError("at least one local or reverse forward is required")
+    if local_port is not None and remote_port is None:
+        raise ValueError("remote_port is required when local_port is set")
+
     args = ["ssh"]
     if config.config_file:
         args += ["-F", config.config_file]
@@ -100,7 +109,7 @@ def build_forward_ssh_args(
     # forward: with a ``-R`` relay present, a remote bind collision (relay port
     # already forwarded by another connection) must NOT tear down the ``-L``
     # endpoint too -- the endpoint's own TCP-accept probe is the readiness gate.
-    if not reverse_forwards:
+    if local_port is not None and not reverse_forwards:
         args += ["-o", "ExitOnForwardFailure=yes"]
     for key, val in config.extra_options.items():
         # ControlMaster machinery must not leak in: a dedicated forward is not
@@ -111,7 +120,8 @@ def build_forward_ssh_args(
         args += ["-o", f"{key}={val}"]
     for key, val in (extra_options or {}).items():
         args += ["-o", f"{key}={val}"]
-    args += ["-L", f"127.0.0.1:{local_port}:{remote_host}:{remote_port}"]
+    if local_port is not None:
+        args += ["-L", f"127.0.0.1:{local_port}:{remote_host}:{remote_port}"]
     for spec in reverse_forwards or []:
         args += ["-R", spec]
     args.append(config.ssh_target)

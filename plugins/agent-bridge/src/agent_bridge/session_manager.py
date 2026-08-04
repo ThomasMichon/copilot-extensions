@@ -470,9 +470,13 @@ class SessionManager:
         self._session_host_active_reap_seconds = session_host_active_reap_seconds
         self._host_index: Any = None
         # Live remote-boundary forwards (session_id -> LocalForward). Held so a
-        # CodeSpace/mesh Session Host's -L/-R forward can be refreshed on
-        # reattach and torn down on teardown. Empty for local hosts.
+        # CodeSpace/mesh Session Host's -L forward can be refreshed on reattach
+        # and torn down on teardown. Empty for local hosts.
         self._forwards: dict[str, Any] = {}
+        # Live dedicated credential-relay supervisors (session_id -> relays).
+        # These are intentionally separate from the frontend-refreshed -L above:
+        # their lifetime follows the remote Session Host/child.
+        self._relays: dict[str, list[Any]] = {}
         # Strong refs to in-flight best-effort remote-reap tasks (so they are not
         # GC'd mid-flight); each removes itself on completion.
         self._remote_reap_tasks: set[Any] = set()
@@ -1081,6 +1085,13 @@ class SessionManager:
             # teardown can cancel it.
             if getattr(spawned, "forward", None) is not None:
                 self._forwards[session_id] = spawned.forward
+            relays = getattr(spawned, "relay", None)
+            if relays is not None:
+                if not isinstance(relays, (list, tuple, set)):
+                    relays = [relays]
+                relays = list(relays)
+                if relays:
+                    self._relays[session_id] = relays
             sock = await SessionHostClient.connect(port=spawned.local_port)
             await sock.attach(0, nonce=spawned.nonce.encode())
             streams = await open_acp_streams(sock)
@@ -1246,14 +1257,19 @@ class SessionManager:
         return reattached
 
     async def _ensure_forward(self, rec: Any) -> None:
-        """Ensure a remote-boundary Host's ``-L`` (+ ``-R`` relay) forward is up.
+        """Ensure a remote-boundary Host's frontend ``-L`` forward is up.
 
         No-op for a local Host (direct loopback, no forward). For a CodeSpace /
         mesh Host, (re-)establishes the forward so ``rec.port`` resolves before we
         dial it -- the ``refresh_endpoint()`` step of the reattach driver, driven
         from the durable ``rec.endpoint`` descriptor so it works even after a
-        frontend restart with no live Spawner. Refreshes an existing forward
-        (cancel + re-establish) or rebuilds one from the endpoint.
+        frontend restart with no live Spawner. Refreshes an existing ``-L``
+        forward (cancel + re-establish) or rebuilds one from the endpoint.
+
+        Credential relay ``-R`` specs in the same endpoint are supervised by
+        dedicated relay handles owned separately from the frontend ``-L``. A
+        normal front detach/reattach leaves an existing relay alone; a daemon
+        restart (no in-memory relay) re-supervises it from the descriptor.
         """
         boundary = getattr(rec, "boundary", "local")
         endpoint = getattr(rec, "endpoint", None) or {}
@@ -1269,6 +1285,7 @@ class SessionManager:
                 fwd = forward_from_endpoint(endpoint)
                 await fwd.establish()
                 self._forwards[rec.session_id] = fwd
+            await self._ensure_relays_from_endpoint(rec.session_id, endpoint)
         except Exception:
             log.warning(
                 "Failed to (re-)establish forward for session %s (boundary=%s)",
@@ -1276,8 +1293,55 @@ class SessionManager:
             )
             raise
 
+    async def _ensure_relays_from_endpoint(self, session_id: str, endpoint: dict) -> None:
+        """Start endpoint-declared relay supervisors if this daemon owns none.
+
+        The relay is independent of frontend reattach. When a live daemon already
+        owns a relay for the Session Host, leave it alone; after a daemon restart
+        the in-memory owner set is empty, so this method reconstructs the relay
+        from the durable endpoint. If a prior handle is present but no longer
+        alive, stop/replace it to avoid double ``-R`` binds.
+        """
+        if not (endpoint.get("reverse_forwards") or []):
+            return
+        existing = self._relays.get(session_id) or []
+        if existing and all(getattr(relay, "is_alive", True) for relay in existing):
+            return
+        await self._replace_relays_from_endpoint(session_id, endpoint)
+
+    async def _replace_relays_from_endpoint(self, session_id: str, endpoint: dict) -> None:
+        """Stop any prior relay owner and start supervisors from ``endpoint``."""
+        from .session_host.endpoints import relay_forwards_from_endpoint
+
+        await self._stop_relays(session_id)
+        relays = relay_forwards_from_endpoint(endpoint)
+        started = []
+        for relay in relays:
+            try:
+                await relay.start()
+            except Exception:
+                log.warning(
+                    "Failed to start credential relay supervisor for session %s; "
+                    "continuing without relay",
+                    session_id, exc_info=True,
+                )
+                with contextlib.suppress(Exception):
+                    await relay.stop()
+                continue
+            started.append(relay)
+        if started:
+            self._relays[session_id] = started
+
+    async def _stop_relays(self, session_id: str) -> None:
+        """Stop and forget a session's credential-relay supervisors."""
+        relays = self._relays.pop(session_id, [])
+        for relay in relays:
+            with contextlib.suppress(Exception):
+                await relay.stop()
+
     async def _drop_forward(self, session_id: str) -> None:
-        """Cancel and forget a session's remote-boundary forward (if any)."""
+        """Cancel and forget a session's remote-boundary forwards (if any)."""
+        await self._stop_relays(session_id)
         fwd = self._forwards.pop(session_id, None)
         if fwd is not None:
             with contextlib.suppress(Exception):
@@ -1364,6 +1428,8 @@ class SessionManager:
                 exc_info=True,
             )
             if prune_on_fail and self._host_index is not None:
+                with contextlib.suppress(Exception):
+                    await self._drop_forward(rec.session_id)
                 with contextlib.suppress(Exception):
                     self._host_index.remove(rec.session_id)
             return False
@@ -1631,7 +1697,8 @@ class SessionManager:
             self._host_index.remove(rec.session_id)
 
     def _kill_forward_sync(self, session_id: str) -> None:
-        """Best-effort synchronous teardown of a session's forward process."""
+        """Best-effort synchronous teardown of session forward processes."""
+        self._kill_relays_sync(session_id)
         fwd = self._forwards.pop(session_id, None)
         if fwd is None:
             return
@@ -1639,6 +1706,18 @@ class SessionManager:
         if proc is not None and getattr(proc, "returncode", 0) is None:
             with contextlib.suppress(Exception):
                 proc.kill()
+
+    def _kill_relays_sync(self, session_id: str) -> None:
+        """Best-effort synchronous teardown of relay supervisors."""
+        for relay in self._relays.pop(session_id, []):
+            task = getattr(relay, "_monitor_task", None)
+            if task is not None and not getattr(task, "done", lambda: True)():
+                with contextlib.suppress(Exception):
+                    task.cancel()
+            proc = getattr(relay, "_proc", None)
+            if proc is not None and getattr(proc, "returncode", 0) is None:
+                with contextlib.suppress(Exception):
+                    proc.kill()
 
     def _schedule_remote_reap(self, rec: Any, reason: str) -> None:
         """Fire-and-forget a remote ``kill`` of a detached far-side Host.

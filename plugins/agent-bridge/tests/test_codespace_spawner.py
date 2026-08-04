@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from agent_bridge.session_host import bundle as bundle_mod
+from agent_bridge.session_host import endpoints as endpoints_mod
 from agent_bridge.session_host import protocol as proto
 from agent_bridge.session_host import spawner as sp
 from agent_bridge.session_host.endpoints import (
@@ -34,6 +35,7 @@ class _FakeForward:
         self.config = config
         self.remote_port = remote_port
         self.local_port = local_port or 49555
+        self.kw = kw
         self.refreshed = 0
         self.cancelled = False
         _FakeForward.instances.append(self)
@@ -52,9 +54,20 @@ class _FakeForward:
 class _FakeTransport:
     boundary = "codespace"
 
-    def __init__(self, state, *, exists=False):
+    def __init__(
+        self,
+        state,
+        *,
+        exists=False,
+        reverse_forwards=None,
+        probe_result=None,
+        probe_error: Exception | None = None,
+    ):
         self._state = state
         self.exists = exists
+        self._reverse_forwards = list(reverse_forwards or [])
+        self.probe_result = probe_result
+        self.probe_error = probe_error
         self.pushed: list[tuple[str, str]] = []
         self.runs: list[str] = []
 
@@ -68,11 +81,18 @@ class _FakeTransport:
         self.runs.append(command)
         if command.startswith("cat "):
             return (0, json.dumps(self._state), "")
+        if "/dev/tcp/127.0.0.1/" in command:
+            if self.probe_error is not None:
+                raise self.probe_error
+            return self.probe_result or (1, "", "refused")
         return (0, "launched", "")
 
     def ssh_config(self):
         return SSHConfig(host_alias="cs.box", user="vscode",
                          config_file="/tmp/cs.config")
+
+    def reverse_forwards(self):
+        return list(self._reverse_forwards)
 
     def endpoint_extra(self):
         return {"codespace": "cs-foo", "repo": "org/repo"}
@@ -81,8 +101,12 @@ class _FakeTransport:
 @pytest.fixture(autouse=True)
 def _reset_forward():
     _FakeForward.instances.clear()
+    _FakeRelay.instances.clear()
+    _FakeRelay.start_error = None
     yield
     _FakeForward.instances.clear()
+    _FakeRelay.instances.clear()
+    _FakeRelay.start_error = None
 
 
 def _patch_common(monkeypatch):
@@ -91,6 +115,33 @@ def _patch_common(monkeypatch):
         lambda *a, **k: (Path("/tmp/session-host-abc123.pyz"), "abc123"),
     )
     monkeypatch.setattr("ssh_manager.LocalForward", _FakeForward)
+
+
+class _FakeRelay:
+    """Stand-in for ssh_manager.SupervisedRelayForward."""
+
+    instances: list["_FakeRelay"] = []
+    start_error: Exception | None = None
+
+    def __init__(self, config, relay_port, *, serving_probe=None, **kw):
+        self.config = config
+        self.relay_port = relay_port
+        self.serving_probe = serving_probe
+        self.kw = kw
+        self.started = 0
+        self.stopped = 0
+        self.is_alive = False
+        _FakeRelay.instances.append(self)
+
+    async def start(self):
+        if _FakeRelay.start_error is not None:
+            raise _FakeRelay.start_error
+        self.started += 1
+        self.is_alive = True
+
+    async def stop(self):
+        self.stopped += 1
+        self.is_alive = False
 
 
 # -- build_remote_launch --------------------------------------------------
@@ -185,6 +236,138 @@ async def test_codespace_spawner_refresh_endpoint(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_codespace_spawner_splits_relay_from_local_forward(monkeypatch):
+    _patch_common(monkeypatch)
+    monkeypatch.setattr(endpoints_mod, "SupervisedRelayForward", _FakeRelay)
+    state = {"pid": 1, "child_pid": 2, "port": 51000}
+    t = _FakeTransport(state, reverse_forwards=["9857:127.0.0.1:9857"])
+
+    spawned = await sp.CodeSpaceSpawner(t, ready_timeout=5).spawn(
+        ["copilot"], session_id="s",
+    )
+
+    assert _FakeForward.instances[-1].kw.get("reverse_forwards") is None
+    assert len(_FakeRelay.instances) == 1
+    assert _FakeRelay.instances[0].relay_port == 9857
+    assert _FakeRelay.instances[0].started == 1
+    assert spawned.relay == [_FakeRelay.instances[0]]
+    assert spawned.endpoint["reverse_forwards"] == ["9857:127.0.0.1:9857"]
+
+
+@pytest.mark.asyncio
+async def test_codespace_spawner_no_relay_when_no_reverse_forward(monkeypatch):
+    _patch_common(monkeypatch)
+    monkeypatch.setattr(endpoints_mod, "SupervisedRelayForward", _FakeRelay)
+    state = {"pid": 1, "child_pid": 2, "port": 51000}
+    t = _FakeTransport(state)
+
+    spawned = await sp.CodeSpaceSpawner(t, ready_timeout=5).spawn(
+        ["copilot"], session_id="s",
+    )
+
+    assert spawned.relay == []
+    assert _FakeRelay.instances == []
+
+
+@pytest.mark.asyncio
+async def test_codespace_spawner_refresh_does_not_touch_relay(monkeypatch):
+    _patch_common(monkeypatch)
+    monkeypatch.setattr(endpoints_mod, "SupervisedRelayForward", _FakeRelay)
+    state = {"pid": 1, "child_pid": 2, "port": 51000}
+    t = _FakeTransport(state, reverse_forwards=["9857:127.0.0.1:9857"])
+    spawned = await sp.CodeSpaceSpawner(t, ready_timeout=5).spawn(
+        ["copilot"], session_id="s",
+    )
+
+    await spawned.refresh_endpoint()
+
+    assert _FakeForward.instances[-1].refreshed == 1
+    assert _FakeRelay.instances[0].started == 1
+    assert _FakeRelay.instances[0].stopped == 0
+
+
+@pytest.mark.asyncio
+async def test_spawned_host_aclose_stops_relay_and_forward(monkeypatch):
+    _patch_common(monkeypatch)
+    monkeypatch.setattr(endpoints_mod, "SupervisedRelayForward", _FakeRelay)
+    state = {"pid": 1, "child_pid": 2, "port": 51000}
+    t = _FakeTransport(state, reverse_forwards=["9857:127.0.0.1:9857"])
+    spawned = await sp.CodeSpaceSpawner(t, ready_timeout=5).spawn(
+        ["copilot"], session_id="s",
+    )
+
+    await spawned.aclose()
+
+    assert _FakeRelay.instances[0].stopped == 1
+    assert _FakeForward.instances[-1].cancelled is True
+
+
+@pytest.mark.asyncio
+async def test_relay_start_failure_does_not_break_spawn(monkeypatch):
+    _patch_common(monkeypatch)
+    monkeypatch.setattr(endpoints_mod, "SupervisedRelayForward", _FakeRelay)
+    _FakeRelay.start_error = RuntimeError("bind failed")
+    state = {"pid": 1, "child_pid": 2, "port": 51000}
+    t = _FakeTransport(state, reverse_forwards=["9857:127.0.0.1:9857"])
+
+    spawned = await sp.CodeSpaceSpawner(t, ready_timeout=5).spawn(
+        ["copilot"], session_id="s",
+    )
+
+    assert spawned.local_port == 49555
+    assert spawned.relay == []
+    assert _FakeRelay.instances[0].stopped == 1
+
+
+@pytest.mark.asyncio
+async def test_relay_serving_probe_checks_far_side_port(monkeypatch):
+    _patch_common(monkeypatch)
+    monkeypatch.setattr(endpoints_mod, "SupervisedRelayForward", _FakeRelay)
+    state = {"pid": 1, "child_pid": 2, "port": 51000}
+    t = _FakeTransport(
+        state,
+        reverse_forwards=["9857:127.0.0.1:9857"],
+        probe_result=(0, "OK\n", ""),
+    )
+    await sp.CodeSpaceSpawner(t, ready_timeout=5).spawn(
+        ["copilot"], session_id="s",
+    )
+
+    assert await _FakeRelay.instances[0].serving_probe() is True
+    assert any("/dev/tcp/127.0.0.1/9857" in command for command in t.runs)
+
+
+@pytest.mark.asyncio
+async def test_relay_serving_probe_false_on_unserved_port(monkeypatch):
+    _patch_common(monkeypatch)
+    monkeypatch.setattr(endpoints_mod, "SupervisedRelayForward", _FakeRelay)
+    state = {"pid": 1, "child_pid": 2, "port": 51000}
+    t = _FakeTransport(state, reverse_forwards=["9857:127.0.0.1:9857"])
+    await sp.CodeSpaceSpawner(t, ready_timeout=5).spawn(
+        ["copilot"], session_id="s",
+    )
+
+    assert await _FakeRelay.instances[0].serving_probe() is False
+
+
+@pytest.mark.asyncio
+async def test_relay_serving_probe_transport_error_is_healthy(monkeypatch):
+    _patch_common(monkeypatch)
+    monkeypatch.setattr(endpoints_mod, "SupervisedRelayForward", _FakeRelay)
+    state = {"pid": 1, "child_pid": 2, "port": 51000}
+    t = _FakeTransport(
+        state,
+        reverse_forwards=["9857:127.0.0.1:9857"],
+        probe_error=RuntimeError("transport down"),
+    )
+    await sp.CodeSpaceSpawner(t, ready_timeout=5).spawn(
+        ["copilot"], session_id="s",
+    )
+
+    assert await _FakeRelay.instances[0].serving_probe() is True
+
+
+@pytest.mark.asyncio
 async def test_codespace_spawner_launch_failure_raises(monkeypatch):
     _patch_common(monkeypatch)
 
@@ -207,8 +390,14 @@ def test_endpoint_roundtrip_rebuilds_forward():
     cfg = SSHConfig(host_alias="cs.box", user="vscode",
                     config_file="/tmp/cs.config",
                     extra_options={"StrictHostKeyChecking": "no"})
-    ep = endpoint_from_ssh_config(cfg, 51000, 49555, kind="codespace",
-                                  extra={"codespace": "cs-foo"})
+    ep = endpoint_from_ssh_config(
+        cfg,
+        51000,
+        49555,
+        kind="codespace",
+        reverse_forwards=["9857:127.0.0.1:9857"],
+        extra={"codespace": "cs-foo"},
+    )
     # survives JSON (host index round-trip)
     ep = json.loads(json.dumps(ep))
     rebuilt = ssh_config_from_endpoint(ep)
@@ -220,3 +409,4 @@ def test_endpoint_roundtrip_rebuilds_forward():
     fwd = forward_from_endpoint(ep)
     assert fwd.local_port == 49555
     assert fwd._remote_port == 51000
+    assert fwd._reverse_forwards == []

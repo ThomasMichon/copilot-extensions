@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -274,6 +275,172 @@ class TestCodespaceSessionHostModelFlags:
         )
 
         assert remote_argv == ["bash", "-lc", acp_command]
+
+
+class TestRemoteForwardRelaySupervision:
+    """Remote Session-Host reattach owns relay supervisors separately from -L."""
+
+    class _Forward:
+        instances: list["TestRemoteForwardRelaySupervision._Forward"] = []
+
+        def __init__(self, config, remote_port, *, local_port=None, **kw):
+            self.config = config
+            self.remote_port = remote_port
+            self.local_port = local_port or 49555
+            self.kw = kw
+            self.established = 0
+            self.refreshed = 0
+            self.cancelled = 0
+            self._proc = None
+            self.__class__.instances.append(self)
+
+        async def establish(self):
+            self.established += 1
+            return self.local_port
+
+        async def refresh(self):
+            self.refreshed += 1
+            return self.local_port
+
+        async def cancel(self):
+            self.cancelled += 1
+
+    class _Relay:
+        instances: list["TestRemoteForwardRelaySupervision._Relay"] = []
+
+        def __init__(self, config, relay_port, *, serving_probe=None, **kw):
+            self.config = config
+            self.relay_port = relay_port
+            self.serving_probe = serving_probe
+            self.kw = kw
+            self.started = 0
+            self.stopped = 0
+            self.is_alive = False
+            self._proc = None
+            self.__class__.instances.append(self)
+
+        async def start(self):
+            self.started += 1
+            self.is_alive = True
+
+        async def stop(self):
+            self.stopped += 1
+            self.is_alive = False
+
+    @pytest.fixture(autouse=True)
+    def _patch_endpoint_forwards(self, monkeypatch):
+        from agent_bridge.session_host import endpoints as endpoints_mod
+
+        self._Forward.instances.clear()
+        self._Relay.instances.clear()
+        monkeypatch.setattr(endpoints_mod, "LocalForward", self._Forward)
+        monkeypatch.setattr(endpoints_mod, "SupervisedRelayForward", self._Relay)
+        yield
+        self._Forward.instances.clear()
+        self._Relay.instances.clear()
+
+    @staticmethod
+    def _endpoint(reverse_forwards=None):
+        return {
+            "kind": "codespace",
+            "remote_port": 51000,
+            "local_port": 49555,
+            "reverse_forwards": list(reverse_forwards or []),
+            "ssh": {
+                "host_alias": "cs.box",
+                "hostname": None,
+                "user": "vscode",
+                "port": None,
+                "identity_file": None,
+                "proxy_command": None,
+                "config_file": "cs.config",
+                "extra_options": {},
+            },
+        }
+
+    @pytest.mark.asyncio
+    async def test_ensure_forward_rebuilds_l_only_and_starts_relay(self, tmp_db, tmp_path):
+        manager = SessionManager(
+            tmp_db, session_host_enabled=True, session_host_state_dir=str(tmp_path),
+        )
+        rec = SimpleNamespace(
+            session_id="s1",
+            boundary="codespace",
+            endpoint=self._endpoint(["9857:127.0.0.1:9857"]),
+        )
+
+        await manager._ensure_forward(rec)
+
+        assert len(self._Forward.instances) == 1
+        assert self._Forward.instances[0].kw.get("reverse_forwards") is None
+        assert self._Forward.instances[0].established == 1
+        assert len(self._Relay.instances) == 1
+        assert self._Relay.instances[0].relay_port == 9857
+        assert self._Relay.instances[0].started == 1
+        assert manager._relays["s1"] == [self._Relay.instances[0]]
+
+    @pytest.mark.asyncio
+    async def test_ensure_forward_leaves_live_relay_on_front_reattach(
+        self, tmp_db, tmp_path,
+    ):
+        manager = SessionManager(
+            tmp_db, session_host_enabled=True, session_host_state_dir=str(tmp_path),
+        )
+        rec = SimpleNamespace(
+            session_id="s1",
+            boundary="codespace",
+            endpoint=self._endpoint(["9857:127.0.0.1:9857"]),
+        )
+        forward = self._Forward(None, 51000)
+        live_relay = self._Relay(None, 9857)
+        live_relay.is_alive = True
+        manager._forwards["s1"] = forward
+        manager._relays["s1"] = [live_relay]
+
+        await manager._ensure_forward(rec)
+
+        assert forward.refreshed == 1
+        assert live_relay.stopped == 0
+        assert len(self._Relay.instances) == 1
+
+    @pytest.mark.asyncio
+    async def test_ensure_forward_replaces_dead_prior_relay(self, tmp_db, tmp_path):
+        manager = SessionManager(
+            tmp_db, session_host_enabled=True, session_host_state_dir=str(tmp_path),
+        )
+        rec = SimpleNamespace(
+            session_id="s1",
+            boundary="codespace",
+            endpoint=self._endpoint(["9857:127.0.0.1:9857"]),
+        )
+        dead_relay = self._Relay(None, 9857)
+        dead_relay.is_alive = False
+        manager._relays["s1"] = [dead_relay]
+
+        await manager._ensure_forward(rec)
+
+        assert dead_relay.stopped == 1
+        assert len(self._Relay.instances) == 2
+        assert self._Relay.instances[-1].started == 1
+        assert manager._relays["s1"] == [self._Relay.instances[-1]]
+
+    @pytest.mark.asyncio
+    async def test_drop_forward_stops_relay_and_l_forward(self, tmp_db, tmp_path):
+        manager = SessionManager(
+            tmp_db, session_host_enabled=True, session_host_state_dir=str(tmp_path),
+        )
+        forward = self._Forward(None, 51000)
+        relay = self._Relay(None, 9857)
+        relay.is_alive = True
+        manager._forwards["s1"] = forward
+        manager._relays["s1"] = [relay]
+
+        await manager._drop_forward("s1")
+
+        assert relay.stopped == 1
+        assert forward.cancelled == 1
+        assert "s1" not in manager._forwards
+        assert "s1" not in manager._relays
 
 
 class TestSubmitPrompt:

@@ -14,9 +14,10 @@ remote/local ports and a ``kind`` tag.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable, Iterable
 from typing import Any
 
-from ssh_manager import LocalForward, SSHConfig
+from ssh_manager import LocalForward, SSHConfig, SupervisedRelayForward
 
 
 def endpoint_from_ssh_config(
@@ -74,5 +75,62 @@ def forward_from_endpoint(endpoint: dict[str, Any]) -> LocalForward:
         config,
         int(endpoint["remote_port"]),
         local_port=int(endpoint["local_port"]),
-        reverse_forwards=list(endpoint.get("reverse_forwards") or []),
+    )
+
+
+def relay_ports_from_reverse_forwards(reverse_forwards: Iterable[str]) -> list[int]:
+    """Extract relay listen ports from ``-R`` specs carried in an endpoint.
+
+    The credential relay specs emitted by the CodeSpace transport are
+    ``<port>:127.0.0.1:<port>``. Invalid or non-integer specs are ignored so
+    older/foreign descriptors degrade to the pre-relay-supervisor behavior.
+    """
+    ports: list[int] = []
+    seen: set[int] = set()
+    for spec in reverse_forwards:
+        try:
+            port = int(str(spec).split(":", 1)[0])
+        except (TypeError, ValueError):
+            continue
+        if port in seen:
+            continue
+        seen.add(port)
+        ports.append(port)
+    return ports
+
+
+def relay_forwards_from_ssh_config(
+    config: SSHConfig,
+    reverse_forwards: Iterable[str],
+    *,
+    serving_probe_for_port: Callable[[int], Callable[[], Awaitable[bool]] | None]
+    | None = None,
+) -> list[SupervisedRelayForward]:
+    """Build dedicated credential-relay supervisors from persisted ``-R`` specs."""
+    relays: list[SupervisedRelayForward] = []
+    for relay_port in relay_ports_from_reverse_forwards(reverse_forwards):
+        serving_probe = (
+            serving_probe_for_port(relay_port) if serving_probe_for_port else None
+        )
+        relays.append(
+            SupervisedRelayForward(
+                config,
+                relay_port,
+                serving_probe=serving_probe,
+            )
+        )
+    return relays
+
+
+def relay_forwards_from_endpoint(
+    endpoint: dict[str, Any],
+    *,
+    serving_probe_for_port: Callable[[int], Callable[[], Awaitable[bool]] | None]
+    | None = None,
+) -> list[SupervisedRelayForward]:
+    """Build credential-relay supervisors from an endpoint descriptor."""
+    return relay_forwards_from_ssh_config(
+        ssh_config_from_endpoint(endpoint),
+        list(endpoint.get("reverse_forwards") or []),
+        serving_probe_for_port=serving_probe_for_port,
     )

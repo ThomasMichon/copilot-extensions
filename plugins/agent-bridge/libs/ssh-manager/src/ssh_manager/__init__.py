@@ -30,6 +30,7 @@ from .manager import (
     get_default_manager,
 )
 from .platform import MultiplexMode, PlatformInfo, detect_platform
+from .relay_channel import SupervisedRelayForward
 
 __all__ = [
     "CommandResult",
@@ -44,6 +45,7 @@ __all__ = [
     "PlatformInfo",
     "SSHConfig",
     "SSHProfileSource",
+    "SupervisedRelayForward",
     "TargetBusyError",
     "TargetLock",
     "build_forward_ssh_args",
