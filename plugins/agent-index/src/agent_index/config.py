@@ -13,7 +13,10 @@ ENDPOINT_ENV = "AGENT_INDEX_ENDPOINT"
 HOME_ENV = "AGENT_INDEX_HOME"
 ROLE_ENV = "AGENT_INDEX_ROLE"
 CONFIG_ENV = "AGENT_INDEX_CONFIG"
+MACHINE_ENV = "AGENT_INDEX_MACHINE"
+REPO_ENV = "AGENT_INDEX_REPO"
 VALID_ROLES = ("host", "client")
+REPO_CONFIG_RELPATH = ".agent-index/config.yaml"
 
 
 def install_dir() -> Path:
@@ -49,11 +52,31 @@ def config_path() -> Path:
     return install_dir() / "config.yaml"
 
 
+def _load_yaml(path: Path) -> dict:
+    """Load a YAML mapping from *path*, tolerating a missing/broken file ({})."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    try:
+        import yaml
+
+        data = yaml.safe_load(text)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
 def _read_config_role(path: Path) -> str | None:
     """Read a top-level ``role:`` (preferred) or ``engine:`` scalar from a config
-    file. Deliberately dependency-light -- a single documented scalar, so we scan
-    for it rather than pulling PyYAML into the torch-free service runtime.
+    file. Prefers PyYAML; falls back to a dependency-light scanner so a partially
+    broken config still resolves a role rather than hard-failing the service.
     """
+    data = _load_yaml(path)
+    for key in ("role", "engine"):
+        val = data.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip().lower()
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
@@ -68,6 +91,94 @@ def _read_config_role(path: Path) -> str | None:
         if m:
             return m.group(1).strip().lower()
     return None
+
+
+def machine_id() -> str:
+    """This machine's identity for indexer designation. ``AGENT_INDEX_MACHINE``
+    overrides; otherwise the short hostname. Used only to match against a config
+    designation -- the plugin bakes in no machine names."""
+    override = os.environ.get(MACHINE_ENV)
+    if override and override.strip():
+        return override.strip()
+    import socket
+
+    return socket.gethostname().split(".")[0].strip().lower()
+
+
+def repo_root(explicit: str | None = None) -> Path | None:
+    """Resolve the harness repo being adopted: an explicit path, ``AGENT_INDEX_REPO``,
+    or the CWD's git top-level. ``None`` when not in/at a repo."""
+    cand = explicit or os.environ.get(REPO_ENV)
+    if cand:
+        return Path(cand).expanduser().resolve()
+    try:
+        import subprocess
+
+        out = subprocess.run(  # noqa: S603
+            ["git", "rev-parse", "--show-toplevel"],  # noqa: S607
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return Path(out.stdout.strip()).resolve()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return None
+
+
+def repo_config_path(root: Path) -> Path:
+    """The repo-committed adoption config: ``<repo>/.agent-index/config.yaml``."""
+    return root / REPO_CONFIG_RELPATH
+
+
+def read_indexer(root: Path | None) -> dict | None:
+    """Read the shared indexer designation (``indexer:`` block) from the repo
+    config, or ``None`` when unset."""
+    if root is None:
+        return None
+    data = _load_yaml(repo_config_path(root))
+    ind = data.get("indexer")
+    return ind if isinstance(ind, dict) else None
+
+
+def _dump_yaml(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    import yaml
+
+    text = yaml.safe_dump(data, sort_keys=False, default_flow_style=False)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(path)
+
+
+def write_machine_role(role: str) -> Path:
+    """Write this machine's role into the machine-local config (merging existing
+    keys). Returns the config path."""
+    if role not in VALID_ROLES:
+        raise ValueError(f"invalid role {role!r} (expected one of {VALID_ROLES})")
+    path = config_path()
+    data = _load_yaml(path)
+    data["role"] = role
+    _dump_yaml(path, data)
+    return path
+
+
+def write_indexer_designation(
+    root: Path, machine: str, *, ssh: str | None = None, endpoint: str | None = None
+) -> Path:
+    """Record the shared indexer designation into ``<repo>/.agent-index/config.yaml``
+    (merging existing keys). Returns the repo config path."""
+    path = repo_config_path(root)
+    data = _load_yaml(path)
+    ind: dict = {"machine": machine}
+    if ssh:
+        ind["ssh"] = ssh
+    if endpoint:
+        ind["endpoint"] = endpoint
+    data["indexer"] = ind
+    _dump_yaml(path, data)
+    return path
 
 
 def resolve_role() -> str:

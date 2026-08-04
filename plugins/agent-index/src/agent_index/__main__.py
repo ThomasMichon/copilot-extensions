@@ -102,6 +102,85 @@ def cmd_role(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_setup(args: argparse.Namespace) -> int:
+    """Adopt agent-index: designate one indexer, then write role + designation config.
+
+    Records the shared indexer designation into ``<repo>/.agent-index/config.yaml``
+    and this machine's concrete ``role:`` into the machine-local config (which the
+    installer reads). Running setup on the designated machine makes it the ``host``;
+    everywhere else it is a ``client`` (effort agent-index-engine-daemon, Phase 6;
+    vision §adoption-designates-one-indexer).
+    """
+    from agent_index import config as cfg
+
+    this = cfg.machine_id()
+    root = cfg.repo_root(getattr(args, "repo", None))
+    interactive = sys.stdin.isatty() and not getattr(args, "yes", False)
+
+    single = bool(getattr(args, "single", False))
+    indexer = getattr(args, "indexer", None)
+    ssh = getattr(args, "ssh", None)
+    endpoint = getattr(args, "endpoint", None)
+
+    if not single and not indexer:
+        if interactive:
+            ans = input(
+                f"Single-machine setup (this box '{this}' hosts everything)? [Y/n] "
+            ).strip().lower()
+            single = ans in ("", "y", "yes")
+            if not single:
+                indexer = input(
+                    f"Which machine is the indexer? [default: {this}] "
+                ).strip() or this
+                if indexer.lower() != this:
+                    ssh = ssh or (input(
+                        f"SSH alias clients use to reach '{indexer}' (blank to skip): "
+                    ).strip() or None)
+        else:
+            single = True  # non-interactive default: full local stack on this box
+
+    if single:
+        indexer = this
+    designated = (indexer or this).strip()
+    role = "host" if designated.lower() == this.lower() else "client"
+
+    written: dict[str, str] = {}
+    if root is not None:
+        p = cfg.write_indexer_designation(root, designated, ssh=ssh, endpoint=endpoint)
+        written["repo_config"] = str(p)
+    role_path = cfg.write_machine_role(role)
+    written["machine_config"] = str(role_path)
+
+    result = {
+        "machine": this,
+        "indexer": designated,
+        "role": role,
+        "single_machine": single,
+        "ssh": ssh,
+        "endpoint": endpoint,
+        "repo": str(root) if root else None,
+        "written": written,
+    }
+    if getattr(args, "json", False):
+        return _emit(result)
+
+    print(f"agent-index adoption: this machine '{this}' -> role: {role}")
+    print(f"  designated indexer: {designated}" + (f" (ssh: {ssh})" if ssh else ""))
+    if root is None:
+        print("  note: no repo detected (--repo / AGENT_INDEX_REPO / git cwd) -- "
+              "wrote machine-local role only; the shared designation was not recorded")
+    else:
+        print(f"  repo config:    {written.get('repo_config')}")
+    print(f"  machine config: {written['machine_config']}")
+    if role == "host":
+        print("  next: run the installer here to provision the service + engine daemon "
+              "(agent-index-install install)")
+    else:
+        print(f"  next: run the installer here for the client; it will reach '{designated}'"
+              + (f" over ssh:{ssh}" if ssh else " (configure the endpoint / SSH forward)"))
+    return 0
+
+
 def cmd_engine(args: argparse.Namespace) -> int:
     """Manage the durable, persistent embedding-engine daemon."""
     from agent_index.engine import daemon
@@ -439,6 +518,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_role.add_argument("--json", action="store_true", help="emit the role as JSON")
     p_role.set_defaults(func=cmd_role)
+
+    p_setup = sub.add_parser(
+        "setup", help="adopt agent-index: designate the indexer + write role config"
+    )
+    p_setup.add_argument("--indexer", help="machine designated as the indexer (host)")
+    p_setup.add_argument(
+        "--single", action="store_true", help="single-machine: this box hosts everything"
+    )
+    p_setup.add_argument("--ssh", help="SSH alias clients use to reach the indexer")
+    p_setup.add_argument("--endpoint", help="explicit service endpoint URL for clients")
+    p_setup.add_argument("--repo", help="harness repo root (default: AGENT_INDEX_REPO or git cwd)")
+    p_setup.add_argument("--yes", action="store_true", help="non-interactive (no prompts)")
+    p_setup.add_argument("--json", action="store_true", help="emit the outcome as JSON")
+    p_setup.set_defaults(func=cmd_setup)
     return parser
 
 

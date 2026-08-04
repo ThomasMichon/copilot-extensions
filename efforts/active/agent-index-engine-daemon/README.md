@@ -136,12 +136,21 @@ Locked design decisions (operator):
       `engine-update` restarted the daemon (pid changed). Full suite **120 green**.
 
 ### Phase 6 — Adoption & onboarding (designate the indexer)
-- [ ] An explicit adoption/setup flow designates **one machine as the indexer**
+- [x] An explicit adoption/setup flow designates **one machine as the indexer**
       and writes role config; a **single-machine** repo is offered the full local
       stack. Running setup **on the designated machine** configures + (re)starts the
       local service+engine; running it elsewhere installs the client. Realizes
-      vision §adoption-designates-one-indexer. (Home: an `agent-index setup`/`adopt`
-      command and/or installer prompts — see Open Design Questions.)
+      vision §adoption-designates-one-indexer. **Done** — `agent-index setup`
+      (`--single` / `--indexer <machine>` / `--ssh` / `--endpoint` / `--repo` /
+      `--yes` / `--json`; interactive prompts on a TTY): records the shared
+      **indexer designation** into `<repo>/.agent-index/config.yaml` and this
+      machine's concrete **`role:`** into the machine-local config (which the
+      installer already reads). Host/client is decided by matching this machine's
+      identity (`config.machine_id()`, hostname or `AGENT_INDEX_MACHINE`) against
+      the designation. Config is now structured (PyYAML added to base deps; the
+      Phase-4 regex scanner kept as a resilient fallback). 8 adoption tests; full
+      suite **128 green**; real `setup` flows live-validated on Borealis
+      (single→host, remote-indexer→client, designation + role written).
 
 ### Phase 7 — Capability-matched engine device
 - [ ] Detect **CUDA compatibility + machine specs** (compute, memory) and select
@@ -198,6 +207,24 @@ Locked design decisions (operator):
       untouched by either runtime swap.
 
 ## Journal
+
+### 2026-08-03 — Phase 6: adoption/onboarding (`agent-index setup`)
+- Design confirmed with operator: dedicated `setup` command (installer stays
+  non-interactive); indexer discovery via repo-committed `.agent-index/config.yaml`
+  + machine-local override; **point-only** SSH (set endpoint, rely on the SSH mesh);
+  **hard-block** an underpowered indexer (Phase 7); build one phase at a time.
+- Shipped `agent-index setup`: designates one indexer, writes the shared
+  `indexer:` designation into `<repo>/.agent-index/config.yaml` and this machine's
+  `role:` into the machine-local config; host/client decided by matching
+  `machine_id()` against the designation. `--single` = full local stack.
+- Config is now structured YAML: added **PyYAML** to base deps (small, torch-free),
+  with the Phase-4 regex role-scanner retained as a resilient fallback. New config
+  helpers: `machine_id`, `repo_root`, `repo_config_path`, `read_indexer`,
+  `write_machine_role`, `write_indexer_designation`.
+- 8 adoption tests; full suite **128 green**; live-validated on Borealis
+  (single→host, remote-indexer→client, designation + role written). No version bump.
+- Next (Phase 7): capability-matched device (CUDA + specs → device, hard-block
+  underpowered), folding in the engine CPU-fallback fix.
 
 ### 2026-08-03 — Scope extension: adoption / capability / routing (operator directive)
 - Operator clarified the intended **onboarding model**: adopting agent-index into a
