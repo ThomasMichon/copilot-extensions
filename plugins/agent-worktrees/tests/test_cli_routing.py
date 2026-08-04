@@ -188,6 +188,47 @@ def test_router_dispatches_codespaces_project_pinned(monkeypatch):
                         "rest": ["list"]}
 
 
+def test_canonical_slug_tolerates_pluralization():
+    assert m._canonical_slug("bridge") == "bridge"
+    assert m._canonical_slug("codespaces") == "codespaces"
+    assert m._canonical_slug("codespace") == "codespaces"   # singular -> plural
+    assert m._canonical_slug("worktree") == "worktrees"     # singular -> plural
+    assert m._canonical_slug("worktrees") == "worktrees"
+    assert m._canonical_slug("bogusplugin") is None
+
+
+def test_router_singular_slug_alias_routes_canonical(monkeypatch):
+    """`<repo> codespace …` (singular) routes to the canonical `codespaces`
+    plugin, with --project preserved."""
+    captured = {}
+    monkeypatch.setattr(
+        m, "_route_to_sibling_plugin",
+        lambda slug, project, rest: captured.update(
+            slug=slug, project=project, rest=rest) or 0,
+    )
+    rc = m.main(["--project", "demo", "codespace", "list"])
+    assert rc == 0
+    assert captured == {"slug": "codespaces", "project": "demo",
+                        "rest": ["list"]}
+
+
+def test_router_worktree_singular_folds_back(monkeypatch):
+    """`<repo> worktree …` (singular) folds back into this binstub, same as
+    `worktrees`."""
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(
+        m, "_route_to_sibling_plugin",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("worktree(s) must not route to a sibling")),
+    )
+    called = {}
+    monkeypatch.setattr(m, "cmd_launch",
+                        lambda argv: called.__setitem__("launched", True) or 0)
+    rc = m.main(["--project", "demo", "worktree"])
+    assert rc == 0
+    assert called.get("launched") is True
+
+
 def test_router_non_project_slug_omits_project(monkeypatch):
     """A routable slug that does NOT consume --project (e.g. mcp) routes as a
     cwd-preserving alias -- the router never forwards --project to it, even when
