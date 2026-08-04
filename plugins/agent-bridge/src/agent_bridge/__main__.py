@@ -685,6 +685,59 @@ def _kill_pid(pid: int) -> None:
             pass
 
 
+def _pid_is_agent_bridge(pid: int) -> bool:
+    """True if *pid* is a live process running the ``agent_bridge`` module.
+
+    Confirms a lock-recorded pid really is a (possibly wedged) daemon before we
+    kill it, so a pid the OS recycled for an unrelated process after the daemon
+    died is never mistaken for the daemon and killed.
+    """
+    if pid <= 0:
+        return False
+    import subprocess as sp
+
+    try:
+        if sys.platform == "win32":
+            out = sp.run(
+                ["powershell", "-NoProfile", "-Command",
+                 "(Get-CimInstance Win32_Process -Filter "
+                 f"'ProcessId={pid}' -ErrorAction SilentlyContinue).CommandLine"],
+                capture_output=True, text=True, timeout=15,
+            )
+            return "agent_bridge" in (out.stdout or "")
+        # POSIX: read the process command line (Linux /proc; fall back to ps).
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as fh:
+                return b"agent_bridge" in fh.read()
+        except OSError:
+            out = sp.run(["ps", "-p", str(pid), "-o", "command="],
+                         capture_output=True, text=True, timeout=15)
+            return "agent_bridge" in (out.stdout or "")
+    except (OSError, sp.TimeoutExpired, ValueError):
+        return False
+
+
+def _pid_from_lock(port: int) -> int | None:
+    """Holder pid of the singleton lock, if it is a live agent-bridge daemon.
+
+    Catches a *wedged* daemon: one alive and still holding the OS singleton lock
+    -- so it blocks a fresh ``service start`` via the duplicate-start guard
+    (#129) -- but no longer LISTENing or answering ``/health``. Such a daemon is
+    invisible to both :func:`_read_pid_file` (stale/empty pid file) and
+    :func:`_pid_on_port` (nothing listening), yet must be killed for a restart to
+    succeed. An identity check guards against a recycled/reused pid.
+    """
+    from pathlib import Path
+
+    from .singleton import _read_holder_pid
+
+    lock_path = Path(_INSTALL_DIR) / f"agent-bridge.{port}.lock"
+    pid = _read_holder_pid(lock_path)
+    if pid and pid != os.getpid() and _pid_is_agent_bridge(pid):
+        return pid
+    return None
+
+
 def _systemd_available() -> bool:
     import shutil
 
@@ -767,11 +820,20 @@ def _service_stop() -> None:
         stopped_any = True
 
     # The platform manager may not kill an already-detached worker, so also
-    # terminate the process by pid file / port binding.
-    pid = _read_pid_file() or _pid_on_port(_service_port())
-    if pid:
-        _kill_pid(pid)
+    # terminate the process by pid file / port binding / singleton-lock holder.
+    # The lock holder is the crucial addition: a *wedged* daemon (alive, still
+    # holding the OS singleton lock -- so it blocks the next start via the #129
+    # guard -- but no longer LISTENing or answering /health) is invisible to both
+    # the pid file (stale/empty) and the port probe. Without it, stop "succeeds"
+    # (health already fails) while the wedged process lives on and defeats the
+    # following start.
+    port = _service_port()
+    victims = {_read_pid_file(), _pid_on_port(port), _pid_from_lock(port)}
+    victims.discard(None)
+    for victim in victims:
+        _kill_pid(victim)
         stopped_any = True
+    if victims:
         try:
             os.remove(_PID_FILE)
         except OSError:
@@ -781,9 +843,12 @@ def _service_stop() -> None:
         print("[SKIP] agent-bridge does not appear to be running")
         return
 
-    # Confirm the port is released (TimeWait can linger briefly).
+    # Confirm the port is released (TimeWait can linger briefly). "Stopped" means
+    # BOTH: the port no longer answers health AND no wedged daemon still holds the
+    # singleton lock -- a wedged holder answers neither, yet still blocks the next
+    # start, so health alone is not a sufficient success signal.
     for _ in range(10):
-        if not _service_is_running():
+        if not _service_is_running() and _pid_from_lock(_service_port()) is None:
             print("[OK] agent-bridge stopped")
             return
         time.sleep(1)
