@@ -1,0 +1,70 @@
+# Managed by dotfiles control plane: keeps upstream dependency versions current so
+# they flow down to the internal mirror (agent-harness-plugins) via sync.
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/plugins/agent-bridge"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps"
+  - package-ecosystem: "uv"
+    directory: "/plugins/agent-codespaces"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps"
+  - package-ecosystem: "uv"
+    directory: "/plugins/agent-containers"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps"
+  - package-ecosystem: "uv"
+    directory: "/plugins/agent-dispatch"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps"
+  - package-ecosystem: "uv"
+    directory: "/plugins/agent-index"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps"
+  - package-ecosystem: "uv"
+    directory: "/plugins/agent-logger"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps"
+  - package-ecosystem: "uv"
+    directory: "/plugins/agent-machines"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps"
+  - package-ecosystem: "uv"
+    directory: "/plugins/agent-mcp"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps"
+  - package-ecosystem: "uv"
+    directory: "/plugins/agent-ssh"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps"
+  - package-ecosystem: "uv"
+    directory: "/plugins/agent-vault"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps"
+  - package-ecosystem: "uv"
+    directory: "/plugins/agent-worktrees"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps"
