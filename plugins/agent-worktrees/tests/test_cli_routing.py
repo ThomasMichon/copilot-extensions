@@ -188,23 +188,67 @@ def test_router_dispatches_codespaces_project_pinned(monkeypatch):
                         "rest": ["list"]}
 
 
-def test_router_reserved_but_unrouted_slug_falls_through(monkeypatch, capsys):
-    """A reserved core slug without --project routing yet (e.g. mcp) is NOT
-    dispatched to a sibling -- it falls through to the normal path."""
+def test_router_non_project_slug_omits_project(monkeypatch):
+    """A routable slug that does NOT consume --project (e.g. mcp) routes as a
+    cwd-preserving alias -- the router never forwards --project to it, even when
+    the caller passed one."""
     assert "mcp" in m._CORE_SLUGS
-    assert "mcp" not in m._PROJECT_ROUTED_SLUGS
+    assert "mcp" not in m._PROJECT_ARG_SLUGS
+    captured = {}
+    monkeypatch.setattr(
+        m, "_route_to_sibling_plugin",
+        lambda slug, project, rest: captured.update(
+            slug=slug, project=project, rest=rest) or 0,
+    )
+    rc = m.main(["--project", "demo", "mcp", "list"])
+    assert rc == 0
+    assert captured == {"slug": "mcp", "project": None, "rest": ["list"]}
+
+
+def test_router_derives_from_installed_binstubs(monkeypatch):
+    """A non-core slug is routable when its agent-<slug> binstub is installed
+    (the routable set is derived, not hardcoded)."""
+    monkeypatch.setattr(m, "_installed_sibling_slugs", lambda: {"newplugin"})
+    captured = {}
+    monkeypatch.setattr(
+        m, "_route_to_sibling_plugin",
+        lambda slug, project, rest: captured.update(
+            slug=slug, project=project, rest=rest) or 0,
+    )
+    rc = m.main(["newplugin", "do-thing", "--flag"])
+    assert rc == 0
+    assert captured == {"slug": "newplugin", "project": None,
+                        "rest": ["do-thing", "--flag"]}
+
+
+def test_router_worktrees_verb_not_routed(monkeypatch, capsys):
+    """A real worktrees verb must never be routed to a sibling (collision
+    guard), even if some sibling shares the name."""
+    assert "list" in m._worktrees_verbs()
     monkeypatch.setattr(
         m, "_route_to_sibling_plugin",
         lambda *a, **k: (_ for _ in ()).throw(
-            AssertionError("unrouted slug must not dispatch")),
+            AssertionError("a worktrees verb must not route to a sibling")),
     )
+    # Even if a bogus sibling 'list' binstub were present, the verb wins.
+    monkeypatch.setattr(m, "_installed_sibling_slugs", lambda: {"list"})
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
     monkeypatch.setattr(m.inst, "read_projects_registry", lambda: {"projects": {}})
     monkeypatch.setattr(m, "_git_toplevel", lambda p: None)
-    # Falls through to project resolution, which balks (no project) -- proving
-    # it did not route to the sibling.
-    rc = m.main(["mcp", "list"])
+    rc = m.main(["list"])  # falls through to normal handling (balks: no project)
     assert rc == 1
+
+
+def test_installed_sibling_slugs_parses_binstub_names(monkeypatch, tmp_path):
+    for n in ["agent-bridge.ps1", "agent-codespaces.cmd", "agent-logger",
+              "agent-worktrees.ps1", "dotfiles.ps1", "not-agent.ps1"]:
+        (tmp_path / n).write_text("x")
+    monkeypatch.setattr(m.inst, "local_bin", lambda: tmp_path)
+    slugs = m._installed_sibling_slugs()
+    assert "bridge" in slugs and "codespaces" in slugs and "logger" in slugs
+    assert "worktrees" not in slugs   # folds back, excluded
+    assert "dotfiles" not in slugs    # not an agent-* binstub
+
 
 
 def test_route_to_sibling_missing_binstub(monkeypatch, tmp_path, capsys):

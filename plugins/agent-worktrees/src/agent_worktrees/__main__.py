@@ -12527,21 +12527,64 @@ def _extract_project_flag(args_list: list[str]) -> tuple[list[str], str | None]:
 
 
 # ── `<repo> <slug>` command-surface router ───────────────────────────────────
-# Core agent-* plugin slugs reserved by the command surface (command-surface
-# effort). A leading token matching one of these is a *plugin namespace*, never
-# a worktrees verb -- a collision guard test enforces that none is also a
-# registered subcommand. `worktrees` folds back into this binstub so
-# `<repo> worktrees <verb>` == the bare `<repo> <verb>` alias.
+# The router DERIVES its routable set from the installed ``agent-<slug>``
+# binstubs (so a newly-installed agent-* plugin auto-gets a `<repo> <slug>`
+# namespace), unioned with a curated core set as a floor. A leading token that
+# names a routable slug -- and is NOT a real worktrees verb (the collision guard)
+# -- is dispatched to that sibling plugin. `worktrees` folds back into this
+# binstub so `<repo> worktrees <verb>` == the bare `<repo> <verb>` alias.
 _CORE_SLUGS = frozenset({
     "worktrees", "bridge", "ssh", "dispatch",
     "codespaces", "containers", "logger", "vault", "mcp",
 })
 
-# Slugs whose sibling plugin accepts a top-level ``--project`` today, so the
-# router can project-pin the dispatch. Others in _CORE_SLUGS stay reserved but
-# unrouted (they fall through to the normal unknown-subcommand path) until their
-# ``--project`` support lands per the command-surface effort.
-_PROJECT_ROUTED_SLUGS = frozenset({"bridge", "codespaces"})
+# Slugs whose sibling plugin consumes a top-level ``--project`` (bridge overrides
+# its remote-resolve target project; codespaces chdir's to the project checkout).
+# The router injects ``--project <repo>`` only for these; every other slug routes
+# as a cwd-preserving alias (so plugins that don't declare --project never see it
+# and can't argparse-error on it).
+_PROJECT_ARG_SLUGS = frozenset({"bridge", "codespaces"})
+
+
+def _installed_sibling_slugs() -> set[str]:
+    """Discover ``<slug>`` for every installed ``agent-<slug>`` binstub in
+    ~/.local/bin, so the routable set is derived from what's installed rather than
+    hardcoded. Excludes ``agent-worktrees`` itself (which folds back)."""
+    import re as _re
+
+    slugs: set[str] = set()
+    try:
+        entries = list(inst.local_bin().iterdir())
+    except OSError:
+        return slugs
+    for p in entries:
+        m = _re.match(
+            r"^agent-([a-z0-9][a-z0-9-]*?)(?:\.(?:ps1|cmd|exe|sh))?$",
+            p.name.lower(),
+        )
+        if m and m.group(1) != "worktrees":
+            slugs.add(m.group(1))
+    return slugs
+
+
+_WORKTREES_VERBS: set[str] | None = None
+
+
+def _worktrees_verbs() -> set[str]:
+    """The agent-worktrees subcommand names (cached). The router excludes these
+    from routing so a plugin slug can never shadow a real worktrees verb."""
+    global _WORKTREES_VERBS
+    if _WORKTREES_VERBS is None:
+        import argparse
+
+        try:
+            parser = build_parser()
+            subs = [a for a in parser._actions
+                    if isinstance(a, argparse._SubParsersAction)]
+            _WORKTREES_VERBS = set(subs[0].choices) if subs else set()
+        except Exception:
+            _WORKTREES_VERBS = set()
+    return _WORKTREES_VERBS
 
 
 def _sibling_binstub(slug: str) -> Path | None:
@@ -13461,18 +13504,22 @@ def main(argv: list[str] | None = None) -> int:
     args_list, _proj = _extract_project_flag(args_list)
 
     # ── `<repo> <slug>` command-surface router ───────────────────────────
-    # A leading core agent-* slug is a plugin namespace: `<repo> bridge send …`
-    # (the binstub passes `--project <repo>`) re-dispatches to
-    # `agent-bridge --project <repo> send …`. `worktrees` folds back into this
-    # binstub (`<repo> worktrees <verb>` == the bare `<repo> <verb>` alias).
-    # Reserved-but-unrouted slugs fall through unchanged. See the
-    # command-surface effort.
-    if args_list and args_list[0] in _CORE_SLUGS:
-        _slug = args_list[0]
-        if _slug == "worktrees":
+    # A leading token naming a routable sibling plugin (the routable set is
+    # DERIVED: the curated core set ∪ installed agent-<slug> binstubs, excluding
+    # real worktrees verbs) is a plugin namespace: `<repo> <slug> …` →
+    # `agent-<slug> …`. `--project <repo>` is injected only for plugins that
+    # consume it (_PROJECT_ARG_SLUGS); other slugs route as a cwd-preserving
+    # alias. `worktrees` folds back into this binstub. See the command-surface
+    # effort.
+    if args_list:
+        _tok = args_list[0]
+        if _tok == "worktrees":
             args_list = args_list[1:]
-        elif _slug in _PROJECT_ROUTED_SLUGS:
-            return _route_to_sibling_plugin(_slug, _proj, args_list[1:])
+        elif _tok not in _worktrees_verbs() and (
+            _tok in _CORE_SLUGS or _tok in _installed_sibling_slugs()
+        ):
+            _sib_project = _proj if _tok in _PROJECT_ARG_SLUGS else None
+            return _route_to_sibling_plugin(_tok, _sib_project, args_list[1:])
 
     # Only auto-derive from CWD for project-requiring commands (skip the git
     # subprocess for global no-project commands and bare flags).
