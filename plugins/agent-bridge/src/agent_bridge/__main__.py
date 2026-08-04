@@ -417,6 +417,15 @@ def _cmd_start(args: argparse.Namespace) -> None:
     config = uvicorn.Config(app, **config_kwargs)
     server = uvicorn.Server(config)
     app.state.uvicorn_server = server
+
+    # Self-watchdog (#166): a plain OS thread that force-exits the process if it
+    # wedges "alive but not serving" -- so the kernel frees the singleton lock
+    # and the next start succeeds instead of refusing against a zombie. Armed
+    # before serving so it also catches a startup that hangs after the lock is
+    # taken. A graceful shutdown (server.should_exit) is never treated as a wedge.
+    from .watchdog import arm_serving_watchdog
+
+    arm_serving_watchdog(server, bind=cfg.bind, port=bound_port)
     try:
         if listen_sock is not None:
             server.run(sockets=[listen_sock])
