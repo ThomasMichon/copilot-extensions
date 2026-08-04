@@ -29,6 +29,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .codespace_config import CodespaceSource
 from . import relay_launch
@@ -58,6 +59,9 @@ from .lifecycle import (
 from .sessions import sync_codespace_sessions
 
 log = logging.getLogger("agent-codespaces")
+
+if TYPE_CHECKING:
+    from ssh_manager import SSHConfig, SupervisedRelayForward
 
 # Patience budget for the SSH-to-CodeSpace stage -- a Shutdown CodeSpace boots
 # on connect, which can take well over a minute. Overridable via env.
@@ -521,6 +525,36 @@ def _relay_listening(port: int, timeout: float = 0.5) -> bool:
     return relay_launch.relay_listening(port, timeout=timeout)
 
 
+async def _start_supervised_relay(
+    name: str,
+    ssh_config: SSHConfig,
+    relay_port: int,
+    *,
+    context: str,
+) -> SupervisedRelayForward | None:
+    """Start the best-effort supervised credential-relay reverse-forward."""
+    relay = None
+    try:
+        from ssh_manager import SupervisedRelayForward
+
+        relay = SupervisedRelayForward(ssh_config, relay_port)
+        await relay.start()
+        return relay
+    except Exception as exc:
+        log.warning(
+            "Credential relay reverse-forward for %s failed to establish: %s",
+            name,
+            exc,
+        )
+        relay_launch.warn_if_relay_unavailable(relay_port, name, context=context)
+        try:
+            if relay is not None:
+                await relay.stop()
+        except Exception as stop_exc:
+            log.debug("Relay cleanup after failed start for %s failed: %s", name, stop_exc)
+        return None
+
+
 def _build_launch_command(
     remote_cmd: str | None,
     plugin_dirs: list[str],
@@ -581,7 +615,9 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
             print(f"[WARN] CodeSpace lease conflict (continuing): {exc}",
                   file=sys.stderr)
 
-    # Build port forwards for credential relay
+    # Credential relay state. The relay reverse-forward now has its own
+    # supervised ``ssh -N -R`` channel, so it is not piggybacked on the
+    # coordination connection's port_forwards.
     port_forwards: list[str] = []
     # Neutralize static PATs the CodeSpace injects (e.g. MS_ADO_PAT) so a
     # dispatched agent never relies on a stale/expired token instead of the
@@ -594,7 +630,6 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     # clobbered by the relay exports.
     relay_token: str | None = None
     if not args.no_relay:
-        port_forwards.append(f"-R {relay_port}:127.0.0.1:{relay_port}")
         # #122: the relay is owned/run by the agent-bridge daemon; this command
         # only forwards the port. If the relay isn't listening host-side, the
         # -R forward dead-ends and git auth over the tunnel silently returns
@@ -629,6 +664,7 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     )
 
     manager = ConnectionManager()
+    relay_forward = None
 
     # The remote command is assembled inside _run() -- AFTER the relay is up and
     # any --stage-plugin payloads are staged -- so their on-CodeSpace
@@ -660,6 +696,8 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         )
 
     async def _run() -> int:
+        nonlocal relay_forward
+
         # Stage 3 (ssh-to-target): a Shutdown CodeSpace boots on connect, so be
         # patient -- retry to the boot deadline, then fail fast with a clear,
         # staged message (never an opaque provider death).
@@ -668,7 +706,16 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         backoff = 3.0
         while True:
             try:
-                await manager.ensure_connected(args.name, source, port_forwards)
+                connection = await manager.ensure_connected(
+                    args.name, source, port_forwards,
+                )
+                if not args.no_relay and relay_forward is None:
+                    relay_forward = await _start_supervised_relay(
+                        args.name,
+                        connection.config,
+                        relay_port,
+                        context="CodeSpace connect",
+                    )
                 tracker.reached(ConnectStage.SSH_TO_TARGET, f"codespace={args.name}")
                 break
             except (ConnectionError, TimeoutError) as exc:
@@ -831,6 +878,8 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
             )
             raise
         finally:
+            if relay_forward is not None:
+                await relay_forward.stop()
             await manager.disconnect(args.name)
 
     try:
@@ -2387,20 +2436,30 @@ def _cmd_create(args: argparse.Namespace) -> int:
     # (including on_create extras).
     from .relay_launch import effective_relay_port
     relay_port = effective_relay_port(config)
-    port_forwards = [f"-R {relay_port}:127.0.0.1:{relay_port}"]
     source = CodespaceSource(info.name, account=info.account or None)
     manager = ConnectionManager()
 
     async def _run() -> int:
-        await manager.ensure_connected(info.name, source, port_forwards)
-        await _provision_relay_helpers(manager, info.name)
-        await _provision_dotfiles(manager, info.name, config)
-        await _provision_harness(manager, info.name, config)
-        await _provision_repo_hooks(
-            manager, info.name, config, args.repo, include_on_create=True,
-        )
-        await manager.disconnect(info.name)
-        return 0
+        relay_forward = None
+        try:
+            connection = await manager.ensure_connected(info.name, source, [])
+            relay_forward = await _start_supervised_relay(
+                info.name,
+                connection.config,
+                relay_port,
+                context="CodeSpace create provisioning",
+            )
+            await _provision_relay_helpers(manager, info.name)
+            await _provision_dotfiles(manager, info.name, config)
+            await _provision_harness(manager, info.name, config)
+            await _provision_repo_hooks(
+                manager, info.name, config, args.repo, include_on_create=True,
+            )
+            return 0
+        finally:
+            if relay_forward is not None:
+                await relay_forward.stop()
+            await manager.disconnect(info.name)
 
     print("Running post-create provisioning...")
     rc = asyncio.run(_run())

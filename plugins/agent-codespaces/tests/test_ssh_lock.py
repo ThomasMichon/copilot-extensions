@@ -108,13 +108,17 @@ class _FakeManager:
     def __init__(self, calls: list[str], *, hang_connect: bool = False) -> None:
         self.calls = calls
         self.hang_connect = hang_connect
+        self.port_forwards: list[list[str]] = []
 
     async def ensure_connected(self, *_args, **_kwargs):
         self.calls.append("ensure_connected")
+        if len(_args) >= 3:
+            self.port_forwards.append(list(_args[2]))
         if self.hang_connect:
             import asyncio
 
             await asyncio.sleep(30)
+        return SimpleNamespace(config=SimpleNamespace(ssh_target="cs-one"))
 
     async def exec_command(self, *_args, **_kwargs):
         self.calls.append("exec_command")
@@ -152,8 +156,20 @@ def _fake_config():
 def _patch_ssh_dependencies(monkeypatch, tmp_path, manager):
     locks = tmp_path / "locks"
     locks.mkdir(parents=True)
+
+    class _FakeRelayForward:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        async def start(self) -> None:
+            return None
+
+        async def stop(self) -> None:
+            return None
+
     monkeypatch.setattr("ssh_manager.locks.locks_dir", lambda: locks)
     monkeypatch.setattr("ssh_manager.ConnectionManager", lambda: manager)
+    monkeypatch.setattr("ssh_manager.SupervisedRelayForward", _FakeRelayForward)
     monkeypatch.setattr(
         "agent_codespaces.lifecycle.account_for_codespace",
         lambda _name: None,
@@ -195,6 +211,7 @@ class TestDiagnosticRemoteCmd:
         assert "relay" in calls
         assert "auth" in calls
         assert "exec_command" in calls
+        assert manager.port_forwards == [[]]
         assert "dotfiles" not in calls
         assert "harness" not in calls
         assert "register" not in calls
