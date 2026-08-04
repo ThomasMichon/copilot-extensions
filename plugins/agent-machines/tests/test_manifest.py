@@ -26,6 +26,18 @@ def test_wildcard_gate_applies_everywhere(tmp_path):
     assert pkg.applies_to("anything")
 
 
+def test_gate_match_is_case_insensitive(tmp_path):
+    # platform.node() returns the OS-cased hostname (e.g. "Box-1"/"BOX-1"),
+    # but manifests list gates in lowercase ("box-1"). The gate must still match
+    # regardless of casing, or a machine is silently excluded from its own package.
+    path = write_package(tmp_path, "d.yaml", base_package(gate=["box-1"]))
+    pkg = load_package(path)
+    assert pkg.applies_to("box-1")
+    assert pkg.applies_to("Box-1")
+    assert pkg.applies_to("BOX-1")
+    assert not pkg.applies_to("box-2")
+
+
 def test_bad_schema_version_rejected(tmp_path):
     path = write_package(tmp_path, "d.yaml", base_package(schema_version=99))
     with pytest.raises(ManifestError):
