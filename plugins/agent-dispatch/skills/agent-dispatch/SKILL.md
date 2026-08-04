@@ -255,7 +255,9 @@ agent-dispatch create "Add narration track" \
   --affinity worktree=same \         # soft: bias toward the same worktree, never exclude
   --label media \
   --target-repo copilot-extensions \ # OPTIONAL: the cross-repo *code* target (stays in THIS lane)
-  --dedup-key narration-seg42        # makes create idempotent
+  --dedup-key narration-seg42 \      # makes create idempotent
+  --goal "segment 42 has a merged narration track" \  # durable objective (see Goal-loop tasks)
+  --done-criteria "track rendered, reviewed, merged"  # when --goal is met
 ```
 
 The **lane** (`--repo`) defaults to the calling repo -- omit it inside your
@@ -291,6 +293,48 @@ Defer with `--not-before <epoch>` (scheduled creation). Attach a payload with
 `--payload-inline` (small), `--payload-file <path>` (reads a file; a large one
 spills to a content-addressed blob automatically), or `--payload-ref` (an
 external pointer like `pr/123`).
+
+### Goal-loop tasks — a durable goal a worker loops toward *(the norm for delegated work)*
+
+A dispatched task is **not** a fire-once prompt — it is, by default, a **durable
+goal an agent loops toward across turns and across embodiments.** Reach for
+`--goal` + `--done-criteria` on any delegation that is an *objective* rather than
+a single mechanical step; a plain one-shot prompt (no goal) is the exception, for
+genuinely atomic work.
+
+```bash
+agent-dispatch create "Drive PR #128 to ready" \
+  --prompt "review, address feedback, and land the auth-hardening PR" \
+  --goal "PR #128 is approved and merged" \
+  --done-criteria "review approved, CI green, merged to master"
+```
+
+- **`--goal`** is the durable objective; **`--done-criteria`** is the explicit
+  test for *done*. Both are stored on the task row and both are optional — omit
+  them for a one-shot task.
+- A worker treats a goal-bearing task as something to **pursue in a loop**: do one
+  unit of work → record a **progress beat** (`agent-dispatch progress <id> …`,
+  which *appends* to the task's durable `progress_log`) → re-check the
+  done-criteria → repeat until they are genuinely met. Dispatched **autopilot**
+  bodies (`embody` / fleet seeds) run exactly this loop; the seed prompt spells it
+  out (read the goal + prior `progress_log`, resume, loop, complete only on
+  done-criteria).
+- **Resume, don't restart.** Because the goal *and* its accumulated progress are
+  durable, a worker that vanishes mid-goal is replaced by one that **resumes from
+  the recorded `progress_log`** — the fabric loses only the *remainder* of the
+  work, never the whole of it. This is why a progress beat is worth emitting at
+  every real transition: it is the resume point.
+- **Completion is self-judged but corroborated.** The worker completes the task
+  **explicitly**, only once it judges the done-criteria met (**deferred
+  completion**). For a goal-bearing task the coordinator corroborates the claim
+  against a recorded result + progress consistent with the done-criteria before
+  treating the goal as closed — a `complete` with no result and no progress toward
+  a real goal is **held for attention**, not silently accepted. (A plain one-shot
+  task keeps the simple deferred-completion path.)
+- **What the layer does *not* do:** it makes the goal durable and resumable; it
+  does **not** drive the worker's loop turn-by-turn (fire-and-forget, not driven).
+  The supervisor re-embodies a *confirmed-gone* goal to resume it, and nudges an
+  *alive-but-quiet* worker rather than yanking its goal away.
 
 ### Producers -- scheduled + reactive task creation
 
@@ -360,9 +404,10 @@ agent-dispatch focus --list     # every worktree's focus (this machine)
 > at real transitions -- a plan settled, implementation done, a PR opened, a
 > blocker hit -- never on a timer. The `--summary` is hard-capped and stored
 > **latest-only** as `latest_progress` (a structured object surfaced by
-> `show`/`list`/`inbox`), plus appended to the audit trail -- so a reader sees
-> *how far toward the goal* without a transcript. Identity auto-resolves from CWD
-> like the other lease verbs.
+> `show`/`list`/`inbox`) **and appended to the task's durable `progress_log`** --
+> so a reader sees *how far toward the goal* without a transcript, **and a
+> replacement worker can resume a goal from the recorded beats** rather than
+> restarting it. Identity auto-resolves from CWD like the other lease verbs.
 
 Recoverable snag -> return it for a later cycle (keep the note!):
 

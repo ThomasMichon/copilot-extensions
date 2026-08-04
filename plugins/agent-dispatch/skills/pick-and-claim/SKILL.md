@@ -68,9 +68,14 @@ what makes your pick *stick uniquely*. Do both — sweep, then claim.
    then `claim`, but `--claim` is the clean primitive.)
 
 4. **Work it, then close the loop.** `agent-dispatch progress <id> …` at phase
-   boundaries; `agent-dispatch complete <id> --result-ref <ref>` when done. If you
-   must drop it: `agent-dispatch yield <id> --exclude-self worktree` (append a "not me"
-   so you are not re-offered it), or `abandon --duplicate-of <ref>` if it turns
+   boundaries; `agent-dispatch complete <id> --result-ref <ref>` when done. If the
+   pick is an *objective* rather than a single step, make it a **durable goal**
+   (`create … --goal "<objective>" --done-criteria "<when done>"`) and **loop
+   toward it** — work a unit, record a progress beat, re-check the done-criteria,
+   repeat — so a replacement resumes from the recorded progress rather than
+   restarting (see the **`agent-dispatch`** skill § *Goal-loop tasks*). If you
+   must drop it: `agent-dispatch yield <id> --exclude-self worktree` (append a "not
+   me" so you are not re-offered it), or `abandon --duplicate-of <ref>` if it turns
    out to be a duplicate.
 
 ## Canonical `dedup_key` conventions
