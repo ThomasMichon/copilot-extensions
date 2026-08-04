@@ -103,9 +103,17 @@ Locked design decisions (operator):
       stays warm). Live-validated on a torch host (Borealis).
 
 ### Phase 4 — Role-aware install
-- [ ] `host` role installs the engine daemon + heavy stack; `client` role installs
+- [x] `host` role installs the engine daemon + heavy stack; `client` role installs
       the service/CLI only (or nothing). Role resolved from `~/.agent-index/` or
       `<repo>/.agent-index/config.yaml`. No machine specifics in the plugin.
+      **Done** — `config.resolve_role()` (precedence: `AGENT_INDEX_ROLE` env →
+      machine-local `<install_dir>/config.yaml` `role:`/`engine:` scalar → default
+      `client`) + `agent-index role [--json]` CLI. Installers gained
+      `Get-InstallRole`/`_install_role`: the `install` action provisions the engine
+      **only when role resolves to `host`** (client installs stay torch-free); the
+      explicit `engine` action still force-provisions (role-independent). 10 role
+      tests; full suite **115 green** on Borealis; role-gated install decisions
+      live-validated (client skips engine, host provisions).
 
 ### Phase 5 — Service on the external seam
 - [ ] Service defaults to `external` engine mode against the persistent daemon.
@@ -132,6 +140,21 @@ Locked design decisions (operator):
       untouched by either runtime swap.
 
 ## Journal
+
+### 2026-08-03 — Phase 4: config-driven role-aware install
+- `config.resolve_role()` resolves this machine's role — `host` (runs the durable
+  engine daemon) or `client` (light, torch-free service/CLI only). Precedence:
+  `AGENT_INDEX_ROLE` env → machine-local `<install_dir>/config.yaml` `role:`/`engine:`
+  scalar → default `client`. The scalar is read with a dependency-light scanner
+  (no PyYAML pulled into the torch-free service). Exposed as `agent-index role
+  [--json]`. **No machine names in the plugin** — role is pure configuration.
+- Installers gained `Get-InstallRole`/`_install_role`; the **`install`** action now
+  provisions the engine + daemon **only when role == host** (a `client` install
+  stays entirely torch-free), while the explicit **`engine`** action still
+  force-provisions for manual host setup. `update` remains engine-untouched.
+- Validated on Borealis: default (no config) → `client`, engine skipped, no engine
+  venv; `role: host` in config.yaml → engine provisioned. 10 new role tests;
+  **full suite 115 green**; ruff (F,E9) clean. No version bump (batched).
 
 ### 2026-08-03 — Phase 3b: installer provisions the durable engine + daemon
 - `install.ps1` + `install.sh` now provision the **durable engine venv**

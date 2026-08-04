@@ -387,6 +387,23 @@ EOF
     _ok "Deploy manifest written (source: $kind)"
 }
 
+_install_role() {
+    # Resolve this machine's role (host runs the engine; client is service-only).
+    # Precedence: AGENT_INDEX_ROLE env, then the freshly-installed CLI's resolver
+    # (config.yaml role:/engine:), else client. No machine names live here.
+    if [[ -n "${AGENT_INDEX_ROLE:-}" ]]; then
+        local r
+        r="$(printf '%s' "$AGENT_INDEX_ROLE" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+        if [[ "$r" == "host" || "$r" == "client" ]]; then printf '%s' "$r"; return 0; fi
+    fi
+    if [[ -x "$LINK_PYTHON" ]]; then
+        local out
+        out="$("$LINK_PYTHON" -m agent_index role 2>/dev/null | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+        if [[ "$out" == "host" || "$out" == "client" ]]; then printf '%s' "$out"; return 0; fi
+    fi
+    printf 'client'
+}
+
 _install_engine() {
     # Provision the DURABLE engine venv (agent-index[engine], the torch stack) at
     # AGENT_INDEX_ENGINE_HOME. Built ONCE and skipped if present (idempotent);
@@ -609,9 +626,19 @@ _uninstall() {
 }
 
 case "$ACTION" in
-    install) _ensure_runtime; _install_service; _install_engine || true; _register_engine_daemon ;;
+    install)
+        _ensure_runtime
+        _install_service
+        _role="$(_install_role)"
+        if [[ "$_role" == "host" ]]; then
+            _install_engine || true
+            _register_engine_daemon
+        else
+            _skip "Engine runtime skipped (role: $_role) -- set 'role: host' in $INSTALL_DIR/config.yaml or AGENT_INDEX_ROLE=host to host the durable engine"
+        fi
+        ;;
     update) _downgrade_guard; _ensure_runtime; _install_service ;;  # engine venv + daemon left untouched by design
-    engine) _install_engine || true; _register_engine_daemon ;;
+    engine) _install_engine || true; _register_engine_daemon ;;     # explicit host-side provisioning (role-independent)
     status) _status ;;
     start) _start ;;
     stop) _stop ;;

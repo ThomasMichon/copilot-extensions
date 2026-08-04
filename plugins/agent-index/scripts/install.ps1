@@ -449,6 +449,26 @@ function Write-Manifest {
     Write-Ok "Deploy manifest written (source: $kind)"
 }
 
+function Get-InstallRole {
+    # host runs the engine; client is service-only. Precedence: AGENT_INDEX_ROLE
+    # env, then the freshly-installed CLI resolver (config.yaml), else client.
+    if ($env:AGENT_INDEX_ROLE) {
+        $r = ($env:AGENT_INDEX_ROLE).Trim().ToLower()
+        if ($r -in @('host', 'client')) { return $r }
+    }
+    if (Test-Path $LinkPython) {
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $out = & $LinkPython -m agent_index role 2>$null
+        $ErrorActionPreference = $prevEAP
+        if ($LASTEXITCODE -eq 0 -and $out) {
+            $r = ("$out" -replace '\s', '').ToLower()
+            if ($r -in @('host', 'client')) { return $r }
+        }
+    }
+    return 'client'
+}
+
 function Test-EnginePort {
     $eh = '127.0.0.1'; $ep = 8421
     if ($env:AGENT_INDEX_ENGINE_HOST) { $eh = $env:AGENT_INDEX_ENGINE_HOST }
@@ -676,9 +696,18 @@ function Invoke-Uninstall {
 }
 
 switch ($Action) {
-    'install' { Install-Runtime; Install-Service; Install-Engine | Out-Null; Register-EngineDaemon }
+    'install' {
+        Install-Runtime; Install-Service
+        $role = Get-InstallRole
+        if ($role -eq 'host') {
+            Install-Engine | Out-Null
+            Register-EngineDaemon
+        } else {
+            Write-Skip "Engine runtime skipped (role: $role) -- set 'role: host' in $InstallDir\config.yaml or AGENT_INDEX_ROLE=host to host the durable engine"
+        }
+    }
     'update' { Invoke-DowngradeGuard; Install-Runtime; Install-Service }  # engine venv + daemon left untouched by design
-    'engine' { Install-Engine | Out-Null; Register-EngineDaemon }
+    'engine' { Install-Engine | Out-Null; Register-EngineDaemon }        # explicit host-side provisioning (role-independent)
     'status' { Invoke-Status }
     'start' { Invoke-Start }
     'stop' { Invoke-Stop }

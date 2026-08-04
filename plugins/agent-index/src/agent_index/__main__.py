@@ -91,6 +91,17 @@ def cmd_mcp(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_role(args: argparse.Namespace) -> int:
+    """Print this machine's resolved agent-index role (host/client)."""
+    from agent_index.config import resolve_role
+
+    role = resolve_role()
+    if getattr(args, "json", False):
+        return _emit({"role": role})
+    print(role)
+    return 0
+
+
 def cmd_engine(args: argparse.Namespace) -> int:
     """Manage the durable, persistent embedding-engine daemon."""
     from agent_index.engine import daemon
@@ -422,6 +433,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="start/stop/status the daemon, or run it in the foreground (task entry)",
     )
     p_engine.set_defaults(func=cmd_engine)
+
+    p_role = sub.add_parser(
+        "role", help="print this machine's resolved agent-index role (host/client)"
+    )
+    p_role.add_argument("--json", action="store_true", help="emit the role as JSON")
+    p_role.set_defaults(func=cmd_role)
     return parser
 
 
