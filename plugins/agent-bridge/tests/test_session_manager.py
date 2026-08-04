@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import sys
 import time
-from types import ModuleType
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -200,26 +198,17 @@ class TestConcurrencyGuard:
         assert second.status == SessionStatus.IDLE
 
 
-def _install_model_launch(monkeypatch, *, result: str = "", raises: bool = False) -> None:
-    parent = ModuleType("agent_codespaces")
-    parent.__path__ = []
-    module = ModuleType("agent_codespaces.model_launch")
-
-    def build_model_flags() -> str:
+async def _start_codespace_session(
+    tmp_db, monkeypatch, *, model_flags: str = "", raises: bool = False,
+):
+    def fake_resolve() -> str:
         if raises:
             raise RuntimeError("resolver failed")
-        return result
+        return model_flags
 
-    module.build_model_flags = build_model_flags
-    parent.model_launch = module
-    monkeypatch.setitem(sys.modules, "agent_codespaces", parent)
-    monkeypatch.setitem(sys.modules, "agent_codespaces.model_launch", module)
-
-
-async def _start_codespace_session(
-    tmp_db, monkeypatch, *, model_result: str, raises: bool = False,
-):
-    _install_model_launch(monkeypatch, result=model_result, raises=raises)
+    monkeypatch.setattr(
+        "agent_bridge.session_manager._resolve_acp_model_flags", fake_resolve,
+    )
     monkeypatch.setattr(
         "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
         lambda *args, **kwargs: object(),
@@ -252,22 +241,28 @@ async def _start_codespace_session(
 
 
 class TestCodespaceSessionHostModelFlags:
-    """Model flags are appended at the Session-Host CodeSpace dispatch seam."""
+    """Model flags are appended at the Session-Host CodeSpace dispatch seam.
+
+    Resolved via a process-to-process call to the agent-codespaces binstub
+    (``_resolve_acp_model_flags``), not an in-process import.
+    """
 
     @pytest.mark.asyncio
     async def test_appends_model_flags(self, tmp_db, monkeypatch) -> None:
-        flags = " --model claude-opus-4.8 --reasoning-effort high --context long_context"
+        # The binstub prints the flags without a leading space; the dispatch
+        # seam inserts the separating space.
+        flags = "--model claude-opus-4.8 --reasoning-effort high --context long_context"
 
         acp_command, remote_argv = await _start_codespace_session(
-            tmp_db, monkeypatch, model_result=flags,
+            tmp_db, monkeypatch, model_flags=flags,
         )
 
-        assert remote_argv == ["bash", "-lc", acp_command + flags]
+        assert remote_argv == ["bash", "-lc", f"{acp_command} {flags}"]
 
     @pytest.mark.asyncio
     async def test_unchanged_when_model_flags_empty(self, tmp_db, monkeypatch) -> None:
         acp_command, remote_argv = await _start_codespace_session(
-            tmp_db, monkeypatch, model_result="",
+            tmp_db, monkeypatch, model_flags="",
         )
 
         assert remote_argv == ["bash", "-lc", acp_command]
@@ -275,7 +270,7 @@ class TestCodespaceSessionHostModelFlags:
     @pytest.mark.asyncio
     async def test_unchanged_when_model_flags_raise(self, tmp_db, monkeypatch) -> None:
         acp_command, remote_argv = await _start_codespace_session(
-            tmp_db, monkeypatch, model_result="", raises=True,
+            tmp_db, monkeypatch, model_flags="", raises=True,
         )
 
         assert remote_argv == ["bash", "-lc", acp_command]

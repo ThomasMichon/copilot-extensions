@@ -15,6 +15,8 @@ import logging
 import os
 import random
 import re
+import shutil
+import subprocess
 import sys
 import time
 import uuid
@@ -37,6 +39,35 @@ from .models import (
 from .transport import SpawnTarget, spawn
 
 log = logging.getLogger("agent-bridge")
+
+
+def _resolve_acp_model_flags() -> str:
+    """Resolve per-session copilot model flags for a CodeSpace ACP dispatch.
+
+    Shells out to the ``agent-codespaces`` binstub (``acp-model-flags``) rather
+    than importing ``agent_codespaces`` in the bridge venv, so the two
+    separately-versioned plugin venvs stay decoupled -- an in-process import
+    would force the installer to keep a synced copy of ``agent_codespaces`` in
+    the bridge venv (which drifts stale). Mirrors ``gh_account``'s
+    shell-out-to-a-sibling-binstub pattern. Degrade-safe: returns ``""`` (no
+    propagation, today's behavior) when the binstub is absent or the call fails.
+    """
+    binstub = shutil.which("agent-codespaces")
+    if not binstub:
+        return ""
+    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    try:
+        result = subprocess.run(
+            [binstub, "acp-model-flags"],
+            capture_output=True, text=True, timeout=10,
+            creationflags=creationflags,
+        )
+    except Exception:
+        return ""
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
 
 # Session states that "occupy" a workspace -- a workspace with a session
 # in any of these states cannot accept a second concurrent session.
@@ -1978,17 +2009,22 @@ class SessionManager:
                 # so the Session Host execs it through a login shell (with the
                 # relay prelude prepended); copilot inherits the host's stdio pipe
                 # as fd 0/1 and its exit ends the shell (child-liveness tracks it).
-                model_flags = ""
+                # Fresh-at-dispatch model propagation seam (dotfiles #790).
+                # Resolved via a process-to-process call to the agent-codespaces
+                # binstub -- NOT an in-process import -- so the separately
+                # versioned bridge and agent-codespaces venvs stay decoupled (an
+                # in-process import forces the installer to keep a synced copy of
+                # agent_codespaces in the bridge venv, which drifts stale). Mirrors
+                # gh_account's shell-out-to-a-sibling-binstub pattern.
                 try:
-                    from agent_codespaces.model_launch import build_model_flags
-
-                    model_flags = build_model_flags()
+                    model_flags = _resolve_acp_model_flags()
                 except Exception:
                     model_flags = ""
-                # Fresh-at-dispatch model propagation seam (dotfiles #790),
-                # version-skew tolerant and mirrored after the relay_prelude seam.
+                acp_command = cs_target["acp_command"]
+                if model_flags:
+                    acp_command = f"{acp_command} {model_flags}"
                 remote_argv = [
-                    "bash", "-lc", relay_prelude + cs_target["acp_command"] + model_flags,
+                    "bash", "-lc", relay_prelude + acp_command,
                 ]
                 # Copilot runs its tools from the ACP session cwd, so it must be
                 # the CodeSpace workspace checkout (e.g. /workspaces/example-web) --
