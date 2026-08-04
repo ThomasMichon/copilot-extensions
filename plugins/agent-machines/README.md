@@ -37,13 +37,17 @@ agent-machines validate           # run the conflict validator
 agent-machines restore            # DRY-RUN by default: preview what would change and why
 agent-machines restore --apply    # actually apply (surfaces + modules)
 agent-machines restore --only ssh --apply   # review + apply one section at a time
+agent-machines restore --only ssh --json    # machine-readable result (incl. module output)
 agent-machines version
 ```
 
 **Restore is deliberate and reviewable.** It defaults to a dry-run that shows the
 per-key/-location diff; `--apply` makes changes; `--only` scopes to named
 surfaces/modules. Surfaces back up before writing; a module runs during a dry-run
-only if it declares `dry_run_args`.
+only if it declares `dry_run_args`. A **module's own output** (its step-by-step
+`[OK]/[PLAN]/[CHANGE]` preview) is surfaced under its result line **by default in
+a dry-run**, and behind `--verbose` for `--apply`; `--json` returns the full
+structured result (plan + surface results + module `stdout_tail`/`stderr_tail`).
 
 ## Repo-local modules
 
