@@ -46,6 +46,21 @@ SYSTEMD_UNIT="agent-index.service"
 UNIT_DIR="$HOME/.config/systemd/user"
 ENV_FILE="$INSTALL_DIR/service.env"
 
+# === engine-daemon: durable, persistent embedding-engine runtime =============
+# The heavy embedding stack (torch + transformers + sentence-transformers) lives
+# in a DURABLE venv OUTSIDE the versioned service runtime, at
+# AGENT_INDEX_ENGINE_HOME (default ~/.agent-index/engine). It is provisioned ONCE
+# and preserved across service updates -- a routine `update` swaps only the
+# versioned service runtime + symlink and never rebuilds torch or restarts the
+# warm engine daemon (effort agent-index-engine-daemon; vision §warm-durable-engine).
+ENGINE_HOME="${AGENT_INDEX_ENGINE_HOME:-$HOME/.agent-index/engine}"
+ENGINE_HOME="${ENGINE_HOME/#\~/$HOME}"
+ENGINE_VENV="$ENGINE_HOME/.venv"
+ENGINE_VENV_PYTHON="$ENGINE_VENV/bin/python"
+ENGINE_ENV_FILE="$ENGINE_HOME/engine.env"
+ENGINE_SYSTEMD_UNIT="agent-index-engine.service"
+# === end engine-daemon ======================================================
+
 # === install-contract:v3 versioned-venv (agent-index: .venv-as-symlink) ===
 # Build each version into versions/<version> and make the historical `.venv`
 # path a symlink into the active slot. Enabled by default (set AGENT_INDEX_VERSIONED=0
@@ -372,6 +387,128 @@ EOF
     _ok "Deploy manifest written (source: $kind)"
 }
 
+_install_engine() {
+    # Provision the DURABLE engine venv (agent-index[engine], the torch stack) at
+    # AGENT_INDEX_ENGINE_HOME. Built ONCE and skipped if present (idempotent);
+    # never rebuilt by a service `update`. Non-fatal -- a failure here leaves the
+    # light, torch-free service fully functional.
+    if [[ "${AGENT_INDEX_NO_ENGINE_DEPS:-}" == "1" ]]; then
+        _skip "Engine runtime skipped (AGENT_INDEX_NO_ENGINE_DEPS=1)"
+        return 1
+    fi
+    if [[ -x "$ENGINE_VENV_PYTHON" ]]; then
+        _skip "Engine runtime already provisioned (durable venv preserved): $ENGINE_VENV"
+        return 0
+    fi
+    local py
+    py="$(_find_python)" || { _warn 'Python not found -- cannot provision engine runtime'; return 1; }
+    _step 'Provisioning durable engine runtime (torch stack) -- one-time, may take a while'
+    mkdir -p "$ENGINE_HOME"
+    local have_uv=0
+    command -v uv >/dev/null 2>&1 && have_uv=1
+    if [[ "$have_uv" -eq 1 ]]; then
+        uv venv "$ENGINE_VENV" --allow-existing >/dev/null 2>&1 || "$py" -m venv "$ENGINE_VENV" >/dev/null 2>&1
+    else
+        "$py" -m venv "$ENGINE_VENV" >/dev/null 2>&1
+    fi
+    [[ -x "$ENGINE_VENV_PYTHON" ]] || { _warn "Engine venv creation failed -- $ENGINE_VENV_PYTHON not found"; return 1; }
+
+    # zdd is a declared dependency of agent-index but is not on PyPI -- install it
+    # from the vendored lib first so pip can satisfy the requirement.
+    local zdd_dir
+    if zdd_dir="$(_resolve_zdd)"; then
+        if [[ "$have_uv" -eq 1 ]]; then
+            uv pip install --python "$ENGINE_VENV_PYTHON" "$zdd_dir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet >/dev/null 2>&1 || true
+        else
+            "$ENGINE_VENV_PYTHON" -m pip install "$zdd_dir" >/dev/null 2>&1 || true
+        fi
+    fi
+
+    # agent-index[engine] -- the heavy embedding stack into the DURABLE venv only.
+    # Default PyPI torch is the CPU wheel; set AGENT_INDEX_TORCH_INDEX to a CUDA
+    # wheel index (e.g. https://download.pytorch.org/whl/cu121) for a GPU host.
+    local rc=0
+    if [[ "$have_uv" -eq 1 ]]; then
+        local uv_args=(pip install --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR[engine]")
+        [[ -n "${AGENT_INDEX_TORCH_INDEX:-}" ]] && uv_args+=(--extra-index-url "$AGENT_INDEX_TORCH_INDEX")
+        uv "${uv_args[@]}" || rc=$?
+    else
+        local pip_args=(-m pip install "$PLUGIN_DIR[engine]")
+        [[ -n "${AGENT_INDEX_TORCH_INDEX:-}" ]] && pip_args+=(--extra-index-url "$AGENT_INDEX_TORCH_INDEX")
+        "$ENGINE_VENV_PYTHON" "${pip_args[@]}" || rc=$?
+    fi
+    if [[ "$rc" -ne 0 ]]; then
+        _warn 'Engine runtime install failed (torch stack) -- light service unaffected; provision later with the "engine" action'
+        return 1
+    fi
+    if ! "$ENGINE_VENV_PYTHON" -c 'import torch' 2>/dev/null; then
+        _warn 'Engine venv built but torch import failed'
+        return 1
+    fi
+    _ok "Engine runtime provisioned (durable venv): $ENGINE_VENV"
+    return 0
+}
+
+_register_engine_daemon() {
+    # Register the persistent systemd --user unit that runs the warm engine from
+    # the durable venv. A warm engine is left untouched (never restarted) when it
+    # is already active.
+    if [[ "$NO_SERVICE" -eq 1 ]]; then
+        _skip "Engine daemon skipped (--no-service)"
+        return 0
+    fi
+    if [[ ! -x "$ENGINE_VENV_PYTHON" ]]; then
+        _skip "Engine runtime not provisioned -- daemon not registered"
+        return 0
+    fi
+    if [[ ! -f "$ENGINE_ENV_FILE" ]]; then
+        cat > "$ENGINE_ENV_FILE" << 'ENVEOF'
+# agent-index engine daemon environment
+AGENT_INDEX_ENGINE_HOST=127.0.0.1
+AGENT_INDEX_ENGINE_PORT=8421
+ENVEOF
+        _ok "Engine env: $ENGINE_ENV_FILE"
+    else
+        _skip "Engine env already exists: $ENGINE_ENV_FILE"
+    fi
+    if ! command -v systemctl >/dev/null 2>&1; then
+        _skip "systemd not available -- run 'agent-index engine run' via your own supervisor on this host"
+        return 0
+    fi
+    mkdir -p "$UNIT_DIR"
+    cat > "$UNIT_DIR/$ENGINE_SYSTEMD_UNIT" << EOF
+[Unit]
+Description=agent-index -- durable, persistent embedding-engine daemon (warm, torch)
+After=network.target
+
+[Service]
+Type=simple
+Environment=PYTHONUTF8=1
+Environment=AGENT_INDEX_ENGINE_HOME=$ENGINE_HOME
+EnvironmentFile=-$ENGINE_ENV_FILE
+ExecStart=$ENGINE_VENV_PYTHON -m agent_index engine run
+Restart=on-failure
+RestartSec=5
+WorkingDirectory=$ENGINE_HOME
+
+[Install]
+WantedBy=default.target
+EOF
+    systemctl --user daemon-reload 2>/dev/null || true
+    systemctl --user enable "$ENGINE_SYSTEMD_UNIT" 2>/dev/null || true
+    # Keep a warm engine warm: only START if not already active (never restart on re-register).
+    if systemctl --user is-active "$ENGINE_SYSTEMD_UNIT" >/dev/null 2>&1; then
+        _skip "Engine daemon already running -- leaving the warm engine untouched ($ENGINE_SYSTEMD_UNIT)"
+    else
+        systemctl --user start "$ENGINE_SYSTEMD_UNIT" 2>/dev/null || true
+        if systemctl --user is-active "$ENGINE_SYSTEMD_UNIT" >/dev/null 2>&1; then
+            _ok "Engine daemon installed + started ($ENGINE_SYSTEMD_UNIT)"
+        else
+            _warn "Engine daemon installed but not active -- check: systemctl --user status agent-index-engine"
+        fi
+    fi
+}
+
 _install_service() {
     if [[ "$NO_SERVICE" -eq 1 ]]; then
         _skip "Service skipped (--no-service)"
@@ -457,16 +594,24 @@ _uninstall() {
         rm -f "$UNIT_DIR/$SYSTEMD_UNIT"
         systemctl --user daemon-reload 2>/dev/null || true
     fi
+    if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$ENGINE_SYSTEMD_UNIT" ]]; then
+        systemctl --user stop "$ENGINE_SYSTEMD_UNIT" 2>/dev/null || true
+        systemctl --user disable "$ENGINE_SYSTEMD_UNIT" 2>/dev/null || true
+        rm -f "$UNIT_DIR/$ENGINE_SYSTEMD_UNIT"
+        systemctl --user daemon-reload 2>/dev/null || true
+    fi
     rm -f "$STUB"
     if [[ "$PURGE" -eq 1 ]]; then
+        rm -rf "$ENGINE_HOME"
         rm -rf "$INSTALL_DIR"
     fi
     _ok 'agent-index uninstalled'
 }
 
 case "$ACTION" in
-    install) _ensure_runtime; _install_service ;;
-    update) _downgrade_guard; _ensure_runtime; _install_service ;;
+    install) _ensure_runtime; _install_service; _install_engine || true; _register_engine_daemon ;;
+    update) _downgrade_guard; _ensure_runtime; _install_service ;;  # engine venv + daemon left untouched by design
+    engine) _install_engine || true; _register_engine_daemon ;;
     status) _status ;;
     start) _start ;;
     stop) _stop ;;
