@@ -396,7 +396,9 @@ def _run_git_cache(cache_dir, port: int, ttl: int, request: str):
     )
 
 
-def _require_bash():
+def _bash_candidates():
+    """Candidate bash executables, in preference order: whatever is on PATH,
+    then the well-known Git-Bash locations on Windows."""
     candidates = []
     found = shutil.which("bash")
     if found:
@@ -406,22 +408,76 @@ def _require_bash():
             r"C:\Program Files\Git\bin\bash.exe",
             r"C:\Program Files\Git\usr\bin\bash.exe",
         ])
-    for bash in candidates:
-        if not bash or not os.path.exists(bash):
-            continue
-        try:
-            result = subprocess.run(
-                [bash, "-lc", "echo ok"],
-                text=True,
-                capture_output=True,
-                timeout=5,
-                check=False,
-            )
-        except OSError:
-            continue
-        if result.returncode == 0 and "ok" in result.stdout:
+    return candidates
+
+
+def _bash_runs(bash) -> bool:
+    """True iff ``bash`` exists and can run a trivial login shell. Tolerates a
+    slow/cold WSL launch (TimeoutExpired) by treating it as unusable."""
+    if not bash or not os.path.exists(bash):
+        return False
+    try:
+        result = subprocess.run(
+            [bash, "-lc", "echo ok"],
+            text=True, capture_output=True, timeout=10, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0 and "ok" in result.stdout
+
+
+def _require_bash():
+    for bash in _bash_candidates():
+        if _bash_runs(bash):
             return bash
     pytest.skip("bash is required for /dev/tcp relay-helper probes")
+
+
+def _is_wsl_bash(bash) -> bool:
+    """The Microsoft Store WSL launcher lives under ``WindowsApps`` and runs the
+    shell *inside* the WSL VM, whose loopback is a separate network namespace
+    from the Windows host -- so its ``/dev/tcp/127.0.0.1`` cannot reach a
+    host-bound relay -- so the host-relay probe tests must skip on it."""
+    return "windowsapps" in (bash or "").lower()
+
+
+def _bash_reaches_host_loopback(bash) -> bool:
+    """True iff ``bash``'s ``/dev/tcp`` can reach a socket bound on the *host*
+    loopback (127.0.0.1). Git Bash (MSYS2) uses the host network stack and
+    succeeds; used to confirm a non-WSL candidate before the probe tests run."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv:
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        port = srv.getsockname()[1]
+        script = (
+            '{ exec 3<>"/dev/tcp/127.0.0.1/%d"; } 2>/dev/null && echo ok || echo no'
+            % port
+        )
+        try:
+            r = subprocess.run(
+                [bash, "-c", script],
+                text=True, capture_output=True, timeout=5, check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return r.stdout.strip() == "ok"
+
+
+def _require_host_loopback_bash():
+    """A host-native bash whose ``/dev/tcp`` reaches the host loopback, so the
+    relay-probe tests (which bind a fake relay on the Windows-host 127.0.0.1 and
+    expect the wrapper's bash probe to connect to it) can run. Excludes the WSL
+    launcher (isolated loopback) and prefers Git Bash; skips when none qualifies
+    -- e.g. a Windows host whose only bash is WSL2, whose loopback is isolated."""
+    for bash in _bash_candidates():
+        if _is_wsl_bash(bash) or not _bash_runs(bash):
+            continue
+        if _bash_reaches_host_loopback(bash):
+            return bash
+    pytest.skip(
+        "no host-loopback-capable bash found (WSL bash has an isolated loopback "
+        "namespace); the host-relay /dev/tcp probe tests need a host-native bash"
+    )
 
 
 def _require_node():
@@ -478,7 +534,7 @@ def _unused_closed_port() -> int:
 
 class TestRelayServingLiveness:
     def test_bash_env_liveness_is_connect_not_ping_gated(self):
-        bash = _require_bash()
+        bash = _require_host_loopback_bash()
         probe = _extract_bash_relay_connects() + '\n_relay_connects "$1"\n'
         env = {**os.environ, "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.1"}
 
@@ -559,7 +615,7 @@ class TestRelayServingLiveness:
         assert mapping.exists()
 
     def test_wrapper_probe_distinguishes_pong_connect_dead(self, tmp_path):
-        bash = _require_bash()
+        bash = _require_host_loopback_bash()
         node = _require_node()
         wrapper = asset_text("ado-auth-helper-wrapper")
         script = (
@@ -610,7 +666,7 @@ class TestRelayServingLiveness:
     def test_wrapper_discovery_adopts_only_serving_and_prunes_silent(
         self, tmp_path
     ):
-        bash = _require_bash()
+        bash = _require_host_loopback_bash()
         node = _require_node()
         wrapper = asset_text("ado-auth-helper-wrapper")
         ports_dir = tmp_path / "relay-ports"
