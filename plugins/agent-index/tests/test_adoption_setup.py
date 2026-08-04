@@ -22,6 +22,13 @@ def _iso(monkeypatch, tmp_path):
     monkeypatch.delenv("AGENT_INDEX_REPO", raising=False)
     monkeypatch.setenv("AGENT_INDEX_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("AGENT_INDEX_MACHINE", "boxA")
+    # Adoption tests exercise *designation*, not host capability -- present a
+    # capable host so a host designation is never blocked by the real test box.
+    from agent_index import capability
+
+    monkeypatch.setattr(
+        capability, "detect", lambda: {"cores": 16, "ram_gb": 64.0, "cuda": False}
+    )
     return tmp_path
 
 

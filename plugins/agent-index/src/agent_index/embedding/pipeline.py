@@ -142,6 +142,20 @@ class EmbeddingPipeline:
             self._model_name,
             self._device,
         )
+        # Match the device to reality: a configured 'cuda' downgrades to 'cpu' when
+        # CUDA is not actually available (e.g. torch installed but the driver is too
+        # old), so the engine never wedges (effort agent-index-engine-daemon,
+        # Phase 7; vision §capability-matched-engine-runtime).
+        from agent_index.capability import effective_device
+
+        load_device = effective_device(self._device)
+        if load_device != self._device:
+            logger.warning(
+                "Requested device %r unavailable; loading model on %r instead",
+                self._device,
+                load_device,
+            )
+            self._device = load_device
         self._model = SentenceTransformer(
             self._model_name,
             device=self._device,

@@ -123,6 +123,24 @@ def _default_model_profiles() -> dict[str, ModelProfile]:
     }
 
 
+def _default_device() -> str:
+    """Resolve the engine device: ``AGENT_INDEX_DEVICE`` env, then the machine-local
+    config's recorded ``device`` (adoption's capability match), else ``cuda`` (the
+    engine downgrades a wrong ``cuda`` to ``cpu`` at load; see capability.effective_device)."""
+    env = os.environ.get("AGENT_INDEX_DEVICE")
+    if env and env.strip():
+        return env.strip()
+    try:
+        from agent_index.config import machine_device
+
+        recorded = machine_device()
+        if recorded:
+            return recorded
+    except Exception:
+        pass
+    return "cuda"
+
+
 def _default_stream_batch_size() -> int:
     """Chunks per embed+store batch, capability-aware (#115).
 
@@ -160,7 +178,7 @@ class IndexConfig:
         "AGENT_INDEX_MODEL", "jinaai/jina-embeddings-v2-base-code"
     )
     batch_size: int = int(os.environ.get("AGENT_INDEX_BATCH_SIZE", "16"))
-    device: str = os.environ.get("AGENT_INDEX_DEVICE", "cuda")
+    device: str = field(default_factory=lambda: _default_device())
     max_seq_length: int = int(os.environ.get("AGENT_INDEX_MAX_SEQ_LENGTH", "1024"))
 
     # Streaming embed batch size (chunks per embed+store batch) -- caps peak RAM
