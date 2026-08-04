@@ -9,7 +9,7 @@ into. It realizes the `visions/plugins/agent-ssh/` connectivity-layer intent.
 | Piece | Home | Owns |
 |---|---|---|
 | **agent-ssh core + contract** (this plugin) | copilot-extensions (public) | SSH-profile creation/validation, `~/.ssh/config.d` coexistence, `verify`, and the `module.yaml`/registry-record contract schemas. |
-| **In-box transports** (`transports/<module>/`) | this plugin (public) | **Self-contained** transports with **no non-public provider/facility config** — today `direct` (plain SSH) and `dtssh` (real-user reach over public Microsoft Dev Tunnels; operator identity injected at deploy). |
+| **In-box transports** (`transports/<module>/`) | this plugin (public) | **Self-contained** transports with **no non-public provider/facility config** — today `direct` (plain SSH), `dtssh` (real-user reach over public Microsoft Dev Tunnels; operator identity injected at deploy), and `wsl` (local-to-WSL reach via the `wsl.exe` interop stdio pipe — GSA-safe, needs no ProxyJump/localhostForwarding). |
 | **External provider transports** | provider-owned marketplaces | Transports needing **facility/provider config or credentials** — e.g. the Cloudflare transport (Access org / SSO / facility hostnames), which ships as its own plugin and registers against this contract. |
 
 **Where a transport lives is decided by one axis: does it carry non-public

@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/ThomasMichon/copilot-extensions/plugins/agent-ssh/transports/wsl/schema/config.schema.json",
+  "title": "agent-ssh wsl transport normalized registry",
+  "description": "wsl transport extension for agent-ssh's normalized registry. Reaches a Windows machine's OWN WSL sshd through the wsl.exe interop stdio pipe (GSA-safe) rather than a TCP ProxyJump. Adds the `distro` field consumed by the proxy_command template's {distro} placeholder. There is no `hostname` (the interop pipe is local, not a TCP endpoint).",
+  "allOf": [
+    {
+      "$ref": "https://github.com/ThomasMichon/copilot-extensions/plugins/agent-ssh/contract/registry-record.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "transport": { "const": "wsl" },
+        "topology": { "const": "per-machine" },
+        "machines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string", "description": "SSH alias for the WSL target, e.g. '<machine>-wsl'." },
+              "user": { "type": "string", "description": "Linux login user inside WSL." },
+              "port": { "type": ["integer", "string"], "description": "WSL sshd loopback port (default 2200)." },
+              "distro": { "type": "string", "description": "WSL distro name passed to `wsl.exe -d`, e.g. 'Ubuntu'." },
+              "identity_file": { "type": "string", "description": "Client key whose public half is in the WSL user's authorized_keys." },
+              "options": {
+                "type": "object",
+                "properties": {
+                  "StrictHostKeyChecking": { "type": "string" },
+                  "ServerAliveInterval": { "type": ["integer", "string"] }
+                },
+                "additionalProperties": { "type": ["string", "number", "boolean"] }
+              }
+            },
+            "required": ["name", "user", "port", "distro"]
+          }
+        }
+      },
+      "required": ["transport", "machines"]
+    }
+  ]
+}

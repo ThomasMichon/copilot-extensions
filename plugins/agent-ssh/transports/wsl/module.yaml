@@ -1,0 +1,32 @@
+module: wsl
+kind: transport
+summary: Local-to-WSL reach — bridge the SSH last hop through wsl.exe interop (a stdio pipe), so it works even where the corp network filter (e.g. Global Secure Access) blocks Windows→WSL TCP.
+# Reaches a Windows machine's OWN WSL sshd -- NOT over TCP. On a managed box the
+# corp Global Secure Access client filters the WSL vNIC, so Windows→WSL
+# localhost/NAT is dropped in BOTH mirrored and nat networking modes (and
+# `localhostForwarding` is a no-op under mirrored). But GSA does NOT touch the
+# `wsl.exe` **interop** channel (a plain stdio pipe): a process launched via
+# `wsl.exe` reaches WSL's own loopback fine. So the SSH last hop is bridged
+# through interop instead of TCP --
+#     wsl.exe -d <distro> -u <user> exec nc 127.0.0.1 <port>
+# -- which delivers the WSL sshd banner cleanly on stdout (WSL/GSA notices go to
+# stderr). This is a LOCAL transport: `wsl.exe` runs on the same Windows box, so
+# it reaches only that machine's WSL, and only while an interactive Windows
+# session is up (a keepalive pins WSL up). No inbound port, no WSL egress, no
+# ProxyJump/localhostForwarding required. {distro} is a wsl-transport registry
+# field (schema/config.schema.json); WSL needs `nc` (netcat-openbsd) installed.
+proxy_command: "wsl.exe -d {distro} -u {user} exec nc 127.0.0.1 {port}"
+proxy_binary_default: wsl.exe
+produces:
+  ssh_profile: true
+  keyed_by: machine-name
+inbound_ports: none          # interop stdio pipe; zero inbound, no WSL egress
+topology:
+  default: per-machine
+  supported: [per-machine]
+capabilities:
+  install-client: false      # wsl.exe ships with Windows; nothing to install client-side
+  emit-profile: true
+  verify: true
+  provision-server: false    # WSL sshd + keepalive are provisioned out-of-band (see notes)
+config_schema: schema/config.schema.json

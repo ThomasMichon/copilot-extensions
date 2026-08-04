@@ -73,12 +73,14 @@ def fragment_name(module: str) -> str:
 def _render_proxy_command(template: str, *, hostname: str, machine: dict[str, Any],
                           proxy_binary: str) -> str:
     """Fill a transport's proxy_command template. Available placeholders:
-    {hostname} {name} {user} {port} {proxy_binary}."""
+    {hostname} {name} {user} {port} {distro} {proxy_binary}. ({distro} is used by
+    local-machine transports such as `wsl`; other transports simply ignore it.)"""
     return template.format(
         hostname=hostname,
         name=machine.get("name", ""),
         user=machine.get("user", ""),
         port=machine.get("port", ""),
+        distro=machine.get("distro", ""),
         proxy_binary=proxy_binary,
     )
 

@@ -14,7 +14,7 @@
     "summary": { "type": "string" },
     "proxy_command": {
       "type": "string",
-      "description": "OPTIONAL recipe: the ProxyCommand template used to dial a host. Placeholders: {hostname} {name} {user} {port} {proxy_binary}. Omit for a plain-SSH transport (e.g. `direct`). This is the ONLY transport-specific rendering the core needs."
+      "description": "OPTIONAL recipe: the ProxyCommand template used to dial a host. Placeholders: {hostname} {name} {user} {port} {distro} {proxy_binary}. Omit for a plain-SSH transport (e.g. `direct`). This is the ONLY transport-specific rendering the core needs."
     },
     "proxy_binary_default": {
       "type": "string",

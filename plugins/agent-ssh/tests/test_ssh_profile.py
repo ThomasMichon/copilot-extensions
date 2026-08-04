@@ -92,3 +92,97 @@ def test_chmod_windows_removes_owner_rights() -> None:
     assert "OWNER RIGHTS" not in acl
     user = os.environ.get("USERNAME", "")
     assert user and user in acl  # only the current user is granted
+
+
+def _load_transport(name: str) -> dict:
+    with (ROOT / "transports" / name / "module.yaml").open(encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def test_wsl_transport_interop_proxycommand() -> None:
+    """The wsl transport bridges the last hop through wsl.exe interop, filling
+    the {distro}/{user}/{port} placeholders and emitting no TCP HostName."""
+    wsl = _load_transport("wsl")
+    assert wsl["module"] == "wsl"
+
+    cfg = {
+        "transport": "wsl",
+        "machines": [
+            {
+                "name": "devbox-wsl",
+                "user": "agent",
+                "port": 2200,
+                "distro": "Ubuntu",
+                "identity_file": "~/.ssh/id_ed25519",
+                "via": "direct",
+                "options": {"StrictHostKeyChecking": "accept-new", "ServerAliveInterval": 30},
+            }
+        ],
+    }
+
+    fragment = ssh_profile.render_fragment(cfg, wsl)
+    assert "Host devbox-wsl" in fragment
+    assert (
+        "ProxyCommand wsl.exe -d Ubuntu -u agent exec nc 127.0.0.1 2200" in fragment
+    )
+    assert "User agent" in fragment
+    assert "IdentityFile ~/.ssh/id_ed25519" in fragment
+    # No TCP endpoint: the interop pipe carries everything, so no HostName / ProxyJump.
+    assert "HostName" not in fragment
+    assert "ProxyJump" not in fragment
+    assert written_name(wsl) == "50-agent-ssh-wsl.conf"
+
+
+def written_name(module: dict) -> str:
+    return ssh_profile.fragment_name(module["module"])
+
+
+def _load_wsl_emit_registry():
+    import importlib.util
+
+    path = ROOT / "transports" / "wsl" / "deploy" / "emit-registry.py"
+    spec = importlib.util.spec_from_file_location("wsl_emit_registry", path)
+    mod = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_wsl_emit_registry_from_machines_yaml() -> None:
+    scratch = _reset_scratch()
+    machines_yaml = scratch / "machines.yaml"
+    machines_yaml.write_text(
+        "machines:\n"
+        "  devbox:\n"
+        "    ssh:\n"
+        "      environments:\n"
+        "        - name: windows\n"
+        "          alias: devbox\n"
+        "        - name: wsl\n"
+        "          alias: devbox-wsl\n"
+        "          user: agent\n",
+        encoding="utf-8",
+    )
+    mod = _load_wsl_emit_registry()
+    out = scratch / "wsl-registry.yaml"
+    rc = mod.main(
+        [
+            "--machines", str(machines_yaml),
+            "--machine", "devbox",
+            "--distro", "Ubuntu",
+            "--out", str(out),
+        ]
+    )
+    assert rc == 0
+    reg = yaml.safe_load(out.read_text(encoding="utf-8"))
+    assert reg["transport"] == "wsl"
+    m = reg["machines"][0]
+    assert m["name"] == "devbox-wsl"
+    assert m["user"] == "agent"
+    assert m["port"] == 2200
+    assert m["distro"] == "Ubuntu"
+
+    # Round-trip: the emitted registry renders the interop ProxyCommand.
+    wsl = _load_transport("wsl")
+    fragment = ssh_profile.render_fragment(reg, wsl)
+    assert "ProxyCommand wsl.exe -d Ubuntu -u agent exec nc 127.0.0.1 2200" in fragment

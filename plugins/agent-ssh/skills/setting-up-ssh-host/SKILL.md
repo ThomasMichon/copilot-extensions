@@ -133,6 +133,42 @@ Host dt-<host>-wsl
 > the WSL sshd. The `-W` forward the jump performs requires the dtssh host's sshd
 > to permit TCP forwarding (it does by default).
 
+### When the ProxyJump→localhost path is blocked: the `wsl` transport (interop)
+
+The ProxyJump wiring above depends on Windows→WSL **TCP** working. On a machine
+behind a **corp network filter** — notably the **Global Secure Access** (Entra)
+client — that path is dead in **both** WSL networking modes: under `mirrored`,
+`localhostForwarding` is a documented no-op and the host→WSL loopback relay never
+opens; switching to `nat` is worse (GSA leaves the WSL vNIC with no IP and no
+egress). sshd is healthy *inside* WSL, but nothing reaches it from Windows.
+
+The fix is the in-box **`wsl` transport**: bridge the SSH last hop through the
+**`wsl.exe` interop** channel (a stdio pipe GSA does **not** filter) instead of a
+TCP connection. A process launched via `wsl.exe` reaches WSL's own loopback fine,
+so pipe SSH through it and let `nc` inside WSL make the local connection:
+
+```
+Host <host>-wsl
+    User <linux-user>
+    ProxyCommand wsl.exe -d <distro> -u <linux-user> exec nc 127.0.0.1 2200
+    IdentityFile ~/.ssh/id_ed25519
+    StrictHostKeyChecking accept-new
+```
+
+Generate this with the transport rather than hand-writing it:
+
+```
+python transports/wsl/deploy/emit-registry.py --machines machines.yaml --out wsl-registry.yaml
+python -m agent_ssh emit-profile wsl-registry.yaml --module transports/wsl/module.yaml
+```
+
+`emit-registry` auto-detects the local machine's `ssh.environments` `wsl` entry
+and emits a one-record registry; the core renders `50-agent-ssh-wsl.conf`. This is
+a **local** transport — `wsl.exe` runs on the same box, so it reaches only that
+machine's WSL, and only while an **interactive Windows session** is up (the
+keepalive pins WSL up). WSL needs `nc` (`netcat-openbsd`) installed. No inbound
+port, no WSL egress, no ProxyJump. (See `transports/wsl/module.yaml`.)
+
 ### Provisioning WSL itself — bring your own, or use `wsl-setup`
 
 This ProxyJump wiring only needs an sshd **listening on a known loopback port
