@@ -88,12 +88,19 @@ Locked design decisions (operator):
       platform-native task. `agent-index engine {start,stop,status,run}` CLI. The
       daemon serves the stable engine HTTP API, so a service of any code version
       talks to it over `external` mode. 13 tests.
-- [ ] **3b — installer provisioning (next):** installer builds the **durable engine
+- [x] **3b — installer provisioning:** installer builds the **durable engine
       venv** (`agent-index[engine]`) at `AGENT_INDEX_ENGINE_HOME`, **once** and
       **preserved across service updates** (rebuilt only when the embedding stack
       changes); registers a **persistent platform-native daemon task** running
       `agent-index engine run`. `update` swaps only the versioned service runtime
-      and leaves the daemon + venv untouched. Live-validated on a torch host.
+      and leaves the daemon + venv untouched. **Done** — `install.{ps1,sh}` gained
+      `Install-Engine`/`_install_engine` (idempotent, skip-if-present, non-fatal;
+      `AGENT_INDEX_NO_ENGINE_DEPS=1` to skip, `AGENT_INDEX_TORCH_INDEX` for CUDA)
+      and `Register-EngineDaemon`/`_register_engine_daemon` (Windows scheduled task
+      `agent-index-engine` / systemd-user unit `agent-index-engine.service`, warm
+      engine never restarted on re-register). A new `engine` action provisions +
+      registers explicitly; `install` runs both; **`update` calls neither** (engine
+      stays warm). Live-validated on a torch host (Borealis).
 
 ### Phase 4 — Role-aware install
 - [ ] `host` role installs the engine daemon + heavy stack; `client` role installs
@@ -125,6 +132,25 @@ Locked design decisions (operator):
       untouched by either runtime swap.
 
 ## Journal
+
+### 2026-08-03 — Phase 3b: installer provisions the durable engine + daemon
+- `install.ps1` + `install.sh` now provision the **durable engine venv**
+  (`agent-index[engine]`) at `AGENT_INDEX_ENGINE_HOME` (default
+  `~/.agent-index/engine/.venv`) and register a **persistent platform-native
+  daemon** running `agent-index engine run` (Windows scheduled task
+  `agent-index-engine`; systemd-user unit `agent-index-engine.service`).
+- Provisioning is **idempotent** (skip-if-present), **non-fatal** (a torch-stack
+  failure leaves the light service fully working), opt-out via
+  `AGENT_INDEX_NO_ENGINE_DEPS=1`, and honors `AGENT_INDEX_TORCH_INDEX` (CUDA wheel
+  index) — default PyPI torch is the CPU wheel. `zdd` (a non-PyPI declared dep) is
+  installed from the vendored lib first, mirroring the service venv.
+- **Update-safety:** the `install` action runs `Install-Engine` +
+  `Register-EngineDaemon`; the new **`engine`** action runs them explicitly; the
+  **`update`** action runs *neither* — it swaps only the versioned service runtime
+  + junction, so torch is never rebuilt and the warm daemon is never restarted.
+  Re-registration also refuses to bounce a warm engine (start-only-if-not-serving).
+- No version bump (still `0.1.0-dev17`); batched on the effort branch. Both scripts
+  pass `bash -n` / PS parse. Next: live-validate on Borealis, then Phase 4.
 
 ### 2026-08-03 — Batched onto an effort branch
 - Per operator direction, the plugin (host) work moves off per-phase direct-pushes

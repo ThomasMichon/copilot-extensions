@@ -6,7 +6,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('install', 'update', 'status', 'start', 'stop', 'uninstall')]
+    [ValidateSet('install', 'update', 'status', 'start', 'stop', 'uninstall', 'engine')]
     [string]$Action = 'install',
     [string]$InstallDir,
     [switch]$NoService,
@@ -34,6 +34,23 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 $TaskName = 'agent-index'
 $EnvFile = Join-Path $InstallDir 'service.env'
 $Launcher = Join-Path $InstallDir 'service.ps1'
+
+# === engine-daemon: durable, persistent embedding-engine runtime =============
+# The heavy embedding stack (torch + transformers + sentence-transformers) lives
+# in a DURABLE venv OUTSIDE the versioned service runtime, at
+# AGENT_INDEX_ENGINE_HOME (default ~/.agent-index/engine). It is provisioned ONCE
+# and preserved across service updates -- a routine `update` swaps only the
+# versioned service runtime + junction and never rebuilds torch or restarts the
+# warm engine daemon (effort agent-index-engine-daemon; vision §warm-durable-engine).
+$EngineHome = if ($env:AGENT_INDEX_ENGINE_HOME) { $env:AGENT_INDEX_ENGINE_HOME } else { '~/.agent-index/engine' }
+$EngineHome = $EngineHome -replace '^~', $env:USERPROFILE
+$EngineHome = [System.IO.Path]::GetFullPath(($EngineHome -replace '/', '\'))
+$EngineVenv       = Join-Path $EngineHome '.venv'
+$EngineVenvPython = Join-Path $EngineVenv 'Scripts\python.exe'
+$EngineTaskName   = 'agent-index-engine'
+$EngineEnvFile    = Join-Path $EngineHome 'engine.env'
+$EngineLauncher   = Join-Path $EngineHome 'engine.ps1'
+# === end engine-daemon ======================================================
 
 # === install-contract:v3 versioned-venv (agent-index: .venv-as-junction) ===
 # Build each version into versions/<version> and make the historical `.venv`
@@ -432,6 +449,149 @@ function Write-Manifest {
     Write-Ok "Deploy manifest written (source: $kind)"
 }
 
+function Test-EnginePort {
+    $eh = '127.0.0.1'; $ep = 8421
+    if ($env:AGENT_INDEX_ENGINE_HOST) { $eh = $env:AGENT_INDEX_ENGINE_HOST }
+    if ($env:AGENT_INDEX_ENGINE_PORT) { $ep = [int]$env:AGENT_INDEX_ENGINE_PORT }
+    try {
+        $c = New-Object System.Net.Sockets.TcpClient
+        $iar = $c.BeginConnect($eh, $ep, $null, $null)
+        $ok = $iar.AsyncWaitHandle.WaitOne(2000)
+        $connected = ($ok -and $c.Connected)
+        $c.Close()
+        return $connected
+    } catch { return $false }
+}
+
+function Install-Engine {
+    # Provision the DURABLE engine venv (agent-index[engine], the torch stack) at
+    # AGENT_INDEX_ENGINE_HOME. Built ONCE and skipped if present (idempotent);
+    # never rebuilt by a service `update`. Non-fatal -- a failure here leaves the
+    # light, torch-free service fully functional.
+    if ($env:AGENT_INDEX_NO_ENGINE_DEPS -eq '1') {
+        Write-Skip 'Engine runtime skipped (AGENT_INDEX_NO_ENGINE_DEPS=1)'
+        return $false
+    }
+    if (Test-Path $EngineVenvPython) {
+        Write-Skip "Engine runtime already provisioned (durable venv preserved): $EngineVenv"
+        return $true
+    }
+    $pythonCmd = $null
+    foreach ($candidate in @('python', 'python3', 'py')) {
+        $found = Get-Command $candidate -ErrorAction SilentlyContinue
+        if ($found) {
+            $prevEAP = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+                $testOut = & $found.Source --version 2>&1
+                if ($LASTEXITCODE -eq 0 -and $testOut -match 'Python') { $pythonCmd = $found.Source }
+            } catch { }
+            $ErrorActionPreference = $prevEAP
+            if ($pythonCmd) { break }
+        }
+    }
+    if (-not $pythonCmd) { Write-Warn 'Python not found -- cannot provision engine runtime'; return $false }
+
+    Write-Host '  ...    Provisioning durable engine runtime (torch stack) -- one-time, may take a while' -ForegroundColor DarkGray
+    if (-not (Test-Path $EngineHome)) { New-Item -ItemType Directory -Path $EngineHome -Force | Out-Null }
+
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    if (Get-Command uv -ErrorAction SilentlyContinue) {
+        & uv venv $EngineVenv --allow-existing 2>&1 | Out-Null
+    } else {
+        & $pythonCmd -m venv $EngineVenv 2>&1 | Out-Null
+    }
+    if (-not (Test-Path $EngineVenvPython)) {
+        $ErrorActionPreference = $prevEAP
+        Write-Warn "Engine venv creation failed -- $EngineVenvPython not found"
+        return $false
+    }
+
+    # zdd is a declared dependency of agent-index but is not on PyPI -- install it
+    # from the vendored lib first so pip can satisfy the requirement.
+    $ZddDir = Resolve-Zdd
+    if ($ZddDir) {
+        if (Get-Command uv -ErrorAction SilentlyContinue) {
+            & uv pip install --python $EngineVenvPython "$ZddDir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet 2>&1 |
+                ForEach-Object { Write-Host "  ...    $_" -ForegroundColor DarkGray }
+        } else {
+            & $EngineVenvPython -m pip install "$ZddDir" 2>&1 |
+                ForEach-Object { Write-Host "  ...    $_" -ForegroundColor DarkGray }
+        }
+    }
+
+    # agent-index[engine] -- the heavy embedding stack into the DURABLE venv only.
+    # Default PyPI torch is the CPU wheel; set AGENT_INDEX_TORCH_INDEX to a CUDA
+    # wheel index (e.g. https://download.pytorch.org/whl/cu121) for a GPU host.
+    if (Get-Command uv -ErrorAction SilentlyContinue) {
+        $pipArgs = @('pip', 'install', '--python', $EngineVenvPython, "$PluginDir[engine]")
+        if ($env:AGENT_INDEX_TORCH_INDEX) { $pipArgs += @('--extra-index-url', $env:AGENT_INDEX_TORCH_INDEX) }
+        $engOut = & uv @pipArgs 2>&1
+    } else {
+        $pipArgs = @('-m', 'pip', 'install', "$PluginDir[engine]")
+        if ($env:AGENT_INDEX_TORCH_INDEX) { $pipArgs += @('--extra-index-url', $env:AGENT_INDEX_TORCH_INDEX) }
+        $engOut = & $EngineVenvPython @pipArgs 2>&1
+    }
+    $engRc = $LASTEXITCODE
+    $ErrorActionPreference = $prevEAP
+    if ($engRc -ne 0) {
+        Write-Warn 'Engine runtime install failed (torch stack) -- light service unaffected; provision later with the "engine" action'
+        Write-Host ($engOut | Out-String)
+        return $false
+    }
+    & $EngineVenvPython -c 'import torch' 2>$null
+    if ($LASTEXITCODE -ne 0) { Write-Warn 'Engine venv built but torch import failed'; return $false }
+    Write-Ok "Engine runtime provisioned (durable venv): $EngineVenv"
+    return $true
+}
+
+function Write-EngineFiles {
+    if (-not (Test-Path $EngineEnvFile)) {
+        [System.IO.File]::WriteAllText($EngineEnvFile, "# agent-index engine daemon environment`nAGENT_INDEX_ENGINE_HOST=127.0.0.1`nAGENT_INDEX_ENGINE_PORT=8421`n", $utf8NoBom)
+        Write-Ok "Engine env: $EngineEnvFile"
+    } else { Write-Skip "Engine env already exists: $EngineEnvFile" }
+    $engLauncher = @"
+`$env:PYTHONUTF8 = '1'
+`$env:AGENT_INDEX_ENGINE_HOME = '$($EngineHome -replace "'","''")'
+`$envFile = '$($EngineEnvFile -replace "'","''")'
+if (Test-Path `$envFile) {
+    Get-Content `$envFile | ForEach-Object {
+        `$line = `$_.Trim()
+        if (`$line -and -not `$line.StartsWith('#') -and `$line.Contains('=')) {
+            `$k, `$v = `$line.Split('=', 2)
+            [Environment]::SetEnvironmentVariable(`$k.Trim(), `$v.Trim(), 'Process')
+        }
+    }
+}
+& '$($EngineVenvPython -replace "'","''")' -m agent_index engine run
+exit `$LASTEXITCODE
+"@
+    [System.IO.File]::WriteAllText($EngineLauncher, $engLauncher, $utf8NoBom)
+}
+
+function Register-EngineDaemon {
+    # Register the persistent, platform-native daemon task that runs the warm
+    # engine from the durable venv. A warm engine is left untouched (never
+    # restarted) when it is already serving.
+    if ($NoService) { Write-Skip 'Engine daemon task skipped (-NoService)'; return }
+    if (-not (Test-Path $EngineVenvPython)) { Write-Skip 'Engine runtime not provisioned -- daemon task not registered'; return }
+    Write-EngineFiles
+    try {
+        $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$EngineLauncher`""
+        $trigger = New-ScheduledTaskTrigger -AtLogOn
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+        $principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
+        Register-ScheduledTask -TaskName $EngineTaskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
+        if (Test-EnginePort) {
+            Write-Skip "Engine daemon already serving -- leaving the warm engine untouched: $EngineTaskName"
+        } else {
+            Start-ScheduledTask -TaskName $EngineTaskName -ErrorAction SilentlyContinue
+            Write-Ok "Engine daemon task installed + started: $EngineTaskName"
+        }
+    } catch { Write-Warn "Could not install/start engine daemon task: $($_.Exception.Message)" }
+}
+
 function Write-ServiceFiles {
     if (-not (Test-Path $EnvFile)) {
         [System.IO.File]::WriteAllText($EnvFile, "# agent-index service environment`nAGENT_INDEX_HOST=127.0.0.1`n# AGENT_INDEX_PORT=0  # unset/0 = OS-assigned dynamic port advertised via rendezvous`n", $utf8NoBom)
@@ -502,15 +662,23 @@ function Invoke-Uninstall {
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
     }
+    if (Get-ScheduledTask -TaskName $EngineTaskName -ErrorAction SilentlyContinue) {
+        Stop-ScheduledTask -TaskName $EngineTaskName -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskName $EngineTaskName -Confirm:$false -ErrorAction SilentlyContinue
+    }
     Remove-Item (Join-Path $LocalBin 'agent-index.ps1') -Force -ErrorAction SilentlyContinue
     Remove-Item (Join-Path $LocalBin 'agent-index.cmd') -Force -ErrorAction SilentlyContinue
-    if ($Purge -and (Test-Path $InstallDir)) { Remove-Item $InstallDir -Recurse -Force }
+    if ($Purge) {
+        if (Test-Path $EngineHome) { Remove-Item $EngineHome -Recurse -Force -ErrorAction SilentlyContinue }
+        if (Test-Path $InstallDir) { Remove-Item $InstallDir -Recurse -Force }
+    }
     Write-Ok 'agent-index uninstalled'
 }
 
 switch ($Action) {
-    'install' { Install-Runtime; Install-Service }
-    'update' { Invoke-DowngradeGuard; Install-Runtime; Install-Service }
+    'install' { Install-Runtime; Install-Service; Install-Engine | Out-Null; Register-EngineDaemon }
+    'update' { Invoke-DowngradeGuard; Install-Runtime; Install-Service }  # engine venv + daemon left untouched by design
+    'engine' { Install-Engine | Out-Null; Register-EngineDaemon }
     'status' { Invoke-Status }
     'start' { Invoke-Start }
     'stop' { Invoke-Stop }
