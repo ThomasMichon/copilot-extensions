@@ -6,7 +6,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('install', 'update', 'status', 'start', 'stop', 'uninstall', 'engine')]
+    [ValidateSet('install', 'update', 'status', 'start', 'stop', 'uninstall', 'engine', 'engine-update')]
     [string]$Action = 'install',
     [string]$InstallDir,
     [switch]$NoService,
@@ -487,12 +487,15 @@ function Install-Engine {
     # Provision the DURABLE engine venv (agent-index[engine], the torch stack) at
     # AGENT_INDEX_ENGINE_HOME. Built ONCE and skipped if present (idempotent);
     # never rebuilt by a service `update`. Non-fatal -- a failure here leaves the
-    # light, torch-free service fully functional.
+    # light, torch-free service fully functional. With -Upgrade, an existing venv
+    # is upgraded in place (the explicit engine-runtime update path) rather than
+    # skipped.
+    param([switch]$Upgrade)
     if ($env:AGENT_INDEX_NO_ENGINE_DEPS -eq '1') {
         Write-Skip 'Engine runtime skipped (AGENT_INDEX_NO_ENGINE_DEPS=1)'
         return $false
     }
-    if (Test-Path $EngineVenvPython) {
+    if ((Test-Path $EngineVenvPython) -and -not $Upgrade) {
         Write-Skip "Engine runtime already provisioned (durable venv preserved): $EngineVenv"
         return $true
     }
@@ -512,7 +515,7 @@ function Install-Engine {
     }
     if (-not $pythonCmd) { Write-Warn 'Python not found -- cannot provision engine runtime'; return $false }
 
-    Write-Host '  ...    Provisioning durable engine runtime (torch stack) -- one-time, may take a while' -ForegroundColor DarkGray
+    Write-Host "  ...    $(if ($Upgrade) { 'Updating' } else { 'Provisioning' }) durable engine runtime (torch stack) -- may take a while" -ForegroundColor DarkGray
     if (-not (Test-Path $EngineHome)) { New-Item -ItemType Directory -Path $EngineHome -Force | Out-Null }
 
     $prevEAP = $ErrorActionPreference
@@ -546,10 +549,12 @@ function Install-Engine {
     # wheel index (e.g. https://download.pytorch.org/whl/cu121) for a GPU host.
     if (Get-Command uv -ErrorAction SilentlyContinue) {
         $pipArgs = @('pip', 'install', '--python', $EngineVenvPython, "$PluginDir[engine]")
+        if ($Upgrade) { $pipArgs += '--upgrade' }
         if ($env:AGENT_INDEX_TORCH_INDEX) { $pipArgs += @('--extra-index-url', $env:AGENT_INDEX_TORCH_INDEX) }
         $engOut = & uv @pipArgs 2>&1
     } else {
         $pipArgs = @('-m', 'pip', 'install', "$PluginDir[engine]")
+        if ($Upgrade) { $pipArgs += '--upgrade' }
         if ($env:AGENT_INDEX_TORCH_INDEX) { $pipArgs += @('--extra-index-url', $env:AGENT_INDEX_TORCH_INDEX) }
         $engOut = & $EngineVenvPython @pipArgs 2>&1
     }
@@ -562,8 +567,23 @@ function Install-Engine {
     }
     & $EngineVenvPython -c 'import torch' 2>$null
     if ($LASTEXITCODE -ne 0) { Write-Warn 'Engine venv built but torch import failed'; return $false }
-    Write-Ok "Engine runtime provisioned (durable venv): $EngineVenv"
+    Write-Ok "Engine runtime $(if ($Upgrade) { 'updated' } else { 'provisioned' }) (durable venv): $EngineVenv"
     return $true
+}
+
+function Restart-EngineDaemon {
+    # Restart the engine daemon so a freshly-updated durable venv is loaded. This
+    # is the ONE place a restart is intended -- the explicit engine-runtime update
+    # path, decoupled from the service `update` (which must never bounce the engine).
+    if ($NoService) { Write-Skip 'Engine daemon restart skipped (-NoService)'; return }
+    if (Get-ScheduledTask -TaskName $EngineTaskName -ErrorAction SilentlyContinue) {
+        Stop-ScheduledTask -TaskName $EngineTaskName -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 1
+        Start-ScheduledTask -TaskName $EngineTaskName -ErrorAction SilentlyContinue
+        Write-Ok "Engine daemon restarted (new engine runtime loaded): $EngineTaskName"
+    } else {
+        Register-EngineDaemon
+    }
 }
 
 function Write-EngineFiles {
@@ -708,6 +728,7 @@ switch ($Action) {
     }
     'update' { Invoke-DowngradeGuard; Install-Runtime; Install-Service }  # engine venv + daemon left untouched by design
     'engine' { Install-Engine | Out-Null; Register-EngineDaemon }        # explicit host-side provisioning (role-independent)
+    'engine-update' { if (Install-Engine -Upgrade) { Restart-EngineDaemon } }  # rebuild durable engine venv + restart daemon (decoupled from service update)
     'status' { Invoke-Status }
     'start' { Invoke-Start }
     'stop' { Invoke-Stop }

@@ -60,16 +60,19 @@ class ModelProfile:
     # How the indexer brings this model's engine up when it isn't already
     # reachable:
     #   "subprocess" -- spawn ``python -m agent_index.engine.app`` as a detached
-    #                   child process (cross-platform; the easy default for
-    #                   local / user-side installs, e.g. Windows without systemd),
+    #                   child process (needs torch in the service venv),
     #   "systemd"    -- start a systemd unit (Linux system deployments),
-    #   "external"   -- never manage it; a container or externally-managed task
-    #                   owns the engine, so just require it to be reachable
-    #                   (the VEI-style containerized split), and
+    #   "external"   -- never manage it; a durable, externally-owned daemon owns
+    #                   the engine, so just require it to be reachable, and
     #   "auto"       -- systemd when a unit is configured and ``systemctl`` is
     #                   available, otherwise subprocess.
+    # Default is "external": the versioned service runtime is torch-free and all
+    # embedding (index + query) routes through the durable engine daemon
+    # (effort agent-index-engine-daemon; vision §warm-durable-engine). Set
+    # AGENT_INDEX_ENGINE_MODE=subprocess|systemd|auto for a single-venv install
+    # that owns its own engine.
     engine_mode: str = field(
-        default_factory=lambda: os.environ.get("AGENT_INDEX_ENGINE_MODE", "auto")
+        default_factory=lambda: os.environ.get("AGENT_INDEX_ENGINE_MODE", "external")
     )
 
     @property
@@ -165,13 +168,18 @@ class IndexConfig:
     # GPU, 64 on CPU; override with AGENT_INDEX_STREAM_BATCH_SIZE.
     stream_batch_size: int = field(default_factory=_default_stream_batch_size)
 
-    # Query-time embedding. The search/read path embeds queries in-process on
-    # CPU by default so search stays responsive and never waits on a cold GPU
-    # engine. Set AGENT_INDEX_SEARCH_IN_PROCESS=0 to embed queries through the
-    # engine subprocess.
-    search_in_process: bool = os.environ.get(
-        "AGENT_INDEX_SEARCH_IN_PROCESS", "1"
-    ).lower() not in ("0", "false", "no")
+    # Query-time embedding. All embedding routes through the durable engine
+    # daemon by default (the service venv is torch-free), so query embedding is
+    # OFF-process by default (effort agent-index-engine-daemon;
+    # vision §warm-durable-engine). Set AGENT_INDEX_SEARCH_IN_PROCESS=1 to embed
+    # queries in-process on CPU instead -- only valid on a single-venv install
+    # whose service venv carries the torch stack.
+    search_in_process: bool = field(
+        default_factory=lambda: os.environ.get(
+            "AGENT_INDEX_SEARCH_IN_PROCESS", "0"
+        ).lower()
+        not in ("0", "false", "no")
+    )
     query_device: str = os.environ.get("AGENT_INDEX_QUERY_DEVICE", "cpu")
 
     # BM25/full-text indexing. Set AGENT_INDEX_FTS_ENABLED=0 for vector-only
