@@ -515,3 +515,53 @@ def test_cli_consume_completes_and_prints_payload(server_url, client, monkeypatc
     assert "already COMPLETED" in out
     assert "BRIEF-BODY" not in out
     assert client.get(tid)["status"] == Status.COMPLETED
+
+
+# -- satellite presence registry ---------------------------------------------
+
+
+def test_satellite_register_and_list(api):
+    r = api.post(
+        "/satellites/register",
+        json={
+            "machine": "field-laptop",
+            "worktrees": ["wt-a"],
+            "capabilities": ["logger"],
+            "agent_versions": {"agent-dispatch": "0.1.0-dev104"},
+        },
+    )
+    assert r.status_code == 200
+    entry = r.json()
+    assert entry["machine"] == "field-laptop"
+    assert entry["expires_at"] > entry["last_seen"]
+
+    listing = api.get("/satellites").json()
+    assert [e["machine"] for e in listing] == ["field-laptop"]
+
+
+def test_satellite_heartbeat_updates_status(api):
+    api.post("/satellites/register", json={"machine": "book2"})
+    r = api.post(
+        "/satellites/book2/heartbeat",
+        json={"status": {"wt-a": {"turn_state": "active"}}},
+    )
+    assert r.status_code == 200
+    assert r.json()["status"] == {"wt-a": {"turn_state": "active"}}
+
+
+def test_satellite_heartbeat_unknown_is_404(api):
+    r = api.post("/satellites/ghost/heartbeat", json={})
+    assert r.status_code == 404
+
+
+def test_satellite_deregister(api):
+    api.post("/satellites/register", json={"machine": "book2"})
+    r = api.delete("/satellites/book2")
+    assert r.status_code == 200
+    assert r.json() == {"deregistered": True}
+    assert api.get("/satellites").json() == []
+
+
+def test_satellite_deregister_absent(api):
+    r = api.delete("/satellites/never")
+    assert r.json() == {"deregistered": False}
