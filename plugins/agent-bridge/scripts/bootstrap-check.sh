@@ -19,7 +19,10 @@ if [ -f "$pyproj" ]; then
   v="$(grep -m1 -E '^[[:space:]]*version[[:space:]]*=' "$pyproj" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')"
   [ -n "$v" ] && current="$v"
 fi
-if [ -e "$InstallDir/.venv" ] && [ "$deployed" = "$current" ]; then exit 0; fi
+# The stable runtime link is named '.venv' for most plugins but 'venv' for a
+# few (agent-bridge); accept EITHER so this early-exit actually fires instead of
+# re-launching the installer on every session start.
+if { [ -e "$InstallDir/.venv" ] || [ -e "$InstallDir/venv" ]; } && [ "$deployed" = "$current" ]; then exit 0; fi
 if [ -f "$PluginDir/scripts/init.sh" ]; then
   target=("$PluginDir/scripts/init.sh")
 elif [ -f "$PluginDir/scripts/install.sh" ]; then

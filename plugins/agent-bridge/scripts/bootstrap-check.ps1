@@ -22,7 +22,13 @@ try {
         $vl = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
         if ($vl) { $current = ($vl.Line -replace '.*=\s*"([^"]+)".*', '$1') }
     }
-    if ((Test-Path (Join-Path $InstallDir '.venv')) -and $deployed -eq $current) { exit 0 }
+    # The immutable-versioned layout points a stable link at the active slot;
+    # its name is '.venv' for most plugins but 'venv' for a few (agent-bridge).
+    # Accept EITHER so the early-exit actually fires -- otherwise this hook
+    # re-launches the installer on every session start (churn), and under a
+    # version drift it repeatedly attempts a swap.
+    $venvPresent = (Test-Path (Join-Path $InstallDir '.venv')) -or (Test-Path (Join-Path $InstallDir 'venv'))
+    if ($venvPresent -and $deployed -eq $current) { exit 0 }
     $init = Join-Path $PluginDir 'scripts\init.ps1'
     if (Test-Path $init) {
         $targs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $init)
