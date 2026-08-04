@@ -1152,6 +1152,16 @@ class SessionManager:
                 boundary=spawned.boundary,
                 endpoint=getattr(spawned, "endpoint", {}) or {},
             ))
+        # #4272 bridge-lock: mark this bridge-owned session's liveness as a
+        # lattice file the picker reads cheaply, so a bare/bridge Copilot
+        # (cwd=home) still shows ACTIVE (#1416). LOCAL boundary only -- a remote
+        # child_pid is far-side, so its liveness isn't provable locally. Best-
+        # effort: never breaks a launch.
+        if getattr(spawned, "boundary", "local") == "local":
+            from . import bridge_lock
+            with contextlib.suppress(Exception):
+                await bridge_lock.write(
+                    session_id, target.worktree_id, spawned.child_pid)
         return client, acp_sid
 
     # -- boundary-aware Session Host liveness ---------------------------------
@@ -1695,6 +1705,12 @@ class SessionManager:
             self._schedule_remote_reap(rec, reason)
         with contextlib.suppress(Exception):
             self._host_index.remove(rec.session_id)
+        # #4272 bridge-lock: best-effort clear the lattice lock at teardown.
+        # Fire-and-forget (this reap path is sync); a lingering lock is already
+        # ignored by the picker's reader once the child pid dies.
+        with contextlib.suppress(Exception):
+            from . import bridge_lock
+            bridge_lock.remove_sync(rec.session_id)
 
     def _kill_forward_sync(self, session_id: str) -> None:
         """Best-effort synchronous teardown of session forward processes."""
