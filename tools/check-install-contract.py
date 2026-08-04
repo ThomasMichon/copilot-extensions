@@ -72,20 +72,11 @@ FORBIDDEN_TRAMPOLINE = re.compile(
 # hooks file with a non-empty hooks.sessionStart whose command runs a
 # `bootstrap-check`. See docs/install-contract.md § "Runtime self-reconcile".
 #
-# Baseline of runtime plugins that predate the invariant and do NOT yet comply
-# (tracked in dotfiles#779). New runtime plugins are REQUIRED to comply -- do NOT
-# add to this set to silence the check; wire the hook and remove the plugin here.
-# Burn this set down to empty.
-EXEMPT_SESSION_HOOK: frozenset[str] = frozenset({
-    "agent-bridge",
-    "agent-codespaces",
-    "agent-containers",
-    "agent-dispatch",
-    "agent-index",
-    "agent-logger",
-    "agent-mcp",
-    "agent-vault",
-})
+# The baseline is now EMPTY -- every runtime plugin complies (dotfiles#779 burned
+# it down). Do NOT add plugins here to silence the check: wire the hook instead.
+# This set exists only as the explicit, greppable seam for a deliberate,
+# time-boxed exemption should one ever be genuinely needed.
+EXEMPT_SESSION_HOOK: frozenset[str] = frozenset()
 
 
 def _session_hook_problem(plugin: Path) -> str | None:

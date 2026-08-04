@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "powershell": "$s = \"$env:USERPROFILE\\.copilot\\installed-plugins\\copilot-extensions\\agent-dispatch\\scripts\\bootstrap-check.ps1\"; if (Test-Path $s) { $p = Get-Command pwsh -ErrorAction SilentlyContinue; if ($p) { & $p.Source -NoProfile -File $s } else { powershell.exe -NoProfile -ExecutionPolicy Bypass -File $s } }",
+        "bash": "s=\"$HOME/.copilot/installed-plugins/copilot-extensions/agent-dispatch/scripts/bootstrap-check.sh\"; [ -f \"$s\" ] && bash \"$s\"",
+        "timeoutSec": 15
+      }
+    ]
+  }
+}
