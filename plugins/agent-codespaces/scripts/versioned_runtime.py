@@ -114,22 +114,24 @@ def _is_link(link: Path) -> bool:
 def _link_target(link: Path) -> Path | None:
     """Resolve the ``current`` link's target dir, whether symlink or junction.
 
-    A POSIX symlink resolves via ``os.readlink``; a Windows junction is a reparse
-    point that ``Path.resolve()`` follows. Returns the absolute target dir, or
-    ``None`` when the link is absent/broken.
+    #637: never *traverse* the reparse point. ``Path.exists()``/``Path.resolve()``
+    do an ``os.stat`` that follows the junction, which RedirectionGuard
+    (PROCESS_MITIGATION_REDIRECTION_TRUST_POLICY) blocks with WinError 448
+    ("untrusted mount point") over a non-interactive network logon (e.g. the
+    installer run over SSH). Detect the link with lstat (``_is_link``) and read
+    its target directly with ``os.readlink`` (handles POSIX symlinks and Windows
+    junctions). A non-link -- a real dir at the link path, or absent -- has no
+    link target. Returns the absolute target dir, or ``None`` when absent/broken.
     """
-    if not link.exists() and not link.is_symlink():
-        return None
     try:
-        if link.is_symlink():
-            target = Path(os.readlink(link))
-            if not target.is_absolute():
-                target = (link.parent / target)
-            return target
-        # Junction (Windows) or a real dir: resolve() follows the reparse point.
-        return link.resolve()
+        if not _is_link(link):
+            return None
+        target = Path(os.readlink(link))
     except OSError:
         return None
+    if not target.is_absolute():
+        target = (link.parent / target)
+    return target
 
 
 def current_version(root: Path, link_name: str = CURRENT_LINK) -> str | None:
@@ -183,8 +185,13 @@ def _remove_link(link: Path) -> None:
     A symlink/junction is unlinked, never recursed into (so we never delete the
     version dir it points at). ``os.rmdir`` removes a Windows junction; ``unlink``
     removes a POSIX symlink.
+
+    #637: gate on ``_is_link`` (lstat, never traverses) rather than
+    ``link.exists()`` -- an ``os.stat`` on a junction is blocked by
+    RedirectionGuard with WinError 448 over a non-interactive logon. A non-link
+    (absent, or a real dir the caller already moved aside) has no link to remove.
     """
-    if not link.exists() and not link.is_symlink():
+    if not _is_link(link):
         return
     if link.is_symlink():
         link.unlink()
@@ -225,7 +232,16 @@ def activate(root: Path, version: str, *, link_name: str = CURRENT_LINK,
 
     # Legacy real dir occupying the link path (first migration to the versioned
     # layout). Never recurse-delete it implicitly; move it aside on request.
-    if (link.exists() or link.is_symlink()) and not _is_link(link):
+    #
+    # #637: check ``_is_link`` (lstat-based, never traverses) FIRST so it can
+    # short-circuit before ``link.exists()``. ``Path.exists()`` does an
+    # ``os.stat`` that *traverses* the junction, which RedirectionGuard
+    # (PROCESS_MITIGATION_REDIRECTION_TRUST_POLICY) blocks with WinError 448
+    # ("untrusted mount point") over a non-interactive network logon -- i.e. when
+    # the installer runs over SSH. For an existing junction we skip this block
+    # entirely, so ``exists()`` must not be evaluated. A real dir has no reparse
+    # point, so ``exists()`` is safe once ``_is_link`` is known False.
+    if not _is_link(link) and (link.exists() or link.is_symlink()):
         if not replace_nonlink:
             raise FileExistsError(
                 f"{link} is a real directory, not a link; pass replace_nonlink "
