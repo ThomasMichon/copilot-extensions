@@ -33,6 +33,10 @@ dependencies = [
     "tree-sitter-javascript>=0.23,<1.0",
     "tree-sitter-typescript>=0.23,<1.0",
     "tree-sitter-bash>=0.23,<1.0",
+    # Structured adoption config (.agent-index/config.yaml: role, indexer
+    # designation, routing). Small, pure-Python, torch-free -- fine for the light
+    # service (effort agent-index-engine-daemon, Phase 6 adoption).
+    "pyyaml>=6.0",
 ]
 
 [tool.uv.sources]
