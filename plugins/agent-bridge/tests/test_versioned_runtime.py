@@ -82,6 +82,47 @@ def test_activate_preserves_old_version_dir(tmp_path):
     assert (old / "marker.txt").read_text() == "1.0.0"
 
 
+def test_activate_and_current_never_traverse_the_link(tmp_path, monkeypatch):
+    """Regression (#637): activate() and current must operate on an existing link
+    via lstat / os.readlink and never call exists()/resolve() on the link path.
+
+    On Windows an os.stat that *traverses* a directory junction is blocked by
+    RedirectionGuard (PROCESS_MITIGATION_REDIRECTION_TRUST_POLICY) with WinError
+    448 ("untrusted mount point") over a non-interactive network logon -- i.e.
+    when the installer runs over SSH (the mesh-rollout path). Simulate it by
+    making Path.exists()/Path.resolve() on the link path raise OSError(448); the
+    junction swap and the active-version lookup must still succeed.
+    """
+    _install(tmp_path, "1.0.0")
+    _install(tmp_path, "2.0.0")
+    vr.activate(tmp_path, "1.0.0")  # lay the link
+    link = vr.current_link(tmp_path)
+    link_key = os.path.normcase(os.path.abspath(str(link)))
+
+    real_exists = Path.exists
+    real_resolve = Path.resolve
+
+    def _guard(self):
+        if os.path.normcase(os.path.abspath(str(self))) == link_key:
+            raise OSError(448, "untrusted mount point (simulated RedirectionGuard)")
+
+    def guarded_exists(self, *a, **k):
+        _guard(self)
+        return real_exists(self, *a, **k)
+
+    def guarded_resolve(self, *a, **k):
+        _guard(self)
+        return real_resolve(self, *a, **k)
+
+    monkeypatch.setattr(Path, "exists", guarded_exists)
+    monkeypatch.setattr(Path, "resolve", guarded_resolve)
+
+    # Swap over the existing link: must not evaluate exists()/resolve() on it.
+    vr.activate(tmp_path, "2.0.0")
+    # Reading the active version must not traverse the link either.
+    assert vr.current_version(tmp_path) == "2.0.0"
+
+
 def test_current_none_when_unset(tmp_path):
     assert vr.current_version(tmp_path) is None
 
