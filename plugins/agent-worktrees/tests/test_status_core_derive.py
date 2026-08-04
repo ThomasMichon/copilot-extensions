@@ -70,6 +70,12 @@ class TestFastPassActive:
         n = derive.norm(self._raw_active(session_lock_live=True), "m", "e")
         assert n["state"] == "ACTIVE"
 
+    def test_bound_live_marks_active_without_git(self):
+        # #1416 bare-resume: no mux, no lock -- only the cached bound-Copilot hint
+        # (a bare-resumed session, cwd=home) marks the worktree ACTIVE.
+        n = derive.norm(self._raw_active(session_bound_live=True), "m", "e")
+        assert n["state"] == "ACTIVE"
+
     def test_live_session_beats_merged_pr(self):
         # A just-merged PR with the session still running must render ACTIVE, not
         # FINAL -- the git pass returns ACTIVE (active_paths precedence), so the

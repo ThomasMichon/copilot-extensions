@@ -129,15 +129,16 @@ def _state(w):
     # Classification absent (the fast Phase-1 populate pass). A live session ->
     # ACTIVE, PERIOD -- checked before PR/finalized, mirroring
     # ``git_ops.classify_worktree``'s active_paths precedence (it returns ACTIVE
-    # before any git status/PR consideration). A live mux OR a live
-    # ``inuse.<pid>.lock`` binding means a live Copilot session, so surface it in
-    # the Active section IMMEDIATELY instead of waiting for the per-worktree git
-    # classify -- the ONLY other path to ACTIVE, seconds across the fleet. Doing
-    # this FIRST is what avoids flicker: a live worktree that ALSO has a merged
-    # PR (just-merged, session still running) must not render FINAL here and
-    # ACTIVE after Phase 2.
+    # before any git status/PR consideration). A live mux, a live
+    # ``inuse.<pid>.lock`` binding, OR the cached bound-Copilot hint (#1416: a
+    # bare-resumed session, cwd=home, that the mux/lock scans miss) means a live
+    # Copilot session, so surface it in the Active section IMMEDIATELY instead of
+    # waiting for the per-worktree git classify -- the ONLY other path to ACTIVE,
+    # seconds across the fleet. Doing this FIRST is what avoids flicker: a live
+    # worktree that ALSO has a merged PR (just-merged, session still running)
+    # must not render FINAL here and ACTIVE after Phase 2.
     if (w.get("mux_session") or w.get("mux_attached")
-            or w.get("session_lock_live")):
+            or w.get("session_lock_live") or w.get("session_bound_live")):
         return "ACTIVE"
     if pr.get("state") == "merged":
         return "FINAL"
@@ -368,6 +369,11 @@ def norm(w, machine, env):
         # ``inuse.<pid>.lock`` binds a Copilot process right now (gates Reclaim).
         "last_session_id": w.get("last_session_id"),
         "session_lock_live": bool(w.get("session_lock_live")),
+        # #4057/#1416: worktree hosts a live bound Copilot per the OFF-hot-path
+        # reconcile (mux OR bare) -- the cached signal that surfaces a
+        # bare-resumed session (cwd=home) in the Active section. Distinct from
+        # mux_live; drives the classification-absent fast-pass ACTIVE.
+        "session_bound_live": bool(w.get("session_bound_live")),
         # #93: worktree hosts a bare (un-muxed) bound Copilot -> orphan marker.
         "session_bare_orphan": bare_orphan,
         # Picker default-visibility. Keys on the origin-based ``picker_hidden``

@@ -488,6 +488,17 @@ def reconcile_prs() -> int:
     return data_local.reconcile_prs()
 
 
+def reconcile_bound_live() -> int:
+    """Reconcile the LOCAL machine's cached bound-Copilot liveness (#4057/#1416).
+
+    Delegates to :func:`data_local.reconcile_bound_live`. The bound-Copilot scan
+    is inherently machine-local (it reads this host's session-state), so -- like
+    :func:`reconcile_prs` -- each remote machine reconciles its own worktrees when
+    its picker runs; this only ever touches the local machine's records.
+    """
+    return data_local.reconcile_bound_live()
+
+
 def _reconcile_argv(source: "Source"):
     """The remote list argv for *source* with PR reconcile enabled (#2102).
 

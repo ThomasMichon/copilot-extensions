@@ -111,6 +111,78 @@ def reconcile_prs() -> int:
     return changed
 
 
+def reconcile_bound_live() -> int:
+    """Off-hot-path: reconcile each local worktree's cached ``bound_live`` signal
+    against the authoritative machine-wide bound-Copilot scan (#4057 / #1416).
+
+    A bare-resumed Copilot (cwd=home) is invisible to BOTH the registered-session
+    lock scan (its session was never registered under the worktree) and the mux
+    batch (a bare Copilot has no mux), so its worktree wrongly renders non-ACTIVE
+    (#1416). This reconciler resolves every live bound Copilot on the machine via
+    :func:`reclaim.resolve_bound_copilots` -- cwd-independent, and NOT
+    self-excluding (unlike ``bare_orphan_worktree_ids``, so it also counts *this*
+    session's own worktree and every mux-homed one) -- and stamps each affected
+    worktree's cached ``bound_live`` so a follow-up populate can surface a
+    bare-resumed session in the Active section from cache alone.
+
+    TRI-STATE, minimal-churn: a live worktree is stamped ``True`` (refresh, so a
+    steadily-live session's hint never ages out); a worktree that was ``True`` but
+    is no longer bound is stamped ``False`` (the session-ended transition). A
+    never-bound worktree is left untouched (``None`` = Unknown, NEVER persisted),
+    so the fleet's idle YAMLs are not rewritten. When the scan itself fails
+    (Unknown), nothing is stamped. Never raises; local machine only -- remote
+    worktrees reconcile on their owning machine. Returns the count of records
+    whose CONSUMER-VISIBLE liveness (fresh ``bound_live=True`` vs not) flipped, so
+    a nonzero result reloads the picker -- including a still-live worktree whose
+    hint had aged past the populate TTL (renewing it must re-surface it ACTIVE,
+    not silently leave it non-active until the next poll).
+
+    A bound Copilot the scan could not attribute to a worktree (``worktree_id``
+    None -- a transient attribution failure, not proof of death) suppresses ALL
+    negative transitions this pass: a genuinely-gone positive still expires via
+    the freshness TTL, but a momentarily-unattributable live session is never
+    wrongly cleared to ``False``.
+    """
+    try:
+        tracking_path = cfg.tracking_dir()
+        plat = cfg.detect_platform()
+        records = tracking.list_records(tracking_path, platform_filter=plat)
+    except Exception:
+        return 0
+    records = [
+        r for r in records if r.worktree_path and Path(r.worktree_path).exists()
+    ]
+    if not records:
+        return 0
+    try:
+        bound = reclaim.resolve_bound_copilots()
+    except Exception:
+        return 0  # Unknown -- never persist
+    # Lazy import (avoids a picker_tui <-> __main__ cycle): the SAME fresh-hint
+    # test the populate path uses, so "changed" tracks true consumer visibility.
+    from ..__main__ import _fresh_bound_live_hint
+
+    live_ids = {b.get("worktree_id") for b in bound if b.get("worktree_id")}
+    # An unattributable live binding -> some worktree's liveness is Unknown this
+    # pass; hold off on clearing positives so a transient miss can't flap a live
+    # session to non-ACTIVE.
+    had_unresolved = any(b.get("worktree_id") is None for b in bound)
+    changed = 0
+    for rec in records:
+        was_visible = _fresh_bound_live_hint(rec) is True
+        if rec.worktree_id in live_ids:
+            tracking.stamp_bound_live(rec.worktree_id, True, refresh=True)
+            if not was_visible:
+                changed += 1  # became (or re-freshened into) ACTIVE-visible
+        elif rec.bound_live is True and not had_unresolved:
+            # True -> False: the bound session ended. Clear it (a real
+            # transition; idle worktrees that were never bound stay untouched).
+            tracking.stamp_bound_live(rec.worktree_id, False)
+            if was_visible:
+                changed += 1
+    return changed
+
+
 def load(machine: str | None = None, env: str | None = None,
          *, classify: bool = True):
     """Normalized records for this machine's worktrees (tracking + classify).

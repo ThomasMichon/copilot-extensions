@@ -300,6 +300,18 @@ def _build_active_paths(
                 active.add(_normalize_path(rec.worktree_path))
             elif hint is None and sessions.has_mux_session(rec.worktree_id):
                 active.add(_normalize_path(rec.worktree_path))
+    # #4057/#1416 bare-resume blind spot: a bare-resumed Copilot (cwd=home) is
+    # invisible to BOTH the lock scan above (its session isn't registered under
+    # the worktree) and the mux batch (it has no mux), so union in the cached
+    # ``bound_live`` hint -- reconciled OFF the hot path by
+    # ``data_local.reconcile_bound_live`` via the authoritative machine-wide
+    # ``reclaim.resolve_bound_copilots`` scan -- when FRESH and True. Strictly
+    # ADDITIVE (only ever ADDS a worktree to the active set), so a stale/false
+    # bound hint can never hide a live mux/lock the checks above found, and a
+    # never-reconciled record (hint None) is a no-op.
+    for rec in records:
+        if rec.worktree_path and _fresh_bound_live_hint(rec) is True:
+            active.add(_normalize_path(rec.worktree_path))
     return active
 
 
@@ -326,6 +338,36 @@ def _fresh_mux_live_hint(rec) -> bool | None:
         return None
     now = datetime.now(dt.tzinfo) if dt.tzinfo is not None else datetime.now()
     if (now - dt).total_seconds() > _MUX_LIVE_HINT_TTL_SECS:
+        return None
+    return bool(live)
+
+
+# #4057/#1416: how long a cached ``bound_live`` stamp is trusted as a populate
+# hint (the bare-resume Active surfacing). Same budget as the mux hint.
+_BOUND_LIVE_HINT_TTL_SECS = 600
+
+
+def _fresh_bound_live_hint(rec) -> bool | None:
+    """The record's cached bound-Copilot liveness, iff still fresh; else None.
+
+    Returns ``True``/``False`` when the record carries a ``bound_live`` stamp
+    whose ``bound_live_at`` is within :data:`_BOUND_LIVE_HINT_TTL_SECS`, otherwise
+    ``None`` (absent/Unknown or stale). The bound signal is reconciled OFF the hot
+    path (``data_local.reconcile_bound_live``); populate only ever *reads* this
+    cached hint -- it never scans or writes. Never raises.
+    """
+    live = getattr(rec, "bound_live", None)
+    if live is None:
+        return None
+    stamped = getattr(rec, "bound_live_at", None)
+    if not stamped:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(stamped))
+    except (ValueError, TypeError):
+        return None
+    now = datetime.now(dt.tzinfo) if dt.tzinfo is not None else datetime.now()
+    if (now - dt).total_seconds() > _BOUND_LIVE_HINT_TTL_SECS:
         return None
     return bool(live)
 
@@ -655,6 +697,13 @@ def _worktree_to_dict(
     # cannot see). Set only when true, to keep the dict lean.
     if bare_orphan_wts and rec.worktree_id in bare_orphan_wts:
         d["session_bare_orphan"] = True
+    # #4057/#1416: the cached bound-Copilot liveness hint (reconciled OFF the hot
+    # path). Surfaced so the picker's fast (classification-absent) pass can mark a
+    # bare-resumed session ACTIVE from cache -- matching what ``_build_active_paths``
+    # feeds the git-classify pass. A bare Copilot has no mux, so this is DISTINCT
+    # from ``mux_session``; emitted only when fresh+True to keep the dict lean.
+    if _fresh_bound_live_hint(rec) is True:
+        d["session_bound_live"] = True
     return d
 
 

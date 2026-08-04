@@ -33,7 +33,7 @@ from agent_worktrees.picker_tui import derive
 # Fields each effort depends on, asserted present on the single shared record.
 _SESSION_STATE_SIGNAL_KEYS = (
     "mux_live", "attached", "session_lock_live", "session_bare_orphan",
-    "last_session_id", "live_intent", "live_pulse",
+    "session_bound_live", "last_session_id", "live_intent", "live_pulse",
 )
 _INTERACTION_LAYER_KEYS = (
     "id4", "title", "machine", "env", "machine_env",
@@ -109,5 +109,6 @@ def test_signals_absent_default_off_not_missing():
     assert rec["mux_live"] is False
     assert rec["session_lock_live"] is False
     assert rec["session_bare_orphan"] is False
+    assert rec["session_bound_live"] is False
     assert rec["last_session_id"] is None
     assert rec["live_pulse"] is None

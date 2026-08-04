@@ -1448,6 +1448,13 @@ class PickerScreen(Widget):
         rec_fn = getattr(self.src, "reconcile_prs", None)
         if callable(rec_fn):
             self._start_pr_reconcile(rec_fn)
+        # #4057/#1416: same after-first-paint pattern for the cached bound-Copilot
+        # liveness reconcile -- surfaces a bare-resumed session (cwd=home) in the
+        # Active section without a live per-worktree scan on the populate path.
+        self._bound_live_reconciled = False
+        blr_fn = getattr(self.src, "reconcile_bound_live", None)
+        if callable(blr_fn):
+            self._start_bound_live_reconcile(blr_fn)
         # Reconcile the persisted Worktrees selection against the freshly loaded
         # records (#2258 P3-7): keep survivors, drop rows that vanished, re-seat
         # a now-invalid range anchor. A no-op while records are still streaming.
@@ -1474,6 +1481,30 @@ class PickerScreen(Widget):
             self._pr_reconciled = True
 
         threading.Thread(target=work, name="pr-reconcile", daemon=True).start()
+
+    def _start_bound_live_reconcile(self, blr_fn):
+        """Reconcile cached bound-Copilot liveness off the UI thread, then reload.
+
+        Mirrors :meth:`_start_pr_reconcile` (#4057/#1416): resolves the machine's
+        live bound Copilots via the authoritative scan and stamps each worktree's
+        cached ``bound_live`` so a bare-resumed session surfaces ACTIVE. Never
+        blocks the first paint and never raises; only reloads when a bound-liveness
+        transition actually happened (an all-current store costs one silent pass).
+        """
+        def work():
+            try:
+                changed = blr_fn()
+            except Exception:
+                changed = 0
+            if changed:
+                try:
+                    self._reload_local_after_reconcile()
+                except Exception:
+                    pass
+            self._bound_live_reconciled = True
+
+        threading.Thread(
+            target=work, name="bound-live-reconcile", daemon=True).start()
 
     def _reload_local_after_reconcile(self):
         """Re-fetch the local machine's rows after a PR reconcile wrote back.
