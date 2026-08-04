@@ -221,6 +221,17 @@ foreach ($dir in @($InstallDir, $LocalBin)) {
 }
 Write-Ok "Directories: $InstallDir"
 
+# -- Deploy the session-start hook (version-gated runtime reconcile) --
+# hooks.json runs ~/.agent-ssh/bin/bootstrap-check.ps1 at session start; it
+# re-runs this installer only when the deployed version drifts from the payload.
+$BinHookDir = Join-Path $InstallDir 'bin'
+if (-not (Test-Path $BinHookDir)) { New-Item -ItemType Directory -Path $BinHookDir -Force | Out-Null }
+foreach ($h in @('bootstrap-check.ps1', 'bootstrap-check.sh')) {
+    $hSrc = Join-Path $PSScriptRoot $h
+    if (Test-Path $hSrc) { Copy-Item $hSrc (Join-Path $BinHookDir $h) -Force }
+}
+Write-Ok "Session-start hook: $BinHookDir\bootstrap-check.ps1"
+
 if ($Force -or -not (Test-Path $VenvPython)) {
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'

@@ -425,6 +425,29 @@ A plugin's own `scripts/*` and `src/<pkg>/installer.py` ship together, so they
 may share freely. Secondary entry points (e.g. `init.ps1`/`init.sh`) should
 delegate to the canonical `install.*` rather than duplicate the deploy logic.
 
+## Runtime self-reconcile (session-start hook)
+
+A Python runtime plugin installs a `~/.local/bin/<name>` binstub, but a
+`copilot plugin update` refreshes only the cached payload — it does **not**
+redeploy the binstub/venv. Without a nudge, the runtime silently lags the payload
+until someone re-runs the installer by hand.
+
+So every Python runtime plugin **self-reconciles at session start**: it declares
+a `sessionStart` hook that re-runs its own installer **only when the deployed
+version drifts** from the payload.
+
+- `plugin.json` sets `"hooks": "hooks.json"`.
+- `hooks.json` `hooks.sessionStart` runs `~/.<plugin>/bin/bootstrap-check.{ps1,sh}`.
+- `scripts/bootstrap-check.{ps1,sh}` is a **version-gated reconcile**: it compares
+  the deployed version (`deploy-manifest.json` → `source.version`) to the payload
+  (`pyproject.toml`) and, on drift (or a missing venv), re-runs the canonical
+  installer **in the background** — the atomic versioned-venv swap keeps concurrent
+  use safe, and backgrounding keeps session start non-blocking.
+- The canonical installer deploys those scripts to `~/.<plugin>/bin/`.
+
+This reconciles the **tool**, never machine state or config. First install remains
+the one-time setup step; the hook only keeps an installed runtime current.
+
 ## Enforcement
 
 `tools/check-install-contract.py` verifies, per plugin, against its canonical
@@ -439,7 +462,11 @@ runtime entrypoint (`install.*` if present, else `init.*`):
 - the source-kind resolver is identical across plugins (per language),
 - each Python runtime's `scripts/versioned_runtime.py` is byte-identical to the
   canonical `libs/versioned-runtime/versioned_runtime.py` (edit the canonical and
-  run `python tools/sync-versioned-runtime.py`; `--check` verifies in CI/pre-push).
+  run `python tools/sync-versioned-runtime.py`; `--check` verifies in CI/pre-push),
+- each Python runtime wires the **session-start reconcile hook** above
+  (`plugin.json` `hooks` → a `sessionStart` `bootstrap-check`). Plugins predating
+  the invariant are listed in `EXEMPT_SESSION_HOOK` (tracked in dotfiles#779) —
+  new runtime plugins must comply, not be added to that set.
 
 Wire it as a `pre-push` hook (see `tools/hooks/pre-push`, which also runs
 `tools/check-no-internal-identifiers.py` — a repo-wide guard that fails the push

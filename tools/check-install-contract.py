@@ -30,6 +30,7 @@ Exit code 0 = conformant, 1 = violations (suitable for a pre-push hook).
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import sys
 from pathlib import Path
@@ -63,6 +64,52 @@ FORBIDDEN_TRAMPOLINE = re.compile(
     r"Scripts[\\/](?!python\.exe)(?!pythonw\.exe)[\w.-]+\.exe[\"']?\s+(?:%\*|start\b|version\b)",
     re.IGNORECASE,
 )
+
+# Session-start runtime-reconcile invariant: every Python runtime plugin (it
+# installs a ~/.local/bin binstub) MUST wire a sessionStart hook that reconciles
+# that runtime at launch, so a `copilot plugin update` redeploys the binstub
+# without a manual reinstall. Detected structurally: plugin.json "hooks" -> a
+# hooks file with a non-empty hooks.sessionStart whose command runs a
+# `bootstrap-check`. See docs/install-contract.md § "Runtime self-reconcile".
+#
+# Baseline of runtime plugins that predate the invariant and do NOT yet comply
+# (tracked in dotfiles#779). New runtime plugins are REQUIRED to comply -- do NOT
+# add to this set to silence the check; wire the hook and remove the plugin here.
+# Burn this set down to empty.
+EXEMPT_SESSION_HOOK: frozenset[str] = frozenset({
+    "agent-bridge",
+    "agent-codespaces",
+    "agent-containers",
+    "agent-dispatch",
+    "agent-index",
+    "agent-logger",
+    "agent-mcp",
+    "agent-vault",
+})
+
+
+def _session_hook_problem(plugin: Path) -> str | None:
+    """Return a violation string if a runtime plugin lacks the sessionStart
+    reconcile hook, else None."""
+    try:
+        data = json.loads((plugin / "plugin.json").read_text(encoding="utf-8"))
+    except Exception:
+        return "plugin.json unreadable (cannot verify sessionStart reconcile hook)"
+    hooks_ref = data.get("hooks")
+    if not hooks_ref:
+        return ('no sessionStart runtime-reconcile hook -- set plugin.json "hooks" to a '
+                "hooks file with a sessionStart bootstrap-check (docs/install-contract.md "
+                "\u00a7 'Runtime self-reconcile')")
+    try:
+        hooks_doc = json.loads((plugin / hooks_ref).read_text(encoding="utf-8"))
+    except Exception:
+        return f"hooks file '{hooks_ref}' is missing or unreadable"
+    session = (hooks_doc.get("hooks") or {}).get("sessionStart")
+    if not session:
+        return f"hooks file '{hooks_ref}' has no sessionStart entry"
+    if "bootstrap-check" not in json.dumps(session):
+        return f"sessionStart hook does not run a bootstrap-check runtime reconcile"
+    return None
 
 
 def _extract_block(text: str, start_marker: str, open_char: str, close_char: str) -> str | None:
@@ -143,6 +190,13 @@ def check() -> int:
                 )
             else:
                 vrt_hashes[name] = hashlib.sha256(vrt.read_bytes()).hexdigest()
+        # Session-start reconcile invariant (dotfiles#779): a Python runtime plugin
+        # must self-reconcile its binstub at launch. Payload runtimes are exempt
+        # (no binstub); the baseline set tracks pre-existing gaps.
+        if not is_payload and name not in EXEMPT_SESSION_HOOK:
+            hook_problem = _session_hook_problem(plugin)
+            if hook_problem:
+                violations.append(f"{name}: {hook_problem}")
         # Enforce the canonical entrypoint pair (install.* if present, else
         # init.*). Both language variants of that base must exist and conform.
         base = _entrypoint_base(plugin)
