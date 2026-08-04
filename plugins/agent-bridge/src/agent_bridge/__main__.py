@@ -612,6 +612,30 @@ def _read_pid_file() -> int | None:
         return None
 
 
+def _print_reconcile_status() -> None:
+    """Surface the last session-start auto-reconcile attempt, if recorded (#167).
+
+    bootstrap-check writes ``reconcile-status.json`` on every reconcile it
+    launches and tees the installer output to ``reconcile.log``; showing the last
+    attempt here makes a silent/failed background update discoverable from
+    ``service status`` instead of only by reading log files.
+    """
+    import json
+
+    status_path = os.path.join(_INSTALL_DIR, "reconcile-status.json")
+    try:
+        with open(status_path, encoding="utf-8") as fh:
+            st = json.load(fh)
+    except (OSError, ValueError):
+        return
+    at = st.get("at", "?")
+    frm = st.get("from", "?")
+    to = st.get("to", "?")
+    log = st.get("log", os.path.join(_INSTALL_DIR, "reconcile.log"))
+    print(f"  Last auto-reconcile: {at}  {frm} -> {to}")
+    print(f"    log: {log}")
+
+
 def _reconcile_service_marker(pid: int, version: str | None) -> None:
     """Point the service-management side files at the post-cutover active daemon.
 
@@ -883,6 +907,7 @@ def _cmd_service(args: argparse.Namespace) -> None:
         if pid:
             print(f"  PID:  {pid}")
         print(f"  Port: {_service_port()}")
+        _print_reconcile_status()
     else:
         print(
             "Usage: agent-bridge service {start|stop|restart|status}",
