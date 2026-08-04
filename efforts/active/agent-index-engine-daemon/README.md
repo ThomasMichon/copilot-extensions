@@ -116,10 +116,24 @@ Locked design decisions (operator):
       live-validated (client skips engine, host provisions).
 
 ### Phase 5 — Service on the external seam
-- [ ] Service defaults to `external` engine mode against the persistent daemon.
-- [ ] A separate, explicit **engine-runtime update** path rebuilds the durable
+- [x] Service defaults to `external` engine mode against the persistent daemon.
+      **Done** — `ModelProfile.engine_mode` default flipped `auto`→`external`
+      (index_config.py); the torch-free service now requires the durable daemon
+      rather than trying to spawn/own an engine from its own venv.
+- [x] Flip `AGENT_INDEX_SEARCH_IN_PROCESS` default `1`→`0` so query embedding
+      routes through the daemon too. **Done** — flipped and converted to a
+      `default_factory` (per-instance, honoring env set before construction).
+      With both flips, *all* embedding (index + query) flows through the daemon
+      and the service venv is fully torch-free.
+- [x] A separate, explicit **engine-runtime update** path rebuilds the durable
       engine venv only when the embedding stack changes (decoupled from service
-      `update`/cutover).
+      `update`/cutover). **Done** — new `engine-update` action: `Install-Engine
+      -Upgrade`/`_install_engine upgrade` (pip `--upgrade` into the durable venv)
+      + `Restart-EngineDaemon`/`_restart_engine_daemon` (the ONE intended restart).
+      Live-validated on Borealis: torch-free service embedded a query **through the
+      daemon** (`agent-index search` → clean empty result, no torch-in-service),
+      config resolved `search_in_process=False`/`engine_mode=external`,
+      `engine-update` restarted the daemon (pid changed). Full suite **120 green**.
 
 ### Phase 6 — Validation, parity, tests
 - [ ] Cross-platform parity (daemon + role model work without systemd); unit tests;
@@ -140,6 +154,29 @@ Locked design decisions (operator):
       untouched by either runtime swap.
 
 ## Journal
+
+### 2026-08-03 — Phase 5: service defaults to the external daemon seam
+- Flipped the two standing defaults so the torch-free service routes **all**
+  embedding through the durable daemon: `ModelProfile.engine_mode` `auto`→
+  `external` and `AGENT_INDEX_SEARCH_IN_PROCESS` `1`→`0` (also converted the latter
+  to a `default_factory` so an env set before `IndexConfig()` is honored, matching
+  `engine_mode`). Env vars still select `subprocess`/`systemd`/`auto` + in-process
+  embedding for a single-venv install.
+- Added the explicit **engine-runtime update** path: `engine-update` action
+  (`Install-Engine -Upgrade` / `_install_engine upgrade` → pip `--upgrade` into the
+  durable venv, then `Restart-EngineDaemon` / `_restart_engine_daemon`). This is
+  the ONE place a daemon restart is intended — decoupled from service `update`,
+  which still never touches the engine.
+- Validated on Borealis: service venv torch-free, yet `agent-index search`
+  embedded the query **through the daemon** `/embed` and returned cleanly
+  (empty index, no torch-in-service error); config resolved
+  `search_in_process=False` / `engine_mode=external`; `engine-update` rebuilt the
+  durable venv and restarted the daemon (pid changed). Full suite **120 green**.
+- Observed (pre-existing, out of scope): the engine defaults `device=cuda` and does
+  **not** fall back to CPU when CUDA is unavailable (`/embed` 500 on Borealis WSL's
+  too-old CUDA driver until `AGENT_INDEX_DEVICE=cpu` was set). Candidate follow-up.
+- No version bump (batched). Next: Phase 6 — parity/tests + docs/patterns entry,
+  then the single dev17→dev18 bump and land the branch to `main`.
 
 ### 2026-08-03 — Phase 4: config-driven role-aware install
 - `config.resolve_role()` resolves this machine's role — `host` (runs the durable

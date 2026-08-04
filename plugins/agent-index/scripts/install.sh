@@ -408,18 +408,26 @@ _install_engine() {
     # Provision the DURABLE engine venv (agent-index[engine], the torch stack) at
     # AGENT_INDEX_ENGINE_HOME. Built ONCE and skipped if present (idempotent);
     # never rebuilt by a service `update`. Non-fatal -- a failure here leaves the
-    # light, torch-free service fully functional.
+    # light, torch-free service fully functional. With arg "upgrade", an existing
+    # venv is upgraded in place (the explicit engine-runtime update path) instead
+    # of skipped.
+    local upgrade=0
+    [[ "${1:-}" == "upgrade" ]] && upgrade=1
     if [[ "${AGENT_INDEX_NO_ENGINE_DEPS:-}" == "1" ]]; then
         _skip "Engine runtime skipped (AGENT_INDEX_NO_ENGINE_DEPS=1)"
         return 1
     fi
-    if [[ -x "$ENGINE_VENV_PYTHON" ]]; then
+    if [[ -x "$ENGINE_VENV_PYTHON" && "$upgrade" -eq 0 ]]; then
         _skip "Engine runtime already provisioned (durable venv preserved): $ENGINE_VENV"
         return 0
     fi
     local py
     py="$(_find_python)" || { _warn 'Python not found -- cannot provision engine runtime'; return 1; }
-    _step 'Provisioning durable engine runtime (torch stack) -- one-time, may take a while'
+    if [[ "$upgrade" -eq 1 ]]; then
+        _step 'Updating durable engine runtime (torch stack) -- may take a while'
+    else
+        _step 'Provisioning durable engine runtime (torch stack) -- one-time, may take a while'
+    fi
     mkdir -p "$ENGINE_HOME"
     local have_uv=0
     command -v uv >/dev/null 2>&1 && have_uv=1
@@ -447,10 +455,12 @@ _install_engine() {
     local rc=0
     if [[ "$have_uv" -eq 1 ]]; then
         local uv_args=(pip install --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR[engine]")
+        [[ "$upgrade" -eq 1 ]] && uv_args+=(--upgrade)
         [[ -n "${AGENT_INDEX_TORCH_INDEX:-}" ]] && uv_args+=(--extra-index-url "$AGENT_INDEX_TORCH_INDEX")
         uv "${uv_args[@]}" || rc=$?
     else
         local pip_args=(-m pip install "$PLUGIN_DIR[engine]")
+        [[ "$upgrade" -eq 1 ]] && pip_args+=(--upgrade)
         [[ -n "${AGENT_INDEX_TORCH_INDEX:-}" ]] && pip_args+=(--extra-index-url "$AGENT_INDEX_TORCH_INDEX")
         "$ENGINE_VENV_PYTHON" "${pip_args[@]}" || rc=$?
     fi
@@ -462,8 +472,32 @@ _install_engine() {
         _warn 'Engine venv built but torch import failed'
         return 1
     fi
-    _ok "Engine runtime provisioned (durable venv): $ENGINE_VENV"
+    if [[ "$upgrade" -eq 1 ]]; then
+        _ok "Engine runtime updated (durable venv): $ENGINE_VENV"
+    else
+        _ok "Engine runtime provisioned (durable venv): $ENGINE_VENV"
+    fi
     return 0
+}
+
+_restart_engine_daemon() {
+    # Restart the engine daemon so a freshly-updated durable venv is loaded -- the
+    # ONE place a restart is intended (the explicit engine-runtime update path),
+    # decoupled from the service `update` (which must never bounce the engine).
+    if [[ "$NO_SERVICE" -eq 1 ]]; then
+        _skip "Engine daemon restart skipped (--no-service)"
+        return 0
+    fi
+    if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$ENGINE_SYSTEMD_UNIT" ]]; then
+        systemctl --user restart "$ENGINE_SYSTEMD_UNIT" 2>/dev/null || true
+        if systemctl --user is-active "$ENGINE_SYSTEMD_UNIT" >/dev/null 2>&1; then
+            _ok "Engine daemon restarted (new engine runtime loaded) ($ENGINE_SYSTEMD_UNIT)"
+        else
+            _warn "Engine daemon restart failed -- check: systemctl --user status agent-index-engine"
+        fi
+    else
+        _register_engine_daemon
+    fi
 }
 
 _register_engine_daemon() {
@@ -639,6 +673,8 @@ case "$ACTION" in
         ;;
     update) _downgrade_guard; _ensure_runtime; _install_service ;;  # engine venv + daemon left untouched by design
     engine) _install_engine || true; _register_engine_daemon ;;     # explicit host-side provisioning (role-independent)
+    engine-update)                                                  # rebuild durable engine venv + restart daemon (decoupled from service update)
+        if _install_engine upgrade; then _restart_engine_daemon; fi ;;
     status) _status ;;
     start) _start ;;
     stop) _stop ;;
