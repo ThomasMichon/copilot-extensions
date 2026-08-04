@@ -1037,12 +1037,60 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
     return None
 
 
+def _sibling_plugin_installed(plugin_name: str) -> bool:
+    """Whether a sibling copilot-extensions plugin is installed on this machine.
+
+    Used to distinguish a *legitimate opt-out* (the plugin isn't installed at all,
+    so its namespace being unavailable is expected) from a *regression* (the plugin
+    IS installed but didn't make it into the agent-bridge runtime venv, so its
+    namespace silently vanished). Best-effort + never raises -- it only decides a
+    log level.
+    """
+    try:
+        root = (
+            Path.home()
+            / ".copilot"
+            / "installed-plugins"
+            / "copilot-extensions"
+            / plugin_name
+        )
+        return (root / "pyproject.toml").exists()
+    except Exception:
+        return False
+
+
+def _log_missing_namespace(plugin_name: str, namespace: str) -> None:
+    """Log a skipped optional namespace resolver at the right severity.
+
+    If ``plugin_name`` is installed on the machine but not importable in the bridge
+    runtime venv, the runtime slot was built without carrying the extension forward
+    (e.g. a version-env upgrade that skipped the sibling install) -- the namespace
+    then silently disappears and dispatch to it 404s. That is a **regression**, so
+    log it at WARNING with the remedy. If the plugin simply isn't installed, it's a
+    legitimate opt-out -> debug (no false-alarm noise on machines that don't use it).
+    """
+    if _sibling_plugin_installed(plugin_name):
+        log.warning(
+            "%s is installed on this machine but not importable in the agent-bridge "
+            "runtime -- the '%s' namespace is UNAVAILABLE, so dispatch to those "
+            "agents will fail with 'not a known agent'. The runtime venv slot was "
+            "built without the sibling extension; reinstall/redeploy agent-bridge "
+            "to repopulate it.",
+            plugin_name,
+            namespace,
+        )
+    else:
+        log.debug("%s not installed -- %s namespace unavailable", plugin_name, namespace)
+
+
 def _register_namespace_resolvers(resolver: AgentResolver) -> None:
     """Auto-discover and register namespace resolvers from optional packages.
 
     Each resolver is imported from its package and registered on the
-    AgentResolver. Import failures are logged at debug level and silently
-    skipped -- namespace resolvers are optional extensions.
+    AgentResolver. A missing optional extension is skipped: at WARNING when the
+    extension is installed on the machine but not importable here (a regression --
+    the runtime slot lost it), otherwise at debug (a legitimate opt-out). See
+    :func:`_log_missing_namespace`.
     """
     # codespace: -- GitHub Codespaces (agent-codespaces package)
     try:
@@ -1051,7 +1099,7 @@ def _register_namespace_resolvers(resolver: AgentResolver) -> None:
         resolver.register_namespace_resolver(CodespaceResolver())
         log.info("Registered codespace: namespace resolver (agent-codespaces)")
     except ImportError:
-        log.debug("agent-codespaces not installed -- codespace: namespace unavailable")
+        _log_missing_namespace("agent-codespaces", "codespace:")
     except Exception:
         log.warning(
             "Failed to register codespace: namespace resolver",
@@ -1065,7 +1113,7 @@ def _register_namespace_resolvers(resolver: AgentResolver) -> None:
         resolver.register_namespace_resolver(ContainerResolver())
         log.info("Registered container: namespace resolver (agent-containers)")
     except ImportError:
-        log.debug("agent-containers not installed -- container: namespace unavailable")
+        _log_missing_namespace("agent-containers", "container:")
     except Exception:
         log.warning(
             "Failed to register container: namespace resolver",

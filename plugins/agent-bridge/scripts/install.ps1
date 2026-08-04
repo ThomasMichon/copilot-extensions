@@ -363,20 +363,32 @@ function Install-SiblingPlugins {
         }
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
+        $pkgName = $name -replace '-', '_'
         if ($Reinstall) {
-            $pkgName = $name -replace '-', '_'
             $out = & uv pip install --python $VenvPython --reinstall-package $pkgName `
                 "$sibDir" --quiet 2>&1
         } else {
             $out = & uv pip install --python $VenvPython "$sibDir" --quiet 2>&1
         }
         $result = $LASTEXITCODE
+        if ($result -ne 0) {
+            $ErrorActionPreference = $prevEAP
+            Write-Fail "Sibling plugin $name install FAILED -- its namespace resolver / relay will be UNAVAILABLE."
+            if ($out) { Write-Host ($out | Out-String) }
+            continue
+        }
+        # Verify the package actually imports in THIS slot (dotfiles #828): a located
+        # sibling that installs 'successfully' but cannot be imported here means the
+        # freshly-built runtime slot would silently lose that namespace -- surface it
+        # LOUDLY at build time rather than let it manifest at runtime as a mysterious
+        # 'not a known agent' 404 (which is exactly how #828 hid for hours).
+        & $VenvPython -c "import $pkgName" 2>$null
+        $importOk = ($LASTEXITCODE -eq 0)
         $ErrorActionPreference = $prevEAP
-        if ($result -eq 0) {
+        if ($importOk) {
             Write-Ok "Sibling plugin (relay import): $name"
         } else {
-            Write-Warn "Sibling plugin $name install failed -- its namespace resolver / relay will be UNAVAILABLE."
-            if ($out) { Write-Host ($out | Out-String) }
+            Write-Fail "Sibling plugin $name installed but '$pkgName' is NOT importable in the runtime slot -- its namespace resolver / relay will be UNAVAILABLE (dotfiles #828). Re-run the install to repopulate the slot."
         }
     }
 }
