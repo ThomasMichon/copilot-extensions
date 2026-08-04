@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 import time
+from types import ModuleType
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -196,6 +198,87 @@ class TestConcurrencyGuard:
         assert first.session_id != second.session_id
         assert first.status == SessionStatus.IDLE
         assert second.status == SessionStatus.IDLE
+
+
+def _install_model_launch(monkeypatch, *, result: str = "", raises: bool = False) -> None:
+    parent = ModuleType("agent_codespaces")
+    parent.__path__ = []
+    module = ModuleType("agent_codespaces.model_launch")
+
+    def build_model_flags() -> str:
+        if raises:
+            raise RuntimeError("resolver failed")
+        return result
+
+    module.build_model_flags = build_model_flags
+    parent.model_launch = module
+    monkeypatch.setitem(sys.modules, "agent_codespaces", parent)
+    monkeypatch.setitem(sys.modules, "agent_codespaces.model_launch", module)
+
+
+async def _start_codespace_session(
+    tmp_db, monkeypatch, *, model_result: str, raises: bool = False,
+):
+    _install_model_launch(monkeypatch, result=model_result, raises=raises)
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+        lambda *args, **kwargs: object(),
+    )
+    manager = SessionManager(tmp_db, session_host_enabled=True)
+    captured: dict[str, list[str] | None] = {}
+
+    async def fake_connect(self, target, **kwargs):
+        captured["remote_child_argv"] = kwargs.get("remote_child_argv")
+        client = MagicMock()
+        client.is_running = True
+        client.pid = 12345
+        return client, "acp-test-123"
+
+    monkeypatch.setattr(SessionManager, "_connect_via_session_host", fake_connect)
+    acp_command = "cd /workspaces/example && copilot --acp --stdio --allow-all-tools"
+    target = SpawnTarget(
+        type="command",
+        cwd="/workspaces/example",
+        codespace={
+            "name": "example-codespace",
+            "repo": "example/repo",
+            "acp_command": acp_command,
+            "workspace_folder": "/workspaces/example",
+        },
+    )
+
+    await manager.start_session(target, agent_name="codespace:example")
+    return acp_command, captured["remote_child_argv"]
+
+
+class TestCodespaceSessionHostModelFlags:
+    """Model flags are appended at the Session-Host CodeSpace dispatch seam."""
+
+    @pytest.mark.asyncio
+    async def test_appends_model_flags(self, tmp_db, monkeypatch) -> None:
+        flags = " --model claude-opus-4.8 --reasoning-effort high --context long_context"
+
+        acp_command, remote_argv = await _start_codespace_session(
+            tmp_db, monkeypatch, model_result=flags,
+        )
+
+        assert remote_argv == ["bash", "-lc", acp_command + flags]
+
+    @pytest.mark.asyncio
+    async def test_unchanged_when_model_flags_empty(self, tmp_db, monkeypatch) -> None:
+        acp_command, remote_argv = await _start_codespace_session(
+            tmp_db, monkeypatch, model_result="",
+        )
+
+        assert remote_argv == ["bash", "-lc", acp_command]
+
+    @pytest.mark.asyncio
+    async def test_unchanged_when_model_flags_raise(self, tmp_db, monkeypatch) -> None:
+        acp_command, remote_argv = await _start_codespace_session(
+            tmp_db, monkeypatch, model_result="", raises=True,
+        )
+
+        assert remote_argv == ["bash", "-lc", acp_command]
 
 
 class TestSubmitPrompt:
