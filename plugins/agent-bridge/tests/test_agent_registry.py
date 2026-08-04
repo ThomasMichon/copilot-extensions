@@ -10,6 +10,8 @@ import pytest
 from agent_bridge.agent_registry import (
     AgentConfig,
     AgentResolver,
+    _log_missing_namespace,
+    _sibling_plugin_installed,
     discover_local_agents,
     load_agent_registry,
     load_elevated_projects,
@@ -2042,3 +2044,55 @@ def test_detect_local_machine_via_hostname_field(monkeypatch):
     machine, _platform = _detect_local_machine(machines)
     assert machine is not None
     assert machine.key == "host-augloop1"
+
+
+class TestMissingNamespaceLogging:
+    """`_register_namespace_resolvers` must surface an *installed-but-unimportable*
+    optional extension loudly (WARNING), while staying quiet (debug) when the
+    extension simply isn't installed -- dotfiles #828."""
+
+    def test_sibling_plugin_installed_true(self, tmp_path, monkeypatch):
+        plugin = (
+            tmp_path
+            / ".copilot"
+            / "installed-plugins"
+            / "copilot-extensions"
+            / "agent-containers"
+        )
+        plugin.mkdir(parents=True)
+        (plugin / "pyproject.toml").write_text("[project]\nname='agent-containers'\n")
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        assert _sibling_plugin_installed("agent-containers") is True
+
+    def test_sibling_plugin_installed_false(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        assert _sibling_plugin_installed("agent-containers") is False
+
+    def test_sibling_plugin_installed_never_raises(self, monkeypatch):
+        def _boom(cls):
+            raise OSError("no home")
+
+        monkeypatch.setattr(Path, "home", classmethod(_boom))
+        # Must swallow errors -- it only decides a log level.
+        assert _sibling_plugin_installed("agent-containers") is False
+
+    def test_installed_but_unimportable_warns(self, caplog, monkeypatch):
+        monkeypatch.setattr(
+            "agent_bridge.agent_registry._sibling_plugin_installed", lambda _n: True
+        )
+        with caplog.at_level("DEBUG", logger="agent-bridge"):
+            _log_missing_namespace("agent-containers", "container:")
+        warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+        assert len(warnings) == 1
+        msg = warnings[0].getMessage()
+        assert "agent-containers" in msg
+        assert "container:" in msg
+
+    def test_not_installed_stays_debug(self, caplog, monkeypatch):
+        monkeypatch.setattr(
+            "agent_bridge.agent_registry._sibling_plugin_installed", lambda _n: False
+        )
+        with caplog.at_level("DEBUG", logger="agent-bridge"):
+            _log_missing_namespace("agent-containers", "container:")
+        assert [r for r in caplog.records if r.levelname == "WARNING"] == []
+        assert any(r.levelname == "DEBUG" for r in caplog.records)

@@ -326,18 +326,24 @@ _install_sibling_plugins() {
         fi
         local pkg_name="${name//-/_}"
         if [[ "$mode" == "reinstall" ]]; then
-            if uv pip install --python "$VENV_DIR/bin/python" --reinstall-package "$pkg_name" \
-                    "$sib_dir" --quiet 2>/dev/null; then
-                _ok "Sibling plugin (relay import): $name"
-            else
-                _warn "Sibling plugin $name install failed -- its namespace resolver / relay will be UNAVAILABLE."
-            fi
+            uv pip install --python "$VENV_DIR/bin/python" --reinstall-package "$pkg_name" \
+                "$sib_dir" --quiet 2>/dev/null
         else
-            if uv pip install --python "$VENV_DIR/bin/python" "$sib_dir" --quiet 2>/dev/null; then
-                _ok "Sibling plugin (relay import): $name"
-            else
-                _warn "Sibling plugin $name install failed -- its namespace resolver / relay will be UNAVAILABLE."
-            fi
+            uv pip install --python "$VENV_DIR/bin/python" "$sib_dir" --quiet 2>/dev/null
+        fi
+        if [[ $? -ne 0 ]]; then
+            _fail "Sibling plugin $name install FAILED -- its namespace resolver / relay will be UNAVAILABLE."
+            continue
+        fi
+        # Verify the package actually imports in THIS slot (dotfiles #828): a located
+        # sibling that installs 'successfully' but cannot be imported here means the
+        # freshly-built runtime slot would silently lose that namespace -- surface it
+        # LOUDLY at build time rather than let it manifest at runtime as a mysterious
+        # 'not a known agent' 404 (which is exactly how #828 hid for hours).
+        if "$VENV_DIR/bin/python" -c "import $pkg_name" 2>/dev/null; then
+            _ok "Sibling plugin (relay import): $name"
+        else
+            _fail "Sibling plugin $name installed but '$pkg_name' is NOT importable in the runtime slot -- its namespace resolver / relay will be UNAVAILABLE (dotfiles #828). Re-run the install to repopulate the slot."
         fi
     done
 }
