@@ -8329,10 +8329,24 @@ def _update_modules(
         # This is more robust than relying on the status command's exit
         # code, since the installed module scripts may be stale (only the
         # host plugin's files are refreshed by copilot plugin update).
+        # A zero-downtime module (declares "zeroDowntimeUpdate": true in its
+        # plugin.json -- e.g. agent-bridge) redeploys via its ZDD cutover on a
+        # version bump instead of a disruptive stop-and-swap, so a live daemon
+        # hosting sessions is never dropped. Carry the same -ZeroDowntime flag the
+        # launch-path reconciler passes (see reconcile.runtime_installer_argv), so
+        # a redeploy ALWAYS cuts over regardless of which trigger drove it.
+        # Windows only: the switch lives in install.ps1 (install.sh has none), and
+        # install.ps1 still downgrades to a classic start when no daemon is
+        # running, so passing it is always safe.
+        update_args = ["update"]
+        if platform == "windows":
+            from . import reconcile as _reconcile
+            if _reconcile._zero_downtime_update(module_dir):
+                update_args.append("-ZeroDowntime")
         output.header(f"Updating Module: {name}")
         try:
             r = subprocess.run(
-                [*shell_prefix, "update"],
+                [*shell_prefix, *update_args],
                 cwd=module_dir, timeout=300,
             )
             if r.returncode == 0:
