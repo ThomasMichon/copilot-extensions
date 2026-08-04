@@ -12587,6 +12587,25 @@ def _worktrees_verbs() -> set[str]:
     return _WORKTREES_VERBS
 
 
+def _canonical_slug(tok: str) -> str | None:
+    """Map a leading token to a routable slug, tolerating singular/plural
+    variance so the surface is forgiving of the plugins' inconsistent
+    pluralization (``bridge``/``ssh`` singular; ``codespaces``/``containers``/
+    ``worktrees`` plural). Returns the canonical slug (matching the actual
+    ``agent-<slug>`` binstub) or None. The caller still gates on the collision
+    guard (a real worktrees verb is never passed here)."""
+    if tok in _CORE_SLUGS:
+        return tok
+    siblings = _installed_sibling_slugs()
+    if tok in siblings:
+        return tok
+    # Toggle a trailing 's' and retry (codespace<->codespaces, worktree<->worktrees).
+    alt = tok[:-1] if (tok.endswith("s") and len(tok) > 1) else tok + "s"
+    if alt in _CORE_SLUGS or alt in siblings:
+        return alt
+    return None
+
+
 def _sibling_binstub(slug: str) -> Path | None:
     """Locate the ``agent-<slug>`` binstub in ~/.local/bin (it runs in its own
     venv, so the router shells out to it rather than importing it)."""
@@ -13507,19 +13526,19 @@ def main(argv: list[str] | None = None) -> int:
     # A leading token naming a routable sibling plugin (the routable set is
     # DERIVED: the curated core set ∪ installed agent-<slug> binstubs, excluding
     # real worktrees verbs) is a plugin namespace: `<repo> <slug> …` →
-    # `agent-<slug> …`. `--project <repo>` is injected only for plugins that
-    # consume it (_PROJECT_ARG_SLUGS); other slugs route as a cwd-preserving
-    # alias. `worktrees` folds back into this binstub. See the command-surface
-    # effort.
+    # `agent-<slug> …`. Singular/plural variants are tolerated (`<repo> codespace`
+    # == `<repo> codespaces`). `--project <repo>` is injected only for plugins
+    # that consume it (_PROJECT_ARG_SLUGS); other slugs route as a cwd-preserving
+    # alias. `worktrees` (and `worktree`) folds back into this binstub. See the
+    # command-surface effort.
     if args_list:
-        _tok = args_list[0]
-        if _tok == "worktrees":
+        _canon = (None if args_list[0] in _worktrees_verbs()
+                  else _canonical_slug(args_list[0]))
+        if _canon == "worktrees":
             args_list = args_list[1:]
-        elif _tok not in _worktrees_verbs() and (
-            _tok in _CORE_SLUGS or _tok in _installed_sibling_slugs()
-        ):
-            _sib_project = _proj if _tok in _PROJECT_ARG_SLUGS else None
-            return _route_to_sibling_plugin(_tok, _sib_project, args_list[1:])
+        elif _canon is not None:
+            _sib_project = _proj if _canon in _PROJECT_ARG_SLUGS else None
+            return _route_to_sibling_plugin(_canon, _sib_project, args_list[1:])
 
     # Only auto-derive from CWD for project-requiring commands (skip the git
     # subprocess for global no-project commands and bare flags).
