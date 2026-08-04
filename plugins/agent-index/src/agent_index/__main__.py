@@ -163,6 +163,14 @@ def cmd_setup(args: argparse.Namespace) -> int:
                 print(msg, file=sys.stderr)
             return 1
 
+    # Client routing: resolve the endpoint this client uses to reach the designated
+    # indexer -- explicit --endpoint, else the repo's recorded indexer.endpoint;
+    # ssh alias likewise falls back to the repo (Phase 8; §local-first-standalone).
+    if role == "client":
+        rec = cfg.read_indexer(root) or {}
+        endpoint = endpoint or rec.get("endpoint")
+        ssh = ssh or rec.get("ssh")
+
     written: dict[str, str] = {}
     if root is not None:
         p = cfg.write_indexer_designation(root, designated, ssh=ssh, endpoint=endpoint)
@@ -170,6 +178,8 @@ def cmd_setup(args: argparse.Namespace) -> int:
     machine_updates: dict = {"role": role}
     if device:
         machine_updates["device"] = device
+    if role == "client" and endpoint:
+        machine_updates["endpoint"] = endpoint
     role_path = cfg.set_machine_config(machine_updates)
     written["machine_config"] = str(role_path)
 
@@ -191,6 +201,12 @@ def cmd_setup(args: argparse.Namespace) -> int:
     print(f"  designated indexer: {designated}" + (f" (ssh: {ssh})" if ssh else ""))
     if device:
         print(f"  engine device: {device}")
+    if role == "client":
+        if endpoint:
+            print(f"  routing endpoint: {endpoint}")
+        else:
+            print("  routing endpoint: (unset) -- pass --endpoint or record indexer.endpoint "
+                  "in the repo config so this client can reach the service")
     if root is None:
         print("  note: no repo detected (--repo / AGENT_INDEX_REPO / git cwd) -- "
               "wrote machine-local role only; the shared designation was not recorded")
@@ -201,8 +217,13 @@ def cmd_setup(args: argparse.Namespace) -> int:
         print("  next: run the installer here to provision the service + engine daemon "
               "(agent-index-install install)")
     else:
-        print(f"  next: run the installer here for the client; it will reach '{designated}'"
-              + (f" over ssh:{ssh}" if ssh else " (configure the endpoint / SSH forward)"))
+        print("  next: run the installer here for the client (service/CLI, no model stack).")
+        if ssh and endpoint:
+            print(f"        establish the trusted transport, e.g. an SSH port-forward via '{ssh}' "
+                  f"so {endpoint} reaches the indexer '{designated}'.")
+        elif ssh:
+            print(f"        establish an SSH port-forward via '{ssh}' to the indexer's service, "
+                  "then set the local endpoint (--endpoint / AGENT_INDEX_ENDPOINT).")
     return 0
 
 

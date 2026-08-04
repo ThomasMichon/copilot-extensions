@@ -171,12 +171,21 @@ Locked design decisions (operator):
       unavailable; loading model on 'cpu' instead").
 
 ### Phase 8 — Client routing to the designated indexer
-- [ ] Adoption **generates each client's routing config** (endpoint pointing at the
+- [x] Adoption **generates each client's routing config** (endpoint pointing at the
       designated indexer) reaching it over the **SSH port-forward** trusted
       transport; clients carry no model stack. Ensure the search path **degrades
       lexical-first** when the remote daemon is unreachable (honor
       §responsive-when-cold cross-host). Realizes vision §local-first-standalone
-      (routing) + §adoption-designates-one-indexer (client side).
+      (routing) + §adoption-designates-one-indexer (client side). **Done** —
+      `config.configured_endpoint()` + `client_url()` now prefer the machine-local
+      `endpoint` (a client's recorded routing) over local zdd/rendezvous. `setup`
+      on a client resolves the endpoint (`--endpoint`, else the repo's published
+      `indexer.endpoint`) and records it machine-locally, printing point-only
+      SSH-forward guidance. `SearchEngine.search()` **degrades to BM25/FTS** when
+      the engine is unreachable instead of returning empty. 7 tests; full suite
+      **145 green**; live-validated on Borealis (host publishes endpoint → a
+      different machine's `setup` inherits it → `client_url()` resolves the
+      indexer).
 
 ### Phase 9 — Validation, parity, tests
 - [ ] Cross-platform parity (daemon + role model work without systemd); unit tests;
@@ -217,6 +226,25 @@ Locked design decisions (operator):
       untouched by either runtime swap.
 
 ## Journal
+
+### 2026-08-03 — Phase 8: client routing + lexical-first degrade
+- `config.configured_endpoint()` reads the machine-local `endpoint:` a client
+  records at adoption; `client_url()` now prefers it over local zdd/rendezvous, so
+  a client resolves the **designated indexer** (an `AGENT_INDEX_ENDPOINT` env still
+  trumps). A host/single machine records no endpoint and resolves its local service.
+- `setup` on a client resolves the endpoint (`--endpoint`, else the repo's
+  published `indexer.endpoint`) and records it machine-locally; prints **point-only**
+  SSH-forward guidance (per operator directive: rely on the existing SSH mesh). The
+  host/single run publishes `indexer: {machine, ssh, endpoint}` into the repo config
+  for clients to discover.
+- `SearchEngine.search()` now **degrades lexical-first**: when the engine is
+  unreachable it returns BM25/FTS hits (`store.fts_search`) instead of empty,
+  realizing §responsive-when-cold for a cold/down remote engine.
+- 7 tests; full suite **145 green**; live-validated on Borealis (host publishes
+  endpoint → a different machine's `setup` inherits it → `client_url()` resolves the
+  indexer). No version bump (batched). **Adoption model (Phases 6-8) complete.**
+- Next (Phase 9): docs + `docs/patterns/` durable-vs-versioned-runtime entry; then
+  the single dev17->dev18 bump and land the branch to `main`.
 
 ### 2026-08-03 — Phase 7: capability-matched device + engine CPU fallback
 - New `capability.py`: `detect()` (cores / RAM / CUDA), `decide_device()` (GPU

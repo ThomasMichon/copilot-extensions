@@ -258,8 +258,27 @@ def _routing_url() -> str | None:
     return ep.base_url if ep is not None else None
 
 
+def configured_endpoint() -> str | None:
+    """The remote service endpoint recorded in the machine-local config
+    (``endpoint:``), written by adoption on a **client** so it reaches the
+    designated indexer over the trusted transport (effort agent-index-engine-daemon,
+    Phase 8; vision §local-first-standalone). ``None`` when unset (a host/single
+    machine resolves its own local service instead)."""
+    val = _load_yaml(config_path()).get("endpoint")
+    return val.strip() if isinstance(val, str) and val.strip() else None
+
+
 def client_url() -> str | None:
-    """Return the active service URL, following zdd routing before rendezvous."""
+    """Return the active service URL.
+
+    A **client** carries an explicit machine-local ``endpoint`` (its routing to the
+    designated indexer) which wins; otherwise the local service is followed via zdd
+    routing, then rendezvous. (An ``AGENT_INDEX_ENDPOINT`` env override, handled by
+    callers, still trumps everything.)"""
+    configured = configured_endpoint()
+    if configured:
+        return configured
+
     routed = _routing_url()
     if routed:
         return routed
