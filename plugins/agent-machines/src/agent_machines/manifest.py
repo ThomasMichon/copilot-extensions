@@ -63,10 +63,17 @@ class RequirementPackage:
     source_path: Path | None = None
 
     def applies_to(self, machine: str) -> bool:
-        """True when this package targets ``machine`` (empty/``*`` gate = all)."""
+        """True when this package targets ``machine`` (empty/``*`` gate = all).
+
+        The gate match is **case-insensitive**: ``current_machine()`` returns
+        ``platform.node()``, whose casing is the OS hostname's (e.g.
+        ``Lambda-Core``/``Borealis`` on Windows), while manifests conventionally
+        list gates in lowercase. Hostnames are case-insensitive, so comparing
+        case-sensitively would silently exclude a machine from its own package.
+        """
         if not self.gate or "*" in self.gate:
             return True
-        return machine in self.gate
+        return machine.lower() in {g.lower() for g in self.gate}
 
     def repo_root(self) -> Path | None:
         """The repo checkout root, derived from ``<repo>/.github/machine-state/<f>``."""
