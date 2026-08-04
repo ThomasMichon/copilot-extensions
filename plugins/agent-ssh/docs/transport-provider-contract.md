@@ -37,10 +37,12 @@ Placeholders filled by the core per host:
 | `{hostname}` | the machine's transport-resolved hostname (`%h` for a jumpbox gate) |
 | `{proxy_binary}` | registry `proxy_command_binary` override, else `proxy_binary_default` |
 | `{name}` `{user}` `{port}` | the machine's registry fields |
+| `{distro}` | the machine's registry `distro` field (used by local-machine transports such as `wsl`; other transports ignore it) |
 
 Examples:
 - Cloudflare: `"{proxy_binary} access ssh --hostname {hostname}"`
 - (a dev-tunnel transport supplies its own equivalent)
+- `wsl`: `"wsl.exe -d {distro} -u {user} exec nc 127.0.0.1 {port}"` (bridges the last hop through WSL interop instead of TCP)
 - `direct`: omit `proxy_command` entirely -> plain SSH.
 
 ## Topology
