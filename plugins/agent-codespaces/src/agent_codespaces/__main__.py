@@ -582,6 +582,12 @@ def _build_launch_command(
     if is_stdio:
         for d in plugin_dirs:
             acp += f' --plugin-dir="{d}"'
+        try:
+            from .model_launch import build_model_flags
+
+            acp += build_model_flags()
+        except Exception as exc:
+            log.debug("Model flag resolution failed for ACP launch: %s", exc)
     inner = relay_env + breadcrumb + "; " + acp
     return f"bash -l -c {shlex.quote(inner)}"
 

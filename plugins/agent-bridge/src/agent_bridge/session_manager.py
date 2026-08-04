@@ -1978,7 +1978,18 @@ class SessionManager:
                 # so the Session Host execs it through a login shell (with the
                 # relay prelude prepended); copilot inherits the host's stdio pipe
                 # as fd 0/1 and its exit ends the shell (child-liveness tracks it).
-                remote_argv = ["bash", "-lc", relay_prelude + cs_target["acp_command"]]
+                model_flags = ""
+                try:
+                    from agent_codespaces.model_launch import build_model_flags
+
+                    model_flags = build_model_flags()
+                except Exception:
+                    model_flags = ""
+                # Fresh-at-dispatch model propagation seam (dotfiles #790),
+                # version-skew tolerant and mirrored after the relay_prelude seam.
+                remote_argv = [
+                    "bash", "-lc", relay_prelude + cs_target["acp_command"] + model_flags,
+                ]
                 # Copilot runs its tools from the ACP session cwd, so it must be
                 # the CodeSpace workspace checkout (e.g. /workspaces/example-web) --
                 # NOT the _default_cwd() /home/<user> fallback, or the agent works

@@ -69,6 +69,30 @@ def test_plugin_dirs_folded_for_stdio_launch():
         assert f'--plugin-dir="{d}"' in cmd
 
 
+def test_model_flags_folded_after_plugin_dirs_for_stdio_launch(monkeypatch):
+    from agent_codespaces import model_launch
+
+    monkeypatch.setattr(
+        model_launch,
+        "build_model_flags",
+        lambda: " --model claude-opus-4.8 --reasoning-effort high --context long_context",
+    )
+    cmd = _build_launch_command(
+        "copilot --acp --stdio --allow-all-tools",
+        _PLUGIN_DIRS,
+        is_stdio=True,
+        relay_env="",
+        breadcrumb="true",
+    )
+    assert cmd is not None
+    expected_tail = (
+        f'--plugin-dir="{_PLUGIN_DIRS[-1]}" --model claude-opus-4.8 '
+        "--reasoning-effort high --context long_context"
+    )
+    assert expected_tail in cmd
+    assert cmd.rstrip("'").endswith("--context long_context")
+
+
 def test_plugin_dirs_NOT_folded_for_plain_remote_cmd():
     """A diagnostic --remote-cmd (non-stdio) must run verbatim -- no
     --plugin-dir spliced onto its tail (#152)."""
@@ -82,6 +106,29 @@ def test_plugin_dirs_NOT_folded_for_plain_remote_cmd():
     assert cmd is not None
     assert "--plugin-dir" not in cmd
     assert "ls ~/.copilot/skills/" in cmd
+
+
+def test_model_flags_NOT_folded_for_plain_remote_cmd(monkeypatch):
+    from agent_codespaces import model_launch
+
+    called = False
+
+    def fake_flags():
+        nonlocal called
+        called = True
+        return " --model claude-opus-4.8"
+
+    monkeypatch.setattr(model_launch, "build_model_flags", fake_flags)
+    cmd = _build_launch_command(
+        "ls ~/.copilot/skills/",
+        _PLUGIN_DIRS,
+        is_stdio=False,
+        relay_env="",
+        breadcrumb="true",
+    )
+    assert cmd is not None
+    assert "--model claude-opus-4.8" not in cmd
+    assert called is False
 
 
 def test_no_remote_cmd_returns_none():
