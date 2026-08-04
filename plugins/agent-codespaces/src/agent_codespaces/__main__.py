@@ -1570,14 +1570,22 @@ def _chdir_to_project(project: str) -> bool:
     it shells out rather than importing agent_worktrees). Best-effort: on any
     failure it warns and leaves the cwd unchanged, so a name-addressed verb still
     runs. Returns True iff the cwd was changed."""
+    import shutil
     import subprocess as sp
 
     name = (project or "").strip()
     if not name:
         return False
+    # Resolve the binstub via PATHEXT (on Windows it is a .cmd/.ps1, not a bare
+    # executable, so a plain ["agent-worktrees", ...] argv fails with WinError 2).
+    exe = shutil.which("agent-worktrees")
+    if not exe:
+        print(f"WARNING: --project {name}: agent-worktrees not found on PATH; "
+              f"using current directory", file=sys.stderr)
+        return False
     try:
         result = sp.run(
-            ["agent-worktrees", "repos", "find", name],
+            [exe, "repos", "find", name],
             capture_output=True, text=True, timeout=15,
         )
     except Exception as exc:  # pragma: no cover - environment-dependent
