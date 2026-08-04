@@ -25,6 +25,7 @@ slices that reuse this exact interface.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import secrets
@@ -39,6 +40,14 @@ from .launcher import launch_session_host
 log = logging.getLogger("agent-bridge.session-host.spawner")
 
 
+def _as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return list(value)
+    return [value]
+
+
 @dataclass
 class SpawnedHost:
     """A launched Session Host + everything the frontend needs to reach it.
@@ -50,7 +59,9 @@ class SpawnedHost:
     ``endpoint`` is the durable, JSON-serializable descriptor a restarted
     frontend uses to re-forward from :class:`~..session_host.host_index.HostIndex`
     alone (no live Spawner needed) -- empty for a local Host whose port never
-    moves. ``forward`` retains a live forward process so it is not GC'd.
+    moves. ``forward`` retains a live ``-L`` process so it is not GC'd. ``relay``
+    retains any dedicated credential-relay ``-R`` supervisors for teardown with
+    the Host/child lifetime.
     """
 
     local_port: int
@@ -63,6 +74,7 @@ class SpawnedHost:
     proc: Any = None
     endpoint: dict = field(default_factory=dict)
     forward: Any = None
+    relay: Any = None
     _refresh: Callable[[], Awaitable[None]] | None = None
 
     async def refresh_endpoint(self) -> None:
@@ -74,6 +86,15 @@ class SpawnedHost:
         """
         if self._refresh is not None:
             await self._refresh()
+
+    async def aclose(self) -> None:
+        """Best-effort teardown of owned forwards."""
+        for relay in _as_list(self.relay):
+            with contextlib.suppress(Exception):
+                await relay.stop()
+        if self.forward is not None:
+            with contextlib.suppress(Exception):
+                await self.forward.cancel()
 
 
 @runtime_checkable
@@ -281,7 +302,7 @@ class CodeSpaceSpawner:
 
         from . import protocol as proto
         from .bundle import build_session_host_bundle
-        from .endpoints import endpoint_from_ssh_config
+        from .endpoints import endpoint_from_ssh_config, relay_forwards_from_ssh_config
 
         nonce = new_nonce()
         bundle_path, _sha = await asyncio.to_thread(build_session_host_bundle)
@@ -323,8 +344,27 @@ class CodeSpaceSpawner:
         get_reverse = getattr(self._transport, "reverse_forwards", None)
         if callable(get_reverse):
             reverse += list(get_reverse() or [])
-        forward = LocalForward(config, remote_port, reverse_forwards=reverse)
+        forward = LocalForward(config, remote_port)
         local_port = await forward.establish()
+        relays = relay_forwards_from_ssh_config(
+            config,
+            reverse,
+            serving_probe_for_port=self._serving_probe_for_port,
+        )
+        started_relays = []
+        for relay in relays:
+            try:
+                await relay.start()
+            except Exception:
+                log.warning(
+                    "Credential relay supervisor failed to start for "
+                    "session %s (boundary=%s); continuing auth-light",
+                    session_id, self.boundary, exc_info=True,
+                )
+                with contextlib.suppress(Exception):
+                    await relay.stop()
+                continue
+            started_relays.append(relay)
 
         extra = {}
         get_extra = getattr(self._transport, "endpoint_extra", None)
@@ -354,8 +394,35 @@ class CodeSpaceSpawner:
             state_file=state_remote,
             endpoint=endpoint,
             forward=forward,
+            relay=started_relays,
             _refresh=_refresh,
         )
+
+    def _serving_probe_for_port(self, relay_port: int) -> Callable[[], Awaitable[bool]]:
+        """Build a best-effort far-side relay-serving probe for Session-Host use.
+
+        A false result means the SSH process is alive but the CodeSpace-side
+        loopback relay port is not accepting connections, so the relay supervisor
+        should re-establish. Probe transport failures return True: the probe is a
+        health hint, not a reason to churn an otherwise live relay during a
+        transient command-channel failure.
+        """
+
+        async def _probe() -> bool:
+            probe = (
+                f'timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/{relay_port}" '
+                "&& echo OK"
+            )
+            try:
+                rc, out, _err = await self._transport.run(
+                    f"bash -lc {shlex.quote(probe)}",
+                    timeout=5.0,
+                )
+            except Exception:
+                return True
+            return rc == 0 and "OK" in (out or "")
+
+        return _probe
 
     async def _poll_state(
         self, state_remote: str, log_remote: str,
