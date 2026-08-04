@@ -431,6 +431,13 @@ def main(argv: list[str] | None = None) -> int:
     # --- version ---
     sub.add_parser("version", help="Show version")
 
+    # --- acp-model-flags (process-to-process seam for agent-bridge dispatch) ---
+    sub.add_parser(
+        "acp-model-flags",
+        help="Print resolved per-session copilot model flags for an ACP launch "
+        "(empty when none / opted out).",
+    )
+
     sub.add_parser(
         "config-migrate",
         help="Migrate machine-local config schema (adopted-repos.yaml); idempotent",
@@ -495,6 +502,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_status()
         if args.command == "version":
             return _cmd_version()
+        if args.command == "acp-model-flags":
+            return _cmd_acp_model_flags()
         if args.command == "config-migrate":
             return _cmd_config_migrate()
     except RuntimeError as e:
@@ -2747,6 +2756,22 @@ def _cmd_version() -> int:
         print(f"agent-codespaces {ver} ({commit})")
     except ImportError:
         print("agent-codespaces 0.1.0-dev2")
+    return 0
+
+
+def _cmd_acp_model_flags() -> int:
+    """Print the resolved per-session copilot model flags (or nothing).
+
+    The process-to-process seam agent-bridge's CodeSpace dispatch shells out to,
+    instead of importing ``agent_codespaces`` in the bridge venv -- keeping the
+    two separately-versioned plugin venvs decoupled (avoids the stale-sync class
+    of bug). Prints the flag string (e.g. ``--model X --reasoning-effort Y
+    --context Z``) to stdout, or an empty line when nothing is configured or
+    propagation is opted out.
+    """
+    from .model_launch import build_model_flags
+
+    print(build_model_flags().strip())
     return 0
 
 

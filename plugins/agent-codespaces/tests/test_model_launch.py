@@ -101,3 +101,23 @@ def test_build_model_flags_emits_only_present_keys() -> None:
 def test_build_model_flags_empty_when_none(monkeypatch, tmp_path: Path) -> None:
     _isolated_home(monkeypatch, tmp_path)
     assert build_model_flags() == ""
+
+
+def test_acp_model_flags_command_prints_stripped_flags(monkeypatch, capsys) -> None:
+    """The ``acp-model-flags`` subcommand is the process-to-process seam that
+    agent-bridge shells out to; it prints the flags stripped of the leading
+    space (the caller inserts its own separator)."""
+    from agent_codespaces import __main__ as cli
+    from agent_codespaces import model_launch
+
+    # _cmd_acp_model_flags does ``from .model_launch import build_model_flags``,
+    # so patch it on the module the command resolves.
+    monkeypatch.setattr(
+        model_launch, "build_model_flags",
+        lambda cfg=None: " --model m --reasoning-effort e",
+    )
+
+    rc = cli.main(["acp-model-flags"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out.strip() == "--model m --reasoning-effort e"
