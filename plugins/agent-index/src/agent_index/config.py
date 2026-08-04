@@ -11,6 +11,9 @@ DEFAULT_PORT = 0
 RUN_DIR_ENV = "AGENT_INDEX_RUN_DIR"
 ENDPOINT_ENV = "AGENT_INDEX_ENDPOINT"
 HOME_ENV = "AGENT_INDEX_HOME"
+ROLE_ENV = "AGENT_INDEX_ROLE"
+CONFIG_ENV = "AGENT_INDEX_CONFIG"
+VALID_ROLES = ("host", "client")
 
 
 def install_dir() -> Path:
@@ -31,6 +34,63 @@ def run_dir() -> Path:
 def routing_dir() -> Path:
     """Stable zdd routing-table directory shared by all installed versions."""
     return install_dir()
+
+
+def config_path() -> Path:
+    """Machine-local role/config file: ``<install_dir>/config.yaml``.
+
+    Overridable with ``AGENT_INDEX_CONFIG``. This is the machine-local half of
+    the role source (the other being a source repo's ``<repo>/.agent-index/
+    config.yaml``, a runtime/indexing concern resolved by the consuming repo).
+    """
+    override = os.environ.get(CONFIG_ENV)
+    if override:
+        return Path(override).expanduser()
+    return install_dir() / "config.yaml"
+
+
+def _read_config_role(path: Path) -> str | None:
+    """Read a top-level ``role:`` (preferred) or ``engine:`` scalar from a config
+    file. Deliberately dependency-light -- a single documented scalar, so we scan
+    for it rather than pulling PyYAML into the torch-free service runtime.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    import re
+
+    for key in ("role", "engine"):
+        m = re.search(
+            rf"(?mi)^[ \t]*{key}[ \t]*:[ \t]*[\"']?([A-Za-z]+)[\"']?[ \t]*(?:#.*)?$",
+            text,
+        )
+        if m:
+            return m.group(1).strip().lower()
+    return None
+
+
+def resolve_role() -> str:
+    """Resolve this machine's agent-index role.
+
+    ``host`` runs the durable embedding-engine daemon (heavy torch stack);
+    ``client`` installs only the light, torch-free service/CLI and reaches a
+    remote engine/service over the trusted transport. Precedence:
+    ``AGENT_INDEX_ROLE`` env, then the machine-local config file's
+    ``role:``/``engine:`` scalar, else ``client``. The plugin encodes **no**
+    machine names -- role is pure configuration (effort agent-index-engine-daemon).
+    """
+    env = os.environ.get(ROLE_ENV)
+    if env and env.strip().lower() in VALID_ROLES:
+        return env.strip().lower()
+    cfg = _read_config_role(config_path())
+    if cfg in VALID_ROLES:
+        return cfg
+    if cfg in ("engine", "server", "indexer"):
+        return "host"
+    if cfg in ("none", "consumer"):
+        return "client"
+    return "client"
 
 
 @dataclass(frozen=True)
