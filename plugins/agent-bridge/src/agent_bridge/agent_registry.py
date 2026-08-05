@@ -1728,6 +1728,33 @@ class AgentResolver:
 
         return candidates
 
+    def _own_plugin_args(self, config) -> list[str]:
+        """``--plugin-dir`` args for the launching repo's OWN enabledPlugins.
+
+        A repo's ``.github/copilot/settings.json`` ``enabledPlugins`` load in a
+        headless launch only when installed on disk; an *enabled-but-uninstalled*
+        plugin (the fork / fresh-machine case) is silently skipped. This stages
+        each such plugin per-launch via ``--plugin-dir`` -- **never** globally
+        enabling it. Resolves the repo anchor from the project registry (or falls
+        back to ``cwd``). Fail-safe -> ``[]`` (never breaks dispatch).
+        """
+        try:
+            from pathlib import Path as _Path
+
+            from .related_plugins import _registry_anchor
+            from .repo_own_plugins import repo_plugin_dir_args
+
+            anchor = None
+            project = getattr(config, "project", None)
+            if project:
+                anchor = _registry_anchor(project)
+            if anchor is None and getattr(config, "cwd", None):
+                anchor = _Path(config.cwd)
+            return repo_plugin_dir_args(anchor)
+        except Exception as exc:  # pragma: no cover - defensive
+            log.debug("own-plugin arg staging failed: %s", exc)
+            return []
+
     def _resolve_static(self, agent_name: str) -> SpawnTarget:
         """Resolve via static/auto-discovered/provider registries."""
         config = self._agents.get(agent_name)
@@ -1759,7 +1786,7 @@ class AgentResolver:
                 type="local",
                 cwd=config.cwd,
                 copilot_path=config.copilot_path,
-                copilot_args=config.copilot_args,
+                copilot_args=config.copilot_args + self._own_plugin_args(config),
                 env=config.env,
                 project=config.project,
             )
@@ -1808,7 +1835,7 @@ class AgentResolver:
                 type="local",
                 cwd=config.cwd,
                 copilot_path=config.copilot_path,
-                copilot_args=config.copilot_args,
+                copilot_args=config.copilot_args + self._own_plugin_args(config),
                 env=config.env,
                 project=config.project,
             )
