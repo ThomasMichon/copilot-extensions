@@ -676,9 +676,17 @@ function Resolve-DaemonLogonMode {
     }
 
     # Offer it on a fresh, genuinely interactive desktop install only. Skip the
-    # prompt over SSH (no reliable TTY -- Read-Host would hang) and on update.
+    # prompt over SSH (no reliable TTY) AND whenever stdin is redirected -- e.g. a
+    # background reconcile launched by bootstrap-check.ps1 with -RedirectStandard*.
+    # Such a process still reports [Environment]::UserInteractive=$true on a
+    # logged-in desktop, but its stdin is a redirected-but-open pipe on which
+    # Read-Host BLOCKS forever (it does not throw, so the catch below never
+    # fires) -- wedging the caller (and the CLI session-start hook that spawned
+    # it). IsInputRedirected is the reliable "no usable console" signal here.
     $overSsh = [bool]($env:SSH_CONNECTION -or $env:SSH_CLIENT)
-    if ($Action -eq 'install' -and [Environment]::UserInteractive -and -not $overSsh) {
+    $stdinRedirected = $true
+    try { $stdinRedirected = [Console]::IsInputRedirected } catch { $stdinRedirected = $true }
+    if ($Action -eq 'install' -and [Environment]::UserInteractive -and -not $overSsh -and -not $stdinRedirected) {
         try {
             Write-Host ''
             Write-Host '  Run agent-bridge whether you are logged on or not?' -ForegroundColor Cyan
@@ -1103,11 +1111,15 @@ function Invoke-Install {
         $ErrorActionPreference = $prevEAP
     }
 
+    # Write the deploy manifest BEFORE registering the scheduled task. The
+    # manifest is what clears the version drift that bootstrap-check.ps1 keys
+    # on; writing it first means a failure/interruption in the (best-effort,
+    # possibly-elevation-gated) task step can never leave drift permanently
+    # unresolved -- which would otherwise re-trigger the reconcile every session.
+    Write-DeployManifest
+
     # Register scheduled task
     Register-ScheduledTask_
-
-    # Write deploy manifest
-    Write-DeployManifest
 
     # Ensure ~/.local/bin is on user PATH
     $userPath = [System.Environment]::GetEnvironmentVariable('PATH', 'User')
@@ -1709,11 +1721,12 @@ function Invoke-Update {
         Write-Binstubs -PythonExe $LinkPython
     }
 
+    # Update deploy manifest BEFORE the scheduled task (see the install path):
+    # clearing drift must not depend on the best-effort task step succeeding.
+    Write-DeployManifest
+
     # Update scheduled task
     Register-ScheduledTask_
-
-    # Update deploy manifest
-    Write-DeployManifest
 
     # Bring the new build into service. The zero-downtime path hands off via the
     # ZDD cutover (`agent-bridge deploy`: new daemon on a fresh port -> flip the

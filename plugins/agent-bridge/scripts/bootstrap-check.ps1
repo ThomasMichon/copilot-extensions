@@ -47,9 +47,8 @@ try {
     } else {
         $inst = Join-Path $PluginDir 'scripts\install.ps1'
         if (-not (Test-Path $inst)) { exit 0 }
-        $targs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $inst, 'install')
+        $targs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $inst, 'install', '-NonInteractive')
     }
-    Write-Host "[$name] runtime $deployed -> $current; reconciling in background (log: $InstallDir\reconcile.log)..." -ForegroundColor DarkGray
     $pw = Get-Command pwsh -ErrorAction SilentlyContinue
     $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
 
@@ -58,8 +57,60 @@ try {
     # so reconcile.log always holds the MOST RECENT reconcile's output.
     $reconcileLog = Join-Path $InstallDir 'reconcile.log'
     $reconcileErr = Join-Path $InstallDir 'reconcile.err.log'
-    $statusFile = Join-Path $InstallDir 'reconcile-status.json'
+    $statusFile   = Join-Path $InstallDir 'reconcile-status.json'
+    $reconcileIn  = Join-Path $InstallDir 'reconcile.in'
+
+    # --- Good boot-citizen guard: single-flight + stale-reap ---
+    # This hook fires on EVERY new session. Without a guard, a slow or wedged
+    # reconcile gets re-spawned each session, stacking orphaned background
+    # installers (observed in the wild: 9 wedged copies in one evening, each
+    # holding a session-start hook and blocking CLI startup). So, if a prior
+    # reconcile PID is still alive:
+    #   * YOUNG  -> a reconcile is already in flight; do nothing (never stack).
+    #   * STALE  -> it is wedged; reap it, then relaunch (self-heal, so a one-off
+    #              wedge can't poison every future session).
+    $staleMinutes = 10
+    try {
+        if (Test-Path $statusFile) {
+            $prev = Get-Content $statusFile -Raw | ConvertFrom-Json
+            $prevPid = 0; [void][int]::TryParse("" + $prev.launched_pid, [ref]$prevPid)
+            if ($prevPid -gt 0 -and (Get-Process -Id $prevPid -ErrorAction SilentlyContinue)) {
+                # Age from the recorded UTC timestamp. ConvertFrom-Json may hand
+                # back $prev.at as an already-parsed (local-kind) [DateTime], so
+                # normalize via [DateTimeOffset] -- comparing instants regardless
+                # of whether it arrived as a string or a DateTime, and avoiding
+                # the [DateTime]::Parse(...Z).ToUniversalTime() double-convert.
+                $ageMin = $staleMinutes  # default to "stale" if the timestamp is unparseable
+                try {
+                    $atVal = $prev.at
+                    $dto = if ($atVal -is [DateTime]) { [DateTimeOffset]$atVal } else { [DateTimeOffset]::Parse([string]$atVal) }
+                    $ageMin = ([DateTimeOffset]::UtcNow - $dto).TotalMinutes
+                } catch { }
+                if ($ageMin -lt $staleMinutes) { exit 0 }         # in flight -- don't stack
+                Stop-Process -Id $prevPid -Force -ErrorAction SilentlyContinue  # wedged -- reap
+            }
+        }
+    } catch { }
+
+    Write-Host "[$name] runtime $deployed -> $current; reconciling in background (log: $InstallDir\reconcile.log)..." -ForegroundColor DarkGray
+
+    # The background reconcile is HEADLESS: the installer must NEVER block on
+    # input. Three independent guards keep this hook non-blocking:
+    #   1. -NonInteractive switch (added to $targs above);
+    #   2. a name-derived <NAME>_NONINTERACTIVE env var the installer honors
+    #      (covers an init.ps1-style installer with no matching switch);
+    #   3. stdin redirected from an EMPTY file below, so any stray Read-Host sees
+    #      immediate EOF (returns, never blocks) AND [Console]::IsInputRedirected
+    #      reports true so the installer's own interactive-desktop gate skips.
+    # (1)+(2) are the deterministic path; (3) is the belt-and-suspenders that
+    # makes "no interactive prompt can wedge us" true regardless of the installer.
+    $niEnvVar = (($name -replace '[^A-Za-z0-9]+', '_').ToUpper()) + '_NONINTERACTIVE'
+    [Environment]::SetEnvironmentVariable($niEnvVar, '1', 'Process')
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($reconcileIn, '', $utf8NoBom)  # empty EOF stdin
+
     $proc = Start-Process -FilePath $exe -WindowStyle Hidden -PassThru `
+        -RedirectStandardInput $reconcileIn `
         -RedirectStandardOutput $reconcileLog -RedirectStandardError $reconcileErr `
         -ArgumentList $targs
     $now = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
@@ -72,7 +123,6 @@ try {
         log          = $reconcileLog
         err_log      = $reconcileErr
     } | ConvertTo-Json -Compress
-    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($statusFile, $status, $utf8NoBom)
 } catch { }
 exit 0
