@@ -1818,6 +1818,24 @@ function Sync-TerminalState {
 
     # --- state.json: generatedProfiles ---
     $statePath = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\state.json'
+
+    # Stale = OUR previous fragment GUIDs no longer emitted -> WT should forget
+    # them. Hoisted out of the state block so it is always defined (the
+    # Clean-TerminalSettingsJson call below references it even when state.json
+    # is absent).
+    $staleGuids = @($OldFragmentGuids | Where-Object { $_ -notin $NewFragmentGuids })
+
+    # GUIDs WT has actually materialized into settings.json right now. The
+    # convergent invariant (dotfiles#601): any CURRENT fragment GUID that WT has
+    # NOT materialized must be pruned from generatedProfiles so WT re-discovers
+    # it. This is idempotent -- it heals every run regardless of update history,
+    # unlike the retired "newly added since the previous fragment" delta, which
+    # only fired on a one-time transition and so left a profile hidden forever
+    # once that single cleanup was lost to the WT-running race warned about
+    # above ("every update makes the fragments worse").
+    $settingsGuids = Get-SettingsProfileGuids
+    $notMaterialized = @($NewFragmentGuids | Where-Object { $_ -notin $settingsGuids })
+
     if (Test-Path $statePath) {
         try {
             $state = Get-Content $statePath -Raw | ConvertFrom-Json
@@ -1825,12 +1843,11 @@ function Sync-TerminalState {
                 $genProfiles = @($state.generatedProfiles)
                 $before = $genProfiles.Count
 
-                # GUIDs to remove: stale (old but not new) + newly added (new but not old)
-                # + changed (same GUID, different content -- force rediscovery).
-                # Unchanged GUIDs (in both, same content) stay, preserving user customizations.
-                $staleGuids = @($OldFragmentGuids | Where-Object { $_ -notin $NewFragmentGuids })
-                $newlyAdded = @($NewFragmentGuids | Where-Object { $_ -notin $OldFragmentGuids })
-                $removeSet  = @(@($staleGuids) + @($newlyAdded) + @($ChangedGuids) | Sort-Object -Unique)
+                # Remove: stale (dropped from the fragment) + not-materialized
+                # (WT is hiding a live fragment profile) + changed (same GUID,
+                # new content -> force rediscovery). Unchanged, materialized
+                # GUIDs stay, preserving user customizations.
+                $removeSet  = @(@($staleGuids) + @($notMaterialized) + @($ChangedGuids) | Sort-Object -Unique)
 
                 if ($removeSet.Count -gt 0) {
                     $state.generatedProfiles = @($genProfiles | Where-Object {
@@ -1850,6 +1867,24 @@ function Sync-TerminalState {
 
     # --- settings.json: stale cached profiles ---
     Clean-TerminalSettingsJson -StaleGuids @(@($staleGuids) + @($ChangedGuids) | Sort-Object -Unique) -NewFragmentGuids $NewFragmentGuids
+}
+
+function Get-SettingsProfileGuids {
+    <# Lower-cased GUIDs WT currently has in settings.json profiles.list --
+       i.e. the profiles WT has actually materialized. Used by the convergent
+       generatedProfiles invariant in Sync-TerminalState. Returns @() when
+       settings.json is absent or unparseable. #>
+    $settingsPath = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json'
+    if (-not (Test-Path $settingsPath)) { return @() }
+    try {
+        $j = Get-Content $settingsPath -Raw | ConvertFrom-Json
+        if ($j.profiles -and $j.profiles.list) {
+            return @($j.profiles.list |
+                Where-Object { $_.PSObject.Properties['guid'] } |
+                ForEach-Object { $_.guid.ToLower() })
+        }
+    } catch { }
+    return @()
 }
 
 function Clean-TerminalSettingsJson {

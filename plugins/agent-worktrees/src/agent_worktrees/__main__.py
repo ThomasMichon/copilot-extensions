@@ -6895,6 +6895,110 @@ def _mirror_terminal_profiles() -> bool:
         return False
 
 
+def cmd_terminal_fragment(args: argparse.Namespace) -> int:
+    """Preview the Windows Terminal fragment this machine's config would emit.
+
+    Reads the same local sources the installer's ``Build-TerminalFragment``
+    consults (``repos.yaml`` / ``projects.yaml`` / per-project ``machines.yaml``
+    + ``config.yaml``) and prints the fragment **without deploying it**. Use it
+    to see why a project does or does not get a Terminal profile.
+
+    Output modes:
+      * default   -- the fragment JSON exactly as it would be written.
+      * --explain -- a per-project decision trace (managed/unmanaged, agent
+                     exposure, and each emitted profile name/target).
+    """
+    from . import terminal_fragment as tf
+
+    machine = getattr(args, "machine", None)
+    if not machine:
+        try:
+            machine = cfg.load_config().machine
+        except Exception:
+            machine = None
+    if not machine:
+        output.err(
+            "Could not resolve this machine's key. Run from a managed repo or "
+            "pass --machine <key>.")
+        return 1
+
+    try:
+        current = cfg.project_name()
+    except Exception:
+        current = None
+
+    if getattr(args, "doctor", False):
+        return _terminal_fragment_doctor(machine, current)
+
+    result = tf.preview_local(machine, current_project=current)
+
+    if getattr(args, "explain", False):
+        print(f"Terminal fragment preview for '{machine}' "
+              f"({len(result.profiles)} profile(s) across "
+              f"{len(result.plans)} project(s)):\n")
+        for plan in result.plans:
+            state = ("unmanaged -> default column" if plan.unmanaged_default
+                     else "managed selection")
+            agent = "agent-exposed" if plan.agent_exposed else "no-agent"
+            print(f"- {plan.display} [{plan.name}]  ({state}; {agent})")
+            if not plan.profiles:
+                print("    (no profiles emitted)")
+            for p in plan.profiles:
+                print(f"    - {p.name!r}  <{p.kind}>  {p.commandline}")
+            print()
+        return 0
+
+    print(json.dumps(result.fragment(), indent=2))
+    return 0
+
+
+def _terminal_fragment_doctor(machine: str, current: str | None) -> int:
+    """Read-only report of Windows Terminal state drift vs. the fragment.
+
+    Surfaces the two failure modes the delta-based ``Sync-TerminalState`` could
+    leave behind and never self-heal: fragment profiles WT is *hiding* (in the
+    fragment + ``generatedProfiles`` but missing from ``settings.json``), and
+    orphaned ``generatedProfiles`` cruft. Never mutates WT state -- the fix is
+    applied by the installer's convergent sync on the next ``update``.
+    """
+    from . import terminal_fragment as tf
+
+    diag = tf.diagnose_wt_state()
+    if diag is None:
+        output.warn("Windows Terminal state unavailable "
+                    "(non-Windows, or WT not installed).")
+        return 0
+
+    result = tf.preview_local(machine, current_project=current)
+    frag_names = {p.guid.lower(): p.name for p in result.profiles}
+
+    print(f"Windows Terminal state doctor for '{machine}':")
+    print(f"  fragment profiles : {diag.fragment_count}")
+    print(f"  settings profiles : {diag.settings_count}")
+    print(f"  generatedProfiles : {diag.generated_count}")
+
+    if diag.hidden:
+        print(f"\n  HIDDEN -- in fragment + generatedProfiles but not in "
+              f"settings.json ({len(diag.hidden)}):")
+        for g in diag.hidden:
+            print(f"    - {frag_names.get(g, g)}  {g}")
+        print("    -> the next 'update' will prune these from generatedProfiles "
+              "so WT re-discovers them.")
+    if diag.orphans:
+        print(f"\n  ORPHANS -- generatedProfiles entries in no fragment and not "
+              f"materialized ({len(diag.orphans)}): accumulated cruft.")
+    if diag.duplicate_names:
+        print("\n  DUPLICATE profile names in settings.json "
+              "(often a legacy stand-alone fragment colliding with the "
+              "generated one):")
+        for name, count in diag.duplicate_names:
+            print(f"    - {name!r} x{count}")
+
+    if diag.healthy:
+        print("\n  OK -- no hidden or duplicate profiles detected.")
+    return 0
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # picker -- persistent new-picker opt-in (machine-wide global config)
 # ═══════════════════════════════════════════════════════════════════════════
@@ -11140,6 +11244,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true",
                    help="Emit a JSON result object")
 
+    # terminal-fragment (preview the generated Windows Terminal fragment)
+    p = sub.add_parser(
+        "terminal-fragment",
+        help="Preview the Windows Terminal fragment this machine's config "
+             "would emit (no deploy)")
+    p.add_argument("--machine", default=None,
+                   help="Machine key to preview as (default: this machine "
+                        "from config)")
+    p.add_argument("--explain", action="store_true",
+                   help="Per-project decision trace instead of the raw "
+                        "fragment JSON")
+    p.add_argument("--doctor", action="store_true",
+                   help="Read-only report of live Windows Terminal state drift "
+                        "(hidden/orphaned/duplicate profiles); no mutation")
+
     # picker (Textual picker is default everywhere; disable = machine opt-out)
     p = sub.add_parser("picker",
                        help="Inspect / opt out of the Textual worktree picker "
@@ -12514,6 +12633,7 @@ COMMAND_MAP = {
     "restart": cmd_restart,
     "sync": cmd_sync,
     "profiles": cmd_profiles,
+    "terminal-fragment": cmd_terminal_fragment,
     "picker": cmd_picker,
     "validate": cmd_validate,
     "config-migrate": cmd_config_migrate,
