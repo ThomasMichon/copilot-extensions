@@ -177,7 +177,17 @@ def main(argv: list[str] | None = None) -> int:
         help="Take over the target if another SSH operation is already in "
              "progress against it: terminates the in-flight connection and "
              "reclaims the target (discards its in-progress work). Without "
-             "this, a busy target is rejected with an explanatory error.",
+             "this, a busy target is rejected with an explanatory error. This "
+             "is the SSH-lock takeover only; it does NOT evict another "
+             "worktree's exclusive claim (use --force-claim for that).",
+    )
+    ssh_parser.add_argument(
+        "--force-claim", dest="force_claim", action="store_true",
+        help="Evict another live worktree's EXCLUSIVE claim on this CodeSpace "
+             "(#897) and take it over. Distinct from --force (the SSH lock): a "
+             "bridge dispatch passes --force for the lock but NOT --force-claim, "
+             "so a genuine claim conflict bounces rather than silently stealing "
+             "another worktree's control.",
     )
 
     # --- list ---
@@ -393,6 +403,37 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("leases", help="Show active CodeSpace leases")
 
+    # --- claim / release-claim (#897: exclusive, worktree-keyed control) ------
+    # The process-to-process seam the agent-bridge daemon shells out to (it
+    # cannot import agent_codespaces; mirrors the acp-model-flags pattern) to
+    # enforce exclusive control of a CodeSpace on the Session-Host dispatch path.
+    claim_p = sub.add_parser(
+        "claim",
+        help="Acquire an EXCLUSIVE, worktree-keyed claim on a CodeSpace (#897)",
+    )
+    claim_p.add_argument("codespace", help="CodeSpace name to claim")
+    claim_p.add_argument(
+        "--owner", dest="owner", default=None,
+        help="Owning worktree (its worktree-dir). Defaults to the calling "
+             "worktree; a dispatched caller (e.g. the bridge daemon) passes the "
+             "original caller's worktree here.",
+    )
+    claim_p.add_argument(
+        "--force-claim", dest="force_claim", action="store_true",
+        help="Evict another live worktree's claim and take over.",
+    )
+
+    release_claim_p = sub.add_parser(
+        "release-claim",
+        help="Release this worktree's exclusive claim on a CodeSpace (#897)",
+    )
+    release_claim_p.add_argument("codespace", help="CodeSpace name")
+    release_claim_p.add_argument(
+        "--owner", dest="owner", default=None,
+        help="Owning worktree (defaults to the calling worktree). Only releases "
+             "if the claim is owned by this worktree.",
+    )
+
     # --- pool (finite, budget-bounded pool view: disposition + budget) ---
     pool_p = sub.add_parser(
         "pool",
@@ -498,6 +539,10 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_release(args)
         if args.command == "leases":
             return _cmd_leases()
+        if args.command == "claim":
+            return _cmd_claim(args)
+        if args.command == "release-claim":
+            return _cmd_release_claim(args)
         if args.command == "pool":
             return _cmd_pool(args)
         if args.command == "wait":
@@ -681,7 +726,7 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         try:
             claim(
                 args.name, claim_owner,
-                force=getattr(args, "force", False),
+                force=getattr(args, "force_claim", False),
                 active=active_worktree_ids(),
             )
         except ClaimConflict as exc:
@@ -691,8 +736,8 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
                 f"worktree cannot drive it concurrently. Options:\n"
                 f"       - let the owner finish, or dispatch to a different "
                 f"CodeSpace; or\n"
-                f"       - take over with --force (evicts the current owner's "
-                f"claim -- its in-flight work may be disrupted).",
+                f"       - take over with --force-claim (evicts the current "
+                f"owner's claim -- its in-flight work may be disrupted).",
                 file=sys.stderr,
             )
             return _BUSY_EXIT
@@ -2668,6 +2713,59 @@ def _cmd_leases() -> int:
             f"{lease.codespace:<40} {lease.effort:<24} "
             f"{lease.host:<16} {lease.pid}"
         )
+    return 0
+
+
+def _cmd_claim(args: argparse.Namespace) -> int:
+    """Acquire an exclusive worktree-keyed claim on a CodeSpace (#897).
+
+    The process-to-process seam the agent-bridge daemon shells out to (it cannot
+    import ``agent_codespaces``). Resolves the owner (``--owner`` else the calling
+    worktree), sweeps existing claims, and either acquires or **bounces** (exit
+    ``_BUSY_EXIT``) on a live different owner. Degrade-safe: an unresolvable owner
+    is a no-op success (there is nothing to key a claim on).
+    """
+    from .lease import (
+        ClaimConflict,
+        active_worktree_ids,
+        claim,
+        resolve_owner_worktree,
+    )
+
+    owner = resolve_owner_worktree(explicit=getattr(args, "owner", None))
+    if not owner:
+        print(
+            "[WARN] No owning worktree resolved (not in a worktree and no "
+            "--owner given); claim skipped.",
+            file=sys.stderr,
+        )
+        return 0
+    try:
+        lease = claim(
+            args.codespace, owner,
+            force=getattr(args, "force_claim", False),
+            active=active_worktree_ids(),
+        )
+    except ClaimConflict as exc:
+        print(f"[BUSY] {exc} Use --force-claim to take over.", file=sys.stderr)
+        return _BUSY_EXIT
+    print(f"[OK] Claimed {lease.codespace} for {owner}")
+    return 0
+
+
+def _cmd_release_claim(args: argparse.Namespace) -> int:
+    """Release this worktree's exclusive claim on a CodeSpace (#897)."""
+    from .lease import release_claim, resolve_owner_worktree
+
+    owner = resolve_owner_worktree(explicit=getattr(args, "owner", None))
+    if not owner:
+        print("[WARN] No owning worktree resolved; nothing to release.",
+              file=sys.stderr)
+        return 0
+    if release_claim(args.codespace, owner):
+        print(f"[OK] Released claim on {args.codespace} (owner {owner})")
+    else:
+        print(f"No claim on {args.codespace} owned by {owner}.")
     return 0
 
 
