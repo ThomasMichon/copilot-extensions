@@ -111,11 +111,46 @@ def serve(cfg: Config | None = None) -> None:
     from .runtime_version import write_running_version
 
     write_running_version()
+    fed_runner = _maybe_start_federation()
     try:
         uvicorn.Server(uvicorn.Config(build_app(cfg), log_level="info")).run(sockets=[sock])
     finally:
+        if fed_runner is not None:
+            fed_runner.stop()
         clear_endpoint(run_dir())
         sock.close()
+
+
+def _maybe_start_federation():
+    """Start the federation runner alongside the coordinator when a federation
+    role is configured (``AGENT_DISPATCH_FEDERATION_ROLE``); return it (so
+    :func:`serve` can stop it) or ``None``.
+
+    **Fail-soft:** a misconfiguration (role set but no Gateway / no resolvable
+    instance) logs a warning and leaves the coordinator serving *without*
+    federation -- federation is an overlay, never a reason to fail the queue. The
+    runner's own loop tolerates the coordinator not yet being bound on the first
+    tick (it retries), so starting it just before uvicorn is safe."""
+    from . import config as _cfg
+
+    if not _cfg.federation_enabled():
+        return None
+    try:
+        from .federation_runner import runner_from_config
+
+        runner = runner_from_config()
+        if runner is None:
+            return None
+        runner.start(interval=_cfg.federation_interval())
+        log.info(
+            "federation runner started: role=%s instance=%s",
+            _cfg.federation_role(),
+            _cfg.federation_instance(),
+        )
+        return runner
+    except Exception as exc:
+        log.warning("federation runner not started (serving without it): %s", exc)
+        return None
 
 
 def _server_bind_port() -> int:
