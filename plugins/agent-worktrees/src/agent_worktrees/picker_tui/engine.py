@@ -2090,9 +2090,9 @@ class PickerScreen(Widget):
             acts.append("Finalize")
         if any(r.get("mux_live") for r in chosen):
             acts.append("Stop")
-        if any(r.get("session_bare_orphan") for r in chosen):
-            # Bulk parity with the per-row menu: reap the bare (un-muxed) orphan
-            # Copilots across the selection -- the ones Stop cannot reach (#4058).
+        if any(PickerScreen._reclaimable(r) for r in chosen):
+            # Bulk parity with the per-row menu: reap the un-muxed bound Copilots
+            # across the selection -- the ones Stop cannot reach (#4058).
             acts.append("Reclaim")
         if not acts:
             self.debug = (f"no bulk action for {len(chosen)} "
@@ -3363,19 +3363,21 @@ class PickerScreen(Widget):
 
         Runs the same maintenance progress path as Stop, but drives the
         ``reclaim`` op (kill the exact Copilot process holding the session's
-        ``inuse.<pid>.lock``, **bare orphans only**) instead of a mux quit.
-        Offered -- and here filtered -- on ``session_bare_orphan``: a **bare**
-        Copilot with no mux session, which Stop cannot touch. Filtering on the
-        same predicate the executor acts on (bare-only) keeps the verb honest --
-        a healthy muxed session is left to Stop, and a bare orphan the cwd-keyed
-        lock-scan never registered (#662/#1416) still reaps. After it finishes
-        the touched machines reload, so the row re-renders without the stale
-        bound process -- ready for a fresh Open / Bare resume.
+        ``inuse.<pid>.lock``, **un-muxed bindings only**) instead of a mux quit.
+        Offered -- and here filtered -- on :meth:`_reclaimable`: a bound Copilot
+        with no mux for Stop to reach (a bare orphan, or a live lock whose homing
+        could not be classified ``bare``). Filtering on the same predicate the
+        executor acts on keeps the verb honest -- a positively muxed session is
+        left to Stop, a bare orphan the cwd-keyed lock-scan never registered
+        (#662/#1416) still reaps, and a bound-but-unclassifiable Copilot is no
+        longer stranded. After it finishes the touched machines reload, so the
+        row re-renders without the stale bound process -- ready for a fresh Open /
+        Bare resume.
         """
         recs = [recs] if isinstance(recs, dict) else list(recs)
-        live = [r for r in recs if r.get("session_bare_orphan")]
+        live = [r for r in recs if PickerScreen._reclaimable(r)]
         if not live:
-            self.debug = "no bare orphan process to reclaim"
+            self.debug = "no un-muxed bound process to reclaim"
             return
         self._run_op_progress("Reclaim", "reclaim", live, armed=True)
 
@@ -3601,6 +3603,36 @@ class PickerScreen(Widget):
             "clean", "unused", "conversation", "gone")
 
     @staticmethod
+    def _reclaimable(rec) -> bool:
+        """Whether a live bound Copilot that **Stop cannot reach** is present, so
+        the Reclaim verb applies. The load-bearing invariant: as long as a live
+        ``inuse.<pid>.lock`` binds a Copilot to this worktree, the Actions menu
+        must offer *some* lifecycle verb (Stop when muxed, else Reclaim) -- never
+        strand the row ACTIVE with no way to act on it.
+
+        True when either:
+
+        * ``session_bare_orphan`` -- the machine-wide bare-orphan scan flagged a
+          **bare** (un-muxed) bound Copilot, possibly one the cwd-keyed lock scan
+          never registered (#662/#1416). Kept even alongside a live mux, because
+          a worktree can host *both* a healthy muxed session (Stop) and a
+          separate bare orphan (Reclaim).
+        * a live bound lock with **no mux** for Stop to reach --
+          ``session_lock_live`` (the authoritative menu-open verdict) or
+          ``session_bound_live`` (the cached off-hot-path hint) AND not
+          ``mux_live``. This arm closes the strand where the bound Copilot's
+          homing cannot be positively classified ``bare`` (e.g. an un-walkable /
+          racing ancestry -> ``unknown``): the lock is present and there is no
+          mux, so Reclaim must still light up.
+        """
+        if rec.get("session_bare_orphan"):
+            return True
+        return bool(
+            (rec.get("session_lock_live") or rec.get("session_bound_live"))
+            and not rec.get("mux_live")
+        )
+
+    @staticmethod
     def _session_action_verbs(rec) -> list[str]:
         """The session-lifecycle verbs a worktree's Actions menu offers, from its
         (freshly menu-verified) liveness signals -- extracted as a pure,
@@ -3613,21 +3645,19 @@ class PickerScreen(Widget):
         conversation); a **sessionless** worktree -> "Open" (cold start --
         resuming nothing would silently blank-start, #1026).
 
-        Stop/Reclaim are deliberately disjoint against the operator's intent so
-        neither is a dead verb:
+        Stop/Reclaim together guarantee that a worktree holding a live bound lock
+        always exposes a lifecycle verb:
 
         * **Stop** -- only with a live mux to stop. Its executor gracefully quits
           the ``wt-<id>`` mux (double->triple Ctrl-C, Copilot's native clean
           exit) and hard-kills only as a fallback.
-        * **Reclaim** -- only when a **bare orphan** is bound
-          (``session_bare_orphan``): a Copilot launched *outside* the mux (e.g. a
-          Bridge-owned one, or a bare ``/resume``) that Stop cannot reach. The
-          executor reaps **bare** bindings only (``reclaim_one`` /
-          ``reclaim --bare-only``), leaving a healthy muxed session to Stop -- so
-          gating on the live-lock alone would both (a) offer a **no-op** Reclaim
-          on a healthy muxed worktree and (b) **miss** a bare orphan the
-          cwd-keyed lock-scan never registered (the #662/#1416 bare-session blind
-          spot). ``bare`` implies a live lock, so this is the precise predicate.
+        * **Reclaim** -- whenever a live bound Copilot that Stop cannot reach is
+          present (see :meth:`_reclaimable`): a **bare orphan**, OR a live lock
+          with no mux whose homing could not be classified ``bare``. Its executor
+          reaps every **un-muxed** binding (``reclaim_one`` /
+          ``reclaim --bare-only``), leaving a positively mux-homed session to
+          Stop. This closes the strand where a bound-but-unclassifiable Copilot
+          (lock present, no mux) previously offered neither verb.
         """
         if rec.get("sessionless") or rec.get("mux_live"):
             acts = ["Open"]
@@ -3656,7 +3686,7 @@ class PickerScreen(Widget):
             acts.append("Finalize")
         if rec.get("mux_live"):
             acts.append("Stop")
-        if rec.get("session_bare_orphan"):
+        if PickerScreen._reclaimable(rec):
             acts.append("Reclaim")
         return acts
 
@@ -4686,6 +4716,8 @@ class SubMenuScreen(ModalScreen[tuple]):
         if sid:
             if rec.get("session_bare_orphan"):
                 lock = " · bound (⚠ bare orphan — Reclaim frees it)"
+            elif rec.get("session_lock_live") and not rec.get("mux_live"):
+                lock = " · bound (lock live — Reclaim frees it)"
             elif rec.get("session_lock_live"):
                 lock = " · bound (lock live)"
             else:

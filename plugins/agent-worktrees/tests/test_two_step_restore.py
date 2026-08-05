@@ -99,12 +99,16 @@ class TestBareResumePlan:
 
 # ── reclaim_one executor ───────────────────────────────────────────────────
 class TestReclaimOne:
-    def test_bare_only_and_self_guard(self, monkeypatch):
+    def test_unmuxed_only_and_self_guard(self, monkeypatch):
         me = os.getpid()
         rows = [
             {"session_id": "s1", "pid": 111, "worktree_id": "wtX", "homing": "bare"},
             {"session_id": "s2", "pid": 222, "worktree_id": "wtX", "homing": "mux"},
             {"session_id": "s3", "pid": me, "worktree_id": "wtX", "homing": "bare"},
+            # A live bound Copilot whose homing could not be classified (pid
+            # missing from a racing process-table snapshot): un-muxed, so it must
+            # be reaped too -- the strand this fix closes.
+            {"session_id": "s4", "pid": 444, "worktree_id": "wtX", "homing": "unknown"},
         ]
         monkeypatch.setattr(m.reclaim, "build_process_table", lambda: {})
         monkeypatch.setattr(m.reclaim, "resolve_bound_copilots",
@@ -117,10 +121,11 @@ class TestReclaimOne:
             or [{"pid": t["pid"], "killed": True, "children_killed": 0}
                 for t in targets])
         out = m.reclaim_one("wtX")
-        # mux (222) filtered by bare_only; self (me) guarded; only 111 reaped
-        assert captured["t"] == [111]
+        # mux (222) filtered as positively muxed; self (me) guarded; bare (111)
+        # and unknown (444) both reaped as un-muxed.
+        assert captured["t"] == [111, 444]
         assert out["ok"] is True
-        assert out["targets"] == 1
+        assert out["targets"] == 2
 
     def test_nothing_bound_is_ok(self, monkeypatch):
         monkeypatch.setattr(m.reclaim, "build_process_table", lambda: {})
@@ -194,10 +199,10 @@ class TestMaintenanceReclaimOp:
 #    they apply (#4058 Slice 4) ──────────────────────────────────────────────
 class TestSessionActionVerbs:
     """``PickerScreen._session_action_verbs`` -- the pure, record-driven gate
-    for the per-row Actions menu. Reclaim is gated on ``session_bare_orphan``
-    (the bare-only executor's exact predicate), NOT the live-lock, so it never
-    (a) no-ops on a healthy muxed session or (b) misses a bare orphan the
-    cwd-keyed lock-scan never registered."""
+    for the per-row Actions menu. The invariant: a worktree holding a live bound
+    lock always exposes a lifecycle verb -- Stop when muxed, else Reclaim (see
+    ``_reclaimable``), so a bound-but-unclassifiable Copilot is never stranded
+    ACTIVE with no verb."""
 
     from agent_worktrees.picker_tui.engine import PickerScreen as _PS
 
@@ -206,7 +211,7 @@ class TestSessionActionVerbs:
 
     def test_healthy_muxed_offers_stop_not_reclaim(self):
         # A live mux + live lock, no bare orphan -> Stop (graceful) is the verb;
-        # Reclaim (bare-only) would no-op, so it must NOT appear.
+        # Reclaim would no-op on the muxed session, so it must NOT appear.
         verbs = self._verbs(mux_live=True, session_lock_live=True,
                             session_bare_orphan=False, last_session_id="s1")
         assert "Stop" in verbs
@@ -229,6 +234,23 @@ class TestSessionActionVerbs:
                             session_bare_orphan=True, last_session_id="s1")
         assert "Reclaim" in verbs
 
+    def test_unmuxed_live_lock_offers_reclaim_even_without_bare_flag(self):
+        # The strand this fix closes: a live inuse lock binds a Copilot, there is
+        # NO mux for Stop, and the bare scan did not flag it (homing could not be
+        # classified "bare" -> "unknown"). Reclaim MUST still light up so the row
+        # is never ACTIVE-with-no-verb.
+        verbs = self._verbs(mux_live=False, session_lock_live=True,
+                            session_bare_orphan=False, last_session_id="s1")
+        assert "Reclaim" in verbs
+        assert "Stop" not in verbs
+
+    def test_unmuxed_cached_bound_live_offers_reclaim(self):
+        # Even from the cached off-hot-path hint alone (session_bound_live, no
+        # fresh lock verdict yet), an un-muxed bound worktree offers Reclaim.
+        verbs = self._verbs(mux_live=False, session_bound_live=True,
+                            session_bare_orphan=False, last_session_id="s1")
+        assert "Reclaim" in verbs
+
     def test_muxed_plus_bare_offers_both(self):
         verbs = self._verbs(mux_live=True, session_lock_live=True,
                             session_bare_orphan=True, last_session_id="s1")
@@ -241,8 +263,8 @@ class TestSessionActionVerbs:
 
 
 class TestStartReclaimFilter:
-    """``_start_reclaim`` filters targets on ``session_bare_orphan`` -- the same
-    predicate the bare-only executor acts on -- so it never dispatches a no-op
+    """``_start_reclaim`` filters targets on :meth:`_reclaimable` -- the same
+    predicate the un-muxed executor acts on -- so it never dispatches a no-op
     reclaim (and the debug line is honest when nothing qualifies)."""
 
     from agent_worktrees.picker_tui.engine import PickerScreen as _PS
@@ -264,12 +286,21 @@ class TestStartReclaimFilter:
         assert len(calls) == 1
         assert calls[0][0][:3] == ("Reclaim", "reclaim", [rec])
 
-    def test_muxed_only_lock_is_no_op(self):
-        # Live lock but no bare orphan (a healthy muxed session) -> filtered out,
-        # nothing dispatched, honest debug line.
+    def test_unmuxed_live_lock_dispatches(self):
+        # Live lock, no mux, not flagged bare -> the stranded case now dispatches.
         stub, calls = self._stub()
         rec = {"id4": "wtX", "session_bare_orphan": False,
-               "session_lock_live": True}
+               "session_lock_live": True, "mux_live": False}
+        type(self)._PS._start_reclaim(stub, rec)
+        assert len(calls) == 1
+        assert calls[0][0][:3] == ("Reclaim", "reclaim", [rec])
+
+    def test_healthy_muxed_is_no_op(self):
+        # A genuine healthy muxed session (mux_live True) -> filtered out,
+        # nothing dispatched, honest debug line (Stop is the verb, not Reclaim).
+        stub, calls = self._stub()
+        rec = {"id4": "wtX", "session_bare_orphan": False,
+               "session_lock_live": True, "mux_live": True}
         type(self)._PS._start_reclaim(stub, rec)
         assert calls == []
-        assert "no bare orphan" in stub.debug
+        assert "no un-muxed bound" in stub.debug
