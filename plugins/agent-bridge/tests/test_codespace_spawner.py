@@ -410,3 +410,86 @@ def test_endpoint_roundtrip_rebuilds_forward():
     assert fwd.local_port == 49555
     assert fwd._remote_port == 51000
     assert fwd._reverse_forwards == []
+
+
+def _probe_cfg() -> SSHConfig:
+    return SSHConfig(
+        host_alias="cs.box", user="vscode", port=22,
+        identity_file="id_ed25519", config_file="/tmp/cs.config",
+        extra_options={"ControlMaster": "auto", "StrictHostKeyChecking": "no"},
+    )
+
+
+def test_build_remote_exec_args_shape():
+    from ssh_manager import build_remote_exec_args
+
+    cfg = _probe_cfg()
+    argv = build_remote_exec_args(cfg, "bash -lc 'echo hi'")
+    assert argv[0] == "ssh"
+    assert "-F" in argv and "-i" in argv
+    assert "-T" in argv
+    assert "-N" not in argv  # an exec, not a forward
+    assert "ControlMaster" not in " ".join(argv)  # a probe never multiplexes
+    assert argv[-1] == "bash -lc 'echo hi'"  # remote command is the last arg
+    assert argv[-2] == cfg.ssh_target
+
+
+class _FakeProbeProc:
+    def __init__(self, returncode: int, stdout: bytes = b"") -> None:
+        self.returncode = returncode
+        self._stdout = stdout
+
+    async def communicate(self):
+        return (self._stdout, b"")
+
+
+def _relay_endpoint() -> dict:
+    return endpoint_from_ssh_config(
+        _probe_cfg(), 51000, 61000, kind="codespace",
+        reverse_forwards=["50629:127.0.0.1:50629"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_endpoint_serving_probe_serves(monkeypatch):
+    seen = {}
+
+    async def fake_exec(*argv, **_kw):
+        seen["argv"] = argv
+        return _FakeProbeProc(0, b"OK\n")
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.endpoints.asyncio.create_subprocess_exec",
+        fake_exec,
+    )
+    probe = endpoints_mod.endpoint_serving_probe_factory(_relay_endpoint())(50629)
+    assert await probe() is True
+    # the probe execs a /dev/tcp accept check against the CS-side listen port
+    assert any("/dev/tcp/127.0.0.1/50629" in str(a) for a in seen["argv"])
+
+
+@pytest.mark.asyncio
+async def test_endpoint_serving_probe_false_on_unserved_port(monkeypatch):
+    async def fake_exec(*_argv, **_kw):
+        return _FakeProbeProc(124, b"")  # timeout/refused -> no OK
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.endpoints.asyncio.create_subprocess_exec",
+        fake_exec,
+    )
+    probe = endpoints_mod.endpoint_serving_probe_factory(_relay_endpoint())(50629)
+    assert await probe() is False
+
+
+@pytest.mark.asyncio
+async def test_endpoint_serving_probe_transport_error_is_healthy(monkeypatch):
+    async def fake_exec(*_argv, **_kw):
+        raise RuntimeError("ssh spawn failed")
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.endpoints.asyncio.create_subprocess_exec",
+        fake_exec,
+    )
+    probe = endpoints_mod.endpoint_serving_probe_factory(_relay_endpoint())(50629)
+    # a transport failure is a health hint, never a reason to churn the relay
+    assert await probe() is True

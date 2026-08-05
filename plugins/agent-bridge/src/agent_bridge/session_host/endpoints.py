@@ -14,10 +14,17 @@ remote/local ports and a ``kind`` tag.
 
 from __future__ import annotations
 
+import asyncio
+import shlex
 from collections.abc import Awaitable, Callable, Iterable
 from typing import Any
 
-from ssh_manager import LocalForward, SSHConfig, SupervisedRelayForward
+from ssh_manager import (
+    LocalForward,
+    SSHConfig,
+    SupervisedRelayForward,
+    build_remote_exec_args,
+)
 
 
 def endpoint_from_ssh_config(
@@ -143,3 +150,46 @@ def relay_forwards_from_endpoint(
         serving_probe_for_port=serving_probe_for_port,
         host_port_resolver=host_port_resolver,
     )
+
+
+def endpoint_serving_probe_factory(
+    endpoint: dict[str, Any],
+) -> Callable[[int], Callable[[], Awaitable[bool]]]:
+    """Build a ``serving_probe_for_port`` factory for a persisted endpoint.
+
+    Each probe execs a one-shot far-side TCP-accept check on the CodeSpace-side
+    relay listen port over a **fresh** SSH connection (no live transport is
+    available on the daemon-restart reconstruction path). A ``False`` result
+    means the ``-R`` process is alive but the far side is not accepting -- e.g.
+    a remote bind that **silently failed** because a stale listener from the
+    pre-restart ``-R`` had not been released yet -- so the relay supervisor
+    re-establishes until the rebind takes (dotfiles #855). Transport failures
+    return ``True`` (a health hint, never a reason to churn a possibly-fine
+    relay on a transient SSH failure). Mirrors
+    ``spawner._serving_probe_for_port`` for the restart path.
+    """
+    config = ssh_config_from_endpoint(endpoint)
+
+    def _for_port(relay_port: int) -> Callable[[], Awaitable[bool]]:
+        probe = (
+            f'timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/{relay_port}" '
+            "&& echo OK"
+        )
+        argv = build_remote_exec_args(config, f"bash -lc {shlex.quote(probe)}")
+
+        async def _probe() -> bool:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    *argv,
+                    stdin=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                out, _ = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+            except Exception:
+                return True
+            return proc.returncode == 0 and b"OK" in (out or b"")
+
+        return _probe
+
+    return _for_port
