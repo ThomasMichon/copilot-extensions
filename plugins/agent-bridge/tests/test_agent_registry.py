@@ -933,6 +933,9 @@ class TestAdminResolver:
         # Windows path: admin: routes through the elevated sub-daemon relay.
         monkeypatch.setattr(elevated, "relay_applicable", lambda req: True)
         monkeypatch.setattr(elevated, "ensure_running", lambda: "subtok")
+        # Pin the dynamically-discovered sub-daemon port (post-#694 it is an
+        # OS-assigned ephemeral port; asserting a fixed 9281 was stale, #839).
+        monkeypatch.setattr(elevated, "discovered_port", lambda *a, **k: 59051)
 
         resolver = self._make_resolver_with_agents()
         admin = AdminResolver(resolver)
@@ -940,7 +943,7 @@ class TestAdminResolver:
         assert target.type == "command"
         assert target.project == "my-project"
         assert target.spawn_command[-4:] == [
-            "ws://127.0.0.1:9281/acp/local-agent",
+            "ws://127.0.0.1:59051/acp/local-agent",
             "--token", "subtok", "--stdio",
         ]
 
@@ -1044,6 +1047,8 @@ class TestAdminResolver:
 
         monkeypatch.setattr(elevated, "relay_applicable", lambda req: True)
         monkeypatch.setattr(elevated, "ensure_running", lambda: "subtok")
+        # Pin the dynamically-discovered sub-daemon port (#839).
+        monkeypatch.setattr(elevated, "discovered_port", lambda *a, **k: 59051)
 
         resolver = self._make_resolver_with_agents()
         admin = AdminResolver(resolver)
@@ -1052,7 +1057,7 @@ class TestAdminResolver:
         target = await resolver.resolve_async("admin:local-agent")
         assert target.type == "command"
         assert target.spawn_command[-4:] == [
-            "ws://127.0.0.1:9281/acp/local-agent",
+            "ws://127.0.0.1:59051/acp/local-agent",
             "--token", "subtok", "--stdio",
         ]
 
@@ -1079,6 +1084,8 @@ class TestElevatedRelayRouting:
 
         monkeypatch.setattr(elevated, "relay_applicable", lambda req: bool(req))
         monkeypatch.setattr(elevated, "ensure_running", lambda: "subtok")
+        # Pin the dynamically-discovered sub-daemon port (#839).
+        monkeypatch.setattr(elevated, "discovered_port", lambda *a, **k: 59051)
 
         target = await self._resolver().resolve_async("SPO.Core")
 
@@ -1086,7 +1093,7 @@ class TestElevatedRelayRouting:
         assert target.project == "SPO.Core"
         assert target.spawn_command[1:] == [
             "-m", "agent_bridge", "acp-connect",
-            "ws://127.0.0.1:9281/acp/SPO.Core", "--token", "subtok", "--stdio",
+            "ws://127.0.0.1:59051/acp/SPO.Core", "--token", "subtok", "--stdio",
         ]
 
     @pytest.mark.asyncio
@@ -1154,6 +1161,8 @@ class TestElevatedRelayRouting:
 
         monkeypatch.setattr(elevated, "relay_applicable", lambda req: bool(req))
         monkeypatch.setattr(elevated, "ensure_running", lambda: "subtok")
+        # Pin the dynamically-discovered sub-daemon port (#839).
+        monkeypatch.setattr(elevated, "discovered_port", lambda *a, **k: 59051)
 
         target = await self._venue_resolver().resolve_async("SPO.Core@dev6")
 
@@ -1161,7 +1170,7 @@ class TestElevatedRelayRouting:
         assert target.project == "SPO.Core"
         assert target.spawn_command[1:] == [
             "-m", "agent_bridge", "acp-connect",
-            "ws://127.0.0.1:9281/acp/SPO.Core@dev6", "--token", "subtok",
+            "ws://127.0.0.1:59051/acp/SPO.Core@dev6", "--token", "subtok",
             "--stdio",
         ]
 
