@@ -4266,6 +4266,86 @@ def test_native_list_sticky_header(monkeypatch):
     asyncio.run(run())
 
 
+def test_native_list_sticky_no_reflow_flicker(monkeypatch):
+    """#169: once the native list is scrolled, the sticky section-header region
+    stays present at a CONSTANT height across section boundaries -- it must not
+    collapse (display False) when a section header reaches the top and re-appear
+    a row later, because that 1-row toggle reflowed the OptionList and read as a
+    flicker. It is hidden only at the very top (unscrolled), so grid parity is
+    unchanged."""
+    import datetime
+    import types
+
+    from agent_worktrees.picker_tui import derive
+    from agent_worktrees.picker_tui.engine import _PickerStickyHeader
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "1")
+
+    def _multi_section_src():
+        # Mixed statuses / ages so bucket() yields several sections (Active /
+        # Recent / Completed), i.e. multiple header rows to scroll past.
+        derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+        local = ("lambda-core", "Win")
+        raws = []
+        for i in range(30):
+            if i % 3 == 0:
+                started, status = "2026-06-27T17:00:00", "active"
+            elif i % 3 == 1:
+                started, status = "2026-06-20T17:00:00", "idle"
+            else:
+                started, status = "2026-05-01T17:00:00", "done"
+            raws.append({"id": f"lambda-core-win-2026062{i % 9}-r{i:02d}",
+                         "title": f"Row {i}", "status": status,
+                         "started_at": started, "turn_count": i,
+                         "state": "active" if i % 2 else "wip"})
+        s = types.SimpleNamespace()
+        s.LOCAL = local
+        s.LOCAL_LABEL = "lc"
+        s.machines = lambda: [("lambda-core Win", "lambda-core", "Win", True)]
+        s.bucket = derive.bucket
+        s.for_machine = derive.for_machine
+        s.load = lambda: [derive.norm(w, *local) for w in raws]
+        return s
+
+    async def run():
+        app = PickerApp(_multi_section_src(), live=False)
+        async with app.run_test(size=(118, 16)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            scr.sel = ("L", 0)
+            scr.refresh()
+            await pilot.pause()
+            st = scr.query_one("#nf-body-sticky", _PickerStickyHeader)
+            nl = scr.query_one("#nf-body-data")
+            assert st.display is False   # unscrolled: hidden, no extra row
+            nl.focus()
+            await pilot.pause()
+
+            # Drive the cursor all the way down one row at a time; record the
+            # sticky's presence at every offset once we are scrolled.
+            saw_section_at_top = False
+            displays_while_scrolled = []
+            for _ in range(29):
+                await pilot.press("down")
+                await pilot.pause()
+                y = int(getattr(nl.scroll_offset, "y", 0) or 0)
+                if y > 0:
+                    displays_while_scrolled.append(st.display)
+                    if y < len(nl._kinds) and nl._kinds[y] == "section":
+                        saw_section_at_top = True
+
+            # The whole point of the repro: we actually scrolled past a section
+            # header sitting at the top of the viewport...
+            assert saw_section_at_top
+            # ...and yet the sticky region never collapsed mid-scroll -- its
+            # height is stable, so no row-reflow flicker.
+            assert displays_while_scrolled
+            assert all(displays_while_scrolled)
+
+    asyncio.run(run())
+
+
 def test_native_list_checkbox_click_toggles(monkeypatch):
     """NF5-5 (#88): clicking the checkbox gutter (first cells) of a native-list
     row toggles its multi-select *without* activating it; clicking the row body

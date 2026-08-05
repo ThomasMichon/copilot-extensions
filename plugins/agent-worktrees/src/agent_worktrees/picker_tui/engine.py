@@ -634,13 +634,21 @@ class _PickerStickyHeader(Widget):
         self._line = None
         self.display = False
 
-    def set_line(self, line) -> None:
+    def set_line(self, line, keep_space: bool = False) -> None:
+        # ``keep_space`` decouples *what to show* from *does the row exist*: while
+        # the list is scrolled we keep this 1-row region present with a blank
+        # line (rather than collapsing it to height 0) so a section boundary
+        # never reflows the OptionList by a row. That reflow -- the pin toggling
+        # ``display`` on/off as headers passed the top -- was the visible flicker
+        # (#169). Only the unscrolled top fully hides it, preserving the at-rest
+        # grid parity the feature was built to keep.
         cur = self._line.plain if self._line is not None else None
         new = line.plain if line is not None else None
-        if cur == new:
+        want_display = bool(line is not None or keep_space)
+        if cur == new and self.display == want_display:
             return
         self._line = line
-        self.display = line is not None
+        self.display = want_display
         self.refresh()
 
     def render(self):
@@ -650,9 +658,9 @@ class _PickerStickyHeader(Widget):
 class _PickerNativeData(OptionList):
     """NF5-5 (#88): swappable *native* data body -- the pivot's data rows as real
     ``OptionList`` options (native focus, cursor, up/down, click, scroll, a11y)
-    instead of painted text lines driven by the manual ``sel`` cursor. Opt-in via
-    ``AGENT_WORKTREES_PICKER_NATIVE_LIST`` (default OFF) so it can be soaked before
-    it becomes the default -- the same swap-behind-a-toggle playbook NF1-NF5 used.
+    instead of painted text lines driven by the manual ``sel`` cursor. This is
+    the **default** body since dev351; set ``AGENT_WORKTREES_PICKER_NATIVE_LIST``
+    to a falsey value to fall back to the legacy text-line body.
 
     Bridged to the engine ``sel`` model both ways so the rest of the picker
     (chrome, activation, tests) is unchanged: native cursor moves mirror into
@@ -769,15 +777,24 @@ class _PickerNativeData(OptionList):
         except Exception:
             return
         y = int(getattr(self.scroll_offset, "y", 0) or 0)
-        if y <= 0 or y >= len(self._sections):
+        if y <= 0:
+            # Unscrolled: fully hide the pin so the at-rest layout / grid parity
+            # is unchanged (#88 NF5-5).
             sticky.set_line(None)
             return
-        # If the top visible option is itself a section header, no pin needed.
-        if y < len(self._kinds) and self._kinds[y] == "section":
-            sticky.set_line(None)
+        # Scrolled: keep the 1-row region present for EVERY offset (``keep_space``)
+        # so its presence never toggles the body's height mid-scroll -- blank it
+        # when there is nothing to pin (the top visible row is itself a section
+        # header, or out of range) instead of collapsing it, which used to jump
+        # the list by a row at each section boundary (the flicker, #169).
+        if y >= len(self._sections) or (
+            y < len(self._kinds) and self._kinds[y] == "section"
+        ):
+            sticky.set_line(None, keep_space=True)
             return
         label = self._sections[y] if y < len(self._sections) else None
-        sticky.set_line(self._section_texts.get(label) if label else None)
+        line = self._section_texts.get(label) if label else None
+        sticky.set_line(line, keep_space=True)
 
     def refresh_data(self):
         """Called by the screen on a state change (in place of a plain
@@ -913,6 +930,18 @@ class PickerScreen(Widget):
         # data-relative (indexes the scrolling data rows only, since the M/BTN
         # chrome is fixed above it), distinct from the monolith's ``top``.
         self._data_top = 0
+        # Per-refresh render caches (#169): in the NF compose tree every segment
+        # widget (title / pivots / chrome / machine / buttons / footer) renders
+        # from this one screen's derived frame in the SAME paint pass. Without a
+        # cache each independently rebuilds the whole body, so build_body /
+        # build_data run ~10x per keystroke -- a ~100ms/key stall that reads as a
+        # hang under key-repeat. These memoize the derived frame / split keyed by
+        # ``_render_sig`` (a fingerprint of every input), so the sibling widgets
+        # in one pass share a single build while any state change rebuilds once;
+        # ``refresh()`` also busts them as a belt-and-suspenders for the
+        # interactive path.
+        self._frame_cache = None   # (render_sig, segments-dict)
+        self._split_cache = None   # ((render_sig, use_sel), (chrome, data))
         # NF3 focus bridge (#88): guards the on_focus <-> sel mirror so focusing
         # a region widget to match ``sel`` doesn't recurse back into a sel write.
         self._nf_syncing = False
@@ -2261,6 +2290,31 @@ class PickerScreen(Widget):
             "registered": self.tasks_view,
         }.get(self._kind(), self.profiles_view)
 
+    def _render_sig(self, W, H):
+        """A cheap fingerprint of everything the derived frame / split depend on
+        (#169). Two sibling segment widgets rendering in one paint pass share the
+        same signature, so the memoized frame is built once and reused; any state
+        change (a nav, a scroll, a reload, a machine/pivot switch, a direct
+        attribute set from the capture seam) shifts the signature and forces a
+        single rebuild. Mirrors the native list's own data signature, widened
+        with the focus-cursor state (``sel`` / ``btn_idx`` / ``pcol``) and scroll
+        offsets the chrome + body window also key on."""
+        try:
+            kind = self._kind()
+            if kind == "registered":
+                nrows = len(self._task_rows())
+            elif kind == "maintenance":
+                nrows = len(self.maint_records())
+            else:
+                nrows = len(self.list_records())
+        except Exception:
+            kind, nrows = None, -1
+        wt = tuple(sorted(self.wt_sel.ids)) if hasattr(self, "wt_sel") else ()
+        return (W, H, self.sel, self.top, self._data_top, kind, self.htab,
+                self.machine_idx, self.btn_idx, getattr(self, "pcol", 0),
+                nrows, wt, getattr(self, "pulse", 0),
+                getattr(self, "update_state", None), getattr(self, "debug", None))
+
     def _build_body_split(self, width, sel=None):
         """Return ``(chrome_vrows, data_vrows)`` for the current pivot -- the
         fixed machine-scope + button chrome vs the scrolling data -- by driving
@@ -2272,6 +2326,11 @@ class PickerScreen(Widget):
         sentinel sel so no focus-cursor highlight is baked into the row text (the
         native widget owns the cursor)."""
         use_sel = self.sel if sel is None else sel
+        H = self.size.height or 30
+        key = (self._render_sig(width, H), use_sel)
+        cache = self._split_cache
+        if cache is not None and cache[0] == key:
+            return cache[1]
 
         def make_sink():
             vrows = []
@@ -2291,6 +2350,7 @@ class PickerScreen(Widget):
         view.build_chrome(add_c, width, use_sel)
         data, add_d = make_sink()
         view.build_data(add_d, width, use_sel)
+        self._split_cache = (key, (chrome, data))
         return chrome, data
 
     def _build_data_vrows(self, width, sel=None):
@@ -2604,6 +2664,10 @@ class PickerScreen(Widget):
         """
         W = self.size.width or 100
         H = self.size.height or 30
+        key = self._render_sig(W, H)
+        cache = self._frame_cache
+        if cache is not None and cache[0] == key:
+            return cache[1]
         top = self.topbar(W)              # [title, htabs]  (2 rows)
         foot = self.footer(W)
         # chrome rows: title, htabs, header-border, stats, bottom-border, footer
@@ -2625,13 +2689,15 @@ class PickerScreen(Widget):
         header_border = self._border_row(W, "▲", more_above)
         bottom_border = self._border_row(W, "▼", below > 0)
         stats = self._stats_row(W)
-        return {
+        seg = {
             "W": W,
             "header": list(top),
             "chrome": [header_border, stats],
             "body": body_lines,
             "footer": [bottom_border, foot],
         }
+        self._frame_cache = (key, seg)
+        return seg
 
     @staticmethod
     def _join_lines(lines, W):
@@ -2690,6 +2756,11 @@ class PickerScreen(Widget):
         # Keep the NF2 segment widgets in step with the screen: any state change
         # that refreshes the screen must re-render the child segments too (they
         # read off this screen). A no-op when the skeleton is disabled.
+        # Bust the per-refresh render caches (#169) first: a refresh means the
+        # screen state may have changed, so the memoized frame/split must be
+        # recomputed once and then shared by every segment widget in this pass.
+        self._frame_cache = None
+        self._split_cache = None
         result = super().refresh(*args, **kwargs)
         self._refresh_nf_segments()
         return result
