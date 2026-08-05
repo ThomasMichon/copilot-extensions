@@ -17,6 +17,7 @@ leaves the launch to proceed and surface its own error, no worse than today.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 
@@ -39,6 +40,18 @@ REPAIR_COMMAND = (
     "--registry=https://registry.npmjs.org 2>&1'"
 )
 
+# The marker is usually a NOT-READY / timing state, not a permanently-broken
+# install: a CodeSpace's copilot ultimately always finishes installing, so a
+# "no platform package found" seen at ACP-launch time is most often post-create
+# provisioning that hasn't converged yet (or a wrong cwd/user/auth issue that a
+# global reinstall would NOT fix and could mask). So we WAIT-and-retry first and
+# only fall back to the public-npm reinstall as a genuine last resort -- the
+# reinstall exists for the real #111 case (the platform optional-dep was never
+# fetched at image build because the CodeSpace's private-feed npm default 401'd
+# it), which waiting alone never heals.
+_VERIFY_RETRIES = 3
+_VERIFY_RETRY_DELAY_S = 8.0
+
 # ``run_remote(cmd)`` runs a shell command on the CodeSpace, returning
 # ``(exit_code, combined_output)``.
 RunRemote = Callable[[str], Awaitable[tuple[int, str]]]
@@ -49,29 +62,56 @@ def needs_platform_repair(version_output: str) -> bool:
     return PLATFORM_MISSING_MARKER in (version_output or "").lower()
 
 
-async def ensure_copilot_platform(run_remote: RunRemote) -> tuple[bool, str]:
-    """Verify ``copilot`` can load its platform package; repair once if not (#111).
+async def ensure_copilot_platform(
+    run_remote: RunRemote,
+    *,
+    retries: int = _VERIFY_RETRIES,
+    retry_delay: float = _VERIFY_RETRY_DELAY_S,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+) -> tuple[bool, str]:
+    """Ensure ``copilot`` can load its platform package before an ACP launch (#111).
+
+    Polls ``copilot --version`` up to ``retries`` times (waiting ``retry_delay``
+    seconds between attempts) because the platform binary "ultimately always
+    gets installed" -- a transient ``no platform package found`` during
+    post-create convergence heals on its own, so waiting is preferred over a
+    drastic global reinstall. Only if the marker persists after the wait do we
+    fall back to reinstalling ``@github/copilot`` from public npm (the genuine
+    private-feed-401 case that waiting cannot heal).
 
     Returns ``(ok, detail)`` where ``ok`` is whether copilot is (now)
-    launchable and ``detail`` is a short status tag for logging/UX. Never
-    raises: a probe that cannot run returns ``(True, ...)`` so the preflight
-    never blocks a launch it could not diagnose.
+    launchable and ``detail`` is a short status tag. Never raises: a probe that
+    cannot run returns ``(True, ...)`` so the preflight never blocks a launch it
+    could not diagnose.
     """
-    try:
-        rc, out = await run_remote(VERIFY_COMMAND)
-    except Exception as exc:  # pragma: no cover - defensive
-        log.debug("copilot platform verify probe failed to run: %s", exc)
-        return True, "verify-skipped"
+    attempts = max(1, retries)
+    last_out = ""
+    for attempt in range(attempts):
+        try:
+            rc, out = await run_remote(VERIFY_COMMAND)
+        except Exception as exc:  # pragma: no cover - defensive
+            log.debug("copilot platform verify probe failed to run: %s", exc)
+            return True, "verify-skipped"
+        last_out = out
+        if not needs_platform_repair(out):
+            # Either healthy (rc==0) or a non-zero for some *other* reason
+            # (copilot absent entirely, wrong cwd/user, etc.) -- in the latter
+            # case the npm repair wouldn't help, so let the launch surface the
+            # real error rather than masking it.
+            return True, ("already-present" if rc == 0 else "no-repair-signal")
+        if attempt < attempts - 1:
+            log.info(
+                "copilot platform package not ready on attempt %d/%d "
+                "(post-create may still be converging); waiting %.0fs",
+                attempt + 1, attempts, retry_delay,
+            )
+            await sleep(retry_delay)
 
-    if not needs_platform_repair(out):
-        # Either healthy (rc==0) or a non-zero for some *other* reason (copilot
-        # absent entirely, etc.) -- in the latter case the npm repair wouldn't
-        # help, so let the launch surface the real error rather than masking it.
-        return True, ("already-present" if rc == 0 else "no-repair-signal")
-
+    # Marker persisted through the wait -> treat as the genuine #111 case.
     log.warning(
-        "CodeSpace copilot is missing its platform package (#111); "
-        "reinstalling @github/copilot from public npm before ACP launch"
+        "CodeSpace copilot still missing its platform package after %d checks "
+        "(#111); reinstalling @github/copilot from public npm before ACP launch",
+        attempts,
     )
     try:
         r_rc, r_out = await run_remote(REPAIR_COMMAND)
