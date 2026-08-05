@@ -162,6 +162,52 @@ class TestCreateCodespace:
         assert info.account == ""
         bind.assert_not_called()
 
+    @patch("agent_codespaces.lifecycle.resolve_devcontainer_path", return_value=None)
+    @patch("agent_codespaces.lifecycle.subprocess.run")
+    def test_rest_fallback_on_no_terminal_prompt(self, mock_run, _mock_dc):
+        # First call: gh codespace create aborts on the headless billing prompt.
+        # Second call: the REST-API fallback succeeds and returns the name.
+        mock_run.side_effect = [
+            MagicMock(
+                returncode=1, stdout="",
+                stderr="failed to prompt: no terminal",
+            ),
+            MagicMock(returncode=0, stdout="rest-created-cs\n", stderr=""),
+        ]
+        info = create_codespace(
+            "org/repo",
+            CodespacesConfig(default_machine_type="m", default_location="EastUs"),
+            display_name="my-cs",
+        )
+        assert info.name == "rest-created-cs"
+        assert mock_run.call_count == 2
+        rest_args = mock_run.call_args_list[1][0][0]
+        assert rest_args[:4] == ["gh", "api", "--method", "POST"]
+        assert "repos/org/repo/codespaces" in rest_args
+        assert "multi_repo_permissions_opt_out=true" in rest_args
+        assert "display_name=my-cs" in rest_args
+
+    @patch("agent_codespaces.lifecycle.resolve_devcontainer_path", return_value=None)
+    @patch("agent_codespaces.lifecycle.subprocess.run")
+    def test_no_rest_fallback_on_other_failure(self, mock_run, _mock_dc):
+        # A non-prompt failure must still hard-fail (no REST retry).
+        mock_run.return_value = MagicMock(
+            returncode=1, stdout="", stderr="HTTP 404: repo not found",
+        )
+        with pytest.raises(RuntimeError, match="gh codespace create failed"):
+            create_codespace("org/repo", CodespacesConfig())
+        assert mock_run.call_count == 1
+
+    @patch("agent_codespaces.lifecycle.resolve_devcontainer_path", return_value=None)
+    @patch("agent_codespaces.lifecycle.subprocess.run")
+    def test_rest_fallback_failure_raises(self, mock_run, _mock_dc):
+        mock_run.side_effect = [
+            MagicMock(returncode=1, stdout="", stderr="failed to prompt"),
+            MagicMock(returncode=1, stdout="", stderr="HTTP 403: forbidden"),
+        ]
+        with pytest.raises(RuntimeError, match="REST API fallback also failed"):
+            create_codespace("org/repo", CodespacesConfig())
+
     @patch("agent_codespaces.lifecycle.subprocess.run")
     def test_delete_success(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0)
