@@ -12,7 +12,8 @@ param(
     [string]$Tunnel,
     [string]$User,
     [switch]$NoStart,
-    [switch]$SkipLogin
+    [switch]$SkipLogin,
+    [string]$DtsshVersion
 )
 
 $ErrorActionPreference = 'Stop'
@@ -34,12 +35,49 @@ function Add-UserPath([string]$PathToAdd) {
 }
 
 function Install-Dtssh {
-    if (-not (Test-Path $DtsshExe)) {
+    <#
+      Install dtssh, or -- on -Force (the `update` action) -- REPLACE an
+      already-installed binary. Guarding the install on `-not Test-Path` alone
+      made `update` a silent no-op that kept the old binary (dotfiles#850).
+
+      The running host locks dtssh.exe, but Windows permits *renaming* a running
+      image, so rename the current binary aside, let install-release.ps1 drop a
+      fresh one, then clean up (or restore it on failure so the host is never
+      bricked). The self-healing launcher relaunches the host child on the new
+      binary after Start-HostLauncher. $DtsshVersion (script param) pins the
+      release via install-release.ps1's $env:VERSION; unset = latest.
+    #>
+    param([switch]$Force)
+    if (-not $Force -and (Test-Path $DtsshExe)) { Add-UserPath $DtsshDir; return }
+
+    $asideName = $null
+    if (Test-Path $DtsshExe) {
+        Write-Host "Updating dtssh binary$(if ($DtsshVersion) { " to $DtsshVersion" })..."
+        $asideName = "$DtsshExe.old-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+        try { Rename-Item $DtsshExe $asideName -ErrorAction Stop } catch { $asideName = $null }
+    } else {
         Write-Host "Installing dtssh..."
-        $ProgressPreference = 'SilentlyContinue'
-        Invoke-RestMethod $InstallRelease | Invoke-Expression | Out-Null
     }
-    if (-not (Test-Path $DtsshExe)) { throw "dtssh install did not produce $DtsshExe" }
+
+    $ProgressPreference = 'SilentlyContinue'
+    $hadVersion = Test-Path Env:\VERSION
+    $prevVersion = if ($hadVersion) { $env:VERSION } else { $null }
+    if ($DtsshVersion) { $env:VERSION = $DtsshVersion }
+    try {
+        Invoke-RestMethod $InstallRelease | Invoke-Expression | Out-Null
+    } finally {
+        if ($DtsshVersion) {
+            if ($hadVersion) { $env:VERSION = $prevVersion } else { Remove-Item Env:\VERSION -ErrorAction SilentlyContinue }
+        }
+    }
+
+    if (-not (Test-Path $DtsshExe)) {
+        if ($asideName -and (Test-Path $asideName)) { Rename-Item $asideName $DtsshExe }
+        throw "dtssh install did not produce $DtsshExe"
+    }
+    # New binary confirmed; drop the aside copy (best-effort -- may still be locked
+    # by a host left running under -NoStart; a later update sweeps stale *.old-*).
+    if ($asideName -and (Test-Path $asideName)) { Remove-Item $asideName -Force -ErrorAction SilentlyContinue }
     Add-UserPath $DtsshDir
 }
 
@@ -186,18 +224,21 @@ function Stop-Launcher {
 
 switch ($Action) {
     { $_ -in @('install', 'update') } {
-        Install-Dtssh
+        # Retire any legacy/own watchdog + host child FIRST: this frees the locked
+        # dtssh.exe so `update` can replace the binary, prevents double-hosting on a
+        # migration off the legacy dotfiles host (dotfiles#401), and makes `update`
+        # reload new launcher code. No-op on a clean first install. Skipped under
+        # -NoStart, where Install-Dtssh's rename-aside still lets the binary be
+        # swapped under a still-running host.
+        if (-not $NoStart) {
+            Stop-Launcher
+            Stop-HostLauncher
+        }
+        Install-Dtssh -Force:($Action -eq 'update')
         Install-OpenSSHBinaries
         Assert-Login
         Install-Shortcut
-        if (-not $NoStart) {
-            # Retire any legacy/own watchdog first so update reloads new code and a
-            # migration off the legacy dotfiles host can't double-host (dotfiles#401),
-            # then free the child + dedicated sshd, then start the fresh watchdog.
-            Stop-Launcher
-            Stop-HostLauncher
-            Start-HostLauncher
-        }
+        if (-not $NoStart) { Start-HostLauncher }
         Write-Host "Done. On clients: dtssh discover; ssh $Alias"
     }
     'uninstall' {
