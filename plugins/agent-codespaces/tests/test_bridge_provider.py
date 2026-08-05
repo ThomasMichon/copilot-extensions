@@ -65,7 +65,16 @@ class TestBuildAgentConfigs:
         assert "main" in first["description"]
 
     def test_spawn_command_structure(self):
-        agents = build_agent_configs(SAMPLE_CODESPACES)
+        from agent_codespaces.config import CodespacesConfig
+
+        # Hermetic (#73): force the no-config default (no workspace_folder)
+        # instead of reading the machine's real codespaces.yaml, so the built
+        # command deterministically uses the env-var workspace expression.
+        with patch(
+            "agent_codespaces.config.load_merged_config",
+            return_value=CodespacesConfig(),
+        ):
+            agents = build_agent_configs(SAMPLE_CODESPACES)
         cmd = agents[0]["spawn_command"]
         # Should contain ssh --stdio and --remote-cmd with acp_command
         assert "--stdio" in cmd
