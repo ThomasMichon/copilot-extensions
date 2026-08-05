@@ -7245,6 +7245,54 @@ def _deploy_worktree_conduct(proj_dir: Path) -> None:
         output.changed(f"worktree-conduct.instructions.md -> {path}")
 
 
+# account-conduct: static multi-account gh hygiene guidance, deployed as a
+# managed custom-instruction (a sibling of worktree-conduct) so ad-hoc `gh`
+# ops in any launched session use the account that can access the target repo.
+# Generic (not machine-specific); the account catalog itself is resolved at
+# runtime via `agent-worktrees repos account-for` / `accounts`.
+_ACCOUNT_CONDUCT = """# GitHub account conduct (multi-account gh)
+
+Multiple `gh` accounts may be logged in on this machine -- e.g. an
+enterprise-managed (EMU) account and a personal account that own different
+GitHub orgs/repos. Ad-hoc `gh` calls (`gh issue`, `gh label`, `gh api`,
+GraphQL) use whichever account is **active** in the keyring; if the active
+account can't access the target repo the call fails with a confusing
+`GraphQL: Could not resolve to a Repository` -- while `gh pr` REST ops often
+still work, so the symptom misleads.
+
+`agent-worktrees` commands (`create-pr`, `pr-merge`, ...) already resolve
+repo->account and inject the right token automatically. **Ad-hoc `gh` in
+skills does not** -- so before running one against a repo:
+
+- Resolve the owning account: `agent-worktrees repos account-for <owner/repo>`.
+- If it isn't the active account, switch: `gh auth switch --user <login>`
+  (and switch back afterward if you had switched away for another repo).
+- `agent-worktrees accounts list` shows the catalog of logged-in accounts.
+
+Match the account to the repo's owner *before* the `gh` call, not after it
+fails.
+"""
+
+
+def _deploy_account_conduct(proj_dir: Path) -> None:
+    """Deploy the static multi-account gh conduct instruction (idempotent).
+
+    Mirrors :func:`_deploy_worktree_conduct`: writes a marked
+    ``account-conduct.instructions.md`` into the project's custom-instructions
+    dir so the CLI loads it into every agent-worktrees-launched session. Never
+    touches unmarked user files.
+    """
+    content = f"{_INSTRUCTION_MARKER}\n{_ACCOUNT_CONDUCT}"
+    instr_dir = proj_dir / ".github" / "instructions"
+    instr_dir.mkdir(parents=True, exist_ok=True)
+    path = instr_dir / "account-conduct.instructions.md"
+    if path.exists() and path.read_text() == content:
+        output.skipped("account-conduct.instructions.md already in sync")
+    else:
+        path.write_text(content)
+        output.changed(f"account-conduct.instructions.md -> {path}")
+
+
 # ── Temporary: extension-reload "Loading…/Resuming…" hang warning ──────────
 # A per-project custom-instruction warning about the CAR extension-reload
 # generation-race hang (github/copilot-agent-runtime#13492; fix: #13494).
@@ -7356,6 +7404,9 @@ def _deploy_copilot_instructions(
     # not machine-specific) rides the same managed deploy.
     _deploy_worktree_conduct(proj_dir)
 
+    # account-conduct: multi-account gh hygiene for ad-hoc gh ops (generic).
+    _deploy_account_conduct(proj_dir)
+
     # Temporary: the ext-reload hang warning rides the same managed deploy.
     _deploy_ext_reload_warning(proj_dir)
 
@@ -7388,6 +7439,7 @@ def _cleanup_stale_instructions(proj_dir: Path) -> None:
         proj_dir / ".github" / "instructions" / "machine.instructions.md",
         proj_dir / ".github" / "instructions" / "ssh.instructions.md",
         proj_dir / ".github" / "instructions" / "worktree-conduct.instructions.md",
+        proj_dir / ".github" / "instructions" / "account-conduct.instructions.md",
         proj_dir / ".github" / "instructions" / "ext-reload-hang.instructions.md",
         proj_dir / "AGENTS.md",
     ]
