@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from . import config as _config
 from .client import DispatchClient, DispatchError
 from .config import Config, client_token, client_url, shared_token, shared_url
 
@@ -29,6 +30,59 @@ def _emit(value: Any) -> int:
     json.dump(value, sys.stdout, indent=2, sort_keys=True)
     sys.stdout.write("\n")
     return 0
+
+
+def _federation_rendezvous(args: argparse.Namespace):
+    """Resolve the rendezvous a federation command targets: an explicit ``--url``,
+    else the Gateway (shared) coordinator. Errors loudly when neither exists."""
+    from .federation_runner import build_rendezvous, gateway_rendezvous
+
+    url = getattr(args, "url", None)
+    if url:
+        return build_rendezvous(url, token=getattr(args, "token", None) or client_token())
+    rv = gateway_rendezvous()
+    if rv is None:
+        print(
+            "no Gateway configured -- set AGENT_DISPATCH_SHARED_URL (facility: the "
+            "gateway endpoint) or pass --url",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    return rv
+
+
+def _cmd_federation_run(args: argparse.Namespace) -> int:
+    from .federation_runner import FederationRunner
+
+    role = args.role or _config.federation_role() or "peer"
+    instance = args.instance or _config.federation_instance()
+    if not instance:
+        print(
+            "no instance id -- pass --instance or set AGENT_DISPATCH_FEDERATION_INSTANCE",
+            file=sys.stderr,
+        )
+        return 2
+    rv = _federation_rendezvous(args)
+    runner = FederationRunner(
+        rv, instance, role=role, machine=instance, lease_ttl=args.lease_ttl
+    )
+    if args.once:
+        return _emit(runner.tick())
+    interval = args.interval if args.interval is not None else _config.federation_interval()
+    try:
+        runner.run(interval=interval)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        runner.resign()
+    return 0
+
+
+def _cmd_federation_status(args: argparse.Namespace) -> int:
+    rv = _federation_rendezvous(args)
+    return _emit(
+        {"coordinator": rv.discover_coordinator(), "peers": rv.discover_peers()}
+    )
 
 
 def _resolve_client_target(args: argparse.Namespace) -> tuple[str, str | None]:
@@ -2044,6 +2098,50 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("key")
     rp.add_argument("--detail")
     rp.set_defaults(func=_cmd_reservations)
+
+    p = sub.add_parser(
+        "federation",
+        help="federation runtime: register presence + drive the fenced-epoch "
+             "coordinator lease over the rendezvous directory (Gateway backend)",
+    )
+    fed_sub = p.add_subparsers(dest="federation_command", required=True)
+    sp = fed_sub.add_parser(
+        "run",
+        help="run the federation loop (presence + lease) until stopped",
+    )
+    sp.add_argument(
+        "--role", choices=sorted(_config.FEDERATION_ROLES),
+        help="this node's role (default: AGENT_DISPATCH_FEDERATION_ROLE or peer)",
+    )
+    sp.add_argument(
+        "--instance",
+        help="stable directory id (default: AGENT_DISPATCH_FEDERATION_INSTANCE or "
+             "the machine id)",
+    )
+    sp.add_argument(
+        "--url", help="rendezvous coordinator URL (default: the Gateway / "
+                      "AGENT_DISPATCH_SHARED_URL)",
+    )
+    sp.add_argument("--token", help="bearer token for --url")
+    sp.add_argument(
+        "--interval", type=float,
+        help="seconds between ticks (default: AGENT_DISPATCH_FEDERATION_INTERVAL)",
+    )
+    sp.add_argument(
+        "--lease-ttl", type=float, dest="lease_ttl",
+        help="staleness threshold before a standby fails over (lease-eligible roles)",
+    )
+    sp.add_argument(
+        "--once", action="store_true",
+        help="run a single tick and exit (print the resulting state)",
+    )
+    sp.set_defaults(func=_cmd_federation_run)
+    sp = fed_sub.add_parser(
+        "status", help="print the discovered coordinator + live peers"
+    )
+    sp.add_argument("--url", help="rendezvous coordinator URL (default: the Gateway)")
+    sp.add_argument("--token", help="bearer token for --url")
+    sp.set_defaults(func=_cmd_federation_status)
 
     p = sub.add_parser("health", help="check coordinator health")
     p.set_defaults(func=lambda args: _emit(_client(args, ensure=False).health()))

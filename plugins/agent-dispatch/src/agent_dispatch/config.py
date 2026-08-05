@@ -235,3 +235,75 @@ def shared_token() -> str | None:
     through the gateway/secured mesh atop its own per-client bearer.
     """
     return os.environ.get("AGENT_DISPATCH_SHARED_TOKEN") or None
+
+
+# -- federation (relay-rendezvous directory + fenced-epoch lease) -------------
+#
+# Federation lets the operator's coordinators federate across machines over a
+# rendezvous directory (the fleet directory served by the shared/Gateway
+# coordinator). A node opts in by declaring a *role*; the runtime
+# (:class:`~agent_dispatch.federation_runner.FederationRunner`) then keeps it
+# present in the directory and -- for a lease-eligible role -- drives the
+# fenced-epoch coordinator lease. See the ``agent-dispatch-federation`` effort.
+
+#: The federation roles a node may declare. ``coordinator``/``standby`` are
+#: **lease-eligible** (they run the fenced lease; which one is *active* is decided
+#: by the lease, not this hint); ``peer``/``satellite`` are presence-only.
+FEDERATION_ROLES = frozenset({"peer", "coordinator", "standby", "satellite"})
+
+#: Roles that participate in the fenced-epoch coordinator lease.
+FEDERATION_LEASE_ROLES = frozenset({"coordinator", "standby"})
+
+DEFAULT_FEDERATION_INTERVAL = 15.0
+
+
+def federation_role() -> str | None:
+    """This node's declared federation role (``AGENT_DISPATCH_FEDERATION_ROLE``),
+    or ``None`` when federation is not enabled. An unrecognized value is treated
+    as unset so a typo fails closed rather than silently mis-registering."""
+    role = (os.environ.get("AGENT_DISPATCH_FEDERATION_ROLE") or "").strip().lower()
+    return role if role in FEDERATION_ROLES else None
+
+
+def federation_enabled() -> bool:
+    """Whether this node participates in federation (a valid role is declared)."""
+    return federation_role() is not None
+
+
+def federation_instance() -> str | None:
+    """The stable directory id this node registers under.
+
+    ``AGENT_DISPATCH_FEDERATION_INSTANCE`` when set; otherwise the machine id
+    resolved from context (``identity.resolve_identity``), falling back to the
+    hostname. ``None`` only when nothing can be resolved (the caller must then
+    supply one explicitly)."""
+    explicit = (os.environ.get("AGENT_DISPATCH_FEDERATION_INSTANCE") or "").strip()
+    if explicit:
+        return explicit
+    try:
+        from .identity import resolve_identity
+
+        machine, _worktree = resolve_identity()
+        if machine:
+            return machine
+    except Exception:
+        pass
+    import socket
+
+    return socket.gethostname() or None
+
+
+def federation_interval() -> float:
+    """Seconds between federation ticks (``AGENT_DISPATCH_FEDERATION_INTERVAL``).
+
+    A tick must fire comfortably inside both the lease staleness threshold and the
+    directory presence TTL; the default is well under both."""
+    raw = os.environ.get("AGENT_DISPATCH_FEDERATION_INTERVAL")
+    if raw:
+        try:
+            val = float(raw)
+            if val > 0:
+                return val
+        except ValueError:
+            pass
+    return DEFAULT_FEDERATION_INTERVAL
