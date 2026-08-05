@@ -565,3 +565,65 @@ def test_satellite_deregister(api):
 def test_satellite_deregister_absent(api):
     r = api.delete("/satellites/never")
     assert r.json() == {"deregistered": False}
+
+
+# -- fleet directory endpoints -----------------------------------------------
+
+
+def test_directory_register_and_list(api):
+    r = api.post(
+        "/directory/register",
+        json={"instance": "wheatley", "role": "coordinator", "epoch": 3},
+    )
+    assert r.status_code == 200
+    entry = r.json()
+    assert entry["instance"] == "wheatley"
+    assert entry["role"] == "coordinator"
+    assert entry["epoch"] == 3
+
+    listing = api.get("/directory").json()
+    assert [e["instance"] for e in listing] == ["wheatley"]
+
+
+def test_directory_list_filters_by_role(api):
+    api.post("/directory/register", json={"instance": "peer-1", "role": "peer"})
+    api.post("/directory/register", json={"instance": "sat-1", "role": "satellite"})
+    sats = api.get("/directory", params={"role": "satellite"}).json()
+    assert [e["instance"] for e in sats] == ["sat-1"]
+
+
+def test_directory_coordinator_endpoint(api):
+    assert api.get("/directory/coordinator").json() is None
+    api.post(
+        "/directory/register",
+        json={"instance": "c-old", "role": "coordinator", "epoch": 1},
+    )
+    api.post(
+        "/directory/register",
+        json={"instance": "c-new", "role": "coordinator", "epoch": 9},
+    )
+    coord = api.get("/directory/coordinator").json()
+    assert coord["instance"] == "c-new"
+    assert coord["epoch"] == 9
+
+
+def test_directory_heartbeat_unknown_is_404(api):
+    r = api.post("/directory/ghost/heartbeat", json={})
+    assert r.status_code == 404
+
+
+def test_directory_deregister(api):
+    api.post("/directory/register", json={"instance": "peer-1"})
+    assert api.delete("/directory/peer-1").json() == {"deregistered": True}
+    assert api.get("/directory").json() == []
+
+
+def test_satellite_facade_tags_role_and_shows_in_directory(api):
+    # A satellite registered via the /satellites facade appears in the unified
+    # directory with role=satellite.
+    api.post("/satellites/register", json={"machine": "book2"})
+    sats = api.get("/satellites").json()
+    assert [e["instance"] for e in sats] == ["book2"]
+    assert sats[0]["role"] == "satellite"
+    directory = api.get("/directory", params={"role": "satellite"}).json()
+    assert [e["instance"] for e in directory] == ["book2"]
