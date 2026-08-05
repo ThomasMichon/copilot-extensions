@@ -2732,6 +2732,14 @@ def _cmd_claim(args: argparse.Namespace) -> int:
         resolve_owner_worktree,
     )
 
+    # Escape hatch parity with the ``ssh`` direct path: an operator (or a unit
+    # test) can disable exclusive-control enforcement entirely. Honored here too
+    # so the daemon's shelled ``claim`` is a no-op success when the daemon runs
+    # with claiming disabled.
+    if os.environ.get("AGENT_CODESPACES_DISABLE_CLAIM"):
+        print("[OK] Claim disabled (AGENT_CODESPACES_DISABLE_CLAIM); skipped.")
+        return 0
+
     owner = resolve_owner_worktree(explicit=getattr(args, "owner", None))
     if not owner:
         print(
@@ -2757,6 +2765,9 @@ def _cmd_release_claim(args: argparse.Namespace) -> int:
     """Release this worktree's exclusive claim on a CodeSpace (#897)."""
     from .lease import release_claim, resolve_owner_worktree
 
+    if os.environ.get("AGENT_CODESPACES_DISABLE_CLAIM"):
+        print("[OK] Claim disabled (AGENT_CODESPACES_DISABLE_CLAIM); skipped.")
+        return 0
     owner = resolve_owner_worktree(explicit=getattr(args, "owner", None))
     if not owner:
         print("[WARN] No owning worktree resolved; nothing to release.",

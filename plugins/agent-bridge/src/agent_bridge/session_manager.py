@@ -69,6 +69,131 @@ def _resolve_acp_model_flags() -> str:
     return result.stdout.strip()
 
 
+# ``agent-codespaces claim`` exits with this code on a live claim conflict
+# (a different, still-alive worktree already controls the CodeSpace). Kept in
+# sync with ``agent_codespaces.__main__._BUSY_EXIT``.
+_CODESPACE_BUSY_EXIT = 75
+
+
+class CodespaceClaimConflictError(Exception):
+    """Raised when a CodeSpace is exclusively claimed by another worktree.
+
+    A CodeSpace is fronted by exactly one agent-bridge Session Host (#897), so a
+    second worktree dispatching to an already-claimed CodeSpace is bounced here
+    rather than clobbering the incumbent's control. Carries the CLI's actionable
+    guidance (let the owner finish, dispatch elsewhere, or take over with
+    ``--force-claim``).
+    """
+
+    def __init__(self, codespace: str, owner: str, detail: str) -> None:
+        self.codespace = codespace
+        self.owner = owner
+        self.detail = detail
+        super().__init__(
+            detail
+            or (
+                f"CodeSpace '{codespace}' is exclusively claimed by another "
+                f"worktree; refusing to dispatch '{owner}' over it."
+            )
+        )
+
+
+def _codespace_claim_key(target: "SpawnTarget") -> tuple[str, str] | None:
+    """Resolve ``(codespace_name, owner_worktree)`` for a CodeSpace target.
+
+    The owner is the *caller's* worktree (the dispatcher), carried on
+    ``target.caller_worktree`` -- the same key agent-codespaces uses. Returns
+    ``None`` when the target is not a resolvable CodeSpace or has no owner to key
+    a claim on (degrade-safe: no owner -> no claim). Deterministic from the
+    persisted target, so it survives a daemon restart (unlike a per-session
+    in-memory attribute).
+    """
+    name: str | None = None
+    cs = getattr(target, "codespace", None)
+    if isinstance(cs, dict) and cs.get("name"):
+        name = cs["name"]
+    elif getattr(target, "spawn_command", None):
+        from .session_host.codespace_transport import parse_codespace_target
+
+        parsed = parse_codespace_target(target.spawn_command)
+        if parsed:
+            name = parsed.get("name")
+    if not name:
+        return None
+    owner = getattr(target, "caller_worktree", None)
+    if not owner:
+        return None
+    return name, owner
+
+
+def _claim_codespace(codespace_name: str, owner: str) -> tuple[bool, str]:
+    """Acquire the exclusive, worktree-keyed CodeSpace claim before the
+    Session-Host transport is established (#897 Increment B step 2).
+
+    Session-Host dispatch never runs ``agent-codespaces ssh``, so the
+    direct-path claim enforcement is bypassed for a bridge dispatch -- this is
+    where the daemon closes that gap. Shells the ``agent-codespaces claim`` seam
+    rather than importing ``agent_codespaces`` in the bridge venv (#796), so the
+    two separately-versioned plugin venvs stay decoupled; mirrors
+    ``_resolve_acp_model_flags``'s shell-out-to-a-sibling-binstub pattern.
+
+    Returns ``(True, "")`` on success or a degrade-safe skip (claim disabled,
+    no owner, binstub absent, or an unexpected error -- claim bookkeeping must
+    never block a dispatch) and ``(False, <detail>)`` on a live claim conflict
+    (the CLI exits ``_CODESPACE_BUSY_EXIT``), which the caller turns into a
+    bounce.
+    """
+    if os.environ.get("AGENT_CODESPACES_DISABLE_CLAIM"):
+        return True, ""
+    if not owner or not codespace_name:
+        return True, ""
+    binstub = shutil.which("agent-codespaces")
+    if not binstub:
+        return True, ""
+    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    try:
+        result = subprocess.run(
+            [binstub, "claim", codespace_name, "--owner", owner],
+            capture_output=True, text=True, timeout=30,
+            creationflags=creationflags,
+        )
+    except Exception as exc:
+        log.info("CodeSpace claim skipped for %s: %s", codespace_name, exc)
+        return True, ""
+    if result.returncode == _CODESPACE_BUSY_EXIT:
+        return False, (result.stderr or result.stdout or "").strip()
+    if result.returncode != 0:
+        # Any other non-zero is a bookkeeping error, not a conflict -- never
+        # block the dispatch on it (degrade-safe, mirroring the direct path).
+        log.info(
+            "CodeSpace claim for %s exited %s: %s",
+            codespace_name, result.returncode, (result.stderr or "").strip(),
+        )
+    return True, ""
+
+
+def _release_codespace_claim(codespace_name: str, owner: str) -> None:
+    """Release a Session-Host CodeSpace claim on session end (#897). Best-effort.
+
+    Symmetric with :func:`_claim_codespace`; a failure is swallowed because the
+    worktree-liveness sweep (and finalize-release) is the durable backstop.
+    """
+    if os.environ.get("AGENT_CODESPACES_DISABLE_CLAIM"):
+        return
+    if not owner or not codespace_name:
+        return
+    binstub = shutil.which("agent-codespaces")
+    if not binstub:
+        return
+    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    with contextlib.suppress(Exception):
+        subprocess.run(
+            [binstub, "release-claim", codespace_name, "--owner", owner],
+            capture_output=True, text=True, timeout=30,
+            creationflags=creationflags,
+        )
+
+
 # Session states that "occupy" a workspace -- a workspace with a session
 # in any of these states cannot accept a second concurrent session.
 # STOPPED is included because it is resumable (the ACP session persists),
@@ -2074,7 +2199,24 @@ class SessionManager:
                 # ADO/git during a build.
                 from .session_host.codespace_transport import build_codespace_spawner
 
-                # Reproduce the relay env prelude the ``agent-codespaces ssh``
+                # #897 Increment B step 2: acquire the exclusive, worktree-keyed
+                # claim BEFORE establishing the Session-Host transport. A
+                # CodeSpace is fronted by exactly one bridge, and Session-Host
+                # dispatch never runs ``agent-codespaces ssh`` (the direct-path
+                # enforcement point), so this is where a second worktree
+                # dispatching to an already-claimed CodeSpace is bounced instead
+                # of clobbering the incumbent. Degrade-safe: no owner / disabled
+                # / binstub absent -> proceed unclaimed, today's behavior.
+                claim_owner = getattr(target, "caller_worktree", None) or caller_id
+                _claimed, _conflict = _claim_codespace(
+                    cs_target["name"], claim_owner or ""
+                )
+                if not _claimed:
+                    raise CodespaceClaimConflictError(
+                        cs_target["name"], claim_owner or "", _conflict
+                    )
+
+
                 # path injects, so a detached copilot on the CS has working
                 # ADO/git auth over the credential relay (the daemon owns the
                 # relay; the per-codespace token is minted by agent-codespaces).
@@ -2247,6 +2389,29 @@ class SessionManager:
                 "Session %s failed at stage %d/%s: %s",
                 session_id, int(exc.stage), exc.stage.name, exc.detail,
                 exc_info=True,
+            )
+        except CodespaceClaimConflictError as exc:
+            # #897: the CodeSpace is exclusively held by another live worktree.
+            # This is a deliberate BOUNCE, not a transport failure -- mark the
+            # session FAILED with an actionable, distinguishable event so a
+            # caller (or the Picker) can tell "someone else owns this box" apart
+            # from an infra failure, and re-dispatch elsewhere or take over with
+            # --force-claim. No claim was acquired, so there is nothing to
+            # release here.
+            session.status = SessionStatus.FAILED
+            self._db.update_session_status(
+                session_id, SessionStatus.FAILED.value, time.time()
+            )
+            session.event_log.append("codespace_claim_conflict", {
+                "codespace": exc.codespace,
+                "owner": exc.owner,
+                "message": exc.detail or str(exc),
+            })
+            session.event_log.append("error", {"message": str(exc)})
+            log.warning(
+                "Session %s bounced: CodeSpace '%s' is claimed by another "
+                "worktree (dispatcher '%s')",
+                session_id, exc.codespace, exc.owner,
             )
         except Exception as exc:
             session.status = SessionStatus.FAILED
@@ -3198,6 +3363,15 @@ class SessionManager:
         session.status = SessionStatus.ENDED
         with contextlib.suppress(Exception):
             self._clear_pending_queue(session, reason="ended")
+        # #897: release the exclusive CodeSpace claim this session held, so the
+        # box is immediately re-dispatchable by another worktree instead of
+        # waiting for the liveness/TTL sweep. Best-effort and idempotent (the
+        # CLI only releases a claim this owner actually holds). Keyed off the
+        # persisted target, so it is correct even after a daemon restart.
+        with contextlib.suppress(Exception):
+            claim_key = _codespace_claim_key(session.target)
+            if claim_key is not None:
+                _release_codespace_claim(*claim_key)
         with contextlib.suppress(Exception):
             self._db.update_session_status(
                 session_id, SessionStatus.ENDED.value, time.time()
