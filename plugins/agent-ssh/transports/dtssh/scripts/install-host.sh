@@ -22,8 +22,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 ensure_dtssh() {
-  if ! command -v dtssh >/dev/null 2>&1; then
-    curl -fsSL https://raw.githubusercontent.com/bmiddha/devtunnel-ssh/main/scripts/install-release.sh | sh
+  # $1=1 forces a (re)install even when dtssh is already present, so `update`
+  # actually refreshes the binary instead of no-op'ing. DTSSH_VERSION pins the
+  # release via install-release.sh's VERSION env var; unset = latest.
+  local force="${1:-0}"
+  if [[ "$force" == "1" ]] || ! command -v dtssh >/dev/null 2>&1; then
+    if [[ -n "${DTSSH_VERSION:-}" ]]; then
+      curl -fsSL https://raw.githubusercontent.com/bmiddha/devtunnel-ssh/main/scripts/install-release.sh | VERSION="$DTSSH_VERSION" sh
+    else
+      curl -fsSL https://raw.githubusercontent.com/bmiddha/devtunnel-ssh/main/scripts/install-release.sh | sh
+    fi
     export PATH="$HOME/.local/bin:$HOME/.dtssh/bin:$PATH"
   fi
 }
@@ -48,10 +56,16 @@ host_args=(--alias "$alias_name" --port "$port")
 [[ -n "$user_name" ]] && host_args+=(--user "$user_name")
 
 case "$action" in
-  install|update)
+  install)
     ensure_dtssh
     ensure_login
     dtssh service install "${host_args[@]}"
+    ;;
+  update)
+    ensure_dtssh 1
+    ensure_login
+    dtssh service install "${host_args[@]}"
+    dtssh service restart 2>/dev/null || true
     ;;
   uninstall)
     dtssh service uninstall

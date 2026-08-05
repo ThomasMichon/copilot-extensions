@@ -82,6 +82,25 @@ A reference implementation (launcher + installer) ships **in-box with the
 self-healing `transports/dtssh/scripts/dtssh-host-launcher.ps1` from a hidden
 Startup-folder shortcut.
 
+### Updating dtssh
+
+`install-host.ps1 update` performs a transport-safe binary swap: it retires the
+running watchdog + host child (freeing the locked `dtssh.exe`), replaces the
+binary via the upstream SHA-verified `install-release.ps1`, then restarts the
+self-healing launcher on the new binary. Pin a specific release with
+`-DtsshVersion`:
+
+```powershell
+# from the plugin dir (or the deployed copy):
+pwsh -File transports/dtssh/scripts/install-host.ps1 update -Alias <host> -DtsshVersion v0.2.0
+```
+
+The host reconnects on the new binary within ~1–2 min (first start of dtssh
+≥ v0.2.0 downloads its bundled portable OpenSSH). No manual rename-aside /
+hand-download is needed — that was a gap (`update` used to no-op on an existing
+binary; dotfiles#850) and is now fixed. On Linux the sibling `install-host.sh
+update` (honoring `DTSSH_VERSION`) does the same via `dtssh service`.
+
 ## 5. Validate
 
 ```powershell
