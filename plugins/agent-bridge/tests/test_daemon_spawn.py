@@ -1,37 +1,29 @@
-"""Test the console-free daemon interpreter selection (headed-console fix).
+"""Guard the detached passive-daemon creation flags (headed-console fix).
 
-The cutover spawns the passive daemon straight from Python (no `conhost --headless`
-wrapper the installer uses). Under DefTerm (Windows Terminal as the default
-terminal app), a `python.exe` + `CREATE_NO_WINDOW` spawn is still captured as a
-visible window/tab, so `_windowless_daemon_executable` must prefer the
-GUI-subsystem `pythonw.exe` to allocate no console at all.
+The ZDD cutover spawns the passive daemon straight from Python (no
+`conhost --headless` wrapper the installer uses). Under DefTerm (Windows Terminal
+as the default terminal app), `CREATE_NO_WINDOW` still surfaces a visible
+window/tab -- it *creates* a console and merely hides its window, which DefTerm
+overrides. `DETACHED_PROCESS` alone creates NO console, so there is nothing for
+DefTerm to grab. This pins that choice so a future edit can't reintroduce
+`CREATE_NO_WINDOW` (the headed-console bug).
 """
 
 from __future__ import annotations
 
-import os
+import subprocess
 
 from agent_bridge import __main__ as main
 
 
-def test_prefers_pythonw_on_windows(monkeypatch):
+def test_win32_uses_detached_not_create_no_window(monkeypatch):
     monkeypatch.setattr(main.sys, "platform", "win32")
-    monkeypatch.setattr(main.sys, "executable", r"C:\venv\Scripts\python.exe")
-    monkeypatch.setattr(os.path, "exists", lambda p: p.endswith("pythonw.exe"))
-    exe = main._windowless_daemon_executable()
-    assert exe.replace("/", "\\").endswith(r"Scripts\pythonw.exe")
+    flags = main._passive_daemon_creationflags()
+    assert flags & subprocess.DETACHED_PROCESS
+    # CREATE_NO_WINDOW is the headed-console bug under DefTerm -- must NOT be set.
+    assert not (flags & subprocess.CREATE_NO_WINDOW)
 
 
-def test_falls_back_when_pythonw_absent(monkeypatch):
-    monkeypatch.setattr(main.sys, "platform", "win32")
-    monkeypatch.setattr(main.sys, "executable", r"C:\venv\Scripts\python.exe")
-    monkeypatch.setattr(os.path, "exists", lambda p: False)
-    assert main._windowless_daemon_executable() == r"C:\venv\Scripts\python.exe"
-
-
-def test_uses_sys_executable_off_windows(monkeypatch):
+def test_non_windows_no_flags(monkeypatch):
     monkeypatch.setattr(main.sys, "platform", "linux")
-    monkeypatch.setattr(main.sys, "executable", "/venv/bin/python")
-    # os.path.exists must not even be consulted off Windows, but guard anyway.
-    monkeypatch.setattr(os.path, "exists", lambda p: True)
-    assert main._windowless_daemon_executable() == "/venv/bin/python"
+    assert main._passive_daemon_creationflags() == 0

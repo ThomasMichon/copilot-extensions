@@ -1119,26 +1119,20 @@ def _cmd_undrain(args: argparse.Namespace) -> None:
     print("Drain gate released; accepting new work.")
 
 
-def _windowless_daemon_executable() -> str:
-    """Interpreter to launch a *detached* daemon with, chosen to allocate NO
-    console -- so a DefTerm handoff (Windows Terminal set as the default terminal
-    app) cannot capture the daemon as a visible window/tab.
+def _passive_daemon_creationflags() -> int:
+    """Windows process-creation flags for the detached passive daemon.
 
-    On Windows, prefer ``pythonw.exe`` (a GUI-subsystem binary: it never gets a
-    console, so DefTerm has nothing to grab) beside the active ``python.exe``.
-    ``python.exe`` + ``CREATE_NO_WINDOW`` is NOT enough under DefTerm -- which is
-    exactly why the installer's direct-start wraps its spawn in
-    ``conhost --headless``. The cutover spawns the passive daemon straight from
-    Python (no conhost wrapper), so it needs this console-free interpreter to stay
-    invisible. Falls back to ``sys.executable`` off Windows or when pythonw is not
-    beside it.
+    ``DETACHED_PROCESS`` **alone** -- the daemon gets NO console, so a DefTerm
+    handoff (Windows Terminal as the default terminal app) has nothing to surface
+    as a window/tab. Deliberately NOT ``CREATE_NO_WINDOW``: that flag *creates* a
+    console (merely hiding its window), which DefTerm then shows anyway -- the
+    headed-console bug. With no console the daemon has no inherited stdio, so the
+    spawn must redirect stdout/stderr to real handles (see ``spawn_passive``), or
+    uvicorn's logging writes to a broken stream and startup fails.
     """
-    exe = sys.executable
     if sys.platform == "win32":
-        cand = os.path.join(os.path.dirname(exe), "pythonw.exe")
-        if os.path.exists(cand):
-            return cand
-    return exe
+        return subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]
+    return 0
 
 
 def _cmd_deploy(args: argparse.Namespace) -> None:
@@ -1172,18 +1166,23 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
 
     def spawn_passive(port: int):
         # Launch the *currently installed* code (this interpreter's venv) as a
-        # passive instance, detached so it outlives this deploy process. Use the
-        # console-free interpreter (pythonw.exe on Windows) so a DefTerm handoff
-        # cannot surface the detached daemon as a visible window (the headed
-        # console bug); CREATE_NO_WINDOW alone is ignored under DefTerm.
-        cmd = [_windowless_daemon_executable(), "-m", "agent_bridge", "start",
+        # passive instance, detached so it outlives this deploy process. Use
+        # DETACHED_PROCESS (no console -> no DefTerm window) and REDIRECT stdio to
+        # the daemon's log files: a detached process has no console to provide
+        # stdout/stderr, so without valid handles uvicorn's logging fails at
+        # startup and the cutover rolls back. Also keeps the daemon from
+        # inheriting THIS deploy process's console handle (which would keep it
+        # alive / visible).
+        cmd = [sys.executable, "-m", "agent_bridge", "start",
                "--port", str(port), "--passive"]
         kwargs: dict = {}
         if sys.platform == "win32":
-            kwargs["creationflags"] = (
-                subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
-                | subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]
-            )
+            log_out = open(config_dir() / "agent-bridge.log", "ab")
+            log_err = open(config_dir() / "agent-bridge-err.log", "ab")
+            kwargs["stdout"] = log_out
+            kwargs["stderr"] = log_err
+            kwargs["stdin"] = subprocess.DEVNULL
+            kwargs["creationflags"] = _passive_daemon_creationflags()
         else:
             kwargs["start_new_session"] = True
         return subprocess.Popen(cmd, **kwargs)
