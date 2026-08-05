@@ -1,9 +1,9 @@
 """Preflight: ensure the CodeSpace's Copilot CLI has its platform package (#111).
 
-A freshly-created odsp-web CodeSpace ships the ``@github/copilot`` npm-loader
+A freshly-created CodeSpace can ship the ``@github/copilot`` npm-loader
 stub but is missing its platform optional-dependency (e.g.
 ``@github/copilot-linux-x64``) -- the devcontainer's global npm registry
-defaults to the ODSP **private feed**, so the optional dep was skipped/401'd at
+defaults to a **private feed**, so the optional dep was skipped/401'd at
 image build. Without the platform binary, ``copilot --acp`` cannot launch and an
 agent-bridge dispatch dies at ``stage 7/LAUNCH_ACP`` with a bare "Connection
 closed", masking the real cause (``copilot --version`` -> "no platform package
@@ -85,14 +85,12 @@ async def ensure_copilot_platform(
     could not diagnose.
     """
     attempts = max(1, retries)
-    last_out = ""
     for attempt in range(attempts):
         try:
             rc, out = await run_remote(VERIFY_COMMAND)
         except Exception as exc:  # pragma: no cover - defensive
             log.debug("copilot platform verify probe failed to run: %s", exc)
             return True, "verify-skipped"
-        last_out = out
         if not needs_platform_repair(out):
             # Either healthy (rc==0) or a non-zero for some *other* reason
             # (copilot absent entirely, wrong cwd/user, etc.) -- in the latter
