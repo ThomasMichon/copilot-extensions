@@ -686,6 +686,7 @@ class _PickerNativeData(OptionList):
         self._sections = []       # option index -> section label active there
         self._section_texts = {}  # section label -> its header Text (for sticky)
         self._kinds = []          # option index -> VRow kind ('section' etc.)
+        self._l_rows = {}         # worktree row id4 -> (option index, rec, li)
         self._sig = None          # last data signature (rebuild only on change)
         self._syncing = False
         self._suppress_activate = False   # one-shot: gutter click toggled, don't open
@@ -726,6 +727,7 @@ class _PickerNativeData(OptionList):
             self._stops = []
             self._sections = []
             self._kinds = []
+            self._l_rows = {}
             self._section_texts = {}
             cur_label = None
             opts = []
@@ -737,10 +739,19 @@ class _PickerNativeData(OptionList):
                 cur_label = ps[0] if ps else cur_label
                 if kind == "section" and cur_label is not None:
                     self._section_texts[cur_label] = text
+                idx = len(opts)
                 opts.append(Option(text, disabled=stop is None))
                 self._stops.append(stop)
                 self._sections.append(cur_label)
                 self._kinds.append(kind)
+                # Map worktree rows id4 -> (option index, rec, li) so a
+                # selection-only change can repaint just those rows in place
+                # instead of a full rebuild (#171).
+                rec = getattr(vr, "data", None)
+                if stop is not None and stop[0] == "L" and rec is not None:
+                    rid = rec.get("id4")
+                    if rid is not None:
+                        self._l_rows[rid] = (idx, rec, stop[1])
             if opts:
                 self.add_options(opts)
         finally:
@@ -802,11 +813,66 @@ class _PickerNativeData(OptionList):
         -- so plain cursor moves stay smooth and native -- else just mirror
         ``sel`` onto the native highlight. Always re-pins the sticky header
         (cheap) so a mouse-wheel scroll (no highlight change) tracks too."""
-        if self._signature() != self._sig:
-            self._rebuild()
-        else:
+        new_sig = self._signature()
+        if new_sig == self._sig:
             self._sync_from_sel()
             self._update_sticky()
+            return
+        # Held-arrow fast path (#171): when only the focus-tracking selection
+        # moved (same pivot + data, only the wt_sel field changed), repaint just
+        # the rows whose checkbox glyph flipped -- O(delta), not a full O(rows)
+        # clear+rebuild -- so a held uparrow/downarrow keeps up with key-repeat.
+        if self._try_selection_repaint(new_sig):
+            self._sig = new_sig
+            self._sync_from_sel()
+            self._update_sticky()
+            return
+        self._rebuild()
+
+    def _try_selection_repaint(self, new_sig) -> bool:
+        """Repaint only the worktree rows whose checkbox glyph changed, in place
+        (#171). Returns True if it fully handled the update; False to fall back
+        to :meth:`_rebuild`.
+
+        Applies only when the signature delta is *selection-only*: the pivot is
+        Worktrees and ``new_sig`` differs from the last signature in nothing but
+        the ``wt`` (selection ids) field -- i.e. plain/shift arrow navigation,
+        where single-select tracks focus. The native list is built with a
+        sentinel sel (focus is the native amber cursor, not baked into row text),
+        so the only per-row change is the box glyph on the rows entering/leaving
+        the selection; re-rendering just those via the SAME per-row renderer as
+        the full rebuild keeps the output byte-identical."""
+        old = self._sig
+        if old is None or len(old) != len(new_sig):
+            return False
+        if old[0] != "worktrees" or new_sig[0] != "worktrees":
+            return False
+        # Differ ONLY in the wt (selection) field -- index 4 of _signature().
+        if any(old[i] != new_sig[i] for i in range(len(old)) if i != 4):
+            return False
+        changed = set(old[4]) ^ set(new_sig[4])
+        if not changed:
+            return False
+        scr = self._screen
+        W = scr.size.width or 100
+        try:
+            cols, _sections = scr.current_list()
+            lcols = fit(cols, W - 2, "title", 14)
+        except Exception:
+            return False
+        view = scr.worktrees_view
+        count = self.option_count
+        for rid in changed:
+            row = self._l_rows.get(rid)
+            if row is None:
+                return False   # unknown row -> safe fallback to a full rebuild
+            idx, rec, li = row
+            if not (0 <= idx < count):
+                return False
+            text = view._row_text(rec, li, self._SENTINEL_SEL, W, lcols,
+                                  None, None)
+            self.replace_option_prompt_at_index(idx, text)
+        return True
 
     def on_mount(self) -> None:
         self._rebuild()
@@ -5793,37 +5859,9 @@ class WorktreesView:
             if not rows:
                 add(Text("    (none)", style=C_DIM))
             for rec in rows:
-                focused = sel == ("L", li)
-                is_sel = rec["id4"] in eng.wt_sel
-                # Always show the per-row checkbox glyph (#88 NF5-5): with mouse
-                # support the box is a discoverable, clickable multi-select
-                # affordance, so it renders at rest rather than only when a set
-                # is already held.
-                box = eng._checkbox(is_sel)
-                vr = add(row_text(rec, lcols, width, False,
-                                  pulse=eng.pulse, mark=box),
-                         stop=("L", li), data=rec)
-                if rec.get("hidden") and not focused:
-                    # Revealed bridge/system worktree -> dim it (#1422).
-                    vr.text.stylize("grey42")
-                elif (preview_ids is not None and rec["id4"] not in preview_ids
-                      and not focused):
-                    vr.text.stylize("grey35")   # outside the net set
-                elif preview and not focused and not (
-                    eng._cleanable(rec) if preview == "clean"
-                    else rec.get("ff_eligible")
-                ):
-                    vr.text.stylize("grey35")   # out of this action's scope
-                # Focus / selection highlight, layered last so it reads as
-                # one state (#2258 follow-up): green invert = focused AND
-                # selected, plain invert = focused only, grey background =
-                # selected but the cursor has moved off it.
-                if focused and is_sel:
-                    vr.text.stylize(C_SEL_ON)
-                elif focused:
-                    vr.text.stylize(C_SEL)
-                elif is_sel:
-                    vr.text.stylize(C_SEL_BG)
+                add(self._row_text(rec, li, sel, width, lcols,
+                                   preview, preview_ids),
+                    stop=("L", li), data=rec)
                 # worktree-status-core live pulse (#2917): a dim, expiring
                 # sub-line carrying the agent's current intent, derived from
                 # the assistant.intent stream. Decorative (no stop) so it is
@@ -5839,6 +5877,42 @@ class WorktreesView:
                                  style=_pstyle)
                     add(pline)
                 li += 1
+
+    def _row_text(self, rec, li, sel, width, lcols, preview, preview_ids):
+        """Render one worktree row's fully-styled Text. Extracted from
+        ``build_data`` so the native list's incremental checkbox repaint (#171)
+        renders a single row through the SAME path as a full rebuild -- keeping
+        the two byte-identical. ``sel`` drives the focus/selection highlight; the
+        native list passes a sentinel (focus is the amber cursor, not baked in)."""
+        eng = self._eng
+        focused = sel == ("L", li)
+        is_sel = rec["id4"] in eng.wt_sel
+        # Always show the per-row checkbox glyph (#88 NF5-5): with mouse support
+        # the box is a discoverable, clickable multi-select affordance, so it
+        # renders at rest rather than only when a set is already held.
+        box = eng._checkbox(is_sel)
+        txt = row_text(rec, lcols, width, False, pulse=eng.pulse, mark=box)
+        if rec.get("hidden") and not focused:
+            # Revealed bridge/system worktree -> dim it (#1422).
+            txt.stylize("grey42")
+        elif (preview_ids is not None and rec["id4"] not in preview_ids
+              and not focused):
+            txt.stylize("grey35")   # outside the net set
+        elif preview and not focused and not (
+            eng._cleanable(rec) if preview == "clean"
+            else rec.get("ff_eligible")
+        ):
+            txt.stylize("grey35")   # out of this action's scope
+        # Focus / selection highlight, layered last so it reads as one state
+        # (#2258 follow-up): green invert = focused AND selected, plain invert =
+        # focused only, grey background = selected but the cursor has moved off.
+        if focused and is_sel:
+            txt.stylize(C_SEL_ON)
+        elif focused:
+            txt.stylize(C_SEL)
+        elif is_sel:
+            txt.stylize(C_SEL_BG)
+        return txt
 
 
 class TasksView:
