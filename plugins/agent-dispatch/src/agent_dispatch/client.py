@@ -206,6 +206,82 @@ class DispatchClient:
     def recover(self) -> dict:
         return self._unwrap(self._http.post("/recover"))
 
+    # -- fleet directory (federation awareness plane) ------------------------
+
+    def directory_register(
+        self,
+        instance: str,
+        *,
+        role: str = "peer",
+        epoch: int = 0,
+        machine: str | None = None,
+        worktrees: list[str] | None = None,
+        capabilities: list[str] | None = None,
+        gate_state: str = "open",
+        agent_versions: dict[str, str] | None = None,
+        status: dict | None = None,
+    ) -> dict:
+        """Register (or refresh) this instance in the coordinator's fleet
+        directory. Idempotent -- a re-register keeps the original
+        ``registered_at`` and restamps ``last_seen``."""
+        return self._unwrap(
+            self._http.post(
+                "/directory/register",
+                json={
+                    "instance": instance,
+                    "role": role,
+                    "epoch": epoch,
+                    "machine": machine,
+                    "worktrees": worktrees or [],
+                    "capabilities": capabilities or [],
+                    "gate_state": gate_state,
+                    "agent_versions": agent_versions or {},
+                    "status": status or {},
+                },
+            )
+        )
+
+    def directory_heartbeat(
+        self,
+        instance: str,
+        *,
+        status: dict | None = None,
+        worktrees: list[str] | None = None,
+        gate_state: str | None = None,
+        role: str | None = None,
+        epoch: int | None = None,
+    ) -> dict:
+        """Refresh a live entry's ``last_seen`` (+ optional fields). Raises
+        :class:`DispatchError` with status 404 when the entry is not live, so
+        the caller re-registers instead of resurrecting a reaped entry."""
+        return self._unwrap(
+            self._http.post(
+                f"/directory/{instance}/heartbeat",
+                json={
+                    "status": status,
+                    "worktrees": worktrees,
+                    "gate_state": gate_state,
+                    "role": role,
+                    "epoch": epoch,
+                },
+            )
+        )
+
+    def directory_deregister(self, instance: str) -> dict:
+        """Explicitly remove this instance from the directory."""
+        return self._unwrap(self._http.delete(f"/directory/{instance}"))
+
+    def directory_list(self, *, role: str | None = None) -> list[dict]:
+        """All live directory entries (optional ``role`` filter) -- the
+        awareness-plane read."""
+        params = {"role": role} if role is not None else {}
+        return self._unwrap(self._http.get("/directory", params=params))
+
+    def directory_coordinator(self) -> dict | None:
+        """The live coordinator entry with the highest epoch, or ``None`` -- the
+        claim-plane discovery read."""
+        return self._unwrap(self._http.get("/directory/coordinator"))
+
     # -- spawn reservations --------------------------------------------------
 
     def reserve_spawn(self, task_id: str, *, reserved_by: str | None = None) -> dict:
