@@ -1735,8 +1735,21 @@ function Invoke-Update {
     # stopped above. Launch via the `venv` link ($LinkPython) so the process
     # resolves through the junction (never a versions/<v> absolute).
     if ($useCutover) {
+        # Warm the freshly-built slot before the timed cutover (#864): the slot's
+        # first full-app start is cold -- Python compiles the whole app graph and,
+        # on a managed Windows box, Defender / Smart App Control scans the freshly
+        # written venv files on first *execute*. A full-app import here pays that
+        # one-time cost up front (pycache + AV scan) so the cutover's passive
+        # becomes healthy well within the health window instead of timing out and
+        # rolling back to a stop-restart. Best-effort; never fails the deploy.
+        Write-Step 'Warming the new runtime slot before cutover...'
+        & $LinkPython -c 'import agent_bridge.app, agent_bridge.__main__, agent_bridge.session_manager' 2>&1 | Out-Null
+
         Write-Step 'Cutting over to the new build (zero-downtime)...'
-        & $LinkPython -m agent_bridge deploy --force 2>&1 | ForEach-Object { Write-Host "  $_" }
+        # Give the cutover a generous health window: a cold fresh-build first start
+        # (even after the warm-up above) can outlast the 60s deploy default, which
+        # is tuned for warm standalone cutovers -- see #864.
+        & $LinkPython -m agent_bridge deploy --force --health-timeout 180 2>&1 | ForEach-Object { Write-Host "  $_" }
         if ($LASTEXITCODE -eq 0) {
             Write-Ok 'Cutover complete (zero-downtime)'
         } else {
