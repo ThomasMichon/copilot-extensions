@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -27,12 +28,55 @@ from .resolver import build_wrapper_command
 
 log = logging.getLogger("agent-containers")
 
+# Fallback only. Post-#694 the daemon binds an OS-assigned ephemeral port (never
+# :9280) and advertises it in ~/.agent-bridge/active.json; _resolve_bridge_url()
+# reads that table so a redeploy that flipped the port still reaches the live
+# daemon. Registering against this hardcoded default fails after any restart
+# (dotfiles #826) -- keep it strictly as the no-routing-table fallback.
 DEFAULT_BRIDGE_URL = "http://127.0.0.1:9280"
 DEFAULT_TTL = 300.0
 PROVIDER_NAME = "containers"
 
-_BRIDGE_AUTH_PATH = Path.home() / ".agent-bridge" / "auth.yaml"
-_BRIDGE_TOKEN_PATH = Path.home() / ".agent-bridge" / "auth_token"
+
+def _bridge_config_dir() -> Path:
+    return Path(
+        os.environ.get("AGENT_BRIDGE_CONFIG_DIR", "~/.agent-bridge")
+    ).expanduser()
+
+
+_BRIDGE_AUTH_PATH = _bridge_config_dir() / "auth.yaml"
+_BRIDGE_TOKEN_PATH = _bridge_config_dir() / "auth_token"
+
+
+def _resolve_bridge_url() -> str:
+    """Resolve the live agent-bridge daemon URL.
+
+    Precedence mirrors the agent-bridge CLI client (client.py): an explicit
+    ``AGENT_BRIDGE_BASE_URL`` env wins (deploy orchestrator dials a specific
+    daemon), then the routing table (``active.json``) written by the running
+    daemon, then the static :data:`DEFAULT_BRIDGE_URL` fallback. The table is an
+    optimization, never a hard dependency -- any read/parse error falls through
+    to the default.
+    """
+    explicit = os.environ.get("AGENT_BRIDGE_BASE_URL")
+    if explicit:
+        return explicit.rstrip("/")
+
+    active_path = _bridge_config_dir() / "active.json"
+    try:
+        data = json.loads(active_path.read_text())
+        active = data.get("active") or {}
+        port = int(active.get("port") or 0)
+        if port > 0:
+            bind = active.get("bind") or "127.0.0.1"
+            if bind in ("0.0.0.0", "", None):  # noqa: S104 -- normalize probe target, not a bind
+                bind = "127.0.0.1"
+            elif bind == "::":
+                bind = "::1"
+            return f"http://{bind}:{port}"
+    except Exception:  # noqa: S110 -- routing table is best-effort; fall back to default
+        pass
+    return DEFAULT_BRIDGE_URL
 
 
 def _load_bridge_token() -> str | None:
@@ -67,9 +111,10 @@ def build_agent_configs() -> list[dict[str, Any]]:
 
 
 def register_with_bridge(
-    bridge_url: str = DEFAULT_BRIDGE_URL, ttl: float = DEFAULT_TTL
+    bridge_url: str | None = None, ttl: float = DEFAULT_TTL
 ) -> dict[str, Any]:
     """Push container agents to agent-bridge's provider API."""
+    bridge_url = bridge_url or _resolve_bridge_url()
     token = _load_bridge_token()
     if not token:
         raise RuntimeError(
@@ -96,8 +141,9 @@ def register_with_bridge(
         raise RuntimeError(f"Cannot reach agent-bridge at {bridge_url}: {exc.reason}") from None
 
 
-def unregister_from_bridge(bridge_url: str = DEFAULT_BRIDGE_URL) -> dict[str, Any]:
+def unregister_from_bridge(bridge_url: str | None = None) -> dict[str, Any]:
     """Remove container agents from agent-bridge."""
+    bridge_url = bridge_url or _resolve_bridge_url()
     token = _load_bridge_token()
     if not token:
         raise RuntimeError(f"Agent-bridge auth token not found at {_BRIDGE_AUTH_PATH}")
@@ -117,8 +163,9 @@ def unregister_from_bridge(bridge_url: str = DEFAULT_BRIDGE_URL) -> dict[str, An
         raise RuntimeError(f"Cannot reach agent-bridge at {bridge_url}: {exc.reason}") from None
 
 
-def get_bridge_status(bridge_url: str = DEFAULT_BRIDGE_URL) -> dict[str, Any] | None:
+def get_bridge_status(bridge_url: str | None = None) -> dict[str, Any] | None:
     """Query provider status from agent-bridge. Returns None on failure."""
+    bridge_url = bridge_url or _resolve_bridge_url()
     token = _load_bridge_token()
     if not token:
         return None

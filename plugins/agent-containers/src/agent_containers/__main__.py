@@ -82,9 +82,18 @@ def main(argv: list[str] | None = None) -> int:
 
     bridge_p = sub.add_parser("bridge", help="agent-bridge provider integration")
     bridge_sub = bridge_p.add_subparsers(dest="bridge_command")
-    bridge_sub.add_parser("register", help="Register container agents")
-    bridge_sub.add_parser("unregister", help="Remove container agents")
-    bridge_sub.add_parser("status", help="Show registration status")
+    for _bc, _help in (
+        ("register", "Register container agents"),
+        ("unregister", "Remove container agents"),
+        ("status", "Show registration status"),
+    ):
+        _bp = bridge_sub.add_parser(_bc, help=_help)
+        _bp.add_argument(
+            "--bridge-url",
+            default=None,
+            help="Override the agent-bridge daemon URL "
+            "(default: resolve from ~/.agent-bridge/active.json)",
+        )
 
     sub.add_parser("version", help="Show version")
 
@@ -371,16 +380,17 @@ def _cmd_bridge(args: argparse.Namespace) -> int:
     from . import bridge_provider
 
     cmd = getattr(args, "bridge_command", None)
+    bridge_url = getattr(args, "bridge_url", None)
     if cmd == "register":
-        result = bridge_provider.register_with_bridge()
+        result = bridge_provider.register_with_bridge(bridge_url)
         print(json.dumps(result, indent=2))
         return 0
     if cmd == "unregister":
-        result = bridge_provider.unregister_from_bridge()
+        result = bridge_provider.unregister_from_bridge(bridge_url)
         print(json.dumps(result, indent=2))
         return 0
     if cmd == "status":
-        status = bridge_provider.get_bridge_status()
+        status = bridge_provider.get_bridge_status(bridge_url)
         if status is None:
             print("containers provider not registered (or bridge unreachable)")
             return 1
