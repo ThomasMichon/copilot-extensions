@@ -325,13 +325,17 @@ class TestCmdReclaim:
              "homing": "bare"},
             {"session_id": "s1", "pid": 201, "cwd": "/w", "worktree_id": "wt",
              "homing": "mux"},
+            # Un-muxed but unclassifiable (racing snapshot) -> still reclaimable.
+            {"session_id": "s1", "pid": 202, "cwd": "/w", "worktree_id": "wt",
+             "homing": "unknown"},
         ]
         self._stub_resolution(monkeypatch, rows)
         monkeypatch.setattr(m.reclaim, "reap_bound_copilots", lambda *a, **k: [])
         rc = m.cmd_reclaim(_ns(worktree_id=None, session_id="s1", bare_only=True))
         assert rc == 0
         out = json.loads(capfd.readouterr().out)
-        assert [t["pid"] for t in out["targets"]] == [200]
+        # bare + unknown kept (un-muxed); only the positively muxed one dropped.
+        assert [t["pid"] for t in out["targets"]] == [200, 202]
 
     def test_no_target_and_neutral_cwd_errors(self, monkeypatch, capfd):
         monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: None)

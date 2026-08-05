@@ -6025,7 +6025,13 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
         worktree_path=wt_path, table=table,
     )
     if getattr(args, "bare_only", False):
-        found = [f for f in found if f["homing"] == "bare"]
+        # "un-muxed orphans": every bound Copilot Stop cannot reach -- a walkable
+        # non-mux ancestry ("bare") AND one whose homing could not be positively
+        # classified ("unknown", e.g. the pid missing from a racing process-table
+        # snapshot). Only a positively mux-homed session is left to restart/Stop,
+        # so a live-but-unclassifiable bound Copilot is still reclaimable instead
+        # of stranding its worktree ACTIVE with no lifecycle verb.
+        found = [f for f in found if f["homing"] != "mux"]
 
     # Safety guard: never reap the process subtree that contains this very
     # command (it runs as a child of the orchestrating Copilot).
@@ -6146,15 +6152,18 @@ def reclaim_one(worktree_id: str, *, bare_only: bool = True) -> dict:
     The in-process executor behind the Picker's per-row **Reclaim** action:
     resolves the exact Copilot process(es) bound to *worktree_id*'s session(s)
     via :func:`reclaim.resolve_bound_copilots` and terminates them (and their
-    Copilot child tree). ``bare_only`` (default) restricts to un-muxed orphans
-    so a healthy muxed sibling is left to the graceful ``restart``/Stop path.
-    Never reaps the process subtree containing this command. Returns a JSON-able
-    ``{ok, worktree_id, targets, reaped}``.
+    Copilot child tree). ``bare_only`` (default) restricts to **un-muxed**
+    orphans -- a bound Copilot with no mux ancestor, i.e. homing ``bare`` OR
+    ``unknown`` (an un-walkable/racing ancestry that still is not positively
+    mux-homed) -- so a healthy muxed sibling is left to the graceful
+    ``restart``/Stop path while a live-but-unclassifiable bound Copilot is still
+    reclaimable. Never reaps the process subtree containing this command. Returns
+    a JSON-able ``{ok, worktree_id, targets, reaped}``.
     """
     table = reclaim.build_process_table()
     found = reclaim.resolve_bound_copilots(worktree_id=worktree_id, table=table)
     if bare_only:
-        found = [f for f in found if f["homing"] == "bare"]
+        found = [f for f in found if f["homing"] != "mux"]
     me = os.getpid()
     targets = [
         f for f in found
@@ -11022,8 +11031,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--all", action="store_true",
                    help="Target every bound Copilot on the machine")
     p.add_argument("--bare-only", action="store_true",
-                   help="Restrict to un-muxed (bare) orphans -- the common "
-                        "intent; leaves mux-homed sessions to restart/reap")
+                   help="Restrict to un-muxed orphans (homing bare or "
+                        "unclassifiable) -- the common intent; leaves only "
+                        "positively mux-homed sessions to restart/reap")
     p.add_argument("--yes", action="store_true",
                    help="Actually terminate the matched processes (without it, "
                         "the command is a dry run that kills nothing)")
