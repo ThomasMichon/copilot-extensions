@@ -493,3 +493,81 @@ async def test_endpoint_serving_probe_transport_error_is_healthy(monkeypatch):
     probe = endpoints_mod.endpoint_serving_probe_factory(_relay_endpoint())(50629)
     # a transport failure is a health hint, never a reason to churn the relay
     assert await probe() is True
+
+
+# -- dispatch-path auth-helper (re)deploy (dotfiles #733 T2) ---------------
+def _install_fake_agent_codespaces(monkeypatch, recorder=None):
+    """Inject a fake ``agent_codespaces.codespace_assets`` whose
+    ``build_provision_command`` returns a sentinel (optionally recording calls),
+    so the spawner's dispatch-path helper (re)deploy has something to import even
+    though agent_codespaces is not an agent-bridge test dependency."""
+    import sys
+    import types
+
+    assets = types.ModuleType("agent_codespaces.codespace_assets")
+
+    def _build():
+        if recorder is not None:
+            recorder.append(1)
+        return "PROVISION_HELPERS_CMD"
+
+    assets.build_provision_command = _build
+    pkg = types.ModuleType("agent_codespaces")
+    monkeypatch.setitem(sys.modules, "agent_codespaces", pkg)
+    monkeypatch.setitem(sys.modules, "agent_codespaces.codespace_assets", assets)
+
+
+@pytest.mark.asyncio
+async def test_codespace_dispatch_redeploys_auth_helpers(monkeypatch):
+    """On the codespace boundary, spawn() re-asserts the ADO/git auth helpers
+    (Stage-4 provision) BEFORE launching the dispatched agent, so a dispatched
+    agent isn't left on a reboot-stale VS Code helper (#733 T2)."""
+    _patch_common(monkeypatch)
+    _install_fake_agent_codespaces(monkeypatch)
+    state = {"pid": 1, "child_pid": 2, "port": 51000,
+             "protocol_version": proto.PROTOCOL_VERSION}
+    t = _FakeTransport(state)
+    await sp.CodeSpaceSpawner(t, ready_timeout=5).spawn(
+        ["copilot", "--acp", "--stdio"], session_id="s1",
+    )
+    assert "PROVISION_HELPERS_CMD" in t.runs
+    # ...and it ran BEFORE the detached Host launch, so the dispatched agent sees
+    # the fresh helper.
+    launch_idx = next(i for i, c in enumerate(t.runs) if "setsid nohup" in c)
+    assert t.runs.index("PROVISION_HELPERS_CMD") < launch_idx
+
+
+@pytest.mark.asyncio
+async def test_non_codespace_boundary_skips_helper_redeploy(monkeypatch):
+    """The mesh (non-codespace) boundary must NOT run the codespace auth-helper
+    (re)deploy -- it is codespace-specific (#733 T2)."""
+    _patch_common(monkeypatch)
+    calls: list[int] = []
+    _install_fake_agent_codespaces(monkeypatch, recorder=calls)
+    state = {"pid": 1, "child_pid": 2, "port": 51000,
+             "protocol_version": proto.PROTOCOL_VERSION}
+    t = _FakeTransport(state)
+    t.boundary = "mesh"
+    await sp.CodeSpaceSpawner(t, ready_timeout=5).spawn(
+        ["copilot", "--acp", "--stdio"], session_id="s2",
+    )
+    assert "PROVISION_HELPERS_CMD" not in t.runs
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_dispatch_helper_redeploy_missing_agent_codespaces_is_noop(monkeypatch):
+    """When agent_codespaces is not importable, the dispatch-path helper
+    (re)deploy is silently skipped and the launch still proceeds (best-effort,
+    #733 T2)."""
+    _patch_common(monkeypatch)
+    import sys
+    monkeypatch.setitem(sys.modules, "agent_codespaces", None)
+    state = {"pid": 1, "child_pid": 2, "port": 51000,
+             "protocol_version": proto.PROTOCOL_VERSION}
+    t = _FakeTransport(state)
+    spawned = await sp.CodeSpaceSpawner(t, ready_timeout=5).spawn(
+        ["copilot", "--acp", "--stdio"], session_id="s3",
+    )
+    assert any("setsid nohup" in c for c in t.runs)  # launch still happened
+    assert spawned.host_pid == 1
