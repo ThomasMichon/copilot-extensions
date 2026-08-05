@@ -36,6 +36,13 @@
     `--persist`, a restart REUSES the same tunnel id + host key (no rotation, no
     client re-`discover` needed).
 
+    The relay count alone is NOT sufficient: the dtssh host can stay connected to
+    the relay (host-conn > 0) while its dedicated sshd CHILD dies, leaving :$Port
+    with no listener and remote reach silently broken until an interactive re-host
+    (#576). So each cycle ALSO probes the sshd with a plain TCP connect to
+    127.0.0.1:<port> and restarts the child when the port isn't listening, even
+    when the relay count looks healthy.
+
     The tunnel id is resolved from dtssh's own persisted record
     (`%LOCALAPPDATA%\dtssh\host\service-<alias>.tunnel`), falling back to matching
     the alias against `devtunnel list` descriptions. If no tunnel id can be
@@ -236,6 +243,30 @@ function Clear-DedicatedSshd {
     } catch { Write-Log "sshd reap failed: $_" 'WARN' }
 }
 
+function Test-SshdListening {
+    <#
+      True if the dedicated sshd is accepting TCP on 127.0.0.1:$ProbePort. This is
+      the #576 liveness probe: the relay host-connection check can read >0 while the
+      sshd CHILD behind the tunnel is dead, so the tunnel forwards to a port with no
+      listener and remote reach is silently broken. A plain TCP connect (not a full
+      SSH handshake) proves the listener is alive; a short timeout keeps the health
+      loop responsive.
+    #>
+    param([int]$ProbePort)
+    $client = $null
+    try {
+        $client = [System.Net.Sockets.TcpClient]::new()
+        $iar = $client.BeginConnect('127.0.0.1', $ProbePort, $null, $null)
+        if (-not $iar.AsyncWaitHandle.WaitOne(3000)) { return $false }
+        $client.EndConnect($iar)
+        return $client.Connected
+    } catch {
+        return $false
+    } finally {
+        if ($client) { $client.Dispose() }
+    }
+}
+
 function Start-HostProc {
     <# Start `dtssh host --persist` as a hidden monitored child; return the Process. #>
     Clear-DedicatedSshd   # free :$Port — a prior child may have orphaned its sshd
@@ -323,25 +354,37 @@ try {
             continue
         }
 
+        # Health = relay connected AND the dedicated sshd is actually listening.
+        # Checking only the relay host-connection count misses the case where the
+        # dtssh host stays connected but its sshd CHILD dies: host-conn reads >0
+        # while :$Port has no listener, so remote reach is silently broken until an
+        # interactive re-host (#576). Probe both and restart on either failure.
+        $relayOk = $true
         if ($tunnelId) {
             $conns = Get-HostConnections $tunnelId
-            if ($conns -gt 0) {
-                if ($failCount -ne 0) { Write-Log "recovered: $conns host connection(s)" }
+            if ($conns -eq 0) { $relayOk = $false }
+            # $conns -eq -1: transient/unknown — do not treat as a failure.
+        }
+        $sshdOk = Test-SshdListening $Port
+
+        if ($relayOk -and $sshdOk) {
+            if ($failCount -ne 0) { Write-Log "recovered: healthy (relay connected, sshd :$Port listening)" }
+            $failCount = 0
+        } else {
+            $failCount++
+            $reasons = @()
+            if (-not $relayOk) { $reasons += '0 relay host-connections' }
+            if (-not $sshdOk)  { $reasons += "sshd :$Port not listening" }
+            Write-Log "UNHEALTHY: $($reasons -join '; ') (consecutive $failCount/$ConsecutiveFailures)" 'WARN'
+            if ($failCount -ge $ConsecutiveFailures) {
+                Write-Log "restarting dtssh host after $failCount unhealthy checks" 'WARN'
+                Stop-HostProc $hostProc.Id
+                Start-Sleep -Seconds 3
+                $hostProc = Start-HostProc
                 $failCount = 0
-            } elseif ($conns -eq 0) {
-                $failCount++
-                Write-Log "STALE: 0 host connections (consecutive $failCount/$ConsecutiveFailures)" 'WARN'
-                if ($failCount -ge $ConsecutiveFailures) {
-                    Write-Log "restarting dtssh host after $failCount stale checks" 'WARN'
-                    Stop-HostProc $hostProc.Id
-                    Start-Sleep -Seconds 3
-                    $hostProc = Start-HostProc
-                    $failCount = 0
-                    Start-Sleep -Seconds $GracePeriodSec
-                    continue
-                }
+                Start-Sleep -Seconds $GracePeriodSec
+                continue
             }
-            # $conns -eq -1: transient/unknown — do not count.
         }
 
         Start-Sleep -Seconds $HealthCheckSec
