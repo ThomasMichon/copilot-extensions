@@ -346,10 +346,12 @@ class CodeSpaceSpawner:
             reverse += list(get_reverse() or [])
         forward = LocalForward(config, remote_port)
         local_port = await forward.establish()
+        from ..relay_state import get_live_relay_port
         relays = relay_forwards_from_ssh_config(
             config,
             reverse,
             serving_probe_for_port=self._serving_probe_for_port,
+            host_port_resolver=get_live_relay_port,
         )
         started_relays = []
         for relay in relays:

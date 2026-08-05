@@ -30,6 +30,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
+from collections.abc import Callable
 
 from .codespace_config import CodespaceSource
 from . import relay_launch
@@ -540,13 +541,16 @@ async def _start_supervised_relay(
     relay_port: int,
     *,
     context: str,
+    host_port_resolver: Callable[[], int] | None = None,
 ) -> SupervisedRelayForward | None:
     """Start the best-effort supervised credential-relay reverse-forward."""
     relay = None
     try:
         from ssh_manager import SupervisedRelayForward
 
-        relay = SupervisedRelayForward(ssh_config, relay_port)
+        relay = SupervisedRelayForward(
+            ssh_config, relay_port, host_port_resolver=host_port_resolver
+        )
         await relay.start()
         return relay
     except Exception as exc:
@@ -730,6 +734,9 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
                         connection.config,
                         relay_port,
                         context="CodeSpace connect",
+                        host_port_resolver=lambda: relay_launch.effective_relay_port(
+                            config
+                        ),
                     )
                 tracker.reached(ConnectStage.SSH_TO_TARGET, f"codespace={args.name}")
                 break
@@ -2471,6 +2478,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
                 connection.config,
                 relay_port,
                 context="CodeSpace create provisioning",
+                host_port_resolver=lambda: relay_launch.effective_relay_port(config),
             )
             await _provision_relay_helpers(manager, info.name)
             await _provision_dotfiles(manager, info.name, config)

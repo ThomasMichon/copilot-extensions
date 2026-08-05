@@ -105,8 +105,14 @@ def relay_forwards_from_ssh_config(
     *,
     serving_probe_for_port: Callable[[int], Callable[[], Awaitable[bool]] | None]
     | None = None,
+    host_port_resolver: Callable[[], int] | None = None,
 ) -> list[SupervisedRelayForward]:
-    """Build dedicated credential-relay supervisors from persisted ``-R`` specs."""
+    """Build dedicated credential-relay supervisors from persisted ``-R`` specs.
+
+    ``host_port_resolver`` (when given) is passed to each supervisor so the
+    host-side ``-R`` target follows a relay that rebinds a new port across a
+    daemon restart, while the CodeSpace-listen port stays stable (#855).
+    """
     relays: list[SupervisedRelayForward] = []
     for relay_port in relay_ports_from_reverse_forwards(reverse_forwards):
         serving_probe = (
@@ -117,6 +123,7 @@ def relay_forwards_from_ssh_config(
                 config,
                 relay_port,
                 serving_probe=serving_probe,
+                host_port_resolver=host_port_resolver,
             )
         )
     return relays
@@ -127,10 +134,12 @@ def relay_forwards_from_endpoint(
     *,
     serving_probe_for_port: Callable[[int], Callable[[], Awaitable[bool]] | None]
     | None = None,
+    host_port_resolver: Callable[[], int] | None = None,
 ) -> list[SupervisedRelayForward]:
     """Build credential-relay supervisors from an endpoint descriptor."""
     return relay_forwards_from_ssh_config(
         ssh_config_from_endpoint(endpoint),
         list(endpoint.get("reverse_forwards") or []),
         serving_probe_for_port=serving_probe_for_port,
+        host_port_resolver=host_port_resolver,
     )

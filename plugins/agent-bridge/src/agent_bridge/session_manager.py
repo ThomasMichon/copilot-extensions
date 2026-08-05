@@ -1321,10 +1321,13 @@ class SessionManager:
 
     async def _replace_relays_from_endpoint(self, session_id: str, endpoint: dict) -> None:
         """Stop any prior relay owner and start supervisors from ``endpoint``."""
+        from .relay_state import get_live_relay_port
         from .session_host.endpoints import relay_forwards_from_endpoint
 
         await self._stop_relays(session_id)
-        relays = relay_forwards_from_endpoint(endpoint)
+        relays = relay_forwards_from_endpoint(
+            endpoint, host_port_resolver=get_live_relay_port
+        )
         started = []
         for relay in relays:
             try:
