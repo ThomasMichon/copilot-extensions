@@ -1,4 +1,4 @@
-"""Tests for the in-memory satellite presence registry."""
+"""Tests for the in-memory fleet directory (and its satellite façade)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,13 @@ import pytest
 
 from agent_dispatch.satellites import (
     DEFAULT_TTL_SECONDS,
+    ROLE_COORDINATOR,
+    ROLE_PEER,
+    ROLE_SATELLITE,
+    ROLE_STANDBY,
+    FleetDirectory,
     SatelliteRegistry,
+    UnknownInstance,
     UnknownSatellite,
 )
 
@@ -31,7 +37,7 @@ def clock():
 
 @pytest.fixture
 def reg(clock):
-    return SatelliteRegistry(ttl_seconds=90.0, clock=clock)
+    return FleetDirectory(ttl_seconds=90.0, clock=clock)
 
 
 # -- register ----------------------------------------------------------------
@@ -183,3 +189,85 @@ def test_status_is_copied_not_aliased(reg):
     reg.register("book2", status=pushed)
     pushed["wt-a"]["turn_state"] = "idle"  # mutate caller's dict
     assert reg.get("book2")["status"] == {"wt-a": {"turn_state": "active"}}
+
+
+# -- fleet directory: role + epoch -------------------------------------------
+
+
+def test_register_defaults_to_peer_role(reg):
+    e = reg.register("host-a")
+    assert e["role"] == ROLE_PEER
+    assert e["epoch"] == 0
+    # machine defaults to the instance id when not given.
+    assert e["instance"] == "host-a"
+    assert e["machine"] == "host-a"
+
+
+def test_register_records_role_epoch_and_distinct_machine(reg):
+    e = reg.register(
+        "wheatley/wt-boards",
+        role=ROLE_COORDINATOR,
+        epoch=7,
+        machine="wheatley",
+    )
+    assert e["role"] == ROLE_COORDINATOR
+    assert e["epoch"] == 7
+    assert e["instance"] == "wheatley/wt-boards"
+    assert e["machine"] == "wheatley"
+
+
+def test_heartbeat_can_promote_role_and_bump_epoch(reg):
+    reg.register("host-a", role=ROLE_STANDBY, epoch=3)
+    e = reg.heartbeat("host-a", role=ROLE_COORDINATOR, epoch=4)
+    assert e["role"] == ROLE_COORDINATOR
+    assert e["epoch"] == 4
+
+
+# -- discover_peers (role filter) --------------------------------------------
+
+
+def test_discover_peers_lists_all_then_filters_by_role(reg):
+    reg.register("peer-1", role=ROLE_PEER)
+    reg.register("sat-1", role=ROLE_SATELLITE)
+    reg.register("coord-1", role=ROLE_COORDINATOR)
+    assert {e["instance"] for e in reg.discover_peers()} == {
+        "peer-1",
+        "sat-1",
+        "coord-1",
+    }
+    assert [e["instance"] for e in reg.discover_peers(role=ROLE_SATELLITE)] == [
+        "sat-1"
+    ]
+
+
+# -- discover_coordinator (highest live epoch) -------------------------------
+
+
+def test_discover_coordinator_none_when_absent(reg):
+    reg.register("peer-1", role=ROLE_PEER)
+    assert reg.discover_coordinator() is None
+
+
+def test_discover_coordinator_picks_highest_epoch(reg):
+    reg.register("coord-old", role=ROLE_COORDINATOR, epoch=2)
+    reg.register("coord-new", role=ROLE_COORDINATOR, epoch=5)
+    winner = reg.discover_coordinator()
+    assert winner["instance"] == "coord-new"
+    assert winner["epoch"] == 5
+
+
+def test_discover_coordinator_ignores_expired(reg, clock):
+    reg.register("coord-1", role=ROLE_COORDINATOR, epoch=1)
+    clock.advance(91)  # coordinator entry expires
+    assert reg.discover_coordinator() is None
+
+
+# -- back-compat aliases -----------------------------------------------------
+
+
+def test_satellite_registry_alias_is_fleet_directory():
+    assert SatelliteRegistry is FleetDirectory
+
+
+def test_unknown_satellite_alias_is_unknown_instance():
+    assert UnknownSatellite is UnknownInstance

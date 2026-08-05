@@ -23,7 +23,11 @@ from pydantic import BaseModel, Field
 from . import __version__, telemetry
 from .events import EventBus, sse_format
 from .queue import SpawnReservation, Task, TaskError, TaskQueue, worker_id_for
-from .satellites import SatelliteRegistry, UnknownSatellite
+from .satellites import (
+    ROLE_SATELLITE,
+    FleetDirectory,
+    UnknownInstance,
+)
 
 log = logging.getLogger("agent-dispatch.coordinator")
 
@@ -188,6 +192,26 @@ class SatelliteHeartbeatBody(BaseModel):
     gate_state: str | None = None
 
 
+class DirectoryRegisterBody(BaseModel):
+    instance: str
+    role: str = "peer"
+    epoch: int = 0
+    machine: str | None = None
+    worktrees: list[str] = Field(default_factory=list)
+    capabilities: list[str] = Field(default_factory=list)
+    gate_state: str = "open"
+    agent_versions: dict[str, str] = Field(default_factory=dict)
+    status: dict = Field(default_factory=dict)
+
+
+class DirectoryHeartbeatBody(BaseModel):
+    status: dict | None = None
+    worktrees: list[str] | None = None
+    gate_state: str | None = None
+    role: str | None = None
+    epoch: int | None = None
+
+
 def _task_dict(task: Task) -> dict:
     return asdict(task)
 
@@ -226,7 +250,7 @@ def create_app(
     ``X-Agent-Machine``/``X-Agent-Worktree`` headers or explicit tool args).
     """
     bus = EventBus()
-    satellites = SatelliteRegistry()
+    directory = FleetDirectory()
 
     mcp_app = None
     if enable_mcp:
@@ -269,7 +293,9 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.bus = bus
-    app.state.satellites = satellites
+    app.state.directory = directory
+    # Back-compat alias for the pre-generalization attribute name.
+    app.state.satellites = directory
 
     def _require(task: Task | None) -> Task:
         if task is None:
@@ -310,14 +336,60 @@ def create_app(
 
         return StreamingResponse(gen(), media_type="text/event-stream")
 
-    # -- satellite presence registry (outbound-only field machines) ----------
-    # A satellite reaches the facility only outbound: it registers/heartbeats
-    # here and pushes its embodiment status, so the union view can see it
-    # without ever dialing into it (there is no inbound path to a satellite).
+    # -- fleet directory (awareness plane) + satellite façade ----------------
+    # Every federating instance registers here so the fleet is enumerable from
+    # any seat (awareness plane); a coordinator advertises itself so peers
+    # *discover* it (claim plane) rather than electing one. A satellite is just
+    # a directory entry with role="satellite" -- an outbound-only field machine
+    # the facility never dials into.
+    @app.post("/directory/register")
+    def directory_register(body: DirectoryRegisterBody) -> dict:
+        return directory.register(
+            body.instance,
+            role=body.role,
+            epoch=body.epoch,
+            machine=body.machine,
+            worktrees=body.worktrees,
+            capabilities=body.capabilities,
+            gate_state=body.gate_state,
+            agent_versions=body.agent_versions,
+            status=body.status,
+        )
+
+    @app.post("/directory/{instance}/heartbeat")
+    def directory_heartbeat(instance: str, body: DirectoryHeartbeatBody) -> dict:
+        try:
+            return directory.heartbeat(
+                instance,
+                status=body.status,
+                worktrees=body.worktrees,
+                gate_state=body.gate_state,
+                role=body.role,
+                epoch=body.epoch,
+            )
+        except UnknownInstance as exc:
+            raise HTTPException(
+                status_code=404, detail="unknown instance"
+            ) from exc
+
+    @app.delete("/directory/{instance}")
+    def directory_deregister(instance: str) -> dict:
+        return {"deregistered": directory.deregister(instance)}
+
+    @app.get("/directory")
+    def directory_list(role: str | None = None) -> list[dict]:
+        return directory.discover_peers(role=role)
+
+    @app.get("/directory/coordinator")
+    def directory_coordinator() -> dict | None:
+        return directory.discover_coordinator()
+
+    # Satellite façade: same store, role pinned to "satellite".
     @app.post("/satellites/register")
     def satellite_register(body: SatelliteRegisterBody) -> dict:
-        return satellites.register(
+        return directory.register(
             body.machine,
+            role=ROLE_SATELLITE,
             worktrees=body.worktrees,
             capabilities=body.capabilities,
             gate_state=body.gate_state,
@@ -328,24 +400,24 @@ def create_app(
     @app.post("/satellites/{machine}/heartbeat")
     def satellite_heartbeat(machine: str, body: SatelliteHeartbeatBody) -> dict:
         try:
-            return satellites.heartbeat(
+            return directory.heartbeat(
                 machine,
                 status=body.status,
                 worktrees=body.worktrees,
                 gate_state=body.gate_state,
             )
-        except UnknownSatellite as exc:
+        except UnknownInstance as exc:
             # 404 tells the satellite client to re-register rather than resurrect
             # a reaped entry.
             raise HTTPException(status_code=404, detail="unknown satellite") from exc
 
     @app.delete("/satellites/{machine}")
     def satellite_deregister(machine: str) -> dict:
-        return {"deregistered": satellites.deregister(machine)}
+        return {"deregistered": directory.deregister(machine)}
 
     @app.get("/satellites")
     def satellite_list() -> list[dict]:
-        return satellites.list()
+        return directory.discover_peers(role=ROLE_SATELLITE)
 
     @app.post("/tasks")
     def create(body: CreateBody) -> dict:
