@@ -63,6 +63,38 @@ def test_daemon_supports_gates_on_version():
     assert c.daemon_supports(3) is False  # newer client feature, older daemon
 
 
+def test_assert_client_supported_ok_when_at_or_above_floor():
+    # Daemon's floor <= this client's HTTP_PROTOCOL_VERSION -> compatible.
+    c = _client({
+        "protocol_version": HTTP_PROTOCOL_VERSION,
+        "min_protocol_version": HTTP_PROTOCOL_VERSION,
+    })
+    c.assert_client_supported()  # must not raise
+
+
+def test_assert_client_supported_unversioned_daemon_is_noop():
+    # A daemon predating protocol advertisement advertises min == 0, so a
+    # too-old check can never fire against it (degrade-safe).
+    c = _client({"status": "ok"})
+    c.assert_client_supported()  # must not raise
+
+
+def test_assert_client_supported_raises_426_when_client_below_floor():
+    from agent_bridge.client import BridgeClientError
+
+    # Daemon requires a floor ABOVE this client's contract version -> the client
+    # is genuinely too old; enforce with a clear 426 instead of blind-sending.
+    floor = HTTP_PROTOCOL_VERSION + 1
+    c = _client({"protocol_version": floor, "min_protocol_version": floor})
+    try:
+        c.assert_client_supported()
+    except BridgeClientError as exc:
+        assert exc.status == 426
+        assert str(floor) in exc.detail
+    else:
+        raise AssertionError("expected BridgeClientError (client below daemon floor)")
+
+
 def test_malformed_protocol_field_degrades_off():
     c = _client({"protocol_version": "not-an-int"})
     assert c.daemon_protocol() == (UNVERSIONED, UNVERSIONED)
