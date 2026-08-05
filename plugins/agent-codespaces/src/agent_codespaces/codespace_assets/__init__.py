@@ -256,9 +256,17 @@ def build_provision_command() -> str:
         'if [ -f "$HOME/$_n" ] && '
         '! grep -q ado-auth-helper-relay "$HOME/$_n" 2>/dev/null; then '
         'cp -f "$HOME/$_n" "$HOME/.$_n-vscode"; fi; '
-        # Preserve the extension's node shebang if we can detect one
+        # Preserve the extension's node shebang only if it still resolves. A VS
+        # Code server build rotation deletes the old /vscode/bin/<hash>/node, so
+        # the backed-up shim's shebang can dangle -- and once our wrapper is
+        # installed the backup is never refreshed, so a stale shebang would
+        # otherwise persist across every redeploy and break `git push` with
+        # `bad interpreter` (dotfiles #733). Validate the interpreter exists and
+        # fall back to env-node when the pinned node is gone.
         '_sb=$(head -1 "$HOME/.$_n-vscode" 2>/dev/null || true); '
-        'case "$_sb" in "#!"*node*) : ;; *) _sb="#!/usr/bin/env node" ;; esac; '
+        '_interp=$(printf "%s" "$_sb" | sed -e "s/^#![[:space:]]*//" -e "s/[[:space:]].*$//"); '
+        'case "$_sb" in "#!"*node*) [ -x "$_interp" ] || _sb="#!/usr/bin/env node" ;; '
+        '*) _sb="#!/usr/bin/env node" ;; esac; '
         '{ printf "%s\\n" "$_sb"; tail -n +2 "$HOME/.agent-codespaces-auth-wrapper"; } '
         '> "$HOME/$_n"; '
         'chmod +x "$HOME/$_n"; '

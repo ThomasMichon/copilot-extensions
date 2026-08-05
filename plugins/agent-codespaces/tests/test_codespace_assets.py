@@ -82,6 +82,18 @@ class TestProvisionCommand:
         assert "head -1" in cmd
         assert "#!/usr/bin/env node" in cmd
 
+    def test_command_falls_back_when_pinned_node_is_stale(self) -> None:
+        """dotfiles #733: the backed-up shebang can point at a since-deleted
+        /vscode/bin/<hash>/node after a VS Code server build rotation. The
+        provision must validate the interpreter exists and fall back to
+        env-node, rather than re-applying a dangling shebang that fails with
+        `bad interpreter`."""
+        cmd = build_provision_command()
+        # Interpreter is extracted from the shebang...
+        assert '_interp=' in cmd
+        # ...and only kept when it is actually executable; otherwise env-node.
+        assert '[ -x "$_interp" ] || _sb="#!/usr/bin/env node"' in cmd
+
     def test_command_backs_up_native_helper_once(self) -> None:
         cmd = build_provision_command()
         # Only back up when the existing helper isn't already ours
