@@ -426,8 +426,9 @@ function Get-RunningProcess {
         }
     }
     # Last resort: find by port binding (catches orphaned processes
-    # whose PID file was lost or exe path changed during update)
-    $conn = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue |
+    # whose PID file was lost or exe path changed during update). Resolve the
+    # live port from active.json so a dynamic-port daemon is found too (#856).
+    $conn = Get-NetTCPConnection -LocalPort (Get-ActiveEndpoint).Port -ErrorAction SilentlyContinue |
         Where-Object { $_.State -eq 'Listen' } |
         Select-Object -First 1
     if ($conn) {
@@ -437,11 +438,41 @@ function Get-RunningProcess {
     return $null
 }
 
+function Get-ActiveEndpoint {
+    <# Resolve the daemon's LIVE endpoint from the routing table
+       (~/.agent-bridge/active.json). Post-#694 a primary daemon binds an
+       OS-assigned ephemeral port and advertises the *actual* bound bind+port
+       there -- the `agent-bridge` CLI client already resolves it the same way
+       (BridgeClient.from_config). The installer's health probes + port-based
+       process finder MUST do likewise: otherwise a dynamic-port daemon looks
+       dead on the pinned $Port (9280), and a routine version-bump redeploy
+       health-gate false-fails a perfectly healthy daemon and self-inflicts an
+       outage (dotfiles #856). Falls back to the pinned $Port when there is no
+       routing table yet (fresh install) or the deployment pins a fixed port. #>
+    $bind = '127.0.0.1'
+    $resolved = $Port
+    $activeJson = Join-Path $InstallDir 'active.json'
+    if (Test-Path $activeJson) {
+        try {
+            $aj = Get-Content $activeJson -Raw -ErrorAction Stop | ConvertFrom-Json
+            $p = [int]($aj.active.port)
+            if ($p -gt 0) {
+                $resolved = $p
+                $b = [string]$aj.active.bind
+                if (-not [string]::IsNullOrWhiteSpace($b) -and $b -ne '0.0.0.0') { $bind = $b }
+            }
+        } catch { }
+    }
+    return @{ Bind = $bind; Port = $resolved }
+}
+
 function Test-HealthOnce {
     # Single-shot health probe (no retry/sleep). Used by readiness loops that do
     # their own pacing, so the loop interval is not multiplied by an inner retry.
+    # Resolves the live endpoint from active.json (dynamic-port aware, #856).
+    $ep = Get-ActiveEndpoint
     try {
-        Invoke-RestMethod -Uri "http://127.0.0.1:${Port}/health" `
+        Invoke-RestMethod -Uri "http://$($ep.Bind):$($ep.Port)/health" `
             -TimeoutSec 2 -ErrorAction Stop | Out-Null
         return $true
     } catch {
@@ -1091,7 +1122,8 @@ function Invoke-Install {
     Write-Host "  Install dir: $InstallDir"
     Write-Host "  Binstub:     $Binstub"
     Write-Host "  Config:      agent-bridge config show"
-    Write-Host "  API:         http://127.0.0.1:$Port"
+    $__ep = Get-ActiveEndpoint
+    Write-Host "  API:         http://$($__ep.Bind):$($__ep.Port)"
 
     # Start service and verify health
     Write-Host ''
@@ -1199,7 +1231,7 @@ function Invoke-Start {
             if (Test-HealthOnce) {
                 $rp = Get-RunningProcess
                 $pidTxt = if ($rp) { "pid=$($rp.Id), " } else { '' }
-                Write-Ok ("agent-bridge started ({0}port={1}, {2})" -f $pidTxt, $Port, $mode)
+                Write-Ok ("agent-bridge started ({0}port={1}, {2})" -f $pidTxt, (Get-ActiveEndpoint).Port, $mode)
                 return
             }
         }
@@ -1261,7 +1293,7 @@ Set-Content -Path '$($PidFile -replace "'", "''")' -Value `$p.Id
             if (Test-HealthOnce) {
                 $rp = Get-RunningProcess
                 $pidTxt = if ($rp) { "pid=$($rp.Id), " } else { '' }
-                Write-Ok ("agent-bridge started ({0}port={1})" -f $pidTxt, $Port)
+                Write-Ok ("agent-bridge started ({0}port={1})" -f $pidTxt, (Get-ActiveEndpoint).Port)
                 return
             }
         }

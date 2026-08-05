@@ -172,10 +172,41 @@ _get_pid() {
     return 1
 }
 
+_active_port() {
+    # Resolve the daemon's LIVE port from the routing table ($INSTALL_DIR/active.json).
+    # Post-#694 a primary daemon binds an OS-assigned ephemeral port and advertises the
+    # actual bound port there (the `agent-bridge` CLI client already resolves it the same
+    # way). Health probes MUST use it, or a dynamic-port daemon looks dead on the pinned
+    # $PORT and a routine redeploy health-gate false-fails a healthy daemon and can
+    # self-inflict an outage (dotfiles #856). Echoes the live port, or nothing when there
+    # is no routing table (fresh install / pinned-port deployment) so callers fall back to $PORT.
+    local aj="$INSTALL_DIR/active.json"
+    [[ -f "$aj" ]] || return 1
+    local py="$VENV_DIR/bin/python"
+    [[ -x "$py" ]] || py="$(command -v python3 || command -v python || true)"
+    [[ -n "$py" ]] || return 1
+    "$py" - "$aj" <<'PYEOF' 2>/dev/null
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+    p = int((d.get("active") or {}).get("port") or 0)
+except Exception:
+    p = 0
+if p > 0:
+    print(p)
+else:
+    sys.exit(1)
+PYEOF
+}
+
 _health_check() {
-    local retries=5
+    local retries=5 port
     for i in $(seq 1 $retries); do
-        if curl -sf "http://127.0.0.1:${PORT}/health" > /dev/null 2>&1; then
+        # Re-resolve each iteration: during a stop-restart active.json initially
+        # advertises the old (now-stopped) daemon until the new one publishes.
+        port="$(_active_port || true)"
+        [[ -n "$port" ]] || port="$PORT"
+        if curl -sf "http://127.0.0.1:${port}/health" > /dev/null 2>&1; then
             return 0
         fi
         sleep 2
