@@ -101,3 +101,85 @@ def test_lease_survives_within_ttl(leases):
     active = lease_mod.list_leases()
     assert len(active) == 1
     assert active[0].effort == "effort-a"
+
+
+# -- Exclusive worktree-keyed claims (#897) -----------------------------------
+
+
+def test_claim_records_worktree_owner(leases):
+    cl = lease_mod.claim("cs-one", "/wt/a", active={"/wt/a"})
+    assert cl.codespace == "cs-one"
+    assert cl.worktree == "/wt/a"
+    assert cl.effort == "/wt/a"  # owner mirrored into effort for back-compat reads
+
+
+def test_claim_same_owner_idempotent(leases):
+    first = lease_mod.claim("cs-one", "/wt/a", active={"/wt/a"})
+    second = lease_mod.claim("cs-one", "/wt/a", active={"/wt/a"})
+    assert second.acquired_at == first.acquired_at  # preserved on refresh
+
+
+def test_claim_live_different_owner_bounces(leases):
+    lease_mod.claim("cs-one", "/wt/a", active={"/wt/a", "/wt/b"})
+    with pytest.raises(lease_mod.ClaimConflict) as ei:
+        lease_mod.claim("cs-one", "/wt/b", active={"/wt/a", "/wt/b"})
+    assert ei.value.holder == "/wt/a"
+    assert ei.value.codespace == "cs-one"
+
+
+def test_claim_force_takes_over_live_owner(leases):
+    lease_mod.claim("cs-one", "/wt/a", active={"/wt/a", "/wt/b"})
+    cl = lease_mod.claim("cs-one", "/wt/b", force=True, active={"/wt/a", "/wt/b"})
+    assert cl.worktree == "/wt/b"
+
+
+def test_claim_auto_releases_dead_owner(leases):
+    # /wt/a holds it but is absent from the active set and its path doesn't
+    # exist -> positively dead -> /wt/b takes over WITHOUT --force.
+    lease_mod.claim("cs-one", "/wt/a", active={"/wt/a"})
+    cl = lease_mod.claim("cs-one", "/wt/b", active={"/wt/b"})
+    assert cl.worktree == "/wt/b"
+
+
+def test_claim_live_by_path_existence_bounces(leases, tmp_path):
+    # active set unavailable (None): a holder whose path EXISTS is treated live
+    # (path-existence fallback), so a different owner is bounced.
+    wt = tmp_path / "wt-a"
+    wt.mkdir()
+    lease_mod.claim("cs-one", str(wt), active=None)
+    with pytest.raises(lease_mod.ClaimConflict):
+        lease_mod.claim("cs-one", str(tmp_path / "wt-b"), active=None)
+
+
+def test_release_claim_is_owner_scoped(leases):
+    lease_mod.claim("cs-one", "/wt/a", active={"/wt/a"})
+    assert lease_mod.release_claim("cs-one", "/wt/b") is False  # not the owner
+    assert lease_mod.release_claim("cs-one", "/wt/a") is True
+    assert lease_mod.get_lease("cs-one") is None
+
+
+def test_release_worktree_claims_releases_all_for_owner(leases):
+    lease_mod.claim("cs-one", "/wt/a", active={"/wt/a"})
+    lease_mod.claim("cs-two", "/wt/a", active={"/wt/a"})
+    lease_mod.claim("cs-three", "/wt/b", active={"/wt/a", "/wt/b"})
+    released = lease_mod.release_worktree_claims("/wt/a")
+    assert set(released) == {"cs-one", "cs-two"}
+    assert lease_mod.get_lease("cs-three").worktree == "/wt/b"
+
+
+def test_sweep_dead_releases_gone_worktree(leases):
+    lease_mod.claim("cs-one", "/wt/gone", active={"/wt/gone"})
+    released = lease_mod.sweep_dead(active=set())  # /wt/gone no longer active
+    assert released == ["cs-one"]
+    assert lease_mod.get_lease("cs-one") is None
+
+
+def test_sweep_dead_keeps_live_and_legacy(leases, tmp_path):
+    wt = tmp_path / "wt-live"
+    wt.mkdir()
+    lease_mod.claim("cs-live", str(wt), active=None)  # path exists -> live
+    lease_mod.borrow("effort-x", "cs-legacy")  # advisory lease (no worktree)
+    released = lease_mod.sweep_dead(active=set())
+    assert released == []
+    assert lease_mod.get_lease("cs-live") is not None
+    assert lease_mod.get_lease("cs-legacy") is not None

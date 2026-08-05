@@ -156,10 +156,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     ssh_parser.add_argument(
         "--effort", dest="effort", default=None,
-        help="Effort/worktree borrowing this CodeSpace. When set, records an "
-             "advisory lease (check-out) and refreshes its heartbeat on connect. "
-             "A conflicting live lease warns but does not block (use `borrow "
-             "--force` to take over explicitly).",
+        help="Explicit owner for this CodeSpace's EXCLUSIVE claim (#897). When "
+             "omitted, the owner is auto-resolved to the calling worktree. A "
+             "dispatched ssh (whose cwd is the daemon's, not the caller's "
+             "worktree) passes the caller's worktree here. A CodeSpace is "
+             "fronted by one bridge, so if a different LIVE worktree already "
+             "holds the claim the connect is bounced (exit 75) unless --force; "
+             "a claim held by a gone worktree is auto-released.",
     )
     ssh_parser.add_argument(
         "--stage-plugin", dest="stage_plugins", action="append", default=[],
@@ -649,20 +652,53 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     # Reusing a box (an explicit ssh connect) clears any prune-lifecycle marker
     # -- it is active work again, not a recovered/prunable reclaim candidate.
     _clear_status_quietly(args.name)
-    # Advisory check-out: record/refresh the borrow so a parallel same-machine
-    # agent doesn't dispatch to this CodeSpace concurrently. Non-blocking -- a
-    # conflicting live lease warns but still connects (use `borrow --force` to
-    # take over explicitly). ``ssh --force`` (SSH-lock takeover) also forces the
-    # lease takeover for consistency.
-    effort = getattr(args, "effort", None)
-    if effort:
-        from .lease import borrow
+    # Exclusive, worktree-keyed claim (#897). A CodeSpace is fronted by exactly
+    # one agent-bridge Session Host, so only one worktree may control it at a
+    # time. Resolve the owning worktree -- an explicit ``--effort`` (used by a
+    # dispatched ``ssh`` whose cwd is the daemon's, not the caller's worktree),
+    # else the calling worktree via agent-worktrees -- then acquire the claim,
+    # sweeping existing claims and BOUNCING a live different owner (unless
+    # ``--force``). A claim held by a gone/finalized worktree is auto-released and
+    # taken over. Degrade-safe: when no worktree resolves (not a worktree,
+    # agent-worktrees absent), we skip claiming and connect exactly as before.
+    from .lease import (
+        ClaimConflict,
+        active_worktree_ids,
+        claim,
+        resolve_owner_worktree,
+    )
 
+    # Escape hatch: an operator (or a unit test) can disable exclusive-control
+    # enforcement entirely. --force remains the per-call takeover.
+    if os.environ.get("AGENT_CODESPACES_DISABLE_CLAIM"):
+        claim_owner = None
+    else:
+        claim_owner = resolve_owner_worktree(
+            explicit=getattr(args, "effort", None),
+            session_id=getattr(args, "session_id", None),
+        )
+    if claim_owner:
         try:
-            borrow(effort, args.name, force=getattr(args, "force", False))
+            claim(
+                args.name, claim_owner,
+                force=getattr(args, "force", False),
+                active=active_worktree_ids(),
+            )
+        except ClaimConflict as exc:
+            print(
+                f"[BUSY] {exc}\n"
+                f"       A CodeSpace is fronted by a single bridge, so a second "
+                f"worktree cannot drive it concurrently. Options:\n"
+                f"       - let the owner finish, or dispatch to a different "
+                f"CodeSpace; or\n"
+                f"       - take over with --force (evicts the current owner's "
+                f"claim -- its in-flight work may be disrupted).",
+                file=sys.stderr,
+            )
+            return _BUSY_EXIT
         except RuntimeError as exc:
-            print(f"[WARN] CodeSpace lease conflict (continuing): {exc}",
-                  file=sys.stderr)
+            # Never let a claim-bookkeeping error block a connect.
+            print(f"[WARN] CodeSpace claim skipped: {exc}", file=sys.stderr)
 
     # Credential relay state. The relay reverse-forward now has its own
     # supervised ``ssh -N -R`` channel, so it is not piggybacked on the

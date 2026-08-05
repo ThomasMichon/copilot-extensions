@@ -317,3 +317,74 @@ class TestAuthCacheWarmup:
         assert "disconnect" in calls
         assert not list(locks.glob("*.lock"))
         assert "exceeded 0.05s" in capsys.readouterr().err
+
+
+class TestSshClaimEnforcement:
+    """The #897 exclusive worktree-keyed claim gates the ssh connect path."""
+
+    def test_live_claim_conflict_bounces(self, monkeypatch, capsys):
+        # Opt back into claim enforcement (conftest disables it by default) and
+        # mock the lease seam so no real subprocess/host-state I/O happens.
+        monkeypatch.delenv("AGENT_CODESPACES_DISABLE_CLAIM", raising=False)
+        monkeypatch.setattr(
+            "agent_codespaces.__main__.load_merged_config",
+            lambda: SimpleNamespace(credentials=SimpleNamespace(relay_port=9857)),
+        )
+        monkeypatch.setattr(
+            "agent_codespaces.lifecycle.account_for_codespace", lambda name: None,
+        )
+        from agent_codespaces import lease as lease_mod
+
+        monkeypatch.setattr(
+            lease_mod, "resolve_owner_worktree",
+            lambda explicit=None, session_id=None: "/wt/mine",
+        )
+        monkeypatch.setattr(
+            lease_mod, "active_worktree_ids", lambda: {"/wt/other", "/wt/mine"},
+        )
+
+        def _boom(cs, owner, **kw):
+            raise lease_mod.ClaimConflict(cs, "/wt/other", "host-x", 4321)
+
+        monkeypatch.setattr(lease_mod, "claim", _boom)
+
+        rc = main(["ssh", "cs-claimed", "--no-relay"])
+        assert rc == _BUSY_EXIT
+        err = capsys.readouterr().err
+        assert "BUSY" in err
+        assert "/wt/other" in err  # names the current owner
+
+    def test_claim_acquired_for_resolved_owner(self, monkeypatch):
+        # When the CodeSpace is free the claim is acquired for the resolved owner
+        # and the connect proceeds (we short-circuit right after via a sentinel).
+        monkeypatch.delenv("AGENT_CODESPACES_DISABLE_CLAIM", raising=False)
+        monkeypatch.setattr(
+            "agent_codespaces.__main__.load_merged_config",
+            lambda: SimpleNamespace(credentials=SimpleNamespace(relay_port=9857)),
+        )
+        monkeypatch.setattr(
+            "agent_codespaces.lifecycle.account_for_codespace", lambda name: None,
+        )
+        from agent_codespaces import lease as lease_mod
+
+        monkeypatch.setattr(
+            lease_mod, "resolve_owner_worktree",
+            lambda explicit=None, session_id=None: "/wt/mine",
+        )
+        monkeypatch.setattr(lease_mod, "active_worktree_ids", lambda: {"/wt/mine"})
+
+        seen = {}
+
+        class _Stop(Exception):
+            pass
+
+        def _claim(cs, owner, **kw):
+            seen["cs"] = cs
+            seen["owner"] = owner
+            raise _Stop  # short-circuit before the real connect
+
+        monkeypatch.setattr(lease_mod, "claim", _claim)
+
+        with pytest.raises(_Stop):
+            main(["ssh", "cs-free", "--no-relay"])
+        assert seen == {"cs": "cs-free", "owner": "/wt/mine"}
