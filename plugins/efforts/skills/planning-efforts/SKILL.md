@@ -63,6 +63,31 @@ Efforts and issues go hand in hand: an effort opens an umbrella issue and
 breaks into sub-issues. **Only issues in *this* repo may directly link effort
 files in this repo.**
 
+## First: resolve where efforts live (the state root)
+
+Do **not** assume efforts live in the launch repo. Before creating or resuming
+an effort, resolve the **state root** — the checkout where personal state
+(efforts/logs/visions) belongs on this machine:
+
+```
+agent-worktrees state-root        # prints the state-root path (exit 0)
+```
+
+- **Exit 0 + a path** → that checkout is the effort home; the `efforts/` tree
+  (and everything below) lives there. For a normal repo this is just the current
+  repo (unchanged behavior). For a **stateless harness** it is the bound
+  **knowledge repo** — so efforts land there, never in the harness tree.
+- **Non-zero (unbound)** → the launch repo is a stateless harness with no
+  knowledge repo bound. **Stop** — do not write the effort into the harness
+  checkout. Bind a knowledge repo first (set `knowledge_repo:` in the
+  machine-local config / run the harness setup), then retry.
+
+`agent-worktrees state-root --json` gives the full resolution (`source`,
+`repo`, `stateless`, `bound`) if you need to explain where it landed. All
+`efforts/` paths in the steps below are **relative to the resolved state root**,
+not the launch repo. (When agent-worktrees is not installed, there is no
+stateless split — fall back to the launch repo as before.)
+
 ## Start an effort
 
 1. **Find the seed.** An effort starts pointing at something that already

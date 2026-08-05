@@ -88,6 +88,18 @@ fields, unsupported schema versions/placeholders, malformed YAML, invalid
 timezones, and paths that are absolute or escape the repository fail with an
 explicit error. Do not silently fall back when validation fails.
 
+> **Stateless-harness binding.** When sessions are driven from a **stateless
+> harness** (a shareable control plane that holds no personal state), logs must
+> **not** land in the harness checkout. agent-logger already supports a
+> configurable root: set the **user-level** `log.root` (in
+> `~/.<agent-logger>/config.yaml`, which may be absolute) to the bound
+> **knowledge** repo's logs directory — resolvable on this machine with
+> `agent-worktrees state-root` (append `/logs`). The harness setup flow writes
+> this per machine; the repo-local `.agent-logger.yaml` `root` stays relative
+> (it can only point inside the launch repo, so it cannot cross into the
+> knowledge repo). For a non-stateless repo, the default `repo_root/logs` is
+> unchanged.
+
 ### 2. Build a one-session manifest
 
 Write a manifest JSON to a temp file using the prep output -- shape (full

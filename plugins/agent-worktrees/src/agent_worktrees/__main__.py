@@ -69,6 +69,7 @@ from . import config as cfg
 from . import finalize as fin
 from . import installer as inst
 from . import services as svc
+from . import state_root as state_root_mod
 from . import validate as val
 from .picker import ItemKind, MenuItem, pick
 from .update_stage import cmd_stage_update, discover_plugin_dir
@@ -9885,6 +9886,53 @@ def _related_lookup_anchor(
     return anchor, False
 
 
+def cmd_state_root_dispatch(argv: list[str]) -> int:
+    """Resolve the state root (where efforts/visions/logs should be written).
+
+    The seam behind the **stateless harness** split: a stateless harness routes
+    personal-state writes to its bound knowledge repo, while a normal repo is its
+    own state home. Consumed by the ``efforts``/``visions``/``agent-logger``
+    plugin skills so they never hardcode "the launch repo".
+
+    Exit codes: ``0`` when a root is resolved, ``3`` when it is unbound /
+    unresolvable (callers must NOT write on non-zero).
+    """
+    p = argparse.ArgumentParser(
+        prog="agent-worktrees state-root",
+        description=(
+            "Resolve the repo checkout where personal state (efforts, visions, "
+            "logs) should be written for the current launch context."
+        ),
+    )
+    p.add_argument(
+        "--json", action="store_true",
+        help="Emit the full resolution as JSON (state_root/source/repo/"
+             "stateless/bound/error) instead of the bare path.",
+    )
+    p.add_argument(
+        "--repo", default=None, metavar="NAME",
+        help="Explicit override: resolve this registered repo's checkout "
+             "(target the harness itself or a product repo, ignoring the "
+             "stateless binding).",
+    )
+    try:
+        args = p.parse_args(argv)
+    except SystemExit as exc:
+        return int(exc.code or 0)
+
+    config = cfg.load_config()
+    res = state_root_mod.resolve_state_root(config, repo_override=args.repo)
+
+    if args.json:
+        print(json.dumps(res.as_dict(), indent=2))
+    else:
+        if res.path:
+            print(res.path)
+        if res.error:
+            print(res.error, file=sys.stderr)
+    return 0 if res.path else 3
+
+
 def cmd_related_dispatch(argv: list[str]) -> int:
     """Route related subcommands (per-project related-repos index)."""
     from . import related, repos
@@ -11213,6 +11261,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     # related -- dispatched pre-argparse (see cmd_related_dispatch)
     sub.add_parser("related", help="Per-project related repos (run 'related' for usage)")
+
+    # state-root -- dispatched pre-argparse (see cmd_state_root_dispatch)
+    sp = sub.add_parser(
+        "state-root",
+        help="Resolve where efforts/visions/logs are written (stateless-harness "
+             "aware; --json / --repo NAME)")
+    sp.add_argument("--json", action="store_true",
+                    help="Emit the full resolution as JSON")
+    sp.add_argument("--repo", default=None, metavar="NAME",
+                    help="Explicit override: resolve this registered repo")
 
     # git -- dispatched pre-argparse (see cmd_git_dispatch)
     sub.add_parser("git", help="Git collaboration primitives (run 'git' for usage)")
@@ -13765,6 +13823,15 @@ def main(argv: list[str] | None = None) -> int:
     if args_list[0] == "related":
         try:
             return cmd_related_dispatch(args_list[1:])
+        except KeyboardInterrupt:
+            print("\nCancelled.")
+            return 130
+
+    # state-root (resolve where efforts/visions/logs are written) -- manual
+    # dispatch (needs project context; see cmd_state_root_dispatch).
+    if args_list[0] == "state-root":
+        try:
+            return cmd_state_root_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130
