@@ -99,7 +99,7 @@ def _session_hook_problem(plugin: Path) -> str | None:
     if not session:
         return f"hooks file '{hooks_ref}' has no sessionStart entry"
     if "bootstrap-check" not in json.dumps(session):
-        return f"sessionStart hook does not run a bootstrap-check runtime reconcile"
+        return "sessionStart hook does not run a bootstrap-check runtime reconcile"
     return None
 
 
