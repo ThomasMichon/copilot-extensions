@@ -9,7 +9,10 @@ ConnectionManager, including a CodeSpace's ``gh cs ssh`` ``ProxyCommand`` via
 connection's lifetime.
 
 The agent-bridge detached Session-Host path uses this seam to keep credential
-relay lifetime independent from frontend reattach.
+relay lifetime independent from frontend reattach. An optional
+``host_port_resolver`` lets the host-side target of the ``-R`` follow a relay
+that rebinds a new port across a daemon restart, while the CodeSpace-listen
+port stays stable (dotfiles #855).
 """
 
 from __future__ import annotations
@@ -52,7 +55,11 @@ class SupervisedRelayForward:
     backoff.
 
     The remote bind is loopback-to-loopback:
-    ``<relay_port>:127.0.0.1:<relay_port>``. ``ExitOnForwardFailure`` is
+    ``<relay_port>:127.0.0.1:<host_port>`` -- symmetric by default, but when a
+    ``host_port_resolver`` is supplied the host-side target is re-resolved live
+    on each (re-)establish so it follows a relay that rebinds after a daemon
+    restart, while the CodeSpace-listen ``relay_port`` stays stable (#855).
+    ``ExitOnForwardFailure`` is
     deliberately omitted so a transient remote bind collision does not make ssh
     exit. Because OpenSSH can then leave the process alive after a failed
     remote ``-R`` bind, ``establish()`` watches stderr during the readiness
@@ -69,9 +76,12 @@ class SupervisedRelayForward:
         backoff_max: float = 30.0,
         ready_timeout: float = 40.0,
         serving_probe: Callable[[], Awaitable[bool]] | None = None,
+        host_port_resolver: Callable[[], int] | None = None,
     ) -> None:
         self._config = config
         self._relay_port = int(relay_port)
+        self._host_port_resolver = host_port_resolver
+        self._established_host_port: int | None = None
         self._monitor_interval = float(monitor_interval)
         self._backoff_base = float(backoff_base)
         self._backoff_max = float(backoff_max)
@@ -84,6 +94,24 @@ class SupervisedRelayForward:
     def is_alive(self) -> bool:
         """Whether the supervised ``ssh -N -R`` process is currently running."""
         return self._proc is not None and self._proc.returncode is None
+
+    def _resolve_host_port(self) -> int:
+        """Resolve the host-side ``-R`` target port.
+
+        Defaults to the (stable) CodeSpace-listen ``relay_port`` so behavior is
+        unchanged without a resolver. When a ``host_port_resolver`` is supplied,
+        its positive result wins -- so the host target follows a relay that
+        rebinds a new port after a daemon restart while the listen port (which
+        the agent's ``LC_GIT_CREDENTIAL_RELAY`` is frozen to) stays put (#855).
+        """
+        if self._host_port_resolver is not None:
+            try:
+                resolved = int(self._host_port_resolver() or 0)
+            except Exception:  # noqa: BLE001 - resolver is best-effort
+                resolved = 0
+            if resolved > 0:
+                return resolved
+        return self._relay_port
 
     async def establish(self) -> None:
         """Spawn the reverse-forward process and wait for it to stay alive.
@@ -101,7 +129,8 @@ class SupervisedRelayForward:
         if self._proc is not None:
             self._proc = None
 
-        spec = f"{self._relay_port}:127.0.0.1:{self._relay_port}"
+        host_port = self._resolve_host_port()
+        spec = f"{self._relay_port}:127.0.0.1:{host_port}"
         last_err = ""
         for attempt in range(1, _ESTABLISH_ATTEMPTS + 1):
             args = build_forward_ssh_args(
@@ -134,10 +163,13 @@ class SupervisedRelayForward:
                     self._proc = None
                 raise
             if settled.ready:
+                self._established_host_port = host_port
                 log.info(
-                    "Credential relay reverse-forward up on %s:%d",
+                    "Credential relay reverse-forward up on %s "
+                    "(-R %d:127.0.0.1:%d)",
                     self._config.ssh_target,
                     self._relay_port,
+                    host_port,
                 )
                 return
 
@@ -208,6 +240,13 @@ class SupervisedRelayForward:
     async def _restart_reason(self) -> str | None:
         if not self.is_alive:
             return "process exited"
+        if self._established_host_port is not None:
+            current = self._resolve_host_port()
+            if current != self._established_host_port:
+                return (
+                    "host relay port changed "
+                    f"({self._established_host_port} -> {current})"
+                )
         if self._serving_probe is None:
             return None
         try:

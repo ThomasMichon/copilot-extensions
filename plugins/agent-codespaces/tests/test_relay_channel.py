@@ -348,3 +348,98 @@ async def test_live_process_with_remote_forward_failure_is_not_ready(
     assert settled.remote_forward_failed is True
     assert "Remote port forwarding failed" in settled.stderr
     assert proc.returncode is None
+
+
+@pytest.mark.asyncio
+async def test_asymmetric_host_port_from_resolver(monkeypatch) -> None:
+    """A host_port_resolver re-targets the -R host side while the CodeSpace
+    listen port stays stable (dotfiles #855)."""
+    calls: list[tuple[tuple[str, ...], dict]] = []
+    proc = _FakeProcess()
+
+    async def fake_create(*args, **kwargs):
+        calls.append((args, kwargs))
+        return proc
+
+    monkeypatch.setattr(
+        "ssh_manager.relay_channel.asyncio.create_subprocess_exec",
+        fake_create,
+    )
+    relay = SupervisedRelayForward(
+        _config(), 51234, ready_timeout=0.01, host_port_resolver=lambda: 60437,
+    )
+
+    await relay.establish()
+    await relay.stop()
+
+    argv = list(calls[0][0])
+    assert "51234:127.0.0.1:60437" in argv
+    assert "51234:127.0.0.1:51234" not in argv
+
+
+@pytest.mark.asyncio
+async def test_resolver_falsy_falls_back_to_listen_port(monkeypatch) -> None:
+    """A resolver that yields 0/None (relay not up yet) falls back to the
+    symmetric listen port -- unchanged legacy behavior."""
+    calls: list[tuple[tuple[str, ...], dict]] = []
+    proc = _FakeProcess()
+
+    async def fake_create(*args, **kwargs):
+        calls.append((args, kwargs))
+        return proc
+
+    monkeypatch.setattr(
+        "ssh_manager.relay_channel.asyncio.create_subprocess_exec",
+        fake_create,
+    )
+    relay = SupervisedRelayForward(
+        _config(), 51234, ready_timeout=0.01, host_port_resolver=lambda: 0,
+    )
+
+    await relay.establish()
+    await relay.stop()
+
+    assert "51234:127.0.0.1:51234" in list(calls[0][0])
+
+
+@pytest.mark.asyncio
+async def test_reestablishes_on_host_port_change(monkeypatch) -> None:
+    """When the resolved host relay port changes (a daemon restart rebinds the
+    relay), the monitor's restart path re-establishes the -R against the new
+    host port while keeping the listen port stable (dotfiles #855)."""
+    calls: list[tuple[str, ...]] = []
+    live_port = {"v": 51234}
+
+    async def fake_create(*args, **_kwargs):
+        calls.append(args)
+        return _FakeProcess()
+
+    monkeypatch.setattr(
+        "ssh_manager.relay_channel.asyncio.create_subprocess_exec",
+        fake_create,
+    )
+    relay = SupervisedRelayForward(
+        _config(), 51234, ready_timeout=0.01,
+        host_port_resolver=lambda: live_port["v"],
+    )
+
+    # First establish: host == listen == 51234.
+    await relay.establish()
+    assert "51234:127.0.0.1:51234" in " ".join(calls[0])
+    assert relay._established_host_port == 51234
+    # No restart while the resolved host port is unchanged.
+    assert await relay._restart_reason() is None
+
+    # The daemon restarts and the host credential relay rebinds a new port.
+    live_port["v"] = 60437
+    reason = await relay._restart_reason()
+    assert reason is not None and "host relay port changed" in reason
+
+    # Re-establish targets the new host port; the listen port stays stable.
+    await relay._restart_with_backoff(reason)
+    assert "51234:127.0.0.1:60437" in " ".join(calls[-1])
+    assert relay._established_host_port == 60437
+    # Converged: no further restart is requested.
+    assert await relay._restart_reason() is None
+
+    await relay.stop()
