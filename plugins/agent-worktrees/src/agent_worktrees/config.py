@@ -241,6 +241,18 @@ class RepoConfig:
     so agent-bridge can launch an ACP agent against the anchor via a custom
     ``launch`` command. Configured entirely from the user-local
     ``~/.<project>/config.yaml`` overlay -- nothing is written into the repo."""
+    stateless: bool = False
+    """When true, this repo is a **stateless harness**: it holds the shareable
+    control-plane intelligence (instructions, config, skills, sub-agents) but no
+    personal state (efforts, logs, visions, artifacts). Personal state is routed
+    to a separately-bound **knowledge repo** (top-level ``knowledge_repo`` in the
+    machine-local config; see :attr:`Config.knowledge_repo`). Consumed by the
+    state-root resolver (``agent-worktrees state-root``) so effort/vision/log
+    plugins default their writes into the bound knowledge checkout instead of the
+    harness tree. Declared in the repo's own committed
+    ``<anchor>/.agent-worktrees/config.yaml`` (``stateless: true``) -- it is a
+    property of the harness, not of a machine. See the ``stateless-harness``
+    vision / ``citadel-harness-split`` effort."""
 
 
 @dataclass(frozen=True)
@@ -252,6 +264,16 @@ class Config:
     platform: str
     repo_name: str = ""
     repos: dict[str, RepoConfig] = field(default_factory=dict)
+    knowledge_repo: str = ""
+    """Name of the **knowledge repo** this machine routes personal state to when
+    the launch repo is a **stateless harness** (see :attr:`RepoConfig.stateless`).
+    Machine-local only -- carried in ``~/.<project>/config.yaml`` (top-level
+    ``knowledge_repo:``), never committed into the shareable harness tree, so a
+    fork or a different operator changes only their own machine-local pointer.
+    Name-only: the checkout path is resolved via the repos registry
+    (``agent-worktrees repos find <name>``). Consumed by the state-root resolver.
+    Empty means unbound -- the resolver then refuses to silently write state into
+    the harness. See the ``stateless-harness`` vision."""
     copilot_profiles: list[CopilotProfile] = field(default_factory=list)
     headless: bool = False
     """When true, the project is driven via CLI only -- its bare binstub
@@ -710,6 +732,11 @@ def load_config(path: Path | None = None) -> Config:
         platform=platform,
         repo_name=repo_name,
         repos=repos,
+        knowledge_repo=(
+            machine_raw.get("knowledge_repo")
+            or global_raw.get("knowledge_repo")
+            or ""
+        ),
         copilot_profiles=_parse_profiles(profiles_raw or []),
         headless=bool(
             machine_raw.get("headless", global_raw.get("headless", False))
@@ -921,6 +948,7 @@ def _build_repo_config(
         post_install_hook=post_install_hook,
         pr=_parse_pr(data.get("pr")),
         base_repo=bool(data.get("base_repo", False)),
+        stateless=bool(data.get("stateless", False)),
     )
 
 

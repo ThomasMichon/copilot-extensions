@@ -142,6 +142,29 @@ and never let the private elaboration silently contradict the public intent — 
 the *shared* intent changes, revise the **public** vision (the canonical source),
 then re-elaborate the private one.
 
+### Stateless harness: harness-build-out vs. personal visions
+
+When the launch repo is a **stateless harness** (a shareable control plane that
+holds no personal state), visions split by subject — resolve the **state root**
+first:
+
+```
+agent-worktrees state-root --json    # source/repo/stateless/bound
+```
+
+- A vision **about the harness's own build-out** (how the shareable harness
+  should evolve) *is* harness intelligence — keep it **in the harness tree**
+  (author it there; it ships with the harness). Do **not** route it to the
+  knowledge repo.
+- A vision about a **personal or product subject** is personal state — author it
+  under the resolved **state root** (the bound knowledge repo), exactly like an
+  effort. If the state root is **unbound** (non-zero exit) and the vision is
+  personal, **stop** and bind a knowledge repo first rather than writing it into
+  the harness.
+
+For a non-stateless repo this distinction doesn't arise — visions live here as
+usual.
+
 ## Adding, changing, and removing (positive vs. negative intent)
 
 A vision is **open-world**: authoritative about what it *states*, and
