@@ -20,9 +20,15 @@ import json
 import logging
 from typing import Protocol, runtime_checkable
 
+from . import osutil
 from . import protocol as proto
 
 log = logging.getLogger("agent-bridge.session-host")
+
+# Indirection seam for the in-host child reap's tree-kill (dotfiles #911). Bound
+# to osutil.kill_pid; kept as a module attribute so tests can stub *only* the
+# in-host reap without touching the session-manager's own osutil.kill_pid reap.
+_tree_kill = osutil.kill_pid
 
 
 @runtime_checkable
@@ -354,7 +360,20 @@ class SessionHost:
         if rc is not None:
             return
         proc = self._child
-        # Best-effort: prefer the real Process tree-kill if available.
+        # Tree-kill, not just the copilot pid: copilot spawns MCP-bridge
+        # (agent_mcp) and sub-agent processes as descendants, and a bare
+        # proc.kill() reaps only copilot and leaves that subtree orphaned to
+        # accumulate as stale daemons (dotfiles #911). osutil.kill_pid collects
+        # the whole tree (taskkill /T on Windows, /proc walk on POSIX). Called
+        # via the module attribute so tests can stub it.
+        pid = self._child.pid
+        if pid:
+            try:
+                _tree_kill(int(pid), force=True)
+            except Exception:  # noqa: S110 -- reaping is best-effort
+                pass
+        # Also drive the asyncio transport so its returncode/bookkeeping settle
+        # (a no-op when the tree-kill above already reaped the child).
         killer = getattr(proc, "kill", None)
         if callable(killer):
             try:

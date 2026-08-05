@@ -23,6 +23,27 @@ from agent_bridge.session_host.client import SessionHostClient
 from agent_bridge.session_host.host import SessionHost
 
 
+@pytest.fixture(autouse=True)
+def _stub_tree_kill(monkeypatch):
+    """Stub the in-host reap's tree-kill so a ``_FakeChild`` pid never reaches a
+    real ``taskkill``/``os.kill``.
+
+    ``_terminate_child`` now tree-kills the copilot subtree via the
+    ``host._tree_kill`` seam (dotfiles #911). We replace only that seam with a
+    recorder -- NOT ``osutil.kill_pid`` itself -- so tests that reap real host
+    processes through the session manager keep the real reaper.
+    """
+    from agent_bridge.session_host import host as host_mod
+
+    calls: list[tuple[int, bool]] = []
+
+    def _record(pid, *, force=False):
+        calls.append((pid, force))
+
+    monkeypatch.setattr(host_mod, "_tree_kill", _record)
+    return calls
+
+
 # --------------------------------------------------------------------------
 # protocol
 # --------------------------------------------------------------------------
@@ -282,6 +303,25 @@ async def test_terminate_reaps_child():
         await c1.terminate()
         await asyncio.sleep(0.05)
         assert child.killed is True
+        await c1.close()
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_terminate_tree_kills_child_subtree(_stub_tree_kill):
+    """The reap tree-kills the copilot subtree (via osutil.kill_pid) so
+    descendant MCP-bridge / sub-agent processes are not orphaned (#911), in
+    addition to driving the transport reap (child.killed)."""
+    child = _FakeChild(pid=4242)
+    host, port = await _serve(child)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.terminate()
+        await asyncio.sleep(0.05)
+        assert (4242, True) in _stub_tree_kill  # tree-kill invoked with child pid
+        assert child.killed is True             # transport bookkeeping still fires
         await c1.close()
     finally:
         await host.close()

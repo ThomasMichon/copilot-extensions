@@ -39,6 +39,46 @@ def pid_alive(pid: int | None) -> bool:
     return True
 
 
+def _posix_descendant_pids(pid: int) -> list[int]:
+    """Best-effort descendant pids of ``pid`` via ``/proc`` (Linux).
+
+    Returns the transitive children of ``pid`` (shallow-to-deep order), or an
+    empty list on any failure / non-Linux. Used to give :func:`kill_pid` a real
+    tree-kill on POSIX (the Windows branch already collects the tree via
+    ``taskkill /T``), so reaping a Session Host's copilot child also reaps the
+    MCP-bridge / sub-agent processes copilot spawned (dotfiles #911).
+    """
+    if not sys.platform.startswith("linux"):
+        return []
+    children: dict[int, list[int]] = {}
+    try:
+        entries = [e for e in os.listdir("/proc") if e.isdigit()]
+    except OSError:
+        return []
+    for e in entries:
+        try:
+            with open(f"/proc/{e}/stat", "rb") as f:
+                data = f.read()
+            # comm (field 2) is parenthesized and may contain spaces/parens;
+            # ppid is the 2nd whitespace token AFTER the final ')'.
+            rparen = data.rfind(b")")
+            ppid = int(data[rparen + 2:].split()[1])
+        except (OSError, ValueError, IndexError):
+            continue
+        children.setdefault(ppid, []).append(int(e))
+    out: list[int] = []
+    seen: set[int] = set()
+    stack = [pid]
+    while stack:
+        p = stack.pop()
+        for c in children.get(p, ()):
+            if c not in seen:
+                seen.add(c)
+                out.append(c)
+                stack.append(c)
+    return out
+
+
 def kill_pid(pid: int | None, *, force: bool = False) -> None:
     """Best-effort tree-kill of a process by pid (cross-platform, idempotent).
 
@@ -64,10 +104,16 @@ def kill_pid(pid: int | None, *, force: bool = False) -> None:
         return
     import signal
 
-    try:
-        os.kill(pid, signal.SIGKILL if force else signal.SIGTERM)
-    except (ProcessLookupError, PermissionError):
-        pass
+    # Real tree-kill on POSIX (mirrors the Windows ``taskkill /T``): reap the
+    # descendants copilot spawned (MCP bridges, sub-agents) too, not just the
+    # single pid -- otherwise they orphan and accumulate (dotfiles #911).
+    # Descendants first, then the root, so a parent can't respawn a child.
+    sig = signal.SIGKILL if force else signal.SIGTERM
+    for target in (*_posix_descendant_pids(pid), pid):
+        try:
+            os.kill(target, sig)
+        except (ProcessLookupError, PermissionError):
+            pass
 
 
 def set_pdeathsig(sig: int | None = None) -> None:
