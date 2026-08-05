@@ -472,7 +472,10 @@ def claim(
         )
         lease = Lease(
             codespace=codespace,
-            effort=owner,
+            # A worktree claim's owner is a lock holder, NOT an effort -- keep the
+            # legacy ``effort`` field empty so the two concepts never conflate
+            # (the owner lives in ``worktree``; ``_claim_owner`` reads it).
+            effort="",
             pid=os.getpid(),
             host=_this_host(),
             acquired_at=keep_acquired,

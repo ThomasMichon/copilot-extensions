@@ -110,7 +110,7 @@ def test_claim_records_worktree_owner(leases):
     cl = lease_mod.claim("cs-one", "/wt/a", active={"/wt/a"})
     assert cl.codespace == "cs-one"
     assert cl.worktree == "/wt/a"
-    assert cl.effort == "/wt/a"  # owner mirrored into effort for back-compat reads
+    assert cl.effort == ""  # owner is a lock-holder, not an effort (untangled)
 
 
 def test_claim_same_owner_idempotent(leases):
