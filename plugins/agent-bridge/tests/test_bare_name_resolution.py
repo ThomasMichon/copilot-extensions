@@ -161,6 +161,9 @@ async def test_admin_resolver_does_not_shadow_bare_static_agent(monkeypatch):
 
     monkeypatch.setattr(elevated, "relay_applicable", lambda req: bool(req))
     monkeypatch.setattr(elevated, "ensure_running", lambda: "subtok")
+    # Pin the dynamically-discovered sub-daemon port (post-#694 it is an
+    # OS-assigned ephemeral port; asserting a fixed 9281 was stale, #839).
+    monkeypatch.setattr(elevated, "discovered_port", lambda *a, **k: 59051)
 
     r = AgentResolver(
         {"spo": AgentConfig(name="spo", project="p", requires_admin=True)}, {}
@@ -170,7 +173,7 @@ async def test_admin_resolver_does_not_shadow_bare_static_agent(monkeypatch):
     assert target.type == "command"
     assert target.project == "p"
     assert target.spawn_command[-4:] == [
-        "ws://127.0.0.1:9281/acp/spo", "--token", "subtok", "--stdio",
+        "ws://127.0.0.1:59051/acp/spo", "--token", "subtok", "--stdio",
     ]
 
 
@@ -225,6 +228,8 @@ async def test_admin_prefix_still_elevates_explicitly(monkeypatch):
 
     monkeypatch.setattr(elevated, "relay_applicable", lambda req: True)
     monkeypatch.setattr(elevated, "ensure_running", lambda: "subtok")
+    # Pin the dynamically-discovered sub-daemon port (#839).
+    monkeypatch.setattr(elevated, "discovered_port", lambda *a, **k: 59051)
 
     r = AgentResolver(
         {
@@ -238,7 +243,7 @@ async def test_admin_prefix_still_elevates_explicitly(monkeypatch):
     target = await r.resolve_async("admin:spo")
     assert target.type == "command"
     assert target.spawn_command[-4:] == [
-        "ws://127.0.0.1:9281/acp/spo", "--token", "subtok", "--stdio",
+        "ws://127.0.0.1:59051/acp/spo", "--token", "subtok", "--stdio",
     ]
 
 
