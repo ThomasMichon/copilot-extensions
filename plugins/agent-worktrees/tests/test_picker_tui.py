@@ -4346,6 +4346,99 @@ def test_native_list_sticky_no_reflow_flicker(monkeypatch):
     asyncio.run(run())
 
 
+def test_native_list_incremental_selection_repaint(monkeypatch):
+    """#171: plain-arrow navigation repaints only the rows whose checkbox glyph
+    changed (single-select tracks focus), via ``replace_option_prompt_at_index``,
+    instead of a full clear + rebuild of every option -- so a held arrow key
+    stays O(delta) and keeps up with key-repeat. The incremental result is
+    byte-identical to a full rebuild at the same state."""
+    import datetime
+    import types
+
+    from rich.text import Text as _Text
+
+    from agent_worktrees.picker_tui import derive
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "1")
+    # Freeze the 0.1s pulse tick: ``pulse`` is part of the native-list signature
+    # (it drives the live ● indicator), so a tick coinciding with a keypress
+    # legitimately forces a full rebuild -- pinning it keeps this test's
+    # incremental-path assertion deterministic (the fixture is live=False, where
+    # _tick only advances the pulse animation).
+    monkeypatch.setattr(PickerScreen, "_tick", lambda self: None)
+
+    def _src():
+        derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+        local = ("lambda-core", "Win")
+        raws = []
+        for i in range(24):
+            if i % 3 == 0:
+                started, status = "2026-06-27T17:00:00", "active"
+            elif i % 3 == 1:
+                started, status = "2026-06-20T17:00:00", "idle"
+            else:
+                started, status = "2026-05-01T17:00:00", "done"
+            raws.append({"id": f"lambda-core-win-2026062{i % 9}-r{i:02d}",
+                         "title": f"Row {i}", "status": status,
+                         "started_at": started, "turn_count": i,
+                         "state": "active" if i % 2 else "wip"})
+        s = types.SimpleNamespace()
+        s.LOCAL = local
+        s.LOCAL_LABEL = "lc"
+        s.machines = lambda: [("lambda-core Win", "lambda-core", "Win", True)]
+        s.bucket = derive.bucket
+        s.for_machine = derive.for_machine
+        s.load = lambda: [derive.norm(w, *local) for w in raws]
+        return s
+
+    def _prompts(nl):
+        out = []
+        for k in range(nl.option_count):
+            p = nl.get_option_at_index(k).prompt
+            out.append(p.plain if isinstance(p, _Text) else str(p))
+        return out
+
+    async def run():
+        app = PickerApp(_src(), live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            scr.sel = ("L", 0)
+            scr.refresh()
+            await pilot.pause()
+            nl = scr.query_one("#nf-body-data")
+            nl.focus()
+            await pilot.pause()
+
+            # Count full rebuilds triggered DURING plain-arrow navigation.
+            rebuilds = {"n": 0}
+            real_rebuild = nl._rebuild
+
+            def counting_rebuild():
+                rebuilds["n"] += 1
+                return real_rebuild()
+
+            monkeypatch.setattr(nl, "_rebuild", counting_rebuild)
+            for _ in range(6):
+                await pilot.press("down")
+                await pilot.pause()
+
+            # Every move took the incremental fast path -- zero full rebuilds.
+            assert rebuilds["n"] == 0
+            # wt_sel followed focus (single-select), so a checkbox actually moved.
+            assert len(scr.wt_sel) == 1
+
+            # The incrementally-repainted options are byte-identical to a full
+            # rebuild at the same state.
+            monkeypatch.setattr(nl, "_rebuild", real_rebuild)
+            incremental = _prompts(nl)
+            nl._rebuild()
+            await pilot.pause()
+            assert _prompts(nl) == incremental
+
+    asyncio.run(run())
+
+
 def test_native_list_checkbox_click_toggles(monkeypatch):
     """NF5-5 (#88): clicking the checkbox gutter (first cells) of a native-list
     row toggles its multi-select *without* activating it; clicking the row body
