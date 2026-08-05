@@ -4346,6 +4346,119 @@ def test_native_list_sticky_no_reflow_flicker(monkeypatch):
     asyncio.run(run())
 
 
+def test_native_list_no_rowwrap_and_incremental_repaint(monkeypatch):
+    """#171 (proper fix): holding up/down must not wrap worktree rows, and each
+    nav step must repaint only the changed rows (O(1)), not rebuild the list.
+
+    Two invariants, checked with a **scrollbar present** (tall list, short
+    viewport) -- the exact condition that produced the dev376 line-wrap jitter:
+
+    1. NO ROW WRAPS. The native scrollbar is hidden, so the content width equals
+       the widget width and full-width rows fit on one line. We assert every
+       option occupies exactly one display line (``len(nl._lines) ==
+       option_count``) at every nav step -- the transient-frame invariant the
+       original byte-identity check missed.
+    2. INCREMENTAL. Plain-arrow moves take the ``replace_option_prompt_at_index``
+       fast path (zero full rebuilds), and the result is byte-identical to a
+       full rebuild.
+    """
+    import datetime
+    import types
+
+    from rich.text import Text as _Text
+
+    from agent_worktrees.picker_tui import derive
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "1")
+    # Freeze the 0.1s pulse tick: ``pulse`` is part of the native-list signature
+    # (it drives the live ● indicator), so a tick coinciding with a keypress
+    # legitimately forces a full rebuild -- pinning it keeps the incremental-path
+    # assertion deterministic (the fixture is live=False).
+    monkeypatch.setattr(PickerScreen, "_tick", lambda self: None)
+
+    def _src():
+        derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+        local = ("lambda-core", "Win")
+        raws = []
+        for i in range(30):
+            if i % 3 == 0:
+                started, status = "2026-06-27T17:00:00", "active"
+            elif i % 3 == 1:
+                started, status = "2026-06-20T17:00:00", "idle"
+            else:
+                started, status = "2026-05-01T17:00:00", "done"
+            raws.append({"id": f"lambda-core-win-2026062{i % 9}-r{i:02d}",
+                         # a full-width-ish title so a scrollbar-shrunk content
+                         # region would wrap it (the dev376 failure mode)
+                         "title": f"Row {i} with a longish descriptive title here",
+                         "status": status, "started_at": started,
+                         "turn_count": i, "state": "active" if i % 2 else "wip"})
+        s = types.SimpleNamespace()
+        s.LOCAL = local
+        s.LOCAL_LABEL = "lc"
+        s.machines = lambda: [("lambda-core Win", "lambda-core", "Win", True)]
+        s.bucket = derive.bucket
+        s.for_machine = derive.for_machine
+        s.load = lambda: [derive.norm(w, *local) for w in raws]
+        return s
+
+    def _prompts(nl):
+        out = []
+        for k in range(nl.option_count):
+            p = nl.get_option_at_index(k).prompt
+            out.append(p.plain if isinstance(p, _Text) else str(p))
+        return out
+
+    async def run():
+        # Short viewport (height 14) with 30 rows -> the list scrolls, so a
+        # native scrollbar WOULD appear (and shrink content) if it weren't hidden.
+        app = PickerApp(_src(), live=False)
+        async with app.run_test(size=(100, 14)) as pilot:
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            scr.sel = ("L", 0)
+            scr.refresh()
+            await pilot.pause()
+            nl = scr.query_one("#nf-body-data")
+            nl.focus()
+            await pilot.pause()
+
+            # The scrollbar must be hidden: content width == widget width, so no
+            # row can be re-measured narrower and wrap.
+            assert nl.scrollable_content_region.width == nl.size.width
+
+            rebuilds = {"n": 0}
+            real_rebuild = nl._rebuild
+
+            def counting_rebuild():
+                rebuilds["n"] += 1
+                return real_rebuild()
+
+            monkeypatch.setattr(nl, "_rebuild", counting_rebuild)
+
+            for _ in range(12):
+                await pilot.press("down")
+                await pilot.pause()
+                # INVARIANT 1: every option is exactly one display line -- no wrap
+                # at any step (the transient-frame check).
+                assert len(nl._lines) == nl.option_count
+
+            # INVARIANT 2: every move took the incremental fast path.
+            assert rebuilds["n"] == 0
+            assert len(scr.wt_sel) == 1
+
+            # Byte-identical to a full rebuild at the same state.
+            monkeypatch.setattr(nl, "_rebuild", real_rebuild)
+            incremental = _prompts(nl)
+            nl._rebuild()
+            await pilot.pause()
+            assert _prompts(nl) == incremental
+            # ...and still no wrap after the rebuild.
+            assert len(nl._lines) == nl.option_count
+
+    asyncio.run(run())
+
+
 def test_native_list_checkbox_click_toggles(monkeypatch):
     """NF5-5 (#88): clicking the checkbox gutter (first cells) of a native-list
     row toggles its multi-select *without* activating it; clicking the row body
