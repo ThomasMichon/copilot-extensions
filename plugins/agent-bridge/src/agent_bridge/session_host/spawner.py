@@ -311,6 +311,39 @@ class CodeSpaceSpawner:
         if not await self._transport.path_exists(remote_bundle):
             await self._transport.push_file(str(bundle_path), remote_bundle)
 
+        # Re-assert the CodeSpace-side ADO/git auth helpers before launching the
+        # dispatched agent (dotfiles #733 T2). The interactive `agent-codespaces
+        # ssh` connect path deploys these via Stage-4 `_provision_relay_helpers`,
+        # but the Session-Host DISPATCH path bypasses that codepath -- so without
+        # this a dispatched agent inherits whatever helper the box already has.
+        # After a CodeSpace reboot that is the VS Code extension's own helper,
+        # whose shebang points at a since-deleted node (`bad interpreter`),
+        # breaking `git push`/PR to ADO. Overwrite it with our stable-shebang,
+        # relay-first wrapper. Codespace boundary only; idempotent + best-effort
+        # (a failure here must never block the launch -- the launch's own auth
+        # verification surfaces a genuinely broken relay).
+        if self.boundary == "codespace":
+            try:
+                from agent_codespaces.codespace_assets import build_provision_command
+                prov_rc, _pout, prov_err = await self._transport.run(
+                    build_provision_command(), timeout=30.0,
+                )
+                if prov_rc != 0:
+                    log.warning(
+                        "CodeSpace relay-helper (re)deploy exited %s: %s",
+                        prov_rc, (prov_err or "").strip(),
+                    )
+            except ImportError:
+                log.debug(
+                    "agent_codespaces not importable -- skipping relay-helper "
+                    "redeploy on the dispatch path"
+                )
+            except Exception:
+                log.warning(
+                    "CodeSpace relay-helper (re)deploy failed (dispatch path)",
+                    exc_info=True,
+                )
+
         ts = int(time.time() * 1000)
         safe_sid = re.sub(r"[^A-Za-z0-9_.-]", "_", session_id or "session")[:48]
         state_remote = f"{self._remote_dir}/host-{safe_sid}-{ts}.json"
