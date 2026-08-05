@@ -128,6 +128,41 @@ def build_forward_ssh_args(
     return args
 
 
+def build_remote_exec_args(config: SSHConfig, command: str) -> list[str]:
+    """Build an ``ssh`` argv that runs a one-shot remote ``command`` over a
+    fresh, non-multiplexed connection.
+
+    Used for far-side health probes (e.g. "is the CodeSpace-side relay listen
+    port accepting connections?") from code paths that hold only an
+    :class:`SSHConfig` and no live multiplexed connection -- notably the
+    daemon-restart relay reconstruction. Mirrors the base ``-F``/``-p``/``-i`` +
+    keepalive/batch options of :func:`build_forward_ssh_args` but appends a
+    remote command instead of ``-N``, and never multiplexes over a
+    ControlMaster (so the probe's lifetime is independent of any shared master).
+    """
+    args = ["ssh"]
+    if config.config_file:
+        args += ["-F", config.config_file]
+    if config.port:
+        args += ["-p", str(config.port)]
+    if config.identity_file:
+        args += ["-i", config.identity_file]
+    args += [
+        "-o", "ConnectTimeout=15",
+        "-o", "ServerAliveInterval=30",
+        "-o", "ServerAliveCountMax=3",
+        "-o", "BatchMode=yes",
+        "-T",  # no PTY
+    ]
+    for key, val in config.extra_options.items():
+        if key.lower() in ("controlmaster", "controlpath", "controlpersist"):
+            continue
+        args += ["-o", f"{key}={val}"]
+    args.append(config.ssh_target)
+    args.append(command)
+    return args
+
+
 class LocalForward:
     """A dedicated ``ssh -N -L`` process forwarding a remote loopback port.
 
