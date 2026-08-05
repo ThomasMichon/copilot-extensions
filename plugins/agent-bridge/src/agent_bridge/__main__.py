@@ -152,8 +152,24 @@ def _liveness_line(s: dict) -> str | None:
 
 def _get_client():
     """Build a BridgeClient from config. Exits on failure."""
-    from .client import BridgeClient
-    return BridgeClient.from_config()
+    from .client import BridgeClient, BridgeClientError, BridgeConnectionError
+    client = BridgeClient.from_config()
+    # #632: fail fast if THIS client predates the daemon's advertised support
+    # floor (min_protocol_version) -- a genuine past-the-support-window
+    # incompatibility where the tolerant-reader contract can no longer carry
+    # correctness. Degrade-safe: an unreachable/unversioned daemon advertises
+    # min == 0, so this is a no-op there; a mid-restart daemon raises
+    # BridgeConnectionError which we swallow so the command's own path (e.g. the
+    # streaming engine's reconnect) handles it exactly as before. Latent while
+    # HTTP_PROTOCOL_MIN_SUPPORTED == 1; activates automatically when it is raised.
+    try:
+        client.assert_client_supported()
+    except BridgeClientError as exc:
+        print(f"[FAIL] {exc.detail}", file=sys.stderr)
+        sys.exit(3)
+    except BridgeConnectionError:
+        pass
+    return client
 
 
 def _add_stream_args(p: argparse.ArgumentParser) -> None:

@@ -339,6 +339,37 @@ class BridgeClient:
         version, _min_supported = self.daemon_protocol()
         return version >= min_version
 
+    def assert_client_supported(self) -> None:
+        """Fail fast when THIS client is older than the daemon's support floor.
+
+        The counterpart to :meth:`daemon_supports` (which gates a *newer* client
+        against an *older* daemon): here we detect a client whose HTTP contract
+        version is **below** the daemon's advertised ``min_protocol_version`` — a
+        genuine past-the-support-window incompatibility where the tolerant-reader
+        contract can no longer carry correctness — and raise a clear, actionable
+        :class:`BridgeClientError` (426 Upgrade Required) instead of blind-sending
+        requests the daemon has stopped serving (dotfiles #632).
+
+        Symmetric, self-gating design consistent with the version-skew-tolerant
+        stance: each side checks the peer's advertised bounds; the daemon still
+        only *advertises* its floor (it does not refuse to operate). Degrade-safe:
+        an unreachable or unversioned daemon advertises ``min == UNVERSIONED (0)``,
+        so this never raises against it. Latent while
+        ``HTTP_PROTOCOL_MIN_SUPPORTED`` stays at its current value; it activates
+        automatically the day the floor is raised past this client's version.
+        """
+        from .protocol import HTTP_PROTOCOL_VERSION
+
+        _version, min_supported = self.daemon_protocol()
+        if HTTP_PROTOCOL_VERSION < min_supported:
+            raise BridgeClientError(
+                426,
+                f"agent-bridge client HTTP protocol v{HTTP_PROTOCOL_VERSION} is "
+                f"older than this daemon's minimum supported v{min_supported}. "
+                f"Update the agent-bridge plugin + runtime on this machine — the "
+                f"daemon has moved past this client's contract.",
+            )
+
     def list_agents(self) -> list[dict[str, Any]]:
         """GET /api/v1/agents"""
         resp = self._request("GET", "/api/v1/agents")
