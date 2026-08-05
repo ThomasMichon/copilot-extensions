@@ -251,8 +251,22 @@ class RepoConfig:
     plugins default their writes into the bound knowledge checkout instead of the
     harness tree. Declared in the repo's own committed
     ``<anchor>/.agent-worktrees/config.yaml`` (``stateless: true``) -- it is a
-    property of the harness, not of a machine. See the ``stateless-harness``
-    vision / ``citadel-harness-split`` effort."""
+    property of the harness, not of a machine. **Implies**
+    :attr:`requires_external_state_root` (a stateless harness by definition
+    requires an external state root). See the ``stateless-harness`` vision /
+    ``citadel-harness-split`` effort."""
+    requires_external_state_root: bool = False
+    """When true, personal state (efforts/visions/logs) **must** be written to a
+    separately-bound external **knowledge repo**, not into this repo's checkout.
+    The state-root resolver routes to the bound knowledge repo and **refuses**
+    (rather than falling back to the launch repo) when nothing is bound. This is
+    the explicit, plugin-facing knob the ``efforts`` and ``visions`` plugins key
+    on; it is **decoupled** from :attr:`stateless` (a repo can require external
+    state without being a fully guarded/linted stateless harness), but
+    ``stateless: true`` **implies** it, so a harness never has to set both.
+    **Default false** -- a normal repo is its own state home (fully
+    backward-compatible). Declared in the repo's committed
+    ``<anchor>/.agent-worktrees/config.yaml``."""
 
 
 @dataclass(frozen=True)
@@ -949,6 +963,9 @@ def _build_repo_config(
         pr=_parse_pr(data.get("pr")),
         base_repo=bool(data.get("base_repo", False)),
         stateless=bool(data.get("stateless", False)),
+        requires_external_state_root=bool(
+            data.get("requires_external_state_root", False)
+        ),
     )
 
 

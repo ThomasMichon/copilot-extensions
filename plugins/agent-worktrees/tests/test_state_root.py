@@ -8,7 +8,8 @@ from agent_worktrees import config as cfg
 from agent_worktrees import state_root as sr
 
 
-def _config(repo_name, *, stateless=False, knowledge_repo="", anchor="/anchor"):
+def _config(repo_name, *, stateless=False, requires_external_state_root=False,
+            knowledge_repo="", anchor="/anchor"):
     return cfg.Config(
         srcroot="/src",
         machine="test",
@@ -22,6 +23,7 @@ def _config(repo_name, *, stateless=False, knowledge_repo="", anchor="/anchor"):
                 default_branch="main",
                 remote="origin",
                 stateless=stateless,
+                requires_external_state_root=requires_external_state_root,
             )
         },
     )
@@ -49,6 +51,7 @@ def test_non_stateless_uses_git_toplevel(monkeypatch):
     assert res.path == "/work/tree"
     assert res.source == "launch_repo"
     assert res.stateless is False
+    assert res.requires_external is False
     assert res.bound is True
     assert res.error is None
 
@@ -82,7 +85,32 @@ def test_stateless_bound_resolves_knowledge_repo(fake_checkouts):
     assert res.source == "knowledge_repo"
     assert res.repo == "citadel-knowledge"
     assert res.stateless is True
+    assert res.requires_external is True  # stateless implies it
     assert res.bound is True
+
+
+def test_requires_external_without_stateless_routes_knowledge(fake_checkouts):
+    # A repo can require an external state root without being a stateless harness.
+    fake_checkouts["knowledge"] = "/repos/k"
+    res = sr.resolve_state_root(
+        _config("some-repo", requires_external_state_root=True, knowledge_repo="knowledge")
+    )
+    assert res.path == "/repos/k"
+    assert res.source == "knowledge_repo"
+    assert res.stateless is False
+    assert res.requires_external is True
+    assert res.bound is True
+
+
+def test_requires_external_unbound_refuses(fake_checkouts):
+    res = sr.resolve_state_root(
+        _config("some-repo", requires_external_state_root=True, knowledge_repo="")
+    )
+    assert res.path is None
+    assert res.bound is False
+    assert res.stateless is False
+    assert res.requires_external is True
+    assert "requires an external state root" in res.error
 
 
 def test_stateless_unbound_refuses(fake_checkouts):
@@ -92,8 +120,9 @@ def test_stateless_unbound_refuses(fake_checkouts):
     assert res.path is None
     assert res.bound is False
     assert res.stateless is True
+    assert res.requires_external is True
     assert "no knowledge_repo is bound" in res.error
-    # Must NOT fall back to the harness tree.
+    # Must NOT fall back to the launch repo tree.
     assert "citadel-harness" in res.error
 
 
@@ -137,6 +166,10 @@ def test_as_dict_shape(fake_checkouts):
         _config("h", stateless=True, knowledge_repo="k")
     )
     d = res.as_dict()
-    assert set(d) == {"state_root", "source", "repo", "stateless", "bound", "error"}
+    assert set(d) == {
+        "state_root", "source", "repo", "stateless", "requires_external",
+        "bound", "error",
+    }
     assert d["state_root"] == "/k"
+    assert d["requires_external"] is True
     assert d["bound"] is True

@@ -11,16 +11,18 @@ Resolution rules (highest precedence first):
 
 1. **Explicit override** (``--repo NAME``): resolve that registered repo's local
    checkout. Lets a caller deliberately target the harness itself or a product
-   repo, regardless of the stateless binding.
-2. **Stateless harness**: when the launch repo declares ``stateless: true``,
-   route to the bound **knowledge repo** (top-level ``knowledge_repo`` in the
-   machine-local config), resolved to a checkout via the repos registry. If no
-   knowledge repo is bound -- or the bound name is not a registered checkout --
-   resolution **fails** (no fallback): the resolver refuses to silently write
-   personal state into the shareable harness tree.
-3. **Non-stateless (backward-compatible default)**: the launch repo *is* the
-   state home. Prefer the current git worktree root (so state lands in the tree
-   being edited); fall back to the repo's anchor.
+   repo, regardless of the binding.
+2. **Requires an external state root**: when the launch repo declares
+   ``requires_external_state_root: true`` (or ``stateless: true``, which implies
+   it), route to the bound **knowledge repo** (top-level ``knowledge_repo`` in
+   the machine-local config), resolved to a checkout via the repos registry. If
+   no knowledge repo is bound -- or the bound name is not a registered checkout
+   -- resolution **fails** (no fallback): the resolver refuses to silently write
+   personal state into the launch repo (e.g. a shareable harness tree).
+3. **Self-hosted state (backward-compatible default)**: when the repo does not
+   require an external state root (the default), the launch repo *is* the state
+   home. Prefer the current git worktree root (so state lands in the tree being
+   edited); fall back to the repo's anchor.
 
 The resolver never hardcodes a repo name or path -- everything comes from the
 layered config + the repos registry.
@@ -51,6 +53,10 @@ class StateRoot:
     name, or the explicit override)."""
     stateless: bool
     """Whether the launch repo declared itself a stateless harness."""
+    requires_external: bool
+    """Whether the launch repo requires an external state root -- the effective
+    value of ``requires_external_state_root`` OR ``stateless`` (stateless
+    implies it). This is the flag the ``efforts``/``visions`` plugins key on."""
     bound: bool
     """True when a usable path was resolved."""
     error: str | None = None
@@ -62,6 +68,7 @@ class StateRoot:
             "source": self.source,
             "repo": self.repo,
             "stateless": self.stateless,
+            "requires_external": self.requires_external,
             "bound": self.bound,
             "error": self.error,
         }
@@ -111,7 +118,7 @@ def resolve_state_root(
         config: The layered project config (``cfg.load_config()``).
         repo_override: Explicit registered-repo name to target instead of the
             binding-driven default.
-        cwd: Directory used for the non-stateless git-toplevel probe (defaults
+        cwd: Directory used for the self-hosted git-toplevel probe (defaults
             to the process cwd).
 
     Returns:
@@ -125,39 +132,47 @@ def resolve_state_root(
         repo_cfg = None
     launch_repo = config.repo_name or (repo_cfg and repo_cfg.anchor) or "?"
     stateless = bool(getattr(repo_cfg, "stateless", False))
+    # A stateless harness always requires an external state root, so stateless
+    # implies requires_external_state_root -- a harness never has to set both.
+    requires_external = bool(
+        getattr(repo_cfg, "requires_external_state_root", False) or stateless
+    )
 
     # 1. Explicit override -- resolve any registered repo by name.
     if repo_override:
         path = _checkout_path(repo_override)
         if not path:
             return StateRoot(
-                None, "explicit", repo_override, stateless, False,
+                None, "explicit", repo_override, stateless, requires_external,
+                False,
                 error=(
                     f"repo '{repo_override}' is not a registered repo with a "
                     f"local checkout on this machine (agent-worktrees repos add …)"
                 ),
             )
-        return StateRoot(path, "explicit", repo_override, stateless, True)
+        return StateRoot(
+            path, "explicit", repo_override, stateless, requires_external, True
+        )
 
-    # 2. Stateless harness -> the bound knowledge repo (no fallback).
-    if stateless:
+    # 2. Requires an external state root -> the bound knowledge repo (no fallback).
+    if requires_external:
         kr = (config.knowledge_repo or "").strip()
         if not kr:
             return StateRoot(
-                None, "knowledge_repo", "", True, False,
+                None, "knowledge_repo", "", stateless, True, False,
                 error=(
-                    f"launch repo '{launch_repo}' is a stateless harness but no "
-                    f"knowledge_repo is bound on this machine. Set "
+                    f"launch repo '{launch_repo}' requires an external state "
+                    f"root but no knowledge_repo is bound on this machine. Set "
                     f"'knowledge_repo: <name>' in ~/.{launch_repo}/config.yaml "
                     f"(or run the harness-knowledge setup) before writing "
                     f"efforts/logs/visions. Refusing to write state into the "
-                    f"harness tree."
+                    f"launch repo."
                 ),
             )
         path = _checkout_path(kr)
         if not path:
             return StateRoot(
-                None, "knowledge_repo", kr, True, False,
+                None, "knowledge_repo", kr, stateless, True, False,
                 error=(
                     f"knowledge_repo '{kr}' is not a registered repo with a "
                     f"local checkout on this machine. Register it "
@@ -165,19 +180,21 @@ def resolve_state_root(
                     f"~/.{launch_repo}/config.yaml."
                 ),
             )
-        return StateRoot(path, "knowledge_repo", kr, True, True)
+        return StateRoot(path, "knowledge_repo", kr, stateless, True, True)
 
-    # 3. Non-stateless -> the launch repo is the state home (backward-compatible).
+    # 3. Self-hosted -> the launch repo is the state home (backward-compatible).
     #    Prefer the current git worktree root so state lands in the tree being
     #    edited; fall back to the repo's anchor.
     root = _git_toplevel(cwd)
     if root:
-        return StateRoot(root, "launch_repo", launch_repo, False, True)
+        return StateRoot(root, "launch_repo", launch_repo, stateless, False, True)
     anchor = repo_cfg.anchor if repo_cfg else None
     if anchor and os.path.isdir(anchor):
-        return StateRoot(anchor, "launch_repo", launch_repo, False, True)
+        return StateRoot(
+            anchor, "launch_repo", launch_repo, stateless, False, True
+        )
     return StateRoot(
-        None, "launch_repo", launch_repo, False, False,
+        None, "launch_repo", launch_repo, stateless, False, False,
         error=(
             f"could not resolve a state root for '{launch_repo}': no git "
             f"worktree at the current directory and no usable anchor."

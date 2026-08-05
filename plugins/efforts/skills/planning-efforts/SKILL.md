@@ -65,28 +65,32 @@ files in this repo.**
 
 ## First: resolve where efforts live (the state root)
 
-Do **not** assume efforts live in the launch repo. Before creating or resuming
-an effort, resolve the **state root** — the checkout where personal state
-(efforts/logs/visions) belongs on this machine:
+Do **not** assume efforts live in the launch repo. Whether they do is governed
+by a repo-level setting, **`requires_external_state_root`** (default **false**),
+in the launch repo's `.agent-worktrees/config.yaml` (a stateless harness sets it
+implicitly). Before creating or resuming an effort, resolve the **state root** —
+the checkout where personal state (efforts/logs/visions) belongs on this machine:
 
 ```
 agent-worktrees state-root        # prints the state-root path (exit 0)
 ```
 
-- **Exit 0 + a path** → that checkout is the effort home; the `efforts/` tree
-  (and everything below) lives there. For a normal repo this is just the current
-  repo (unchanged behavior). For a **stateless harness** it is the bound
-  **knowledge repo** — so efforts land there, never in the harness tree.
-- **Non-zero (unbound)** → the launch repo is a stateless harness with no
-  knowledge repo bound. **Stop** — do not write the effort into the harness
-  checkout. Bind a knowledge repo first (set `knowledge_repo:` in the
-  machine-local config / run the harness setup), then retry.
+- **Repo does NOT require an external state root** (the default) → the launch
+  repo *is* the effort home; `state-root` returns the current repo and efforts
+  live here, exactly as before.
+- **Repo requires an external state root** (`requires_external_state_root: true`,
+  or a stateless harness) → `state-root` returns the bound **knowledge repo**;
+  the `efforts/` tree lives **there**, never in the launch repo.
+- **Non-zero exit (unbound)** → the repo requires an external state root but none
+  is bound. **Stop** — do not write the effort into the launch repo. Bind a
+  knowledge repo first (set `knowledge_repo:` in the machine-local config / run
+  the harness setup), then retry.
 
-`agent-worktrees state-root --json` gives the full resolution (`source`,
-`repo`, `stateless`, `bound`) if you need to explain where it landed. All
-`efforts/` paths in the steps below are **relative to the resolved state root**,
-not the launch repo. (When agent-worktrees is not installed, there is no
-stateless split — fall back to the launch repo as before.)
+`agent-worktrees state-root --json` gives the full resolution (`source`, `repo`,
+`stateless`, `requires_external`, `bound`) if you need to explain where it
+landed. All `efforts/` paths in the steps below are **relative to the resolved
+state root**, not the launch repo. (When agent-worktrees is not installed, no
+repo requires an external state root — fall back to the launch repo as before.)
 
 ## Start an effort
 
