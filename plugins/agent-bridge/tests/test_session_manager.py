@@ -1510,3 +1510,232 @@ class TestDurablePromptQueue:
         await session_manager.stop_session(sid)
         assert session.status == SessionStatus.STOPPED
         assert session_manager._db.count_pending_prompts(sid) == 1
+
+
+class TestCodespaceExclusiveClaim:
+    """#897 Increment B step 2: the Session-Host CodeSpace dispatch path
+    acquires an exclusive, worktree-keyed claim before establishing the
+    transport (a second worktree is BOUNCED), and releases it on session end.
+
+    Session-Host dispatch never runs ``agent-codespaces ssh`` (the direct-path
+    enforcement point), so the daemon shells the ``agent-codespaces claim`` seam
+    -- these tests mock that seam (``_claim_codespace`` / ``_release_codespace_claim``)
+    to keep unit tests off real ``~/.agent-codespaces/leases.json`` state.
+    """
+
+    @staticmethod
+    def _cs_target(caller_worktree: str | None = None) -> SpawnTarget:
+        acp = "cd /workspaces/example && copilot --acp --stdio --allow-all-tools"
+        return SpawnTarget(
+            type="command",
+            cwd="/workspaces/example",
+            caller_worktree=caller_worktree,
+            codespace={
+                "name": "example-codespace",
+                "repo": "example/repo",
+                "acp_command": acp,
+                "workspace_folder": "/workspaces/example",
+            },
+        )
+
+    async def _start(self, tmp_db, monkeypatch, *, claim_result, caller_worktree,
+                     caller_id=None):
+        monkeypatch.setattr(
+            "agent_bridge.session_manager._resolve_acp_model_flags", lambda: "",
+        )
+        monkeypatch.setattr(
+            "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+            lambda *a, **k: object(),
+        )
+        claim_calls: list[tuple[str, str]] = []
+
+        def fake_claim(name, owner):
+            claim_calls.append((name, owner))
+            return claim_result
+
+        monkeypatch.setattr(
+            "agent_bridge.session_manager._claim_codespace", fake_claim,
+        )
+
+        async def fake_connect(self, target, **kwargs):
+            client = MagicMock()
+            client.is_running = True
+            client.pid = 12345
+            return client, "acp-test-123"
+
+        monkeypatch.setattr(
+            SessionManager, "_connect_via_session_host", fake_connect,
+        )
+        manager = SessionManager(tmp_db, session_host_enabled=True)
+        session = await manager.start_session(
+            self._cs_target(caller_worktree),
+            agent_name="codespace:example",
+            caller_id=caller_id,
+        )
+        return manager, session, claim_calls
+
+    @pytest.mark.asyncio
+    async def test_claim_acquired_with_caller_worktree_owner(
+        self, tmp_db, monkeypatch
+    ) -> None:
+        """A successful claim is keyed by the caller's worktree and the session
+        comes up IDLE."""
+        _, session, claim_calls = await self._start(
+            tmp_db, monkeypatch,
+            claim_result=(True, ""),
+            caller_worktree="/wt/dispatcher-a",
+        )
+        assert claim_calls == [("example-codespace", "/wt/dispatcher-a")]
+        assert session.status == SessionStatus.IDLE
+
+    @pytest.mark.asyncio
+    async def test_claim_owner_falls_back_to_caller_id(
+        self, tmp_db, monkeypatch
+    ) -> None:
+        """With no pre-bound caller_worktree, the claim owner is the caller_id
+        (bound onto the target as caller_worktree earlier in start_session)."""
+        _, _session, claim_calls = await self._start(
+            tmp_db, monkeypatch,
+            claim_result=(True, ""),
+            caller_worktree=None,
+            caller_id="/wt/dispatcher-b",
+        )
+        assert claim_calls == [("example-codespace", "/wt/dispatcher-b")]
+
+    @pytest.mark.asyncio
+    async def test_conflict_bounces_session_failed(
+        self, tmp_db, monkeypatch
+    ) -> None:
+        """A live claim conflict BOUNCES the dispatch: the session ends FAILED
+        with a distinguishable ``codespace_claim_conflict`` event, not an opaque
+        transport error."""
+        _, session, _calls = await self._start(
+            tmp_db, monkeypatch,
+            claim_result=(False, "[BUSY] held by /wt/other"),
+            caller_worktree="/wt/dispatcher-a",
+        )
+        assert session.status == SessionStatus.FAILED
+        types = [e.event for e in session.event_log.get_events()]
+        assert "codespace_claim_conflict" in types
+
+    @pytest.mark.asyncio
+    async def test_end_session_releases_claim(
+        self, tmp_db, monkeypatch
+    ) -> None:
+        """Ending a claimed CodeSpace session releases the claim (keyed off the
+        persisted target: codespace name + caller worktree owner)."""
+        released: list[tuple[str, str]] = []
+        monkeypatch.setattr(
+            "agent_bridge.session_manager._release_codespace_claim",
+            lambda name, owner: released.append((name, owner)),
+        )
+        manager, session, _calls = await self._start(
+            tmp_db, monkeypatch,
+            claim_result=(True, ""),
+            caller_worktree="/wt/dispatcher-a",
+        )
+        await manager.end_session(session.session_id, force=True)
+        assert released == [("example-codespace", "/wt/dispatcher-a")]
+
+
+class TestClaimCodespaceHelper:
+    """``_claim_codespace`` shells ``agent-codespaces claim`` and maps its exit
+    code: 75 -> conflict (bounce), 0/other -> proceed (degrade-safe)."""
+
+    def test_conflict_on_busy_exit(self, monkeypatch) -> None:
+        from agent_bridge import session_manager as sm
+
+        monkeypatch.delenv("AGENT_CODESPACES_DISABLE_CLAIM", raising=False)
+        monkeypatch.setattr(sm.shutil, "which", lambda _: "/usr/bin/agent-codespaces")
+        monkeypatch.setattr(
+            sm.subprocess, "run",
+            lambda *a, **k: SimpleNamespace(returncode=75, stdout="", stderr="[BUSY] x"),
+        )
+        ok, detail = sm._claim_codespace("cs", "/wt/a")
+        assert ok is False
+        assert "BUSY" in detail
+
+    def test_success_on_zero_exit(self, monkeypatch) -> None:
+        from agent_bridge import session_manager as sm
+
+        monkeypatch.delenv("AGENT_CODESPACES_DISABLE_CLAIM", raising=False)
+        monkeypatch.setattr(sm.shutil, "which", lambda _: "/usr/bin/agent-codespaces")
+        monkeypatch.setattr(
+            sm.subprocess, "run",
+            lambda *a, **k: SimpleNamespace(returncode=0, stdout="[OK]", stderr=""),
+        )
+        assert sm._claim_codespace("cs", "/wt/a") == (True, "")
+
+    def test_other_nonzero_is_degrade_safe(self, monkeypatch) -> None:
+        from agent_bridge import session_manager as sm
+
+        monkeypatch.delenv("AGENT_CODESPACES_DISABLE_CLAIM", raising=False)
+        monkeypatch.setattr(sm.shutil, "which", lambda _: "/usr/bin/agent-codespaces")
+        monkeypatch.setattr(
+            sm.subprocess, "run",
+            lambda *a, **k: SimpleNamespace(returncode=2, stdout="", stderr="boom"),
+        )
+        assert sm._claim_codespace("cs", "/wt/a") == (True, "")
+
+    def test_no_owner_is_skip(self, monkeypatch) -> None:
+        from agent_bridge import session_manager as sm
+
+        called = {"ran": False}
+
+        def _run(*a, **k):
+            called["ran"] = True
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(sm.subprocess, "run", _run)
+        assert sm._claim_codespace("cs", "") == (True, "")
+        assert called["ran"] is False
+
+    def test_missing_binstub_is_skip(self, monkeypatch) -> None:
+        from agent_bridge import session_manager as sm
+
+        monkeypatch.delenv("AGENT_CODESPACES_DISABLE_CLAIM", raising=False)
+        monkeypatch.setattr(sm.shutil, "which", lambda _: None)
+        assert sm._claim_codespace("cs", "/wt/a") == (True, "")
+
+    def test_disabled_env_is_skip(self, monkeypatch) -> None:
+        from agent_bridge import session_manager as sm
+
+        monkeypatch.setenv("AGENT_CODESPACES_DISABLE_CLAIM", "1")
+        called = {"ran": False}
+
+        def _run(*a, **k):
+            called["ran"] = True
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(sm.subprocess, "run", _run)
+        assert sm._claim_codespace("cs", "/wt/a") == (True, "")
+        assert called["ran"] is False
+
+
+class TestCodespaceClaimKey:
+    """``_codespace_claim_key`` resolves (name, owner) from a target for the
+    end-session release, deterministically from persisted state."""
+
+    def test_structured_codespace_dict(self) -> None:
+        from agent_bridge import session_manager as sm
+
+        t = SpawnTarget(
+            type="command", cwd="/workspaces/x", caller_worktree="/wt/a",
+            codespace={"name": "cs-1", "repo": "o/r", "acp_command": "c"},
+        )
+        assert sm._codespace_claim_key(t) == ("cs-1", "/wt/a")
+
+    def test_no_owner_returns_none(self) -> None:
+        from agent_bridge import session_manager as sm
+
+        t = SpawnTarget(
+            type="command", cwd="/workspaces/x",
+            codespace={"name": "cs-1", "repo": "o/r", "acp_command": "c"},
+        )
+        assert sm._codespace_claim_key(t) is None
+
+    def test_non_codespace_returns_none(self) -> None:
+        from agent_bridge import session_manager as sm
+
+        t = SpawnTarget(type="local", cwd="/tmp", caller_worktree="/wt/a")
+        assert sm._codespace_claim_key(t) is None
