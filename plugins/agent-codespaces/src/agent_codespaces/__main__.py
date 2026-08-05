@@ -605,6 +605,36 @@ def _build_launch_command(
     return f"bash -l -c {shlex.quote(inner)}"
 
 
+async def _preflight_copilot_platform(manager, name: str) -> None:  # noqa: ANN001
+    """Ensure the CodeSpace's copilot has its platform binary before ACP launch.
+
+    #111: a fresh CodeSpace can ship the ``@github/copilot`` loader stub without
+    its platform optional-dependency (the private-feed npm default 401s the
+    fetch), so ``copilot --acp`` fails at ``stage 7/LAUNCH_ACP`` with a bare
+    "Connection closed". This verifies ``copilot --version`` and, if the
+    platform package is missing, reinstalls it from public npm. Best-effort: any
+    failure only warns; the launch proceeds and surfaces its own error.
+    """
+    from .platform_preflight import ensure_copilot_platform
+
+    async def _run(cmd: str) -> tuple[int, str]:
+        result = await manager.exec_command(name, cmd, timeout=240)
+        return result.exit_code, (result.stdout or "") + (result.stderr or "")
+
+    try:
+        ok, detail = await ensure_copilot_platform(_run)
+    except Exception as exc:
+        log.debug("copilot platform preflight raised: %s", exc)
+        return
+    if not ok:
+        print(
+            "[WARN] CodeSpace copilot may be missing its platform package and "
+            f"auto-repair did not confirm success ({detail}); the ACP launch "
+            "may fail at LAUNCH_ACP -- see #111.",
+            file=sys.stderr,
+        )
+
+
 def _cmd_ssh(args: argparse.Namespace) -> int:
     """SSH into a CodeSpace using ssh-manager."""
     from ssh_manager import ConnectionManager, TargetBusyError, TargetLock
@@ -841,6 +871,10 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         remote_cmd = _finalize_remote_cmd(plugin_dirs)
 
         if args.stdio and remote_cmd:
+            # #111: a fresh CodeSpace can ship copilot's loader stub without its
+            # platform binary, so `copilot --acp` dies at LAUNCH_ACP ("Connection
+            # closed"). Verify + self-repair (public-npm reinstall) up front.
+            await _preflight_copilot_platform(manager, args.name)
             # Structured stdio mode for agent-bridge
             tracker.started(ConnectStage.LAUNCH_ACP, "stdio channel")
             proc = await manager.open_stdio_channel(args.name, remote_cmd)
