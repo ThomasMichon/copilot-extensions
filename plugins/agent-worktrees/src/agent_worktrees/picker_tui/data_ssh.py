@@ -169,6 +169,62 @@ def _drop_classify_arg(argv: list[str]) -> list[str]:
     return out
 
 
+# picker-cache-first-paint (dotfiles#948): the remote fast phase can request a
+# **cache-only** listing (``list --json --cache-only``) that builds rows from the
+# remote's tracking-record cache with no events.jsonl / process / git scan --
+# symmetric with the local cache-only first paint. Opt-in per box (default off)
+# during fleet rollout, since a remote whose runtime predates ``--cache-only``
+# would reject it; when enabled the fetch falls back gracefully (drops the flag)
+# for such a remote. Flip on once a box's remotes all carry the flag.
+_CACHE_ONLY_GATE = os.environ.get("AGENT_WORKTREES_PICKER_CACHE_ONLY") == "1"
+
+
+def _edit_remote_cmd(argv: list[str], transform) -> list[str]:
+    """Apply ``transform`` to the remote command string in *argv*, encoding-aware.
+
+    Mirrors :func:`_drop_classify_arg`'s handling of both the plain
+    ``bash -lc '<cmd>'`` form and the Windows ``pwsh -EncodedCommand <base64>``
+    form (where the command lives inside a UTF-16LE base64 blob), so a flag can be
+    added/removed regardless of the remote shell."""
+    marker = "-EncodedCommand "
+    out: list[str] = []
+    for a in argv:
+        if marker in a:
+            head, b64 = a.rsplit(marker, 1)
+            try:
+                decoded = base64.b64decode(b64).decode("utf-16-le")
+                decoded = transform(decoded)
+                b64 = base64.b64encode(
+                    decoded.encode("utf-16-le")).decode("ascii")
+                a = head + marker + b64
+            except Exception:
+                a = transform(a)
+        else:
+            a = transform(a)
+        out.append(a)
+    return out
+
+
+def _add_cache_only_arg(argv: list[str]) -> list[str]:
+    """Add ``--cache-only`` to a remote list argv (idempotent). Inserted after
+    ``--json`` (always present in the picker's list command)."""
+    def _t(s: str) -> str:
+        if "--cache-only" in s:
+            return s
+        return s.replace(" --json", " --json --cache-only", 1)
+    return _edit_remote_cmd(argv, _t)
+
+
+def _drop_cache_only_arg(argv: list[str]) -> list[str]:
+    """Remove ``--cache-only`` from a remote list argv (the old-remote fallback)."""
+    return _edit_remote_cmd(argv, lambda s: s.replace(" --cache-only", ""))
+
+
+def _is_cache_only_unsupported(stderr: str) -> bool:
+    s = (stderr or "").lower()
+    return "unrecognized arguments" in s and "--cache-only" in s
+
+
 def _argv_for(shell: str, alias: str, project: str, *, classify: bool,
               reconcile: bool = False):
     """Remote list argv for a machine/env: pwsh on Windows, bash elsewhere."""
@@ -747,6 +803,12 @@ def _fetch(source: Source, runner=None, *, classify: bool = True, argv=None,
     eff_timeout = source.timeout if timeout is None else timeout
     use_argv = argv if argv is not None else source.argv
     proc = runner(use_argv, eff_timeout)
+    if proc.returncode != 0 and _is_cache_only_unsupported(proc.stderr):
+        # Older remote without --cache-only (picker-cache-first-paint,
+        # dotfiles#948): drop the flag and retry. The remote falls back to its
+        # normal (non-cache) fast listing, so the tab still resolves.
+        use_argv = _drop_cache_only_arg(use_argv)
+        proc = runner(use_argv, eff_timeout)
     if proc.returncode != 0 and _is_classify_unsupported(proc.stderr):
         # Older remote: drop --classify and retry (rows will lack canonical
         # state but still load). Encoding-aware so the pwsh/-EncodedCommand
@@ -1208,6 +1270,12 @@ class LiveLoader:
         gen = self._gen.get(source.key, 0)
         fast_argv = _drop_classify_arg(source.argv)
         two_phase = source.use_classify and fast_argv != source.argv
+        # picker-cache-first-paint (dotfiles#948): when enabled, the fast phase
+        # goes cache-only (no remote events.jsonl/process scan) -- but only for a
+        # real two-phase remote (an old no-classify remote almost certainly lacks
+        # --cache-only too, and the classify phase 2 warms its cache anyway).
+        if _CACHE_ONLY_GATE and two_phase:
+            fast_argv = _add_cache_only_arg(fast_argv)
         # Phase 1: fast, no classify (or the only pass for a no-classify remote).
         t0 = _dt.datetime.now()
         try:

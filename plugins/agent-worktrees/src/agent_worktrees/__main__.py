@@ -4648,12 +4648,17 @@ def _cmd_list_stream(args: argparse.Namespace, records) -> int:
         config = cfg.load_config()
         repo = config.default_repo
         active_paths = _build_active_paths(records, session_ctx)
+        from .picker_tui.data_local import _stamp_from_raw
         for rec in records:
             info = _classify_one_record(
                 rec, repo=repo, active_paths=active_paths,
                 session_ctx=session_ctx)
-            emit({"type": "worktree", "phase": "classified",
-                  "wt": to_dict(rec, info)})
+            wt = to_dict(rec, info)
+            # picker-cache-first-paint (dotfiles#948) remote write-back: warm
+            # this machine's session-render cache so a future --cache-only fast
+            # phase reads it directly.
+            _stamp_from_raw(rec, wt, session_ctx)
+            emit({"type": "worktree", "phase": "classified", "wt": wt})
     emit({"type": "done", "count": len(records)})
     return 0
 
@@ -4697,6 +4702,22 @@ def cmd_list(args: argparse.Namespace) -> int:
         return _cmd_list_stream(args, records)
 
     if args.json:
+        # picker-cache-first-paint (dotfiles#948): cache-only fast paint --
+        # build rows from ONLY the cached session-render fields, no live scan,
+        # so a remote SSH fast phase paints instantly and never re-reads
+        # events.jsonl or scans processes. Never-populated -> Unknown.
+        if getattr(args, "cache_only", False):
+            from .picker_tui.data_local import _overlay_cached_state
+            worktrees = []
+            for rec in records:
+                raw = _worktree_to_dict(rec)
+                if rec.session_summary and not (
+                        raw.get("title") and raw["title"] != "null"):
+                    raw["title"] = rec.session_summary
+                _overlay_cached_state(raw, rec)
+                worktrees.append(raw)
+            _json_output({"worktrees": worktrees})
+            return 0
         mux_map: dict[str, sessions.MuxInfo] = {}
         if getattr(args, "mux_details", False):
             wt_ids = [rec.worktree_id for rec in records]
@@ -4731,6 +4752,13 @@ def cmd_list(args: argparse.Namespace) -> int:
                 norm = _normalize_path(rec.worktree_path)
                 title = session_ctx.latest_summary.get(norm)
             wt_dict["title"] = title
+        # picker-cache-first-paint (dotfiles#948) remote write-back: on the
+        # authoritative classify pass, stamp each worktree's session-render cache
+        # so a FUTURE --cache-only fast phase on THIS machine reads it directly.
+        if getattr(args, "classify", False):
+            from .picker_tui.data_local import _stamp_from_raw
+            for wt_dict, rec in zip(worktrees, records, strict=True):
+                _stamp_from_raw(rec, wt_dict, session_ctx)
         _json_output({"worktrees": worktrees})
         return 0
 
@@ -11202,6 +11230,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--classify", action="store_true",
                    help="Include git state classification (state/ahead/behind/"
                         "dirty; JSON only). Slower: ~5 git calls per worktree.")
+    p.add_argument("--cache-only", action="store_true",
+                   help="Cache-only fast paint (picker-cache-first-paint, "
+                        "dotfiles#948): build JSON rows from ONLY the cached "
+                        "session-render fields in each tracking record -- no "
+                        "events.jsonl scan, no process/mux scan, no git "
+                        "classify. Never-populated worktrees render Unknown. "
+                        "Used by the Picker's SSH fast phase; a --classify "
+                        "populate later fills + writes the cache back.")
     p.add_argument("--stream", action="store_true",
                    help="Emit newline-delimited JSON (one worktree per line, "
                         "flushed) for the Picker's streaming SSH consumer: a "

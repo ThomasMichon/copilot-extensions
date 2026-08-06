@@ -276,6 +276,62 @@ def _is_copilot_process(pid: int) -> bool:
             return False
 
 
+# picker-cache-first-paint (dotfiles#948): the per-session turn-count sidecar.
+# ``events.jsonl`` is append-only and can reach tens of MB, so re-counting
+# ``"user.message"`` lines across every session on each populate/refresh is the
+# dominant scan cost (measured: ~2s over 476 MB on cloud1). This memoizes the
+# count keyed by file size next to the events file, so a stable session costs a
+# stat + tiny JSON read, and a grown session re-reads ONLY the appended bytes.
+_TURNS_SIDECAR = ".aw-turns.json"
+
+
+def _count_user_turns(entry: Path) -> int:
+    """User-turn count for a session dir, computed incrementally.
+
+    Counts ``"user.message"`` lines in ``events.jsonl`` but reuses a size-keyed
+    sidecar (``.aw-turns.json``) so an unchanged file is O(1) and a grown file
+    only re-reads the appended tail (events.jsonl is append-only, line-delimited,
+    so the cached size is a line boundary). Falls back to a full recount when the
+    file shrank/rotated or the sidecar is unreadable. Best-effort: a read/write
+    hiccup never raises (returns the best count it has).
+    """
+    events = entry / "events.jsonl"
+    try:
+        size = events.stat().st_size
+    except OSError:
+        return 0
+    prev_size = 0
+    prev_turns = 0
+    sidecar = entry / _TURNS_SIDECAR
+    try:
+        d = json.loads(sidecar.read_text(encoding="utf-8"))
+        prev_size = int(d.get("size", 0))
+        prev_turns = int(d.get("turns", 0))
+    except Exception:
+        prev_size = prev_turns = 0
+    if prev_size == size and size > 0:
+        return prev_turns
+    # Grown file: resume from the cached boundary; otherwise full recount.
+    resume = 0 < prev_size < size
+    start = prev_size if resume else 0
+    turns = prev_turns if resume else 0
+    try:
+        with open(events, "rb") as f:
+            if start:
+                f.seek(start)
+            for line in f:
+                if b'"user.message"' in line:
+                    turns += 1
+    except OSError:
+        return prev_turns
+    try:
+        sidecar.write_text(
+            json.dumps({"size": size, "turns": turns}), encoding="utf-8")
+    except OSError:
+        pass
+    return turns
+
+
 def scan_sessions(worktree_paths: list[str]) -> SessionContext:
     """Scan Copilot session-state for active sessions and summaries.
 
@@ -341,18 +397,14 @@ def scan_sessions(worktree_paths: list[str]) -> SessionContext:
         # Count sessions per worktree
         ctx.session_count[matched_path] = ctx.session_count.get(matched_path, 0) + 1
 
-        # Count user turns from events.jsonl (cheap string match, no JSON parse)
+        # Count user turns from events.jsonl (incremental, size-keyed sidecar).
         events_file = entry / "events.jsonl"
         if events_file.exists():
-            try:
-                with open(events_file, encoding="utf-8", errors="replace") as ef:
-                    turns = sum(1 for line in ef if '"user.message"' in line)
-                if turns > 0:
-                    ctx.turn_count[matched_path] = (
-                        ctx.turn_count.get(matched_path, 0) + turns
-                    )
-            except OSError:
-                pass
+            turns = _count_user_turns(entry)
+            if turns > 0:
+                ctx.turn_count[matched_path] = (
+                    ctx.turn_count.get(matched_path, 0) + turns
+                )
 
         # Track best available display text per path by updated_at.
         # Prefer summary (richer) over name (short title), but pick
@@ -421,18 +473,14 @@ def _enrich_session_dir(
 
     norm_path = _normalize_path(worktree_path)
 
-    # Turn count from events.jsonl
+    # Turn count from events.jsonl (incremental, size-keyed sidecar).
     events_file = entry / "events.jsonl"
     if events_file.exists():
-        try:
-            with open(events_file, encoding="utf-8", errors="replace") as ef:
-                turns = sum(1 for line in ef if '"user.message"' in line)
-            if turns > 0:
-                ctx.turn_count[norm_path] = (
-                    ctx.turn_count.get(norm_path, 0) + turns
-                )
-        except OSError:
-            pass
+        turns = _count_user_turns(entry)
+        if turns > 0:
+            ctx.turn_count[norm_path] = (
+                ctx.turn_count.get(norm_path, 0) + turns
+            )
 
     # Summary from workspace.yaml
     ws_file = entry / "workspace.yaml"

@@ -258,8 +258,20 @@ class TestSessionActionVerbs:
 
     def test_sessionless_offers_neither(self):
         verbs = self._verbs(sessionless=True)
-        assert verbs == ["Open"]
+        # Refresh is always offered (picker-cache-first-paint, dotfiles#948);
+        # the lifecycle set for a sessionless worktree is still just Open.
+        assert [v for v in verbs if v != "Refresh"] == ["Open"]
         assert "Stop" not in verbs and "Reclaim" not in verbs
+
+    def test_refresh_always_offered(self):
+        # picker-cache-first-paint (dotfiles#948): every worktree carries a
+        # Refresh verb (the only way to populate an Unknown row on demand),
+        # regardless of its lifecycle state.
+        assert "Refresh" in self._verbs(sessionless=True)
+        assert "Refresh" in self._verbs(
+            mux_live=True, session_lock_live=True, last_session_id="s1")
+        assert "Refresh" in self._verbs(
+            session_bare_orphan=True, last_session_id="s1")
 
 
 class TestStartReclaimFilter:

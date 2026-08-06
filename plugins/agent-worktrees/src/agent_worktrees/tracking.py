@@ -330,6 +330,26 @@ class WorktreeRecord:
     # byte-identical.
     bound_live: bool | None = None
     bound_live_at: str | None = None
+    # picker-cache-first-paint (dotfiles#948): the session-derived render cache.
+    # The Worktree Picker's first paint must read ONLY the per-worktree state
+    # file (no events.jsonl turn-count, no process/mux scan) -- so the expensive
+    # populate pass (or a per-worktree Refresh) stamps its results back here via
+    # ``stamp_session_state``, and the cache-only load reads them directly.
+    #   * ``session_turns`` -- cached user-turn count (drives WIP/CONVO + the
+    #     Turns column). None = never populated -> the row renders **Unknown**.
+    #   * ``session_summary`` -- cached latest-session summary (title fallback).
+    #   * ``git_state`` -- cached git-classification state value (e.g. ``wip`` /
+    #     ``clean``); None = never classified -> Unknown.
+    #   * ``session_state_at`` -- freshness stamp for the whole bundle.
+    # Unlike the liveness hints these are NOT aged out on read (a cached turn
+    # count / last-known state is shown as-is until the next populate/Refresh
+    # rewrites it); ``session_state_at`` exists for throttling + display only.
+    # All emitted only when populated, so a never-populated worktree's YAML
+    # stays byte-identical.
+    session_turns: int | None = None
+    session_summary: str | None = None
+    git_state: str | None = None
+    session_state_at: str | None = None
 
     @property
     def owner_claim_ref(self) -> ClaimRef | None:
@@ -609,6 +629,14 @@ def load_record(path: Path) -> WorktreeRecord:
     elif bound_live_at_raw in (None, "", "null"):
         bound_live_at_raw = None
 
+    # picker-cache-first-paint (dotfiles#948): datetime->isoformat normalization
+    # for the session-render-cache freshness stamp so it round-trips as text.
+    session_state_at_raw = data.get("session_state_at")
+    if hasattr(session_state_at_raw, "isoformat"):
+        session_state_at_raw = session_state_at_raw.isoformat()
+    elif session_state_at_raw in (None, "", "null"):
+        session_state_at_raw = None
+
     # Parse sessions list -- None means "not yet indexed" (pre-registry),
     # [] means "indexed, no sessions recorded".  This distinction drives
     # fallback: None -> full scan, [] -> skip scan.
@@ -724,6 +752,14 @@ def load_record(path: Path) -> WorktreeRecord:
         bound_live=(bool(data["bound_live"])
                     if data.get("bound_live") is not None else None),
         bound_live_at=(str(bound_live_at_raw) if bound_live_at_raw else None),
+        session_turns=(int(data["session_turns"])
+                       if data.get("session_turns") is not None else None),
+        session_summary=(str(data["session_summary"])
+                         if data.get("session_summary") else None),
+        git_state=(str(data["git_state"])
+                   if data.get("git_state") else None),
+        session_state_at=(str(session_state_at_raw)
+                          if session_state_at_raw else None),
     )
 
 
@@ -822,6 +858,18 @@ def save_record(record: WorktreeRecord, path: Path | None = None) -> None:
         content += f"bound_live: {'true' if record.bound_live else 'false'}\n"
         if record.bound_live_at:
             content += f"bound_live_at: {record.bound_live_at}\n"
+    # picker-cache-first-paint (dotfiles#948) session-render cache -- emitted
+    # only when populated (None absent), so a never-populated worktree's YAML
+    # stays byte-identical. Read directly by the cache-only first-paint load.
+    if record.session_turns is not None:
+        content += f"session_turns: {int(record.session_turns)}\n"
+    if record.session_summary:
+        safe_ss = record.session_summary.replace("'", "''")
+        content += f"session_summary: '{safe_ss}'\n"
+    if record.git_state:
+        content += f"git_state: {record.git_state}\n"
+    if record.session_state_at:
+        content += f"session_state_at: {record.session_state_at}\n"
 
     # #1029: originating-session pointer. Emitted only when set, so the
     # common-case session-record YAML stays byte-identical (no churn).
@@ -1094,6 +1142,58 @@ def stamp_bound_live(
         worktree_id, live, live_attr="bound_live", at_attr="bound_live_at",
         refresh=refresh, throttle_secs=throttle_secs,
     )
+
+
+def stamp_session_state(
+    worktree_id: str, *,
+    turns: int | None = None,
+    summary: str | None = None,
+    git_state: str | None = None,
+    throttle_secs: float = 30.0,
+) -> bool:
+    """Write the picker's session-render cache back onto a worktree's record.
+
+    picker-cache-first-paint (dotfiles#948): the expensive populate pass (and a
+    per-worktree Refresh) call this to persist what the cache-only first paint
+    later reads WITHOUT touching ``events.jsonl`` or scanning processes --
+    ``session_turns`` (turn count), ``session_summary`` (title fallback), and
+    ``git_state`` (last-known git classification). Only the provided fields are
+    updated; ``None`` means "leave as-is" (so a turns-only refresh does not clear
+    a cached summary/state).
+
+    A best-effort, locked read-modify-write mirroring :func:`stamp_mux_live`:
+    never raises, no-ops when the record is absent. Skips the write entirely when
+    every provided value is unchanged AND the existing freshness stamp is younger
+    than ``throttle_secs`` (bounds YAML churn on a steadily-populated worktree); a
+    value CHANGE always writes. Returns True iff the record was rewritten.
+    """
+    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+    if not yaml_path.exists():
+        return False
+    try:
+        with _RecordLock(yaml_path):
+            record = load_record(yaml_path)
+            changed = False
+            if turns is not None and record.session_turns != int(turns):
+                record.session_turns = int(turns)
+                changed = True
+            if summary is not None and (record.session_summary or "") != summary:
+                record.session_summary = summary or None
+                changed = True
+            if git_state is not None and (record.git_state or "") != git_state:
+                record.git_state = git_state or None
+                changed = True
+            if not changed:
+                # Nothing moved: renew freshness only once past the throttle, so
+                # a steadily-populated worktree is not rewritten every pass.
+                if record.session_state_at and not _stamp_older_than(
+                        record.session_state_at, throttle_secs):
+                    return False
+            record.session_state_at = _now_iso()
+            save_record(record)
+            return True
+    except Exception:
+        return False
 
 
 def _stamp_older_than(stamped: str, secs: float) -> bool:
