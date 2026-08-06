@@ -643,12 +643,40 @@ def _norm_guids(guids) -> set[str]:
     return {str(g).strip().lower() for g in (guids or []) if str(g).strip()}
 
 
+def is_rfc_v4_or_v5_guid(guid) -> bool:
+    """Whether ``guid`` has an RFC-4122 version nibble of 4 (random) or 5 (SHA-1).
+
+    Windows Terminal's own built-in dynamic profile generators (WSL, Azure Cloud
+    Shell, the default PowerShell/cmd profiles) mint **v5** namespace GUIDs, and
+    hand-added profiles get **v4** random GUIDs. Our :func:`stable_guid`
+    (mirroring ``New-StableGuid``) builds a GUID straight from raw SHA-256 bytes
+    without setting the RFC version bits, so its version nibble is effectively
+    uniform over 0-f and is v4/v5 only ~1/8 of the time.
+
+    Orphan GC therefore treats a v4/v5 GUID as **foreign-owned** and never prunes
+    it -- so a WSL/Azure profile the user deliberately deleted is never
+    resurrected. The cost is that the ~1/8 of *our* orphans that happen to carry
+    a 4/5 nibble are conservatively left behind (inert). Safety over
+    completeness.
+
+    The version nibble is the first hex digit of the third dash-group:
+    ``xxxxxxxx-xxxx-Nxxx-...``.
+    """
+    s = str(guid).strip().strip("{}")
+    parts = s.split("-")
+    if len(parts) < 3 or not parts[2]:
+        return False
+    return parts[2][0].lower() in ("4", "5")
+
+
 @dataclass
 class GeneratedProfilesPlan:
     """Reconciliation result for ``state.json``'s ``generatedProfiles``."""
 
     keep: list[str]
     remove: list[str]
+    healed: list[str] = field(default_factory=list)     # hidden fragment GUIDs
+    reclaimed: list[str] = field(default_factory=list)   # our accumulated orphans
 
     @property
     def changed(self) -> bool:
@@ -662,38 +690,70 @@ def reconcile_generated_profiles(
     *,
     stale_guids=(),
     changed_guids=(),
+    all_fragment_guids=None,
+    reclaim_orphans=True,
 ) -> GeneratedProfilesPlan:
     """Compute the pruned ``generatedProfiles`` (idempotent, convergent).
 
     A GUID is removed from ``generated_profiles`` when it is any of:
 
-    * **not materialized** -- present in the current ``fragment_guids`` but
-      absent from ``settings_guids`` (WT is hiding a live fragment profile ->
+    * **not materialized (heal)** -- present in the current ``fragment_guids``
+      but absent from ``settings_guids`` (WT is hiding a live fragment profile ->
       force re-discovery). This alone heals the "hidden profile" bug on the
       *next* update, no matter how the drift arose.
     * **stale** -- one of ``stale_guids`` (was in the previous fragment, no
       longer emitted -> WT should forget it).
     * **changed** -- one of ``changed_guids`` (same GUID, new content -> force
       re-discovery so WT picks up the new commandline/name).
+    * **our orphan (reclaim)** -- when ``reclaim_orphans`` is set: a GUID that is
+      not materialized in settings, appears in **no** installed fragment
+      (``all_fragment_guids``), and is **not** an RFC v4/v5 GUID -- i.e. an
+      accumulated leftover from *our* raw-hash generator whose source seed is
+      gone. This is what lets a plain ``update`` finally drain the
+      ``generatedProfiles`` cruft the old delta-sync left behind.
+
+    **Foreign-safe by construction.** Orphan reclaim never touches a GUID that a
+    live source still owns (it's in settings, so excluded), a GUID any fragment
+    still emits (in ``all_fragment_guids``), or a v4/v5 GUID (WT's built-in
+    generators / random profiles -- see :func:`is_rfc_v4_or_v5_guid`). So a
+    user-deleted WSL/Azure profile is never resurrected. ``all_fragment_guids``
+    defaults to ``fragment_guids`` when omitted; pass the union across *all*
+    installed fragment files so a foreign fragment's profiles are recognised.
 
     Everything else is kept, preserving user customizations for materialized
-    profiles and leaving unrelated (e.g. other-extension) GUIDs untouched.
-    Comparison is case-insensitive; the kept/removed lists preserve the original
-    ``generated_profiles`` entries.
+    profiles. Comparison is case-insensitive; the kept/removed lists preserve the
+    original ``generated_profiles`` entries.
     """
     frag = _norm_guids(fragment_guids)
     settings = _norm_guids(settings_guids)
     stale = _norm_guids(stale_guids)
     changed = _norm_guids(changed_guids)
+    all_frag = _norm_guids(fragment_guids if all_fragment_guids is None
+                           else all_fragment_guids)
 
-    not_materialized = {g for g in frag if g not in settings}
-    remove_set = not_materialized | stale | changed
+    heal = {g for g in frag if g not in settings}
+    remove_set = heal | stale | changed
+
+    reclaim: set[str] = set()
+    if reclaim_orphans:
+        for g in _norm_guids(generated_profiles):
+            if (g not in settings and g not in all_frag
+                    and not is_rfc_v4_or_v5_guid(g)):
+                reclaim.add(g)
+        remove_set |= reclaim
 
     keep: list[str] = []
     remove: list[str] = []
     for g in (generated_profiles or []):
-        (remove if str(g).strip().lower() in remove_set else keep).append(g)
-    return GeneratedProfilesPlan(keep=keep, remove=remove)
+        if str(g).strip().lower() in remove_set:
+            remove.append(g)
+        else:
+            keep.append(g)
+    return GeneratedProfilesPlan(
+        keep=keep, remove=remove,
+        healed=sorted(g for g in remove if g.strip().lower() in heal),
+        reclaimed=sorted(g for g in remove if g.strip().lower() in reclaim),
+    )
 
 
 @dataclass
@@ -706,6 +766,8 @@ class WtStateDiagnosis:
     hidden: list[str]     # in fragment + generatedProfiles, missing from settings
     orphans: list[str]    # in generatedProfiles, in no fragment and not in settings
     duplicate_names: list[tuple[str, int]]  # profile name -> count, when > 1
+    reclaimable_orphans: list[str] = field(default_factory=list)  # ours -> auto-GC
+    foreign_orphans: list[str] = field(default_factory=list)      # v4/v5 -> kept
 
     @property
     def healthy(self) -> bool:
@@ -788,6 +850,9 @@ def diagnose_wt_state() -> WtStateDiagnosis | None:
                      if g not in fragment_guids and g not in settings_guids)
     duplicate_names = sorted((n, c) for n, c in name_counts.items() if c > 1)
 
+    reclaimable = [g for g in orphans if not is_rfc_v4_or_v5_guid(g)]
+    foreign = [g for g in orphans if is_rfc_v4_or_v5_guid(g)]
+
     return WtStateDiagnosis(
         fragment_count=len(fragment_guids),
         settings_count=len(settings_guids),
@@ -795,4 +860,6 @@ def diagnose_wt_state() -> WtStateDiagnosis | None:
         hidden=hidden,
         orphans=orphans,
         duplicate_names=duplicate_names,
+        reclaimable_orphans=reclaimable,
+        foreign_orphans=foreign,
     )

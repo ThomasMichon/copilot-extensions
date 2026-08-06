@@ -1836,6 +1836,10 @@ function Sync-TerminalState {
     $settingsGuids = Get-SettingsProfileGuids
     $notMaterialized = @($NewFragmentGuids | Where-Object { $_ -notin $settingsGuids })
 
+    # GUIDs from EVERY installed fragment (ours + any other extension's), so
+    # orphan reclamation never touches a GUID some live fragment still emits.
+    $allFragGuids = Get-AllFragmentGuids
+
     if (Test-Path $statePath) {
         try {
             $state = Get-Content $statePath -Raw | ConvertFrom-Json
@@ -1843,11 +1847,29 @@ function Sync-TerminalState {
                 $genProfiles = @($state.generatedProfiles)
                 $before = $genProfiles.Count
 
+                # Reclaim OUR accumulated orphans (dotfiles#601): a
+                # generatedProfiles GUID that WT has NOT materialized
+                # (not in settings), that NO installed fragment emits, and that
+                # is NOT an RFC v4/v5 GUID. Our New-StableGuid builds a GUID from
+                # raw SHA-256 bytes without setting the version bits, so it is
+                # v4/v5 only ~1/8 of the time; WT's own built-in generators
+                # (WSL/Azure/default shells) mint v5 and hand-added profiles are
+                # v4. Excluding v4/v5 therefore drains our leftover cruft while
+                # NEVER resurrecting a WSL/Azure profile the user deliberately
+                # deleted (see Test-IsV4OrV5Guid). Foreign-safe by construction.
+                $reclaimOrphans = @($genProfiles | Where-Object {
+                    $g = $_.ToLower()
+                    ($g -notin $settingsGuids) -and
+                    ($g -notin $allFragGuids) -and
+                    (-not (Test-IsV4OrV5Guid $g))
+                })
+
                 # Remove: stale (dropped from the fragment) + not-materialized
                 # (WT is hiding a live fragment profile) + changed (same GUID,
-                # new content -> force rediscovery). Unchanged, materialized
-                # GUIDs stay, preserving user customizations.
-                $removeSet  = @(@($staleGuids) + @($notMaterialized) + @($ChangedGuids) | Sort-Object -Unique)
+                # new content -> force rediscovery) + our reclaimable orphans.
+                # Unchanged, materialized GUIDs stay, preserving user
+                # customizations; foreign GUIDs are never touched.
+                $removeSet  = @(@($staleGuids) + @($notMaterialized) + @($ChangedGuids) + @($reclaimOrphans) | ForEach-Object { $_.ToLower() } | Sort-Object -Unique)
 
                 if ($removeSet.Count -gt 0) {
                     $state.generatedProfiles = @($genProfiles | Where-Object {
@@ -1856,7 +1878,9 @@ function Sync-TerminalState {
                     $after = @($state.generatedProfiles).Count
                     if ($after -ne $before) {
                         $state | ConvertTo-Json -Depth 10 | Set-Content $statePath -Encoding UTF8
-                        Write-ServiceChanged "Cleaned $($before - $after) GUID(s) from WT state.json generatedProfiles"
+                        $reclN = @($reclaimOrphans).Count
+                        $suffix = if ($reclN -gt 0) { " ($reclN orphan(s) reclaimed)" } else { "" }
+                        Write-ServiceChanged "Cleaned $($before - $after) GUID(s) from WT state.json generatedProfiles$suffix"
                     }
                 }
             }
@@ -1867,6 +1891,39 @@ function Sync-TerminalState {
 
     # --- settings.json: stale cached profiles ---
     Clean-TerminalSettingsJson -StaleGuids @(@($staleGuids) + @($ChangedGuids) | Sort-Object -Unique) -NewFragmentGuids $NewFragmentGuids
+}
+
+function Test-IsV4OrV5Guid {
+    <# Whether a GUID's RFC-4122 version nibble is 4 (random) or 5 (SHA-1) --
+       the shapes WT's built-in dynamic generators and hand-added profiles use.
+       Our New-StableGuid emits raw-hash GUIDs whose version nibble is ~uniform,
+       so this cheaply distinguishes "almost certainly foreign" (v4/v5) from
+       "probably ours" for foreign-safe orphan reclamation. The version nibble
+       is the first hex digit of the third dash-group: xxxxxxxx-xxxx-Nxxx-... #>
+    param([string]$Guid)
+    $s = ($Guid -replace '[{}]', '')
+    $parts = $s.Split('-')
+    if ($parts.Count -lt 3 -or [string]::IsNullOrEmpty($parts[2])) { return $false }
+    return ($parts[2][0] -eq '4' -or $parts[2][0] -eq '5')
+}
+
+function Get-AllFragmentGuids {
+    <# Lower-cased union of profile GUIDs across EVERY installed Windows Terminal
+       fragment (ours + any other extension's), so orphan reclamation never
+       prunes a GUID a live fragment still emits. Returns @() when no fragments
+       are present. #>
+    $fragRoot = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments'
+    if (-not (Test-Path $fragRoot)) { return @() }
+    $out = @()
+    Get-ChildItem $fragRoot -Recurse -File -Filter *.json -ErrorAction SilentlyContinue | ForEach-Object {
+        try {
+            $frag = Get-Content $_.FullName -Raw | ConvertFrom-Json
+            if ($frag.profiles) {
+                $out += @($frag.profiles | Where-Object { $_.PSObject.Properties['guid'] } | ForEach-Object { $_.guid.ToLower() })
+            }
+        } catch { }
+    }
+    return @($out | Sort-Object -Unique)
 }
 
 function Get-SettingsProfileGuids {

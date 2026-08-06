@@ -6987,6 +6987,12 @@ def _terminal_fragment_doctor(machine: str, current: str | None) -> int:
     if diag.orphans:
         print(f"\n  ORPHANS -- generatedProfiles entries in no fragment and not "
               f"materialized ({len(diag.orphans)}): accumulated cruft.")
+        if diag.reclaimable_orphans:
+            print(f"    - {len(diag.reclaimable_orphans)} reclaimable (ours) -> "
+                  f"the next 'update' prunes these automatically.")
+        if diag.foreign_orphans:
+            print(f"    - {len(diag.foreign_orphans)} kept (v4/v5 GUIDs -- "
+                  f"WT built-in / random profiles; never auto-pruned).")
     if diag.duplicate_names:
         print("\n  DUPLICATE profile names in settings.json "
               "(often a legacy stand-alone fragment colliding with the "
