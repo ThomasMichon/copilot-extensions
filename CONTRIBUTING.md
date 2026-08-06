@@ -10,12 +10,19 @@ add ThomasMichon/copilot-extensions`. The marketplace catalog lives at
 `.github/plugin/marketplace.json` and lists every plugin with its current
 version. The Copilot CLI reads this file to determine available updates.
 
-> **`copilot plugin update` refreshes only the payload, not the runtime.**
-> For plugins with a runtime (venv/binstubs/service — agent-worktrees,
-> agent-bridge, agent-codespaces, agent-containers), `copilot plugin update`
-> updates the cached source + skills but does **not** redeploy the runtime; that
-> is a separate installer step run from the source folder (via the plugin's
-> install skill). Pure skill/hook/agent plugins need no installer. See
+> **Deploy with `<repo> update` — never hand-run `copilot plugin update`.**
+> `copilot plugin update` on its own refreshes only a plugin's *payload* (cached
+> source + skills) — it does **not** rebuild a runtime (venv/binstubs/service),
+> and if the version wasn't bumped it silently no-ops ("already at latest"). Do
+> not chase that gap with per-plugin installers by hand; use the one unified
+> flow: **`<repo> update`** (`agent-worktrees update`, or any repo binstub such
+> as `dotfiles update`). It refreshes **every** registered plugin's payload
+> (invoking the plugin manager for you), rebuilds **every** runtime
+> (agent-worktrees, agent-bridge, agent-codespaces, …), and fast-forwards the
+> anchor checkouts — in a single command, per machine. The per-plugin
+> `scripts/install.*` / `scripts/init.*` documented below are the internals it
+> runs for you (and a local-testing / recovery path), **not** the normal deploy
+> path. See
 > [docs/install-contract.md → Plugin update ≠ runtime install](docs/install-contract.md#plugin-update--runtime-install).
 
 ### Version scheme
@@ -132,6 +139,34 @@ file is out of sync:
 - After a set of changes is committed and ready to push.
 - Before pushing to GitHub — the push is the "release."
 - One bump per push is fine; don't bump on every commit.
+
+## Deploying: one command — `<repo> update`
+
+**The canonical deploy is a single unified command: `<repo> update`**
+(`agent-worktrees update`, or any repo binstub, e.g. `dotfiles update`). Run it
+on each target machine (over SSH for remotes) after pushing. In one flow it:
+
+- refreshes the marketplace catalog once, then updates **every** registered
+  plugin's payload — runtime **and** payload-only (`efforts`, `visions`,
+  `context-handoff`, `customizing-copilot`, `harness-*`) — by calling the plugin
+  manager for you (`_update_registered_plugins`);
+- rebuilds **every** runtime (agent-worktrees, agent-bridge, agent-codespaces,
+  agent-containers, …) into a fresh versioned slot and cuts over;
+- fast-forwards each managed repo's **anchor checkout** so in-repo config lands
+  with the plugin;
+- redeploys binstubs, Windows Terminal profiles, and shortcuts.
+
+**Do not deploy plugin-by-plugin by hand.** Hand-running `copilot plugin update`
+or a per-plugin `scripts/install.* update` / `scripts/init.*` is the wrong path:
+it is easy to update one plugin and miss its runtime (or a sibling), and a
+push without a version bump makes the payload refresh a silent no-op that *looks*
+successful. The per-plugin "Deploying Agent X" sections below document the
+**internals** `<repo> update` runs for you — plus the **local-testing /
+recovery** path (running an installer from a local checkout before pushing).
+They are not the normal deploy step.
+
+> Prerequisite, every time: **bump the version** (see *Where the version lives*).
+> `<repo> update` is version-gated — an un-bumped change deploys nothing.
 
 ## Deploying Agent Worktrees
 
