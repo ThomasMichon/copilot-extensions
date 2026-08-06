@@ -200,3 +200,67 @@ def resolve_state_root(
             f"worktree at the current directory and no usable anchor."
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Config-source anchors (E1e) -- the state-root config-overlay seam
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ConfigSource:
+    """One checkout that contributes ``.agent-*`` config for a launch context."""
+
+    anchor: str
+    """Absolute path to the checkout supplying config (``related.yaml``,
+    ``machines.yaml``, ...)."""
+    origin: str
+    """``"harness"`` for the base/launch repo, ``"knowledge"`` for the bound
+    state-root (knowledge) repo overlay."""
+
+
+def _default_anchor(config: cfg.Config) -> str | None:
+    try:
+        repo_cfg = config.default_repo
+    except KeyError:
+        return None
+    return repo_cfg.anchor if repo_cfg else None
+
+
+def config_source_anchors(
+    config: cfg.Config,
+    *,
+    base_anchor: str | None = None,
+    cwd: str | None = None,
+) -> list[ConfigSource]:
+    """Ordered ``.agent-*`` config sources for the current launch context.
+
+    This is the **state-root config-overlay** seam (E1e): agent-* tools that read
+    harness config (``related.yaml``, and later ``machines.yaml`` / ``config.yaml``)
+    should union across these anchors instead of assuming the launch repo is the
+    sole config source. The list is in **overlay order** -- the base (harness /
+    launch) anchor first, then the bound **knowledge repo** when the launch repo
+    requires an external state root -- so later sources win on conflict.
+
+    A normal (self-hosted) repo yields just its own anchor, so grafted readers
+    behave identically to the pre-overlay single-anchor path.
+
+    Args:
+        config: The layered project config (``cfg.load_config()``).
+        base_anchor: Explicit base anchor (e.g. a ``--repo`` target or the
+            control-plane anchor). Defaults to the git worktree root of ``cwd``,
+            then the launch repo's anchor.
+        cwd: Directory for the git-toplevel probe (defaults to the process cwd).
+
+    Returns:
+        A list of :class:`ConfigSource`, base first. Empty only when no base
+        anchor can be resolved at all.
+    """
+    base = base_anchor or _git_toplevel(cwd) or _default_anchor(config)
+    sources: list[ConfigSource] = []
+    if base:
+        sources.append(ConfigSource(anchor=base, origin="harness"))
+    res = resolve_state_root(config, cwd=cwd)
+    if res.requires_external and res.bound and res.path:
+        if not base or os.path.abspath(res.path) != os.path.abspath(base):
+            sources.append(ConfigSource(anchor=res.path, origin="knowledge"))
+    return sources

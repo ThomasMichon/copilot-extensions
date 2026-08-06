@@ -365,6 +365,15 @@ def machines_yaml_path(repo_dir: str | Path) -> Path:
     ``config.yaml`` / ``related.yaml``). Falls back to the legacy repo-root
     ``machines.yaml`` when the canonical file is absent, so existing repos keep
     working until migrated. Prefers the canonical path when both exist.
+
+    **State-root config-overlay (E1e):** when ``repo_dir`` is the **stateless
+    launch harness** and has no ``machines.yaml`` of its own, redirect to the bound
+    **knowledge repo's** ``machines.yaml`` -- the machine topology is personal state
+    that lives in the knowledge repo, not the shareable harness tree. This makes
+    every ``load_machines_yaml`` caller knowledge-aware without changing its call.
+    The redirect only fires for the launch/default repo, never an arbitrary
+    ``repo_dir`` (a product repo with no ``machines.yaml`` still reports its own
+    canonical path, unchanged).
     """
     canonical = Path(repo_dir) / INREPO_CONFIG_DIRNAME / "machines.yaml"
     if canonical.exists():
@@ -372,7 +381,46 @@ def machines_yaml_path(repo_dir: str | Path) -> Path:
     legacy = Path(repo_dir) / "machines.yaml"
     if legacy.exists():
         return legacy
+    overlay = _overlay_machines_yaml_path(repo_dir)
+    if overlay is not None:
+        return overlay
     return canonical  # non-existent: report the canonical path in errors
+
+
+def _overlay_machines_yaml_path(repo_dir: str | Path) -> Path | None:
+    """Resolve the knowledge-repo overlay's ``machines.yaml`` for a stateless
+    launch harness, via the state-root config-source seam. Fail-safe -> ``None``.
+
+    Only redirects when ``repo_dir`` is the launch/default repo AND that repo
+    requires an external state root -- so a plain product repo without a
+    ``machines.yaml`` is never silently redirected.
+    """
+    try:
+        from . import state_root
+        config = load_config()
+        try:
+            default_anchor = config.default_repo.anchor
+        except KeyError:
+            return None
+        if not default_anchor or os.path.abspath(default_anchor) != os.path.abspath(
+            str(repo_dir)
+        ):
+            return None
+        srcs = state_root.config_source_anchors(config, base_anchor=str(repo_dir))
+    except Exception:
+        return None
+    # Walk the overlay sources (everything past the base) for a machines.yaml;
+    # the knowledge overlay wins.
+    for src in srcs:
+        if os.path.abspath(src.anchor) == os.path.abspath(str(repo_dir)):
+            continue
+        cand = Path(src.anchor) / INREPO_CONFIG_DIRNAME / "machines.yaml"
+        if cand.exists():
+            return cand
+        legacy = Path(src.anchor) / "machines.yaml"
+        if legacy.exists():
+            return legacy
+    return None
 
 
 def load_machines_yaml(repo_dir: str | Path) -> dict[str, MachineEntry]:

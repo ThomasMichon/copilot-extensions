@@ -136,6 +136,12 @@ class RelatedEntry:
     # source. Consumed by agent-bridge, which injects them into the dispatched
     # agent's launch (``--plugin-dir`` / user-settings), never by agent-worktrees.
     plugins: list[dict[str, Any]] = field(default_factory=list)
+    # The checkout anchor this entry was **read from**, set by the state-root
+    # config-graft (:func:`read_related_grafted`) so a knowledge-repo overlay
+    # entry's narrative ``doc`` -- which is relative to ITS source repo's
+    # ``.agent-worktrees/`` -- still resolves against that repo, not the harness
+    # base. ``None`` for a plain single-anchor read; never serialized.
+    origin_anchor: str | None = None
 
 
 @dataclass
@@ -174,10 +180,15 @@ def doc_abs_path(anchor: str | Path, entry_or_name: RelatedEntry | str) -> Path:
     """Absolute path to a related repo's narrative doc.
 
     Resolves the entry's ``doc`` field (or the default ``related/<name>.md``)
-    against the in-repo ``.agent-worktrees`` directory.
+    against the in-repo ``.agent-worktrees`` directory. When the entry carries an
+    ``origin_anchor`` (a state-root config-graft overlay entry), the doc resolves
+    against **that** anchor -- a knowledge-repo entry's ``doc`` is relative to the
+    knowledge checkout, not the harness base it was grafted onto.
     """
     if isinstance(entry_or_name, RelatedEntry):
         rel = entry_or_name.doc or default_doc_rel(entry_or_name.name)
+        if entry_or_name.origin_anchor:
+            anchor = entry_or_name.origin_anchor
     else:
         rel = default_doc_rel(entry_or_name)
     return related_dir(anchor) / rel
@@ -495,6 +506,62 @@ def list_related(
 def get_primary(anchor: str | Path) -> str:
     """Return the ``primary:`` marker (empty string if unset)."""
     return read_related(anchor).primary
+
+
+# ---------------------------------------------------------------------------
+# State-root config-graft (E1e): union related.yaml across config-source anchors
+# ---------------------------------------------------------------------------
+
+def read_related_grafted(anchors: list[str | Path]) -> RelatedConfig:
+    """Union ``related.yaml`` across ordered config-source anchors.
+
+    This is the E1e **state-root config-overlay**: a stateless harness contributes
+    its (name-free) base ``related.yaml`` while the bound **knowledge repo**
+    contributes the real personal entries. ``anchors`` is the overlay order (base
+    first, knowledge overlay last), as produced by
+    :func:`agent_worktrees.state_root.config_source_anchors`.
+
+    Merge semantics: later anchors **overlay** earlier ones -- on a name collision
+    the later entry wins wholesale, and the later ``primary`` wins when set. Each
+    returned entry's :attr:`RelatedEntry.origin_anchor` records the anchor it was
+    read from so its narrative ``doc`` still resolves against its own repo (see
+    :func:`doc_abs_path`).
+
+    A single-anchor list reproduces the pre-graft single-repo behavior exactly, so
+    callers can always route reads through this function.
+    """
+    merged = RelatedConfig()
+    for anchor in anchors:
+        rc = read_related(anchor)
+        if rc.primary:
+            merged.primary = rc.primary
+        for name, entry in rc.related.items():
+            entry.origin_anchor = str(anchor)
+            merged.related[name] = entry
+    return merged
+
+
+def list_related_grafted(
+    anchors: list[str | Path], *, role: str | None = None
+) -> list[RelatedEntry]:
+    """Grafted variant of :func:`list_related` over config-source anchors."""
+    entries = list(read_related_grafted(anchors).related.values())
+    if role:
+        wanted = normalize_role(role)
+        entries = [e for e in entries if e.role == wanted]
+    return sorted(entries, key=lambda e: e.name)
+
+
+def get_related_grafted(
+    anchors: list[str | Path], name: str
+) -> RelatedEntry | None:
+    """Grafted variant of :func:`get_related` over config-source anchors."""
+    return read_related_grafted(anchors).related.get(name)
+
+
+def get_primary_grafted(anchors: list[str | Path]) -> str:
+    """Grafted variant of :func:`get_primary` over config-source anchors."""
+    return read_related_grafted(anchors).primary
 
 
 def set_primary(anchor: str | Path, name: str) -> RelatedConfig:
