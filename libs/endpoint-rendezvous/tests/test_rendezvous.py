@@ -153,6 +153,16 @@ def test_pid_alive_nonpositive():
     assert pid_alive(None) is False
 
 
+def test_openprocess_denied_means_alive():
+    # A denied OpenProcess (ERROR_ACCESS_DENIED = 5) means the process exists
+    # -- e.g. a coordinator under a Scheduled Task (LogonType S4U) queried by a
+    # client in another logon session. Any other failure is treated as gone.
+    assert rv._openprocess_denied_means_alive(rv._ERROR_ACCESS_DENIED) is True
+    assert rv._openprocess_denied_means_alive(5) is True
+    assert rv._openprocess_denied_means_alive(87) is False  # ERROR_INVALID_PARAMETER
+    assert rv._openprocess_denied_means_alive(0) is False
+
+
 def test_is_stale_none():
     assert is_stale(None) is True
 
