@@ -582,7 +582,10 @@ def collect_local_projects(current_project: str | None = None) -> list[ProjectIn
         anchor = anchor_for(name, entry)
         roster: tuple[RosterMachine, ...] = ()
         if anchor:
-            roster = _load_roster(Path(anchor) / "machines.yaml")
+            _my = Path(anchor) / ".agent-worktrees" / "machines.yaml"
+            if not _my.is_file():
+                _my = Path(anchor) / "machines.yaml"  # legacy repo-root fallback
+            roster = _load_roster(_my)
 
         display = (entry.get("display_name") if isinstance(entry, dict) else None) \
             or _display_from_slug(name)
