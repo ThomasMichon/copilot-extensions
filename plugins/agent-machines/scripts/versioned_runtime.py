@@ -266,9 +266,23 @@ def activate(root: Path, version: str, *, link_name: str = CURRENT_LINK,
     return vdir
 
 
-def slot(root: Path, version: str) -> Path:
-    """Ensure ``versions/<version>`` exists (empty is fine) and return it."""
+def slot(root: Path, version: str, *, clean_incomplete: bool = False,
+         link_name: str = CURRENT_LINK) -> Path:
+    """Ensure ``versions/<version>`` exists (empty is fine) and return it.
+
+    With ``clean_incomplete`` (dotfiles #935): if the slot already exists but is
+    NOT marked complete -- a failed/partial/watchdog-killed prior build -- remove
+    it first so the caller builds a FRESH venv rather than reusing a corpse via
+    ``uv venv --allow-existing`` (which can inherit half-installed packages). A
+    complete slot is left intact (idempotent, fast re-run). The **current
+    (active)** slot is NEVER tossed even when unmarked -- a legacy slot predates
+    the marker convention yet still backs the live daemon.
+    """
     vdir = version_dir(root, version)
+    if (clean_incomplete and vdir.is_dir()
+            and current_version(root, link_name) != version
+            and not is_complete(root, version)):
+        shutil.rmtree(vdir, ignore_errors=True)
     vdir.mkdir(parents=True, exist_ok=True)
     return vdir
 
@@ -363,6 +377,107 @@ def gc(root: Path, keep: list[str] | None = None,
 
 
 # --------------------------------------------------------------------------
+# Completion marker (dotfiles #935): assert a slot finished a HEALTHY build
+# --------------------------------------------------------------------------
+# A per-slot ``.install-complete.json`` marker turns "is versions/<v> a real
+# install or a half-built corpse?" into a cheap positive check. The installer
+# writes it ATOMICALLY right after the freshly-built slot passes its isolated
+# health gate, so "marker present" == "this slot is a healthy, complete build".
+# A crashed / watchdog-killed install never reaches the marker, so its slot is
+# provably incomplete -> tossed and rebuilt on the next run (clean retry),
+# instead of being silently reused via ``uv venv --allow-existing``.
+
+COMPLETE_MARKER = ".install-complete.json"
+
+
+def marker_path(root: Path, version: str) -> Path:
+    return version_dir(root, version) / COMPLETE_MARKER
+
+
+def read_marker(root: Path, version: str) -> dict | None:
+    """Parse a slot's completion marker, or None if absent/partial/mismatched."""
+    try:
+        data = json.loads(marker_path(root, version).read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(data, dict) or data.get("version") != version:
+        return None
+    return data
+
+
+def is_complete(root: Path, version: str, *, expect_hash: str | None = None) -> bool:
+    """True iff versions/<version> exists AND carries a valid completion marker.
+
+    A slot without a valid marker is a failed/partial build (crashed, killed by
+    the install watchdog, or interrupted) -- it must be tossed + rebuilt, never
+    reused. ``expect_hash``, when given, also requires the recorded payload hash
+    to match, so a dev-checkout that changed the payload WITHOUT bumping the
+    version forces a rebuild (marketplace: version==content, so the hash is
+    belt-and-suspenders).
+    """
+    if not version_dir(root, version).is_dir():
+        return False
+    m = read_marker(root, version)
+    if m is None:
+        return False
+    if expect_hash is not None and m.get("payload_hash") != expect_hash:
+        return False
+    return True
+
+
+def mark_complete(root: Path, version: str, *, payload_hash: str | None = None,
+                  pid: int | None = None) -> Path:
+    """Atomically write the slot's completion marker (temp + os.replace).
+
+    Call ONLY after the freshly-built slot passes its isolated health gate, so
+    the marker's presence is a positive "healthy, complete install" assertion. A
+    reader treats a partial/absent marker as incomplete, so a torn write (process
+    killed mid-marker) is safe -- it just reads as not-yet-complete and rebuilds.
+    """
+    import time as _t
+
+    vdir = version_dir(root, version)
+    vdir.mkdir(parents=True, exist_ok=True)
+    payload: dict = {
+        "version": version,
+        "completed_at": _t.strftime("%Y-%m-%dT%H:%M:%SZ", _t.gmtime()),
+        "pid": pid if pid is not None else os.getpid(),
+    }
+    if payload_hash is not None:
+        payload["payload_hash"] = payload_hash
+    dest = marker_path(root, version)
+    tmp = dest.with_name(dest.name + f".tmp-{os.getpid()}")
+    tmp.write_text(json.dumps(payload), encoding="utf-8")
+    os.replace(tmp, dest)  # atomic publish
+    return dest
+
+
+def toss_incomplete(root: Path, link_name: str = CURRENT_LINK) -> list[str]:
+    """Remove non-current slots that lack a valid completion marker.
+
+    These are failed/partial builds (dotfiles #935). ``current`` is always kept
+    (a live daemon serves from it; a legacy slot may also predate the marker
+    convention). Incomplete slots are never activated -- activate runs only after
+    the health gate + marker -- so they are never the daemon's live version and
+    are always safe to toss. Returns the tossed version names.
+    """
+    cur = current_version(root, link_name)
+    tossed: list[str] = []
+    for v in list_versions(root):
+        if v == cur:
+            continue
+        if is_complete(root, v):
+            continue
+        d = version_dir(root, v)
+        try:
+            shutil.rmtree(d)
+            tossed.append(v)
+        except OSError as exc:
+            print(f"toss: could not remove {d}: {exc}", file=sys.stderr)
+    return tossed
+
+
+# --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
 
@@ -388,6 +503,10 @@ def main(argv: list[str] | None = None) -> int:
 
     sp = sub.add_parser("slot", help="ensure versions/<version> exists")
     sp.add_argument("version")
+    sp.add_argument("--clean-incomplete", action="store_true",
+                    help="if the slot exists but lacks a valid completion marker "
+                         "(a failed/partial prior build), remove it first so a "
+                         "fresh venv is built (dotfiles #935)")
     ap = sub.add_parser("activate", help="point current -> versions/<version>")
     ap.add_argument("version")
     ap.add_argument("--replace-nonlink", action="store_true",
@@ -402,6 +521,22 @@ def main(argv: list[str] | None = None) -> int:
                     help="version(s) to preserve (repeatable)")
     gp.add_argument("--protect-pids", action="store_true",
                     help="also protect versions a live recorded pid may run from")
+    gp.add_argument("--toss-incomplete", action="store_true",
+                    help="also remove non-current slots lacking a completion "
+                         "marker (failed/partial builds; dotfiles #935)")
+    mp = sub.add_parser("mark-complete",
+                        help="mark versions/<version> as a healthy, complete build")
+    mp.add_argument("version")
+    mp.add_argument("--payload-hash", default=None,
+                    help="record the source payload hash for change detection")
+    mp.add_argument("--pid", type=int, default=None)
+    ip = sub.add_parser("is-complete",
+                        help="exit 0 iff versions/<version> has a valid marker")
+    ip.add_argument("version")
+    ip.add_argument("--expect-hash", default=None,
+                    help="also require the recorded payload hash to match")
+    sub.add_parser("toss-incomplete",
+                   help="remove non-current slots lacking a completion marker")
 
     args = p.parse_args(argv)
     root: Path = args.root
@@ -409,7 +544,8 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.cmd == "slot":
-            _emit(str(slot(root, args.version)), args.json)
+            _emit(str(slot(root, args.version, link_name=link_name,
+                           clean_incomplete=args.clean_incomplete)), args.json)
         elif args.cmd == "activate":
             vdir = activate(root, args.version, link_name=link_name,
                             replace_nonlink=args.replace_nonlink)
@@ -436,7 +572,22 @@ def main(argv: list[str] | None = None) -> int:
         elif args.cmd == "gc":
             removed = gc(root, keep=args.keep, protect_pids=args.protect_pids,
                          link_name=link_name)
+            if args.toss_incomplete:
+                removed = list(removed) + toss_incomplete(root, link_name)
             _emit({"removed": removed} if args.json else removed, args.json)
+        elif args.cmd == "mark-complete":
+            dest = mark_complete(root, args.version,
+                                 payload_hash=args.payload_hash, pid=args.pid)
+            _emit({"marked": args.version, "path": str(dest)}
+                  if args.json else str(dest), args.json)
+        elif args.cmd == "is-complete":
+            ok = is_complete(root, args.version, expect_hash=args.expect_hash)
+            _emit({"version": args.version, "complete": ok}, args.json) \
+                if args.json else None
+            return 0 if ok else 1
+        elif args.cmd == "toss-incomplete":
+            tossed = toss_incomplete(root, link_name)
+            _emit({"tossed": tossed} if args.json else tossed, args.json)
         else:  # pragma: no cover
             p.error(f"unknown command {args.cmd}")
     except Exception as exc:

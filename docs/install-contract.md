@@ -195,6 +195,117 @@ write deploy-manifest.json  (schema_version 3, source block, atomic temp+move)
    shadow it; retire `lib/` **before** the probe.
 6. **Create the venv before installing the package** (the install targets it).
 
+## Update-flow robustness — self-stage, watchdog, completion markers (#935)
+
+The runtime is (re)installed by **four** cooperating mechanisms, and the danger is
+that they collide:
+
+1. **`<repo> update`** updates every enabled plugin's payload (`copilot plugin
+   update`) and re-runs each runtime installer.
+2. **Worktree launch** runs `<repo> update` as a pre-flight.
+3. **Copilot auto-update** refreshes the user/repo `enabledPlugins` payloads on its
+   own cadence — it must *replace* `installed-plugins/<mkt>/<plugin>` on disk.
+4. **Session-start hooks** (`bootstrap-check`) kick each plugin's installer to
+   reconcile a drifted runtime.
+
+(3)+(4) are meant to make (1)+(2) *unnecessary* day-to-day; running (1)/(2)
+*guarantees* the payloads and runtimes don't drift apart. Two failure classes made
+this fragile — **file locks** (in 3) and **stall-outs** (in 4). Three mechanisms fix
+them; every Python runtime installer carries them (byte-identically where noted),
+enforced by `tools/check-install-contract.py`.
+
+### Self-stage — the installer never holds the singleton payload (fixes file locks)
+
+An installer reads its own payload (`src/`, `libs/`, `pyproject.toml`) to build the
+venv, so **while it runs it holds the singleton `installed-plugins/<mkt>/<plugin>`
+dir open** (CWD/handles). On Windows a concurrent Copilot auto-update (3) then fails
+to replace that dir with **os error 32** ("used by another process") — the payload
+freezes at the old version and reconcile keeps reverting the runtime toward it (the
+dev214↔dev230 drift saga).
+
+Fix — the **`install-contract:v4 self-stage`** prologue (byte-identical, at each
+installer entry): when running from the marketplace payload, copy the **whole**
+payload into a **unique per-invocation** dir `~/.<name>/.install-stage/<ts>-<pid>/`
+and **re-exec from there**. The singleton payload is then touched only for the fast
+copy, never the whole (possibly-wedged) install. Guards:
+- `COPILOT_PLUGIN_INSTALL_STAGED=1` prevents a re-exec loop; the stage path (not under
+  `installed-plugins`) is a second guard.
+- `COPILOT_PLUGIN_STAGED_FROM=<real payload path>` preserves marketplace detection
+  (see [Source](#source--where-the-installer-runs-from-no-flag)).
+- **Reap is pid-guarded:** a sibling stage dir is removed only if its owner pid (the
+  `<ts>-<pid>` suffix) is **dead** — a concurrent or stalled installer's dir is never
+  touched. *A stalled install must never block another copy.*
+
+### Watchdog — a stalled install self-terminates (fixes stall-outs)
+
+The session-start hook (4) launches the installer **detached with no deadline**;
+before this, a wedged `uv pip install` (no network timeout) leaked forever — orphans
+piled up one-per-session and (pre-self-stage) locked the payload.
+
+Fix — the **self-stage parent doubles as a watchdog**: already outside the payload and
+wrapping the child's whole lifetime, it enforces a deadline and, on expiry, kills the
+**whole tree** via `taskkill /T` (Windows' subprocess-kill leaves grandchildren),
+logs `WATCHDOG-KILL` to `~/.<name>/reconcile.err.log`, and exits `124`. Deadline:
+`<NAME>_INSTALL_DEADLINE_SEC` → `COPILOT_PLUGIN_INSTALL_DEADLINE_SEC` → **480s**
+default; `<=0` disables. Secondary: `UV_HTTP_TIMEOUT` bounds each uv request so a hung
+download degrades to "failed + retryable" rather than wedging. Backstop:
+`bootstrap-check`'s single-flight + stale-reap.
+
+### Completion marker — no corpse reuse, clean retry
+
+Completion was inferred only from the runtime-root `deploy-manifest.json` /
+`running-version.json` + the active junction. A killed/crashed build left a
+**half-built `versions/<v>` slot** on disk that the next `uv venv --allow-existing`
+could silently reuse.
+
+Fix — a per-slot **`.install-complete.json`** marker, written **atomically right after
+the slot passes its isolated health gate** (so "marker present" == "healthy, complete
+build"), owned by the shared `versioned_runtime.py`:
+- `mark-complete <v>` / `is-complete <v>` (+ optional `--payload-hash` to force a
+  rebuild when a dev-checkout changed the payload without bumping the version).
+- `slot <v> --clean-incomplete` tosses an **incomplete** slot before building (never
+  the current/active slot); `toss-incomplete` / `gc --toss-incomplete` reap markerless
+  non-current slots.
+
+Because **activate (junction swap) runs only after the health gate + marker**, a
+watchdog-killed build never becomes the live version — the old daemon keeps serving,
+and the markerless corpse is tossed + rebuilt on the next run (automatic retry).
+
+> **Test it:** `tools/test-install-flow.ps1 -Plugin <name>` (Windows) and
+> `bash tools/test-install-flow.sh --plugin <name>` (Linux/WSL) are the turn-key
+> mini end-to-ends that assert all of the above in an isolated sandbox (STAGED,
+> NOT-IN-PAYLOAD, PAYLOAD-FREE-during-install, MARKETPLACE-preserved, NO-COLLISION,
+> WATCHDOG whole-tree kill, MARKER/TOSS, NO-ORPHANS, BOUNDED) — via a
+> `COPILOT_PLUGIN_INSTALL_SMOKE` seam, without a heavy venv build.
+
+### POSIX parity (`.sh`)
+
+The `.sh` installers carry the **same** `install-contract:v4` blocks as `.ps1`,
+byte-identical per language and enforced by `tools/check-install-contract.py`
+(self-stage prologue, smoke seam, and the `_source_kind` env-fallback that honors
+`COPILOT_PLUGIN_STAGED_FROM`). Two POSIX-specific choices mirror the Windows
+behavior:
+
+- **Watchdog kill uses the process group, not `taskkill /T`.** The staging parent
+  launches the staged child under bash **job control** (`set -m`), giving it its
+  own process group; on deadline it kills the **whole group** with
+  `kill -- -<pgid>` (the POSIX twin of `taskkill /T`), so grandchildren die too.
+- **Exit-code propagation via `wait`, not `setsid -w`.** Job control's `wait`
+  returns the staged child's real exit code, so a genuinely failed install
+  surfaces non-zero. `setsid -w` is deliberately avoided — on some util-linux
+  builds it swallows the child's exit code (returns 0), which would mask a
+  failed install.
+
+The completion-marker primitive (`versioned_runtime.py`) is already
+cross-platform, and **all 11 `.sh` installers are fully wired** (self-stage +
+watchdog + smoke + `_source_kind` + toss-before-build + mark-after-health-gate).
+The marker/toss body-wiring is per-plugin, not mechanical: the link-name is
+derived as `basename "$LINK_DIR"` (`venv` vs `.venv`), and mark-complete is
+placed relative to each plugin's health gate — on its own line before
+`_versioned_activate` for the external-gate (daemon) plugins, or inside
+`_versioned_activate` (after the gate) for the CLI plugins that fold the gate in.
+`agent-bridge/scripts/install.sh` is the reference.
+
 ## SAC-safe launchers (Windows)
 
 Smart App Control (SAC), enforcing on Windows 11, hard-blocks two unsigned,
@@ -352,6 +463,13 @@ Run the installer from the marketplace plugin dir → marketplace takes over;
 `update` keeps pulling from marketplace. Run it from a local checkout → local
 takes over. Switching is an explicit act: invoke the installer from the other
 location. `status` always reports the current `source.kind`.
+
+> **Self-stage caveat (#935).** When the `install-contract:v4 self-stage` prologue
+> re-execs out of the marketplace payload, the installer's *live* path is a
+> throwaway `~/.<name>/.install-stage/…` dir — which would read as `local`. The
+> resolver therefore honors **`COPILOT_PLUGIN_STAGED_FROM`** (the real payload path
+> the prologue recorded) so a staged marketplace install still resolves to
+> `marketplace`. Keep this env-fallback in the byte-identical resolver.
 
 The source-kind resolver is the one block tagged for byte-identical replication
 across plugins:
