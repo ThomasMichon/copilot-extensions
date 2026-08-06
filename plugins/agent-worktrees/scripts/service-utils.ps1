@@ -244,12 +244,12 @@ function Resolve-ServicePassword {
     <#
     .SYNOPSIS
         Retrieve the Windows login password for the current machine, preferring
-        the Aperture Vault. Falls back to interactive Read-Host if the vault is
+        the local vault. Falls back to interactive Read-Host if the vault is
         unavailable.
     .DESCRIPTION
         Scheduled tasks that run before login (ONSTART, /RL HIGHEST) require the
         user's plaintext password. This function tries Vault.psm1 first -- entry
-        "Aperture Science/Windows on <Machine>" -- then falls back to a masked
+        "Windows on <Machine>" -- then falls back to a masked
         interactive prompt.
 
         The vault module is resolved relative to $PSScriptRoot (assumes we're
@@ -261,7 +261,7 @@ function Resolve-ServicePassword {
         try {
             Import-Module $vaultModule -ErrorAction Stop
             $machineName = (Get-Culture).TextInfo.ToTitleCase($env:COMPUTERNAME.ToLower())
-            $pw = Get-VaultSecret "Aperture Science/Windows on $machineName" -Field password -ErrorAction Stop
+            $pw = Get-VaultSecret "Windows on $machineName" -Field password -ErrorAction Stop
             if ($pw) {
                 Write-ServiceOk "Retrieved Windows password from vault"
                 return $pw
