@@ -133,6 +133,32 @@ def test_refresh_uses_narrow_action_and_passes_project(tmp_path, monkeypatch):
     assert captured["timeout"] and captured["timeout"] >= 120
 
 
+def test_refresh_decodes_output_defensively(tmp_path, monkeypatch):
+    """The installer's captured output is not guaranteed UTF-8 (a redirected
+    PowerShell pipe honors the console's OEM/ANSI codepage, and child tools can
+    leak raw bytes). The capture must decode with ``errors="replace"`` so a
+    stray byte can't crash subprocess's reader thread with UnicodeDecodeError --
+    the regression the user hit (0xfb) even though the refresh itself succeeded.
+    """
+    _stub_script(tmp_path, monkeypatch)
+    monkeypatch.setattr(m.cfg, "project_name", lambda: "dotfiles")
+
+    captured = {}
+
+    def _run(cmd, **kwargs):
+        captured.update(kwargs)
+        return _FakeProc(0)
+
+    monkeypatch.setattr(m.subprocess, "run", _run)
+    monkeypatch.setattr(m.output, "ok", lambda *_a, **_k: None)
+
+    assert m._refresh_terminal_profiles() is True
+    # Robust decode: never strict text=True (which raises on a non-UTF-8 byte).
+    assert captured.get("errors") == "replace"
+    assert captured.get("encoding") == "utf-8"
+    assert captured.get("text") is not True
+
+
 def test_refresh_returns_false_on_nonzero_exit(tmp_path, monkeypatch):
     """A non-zero installer exit -> warn + return False (no misreported success)."""
     _stub_script(tmp_path, monkeypatch)
