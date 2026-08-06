@@ -190,6 +190,67 @@ else
     VERSIONED_RUNTIME=0
 fi
 # === end install-contract:v3 versioned-venv ===
+
+_bootstrap_python() {
+    # A python to run the stdlib-only versioned_runtime.py helper BEFORE the slot
+    # venv exists (e.g. the pre-build toss). Prefers the current `venv` link's
+    # python, then python3/python on PATH. Prints nothing + returns 1 if none
+    # found (#935).
+    if [[ -x "$LINK_DIR/bin/python" ]]; then echo "$LINK_DIR/bin/python"; return 0; fi
+    local __c
+    for __c in python3 python; do
+        if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
+    done
+    return 1
+}
+
+_payload_hash() {
+    # Cheap payload fingerprint for the completion marker (#935): sha256 of
+    # pyproject.toml + the vendored-lib version set. Detects a dev-checkout that
+    # changed the payload WITHOUT bumping the version. Empty on any error.
+    local __parts=""
+    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then __parts="$(cat "$PLUGIN_DIR/pyproject.toml")"; fi
+    if [[ -d "$PLUGIN_DIR/libs" ]]; then
+        local __f
+        while IFS= read -r __f; do
+            __parts="$__parts"$'\n'"$(cat "$__f")"
+        done < <(find "$PLUGIN_DIR/libs" -name pyproject.toml 2>/dev/null | sort)
+    fi
+    printf '%s' "$__parts" | sha256sum 2>/dev/null | awk '{print $1}' || true
+}
+
+_versioned_slot_clean() {
+    # #935: ensure the target slot exists, tossing it first if a prior build left
+    # it INCOMPLETE (no completion marker) so we never `uv venv --allow-existing`
+    # over a corpse. The current/active slot is never tossed (the link-name is
+    # derived from LINK_DIR so the current-slot guard works per plugin). No-op in
+    # legacy mode.
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
+    local vr="$SCRIPT_DIR/versioned_runtime.py"
+    local py
+    py="$(_bootstrap_python)" || return 0
+    [[ -n "$py" ]] || return 0
+    "$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /' || true
+}
+
+_versioned_mark_complete() {
+    # #935: write the slot's completion marker AFTER its isolated health gate
+    # passed, so "marker present" == "healthy, complete build". A crashed /
+    # watchdog-killed install never reaches here, leaving its slot markerless and
+    # thus tossable + retryable. No-op in legacy mode. Runs the stdlib-only
+    # versioned_runtime.py via any bootstrap python (the marker is slot-scoped, so
+    # this helper is portable byte-identically across plugins).
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
+    local vr="$SCRIPT_DIR/versioned_runtime.py"
+    local py
+    py="$(_bootstrap_python)" || return 0
+    [[ -n "$py" ]] || return 0
+    local ph
+    ph="$(_payload_hash)"
+    local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
+    if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
+    "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /' || true
+}
 # credential-relay dir (vendored): plugin-vendored or repo-root. Force-reinstalled
 # below so a local code change propagates even without a version bump.
 CRED_RELAY_DIR="$PLUGIN_DIR/libs/credential-relay"
@@ -244,6 +305,7 @@ _ok "Directories: $INSTALL_DIR"
 if [[ "$FORCE" -eq 1 || ! -x "$VENV_PYTHON" ]]; then
     if [[ "$HAVE_UV" -eq 1 ]]; then
         _step 'Creating venv via uv...'
+        _versioned_slot_clean
         uv venv "$VENV_DIR" --allow-existing >/dev/null 2>&1 || {
             _step 'uv venv failed -- falling back to python -m venv'
             "$PYTHON_CMD" -m venv "$VENV_DIR" >/dev/null 2>&1
@@ -299,6 +361,14 @@ if [[ "$VERSIONED_RUNTIME" -eq 1 ]]; then
     # legacy real .venv aside on the first migration. Run via the slot's own
     # python (stdlib-only helper); a CLI plugin has no daemon holding the link.
     VR_SCRIPT="$SCRIPT_DIR/versioned_runtime.py"
+    # Health-gate (#935): never swap the stable .venv link onto a slot whose
+    # package does not import -- a broken build must not become the live runtime.
+    # The marker is written only after this gate passes (so "marked" == healthy).
+    if ! "$VENV_PYTHON" -c 'import agent_containers' 2>/dev/null; then
+        _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
+        exit 1
+    fi
+    _versioned_mark_complete
     if ! "$VENV_PYTHON" "$VR_SCRIPT" --root "$INSTALL_DIR" --link-name '.venv' \
             activate "$SRC_VERSION" --replace-nonlink >/dev/null 2>&1; then
         _fail "Failed to activate versioned venv (.venv -> versions/$SRC_VERSION)"
@@ -319,6 +389,7 @@ chmod +x "$STUB"
 _ok "Binstub: $STUB"
 
 # -- 5. Deploy manifest ------------------------------------------------
+
 # === install-contract:v4 source-kind -- keep byte-identical across plugins ===
 # A runtime footprint's source is inferred from where the installer runs.
 # Vendored under the Copilot CLI installed-plugins dir => marketplace;

@@ -323,27 +323,32 @@ _payload_hash() {
 _versioned_slot_clean() {
     # #935: ensure the target slot exists, tossing it first if a prior build left
     # it INCOMPLETE (no completion marker) so we never `uv venv --allow-existing`
-    # over a corpse. The current/active slot is never tossed. No-op in legacy mode.
+    # over a corpse. The current/active slot is never tossed (the link-name is
+    # derived from LINK_DIR so the current-slot guard works per plugin). No-op in
+    # legacy mode.
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py
     py="$(_bootstrap_python)" || return 0
     [[ -n "$py" ]] || return 0
-    "$py" "$vr" --root "$INSTALL_DIR" --link-name "venv" slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /' || true
+    "$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /' || true
 }
 
 _versioned_mark_complete() {
     # #935: write the slot's completion marker AFTER its isolated health gate
     # passed, so "marker present" == "healthy, complete build". A crashed /
     # watchdog-killed install never reaches here, leaving its slot markerless and
-    # thus tossable + retryable. No-op in legacy mode.
+    # thus tossable + retryable. No-op in legacy mode. Runs the stdlib-only
+    # versioned_runtime.py via any bootstrap python (the marker is slot-scoped, so
+    # this helper is portable byte-identically across plugins).
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
     local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py="$VENV_DIR/bin/python"
-    [[ -x "$py" ]] || py="$LINK_DIR/bin/python"
+    local py
+    py="$(_bootstrap_python)" || return 0
+    [[ -n "$py" ]] || return 0
     local ph
     ph="$(_payload_hash)"
-    local args=("$vr" --root "$INSTALL_DIR" --link-name "venv" mark-complete "$SRC_VERSION")
+    local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
     if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
     "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /' || true
 }
