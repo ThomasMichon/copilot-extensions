@@ -186,29 +186,47 @@ def reconcile_bound_live() -> int:
 def _overlay_cached_state(raw: dict, rec) -> None:
     """Overlay a worktree's cached session-render state onto its cache-only row.
 
-    picker-cache-first-paint (dotfiles#948): the first-paint pass reads no live
-    data, so a row's turns/state come from the record's session-render cache
-    (stamped by a prior populate / Refresh). A worktree the cache has never
-    populated (both ``session_turns`` and ``git_state`` absent) renders
-    **Unknown** -- no live lookup; a Refresh or the follow-up populate fills it.
-    A fresh cached bound-Copilot hint (``session_bound_live`` -- the
-    cwd-independent #1416 bare-resume signal, itself read cache-only by
-    ``_worktree_to_dict``) means a live session, so it wins over a now-stale
-    cached terminal state -> ACTIVE.
+    picker-cache-first-paint (dotfiles#948): the first-paint pass reads no
+    EXPENSIVE live data (no events.jsonl, no process-table scan, no git
+    classify), so turns/state/summary come from the record's session-render
+    cache (stamped by a prior populate / Refresh). Two exceptions are resolved
+    live because they are CHEAP and must be correct immediately:
+
+    * **ACTIVE** -- a live ``inuse.<pid>.lock`` in one of this worktree's
+      registered session folders (``sessions.worktree_has_live_session`` -- a
+      targeted glob + pid-check, not a machine scan) means a running Copilot.
+      ACTIVE wins over ANY cached/terminal/unknown state, because git's own
+      ``active`` derivation needs exactly this lock scan, so a running worktree
+      would otherwise render ``?``/stale until the Pass 2 classify.
+    * The cached ``bound_live`` hint (``session_bound_live`` -- the
+      cwd-independent #1416 bare-resume signal, read cache-only by
+      ``_worktree_to_dict``) is the second live signal.
+
+    A worktree with neither live signal NOR any cached state (both
+    ``session_turns`` and ``git_state`` absent) renders **Unknown** -- a Refresh
+    or the follow-up populate fills it.
     """
-    populated = rec.session_turns is not None or bool(rec.git_state)
-    if not populated:
-        raw["state"] = "unknown"
-        return
+    try:
+        live = sessions.worktree_has_live_session(rec)
+    except Exception:
+        live = False
+    live = live or (raw.get("session_bound_live") is True)
+
     if rec.session_turns is not None:
         raw["turn_count"] = rec.session_turns
     if rec.git_state:
         raw["state"] = rec.git_state
     if rec.session_summary and not (raw.get("title") and raw["title"] != "null"):
         raw["title"] = rec.session_summary
-    if raw.get("session_bound_live") and (
-            raw.get("state") in (None, "", "completed", "unused", "gone")):
+
+    if live:
+        # A live bound Copilot -> ACTIVE, authoritative in the fast pass (wins
+        # over a cached terminal/unknown state). Also surface the lock signal so
+        # the Sess column + Reclaim/Stop gating read it.
+        raw["session_lock_live"] = True
         raw["state"] = "active"
+    elif rec.session_turns is None and not rec.git_state:
+        raw["state"] = "unknown"
 
 
 def load(machine: str | None = None, env: str | None = None,
