@@ -1405,6 +1405,14 @@ function Build-TerminalFragment {
             foreach ($mProp in $RosterData.machines.PSObject.Properties) {
                 $key = $mProp.Name
                 $mEntry = $mProp.Value
+                # Resilience: a null/empty-bodied machines.yaml entry ($mEntry is
+                # $null) would throw under Set-StrictMode on the .PSObject access
+                # below. Note it, flag, and move on so the rest of the roster
+                # still produces profiles.
+                if (-not ($mEntry -is [PSCustomObject])) {
+                    Write-ServiceWarn "Skipped malformed machines.yaml roster entry '$key' (empty/invalid body)"
+                    continue
+                }
                 # Robust self-skip (mirrors the SSH loop below): match the local
                 # identity against key / display_name / hostname / ssh aliases.
                 $entryIds = @($key)
@@ -1637,6 +1645,14 @@ function Build-TerminalFragment {
                     foreach ($mProp in $machinesData.machines.PSObject.Properties) {
                         $key = $mProp.Name
                         $mEntry = $mProp.Value
+                        # Resilience: skip a null/empty-bodied roster entry (it
+                        # would throw under Set-StrictMode on the .PSObject access
+                        # below) -- flag it and keep emitting the other machines'
+                        # SSH profiles.
+                        if (-not ($mEntry -is [PSCustomObject])) {
+                            Write-ServiceWarn "Skipped malformed machines.yaml roster entry '$key' (empty/invalid body)"
+                            continue
+                        }
                         # Skip self robustly (dotfiles#572): a drifted/stale
                         # checkout may key the local machine under an old name,
                         # so match the local identity against the entry's key,
@@ -2141,40 +2157,53 @@ function Deploy-Shortcuts {
         }
 
     foreach ($proj in $allProjects) {
-        $displayName = ($proj -replace '-', ' ') -replace '(^| )(.)', { $_.Value.ToUpper() }
+        # Resilience: a single malformed / incomplete projects.yaml entry (e.g. a
+        # null-bodied orphan left by a partial registration) must NOT abort the
+        # whole shortcut deploy. Do as much as possible -- note the bad entry,
+        # flag it, and move on so every other project's shortcut still lands.
+        try {
+            $displayName = ($proj -replace '-', ' ') -replace '(^| )(.)', { $_.Value.ToUpper() }
 
-        $lnkPath = Join-Path $LocalBin "$displayName.lnk"
-        $lnk = $shell.CreateShortcut($lnkPath)
-        $lnk.TargetPath = $wtExe
-        $lnk.Arguments = "-p `"$displayName`""
-        $lnk.WorkingDirectory = "%USERPROFILE%"
-        $lnk.Description = "$displayName - Worktree Session Manager"
-        $lnk.Save()
-
-        # WSL shortcut -- only when WSL support is recorded in registry
-        $projWslInfo = $null
-        if ($registry.projects -is [PSCustomObject] -and $registry.projects.PSObject.Properties[$proj]) {
-            $projEntry = $registry.projects.$proj
-            if ($projEntry.PSObject.Properties['wsl'] -and $projEntry.wsl) {
-                $projWslInfo = $projEntry.wsl
-            }
-        }
-        $shortcutWslState = if ($projWslInfo -is [PSCustomObject] -and $projWslInfo.PSObject.Properties['state']) { $projWslInfo.state } else { $null }
-        $shortcutWslDistro = if ($projWslInfo -is [PSCustomObject] -and $projWslInfo.PSObject.Properties['distro']) { $projWslInfo.distro } else { $null }
-        if ($shortcutWslState -and $shortcutWslDistro) {
-            $wslLabel = "$displayName (WSL)"
-            $lnkPath = Join-Path $LocalBin "$wslLabel.lnk"
+            $lnkPath = Join-Path $LocalBin "$displayName.lnk"
             $lnk = $shell.CreateShortcut($lnkPath)
             $lnk.TargetPath = $wtExe
-            $lnk.Arguments = "-p `"$wslLabel`""
+            $lnk.Arguments = "-p `"$displayName`""
             $lnk.WorkingDirectory = "%USERPROFILE%"
-            $lnk.Description = "$displayName - Worktree Session Manager (WSL)"
+            $lnk.Description = "$displayName - Worktree Session Manager"
             $lnk.Save()
-        } else {
-            # Remove stale WSL shortcut if it exists from a previous install
-            foreach ($pattern in @("$displayName (WSL).lnk", "$displayName (WSL: *).lnk")) {
-                Get-ChildItem -Path $LocalBin -Filter $pattern -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+
+            # WSL shortcut -- only when WSL support is recorded in registry. Guard
+            # the entry TYPE before touching .PSObject: a null-valued project key
+            # (``realproj:`` with no body) yields $null here, and $null.PSObject
+            # .Properties throws "The property 'Properties' cannot be found" --
+            # the exact crash this hardening prevents.
+            $projWslInfo = $null
+            if ($registry.projects -is [PSCustomObject] -and $registry.projects.PSObject.Properties[$proj]) {
+                $projEntry = $registry.projects.$proj
+                if ($projEntry -is [PSCustomObject] -and $projEntry.PSObject.Properties['wsl'] -and $projEntry.wsl) {
+                    $projWslInfo = $projEntry.wsl
+                }
             }
+            $shortcutWslState = if ($projWslInfo -is [PSCustomObject] -and $projWslInfo.PSObject.Properties['state']) { $projWslInfo.state } else { $null }
+            $shortcutWslDistro = if ($projWslInfo -is [PSCustomObject] -and $projWslInfo.PSObject.Properties['distro']) { $projWslInfo.distro } else { $null }
+            if ($shortcutWslState -and $shortcutWslDistro) {
+                $wslLabel = "$displayName (WSL)"
+                $lnkPath = Join-Path $LocalBin "$wslLabel.lnk"
+                $lnk = $shell.CreateShortcut($lnkPath)
+                $lnk.TargetPath = $wtExe
+                $lnk.Arguments = "-p `"$wslLabel`""
+                $lnk.WorkingDirectory = "%USERPROFILE%"
+                $lnk.Description = "$displayName - Worktree Session Manager (WSL)"
+                $lnk.Save()
+            } else {
+                # Remove stale WSL shortcut if it exists from a previous install
+                foreach ($pattern in @("$displayName (WSL).lnk", "$displayName (WSL: *).lnk")) {
+                    Get-ChildItem -Path $LocalBin -Filter $pattern -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+                }
+            }
+        } catch {
+            Write-ServiceWarn "Skipped shortcut for project '$proj' (malformed or incomplete registry entry): $_"
+            continue
         }
     }
 
