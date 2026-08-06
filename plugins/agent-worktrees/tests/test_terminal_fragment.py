@@ -394,15 +394,71 @@ def test_reconcile_removes_stale_and_changed():
 
 
 def test_reconcile_leaves_foreign_orphans_untouched():
-    """A generatedProfiles GUID in no fragment and not materialized (e.g. another
-    extension's, or ancient cruft) is conservatively kept -- we never blow away
-    unrelated dynamic-profile state."""
+    """A v4/v5 orphan (WT built-in / random profile the user deleted) is kept --
+    reclamation must never resurrect a foreign dynamic profile."""
     frag = ["{aaaa}"]
     settings = ["{aaaa}"]
-    generated = ["{aaaa}", "{foreign-orphan}"]
+    wsl_v5 = "{7edcd332-66b5-51da-b9b9-c9feed3a9fd2}"   # version nibble 5
+    random_v4 = "{12345678-1234-4abc-8def-1234567890ab}"  # version nibble 4
+    generated = ["{aaaa}", wsl_v5, random_v4]
     plan = tf.reconcile_generated_profiles(frag, settings, generated)
     assert plan.remove == []
-    assert "{foreign-orphan}" in plan.keep
+    assert wsl_v5 in plan.keep and random_v4 in plan.keep
+
+
+def test_reconcile_reclaims_our_orphans():
+    """A non-v4/v5 orphan (our raw-hash generator's leftover, in no fragment,
+    not materialized) is reclaimed -- this is what lets plain `update` finally
+    drain the accumulated generatedProfiles cruft."""
+    frag = ["{aaaa}"]
+    settings = ["{aaaa}"]
+    ours = "{593ace19-f6f2-a0bd-237c-bd163f6708f3}"   # version nibble a -> ours
+    plan = tf.reconcile_generated_profiles(frag, settings, ["{aaaa}", ours])
+    assert plan.remove == [ours]
+    assert ours in plan.reclaimed
+    assert "{aaaa}" in plan.keep
+
+
+def test_reconcile_orphan_in_foreign_fragment_is_kept():
+    """A non-v4/v5 orphan that a foreign fragment still emits is kept: pass the
+    union of all installed fragments so we don't prune another extension's."""
+    ours_frag = ["{aaaa}"]
+    foreign = "{593ace19-f6f2-a0bd-237c-bd163f6708f3}"  # non-v4/v5 but foreign-owned
+    plan = tf.reconcile_generated_profiles(
+        ours_frag, ["{aaaa}"], ["{aaaa}", foreign],
+        all_fragment_guids=["{aaaa}", foreign])
+    assert plan.remove == []
+    assert foreign in plan.keep
+
+
+def test_reconcile_orphan_reclaim_can_be_disabled():
+    ours = "{593ace19-f6f2-a0bd-237c-bd163f6708f3}"
+    plan = tf.reconcile_generated_profiles(
+        ["{aaaa}"], ["{aaaa}"], ["{aaaa}", ours], reclaim_orphans=False)
+    assert plan.remove == []
+    assert ours in plan.keep
+
+
+def test_reconcile_heal_and_reclaim_reported_separately():
+    frag = ["{aaaa}", "{bbbb}"]
+    settings = ["{aaaa}"]                                  # bbbb hidden
+    ours_orphan = "{593ace19-f6f2-a0bd-237c-bd163f6708f3}"
+    plan = tf.reconcile_generated_profiles(
+        frag, settings, ["{aaaa}", "{bbbb}", ours_orphan])
+    assert plan.healed == ["{bbbb}"]
+    assert plan.reclaimed == [ours_orphan]
+    assert set(plan.remove) == {"{bbbb}", ours_orphan}
+
+
+def test_is_rfc_v4_or_v5_guid():
+    assert tf.is_rfc_v4_or_v5_guid("{7edcd332-66b5-51da-b9b9-c9feed3a9fd2}")   # v5
+    assert tf.is_rfc_v4_or_v5_guid("12345678-1234-4abc-8def-1234567890ab")     # v4
+    # Our raw-hash GUIDs: version nibble not 4/5.
+    assert not tf.is_rfc_v4_or_v5_guid("{593ace19-f6f2-a0bd-237c-bd163f6708f3}")
+    assert not tf.is_rfc_v4_or_v5_guid("{440d9b37-e5d0-d1f2-d8e7-ab1e0a8d6d3b}")
+    # Malformed / short tokens are not treated as v4/v5.
+    assert not tf.is_rfc_v4_or_v5_guid("{foobar}")
+    assert not tf.is_rfc_v4_or_v5_guid("")
 
 
 def test_reconcile_case_insensitive_preserves_original():
