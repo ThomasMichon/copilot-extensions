@@ -566,6 +566,16 @@ def collect_local_projects(current_project: str | None = None) -> list[ProjectIn
         if name not in ordered:
             ordered.append(name)
 
+    # The runtime's own name is never a launchable project. It can leak into
+    # ``ordered`` from any source -- a stale projects.yaml entry, a repos.yaml
+    # entry, or ``current_project`` (running the ``agent-worktrees`` binstub
+    # itself resolves the active project to ``agent-worktrees``) -- so filter it
+    # here, at the single point every candidate flows through, rather than
+    # trusting each source to be clean. Without this the generator emits a bogus
+    # "Agent Worktrees" launcher backed by no repo.
+    from .installer import _RESERVED_BINSTUB_NAMES
+    ordered = [n for n in ordered if n not in _RESERVED_BINSTUB_NAMES]
+
     out: list[ProjectInput] = []
     for name in ordered:
         entry = projects_reg.get(name, {}) or {}
