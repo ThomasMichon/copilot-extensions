@@ -905,3 +905,30 @@ def test_stream_argv_adds_stream_flag():
     argv = data_ssh._stream_argv(src)
     rendered = data_ssh._remote_cmd_str(argv)
     assert "list --json" in rendered and "--stream" in rendered
+
+
+def test_records_serves_last_good_during_reload():
+    """records() keeps a source's last-good rows while it is reloading, so a
+    refresh never blanks the list (dotfiles#948 follow-up)."""
+    loader = data_ssh.LiveLoader(sources=[])
+    key = ("host", "Win")
+    loader._records[key] = [{"id4": "aaaa"}, {"id4": "bbbb"}]
+    # ready -> served
+    loader._state[key] = "ready"
+    assert len(loader.records()) == 2
+    # loading (a reload in flight) with last-good rows -> STILL served (no blank)
+    loader._state[key] = "loading"
+    assert len(loader.records()) == 2
+    # failed with last-good rows -> still served (transient failure keeps rows)
+    loader._state[key] = "failed"
+    assert len(loader.records()) == 2
+
+
+def test_records_hides_source_that_never_resolved():
+    """A source still on its initial connect (loading, no records) contributes
+    nothing -- the spinner shows, not stale/empty rows."""
+    loader = data_ssh.LiveLoader(sources=[])
+    key = ("host", "Win")
+    loader._records[key] = []
+    loader._state[key] = "loading"
+    assert loader.records() == []

@@ -540,7 +540,7 @@ class _PickerMachine(_FocusRegion):
     def render(self):
         scr = self._screen
         W = scr.size.width or 100
-        chrome, _data = scr._build_body_split(W)
+        chrome = scr._build_chrome_vrows(W)
         machine, _buttons = scr._chrome_split(chrome)
         return scr._join_lines([vr.text for vr in machine], W)
 
@@ -555,7 +555,7 @@ class _PickerButtons(_FocusRegion):
     def render(self):
         scr = self._screen
         W = scr.size.width or 100
-        chrome, _data = scr._build_body_split(W)
+        chrome = scr._build_chrome_vrows(W)
         _machine, buttons = scr._chrome_split(chrome)
         return scr._join_lines([vr.text for vr in buttons], W)
 
@@ -918,7 +918,11 @@ class _PickerNativeData(OptionList):
         if stop is not None and scr.sel != stop:
             scr.sel = stop
             scr._wt_track_focus()
-            scr.refresh()
+            # Defer the sel-dependent CHROME refresh to the render tick instead
+            # of a synchronous per-keystroke full-screen re-composite (the
+            # held-arrow freeze): the native cursor already moved, so mark the
+            # chrome dirty and let ``_tick`` coalesce the refresh at ~10fps.
+            scr._nav_dirty = True
         self._update_sticky()
 
     def on_option_list_option_selected(self, event) -> None:
@@ -1015,6 +1019,15 @@ class PickerScreen(Widget):
         # interactive path.
         self._frame_cache = None   # (render_sig, segments-dict)
         self._split_cache = None   # ((render_sig, use_sel), (chrome, data))
+        self._chrome_cache = None  # ((render_sig, use_sel), chrome-only vrows)
+        # Held-arrow flood guard (dotfiles#948 follow-up): a cursor move only
+        # needs the native OptionList to repaint its own highlight (instant); the
+        # sel-dependent CHROME (topbar/footer) is refreshed by the render tick,
+        # not synchronously per keystroke. Without this, every key fired a full
+        # ~100ms screen re-composite, so a held arrow queued refreshes faster
+        # than they drained and the picker froze. The tick coalesces them to
+        # ~10fps regardless of key-repeat rate.
+        self._nav_dirty = False
         # NF3 focus bridge (#88): guards the on_focus <-> sel mirror so focusing
         # a region widget to match ``sel`` doesn't recurse back into a sel write.
         self._nf_syncing = False
@@ -1448,7 +1461,14 @@ class PickerScreen(Widget):
         # so this only paces the cosmetic live-glyph pulse -- and it stops the
         # picker from flooding an SSH/tmux link with continuous full-screen
         # repaints (the over-SSH sluggishness the legacy picker never had).
-        if busy or self.frame % 5 == 0:
+        # Held-arrow flood guard: a pending navigation refresh is serviced here
+        # (coalesced to the tick) instead of synchronously per keystroke, so a
+        # held arrow can never queue full-screen re-composites faster than they
+        # drain. The native OptionList already moved its cursor; this catches
+        # the sel-dependent chrome up at tick rate.
+        nav = self._nav_dirty
+        self._nav_dirty = False
+        if busy or nav or self.frame % 5 == 0:
             self.refresh()
 
     def _advance_progress(self):
@@ -2447,6 +2467,41 @@ class PickerScreen(Widget):
         self._current_view().build_data(add, width, use_sel)
         return vrows
 
+    def _build_chrome_vrows(self, width, sel=None):
+        """Chrome-only VRows (machine-scope + button rows) -- no data body.
+
+        The interactive path's chrome segment widgets (``_PickerMachine`` /
+        ``_PickerButtons``) use THIS instead of ``_build_body_split`` so a pure
+        navigation (a highlight/``sel`` move) repaints only the small fixed
+        chrome and NEVER rebuilds the scrolling data body. The live body is the
+        native OptionList (``_PickerNativeData``), which owns its own cursor and
+        diffs cheaply; rebuilding every data row here on each arrow keypress was
+        a ~100ms/key stall that saturated the input queue under key-repeat and
+        read as an unrecoverable freeze (dotfiles#948 follow-up). Cached by the
+        same ``_render_sig`` key so the two chrome widgets in one paint pass
+        share a single build; ``refresh()`` busts it alongside the other caches.
+        """
+        use_sel = self.sel if sel is None else sel
+        H = self.size.height or 30
+        key = (self._render_sig(width, H), use_sel)
+        cache = self._chrome_cache
+        if cache is not None and cache[0] == key:
+            return cache[1]
+        vrows = []
+        section = {"cur": None}
+
+        def add(text, stop=None, kind=None, data=None, new_section=None):
+            if new_section is not None:
+                section["cur"] = (new_section, len(vrows))
+            vr = VRow(text, stop, kind, data)
+            vr.pin_section = section["cur"]
+            vrows.append(vr)
+            return vr
+
+        self._current_view().build_chrome(add, width, use_sel)
+        self._chrome_cache = (key, vrows)
+        return vrows
+
     def _ensure_data_visible(self, data_vrows, data_h):
         """Scroll the data-body (compose tree) so the selected data row is
         visible; a no-op for chrome selections (they live in the fixed chrome and
@@ -2834,6 +2889,7 @@ class PickerScreen(Widget):
         # recomputed once and then shared by every segment widget in this pass.
         self._frame_cache = None
         self._split_cache = None
+        self._chrome_cache = None
         result = super().refresh(*args, **kwargs)
         self._refresh_nf_segments()
         return result

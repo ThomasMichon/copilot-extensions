@@ -5748,3 +5748,30 @@ def test_global_binding_keys_bubble_without_crashing():
             assert app.query_one(PickerScreen) is scr
 
     asyncio.run(run())
+
+
+def test_tick_services_deferred_nav_refresh():
+    """Held-arrow flood guard (dotfiles#948 follow-up): a cursor move marks the
+    chrome dirty (``_nav_dirty``) instead of refreshing synchronously per key;
+    the render tick coalesces it into a single refresh (and clears the flag), so
+    key-repeat can never flood the SSH/tmux link with full-screen repaints."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            scr._nav_dirty = True
+            calls = []
+            orig = scr.refresh
+            scr.refresh = lambda *a, **k: calls.append(1)
+            try:
+                scr._tick()
+            finally:
+                scr.refresh = orig
+            assert calls, "tick did not service the deferred nav refresh"
+            assert scr._nav_dirty is False
+
+    asyncio.run(run())
