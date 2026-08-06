@@ -6,6 +6,11 @@ Each plugin with a runtime installer must, per language variant:
   2. emit no binstub that sets PYTHONPATH to a runtime lib/ dir,
   3. write a schema_version 3 deploy manifest with a `source` block,
   4. carry a source-kind resolver identical (per language) across plugins,
+     and — for the update-flow robustness contract (dotfiles #935) — the
+     byte-identical `install-contract:v4` self-stage prologue and smoke seam
+     (per language), so a concurrent `copilot plugin update` never fights a
+     wedged installer for the singleton payload and a stalled install
+     self-terminates,
   5. adopt the immutable-versioned venv layout (dotfiles #581): ship a
      `scripts/versioned_runtime.py` primitive that is byte-identical to the
      canonical source (`libs/versioned-runtime/versioned_runtime.py`, vendored in
@@ -128,6 +133,20 @@ def _norm(s: str | None) -> str | None:
     return re.sub(r"\s+", " ", s).strip()
 
 
+def _extract_marker(text: str, start_marker: str, end_marker: str) -> str | None:
+    """Return the substring from the line bearing start_marker through the line
+    bearing end_marker (inclusive), or None. Used for the install-contract:v4
+    self-stage / smoke-seam blocks, which are byte-identical across plugins per
+    language (they are delimited by comment markers, not a single brace)."""
+    i = text.find(start_marker)
+    if i < 0:
+        return None
+    j = text.find(end_marker, i)
+    if j < 0:
+        return None
+    return text[i : j + len(end_marker)]
+
+
 def _entrypoint_base(plugin: Path) -> str | None:
     """Return the runtime entrypoint base for a plugin, or None.
 
@@ -150,6 +169,11 @@ def check() -> int:
     ps1_resolvers: dict[str, str | None] = {}
     sh_resolvers: dict[str, str | None] = {}
     vrt_hashes: dict[str, str] = {}
+    # install-contract:v4 self-stage / smoke-seam blocks -- byte-identical across
+    # plugins, per language (#935). Keyed by plugin name; value is the exact block
+    # text (or None if absent). Non-payload plugins must carry both.
+    v4_selfstage: dict[str, dict[str, str | None]] = {"ps1": {}, "sh": {}}
+    v4_smoke: dict[str, dict[str, str | None]] = {"ps1": {}, "sh": {}}
 
     plugins = sorted(
         p for p in PLUGINS_DIR.iterdir()
@@ -224,8 +248,24 @@ def check() -> int:
             else:
                 sh_resolvers[name] = _norm(_extract_block(text, "_source_kind()", "{", "}"))
 
+            # install-contract:v4 self-stage + smoke seam (#935). Byte-identical
+            # per language across every Python-runtime plugin, so a concurrent
+            # `copilot plugin update` never fights a wedged installer for the
+            # singleton payload (self-stage) and a stalled install self-terminates
+            # (watchdog). Payload (non-Python) runtimes are exempt.
+            if not is_payload:
+                v4_selfstage[ext][name] = _extract_marker(
+                    text, "# === install-contract:v4 self-stage", "# === end install-contract:v4 self-stage ==="
+                )
+                v4_smoke[ext][name] = _extract_marker(
+                    text, "# === install-contract:v4 smoke seam", "# === end install-contract:v4 smoke seam ==="
+                )
+
     _check_identical("Get-SourceKind (ps1)", ps1_resolvers, violations)
     _check_identical("_source_kind (sh)", sh_resolvers, violations)
+    for ext in ("ps1", "sh"):
+        _check_identical(f"install-contract:v4 self-stage ({ext})", v4_selfstage[ext], violations)
+        _check_identical(f"install-contract:v4 smoke seam ({ext})", v4_smoke[ext], violations)
 
     # The versioned_runtime.py primitive is a self-contained per-plugin copy
     # vendored byte-identically from the canonical source
@@ -262,10 +302,10 @@ def _check_identical(label: str, resolvers: dict[str, str | None], violations: l
     present = {k: v for k, v in resolvers.items() if v}
     missing = [k for k, v in resolvers.items() if not v]
     for k in missing:
-        violations.append(f"{k}: missing {label} source-kind resolver")
+        violations.append(f"{k}: missing {label} block")
     distinct = set(present.values())
     if len(distinct) > 1:
-        violations.append(f"{label} resolver differs across plugins: {sorted(present)}")
+        violations.append(f"{label} block differs across plugins: {sorted(present)}")
 
 
 if __name__ == "__main__":
