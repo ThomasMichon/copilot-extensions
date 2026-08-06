@@ -431,7 +431,9 @@ def _control_plane_project(anchor: str | Path) -> str | None:
     bare form (``control_plane: <name>``). Returns ``None`` when the file is
     absent/malformed or declares no control plane. Fail-safe (never raises).
     """
-    path = Path(anchor) / "machines.yaml"
+    path = Path(anchor) / ".agent-worktrees" / "machines.yaml"
+    if not path.is_file():
+        path = Path(anchor) / "machines.yaml"  # legacy repo-root fallback
     try:
         if not path.is_file():
             return None

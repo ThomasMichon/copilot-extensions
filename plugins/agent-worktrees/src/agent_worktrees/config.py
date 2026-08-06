@@ -357,13 +357,33 @@ class MachineEntry:
     copilot: bool = True
 
 
-def load_machines_yaml(repo_dir: str | Path) -> dict[str, MachineEntry]:
-    """Load the machine registry from ``machines.yaml`` in the repo root.
+def machines_yaml_path(repo_dir: str | Path) -> Path:
+    """Resolve the ``machines.yaml`` path for a repo.
 
+    Canonical location is the in-repo ``.agent-worktrees/machines.yaml`` (agent-*
+    plugin config belongs in the plugin's ``.agent-*/`` folder, alongside
+    ``config.yaml`` / ``related.yaml``). Falls back to the legacy repo-root
+    ``machines.yaml`` when the canonical file is absent, so existing repos keep
+    working until migrated. Prefers the canonical path when both exist.
+    """
+    canonical = Path(repo_dir) / INREPO_CONFIG_DIRNAME / "machines.yaml"
+    if canonical.exists():
+        return canonical
+    legacy = Path(repo_dir) / "machines.yaml"
+    if legacy.exists():
+        return legacy
+    return canonical  # non-existent: report the canonical path in errors
+
+
+def load_machines_yaml(repo_dir: str | Path) -> dict[str, MachineEntry]:
+    """Load the machine registry from ``machines.yaml``.
+
+    Reads the canonical ``<repo>/.agent-worktrees/machines.yaml`` (falling back to
+    the legacy repo-root ``<repo>/machines.yaml`` -- see :func:`machines_yaml_path`).
     Returns a dict mapping machine key → MachineEntry.
     Raises FileNotFoundError if machines.yaml is missing.
     """
-    path = Path(repo_dir) / "machines.yaml"
+    path = machines_yaml_path(repo_dir)
     if not path.exists():
         raise FileNotFoundError(f"Machine registry not found at {path}")
 

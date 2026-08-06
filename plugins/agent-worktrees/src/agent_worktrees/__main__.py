@@ -7181,8 +7181,8 @@ def _validate_machine_registry(
     try:
         registry = cfg.load_machines_yaml(repo_dir)
     except FileNotFoundError:
-        output.err(f"Machine registry not found at {repo_dir / 'machines.yaml'}")
-        output.info("Create machines.yaml in the repo root with an entry for this machine.")
+        output.err(f"Machine registry not found at {cfg.machines_yaml_path(repo_dir)}")
+        output.info("Create .agent-worktrees/machines.yaml with an entry for this machine.")
         return None
     except ValueError as exc:
         output.err(str(exc))
