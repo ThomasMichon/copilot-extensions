@@ -1194,18 +1194,6 @@ function Ensure-Psmux {
     Ensure-PsmuxSshSafe
 }
 
-function Deploy-Icon {
-    if (-not $RepoDir) { return }
-    foreach ($icon in @('aperture-science.ico', 'aperture-science-wsl.ico')) {
-        $iconSrc = Join-Path $RepoDir "home-assistant\media\$icon"
-        $iconDst = Join-Path $InstallDir $icon
-        if (Test-Path $iconSrc) {
-            Copy-Item $iconSrc $iconDst -Force
-        }
-    }
-    Write-ServiceOk "Icons deployed"
-}
-
 # Helper: check if a WSL binstub actually exists on disk
 function Test-WslBinstubExists {
     param(
@@ -1567,24 +1555,6 @@ function Build-TerminalFragment {
             $pSel["$localDisplay|Win|agent"] = $true
         }
 
-        # Icon: prefer project-specific, fall back to agent-worktrees default
-        $iconPath = "%USERPROFILE%\.${pName}\aperture-science.ico"
-        if (-not (Test-Path (Join-Path $env:USERPROFILE ".$pName\aperture-science.ico"))) {
-            $iconPath = "%USERPROFILE%\.agent-worktrees\aperture-science.ico"
-        }
-
-        # WSL/Linux icon for bash-shell environments (local WSL + remote WSL /
-        # Linux SSH targets), so they read distinctly from Windows profiles
-        # (#479). Same project-then-default preference as $iconPath, ultimately
-        # falling back to the standard icon if no WSL variant is deployed.
-        $wslIconPath = "%USERPROFILE%\.${pName}\aperture-science-wsl.ico"
-        if (-not (Test-Path (Join-Path $env:USERPROFILE ".$pName\aperture-science-wsl.ico"))) {
-            $wslIconPath = "%USERPROFILE%\.agent-worktrees\aperture-science-wsl.ico"
-            if (-not (Test-Path (Join-Path $env:USERPROFILE ".agent-worktrees\aperture-science-wsl.ico"))) {
-                $wslIconPath = $iconPath
-            }
-        }
-
         # Local Windows profile (self·agent on a Windows host). Always selected
         # when present (the diagonal is locked), but still gated for symmetry.
         if (Test-ProfileSelected $pSel $localDisplay 'Win' 'agent') {
@@ -1593,7 +1563,6 @@ function Build-TerminalFragment {
                 guid              = "{$guid}"
                 name              = $pDisplay
                 commandline       = "cmd /c `"%USERPROFILE%\.local\bin\${pName}.cmd`""
-                icon              = $iconPath
                 startingDirectory = "%USERPROFILE%"
                 colorScheme       = 'Aperture Science'
                 hidden            = $false
@@ -1613,7 +1582,6 @@ function Build-TerminalFragment {
                 guid              = "{$guid}"
                 name              = $wslLabel
                 commandline       = $wslCmd
-                icon              = $wslIconPath
                 startingDirectory = "%USERPROFILE%"
                 colorScheme       = 'Aperture Science'
                 hidden            = $false
@@ -1632,7 +1600,6 @@ function Build-TerminalFragment {
                     guid              = "{$localWinShellGuid}"
                     name              = $localDisplay
                     commandline       = "pwsh.exe"
-                    icon              = $iconPath
                     startingDirectory = "%USERPROFILE%"
                     colorScheme       = 'Aperture Science'
                     hidden            = $false
@@ -1654,7 +1621,6 @@ function Build-TerminalFragment {
                     guid              = "{$localWslShellGuid}"
                     name              = "$localDisplay (WSL)"
                     commandline       = $wslShellCmd
-                    icon              = $wslIconPath
                     startingDirectory = "%USERPROFILE%"
                     colorScheme       = 'Aperture Science'
                     hidden            = $false
@@ -1710,7 +1676,6 @@ function Build-TerminalFragment {
 
                             # WSL/Linux SSH targets get the WSL icon (#479);
                             # remote Windows keeps the standard icon.
-                            $profileIcon = if ($sshEnv.name -eq 'wsl' -or $sshEnv.name -eq 'linux') { $wslIconPath } else { $iconPath }
 
                             # Plain SSH (shell) profile -- gated by a 'shell'
                             # selection; deduplicated across projects since
@@ -1722,7 +1687,6 @@ function Build-TerminalFragment {
                                     guid              = "{$sshGuid}"
                                     name              = $profileName
                                     commandline       = "ssh $alias"
-                                    icon              = $profileIcon
                                     startingDirectory = "%USERPROFILE%"
                                     colorScheme       = 'Aperture Science'
                                     hidden            = $false
@@ -1743,7 +1707,6 @@ function Build-TerminalFragment {
                                     guid              = "{$launchGuid}"
                                     name              = $launchProfileName
                                     commandline       = $launchCmdline
-                                    icon              = $profileIcon
                                     startingDirectory = "%USERPROFILE%"
                                     colorScheme       = 'Aperture Science'
                                     hidden            = $false
@@ -2186,7 +2149,6 @@ function Deploy-Shortcuts {
         $lnk.Arguments = "-p `"$displayName`""
         $lnk.WorkingDirectory = "%USERPROFILE%"
         $lnk.Description = "$displayName - Worktree Session Manager"
-        $lnk.IconLocation = "$InstallDir\aperture-science.ico, 0"
         $lnk.Save()
 
         # WSL shortcut -- only when WSL support is recorded in registry
@@ -2207,7 +2169,6 @@ function Deploy-Shortcuts {
             $lnk.Arguments = "-p `"$wslLabel`""
             $lnk.WorkingDirectory = "%USERPROFILE%"
             $lnk.Description = "$displayName - Worktree Session Manager (WSL)"
-            $lnk.IconLocation = "$InstallDir\aperture-science-wsl.ico, 0"
             $lnk.Save()
         } else {
             # Remove stale WSL shortcut if it exists from a previous install
@@ -2477,7 +2438,6 @@ switch ($Action) {
             Deploy-Config -Machine $machine | Out-Null
             Deploy-Binstub
             Register-ProjectEntry
-            if ($RepoDir) { Deploy-Icon }
             Deploy-Shortcuts -Machine $machine
             if ($RepoDir) { Deploy-GitHooksPath }
 
@@ -2802,7 +2762,6 @@ switch ($Action) {
         if ($HasProject) {
             Deploy-Binstub
             Register-ProjectEntry
-            if ($RepoDir) { Deploy-Icon }
             $updateMachine = Resolve-Machine
             $configPath = Join-Path $ProjectDir 'config.yaml'
             if (Test-Path $configPath) {
