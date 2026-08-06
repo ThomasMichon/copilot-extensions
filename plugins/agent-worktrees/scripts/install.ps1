@@ -810,8 +810,8 @@ function Deploy-Wrappers {
         Write-ServiceOk "Wrapper: $wrapper"
     }
 
-    # Deploy sessionStart/sessionEnd hook scripts (bootstrap-check + project-hooks + register/deregister-session + anchor-hygiene-check + provision-check)
-    foreach ($script in @('bootstrap-check.ps1', 'bootstrap-check.sh', 'project-hooks.ps1', 'project-hooks.sh', 'register-session.ps1', 'register-session.sh', 'deregister-session.ps1', 'deregister-session.sh', 'anchor-hygiene-check.ps1', 'anchor-hygiene-check.sh', 'provision-check.ps1', 'provision-check.sh')) {
+    # Deploy hook scripts: sessionStart (bootstrap-check + project-hooks + register/deregister-session + anchor-hygiene-check + provision-check) + preToolUse (statelessness_guard.py)
+    foreach ($script in @('bootstrap-check.ps1', 'bootstrap-check.sh', 'project-hooks.ps1', 'project-hooks.sh', 'register-session.ps1', 'register-session.sh', 'deregister-session.ps1', 'deregister-session.sh', 'anchor-hygiene-check.ps1', 'anchor-hygiene-check.sh', 'provision-check.ps1', 'provision-check.sh', 'statelessness_guard.py')) {
         $src = Join-Path $ScriptDir $script
         $dst = Join-Path $BinDir $script
         if (Test-Path $src) {
