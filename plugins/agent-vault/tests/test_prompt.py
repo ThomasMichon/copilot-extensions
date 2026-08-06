@@ -22,8 +22,8 @@ def test_explicit_title_wins(monkeypatch):
 
 
 def test_env_title_used_when_no_arg(monkeypatch):
-    monkeypatch.setenv(prompt.PROMPT_TITLE_ENV, "Aperture Science Vault")
-    assert prompt._resolve_title(None) == "Aperture Science Vault"
+    monkeypatch.setenv(prompt.PROMPT_TITLE_ENV, "Custom Vault Title")
+    assert prompt._resolve_title(None) == "Custom Vault Title"
 
 
 def test_empty_env_falls_back_to_default(monkeypatch):
