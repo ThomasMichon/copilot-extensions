@@ -34,6 +34,31 @@ Copilot CLI does not ship natively.
 > system below now covers what they did -- including injecting `additionalContext`
 > into the model. Reach for an extension only when no declarative surface fits.
 
+## Two ways to add an in-repo skill or agent — prefer the local-plugin model
+
+Before writing a skill or sub-agent for a repo, decide **how it is packaged**:
+
+| Approach | What it is | When |
+|----------|-----------|------|
+| **Local plugin** (preferred) | The skill/agent is a plugin in the repo's **in-repo `.ai` local marketplace** (`.ai/<name>/skills/...` or `.ai/<name>/agents/...`), declared via a `directory` marketplace source in `.github/copilot/settings.json`. | **Default.** Whenever it should be modular, individually toggleable, travel with the repo, and compose across contexts (repo launched directly, consumed by another harness, or dispatched to via agent-bridge). |
+| **Loose local skill / agent** | A bare `.github/skills/<name>/SKILL.md` or `.github/agents/<name>.agent.md` (or `.copilot/…`). Loaded directly by the runtime, no marketplace. | A quick one-off / experiment, or a repo that deliberately wants a single flat set with no plugin packaging. Simplest to create; loads **only** for the launch repo. |
+
+**Prefer the local-plugin model when practical.** It costs one extra `plugin.json`
++ a `marketplace.json` entry, but it makes each capability independently
+enable-able, reviewable, and portable — and it is the only form that loads when
+the repo is *consumed* rather than *launched* (a bound data/knowledge repo, an
+agent-bridge dispatch target). Use a loose skill/agent only when that portability
+genuinely doesn't matter.
+
+> **The two are otherwise identical to author.** A skill is the same `SKILL.md`
+> and a sub-agent the same `.agent.md` either way — the *only* differences are
+> **where the file lives** (`.ai/<name>/skills/<name>/` vs `.github/skills/<name>/`)
+> and, for a plugin, the small `.claude-plugin/plugin.json` + `marketplace.json`
+> entry + the `directory` marketplace declaration. See the `installing-plugins`
+> skill (§ *the `.ai` local marketplace*) for the packaging + **required
+> marketplace declaration** mechanics; this skill covers authoring the SKILL.md
+> itself.
+
 Reference documentation:
 
 | Feature | URL |
@@ -65,13 +90,11 @@ when relevant.
 
 Add extra search paths with `/skills add`.
 
-> **Choosing a home for a repo's own skill.** A loose project skill
-> (`.github/skills/<name>/`) loads only for the launch repo. Prefer packaging a
-> repo's own skills as **`.ai` local-marketplace plugins** when they should be
-> modular/toggleable and compose across contexts (the repo launched directly, or
-> consumed by another harness / dispatched to via agent-bridge). See
-> `installing-plugins` → *Preferred for modular in-repo capability: the `.ai`
-> local marketplace*.
+> **Choosing a home for a repo's own skill.** See § *Two ways to add an in-repo
+> skill or agent* above — prefer the **`.ai` local-plugin** model over a loose
+> `.github/skills/<name>/` (which loads only for the launch repo), and remember
+> the `.ai` marketplace **must be declared** in `.github/copilot/settings.json`
+> (`installing-plugins` → *the `.ai` local marketplace*).
 
 ### SKILL.md format
 

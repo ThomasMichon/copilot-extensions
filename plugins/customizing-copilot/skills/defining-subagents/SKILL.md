@@ -42,9 +42,15 @@ Personal agents override project agents with the same name.
 > server (per the per-agent MCP pattern below) is a natural unit to ship as an
 > `.ai` local-marketplace plugin — one `.ai/<name>/` with
 > `agents/<name>.agent.md`, enabled via the repo's `directory` marketplace
-> source. This keeps the MCP wrapped in the sub-agent (out of the main context)
-> **and** lets the agent load whether the repo is launched directly or consumed
-> by another harness. See `installing-plugins` → *the `.ai` local marketplace*.
+> source (**which the repo must declare in `.github/copilot/settings.json` —
+> the `.ai` directory is inert until it is declared as a locally-referenced
+> marketplace**). This keeps the MCP wrapped in the sub-agent (out of the main
+> context) **and** lets the agent load whether the repo is launched directly or
+> consumed by another harness. **Prefer this local-plugin form** over a loose
+> `.github/agents/<name>.agent.md` when practical (same `.agent.md` either way —
+> see `authoring-skills` § *Two ways to add an in-repo skill or agent*). See
+> `installing-plugins` → *the `.ai` local marketplace* for the required
+> marketplace declaration.
 
 ## Agent file format
 

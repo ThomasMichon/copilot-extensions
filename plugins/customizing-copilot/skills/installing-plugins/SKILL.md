@@ -107,10 +107,14 @@ in-repo plugins.
 > or `.claude-plugin/plugin.json`. The `.ai` + `.claude-plugin` spelling is the
 > cross-tool convention.
 
-**Declare + enable it** in the repo's committed `.github/copilot/settings.json`
-(the CLI also reads `.claude/settings.json` as a fallback) — a **`directory`**
-marketplace source whose `path` is the repo-relative `./.ai`, then one
-`enabledPlugins` line per plugin:
+**Declaring the `.ai` marketplace is REQUIRED — the directory alone does
+nothing.** The `.ai/` tree is inert until the repo **declares it as a
+locally-referenced plugin marketplace** in its own committed
+`.github/copilot/settings.json` (the CLI also reads `.claude/settings.json` as a
+fallback). Without the `extraKnownMarketplaces` `directory` entry, Copilot never
+discovers the marketplace and none of its plugins load — no matter how many
+`enabledPlugins` lines you add. So the declaration + per-plugin enable are two
+required halves:
 
 ```json
 {
@@ -122,6 +126,13 @@ marketplace source whose `path` is the repo-relative `./.ai`, then one
   }
 }
 ```
+
+- The **`directory` source** with the repo-relative `path: "./.ai"` is what makes
+  it a *locally-referenced* marketplace of the *current repo* — the `path` is
+  resolved relative to the repo the settings.json lives in.
+- Each plugin is then enabled by `"<name>@<marketplace-name>": true`, where
+  `<marketplace-name>` is the `extraKnownMarketplaces` key you chose (not the
+  directory name).
 
 Because the source is **declarative and repo-relative**, a session launched in
 the repo picks the marketplace up from the committed settings.json with **no
