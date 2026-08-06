@@ -240,43 +240,6 @@ function Ensure-InstallDir {
     }
 }
 
-function Resolve-ServicePassword {
-    <#
-    .SYNOPSIS
-        Retrieve the Windows login password for the current machine, preferring
-        the local vault. Falls back to interactive Read-Host if the vault is
-        unavailable.
-    .DESCRIPTION
-        Scheduled tasks that run before login (ONSTART, /RL HIGHEST) require the
-        user's plaintext password. This function tries Vault.psm1 first -- entry
-        "Windows on <Machine>" -- then falls back to a masked
-        interactive prompt.
-
-        The vault module is resolved relative to $PSScriptRoot (assumes we're
-        dot-sourced from a service installer under the repo tree). If the module
-        can't be found or the lookup fails, the fallback prompt still works.
-    #>
-    $vaultModule = Join-Path $script:_ServiceUtilsRepoRoot 'tools\vault\Vault.psm1'
-    if (Test-Path $vaultModule) {
-        try {
-            Import-Module $vaultModule -ErrorAction Stop
-            $machineName = (Get-Culture).TextInfo.ToTitleCase($env:COMPUTERNAME.ToLower())
-            $pw = Get-VaultSecret "Windows on $machineName" -Field password -ErrorAction Stop
-            if ($pw) {
-                Write-ServiceOk "Retrieved Windows password from vault"
-                return $pw
-            }
-        } catch {
-            Write-Warning "Vault lookup failed: $_"
-        }
-    }
-
-    # Fallback: interactive prompt
-    $secure = Read-Host "  Windows password for $env:USERDOMAIN\$env:USERNAME" -AsSecureString
-    return [System.Runtime.InteropServices.Marshal]::PtrToStringAuto(
-        [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
-}
-
 function Remove-InstallDir {
     param(
         [string]$Path,
