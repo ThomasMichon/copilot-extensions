@@ -291,11 +291,14 @@ behavior:
   failed install.
 
 The completion-marker primitive (`versioned_runtime.py`) is already
-cross-platform. `agent-bridge/scripts/install.sh` is the wired `.sh` reference
-(self-stage + watchdog + smoke + `_source_kind` + toss-before-build +
-mark-after-health-gate); the per-plugin marker/toss body-wiring for the other
-`.sh` installers is a tracked rollout (the link-name and the marker's placement
-relative to each plugin's health gate are per-plugin, so it is not mechanical).
+cross-platform, and **all 11 `.sh` installers are fully wired** (self-stage +
+watchdog + smoke + `_source_kind` + toss-before-build + mark-after-health-gate).
+The marker/toss body-wiring is per-plugin, not mechanical: the link-name is
+derived as `basename "$LINK_DIR"` (`venv` vs `.venv`), and mark-complete is
+placed relative to each plugin's health gate — on its own line before
+`_versioned_activate` for the external-gate (daemon) plugins, or inside
+`_versioned_activate` (after the gate) for the CLI plugins that fold the gate in.
+`agent-bridge/scripts/install.sh` is the reference.
 
 ## SAC-safe launchers (Windows)
 
