@@ -3,9 +3,11 @@ name: installing-plugins
 description: >
   Install and enable Copilot CLI plugins -- repo-scoped registration via
   .github/copilot/settings.json (extraKnownMarketplaces + enabledPlugins) with
-  experimental mode, versus global installs, plus the payload-vs-runtime model
-  and launch-time reconciliation. Use when installing, enabling, or updating a
-  plugin, adding a marketplace, or setting up a repo's or machine's plugin set.
+  experimental mode, versus global installs, the in-repo `.ai` local plugin
+  marketplace (directory source) for modular in-repo capability, plus the
+  payload-vs-runtime model and launch-time reconciliation. Use when installing,
+  enabling, or updating a plugin, adding a marketplace, packaging a repo's own
+  skills/agents as in-repo plugins, or setting up a repo's or machine's plugin set.
   Trigger phrases include:
   - 'install a plugin'
   - 'enable a plugin'
@@ -16,6 +18,10 @@ description: >
   - 'experimental mode'
   - 'repo plugins'
   - 'settings.json plugins'
+  - 'local marketplace'
+  - '.ai plugins'
+  - 'directory source'
+  - 'in-repo plugins'
 ---
 
 # Installing Plugins
@@ -73,6 +79,69 @@ A repo's `.github/copilot/settings.json` is merged with the user
 > **user level** (or installed globally), not via repo-scoped `enabledPlugins`
 > alone. Skills/payload are unaffected; repo-scoped activation of *session
 > extensions* is a known limitation.
+
+## Preferred for modular in-repo capability: the `.ai` local marketplace
+
+When a repo's **own** skills/agents should be **modular, individually
+toggleable, and travel with the repo** — rather than a single monolithic plugin,
+or loose `.github/skills/` / `.github/agents/` trees — package them as plugins in
+an **in-repo local plugin marketplace**: an **`.ai/` directory** the repo
+declares as a `directory`-source marketplace. This is the standard used across MS
+repos (e.g. `SPO.Core`) and is the **preferred pattern** for driving modular
+in-repo plugins.
+
+**Layout** (`.ai/` at the repo root):
+
+```
+.ai/
+├── .claude-plugin/marketplace.json     # lists every plugin (name, description, version, source: "./<name>")
+└── <capability>/
+    ├── .claude-plugin/plugin.json       # { name, description, version, author }
+    ├── skills/<capability>/SKILL.md      # a skill plugin
+    └── agents/<capability>.agent.md      # (or) a sub-agent plugin
+```
+
+> The CLI looks for the marketplace manifest at `marketplace.json`,
+> `.plugin/marketplace.json`, `.github/plugin/marketplace.json`, **or**
+> `.claude-plugin/marketplace.json`; a plugin's own manifest may be `plugin.json`
+> or `.claude-plugin/plugin.json`. The `.ai` + `.claude-plugin` spelling is the
+> cross-tool convention.
+
+**Declare + enable it** in the repo's committed `.github/copilot/settings.json`
+(the CLI also reads `.claude/settings.json` as a fallback) — a **`directory`**
+marketplace source whose `path` is the repo-relative `./.ai`, then one
+`enabledPlugins` line per plugin:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "my-repo-plugins": { "source": { "source": "directory", "path": "./.ai" } }
+  },
+  "enabledPlugins": {
+    "some-capability@my-repo-plugins": true
+  }
+}
+```
+
+Because the source is **declarative and repo-relative**, a session launched in
+the repo picks the marketplace up from the committed settings.json with **no
+per-machine `copilot plugin marketplace add`** — the `.ai` plugins Just Work on a
+fresh clone or a fork. (Contrast a global `marketplace add /PATH`, which records
+an absolute machine path; prefer the declarative `directory` source for anything
+that should travel with the repo.)
+
+**Add a capability:** create `.ai/<name>/.claude-plugin/plugin.json` +
+`skills/<name>/SKILL.md` (or `agents/<name>.agent.md`), add a `{name, description,
+version, source: "./<name>"}` entry to `.ai/.claude-plugin/marketplace.json`, and
+enable `"<name>@<marketplace>": true`. One plugin per capability keeps each
+skill/agent independently enable-able and reviewable.
+
+**Why prefer this over loose in-repo skills/agents:** the same plugin loads
+whether the repo is launched **directly** (as its own harness) or **consumed by
+another harness** (e.g. bound as a state/knowledge repo, or dispatched to by
+agent-bridge, whose own-plugin staging resolves a repo's `.ai` `directory`
+marketplace by anchor-relative path). Loose `.github/skills/` trees only load for
+the launch repo and don't compose across those cases.
 
 ## Alternative: global install
 
