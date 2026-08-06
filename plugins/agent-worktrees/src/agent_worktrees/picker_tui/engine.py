@@ -359,6 +359,10 @@ ACTION_DESC = {
                     "it (reveals hidden bridge/system worktrees).",
     "Jump to caller": "Jump to the worktree that requested this bridge worktree "
                       "(its caller) and highlight it.",
+    "Refresh": "Gather this worktree's live state now (turns, session summary, "
+               "git + session liveness) and write it back to the cache -- "
+               "populates an Unknown row / re-syncs a stale one, without a "
+               "full-fleet reload.",
 }
 
 # Per-action descriptions for the Maintenance actions menu (#1345).
@@ -3521,6 +3525,59 @@ class PickerScreen(Widget):
             return
         self._run_op_progress("Reclaim", "reclaim", live, armed=True)
 
+    def _start_refresh(self, rec):
+        """Per-row Refresh (picker-cache-first-paint, dotfiles#948).
+
+        On-demand live gather + session-render-cache write-back for ONE worktree,
+        run off the UI thread, then swap its row in place -- the only way to
+        populate an **Unknown** row (the first paint reads cache only) and a cheap
+        way to re-sync a stale one without a full-fleet reload. A LOCAL worktree
+        is gathered + stamped via :func:`data_local.refresh_one`; a remote row
+        (not resolvable in the local tracking store) falls back to reloading its
+        owning machine through the live loader. Best-effort; never raises on the
+        UI thread."""
+        raw = rec.get("raw") or {}
+        wt_id = raw.get("id")
+        if not (getattr(self, "real_ops", False) and wt_id):
+            self.debug = "refresh unavailable (no record)"
+            return
+        id4 = rec.get("id4")
+        m, e = rec.get("machine"), rec.get("env")
+        self.debug = f"refreshing {id4}…"
+
+        def work():
+            row = None
+            try:
+                from . import data_local
+                row = data_local.refresh_one(wt_id, m, e)
+            except Exception:
+                row = None
+            if row is not None:
+                self._replace_row(wt_id, row)
+                self.debug = f"refreshed {id4}"
+                return
+            # Remote (or gone locally): fall back to a machine-level reload.
+            try:
+                if self.live and self.loader is not None and m and e:
+                    self.loader.reload(m, e)
+                    self.debug = f"refreshing {m} · {e}…"
+                elif not self.live:
+                    self._reload_local_after_reconcile()
+            except Exception:
+                pass
+
+        threading.Thread(target=work, name="wt-refresh", daemon=True).start()
+
+    def _replace_row(self, wt_id, row):
+        """Swap a single freshly-normalized row into ``self.data`` by worktree id
+        (in place), appending if it is not already present. Used by the per-row
+        Refresh so one row updates without rebuilding the whole data source."""
+        for i, r in enumerate(self.data):
+            if (r.get("raw") or {}).get("id") == wt_id:
+                self.data[i] = row
+                return
+        self.data.append(row)
+
     def _start_finalize(self, recs):
         """Finalize one or more conversation-only / unused worktrees (the
         'Finalize' action -- solo or aggregate, #2258 follow-up).
@@ -3828,6 +3885,11 @@ class PickerScreen(Widget):
             acts.append("Stop")
         if PickerScreen._reclaimable(rec):
             acts.append("Reclaim")
+        # picker-cache-first-paint (dotfiles#948): every worktree gets a Refresh
+        # -- the on-demand live gather + cache write-back. It is the ONLY way to
+        # populate an **Unknown** row (the first paint reads cache only), and
+        # re-syncs any stale row without a full-fleet reload.
+        acts.append("Refresh")
         return acts
 
     def _submenu_target(self):
@@ -3958,6 +4020,11 @@ class PickerScreen(Widget):
                 # Kill the exact Copilot process holding the session's lock
                 # (bare orphans Stop cannot reach); then re-Open / Bare resume.
                 self._start_reclaim(rec)
+            elif cur == "Refresh":
+                # picker-cache-first-paint (dotfiles#948): on-demand live gather
+                # + cache write-back for THIS worktree (populates an Unknown row
+                # / re-syncs a stale one) without a full-fleet reload.
+                self._start_refresh(rec)
         self.app.push_screen(SubMenuScreen(rec, acts), _after)
 
     def _wt_action_ctx(self, rec: dict) -> dict:

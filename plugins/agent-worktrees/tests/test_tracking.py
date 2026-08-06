@@ -208,6 +208,80 @@ class TestSaveLoadRoundTrip:
         save_record(rec, path)
         assert load_record(path).summary == "don't break on quotes"
 
+    # ---- picker-cache-first-paint (dotfiles#948): session-render cache ----
+
+    def test_session_cache_absent_omitted(self, tmp_path: Path):
+        # A never-populated worktree emits no session-cache lines, so a legacy
+        # YAML stays byte-identical and the cache-only load reads it as Unknown.
+        rec = self._make_record()
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        txt = path.read_text()
+        assert "session_turns" not in txt
+        assert "session_summary" not in txt
+        assert "git_state" not in txt
+        assert "session_state_at" not in txt
+        loaded = load_record(path)
+        assert loaded.session_turns is None
+        assert loaded.session_summary is None
+        assert loaded.git_state is None
+        assert loaded.session_state_at is None
+
+    def test_session_cache_round_trip(self, tmp_path: Path):
+        rec = self._make_record(
+            session_turns=12, session_summary="Fix the thing",
+            git_state="wip", session_state_at="2026-08-05T10:00:00",
+        )
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        txt = path.read_text()
+        assert "session_turns: 12" in txt
+        assert "session_summary: 'Fix the thing'" in txt
+        assert "git_state: wip" in txt
+        loaded = load_record(path)
+        assert loaded.session_turns == 12
+        assert loaded.session_summary == "Fix the thing"
+        assert loaded.git_state == "wip"
+        assert loaded.session_state_at.startswith("2026-08-05")
+
+    def test_session_cache_turns_zero_round_trips(self, tmp_path: Path):
+        # 0 is a real populated value (UNUSED), distinct from None (Unknown):
+        # it must serialize so the cache-only load renders UNUSED, not Unknown.
+        rec = self._make_record(session_turns=0,
+                                session_state_at="2026-08-05T10:00:00")
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        assert "session_turns: 0" in path.read_text()
+        assert load_record(path).session_turns == 0
+
+    def test_stamp_session_state_writes_and_preserves(
+        self, tmp_path: Path, monkeypatch,
+    ):
+        from agent_worktrees import tracking as _t
+        monkeypatch.setattr(_t.cfg, "tracking_dir", lambda: tmp_path)
+        rec = self._make_record(worktree_id="wt-cache")
+        save_record(rec, tmp_path / "wt-cache.yaml")
+
+        # Full stamp writes all three fields + freshness.
+        assert _t.stamp_session_state(
+            "wt-cache", turns=7, summary="hello", git_state="wip") is True
+        r = load_record(tmp_path / "wt-cache.yaml")
+        assert (r.session_turns, r.session_summary, r.git_state) == (
+            7, "hello", "wip")
+
+        # A turns-only stamp preserves the cached summary + state (None = skip).
+        assert _t.stamp_session_state("wt-cache", turns=9) is True
+        r = load_record(tmp_path / "wt-cache.yaml")
+        assert (r.session_turns, r.session_summary, r.git_state) == (
+            9, "hello", "wip")
+
+    def test_stamp_session_state_absent_record_noops(
+        self, tmp_path: Path, monkeypatch,
+    ):
+        from agent_worktrees import tracking as _t
+        monkeypatch.setattr(_t.cfg, "tracking_dir", lambda: tmp_path)
+        assert _t.stamp_session_state("nope", turns=1) is False
+
     def test_pr_absent_round_trips_as_none(self, tmp_path: Path):
         rec = self._make_record()
         path = tmp_path / "wt.yaml"

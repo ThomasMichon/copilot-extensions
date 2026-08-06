@@ -183,6 +183,34 @@ def reconcile_bound_live() -> int:
     return changed
 
 
+def _overlay_cached_state(raw: dict, rec) -> None:
+    """Overlay a worktree's cached session-render state onto its cache-only row.
+
+    picker-cache-first-paint (dotfiles#948): the first-paint pass reads no live
+    data, so a row's turns/state come from the record's session-render cache
+    (stamped by a prior populate / Refresh). A worktree the cache has never
+    populated (both ``session_turns`` and ``git_state`` absent) renders
+    **Unknown** -- no live lookup; a Refresh or the follow-up populate fills it.
+    A fresh cached bound-Copilot hint (``session_bound_live`` -- the
+    cwd-independent #1416 bare-resume signal, itself read cache-only by
+    ``_worktree_to_dict``) means a live session, so it wins over a now-stale
+    cached terminal state -> ACTIVE.
+    """
+    populated = rec.session_turns is not None or bool(rec.git_state)
+    if not populated:
+        raw["state"] = "unknown"
+        return
+    if rec.session_turns is not None:
+        raw["turn_count"] = rec.session_turns
+    if rec.git_state:
+        raw["state"] = rec.git_state
+    if rec.session_summary and not (raw.get("title") and raw["title"] != "null"):
+        raw["title"] = rec.session_summary
+    if raw.get("session_bound_live") and (
+            raw.get("state") in (None, "", "completed", "unused", "gone")):
+        raw["state"] = "active"
+
+
 def load(machine: str | None = None, env: str | None = None,
          *, classify: bool = True):
     """Normalized records for this machine's worktrees (tracking + classify).
@@ -192,12 +220,18 @@ def load(machine: str | None = None, env: str | None = None,
     display name and env label, matching the multi-machine tab descriptors.
 
     ``classify`` gates the expensive per-worktree git classification
-    (``_classify_records`` -- ~5 git spawns each). When ``False`` this returns a
-    **fast** provisional listing (tracking + sessions + mux only, no git), whose
-    rows the picker renders immediately via ``derive``'s classification-absent
-    heuristic (status + turns + PR); the loader then fills authoritative git
-    states in with a second ``classify=True`` pass. When ``True`` (default) rows
-    carry the canonical git-derived ``state``.
+    (``_classify_records`` -- ~5 git spawns each) **and** the live session/
+    process gather. When ``False`` this returns a **cache-only** provisional
+    listing (picker-cache-first-paint, dotfiles#948): it reads ONLY the
+    per-worktree state files -- turns/state/summary from the session-render cache
+    (``session_turns``/``git_state``/``session_summary``, stamped by a prior
+    populate) plus the cheap cached bound-Copilot hint -- with NO ``events.jsonl``
+    read, NO machine-wide process/lock scan, and NO mux probe, so the picker
+    paints immediately. A worktree the cache has never populated renders
+    **Unknown**; the loader then fills authoritative live+git state in with a
+    second ``classify=True`` pass (which also writes the cache back). When
+    ``True`` (default) rows carry the canonical git-derived ``state`` and the
+    full live session/mux gather.
     """
     # Lazy import to avoid a picker_tui <-> __main__ import cycle.
     from ..__main__ import _classify_records, _worktree_to_dict
@@ -214,6 +248,21 @@ def load(machine: str | None = None, env: str | None = None,
     ]
     if not records:
         return []
+    machine = machine if machine is not None else LOCAL[0]
+    env = env if env is not None else LOCAL[1]
+
+    if not classify:
+        # PASS 1 -- cache-only first paint (dotfiles#948). Read ONLY the state
+        # files: no scan_sessions_fast (events.jsonl), no bare_orphan/
+        # resolve_bound (process table), no mux probe, no git classify. Rows
+        # render from the session-render cache; never-populated -> Unknown.
+        out = []
+        for rec in records:
+            raw = _worktree_to_dict(rec)
+            _overlay_cached_state(raw, rec)
+            out.append(derive.norm(raw, machine, env))
+        return out
+
     session_ctx = sessions.scan_sessions_fast(records)
     # #93: one machine-wide pass to find worktrees hosting a bare (un-muxed)
     # bound Copilot, so each row can be marked as an orphan. Best-effort: a
@@ -231,8 +280,6 @@ def load(machine: str | None = None, env: str | None = None,
         bridge_live_wts = set()
     mux_map = sessions.mux_status_many([r.worktree_id for r in records])
     state_map = _classify_records(records, session_ctx) if classify else {}
-    machine = machine if machine is not None else LOCAL[0]
-    env = env if env is not None else LOCAL[1]
     out = []
     for rec in records:
         raw = _worktree_to_dict(
@@ -241,5 +288,82 @@ def load(machine: str | None = None, env: str | None = None,
             bare_orphan_wts=bare_orphan_wts,
             bridge_live_wts=bridge_live_wts,
         )
+        # picker-cache-first-paint (dotfiles#948) write-back: on the
+        # authoritative (classify=True) populate pass, stamp the session-render
+        # cache back onto the record so the NEXT cache-only first paint reads
+        # turns/state/summary without touching events.jsonl or scanning
+        # processes. Best-effort: a stamp hiccup must never break the render.
+        if classify:
+            _stamp_from_raw(rec, raw, session_ctx)
         out.append(derive.norm(raw, machine, env))
     return out
+
+
+def _stamp_from_raw(rec, raw: dict, session_ctx) -> None:
+    """Write the session-render cache back from a freshly gathered ``raw`` row.
+
+    picker-cache-first-paint (dotfiles#948): shared by the classify populate and
+    the per-row :func:`refresh_one` -- persists ``session_turns``/``git_state``/
+    ``session_summary`` so the next cache-only first paint reads them without any
+    ``events.jsonl`` or process scan. Best-effort: never raises.
+    """
+    try:
+        _norm = sessions._normalize_path(rec.worktree_path)
+        tracking.stamp_session_state(
+            rec.worktree_id,
+            turns=int(raw.get("turn_count", 0)),
+            summary=session_ctx.latest_summary.get(_norm),
+            git_state=raw.get("state"),
+        )
+    except Exception:
+        pass
+
+
+def refresh_one(worktree_id: str, machine: str | None = None,
+                env: str | None = None):
+    """Live-gather + write-back for ONE worktree -- the picker's per-row Refresh.
+
+    picker-cache-first-paint (dotfiles#948): runs the same authoritative gather
+    the classify populate does (session scan + git classify + mux + bound/bridge
+    liveness) but scoped to a single worktree, stamps the session-render cache,
+    and returns the freshly normalized row -- so an **Unknown** or stale row can
+    be populated on demand without a full-fleet reload. Returns ``None`` when the
+    worktree's record or checkout is gone. Never raises for a missing record;
+    local machine only (a remote row refreshes on its owning machine).
+    """
+    from ..__main__ import (
+        _build_active_paths, _classify_one_record, _worktree_to_dict)
+
+    derive.NOW = _dt.datetime.now()
+    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+    if not yaml_path.exists():
+        return None
+    rec = tracking.load_record(yaml_path)
+    if not (rec and rec.worktree_path and Path(rec.worktree_path).exists()
+            and (Path(rec.worktree_path) / ".git").exists()):
+        return None
+    machine = machine if machine is not None else LOCAL[0]
+    env = env if env is not None else LOCAL[1]
+    session_ctx = sessions.scan_sessions_fast([rec])
+    try:
+        bare_orphan_wts = reclaim.bare_orphan_worktree_ids()
+    except Exception:
+        bare_orphan_wts = set()
+    try:
+        bridge_live_wts = reclaim.live_bridge_worktrees()
+    except Exception:
+        bridge_live_wts = set()
+    mux_map = sessions.mux_status_many([rec.worktree_id])
+    config = cfg.load_config()
+    active_paths = _build_active_paths([rec], session_ctx)
+    info = _classify_one_record(
+        rec, repo=config.default_repo, active_paths=active_paths,
+        session_ctx=session_ctx)
+    raw = _worktree_to_dict(
+        rec, mux_info=mux_map.get(rec.worktree_id), session_ctx=session_ctx,
+        state_info=info, bare_orphan_wts=bare_orphan_wts,
+        bridge_live_wts=bridge_live_wts,
+    )
+    _stamp_from_raw(rec, raw, session_ctx)
+    return derive.norm(raw, machine, env)
+
