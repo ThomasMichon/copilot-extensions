@@ -1415,11 +1415,23 @@ class LiveLoader:
             return self._state.get((machine, env), "loading")
 
     def records(self):
-        """Flat list of every normalized worktree from machines that are ready."""
+        """Flat list of every normalized worktree, keeping last-good rows in
+        place across a refresh so the list never blanks.
+
+        A source's rows are served whenever it HAS rows -- ``ready``, or
+        ``loading``/``failed`` while it still holds its last-good records (a
+        ``reload()`` after an action, or a transient re-fetch failure). Only a
+        source that has never resolved (initial connect spinner, empty records)
+        contributes nothing. This makes every refresh path update **in place**:
+        the fresh rows swap in atomically when they arrive instead of the
+        machine's rows vanishing to a blank while it re-fetches (dotfiles#948
+        follow-up). ``repoll_silent`` already kept rows during its silent
+        re-fetch; this extends the same courtesy to ``reload()`` (which flips a
+        source to ``loading``) and to a post-action refresh."""
         with self._lock:
             out = []
             for key, recs in self._records.items():
-                if self._state.get(key) == "ready":
+                if recs or self._state.get(key) == "ready":
                     out.extend(recs)
             return out
 
