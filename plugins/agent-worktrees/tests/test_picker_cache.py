@@ -12,7 +12,8 @@ from agent_worktrees.picker_tui import data_local, derive
 
 
 def _rec(**kw):
-    base = dict(session_turns=None, git_state=None, session_summary=None)
+    base = dict(session_turns=None, git_state=None, session_summary=None,
+                sessions=None)
     base.update(kw)
     return types.SimpleNamespace(**base)
 
@@ -57,11 +58,43 @@ class TestOverlayCachedState:
         assert raw["state"] == "active"
         assert derive._state(raw) == "ACTIVE"
 
-    def test_bound_hint_does_not_override_live_active(self):
+    def test_bound_live_always_means_active(self):
+        # A live bound Copilot is ACTIVE regardless of the cached state -- WIP is
+        # a lower (session-ended) state, so liveness overrides it (dotfiles#948
+        # follow-up: ACTIVE must be surfaced in the first paint).
         raw = {"session_bound_live": True}
         data_local._overlay_cached_state(
             raw, _rec(session_turns=5, git_state="wip"))
-        # A non-terminal cached state is left as-is (not forced to active).
+        assert raw["state"] == "active"
+
+    def test_live_lock_forces_active_even_when_unknown(self, monkeypatch):
+        # The cheap lock-file scan is the primary first-paint ACTIVE signal: a
+        # running Copilot in a never-cached worktree must render ACTIVE, not "?".
+        monkeypatch.setattr(
+            data_local.sessions, "worktree_has_live_session",
+            lambda rec: True)
+        raw: dict = {}
+        data_local._overlay_cached_state(raw, _rec())  # no cache at all
+        assert raw["state"] == "active"
+        assert raw["session_lock_live"] is True
+        assert derive._state(raw) == "ACTIVE"
+
+    def test_live_lock_beats_cached_terminal(self, monkeypatch):
+        monkeypatch.setattr(
+            data_local.sessions, "worktree_has_live_session",
+            lambda rec: True)
+        raw: dict = {}
+        data_local._overlay_cached_state(
+            raw, _rec(session_turns=9, git_state="completed"))
+        assert raw["state"] == "active"
+
+    def test_no_live_signal_keeps_cached_state(self, monkeypatch):
+        monkeypatch.setattr(
+            data_local.sessions, "worktree_has_live_session",
+            lambda rec: False)
+        raw: dict = {}
+        data_local._overlay_cached_state(
+            raw, _rec(session_turns=2, git_state="wip"))
         assert raw["state"] == "wip"
 
 
@@ -69,6 +102,63 @@ class TestRefreshOneGuard:
     def test_missing_record_returns_none(self, tmp_path, monkeypatch):
         monkeypatch.setattr(data_local.cfg, "tracking_dir", lambda: tmp_path)
         assert data_local.refresh_one("no-such-wt") is None
+
+
+class TestWorktreeHasLiveSession:
+    """``sessions.worktree_has_live_session`` -- the cheap, registry-targeted
+    lock-file ACTIVE probe used by the cache-only first paint."""
+
+    def _rec_with_sessions(self, *session_ids):
+        sess = [types.SimpleNamespace(session_id=s) for s in session_ids]
+        return types.SimpleNamespace(sessions=sess)
+
+    def test_no_sessions_is_false(self, tmp_path, monkeypatch):
+        from agent_worktrees import sessions
+        monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_path)
+        assert sessions.worktree_has_live_session(
+            types.SimpleNamespace(sessions=None)) is False
+        assert sessions.worktree_has_live_session(
+            types.SimpleNamespace(sessions=[])) is False
+
+    def test_live_lock_detected(self, tmp_path, monkeypatch):
+        from agent_worktrees import sessions
+        monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_path)
+        monkeypatch.setattr(sessions, "_is_copilot_process", lambda pid: pid == 4242)
+        sdir = tmp_path / "sess-A"
+        sdir.mkdir()
+        (sdir / "inuse.4242.lock").write_text("")
+        assert sessions.worktree_has_live_session(
+            self._rec_with_sessions("sess-A")) is True
+
+    def test_dead_lock_not_detected(self, tmp_path, monkeypatch):
+        from agent_worktrees import sessions
+        monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_path)
+        monkeypatch.setattr(sessions, "_is_copilot_process", lambda pid: False)
+        sdir = tmp_path / "sess-B"
+        sdir.mkdir()
+        (sdir / "inuse.999.lock").write_text("")
+        assert sessions.worktree_has_live_session(
+            self._rec_with_sessions("sess-B")) is False
+
+    def test_detached_session_skipped(self, tmp_path, monkeypatch):
+        from agent_worktrees import sessions
+        monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_path)
+        monkeypatch.setattr(sessions, "_is_copilot_process", lambda pid: True)
+        sdir = tmp_path / "sess-C"
+        sdir.mkdir()
+        (sdir / "inuse.4242.lock").write_text("")
+        (sdir / sessions._DETACHED_MARKER).write_text("")
+        assert sessions.worktree_has_live_session(
+            self._rec_with_sessions("sess-C")) is False
+
+    def test_no_lock_file_is_false(self, tmp_path, monkeypatch):
+        from agent_worktrees import sessions
+        monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_path)
+        sdir = tmp_path / "sess-D"
+        sdir.mkdir()
+        assert sessions.worktree_has_live_session(
+            self._rec_with_sessions("sess-D")) is False
+
 
 
 class TestIncrementalTurnCount:

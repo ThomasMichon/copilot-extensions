@@ -332,6 +332,62 @@ def _count_user_turns(entry: Path) -> int:
     return turns
 
 
+def worktree_has_live_session(rec) -> bool:
+    """Cheap ACTIVE check for the picker's cache-only first paint (dotfiles#948).
+
+    Does any of this worktree's REGISTERED sessions currently hold a live
+    ``inuse.<pid>.lock`` (a running bound Copilot -- mux OR bare)? Targeted via
+    the per-worktree session registry (``rec.sessions``), so it globs ONLY this
+    worktree's own session dirs and pid-checks ONLY the few that actually carry a
+    lock file -- no ``events.jsonl`` read, no ``workspace.yaml`` parse, and no
+    machine-wide process-table scan. This is the same lock-file liveness signal
+    ``scan_sessions_fast`` derives (``session_lock_live``), factored out so the
+    first paint can surface ACTIVE immediately instead of waiting for the
+    git-classify populate -- whose OWN ``active`` derivation depends on exactly
+    this lock scan (``_build_active_paths``), so without it a running worktree
+    renders ``?``/stale until Pass 2.
+
+    Best-effort: never raises. Returns False for an unindexed worktree
+    (``sessions`` None/empty) -- the cached ``bound_live`` hint and the Pass 2
+    populate cover that case.
+    """
+    sessions_list = getattr(rec, "sessions", None)
+    if not sessions_list:
+        return False
+    state_dir = _session_state_dir()
+    if not state_dir.exists():
+        return False
+    for entry in sessions_list:
+        sid = getattr(entry, "session_id", None)
+        if not sid:
+            continue
+        sdir = state_dir / sid
+        if not sdir.is_dir():
+            continue
+        # Detached parent-continuation runs reuse a foreign cwd -- never a live
+        # signal for THIS worktree (mirrors _enrich_session_dir).
+        if _is_detached_session(sdir):
+            continue
+        try:
+            lock_files = list(sdir.glob("inuse.*.lock"))
+        except OSError:
+            continue
+        for lock_file in lock_files:
+            parts = lock_file.stem.split(".")
+            if len(parts) < 2:
+                continue
+            try:
+                pid = int(parts[1])
+            except ValueError:
+                continue
+            # _is_copilot_process is alive-AND-copilot in one call (OpenProcess
+            # fails for a dead pid), so a stale lock from a crashed session does
+            # not count.
+            if _is_copilot_process(pid):
+                return True
+    return False
+
+
 def scan_sessions(worktree_paths: list[str]) -> SessionContext:
     """Scan Copilot session-state for active sessions and summaries.
 
