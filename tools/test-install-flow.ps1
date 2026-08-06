@@ -41,8 +41,15 @@ $ErrorActionPreference = 'Stop'
 
 if (-not $RepoRoot) { $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path }
 $srcPayload = Join-Path $RepoRoot "plugins\$Plugin"
-if (-not (Test-Path (Join-Path $srcPayload 'scripts\install.ps1'))) {
-    Write-Host "no scripts/install.ps1 for plugin '$Plugin' under $RepoRoot" -ForegroundColor Red
+# Canonical entry script: install.ps1 if present (carries an `install` action),
+# else init.ps1 for plugins that ship only an idempotent bootstrap (matches
+# tools/check-install-contract.py's _entrypoint_base). init.ps1 takes no action arg.
+if (Test-Path (Join-Path $srcPayload 'scripts\install.ps1')) {
+    $entryRel = 'scripts\install.ps1'; $entryArgs = @('install')
+} elseif (Test-Path (Join-Path $srcPayload 'scripts\init.ps1')) {
+    $entryRel = 'scripts\init.ps1'; $entryArgs = @()
+} else {
+    Write-Host "no scripts/install.ps1 or scripts/init.ps1 for plugin '$Plugin' under $RepoRoot" -ForegroundColor Red
     exit 2
 }
 
@@ -63,8 +70,8 @@ $launched = [System.Collections.Generic.List[System.Diagnostics.Process]]::new()
 function Start-Install([int]$sleep, [int]$deadline = 0, [bool]$grandchild = $false) {
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
     $psi.FileName = $pwshExe
-    foreach ($a in @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
-            (Join-Path $payload 'scripts\install.ps1'), 'install')) { [void]$psi.ArgumentList.Add($a) }
+    foreach ($a in (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+            (Join-Path $payload $entryRel)) + $entryArgs)) { [void]$psi.ArgumentList.Add($a) }
     foreach ($e in [System.Environment]::GetEnvironmentVariables().GetEnumerator()) {
         $psi.EnvironmentVariables[[string]$e.Key] = [string]$e.Value
     }
@@ -106,7 +113,7 @@ try {
     Write-Host "== install-flow test: $Plugin ==" -ForegroundColor Cyan
     New-Item -ItemType Directory -Force -Path $payloadRoot | Out-Null
     Copy-Item -LiteralPath $srcPayload -Destination $payloadRoot -Recurse -Force
-    Assert 'payload staged into sandbox' (Test-Path (Join-Path $payload 'scripts\install.ps1'))
+    Assert 'payload staged into sandbox' (Test-Path (Join-Path $payload $entryRel))
 
     # --- single install: staging + lock invariants ---
     $sw = [System.Diagnostics.Stopwatch]::StartNew()

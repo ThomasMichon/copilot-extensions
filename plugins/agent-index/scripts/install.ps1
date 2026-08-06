@@ -17,6 +17,147 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
+# === install-contract:v4 self-stage -- keep byte-identical across plugins ===
+# dotfiles #935: a plugin installer reads its own payload (src/, libs/,
+# pyproject.toml) to build the venv, so while it runs -- especially if it wedges
+# or times out -- it holds the SINGLETON `installed-plugins/<mkt>/<plugin>`
+# payload dir open (CWD/handles). A concurrent `copilot plugin update <plugin>`
+# then fails on Windows with os error 32 ("used by another process"): the payload
+# freezes at the old version and reconcile keeps reverting the runtime toward it
+# (the version-drift saga). Fix: when running from the marketplace payload, copy
+# the WHOLE payload into a UNIQUE per-invocation staging dir OUTSIDE the payload
+# and re-exec from there, so the singleton is touched only for the fast copy. A
+# stalled run then holds only its own throwaway stage dir, never blocking the
+# next invocation or a `copilot plugin update`. COPILOT_PLUGIN_STAGED_FROM tells
+# Get-SourceKind the payload was really the marketplace (see below). Env-guarded
+# against re-exec loops; the stage-dir path (not under installed-plugins) is a
+# second guard. Best-effort, non-blocking reap of old stage dirs.
+if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED) {
+    try {
+        $__selfStageScriptDir = $PSScriptRoot
+        $__selfStagePayload = (Resolve-Path (Join-Path $__selfStageScriptDir '..')).Path
+        if (($__selfStagePayload -replace '\\', '/') -match '/\.copilot/installed-plugins/') {
+            $__selfStageName = (Get-Content (Join-Path $__selfStagePayload 'plugin.json') -Raw | ConvertFrom-Json).name
+            if ($__selfStageName) {
+                $__selfStageRoot = Join-Path (Join-Path $env:USERPROFILE ".$__selfStageName") '.install-stage'
+                $__selfStageDir = Join-Path $__selfStageRoot ((Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfff') + "-$PID")
+                New-Item -ItemType Directory -Force -Path $__selfStageDir | Out-Null
+                Copy-Item -LiteralPath $__selfStagePayload -Destination $__selfStageDir -Recurse -Force
+                $__selfStagedPayload = Join-Path $__selfStageDir (Split-Path -Leaf $__selfStagePayload)
+                $__selfStagedEntry = Join-Path (Join-Path $__selfStagedPayload 'scripts') (Split-Path -Leaf $PSCommandPath)
+                # Best-effort reap of prior stage dirs; NEVER touch a live one.
+                # Only remove a sibling whose owner pid (the <ts>-<pid> suffix) is
+                # DEAD -- so a concurrent or wedged installer's dir is left alone
+                # (it uses its own unique dir), honoring "a stalled install must
+                # never block another copy". Dead leftovers are cleaned up.
+                Get-ChildItem $__selfStageRoot -Directory -Force -ErrorAction SilentlyContinue |
+                    Where-Object { $_.FullName -ne $__selfStageDir } |
+                    ForEach-Object {
+                        $__selfStageOwnerPid = 0
+                        if ($_.Name -match '-(\d+)$') { [void][int]::TryParse($Matches[1], [ref]$__selfStageOwnerPid) }
+                        $__selfStageOwnerAlive = $false
+                        if ($__selfStageOwnerPid -gt 0) {
+                            $__selfStageOwnerAlive = [bool](Get-Process -Id $__selfStageOwnerPid -ErrorAction SilentlyContinue)
+                        }
+                        if (-not $__selfStageOwnerAlive) {
+                            try { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop } catch {}
+                        }
+                    }
+                # Faithful arg forwarding, independent of this script's param() shape.
+                $__selfStageCl = [Environment]::GetCommandLineArgs()
+                $__selfStageFi = [Array]::IndexOf($__selfStageCl, '-File')
+                if ($__selfStageFi -lt 0) { $__selfStageFi = [Array]::IndexOf($__selfStageCl, '-f') }
+                if ($__selfStageFi -ge 0 -and ($__selfStageFi + 2) -le ($__selfStageCl.Length - 1)) {
+                    $__selfStageFwd = @($__selfStageCl[($__selfStageFi + 2)..($__selfStageCl.Length - 1)])
+                } else {
+                    # No args after `-File <path>` (e.g. an init.ps1 entry invoked
+                    # with no action). $args is unavailable in a param()-script
+                    # under StrictMode, so forward nothing rather than throw.
+                    $__selfStageFwd = @()
+                }
+                $env:COPILOT_PLUGIN_INSTALL_STAGED = '1'
+                $env:COPILOT_PLUGIN_STAGED_FROM = $__selfStagePayload
+                $__selfStageExe = (Get-Process -Id $PID).Path
+                # WATCHDOG (#935): the staging parent is already outside the
+                # payload and wraps the child's whole lifetime, so it doubles as
+                # a watchdog -- launch the staged child, then enforce a deadline.
+                # A stalled install (the (4) session-start-hook failure class)
+                # self-terminates instead of leaking forever: kill the WHOLE tree
+                # (taskkill /T -- Windows' subprocess kill leaves grandchildren)
+                # and log. The killed child's stage dir has a dead owner pid, so
+                # the next run's pid-guarded reap cleans it; its half-built slot
+                # has no completion marker, so it is tossed + rebuilt (retry).
+                # Deadline: <NAME>_INSTALL_DEADLINE_SEC, else
+                # COPILOT_PLUGIN_INSTALL_DEADLINE_SEC, else 480s; <=0 disables.
+                $__wdDeadline = 480
+                $__wdEnvVar = (($__selfStageName -replace '[^A-Za-z0-9]+', '_').ToUpper()) + '_INSTALL_DEADLINE_SEC'
+                $__wdRaw = [Environment]::GetEnvironmentVariable($__wdEnvVar)
+                if (-not $__wdRaw) { $__wdRaw = $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC }
+                if ($__wdRaw) { [void][int]::TryParse([string]$__wdRaw, [ref]$__wdDeadline) }
+                $__wdChild = Start-Process -FilePath $__selfStageExe -PassThru -NoNewWindow `
+                    -ArgumentList (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $__selfStagedEntry) + $__selfStageFwd)
+                if ($__wdDeadline -gt 0 -and -not $__wdChild.WaitForExit($__wdDeadline * 1000)) {
+                    try { & taskkill.exe /PID $__wdChild.Id /T /F 2>&1 | Out-Null } catch {}
+                    try { Stop-Process -Id $__wdChild.Id -Force -ErrorAction SilentlyContinue } catch {}
+                    $__wdLog = Join-Path (Join-Path $env:USERPROFILE ".$__selfStageName") 'reconcile.err.log'
+                    try {
+                        Add-Content -LiteralPath $__wdLog -Value ("[{0}] WATCHDOG-KILL {1}: install exceeded {2}s deadline (child pid {3}); killed tree. Slot lacks a completion marker -> will be tossed + retried. Stage: {4}" -f ((Get-Date).ToUniversalTime().ToString('s') + 'Z'), $__selfStageName, $__wdDeadline, $__wdChild.Id, $__selfStageDir)
+                    } catch {}
+                    exit 124
+                }
+                $__wdChild.WaitForExit()
+                exit $__wdChild.ExitCode
+            }
+        }
+    } catch {
+        Write-Host "  [WARN] self-stage failed, running in place: $_" -ForegroundColor Yellow
+    }
+}
+# === end install-contract:v4 self-stage ===
+
+# === install-contract:v4 smoke seam (test-only) -- keep byte-identical ===
+# #935 install-flow test hook. When COPILOT_PLUGIN_INSTALL_SMOKE is set, prove
+# the self-stage/lock behavior WITHOUT a heavy venv build: this (post-stage)
+# process records where it is running from + the recorded marketplace origin,
+# then sleeps to simulate a slow/wedged install so a test can assert the
+# SINGLETON payload dir stays replaceable meanwhile. Never set in production.
+if ($env:COPILOT_PLUGIN_INSTALL_SMOKE) {
+    try {
+        $__smokePayload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+        $__smokeName = (Get-Content (Join-Path $__smokePayload 'plugin.json') -Raw | ConvertFrom-Json).name
+        $__smokeHome = Join-Path $env:USERPROFILE ".$__smokeName"
+        New-Item -ItemType Directory -Force -Path $__smokeHome | Out-Null
+        $__smokeSleep = 6
+        [void][int]::TryParse([string]$env:COPILOT_PLUGIN_INSTALL_SMOKE_SLEEP, [ref]$__smokeSleep)
+        # Optionally spawn a GRANDCHILD sleeper so a watchdog test can prove the
+        # WHOLE tree is killed (Windows subprocess-kill leaves grandchildren).
+        $__smokeGrandPid = 0
+        if ($env:COPILOT_PLUGIN_INSTALL_SMOKE_GRANDCHILD) {
+            try {
+                $__g = Start-Process -FilePath (Get-Process -Id $PID).Path -PassThru -WindowStyle Hidden `
+                    -ArgumentList @('-NoProfile', '-Command', "Start-Sleep -Seconds $([Math]::Max($__smokeSleep, 3600))")
+                $__smokeGrandPid = $__g.Id
+            } catch {}
+        }
+        ([ordered]@{
+            ran_from     = $PSScriptRoot
+            staged_from  = [string]$env:COPILOT_PLUGIN_STAGED_FROM
+            staged       = [bool]$env:COPILOT_PLUGIN_INSTALL_STAGED
+            child_pid    = $PID
+            grandchild_pid = $__smokeGrandPid
+        } | ConvertTo-Json -Compress) | Set-Content -LiteralPath (Join-Path $__smokeHome 'smoke.json')
+        Start-Sleep -Seconds $__smokeSleep
+    } catch {}
+    exit 0
+}
+# === end install-contract:v4 smoke seam ===
+
+# #935: bound uv's per-request network wait so a hung index/download degrades to
+# "failed + retryable" rather than wedging the install; the self-stage watchdog
+# is the authoritative TOTAL bound, this just shortens single-request stalls.
+if (-not $env:UV_HTTP_TIMEOUT) { $env:UV_HTTP_TIMEOUT = '60' }
+
+
 if ($env:AGENT_INDEX_ALLOW_DOWNGRADE -eq '1') { $Force = $true }
 
 function Write-Ok      { param([string]$Msg) Write-Host "  [OK]   $Msg" -ForegroundColor Green }
@@ -127,7 +268,11 @@ function Invoke-VersionedGc {
 # anything else (a git checkout) => local.
 function Get-SourceKind {
     param([string]$PluginPath)
-    if (($PluginPath -replace '\\', '/') -match '/\.copilot/installed-plugins/') {
+    # #935: when the installer self-staged out of the marketplace payload, its
+    # live path is a throwaway stage dir, so infer the kind from the ORIGINAL
+    # payload path the self-stage prologue recorded (else the current path).
+    $__srcPath = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginPath }
+    if (($__srcPath -replace '\\', '/') -match '/\.copilot/installed-plugins/') {
         return 'marketplace'
     }
     return 'local'

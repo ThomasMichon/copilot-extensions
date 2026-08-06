@@ -105,7 +105,10 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED) {
                 if ($__selfStageFi -ge 0 -and ($__selfStageFi + 2) -le ($__selfStageCl.Length - 1)) {
                     $__selfStageFwd = @($__selfStageCl[($__selfStageFi + 2)..($__selfStageCl.Length - 1)])
                 } else {
-                    $__selfStageFwd = @($args)
+                    # No args after `-File <path>` (e.g. an init.ps1 entry invoked
+                    # with no action). $args is unavailable in a param()-script
+                    # under StrictMode, so forward nothing rather than throw.
+                    $__selfStageFwd = @()
                 }
                 $env:COPILOT_PLUGIN_INSTALL_STAGED = '1'
                 $env:COPILOT_PLUGIN_STAGED_FROM = $__selfStagePayload
