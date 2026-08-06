@@ -30,7 +30,18 @@ log = logging.getLogger("agent-bridge")
 
 _INSTALLED = Path("~/.copilot/installed-plugins").expanduser()
 _SETTINGS_REL = Path(".github") / "copilot" / "settings.json"
-_MARKETPLACE_REL = Path(".github") / "plugin" / "marketplace.json"
+# Candidate marketplace-manifest locations within a marketplace directory, in the
+# CLI's own lookup order (see `copilot plugin marketplace add`). Covers both the
+# legacy ``.github/plugin`` home and the ``.ai`` standard's ``.claude-plugin``.
+_MARKETPLACE_MANIFEST_RELS = (
+    Path("marketplace.json"),
+    Path(".plugin") / "marketplace.json",
+    Path(".github") / "plugin" / "marketplace.json",
+    Path(".claude-plugin") / "marketplace.json",
+)
+# A plugin directory's manifest may live at the root or under ``.claude-plugin``
+# (the ``.ai`` local-marketplace convention).
+_PLUGIN_MANIFEST_RELS = (Path("plugin.json"), Path(".claude-plugin") / "plugin.json")
 
 
 def _load_json(path: Path) -> dict | None:
@@ -49,41 +60,70 @@ def _split_source(source: str) -> tuple[str, str]:
     return name.strip(), marketplace.strip()
 
 
+def _has_plugin_manifest(d: Path) -> bool:
+    """True when ``d`` holds a plugin manifest (root or ``.claude-plugin``)."""
+    for rel in _PLUGIN_MANIFEST_RELS:
+        try:
+            if (d / rel).is_file():
+                return True
+        except OSError:
+            pass
+    return False
+
+
 def _installed_dir(name: str, marketplace: str) -> Path | None:
     """The installed plugin dir (``installed-plugins/<mp>/<name>``) if present."""
     if not name or not marketplace:
         return None
     d = _INSTALLED / marketplace / name
-    try:
-        if (d / "plugin.json").is_file():
-            return d
-    except OSError:
-        pass
+    if _has_plugin_manifest(d):
+        return d
     return None
 
 
-def _local_marketplace_path(marketplace: str, marketplaces: dict) -> Path | None:
-    """Resolve a ``local``-source marketplace to its on-disk path (or ``None``).
+def _local_marketplace_path(
+    marketplace: str, marketplaces: dict, anchor: Path | None = None
+) -> Path | None:
+    """Resolve a **local** marketplace to its on-disk path (or ``None``).
 
-    Only ``{"source": {"source": "local", "path": ...}}`` entries are resolved
-    here -- a remote (github/git) marketplace is not fetched (that would be a
-    heavier, separate backstop); such plugins are reported as unresolved rather
-    than triggering any global mutation.
+    Recognizes the two local source spellings a repo may use:
+
+    * ``{"source": {"source": "local", "path": ...}}`` -- the original spelling; and
+    * ``{"source": {"source": "directory", "path": "./.ai"}}`` -- the ``.ai``
+      **local plugin marketplace** standard (SPO.Core; the CLI's ``directory``
+      source).
+
+    A **relative** ``path`` is resolved against ``anchor`` (the repo checkout
+    root), so a repo-scoped ``./.ai`` resolves correctly regardless of the daemon's
+    cwd. Remote (github/git) marketplaces are not fetched here (a heavier, separate
+    backstop) and yield ``None``.
     """
     if not isinstance(marketplaces, dict):
         return None
     entry = marketplaces.get(marketplace)
     src = entry.get("source") if isinstance(entry, dict) else None
-    if isinstance(src, dict) and src.get("source") == "local":
+    if isinstance(src, dict) and src.get("source") in ("local", "directory"):
         path = src.get("path")
         if isinstance(path, str) and path.strip():
-            return Path(path.strip())
+            p = Path(path.strip())
+            if not p.is_absolute() and anchor is not None:
+                p = anchor / p
+            return p
+    return None
+
+
+def _load_marketplace_manifest(mp_path: Path) -> dict | None:
+    """Load a marketplace's ``marketplace.json`` from any supported location."""
+    for rel in _MARKETPLACE_MANIFEST_RELS:
+        manifest = _load_json(mp_path / rel)
+        if manifest:
+            return manifest
     return None
 
 
 def _plugin_dir_in_marketplace(mp_path: Path, name: str) -> Path | None:
     """The plugin's source dir within a local marketplace, via its manifest."""
-    manifest = _load_json(mp_path / _MARKETPLACE_REL)
+    manifest = _load_marketplace_manifest(mp_path)
     if not manifest:
         return None
     plugins = manifest.get("plugins")
@@ -94,11 +134,8 @@ def _plugin_dir_in_marketplace(mp_path: Path, name: str) -> Path | None:
             sub = p.get("source")
             if isinstance(sub, str) and sub.strip():
                 d = mp_path / sub.strip()
-                try:
-                    if (d / "plugin.json").is_file():
-                        return d
-                except OSError:
-                    pass
+                if _has_plugin_manifest(d):
+                    return d
     return None
 
 
@@ -138,7 +175,7 @@ def repo_plugin_dir_args(anchor: str | Path | None) -> list[str]:
                 continue
             if _installed_dir(name, marketplace) is not None:
                 continue  # already loads from settings.json; don't double-stage
-            mp_path = _local_marketplace_path(marketplace, marketplaces)
+            mp_path = _local_marketplace_path(marketplace, marketplaces, anchor)
             plugin_dir = (
                 _plugin_dir_in_marketplace(mp_path, name)
                 if mp_path is not None

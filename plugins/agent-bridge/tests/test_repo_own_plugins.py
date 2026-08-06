@@ -96,3 +96,68 @@ def test_fail_safe_on_bad_input(tmp_path):
     # A repo without settings.json -> [].
     (tmp_path / "empty").mkdir()
     assert repo_plugin_dir_args(tmp_path / "empty") == []
+
+
+# ---------------------------------------------------------------------------
+# `.ai` local plugin marketplace (SPO.Core standard): `directory` source, a
+# relative path resolved against the anchor, and `.claude-plugin` manifests.
+# ---------------------------------------------------------------------------
+
+def _make_ai_marketplace(anchor: Path, mp_name: str, plugin: str) -> None:
+    """A repo-local ``.ai`` marketplace: manifest at .ai/.claude-plugin, plugin at
+    .ai/<plugin>/.claude-plugin (the SPO.Core / dotfiles layout)."""
+    _write(
+        anchor / ".ai" / ".claude-plugin" / "marketplace.json",
+        {
+            "name": mp_name,
+            "plugins": [
+                {"name": plugin, "version": "0.1.0", "source": f"./{plugin}"}
+            ],
+        },
+    )
+    _write(
+        anchor / ".ai" / plugin / ".claude-plugin" / "plugin.json",
+        {"name": plugin, "version": "0.1.0"},
+    )
+
+
+def test_stages_ai_directory_marketplace_relative_path(tmp_path):
+    anchor = tmp_path / "repo"
+    _make_ai_marketplace(anchor, "dotfiles-plugins", "generating-connect")
+    _make_repo(
+        anchor,
+        enabled={"generating-connect@dotfiles-plugins": True},
+        # the `.ai` standard: a `directory` source with a repo-relative path
+        marketplaces={
+            "dotfiles-plugins": {"source": {"source": "directory", "path": "./.ai"}}
+        },
+    )
+    repo_own_plugins._INSTALLED = tmp_path / "installed"
+
+    args = repo_plugin_dir_args(anchor)
+
+    assert "--plugin-dir" in args
+    # relative ./.ai resolved against the anchor; plugin dir found via manifest
+    assert str(anchor / ".ai" / "generating-connect") in args
+
+
+def test_ai_installed_plugin_not_restaged(tmp_path):
+    anchor = tmp_path / "repo"
+    _make_ai_marketplace(anchor, "dotfiles-plugins", "generating-connect")
+    _make_repo(
+        anchor,
+        enabled={"generating-connect@dotfiles-plugins": True},
+        marketplaces={
+            "dotfiles-plugins": {"source": {"source": "directory", "path": "./.ai"}}
+        },
+    )
+    # Mark installed via a `.claude-plugin/plugin.json` manifest -> not re-staged.
+    installed = tmp_path / "installed"
+    _write(
+        installed / "dotfiles-plugins" / "generating-connect" / ".claude-plugin"
+        / "plugin.json",
+        {"name": "generating-connect"},
+    )
+    repo_own_plugins._INSTALLED = installed
+
+    assert repo_plugin_dir_args(anchor) == []
