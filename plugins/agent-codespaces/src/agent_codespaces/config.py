@@ -460,18 +460,68 @@ def load_repo_config(repo_path: Path) -> dict[str, Any] | None:
         return yaml.safe_load(f) or {}
 
 
+def _read_settings_layer(base: Path, rels: tuple[tuple[str, ...], ...]) -> dict[str, Any]:
+    """Read one settings *convention* (an ordered list of relative file paths)
+    into ``{"extraKnownMarketplaces": {...}, "enabledPlugins": {...}}``.
+
+    Within a layer: ``extraKnownMarketplaces`` is **first-wins** and
+    ``enabledPlugins`` is **last-wins** (so a convention's ``settings.local.json``
+    overrides its ``settings.json``). Missing / malformed files are skipped.
+    """
+    ekm: dict[str, Any] = {}
+    ep: dict[str, Any] = {}
+    for rel in rels:
+        path = base.joinpath(*rel)
+        try:
+            if not path.is_file():
+                continue
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        mk = data.get("extraKnownMarketplaces")
+        if isinstance(mk, dict):
+            for k, v in mk.items():
+                ekm.setdefault(k, v)
+        en = data.get("enabledPlugins")
+        if isinstance(en, dict):
+            for k, v in en.items():
+                ep[k] = v
+    return {"extraKnownMarketplaces": ekm, "enabledPlugins": ep}
+
+
+# Settings-file conventions, **Copilot-native first, Claude fallback**. Copilot
+# CLI resolves a repo's plugin config preferring its native location and falling
+# back to the Claude convention (mirroring the documented ``.claude-plugin``
+# marketplace-manifest fallback); our rollup honors the same precedence so a repo
+# that declares its plugins in either place propagates correctly.
+_NATIVE_SETTINGS_RELS = (
+    (".github", "copilot", "settings.json"),
+    (".github", "copilot", "settings.local.json"),
+)
+_CLAUDE_SETTINGS_RELS = (
+    (".claude", "settings.json"),
+    (".claude", "settings.local.json"),
+)
+
+
 def repo_copilot_settings(source_paths: Iterable[Path]) -> dict[str, Any]:
     """Merge repo-scoped Copilot settings across the adopted control-plane repos.
 
-    Reads ``<repo>/.github/copilot/settings.json`` (and ``settings.local.json``)
-    from each adopted repo path and returns the merged ``extraKnownMarketplaces``
-    and ``enabledPlugins`` maps. This is the **repo-scoped** replacement for
-    reading the harness *user* ``~/.copilot/settings.json`` -- the marketplace
-    registry and plugin enablement are versioned, in-repo config, not per-machine
-    user state. ``extraKnownMarketplaces`` entries union **first-wins** across
-    repos (and across a repo's ``settings.json`` then ``settings.local.json``);
-    ``enabledPlugins`` entries are **last-wins** (a repo's ``settings.local.json``
-    overrides its ``settings.json``). Missing / malformed files are skipped.
+    Reads each repo's plugin config from the **Copilot-native**
+    ``.github/copilot/settings.json`` (+ ``settings.local.json``) **and**, as a
+    fallback, the **Claude** ``.claude/settings.json`` (+ ``.claude/settings.local.json``),
+    returning the merged ``extraKnownMarketplaces`` and ``enabledPlugins`` maps.
+    This is the **repo-scoped** replacement for reading the harness *user*
+    ``~/.copilot/settings.json`` -- the marketplace registry and plugin enablement
+    are versioned, in-repo config, not per-machine user state.
+
+    Precedence: **Copilot-native wins over Claude** on a key conflict (for both
+    maps); within a convention, ``settings.local.json`` overrides ``settings.json``
+    (``enabledPlugins`` last-wins) and ``extraKnownMarketplaces`` is first-wins.
+    Across repos, ``extraKnownMarketplaces`` is first-wins and ``enabledPlugins``
+    is last-wins. Missing / malformed files are skipped.
 
     Returns ``{"extraKnownMarketplaces": {...}, "enabledPlugins": {...}}`` (both
     always present, possibly empty).
@@ -479,24 +529,19 @@ def repo_copilot_settings(source_paths: Iterable[Path]) -> dict[str, Any]:
     ekm: dict[str, Any] = {}
     ep: dict[str, Any] = {}
     for base in source_paths:
-        for fname in ("settings.json", "settings.local.json"):
-            path = Path(base) / ".github" / "copilot" / fname
-            try:
-                if not path.is_file():
-                    continue
-                data = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
-                continue
-            if not isinstance(data, dict):
-                continue
-            mk = data.get("extraKnownMarketplaces")
-            if isinstance(mk, dict):
-                for k, v in mk.items():
-                    ekm.setdefault(k, v)
-            en = data.get("enabledPlugins")
-            if isinstance(en, dict):
-                for k, v in en.items():
-                    ep[k] = v
+        base = Path(base)
+        native = _read_settings_layer(base, _NATIVE_SETTINGS_RELS)
+        claude = _read_settings_layer(base, _CLAUDE_SETTINGS_RELS)
+        # Native preferred, Claude fallback (per key), for BOTH maps.
+        merged_ekm = dict(claude["extraKnownMarketplaces"])
+        merged_ekm.update(native["extraKnownMarketplaces"])
+        merged_ep = dict(claude["enabledPlugins"])
+        merged_ep.update(native["enabledPlugins"])
+        # Fold this repo into the cross-repo result (ekm first-wins, ep last-wins).
+        for k, v in merged_ekm.items():
+            ekm.setdefault(k, v)
+        for k, v in merged_ep.items():
+            ep[k] = v
     return {"extraKnownMarketplaces": ekm, "enabledPlugins": ep}
 
 

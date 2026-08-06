@@ -161,3 +161,80 @@ def test_ai_installed_plugin_not_restaged(tmp_path):
     repo_own_plugins._INSTALLED = installed
 
     assert repo_plugin_dir_args(anchor) == []
+
+
+# ---------------------------------------------------------------------------
+# Claude-convention settings fallback: a repo may declare its plugins in
+# `.claude/settings.json` instead of `.github/copilot/settings.json`
+# (Copilot-native preferred, Claude fallback).
+# ---------------------------------------------------------------------------
+
+def _make_repo_claude_settings(anchor: Path, enabled: dict, marketplaces: dict) -> None:
+    _write(
+        anchor / ".claude" / "settings.json",
+        {"extraKnownMarketplaces": marketplaces, "enabledPlugins": enabled},
+    )
+
+
+def test_stages_from_claude_settings_when_no_native(tmp_path):
+    anchor = tmp_path / "repo"
+    _make_ai_marketplace(anchor, "dotfiles-plugins", "generating-connect")
+    # Only a .claude/settings.json (no .github/copilot/settings.json).
+    _make_repo_claude_settings(
+        anchor,
+        enabled={"generating-connect@dotfiles-plugins": True},
+        marketplaces={
+            "dotfiles-plugins": {"source": {"source": "directory", "path": "./.ai"}}
+        },
+    )
+    repo_own_plugins._INSTALLED = tmp_path / "installed"
+
+    args = repo_plugin_dir_args(anchor)
+
+    assert "--plugin-dir" in args
+    assert str(anchor / ".ai" / "generating-connect") in args
+
+
+def test_native_settings_win_over_claude(tmp_path):
+    anchor = tmp_path / "repo"
+    _make_ai_marketplace(anchor, "mp", "cap")
+    # Claude disables the plugin; native enables it (same key) -> native wins.
+    _make_repo_claude_settings(
+        anchor,
+        enabled={"cap@mp": False},
+        marketplaces={"mp": {"source": {"source": "directory", "path": "./.ai"}}},
+    )
+    _make_repo(
+        anchor,
+        enabled={"cap@mp": True},
+        marketplaces={"mp": {"source": {"source": "directory", "path": "./.ai"}}},
+    )
+    repo_own_plugins._INSTALLED = tmp_path / "installed"
+
+    args = repo_plugin_dir_args(anchor)
+
+    # Native's enabled=True wins over Claude's False -> the plugin is staged.
+    assert str(anchor / ".ai" / "cap") in args
+
+
+def test_claude_settings_local_overrides_claude_base(tmp_path):
+    anchor = tmp_path / "repo"
+    _make_ai_marketplace(anchor, "mp", "cap")
+    _write(
+        anchor / ".claude" / "settings.json",
+        {
+            "extraKnownMarketplaces": {
+                "mp": {"source": {"source": "directory", "path": "./.ai"}}
+            },
+            "enabledPlugins": {"cap@mp": False},
+        },
+    )
+    _write(
+        anchor / ".claude" / "settings.local.json",
+        {"enabledPlugins": {"cap@mp": True}},  # local override flips it on
+    )
+    repo_own_plugins._INSTALLED = tmp_path / "installed"
+
+    args = repo_plugin_dir_args(anchor)
+
+    assert str(anchor / ".ai" / "cap") in args

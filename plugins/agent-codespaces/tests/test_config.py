@@ -47,6 +47,60 @@ def test_repo_copilot_settings_missing_is_empty(tmp_path):
     assert merged == {"extraKnownMarketplaces": {}, "enabledPlugins": {}}
 
 
+def test_repo_copilot_settings_reads_claude_convention(tmp_path):
+    # A repo that declares its plugins in .claude/settings.json (Claude
+    # convention) instead of .github/copilot/settings.json.
+    repo = tmp_path / "claude-repo"
+    claude = repo / ".claude"
+    claude.mkdir(parents=True)
+    (claude / "settings.json").write_text(json.dumps({
+        "extraKnownMarketplaces": {
+            "spo-core-plugins": {"source": {"source": "directory", "path": "./.ai"}},
+        },
+        "enabledPlugins": {"cps@spo-core-plugins": True},
+    }), encoding="utf-8")
+
+    merged = repo_copilot_settings([repo])
+    assert "spo-core-plugins" in merged["extraKnownMarketplaces"]
+    assert merged["enabledPlugins"]["cps@spo-core-plugins"] is True
+
+
+def test_repo_copilot_settings_native_wins_over_claude(tmp_path):
+    # Same key declared in both conventions -> Copilot-native wins.
+    repo = tmp_path / "both"
+    native = repo / ".github" / "copilot"
+    native.mkdir(parents=True)
+    claude = repo / ".claude"
+    claude.mkdir(parents=True)
+    (claude / "settings.json").write_text(json.dumps({
+        "extraKnownMarketplaces": {"mp": {"source": {"source": "git", "url": "claude"}}},
+        "enabledPlugins": {"cap@mp": False},
+    }), encoding="utf-8")
+    (native / "settings.json").write_text(json.dumps({
+        "extraKnownMarketplaces": {"mp": {"source": {"source": "git", "url": "native"}}},
+        "enabledPlugins": {"cap@mp": True},
+    }), encoding="utf-8")
+
+    merged = repo_copilot_settings([repo])
+    assert merged["extraKnownMarketplaces"]["mp"]["source"]["url"] == "native"
+    assert merged["enabledPlugins"]["cap@mp"] is True  # native wins
+
+
+def test_repo_copilot_settings_claude_local_overrides_claude_base(tmp_path):
+    repo = tmp_path / "claude-local"
+    claude = repo / ".claude"
+    claude.mkdir(parents=True)
+    (claude / "settings.json").write_text(json.dumps({
+        "enabledPlugins": {"cap@mp": False},
+    }), encoding="utf-8")
+    (claude / "settings.local.json").write_text(json.dumps({
+        "enabledPlugins": {"cap@mp": True},
+    }), encoding="utf-8")
+
+    merged = repo_copilot_settings([repo])
+    assert merged["enabledPlugins"]["cap@mp"] is True
+
+
 @pytest.fixture
 def config_dir(tmp_path, monkeypatch):
     """Set up a temp runtime dir and adopted repo."""
