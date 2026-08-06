@@ -560,6 +560,31 @@ def _discover_project_binstubs() -> dict[str, list[Path]]:
     return found
 
 
+def prune_reserved_projects() -> list[str]:
+    """Remove any reserved-name entries from projects.yaml (self-heal).
+
+    The runtime's own name (``agent-worktrees``) is not a project. A prior buggy
+    install could have self-registered it (see :func:`register_project`), leaving
+    a projects.yaml entry that grows a bogus "Agent Worktrees" Terminal profile
+    and a launcher backed by no repo. ``register_project`` now refuses such a
+    write, but existing machines still carry the stale entry -- so drop it here,
+    on every install/update, to heal them fleet-wide. Returns the names removed.
+    """
+    registry = read_projects_registry()
+    projects = registry.get("projects", {})
+    if not isinstance(projects, dict):
+        return []
+    removed = [n for n in list(projects) if n in _RESERVED_BINSTUB_NAMES]
+    if removed:
+        for n in removed:
+            projects.pop(n, None)
+        write_projects_registry(registry)
+        output.changed(
+            "Projects: removed non-project runtime entry "
+            f"({', '.join(removed)}) from projects.yaml")
+    return removed
+
+
 def reconcile_binstubs() -> dict:
     """Reconcile project binstubs against the projects registry.
 
@@ -568,6 +593,9 @@ def reconcile_binstubs() -> dict:
     no longer registered. Runs without a project context, so it is safe to call
     from a plugin-driven ``update`` where no single project is in scope.
     """
+    # Self-heal: a reserved runtime name must never be a registered project.
+    prune_reserved_projects()
+
     registered = set(read_projects_registry().get("projects", {}).keys())
 
     added = 0
@@ -1037,6 +1065,22 @@ def register_project(
     wsl_path
         Path to the repo anchor inside WSL (e.g. ``~/src/my-project``).
     """
+    # The runtime's own name is NOT a project. ``~/.agent-worktrees`` is the
+    # shared *install* dir (it carries a global ``config.yaml``), so the
+    # installer's "does ``~/.<cwd>/config.yaml`` exist?" project inference gives
+    # a false positive when ``install.ps1`` runs from a dir named
+    # ``agent-worktrees`` (the plugin checkout or the venv), self-registering the
+    # manager as a launchable project -- which then grows a bogus "Agent
+    # Worktrees" Terminal profile and a projects.yaml entry backed by no repo.
+    # ``_RESERVED_BINSTUB_NAMES`` already made such an entry inert to binstub
+    # reconciliation; refuse the registry *write* here too so it never appears in
+    # the first place (the single owning writer is the right place to enforce it).
+    if project in _RESERVED_BINSTUB_NAMES:
+        output.skipped(
+            f"'{project}' is the runtime itself, not a project -- "
+            "skipping projects.yaml registration")
+        return
+
     registry = read_projects_registry()
     existing = registry["projects"].get(project, {})
     if not isinstance(existing, dict):

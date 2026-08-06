@@ -181,3 +181,57 @@ def test_subcommand_force_no_expose_agent(monkeypatch, tmp_path: Path):
     assert rc == 0
     data = yaml.safe_load(target.read_text(encoding="utf-8"))
     assert data["projects"]["myproj"]["expose_agent"] is False
+
+
+# ---------------------------------------------------------------------------
+# Reserved-name guard -- the runtime is not a project
+# ---------------------------------------------------------------------------
+
+def test_register_refuses_reserved_runtime_name(monkeypatch, tmp_path: Path):
+    """``agent-worktrees`` is the runtime's own install dir (it carries a global
+    config.yaml), so the installer's ``~/.<cwd>/config.yaml`` project inference
+    false-positives when run from a dir named ``agent-worktrees``. The single
+    registry writer must refuse it, or projects.yaml grows a bogus launchable
+    project (the "Agent Worktrees" Terminal profile backed by no repo)."""
+    monkeypatch.setattr(installer.output, "skipped", lambda *_a, **_k: None)
+    target = _patch_registry_path(monkeypatch, tmp_path)
+    installer.register_project("agent-worktrees", expose_agent=True)
+    # No file written / no entry created.
+    if target.exists():
+        data = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
+        assert "agent-worktrees" not in (data.get("projects") or {})
+
+
+def test_prune_reserved_projects_self_heals(monkeypatch, tmp_path: Path):
+    """A machine that a prior buggy install already polluted must self-heal:
+    prune_reserved_projects drops the reserved entry, leaving real projects."""
+    monkeypatch.setattr(installer.output, "changed", lambda *_a, **_k: None)
+    target = _patch_registry_path(monkeypatch, tmp_path)
+    target.write_text(
+        "schema_version: 2\n"
+        "projects:\n"
+        "  agent-worktrees:\n"
+        "    config_dir: ~/.agent-worktrees\n"
+        "    expose_agent: true\n"
+        "  dotfiles:\n"
+        "    config_dir: ~/.dotfiles\n",
+        encoding="utf-8",
+    )
+    removed = installer.prune_reserved_projects()
+    assert removed == ["agent-worktrees"]
+    data = yaml.safe_load(target.read_text(encoding="utf-8"))
+    assert "agent-worktrees" not in data["projects"]
+    assert "dotfiles" in data["projects"]
+
+
+def test_prune_reserved_projects_noop_when_clean(monkeypatch, tmp_path: Path):
+    target = _patch_registry_path(monkeypatch, tmp_path)
+    target.write_text(
+        "schema_version: 2\nprojects:\n  dotfiles:\n    config_dir: ~/.dotfiles\n",
+        encoding="utf-8",
+    )
+    before = target.read_text(encoding="utf-8")
+    assert installer.prune_reserved_projects() == []
+    # Untouched when there is nothing reserved to prune.
+    assert target.read_text(encoding="utf-8") == before
+
