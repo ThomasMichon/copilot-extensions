@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 
 import pytest
@@ -56,24 +57,57 @@ def test_worker_prompt_mentions_task_and_verbs():
 
 
 def test_spawn_worker_unavailable_when_no_bridge(monkeypatch):
-    monkeypatch.setattr(bridge.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(bridge, "_agent_bridge_launch_prefix", lambda: None)
     assert bridge.bridge_available() is False
     with pytest.raises(bridge.BridgeUnavailable):
         bridge.spawn_worker("t1", coordinator_url="http://c", worker_id="w1")
 
 
+def test_launch_prefix_prefers_venv_python_over_cmd_shim(monkeypatch, tmp_path):
+    """The autopilot seed carries cmd.exe metacharacters (``&``, ``()``, ``<>``,
+    backtick). Launching the Windows ``agent-bridge.cmd`` shim makes cmd.exe
+    re-parse ``%*`` and corrupt the seed (WinError 2, BatBadBut -- #4395). So when
+    the agent-bridge runtime venv exists, its interpreter + ``-m agent_bridge`` is
+    preferred, bypassing any ``.cmd`` shim entirely."""
+    venv_py = tmp_path / ".agent-bridge" / "venv" / (
+        "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    )
+    venv_py.parent.mkdir(parents=True)
+    venv_py.write_text("")  # only needs to exist as a file
+    monkeypatch.setattr(bridge.Path, "home", classmethod(lambda cls: tmp_path))
+    # Even with a .cmd binstub on PATH, the venv interpreter wins.
+    monkeypatch.setattr(bridge.shutil, "which", lambda _n: r"C:\bin\agent-bridge.cmd")
+    prefix = bridge._agent_bridge_launch_prefix()
+    assert prefix == [str(venv_py), "-m", "agent_bridge"]
+    # The launcher is a real interpreter, never a shell shim that re-parses args.
+    assert not prefix[0].lower().endswith((".cmd", ".bat"))
+
+
+def test_launch_prefix_falls_back_to_binstub_when_no_venv(monkeypatch, tmp_path):
+    """Without the runtime venv, fall back to the ``agent-bridge`` binstub on PATH
+    (POSIX shims are plain exec scripts -- no cmd.exe re-parse)."""
+    monkeypatch.setattr(bridge.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(bridge.shutil, "which", lambda _n: "/usr/bin/agent-bridge")
+    assert bridge._agent_bridge_launch_prefix() == ["/usr/bin/agent-bridge"]
+
+
+def test_launch_prefix_none_when_unresolvable(monkeypatch, tmp_path):
+    monkeypatch.setattr(bridge.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(bridge.shutil, "which", lambda _n: None)
+    assert bridge._agent_bridge_launch_prefix() is None
+
+
 def test_spawn_worker_invokes_agent_bridge_create(monkeypatch):
     calls = {}
-
-    def fake_which(name):
-        return "/usr/bin/agent-bridge" if name == "agent-bridge" else None
 
     def fake_run(cmd, **kwargs):
         calls["cmd"] = cmd
         calls["kwargs"] = kwargs
         return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
 
-    monkeypatch.setattr(bridge.shutil, "which", fake_which)
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
     monkeypatch.setattr(bridge.subprocess, "run", fake_run)
 
     result = bridge.spawn_worker(
@@ -90,7 +124,9 @@ def test_spawn_worker_passes_no_window_kwargs(monkeypatch):
     """The console launcher runs windowless (CREATE_NO_WINDOW on Windows)."""
     calls = {}
 
-    monkeypatch.setattr(bridge.shutil, "which", lambda _n: "/usr/bin/agent-bridge")
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
     monkeypatch.setattr(
         bridge, "no_window_kwargs", lambda: {"creationflags": 0x08000000}
     )
@@ -105,7 +141,9 @@ def test_spawn_worker_passes_no_window_kwargs(monkeypatch):
 
 
 def test_spawn_worker_wait_omits_no_wait(monkeypatch):
-    monkeypatch.setattr(bridge.shutil, "which", lambda _n: "/usr/bin/agent-bridge")
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
     monkeypatch.setattr(
         bridge.subprocess, "run",
         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""),
