@@ -60,7 +60,7 @@ $payload = Join-Path $payloadRoot $Plugin
 $pwshExe = (Get-Process -Id $PID).Path
 $launched = [System.Collections.Generic.List[System.Diagnostics.Process]]::new()
 
-function Start-Install([int]$sleep) {
+function Start-Install([int]$sleep, [int]$deadline = 0, [bool]$grandchild = $false) {
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
     $psi.FileName = $pwshExe
     foreach ($a in @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
@@ -72,6 +72,8 @@ function Start-Install([int]$sleep) {
     $psi.EnvironmentVariables['HOME'] = $sandbox
     $psi.EnvironmentVariables['COPILOT_PLUGIN_INSTALL_SMOKE'] = '1'
     $psi.EnvironmentVariables['COPILOT_PLUGIN_INSTALL_SMOKE_SLEEP'] = "$sleep"
+    if ($deadline -gt 0) { $psi.EnvironmentVariables['COPILOT_PLUGIN_INSTALL_DEADLINE_SEC'] = "$deadline" }
+    if ($grandchild) { $psi.EnvironmentVariables['COPILOT_PLUGIN_INSTALL_SMOKE_GRANDCHILD'] = '1' }
     # ensure a clean guard state so staging actually fires
     $psi.EnvironmentVariables.Remove('COPILOT_PLUGIN_INSTALL_STAGED') | Out-Null
     $psi.EnvironmentVariables.Remove('COPILOT_PLUGIN_STAGED_FROM') | Out-Null
@@ -148,12 +150,66 @@ try {
             Where-Object { $_.CommandLine -and ($_.CommandLine -replace '\\', '/') -match ([regex]::Escape(($payload -replace '\\', '/'))) })
     Assert 'NO-ORPHANS (none holding payload)' ($orphans.Count -eq 0) "orphans: $($orphans.Count)"
     Assert 'NO-ORPHANS (payload renamable after)' (Test-Renamable $payload)
+
+    # --- WATCHDOG: a stalled install self-terminates (the (4) failure class) ---
+    # Short deadline + long smoke sleep + a grandchild sleeper. The staging
+    # parent watchdog must kill the WHOLE tree before the sleep elapses, leave
+    # the payload free, and leave no orphan.
+    Remove-Item -Recurse -Force (Join-Path (Join-Path $sandbox ".$Plugin") '.install-stage') -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path (Join-Path $sandbox ".$Plugin") 'smoke.json') -ErrorAction SilentlyContinue
+    $wdDeadline = 3
+    $w1 = Start-Install -sleep 90 -deadline $wdDeadline -grandchild $true
+    $smokeW = Wait-Smoke $TimeoutSec
+    $childPid = if ($smokeW) { [int]$smokeW.child_pid } else { 0 }
+    $grandPid = if ($smokeW) { [int]$smokeW.grandchild_pid } else { 0 }
+    Assert 'WATCHDOG smoke reached (child+grandchild spawned)' (($null -ne $smokeW) -and $grandPid -gt 0) "child=$childPid grand=$grandPid"
+    # Parent (watchdog) should exit ~deadline; wait a bounded grace beyond it.
+    $w1.WaitForExit(($wdDeadline + 20) * 1000) | Out-Null
+    Assert 'WATCHDOG parent exited on deadline (124)' ($w1.HasExited -and $w1.ExitCode -eq 124) "exit=$(if($w1.HasExited){$w1.ExitCode}else{'running'})"
+    Start-Sleep -Milliseconds 800
+    $childAlive = [bool](Get-Process -Id $childPid -ErrorAction SilentlyContinue)
+    $grandAlive = ($grandPid -gt 0) -and [bool](Get-Process -Id $grandPid -ErrorAction SilentlyContinue)
+    Assert 'WATCHDOG killed the staged child' (-not $childAlive)
+    Assert 'WATCHDOG killed the GRANDCHILD (whole tree)' (-not $grandAlive) "grand=$grandPid"
+    Assert 'WATCHDOG payload still free after kill' (Test-Renamable $payload)
+
+    # --- MARKER: watchdog-killed build left NO completion marker; a real (non-
+    # smoke) rebuild would toss it. Assert versioned_runtime sees it incomplete. ---
+    $vr = Join-Path $payload 'scripts\versioned_runtime.py'
+    $srcVer = ((Get-Content (Join-Path $payload 'pyproject.toml') | Where-Object { $_ -match '^\s*version\s*=' } | Select-Object -First 1) -replace '.*=\s*"([^"]+)".*', '$1')
+    $abRoot = Join-Path $sandbox ".$Plugin"
+    # simulate a killed build's corpse slot (dir present, no marker)
+    $corpse = Join-Path (Join-Path $abRoot 'versions') $srcVer
+    New-Item -ItemType Directory -Force -Path $corpse | Out-Null
+    $bootPy = (Get-Command python -ErrorAction SilentlyContinue).Source
+    if (-not $bootPy) { $bootPy = (Get-Command python3 -ErrorAction SilentlyContinue).Source }
+    if ($bootPy) {
+        & $bootPy $vr --root $abRoot is-complete $srcVer 2>$null; $incompleteRc = $LASTEXITCODE
+        Assert 'MARKER absent on a killed/partial slot (is-complete => 1)' ($incompleteRc -eq 1) "rc=$incompleteRc ver=$srcVer"
+        & $bootPy $vr --root $abRoot slot $srcVer --clean-incomplete 2>$null | Out-Null
+        $corpseItems = @(Get-ChildItem $corpse -Force -ErrorAction SilentlyContinue)
+        $tossed = (-not (Test-Path (Join-Path $corpse 'pyvenv.cfg'))) -and ($corpseItems.Count -eq 0)
+        Assert 'TOSS: corpse slot cleaned for rebuild (slot --clean-incomplete)' $tossed "items=$($corpseItems.Count)"
+        & $bootPy $vr --root $abRoot mark-complete $srcVer 2>$null | Out-Null
+        & $bootPy $vr --root $abRoot is-complete $srcVer 2>$null; $completeRc = $LASTEXITCODE
+        Assert 'MARKER present after mark-complete (is-complete => 0)' ($completeRc -eq 0) "rc=$completeRc"
+    } else {
+        Assert 'MARKER test skipped (no system python)' $true 'no python on PATH'
+    }
 }
 catch {
     Assert 'test harness error' $false "$_"
 }
 finally {
     foreach ($p in $launched) { try { if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } } catch {} }
+    # Reap any straggler process still referencing this sandbox (e.g. a smoke
+    # grandchild if a watchdog assertion failed) so the test never leaks.
+    try {
+        $sbNorm = ($sandbox -replace '\\', '/')
+        Get-CimInstance Win32_Process -Filter "Name='pwsh.exe' OR Name='powershell.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -and (($_.CommandLine -replace '\\', '/') -match [regex]::Escape($sbNorm)) } |
+            ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {} }
+    } catch {}
     Start-Sleep -Milliseconds 300
     Remove-Item -Recurse -Force $sandbox -ErrorAction SilentlyContinue
 }
