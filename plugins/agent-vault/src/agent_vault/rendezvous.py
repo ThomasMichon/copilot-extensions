@@ -52,6 +52,24 @@ SCHEMA = 1
 # Windows GetExitCodeProcess sentinel for a process that is still running.
 _STILL_ACTIVE = 259
 
+# Windows OpenProcess failure code for a query denied by the OS -- e.g. a process
+# in another logon session or owned by another user. Denied != gone.
+_ERROR_ACCESS_DENIED = 5
+
+
+def _openprocess_denied_means_alive(last_error: int) -> bool:
+    """Interpret an ``OpenProcess`` failure.
+
+    A denied query (``ERROR_ACCESS_DENIED`` -- the target runs in another logon
+    session or is owned by another user) means the process **exists**; any other
+    failure is treated as gone. This is the Windows analogue of POSIX
+    ``os.kill(pid, 0)`` raising ``PermissionError`` (alive) vs ``ProcessLookupError``
+    (dead), and it is the fix for a coordinator started under a Scheduled Task
+    (``LogonType S4U``) looking "dead" to a client in another session.
+    """
+    return last_error == _ERROR_ACCESS_DENIED
+
+
 VALID_TRANSPORTS = ("unix", "pipe", "tcp")
 
 
@@ -76,10 +94,14 @@ def pid_alive(pid: int | None) -> bool:
         import ctypes
 
         access = 0x1000  # PROCESS_QUERY_LIMITED_INFORMATION
-        kernel32 = ctypes.windll.kernel32
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         handle = kernel32.OpenProcess(access, False, pid)
         if not handle:
-            return False
+            # OpenProcess failed. Distinguish a denied query from a genuine
+            # "no such process": a process in another logon session / owned by
+            # another user denies the query but is alive -- mirror the POSIX
+            # PermissionError branch below.
+            return _openprocess_denied_means_alive(ctypes.get_last_error())
         try:
             exit_code = ctypes.c_ulong()
             ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
