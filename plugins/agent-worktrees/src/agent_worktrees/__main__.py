@@ -7266,17 +7266,22 @@ account can't access the target repo the call fails with a confusing
 `GraphQL: Could not resolve to a Repository` -- while `gh pr` REST ops often
 still work, so the symptom misleads.
 
-`agent-worktrees` commands (`create-pr`, `pr-merge`, ...) already resolve
-repo->account and inject the right token automatically. **Ad-hoc `gh` in
-skills does not** -- so before running one against a repo:
+`gh`'s **active account is global per-machine** (`hosts.yml`), shared across
+every session -- so `gh auth switch` is **racy** on a shared box: a concurrent
+switch by another session flips it under you. **Don't depend on / mutate the
+active account for ad-hoc `gh`; inject the resolved account's token instead**
+(side-effect-free, race-safe):
 
-- Resolve the owning account: `agent-worktrees repos account-for <owner/repo>`.
-- If it isn't the active account, switch: `gh auth switch --user <login>`
-  (and switch back afterward if you had switched away for another repo).
-- `agent-worktrees accounts list` shows the catalog of logged-in accounts.
+- **Preferred** -- let agent-worktrees resolve + inject for you:
+  `agent-worktrees repos gh <owner/repo> -- <gh args>`
+  (e.g. `agent-worktrees repos gh <owner/repo> -- issue create ...`).
+- By hand (equivalent):
+  `GH_TOKEN=$(gh auth token --user $(agent-worktrees repos account-for <owner/repo>)) gh <args>`
+- `agent-worktrees` commands (`create-pr`, `pr-merge`, ...) already inject
+  per-account tokens; `agent-worktrees accounts list` shows the catalog.
 
-Match the account to the repo's owner *before* the `gh` call, not after it
-fails.
+`gh auth switch --user <login>` is a **last-resort** fallback (interactive
+human), not the mechanism agents should use -- it mutates shared global state.
 """
 
 
@@ -7297,6 +7302,34 @@ def _deploy_account_conduct(proj_dir: Path) -> None:
     else:
         path.write_text(content)
         output.changed(f"account-conduct.instructions.md -> {path}")
+
+
+def _gh_env_for_repo(target: str) -> tuple[dict[str, str], str | None, bool]:
+    """Build the environment for running ``gh`` against *target* under the
+    account that owns it, via **token injection** (never ``gh auth switch``).
+
+    ``gh``'s active account is global per-machine, so switching it is racy on a
+    shared box. Instead resolve ``account_for_github_slug(target)`` and mint its
+    token (``gh auth token --user <login>``), injected as ``GH_TOKEN`` -- a
+    side-effect-free, race-safe override that leaves the active account alone.
+
+    Returns ``(env, login, injected)``: a copy of ``os.environ`` with
+    ``GH_TOKEN`` set when an account resolved *and* a token minted; ``login`` is
+    the resolved account (or None); ``injected`` reports whether ``GH_TOKEN``
+    was set. When nothing resolves the ambient env is returned unchanged (caller
+    falls back to the active gh account).
+    """
+    from . import repos
+
+    env = dict(os.environ)
+    login = repos.account_for_github_slug(target)
+    injected = False
+    if login:
+        token = git_ops.gh_token_for_account(login)
+        if token:
+            env["GH_TOKEN"] = token
+            injected = True
+    return env, login, injected
 
 
 # ── Temporary: extension-reload "Loading…/Resuming…" hang warning ──────────
@@ -9303,6 +9336,7 @@ def _repos_usage() -> None:
     print("  account [list|set <owner> <login>|unset <owner>]")
     print("                                      Decoupled owner->gh-login map (account_map)")
     print("  account-for <owner|owner/name>      Print the resolved gh login (exit 1 if none)")
+    print("  gh <owner|owner/name> [--] <args>   Run gh under that repo's account (token-inject)")
     print("  allow-edits <repo> --reason <why>   Break-glass: temporarily allow direct edits")
     print("     [--minutes N] | --list | <repo> --revoke   to a guarded repo (default 10m, max 60m)")
     print()
@@ -9712,6 +9746,30 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             print(login)
             return 0
         return 1
+
+    if sub == "gh":
+        # Run `gh` against a repo under the account that owns it, via token
+        # injection -- race-safe on a shared box where the active gh account is
+        # global per-machine. Usage: repos gh <owner|owner/name> [--] <gh args>
+        args = list(rest)
+        if args and args[0] == "--":
+            args = args[1:]
+        target = args[0] if args else None
+        gh_args = args[1:] if args else []
+        if gh_args and gh_args[0] == "--":
+            gh_args = gh_args[1:]
+        if not target or not gh_args:
+            output.err("Usage: repos gh <owner|owner/name> [--] <gh args...>")
+            return 1
+        if shutil.which("gh") is None:
+            output.err("gh CLI not found on PATH")
+            return 1
+        env, login, injected = _gh_env_for_repo(target)
+        if login and not injected:
+            output.warn(
+                f"could not mint a gh token for '{login}'; using ambient auth"
+            )
+        return subprocess.run(["gh", *gh_args], env=env).returncode
 
     if sub == "account":
         # Manage the decoupled owner->login map (account_map in repos.yaml).

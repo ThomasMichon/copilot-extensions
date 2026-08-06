@@ -27,9 +27,10 @@ def test_deploys_marked_conduct(tmp_path: Path):
     text = path.read_text()
     # Delivered like worktree-conduct: ownership marker first, no frontmatter.
     assert text.startswith(m._INSTRUCTION_MARKER)
-    # Names the resolver + switch mechanics agents must follow.
+    # Names the resolver + injection mechanics agents must follow.
     assert "repos account-for" in text
-    assert "gh auth switch --user" in text
+    assert "repos gh" in text
+    assert "GH_TOKEN" in text
 
 
 def test_deploy_is_idempotent(tmp_path: Path):
