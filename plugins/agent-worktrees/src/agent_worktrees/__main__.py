@@ -7771,6 +7771,71 @@ def _refresh_terminal_profiles() -> bool:
     return True
 
 
+def cmd_repair(args: argparse.Namespace) -> int:
+    """Repair this machine's agent-worktrees integration in place.
+
+    Two independently-selectable targets (default: **both**):
+
+    * ``--terminal`` -- regenerate the Windows Terminal fragment and reconcile
+      live WT state: heal fragment profiles WT is hiding (in the fragment +
+      ``generatedProfiles`` but missing from ``settings.json``) and reclaim our
+      accumulated ``generatedProfiles`` orphans. Windows-only (a no-op else).
+    * ``--binstubs`` -- redeploy every registered project's ``~/.local/bin``
+      launcher (add/refresh missing or stale) and remove stale ones.
+
+    Unlike ``update``, ``repair`` never touches the plugin/runtime version -- it
+    only reconciles local *deployed state*, so it is the right tool when the
+    Terminal dropdown or a binstub is wrong but the runtime is already current
+    (``update`` would otherwise version-skip the installer). It is idempotent
+    and safe to re-run.
+    """
+    want_terminal = getattr(args, "terminal", False)
+    want_binstubs = getattr(args, "binstubs", False)
+    if not want_terminal and not want_binstubs:
+        want_terminal = want_binstubs = True  # neither flag -> repair both
+
+    rc = 0
+
+    if want_binstubs:
+        output.header("Repairing project binstubs")
+        try:
+            inst.reconcile_binstubs()
+        except Exception as e:  # noqa: BLE001 -- report, don't abort the other target
+            output.err(f"Binstub repair failed: {e}")
+            rc = 1
+
+    if want_terminal:
+        output.header("Repairing Windows Terminal profiles")
+        if platform.system() != "Windows":
+            output.skipped("Terminal profile repair is Windows-only -- skipped")
+        else:
+            from . import terminal_fragment as tf
+
+            diag = tf.diagnose_wt_state()
+            if diag is not None:
+                if diag.hidden:
+                    output.info(f"Will heal {len(diag.hidden)} hidden fragment "
+                                "profile(s)")
+                if diag.reclaimable_orphans:
+                    output.info(f"Will reclaim {len(diag.reclaimable_orphans)} "
+                                "orphaned generatedProfiles GUID(s)")
+                for name, count in diag.duplicate_names:
+                    output.warn(f"Duplicate profile {name!r} x{count} in "
+                                "settings.json -- a separate stand-alone fragment "
+                                "shares the name; not auto-resolved here")
+                if diag.healthy and not diag.reclaimable_orphans:
+                    output.ok("Windows Terminal state already clean")
+            if not _refresh_terminal_profiles():
+                rc = 1
+            elif diag is not None and (diag.hidden or diag.reclaimable_orphans):
+                # The installer's Sync-TerminalState logs the concrete counts and
+                # the WT-running caveat; surface the follow-through explicitly.
+                output.info("If Windows Terminal was open, close it fully and "
+                            "reopen for the healed profiles to appear.")
+
+    return rc
+
+
 def cmd_register(args: argparse.Namespace) -> int:
     """Register a project with the worktree manager (create config + binstub)."""
     project = args.project_name
@@ -8116,6 +8181,15 @@ def cmd_update(args: argparse.Namespace) -> int:
     if (not force) and aw_payload_ver and aw_payload_ver == aw_deployed_ver:
         output.ok(f"Runtime already at {aw_deployed_ver} -- skipping installer "
                   "(use --force to re-deploy)")
+        # The full installer is skipped, but LIVE Windows Terminal state drifts
+        # independently of our version -- a fragment profile WT is hiding, or
+        # accumulated generatedProfiles cruft. That reconciliation must NOT be
+        # gated behind the version skip, or a plain `update` on an already-current
+        # runtime would never repair WT state (the very thing this flow exists to
+        # do). Run the narrow, fast terminal refresh (regenerate fragment +
+        # Sync-TerminalState heal/reclaim) instead; it is Windows-only and cheap.
+        if plat == "windows":
+            _refresh_terminal_profiles()
     else:
         if plat == "windows":
             installer = plugin_dir / "scripts" / "install.ps1"
@@ -11375,6 +11449,19 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Read-only report of live Windows Terminal state drift "
                         "(hidden/orphaned/duplicate profiles); no mutation")
 
+    # repair (reconcile local deployed state: terminal profiles + binstubs)
+    p = sub.add_parser(
+        "repair",
+        help="Repair local integration in place -- regenerate Windows Terminal "
+             "profiles (heal hidden + reclaim orphans) and redeploy project "
+             "binstubs. Version-independent (unlike 'update').")
+    p.add_argument("--terminal", action="store_true",
+                   help="Repair only Windows Terminal profiles (default: both "
+                        "terminal and binstubs)")
+    p.add_argument("--binstubs", action="store_true",
+                   help="Repair only project binstubs (default: both terminal "
+                        "and binstubs)")
+
     # picker (Textual picker is default everywhere; disable = machine opt-out)
     p = sub.add_parser("picker",
                        help="Inspect / opt out of the Textual worktree picker "
@@ -12750,6 +12837,7 @@ COMMAND_MAP = {
     "sync": cmd_sync,
     "profiles": cmd_profiles,
     "terminal-fragment": cmd_terminal_fragment,
+    "repair": cmd_repair,
     "picker": cmd_picker,
     "validate": cmd_validate,
     "config-migrate": cmd_config_migrate,

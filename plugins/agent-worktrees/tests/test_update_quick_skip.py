@@ -105,3 +105,33 @@ def test_installer_runs_when_deployed_version_unknown(wired, monkeypatch):
                         lambda name, home=None: None)
     assert m.cmd_update(_args()) == 0
     assert _installer_ran(wired), "unknown deployed version must re-deploy"
+
+
+def test_skip_still_reconciles_terminal_state_on_windows(wired, monkeypatch):
+    """Even when the installer is version-skipped, a plain `update` must still
+    reconcile live Windows Terminal state -- that drift is independent of our
+    version, so gating it behind the skip would leave the dropdown broken
+    (Aperture Labs hidden / orphan cruft) forever."""
+    monkeypatch.setattr(reconcile, "payload_version", lambda d: "1.5.3-dev9")
+    monkeypatch.setattr(reconcile, "runtime_deployed_version",
+                        lambda name, home=None: "1.5.3-dev9")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    refreshed = {"n": 0}
+    monkeypatch.setattr(m, "_refresh_terminal_profiles",
+                        lambda: refreshed.__setitem__("n", refreshed["n"] + 1) or True)
+    assert m.cmd_update(_args()) == 0
+    assert not _installer_ran(wired), "heavy installer still skipped when current"
+    assert refreshed["n"] == 1, "terminal state must be reconciled on the skip path"
+
+
+def test_skip_does_not_reconcile_terminal_on_non_windows(wired, monkeypatch):
+    """The skip-path terminal reconcile is Windows-only (no-op elsewhere)."""
+    monkeypatch.setattr(reconcile, "payload_version", lambda d: "1.5.3-dev9")
+    monkeypatch.setattr(reconcile, "runtime_deployed_version",
+                        lambda name, home=None: "1.5.3-dev9")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
+    refreshed = {"n": 0}
+    monkeypatch.setattr(m, "_refresh_terminal_profiles",
+                        lambda: refreshed.__setitem__("n", refreshed["n"] + 1) or True)
+    assert m.cmd_update(_args()) == 0
+    assert refreshed["n"] == 0
