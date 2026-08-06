@@ -362,8 +362,9 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
         (bd / "launch-session.sh").chmod(0o755)
         output.ok(f"Wrapper: {bd / 'launch-session.sh'}")
 
-    # Deploy bootstrap-check scripts (called by sessionStart hook)
-    for name in ("bootstrap-check.ps1", "bootstrap-check.sh"):
+    # Deploy bootstrap-check scripts (called by sessionStart hook) + the
+    # statelessness_guard (called by the preToolUse hook).
+    for name in ("bootstrap-check.ps1", "bootstrap-check.sh", "statelessness_guard.py"):
         src = scripts / name
         if src.exists():
             shutil.copy2(src, bd / name)
