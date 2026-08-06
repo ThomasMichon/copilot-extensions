@@ -7754,8 +7754,19 @@ def _refresh_terminal_profiles() -> bool:
         # PowerShell start + YAML parse and (unlike the old 30s cap on the full
         # ``update``) comfortably outlasts the work, so we never kill it
         # mid-write.
+        #
+        # Decode defensively: the installer's captured stdout/stderr is not
+        # guaranteed UTF-8 (a redirected PowerShell pipe honors
+        # ``[Console]::OutputEncoding``, which can be an OEM/ANSI codepage under
+        # which glyphs like the box-drawing headers or a project/path name emit
+        # non-UTF-8 bytes). With the default strict ``text=True`` a stray byte
+        # (e.g. 0xfb) raised ``UnicodeDecodeError`` inside subprocess's reader
+        # thread -- a noisy traceback even though the refresh itself succeeded.
+        # ``errors="replace"`` keeps the capture robust regardless of the child's
+        # console codepage.
         result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=180,
+            cmd, capture_output=True, encoding="utf-8", errors="replace",
+            timeout=180,
         )
     except Exception:
         output.warn("Could not refresh Windows Terminal profiles")
