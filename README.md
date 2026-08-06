@@ -37,6 +37,7 @@ Plugins, one marketplace. Install what you need; they compose.
 | [customizing-copilot](plugins/customizing-copilot/) | Customizing the CLI | Teach an agent how to customize and extend the Copilot CLI — authoring skills, defining sub-agents, registering MCP servers, installing plugins, building a control-harness, reviewing customizations, and authoring `<repo>-harness` plugins. Seven focused skills. Payload-only — no runtime to install. |
 | [copilot-extensions-harness](plugins/copilot-extensions-harness/) | Operator harness | The portable, owner-authored skills to work *on* this suite — **contribute** changes and **diagnose** the deployed runtimes. Enable it in any control repo instead of hand-writing a per-repo narrative. Reference implementation of the `<repo>-harness` standard. Payload-only. |
 | [wsl-setup](plugins/wsl-setup/) | Environment setup | Set up and troubleshoot WSL2 as a reachable, persistent service host — pick the networking mode (NAT + localhostForwarding vs mirrored), diagnose corp-network egress + host↔WSL loopback failures, and keep a distro alive for a hosted listener (e.g. sshd behind a Dev Tunnel). Ships a windowless keepalive helper. |
+| [harness-knowledge](plugins/harness-knowledge/) | Binding skill | Bind a stateless control harness to its private **knowledge** repo, harness-first — ask for (or create) the knowledge repo, write the machine-local `knowledge_repo` pointer, and assemble a machine-local instructions fragment labeling the concrete harness/knowledge/product paths. Keeps the shareable harness tree generic + name-free. Payload-only. |
 
 All support **Windows** and **Linux/WSL** (macOS planned).
 
@@ -44,11 +45,12 @@ All support **Windows** and **Linux/WSL** (macOS planned).
 
 ## Architecture at a glance
 
-Seventeen plugins, one marketplace. **Eleven ship a runtime** (a `uv`-built venv under
+Eighteen plugins, one marketplace. **Eleven ship a runtime** (a `uv`-built venv under
 `~/.agent-*` + a `~/.local/bin` binstub, deployed by the plugin's own
-installer); **six are payload-only** — `efforts` (skills), `visions` (skills),
+installer); **seven are payload-only** — `efforts` (skills), `visions` (skills),
 `context-handoff` (a session extension), `customizing-copilot` (skills),
-`copilot-extensions-harness` (skills), and `wsl-setup` (skills) need no install
+`copilot-extensions-harness` (skills), `wsl-setup` (skills), and
+`harness-knowledge` (skills) need no install
 beyond enabling the plugin.
 Everything installs **from the marketplace** and runs
 **from local install paths** — no git checkout required at runtime.
