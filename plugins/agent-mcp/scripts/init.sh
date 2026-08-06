@@ -29,6 +29,141 @@ done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# === install-contract:v4 self-stage -- keep byte-identical across plugins ===
+# dotfiles #935: a plugin installer reads its own payload (src/, libs/,
+# pyproject.toml) to build the venv, so while it runs -- especially if it wedges
+# or times out -- it holds the SINGLETON installed-plugins/<mkt>/<plugin> payload
+# dir busy (cwd/open handles). A concurrent `copilot plugin update <plugin>` then
+# fights it (os error 32 on Windows; POSIX is more forgiving, but the design must
+# be uniform): the payload freezes at the old version and reconcile keeps
+# reverting the runtime toward it (the version-drift saga). Fix: when running
+# from the marketplace payload, copy the WHOLE payload into a UNIQUE
+# per-invocation staging dir OUTSIDE the payload and re-exec from there, so the
+# singleton is touched only for the fast copy. A stalled run then holds only its
+# own throwaway stage dir, never blocking the next invocation or a `copilot
+# plugin update`. COPILOT_PLUGIN_STAGED_FROM tells _source_kind the payload was
+# really the marketplace (see below). Env-guarded against re-exec loops; the
+# stage-dir path (not under installed-plugins) is a second guard. The staging
+# parent doubles as a WATCHDOG: it launches the staged child in its OWN session/
+# process group and, on a deadline, kills the WHOLE group (POSIX process-group
+# kill -- the twin of Windows `taskkill /T`), so a stalled install (the
+# session-start-hook failure class) self-terminates instead of leaking forever.
+# Best-effort, pid-guarded reap of dead-owner stage dirs (a concurrent or wedged
+# installer's dir is never touched -- it uses its own unique dir).
+if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ]]; then
+    __ss_self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    __ss_payload="$(cd "$__ss_self_dir/.." && pwd)"
+    case "$(printf '%s' "$__ss_payload" | tr '\\' '/')" in
+        */.copilot/installed-plugins/*)
+            __ss_name="$(sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$__ss_payload/plugin.json" 2>/dev/null | head -1)"
+            if [[ -n "$__ss_name" ]]; then
+                __ss_root="$HOME/.$__ss_name/.install-stage"
+                __ss_stage="$__ss_root/$(date -u +%Y%m%dT%H%M%S)-$$"
+                if mkdir -p "$__ss_stage" && cp -a "$__ss_payload" "$__ss_stage/"; then
+                    __ss_staged_payload="$__ss_stage/$(basename "$__ss_payload")"
+                    __ss_entry="$__ss_staged_payload/scripts/$(basename "${BASH_SOURCE[0]}")"
+                    # Reap prior stage dirs; NEVER touch a live one. Remove only a
+                    # sibling whose owner pid (the -<pid> suffix) is DEAD, so a
+                    # concurrent or wedged installer's dir is left alone.
+                    if [[ -d "$__ss_root" ]]; then
+                        for __ss_sib in "$__ss_root"/*; do
+                            [[ -d "$__ss_sib" ]] || continue
+                            if [[ "$__ss_sib" == "$__ss_stage" ]]; then continue; fi
+                            __ss_owner="${__ss_sib##*-}"
+                            if [[ "$__ss_owner" =~ ^[0-9]+$ ]] && kill -0 "$__ss_owner" 2>/dev/null; then continue; fi
+                            rm -rf "$__ss_sib" 2>/dev/null || true
+                        done
+                    fi
+                    # WATCHDOG deadline: <NAME>_INSTALL_DEADLINE_SEC, else
+                    # COPILOT_PLUGIN_INSTALL_DEADLINE_SEC, else 480s; <=0 disables.
+                    __ss_deadline=480
+                    __ss_dl_var="$(printf '%s' "$__ss_name" | sed 's/[^A-Za-z0-9][^A-Za-z0-9]*/_/g' | tr '[:lower:]' '[:upper:]')_INSTALL_DEADLINE_SEC"
+                    __ss_dl_raw="${!__ss_dl_var:-}"
+                    if [[ -z "$__ss_dl_raw" ]]; then __ss_dl_raw="${COPILOT_PLUGIN_INSTALL_DEADLINE_SEC:-}"; fi
+                    if [[ "$__ss_dl_raw" =~ ^-?[0-9]+$ ]]; then __ss_deadline="$__ss_dl_raw"; fi
+                    export COPILOT_PLUGIN_INSTALL_STAGED=1
+                    export COPILOT_PLUGIN_STAGED_FROM="$__ss_payload"
+                    # Launch the staged child in its OWN process group (bash job
+                    # control) so `wait` propagates its REAL exit code AND the
+                    # watchdog can kill the WHOLE tree via a process-group signal
+                    # (the POSIX twin of Windows `taskkill /T`). setsid -w is
+                    # avoided: on some util-linux builds it swallows the child's
+                    # exit code (returns 0), which would mask a failed install.
+                    set -m
+                    bash "$__ss_entry" "$@" &
+                    __ss_child=$!
+                    set +m
+                    if [[ "$__ss_deadline" -gt 0 ]]; then
+                        (
+                            __ss_waited=0
+                            while kill -0 "$__ss_child" 2>/dev/null; do
+                                sleep 1
+                                __ss_waited=$((__ss_waited + 1))
+                                if [[ "$__ss_waited" -ge "$__ss_deadline" ]]; then
+                                    : > "$__ss_stage/.watchdog-fired"
+                                    kill -- -"$__ss_child" 2>/dev/null || kill "$__ss_child" 2>/dev/null || true
+                                    printf '[%sZ] WATCHDOG-KILL %s: install exceeded %ss deadline (child pid %s); killed tree. Slot lacks a completion marker -> will be tossed + retried. Stage: %s\n' \
+                                        "$(date -u +%Y-%m-%dT%H:%M:%S)" "$__ss_name" "$__ss_deadline" "$__ss_child" "$__ss_stage" \
+                                        >> "$HOME/.$__ss_name/reconcile.err.log" 2>/dev/null || true
+                                    break
+                                fi
+                            done
+                        ) &
+                        __ss_watcher=$!
+                        if wait "$__ss_child"; then __ss_rc=0; else __ss_rc=$?; fi
+                        kill "$__ss_watcher" 2>/dev/null || true
+                        wait "$__ss_watcher" 2>/dev/null || true
+                        if [[ -e "$__ss_stage/.watchdog-fired" ]]; then exit 124; fi
+                        exit "$__ss_rc"
+                    fi
+                    if wait "$__ss_child"; then exit 0; else exit $?; fi
+                else
+                    printf '  [WARN] self-stage failed, running in place\n' >&2
+                fi
+            fi
+            ;;
+    esac
+fi
+# === end install-contract:v4 self-stage ===
+
+# === install-contract:v4 smoke seam (test-only) -- keep byte-identical ===
+# #935 install-flow test hook. When COPILOT_PLUGIN_INSTALL_SMOKE is set, prove
+# the self-stage/lock/watchdog behavior WITHOUT a heavy venv build: this
+# (post-stage) process records where it runs from + the recorded marketplace
+# origin, optionally spawns a grandchild sleeper in the SAME process group (so a
+# watchdog test can prove the WHOLE tree is killed), then sleeps to simulate a
+# slow/wedged install. Never set in production.
+if [[ -n "${COPILOT_PLUGIN_INSTALL_SMOKE:-}" ]]; then
+    __sm_self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    __sm_payload="$(cd "$__sm_self_dir/.." && pwd)"
+    __sm_name="$(sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$__sm_payload/plugin.json" 2>/dev/null | head -1)"
+    __sm_home="$HOME/.$__sm_name"
+    mkdir -p "$__sm_home"
+    __sm_sleep=6
+    if [[ "${COPILOT_PLUGIN_INSTALL_SMOKE_SLEEP:-}" =~ ^[0-9]+$ ]]; then __sm_sleep="$COPILOT_PLUGIN_INSTALL_SMOKE_SLEEP"; fi
+    __sm_grand_pid=0
+    if [[ -n "${COPILOT_PLUGIN_INSTALL_SMOKE_GRANDCHILD:-}" ]]; then
+        __sm_grand_sleep="$__sm_sleep"
+        if [[ "$__sm_grand_sleep" -lt 3600 ]]; then __sm_grand_sleep=3600; fi
+        sleep "$__sm_grand_sleep" &
+        __sm_grand_pid=$!
+    fi
+    __sm_staged=false
+    if [[ -n "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ]]; then __sm_staged=true; fi
+    printf '{"ran_from":"%s","staged_from":"%s","staged":%s,"child_pid":%s,"grandchild_pid":%s}\n' \
+        "$__sm_self_dir" "${COPILOT_PLUGIN_STAGED_FROM:-}" "$__sm_staged" "$$" "$__sm_grand_pid" \
+        > "$__sm_home/smoke.json"
+    sleep "$__sm_sleep"
+    exit 0
+fi
+# === end install-contract:v4 smoke seam ===
+
+# #935: bound uv's per-request network wait so a hung index/download degrades to
+# "failed + retryable" rather than wedging the install; the self-stage watchdog
+# is the authoritative TOTAL bound, this just shortens single-request stalls.
+if [[ -z "${UV_HTTP_TIMEOUT:-}" ]]; then export UV_HTTP_TIMEOUT=60; fi
+
 PKG_SRC_DIR="$PLUGIN_DIR/src/agent_mcp"
 
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.agent-mcp}"
@@ -149,14 +284,20 @@ chmod +x "$STUB"
 _ok "Binstub: $STUB"
 
 # -- 5. Deploy manifest ------------------------------------------------
-# === install-contract:v3 source-kind -- keep byte-identical across plugins ===
+# === install-contract:v4 source-kind -- keep byte-identical across plugins ===
+# A runtime footprint's source is inferred from where the installer runs.
+# Vendored under the Copilot CLI installed-plugins dir => marketplace;
+# anything else (a git checkout) => local. #935: when the installer self-staged
+# out of the marketplace payload, its live path is a throwaway stage dir, so
+# infer the kind from the ORIGINAL payload path the self-stage prologue recorded
+# in COPILOT_PLUGIN_STAGED_FROM (else the current path).
 _source_kind() {
-    case "$(printf '%s' "$1" | tr '\\' '/')" in
+    case "$(printf '%s' "${COPILOT_PLUGIN_STAGED_FROM:-$1}" | tr '\\' '/')" in
         */.copilot/installed-plugins/*) printf 'marketplace' ;;
         *) printf 'local' ;;
     esac
 }
-# === end install-contract:v3 source-kind ===
+# === end install-contract:v4 source-kind ===
 _git_info() {
     local path="$1" commit branch dirty
     commit=$(git -C "$path" rev-parse --short HEAD 2>/dev/null || echo "unknown")
