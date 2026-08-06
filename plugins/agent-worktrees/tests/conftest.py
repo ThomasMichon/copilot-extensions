@@ -10,6 +10,68 @@ import pytest
 from agent_worktrees import tracking
 
 # ---------------------------------------------------------------------------
+# Global HOME isolation -- the suite must NEVER touch real machine state.
+#
+# The agent-worktrees registries resolve from the home directory via two paths:
+#   * ``config._home()``  -> ``USERPROFILE`` (Windows) / ``Path.home()``, which
+#     backs ``config.install_dir()`` -> ``~/.agent-worktrees/projects.yaml``.
+#   * ``repos.py`` resolves ``~/.agent-worktrees/repos.yaml`` via ``Path.home()``
+#     directly.
+# A test that reaches a real registry *writer* (e.g. ``reconcile_binstubs`` ->
+# ``prune_reserved_projects`` -> ``write_projects_registry``) while patching only
+# the *reader* would otherwise clobber the developer's real
+# ``~/.agent-worktrees/projects.yaml`` -- observed live as a projects.yaml
+# reduced to a stray ``realproj`` entry (aperture-labs #4349). Redirect HOME to a
+# throwaway per-test dir so NO test can reach real state regardless of what it
+# patches, and running the suite (even concurrently with an install) can never
+# mutate the host. Tests that need finer control still layer their own patches
+# (e.g. ``monkeypatch_config``) on top of this safe default.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _isolate_agent_worktrees_home(tmp_path_factory):
+    import os
+    import pathlib
+
+    # Use tmp_path_factory (a SEPARATE dir), never the test's own ``tmp_path`` --
+    # otherwise this fake home would show up inside a test's tmp_path and break
+    # tests that assert on ``tmp_path.iterdir()``.
+    fake_home = tmp_path_factory.mktemp("aw-home")
+    (fake_home / ".agent-worktrees").mkdir(parents=True, exist_ok=True)
+
+    # Uses os.environ + a manual attribute save/restore (NOT monkeypatch), so
+    # this autouse fixture introduces no ``monkeypatch`` dependency that could
+    # reorder fixture teardown -- the same discipline as ``_isolate_pivots``
+    # below. (Requesting ``monkeypatch`` here pulled its teardown after
+    # ``_reset_active_project``'s, which then called a still-patched
+    # ``set_active_project`` and errored.)
+    saved_userprofile = os.environ.get("USERPROFILE")
+    saved_home = os.environ.get("HOME")
+    saved_path_home = pathlib.Path.__dict__.get("home")
+
+    os.environ["USERPROFILE"] = str(fake_home)
+    os.environ["HOME"] = str(fake_home)
+    # ``repos.py`` and several helpers call ``Path.home()`` directly, so the env
+    # vars alone are not enough -- patch the resolver on the class too.
+    pathlib.Path.home = classmethod(lambda cls: fake_home)
+    try:
+        yield fake_home
+    finally:
+        if saved_path_home is not None:
+            pathlib.Path.home = saved_path_home
+        else:  # pragma: no cover - defensive; home is defined on Path in CPython
+            try:
+                del pathlib.Path.home
+            except AttributeError:
+                pass
+        for key, val in (("USERPROFILE", saved_userprofile), ("HOME", saved_home)):
+            if val is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = val
+
+
+# ---------------------------------------------------------------------------
 # Isolate the in-process active-project / assumed-CWD state between tests.
 # These module globals are set by main() during CWD/--project resolution;
 # without a reset a test that runs main() (or set_active_project) would leak
