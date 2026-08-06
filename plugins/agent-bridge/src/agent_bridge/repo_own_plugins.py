@@ -1,10 +1,11 @@
 """Stage a repo's OWN ``enabledPlugins`` as per-launch ``--plugin-dir`` args.
 
 For a headless bridge launch of a repo's agent, make the plugins the repo declares
-in its ``.github/copilot/settings.json`` ``enabledPlugins`` available to the
-dispatched ``copilot`` process **without globally enabling them on behalf of one
-repo**. Staging is per-launch (``--plugin-dir``), scoped to that one process; this
-module **never** writes ``~/.copilot/settings.json`` (``enabledPlugins`` /
+in its committed settings -- ``.github/copilot/settings.json`` (Copilot-native)
+or, as a fallback, ``.claude/settings.json`` (Claude convention) -- available to
+the dispatched ``copilot`` process **without globally enabling them on behalf of
+one repo**. Staging is per-launch (``--plugin-dir``), scoped to that one process;
+this module **never** writes ``~/.copilot/settings.json`` (``enabledPlugins`` /
 ``extraKnownMarketplaces``), never registers a marketplace, and never enables a
 plugin globally.
 
@@ -29,7 +30,19 @@ from pathlib import Path
 log = logging.getLogger("agent-bridge")
 
 _INSTALLED = Path("~/.copilot/installed-plugins").expanduser()
-_SETTINGS_REL = Path(".github") / "copilot" / "settings.json"
+# Repo settings-file conventions, **Copilot-native first, Claude fallback**.
+# Copilot CLI resolves a repo's plugin config preferring its native
+# ``.github/copilot/settings.json`` and falling back to the Claude
+# ``.claude/settings.json`` (mirroring the documented ``.claude-plugin``
+# marketplace-manifest fallback); own-plugin staging honors the same precedence
+# so a repo declaring its plugins in either place is staged correctly. Ordered so
+# a later file overrides an earlier one (native last => native wins).
+_SETTINGS_RELS = (
+    Path(".claude") / "settings.json",
+    Path(".claude") / "settings.local.json",
+    Path(".github") / "copilot" / "settings.json",
+    Path(".github") / "copilot" / "settings.local.json",
+)
 # Candidate marketplace-manifest locations within a marketplace directory, in the
 # CLI's own lookup order (see `copilot plugin marketplace add`). Covers both the
 # legacy ``.github/plugin`` home and the ``.ai`` standard's ``.claude-plugin``.
@@ -139,14 +152,39 @@ def _plugin_dir_in_marketplace(mp_path: Path, name: str) -> Path | None:
     return None
 
 
+def _load_repo_plugin_settings(anchor: Path) -> tuple[dict, dict]:
+    """Merge a repo's ``enabledPlugins`` + ``extraKnownMarketplaces`` across the
+    Copilot-native and Claude settings conventions (native preferred).
+
+    Reads the ``_SETTINGS_RELS`` files in order (Claude first, native last), so
+    native entries win on a key conflict; ``settings.local.json`` overrides
+    ``settings.json`` within each convention. Returns ``(enabled, marketplaces)``.
+    """
+    enabled: dict = {}
+    marketplaces: dict = {}
+    for rel in _SETTINGS_RELS:
+        data = _load_json(anchor / rel)
+        if not data:
+            continue
+        en = data.get("enabledPlugins")
+        if isinstance(en, dict):
+            enabled.update(en)  # later file (native) wins
+        mk = data.get("extraKnownMarketplaces")
+        if isinstance(mk, dict):
+            marketplaces.update(mk)  # later file (native) wins
+    return enabled, marketplaces
+
+
 def repo_plugin_dir_args(anchor: str | Path | None) -> list[str]:
     """``--plugin-dir`` args for a repo's *enabled-but-uninstalled* plugins.
 
-    ``anchor`` is the repo checkout root (its committed
-    ``.github/copilot/settings.json`` is read). For each enabled
-    ``name@marketplace`` whose files are **not** installed on disk, resolve a
-    ``--plugin-dir`` target (a local-marketplace source dir today) and fold it in.
-    Installed plugins load from ``settings.json`` already and are skipped (no
+    ``anchor`` is the repo checkout root. Its committed plugin config is read
+    **Copilot-native-first with a Claude fallback** -- from
+    ``.github/copilot/settings.json`` (+ ``settings.local.json``) and, as a
+    fallback, ``.claude/settings.json`` (+ ``.claude/settings.local.json``). For
+    each enabled ``name@marketplace`` whose files are **not** installed on disk,
+    resolve a ``--plugin-dir`` target (a local-marketplace source dir today) and
+    fold it in. Installed plugins load from settings already and are skipped (no
     double-load). Leak-safe: never mutates global copilot config; a plugin that
     cannot be resolved without a global mutation is reported, not staged.
 
@@ -156,13 +194,9 @@ def repo_plugin_dir_args(anchor: str | Path | None) -> list[str]:
         if anchor is None:
             return []
         anchor = Path(anchor)
-        settings = _load_json(anchor / _SETTINGS_REL)
-        if not settings:
+        enabled, marketplaces = _load_repo_plugin_settings(anchor)
+        if not enabled:
             return []
-        enabled = settings.get("enabledPlugins")
-        if not isinstance(enabled, dict):
-            return []
-        marketplaces = settings.get("extraKnownMarketplaces") or {}
 
         args: list[str] = []
         staged: list[str] = []
