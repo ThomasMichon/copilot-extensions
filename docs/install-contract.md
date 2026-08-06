@@ -38,12 +38,18 @@ Consequence — a rule for every plugin in this repo:
      agent-bridge), `codespaces-setup` (agent-codespaces), `containers-fleet`
      (agent-containers).
 
-So the full deploy of a runtime plugin is always two steps: `copilot plugin
-update <name>` (refresh the source cache) **then** run the installer from that
-source via its install skill. Never hand-copy source into the deployed runtime
-dir — that bypasses the venv sync, binstub/SAC handling, `_build_info.py`
-stamping, manifest, and service restart (see "What NOT to Do" in
-`CONTRIBUTING.md`).
+So the full deploy of a runtime plugin is two steps — a payload refresh **then**
+its runtime installer — but **you do not run them per plugin by hand.** The
+unified **`<repo> update`** (`agent-worktrees update`) performs BOTH for **every**
+registered plugin at once: it refreshes each payload (the `copilot plugin
+update` step, invoked for you) and then runs each runtime's installer + cutover,
+and fast-forwards the anchor checkouts. This contract exists precisely so
+`update` can orchestrate that self-contained per-plugin flow uniformly; the
+per-plugin install skills below are its internals (and a local-testing /
+recovery path). Never hand-copy source into the deployed runtime dir — that
+bypasses the venv sync, binstub/SAC handling, `_build_info.py` stamping,
+manifest, and service restart (see "What NOT to Do" and "Deploying: one command
+— `<repo> update`" in `CONTRIBUTING.md`).
 
 ### What the marketplace vendors (copied vs loaded)
 

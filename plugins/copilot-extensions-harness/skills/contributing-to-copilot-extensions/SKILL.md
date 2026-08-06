@@ -106,22 +106,33 @@ installer. Know which kind you are changing.
    never bump minor/major unless the maintainer asks. The exact per-plugin file
    table is in `CONTRIBUTING.md` — follow it; entries drift, so trust the repo.
 6. **Push** to `main` (owner) / open the PR (fork).
-7. **Deploy** on each target machine — pushing only *primes* it. The update path
-   is per-plugin: `agent-worktrees update`; `agent-bridge` / `agent-codespaces`
-   `scripts/install.* update`; `agent-containers` / `agent-mcp` / `agent-dispatch`
-   re-run `scripts/init.*` (with `-Force`/`--force`); `agent-logger` via its
-   installer. Payload-only plugins (`efforts`, `visions`, `context-handoff`,
-   `customizing-copilot`, `harness-*`) refresh via `copilot plugin update` +
-   session restart.
+7. **Deploy with `<repo> update` — one unified command.** Pushing only *primes*
+   the change; deploy it on each target machine (over SSH for remotes) with the
+   repo's update binstub: **`<repo> update`** (e.g. `agent-worktrees update`, or
+   any repo binstub such as `dotfiles update`). This single flow does
+   everything: it refreshes the marketplace catalog, updates **every** registered
+   plugin's payload — runtime AND payload-only (`efforts`, `visions`,
+   `context-handoff`, `customizing-copilot`, `harness-*`) — rebuilds **every**
+   runtime (agent-worktrees, agent-bridge, agent-codespaces, …), fast-forwards
+   the anchor checkouts, and redeploys binstubs/profiles. **Do NOT hand-run
+   `copilot plugin update`, or a per-plugin `scripts/install.* update` /
+   `scripts/init.*`** — the unified `update` orchestrates those internally, and
+   running them piecemeal is the wrong path (and, if the version wasn't bumped,
+   the payload refresh silently no-ops — it *looks* like it worked while your
+   change never lands). The per-plugin installers exist only for isolated local
+   testing / recovery, not the normal flow.
 
 ## What NOT to do
 
 - **Don't push without a version bump.** (See step 5. This is the one.)
 - **Don't edit installed/deployed copies** to "fix fast" — fix the repo source,
   bump, push, deploy.
-- **Don't mix deployment paths** — agent-worktrees updates via the marketplace +
-  its installer; agent-bridge via its own installer. They are different
-  pipelines.
+- **Don't hand-run `copilot plugin update` or a per-plugin `scripts/install.*` /
+  `scripts/init.*`** — always deploy with the unified **`<repo> update`**
+  (`agent-worktrees update`). One flow updates every plugin's payload AND
+  rebuilds every runtime; the per-plugin installers are internals / local-test /
+  recovery only. Running them by hand is easy to get wrong (wrong plugin, missed
+  runtime, a version-unbumped no-op that looks like success).
 - **Don't copy source into a runtime dir** — it bypasses versioning and leaves
   other machines stale.
 
