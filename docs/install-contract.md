@@ -265,11 +265,37 @@ Because **activate (junction swap) runs only after the health gate + marker**, a
 watchdog-killed build never becomes the live version — the old daemon keeps serving,
 and the markerless corpse is tossed + rebuilt on the next run (automatic retry).
 
-> **Test it:** `tools/test-install-flow.ps1 -Plugin <name>` is the turn-key mini
-> end-to-end that asserts all of the above in an isolated sandbox (STAGED,
+> **Test it:** `tools/test-install-flow.ps1 -Plugin <name>` (Windows) and
+> `bash tools/test-install-flow.sh --plugin <name>` (Linux/WSL) are the turn-key
+> mini end-to-ends that assert all of the above in an isolated sandbox (STAGED,
 > NOT-IN-PAYLOAD, PAYLOAD-FREE-during-install, MARKETPLACE-preserved, NO-COLLISION,
 > WATCHDOG whole-tree kill, MARKER/TOSS, NO-ORPHANS, BOUNDED) — via a
 > `COPILOT_PLUGIN_INSTALL_SMOKE` seam, without a heavy venv build.
+
+### POSIX parity (`.sh`)
+
+The `.sh` installers carry the **same** `install-contract:v4` blocks as `.ps1`,
+byte-identical per language and enforced by `tools/check-install-contract.py`
+(self-stage prologue, smoke seam, and the `_source_kind` env-fallback that honors
+`COPILOT_PLUGIN_STAGED_FROM`). Two POSIX-specific choices mirror the Windows
+behavior:
+
+- **Watchdog kill uses the process group, not `taskkill /T`.** The staging parent
+  launches the staged child under bash **job control** (`set -m`), giving it its
+  own process group; on deadline it kills the **whole group** with
+  `kill -- -<pgid>` (the POSIX twin of `taskkill /T`), so grandchildren die too.
+- **Exit-code propagation via `wait`, not `setsid -w`.** Job control's `wait`
+  returns the staged child's real exit code, so a genuinely failed install
+  surfaces non-zero. `setsid -w` is deliberately avoided — on some util-linux
+  builds it swallows the child's exit code (returns 0), which would mask a
+  failed install.
+
+The completion-marker primitive (`versioned_runtime.py`) is already
+cross-platform. `agent-bridge/scripts/install.sh` is the wired `.sh` reference
+(self-stage + watchdog + smoke + `_source_kind` + toss-before-build +
+mark-after-health-gate); the per-plugin marker/toss body-wiring for the other
+`.sh` installers is a tracked rollout (the link-name and the marker's placement
+relative to each plugin's health gate are per-plugin, so it is not mechanical).
 
 ## SAC-safe launchers (Windows)
 

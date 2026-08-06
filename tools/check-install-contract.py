@@ -6,6 +6,11 @@ Each plugin with a runtime installer must, per language variant:
   2. emit no binstub that sets PYTHONPATH to a runtime lib/ dir,
   3. write a schema_version 3 deploy manifest with a `source` block,
   4. carry a source-kind resolver identical (per language) across plugins,
+     and — for the update-flow robustness contract (dotfiles #935) — the
+     byte-identical `install-contract:v4` self-stage prologue and smoke seam
+     (per language), so a concurrent `copilot plugin update` never fights a
+     wedged installer for the singleton payload and a stalled install
+     self-terminates,
   5. adopt the immutable-versioned venv layout (dotfiles #581): ship a
      `scripts/versioned_runtime.py` primitive that is byte-identical to the
      canonical source (`libs/versioned-runtime/versioned_runtime.py`, vendored in
