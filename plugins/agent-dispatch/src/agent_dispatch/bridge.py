@@ -9,8 +9,10 @@ remains a standalone plugin usable where no bridge exists.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+from pathlib import Path
 
 from .procutil import no_window_kwargs
 
@@ -21,9 +23,37 @@ class BridgeUnavailable(RuntimeError):
     """Raised when the agent-bridge CLI is not available on this host."""
 
 
+def _agent_bridge_launch_prefix() -> list[str] | None:
+    """Resolve an argv prefix that runs the ``agent-bridge`` CLI **without**
+    routing through a Windows ``.cmd``/``.bat`` shim.
+
+    ``spawn_worker`` hands the autopilot seed to ``agent-bridge create`` and
+    ``send_nudge`` hands an arbitrary message to ``agent-bridge send``; both can
+    contain shell metacharacters (``&``, ``(``, ``)``, ``<``, ``>``, backtick).
+    On Windows a ``subprocess`` launch of the ``agent-bridge.cmd`` binstub runs
+    it through ``cmd.exe``, whose ``%*`` re-parse treats those characters as
+    command operators and corrupts the arguments -- the shim then fails with
+    WinError 2 ("The system cannot find the file specified"). This is the
+    BatBadBut class of bug (the same one ``embody._agent_worktrees_launch_prefix``
+    fixes for the ``agent-worktrees`` binstub). Invoking the interpreter directly
+    (``python -m agent_bridge``) bypasses ``cmd.exe`` entirely, so the argument is
+    delivered verbatim.
+
+    Prefer the agent-bridge runtime venv interpreter; fall back to the
+    ``agent-bridge`` binstub on PATH when that venv isn't present (POSIX shims are
+    plain exec scripts and do not re-parse, so they are unaffected). Returns
+    ``None`` when neither is resolvable."""
+    venv = Path.home() / ".agent-bridge" / "venv"
+    py = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    if py.is_file():
+        return [str(py), "-m", "agent_bridge"]
+    exe = shutil.which("agent-bridge")
+    return [exe] if exe else None
+
+
 def bridge_available() -> bool:
-    """True if the ``agent-bridge`` CLI is on PATH."""
-    return shutil.which("agent-bridge") is not None
+    """True if the ``agent-bridge`` CLI can be launched on this host."""
+    return _agent_bridge_launch_prefix() is not None
 
 
 def worker_prompt(task_id: str, *, coordinator_url: str, worker_id: str) -> str:
@@ -64,14 +94,14 @@ def spawn_worker(
     headless-embodied task is driven identically to a CLI-embodied one -- passes
     the seed it wants delivered verbatim.
     """
-    exe = shutil.which("agent-bridge")
+    exe = _agent_bridge_launch_prefix()
     if exe is None:
         raise BridgeUnavailable("agent-bridge CLI not found on PATH")
     if prompt is None:
         prompt = worker_prompt(
             task_id, coordinator_url=coordinator_url, worker_id=worker_id
         )
-    cmd = [exe, "create", agent, prompt]
+    cmd = [*exe, "create", agent, prompt]
     if not wait:
         cmd.append("--no-wait")
     return subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
@@ -97,11 +127,11 @@ def send_nudge(
     absent or the send fails -- a failed nudge is never fatal (a genuinely-gone
     worker is handled by liveness recovery, not the nudge).
     """
-    exe = shutil.which("agent-bridge")
+    exe = _agent_bridge_launch_prefix()
     if exe is None:
         return False
     cmd = [
-        exe, "send", "--no-wait", "--kind", "notify", "--sender", sender,
+        *exe, "send", "--no-wait", "--kind", "notify", "--sender", sender,
         worktree, message,
     ]
     try:
