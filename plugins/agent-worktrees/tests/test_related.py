@@ -37,6 +37,93 @@ def test_doc_abs_path_default_and_explicit(tmp_path: Path):
     )
 
 
+def test_doc_abs_path_honors_origin_anchor(tmp_path: Path):
+    # A grafted overlay entry carries the anchor it was read from; its doc must
+    # resolve against THAT anchor, not the base passed to doc_abs_path.
+    base = tmp_path / "harness"
+    knowledge = tmp_path / "knowledge"
+    e = RelatedEntry(name="odsp-web", doc="related/odsp-web.md",
+                     origin_anchor=str(knowledge))
+    assert related.doc_abs_path(base, e) == (
+        knowledge / ".agent-worktrees" / "related" / "odsp-web.md"
+    )
+
+
+# ---------------------------------------------------------------------------
+# State-root config-graft (E1e): read_related_grafted + grafted accessors
+# ---------------------------------------------------------------------------
+
+def _write_related(anchor: Path, cfg: RelatedConfig) -> None:
+    related.write_related(anchor, cfg)
+
+
+def test_grafted_union_overlays_knowledge_on_harness(tmp_path: Path):
+    base = tmp_path / "harness"
+    knowledge = tmp_path / "knowledge"
+    _write_related(base, RelatedConfig(
+        primary="base-primary",
+        related={"shared": RelatedEntry(name="shared", role="tooling",
+                                        summary="from harness"),
+                 "harness-only": RelatedEntry(name="harness-only",
+                                              role="docs")},
+    ))
+    _write_related(knowledge, RelatedConfig(
+        primary="odsp-web",
+        related={"shared": RelatedEntry(name="shared", role="product",
+                                        summary="from knowledge"),
+                 "odsp-web": RelatedEntry(name="odsp-web", role="product")},
+    ))
+
+    merged = related.read_related_grafted([base, knowledge])
+    # later (knowledge) primary wins
+    assert merged.primary == "odsp-web"
+    # union of both anchors' entries
+    assert set(merged.related) == {"shared", "harness-only", "odsp-web"}
+    # knowledge overlays the harness entry wholesale on a name collision
+    assert merged.related["shared"].role == "product"
+    assert merged.related["shared"].summary == "from knowledge"
+    # origin_anchor tracks the source per entry
+    assert merged.related["shared"].origin_anchor == str(knowledge)
+    assert merged.related["harness-only"].origin_anchor == str(base)
+    assert merged.related["odsp-web"].origin_anchor == str(knowledge)
+
+
+def test_grafted_single_anchor_matches_ungrafted(tmp_path: Path):
+    base = tmp_path / "harness"
+    _write_related(base, RelatedConfig(
+        primary="p",
+        related={"a": RelatedEntry(name="a", role="tooling")},
+    ))
+    assert related.get_primary_grafted([base]) == related.get_primary(base)
+    assert [e.name for e in related.list_related_grafted([base])] == \
+           [e.name for e in related.list_related(base)]
+    assert related.get_related_grafted([base], "a").role == "tooling"
+
+
+def test_grafted_primary_falls_through_when_overlay_unset(tmp_path: Path):
+    base = tmp_path / "harness"
+    knowledge = tmp_path / "knowledge"
+    _write_related(base, RelatedConfig(primary="base-primary"))
+    # knowledge has entries but no primary of its own
+    _write_related(knowledge, RelatedConfig(
+        related={"odsp-web": RelatedEntry(name="odsp-web", role="product")},
+    ))
+    merged = related.read_related_grafted([base, knowledge])
+    assert merged.primary == "base-primary"  # base primary retained
+
+
+def test_grafted_list_role_filter(tmp_path: Path):
+    base = tmp_path / "harness"
+    knowledge = tmp_path / "knowledge"
+    _write_related(base, RelatedConfig(
+        related={"tool": RelatedEntry(name="tool", role="tooling")}))
+    _write_related(knowledge, RelatedConfig(
+        related={"web": RelatedEntry(name="web", role="product"),
+                 "core": RelatedEntry(name="core", role="product")}))
+    products = related.list_related_grafted([base, knowledge], role="product")
+    assert [e.name for e in products] == ["core", "web"]
+
+
 # ---------------------------------------------------------------------------
 # Parsers / normalizers
 # ---------------------------------------------------------------------------
@@ -670,32 +757,37 @@ def test_find_control_plane_anchor_none_when_undeclared(tmp_path: Path, monkeypa
     assert related.find_control_plane_anchor() is None
 
 
-def test_related_lookup_anchor_falls_back_to_control_plane(monkeypatch):
+def test_related_lookup_anchors_falls_back_to_control_plane(monkeypatch):
     from agent_worktrees import __main__ as cli
+    monkeypatch.setattr(cli, "_related_config_source_anchors", lambda base: [base])
     monkeypatch.setattr(
-        related, "get_related",
-        lambda anchor, name: object() if str(anchor).endswith("cp") else None)
+        related, "get_related_grafted",
+        lambda anchors, name: object()
+        if any(str(a).endswith("cp") for a in anchors) else None)
     monkeypatch.setattr(related, "find_control_plane_anchor",
                         lambda: "/tmp/cp")
-    eff, via = cli._related_lookup_anchor([], "/tmp/cwd", "copilot-extensions")
+    anchors, via = cli._related_lookup_anchors([], "/tmp/cwd", "copilot-extensions")
     assert via is True
-    assert str(eff).endswith("cp")
+    assert any(str(a).endswith("cp") for a in anchors)
 
 
-def test_related_lookup_anchor_local_hit_skips_fallback(monkeypatch):
+def test_related_lookup_anchors_local_hit_skips_fallback(monkeypatch):
     from agent_worktrees import __main__ as cli
-    monkeypatch.setattr(related, "get_related", lambda anchor, name: object())
+    monkeypatch.setattr(cli, "_related_config_source_anchors", lambda base: [base])
+    monkeypatch.setattr(related, "get_related_grafted",
+                        lambda anchors, name: object())
 
     def _boom():
         raise AssertionError("control-plane lookup must not run on a local hit")
 
     monkeypatch.setattr(related, "find_control_plane_anchor", _boom)
-    eff, via = cli._related_lookup_anchor([], "/tmp/cwd", "x")
-    assert eff == "/tmp/cwd" and via is False
+    anchors, via = cli._related_lookup_anchors([], "/tmp/cwd", "x")
+    assert anchors == ["/tmp/cwd"] and via is False
 
 
-def test_related_lookup_anchor_respects_explicit_repo(monkeypatch):
+def test_related_lookup_anchors_respects_explicit_repo(monkeypatch):
     from agent_worktrees import __main__ as cli
+    monkeypatch.setattr(cli, "_related_config_source_anchors", lambda base: [base])
     calls = {"cp": 0}
 
     def _fcp():
@@ -703,6 +795,6 @@ def test_related_lookup_anchor_respects_explicit_repo(monkeypatch):
         return "/tmp/cp"
 
     monkeypatch.setattr(related, "find_control_plane_anchor", _fcp)
-    eff, via = cli._related_lookup_anchor(["--repo", "/tmp/cwd"], "/tmp/cwd", "x")
-    assert eff == "/tmp/cwd" and via is False
+    anchors, via = cli._related_lookup_anchors(["--repo", "/tmp/cwd"], "/tmp/cwd", "x")
+    assert anchors == ["/tmp/cwd"] and via is False
     assert calls["cp"] == 0  # explicit --repo pins the anchor, no fallback

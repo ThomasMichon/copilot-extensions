@@ -10163,32 +10163,58 @@ def _related_anchor(rest: list[str]) -> str | None:
         return None
 
 
-def _related_lookup_anchor(
+def _related_config_source_anchors(base_anchor: str) -> list[str]:
+    """Ordered ``.agent-*`` config-source anchor paths for a related lookup.
+
+    The E1e **state-root config-graft**: the base (harness / launch) anchor plus
+    the bound **knowledge-repo** overlay when the launch repo requires an external
+    state root, so ``related list/show/resolve/doc`` union the harness's base
+    ``related.yaml`` with the knowledge repo's entries. Fail-safe -> ``[base_anchor]``.
+    """
+    try:
+        srcs = state_root_mod.config_source_anchors(
+            cfg.load_config(), base_anchor=base_anchor
+        )
+        anchors = [s.anchor for s in srcs if s.anchor]
+    except Exception:
+        anchors = []
+    if not anchors:
+        return [base_anchor]
+    if os.path.abspath(anchors[0]) != os.path.abspath(base_anchor):
+        anchors.insert(0, base_anchor)
+    return anchors
+
+
+def _related_lookup_anchors(
     rest: list[str], anchor: str, name: str,
-) -> tuple[str, bool]:
-    """Anchor to read ``name`` from for a read-only lookup, with a fallback.
+) -> tuple[list[str], bool]:
+    """Config-source anchors to read ``name`` from for a read-only lookup.
 
-    ``related`` is **cwd-directional**: it reads the ``related.yaml`` of the repo
-    containing the current directory. Running a lookup from *inside* a
-    coordinated repo's own checkout therefore reads that repo's (usually empty)
-    POV and dead-ends. When the cwd anchor doesn't list ``name`` -- and the
-    caller didn't pin an explicit ``--repo`` -- fall back to the **control-plane
-    project's** index (the repo whose ``machines.yaml`` declares
-    ``control_plane.project``), which is the canonical directional index.
+    Layers two mechanisms:
 
-    Returns ``(effective_anchor, via_control_plane)``. Fail-safe: any inability
-    to resolve the control plane leaves the original anchor unchanged.
+    * the **state-root config-graft** -- the base anchor plus the bound
+      knowledge-repo overlay (see :func:`_related_config_source_anchors`); and
+    * the **control-plane fallback** -- ``related`` is cwd-directional, so running
+      a lookup from *inside* a coordinated repo's own checkout reads that repo's
+      (usually empty) POV and dead-ends. When ``name`` isn't found across the
+      base config sources -- and the caller didn't pin an explicit ``--repo`` --
+      fall back to the **control-plane project's** index (grafted the same way).
+
+    Returns ``(anchors, via_control_plane)``. Fail-safe: any inability to resolve
+    the control plane leaves the base anchors unchanged.
     """
     from . import related
+    anchors = _related_config_source_anchors(anchor)
     if _related_opt(rest, "--repo"):
-        return anchor, False
-    if related.get_related(anchor, name) is not None:
-        return anchor, False
+        return anchors, False
+    if related.get_related_grafted(anchors, name) is not None:
+        return anchors, False
     cp = related.find_control_plane_anchor()
-    if (cp and os.path.abspath(cp) != os.path.abspath(anchor)
-            and related.get_related(cp, name) is not None):
-        return cp, True
-    return anchor, False
+    if cp and os.path.abspath(cp) != os.path.abspath(anchor):
+        cp_anchors = _related_config_source_anchors(cp)
+        if related.get_related_grafted(cp_anchors, name) is not None:
+            return cp_anchors, True
+    return anchors, False
 
 
 def cmd_state_root_dispatch(argv: list[str]) -> int:
@@ -10264,8 +10290,9 @@ def cmd_related_dispatch(argv: list[str]) -> int:
 
     if sub == "list":
         role = _related_opt(rest, "--role")
-        entries = related.list_related(anchor, role=role)
-        primary = related.get_primary(anchor)
+        anchors = _related_config_source_anchors(anchor)
+        entries = related.list_related_grafted(anchors, role=role)
+        primary = related.get_primary_grafted(anchors)
         if json_out:
             _json_output({
                 "primary": primary,
@@ -10299,8 +10326,8 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             output.err("Usage: related show <name>")
             return 1
         name = rest[0]
-        anchor, _via_cp = _related_lookup_anchor(rest, anchor, name)
-        e = related.get_related(anchor, name)
+        anchors, _via_cp = _related_lookup_anchors(rest, anchor, name)
+        e = related.get_related_grafted(anchors, name)
         if e is None:
             output.err(f"'{name}' is not a related repo.")
             return 1
@@ -10411,8 +10438,8 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             output.err("Usage: related doc <name>")
             return 1
         name = rest[0]
-        anchor, _via_cp = _related_lookup_anchor(rest, anchor, name)
-        e = related.get_related(anchor, name)
+        anchors, _via_cp = _related_lookup_anchors(rest, anchor, name)
+        e = related.get_related_grafted(anchors, name)
         if e is None:
             output.err(f"'{name}' is not a related repo. Link it first: "
                        f"related add {name}")
@@ -10426,40 +10453,48 @@ def cmd_related_dispatch(argv: list[str]) -> int:
     if sub == "primary":
         if rest and not rest[0].startswith("-"):
             name = rest[0]
-            if related.get_related(anchor, name) is None:
+            if related.get_related_grafted(
+                _related_config_source_anchors(anchor), name
+            ) is None:
                 output.err(f"'{name}' is not a related repo. Link it first.")
                 return 1
             related.set_primary(anchor, name)
             output.ok(f"primary = {name}")
         else:
-            print(related.get_primary(anchor) or "(unset)")
+            print(
+                related.get_primary_grafted(
+                    _related_config_source_anchors(anchor)
+                ) or "(unset)"
+            )
         return 0
 
     if sub == "resolve":
         from . import doctor
         explicit_name = rest[0] if rest and not rest[0].startswith("-") else None
-        name = explicit_name or related.get_primary(anchor)
+        anchors = _related_config_source_anchors(anchor)
+        name = explicit_name or related.get_primary_grafted(anchors)
         via_cp = False
         if not name and not _related_opt(rest, "--repo"):
             # Bare `resolve` from a repo with no primary of its own: fall back to
             # the control-plane index's primary so it still resolves something.
             cp = related.find_control_plane_anchor()
             if cp and os.path.abspath(cp) != os.path.abspath(anchor):
-                cp_primary = related.get_primary(cp)
+                cp_anchors = _related_config_source_anchors(cp)
+                cp_primary = related.get_primary_grafted(cp_anchors)
                 if cp_primary:
-                    anchor, name, via_cp = cp, cp_primary, True
+                    anchors, name, via_cp = cp_anchors, cp_primary, True
         if not name:
             output.err("Usage: related resolve <name>  (or set a primary first)")
             return 1
         if explicit_name:
-            anchor, via_cp = _related_lookup_anchor(rest, anchor, name)
-        entry = related.get_related(anchor, name)
+            anchors, via_cp = _related_lookup_anchors(rest, anchor, name)
+        entry = related.get_related_grafted(anchors, name)
         if entry is None:
             output.err(f"'{name}' is not a related repo.")
             return 1
         reg = repos.find_repo(name)
         try:
-            current_machine = cfg.detect_machine(anchor)
+            current_machine = cfg.detect_machine(anchors[0])
         except Exception:
             current_machine = ""
         try:

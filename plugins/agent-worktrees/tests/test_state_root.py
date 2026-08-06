@@ -173,3 +173,45 @@ def test_as_dict_shape(fake_checkouts):
     assert d["state_root"] == "/k"
     assert d["requires_external"] is True
     assert d["bound"] is True
+
+
+# ---------------------------------------------------------------------------
+# config_source_anchors -- the E1e state-root config-overlay seam.
+# ---------------------------------------------------------------------------
+
+def test_config_sources_non_stateless_is_base_only(monkeypatch):
+    monkeypatch.setattr(sr, "_git_toplevel", lambda cwd: "/work/tree")
+    srcs = sr.config_source_anchors(_config("dotfiles"))
+    assert [(s.anchor, s.origin) for s in srcs] == [("/work/tree", "harness")]
+
+
+def test_config_sources_stateless_grafts_knowledge_overlay(fake_checkouts):
+    fake_checkouts["citadel-knowledge"] = "/repos/knowledge"
+    srcs = sr.config_source_anchors(
+        _config("citadel-harness", stateless=True,
+                knowledge_repo="citadel-knowledge"),
+        base_anchor="/repos/harness",
+    )
+    assert [(s.anchor, s.origin) for s in srcs] == [
+        ("/repos/harness", "harness"),
+        ("/repos/knowledge", "knowledge"),
+    ]
+
+
+def test_config_sources_dedup_when_knowledge_equals_base(fake_checkouts):
+    # Degenerate case: the knowledge checkout is the base -- no duplicate overlay.
+    fake_checkouts["k"] = "/repos/harness"
+    srcs = sr.config_source_anchors(
+        _config("h", stateless=True, knowledge_repo="k"),
+        base_anchor="/repos/harness",
+    )
+    assert [s.anchor for s in srcs] == ["/repos/harness"]
+
+
+def test_config_sources_unbound_stateless_is_base_only(fake_checkouts):
+    # require-external but no bound knowledge repo -> base only (no overlay).
+    srcs = sr.config_source_anchors(
+        _config("h", stateless=True, knowledge_repo=""),
+        base_anchor="/repos/harness",
+    )
+    assert [s.anchor for s in srcs] == ["/repos/harness"]
