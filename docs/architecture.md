@@ -1,11 +1,12 @@
 # Architecture Overview
 
-How the seventeen copilot-extensions plugins fit together — install topology,
+How the eighteen copilot-extensions plugins fit together — install topology,
 runtimes, ports, and the credential relay. **Eleven ship a runtime** (a `uv`-built
 venv under `~/.agent-*` plus a `~/.local/bin` binstub, deployed by the plugin's
-own installer); **six are payload-only** — `efforts` (skills), `visions`
+own installer); **seven are payload-only** — `efforts` (skills), `visions`
 (skills), `context-handoff` (a session extension), `customizing-copilot`
-(skills), `copilot-extensions-harness` (skills), and `wsl-setup` (skills) deploy
+(skills), `copilot-extensions-harness` (skills), `wsl-setup` (skills), and
+`harness-knowledge` (skills) deploy
 entirely from the marketplace payload with no installer. For per-plugin
 internals, follow the links in each section.
 
@@ -37,6 +38,7 @@ internals, follow the links in each section.
 | [customizing-copilot](../plugins/customizing-copilot/) | Customization skills (authoring skills, sub-agents, MCP servers, plugins, harnesses, review) | Marketplace payload (skills) | Loaded on demand when a CLI-customization prompt matches; no runtime to install |
 | [copilot-extensions-harness](../plugins/copilot-extensions-harness/) | Operator-harness skills (`contributing-to-copilot-extensions`, `diagnosing-copilot-extensions`) | Marketplace payload (skills) | Loaded on demand when a work-on-this-repo prompt matches; no runtime to install |
 | [wsl-setup](../plugins/wsl-setup/) | WSL2 setup / troubleshooting skills | Marketplace payload (skills) | Loaded on demand when a WSL-setup prompt matches; no runtime to install |
+| [harness-knowledge](../plugins/harness-knowledge/) | Stateless-harness → knowledge-repo binding skill (`binding-knowledge`) | Marketplace payload (skill + configurator script) | Loaded on demand when a harness-setup prompt matches; no runtime to install |
 
 Every runtime plugin is itself a **Python package** — its `src/` package plus
 any vendored `libs/` — installed by its own `scripts/install.*` / `scripts/init.*`
