@@ -352,6 +352,75 @@ function Remove-ConsoleTrampolines {
 # === install-contract:v3 source-kind -- keep byte-identical across plugins ===
 # Vendored under the Copilot CLI installed-plugins dir => marketplace;
 # anything else (a git checkout) => local.
+# === install-contract:v4 marker/toss helpers (#935) ===
+function Get-BootstrapPython {
+    <# A python to run the stdlib-only versioned_runtime.py helper (#935).
+       Prefers the freshly-built slot venv python ($VenvDir, present at
+       mark-complete before the link is swapped), then the active link's
+       python, then a real base python via the `py` launcher -- avoiding the
+       Windows Store 'python' alias stub. Returns $null if none. #>
+    foreach ($d in @($VenvDir, $LinkDir)) {
+        if ($d) { $p = Join-Path $d 'Scripts\python.exe'; if (Test-Path $p) { return $p } }
+    }
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        $exe = (& py -3 -c 'import sys; print(sys.executable)' 2>$null | Out-String).Trim()
+        if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
+    }
+    foreach ($cand in 'python3', 'python') {
+        $c = Get-Command $cand -ErrorAction SilentlyContinue
+        if ($c -and $c.Source -notmatch 'WindowsApps') { return $c.Source }
+    }
+    return $null
+}
+
+function Get-PayloadHash {
+    <# Cheap payload fingerprint for the completion marker (#935): sha256 of
+       pyproject.toml + the vendored-lib version set. Never throws -> '' on error. #>
+    try {
+        $parts = @()
+        $pp = Join-Path $PluginDir 'pyproject.toml'
+        if (Test-Path $pp) { $parts += (Get-Content $pp -Raw) }
+        $libs = Join-Path $PluginDir 'libs'
+        if (Test-Path $libs) {
+            Get-ChildItem $libs -Recurse -Filter 'pyproject.toml' -ErrorAction SilentlyContinue |
+                Sort-Object FullName | ForEach-Object { $parts += (Get-Content $_.FullName -Raw) }
+        }
+        $joined = [string]::Join("`n", $parts)
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($joined))
+        return (-join ($bytes | ForEach-Object { $_.ToString('x2') }))
+    } catch { return '' }
+}
+
+function Invoke-VersionedSlotClean {
+    <# Toss an INCOMPLETE prior slot before building so we never `uv venv
+       --allow-existing` over a corpse (#935); the current/active slot is never
+       tossed (link-name derived from $LinkDir so the guard works per plugin).
+       No-op in legacy mode. #>
+    if (-not $VersionedRuntime) { return }
+    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
+    $py = Get-BootstrapPython
+    if (-not $py) { return }
+    & $py $vr --root $InstallDir --link-name (Split-Path -Leaf $LinkDir) slot $SrcVersion --clean-incomplete 2>&1 |
+        ForEach-Object { Write-Host "  ...    $_" }
+}
+
+function Invoke-VersionedMarkComplete {
+    <# Write the slot's completion marker AFTER its isolated health gate passed,
+       so "marker present" == "healthy, complete build". A crashed / watchdog-
+       killed install never reaches here, leaving its slot markerless and thus
+       tossable + retryable (#935). No-op in legacy mode. #>
+    if (-not $VersionedRuntime) { return }
+    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
+    $py = Get-BootstrapPython
+    if (-not $py) { return }
+    $mcArgs = @($vr, '--root', $InstallDir, '--link-name', (Split-Path -Leaf $LinkDir), 'mark-complete', $SrcVersion)
+    $ph = Get-PayloadHash
+    if ($ph) { $mcArgs += @('--payload-hash', $ph) }
+    & $py @mcArgs 2>&1 | ForEach-Object { Write-Host "  ...    $_" }
+}
+# === end install-contract:v4 marker/toss helpers ===
+
 function Get-SourceKind {
     param([string]$PluginPath)
     # #935: when the installer self-staged out of the marketplace payload, its
@@ -515,6 +584,7 @@ function Install-Runtime {
         if (-not (Test-Path $VenvPython)) {
             if (Get-Command uv -ErrorAction SilentlyContinue) {
                 Write-Step 'Creating venv via uv...'
+                Invoke-VersionedSlotClean
                 & uv venv $VenvDir --allow-existing 2>&1 | Out-Null
                 if ($LASTEXITCODE -ne 0) {
                     Write-Step 'uv venv failed -- falling back to python -m venv'
@@ -616,6 +686,7 @@ exec "`$HOME/.agent-dispatch/.venv/bin/python" -m agent_dispatch "`$@"
             Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
             exit 1
         }
+        Invoke-VersionedMarkComplete
         if (-not (Invoke-VersionedActivate)) { exit 1 }
     }
 
