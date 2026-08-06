@@ -33,8 +33,18 @@ Reference: https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copi
 |-------|------|
 | Project | `.github/agents/<name>.agent.md` |
 | Personal | `~/.copilot/agents/<name>.agent.md` |
+| Plugin | `plugins/<plugin>/agents/<name>.agent.md` (shipped by an enabled plugin) |
+| In-repo plugin (`.ai`) | `.ai/<name>/agents/<name>.agent.md` — a sub-agent packaged as a plugin in the repo's own **local marketplace** (`directory` source). **Preferred** for a repo's own MCP-owning sub-agents so they travel with the repo and compose across contexts; see `installing-plugins`. |
 
 Personal agents override project agents with the same name.
+
+> **Packaging a sub-agent as an `.ai` plugin.** A sub-agent that owns an MCP
+> server (per the per-agent MCP pattern below) is a natural unit to ship as an
+> `.ai` local-marketplace plugin — one `.ai/<name>/` with
+> `agents/<name>.agent.md`, enabled via the repo's `directory` marketplace
+> source. This keeps the MCP wrapped in the sub-agent (out of the main context)
+> **and** lets the agent load whether the repo is launched directly or consumed
+> by another harness. See `installing-plugins` → *the `.ai` local marketplace*.
 
 ## Agent file format
 

@@ -61,8 +61,17 @@ when relevant.
 | Project | `.github/skills/<skill-name>/SKILL.md` or `.copilot/skills/<skill-name>/SKILL.md` |
 | Personal | `~/.copilot/skills/<skill-name>/SKILL.md` |
 | Plugin | `plugins/<plugin>/skills/<skill-name>/SKILL.md` (shipped by an enabled plugin) |
+| In-repo plugin (`.ai`) | `.ai/<capability>/skills/<capability>/SKILL.md` — a plugin in the repo's own **local marketplace**, enabled via a `directory` source in `.github/copilot/settings.json`. **Preferred** for a repo's modular, individually-toggleable, travels-with-the-repo skills; see the `installing-plugins` skill. |
 
 Add extra search paths with `/skills add`.
+
+> **Choosing a home for a repo's own skill.** A loose project skill
+> (`.github/skills/<name>/`) loads only for the launch repo. Prefer packaging a
+> repo's own skills as **`.ai` local-marketplace plugins** when they should be
+> modular/toggleable and compose across contexts (the repo launched directly, or
+> consumed by another harness / dispatched to via agent-bridge). See
+> `installing-plugins` → *Preferred for modular in-repo capability: the `.ai`
+> local marketplace*.
 
 ### SKILL.md format
 
