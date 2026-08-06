@@ -1,8 +1,9 @@
 ---
 name: borrowing-codespaces
 description: >
-  Advisory borrow/check-in of a GitHub CodeSpace to an effort so parallel
-  same-machine agents don't collide on it, plus patient startup waits for a
+  Advisory borrow/check-in of a GitHub CodeSpace, including distributed
+  cross-machine leases through agent-leases and host-local session-host claims,
+  plus patient startup waits for a
   slow-booting CodeSpace. Use when asked to "borrow a CodeSpace", "check out a
   CodeSpace for this effort", "release a CodeSpace", "who's using which
   CodeSpace", "wait for a CodeSpace to come up", or when a CodeSpace is slow to
@@ -20,11 +21,13 @@ description: >
   - 'codespace not coming up'
 ---
 
-# Borrowing CodeSpaces (advisory lease + startup tolerance)
+# Borrowing CodeSpaces (distributed lease + local claim + startup tolerance)
 
-Two related mechanics from `agent-codespaces` that keep parallel agents from
-colliding on a CodeSpace and keep a slow boot from being mistaken for a dead
-one. This skill owns the **generic CLI mechanics**; the *effort ↔ CodeSpace
+Three related mechanics keep parallel agents from colliding on a CodeSpace and
+keep a slow boot from being mistaken for a dead one. `agent-leases` owns the
+cross-machine lease protocol; `agent-codespaces` retains its host-local claim
+for the single Session Host on one machine. This skill owns the **generic CLI
+mechanics**; the *effort ↔ CodeSpace
 binding* (recording the borrow in the effort file, the dispatch/monitoring loop)
 is owned by the control-plane delegation skill (e.g. `dispatching-work` /
 `working-cross-repo`), which calls these commands.
@@ -35,14 +38,32 @@ is owned by the control-plane delegation skill (e.g. `dispatching-work` /
 
 ---
 
-## Advisory lease (borrow / release / leases)
+## Distributed advisory lease (cross-machine)
 
-The lease is **host-local advisory state** in
+Use `agent-leases` as the shared source of truth before dispatching to a
+CodeSpace from any machine:
+
+```bash
+agent-leases acquire codespace <codespace> --holder <machine/worktree/session> --ttl 3600
+agent-leases renew codespace <codespace> --token <current-oid> --ttl 3600
+agent-leases release codespace <codespace> --token <current-oid>
+agent-leases inspect codespace <codespace> --pretty
+```
+
+Persist the returned lease ID and commit-OID fencing token. Stop using the
+CodeSpace if renewal fails or `safe_deadline` passes. Revalidate the same token
+immediately before delete/rebuild or another destructive CodeSpace mutation.
+The lease is advisory and cannot stop an out-of-band actor or partitioned stale
+holder.
+
+## Host-local claim (same-machine compatibility)
+
+`agent-codespaces` also keeps **host-local advisory state** in
 `~/.agent-codespaces/leases.json` (exclusive-locked for race-safety across
 parallel worktree agents on one box). It records that a given **effort/worktree**
 is borrowing a CodeSpace so a second agent on the same machine doesn't dispatch
-to it concurrently. A CodeSpace is addressed **by name** (unlike the container
-fleet, there is no "pick a free one").
+to the same local Session Host concurrently. This is a compatibility and
+same-host enforcement layer, not a substitute for the distributed lease.
 
 ```bash
 agent-codespaces borrow <effort> <codespace>   # check out (prints the name)
@@ -70,17 +91,10 @@ agent-codespaces leases                         # CODESPACE  EFFORT  HOST  PID
   `finalize <name> --delete` **auto-release** the lease. Releasing by effort
   name frees whatever CodeSpace it held.
 
-> **Cross-machine limitation (v1):** the lease store is **per-machine**. A
-> CodeSpace is a cloud resource that could be borrowed from dev6 *and* book2 /
-> cloud1; a host-local file only coordinates the common **same-machine** case.
-> **Planned multi-machine coordination** layers a **cloud-global beacon** on top:
-> since `gh codespace list` is visible from any machine, the borrowing worktree's
-> 4-hex id is suffixed onto the CodeSpace **display name** (`gh codespace edit
-> --display-name`) so any machine sees who holds it with zero SSH; the rich
-> host-local lease stays the source of truth, and a machine seeing a *foreign*
-> suffix can SSH that one machine for detail. (GitHub exposes no arbitrary
-> CodeSpace metadata API — display-name is the only settable cloud-global field.)
-> Until that lands, treat a lease as a same-box advisory only.
+The local file remains necessary for existing automatic `ssh` claim/release
+wiring and safe migration of current users. New cross-machine workflows must
+acquire `agent-leases` first; no Git CAS logic is duplicated in
+`agent-codespaces`.
 
 ---
 

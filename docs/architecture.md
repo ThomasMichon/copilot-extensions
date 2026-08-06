@@ -1,7 +1,7 @@
 # Architecture Overview
 
-How the eighteen copilot-extensions plugins fit together — install topology,
-runtimes, ports, and the credential relay. **Eleven ship a runtime** (a `uv`-built
+How the nineteen copilot-extensions plugins fit together — install topology,
+runtimes, ports, and the credential relay. **Twelve ship a runtime** (a `uv`-built
 venv under `~/.agent-*` plus a `~/.local/bin` binstub, deployed by the plugin's
 own installer); **seven are payload-only** — `efforts` (skills), `visions`
 (skills), `context-handoff` (a session extension), `customizing-copilot`
@@ -26,6 +26,7 @@ internals, follow the links in each section.
 | [agent-dispatch](../plugins/agent-dispatch/) | Task-queue engine + per-host coordinator + CLI/MCP | `~/.agent-dispatch/` | `~/.local/bin/agent-dispatch` | On-demand CLI + optional always-on coordinator and label-gated embody supervisor(s) (Windows tasks / Linux systemd units) |
 | [agent-index](../plugins/agent-index/) | Indexing/search service shell | `~/.agent-index/` | `~/.local/bin/agent-index` | Phase 1 always-on service shell (Windows task / Linux systemd user unit); indexing engine arrives in later slices |
 | [agent-machines](../plugins/agent-machines/) | Machine-state reconciler CLI | `~/.agent-machines/` | `~/.local/bin/agent-machines` | On-demand CLI (no daemon); reconciled at session launch on its gated machines |
+| [agent-leases](../plugins/agent-leases/) | Distributed advisory lease CLI | `~/.agent-leases/` | `~/.local/bin/agent-leases` | On-demand CLI; remote Git refs are the shared state and commit OIDs are fencing tokens |
 | [agent-vault](../plugins/agent-vault/) | Local secret store: CLI + vault service | `~/.agent-vault/` | `~/.local/bin/agent-vault` | On-demand CLI + a persistent vault daemon (Windows scheduled task / Linux systemd user unit); ships a `vault-askpass` SUDO_ASKPASS helper |
 
 ### Payload-only plugins (no installer, no runtime)
@@ -69,6 +70,7 @@ flowchart TB
       AL["agent-logger/<br/>scripts • src"]
       AD["agent-dispatch/<br/>scripts • src"]
       AV["agent-vault/<br/>scripts • src"]
+      AX["agent-leases/<br/>scripts • src • skills"]
       PO["efforts/ • visions/ • context-handoff/ • customizing-copilot/ • copilot-extensions-harness/ • wsl-setup/<br/>(payload-only: skills / extension)"]
     end
     subgraph RT["Local runtimes"]
@@ -81,8 +83,9 @@ flowchart TB
       RL["~/.agent-logger/<br/>.venv • digests • sync task"]
       RD["~/.agent-dispatch/<br/>.venv • queue db • coordinator • supervisor profiles"]
       RV["~/.agent-vault/<br/>.venv • secret store service"]
+      RX["~/.agent-leases/<br/>.venv • config.json"]
     end
-    BIN["~/.local/bin/<br/>agent-worktrees • agent-bridge • agent-codespaces • agent-containers • agent-mcp • agent-ssh • agent-logger • agent-dispatch • agent-vault"]
+    BIN["~/.local/bin/<br/>agent-worktrees • agent-bridge • agent-codespaces • agent-containers • agent-mcp • agent-ssh • agent-logger • agent-dispatch • agent-vault • agent-leases"]
     MP --> AW --> RW
     MP --> AB --> RB
     MP --> AC --> RC
@@ -92,6 +95,7 @@ flowchart TB
     MP --> AL --> RL
     MP --> AD --> RD
     MP --> AV --> RV
+    MP --> AX --> RX
     MP --> PO
     RW --> BIN
     RB --> BIN
@@ -101,6 +105,7 @@ flowchart TB
     RL --> BIN
     RD --> BIN
     RV --> BIN
+    RX --> BIN
     AC -.->|package imported into bridge venv| RB
     AN -.->|package imported into bridge venv| RB
 ```

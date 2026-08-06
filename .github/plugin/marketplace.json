@@ -5,8 +5,8 @@
     "email": "thomas@thomasmichon.com"
   },
   "metadata": {
-    "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, WSL environment setup, and CLI customization",
-    "version": "1.7.4-dev492"
+    "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, distributed resource leasing, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, WSL environment setup, and CLI customization",
+    "version": "1.7.4-dev493"
   },
   "plugins": [
     {
@@ -24,7 +24,7 @@
     {
       "name": "agent-codespaces",
       "description": "GitHub Codespaces lifecycle management, SSH transport, credential relay, and agent-bridge provider integration",
-      "version": "0.3.4-dev92",
+      "version": "0.3.4-dev93",
       "source": "plugins/agent-codespaces"
     },
     {
@@ -116,6 +116,12 @@
       "description": "Binds a stateless Copilot CLI control harness to its private knowledge repo, harness-first: after cloning the harness, ask for (or create) the knowledge repo, register both, write the machine-local knowledge_repo pointer, and assemble a machine-local instructions fragment labeling the concrete harness/knowledge/product paths - keeping the shareable harness tree generic and name-free. Ships the binding-knowledge setup skill.",
       "version": "0.1.0-dev1",
       "source": "plugins/harness-knowledge"
+    },
+    {
+      "name": "agent-leases",
+      "description": "Distributed advisory leases for remote execution resources using one append-only Git ref per canonical identity, strict metadata commits, and exact expected-OID compare-and-swap fencing.",
+      "version": "0.1.0-dev1",
+      "source": "plugins/agent-leases"
     }
   ]
 }

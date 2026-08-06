@@ -33,6 +33,7 @@ Plugins, one marketplace. Install what you need; they compose.
 | [agent-dispatch](plugins/agent-dispatch/) | Task queue + coordinator | Coordinate multiple agents through a single-writer leased task queue (atomic claim, capability routing, lease recovery) instead of racing through `origin/master` pushes. Per-host coordinator, CLI, and MCP tools. |
 | [agent-index](plugins/agent-index/) | Index/search service | Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem. Phase 1 ships the service shell; indexing and retrieval arrive in later slices. |
 | [agent-machines](plugins/agent-machines/) | Machine-state reconciler | Portable restore-machinestate — converge a machine to desired state declared in in-repo requirement packages (Copilot settings first). Machine-scoped union restore, a seven-disposition model, and a detect-not-arbitrate conflict validator. The engine is generic; sensitive OS-mutating modules stay repo-local. |
+| [agent-leases](plugins/agent-leases/) | Distributed lease CLI | Coordinate advisory borrowing of remote machines, CodeSpaces, worktrees, containers, and other execution resources through append-only Git refs with exact-OID compare-and-swap fencing. |
 | [agent-vault](plugins/agent-vault/) | CLI + service | Local KeePassXC-backed secret store — a machine-local service caches the master password with a TTL and auto-prompts on lock; a CLI fetches API keys, SSH keys, and credentials on demand without hardcoding, committing, or env-exporting them. Ships a SUDO_ASKPASS helper for `sudo -A`. |
 | [customizing-copilot](plugins/customizing-copilot/) | Customizing the CLI | Teach an agent how to customize and extend the Copilot CLI — authoring skills, defining sub-agents, registering MCP servers, installing plugins, building a control-harness, reviewing customizations, and authoring `<repo>-harness` plugins. Seven focused skills. Payload-only — no runtime to install. |
 | [copilot-extensions-harness](plugins/copilot-extensions-harness/) | Operator harness | The portable, owner-authored skills to work *on* this suite — **contribute** changes and **diagnose** the deployed runtimes. Enable it in any control repo instead of hand-writing a per-repo narrative. Reference implementation of the `<repo>-harness` standard. Payload-only. |
@@ -45,7 +46,7 @@ All support **Windows** and **Linux/WSL** (macOS planned).
 
 ## Architecture at a glance
 
-Eighteen plugins, one marketplace. **Eleven ship a runtime** (a `uv`-built venv under
+Nineteen plugins, one marketplace. **Twelve ship a runtime** (a `uv`-built venv under
 `~/.agent-*` + a `~/.local/bin` binstub, deployed by the plugin's own
 installer); **seven are payload-only** — `efforts` (skills), `visions` (skills),
 `context-handoff` (a session extension), `customizing-copilot` (skills),
@@ -158,15 +159,17 @@ copilot plugin install agent-bridge@copilot-extensions
 copilot plugin install agent-mcp@copilot-extensions      # optional, standalone
 copilot plugin install agent-logger@copilot-extensions   # optional — session logging
 copilot plugin install agent-index@copilot-extensions    # optional — indexing/search service shell
+copilot plugin install agent-leases@copilot-extensions   # optional — distributed resource leases
 copilot plugin install efforts@copilot-extensions        # optional — planning skills (no runtime)
 copilot plugin install context-handoff@copilot-extensions # optional — context-window handoff (no runtime)
 copilot plugin install customizing-copilot@copilot-extensions # optional — how to customize the CLI (no runtime)
 ```
 
 Each `copilot plugin install` only vendors the plugin's **payload** (source,
-skills, hooks, extensions). The eleven runtime plugins (every plugin except the
+skills, hooks, extensions). The twelve runtime plugins (every plugin except the
 payload-only `efforts`, `visions`, `context-handoff`, `customizing-copilot`,
-`copilot-extensions-harness`, and `wsl-setup`) then need their runtime deployed once — that's Step 2,
+`copilot-extensions-harness`, `wsl-setup`, and `harness-knowledge`) then need
+their runtime deployed once — that's Step 2,
 which runs each installer to build a `uv` venv under `~/.agent-*` and drop a
 binstub in `~/.local/bin`.
 

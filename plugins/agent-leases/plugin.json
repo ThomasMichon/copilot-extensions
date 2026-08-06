@@ -1,0 +1,23 @@
+{
+  "name": "agent-leases",
+  "description": "Distributed advisory leases for remote machines, CodeSpaces, worktrees, containers, and other execution resources, using append-only metadata commits and exact Git ref compare-and-swap",
+  "version": "0.1.0-dev1",
+  "hooks": "hooks.json",
+  "runtimeScope": "machine-gated",
+  "author": {
+    "name": "Thomas Michon"
+  },
+  "homepage": "https://github.com/ThomasMichon/copilot-extensions",
+  "repository": "https://github.com/ThomasMichon/copilot-extensions",
+  "license": "MIT",
+  "keywords": [
+    "leases",
+    "distributed-coordination",
+    "git",
+    "fencing-token",
+    "remote-execution"
+  ],
+  "skills": [
+    "skills/"
+  ]
+}
