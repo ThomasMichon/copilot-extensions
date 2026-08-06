@@ -315,7 +315,7 @@ def test_collect_local_projects_reads_managed_empty(tmp_path, monkeypatch):
     managed_dir = tmp_path / ".aperture-labs"
     managed_dir.mkdir()
     (managed_dir / "config.yaml").write_text("terminal_profiles: []\n", encoding="utf-8")
-    unmanaged_dir = tmp_path / ".agent-worktrees"
+    unmanaged_dir = tmp_path / ".other-proj"
     unmanaged_dir.mkdir()
     (unmanaged_dir / "config.yaml").write_text("machine: lambda-core\n", encoding="utf-8")
 
@@ -324,7 +324,7 @@ def test_collect_local_projects_reads_managed_empty(tmp_path, monkeypatch):
     monkeypatch.setattr(
         _inst, "read_projects_registry",
         lambda: {"projects": {"aperture-labs": {"display_name": "Aperture Labs"},
-                              "agent-worktrees": {}}})
+                              "other-proj": {}}})
     monkeypatch.setattr(_repos, "read_registry",
                         lambda: _repos.ReposRegistry(repos={}))
 
@@ -337,9 +337,34 @@ def test_collect_local_projects_reads_managed_empty(tmp_path, monkeypatch):
     assert by_name["aperture-labs"].selection == frozenset()
     assert by_name["aperture-labs"].display == "Aperture Labs"
     # Absent key -> None (unmanaged, default column at build time).
-    assert by_name["agent-worktrees"].selection is None
+    assert by_name["other-proj"].selection is None
     # Title-cased slug fallback for the display name.
-    assert by_name["agent-worktrees"].display == "Agent Worktrees"
+    assert by_name["other-proj"].display == "Other Proj"
+
+
+def test_collect_skips_reserved_runtime_name(tmp_path, monkeypatch):
+    """The runtime's own name never becomes a launchable project, from ANY
+    source: a stale projects.yaml/repos.yaml entry, or ``current_project``
+    (running the ``agent-worktrees`` binstub resolves the active project to
+    ``agent-worktrees``). Otherwise the generator emits a bogus "Agent
+    Worktrees" launcher backed by no repo."""
+    from agent_worktrees import config as _cfg
+    from agent_worktrees import installer as _inst
+    from agent_worktrees import repos as _repos
+
+    monkeypatch.setattr(_cfg, "project_dir", lambda name=None: tmp_path / f".{name}")
+    # Both registries still list agent-worktrees (the real-world drift).
+    monkeypatch.setattr(
+        _inst, "read_projects_registry",
+        lambda: {"projects": {"agent-worktrees": {}, "dotfiles": {}}})
+    monkeypatch.setattr(_repos, "read_registry",
+                        lambda: _repos.ReposRegistry(repos={}))
+
+    # Even with current_project explicitly the reserved name, it is filtered.
+    names = [p.name for p in tf.collect_local_projects(
+        current_project="agent-worktrees")]
+    assert "agent-worktrees" not in names
+    assert "dotfiles" in names
 
 
 # ---------------------------------------------------------------------------
