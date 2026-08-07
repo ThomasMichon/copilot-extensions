@@ -190,3 +190,85 @@ def test_load_config_no_harness_when_repo_missing(tmp_path, monkeypatch):
     cfg.write_text("harness:\n  install_command: bash x\n", encoding="utf-8")
     monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(cfg))
     assert load_config().harness is None
+
+
+# --- E1e knowledge overlay (config-graft, #947) -------------------------------
+
+class TestKnowledgeOverlay:
+    """containers.yaml resolves from the bound knowledge repo for a stateless harness."""
+
+    def _isolate(self, tmp_path, monkeypatch):
+        # No env, cwd, or machine-local containers.yaml -> only the overlay remains.
+        monkeypatch.delenv("AGENT_CONTAINERS_CONFIG", raising=False)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("agent_containers.config.RUNTIME_DIR",
+                            tmp_path / "empty-runtime")
+
+    def test_overlay_fallback_used_when_nothing_local(self, tmp_path, monkeypatch):
+        self._isolate(tmp_path, monkeypatch)
+        knowledge = tmp_path / "knowledge"
+        knowledge.mkdir()
+        (knowledge / "containers.yaml").write_text("exec_user: knuser\n", encoding="utf-8")
+        monkeypatch.setattr(
+            "agent_containers.config._knowledge_overlay_config",
+            lambda: knowledge / "containers.yaml")
+        assert load_config().exec_user == "knuser"
+
+    def test_machine_local_wins_over_overlay(self, tmp_path, monkeypatch):
+        # A deliberate machine-local containers.yaml still takes precedence.
+        self._isolate(tmp_path, monkeypatch)
+        runtime = tmp_path / "rt"
+        runtime.mkdir()
+        (runtime / "containers.yaml").write_text("exec_user: localuser\n", encoding="utf-8")
+        monkeypatch.setattr("agent_containers.config.RUNTIME_DIR", runtime)
+        called = {"n": 0}
+        monkeypatch.setattr(
+            "agent_containers.config._knowledge_overlay_config",
+            lambda: called.__setitem__("n", called["n"] + 1) or None)
+        assert load_config().exec_user == "localuser"
+        assert called["n"] == 0  # overlay never consulted
+
+    def test_no_overlay_falls_back_to_defaults(self, tmp_path, monkeypatch):
+        self._isolate(tmp_path, monkeypatch)
+        monkeypatch.setattr(
+            "agent_containers.config._knowledge_overlay_config", lambda: None)
+        assert load_config().exec_user == "vscode"  # built-in default
+
+
+class TestKnowledgeOverlayResolver:
+    """_knowledge_overlay_config -- the resolver seam (mocked subprocess)."""
+
+    def _mock(self, monkeypatch, payload, *, rc=0):
+        import types
+        monkeypatch.setattr("shutil.which", lambda name: "agent-worktrees")
+        proc = types.SimpleNamespace(returncode=rc, stdout=__import__("json").dumps(payload),
+                                     stderr="")
+        monkeypatch.setattr("subprocess.run", lambda *a, **k: proc)
+
+    def test_resolves_when_knowledge_has_containers_yaml(self, tmp_path, monkeypatch):
+        from agent_containers.config import _knowledge_overlay_config
+        knowledge = tmp_path / "knowledge"
+        knowledge.mkdir()
+        (knowledge / "containers.yaml").write_text("exec_user: x\n", encoding="utf-8")
+        self._mock(monkeypatch, {
+            "state_root": str(knowledge), "requires_external": True, "bound": True})
+        assert _knowledge_overlay_config() == knowledge / "containers.yaml"
+
+    def test_none_when_self_hosted(self, tmp_path, monkeypatch):
+        from agent_containers.config import _knowledge_overlay_config
+        self._mock(monkeypatch, {
+            "state_root": str(tmp_path), "requires_external": False, "bound": True})
+        assert _knowledge_overlay_config() is None
+
+    def test_none_when_knowledge_lacks_file(self, tmp_path, monkeypatch):
+        from agent_containers.config import _knowledge_overlay_config
+        knowledge = tmp_path / "knowledge"
+        knowledge.mkdir()
+        self._mock(monkeypatch, {
+            "state_root": str(knowledge), "requires_external": True, "bound": True})
+        assert _knowledge_overlay_config() is None
+
+    def test_none_when_no_binstub(self, tmp_path, monkeypatch):
+        from agent_containers.config import _knowledge_overlay_config
+        monkeypatch.setattr("shutil.which", lambda name: None)
+        assert _knowledge_overlay_config() is None
