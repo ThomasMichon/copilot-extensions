@@ -30,7 +30,7 @@ dependencies = [
     "lancedb",
     "tree-sitter>=0.23,<1.0",
     "tree-sitter-python>=0.23,<1.0",
-    "tree-sitter-javascript>=0.23,<1.0",
+    "tree-sitter-javascript>=0.25.0,<1.0",
     "tree-sitter-typescript>=0.23,<1.0",
     "tree-sitter-bash>=0.23,<1.0",
     # Structured adoption config (.agent-index/config.yaml: role, indexer
