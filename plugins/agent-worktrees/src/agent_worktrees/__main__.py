@@ -392,13 +392,25 @@ def _apply_tracking_override(
 ) -> git_ops.WorktreeStateInfo:
     """Let tracking metadata override ambiguous git-state classification.
 
-    When a worktree was finalized with zero commits (e.g., manual
-    intervention, no code changes), the reflog has no ``commit`` entries
-    and ``classify_worktree`` returns UNUSED. The tracking YAML correctly
-    records ``status: finalized`` -- trust it.
+    A **finalized** (or complete/completed) worktree is done and prune-able:
+    ``finalize`` sets that status only after verifying the work is safely on
+    ``origin/<default>``, and any subsequent ``create-pr`` flips the status away
+    from ``finalized``. So the tracking status is authoritative over the raw
+    git-state -- trust it (#1447). Two cases it corrects:
+
+    - **zero-commit finalize** -- the reflog has no ``commit`` entries and
+      ``classify_worktree`` returns UNUSED.
+    - **squash-merged finalize** -- the worktree branch still carries its
+      pre-squash commits, so raw git reads ``N ahead / M behind`` (WIP) even
+      though the work landed as a squash on the default branch. That "ahead" is
+      the un-reconciled squash artifact, not real work-in-progress.
+
+    A **GONE** worktree (its directory is missing) is never masked -- a missing
+    checkout is real regardless of status.
     """
-    if info.state == git_ops.WorktreeState.UNUSED and rec.status == "finalized":
-        return dataclasses.replace(info, state=git_ops.WorktreeState.COMPLETED)
+    if rec.status in ("finalized", "complete", "completed"):
+        if info.state != git_ops.WorktreeState.GONE:
+            return dataclasses.replace(info, state=git_ops.WorktreeState.COMPLETED)
     return info
 
 
