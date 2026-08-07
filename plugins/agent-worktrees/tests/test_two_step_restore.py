@@ -58,6 +58,16 @@ def _patch_resume(monkeypatch, *, mux_live=False, live_ids=None):
     )
     monkeypatch.setattr(m.sessions, "verify_worktree_active",
                         lambda rec: _verdict)
+    # Capture the cache write-back stamps (mux + bound liveness) so tests can
+    # assert the fresh verdict is persisted without touching the filesystem.
+    stamps: dict[str, list] = {"mux": [], "bound": []}
+    monkeypatch.setattr(
+        m.tracking, "stamp_mux_live",
+        lambda wt, live, **kw: stamps["mux"].append((wt, live, kw)))
+    monkeypatch.setattr(
+        m.tracking, "stamp_bound_live",
+        lambda wt, live, **kw: stamps["bound"].append((wt, live, kw)))
+    plan["_stamps"] = stamps
     return plan
 
 
@@ -182,6 +192,35 @@ class TestResumeFallbackLadder:
         rc = m._resolve_resume(_Rec(), self._cfg(), _resume_args())
         assert rc == 0
         assert any(a == "--resume=head-sid-999" for a in plan["cmd"])
+
+    def test_live_verdict_written_back_to_cache(self, monkeypatch):
+        # The fresh Enter-time verdict is persisted so the NEXT paint is valid:
+        # a live mux + bound Copilot -> stamp both True (so next time Stop /
+        # Reclaim are offered even though this launch only had "Resume").
+        plan = _patch_resume(monkeypatch, mux_live=True, live_ids=["s1"])
+        rc = m._resolve_resume(_Rec(), self._cfg(), _resume_args())
+        assert rc == 0
+        assert plan["_stamps"]["mux"] == [("wtX", True, {"refresh": True})]
+        assert plan["_stamps"]["bound"] == [("wtX", True, {"refresh": True})]
+
+    def test_not_live_verdict_written_back_as_false(self, monkeypatch):
+        # A negative verdict is persisted too (records "not live"), so a stale
+        # cached True hint can't strand the row as Active next time.
+        plan = _patch_resume(monkeypatch, mux_live=False, live_ids=None)
+        rc = m._resolve_resume(_Rec(), self._cfg(), _resume_args())
+        assert rc == 0
+        assert plan["_stamps"]["mux"] == [("wtX", False, {"refresh": True})]
+        assert plan["_stamps"]["bound"] == [("wtX", False, {"refresh": True})]
+
+    def test_json_path_writes_no_cache(self, monkeypatch):
+        # The programmatic --json (ACP) path is gated out of the whole ladder,
+        # so it neither verifies nor writes the cache.
+        plan = _patch_resume(monkeypatch, mux_live=True)
+        rc = m._resolve_resume(_Rec(), self._cfg(),
+                               _resume_args(json=True))
+        assert rc == 0
+        assert plan["_stamps"]["mux"] == []
+        assert plan["_stamps"]["bound"] == []
 
 
 # ── reclaim_one executor ───────────────────────────────────────────────────

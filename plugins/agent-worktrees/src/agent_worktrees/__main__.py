@@ -2931,6 +2931,26 @@ def _resolve_resume(
                       "(overriding the requested launch mode).")
             args.no_mux = False
             args.bare_resume = False
+        # (2) Persist this fresh verdict to the record cache BEFORE we hand the
+        # plan to the launcher, so the NEXT picker paint reflects reality even
+        # if this (re)attach crashes. The scenario: the pre-Enter row was stale
+        # (looked stopped -> only "Resume", no "Stop"); at Enter we discover a
+        # live mux and reattach, but the mux then crashes internally. Without a
+        # write-back the next launch repaints that same stale row and the
+        # operator still can't "Stop" the crashing mux. Stamping the mux + bound
+        # liveness we just authoritatively resolved makes the next first-paint
+        # offer Open/Stop (live mux) or Reclaim (bound/bare Copilot). Same
+        # authoritative source + hint the engine's menu-open stamp uses;
+        # best-effort, never blocks or fails the launch.
+        if _verdict is not None:
+            try:
+                tracking.stamp_mux_live(
+                    record.worktree_id, _verdict.mux_live, refresh=True)
+                tracking.stamp_bound_live(
+                    record.worktree_id, bool(_verdict.live_session_ids),
+                    refresh=True)
+            except Exception:
+                pass
 
     # Auto-fast-forward a stale-but-clean worktree before launch so the
     # session (and any setup script) sees an up-to-date tree.  This is a
