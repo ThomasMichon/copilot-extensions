@@ -8,9 +8,10 @@ blocked.** This is enforced on three layers that agree:
 1. **Tooling** — `.agent-worktrees/config.yaml` sets `pr.required: true`, so
    `agent-worktrees push-changes` refuses direct-to-`main` and the PR-workflow
    git-hooks block committing to `main` / pushing a worktree branch directly.
-2. **Branch policy** — a GitHub repository ruleset ("Copilot review for default
-   branch") carries a `pull_request` rule (+ `non_fast_forward`) that blocks
-   direct pushes to `main` server-side, for everyone (no bypass).
+2. **Branch policy** — a GitHub repository ruleset ("Default-branch policy:
+   PR-required + non-blocking Copilot review") carries a `pull_request` rule (+
+   `non_fast_forward`) that blocks direct pushes to `main` server-side, for
+   everyone (no bypass).
 3. **Review** — the same ruleset's `copilot_code_review` rule auto-requests a
    **non-blocking** Copilot review on every PR (it is a review, not a required
    status check, so it never gates the merge).

@@ -30,10 +30,14 @@ remote: origin
 #      to `main` from a worktree and block pushing a worktree branch directly.
 #      The legitimate `create-pr` / `push-changes` push bypasses the pre-push
 #      guard via `AGENT_WORKTREES_PR_PUSH=1`.
-#   2. A GitHub repository ruleset ("Copilot review for default branch",
-#      id 18553911) with a `pull_request` rule — the FORMAL branch policy that
-#      blocks direct pushes to `main` server-side, so the enforcement holds even
-#      for a tool/path that predates or bypasses layer 1.
+#   2. A GitHub repository ruleset ("Default-branch policy: PR-required +
+#      non-blocking Copilot review", id 18553911) with a `pull_request` rule --
+#      the FORMAL branch policy that blocks direct pushes to `main` server-side,
+#      so the enforcement holds even for a tool/path that predates or bypasses
+#      layer 1. (One nuance: a commit that is the head of an OPEN PR can still
+#      fast-forward `main` because GitHub counts it as "made through a PR"; an
+#      unassociated direct commit is rejected. Layer 1 keeps agents off that
+#      path regardless.)
 #   3. The same ruleset's `copilot_code_review` rule auto-requests a
 #      **non-blocking** Copilot review on every PR (review_on_push: true). It is
 #      a review, not a required status check, so it never gates the merge.
