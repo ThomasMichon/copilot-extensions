@@ -26,14 +26,20 @@ Checks (all stdlib, no dependencies):
 
 Usage:
     scan-customizations.py [REPO_ROOT] [--json] [--strict]
+                           [--from-settings]
                            [--include-plugins DIR ...] [--include-installed]
 
-`REPO_ROOT` defaults to the current directory. `--include-plugins` adds one or
-more installed-plugin trees (layout `<root>/<marketplace>/<plugin>/skills/...`)
-whose skills join the trigger-collision map *only* (no findings are raised
-against third-party plugins you don't own); `--include-installed` is a shortcut
-for the default `~/.copilot/installed-plugins`. Exit code is 0 unless `--strict`
-is given and at least one BLOCKING finding was reported.
+`REPO_ROOT` defaults to the current directory. `--from-settings` assembles the
+plugin set **actually loaded for this repo** -- from its
+`.github/copilot/settings.json` (+ user settings) `enabledPlugins` /
+`extraKnownMarketplaces` -- and brings each into scope: an in-repo `directory`
+marketplace plugin (e.g. `./.ai`) is **owned** (fully checked), while an
+external marketplace plugin is **reference-only** (its skills join the collision
+map, and a collision that touches it is annotated with a fix pointer + upstream
+`source`). `--include-plugins` / `--include-installed` still add raw
+installed-plugin trees (layout `<root>/<marketplace>/<plugin>/skills/...`) the
+same reference-only way. Exit code is 0 unless `--strict` is given and at least
+one BLOCKING finding was reported.
 """
 
 from __future__ import annotations
@@ -112,6 +118,136 @@ class Finding:
     check: str
     path: str
     message: str
+
+
+@dataclass
+class PluginSource:
+    """A plugin whose skills join the review, with ownership + source origin.
+
+    ``controlled`` is True when the repo under review OWNS the plugin (its own
+    in-repo ``.ai`` directory-marketplace plugins, or its ``plugins/*`` suite):
+    those get full checks and their findings are actionable in-repo. When False
+    the plugin is **external** (installed from another marketplace) -- its skills
+    are reference-only for collision detection, and a collision that touches it
+    carries a remediation pointer (fix in-repo, or upstream at ``source``).
+    """
+
+    skills_root: Path
+    origin: str                # "<marketplace>/<plugin>" label
+    controlled: bool = False
+    source: str = ""           # upstream repo URL for an external plugin ("" if in-repo/unknown)
+
+
+def _load_json(path: Path) -> dict:
+    """Best-effort JSON load (settings/manifests); returns {} on any problem."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _merged_settings(repo_root: Path) -> tuple[dict, dict]:
+    """Merge the settings that decide a repo's *loaded* plugin set.
+
+    Reads the repo's committed ``.github/copilot/settings.json`` (and the
+    ``.claude/settings.json`` fallback) plus the user ``~/.copilot/settings.json``,
+    and returns ``(enabled_plugins, marketplaces)``. Repo settings take
+    precedence over user settings for a marketplace of the same name; a plugin
+    is *enabled* if either layer enables it.
+    """
+    layers = [
+        Path.home() / ".copilot" / "settings.json",
+        repo_root / ".claude" / "settings.json",
+        repo_root / ".github" / "copilot" / "settings.json",
+    ]
+    enabled: dict[str, bool] = {}
+    marketplaces: dict[str, dict] = {}
+    for p in layers:                       # later layers win (repo over user)
+        data = _load_json(p)
+        ep = data.get("enabledPlugins")
+        if isinstance(ep, dict):
+            for k, v in ep.items():
+                if v:
+                    enabled[str(k)] = True
+        mk = data.get("extraKnownMarketplaces")
+        if isinstance(mk, dict):
+            for k, v in mk.items():
+                if isinstance(v, dict):
+                    marketplaces[str(k)] = v
+    return enabled, marketplaces
+
+
+def _plugin_repo_url(footprint: Path) -> str:
+    """A plugin's upstream repo URL from its manifest (``repository`` /
+    ``homepage``), read from either manifest spelling. Empty when unknown."""
+    for manifest in (footprint / "plugin.json",
+                     footprint / ".claude-plugin" / "plugin.json"):
+        data = _load_json(manifest)
+        for key in ("repository", "homepage"):
+            val = data.get(key)
+            if isinstance(val, dict):
+                val = val.get("url", "")
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+    return ""
+
+
+def assemble_enabled_plugins(
+    repo_root: Path, installed_root: Path | None = None,
+) -> list[PluginSource]:
+    """Assemble the plugin set *actually loaded for this repo* into review scope.
+
+    Resolves the repo's + user's ``settings.json`` ``enabledPlugins`` /
+    ``extraKnownMarketplaces`` into concrete :class:`PluginSource` entries: each
+    enabled ``<name>@<marketplace>`` mapped to its skills footprint (an in-repo
+    ``directory`` marketplace path, else the installed-plugins tree) and
+    classified ``controlled`` (in-repo) vs external (with an upstream ``source``).
+    Only plugins whose skills footprint exists are returned. Never raises.
+    """
+    if installed_root is None:
+        installed_root = Path.home() / ".copilot" / "installed-plugins"
+    enabled, marketplaces = _merged_settings(repo_root)
+    out: list[PluginSource] = []
+    for key in sorted(enabled):
+        name, _, mkt = key.partition("@")
+        name = name.strip()
+        mkt = mkt.strip()
+        if not name:
+            continue
+        origin = f"{mkt}/{name}" if mkt else name
+        src = (marketplaces.get(mkt) or {}).get("source") or {}
+        src_kind = str(src.get("source", "")).strip().lower() if isinstance(src, dict) else ""
+
+        if src_kind == "directory":
+            # An in-repo local marketplace (e.g. ./.ai): the repo owns it.
+            rel = str(src.get("path", "")).strip() if isinstance(src, dict) else ""
+            base = (repo_root / rel).resolve() if rel else repo_root
+            footprint = base / name
+            try:
+                controlled = repo_root.resolve() in footprint.parents or footprint == repo_root.resolve()
+            except Exception:
+                controlled = False
+            skills_root = footprint / "skills"
+            source_url = ""  # in-repo; fixable here
+        else:
+            # github / other marketplace -> the vendored installed payload.
+            footprint = installed_root / mkt / name if mkt else installed_root / name
+            skills_root = footprint / "skills"
+            controlled = False
+            source_url = ""
+            if isinstance(src, dict) and src_kind == "github" and src.get("repo"):
+                source_url = f"https://github.com/{str(src['repo']).strip()}"
+            if not source_url:
+                source_url = _plugin_repo_url(footprint)
+
+        if skills_root.is_dir() and any(skills_root.glob("*/SKILL.md")):
+            out.append(PluginSource(
+                skills_root=skills_root, origin=origin,
+                controlled=controlled, source=source_url,
+            ))
+    return out
+
 
 
 @dataclass
@@ -232,9 +368,32 @@ def get_field(frontmatter: str, key: str) -> str | None:
     return m.group(1).strip() if m else None
 
 
+def _check_owned_skill(sf: Path, report: Report, frontmatter: str) -> str:
+    """Run the owned-skill frontmatter/name checks; return the skill's name."""
+    name = get_field(frontmatter, "name")
+    desc = "description" in frontmatter.lower()
+    if not name:
+        report.add(BLOCKING, "skill-frontmatter", sf, "frontmatter missing `name`")
+    if not desc:
+        report.add(BLOCKING, "skill-frontmatter", sf,
+                   "frontmatter missing `description`")
+    folder = sf.parent.name
+    if name and name != folder:
+        report.add(BLOCKING, "name-folder-match", sf,
+                   f"skill `name: {name}` != folder `{folder}`")
+    structured = extract_triggers(frontmatter)
+    if not structured:
+        report.add(WARNING, "skill-triggers", sf,
+                   "description advertises no structured trigger phrases "
+                   "(`Trigger phrases include:` list)")
+    return name or folder
+
+
 def scan_skills(root: Path, report: Report,
-                extra_skill_roots: list[Path] | None = None) -> None:
+                plugin_sources: list[PluginSource] | None = None) -> None:
     trigger_owner: dict[str, set[str]] = {}
+    # owner label -> (controlled, source_url). Absent => a plain owned local skill.
+    owner_meta: dict[str, tuple[bool, str]] = {}
 
     # Owned skills: local `.github/skills` + this repo's own `plugins/*`. Full
     # checks apply, and both structured + prose triggers feed the collision map.
@@ -248,47 +407,51 @@ def scan_skills(root: Path, report: Report,
                        "SKILL.md has no YAML frontmatter (--- block)")
             continue
         frontmatter, _ = fm
-        name = get_field(frontmatter, "name")
-        desc = "description" in frontmatter.lower()
-        if not name:
-            report.add(BLOCKING, "skill-frontmatter", sf,
-                       "frontmatter missing `name`")
-        if not desc:
-            report.add(BLOCKING, "skill-frontmatter", sf,
-                       "frontmatter missing `description`")
-        folder = sf.parent.name
-        if name and name != folder:
-            report.add(BLOCKING, "name-folder-match", sf,
-                       f"skill `name: {name}` != folder `{folder}`")
-        structured = extract_triggers(frontmatter)
-        if not structured:
-            report.add(WARNING, "skill-triggers", sf,
-                       "description advertises no structured trigger phrases "
-                       "(`Trigger phrases include:` list)")
-        for t in _dedup(structured + extract_prose_triggers(frontmatter)):
-            trigger_owner.setdefault(t.lower(), set()).add(name or folder)
+        name = _check_owned_skill(sf, report, frontmatter)
+        for t in _dedup(extract_triggers(frontmatter)
+                        + extract_prose_triggers(frontmatter)):
+            trigger_owner.setdefault(t.lower(), set()).add(name)
 
-    # Reference skills from installed-plugin roots: they join the collision map
-    # only (no findings -- we don't own them), so a LOCAL<->PLUGIN collision is
-    # visible even though the plugin lives outside the repo.
-    for proot in (extra_skill_roots or []):
-        for sf in sorted(proot.glob("*/*/skills/*/SKILL.md")):
+    # Plugin sources: the loaded set (from --from-settings) or raw trees (from
+    # --include-plugins). A *controlled* (in-repo) plugin gets full checks and is
+    # an owned collision participant; an *external* plugin is reference-only, its
+    # skills joining the collision map so a LOCAL<->PLUGIN clash is visible and
+    # annotated with a fix pointer.
+    for ps in (plugin_sources or []):
+        for sf in sorted(ps.skills_root.glob("*/SKILL.md")):
             fm = split_frontmatter(sf.read_text(encoding="utf-8", errors="replace"))
             if fm is None:
                 continue
             frontmatter, _ = fm
-            name = get_field(frontmatter, "name") or sf.parent.name
-            origin = _plugin_origin(sf)
-            label = f"{name} [{origin}]" if origin else name
+            if ps.controlled:
+                name = _check_owned_skill(sf, report, frontmatter)
+                label = name
+            else:
+                nm = get_field(frontmatter, "name") or sf.parent.name
+                label = f"{nm} [{ps.origin}]"
+                owner_meta[label] = (False, ps.source)
             for t in _dedup(extract_triggers(frontmatter)
                             + extract_prose_triggers(frontmatter)):
                 trigger_owner.setdefault(t.lower(), set()).add(label)
 
     for phrase, owners in sorted(trigger_owner.items()):
         uniq = sorted(owners)
-        if len(uniq) > 1:
-            report.add(WARNING, "trigger-collision", ".github/skills",
-                       f"trigger '{phrase}' claimed by: {', '.join(uniq)}")
+        if len(uniq) <= 1:
+            continue
+        msg = f"trigger '{phrase}' claimed by: {', '.join(uniq)}"
+        externals = [o for o in uniq if o in owner_meta and owner_meta[o][0] is False]
+        if externals:
+            srcs = sorted({owner_meta[o][1] for o in externals if owner_meta[o][1]})
+            where = f" (source: {', '.join(srcs)})" if srcs else ""
+            msg += (f"  --  involves plugin(s) OUTSIDE this repo's control"
+                    f"{where}. Fix in-repo (reclaim the phrase with a local "
+                    f"authority-override skill, or disable the plugin), OR file "
+                    f"an issue/PR upstream -- if a `<repo>-harness` plugin is "
+                    f"enabled for that source, use its contributing-to-<repo> "
+                    f"skill (e.g. copilot-extensions-harness -> "
+                    f"contributing-to-copilot-extensions).")
+        report.add(WARNING, "trigger-collision", ".github/skills", msg)
+
 
 
 def scan_agents(root: Path, report: Report) -> None:
@@ -368,9 +531,26 @@ def scan_text_files(root: Path, report: Report) -> None:
                                f"ssh/scp/rsync targets raw IP {ip} (use an alias)")
 
 
-def run(root: Path, extra_skill_roots: list[Path] | None = None) -> Report:
+def _sources_from_raw_dir(root: Path) -> list[PluginSource]:
+    """Convert a raw installed-plugins tree (``<root>/<mkt>/<plugin>/skills``)
+    into external :class:`PluginSource` entries (reference-only, source read from
+    each plugin manifest)."""
+    out: list[PluginSource] = []
+    for skills_root in sorted(root.glob("*/*/skills")):
+        if not skills_root.is_dir():
+            continue
+        plugin_dir = skills_root.parent
+        origin = f"{plugin_dir.parent.name}/{plugin_dir.name}"
+        out.append(PluginSource(
+            skills_root=skills_root, origin=origin,
+            controlled=False, source=_plugin_repo_url(plugin_dir),
+        ))
+    return out
+
+
+def run(root: Path, plugin_sources: list[PluginSource] | None = None) -> Report:
     report = Report()
-    scan_skills(root, report, extra_skill_roots)
+    scan_skills(root, report, plugin_sources)
     scan_agents(root, report)
     scan_text_files(root, report)
     return report
@@ -383,6 +563,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--json", action="store_true", help="emit findings as JSON")
     ap.add_argument("--strict", action="store_true",
                     help="exit non-zero if any BLOCKING finding is reported")
+    ap.add_argument("--from-settings", action="store_true",
+                    help="assemble the plugin set actually LOADED for this repo "
+                         "(from .github/copilot/settings.json + user settings) and "
+                         "bring each into scope -- in-repo plugins fully checked, "
+                         "external ones reference-only + source-classified")
     ap.add_argument("--include-plugins", action="append", default=[], metavar="DIR",
                     help="installed-plugin tree (<root>/<marketplace>/<plugin>/skills/...) "
                          "whose skills join the collision map; repeatable")
@@ -395,19 +580,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {root} is not a directory", file=sys.stderr)
         return 2
 
-    extra_roots: list[Path] = []
+    sources: list[PluginSource] = []
+    if args.from_settings:
+        sources += assemble_enabled_plugins(root)
+
     plugin_dirs = list(args.include_plugins)
     if args.include_installed:
         plugin_dirs.append(str(Path.home() / ".copilot" / "installed-plugins"))
     for d in plugin_dirs:
         p = Path(d).expanduser().resolve()
         if p.is_dir():
-            extra_roots.append(p)
+            sources += _sources_from_raw_dir(p)
         else:
             print(f"warning: --include-plugins {p} is not a directory (skipped)",
                   file=sys.stderr)
 
-    report = run(root, extra_roots)
+    report = run(root, sources)
 
     if args.json:
         print(json.dumps({

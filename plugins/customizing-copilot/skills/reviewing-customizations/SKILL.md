@@ -68,27 +68,54 @@ gate. It is a **heuristic aid, not a proof** — it deliberately under-flags rat
 than cry wolf; feed its findings into the design critique, don't treat a clean
 scan as a full review.
 
-**Collision detection spans prose *and* installed plugins.** Trigger collisions
-are computed from both the structured `Trigger phrases include:` list **and**
-inline prose (`Use when asked to "…"`) — a skill hides no triggers by choosing
-prose. Crucially, a harness that *consumes* plugins can only mis-route if a
-**local** skill collides with a **plugin** skill, and the plugin skills live
-outside the repo. Pass the installed-plugin tree so the scan sees those
-cross-layer collisions:
+**Scan the plugin set actually LOADED for the repo — `--from-settings`.** Trigger
+collisions are computed from both the structured `Trigger phrases include:` list
+**and** inline prose (`Use when asked to "…"`) — a skill hides no triggers by
+choosing prose. But the bigger blind spot is *which skills are even in scope*: a
+harness that *consumes* plugins can mis-route when a **local** skill collides
+with a **plugin** skill, and (for a repo that packages its own skills as in-repo
+`.ai` plugins) the repo's *own* owned skills live outside `.github/skills`.
+`--from-settings` resolves the repo's `.github/copilot/settings.json` (+ user
+settings) `enabledPlugins` / `extraKnownMarketplaces` into the concrete loaded
+set and brings each into scope:
 
 ```bash
-# add the operator's installed plugins to the collision map (findings still
-# only fire against skills you OWN — third-party plugins are reference-only):
-python3 <skill-dir>/scripts/scan-customizations.py <repo-root> --include-installed
-# or point at an explicit tree (repeatable):
-python3 <skill-dir>/scripts/scan-customizations.py <repo-root> \
-    --include-plugins ~/.copilot/installed-plugins
+# review against exactly what this repo loads (in-repo .ai plugins fully
+# checked; external marketplace plugins reference-only + source-classified):
+python3 <skill-dir>/scripts/scan-customizations.py <repo-root> --from-settings
 ```
 
-Collision owners are tagged with their origin (`skill [marketplace/plugin]`), so
-a `LOCAL ↔ PLUGIN` clash is obvious. Some collisions are intentional (an
-authority override that deliberately reclaims a phrase); judge each in the
-design critique rather than "fixing" it blindly.
+- An **in-repo `directory` marketplace** plugin (e.g. `./.ai`) is *owned* — it
+  gets the full frontmatter / name-folder / trigger checks, closing the gap
+  where a repo's own `.ai` skills were invisible to the scan.
+- An **external marketplace** plugin is *reference-only*: its skills join the
+  collision map (so a `LOCAL ↔ PLUGIN` clash is visible) but its own frontmatter
+  problems are not flagged — you don't own it.
+
+Collision owners are tagged with their origin (`skill [marketplace/plugin]`).
+(The older `--include-installed` / `--include-plugins DIR` still work — they add
+a raw installed-plugin tree the same reference-only way — but `--from-settings`
+is preferred because it scopes to the *enabled* set, not every installed
+plugin.)
+
+**A collision that touches an external plugin is outside your repo's control.**
+The scan says so, names the upstream `source`, and points at the fix path. You
+can't edit the plugin in-repo, so choose:
+
+1. **In-repo workaround** — reclaim the phrase with a local authority-override
+   skill, disable the offending plugin for this repo, or narrow *your* trigger.
+2. **Upstream fix** — file an issue / open a PR on the plugin's source repo. If a
+   **`<repo>-harness`** plugin is enabled for that source, use its
+   **`contributing-to-<repo>`** skill as the concrete fix path (for the
+   copilot-extensions suite that's **`copilot-extensions-harness` →
+   `contributing-to-copilot-extensions`**). This `<repo>-harness → contributing`
+   hop is the **skill bridge**: it turns "this is broken in an external plugin"
+   into "here is exactly where and how to fix it."
+
+Some collisions are intentional (an authority override that deliberately
+reclaims a phrase); judge each in the design critique rather than "fixing" it
+blindly. And **never edit an external plugin's installed payload in place** — it
+is overwritten on update; fix it in-repo or upstream.
 
 ### 1. Design critique (rubber-duck)
 
