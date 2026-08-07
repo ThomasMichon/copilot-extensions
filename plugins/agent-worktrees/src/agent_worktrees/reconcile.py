@@ -137,18 +137,16 @@ def _versions_equal(a: str | None, b: str | None) -> bool:
 def read_enabled_plugins(repo_dir: Path) -> list[str]:
     """Return copilot-extensions plugin names enabled in repo settings.
 
-    Reads ``.github/copilot/settings.json`` then ``settings.local.json``
-    (the local file overrides per key, matching Copilot's resolution).
-    Excludes ``agent-worktrees`` itself (managed by the self-update path).
+    Reads the repo's plugin settings across both the Copilot-native and Claude
+    conventions (native preferred, Claude fallback) via ``plugin_resolve`` --
+    ``.github/copilot/settings.json`` (+ ``settings.local.json``) and, as a
+    fallback, ``.claude/settings.json`` (+ ``.claude/settings.local.json``), with
+    the local file overriding per key and native winning over Claude on a key
+    conflict. Excludes ``agent-worktrees`` itself (managed by the self-update path).
     """
-    enabled: dict[str, bool] = {}
-    base = repo_dir / ".github" / "copilot"
-    for fname in ("settings.json", "settings.local.json"):
-        data = _read_json(base / fname) or {}
-        ep = data.get("enabledPlugins")
-        if isinstance(ep, dict):
-            for spec, val in ep.items():
-                enabled[spec] = bool(val)
+    from plugin_resolve import read_repo_settings
+
+    enabled = read_repo_settings(repo_dir).enabled
 
     names: set[str] = set()
     for spec, val in enabled.items():
