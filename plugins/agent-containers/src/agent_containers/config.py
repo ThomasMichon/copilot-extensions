@@ -208,6 +208,51 @@ class ContainersConfig:
         return DEFAULT_ACP_COMMAND
 
 
+def _knowledge_overlay_config() -> Path | None:
+    """Resolve the bound knowledge repo's ``containers.yaml`` (the knowledge overlay).
+
+    The citadel E1e **knowledge overlay** (config-graft, #947): when this machine
+    binds a **stateless harness** to a knowledge repo, personal reference config --
+    including the container fleet's ``containers.yaml`` -- lives in the knowledge
+    repo, not the shareable harness tree. This asks ``agent-worktrees state-root``
+    (run with the process cwd) only to LOCATE the knowledge checkout -- the
+    config-READ axis, distinct from where personal state is written -- and returns
+    its ``containers.yaml`` when present.
+
+    Purely additive + fail-open: it is consulted only as a **fallback** after the
+    explicit env / cwd / machine-local locations miss (so a deliberate machine-local
+    ``~/.agent-containers/containers.yaml`` still wins), and a missing binstub /
+    non-stateless / unbound repo / any error yields ``None``. Never raises.
+    """
+    import json
+    import shutil
+    import subprocess
+
+    exe = shutil.which("agent-worktrees")
+    if not exe:
+        return None
+    try:
+        proc = subprocess.run(
+            [exe, "state-root", "--json"],
+            capture_output=True, text=True, timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0 or not (proc.stdout or "").strip():
+        return None
+    try:
+        data = json.loads(proc.stdout)
+    except ValueError:
+        return None
+    if not data.get("requires_external") or not data.get("bound"):
+        return None
+    root = data.get("state_root")
+    if not root:
+        return None
+    candidate = Path(root) / CONFIG_FILENAME
+    return candidate if candidate.exists() else None
+
+
 def _config_path() -> Path | None:
     """Locate the containers.yaml config file, or None if not found."""
     env = os.environ.get("AGENT_CONTAINERS_CONFIG")
@@ -220,6 +265,12 @@ def _config_path() -> Path | None:
     runtime = RUNTIME_DIR / CONFIG_FILENAME
     if runtime.exists():
         return runtime
+    # E1e knowledge overlay: a stateless harness keeps its containers.yaml in the
+    # bound knowledge repo. Additive fallback only -- after the explicit locations
+    # above miss, before built-in defaults.
+    overlay = _knowledge_overlay_config()
+    if overlay is not None:
+        return overlay
     return None
 
 
