@@ -111,6 +111,31 @@ class ConfigSection:
 
 
 @dataclass(frozen=True)
+class Column:
+    """One declarative column in a registered pivot's table view (D1).
+
+    A pivot may declare an ordered ``columns`` list so the generic renderer shows
+    a real table (id / state / age / …) instead of only the flat id/title/badge
+    ``entry`` shape. ``key`` names the field in each entry dict; ``header`` is the
+    column label (defaults to ``key``); ``width`` clips/pads the cell (``None``
+    lets the renderer size it); ``align`` is ``l``/``r``/``c``; ``style`` is an
+    optional Rich style hint the renderer may apply. Purely declarative -- an
+    unknown ``key`` degrades to an empty cell, never an error.
+    """
+
+    key: str
+    header: str
+    width: int | None = None
+    align: str = "l"
+    style: str | None = None
+    #: Optional named palette for **per-value** cell colouring (reusing the
+    #: picker's own vocabulary, e.g. ``"state"`` -> the Worktrees state palette).
+    #: The renderer maps the cell value through the palette; ``style`` is the
+    #: fallback when the value isn't in the palette.
+    palette: str | None = None
+
+
+@dataclass(frozen=True)
 class RegisteredPivot:
     """A pivot contributed by another plugin via a filesystem manifest."""
 
@@ -126,6 +151,27 @@ class RegisteredPivot:
     empty_hint: str
     actions: tuple[PivotAction, ...]
     source_path: str
+    #: D1 -- declarative table columns (empty => fall back to the id/title/badge
+    #: ``entry`` render) and a summary/header-line template whose ``{token}``s are
+    #: filled from the ``list`` payload's ``summary`` object (e.g. budget
+    #: headroom). Both default off so an older manifest is unaffected.
+    columns: tuple[Column, ...] = ()
+    summary_template: str | None = None
+    #: Data scope. ``"machine"`` (default) rides the machine sub-nav -- the pivot's
+    #: ``list`` runs per selected machine (agent-dispatch, containers). ``"account"``
+    #: (or ``"global"``) is a cross-machine shared resource (CodeSpaces): the list
+    #: runs **once**, the machine sub-nav is ignored for scoping, and the header
+    #: counts items, not "on <machine>".
+    scope: str = "machine"
+    #: Optional entry key to **group** a columns table by (``entry.group``): rows
+    #: sharing a value are rendered under a ``── <value> ──`` section header (e.g.
+    #: ``repo @ account``). ``None`` => a flat table.
+    group_field: str | None = None
+
+    @property
+    def account_scoped(self) -> bool:
+        """True when this pivot is a cross-machine (account/global) resource."""
+        return self.scope in ("account", "global")
 
     @property
     def kind(self) -> str:
@@ -181,6 +227,7 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
     title_field = _entry_str("title", "title") or "title"
     worktree_field = _entry_str("worktree", "target_worktree")
     subtitle_field = _entry_str("subtitle", None)
+    group_field = _entry_str("group", None)
 
     badges_raw = entry.get("badges", [])
     if isinstance(badges_raw, str):
@@ -236,6 +283,20 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
             )
         )
 
+    columns = _parse_columns(data.get("columns"))
+
+    summary = data.get("summary")
+    if summary is None:
+        summary_template: str | None = None
+    elif isinstance(summary, str):
+        summary_template = summary
+    else:
+        raise ManifestError("`summary` must be a string template when present")
+
+    scope = data.get("scope", "machine")
+    if not isinstance(scope, str) or scope not in ("machine", "account", "global"):
+        raise ManifestError("`scope` must be one of machine/account/global")
+
     return RegisteredPivot(
         name=name,
         label=label.strip(),
@@ -249,7 +310,91 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
         empty_hint=empty_hint,
         actions=tuple(actions),
         source_path=source_path,
+        columns=columns,
+        summary_template=summary_template,
+        scope=scope,
+        group_field=group_field,
     )
+
+
+_VALID_ALIGN = {"l", "r", "c"}
+
+
+def _parse_columns(raw: object) -> tuple[Column, ...]:
+    """Parse a manifest's optional ``columns`` array into :class:`Column`\\ s (D1).
+
+    Absent => ``()`` (the renderer falls back to the id/title/badge ``entry``
+    shape). Each column needs a string ``key``; ``header`` defaults to ``key``;
+    ``width`` must be a positive int when present; ``align`` is ``l``/``r``/``c``
+    (default ``l``); ``style`` is an optional string hint. A structural problem
+    raises :class:`ManifestError` so the caller can skip the whole manifest.
+    """
+    if raw is None:
+        return ()
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        raise ManifestError("`columns` must be an array when present")
+    cols: list[Column] = []
+    for i, c in enumerate(raw):
+        if not isinstance(c, Mapping):
+            raise ManifestError(f"`columns[{i}]` must be an object")
+        key = c.get("key")
+        if not isinstance(key, str) or not key.strip():
+            raise ManifestError(f"`columns[{i}].key` is required")
+        header = c.get("header", key)
+        if not isinstance(header, str):
+            raise ManifestError(f"`columns[{i}].header` must be a string")
+        width_raw = c.get("width")
+        if width_raw is None:
+            width: int | None = None
+        elif isinstance(width_raw, bool) or not isinstance(width_raw, int) or width_raw <= 0:
+            raise ManifestError(f"`columns[{i}].width` must be a positive integer")
+        else:
+            width = width_raw
+        align = c.get("align", "l")
+        if not isinstance(align, str) or align not in _VALID_ALIGN:
+            raise ManifestError(f"`columns[{i}].align` must be one of l/r/c")
+        style = c.get("style")
+        if style is not None and not isinstance(style, str):
+            raise ManifestError(f"`columns[{i}].style` must be a string")
+        palette = c.get("palette")
+        if palette is not None and not isinstance(palette, str):
+            raise ManifestError(f"`columns[{i}].palette` must be a string")
+        cols.append(
+            Column(
+                key=key.strip(),
+                header=header,
+                width=width,
+                align=align,
+                style=style,
+                palette=palette,
+            )
+        )
+    return tuple(cols)
+
+
+def parse_list_payload(data: object) -> tuple[list[dict], dict]:
+    """Normalize a registered pivot's ``list`` output into ``(rows, summary)`` (D1).
+
+    Two accepted shapes, so the summary/header line (D1) is expressible without
+    breaking the original bare-array contract:
+
+    * a bare JSON **array** of entry objects -> ``(rows, {})`` (back-compat);
+    * a JSON **object** ``{"entries": [...], "summary": {...}}`` -> rows from
+      ``entries`` and the ``summary`` dict threaded to the header-line template.
+
+    Defensive: non-dict rows are dropped; a non-list ``entries`` or non-dict
+    ``summary`` degrades to empty rather than raising, so a malformed payload
+    never breaks the picker.
+    """
+    if isinstance(data, Mapping):
+        raw_rows = data.get("entries", [])
+        raw_summary = data.get("summary", {})
+    else:
+        raw_rows = data
+        raw_summary = {}
+    rows = [r for r in raw_rows if isinstance(r, dict)] if isinstance(raw_rows, list) else []
+    summary = dict(raw_summary) if isinstance(raw_summary, Mapping) else {}
+    return rows, summary
 
 
 def parse_worktree_actions(
@@ -552,6 +697,7 @@ def format_template(template: Sequence[str], ctx: Mapping[str, object]) -> list[
 # Kept for symmetry with maintenance.py's module layout; the engine imports the
 # functions above directly.
 __all__ = [
+    "Column",
     "ConfigSection",
     "ManifestError",
     "PivotAction",
@@ -565,6 +711,7 @@ __all__ = [
     "installed_plugins_dir",
     "order_pivots",
     "parse_config_sections",
+    "parse_list_payload",
     "parse_manifest",
     "parse_worktree_actions",
     "pivots_dir",

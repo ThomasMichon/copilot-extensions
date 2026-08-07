@@ -110,6 +110,19 @@ class TestPathHelpers:
         result = cfg.project_dir("my-project")
         assert result.name == ".my-project"
 
+    def test_agent_home_override_relocates_state_root(self, tmp_path, monkeypatch):
+        # AGENT_HOME relocates the whole ~/.agent-* state tree to a sandbox.
+        monkeypatch.setenv("AGENT_HOME", str(tmp_path))
+        assert cfg._home() == tmp_path
+        assert cfg.install_dir() == tmp_path / ".agent-worktrees"
+        assert cfg.project_dir("proj") == tmp_path / ".proj"
+
+    def test_agent_home_unset_uses_real_home(self, monkeypatch):
+        monkeypatch.delenv("AGENT_HOME", raising=False)
+        # Falls back to USERPROFILE/home -- not the sandbox.
+        assert cfg._home() == cfg._home()          # stable
+        assert cfg.install_dir().name == ".agent-worktrees"
+
     def test_tracking_dir(self, monkeypatch):
         monkeypatch.setenv("WORKTREE_PROJECT", "test-proj")
         result = cfg.tracking_dir()

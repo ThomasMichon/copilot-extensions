@@ -210,3 +210,124 @@ def _iso(epoch: float) -> str:
     from datetime import datetime, timezone
     return datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat().replace(
         "+00:00", "Z")
+
+
+# --- picker_payload (Worktree Picker CodeSpaces-pivot shape, D1) ----------
+
+def test_picker_payload_shape_and_summary():
+    import time as _t
+    from agent_codespaces.pool import picker_payload
+
+    now = _t.time()
+    lease = Lease(codespace="held", effort="my-effort", pid=1, host="dev6",
+                  acquired_at=now, heartbeat_at=now)
+    codespaces = [
+        _cs("held", state="Available", machine="premiumLinux", repo="o/web-cs"),   # 8, in-use
+        _cs("free", state="Shutdown", machine="largePremiumLinux", repo="o/web-cs"),
+    ]
+    members, budget = build_pool(
+        budget_cores=64, now=now, codespaces=codespaces, leases=[lease], markers={},
+    )
+    payload = picker_payload(members, budget, note="")
+
+    assert set(payload) == {"entries", "summary"}
+    by = {e["name"]: e for e in payload["entries"]}
+    # in-use entry: holder rendered, health=running, use=in-use.
+    assert by["held"]["disposition"] == IN_USE
+    assert by["held"]["holder"] == "my-effort@dev6"
+    assert by["held"]["health"] == "running"
+    assert by["held"]["use"] == "in-use"
+    assert by["held"]["repo"] == "web-cs"          # short repo (trailing segment)
+    assert by["held"]["cores"] == "8"
+    assert by["held"]["id"] == "held"              # id mirrors name for the pivot
+    # free/stopped entry: no holder, health=stopped, use=free.
+    assert by["free"]["holder"] == ""
+    assert by["free"]["health"] == "stopped"
+    assert by["free"]["use"] == "free"
+    # summary carries the budget accounting + a (blank) note.
+    s = payload["summary"]
+    assert s["total_cores"] == 64
+    assert s["spent_cores"] == 8                   # only the running box
+    assert s["headroom_cores"] == 56
+    assert s["note"] == ""
+
+
+def test_picker_payload_unknown_cores_render_question_mark():
+    from agent_codespaces.pool import picker_payload
+    cs = CodespaceInfo(
+        name="a", display_name="a", repository="o/r", branch="main",
+        state="Available", machine="mysteryMachine", account="", last_used_at="",
+    )
+    members, budget = build_pool(budget_cores=64, codespaces=[cs], leases=[], markers={})
+    payload = picker_payload(members, budget)
+    assert payload["entries"][0]["cores"] == "?"
+    assert payload["summary"]["note"] == ""        # default note is blank
+
+
+def test_picker_payload_note_passthrough():
+    from agent_codespaces.pool import picker_payload
+    members, budget = build_pool(budget_cores=64, codespaces=[], leases=[], markers={})
+    payload = picker_payload(members, budget, note="gh token is missing the 'codespace' scope")
+    assert payload["entries"] == []
+    assert "codespace" in payload["summary"]["note"]
+
+
+def test_picker_payload_friendly_name_and_subtitle():
+    import time as _t
+    from agent_codespaces.pool import picker_payload
+    now = _t.time()
+    lease = Lease(codespace="held", effort="my-effort", pid=1, host="dev6",
+                  acquired_at=now, heartbeat_at=now)
+    # A friendly display_name distinct from the durable name; and a free box whose
+    # display_name equals its name (no redundant subtitle).
+    held = CodespaceInfo(name="held", display_name="my-feature", repository="o/web-cs",
+                         branch="main", state="Available", machine="premiumLinux",
+                         account="", last_used_at="")
+    free = CodespaceInfo(name="free", display_name="", repository="o/web-cs",
+                         branch="main", state="Shutdown", machine="premiumLinux",
+                         account="", last_used_at="")
+    members, budget = build_pool(now=now, codespaces=[held, free], leases=[lease], markers={})
+    by = {e["name"]: e for e in picker_payload(members, budget)["entries"]}
+    # Durable id vs friendly name both present.
+    assert by["held"]["name"] == "held"
+    assert by["held"]["display"] == "my-feature"
+    # Second metadata line carries the durable id + the claim.
+    assert "held" in by["held"]["subtitle"]
+    assert "claimed by my-effort on dev6" in by["held"]["subtitle"]
+    # Free box: display falls back to name; no redundant id, no claim -> blank subtitle.
+    assert by["free"]["display"] == "free"
+    assert by["free"]["subtitle"] == ""
+
+
+def test_picker_payload_group_status_worktree():
+    import time as _t
+    from agent_codespaces.pool import picker_payload
+    now = _t.time()
+    lease = Lease(codespace="held", effort="3bac", pid=1, host="dev6",
+                  acquired_at=now, heartbeat_at=now)
+    held = CodespaceInfo(name="held", display_name="my-feature",
+                         repository="odsp-microsoft/odsp-web-codespaces", branch="main",
+                         state="Available", machine="premiumLinux", account="acct1",
+                         last_used_at="")
+    members, budget = build_pool(now=now, codespaces=[held], leases=[lease], markers={})
+    e = picker_payload(members, budget)["entries"][0]
+    assert e["group"] == "odsp-web-codespaces @ acct1"
+    assert e["status"] == "RUNNING"          # running box
+    assert e["worktree"] == "3bac"           # claiming worktree short id (effort)
+
+
+def test_picker_payload_status_stale_and_stopped():
+    import time as _t
+    from agent_codespaces.pool import picker_payload
+    now = _t.time()
+    stale = CodespaceInfo(name="s", display_name="", repository="o/r-codespaces",
+                          branch="main", state="Shutdown", machine="premiumLinux",
+                          account="a", last_used_at=_iso(now - 5 * 24 * 3600))
+    stopped = CodespaceInfo(name="f", display_name="", repository="o/r-codespaces",
+                            branch="main", state="Shutdown", machine="premiumLinux",
+                            account="a", last_used_at=_iso(now - 60))
+    members, budget = build_pool(now=now, codespaces=[stale, stopped], leases=[], markers={})
+    by = {e["name"]: e for e in picker_payload(members, budget)["entries"]}
+    assert by["s"]["status"] == "STALE"
+    assert by["f"]["status"] == "STOPPED"
+    assert by["s"]["worktree"] == ""         # unclaimed

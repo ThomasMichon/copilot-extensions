@@ -7421,7 +7421,13 @@ def cmd_picker(args: argparse.Namespace) -> int:
         # Apply) is simulated with no side effects. This is the ONLY sanctioned
         # way to run the picker's mock behaviors; a normal launch is always
         # real. Prints the resulting launch decision instead of acting on it.
-        live = not _in_ssh_session()
+        # ``--local`` forces the local-only source (data_local) instead of the
+        # multi-machine SSH source -- needed for an isolated sandbox preview,
+        # where no mesh repo/roster is resolvable (data_ssh would raise).
+        if getattr(args, "picker_local", False):
+            live = False
+        else:
+            live = not _in_ssh_session()
         decision = picker_tui.run_tui_picker(live=live, mock_mode=True)
         if as_json:
             _json_output({"mock": True, "decision": decision})
@@ -7441,11 +7447,15 @@ def cmd_picker(args: argparse.Namespace) -> int:
         live = bool(getattr(args, "live", False))
         fmt = getattr(args, "picker_format", "svg")
         out = getattr(args, "out", None)
+        pivot = getattr(args, "picker_pivot", None)
+        wait_pivot = float(getattr(args, "picker_wait", 0.0) or 0.0)
         if live:
             from .picker_tui import data_ssh as _source
         else:
             from .picker_tui import data_local as _source
-        caps = _capture.capture(_source, live=live)
+        caps = _capture.capture(
+            _source, live=live, pivot=pivot, wait_pivot=wait_pivot,
+        )
         content = caps[fmt]
         if out:
             Path(out).write_text(content, encoding="utf-8")
@@ -12239,6 +12249,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--live", action="store_true",
                    help="screenshot: render the multi-machine SSH source "
                         "instead of the local-only source")
+    p.add_argument("--pivot", dest="picker_pivot", default=None,
+                   help="screenshot: switch to this pivot (top tab) before "
+                        "capturing, e.g. 'CodeSpaces' (case-insensitive; "
+                        "unknown labels capture the default Worktrees tab)")
+    p.add_argument("--wait", dest="picker_wait", type=float, default=0.0,
+                   help="screenshot: with --pivot, seconds to wait for a "
+                        "registered pivot's background list to finish loading "
+                        "so the capture shows real rows (default: 0 = no wait)")
+    p.add_argument("--local", dest="picker_local", action="store_true",
+                   help="mock: force the local-only source (data_local) instead "
+                        "of the multi-machine SSH source -- for an isolated "
+                        "sandbox preview with no resolvable mesh repo/roster")
 
     # validate
     p = sub.add_parser("validate", help="Validate core infrastructure files")

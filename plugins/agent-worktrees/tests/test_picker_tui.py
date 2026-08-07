@@ -5091,6 +5091,187 @@ def test_tasks_view_component_renders_body(tmp_path, monkeypatch):
     asyncio.run(run())
 
 
+def _write_codespaces_manifest(directory):
+    """A columns+summary (D1) pivot manifest, modelling the CodeSpaces tab."""
+    import json
+    manifest = {
+        "label": "CodeSpaces",
+        "after": "Worktrees",
+        "list": ["true"],
+        "columns": [
+            {"key": "name", "header": "codespace", "width": 24},
+            {"key": "disposition", "header": "state", "width": 10, "style": "yellow"},
+            {"key": "cores", "header": "cores", "width": 5, "align": "r"},
+        ],
+        "summary": "{spent_cores}/{total_cores} cores \u00b7 {headroom_cores} free",
+    }
+    (directory / "agent-codespaces.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+
+class _FakeRuntimeSummary(_FakeRuntime):
+    """A fake runtime that also serves a D1 summary dict (get_summary)."""
+
+    def __init__(self, rows, summary):
+        super().__init__(rows)
+        self.summary = summary
+
+    def get_summary(self, machine):
+        return dict(self.summary)
+
+
+def test_registered_pivot_columns_and_summary_render(tmp_path, monkeypatch):
+    """D1: a pivot declaring ``columns`` renders a table (column header + one row
+    per entry across the declared columns) and its ``summary`` template renders a
+    header line filled from the provider's summary dict."""
+    from agent_worktrees.picker_tui import pivots as pivots_mod
+
+    d = tmp_path / "pivots"
+    d.mkdir()
+    _write_codespaces_manifest(d)
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+
+    rows = [
+        {"name": "feature-a-7qv4", "disposition": "in-use", "cores": 32},
+        {"name": "feature-b-x65q", "disposition": "idle", "cores": 32},
+    ]
+    summary = {"spent_cores": 32, "total_cores": 64, "headroom_cores": 32}
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            reg = scr.registered_pivots[0]
+            rt = _FakeRuntimeSummary(rows, summary)
+            scr._pivot_runtimes[reg.name] = rt
+            scr.htab = scr.htabs.index("CodeSpaces")
+            scr.sel = scr.default_sel()
+            scr.refresh()
+            await pilot.pause()
+
+            # One ("T", i) stop per codespace entry (flat, not grouped).
+            vrows = scr.build_body(118)
+            stops = [getattr(v, "stop", None) for v in vrows]
+            assert stops.count(("T", 0)) == 1
+            assert any(s == ("T", 1) for s in stops)
+
+            plain = pcap.screen_to_text(scr)
+            # Column header (upper-cased) + cell values render.
+            assert "CODESPACE" in plain
+            assert "feature-a-7qv4" in plain
+            assert "in-use" in plain
+            # Summary line rendered from the template + summary dict.
+            assert "32/64 cores" in plain
+            assert "32 free" in plain
+
+    asyncio.run(run())
+
+
+def test_screenshot_pivot_selection_and_wait(tmp_path, monkeypatch):
+    """The snapshot tool can target a specific pivot and wait for its registered
+    ``list`` to load, so a headless capture shows the CodeSpaces tab with real
+    rows (not the default Worktrees tab, not a 'loading…' spinner)."""
+    import json as _json
+    import sys as _sys
+
+    from agent_worktrees.picker_tui import capture as _cap
+    from agent_worktrees.picker_tui import pivots as pivots_mod
+
+    d = tmp_path / "pivots"
+    d.mkdir()
+    # A CodeSpaces columns+summary manifest whose `list` prints a fixture payload
+    # (so the capture is deterministic + offline -- no live agent-codespaces).
+    fixture = tmp_path / "pool.json"
+    fixture.write_text(_json.dumps({
+        "entries": [
+            {"id": "cs-alpha", "name": "cs-alpha", "repo": "web-cs",
+             "disposition": "in-use", "cores": "32", "holder": "eff-a@dev6"},
+        ],
+        "summary": {"spent_cores": 32, "total_cores": 64, "headroom_cores": 32,
+                    "running_count": 1, "total_count": 1, "note": ""},
+    }), encoding="utf-8")
+    manifest = {
+        "label": "CodeSpaces",
+        "after": "Worktrees",
+        "list": [_sys.executable, "-c",
+                 f"import sys;sys.stdout.write(open(r'{fixture}').read())"],
+        "columns": [
+            {"key": "name", "header": "codespace", "width": 24},
+            {"key": "disposition", "header": "state", "width": 10},
+            {"key": "cores", "header": "cores", "width": 5, "align": "r"},
+            {"key": "holder", "header": "holder", "width": 16},
+        ],
+        "summary": "{spent_cores}/{total_cores} cores \u00b7 {headroom_cores} free",
+    }
+    (d / "agent-codespaces.json").write_text(_json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+
+    caps = _cap.capture(_fixture_source(), pivot="CodeSpaces", wait_pivot=5.0)
+    text = caps["text"]
+    # Landed on the CodeSpaces tab and rendered the fixture row + summary.
+    assert "CODESPACE" in text
+    assert "cs-alpha" in text
+    assert "in-use" in text
+    assert "eff-a@dev6" in text
+    assert "32/64 cores" in text
+
+
+def test_registered_pivot_account_scope_and_subtitle(tmp_path, monkeypatch):
+    """An account-scoped columns pivot with a subtitle field: the header counts
+    items ('N codespaces', not 'on <machine>') and each row gets a dim second
+    metadata line from the subtitle field."""
+    from agent_worktrees.picker_tui import pivots as pivots_mod
+
+    d = tmp_path / "pivots"
+    d.mkdir()
+    manifest = {
+        "label": "CodeSpaces",
+        "after": "Worktrees",
+        "scope": "account",
+        "list": ["true"],
+        "entry": {"id": "id", "title": "display", "subtitle": "subtitle"},
+        "columns": [
+            {"key": "display", "header": "codespace", "width": 22},
+            {"key": "disposition", "header": "state", "width": 10},
+        ],
+        "summary": "{spent_cores}/{total_cores} cores",
+    }
+    import json as _json
+    (d / "agent-codespaces.json").write_text(_json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+
+    rows = [
+        {"id": "held", "display": "my-feature", "disposition": "in-use",
+         "subtitle": "held · claimed by eff-a on dev6"},
+        {"id": "free", "display": "free", "disposition": "idle", "subtitle": ""},
+    ]
+    summary = {"spent_cores": 32, "total_cores": 64}
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            reg = scr.registered_pivots[0]
+            scr._pivot_runtimes[reg.name] = _FakeRuntimeSummary(rows, summary)
+            scr.htab = scr.htabs.index("CodeSpaces")
+            scr.sel = scr.default_sel()
+            scr.refresh()
+            await pilot.pause()
+
+            plain = pcap.screen_to_text(scr)
+            # Account-scoped header counts items, not "on <machine>".
+            assert "2 codespaces" in plain
+            assert "on tmichon" not in plain.lower()
+            # Friendly names + the subtitle second line for the held row.
+            assert "my-feature" in plain
+            assert "claimed by eff-a on dev6" in plain
+
+    asyncio.run(run())
+
+
 def test_registered_pivot_action_menu_runs_and_invalidates(tmp_path, monkeypatch):
     from agent_worktrees.picker_tui import pivots as pivots_mod
 
@@ -5773,5 +5954,123 @@ def test_tick_services_deferred_nav_refresh():
                 scr.refresh = orig
             assert calls, "tick did not service the deferred nav refresh"
             assert scr._nav_dirty is False
+
+    asyncio.run(run())
+
+
+def test_registered_pivot_grouped_columns_and_task_correlation(tmp_path, monkeypatch):
+    """A grouped, account-scoped columns pivot: rows render under a
+    section header, and the claiming worktree id is correlated to the owning
+    worktree's title (the TASK column) via the Picker's worktree records."""
+    import json as _json
+
+    from agent_worktrees.picker_tui import pivots as pivots_mod
+
+    d = tmp_path / "pivots"
+    d.mkdir()
+    manifest = {
+        "label": "CodeSpaces",
+        "after": "Worktrees",
+        "scope": "account",
+        "list": ["true"],
+        "entry": {"id": "id", "title": "display", "worktree": "worktree",
+                  "group": "group"},
+        "columns": [
+            {"key": "display", "header": "codespace", "width": 22},
+            {"key": "status", "header": "state", "width": 8},
+            {"key": "worktree", "header": "worktree", "width": 8},
+            {"key": "worktree_title", "header": "task", "width": 28},
+        ],
+    }
+    (d / "agent-codespaces.json").write_text(_json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+
+    rows = [
+        {"id": "cs1", "display": "my-feature", "status": "RUNNING",
+         "worktree": "3bac", "group": "web-cs @ acct1"},
+        {"id": "cs2", "display": "other", "status": "STALE",
+         "worktree": "", "group": "web-cs @ acct1"},
+    ]
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            scr.data = [{"id4": "3bac", "title": "Add browser-mint to auth"}]
+            scr._pivot_runtimes[scr.registered_pivots[0].name] = _FakeRuntime(rows)
+            scr.htab = scr.htabs.index("CodeSpaces")
+            scr.sel = scr.default_sel()
+            scr.refresh()
+            await pilot.pause()
+
+            plain = pcap.screen_to_text(scr)
+            assert "web-cs @ acct1" in plain
+            assert "Add browser-mint to auth" in plain
+            assert "my-feature" in plain
+
+    asyncio.run(run())
+
+
+def test_palette_style_reuses_worktree_state_palette():
+    from agent_worktrees.picker_tui.engine import (
+        C_STATE,
+        _palette_style,
+    )
+    # The 'state' palette REUSES the Worktrees C_STATE colours.
+    assert _palette_style("state", "RUNNING") == C_STATE["ACTIVE"]
+    assert _palette_style("state", "stale") == C_STATE["WIP"]   # case-insensitive
+    assert _palette_style("state", "STOPPED") == C_STATE["UNUSED"]
+    # Raw worktree state names pass through the same palette.
+    assert _palette_style("state", "DIRTY") == C_STATE["DIRTY"]
+    # Unknown palette / value -> no style (falls back to the column's literal).
+    assert _palette_style("nope", "RUNNING") == ""
+    assert _palette_style("state", "???") == ""
+
+
+def test_codespaces_state_column_is_colour_coded(tmp_path, monkeypatch):
+    """The CodeSpaces STATE column renders each status in the reused Worktrees
+    palette (a RUNNING cell carries the ACTIVE colour in the ANSI capture)."""
+    import json as _json
+
+    from agent_worktrees.picker_tui import pivots as pivots_mod
+    from agent_worktrees.picker_tui.engine import C_STATE
+
+    d = tmp_path / "pivots"
+    d.mkdir()
+    manifest = {
+        "label": "CodeSpaces", "after": "Worktrees", "scope": "account",
+        "list": ["true"],
+        "columns": [
+            {"key": "display", "header": "codespace", "width": 20},
+            {"key": "status", "header": "state", "width": 8, "palette": "state"},
+        ],
+    }
+    (d / "agent-codespaces.json").write_text(_json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+
+    rows = [{"id": "cs1", "display": "feat", "status": "RUNNING"}]
+    src = _fixture_source()
+
+    def _rgb(style):
+        from rich.style import Style
+        c = Style.parse(style).color
+        t = c.get_truecolor()
+        return f"{t.red};{t.green};{t.blue}"
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            scr._pivot_runtimes[scr.registered_pivots[0].name] = _FakeRuntime(rows)
+            scr.htab = scr.htabs.index("CodeSpaces")
+            scr.sel = scr.default_sel()
+            scr.refresh()
+            await pilot.pause()
+            ansi = pcap.screen_to_ansi(scr)
+            # The ACTIVE (RUNNING) truecolor appears in the coloured capture.
+            assert _rgb(C_STATE["ACTIVE"]) in ansi
 
     asyncio.run(run())
