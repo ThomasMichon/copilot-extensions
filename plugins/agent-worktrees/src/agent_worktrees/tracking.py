@@ -1297,13 +1297,17 @@ def stamp_bound_live(
     """Cache the last-known bound-Copilot liveness on a worktree's record (#4057).
 
     The bare-resume counterpart of :func:`stamp_mux_live`: persists ``bound_live``
-    + ``bound_live_at`` (see :class:`WorktreeRecord`). Stamped exclusively by the
-    OFF-HOT-PATH reconciler (:func:`picker_tui.data_local.reconcile_bound_live`),
-    which resolves every live bound Copilot on the machine via the authoritative
-    ``reclaim.resolve_bound_copilots`` scan, so a bare-resumed session (cwd=home,
+    + ``bound_live_at`` (see :class:`WorktreeRecord`). Stamped by two
+    authoritative, off-the-populate-hot-path callers -- both sourced from the
+    same ``reclaim.resolve_bound_copilots`` scan: the OFF-HOT-PATH reconciler
+    (:func:`picker_tui.data_local.reconcile_bound_live`), which resolves every
+    live bound Copilot on the machine so a bare-resumed session (cwd=home,
     invisible to the registered-session + mux scans) still surfaces in the Active
-    section from cache alone (#1416). Same best-effort / refresh / throttle
-    semantics as :func:`stamp_mux_live`; never the populate hot path.
+    section from cache alone (#1416); and the Enter-time resume verify in
+    ``_resolve_resume``, which writes back the single worktree's fresh verdict so
+    the next paint can offer Reclaim on a bound/bare Copilot even if this launch
+    crashed. Same best-effort / refresh / throttle semantics as
+    :func:`stamp_mux_live`; never the populate hot path.
     """
     _stamp_liveness(
         worktree_id, live, live_attr="bound_live", at_attr="bound_live_at",
