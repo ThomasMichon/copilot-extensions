@@ -39,3 +39,21 @@ def test_human_merge_profile_when_no_label():
     )
     assert prof.profile == pc.PROFILE_PR_HUMAN_MERGE
     assert prof.applies("pr-merge") is False
+
+
+def test_self_merge_profile_from_self_approve():
+    prof = m._pr_flow_profile(
+        _repo(enabled=True, required=True, provider="github",
+              self_approve=True, reviewer="copilot", review_blocking=False)
+    )
+    assert prof.profile == pc.PROFILE_PR_SELF_MERGE
+    assert prof.applies("pr-merge") is True
+
+
+def test_self_merge_profile_from_merge_actor():
+    prof = m._pr_flow_profile(
+        _repo(enabled=True, required=True, provider="github",
+              merge_actor="submitter-direct")
+    )
+    assert prof.profile == pc.PROFILE_PR_SELF_MERGE
+

@@ -601,6 +601,54 @@ class TestGitHubProvider:
         assert res.merged is False
         assert res.state == "closed"
 
+    def test_merge_pull_squash_admin_builds_args(self, monkeypatch):
+        # pr-merge --now: a submitter self-merge is a squash merge, admin past
+        # the non-blocking gate, and NEVER deletes the branch (so finalize can
+        # affirm the merge).
+        from agent_worktrees.providers import github
+        captured = {}
+
+        def fake(args, **kw):
+            captured["args"] = args
+            return _proc(returncode=0)
+
+        monkeypatch.setattr(github, "run_cli", fake)
+        err = github.GitHubProvider().merge_pull("o/r", 7, squash=True, admin=True)
+        assert err == ""
+        a = captured["args"]
+        assert a[:5] == ["gh", "pr", "merge", "7", "--repo"]
+        assert "--squash" in a and "--admin" in a
+        assert "--delete-branch" not in a
+
+    def test_merge_pull_no_admin_omits_admin_flag(self, monkeypatch):
+        from agent_worktrees.providers import github
+        captured = {}
+        monkeypatch.setattr(
+            github, "run_cli",
+            lambda args, **kw: (captured.__setitem__("args", args), _proc())[1],
+        )
+        github.GitHubProvider().merge_pull("o/r", 7, squash=True, admin=False)
+        assert "--admin" not in captured["args"]
+
+    def test_merge_pull_surfaces_error(self, monkeypatch):
+        from agent_worktrees.providers import github
+        monkeypatch.setattr(
+            github, "run_cli",
+            lambda args, **kw: _proc(returncode=1, stderr="not mergeable"),
+        )
+        err = github.GitHubProvider().merge_pull("o/r", 7)
+        assert "not mergeable" in err
+        assert "o/r#7" in err
+
+    def test_merge_pull_unsupported_on_gitea_and_azure(self):
+        # Direct merge (pr-merge --now) is GitHub-only today; the other
+        # providers return a non-empty "unsupported" message, never "".
+        from agent_worktrees.providers import azure_devops as azure
+        from agent_worktrees.providers import gitea
+        for prov in (gitea.GiteaProvider(), azure.AzureDevOpsProvider()):
+            err = prov.merge_pull("o/r", 7)
+            assert err and "does not support" in err
+
 
 class TestAzureDevOpsProvider:
     def test_get_pull_completed_is_merged(self, monkeypatch):
