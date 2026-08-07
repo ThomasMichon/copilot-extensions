@@ -16,7 +16,9 @@ pivot surfaces, never an exception that breaks the picker.
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import signal
 import subprocess
 import threading
 from collections.abc import Mapping, Sequence
@@ -26,6 +28,40 @@ from .pivots import RegisteredPivot, format_template, parse_list_payload
 #: Hard cap on how long a pivot's ``list``/action command may run.
 LIST_TIMEOUT = 20.0
 ACTION_TIMEOUT = 30.0
+#: Overall watchdog for a one-shot (non-``subscribe``) streaming ``list``: a
+#: stalled producer is killed after this many seconds, but rows already received
+#: are kept. A ``subscribe`` (held/live) stream has no overall deadline.
+STREAM_TIMEOUT = 30.0
+
+_CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def _kill_proc_tree(proc: subprocess.Popen) -> None:
+    """Best-effort terminate a streaming child (and its process group on posix,
+    so a ``list --stream`` that shelled out to ``gh`` dies with it). Mirrors
+    :func:`picker_tui.data_ssh._kill_proc_tree`; never raises."""
+    if proc.poll() is not None:
+        return
+    try:
+        if os.name == "posix":
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except (ProcessLookupError, PermissionError, OSError):
+                proc.terminate()
+        else:
+            proc.kill()
+    except Exception:
+        pass
+    try:
+        proc.wait(timeout=2)
+    except Exception:
+        try:
+            if os.name == "posix":
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            else:
+                proc.kill()
+        except Exception:
+            pass
 
 
 def _resolve_argv(template: Sequence[str], ctx: Mapping[str, object]) -> list[str]:
@@ -37,6 +73,48 @@ def _resolve_argv(template: Sequence[str], ctx: Mapping[str, object]) -> list[st
         if resolved:
             argv = [resolved, *argv[1:]]
     return argv
+
+
+def _parse_ndjson_line(raw: str):
+    """Parse one NDJSON line to a dict, tolerating banner noise / blank lines.
+
+    A login shell can emit a line of noise before the JSON, so locate the first
+    ``{`` and decode from there. Returns ``None`` when the line carries no JSON
+    object (blank, banner, partial, or a bare ``[...]`` array). Mirrors
+    :func:`picker_tui.data_ssh._parse_ndjson_line`."""
+    if not raw:
+        return None
+    s = raw.strip()
+    i = s.find("{")
+    if i < 0:
+        return None
+    try:
+        return json.loads(s[i:])
+    except Exception:
+        return None
+
+
+def _is_stream_unsupported(stderr: str) -> bool:
+    """True when a provider's argparse rejected the trailing ``--stream`` (an
+    older CLI that predates the streaming producer), so the runtime falls back
+    to the one-shot ``list``."""
+    s = (stderr or "").lower()
+    return "unrecognized arguments" in s and "--stream" in s
+
+
+def _stream_entry(obj: Mapping) -> dict:
+    """Extract the entry dict from a streaming ``row``/``delta`` frame.
+
+    The canonical shape nests the entry under ``entry`` (``row``/``wt`` accepted
+    as aliases for symmetry with the built-in worktrees producer). As a last
+    resort the frame's own fields (minus the reserved ``type``) are treated as
+    the entry inline. Always returns a ``dict`` (possibly empty)."""
+    for key in ("entry", "row", "wt"):
+        val = obj.get(key)
+        if isinstance(val, dict):
+            return val
+    return {k: v for k, v in obj.items() if k != "type"}
+
 
 
 class RegisteredPivotRuntime:
@@ -56,6 +134,13 @@ class RegisteredPivotRuntime:
         # its 3-tuple contract; ``get_summary`` reads this.
         self._summaries: dict[object, dict] = {}
         self._inflight: set[object] = set()
+        # D2: live streaming children tracked for teardown -- a held ``subscribe``
+        # stream must be killed on picker exit so no ``list --stream`` is
+        # orphaned. Guarded by its own lock; ``_closed`` short-circuits any spawn
+        # that races :meth:`close`.
+        self._procs: list[subprocess.Popen] = []
+        self._procs_lock = threading.Lock()
+        self._closed = threading.Event()
 
     # -- listing -------------------------------------------------------------
 
@@ -96,13 +181,222 @@ class RegisteredPivotRuntime:
                 self._cache.pop(machine, None)
                 self._summaries.pop(machine, None)
 
+    def close(self) -> None:
+        """Tear down every tracked streaming child (picker exit). Idempotent --
+        a held ``subscribe`` stream reader unblocks when its pipe closes, so no
+        ``list --stream`` process is orphaned after the picker quits."""
+        self._closed.set()
+        with self._procs_lock:
+            procs = list(self._procs)
+            self._procs.clear()
+        for proc in procs:
+            _kill_proc_tree(proc)
+
+    def _spawn_stream(self, argv: Sequence[str]) -> subprocess.Popen:
+        """Spawn a tracked, killable streaming child (line-buffered stdout so
+        rows surface as the provider flushes them). Registered in ``self._procs``
+        so :meth:`close` tears it down. Mirrors
+        :meth:`picker_tui.data_ssh.RemoteLoader._spawn_stream`."""
+        if self._closed.is_set():
+            raise RuntimeError("closed")
+        kwargs: dict = dict(
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
+            text=True, encoding="utf-8", errors="replace",
+            bufsize=1,
+        )
+        if os.name == "posix":
+            kwargs["start_new_session"] = True
+        else:
+            kwargs["creationflags"] = (
+                getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | _CREATE_NO_WINDOW
+            )
+        proc = subprocess.Popen(list(argv), **kwargs)
+        with self._procs_lock:
+            self._procs.append(proc)
+        # Close the spawn/close race: if close() fired between the guard and the
+        # Popen, it never saw this child -- kill it now.
+        if self._closed.is_set():
+            _kill_proc_tree(proc)
+        return proc
+
+    def _untrack(self, proc: subprocess.Popen) -> None:
+        with self._procs_lock:
+            if proc in self._procs:
+                self._procs.remove(proc)
+
     def _run_list(self, machine: object) -> None:
         ctx = {"machine": "" if machine is None else str(machine)}
+        # D2: a ``stream`` pivot runs the streaming runner, which writes the
+        # cache progressively (and, for ``subscribe``, keeps applying live
+        # deltas). It self-heals to the one-shot path when the provider doesn't
+        # understand ``--stream``. A non-stream pivot keeps the original
+        # compute-then-write-once contract.
+        if self.pivot.stream:
+            self._run_list_stream(machine, ctx)
+            return
         state, rows, err, summary = self._exec_list(ctx)
         with self._lock:
             self._cache[machine] = (state, rows, err)
             self._summaries[machine] = summary
             self._inflight.discard(machine)
+
+    def _run_list_stream(self, machine: object, ctx: Mapping[str, object]) -> None:
+        """Streaming ``list`` runner (D2): Popen ``list … --stream``, consume the
+        NDJSON envelope, and write the per-machine cache **in place** as frames
+        arrive so the render loop paints progressively and (with ``subscribe``)
+        live-updates.
+
+        Envelope (line-delimited, one JSON object per flushed line):
+
+        * ``begin`` -- optional roster hint (``count``); no cache effect.
+        * ``row`` / ``entry`` -- an entry object (under ``entry``/``row``/``wt``
+          or inline); accumulated by the pivot's ``id_field``. The first row
+          flips the cache to ``ready``.
+        * ``summary`` -- the D1 header-line substitution source.
+        * ``delta`` -- an entry to add/replace in place (keyed by ``id_field``).
+        * ``removed`` -- drop the entry named by ``id`` (or the entry's id).
+        * ``done`` -- terminal success. ``error`` -- terminal failure (``message``).
+
+        Falls back to the one-shot :meth:`_exec_list` when the provider's
+        argparse rejects ``--stream`` (an older CLI) or emits a plain JSON array
+        with no envelope, so ``stream: true`` is always safe to declare."""
+        argv = _resolve_argv((*self.pivot.list_cmd, "--stream"), ctx)
+        if not argv:
+            self._finish(machine, ("error", [], "empty list command"), {})
+            return
+        try:
+            proc = self._spawn_stream(argv)
+        except FileNotFoundError:
+            self._finish(machine, ("error", [], f"{argv[0]} not found on PATH"), {})
+            return
+        except Exception as exc:
+            self._finish(machine, ("error", [], str(exc)[:200]), {})
+            return
+
+        by_id: dict[str, dict] = {}
+        order: list[str] = []
+        summary: dict = {}
+        ready = False
+        done = False
+        saw_envelope = False
+        err_frame = ""
+        raw_lines: list[str] = []
+        id_field = self.pivot.id_field
+
+        # No overall deadline for a held ``subscribe`` stream (it runs until the
+        # picker exits); a one-shot stream is watchdogged so a stalled producer
+        # can't wedge the loader thread.
+        timer: threading.Timer | None = None
+        if not self.pivot.subscribe:
+            timer = threading.Timer(STREAM_TIMEOUT, lambda: _kill_proc_tree(proc))
+            timer.daemon = True
+            timer.start()
+
+        def publish() -> None:
+            with self._lock:
+                self._cache[machine] = ("ready", [by_id[i] for i in order], "")
+                self._summaries[machine] = dict(summary)
+
+        try:
+            for raw in proc.stdout:  # type: ignore[union-attr]
+                if self._closed.is_set():
+                    break
+                raw_lines.append(raw)
+                obj = _parse_ndjson_line(raw)
+                if obj is None:
+                    continue
+                typ = obj.get("type")
+                if typ == "begin":
+                    saw_envelope = True
+                elif typ in ("row", "entry", "delta"):
+                    saw_envelope = True
+                    entry = _stream_entry(obj)
+                    rid = entry.get(id_field)
+                    if rid is None:
+                        continue
+                    rid = str(rid)
+                    if rid not in by_id:
+                        order.append(rid)
+                    by_id[rid] = entry
+                    ready = True
+                    publish()
+                elif typ == "removed":
+                    saw_envelope = True
+                    rid = obj.get("id")
+                    if rid is None:
+                        rid = _stream_entry(obj).get(id_field)
+                    if rid is not None:
+                        rid = str(rid)
+                        if rid in by_id:
+                            del by_id[rid]
+                            order[:] = [i for i in order if i != rid]
+                            publish()
+                elif typ == "summary":
+                    saw_envelope = True
+                    raw_summary = obj.get("summary")
+                    summary = dict(raw_summary) if isinstance(raw_summary, Mapping) else {
+                        k: v for k, v in obj.items() if k != "type"
+                    }
+                    if ready:
+                        publish()
+                elif typ == "done":
+                    saw_envelope = True
+                    done = True
+                elif typ == "error":
+                    saw_envelope = True
+                    err_frame = str(obj.get("message") or obj.get("error") or "stream error")
+                    break
+        except Exception as exc:
+            if not err_frame:
+                err_frame = str(exc)[:200]
+        finally:
+            if timer is not None:
+                timer.cancel()
+            try:
+                _, stderr = proc.communicate(timeout=5)
+            except Exception:
+                _kill_proc_tree(proc)
+                try:
+                    _, stderr = proc.communicate(timeout=5)
+                except Exception:
+                    stderr = ""
+            self._untrack(proc)
+
+        if err_frame:
+            self._finish(machine, ("error", [], err_frame[:200]), {})
+            return
+        if ready or done:
+            # Fully or partially resolved (empty roster included) -- keep rows.
+            self._finish(
+                machine,
+                ("ready", [by_id[i] for i in order], ""),
+                dict(summary),
+            )
+            return
+        # No envelope was spoken. Fall back to the one-shot list: an old CLI
+        # rejects ``--stream`` (argparse), or the provider emitted a plain array.
+        if _is_stream_unsupported(stderr) or not saw_envelope:
+            state, rows, err, one_summary = self._exec_list(ctx)
+            self._finish(machine, (state, rows, err), one_summary)
+            return
+        detail = (stderr or "").strip().splitlines()
+        msg = detail[-1] if detail else f"exit {proc.returncode}"
+        self._finish(machine, ("error", [], msg[:200]), {})
+
+    def _finish(
+        self,
+        machine: object,
+        cache: tuple[str, list, str],
+        summary: dict,
+    ) -> None:
+        """Atomically write a terminal ``(state, rows, error)`` + summary and drop
+        the in-flight marker (the streaming runner's single write-back point)."""
+        with self._lock:
+            self._cache[machine] = cache
+            self._summaries[machine] = summary
+            self._inflight.discard(machine)
+
 
     def _exec_list(self, ctx: Mapping[str, object]) -> tuple[str, list, str, dict]:
         argv = _resolve_argv(self.pivot.list_cmd, ctx)

@@ -167,6 +167,18 @@ class RegisteredPivot:
     #: sharing a value are rendered under a ``── <value> ──`` section header (e.g.
     #: ``repo @ account``). ``None`` => a flat table.
     group_field: str | None = None
+    #: D2 -- opt into ``--stream``-style NDJSON. When True the runtime runs the
+    #: ``list`` command with a trailing ``--stream`` and consumes a line-delimited
+    #: ``{"type":"begin|row|summary|delta|removed|done|error"}`` envelope, so a
+    #: slow/large provider paints progressively. Falls back to the one-shot
+    #: ``list`` when the CLI doesn't understand ``--stream`` or emits a plain
+    #: array. Default off => the original one-shot contract is unchanged.
+    stream: bool = False
+    #: D2 -- with ``stream``, hold the channel open for **live** updates: the
+    #: provider keeps emitting ``delta``/``removed`` frames (e.g. a periodic
+    #: re-scan + diff) and the runtime applies them in place so an open pivot
+    #: repaints without a re-fetch. Ignored unless ``stream`` is also set.
+    subscribe: bool = False
 
     @property
     def account_scoped(self) -> bool:
@@ -297,6 +309,13 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
     if not isinstance(scope, str) or scope not in ("machine", "account", "global"):
         raise ManifestError("`scope` must be one of machine/account/global")
 
+    stream = data.get("stream", False)
+    if not isinstance(stream, bool):
+        raise ManifestError("`stream` must be a boolean when present")
+    subscribe = data.get("subscribe", False)
+    if not isinstance(subscribe, bool):
+        raise ManifestError("`subscribe` must be a boolean when present")
+
     return RegisteredPivot(
         name=name,
         label=label.strip(),
@@ -314,6 +333,8 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
         summary_template=summary_template,
         scope=scope,
         group_field=group_field,
+        stream=stream,
+        subscribe=subscribe,
     )
 
 

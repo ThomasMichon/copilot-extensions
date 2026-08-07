@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from agent_worktrees.picker_tui import pivots
 
 #: Repo root (…/copilot-extensions), derived from this test's location:
@@ -521,4 +520,23 @@ def test_bad_column_palette_sinks_manifest(tmp_path):
     _write(tmp_path, "ok", {"label": "Ok", "list": ["agent-x", "y"]})
     _write(tmp_path, "bad", {"label": "Bad", "list": ["agent-x", "y"],
         "columns": [{"key": "s", "palette": 5}]})
+    assert {p.name for p in pivots.discover_pivots(tmp_path)} == {"ok"}
+
+
+def test_stream_defaults_off_and_parses_true(tmp_path):
+    _write(tmp_path, "m", {"label": "M", "list": ["agent-x", "y"]})
+    [p] = pivots.discover_pivots(tmp_path)
+    assert p.stream is False
+    assert p.subscribe is False
+    _write(tmp_path, "m", {"label": "M", "list": ["agent-x", "y"],
+                           "stream": True, "subscribe": True})
+    [p] = pivots.discover_pivots(tmp_path)
+    assert p.stream is True
+    assert p.subscribe is True
+
+
+@pytest.mark.parametrize("bad", [{"stream": "yes"}, {"subscribe": 1}])
+def test_bad_stream_flags_sink_only_their_manifest(tmp_path, bad):
+    _write(tmp_path, "ok", {"label": "Ok", "list": ["agent-x", "y"]})
+    _write(tmp_path, "bad", {"label": "Bad", "list": ["agent-x", "y"], **bad})
     assert {p.name for p in pivots.discover_pivots(tmp_path)} == {"ok"}
