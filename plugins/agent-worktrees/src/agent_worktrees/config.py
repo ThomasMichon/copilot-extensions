@@ -399,14 +399,15 @@ def machines_yaml_path(repo_dir: str | Path) -> Path:
     ``machines.yaml`` when the canonical file is absent, so existing repos keep
     working until migrated. Prefers the canonical path when both exist.
 
-    **State-root config-overlay (E1e):** when ``repo_dir`` is the **stateless
+    **Knowledge overlay (config-graft, E1e):** when ``repo_dir`` is the **stateless
     launch harness** and has no ``machines.yaml`` of its own, redirect to the bound
-    **knowledge repo's** ``machines.yaml`` -- the machine topology is personal state
-    that lives in the knowledge repo, not the shareable harness tree. This makes
-    every ``load_machines_yaml`` caller knowledge-aware without changing its call.
-    The redirect only fires for the launch/default repo, never an arbitrary
-    ``repo_dir`` (a product repo with no ``machines.yaml`` still reports its own
-    canonical path, unchanged).
+    **knowledge repo's** ``machines.yaml`` -- the machine topology is personal
+    reference config that lives in the knowledge repo, not the shareable harness
+    tree. This is the config-READ axis (distinct from the state-root, the
+    personal-state *write* destination); it makes every ``load_machines_yaml``
+    caller knowledge-aware without changing its call. The redirect only fires for
+    the launch/default repo, never an arbitrary ``repo_dir`` (a product repo with
+    no ``machines.yaml`` still reports its own canonical path, unchanged).
     """
     canonical = Path(repo_dir) / INREPO_CONFIG_DIRNAME / "machines.yaml"
     if canonical.exists():

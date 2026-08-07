@@ -282,14 +282,14 @@ class TestMergedConfig:
         assert "https://storage.azure.com/" in resources
 
 
-class TestStateRootOverlay:
-    """codespaces.yaml state-root config-overlay graft (citadel E1e, #947)."""
+class TestKnowledgeOverlay:
+    """codespaces.yaml knowledge-overlay config-graft (citadel E1e, #947)."""
 
     def test_stateless_harness_grafts_knowledge_codespaces_yaml(
         self, config_dir, monkeypatch
     ):
         # An adopted harness with NO codespaces.yaml of its own reads the bound
-        # knowledge repo's codespaces.yaml via the state-root overlay.
+        # knowledge repo's codespaces.yaml via the knowledge overlay.
         harness = config_dir / "citadel-harness"
         harness.mkdir()
         knowledge = config_dir / "citadel-knowledge"
