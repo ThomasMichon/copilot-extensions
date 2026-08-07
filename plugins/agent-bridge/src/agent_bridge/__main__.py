@@ -811,6 +811,40 @@ def _win_task_exists() -> bool:
         return False
 
 
+def _daemon_launch_argv() -> list[str]:
+    """Argv that starts the foreground daemon (``agent-bridge start``) without
+    routing through the Windows ``.cmd`` binstub.
+
+    The installed ``agent-bridge`` binstub on Windows is ``agent-bridge.cmd``. A
+    bare ``subprocess.Popen(["agent-bridge", "start"])`` asks ``CreateProcess`` to
+    resolve the *extensionless* name ``agent-bridge`` -- but PATHEXT resolution is
+    a shell feature ``CreateProcess`` does not apply, so it cannot find the
+    ``.cmd`` and fails with ``FileNotFoundError`` (WinError 2). Because
+    ``service restart`` stops first, that failure leaves the bridge down. This is
+    the same bare-name/BatBadBut class ``bridge._agent_bridge_launch_prefix``
+    fixes in agent-dispatch.
+
+    Invoking the interpreter directly (``python -m agent_bridge start``) bypasses
+    the shim entirely. Prefer the running interpreter (this code already executes
+    inside the agent-bridge venv), then the installed venv interpreter, then the
+    ``agent-bridge`` binstub on PATH (POSIX shims are plain exec scripts and are
+    unaffected). Falls back to the bare name only when nothing else resolves."""
+    if sys.executable:
+        return [sys.executable, "-m", "agent_bridge", "start"]
+    venv = os.path.join(_INSTALL_DIR, "venv")
+    py = (
+        os.path.join(venv, "Scripts", "python.exe")
+        if sys.platform == "win32"
+        else os.path.join(venv, "bin", "python")
+    )
+    if os.path.isfile(py):
+        return [py, "-m", "agent_bridge", "start"]
+    exe = shutil.which("agent-bridge")
+    if exe:
+        return [exe, "start"]
+    return ["agent-bridge", "start"]
+
+
 def _service_start() -> None:
     import subprocess as sp
 
@@ -838,7 +872,7 @@ def _service_start() -> None:
         logf = open(os.path.join(_INSTALL_DIR, "agent-bridge.log"), "ab")
         errf = open(os.path.join(_INSTALL_DIR, "agent-bridge-err.log"), "ab")
         _sp.Popen(
-            ["agent-bridge", "start"],
+            _daemon_launch_argv(),
             stdout=logf, stderr=errf, stdin=_sp.DEVNULL, **popen_kwargs,
         )
 
