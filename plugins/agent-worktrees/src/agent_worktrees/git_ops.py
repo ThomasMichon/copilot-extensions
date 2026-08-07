@@ -591,14 +591,53 @@ def merge_squash(branch: str, worktree_id: str, *, cwd: str | Path) -> bool:
     return commit_r.returncode == 0
 
 
+@dataclass
+class PushResult:
+    """Outcome of :func:`push` -- truthy on success, but also carrying git's
+    stderr and a retry classification so callers can surface the *real* reason
+    a push failed instead of a generic "rejected".
+
+    ``__bool__`` returns ``ok`` so every existing ``if git_ops.push(...)`` /
+    ``pushed = git_ops.push(...)`` call keeps working unchanged.
+    """
+
+    ok: bool
+    stderr: str = ""
+
+    def __bool__(self) -> bool:
+        return self.ok
+
+    @property
+    def retryable(self) -> bool:
+        """True only when the failure is a **non-fast-forward race** (the remote
+        advanced) -- the one case a fetch + rebase + re-push actually fixes.
+
+        Everything else recurs identically on retry and must surface at once: a
+        **pre-push hook decline** (e.g. a repo's version-consistency / lint
+        gate), an **auth / permission** error (403, multi-account token
+        mismatch), or a **protected-branch** block. Classified from git's
+        stderr; an empty/unknown stderr is treated as non-retryable so a mystery
+        failure is shown rather than silently retried 3x.
+        """
+        if self.ok:
+            return False
+        s = self.stderr.lower()
+        return (
+            "non-fast-forward" in s
+            or "fetch first" in s
+            or "tip of your current branch is behind" in s
+            or "the remote contains work that you do" in s
+        )
+
+
 def push(
     remote: str,
     branch: str,
     *,
     cwd: str | Path,
     force_with_lease: bool = False,
-) -> bool:
-    """Push a branch to remote. Returns True on success.
+) -> PushResult:
+    """Push a branch to remote. Returns a :class:`PushResult` (truthy on success).
 
     Auto-authenticates when the remote is owned by a different ``gh`` account
     than the active one, without persisting a token in ``.git/config`` (#29).
@@ -606,6 +645,11 @@ def push(
     When *force_with_lease* is True, push with ``--force-with-lease`` -- used
     by the PR workflow to update a feature branch whose history was rewritten
     by the rebase chain, without clobbering unrelated remote updates.
+
+    The result carries git's ``stderr`` and a ``retryable`` classification so a
+    caller's retry loop can surface the real error (a pre-push hook decline, an
+    auth 403, a protected-branch block) and fail fast instead of masking every
+    failure as a generic "rejected" and retrying a doomed push (#993).
     """
     extra = ["--force-with-lease"] if force_with_lease else []
     auth_args = _auth_config_args(remote, cwd=cwd)
@@ -615,7 +659,8 @@ def push(
         cwd=cwd, check=False,
     )
     if result.returncode == 0:
-        return True
+        return PushResult(ok=True)
+    last_stderr = result.stderr or ""
     # Defense-in-depth: if we injected a cross-account token and the push
     # still failed, the injected gh OAuth token may lack push scope (#900).
     # Retry once *without* the override so the default credential helper
@@ -627,8 +672,9 @@ def push(
             cwd=cwd, check=False,
         )
         if retry.returncode == 0:
-            return True
-    return False
+            return PushResult(ok=True)
+        last_stderr = retry.stderr or last_stderr
+    return PushResult(ok=False, stderr=last_stderr)
 
 
 # --- Cross-account authentication (#29) -------------------------------------

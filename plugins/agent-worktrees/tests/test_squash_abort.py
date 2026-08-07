@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from agent_worktrees import git_ops
+from agent_worktrees.git_ops import PushResult
 
 # ---------------------------------------------------------------------------
 # Helpers -- build a real git repo with N commits ahead of a base ref
@@ -233,3 +234,67 @@ def test_allow_unsquashed_proceeds_past_squash(tmp_path: Path, monkeypatch):
         "with --allow-unsquashed the flow must proceed past the squash step"
     )
 
+
+
+# ---------------------------------------------------------------------------
+# #993: push_changes must surface the REAL push error and fail fast on a
+# non-fast-forward-race failure (pre-push hook decline, auth 403, protected
+# branch) instead of masking it as a generic "rejected" + 3 doomed retries.
+# ---------------------------------------------------------------------------
+
+def test_push_changes_fails_fast_and_surfaces_hook_decline(
+        tmp_path: Path, monkeypatch, capsys):
+    from agent_worktrees import finalize
+
+    repo, wt_id, config = _make_pushable_repo(tmp_path, 2, monkeypatch)
+
+    push_calls = {"n": 0}
+
+    def _decline(*a, **k):
+        push_calls["n"] += 1
+        return PushResult(
+            ok=False,
+            stderr="remote: version-consistency violations\n"
+                   "error: failed to push some refs to 'origin'")
+
+    fetch_calls = {"n": 0}
+    monkeypatch.setattr(finalize.git_ops, "push", _decline)
+    monkeypatch.setattr(finalize.git_ops, "fetch",
+                        lambda *a, **k: fetch_calls.__setitem__("n", fetch_calls["n"] + 1))
+
+    ok = finalize.push_changes(wt_id, config)
+
+    assert ok is False
+    # Fail fast: exactly ONE push attempt (the old code retried 3x). A hook
+    # decline recurs identically, so a re-fetch+rebase+re-push is pointless.
+    assert push_calls["n"] == 1
+    # The real git stderr is surfaced to the operator, not a generic "rejected".
+    combined = capsys.readouterr()
+    text = (combined.out + combined.err).lower()
+    assert "version-consistency" in text
+
+
+def test_push_changes_retries_on_non_fast_forward(tmp_path: Path, monkeypatch):
+    """A genuine non-ff race is still retried (fetch+rebase+re-push)."""
+    from agent_worktrees import finalize
+
+    repo, wt_id, config = _make_pushable_repo(tmp_path, 2, monkeypatch)
+
+    push_calls = {"n": 0}
+
+    def _race_then_ok(*a, **k):
+        push_calls["n"] += 1
+        if push_calls["n"] == 1:
+            return PushResult(
+                ok=False,
+                stderr=" ! [rejected]  base -> base (fetch first)")
+        return PushResult(ok=True)
+
+    monkeypatch.setattr(finalize.git_ops, "push", _race_then_ok)
+    monkeypatch.setattr(finalize.git_ops, "fetch", lambda *a, **k: None)
+    monkeypatch.setattr(finalize.git_ops, "rebase", lambda *a, **k: True)
+
+    ok = finalize.push_changes(wt_id, config)
+
+    assert ok is True
+    assert push_calls["n"] == 2  # raced once, then succeeded after rebase

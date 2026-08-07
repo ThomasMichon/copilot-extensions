@@ -384,11 +384,29 @@ def push_changes(
         pushed = False
         for attempt in range(1, max_retries + 1):
             print(f"Pushing to {repo.remote} (attempt {attempt}/{max_retries})...")
-            if git_ops.push(repo.remote, repo.default_branch, cwd=anchor):
+            res = git_ops.push(repo.remote, repo.default_branch, cwd=anchor)
+            if res:
                 pushed = True
                 break
+            # Surface git's REAL stderr instead of a generic "rejected" (#993):
+            # a pre-push hook decline (e.g. the version-consistency gate), an
+            # auth 403, or a protected-branch block is invisible otherwise.
+            if res.stderr:
+                output.err(res.stderr.strip())
+            # Only a non-fast-forward race is fixed by fetch+rebase+retry.
+            # Everything else recurs identically -- fail fast with the real
+            # reason above rather than burning three doomed attempts.
+            if not res.retryable:
+                output.err(
+                    "Push failed and is not a fast-forward race (see the git "
+                    "error above) -- not retrying. Resolve the reported cause "
+                    "and re-run 'agent-worktrees push-changes'."
+                )
+                if record:
+                    tracking.update_status(record, "orphaned")
+                return False
             if attempt < max_retries:
-                output.warn("Push rejected -- fetching and retrying...")
+                output.warn("Non-fast-forward -- fetching and retrying...")
                 git_ops.fetch(repo.remote, cwd=anchor)
                 if not git_ops.rebase(upstream, cwd=anchor):
                     output.err("Rebase after push rejection failed")
@@ -725,6 +743,8 @@ def _push_changes_pr(
             pushed = git_ops.push(remote, feature, cwd=worktree_path, force_with_lease=True)
         if not pushed:
             output.err(f"Failed to push {feature} to {remote}.")
+            if pushed.stderr:
+                output.err(pushed.stderr.strip())
             if pushed_pr is not None and pushed_pr.state in ("", "creating"):
                 tracking.save_record(record)
             return False
@@ -832,6 +852,8 @@ def _push_changes_pr_refspec(
             )
         if not pushed:
             output.err(f"Failed to push {wt_branch} to {remote}/{feature}.")
+            if pushed.stderr:
+                output.err(pushed.stderr.strip())
             if pushed_pr is not None and pushed_pr.state in ("", "creating"):
                 tracking.save_record(record)
             return False
