@@ -27,7 +27,9 @@ async def test_open_stdio_channel_starts_new_session():
     # Minimal state open_stdio_channel touches: a registered connection whose
     # config exposes an ssh_target. Bypass real SSH arg construction.
     mgr._connections = {  # type: ignore[attr-defined]
-        "host": SimpleNamespace(config=SimpleNamespace(ssh_target="user@host")),
+        "host": SimpleNamespace(
+            config=SimpleNamespace(ssh_target="user@host"), child_processes=[]
+        ),
     }
     object.__setattr__(mgr, "_mux_ssh_args", lambda info: ["ssh"])
 
