@@ -32,10 +32,12 @@ Exit code is 0 on success, non-zero on error; errors print to stderr.
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import os
 import shutil
 import sys
+import time
 from pathlib import Path
 
 CURRENT_LINK = "current"
@@ -340,6 +342,58 @@ def _pid_alive(pid: int) -> bool:
         return False
 
 
+_AV_RETRY_ATTEMPTS = 4
+_AV_RETRY_BACKOFF = 0.5  # seconds; grows linearly per attempt
+
+
+def _is_transient_lock(exc: OSError) -> bool:
+    """True when ``exc`` looks like a *transient* file lock we should wait out
+    rather than a real, permanent failure.
+
+    On Windows a version-dir GC routinely races **Windows Defender (MsMpEng)**,
+    which briefly holds a handle to the old slot's ``Scripts/python.exe`` right
+    after the daemon released it -- surfacing as ``WinError 5`` (access denied),
+    ``32``/``33`` (sharing violation / lock violation), or ``errno EACCES``. That
+    is NOT a live daemon and NOT a corrupt slot: the directory is orphaned and
+    reclaimable the moment the scanner lets go (dotfiles #911).
+    """
+    if isinstance(exc, PermissionError):
+        return True
+    if getattr(exc, "errno", None) == errno.EACCES:
+        return True
+    return getattr(exc, "winerror", None) in (5, 32, 33)
+
+
+def _rmtree_deferrable(d: Path, *, label: str) -> bool:
+    """``shutil.rmtree`` with AV-tolerant retries. Returns True iff removed.
+
+    A transient lock (see :func:`_is_transient_lock` -- typically Defender
+    scanning a just-freed ``python.exe``) is retried a few times with a short
+    backoff; if still held, the removal is **deferred to the next sweep** and
+    reported calmly (an informational note, not an alarming "could not remove"
+    error) -- the orphaned slot costs only disk and will be reclaimed next run.
+    A genuinely non-transient ``OSError`` is still surfaced as an error. Fixes
+    the noisy, non-retried ``WinError 5`` GC failure (dotfiles #911).
+    """
+    for attempt in range(_AV_RETRY_ATTEMPTS):
+        try:
+            shutil.rmtree(d)
+            return True
+        except OSError as exc:
+            if not _is_transient_lock(exc):
+                print(f"{label}: could not remove {d}: {exc}", file=sys.stderr)
+                return False
+            if attempt < _AV_RETRY_ATTEMPTS - 1:
+                time.sleep(_AV_RETRY_BACKOFF * (attempt + 1))
+    # Still locked after retries -> defer quietly to the next sweep.
+    print(
+        f"{label}: deferring {d.name} -- transiently locked (likely Windows "
+        f"Defender scanning python.exe); will reclaim on the next sweep.",
+        file=sys.stderr,
+    )
+    return False
+
+
 def gc(root: Path, keep: list[str] | None = None,
        protect_pids: bool = False, link_name: str = CURRENT_LINK) -> list[str]:
     """Remove version dirs that are not protected. Returns the removed names.
@@ -368,11 +422,8 @@ def gc(root: Path, keep: list[str] | None = None,
         if v in keep_set:
             continue
         d = version_dir(root, v)
-        try:
-            shutil.rmtree(d)
+        if _rmtree_deferrable(d, label="gc"):
             removed.append(v)
-        except OSError as exc:
-            print(f"gc: could not remove {d}: {exc}", file=sys.stderr)
     return removed
 
 
@@ -469,11 +520,8 @@ def toss_incomplete(root: Path, link_name: str = CURRENT_LINK) -> list[str]:
         if is_complete(root, v):
             continue
         d = version_dir(root, v)
-        try:
-            shutil.rmtree(d)
+        if _rmtree_deferrable(d, label="toss"):
             tossed.append(v)
-        except OSError as exc:
-            print(f"toss: could not remove {d}: {exc}", file=sys.stderr)
     return tossed
 
 
