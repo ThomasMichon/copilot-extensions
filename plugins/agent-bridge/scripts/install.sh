@@ -527,51 +527,16 @@ _config_migrate_installed() {
     "$VENV_DIR/bin/python" -c 'from config_migrate import migrate_file' 2>/dev/null
 }
 
-# Install sibling plugin packages (e.g. agent-codespaces) into the bridge venv.
-# This provides the `codespace:` namespace resolver and credential relay that
-# agent-bridge imports at startup. Package is installed for IMPORT ONLY -- the
-# canonical agent-codespaces CLI binstub is owned by ~/.agent-codespaces via its
-# own installer. A missing sibling is non-fatal but WARNED loudly, because it
-# disables that sibling's namespace resolver / relay.
-#   $1 = "reinstall" to force reinstall, empty for fresh install
+# #892 Increment 4: agent-bridge no longer VENDORS sibling plugins into its venv.
+# The `codespace:` / `container:` namespace resolvers AND the credential-relay
+# profiles are now driven over a PROCESS BOUNDARY -- the `agent-<sibling>
+# namespace-* / relay-profile` CLIs, run from each sibling's OWN immutable venv.
+# So a sibling bugfix reaches the dispatch path with NO agent-bridge redeploy,
+# and the #929 vendored-copy-drift / #828 installed-but-unimportable classes are
+# structurally gone. Kept as a no-op (call sites unchanged) for a minimal diff.
+# Sibling CLI binstubs remain owned by their own installers (~/.agent-<sibling>).
 _install_sibling_plugins() {
-    local mode="${1:-}"
-    local plugins_root
-    plugins_root="$(cd "$PLUGIN_DIR/.." && pwd)"
-    local siblings=(agent-codespaces agent-containers)
-    for name in "${siblings[@]}"; do
-        local sib_dir="$plugins_root/$name"
-        if [[ ! -f "$sib_dir/pyproject.toml" ]]; then
-            # Check marketplace vendor layout
-            sib_dir="$PLUGIN_DIR/plugins/$name"
-            if [[ ! -f "$sib_dir/pyproject.toml" ]]; then
-                _warn "Sibling plugin '$name' not found -- its namespace resolver / relay will be UNAVAILABLE."
-                _warn "  Install it from the marketplace: copilot plugin install $name@copilot-extensions"
-                continue
-            fi
-        fi
-        local pkg_name="${name//-/_}"
-        if [[ "$mode" == "reinstall" ]]; then
-            uv pip install --python "$VENV_DIR/bin/python" --reinstall-package "$pkg_name" \
-                "$sib_dir" --quiet 2>/dev/null
-        else
-            uv pip install --python "$VENV_DIR/bin/python" "$sib_dir" --quiet 2>/dev/null
-        fi
-        if [[ $? -ne 0 ]]; then
-            _fail "Sibling plugin $name install FAILED -- its namespace resolver / relay will be UNAVAILABLE."
-            continue
-        fi
-        # Verify the package actually imports in THIS slot (dotfiles #828): a located
-        # sibling that installs 'successfully' but cannot be imported here means the
-        # freshly-built runtime slot would silently lose that namespace -- surface it
-        # LOUDLY at build time rather than let it manifest at runtime as a mysterious
-        # 'not a known agent' 404 (which is exactly how #828 hid for hours).
-        if "$VENV_DIR/bin/python" -c "import $pkg_name" 2>/dev/null; then
-            _ok "Sibling plugin (relay import): $name"
-        else
-            _fail "Sibling plugin $name installed but '$pkg_name' is NOT importable in the runtime slot -- its namespace resolver / relay will be UNAVAILABLE (dotfiles #828). Re-run the install to repopulate the slot."
-        fi
-    done
+    _step "Sibling plugins not vendored -- process-boundary CLI seams (#892)"
 }
 
 # Sibling plugin binstubs (e.g. agent-codespaces) are owned by their own
