@@ -252,16 +252,24 @@ def create_app(
     bus = EventBus()
     directory = FleetDirectory()
 
+    coordinator_mcp = None
     mcp_app = None
     if enable_mcp:
         try:
             from .mcp_http import bearer_guard_middleware, build_coordinator_mcp
 
-            mcp_app = build_coordinator_mcp(queue, bus).streamable_http_app()
+            coordinator_mcp = build_coordinator_mcp(queue, bus)
+            # mcp 2.0: transport options moved off the constructor onto the app
+            # factory. streamable_http_path="/" so mounting at "/mcp" yields the
+            # endpoint at "/mcp" (not "/mcp/mcp").
+            mcp_app = coordinator_mcp.streamable_http_app(
+                stateless_http=True, streamable_http_path="/"
+            )
             if token:
                 mcp_app.add_middleware(bearer_guard_middleware(token))
         except ImportError:
             log.warning("mcp extra not installed; coordinator /mcp endpoint disabled")
+            coordinator_mcp = None
             mcp_app = None
 
     @asynccontextmanager
@@ -273,9 +281,10 @@ def create_app(
             else None
         )
         async with contextlib.AsyncExitStack() as stack:
-            if mcp_app is not None:
-                # Run the MCP session manager alongside the coordinator lifespan.
-                await stack.enter_async_context(mcp_app.router.lifespan_context(_app))
+            if coordinator_mcp is not None:
+                # mcp 2.0: a mounted sub-app's own lifespan doesn't run, so drive
+                # the streamable-HTTP session manager from the host lifespan.
+                await stack.enter_async_context(coordinator_mcp.session_manager.run())
             try:
                 yield
             finally:
