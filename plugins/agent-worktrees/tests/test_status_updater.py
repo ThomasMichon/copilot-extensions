@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import argparse
 import subprocess
+import sys
 import time
+
+import pytest
 
 from agent_worktrees import __main__ as m
 
@@ -262,6 +265,11 @@ def test_slot_superseded_no_partial_prefix_match():
     assert m._slot_superseded(f"{root}/dev5", mine, root) is False
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Requires symlink privilege: the active-slot check resolves via "
+           "realpath, but Windows non-dev-mode falls back to a dir copy.",
+)
 def test_runtime_superseded_true_when_active_slot_differs(tmp_path):
     versions = tmp_path / "versions"
     (versions / "dev4").mkdir(parents=True)
