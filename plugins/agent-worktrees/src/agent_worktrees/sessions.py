@@ -66,12 +66,16 @@ class SessionContext:
     """normalized_path → the graded REST state (copilot-extensions#228): one of
     ``"busy"`` / ``"idle"`` / ``"awaiting-operator"``.
 
-    Passively derived from native session events by the live-pulse extension
-    (sidecar ``substatus.json``): ``busy`` = a turn is running; ``idle`` =
-    done-rest (the session went quiescent); ``awaiting-operator`` = parked on a
-    human input/permission request ("this needs me"). Enrichment only — absent
-    when the extension isn't loaded; legacy sidecars (no ``rest``) derive it from
-    the ``idle`` boolean."""
+    Sourced two ways: the crisp value comes from the live-pulse extension's
+    ``substatus.json`` sidecar (``busy`` = a turn is running; ``idle`` = done-rest,
+    the session went quiescent; ``awaiting-operator`` = parked on a human
+    input/permission request, "this needs me"); when the sidecar is absent the
+    **backbone** fills a COARSE ``busy`` / ``idle`` from a bounded ``events.jsonl``
+    tail (turn boundaries). So ``live_rest`` may be present with **no extension
+    loaded** — do NOT infer "extension loaded" from its presence. Only
+    ``awaiting-operator`` is extension-only (``session.idle`` and the
+    ``*.requested`` prompts are ephemeral and never persist to disk). Enrichment
+    only, never the durable ``follow_up`` disposition."""
 
     live_rest_at: dict[str, str] = field(default_factory=dict)
     """normalized_path → ISO timestamp of the last rest-state transition."""

@@ -236,7 +236,8 @@ class TestPulseSessionScan:
     def test_backbone_infers_idle_from_turn_end(
         self, tmp_session_state_dir: Path
     ):
-        """No sidecar, but events.jsonl ends on assistant.turn_end -> coarse
+        """No sidecar; the last TURN BOUNDARY in events.jsonl is an
+        assistant.turn_end (the trailing hook.end is NOT a boundary) -> coarse
         'idle' from the backbone (no live_rest_at, which is sidecar-only)."""
         wt_path = "/tmp/wt-bb-idle"
         make_session_dir(
