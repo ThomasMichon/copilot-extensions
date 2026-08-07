@@ -476,6 +476,52 @@ def load_repo_config(repo_path: Path) -> dict[str, Any] | None:
         return yaml.safe_load(f) or {}
 
 
+def _state_root_config_dir(repo_path: Path) -> Path | None:
+    """Resolve the bound knowledge repo's dir when it carries ``codespaces.yaml``.
+
+    The citadel E1e config-overlay seam (#947): a stateless harness carries no
+    ``codespaces.yaml`` of its own -- personal CodeSpace topology lives in the
+    bound knowledge repo. This asks ``agent-worktrees state-root`` (run with
+    cwd=repo_path, the same resolver efforts/visions/logs use) for the knowledge
+    checkout, returning it only when it actually declares a ``codespaces.yaml``.
+
+    Best-effort + fail-open: a missing ``agent-worktrees`` binstub, a
+    non-stateless / unbound repo, or any error yields ``None``. Never raises.
+    Only the codespaces.yaml *content* + its ``src``/provision ``repo_dir`` graft
+    here; plugin-settings sourcing (``source_paths``) stays the harness's own, so
+    generic CodeSpace plugins remain harness-sourced.
+    """
+    import json
+    import shutil
+    import subprocess
+
+    exe = shutil.which("agent-worktrees")
+    if not exe:
+        return None
+    try:
+        proc = subprocess.run(
+            [exe, "state-root", "--json"], cwd=str(repo_path),
+            capture_output=True, text=True, timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0 or not (proc.stdout or "").strip():
+        return None
+    try:
+        data = json.loads(proc.stdout)
+    except ValueError:
+        return None
+    # Only graft when the launch repo actually requires an external state root
+    # (a stateless harness); a self-hosted repo resolves to itself.
+    if not data.get("requires_external") or not data.get("bound"):
+        return None
+    root = data.get("state_root")
+    if not root:
+        return None
+    kroot = Path(root)
+    return kroot if (kroot / CONFIG_FILENAME).exists() else None
+
+
 def repo_copilot_settings(source_paths: Iterable[Path]) -> dict[str, Any]:
     """Merge repo-scoped Copilot settings across the adopted control-plane repos.
 
@@ -568,7 +614,18 @@ def load_merged_config() -> CodespacesConfig:
     defaults_set = False
 
     for entry in adopted:
-        raw = load_repo_config(entry.path)
+        # E1e config-overlay (#947): read codespaces.yaml from the repo itself,
+        # or -- when it has none and is a stateless harness -- from the bound
+        # knowledge repo (its src/provision paths resolve relative to THAT dir).
+        # source_paths stays the adopted repo (entry.path) so generic CodeSpace
+        # plugin settings remain harness-sourced; only the codespaces.yaml
+        # content + its repo_dir graft to the knowledge overlay.
+        config_dir = entry.path
+        if not (entry.path / CONFIG_FILENAME).exists():
+            grafted = _state_root_config_dir(entry.path)
+            if grafted is not None:
+                config_dir = grafted
+        raw = load_repo_config(config_dir)
         if raw is None:
             continue
 
@@ -636,12 +693,12 @@ def load_merged_config() -> CodespacesConfig:
         # Repos (first wins on conflicts)
         for repo_key, repo_raw in raw.get("repos", {}).items():
             if repo_key not in merged.repos:
-                merged.repos[repo_key] = _parse_repo_config(repo_raw, entry.path)
+                merged.repos[repo_key] = _parse_repo_config(repo_raw, config_dir)
 
         # Global provisioning hooks (union across all adopted repos)
         provision_raw = raw.get("provision")
         if provision_raw:
-            parsed = _parse_provision(provision_raw, entry.path)
+            parsed = _parse_provision(provision_raw, config_dir)
             merged.provision.files.extend(parsed.files)
             merged.provision.on_connect.extend(parsed.on_connect)
             merged.provision.on_create.extend(parsed.on_create)
