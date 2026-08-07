@@ -511,3 +511,20 @@ agent-codespaces version && agent-codespaces status
 agent-containers version && agent-containers fleet
 # agent-mcp status   # if installed
 ```
+
+### WSL notes
+
+The bootstrap above works unchanged **from inside a WSL distro** — run the
+`init.sh` installers and the `config adopt` / `update` steps in the Linux shell.
+Two WSL-specific facts:
+
+- **`~/.local/bin` is already on `PATH`** via the stock `~/.profile` snippet
+  (+ `~/.local/bin/env` from uv), so the binstubs the installers deploy there are
+  picked up without editing PATH.
+- **Don't install (or symlink) the Copilot CLI.** The Windows Copilot CLI's WSL
+  stub auto-installs the Linux binary on first run, and agent-worktrees
+  *resolves* it from known locations even when it isn't on `PATH` — so
+  `<repo> update` and session-start provisioning just work. See the **`wsl-setup`**
+  plugin's `setting-up-wsl` skill (§ "Copilot CLI in WSL") for the details, and
+  its `setting-up-wsl` / `troubleshooting-wsl-networking` skills for the distro,
+  networking, and keepalive setup that this bootstrap assumes is already done.

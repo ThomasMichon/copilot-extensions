@@ -96,6 +96,29 @@ wsl -d <distro> -u root bash -c "curl -m8 -sSI https://archive.ubuntu.com >/dev/
   "Offline package install". Match the distro's exact release build (e.g. jammy
   `8.9p1-3ubuntu0.NN`), not the newest pool version.
 
+### Copilot CLI in WSL — it auto-installs; don't install it
+
+If the machine has the **Windows** Copilot CLI, running `copilot` inside WSL
+invokes its **WSL stub**, which **auto-installs** the Linux binary (to
+`~/.local/share/gh/copilot/copilot`) on first run. So **do not** hand-install
+Copilot in the distro, and **do not** symlink it onto `PATH`.
+
+Two consequences to know about:
+
+- **The auto-installed binary is often not on `PATH` immediately**, and a bare
+  `copilot` in WSL otherwise resolves via **interop** to the non-executable
+  Windows `.exe` stub. Anything that shells out to `copilot` right after the
+  first run can therefore fail to find a runnable CLI.
+- **`agent-worktrees` handles this for you** (≥ 1.5.3): it *resolves* Copilot
+  from known locations — `PATH` → `~/.local/bin/copilot` →
+  `~/.local/share/gh/copilot/copilot` — in both its `update` flow and the
+  session-start provision loop, so `<repo> update` / payload provisioning work
+  **without** any PATH tinkering. It only *finds* Copilot; the Windows-side stub
+  owns the install.
+
+`~/.local/bin` is on `PATH` via the stock `~/.profile` snippet (+ `~/.local/bin/env`
+from uv), so binstubs the plugins deploy there are picked up automatically.
+
 ## 5. Make a WSL-hosted service reachable
 
 With NAT + `localhostForwarding`, a service listening on `0.0.0.0:PORT` inside
