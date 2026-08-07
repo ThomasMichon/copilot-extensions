@@ -1689,6 +1689,72 @@ def add_resource_claim(
     return claim
 
 
+# Terminal statuses for the CASCADE/orphan model (citadel E1b, #877): a parent
+# in one of these states has finished its work, so the outbound worktree
+# resources it owned are no longer actively held -- its children are orphans
+# (protected henceforth only by their OWN git/PR/session safety, not the
+# parent's liveness).
+_TERMINAL_OWNER_STATUSES: frozenset[str] = frozenset({"finalized", "orphaned"})
+
+
+def release_all_resources(
+    record: WorktreeRecord, *, save: bool = True
+) -> list[ResourceClaim]:
+    """Release every live outbound resource claim on ``record`` (cascade).
+
+    Marks each still-live :class:`ResourceClaim` ``released`` so the owner's
+    ledger stops asserting it holds those cross-repo worktrees -- used when a
+    parent worktree is finalized (citadel E1b, #877): the parent is done, so it
+    hands its children back rather than pinning them as claimed forever. The
+    child records are untouched (they keep their own ``owner_ref``; the
+    claimant-liveness gate now sees the parent as terminal -> gone). Idempotent:
+    returns the claims it flipped this call (empty when none were live).
+    """
+    released = [c for c in record.resources if c.is_live]
+    for c in released:
+        c.state = "released"
+    if released and save:
+        save_record(record)
+    return released
+
+
+def find_orphaned_children(
+    tracking_path: Path,
+) -> list[tuple[WorktreeRecord, WorktreeRecord | None]]:
+    """Find tracked worktrees whose owning parent is finalized/orphaned/gone.
+
+    The read side of the citadel E1b cascade (#877): scans the local tracking
+    dir for records carrying an ``owner_ref`` (they were created as another
+    worktree's outbound resource) and returns those whose **same-machine** parent
+    is either absent locally or in a terminal status -- i.e. orphaned children a
+    caller (picker / doctor / cleanup) should surface. Each result pairs the
+    child with its parent record (``None`` when the parent has no local record).
+
+    A **cross-machine** owner is skipped (this local read cannot judge it; the
+    fabric claimant probe owns that). Fail-safe: unreadable records are skipped.
+    """
+    out: list[tuple[WorktreeRecord, WorktreeRecord | None]] = []
+    try:
+        this_machine = cfg.load_config().machine
+    except Exception:
+        this_machine = None
+    for child in list_records(tracking_path):
+        ref = child.owner_claim_ref
+        if ref is None:
+            continue
+        # Same-machine only: a qualified ref naming a different machine is not
+        # judgeable here (parse_claim_ref leaves machine=None for a bare ref,
+        # which we treat as same-machine/local).
+        if ref.machine and this_machine and ref.machine != this_machine:
+            continue
+        parent = load_record_by_id(ref.worktree_id)
+        if parent is None:
+            out.append((child, None))
+        elif parent.status in _TERMINAL_OWNER_STATUSES:
+            out.append((child, parent))
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Session registry -- per-worktree session tracking via hooks
 # ---------------------------------------------------------------------------
