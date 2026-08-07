@@ -44,13 +44,15 @@ the same record at once), reads are cheap, and the store is the one place the
 truth lives. Consumers never keep a parallel copy; they read this owner and
 **derive** over it.
 
-### The derivation / liveness engine — polling as the backbone
+### The derivation / liveness engine — the extension-free backbone
 Liveness and "what is this agent doing" are produced by agent-worktrees from its
-**own transports** — session files/hooks, the multiplexer, the process table,
-lock state, and SSH for remote worktrees. This **polling-and-derive path is the
-always-on backbone**: it needs no cooperation from the agent being observed and no
-higher layer. It is the reason the fabric is legible even when nothing else is
-running.
+**own transports** — on-disk session state, the multiplexer and its terminal
+output, the process table, lock state, and SSH for remote worktrees. This
+**poll-and-derive path is the always-on backbone**: it needs no cooperation from
+the agent being observed, **no higher layer, and no in-session extension loaded**.
+It is the reason the fabric stays legible even when nothing else is running — and
+the reason a fragile, slow-to-initialize, or absent in-session extension can never
+drag tracking below *correct*.
 
 ### The warm-cache accelerator — optional, on-demand, refcounted, losable
 Derivation can be expensive; the ground layer **may** keep it warm in an
@@ -61,11 +63,28 @@ idle. This accelerator is **not the source of truth** — it caches and streams
 dies, the fabric loses *warmth, not data*, and every consumer still reads and
 writes the store directly with it absent.
 
-### The event sink — one owner, many producers
+### The native session-event producer — an optional, non-load-bearing enrichment
+The CLI emits a rich **native session-event stream** (session/turn/tool/idle
+lifecycle) that an **in-session extension agent-worktrees owns** can observe
+passively — writing a small sidecar the store reads, with **zero agent
+cooperation and no injected turns**. This is the crispest, most passive source of
+the graded **rest / idle** signal — an explicit *session-idle* event when the
+agent and everything it spawned are quiescent; a distinct *awaiting-operator*
+state when it is parked on a prompt or permission — and of a live "current intent"
+line. It is an **enrichment, never the backbone**: because it rides an in-session
+extension, it is **non-load-bearing** — its absence, or a failed/slow
+initialization, degrades *fidelity and crispness*, **never** tracking correctness,
+and **must never jeopardize a mainline flow**. When present it *sharpens*; when
+missing the backbone still answers, coarsely, from the extension-free transports.
+
+### The event sink — one owner, an extension-free backbone, optional producers
 Tracking updates flow into agent-worktrees through a **single ingestion seam it
-owns** (hook-shaped, since it already owns lifecycle hooks). The **always-available
-producer is its own polling/derivation**. Higher layers are **additional, optional
-producers into the same sink** — never the backbone, never a second owner.
+owns**. The **always-available producer is its own extension-free
+polling/derivation** (the backbone above). Everything richer is an **additional,
+optional, non-load-bearing producer** into that same sink — never a second owner,
+never a prerequisite: agent-worktrees' own native-event extension, and (higher
+still) agent-bridge's ACP eventing. The sink is authoritative on its own; the
+optional producers only make it fresher and sharper.
 
 ### agent-bridge — an optional ACP eventing supplement
 When present, the coordination layer contributes **tool-level and message-level
@@ -105,18 +124,38 @@ An **opt-in, on-demand** resident tracker may keep derivation hot and stream
 updates for the duration that consumers need it, then release. Its presence is an
 optimization; its absence changes nothing about correctness.
 
-### event ingestion with an optional ACP producer
-Tracking accepts events through one owned sink. agent-bridge's **ACP tool/message
-events** are an **optional producer** into it, enriching liveness/activity when the
-bridge is in the loop.
+### rest and idle are observable
+The ground layer **reports when an agent reaches rest** — and distinguishes
+*done-rest* (a turn/session went quiescent with nothing in flight) from
+*awaiting-operator* (parked on a prompt or permission, i.e. "this needs me"). It
+sources the **crispest available** rest signal: an explicit idle event via the
+native-event producer when that is present, and a **coarser at-rest inference from
+the extension-free transports** otherwise. Either way, "is it at rest, and why" is
+a first-class part of the truth — never dependent on any one signal source.
+
+### event ingestion with optional producers
+Tracking accepts events through one owned sink whose **always-on producer is the
+extension-free backbone**. Richer producers are **optional and non-load-bearing**:
+agent-worktrees' own **native-event extension** (source of the crisp rest/idle and
+intent signals) and agent-bridge's **ACP tool/message events**. Each enriches when
+present; none is required, and a producer failing to initialize never subtracts
+from what the backbone already guarantees.
 
 ## Behaviors
 
 ### graceful degradation
-Tracking is **fully correct with zero higher layers** and **zero resident
-service**. Removing agent-bridge, or the accelerator, degrades *speed/fidelity*,
-never *correctness*. No part of the ground layer demands that a higher layer be
-present.
+Tracking is **fully correct with zero higher layers**, **zero resident service**,
+and **zero in-session extension**. Removing agent-bridge, the accelerator, or the
+native-event extension degrades *speed/fidelity/crispness*, never *correctness*. No
+part of the ground layer demands that any of them be present.
+
+### no in-session extension is load-bearing
+Tracking correctness **must not depend on any in-session extension initializing**.
+The richest signals (crisp rest/idle, live intent) ride an extension, and extension
+startup is inherently fallible — so the ground layer treats every extension-sourced
+signal as **opportunistic enrichment over the extension-free backbone**. A missing,
+slow, or failed extension may only make tracking *less crisp*; it must **never**
+break tracking and must **never** jeopardize a mainline flow.
 
 ### derive, don't duplicate
 Each piece of tracking truth has **one owner** (agent-worktrees). Higher layers
@@ -134,9 +173,11 @@ render path. Expensive or contended writes happen **off** the interaction/render
 path; a keystroke is never held hostage to a file write.
 
 ### push sharpens, poll guarantees
-When ACP events are available they **reduce polling and sharpen** liveness/turn
-signals; when they are absent, **polling still guarantees** a correct answer. The
-two compose: events are an accelerant over a self-sufficient poll.
+When event producers are in the loop — the native-event extension, or agent-bridge's
+ACP events — they **reduce polling and sharpen** liveness/rest/turn signals; when
+they are absent or fail to start, **polling still guarantees** a correct answer. The
+two compose: events are an accelerant over a self-sufficient poll, never a
+dependency of it.
 
 ## Non-Goals / Boundaries
 
@@ -145,6 +186,10 @@ two compose: events are an accelerant over a self-sufficient poll.
   does **not** own session liveness or the state of record.
 - **The resident tracker is not the source of truth.** It is a losable accelerator
   over the durable store — never the authority, never a second owner.
+- **No in-session extension is load-bearing for tracking.** Correctness does not
+  depend on any extension initializing; extension-sourced signals are enrichment
+  over the extension-free backbone, and their failure must not break tracking or a
+  mainline flow.
 - **Not a cross-agent communication layer.** Creating, addressing, messaging, and
   handing off *between* agents is agent-bridge's / ACP's domain, not the ground
   layer's. The ground layer *produces* the truth those higher layers coordinate
@@ -176,3 +221,15 @@ two compose: events are an accelerant over a self-sufficient poll.
   ACP-aligned tool/message eventing into one owned event sink. Mined from the
   agent-fabric branch vision's *graceful composition* + *derive, don't duplicate*
   properties, sharpened to the agent-bridge/agent-worktrees boundary.
+- **2026-08-07** — Revised after investigating the CLI's signal surface for
+  detecting an agent reaching **rest**. Confirmed the interceptor *hooks* surface
+  (prompt/tool edges) carries no rest signal, while the **native session-event
+  stream** does (a graded idle/turn signal, incl. an *awaiting-operator* rest and
+  an explicit session-idle). Named the **native-event producer** (an in-session
+  extension agent-worktrees owns) as the crispest passive rest source, and pinned
+  it — with agent-bridge's ACP eventing — as an **optional, non-load-bearing**
+  producer over an **extension-free backbone**: because in-session extension
+  initialization is fallible, tracking correctness must never depend on any
+  extension loading. Mined from the copilot-sdk event catalog and the existing
+  live-pulse extension; motivated by extension-init fragility observed in mainline
+  flows.
