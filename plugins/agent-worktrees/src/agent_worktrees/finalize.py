@@ -1242,7 +1242,25 @@ def validate_and_finalize(
 
         # Update tracking
         if record:
+            # Citadel E1b cascade (#877): a parent that owns outbound worktree
+            # resources hands them back on finalize -- release the live claims so
+            # the ledger stops asserting the parent holds them, and SURFACE the
+            # children so their downstream cleanup isn't silently forgotten. The
+            # child records keep their own owner_ref; the claimant-liveness gate
+            # now sees this parent as terminal (gone), so the children become
+            # orphans governed by their own prune safety.
+            released = tracking.release_all_resources(record, save=False)
             tracking.update_status(record, "finalized")
+            if released:
+                output.warn(
+                    f"Released {len(released)} downstream worktree resource(s) "
+                    f"owned by {worktree_id} (finalized) -- review/clean them:"
+                )
+                for c in released:
+                    label = f"  · {c.kind}: {c.ref}"
+                    if c.note:
+                        label += f" ({c.note})"
+                    print(label)
 
         activity.log_event(
             "worktree_finalized",
