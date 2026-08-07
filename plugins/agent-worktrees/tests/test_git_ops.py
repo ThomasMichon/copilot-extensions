@@ -49,6 +49,82 @@ class TestGitWrapper:
             assert isinstance(e.stderr, str)
 
 
+class TestNoHooks:
+    """#3707: the plugin's mechanical git ops (squash re-commit / rebase / push)
+    disable a repo's client-side guard hooks via ``-c core.hooksPath=`` so a
+    branch-protection pre-commit/pre-push/pre-rebase can't block or corrupt the
+    flow. Server-side protection is unaffected (not a client hook)."""
+
+    def _capture(self, monkeypatch):
+        import subprocess as _sp
+        seen = {}
+
+        def fake_run(cmd, **kw):
+            seen["cmd"] = cmd
+            return _sp.CompletedProcess(cmd, 0, "", "")
+
+        monkeypatch.setattr(go.subprocess, "run", fake_run)
+        return seen
+
+    def test_no_hooks_prepends_config(self, monkeypatch):
+        seen = self._capture(monkeypatch)
+        go.git("commit", "-m", "x", no_hooks=True)
+        assert seen["cmd"][:3] == ["git", "-c", f"core.hooksPath={go._NO_HOOKS_PATH}"]
+        assert seen["cmd"][3:] == ["commit", "-m", "x"]
+
+    def test_default_keeps_hooks_enabled(self, monkeypatch):
+        seen = self._capture(monkeypatch)
+        go.git("commit", "-m", "x")
+        assert seen["cmd"] == ["git", "commit", "-m", "x"]
+        assert "core.hooksPath" not in " ".join(seen["cmd"])
+
+    def test_squash_recommit_bypasses_hooks(self, monkeypatch):
+        # The squash re-commit must run with hooks disabled (the #3707 root
+        # cause: a branch-guard pre-commit blocking the soft-reset re-commit).
+        calls = []
+
+        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
+                     no_hooks=False):
+            calls.append((args, no_hooks))
+            # merge-base / rev-list --count 2 so we reach the commit path.
+            if args[:1] == ("rev-list",):
+                out = "2"
+            elif args[:1] == ("merge-base",):
+                out = "deadbeef"
+            elif args[:1] == ("rev-parse",):
+                out = "cafef00d"
+            else:
+                out = ""
+            return types.SimpleNamespace(returncode=0, stdout=out, stderr="")
+
+        monkeypatch.setattr(go, "git", fake_git)
+        ok, reason = go.squash_branch("origin/master", "squashed", cwd=".")
+        assert ok and reason is None
+        commit_calls = [c for c in calls if c[0][:1] == ("commit",)]
+        assert commit_calls and all(nh for _, nh in commit_calls)
+
+    def test_rebase_bypasses_hooks(self, monkeypatch):
+        seen = {}
+        monkeypatch.setattr(go, "git", lambda *a, cwd=None, check=True,
+                            capture=True, timeout=None, no_hooks=False: (
+            seen.update(args=a, no_hooks=no_hooks),
+            types.SimpleNamespace(returncode=0, stdout="", stderr=""))[1])
+        assert go.rebase("origin/master", cwd=".") is True
+        assert seen["args"][:1] == ("rebase",)
+        assert seen["no_hooks"] is True
+
+    def test_push_bypasses_hooks(self, monkeypatch):
+        monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
+        seen = {}
+        monkeypatch.setattr(go, "git", lambda *a, cwd=None, check=True,
+                            capture=True, timeout=None, no_hooks=False: (
+            seen.update(args=a, no_hooks=no_hooks),
+            types.SimpleNamespace(returncode=0, stdout="", stderr=""))[1])
+        assert bool(go.push("origin", "main", cwd=".")) is True
+        assert seen["args"][:1] == ("push",)
+        assert seen["no_hooks"] is True
+
+
 # ---------------------------------------------------------------------------
 # Path helpers
 # ---------------------------------------------------------------------------
@@ -316,7 +392,8 @@ class TestFetchTimeout:
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
         captured = {}
 
-        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None):
+        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
+                     no_hooks=False):
             captured["timeout"] = timeout
             captured["args"] = args
             return types.SimpleNamespace(returncode=0, stdout="", stderr="")
