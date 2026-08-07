@@ -11,12 +11,10 @@ from conftest import make_session_dir
 from agent_worktrees.sessions import (
     _normalize_path,
     backfill_sessions,
-    find_latest_session_id,
     find_latest_session_id_fast,
     list_worktree_sessions,
     mux_seed_pane,
     recent_worktree_messages,
-    scan_sessions,
     scan_sessions_fast,
     validate_session_id,
 )
@@ -38,143 +36,6 @@ class TestNormalizePath:
 
     def test_no_trailing_sep(self):
         assert _normalize_path("/home/user/src") == "/home/user/src"
-
-
-# ---------------------------------------------------------------------------
-# scan_sessions (legacy full scan)
-# ---------------------------------------------------------------------------
-
-class TestScanSessions:
-    """Test the full-scan scan_sessions."""
-
-    def test_empty_session_dir(self, tmp_session_state_dir: Path):
-        with patch(
-            "agent_worktrees.sessions._session_state_dir",
-            return_value=tmp_session_state_dir,
-        ):
-            ctx = scan_sessions(["/tmp/wt"])
-        assert ctx.active_sessions == {}
-        assert ctx.session_count == {}
-
-    def test_no_worktree_paths(self, tmp_session_state_dir: Path):
-        with patch(
-            "agent_worktrees.sessions._session_state_dir",
-            return_value=tmp_session_state_dir,
-        ):
-            ctx = scan_sessions([])
-        assert ctx.session_count == {}
-
-    def test_matches_sessions_by_cwd(self, tmp_session_state_dir: Path):
-        wt_path = "/tmp/test-worktree"
-        make_session_dir(
-            tmp_session_state_dir, "sess-001", wt_path,
-            summary="First session",
-        )
-        make_session_dir(
-            tmp_session_state_dir, "sess-002", wt_path,
-            summary="Second session",
-            updated_at="2026-06-01T12:00:00.000Z",
-        )
-        # Unrelated session
-        make_session_dir(
-            tmp_session_state_dir, "sess-other", "/tmp/other-worktree",
-        )
-
-        with patch(
-            "agent_worktrees.sessions._session_state_dir",
-            return_value=tmp_session_state_dir,
-        ):
-            ctx = scan_sessions([wt_path])
-
-        norm = _normalize_path(wt_path)
-        assert ctx.session_count[norm] == 2
-        assert "Second session" in ctx.latest_summary[norm]
-
-    def test_counts_user_turns(self, tmp_session_state_dir: Path):
-        wt_path = "/tmp/wt-turns"
-        make_session_dir(
-            tmp_session_state_dir, "sess-turns", wt_path,
-            events_lines=[
-                '{"type":"user.message","content":"hello"}',
-                '{"type":"assistant.message","content":"hi"}',
-                '{"type":"user.message","content":"do something"}',
-            ],
-        )
-
-        with patch(
-            "agent_worktrees.sessions._session_state_dir",
-            return_value=tmp_session_state_dir,
-        ):
-            ctx = scan_sessions([wt_path])
-
-        norm = _normalize_path(wt_path)
-        assert ctx.turn_count[norm] == 2  # two user.message lines
-
-    def test_detects_live_sessions(self, tmp_session_state_dir: Path):
-        wt_path = "/tmp/wt-live"
-        make_session_dir(
-            tmp_session_state_dir, "sess-live", wt_path,
-            lock_pid=os.getpid(),  # current process
-        )
-
-        with patch(
-            "agent_worktrees.sessions._session_state_dir",
-            return_value=tmp_session_state_dir,
-        ):
-            # Mock _is_copilot_process to return True for our PID
-            with patch("agent_worktrees.sessions._is_copilot_process", return_value=True):
-                ctx = scan_sessions([wt_path])
-
-        norm = _normalize_path(wt_path)
-        assert norm in ctx.active_sessions
-        assert "sess-live" in ctx.active_sessions[norm]
-
-    def test_ignores_dead_lock_files(self, tmp_session_state_dir: Path):
-        wt_path = "/tmp/wt-dead"
-        make_session_dir(
-            tmp_session_state_dir, "sess-dead", wt_path,
-            lock_pid=99999999,  # unlikely to be running
-        )
-
-        with patch(
-            "agent_worktrees.sessions._session_state_dir",
-            return_value=tmp_session_state_dir,
-        ):
-            with patch("agent_worktrees.sessions._is_copilot_process", return_value=False):
-                ctx = scan_sessions([wt_path])
-
-        norm = _normalize_path(wt_path)
-        assert norm not in ctx.active_sessions
-
-    def test_subdirectory_matching(self, tmp_session_state_dir: Path):
-        """Session cwd inside a worktree root should match."""
-        wt_path = "/tmp/wt-parent"
-        make_session_dir(
-            tmp_session_state_dir, "sess-sub", wt_path + "/subdir",
-        )
-
-        with patch(
-            "agent_worktrees.sessions._session_state_dir",
-            return_value=tmp_session_state_dir,
-        ):
-            ctx = scan_sessions([wt_path])
-
-        norm = _normalize_path(wt_path)
-        assert ctx.session_count[norm] == 1
-
-    def test_skips_bad_workspace_yaml(self, tmp_session_state_dir: Path):
-        """Malformed workspace.yaml should be skipped gracefully."""
-        sdir = tmp_session_state_dir / "bad-sess"
-        sdir.mkdir()
-        (sdir / "workspace.yaml").write_text("not: [valid: yaml: {{{")
-
-        with patch(
-            "agent_worktrees.sessions._session_state_dir",
-            return_value=tmp_session_state_dir,
-        ):
-            ctx = scan_sessions(["/tmp/wt"])
-
-        assert ctx.session_count == {}
 
 
 # ---------------------------------------------------------------------------
@@ -238,8 +99,10 @@ class TestScanSessionsFast:
 
         assert ctx.session_count == {}
 
-    def test_fallback_for_unindexed_records(self, tmp_session_state_dir: Path):
-        """Records with sessions=None should fall back to full scan."""
+    def test_unindexed_records_are_not_swept(self, tmp_session_state_dir: Path):
+        """Invariant (GH #198): sessions=None must NOT trigger a full-scan of
+        session-state on a routine read -- the record is left un-enriched until
+        an explicit backfill populates its registry."""
         wt_path = "/tmp/wt-unindexed"
         make_session_dir(
             tmp_session_state_dir, "legacy-sess", wt_path,
@@ -255,11 +118,12 @@ class TestScanSessionsFast:
             ctx = scan_sessions_fast([rec])
 
         norm = _normalize_path(wt_path)
-        assert ctx.session_count[norm] == 1
-        assert "Legacy session" in ctx.latest_summary[norm]
+        assert norm not in ctx.session_count
+        assert norm not in ctx.latest_summary
 
     def test_mixed_indexed_and_unindexed(self, tmp_session_state_dir: Path):
-        """Mix of indexed and unindexed records should merge results."""
+        """Only the registry-indexed record is enriched (random-access); the
+        unindexed record is NOT swept (invariant GH #198)."""
         wt_fast = "/tmp/wt-fast-mix"
         wt_legacy = "/tmp/wt-legacy-mix"
 
@@ -280,7 +144,8 @@ class TestScanSessionsFast:
             ctx = scan_sessions_fast(records)
 
         assert ctx.session_count[_normalize_path(wt_fast)] == 1
-        assert ctx.session_count[_normalize_path(wt_legacy)] == 1
+        # Invariant: the unindexed record is not swept -> no enrichment.
+        assert _normalize_path(wt_legacy) not in ctx.session_count
 
     def test_empty_sessions_list(self, tmp_session_state_dir: Path):
         """sessions=[] with nothing on disk -> empty context (via fallback)."""
@@ -294,13 +159,13 @@ class TestScanSessionsFast:
 
         assert ctx.session_count == {}
 
-    def test_empty_sessions_falls_back_to_full_scan(
+    def test_empty_sessions_are_not_swept(
         self, tmp_session_state_dir: Path,
     ):
-        """sessions=[] (registry active but hook never recorded the session)
-        must fall back to a full cwd-based scan so the worktree still gets its
-        summary + turn count -- otherwise the status bar loses its title and
-        reads a bare UNUSED state.  Mirrors find_latest_session_id_fast."""
+        """Invariant (GH #198): sessions=[] (registry active but the hook never
+        recorded a session) must NOT fall back to a full session-state sweep on
+        a routine read. The worktree is left un-enriched until an explicit
+        backfill runs."""
         wt_path = "/tmp/wt-empty-recovered"
         make_session_dir(
             tmp_session_state_dir, "unregistered-sess", wt_path,
@@ -315,64 +180,8 @@ class TestScanSessionsFast:
             ctx = scan_sessions_fast([rec])
 
         norm = _normalize_path(wt_path)
-        assert ctx.session_count[norm] == 1
-        assert "Recovered session" in ctx.latest_summary[norm]
-
-
-# ---------------------------------------------------------------------------
-# find_latest_session_id
-# ---------------------------------------------------------------------------
-
-class TestFindLatestSessionId:
-    """Test legacy full-scan latest session finder."""
-
-    def test_finds_most_recent(self, tmp_session_state_dir: Path):
-        wt_path = "/tmp/wt-latest"
-        make_session_dir(
-            tmp_session_state_dir, "old-sess", wt_path,
-            updated_at="2026-06-01T10:00:00.000Z",
-        )
-        make_session_dir(
-            tmp_session_state_dir, "new-sess", wt_path,
-            updated_at="2026-06-01T12:00:00.000Z",
-        )
-
-        with patch(
-            "agent_worktrees.sessions._session_state_dir",
-            return_value=tmp_session_state_dir,
-        ):
-            result = find_latest_session_id(wt_path)
-
-        assert result == "new-sess"
-
-    def test_skips_stale_stubs(self, tmp_session_state_dir: Path):
-        """Sessions with only workspace.yaml (no events/db) should be skipped."""
-        wt_path = "/tmp/wt-stubs"
-        make_session_dir(
-            tmp_session_state_dir, "stub-sess", wt_path,
-            has_events_file=False,
-        )
-
-        with patch(
-            "agent_worktrees.sessions._session_state_dir",
-            return_value=tmp_session_state_dir,
-        ):
-            result = find_latest_session_id(wt_path)
-
-        assert result is None
-
-    def test_no_matching_sessions(self, tmp_session_state_dir: Path):
-        make_session_dir(
-            tmp_session_state_dir, "other-sess", "/tmp/other",
-        )
-
-        with patch(
-            "agent_worktrees.sessions._session_state_dir",
-            return_value=tmp_session_state_dir,
-        ):
-            result = find_latest_session_id("/tmp/wt-none")
-
-        assert result is None
+        assert norm not in ctx.session_count
+        assert norm not in ctx.latest_summary
 
 
 # ---------------------------------------------------------------------------
@@ -423,8 +232,9 @@ class TestFindLatestSessionIdFast:
 
         assert result is None
 
-    def test_fast_falls_back_for_none(self, tmp_session_state_dir: Path):
-        """sessions=None should delegate to full scan."""
+    def test_fast_none_returns_none_no_sweep(self, tmp_session_state_dir: Path):
+        """Invariant (GH #198): sessions=None returns None -- never a full-scan
+        sweep. A launch/auto-resume lookup is not severe enough to sweep."""
         wt_path = "/tmp/wt-fallback"
         make_session_dir(
             tmp_session_state_dir, "fallback-sess", wt_path,
@@ -437,10 +247,12 @@ class TestFindLatestSessionIdFast:
         ):
             result = find_latest_session_id_fast(wt_path, None)
 
-        assert result == "fallback-sess"
+        assert result is None
 
-    def test_fast_empty_sessions_falls_back(self, tmp_session_state_dir: Path):
-        """sessions=[] should fall back to full scan (hook may not have fired)."""
+    def test_fast_empty_sessions_returns_none_no_sweep(
+        self, tmp_session_state_dir: Path,
+    ):
+        """Invariant (GH #198): sessions=[] returns None without sweeping."""
         wt_path = "/tmp/wt-empty-fallback"
         make_session_dir(
             tmp_session_state_dir, "discovered-sess", wt_path,
@@ -453,7 +265,7 @@ class TestFindLatestSessionIdFast:
         ):
             result = find_latest_session_id_fast(wt_path, [])
 
-        assert result == "discovered-sess"
+        assert result is None
 
     def test_fast_skips_missing_dirs(self, tmp_session_state_dir: Path):
         sessions = [SessionEntry("gone-sess", "2026-06-01T10:00:00")]
@@ -504,85 +316,6 @@ class TestDetachedSessionsExcluded:
     sessions carry a ``.detached`` marker file and must be skipped so they
     don't re-activate finalized worktrees or pollute their summaries.
     """
-
-    def test_scan_sessions_skips_detached_live_session(
-        self, tmp_session_state_dir: Path
-    ):
-        """A detached session with a live lock must NOT mark the worktree active."""
-        wt_path = "/tmp/wt-detached-live"
-        sdir = make_session_dir(
-            tmp_session_state_dir, "detached-sess", wt_path,
-            summary="Apply context_board add/prune updates",
-            lock_pid=os.getpid(),
-        )
-        _mark_detached(sdir)
-
-        with patch(
-            "agent_worktrees.sessions._session_state_dir",
-            return_value=tmp_session_state_dir,
-        ):
-            with patch(
-                "agent_worktrees.sessions._is_copilot_process", return_value=True
-            ):
-                ctx = scan_sessions([wt_path])
-
-        norm = _normalize_path(wt_path)
-        assert norm not in ctx.active_sessions
-        assert norm not in ctx.session_count
-        # The consolidation prompt must not become the worktree's summary.
-        assert norm not in ctx.latest_summary
-
-    def test_scan_sessions_keeps_normal_live_session(
-        self, tmp_session_state_dir: Path
-    ):
-        """Control: a non-detached live session in the same worktree counts."""
-        wt_path = "/tmp/wt-mixed-live"
-        detached = make_session_dir(
-            tmp_session_state_dir, "detached-sess", wt_path,
-            summary="Apply context_board add/prune updates",
-            lock_pid=os.getpid(),
-        )
-        _mark_detached(detached)
-        make_session_dir(
-            tmp_session_state_dir, "real-sess", wt_path,
-            summary="Real interactive work",
-            lock_pid=os.getpid(),
-        )
-
-        with patch(
-            "agent_worktrees.sessions._session_state_dir",
-            return_value=tmp_session_state_dir,
-        ):
-            with patch(
-                "agent_worktrees.sessions._is_copilot_process", return_value=True
-            ):
-                ctx = scan_sessions([wt_path])
-
-        norm = _normalize_path(wt_path)
-        assert ctx.active_sessions.get(norm) == ["real-sess"]
-        assert ctx.session_count[norm] == 1
-        assert "Real interactive work" in ctx.latest_summary[norm]
-
-    def test_find_latest_skips_detached(self, tmp_session_state_dir: Path):
-        """A newer detached session must not be chosen as the resume target."""
-        wt_path = "/tmp/wt-latest-detached"
-        make_session_dir(
-            tmp_session_state_dir, "real-sess", wt_path,
-            updated_at="2026-06-01T10:00:00.000Z",
-        )
-        detached = make_session_dir(
-            tmp_session_state_dir, "detached-sess", wt_path,
-            updated_at="2026-06-01T12:00:00.000Z",
-        )
-        _mark_detached(detached)
-
-        with patch(
-            "agent_worktrees.sessions._session_state_dir",
-            return_value=tmp_session_state_dir,
-        ):
-            result = find_latest_session_id(wt_path)
-
-        assert result == "real-sess"
 
     def test_scan_fast_skips_detached(self, tmp_session_state_dir: Path):
         """Registry fast-path enrichment must skip detached sessions."""
@@ -682,27 +415,6 @@ class TestMuxSpawnFailureDegrades:
 class TestContextEnrichment:
     """last_activity and context_pct derived from session-state."""
 
-    def test_scan_sessions_populates_activity_and_context(
-        self, tmp_session_state_dir: Path
-    ):
-        wt_path = "/tmp/wt-ctx"
-        make_session_dir(
-            tmp_session_state_dir, "sess-ctx", wt_path,
-            updated_at="2026-06-01T10:00:00.000Z",
-            context_pct=42,
-        )
-        with patch(
-            "agent_worktrees.sessions._session_state_dir",
-            return_value=tmp_session_state_dir,
-        ):
-            ctx = scan_sessions([wt_path])
-
-        norm = _normalize_path(wt_path)
-        assert ctx.context_pct[norm] == 42
-        # YAML parses the timestamp to a datetime; str() form is preserved.
-        assert "2026-06-01" in ctx.last_activity[norm]
-        assert "10:00:00" in ctx.last_activity[norm]
-
     def test_newest_session_wins_for_context(self, tmp_session_state_dir: Path):
         wt_path = "/tmp/wt-ctx2"
         make_session_dir(
@@ -713,30 +425,20 @@ class TestContextEnrichment:
             tmp_session_state_dir, "new", wt_path,
             updated_at="2026-06-01T12:00:00.000Z", context_pct=70,
         )
+        rec = _make_record("wt-ctx2", wt_path, sessions=[
+            SessionEntry("old", "2026-06-01T10:00:00"),
+            SessionEntry("new", "2026-06-01T12:00:00"),
+        ])
         with patch(
             "agent_worktrees.sessions._session_state_dir",
             return_value=tmp_session_state_dir,
         ):
-            ctx = scan_sessions([wt_path])
+            ctx = scan_sessions_fast([rec])
 
         norm = _normalize_path(wt_path)
         # Newest session (12:00) drives both activity and context%.
         assert "12:00:00" in ctx.last_activity[norm]
         assert ctx.context_pct[norm] == 70
-
-    def test_missing_context_json_omits_pct(self, tmp_session_state_dir: Path):
-        wt_path = "/tmp/wt-noctx"
-        make_session_dir(tmp_session_state_dir, "sess-noctx", wt_path)
-        with patch(
-            "agent_worktrees.sessions._session_state_dir",
-            return_value=tmp_session_state_dir,
-        ):
-            ctx = scan_sessions([wt_path])
-
-        norm = _normalize_path(wt_path)
-        assert norm not in ctx.context_pct
-        # last_activity is still populated from workspace.yaml updated_at.
-        assert norm in ctx.last_activity
 
     def test_fast_path_populates_context(self, tmp_session_state_dir: Path):
         wt_path = "/tmp/wt-fast-ctx"
@@ -1173,3 +875,156 @@ class TestResolveResumeTarget:
         with patch("agent_worktrees.sessions._session_state_dir",
                    return_value=tmp_session_state_dir):
             assert resolve_resume_target(rec) is None
+# last_session_id (folded into the single scan pass -- GH #198)
+# ---------------------------------------------------------------------------
+
+class TestLastSessionId:
+    """SessionContext.last_session_id carries the resume-target id (newest
+    session with conversation data), folded into the single registry-driven
+    scan pass so the list render never re-scans all of session-state per
+    worktree (GH #198; docs/patterns/session-state-access.md).
+    """
+
+    def _make_record(self, wt_id: str, wt_path: str, sessions=None) -> WorktreeRecord:
+        return WorktreeRecord(
+            worktree_id=wt_id,
+            branch=f"worktree/{wt_id}",
+            worktree_path=wt_path,
+            repo="test",
+            machine="test",
+            platform="wsl",
+            started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00",
+            resume_count=0,
+            title=None,
+            status="active",
+            completed_at=None,
+            sessions=sessions,
+        )
+
+    def test_records_newest_via_registry(self, tmp_session_state_dir: Path):
+        wt = "/tmp/wt-lsid"
+        make_session_dir(
+            tmp_session_state_dir, "old", wt,
+            updated_at="2026-06-01T10:00:00.000Z",
+        )
+        make_session_dir(
+            tmp_session_state_dir, "new", wt,
+            updated_at="2026-06-01T12:00:00.000Z",
+        )
+        rec = self._make_record("lsid", wt, sessions=[
+            SessionEntry("old", "2026-06-01T10:00:00"),
+            SessionEntry("new", "2026-06-01T12:00:00"),
+        ])
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            ctx = scan_sessions_fast([rec])
+        norm = _normalize_path(wt)
+        assert ctx.last_session_id[norm] == "new"
+
+    def test_newer_stub_does_not_override_older_valid(self, tmp_session_state_dir: Path):
+        """A newer stale stub (workspace.yaml only, no events/db) must NOT
+        become the resume target; the older session carrying conversation data
+        wins. Guards the ordering fix: last_session_id is tracked independently
+        of last_activity so the activity gate can't hide the older valid session
+        behind the newer stub.
+        """
+        wt = "/tmp/wt-lsid-stub"
+        make_session_dir(
+            tmp_session_state_dir, "real-old", wt,
+            updated_at="2026-06-01T10:00:00.000Z",
+        )
+        make_session_dir(
+            tmp_session_state_dir, "stub-new", wt,
+            updated_at="2026-06-01T12:00:00.000Z",
+            has_events_file=False,
+        )
+        rec = self._make_record("lsid-stub", wt, sessions=[
+            SessionEntry("real-old", "2026-06-01T10:00:00"),
+            SessionEntry("stub-new", "2026-06-01T12:00:00"),
+        ])
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            ctx = scan_sessions_fast([rec])
+        norm = _normalize_path(wt)
+        assert ctx.last_session_id[norm] == "real-old"
+
+    def test_fast_path_records_newest(self, tmp_session_state_dir: Path):
+        wt = "/tmp/wt-lsid-fast"
+        make_session_dir(
+            tmp_session_state_dir, "s-old", wt,
+            updated_at="2026-06-01T10:00:00.000Z",
+        )
+        make_session_dir(
+            tmp_session_state_dir, "s-new", wt,
+            updated_at="2026-06-01T12:00:00.000Z",
+        )
+        rec = self._make_record("lsid-fast", wt, sessions=[
+            SessionEntry("s-old", "2026-06-01T10:00:00"),
+            SessionEntry("s-new", "2026-06-01T12:00:00"),
+        ])
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            ctx = scan_sessions_fast([rec])
+            parity = find_latest_session_id_fast(wt, rec.sessions)
+        norm = _normalize_path(wt)
+        assert ctx.last_session_id[norm] == "s-new"
+        assert ctx.last_session_id[norm] == parity
+
+    def test_no_qualifying_session(self, tmp_session_state_dir: Path):
+        wt = "/tmp/wt-lsid-none"
+        make_session_dir(
+            tmp_session_state_dir, "stub-only", wt,
+            has_events_file=False,
+        )
+        rec = self._make_record("lsid-none", wt, sessions=[
+            SessionEntry("stub-only", "2026-06-01T10:00:00"),
+        ])
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            ctx = scan_sessions_fast([rec])
+        assert _normalize_path(wt) not in ctx.last_session_id
+
+
+# ---------------------------------------------------------------------------
+# Regression guard: session-state sweep confined to backfill
+# (docs/patterns/session-state-access.md)
+# ---------------------------------------------------------------------------
+
+def test_session_state_sweep_confined_to_backfill():
+    """Within the session-discovery module, iteration over the session-state
+    ROOT (``iterdir``/``scandir``/``listdir``) may live ONLY in the sanctioned
+    ``backfill_sessions`` sweep. Any other function enumerating the root would
+    reintroduce the O(worktrees x sessions) hot-path sweep this pattern forbids
+    (GH #198; docs/patterns/session-state-access.md).
+    """
+    import ast
+
+    import agent_worktrees.sessions as sessions_mod
+
+    src = Path(sessions_mod.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    sweep_attrs = {"iterdir", "scandir", "listdir"}
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.name == "backfill_sessions":
+            continue
+        for sub in ast.walk(node):
+            if (isinstance(sub, ast.Call)
+                    and isinstance(sub.func, ast.Attribute)
+                    and sub.func.attr in sweep_attrs):
+                offenders.append(f"{node.name}:{sub.func.attr}")
+    assert not offenders, (
+        "session-state sweep found outside backfill_sessions -- resolve by "
+        f"exact session id instead: {sorted(set(offenders))}"
+    )

@@ -684,8 +684,13 @@ def _worktree_to_dict(
         if _live_ids:
             d["live_session_ids"] = list(_live_ids)
             d["session_lock_live"] = True
-        _last_sid = sessions.find_latest_session_id_fast(
-            rec.worktree_path, rec.sessions)
+        # GH #198: read the resume-target id from the single scan pass
+        # (scan_sessions_fast folds it into SessionContext.last_session_id)
+        # instead of a per-worktree full re-scan of session-state. The old
+        # find_latest_session_id_fast() fell back to an O(all-sessions)
+        # yaml.safe_load walk *per worktree*, so with N worktrees it was
+        # O(worktrees x sessions) and could pin a core on a large tree.
+        _last_sid = session_ctx.last_session_id.get(norm)
         if _last_sid:
             d["last_session_id"] = _last_sid
         # worktree-status-core: the live activity pulse (derived from the
