@@ -230,6 +230,90 @@ class TestPulseSessionScan:
             ctx = scan_sessions_fast([rec])
         assert _normalize_path(wt_path) not in ctx.live_rest
 
+    # -- Slice 2 (#228): extension-free backbone at-rest inference from a
+    # bounded events.jsonl tail (turn boundaries persist; session.idle does not).
+
+    def test_backbone_infers_idle_from_turn_end(
+        self, tmp_session_state_dir: Path
+    ):
+        """No sidecar; the last TURN BOUNDARY in events.jsonl is an
+        assistant.turn_end (the trailing hook.end is NOT a boundary) -> coarse
+        'idle' from the backbone (no live_rest_at, which is sidecar-only)."""
+        wt_path = "/tmp/wt-bb-idle"
+        make_session_dir(
+            tmp_session_state_dir, "sess-bb-idle", wt_path,
+            events_lines=['{"type": "assistant.turn_start"}',
+                          '{"type": "tool.execution_complete"}',
+                          '{"type": "assistant.turn_end"}',
+                          '{"type": "hook.end"}'],
+        )
+        rec = _make_record("wt-bb-idle", wt_path,
+                           sessions=[SessionEntry("sess-bb-idle", "t")])
+        with patch("agent_worktrees.sessions._session_state_dir",
+                   return_value=tmp_session_state_dir):
+            ctx = scan_sessions_fast([rec])
+        norm = _normalize_path(wt_path)
+        assert ctx.live_rest[norm] == "idle"
+        assert norm not in ctx.live_rest_at   # backbone carries no timestamp
+
+    def test_backbone_infers_busy_from_turn_start(
+        self, tmp_session_state_dir: Path
+    ):
+        """The last turn boundary is a turn_start (a turn is in flight) -> 'busy'."""
+        wt_path = "/tmp/wt-bb-busy"
+        make_session_dir(
+            tmp_session_state_dir, "sess-bb-busy", wt_path,
+            events_lines=['{"type": "assistant.turn_start"}',
+                          '{"type": "assistant.turn_end"}',
+                          '{"type": "assistant.turn_start"}',
+                          '{"type": "tool.execution_start"}'],
+        )
+        rec = _make_record("wt-bb-busy", wt_path,
+                           sessions=[SessionEntry("sess-bb-busy", "t")])
+        with patch("agent_worktrees.sessions._session_state_dir",
+                   return_value=tmp_session_state_dir):
+            ctx = scan_sessions_fast([rec])
+        assert ctx.live_rest[_normalize_path(wt_path)] == "busy"
+
+    def test_backbone_none_without_turn_boundary(
+        self, tmp_session_state_dir: Path
+    ):
+        """Events with no turn boundary in the tail -> unknown (never guessed)."""
+        wt_path = "/tmp/wt-bb-none"
+        make_session_dir(
+            tmp_session_state_dir, "sess-bb-none", wt_path,
+            events_lines=['{"type": "user.message"}',
+                          '{"type": "tool.execution_start"}'],
+        )
+        rec = _make_record("wt-bb-none", wt_path,
+                           sessions=[SessionEntry("sess-bb-none", "t")])
+        with patch("agent_worktrees.sessions._session_state_dir",
+                   return_value=tmp_session_state_dir):
+            ctx = scan_sessions_fast([rec])
+        assert _normalize_path(wt_path) not in ctx.live_rest
+
+    def test_sidecar_rest_wins_over_backbone(
+        self, tmp_session_state_dir: Path
+    ):
+        """The crisp sidecar rest (awaiting-operator) overrides the coarse
+        events-derived backbone (which would say 'idle' from turn_end)."""
+        wt_path = "/tmp/wt-bb-override"
+        make_session_dir(
+            tmp_session_state_dir, "sess-bb-ov", wt_path,
+            events_lines=['{"type": "assistant.turn_start"}',
+                          '{"type": "assistant.turn_end"}'],
+            substatus={"intent": "Need input", "updatedAt": "t", "idle": False,
+                       "rest": "awaiting-operator", "restAt": "2026-06-01T10:00:00Z"},
+        )
+        rec = _make_record("wt-bb-override", wt_path,
+                           sessions=[SessionEntry("sess-bb-ov", "t")])
+        with patch("agent_worktrees.sessions._session_state_dir",
+                   return_value=tmp_session_state_dir):
+            ctx = scan_sessions_fast([rec])
+        norm = _normalize_path(wt_path)
+        assert ctx.live_rest[norm] == "awaiting-operator"
+        assert ctx.live_rest_at[norm] == "2026-06-01T10:00:00Z"
+
     def test_newest_session_wins(self, tmp_session_state_dir: Path):
         wt_path = "/tmp/wt-pulse2"
         make_session_dir(
