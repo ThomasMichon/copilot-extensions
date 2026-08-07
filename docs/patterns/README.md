@@ -145,6 +145,15 @@ core of the principles above; a reviewer checks a change against these.
   baked into the primitive's owner. A layer must not draw a higher layer's
   orchestration concern inward. (Serves *Vision agent-fabric
   §Behaviors/handoff-orchestrated-above-primitives*.)
+- **Session discovery never sweeps the state root.** Linking a worktree to its
+  Copilot session(s) resolves subfolders of the session-state root by **exact
+  session id** (via the worktree session registry), never by enumerating the
+  directory. A full sweep is quarantined to one explicit, user/agent-initiated
+  **backfill/recovery** verb; normal operation (`list`, status, finalize, resume)
+  must never iterate the state root — otherwise per-worktree enrichment degrades to
+  O(worktrees × total sessions). (Serves *Vision picker §Features/programmatic-parity*,
+  *§Behaviors/live-not-snapshot*; see
+  [`session-state-access.md`](session-state-access.md).)
 
 ## Patterns
 
@@ -162,6 +171,7 @@ the exemplars, and the vision it serves):
 | [cross-platform-parity](cross-platform-parity.md) | One behavior across Windows and Linux/WSL: shells, UTF-8, the WSL/Windows boundary, binstubs |
 | [project-scoped-invocation](project-scoped-invocation.md) | Reach any layer against an explicitly named project (`--project`), CWD-independently, and the per-project `<repo>` binstub as a uniform `<repo> <layer> …` dispatcher over the agent-* fleet |
 | [durable-vs-versioned-runtime](durable-vs-versioned-runtime.md) | When a plugin carries an expensive, warm, stateful runtime (heavy stack + loaded model) that must outlive routine service cutovers: a durable runtime + warm daemon on its own lifecycle, decoupled from the swappable versioned runtime, config-resolved + capability-matched per host |
+| [session-state-access](session-state-access.md) | How worktree↔session discovery stays O(worktrees) at any history size: resolve session-state by exact id via the registry, quarantine the unbounded directory sweep to one explicit user/agent-initiated backfill/recovery verb |
 
 The **runtime deploy contract** (venv + binstub + manifest, `uv`, marketplace-vs-
 runtime split) is its own established pattern doc:
