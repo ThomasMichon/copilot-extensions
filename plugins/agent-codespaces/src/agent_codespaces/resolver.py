@@ -157,35 +157,49 @@ class CodespaceResolver:
         self, name: str, *, extra_plugins: "list | None" = None,
         repo: str | None = None, repo_remote: str | None = None,
     ) -> "SpawnTarget":
-        """Resolve a codespace name to a SpawnTarget.
+        """Resolve a codespace name to a SpawnTarget (agent-bridge in-process path).
 
-        Accepts either the raw codespace name or its friendly (display) name.
-        Accepts CodeSpaces in Available or Shutdown state.  Shutdown
-        CodeSpaces will be started automatically by ``gh`` during the
-        SSH connection (``gh codespace ssh --config`` triggers startup).
-
-        ``repo`` (optional) is the caller-requested workspace repo for a
-        ``<repo>@<codespace>`` address, with ``repo_remote`` its git remote URL
-        (resolved host-side from the repos registry). A CodeSpace hosts a single
-        product checkout plus the account dotfiles repo, but any repo ``<r>`` can
-        live at ``/workspaces/<basename(r)>`` by convention (#174):
-
-        - ``<repo>`` == the CodeSpace's own product (e.g. ``example-web`` on an
-          ``example-web-codespaces`` CodeSpace) -> its existing checkout, no clone.
-        - ``<repo>`` == the account dotfiles repo -> the persisted dotfiles dir,
-          no clone (the universal bootstrap owns it).
-        - any other ``<repo>`` -> ``/workspaces/<basename>``, **clone-if-missing**
-          via ``repo_remote`` over the credential relay the ``--stdio`` login
-          shell already set up (handles GitHub *and* ADO).
-
-        ``extra_plugins`` are **related-repo** plugins agent-bridge decided for
-        this dispatch (a list of objects with ``.source``). They are passed to
-        the ``ssh`` transport as ``--stage-plugin`` args, which stages each
-        payload on the CodeSpace (egress-free) and folds ``--plugin-dir`` into
-        the launch -- dispatch-scoped, no global enablement.
+        Thin wrapper over :meth:`resolve_spec` (the agent_bridge-free data path,
+        also exposed as the ``namespace-resolve`` CLI seam for #892 Inc 3): it
+        extracts the plugin sources and wraps the returned spec dict in the
+        agent-bridge ``SpawnTarget`` type. See :meth:`resolve_spec` for the full
+        contract.
         """
         from agent_bridge.transport import SpawnTarget
 
+        sources = [
+            p.source for p in (extra_plugins or [])
+            if getattr(p, "source", None)
+        ]
+        spec = await self.resolve_spec(
+            name, extra_plugin_sources=sources, repo=repo, repo_remote=repo_remote,
+        )
+        return SpawnTarget(
+            type=spec.get("type", "command"),
+            spawn_command=spec["spawn_command"],
+            user=spec.get("user"),
+        )
+
+    async def resolve_spec(
+        self, name: str, *, extra_plugin_sources: "list[str] | tuple[str, ...]" = (),
+        repo: str | None = None, repo_remote: str | None = None,
+    ) -> dict:
+        """Resolve a codespace name to a **plain-dict** spawn spec.
+
+        The agent_bridge-free core of :meth:`resolve` -- returns
+        ``{"type","spawn_command","user"}`` using only agent-codespaces + stdlib,
+        so the ``agent-codespaces namespace-resolve`` CLI can emit it as JSON and
+        agent-bridge can reconstruct the ``SpawnTarget`` on the far side of a
+        process boundary (#892 Inc 3), with no in-process import of this module.
+
+        ``extra_plugin_sources`` are the already-extracted related-repo plugin
+        source strings (the CLI passes them as repeatable ``--stage-plugin``);
+        the in-process wrapper extracts them from the plugin objects.
+
+        Accepts either the raw codespace name or its friendly (display) name;
+        accepts Available or Shutdown state (a Shutdown box auto-starts on the
+        SSH connect). Raises ``KeyError`` (not found) / ``ValueError`` (bad state).
+        """
         codespaces = await asyncio.to_thread(list_codespaces)
         try:
             cs = _find_codespace(codespaces, name)
@@ -220,10 +234,7 @@ class CodespaceResolver:
         # default workspace folder. A ``<repo>@<codespace>`` request additionally
         # threads ``requested_repo``/``repo_remote`` so a non-host repo lands at
         # ``/workspaces/<basename>`` (clone-if-missing) by convention (#174).
-        stage = [
-            p.source for p in (extra_plugins or [])
-            if getattr(p, "source", None)
-        ]
+        stage = list(extra_plugin_sources or [])
         acp_command = config.effective_acp_command_for(
             cs.repository, requested_repo=repo, repo_remote=repo_remote,
         )
@@ -244,11 +255,11 @@ class CodespaceResolver:
             )
         log.info("Resolved codespace:%s -> %s", cs.name, " ".join(spawn_cmd))
 
-        return SpawnTarget(
-            type="command",
-            spawn_command=spawn_cmd,
-            user=config.ssh_user,
-        )
+        return {
+            "type": "command",
+            "spawn_command": spawn_cmd,
+            "user": config.ssh_user,
+        }
 
     async def target_repo(self, name: str) -> str | None:
         """The CodeSpace's workspace repository (for related-repo plugin
@@ -261,9 +272,26 @@ class CodespaceResolver:
             return None
 
     async def list(self) -> list["NamespaceAgentInfo"]:
-        """List all codespaces as namespace agent info."""
+        """List all codespaces as namespace agent info (in-process path).
+
+        Thin wrapper over :meth:`list_specs` (the agent_bridge-free data path,
+        also the ``namespace-list`` CLI seam for #892 Inc 3): wraps each spec
+        dict in the agent-bridge ``NamespaceAgentInfo`` type.
+        """
         from agent_bridge.agent_registry import NamespaceAgentInfo
 
+        return [NamespaceAgentInfo(**spec) for spec in await self.list_specs()]
+
+    async def list_specs(self) -> list[dict]:
+        """List all codespaces as **plain-dict** agent specs.
+
+        The agent_bridge-free core of :meth:`list` -- returns dicts with the
+        ``NamespaceAgentInfo`` field shape (``name``/``display_name``/
+        ``description``/``icon``/``state``/``aliases``) using only agent-codespaces
+        + stdlib, so the ``agent-codespaces namespace-list`` CLI can emit them as
+        JSON and agent-bridge can reconstruct ``NamespaceAgentInfo`` across a
+        process boundary (#892 Inc 3).
+        """
         codespaces = await asyncio.to_thread(list_codespaces)
         agents = []
         for cs in codespaces:
@@ -278,14 +306,14 @@ class CodespaceResolver:
 
             state = cs.state.lower() if cs.state else "unknown"
 
-            agents.append(NamespaceAgentInfo(
-                name=cs.name,
-                display_name=display,
-                description=description,
-                icon="codespace",
-                state=state,
-                aliases=_friendly_aliases(cs),
-            ))
+            agents.append({
+                "name": cs.name,
+                "display_name": display,
+                "description": description,
+                "icon": "codespace",
+                "state": state,
+                "aliases": _friendly_aliases(cs),
+            })
 
         return agents
 

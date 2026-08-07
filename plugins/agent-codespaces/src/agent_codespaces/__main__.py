@@ -506,6 +506,43 @@ def main(argv: list[str] | None = None) -> int:
         "published/config port when omitted).",
     )
 
+    # --- namespace-* (process-boundary resolver seam for agent-bridge, #892 Inc 3)
+    # The `codespace:` namespace resolver, exposed over a process boundary so
+    # agent-bridge drives it via subprocess instead of importing
+    # `agent_codespaces.resolver` in the bridge venv. Emit plain JSON/dicts
+    # (agent_bridge-free); the bridge shim reconstructs its SpawnTarget /
+    # NamespaceAgentInfo. Mirror the acp-model-flags / provision-command seams.
+    sub.add_parser(
+        "namespace-list",
+        help="Print JSON list of codespace agents (name/display/description/"
+        "icon/state/aliases) for the `codespace:` namespace.",
+    )
+    ns_resolve_p = sub.add_parser(
+        "namespace-resolve",
+        help="Print JSON {type,spawn_command,user} resolving a codespace name "
+        "to a spawn spec (KeyError->exit 3, bad state->exit 4).",
+    )
+    ns_resolve_p.add_argument("name", help="Codespace name (raw or friendly)")
+    ns_resolve_p.add_argument("--repo", default=None, help="Requested workspace repo")
+    ns_resolve_p.add_argument(
+        "--repo-remote", dest="repo_remote", default=None,
+        help="Git remote URL for the requested repo (clone-if-missing).",
+    )
+    ns_resolve_p.add_argument(
+        "--stage-plugin", dest="stage_plugin", action="append", default=[],
+        help="Related-repo plugin source to stage (repeatable).",
+    )
+    ns_target_p = sub.add_parser(
+        "namespace-target-repo",
+        help="Print the workspace repo a codespace hosts (empty if unknown).",
+    )
+    ns_target_p.add_argument("name", help="Codespace name")
+    ns_ready_p = sub.add_parser(
+        "namespace-ensure-ready",
+        help="Exit 0 if the codespace is reachable/startable, else exit 1.",
+    )
+    ns_ready_p.add_argument("name", help="Codespace name")
+
     sub.add_parser(
         "config-migrate",
         help="Migrate machine-local config schema (adopted-repos.yaml); idempotent",
@@ -580,6 +617,14 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_provision_command()
         if args.command == "relay-launch-env":
             return _cmd_relay_launch_env(args)
+        if args.command == "namespace-list":
+            return _cmd_namespace_list()
+        if args.command == "namespace-resolve":
+            return _cmd_namespace_resolve(args)
+        if args.command == "namespace-target-repo":
+            return _cmd_namespace_target_repo(args)
+        if args.command == "namespace-ensure-ready":
+            return _cmd_namespace_ensure_ready(args)
         if args.command == "config-migrate":
             return _cmd_config_migrate()
     except RuntimeError as e:
@@ -3040,6 +3085,74 @@ def _cmd_relay_launch_env(args: argparse.Namespace) -> int:
         args.codespace, relay_port=getattr(args, "relay_port", None)
     )
     print(json.dumps({"prelude": prelude, "port": port}))
+    return 0
+
+
+# --- namespace-* resolver seam (#892 Inc 3) --------------------------------
+# The process-boundary form of the `codespace:` NamespaceResolver: agent-bridge
+# shells out to these instead of importing `agent_codespaces.resolver`. They emit
+# plain JSON (agent_bridge-free) built from the resolver's `*_spec` cores; the
+# bridge shim reconstructs SpawnTarget / NamespaceAgentInfo. Exit codes let the
+# bridge distinguish not-found (3) / bad-state (4) so it can map them back to the
+# resolver's KeyError / ValueError contract.
+
+_NS_NOT_FOUND_EXIT = 3
+_NS_BAD_STATE_EXIT = 4
+
+
+def _cmd_namespace_list() -> int:
+    """Print a JSON list of `codespace:` namespace agent specs (#892 Inc 3)."""
+    from .resolver import CodespaceResolver
+
+    specs = asyncio.run(CodespaceResolver().list_specs())
+    print(json.dumps(specs))
+    return 0
+
+
+def _cmd_namespace_resolve(args: argparse.Namespace) -> int:
+    """Print a JSON spawn spec resolving a codespace name (#892 Inc 3).
+
+    ``{"type","spawn_command","user"}`` on success; a not-found maps to exit 3
+    (bridge -> ``KeyError``) and a non-connectable state to exit 4 (bridge ->
+    ``ValueError``), so the process boundary preserves the resolver's contract.
+    """
+    from .resolver import CodespaceResolver
+
+    try:
+        spec = asyncio.run(CodespaceResolver().resolve_spec(
+            args.name,
+            extra_plugin_sources=list(getattr(args, "stage_plugin", []) or []),
+            repo=getattr(args, "repo", None),
+            repo_remote=getattr(args, "repo_remote", None),
+        ))
+    except KeyError as e:
+        print(str(e).strip("'"), file=sys.stderr)
+        return _NS_NOT_FOUND_EXIT
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return _NS_BAD_STATE_EXIT
+    print(json.dumps(spec))
+    return 0
+
+
+def _cmd_namespace_target_repo(args: argparse.Namespace) -> int:
+    """Print the workspace repo a codespace hosts, or empty (#892 Inc 3)."""
+    from .resolver import CodespaceResolver
+
+    repo = asyncio.run(CodespaceResolver().target_repo(args.name))
+    print(repo or "")
+    return 0
+
+
+def _cmd_namespace_ensure_ready(args: argparse.Namespace) -> int:
+    """Exit 0 if the codespace is reachable/startable, else 1 (#892 Inc 3)."""
+    from .resolver import CodespaceResolver
+
+    try:
+        asyncio.run(CodespaceResolver().ensure_ready(args.name))
+    except Exception as e:
+        print(str(e), file=sys.stderr)
+        return 1
     return 0
 
 
