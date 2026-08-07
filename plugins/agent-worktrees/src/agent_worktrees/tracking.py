@@ -351,11 +351,41 @@ class WorktreeRecord:
     session_summary: str | None = None
     git_state: str | None = None
     session_state_at: str | None = None
+    # citadel paired -harness/-knowledge worktree lifecycle (#957): when a
+    # stateless harness worktree is carved, its bound knowledge repo's worktree
+    # (or, for a non-worktree-class knowledge repo, its anchor) is carved and
+    # tracked together as a PAIR. These optional fields link the two records so
+    # the pair can be resolved, tracked, and finalized together. Emitted only
+    # when set, so an unpaired worktree's YAML stays byte-identical (legacy
+    # records parse with all four None).
+    #   * pair_id   -- the shared pair key: the ``<ts>-<suffix>`` stub both
+    #                  sibling worktrees share (derived from the harness id).
+    #   * pair_role -- this record's role in the pair: ``harness`` | ``knowledge``.
+    #   * pair_ref  -- the canonical :class:`ClaimRef` of the SIBLING record
+    #                  (``<machine>/<project>/<worktree_id>``), so the pair
+    #                  resolves across repos/machines like the owner ledger.
+    #   * pair_kind -- how the sibling is materialized: ``worktree`` (its own
+    #                  carved worktree) | ``anchor`` (a non-worktree-class
+    #                  knowledge repo paired at its anchor checkout).
+    pair_id: str | None = None
+    pair_role: str | None = None
+    pair_ref: str | None = None
+    pair_kind: str | None = None
 
     @property
     def owner_claim_ref(self) -> ClaimRef | None:
         """The parsed backward owner link, or None when unclaimed."""
         return parse_claim_ref(self.owner_ref) if self.owner_ref else None
+
+    @property
+    def pair_claim_ref(self) -> ClaimRef | None:
+        """The parsed sibling link of a paired worktree, or None when unpaired."""
+        return parse_claim_ref(self.pair_ref) if self.pair_ref else None
+
+    @property
+    def is_paired(self) -> bool:
+        """True when this record participates in a harness/knowledge pair."""
+        return bool(self.pair_id and self.pair_ref)
 
     @property
     def live_resources(self) -> list[ResourceClaim]:
@@ -837,6 +867,12 @@ def load_record(path: Path) -> WorktreeRecord:
                    if data.get("git_state") else None),
         session_state_at=(str(session_state_at_raw)
                           if session_state_at_raw else None),
+        pair_id=(str(data["pair_id"]) if data.get("pair_id") else None),
+        pair_role=(data["pair_role"]
+                   if data.get("pair_role") in ("harness", "knowledge") else None),
+        pair_ref=(str(data["pair_ref"]) if data.get("pair_ref") else None),
+        pair_kind=(data["pair_kind"]
+                   if data.get("pair_kind") in ("worktree", "anchor") else None),
     )
 
 
@@ -963,6 +999,17 @@ def save_record(record: WorktreeRecord, path: Path | None = None) -> None:
     # set, so an unclaimed worktree's YAML stays byte-identical.
     if record.owner_ref:
         content += f"owner_ref: {record.owner_ref}\n"
+    # citadel paired -harness/-knowledge worktree lifecycle (#957): the pair
+    # linkage. Emitted only when set, so an unpaired worktree's YAML stays
+    # byte-identical (the common case is unpaired).
+    if record.pair_id:
+        content += f"pair_id: {record.pair_id}\n"
+    if record.pair_role in ("harness", "knowledge"):
+        content += f"pair_role: {record.pair_role}\n"
+    if record.pair_ref:
+        content += f"pair_ref: {record.pair_ref}\n"
+    if record.pair_kind in ("worktree", "anchor"):
+        content += f"pair_kind: {record.pair_kind}\n"
     # agent-fabric resource-claims: the forward outbound list. Emitted only when
     # non-empty (the common case owns nothing), keeping legacy YAMLs identical.
     if record.resources:
@@ -1076,6 +1123,37 @@ def find_worktree_id_by_cwd(cwd: str) -> str | None:
                 best_len = len(wnorm)
                 best_id = rec.worktree_id
     return best_id
+
+
+def load_record_by_id(worktree_id: str) -> WorktreeRecord | None:
+    """Load a tracked worktree record by id from the local tracking dir.
+
+    Returns ``None`` when the id is empty, no record file exists, or the file
+    is unreadable/malformed. Fail-safe -- never raises.
+    """
+    if not worktree_id:
+        return None
+    path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+    if not path.exists():
+        return None
+    try:
+        return load_record(path)
+    except Exception:
+        return None
+
+
+def find_paired_record(record: WorktreeRecord) -> WorktreeRecord | None:
+    """Resolve the SIBLING record of a paired worktree, or ``None``.
+
+    Reads ``record.pair_ref`` (a :class:`ClaimRef` to the sibling) and loads that
+    worktree's record from the local tracking dir. A cross-machine ref resolves
+    only when a local record for the sibling id exists; otherwise ``None``.
+    Fail-safe -- never raises.
+    """
+    ref = record.pair_claim_ref
+    if ref is None:
+        return None
+    return load_record_by_id(ref.worktree_id)
 
 
 def find_worktree_id_by_session(session_id: str) -> str | None:

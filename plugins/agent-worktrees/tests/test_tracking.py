@@ -13,11 +13,13 @@ from agent_worktrees.tracking import (
     add_resource_claim,
     create_new_record,
     deregister_session,
+    find_paired_record,
     find_worktree_id_by_cwd,
     find_worktree_id_by_session,
     format_claim_ref,
     list_records,
     load_record,
+    load_record_by_id,
     mark_resumed,
     parse_claim_ref,
     register_session,
@@ -141,6 +143,64 @@ class TestSaveLoadRoundTrip:
         assert "owner_ref" not in path2.read_text()
         assert load_record(path2).owner_ref is None
         assert load_record(path2).owner_claim_ref is None
+
+    def test_pair_fields_round_trip(self, tmp_path: Path):
+        # citadel #957: the paired -harness/-knowledge linkage survives
+        # save/load, parses into a ClaimRef, and reports is_paired.
+        ref = "test-machine/citadel-knowledge/wt-002"
+        rec = self._make_record(
+            pair_id="20260806-174915-5182",
+            pair_role="harness",
+            pair_ref=ref,
+            pair_kind="worktree",
+        )
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        txt = path.read_text()
+        assert "pair_id: 20260806-174915-5182" in txt
+        assert "pair_role: harness" in txt
+        assert f"pair_ref: {ref}" in txt
+        assert "pair_kind: worktree" in txt
+        loaded = load_record(path)
+        assert loaded.pair_id == "20260806-174915-5182"
+        assert loaded.pair_role == "harness"
+        assert loaded.pair_ref == ref
+        assert loaded.pair_kind == "worktree"
+        assert loaded.is_paired
+        cr = loaded.pair_claim_ref
+        assert cr is not None and cr.worktree_id == "wt-002"
+        assert cr.machine == "test-machine" and cr.project == "citadel-knowledge"
+
+    def test_pair_fields_absent_omitted(self, tmp_path: Path):
+        # No pairing -> all four keys omitted so the common-case (unpaired)
+        # YAML stays byte-identical; is_paired is False.
+        rec = self._make_record()
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        txt = path.read_text()
+        for key in ("pair_id:", "pair_role:", "pair_ref:", "pair_kind:"):
+            assert key not in txt
+        loaded = load_record(path)
+        assert loaded.pair_id is None and loaded.pair_role is None
+        assert loaded.pair_ref is None and loaded.pair_kind is None
+        assert not loaded.is_paired
+        assert loaded.pair_claim_ref is None
+
+    def test_pair_invalid_enum_values_dropped(self, tmp_path: Path):
+        # Unknown pair_role / pair_kind values degrade to None on load, so a
+        # stray value can never be mistaken for a real role/kind.
+        rec = self._make_record()
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        path.write_text(
+            path.read_text()
+            + "pair_id: p1\npair_role: bogus\npair_ref: m/p/wt-x\npair_kind: weird\n"
+        )
+        loaded = load_record(path)
+        assert loaded.pair_id == "p1"
+        assert loaded.pair_role is None
+        assert loaded.pair_kind is None
+        assert loaded.pair_ref == "m/p/wt-x"
 
     def test_resources_round_trip(self, tmp_path: Path):
         # resource-claims: the forward outbound list survives save/load and is
@@ -963,6 +1023,81 @@ class TestFindWorktreeIdByCwd:
 
     def test_empty_cwd_returns_none(self, tmp_tracking_dir: Path, monkeypatch_config):
         assert find_worktree_id_by_cwd("") is None
+
+
+class TestPairedRecordResolution:
+    """load_record_by_id + find_paired_record -- the #957 pairing resolver."""
+
+    def _save(self, tracking_dir: Path, rec: WorktreeRecord) -> None:
+        save_record(rec, tracking_dir / f"{rec.worktree_id}.yaml")
+
+    def _rec(self, wt_id: str, **overrides) -> WorktreeRecord:
+        base = dict(
+            worktree_id=wt_id,
+            branch=f"worktree/{wt_id}",
+            worktree_path=f"/tmp/src/{wt_id}",
+            repo="test-repo",
+            machine="test",
+            platform="wsl",
+            started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00",
+            resume_count=0,
+            title=None,
+            status="active",
+            completed_at=None,
+            sessions=[],
+        )
+        base.update(overrides)
+        return WorktreeRecord(**base)
+
+    def test_load_record_by_id(self, tmp_tracking_dir: Path, monkeypatch_config):
+        self._save(tmp_tracking_dir, self._rec("wt-a"))
+        loaded = load_record_by_id("wt-a")
+        assert loaded is not None and loaded.worktree_id == "wt-a"
+
+    def test_load_record_by_id_missing(self, tmp_tracking_dir: Path, monkeypatch_config):
+        assert load_record_by_id("nope") is None
+        assert load_record_by_id("") is None
+
+    def test_find_paired_record_resolves_sibling(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        harness = self._rec(
+            "wt-harness",
+            pair_id="pair1",
+            pair_role="harness",
+            pair_ref="test/citadel-knowledge/wt-knowledge",
+            pair_kind="worktree",
+        )
+        knowledge = self._rec(
+            "wt-knowledge",
+            pair_id="pair1",
+            pair_role="knowledge",
+            pair_ref="test/citadel-harness/wt-harness",
+            pair_kind="worktree",
+        )
+        self._save(tmp_tracking_dir, harness)
+        self._save(tmp_tracking_dir, knowledge)
+        sib = find_paired_record(harness)
+        assert sib is not None and sib.worktree_id == "wt-knowledge"
+        assert sib.pair_role == "knowledge"
+        # Symmetric: knowledge resolves back to harness.
+        assert find_paired_record(knowledge).worktree_id == "wt-harness"
+
+    def test_find_paired_record_unpaired(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        assert find_paired_record(self._rec("solo")) is None
+
+    def test_find_paired_record_dangling_ref(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        rec = self._rec(
+            "wt-x", pair_id="p", pair_role="harness",
+            pair_ref="test/proj/wt-gone", pair_kind="worktree",
+        )
+        self._save(tmp_tracking_dir, rec)
+        assert find_paired_record(rec) is None
 
 
 class TestFindWorktreeIdBySession:

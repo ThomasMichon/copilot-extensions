@@ -176,6 +176,111 @@ def test_as_dict_shape(fake_checkouts):
 
 
 # ---------------------------------------------------------------------------
+# state-root --pair: the citadel paired-worktree resolver (#957).
+# ---------------------------------------------------------------------------
+
+class TestStateRootPairCLI:
+    """Drive ``cmd_state_root_dispatch(['--pair', ...])`` end to end."""
+
+    def _pair_records(self, tracking_dir, harness_path, knowledge_path):
+        from agent_worktrees import tracking as tk
+
+        def _rec(wt_id, role, wp, ref):
+            rec = tk.WorktreeRecord(
+                worktree_id=wt_id, branch=f"worktree/{wt_id}", worktree_path=wp,
+                repo="r", machine="test", platform="wsl",
+                started_at="2026-06-01T10:00:00",
+                last_resumed_at="2026-06-01T10:00:00", resume_count=0,
+                title=None, status="active", completed_at=None, sessions=[],
+                pair_id="pair1", pair_role=role, pair_ref=ref, pair_kind="worktree",
+            )
+            tk.save_record(rec, tracking_dir / f"{wt_id}.yaml")
+
+        _rec("wt-harness", "harness", str(harness_path),
+             "test/knowledge/wt-knowledge")
+        _rec("wt-knowledge", "knowledge", str(knowledge_path),
+             "test/harness/wt-harness")
+
+    def test_pair_prints_sibling_path(self, tmp_path, monkeypatch, capsys):
+        from agent_worktrees import tracking as tk
+        from agent_worktrees.__main__ import cmd_state_root_dispatch
+
+        tracking_dir = tmp_path / "tracking"
+        tracking_dir.mkdir()
+        harness = tmp_path / "harness"
+        knowledge = tmp_path / "knowledge"
+        harness.mkdir()
+        knowledge.mkdir()
+        self._pair_records(tracking_dir, harness, knowledge)
+        monkeypatch.setattr(tk.cfg, "tracking_dir", lambda: tracking_dir)
+        monkeypatch.setattr("agent_worktrees.__main__.os.getcwd", lambda: str(harness))
+
+        rc = cmd_state_root_dispatch(["--pair"])
+        out = capsys.readouterr().out.strip()
+        assert rc == 0
+        assert out == str(knowledge)
+
+    def test_pair_json(self, tmp_path, monkeypatch, capsys):
+        import json as _json
+
+        from agent_worktrees import tracking as tk
+        from agent_worktrees.__main__ import cmd_state_root_dispatch
+
+        tracking_dir = tmp_path / "tracking"
+        tracking_dir.mkdir()
+        harness = tmp_path / "harness"
+        knowledge = tmp_path / "knowledge"
+        harness.mkdir()
+        knowledge.mkdir()
+        self._pair_records(tracking_dir, harness, knowledge)
+        monkeypatch.setattr(tk.cfg, "tracking_dir", lambda: tracking_dir)
+        monkeypatch.setattr("agent_worktrees.__main__.os.getcwd", lambda: str(harness))
+
+        rc = cmd_state_root_dispatch(["--pair", "--json"])
+        data = _json.loads(capsys.readouterr().out)
+        assert rc == 0
+        assert data["paired"] is True and data["pair_id"] == "pair1"
+        assert data["self"]["role"] == "harness"
+        assert data["sibling"]["worktree_id"] == "wt-knowledge"
+        assert data["sibling"]["role"] == "knowledge"
+        assert data["sibling"]["path"] == str(knowledge)
+
+    def test_pair_untracked_cwd_exits_3(self, tmp_path, monkeypatch, capsys):
+        from agent_worktrees import tracking as tk
+        from agent_worktrees.__main__ import cmd_state_root_dispatch
+
+        tracking_dir = tmp_path / "tracking"
+        tracking_dir.mkdir()
+        monkeypatch.setattr(tk.cfg, "tracking_dir", lambda: tracking_dir)
+        monkeypatch.setattr(
+            "agent_worktrees.__main__.os.getcwd", lambda: str(tmp_path / "nowhere")
+        )
+        rc = cmd_state_root_dispatch(["--pair"])
+        assert rc == 3
+
+    def test_pair_unpaired_worktree_exits_3(self, tmp_path, monkeypatch, capsys):
+        from agent_worktrees import tracking as tk
+        from agent_worktrees.__main__ import cmd_state_root_dispatch
+
+        tracking_dir = tmp_path / "tracking"
+        tracking_dir.mkdir()
+        solo = tmp_path / "solo"
+        solo.mkdir()
+        rec = tk.WorktreeRecord(
+            worktree_id="solo", branch="worktree/solo", worktree_path=str(solo),
+            repo="r", machine="test", platform="wsl",
+            started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00", resume_count=0,
+            title=None, status="active", completed_at=None, sessions=[],
+        )
+        tk.save_record(rec, tracking_dir / "solo.yaml")
+        monkeypatch.setattr(tk.cfg, "tracking_dir", lambda: tracking_dir)
+        monkeypatch.setattr("agent_worktrees.__main__.os.getcwd", lambda: str(solo))
+        rc = cmd_state_root_dispatch(["--pair"])
+        assert rc == 3
+
+
+# ---------------------------------------------------------------------------
 # config_source_anchors -- the E1e state-root config-overlay seam.
 # ---------------------------------------------------------------------------
 
