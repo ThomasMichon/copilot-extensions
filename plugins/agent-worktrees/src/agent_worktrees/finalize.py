@@ -45,12 +45,21 @@ from . import activity, git_ops, hooks, output, permissions, procs, sessions, tr
 from .config import Config
 
 
-def _has_live_session(worktree_path: str) -> bool:
-    """Return True if any Copilot session is currently using this worktree."""
-    ctx = sessions.scan_sessions([worktree_path])
-    # scan_sessions keys results by the normalized path it was given,
-    # so just check if any active sessions were returned.
-    return bool(ctx.active_sessions)
+def _has_live_session(record) -> bool:
+    """Return True if this worktree has a live bound Copilot session.
+
+    Resolved by exact session id (the worktree's session registry) plus its mux
+    session -- never by sweeping session-state (invariant:
+    ``docs/patterns/session-state-access.md``). An untracked worktree
+    (``record is None``) reports not-live; the ``inside_worktree`` gate at the
+    call site still guards the in-use case.
+    """
+    if record is None:
+        return False
+    if sessions.worktree_has_live_session(record):
+        return True
+    wt_id = getattr(record, "worktree_id", None)
+    return bool(wt_id and sessions.has_mux_session(wt_id))
 
 
 class FinalizeLock:
@@ -1081,7 +1090,7 @@ def validate_and_finalize(
     try:
         # Cleanup -- remove worktree and branch
         inside_worktree = git_ops.is_cwd_inside(worktree_path)
-        has_live_session = _has_live_session(worktree_path)
+        has_live_session = _has_live_session(record)
 
         # Reconcile local branch pointers with origin now that the content is
         # verified upstream, so a merged-but-not-yet-cleaned worktree stops

@@ -20,7 +20,6 @@ from unittest.mock import patch
 from agent_worktrees.picker_tui import derive
 from agent_worktrees.sessions import (
     _normalize_path,
-    scan_sessions,
     scan_sessions_fast,
 )
 
@@ -138,9 +137,11 @@ class TestPulseSessionScan:
             substatus={"sessionId": "sess-pulse", "intent": "Doing the thing",
                        "updatedAt": "2026-06-01T10:00:00.000Z", "idle": False},
         )
+        rec = _make_record("wt-pulse", wt_path,
+                           sessions=[SessionEntry("sess-pulse", "t")])
         with patch("agent_worktrees.sessions._session_state_dir",
                    return_value=tmp_session_state_dir):
-            ctx = scan_sessions([wt_path])
+            ctx = scan_sessions_fast([rec])
         norm = _normalize_path(wt_path)
         assert ctx.live_intent[norm] == "Doing the thing"
         assert ctx.live_intent_at[norm] == "2026-06-01T10:00:00.000Z"
@@ -158,9 +159,11 @@ class TestPulseSessionScan:
             updated_at="2026-06-01T12:00:00.000Z",
             substatus={"intent": "new intent", "updatedAt": "new", "idle": False},
         )
+        rec = _make_record("wt-pulse2", wt_path, sessions=[
+            SessionEntry("old", "t"), SessionEntry("new", "t")])
         with patch("agent_worktrees.sessions._session_state_dir",
                    return_value=tmp_session_state_dir):
-            ctx = scan_sessions([wt_path])
+            ctx = scan_sessions_fast([rec])
         norm = _normalize_path(wt_path)
         assert ctx.live_intent[norm] == "new intent"
 
@@ -177,9 +180,11 @@ class TestPulseSessionScan:
             tmp_session_state_dir, "new", wt_path,
             updated_at="2026-06-01T12:00:00.000Z",
         )
+        rec = _make_record("wt-pulse3", wt_path, sessions=[
+            SessionEntry("old", "t"), SessionEntry("new", "t")])
         with patch("agent_worktrees.sessions._session_state_dir",
                    return_value=tmp_session_state_dir):
-            ctx = scan_sessions([wt_path])
+            ctx = scan_sessions_fast([rec])
         norm = _normalize_path(wt_path)
         # The newest session has no pulse -> the older one must not linger.
         assert norm not in ctx.live_intent
@@ -187,9 +192,11 @@ class TestPulseSessionScan:
     def test_missing_sidecar_omits_intent(self, tmp_session_state_dir: Path):
         wt_path = "/tmp/wt-nopulse"
         make_session_dir(tmp_session_state_dir, "sess-nopulse", wt_path)
+        rec = _make_record("wt-nopulse", wt_path,
+                           sessions=[SessionEntry("sess-nopulse", "t")])
         with patch("agent_worktrees.sessions._session_state_dir",
                    return_value=tmp_session_state_dir):
-            ctx = scan_sessions([wt_path])
+            ctx = scan_sessions_fast([rec])
         assert _normalize_path(wt_path) not in ctx.live_intent
 
     def test_blank_intent_ignored(self, tmp_session_state_dir: Path):
@@ -198,9 +205,11 @@ class TestPulseSessionScan:
             tmp_session_state_dir, "blank", wt_path,
             substatus={"intent": "   ", "updatedAt": "x"},
         )
+        rec = _make_record("wt-blankpulse", wt_path,
+                           sessions=[SessionEntry("blank", "t")])
         with patch("agent_worktrees.sessions._session_state_dir",
                    return_value=tmp_session_state_dir):
-            ctx = scan_sessions([wt_path])
+            ctx = scan_sessions_fast([rec])
         assert _normalize_path(wt_path) not in ctx.live_intent
 
     def test_fast_path_populates_intent(self, tmp_session_state_dir: Path):
