@@ -894,3 +894,201 @@ def build_resolution(
     res.available_here = True
     res.steps = _local_edit_steps()
     return res
+
+
+# ---------------------------------------------------------------------------
+# Doctor -- validate related.yaml against reality (report-first)
+# ---------------------------------------------------------------------------
+#
+# related.yaml declares the *expected* relationship; the machine's own
+# ``repos.yaml`` is the single owning store of *where a checkout actually lives*
+# (the fabric's "locations-live-from-the-machine" / "derive-don't-duplicate"
+# rule). The doctor verifies the declaration against that truth **on the current
+# machine**, plus structural checks it can make anywhere (valid machine keys,
+# venue repos present). It is a pure reporter: it never edits related.yaml. The
+# headline case -- an entry that claims a local checkout on THIS machine that the
+# machine's registry doesn't know -- is surfaced for the *agent* to resolve with
+# the user (locate / provide a URL / clone / remove-with-approval), never
+# auto-removed.
+
+SEV_ERROR = "error"
+SEV_WARNING = "warning"
+SEV_INFO = "info"
+
+
+@dataclass
+class RelatedFinding:
+    """One related.yaml validation finding (report-first; never auto-applied)."""
+
+    name: str
+    kind: str
+    severity: str
+    detail: str
+    suggested_actions: list[str] = field(default_factory=list)
+    # Best-effort checkout path the CLI located for a ``local_repo_unregistered``
+    # finding (a dir named like the repo under a source root). Empty when none /
+    # not searched. Lets the agent offer a concrete ``repos add`` without a hunt.
+    candidate_path: str = ""
+
+
+def _locus_here(locus: Locus, current_machine: str) -> tuple[str, bool, bool]:
+    """Return ``(kind, expects_local_checkout, available_here)`` for a locus.
+
+    ``expects_local_checkout`` is True only for the ``local`` / ``machine`` kinds
+    (a CodeSpace/container is provisioned from its venue, not the machine's local
+    registry, so a missing registry entry there is not a defect).
+    """
+    kind, target = parse_preferred(locus.preferred)
+    if not kind:
+        kind = "local"
+    if kind == "codespace":
+        return kind, False, True
+    if kind == "container":
+        return kind, False, _venue_available_here(locus.container, current_machine)
+    if kind == "machine":
+        return kind, True, machine_matches(target, current_machine)
+    # local
+    ms = locus.machines
+    here = (not ms) or any(machine_matches(m, current_machine) for m in ms)
+    return kind, True, here
+
+
+def _referenced_machine_keys(locus: Locus) -> list[str]:
+    """Every machine key a locus names (preferred ``machine:<k>``, ``machines``,
+    and ``container.machines``), de-duplicated in first-seen order."""
+    keys: list[str] = []
+    kind, target = parse_preferred(locus.preferred)
+    if kind == "machine" and target:
+        keys.append(target)
+    for m in locus.machines:
+        keys.append(m)
+    for m in _venue_machines(locus.container):
+        keys.append(m)
+    seen: set[str] = set()
+    out: list[str] = []
+    for k in keys:
+        kl = k.strip().lower()
+        if kl and kl not in seen:
+            seen.add(kl)
+            out.append(k)
+    return out
+
+
+def diagnose_related(
+    cfg: RelatedConfig,
+    *,
+    current_machine: str,
+    machine_known: Any,          # Callable[[str], bool]
+    machines_known_available: bool,
+    registry_has: Any,           # Callable[[str], bool]
+    registry_remote: Any = None,  # Callable[[str], str] | None
+) -> list[RelatedFinding]:
+    """Validate a related.yaml against reality (pure; dependency-injected).
+
+    The caller injects the current machine, a ``machine_known`` predicate (does a
+    locus machine key resolve in ``machines.yaml`` -- key/alias/hostname), a
+    ``registry_has`` predicate (is the name in THIS machine's ``repos.yaml``), and
+    an optional ``registry_remote`` (its remote URL, for clone hints). Returns a
+    list of :class:`RelatedFinding`; never mutates anything.
+
+    Findings:
+
+    * ``unknown_machine`` (warning) -- a locus names a machine key absent from
+      ``machines.yaml``. Skipped when ``machines_known_available`` is False.
+    * ``codespace_missing_repo`` / ``container_missing_repo`` (error) -- a venue
+      is declared with no ``repo`` to provision from.
+    * ``local_repo_unregistered`` (warning) -- the entry claims a *local* checkout
+      available on THIS machine, but the machine's ``repos.yaml`` has no entry:
+      the file points at a repo the machine can't locate. The agent resolves it
+      with the user (locate / URL / clone / remove-with-approval).
+    * ``crossmachine_unverifiable`` (info) -- a local/machine entry that targets
+      *other* machines only; its local registration can't be checked from here.
+    * ``empty_locus`` (info) -- no locus at all; nowhere to resolve work.
+    """
+    remote_of = registry_remote if callable(registry_remote) else (lambda _n: "")
+    findings: list[RelatedFinding] = []
+
+    for name in sorted(cfg.related.keys()):
+        entry = cfg.related[name]
+        locus = entry.locus
+
+        if locus.is_empty():
+            findings.append(RelatedFinding(
+                name=name, kind="empty_locus", severity=SEV_INFO,
+                detail=f"'{name}' has no locus -- can't determine where to work.",
+                suggested_actions=[
+                    "set a locus (local | machine:<key> | codespace | container)",
+                ],
+            ))
+            # No further locus-derived checks are meaningful.
+            continue
+
+        # 1) Unknown machine keys (structural; checkable anywhere machines.yaml is).
+        if machines_known_available:
+            for key in _referenced_machine_keys(locus):
+                if not machine_known(key):
+                    findings.append(RelatedFinding(
+                        name=name, kind="unknown_machine", severity=SEV_WARNING,
+                        detail=(f"'{name}' locus names machine '{key}', which is "
+                                f"not in machines.yaml."),
+                        suggested_actions=[
+                            f"correct the machine key '{key}'",
+                            f"add '{key}' to machines.yaml if it's a real machine",
+                        ],
+                    ))
+
+        # 2) Venue declared without a repo to provision from.
+        if locus.codespace and not str(locus.codespace.get("repo", "")).strip():
+            findings.append(RelatedFinding(
+                name=name, kind="codespace_missing_repo", severity=SEV_ERROR,
+                detail=(f"'{name}' has a codespace locus but no codespace.repo "
+                        f"to provision from."),
+                suggested_actions=["set codespace.repo <org/repo>"],
+            ))
+        if locus.container and not str(locus.container.get("repo", "")).strip():
+            findings.append(RelatedFinding(
+                name=name, kind="container_missing_repo", severity=SEV_ERROR,
+                detail=(f"'{name}' has a container locus but no container.repo "
+                        f"to build the fleet from."),
+                suggested_actions=["set container.repo <org/repo>"],
+            ))
+
+        # 3) Local-checkout claims vs the machine's own registry (the headline).
+        kind, expects_local, available_here = _locus_here(locus, current_machine)
+        if expects_local and not registry_has(name):
+            if available_here:
+                remote = str(remote_of(name) or "").strip()
+                actions = [
+                    f"locate the checkout and register it: `repos add {name} "
+                    f"<path> --class <class>`",
+                ]
+                if remote:
+                    actions.append(f"clone it fresh from {remote}, then `repos add`")
+                else:
+                    actions.append(
+                        "provide a remote URL (no remote is known for this name)")
+                actions.append(
+                    f"remove the related entry `related remove {name}` "
+                    f"(only with your approval)")
+                findings.append(RelatedFinding(
+                    name=name, kind="local_repo_unregistered",
+                    severity=SEV_WARNING,
+                    detail=(f"'{name}' is declared available locally on "
+                            f"'{current_machine}', but this machine's repos.yaml "
+                            f"has no entry -- it's likely checked out but never "
+                            f"registered (or the entry is stale)."),
+                    suggested_actions=actions,
+                ))
+            else:
+                targets = ", ".join(locus.machines) or (
+                    parse_preferred(locus.preferred)[1] or "(unspecified)")
+                findings.append(RelatedFinding(
+                    name=name, kind="crossmachine_unverifiable",
+                    severity=SEV_INFO,
+                    detail=(f"'{name}' targets other machine(s) [{targets}] and "
+                            f"isn't registered here -- run `related doctor` on "
+                            f"that machine to verify its local registration."),
+                    suggested_actions=[],
+                ))
+
+    return findings

@@ -98,6 +98,7 @@ related show <name> [--json]             Show one entry + global-registry contex
 related add <name> [opts]                Link a repo + scaffold its narrative
 related remove <name>                    Unlink (leaves the narrative doc)
 related doc <name>                       Print (scaffold if missing) the narrative
+related doctor [--json]                  Validate entries against reality (report-first)
 related primary [<name>]                 Show or set the primary
 related resolve [<name>]                 How to work on it from here (see working-cross-repo)
 ```
@@ -107,6 +108,44 @@ related resolve [<name>]                 How to work on it from here (see workin
 locus `--cs-repo R --cs-machine M --cs-location L --cs-workspace DIR`; and for a
 container locus `--container-repo R --container-workspace DIR
 --container-machines a,b`.
+
+## Validating the index -- `related doctor` (and how to act on it)
+
+`related doctor` checks each entry against reality **on the current machine**:
+every entry points at a validly-existing repo, names only in-system machines
+(from `machines.yaml`), and has provisionable venues. It is **report-first --
+it never edits `related.yaml`.** Run it after editing the index, and whenever
+cross-repo resolution behaves oddly. `--json` emits `{ current_machine,
+machines_yaml_available, findings: [{name, kind, severity, detail,
+suggested_actions, candidate_path}] }`.
+
+Findings and how you (the agent) resolve each **with the user**:
+
+- **`local_repo_unregistered`** (warning, the headline) -- an entry claims a
+  **local** checkout available on *this* machine, but the machine's own
+  `repos.yaml` has no entry. The repo is *probably checked out but never
+  registered* (or the entry is stale). **Do not delete the entry.** The doctor
+  runs a best-effort hunt; if it found the checkout, `candidate_path` is set --
+  offer to register it (`repos add <name> <candidate_path> --class <class>`).
+  Otherwise **ask the user** which they want:
+  1. **locate it** -- they point you at the path → `repos add`;
+  2. **provide a URL** -- clone it, then `repos add`;
+  3. **create it fresh** -- clone/scaffold, then `repos add`;
+  4. **remove the entry** -- only with explicit approval (`related remove <name>`).
+- **`unknown_machine`** (warning) -- a locus names a machine key absent from
+  `machines.yaml`. Ask whether it's a typo (correct the key) or a real machine
+  to add to `machines.yaml`.
+- **`codespace_missing_repo` / `container_missing_repo`** (error) -- a venue has
+  no `repo` to provision from. Ask for the vessel repo and set it.
+- **`crossmachine_unverifiable`** (info) -- a local entry that targets *other*
+  machines only; its local registration can't be checked from here. Not a
+  defect -- run `related doctor` **on that machine** to verify it there.
+- **`empty_locus`** (info) -- no locus; ask where work on it happens and set one.
+
+**Never remove or rewrite an entry on your own** -- a missing registration is
+almost always the user forgetting to point the harness at an existing checkout,
+not a bad entry. Surface the finding, propose the concrete fix, and let the user
+choose; only remove with their approval.
 
 ## When to link a repo
 
