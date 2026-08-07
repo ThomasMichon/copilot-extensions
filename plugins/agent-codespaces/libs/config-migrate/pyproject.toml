@@ -30,7 +30,7 @@ line-length = 99
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0",
+    "pytest>=9.1.1",
 ]
 
 [tool.ruff.lint]
