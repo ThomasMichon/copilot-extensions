@@ -121,7 +121,8 @@ def run_module(
 
     try:
         proc = subprocess.run(  # noqa: S603 - argv list, repo-declared trusted module
-            command, cwd=str(repo_root), capture_output=True, text=True, timeout=timeout,
+            command, cwd=str(repo_root), capture_output=True,
+            encoding="utf-8", errors="replace", timeout=timeout,
         )
     except FileNotFoundError as exc:
         return ModuleResult(name, pkg.source_repo, ran=False, dry_run=dry_run, command=command,
