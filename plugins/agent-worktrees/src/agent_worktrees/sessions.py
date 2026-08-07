@@ -4,10 +4,9 @@ Scans ~/.copilot/session-state/ to detect active Copilot sessions
 (by lock file + process check) and extract latest session summaries
 for worktree annotation.
 
-Provides two scanning modes:
-- ``scan_sessions()`` -- full walk of all session directories (legacy)
-- ``scan_sessions_fast()`` -- targeted lookup using the per-worktree
-  session registry, falling back to full scan for unindexed records
+Session discovery is **registry-driven** (random access by exact session id).
+The only sanctioned full walk of the state root is the explicit
+``backfill_sessions()`` repair -- see ``docs/patterns/session-state-access.md``.
 """
 
 from __future__ import annotations
@@ -19,6 +18,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
+
+try:  # libyaml (C) is dramatically faster; the one sanctioned sweep uses it.
+    from yaml import CSafeLoader as _YamlSafeLoader
+except ImportError:  # pragma: no cover - pure-Python fallback
+    from yaml import SafeLoader as _YamlSafeLoader
 
 
 @dataclass
@@ -63,6 +67,23 @@ class SessionContext:
 
     _activity_ts: dict[str, str] = field(default_factory=dict)
     """Internal: tracks latest updated_at per path for activity/context selection."""
+
+    last_session_id: dict[str, str] = field(default_factory=dict)
+    """normalized_path → session_id of the most-recent session carrying
+    conversation data (``session.db``/``events.jsonl``).
+
+    Folded into the single ``scan_sessions``/``_enrich_session_dir`` pass so the
+    list command no longer re-scans **all** of ``session-state`` once per
+    worktree -- that per-worktree full scan was O(worktrees x sessions)
+    ``yaml.safe_load`` calls and could pin a CPU core on a large tree (GH #198).
+    Mirrors ``find_latest_session_id`` semantics: detached sessions skipped (by
+    callers), conversation data required, newest ``updated_at`` wins."""
+
+    _last_sid_ts: dict[str, str] = field(default_factory=dict)
+    """Internal: tracks latest updated_at per path for last_session_id selection.
+    Independent of ``_activity_ts`` so an older *valid* session still wins over a
+    newer stale stub (which ``last_activity`` may reflect but a resume target
+    must not)."""
 
 
 def _normalize_path(p: str) -> str:
@@ -135,6 +156,17 @@ def _update_activity(
     """
     if not updated_at:
         return
+    # GH #198: track the newest session that carries conversation data as the
+    # worktree's resume target (``last_session_id``), *before* the
+    # last_activity gate below. This tracker is independent so an older valid
+    # session still wins over a newer stale stub -- mirroring
+    # ``find_latest_session_id`` (which skips stubs lacking session.db /
+    # events.jsonl). Detached sessions are already skipped by every caller.
+    if (entry / "session.db").exists() or (entry / "events.jsonl").exists():
+        sid_prev = ctx._last_sid_ts.get(norm_path, "")
+        if not sid_prev or updated_at > sid_prev:
+            ctx._last_sid_ts[norm_path] = updated_at
+            ctx.last_session_id[norm_path] = entry.name
     prev = ctx._activity_ts.get(norm_path, "")
     if prev and updated_at <= prev:
         return
@@ -388,124 +420,6 @@ def worktree_has_live_session(rec) -> bool:
     return False
 
 
-def scan_sessions(worktree_paths: list[str]) -> SessionContext:
-    """Scan Copilot session-state for active sessions and summaries.
-
-    Args:
-        worktree_paths: List of worktree filesystem paths to match against.
-
-    Returns:
-        SessionContext with active sessions and latest summaries.
-    """
-    ctx = SessionContext()
-    session_dir = _session_state_dir()
-
-    if not session_dir.exists() or not worktree_paths:
-        return ctx
-
-    # Build normalized lookup set
-    path_set: set[str] = {_normalize_path(p) for p in worktree_paths}
-
-    # Track latest summary per path by updated_at
-    latest_ts: dict[str, str] = {}
-
-    for entry in session_dir.iterdir():
-        if not entry.is_dir():
-            continue
-
-        # Skip detached parent-continuation sessions (e.g. headless
-        # rem-agent / subconscious runs). They reuse the parent's cwd and
-        # must not be attributed to a worktree.
-        if _is_detached_session(entry):
-            continue
-
-        ws_file = entry / "workspace.yaml"
-        if not ws_file.exists():
-            continue
-
-        try:
-            with open(ws_file, encoding="utf-8") as f:
-                ws_data = yaml.safe_load(f)
-        except Exception:
-            continue
-
-        if not ws_data or not isinstance(ws_data, dict):
-            continue
-
-        cwd = ws_data.get("cwd", "")
-        if not cwd:
-            continue
-
-        norm_cwd = _normalize_path(cwd)
-
-        # Match against worktree roots -- session cwd may be a subdirectory
-        matched_path: str | None = None
-        _casefold = platform.system() == "Windows"
-        for wt_path in path_set:
-            a, b = (norm_cwd.lower(), wt_path.lower()) if _casefold else (norm_cwd, wt_path)
-            if a == b or a.startswith(b + "/") or a.startswith(b + "\\"):
-                matched_path = wt_path
-                break
-
-        if matched_path is None:
-            continue
-
-        # Count sessions per worktree
-        ctx.session_count[matched_path] = ctx.session_count.get(matched_path, 0) + 1
-
-        # Count user turns from events.jsonl (incremental, size-keyed sidecar).
-        events_file = entry / "events.jsonl"
-        if events_file.exists():
-            turns = _count_user_turns(entry)
-            if turns > 0:
-                ctx.turn_count[matched_path] = (
-                    ctx.turn_count.get(matched_path, 0) + turns
-                )
-
-        # Track best available display text per path by updated_at.
-        # Prefer summary (richer) over name (short title), but pick
-        # the newest session's best text overall.
-        updated_at = str(ws_data.get("updated_at", ""))
-        _update_activity(ctx, matched_path, entry, updated_at)
-
-        _placeholder = ("", "|-", "|", ">-", ">", "null", "Untitled")
-        display_text = ""
-        summary = ws_data.get("summary", "")
-        if isinstance(summary, str) and summary.strip() and summary not in _placeholder:
-            display_text = summary.strip()
-        if not display_text:
-            name = ws_data.get("name", "")
-            if isinstance(name, str) and name.strip() and name not in _placeholder:
-                display_text = name.strip()
-
-        if display_text:
-            if not latest_ts.get(matched_path) or updated_at > latest_ts[matched_path]:
-                latest_ts[matched_path] = updated_at
-                if len(display_text) > 60:
-                    display_text = display_text[:57] + "..."
-                ctx.latest_summary[matched_path] = display_text
-
-        # Check for live lock files
-        live_found = False
-        for lock_file in entry.glob("inuse.*.lock"):
-            parts = lock_file.stem.split(".")
-            if len(parts) >= 2:
-                try:
-                    lock_pid = int(parts[1])
-                except ValueError:
-                    continue
-                if _is_copilot_process(lock_pid):
-                    live_found = True
-                    break
-
-        if live_found:
-            if matched_path not in ctx.active_sessions:
-                ctx.active_sessions[matched_path] = []
-            ctx.active_sessions[matched_path].append(entry.name)
-
-    return ctx
-
-
 def _enrich_session_dir(
     session_dir: Path,
     session_id: str,
@@ -593,13 +507,17 @@ def scan_sessions_fast(
     """Targeted session scan using the per-worktree session registry.
 
     Instead of walking all of ``~/.copilot/session-state/``, reads
-    session IDs from each record's ``sessions`` list and checks only
+    session IDs from each record's ``sessions`` list and random-accesses only
     those specific directories.
 
-    Records whose ``sessions`` field is None (pre-registry, not yet
-    indexed) are collected and their paths passed to the legacy
-    ``scan_sessions()`` for a full-scan fallback.  This ensures
-    correct behavior during the migration window.
+    **Invariant (GH #198):** a routine, looped read path (the ``list`` command a
+    poller drives) must never sweep the whole session-state folder -- only
+    random-access known session ids. A record whose ``sessions`` registry is
+    empty/None (pre-registry, or the register-session hook never fired) is left
+    un-enriched here; its registry is repaired only by an **explicit** backfill
+    (``agent-worktrees backfill-sessions`` / ``doctor``), never by an
+    on-every-list sweep. The prior full-scan fallback made this an
+    O(worktrees x sessions) ``yaml.safe_load`` walk that pinned a CPU core.
 
     Args:
         records: List of WorktreeRecord objects (with sessions field).
@@ -613,50 +531,28 @@ def scan_sessions_fast(
     if not session_dir.exists():
         return ctx
 
-    # Separate indexed vs unindexed records
-    fallback_paths: list[str] = []
-
     for rec in records:
         if not rec.worktree_path:
             continue
 
-        # sessions=None means pre-registry; an empty list means the registry
-        # is active but no session was recorded for this worktree (e.g. the
-        # register-session hook never fired).  Both need the full-scan
-        # fallback -- otherwise the fast path scans nothing and the worktree
-        # silently loses its session summary + turn count (so the status bar
-        # shows a bare UNUSED state with no title).  Mirrors the same
-        # empty-or-None fallback in ``find_latest_session_id_fast``.
+        # sessions=None means pre-registry; an empty list means the registry is
+        # active but no session was recorded for this worktree (e.g. the
+        # register-session hook never fired). Either way there is no
+        # random-access target -- and, per the invariant (GH #198), a routine
+        # read must NOT sweep all of session-state to recover one. The record is
+        # left un-enriched here; an explicit backfill
+        # (``agent-worktrees backfill-sessions`` / ``doctor``) repairs the
+        # registry off the hot path. The prior full-scan fallback made this an
+        # O(worktrees x sessions) yaml.safe_load walk that pinned a CPU core.
         sessions = getattr(rec, "sessions", None)
         if not sessions:
-            fallback_paths.append(rec.worktree_path)
             continue
 
-        # Fast path -- only check known session IDs
+        # Fast path -- random-access only the known session IDs.
         for entry in sessions:
             _enrich_session_dir(
                 session_dir, entry.session_id, rec.worktree_path, ctx,
             )
-
-    # Fallback for unindexed records
-    if fallback_paths:
-        fallback_ctx = scan_sessions(fallback_paths)
-        # Merge fallback results
-        for k, v in fallback_ctx.active_sessions.items():
-            ctx.active_sessions.setdefault(k, []).extend(v)
-        for k, v in fallback_ctx.latest_summary.items():
-            if k not in ctx.latest_summary:
-                ctx.latest_summary[k] = v
-        for k, v in fallback_ctx.session_count.items():
-            ctx.session_count[k] = ctx.session_count.get(k, 0) + v
-        for k, v in fallback_ctx.turn_count.items():
-            ctx.turn_count[k] = ctx.turn_count.get(k, 0) + v
-        # Fallback paths are disjoint from fast-path records, so a direct
-        # copy is safe (no key collisions to reconcile).
-        for k, v in fallback_ctx.last_activity.items():
-            ctx.last_activity.setdefault(k, v)
-        for k, v in fallback_ctx.context_pct.items():
-            ctx.context_pct.setdefault(k, v)
 
     return ctx
 
@@ -686,14 +582,21 @@ def find_latest_session_id_fast(
     """Find the most recent Copilot session ID using the registry.
 
     If *sessions* is None (pre-registry) or empty (registry active but
-    no sessions recorded -- e.g. hook failed to fire), falls back to the
-    full-scan ``find_latest_session_id()``.
+    no sessions recorded -- e.g. hook failed to fire), returns ``None``:
+    per the invariant (GH #198) a launch/auto-resume lookup must not sweep all
+    of session-state to recover a target. An explicit backfill
+    (``agent-worktrees backfill-sessions`` / ``doctor``) repairs the registry.
 
     Validates each candidate: session dir must exist and contain
     ``session.db`` or ``events.jsonl`` (not a stale stub).
     """
     if not sessions:
-        return find_latest_session_id(worktree_path)
+        # Invariant (GH #198): random-access only. With no registry there is no
+        # target to random-access, and a routine launch/auto-resume is not
+        # severe enough to justify a full session-state sweep -- return None.
+        # Callers degrade gracefully (no auto-resume); an explicit backfill
+        # repairs the registry off the hot path.
+        return None
 
     session_dir = _session_state_dir()
     if not session_dir.exists():
@@ -777,68 +680,6 @@ def resolve_resume_target(record) -> str | None:
     )
 
 
-def find_latest_session_id(worktree_path: str) -> str | None:
-    """Find the most recent Copilot session ID for a worktree path.
-
-    Scans ``~/.copilot/session-state/`` for sessions whose ``cwd``
-    matches *worktree_path* and returns the session directory name
-    (which is the session ID) of the most recently updated match.
-
-    Returns None if no matching session is found.
-    """
-    session_dir = _session_state_dir()
-    if not session_dir.exists():
-        return None
-
-    norm_wt = _normalize_path(worktree_path)
-    best_id: str | None = None
-    best_ts: str = ""
-
-    for entry in session_dir.iterdir():
-        if not entry.is_dir():
-            continue
-
-        # Skip detached parent-continuation sessions (subconscious /
-        # rem-agent runs) -- they reuse the parent's cwd and are not a real
-        # resume target for this worktree.
-        if _is_detached_session(entry):
-            continue
-
-        ws_file = entry / "workspace.yaml"
-        if not ws_file.exists():
-            continue
-
-        try:
-            with open(ws_file, encoding="utf-8") as f:
-                ws_data = yaml.safe_load(f)
-        except Exception:
-            continue
-
-        if not ws_data or not isinstance(ws_data, dict):
-            continue
-
-        cwd = ws_data.get("cwd", "")
-        if not cwd:
-            continue
-
-        norm_cwd = _normalize_path(cwd)
-        if norm_cwd != norm_wt and not norm_cwd.startswith(norm_wt + os.sep):
-            continue
-
-        # A session directory with only workspace.yaml but no conversation
-        # data (session.db or events.jsonl) is a stale stub that Copilot
-        # CLI will reject with "No session matched".  Skip it.
-        if not (entry / "session.db").exists() and not (entry / "events.jsonl").exists():
-            continue
-
-        updated_at = str(ws_data.get("updated_at", ""))
-        if updated_at > best_ts:
-            best_ts = updated_at
-            best_id = entry.name
-
-    return best_id
-
-
 def backfill_sessions(records: list) -> dict[str, list[str]]:
     """Populate empty session registries from existing session-state data.
 
@@ -849,6 +690,13 @@ def backfill_sessions(records: list) -> dict[str, list[str]]:
 
     Only processes records whose ``sessions`` field is empty (``None``
     or ``[]``).  Records with populated session lists are skipped.
+
+    **This is the single sanctioned session-state sweep** (invariant:
+    ``docs/patterns/session-state-access.md``). Every other path resolves a
+    session by exact id; this repair is the *only* code that may iterate the
+    state root, and it is invoked explicitly (the ``backfill-sessions`` verb /
+    ``doctor``), never implicitly on a routine read. Parsed with the C YAML
+    loader since this is the lone remaining O(sessions) path.
     """
     session_dir = _session_state_dir()
     if not session_dir.exists():
@@ -891,7 +739,7 @@ def backfill_sessions(records: list) -> dict[str, list[str]]:
 
         try:
             with open(ws_file, encoding="utf-8") as f:
-                ws_data = yaml.safe_load(f)
+                ws_data = yaml.load(f, Loader=_YamlSafeLoader)
         except Exception:
             continue
 
@@ -1020,11 +868,13 @@ def _session_meta(session_dir: Path, session_id: str) -> dict | None:
 def list_worktree_sessions(record) -> list[dict]:
     """Enumerate the Copilot sessions associated with a worktree.
 
-    Uses the worktree's session registry (``record.sessions``) when
-    available; for pre-registry records (``sessions is None``) falls back
-    to a cwd-based scan of session-state.  Each entry carries display
-    metadata (see :func:`_session_meta`).  Sorted newest-first by
-    ``updated_at``.
+    Uses the worktree's session registry (``record.sessions``) and
+    random-accesses only those session dirs. Per the invariant (GH #198) a
+    pre-registry record (``sessions is None``) is **not** auto-backfilled here
+    -- that would sweep all of session-state on a routine read. Until an
+    explicit backfill (``agent-worktrees backfill-sessions`` / ``doctor``) runs,
+    such a worktree lists no sessions. Each entry carries display metadata (see
+    :func:`_session_meta`).  Sorted newest-first by ``updated_at``.
     """
     session_dir = _session_state_dir()
     if not session_dir.exists() or not record.worktree_path:
@@ -1046,10 +896,12 @@ def list_worktree_sessions(record) -> list[dict]:
         for entry in sessions:
             _add(entry.session_id)
     else:
-        # Pre-registry fallback: match sessions by cwd under the worktree.
-        backfilled = backfill_sessions([record])
-        for sid in backfilled.get(record.worktree_id, []):
-            _add(sid)
+        # Invariant (GH #198): pre-registry records are NOT auto-backfilled
+        # here -- an implicit backfill sweeps all of session-state, which a
+        # routine read must never do. Backfill is an explicit maintenance
+        # action (``agent-worktrees backfill-sessions`` / ``doctor``); until it
+        # runs, a pre-registry worktree simply lists no sessions.
+        pass
 
     out.sort(key=lambda s: s.get("updated_at", ""), reverse=True)
 
