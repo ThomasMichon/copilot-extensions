@@ -486,9 +486,36 @@ def has_remote(remote: str, *, cwd: str | Path) -> bool:
     return remote in remotes
 
 
-def fetch(remote: str, *, cwd: str | Path) -> None:
-    """Fetch from a remote (auto-authenticating cross-account remotes; #29)."""
-    git(*_auth_config_args(remote, cwd=cwd), "fetch", remote, "--quiet", cwd=cwd)
+#: Default bound (seconds) for a network ``fetch``. An unbounded fetch hangs the
+#: whole flow when the remote is unreachable (Gitea down / offline) -- every
+#: fetch caller here is best-effort or has a fast-path fallback, so a stalled
+#: fetch should fail fast, not wedge push-changes / create-pr / pr-status /
+#: sync. Generous enough for a slow-but-live remote; callers may override.
+DEFAULT_FETCH_TIMEOUT = 30.0
+
+
+def fetch(
+    remote: str, *, cwd: str | Path, timeout: float | None = DEFAULT_FETCH_TIMEOUT
+) -> None:
+    """Fetch from a remote (auto-authenticating cross-account remotes; #29).
+
+    Bounded by ``timeout`` (default :data:`DEFAULT_FETCH_TIMEOUT`) so an
+    unreachable remote can't hang the caller indefinitely: a stall past the
+    bound is surfaced as a :class:`GitError` (returncode 124, the timeout
+    convention), which every current caller already handles as a best-effort
+    fetch failure. Pass ``timeout=None`` for the historical unbounded behavior.
+    """
+    try:
+        git(
+            *_auth_config_args(remote, cwd=cwd), "fetch", remote, "--quiet",
+            cwd=cwd, timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise GitError(
+            ["git", "fetch", remote, "--quiet"], 124,
+            f"fetch from '{remote}' timed out after {timeout}s "
+            "(remote unreachable?)",
+        ) from exc
 
 
 def rebase(onto: str, *, cwd: str | Path) -> bool:
