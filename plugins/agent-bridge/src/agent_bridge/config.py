@@ -149,6 +149,59 @@ def migrate_config(cfg: ServiceConfig) -> ServiceConfig:
     return cfg
 
 
+def _state_root_machines_yaml(repo: Path) -> str | None:
+    """Resolve the bound knowledge repo's ``machines.yaml`` via ``state-root``.
+
+    The citadel E1e config-overlay seam (#947): a stateless harness carries no
+    ``machines.yaml`` of its own -- personal topology lives in the bound
+    knowledge repo. This asks ``agent-worktrees state-root`` (run with cwd=repo,
+    the same resolver efforts/visions/logs use) for the knowledge checkout, then
+    searches the conventional ``machines.yaml`` locations under it.
+
+    Best-effort + fail-open: a missing ``agent-worktrees`` binstub, a
+    non-stateless / unbound repo, or any error yields ``None`` (the caller then
+    raises its normal "no machines.yaml" error). Never raises.
+    """
+    import json
+    import shutil
+    import subprocess
+
+    exe = shutil.which("agent-worktrees")
+    if not exe:
+        return None
+    try:
+        proc = subprocess.run(
+            [exe, "state-root", "--json"], cwd=str(repo),
+            capture_output=True, text=True, timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0 or not (proc.stdout or "").strip():
+        return None
+    try:
+        data = json.loads(proc.stdout)
+    except ValueError:
+        return None
+    # Only graft when the launch repo actually requires an external state root
+    # (a stateless harness); a self-hosted repo resolves to itself and must not
+    # be redirected.
+    if not data.get("requires_external") or not data.get("bound"):
+        return None
+    root = data.get("state_root")
+    if not root:
+        return None
+    kroot = Path(root)
+    for candidate in [
+        kroot / "machines.yaml",
+        kroot / ".agent-worktrees" / "machines.yaml",
+        kroot / "config" / "machines.yaml",
+        kroot / ".github" / "machines.yaml",
+    ]:
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
 def adopt_topology(
     profile_name: str,
     repo_path: str,
@@ -170,16 +223,28 @@ def adopt_topology(
     if not repo.is_dir():
         raise FileNotFoundError(f"Repo path does not exist: {repo}")
 
-    # Auto-discover machines.yaml
+    # Auto-discover machines.yaml -- conventional in-repo locations first, then
+    # the state-root overlay (a stateless harness carries no machines.yaml of its
+    # own; personal topology lives in the bound knowledge repo -- citadel E1e,
+    # #947). The .agent-worktrees/ location is the canonical one (#950).
     if not machines_yaml:
         for candidate in [
             repo / "machines.yaml",
+            repo / ".agent-worktrees" / "machines.yaml",
             repo / "config" / "machines.yaml",
             repo / ".github" / "machines.yaml",
         ]:
             if candidate.is_file():
                 machines_yaml = str(candidate)
                 break
+
+    # State-root overlay fallback: when the repo itself has no machines.yaml but
+    # is a stateless harness bound to a knowledge repo, resolve the knowledge
+    # repo's machines.yaml via `agent-worktrees state-root` (the same seam
+    # efforts/visions/logs use). Best-effort; a missing binstub / unbound harness
+    # just leaves machines_yaml unset and the FileNotFoundError below fires.
+    if not machines_yaml:
+        machines_yaml = _state_root_machines_yaml(repo)
 
     # acp-agents.json auto-discovery is retired -- the roster is derived from
     # machines.yaml (+ related.yaml). An explicit agents_config is still honored
