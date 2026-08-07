@@ -324,6 +324,14 @@ def norm(w, machine, env):
     follow_up = bool(w.get("follow_up"))
     # #93: a bare (un-muxed) bound Copilot -- invisible to the mux fleet view.
     bare_orphan = bool(w.get("session_bare_orphan"))
+    # citadel paired -harness/-knowledge lifecycle (#957): this worktree is one
+    # half of a carved pair. A scannable link glyph rides on the title so the
+    # operator sees the two rows belong together, and the pair fields ride on the
+    # normalized record for filtering / navigation / status aggregation.
+    pair_id = w.get("pair_id")
+    pair_role = w.get("pair_role")
+    pair_kind = w.get("pair_kind")
+    is_paired = bool(pair_id)
     summary = (w.get("summary") or "").strip()
     disp_title = title
     if summary:
@@ -331,6 +339,11 @@ def norm(w, machine, env):
                       else f"{title} — {summary}")
     if follow_up:
         disp_title = f"✚ {disp_title}"
+    # citadel pair marker: a link glyph (inner of the urgent ⚠/✚ markers) so a
+    # paired row is scannable without widening the state column. Gated on the
+    # pair id, so an unpaired worktree's title is untouched.
+    if is_paired:
+        disp_title = f"⚭ {disp_title}"
     # #93: the orphan marker rides outermost (leftmost) -- most scannable, and
     # a bound-but-un-muxed Copilot is the more urgent signal than a follow-up.
     if bare_orphan:
@@ -382,6 +395,14 @@ def norm(w, machine, env):
         "session_bridge_live": bool(w.get("session_bridge_live")),
         # #93: worktree hosts a bare (un-muxed) bound Copilot -> orphan marker.
         "session_bare_orphan": bare_orphan,
+        # citadel paired -harness/-knowledge lifecycle (#957): the pair linkage,
+        # surfaced on the normalized row so the Picker can group/aggregate the
+        # two rows and offer "jump to paired worktree". All None/False for an
+        # unpaired worktree (the common case).
+        "is_paired": is_paired,
+        "pair_id": pair_id,
+        "pair_role": pair_role,
+        "pair_kind": pair_kind,
         # Picker default-visibility. Keys on the origin-based ``picker_hidden``
         # mark the ``list`` JSON now emits (origin in {system, delegate}) so an
         # operator-owned bridge/ACP worktree -- a Neuron Forge session -- is
