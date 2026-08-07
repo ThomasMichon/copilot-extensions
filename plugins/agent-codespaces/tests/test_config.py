@@ -282,6 +282,100 @@ class TestMergedConfig:
         assert "https://storage.azure.com/" in resources
 
 
+class TestStateRootOverlay:
+    """codespaces.yaml state-root config-overlay graft (citadel E1e, #947)."""
+
+    def test_stateless_harness_grafts_knowledge_codespaces_yaml(
+        self, config_dir, monkeypatch
+    ):
+        # An adopted harness with NO codespaces.yaml of its own reads the bound
+        # knowledge repo's codespaces.yaml via the state-root overlay.
+        harness = config_dir / "citadel-harness"
+        harness.mkdir()
+        knowledge = config_dir / "citadel-knowledge"
+        _write_codespaces_yaml(knowledge, {
+            "defaults": {"machine_type": "knowledgeMachine"},
+            "repos": {"org/kn-web-codespaces": {"workspace_repo": "kn-web"}},
+        })
+        monkeypatch.setattr(
+            "agent_codespaces.config._state_root_config_dir",
+            lambda repo: knowledge if Path(repo) == harness else None)
+        save_adopted_repos([AdoptedRepo(path=harness)])
+        config = load_merged_config()
+        assert config.default_machine_type == "knowledgeMachine"
+        assert "org/kn-web-codespaces" in config.repos
+        # source_paths stays the HARNESS (generic plugin settings sourced there),
+        # NOT the knowledge repo.
+        assert config.source_paths == [harness]
+
+    def test_repo_with_own_codespaces_yaml_not_grafted(self, config_dir, monkeypatch):
+        repo = config_dir / "self-hosted"
+        _write_codespaces_yaml(repo, {"defaults": {"machine_type": "ownMachine"}})
+        # A repo carrying its own codespaces.yaml must NOT consult the overlay.
+        called = {"n": 0}
+        monkeypatch.setattr(
+            "agent_codespaces.config._state_root_config_dir",
+            lambda repo: called.__setitem__("n", called["n"] + 1) or None)
+        save_adopted_repos([AdoptedRepo(path=repo)])
+        config = load_merged_config()
+        assert config.default_machine_type == "ownMachine"
+        assert called["n"] == 0  # overlay never consulted
+
+    def test_provision_src_resolves_under_knowledge(self, config_dir, monkeypatch):
+        harness = config_dir / "harness"
+        harness.mkdir()
+        knowledge = config_dir / "knowledge"
+        _write_codespaces_yaml(knowledge, {
+            "provision": {"files": [{"src": "env/snippet.sh", "dest": "~/x.sh"}]},
+        })
+        monkeypatch.setattr(
+            "agent_codespaces.config._state_root_config_dir",
+            lambda repo: knowledge)
+        save_adopted_repos([AdoptedRepo(path=harness)])
+        config = load_merged_config()
+        assert config.provision.files
+        # repo_dir is the KNOWLEDGE dir so src resolves where the file lives.
+        assert config.provision.files[0].repo_dir == knowledge
+
+
+class TestStateRootConfigDir:
+    """_state_root_config_dir -- the resolver seam (mocked subprocess)."""
+
+    def _mock(self, monkeypatch, payload, *, rc=0):
+        import types
+        monkeypatch.setattr("shutil.which", lambda name: "agent-worktrees")
+        proc = types.SimpleNamespace(returncode=rc, stdout=json.dumps(payload),
+                                     stderr="")
+        monkeypatch.setattr("subprocess.run", lambda *a, **k: proc)
+
+    def test_resolves_when_knowledge_has_codespaces_yaml(self, tmp_path, monkeypatch):
+        from agent_codespaces.config import _state_root_config_dir
+        knowledge = tmp_path / "knowledge"
+        _write_codespaces_yaml(knowledge, {"defaults": {}})
+        self._mock(monkeypatch, {
+            "state_root": str(knowledge), "requires_external": True, "bound": True})
+        assert _state_root_config_dir(tmp_path / "harness") == knowledge
+
+    def test_none_when_knowledge_lacks_codespaces_yaml(self, tmp_path, monkeypatch):
+        from agent_codespaces.config import _state_root_config_dir
+        knowledge = tmp_path / "knowledge"
+        knowledge.mkdir()
+        self._mock(monkeypatch, {
+            "state_root": str(knowledge), "requires_external": True, "bound": True})
+        assert _state_root_config_dir(tmp_path / "harness") is None
+
+    def test_none_when_self_hosted(self, tmp_path, monkeypatch):
+        from agent_codespaces.config import _state_root_config_dir
+        self._mock(monkeypatch, {
+            "state_root": str(tmp_path), "requires_external": False, "bound": True})
+        assert _state_root_config_dir(tmp_path) is None
+
+    def test_none_when_no_binstub(self, tmp_path, monkeypatch):
+        from agent_codespaces.config import _state_root_config_dir
+        monkeypatch.setattr("shutil.which", lambda name: None)
+        assert _state_root_config_dir(tmp_path) is None
+
+
 class TestValidation:
     def test_valid_config(self):
         config = CodespacesConfig(source_paths=[Path("/repo")])
