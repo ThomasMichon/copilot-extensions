@@ -262,25 +262,50 @@ class TestSaveLoadRoundTrip:
         rec = self._make_record(worktree_id="wt-cache")
         save_record(rec, tmp_path / "wt-cache.yaml")
 
-        # Full stamp writes all three fields + freshness.
+        # Full stamp writes all three fields + freshness (sync = apply inline).
         assert _t.stamp_session_state(
-            "wt-cache", turns=7, summary="hello", git_state="wip") is True
+            "wt-cache", turns=7, summary="hello", git_state="wip",
+            sync=True) is True
         r = load_record(tmp_path / "wt-cache.yaml")
         assert (r.session_turns, r.session_summary, r.git_state) == (
             7, "hello", "wip")
 
         # A turns-only stamp preserves the cached summary + state (None = skip).
-        assert _t.stamp_session_state("wt-cache", turns=9) is True
+        assert _t.stamp_session_state("wt-cache", turns=9, sync=True) is True
         r = load_record(tmp_path / "wt-cache.yaml")
         assert (r.session_turns, r.session_summary, r.git_state) == (
             9, "hello", "wip")
+
+        # An unchanged stamp writes nothing (the render cache never ages out,
+        # so there is no freshness renewal to churn the YAML).
+        assert _t.stamp_session_state(
+            "wt-cache", turns=9, summary="hello", git_state="wip",
+            sync=True) is False
+
+    def test_stamp_session_state_async_writes_via_queue(
+        self, tmp_path: Path, monkeypatch,
+    ):
+        from agent_worktrees import tracking as _t
+        monkeypatch.setattr(_t.cfg, "tracking_dir", lambda: tmp_path)
+        rec = self._make_record(worktree_id="wt-async")
+        save_record(rec, tmp_path / "wt-async.yaml")
+
+        # Async (default): enqueues + returns True immediately; the write lands
+        # after the queue is flushed.
+        assert _t.stamp_session_state(
+            "wt-async", turns=4, summary="async", git_state="clean") is True
+        _t.flush_stamp_writes()
+        r = load_record(tmp_path / "wt-async.yaml")
+        assert (r.session_turns, r.session_summary, r.git_state) == (
+            4, "async", "clean")
 
     def test_stamp_session_state_absent_record_noops(
         self, tmp_path: Path, monkeypatch,
     ):
         from agent_worktrees import tracking as _t
         monkeypatch.setattr(_t.cfg, "tracking_dir", lambda: tmp_path)
-        assert _t.stamp_session_state("nope", turns=1) is False
+        # sync gives the real "record absent" result (async just enqueues).
+        assert _t.stamp_session_state("nope", turns=1, sync=True) is False
 
     def test_pr_absent_round_trips_as_none(self, tmp_path: Path):
         rec = self._make_record()

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -496,23 +497,100 @@ def _now_iso() -> str:
     return datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
 
+# In-process per-YAML write serialization (dotfiles#948 follow-up). The picker's
+# background populate/repoll threads stamp the session-render cache while a
+# foreground op (e.g. a resume's ``mark_resumed``) writes the SAME record -- all
+# in the one picker process. On Windows a concurrent temp+replace collides
+# (``WinError 32``/``5``), so serialize every write to a given path with an
+# in-process lock keyed by the normalized path. Cross-PROCESS races (a separate
+# CLI writing the same YAML) are the rarer case, still covered by the atomic
+# replace's bounded retry below.
+_PATH_LOCKS: dict[str, threading.RLock] = {}
+_PATH_LOCKS_GUARD = threading.Lock()
+
+
+def _path_write_lock(path: Path) -> threading.RLock:
+    key = os.path.normcase(os.path.abspath(str(path)))
+    with _PATH_LOCKS_GUARD:
+        lk = _PATH_LOCKS.get(key)
+        if lk is None:
+            lk = threading.RLock()  # re-entrant: _RecordLock + nested _atomic_write
+            _PATH_LOCKS[key] = lk
+        return lk
+
+
 def _atomic_write(path: Path, content: str) -> None:
-    """Write content to a file atomically via temp + rename."""
+    """Write content to a file atomically via temp + atomic replace.
+
+    Serialized per path by an in-process lock (so the picker's own background
+    stamp threads and a foreground write never collide), then ``os.replace``
+    (atomic even over an existing target on Windows) with a bounded retry on a
+    transient Windows sharing violation (``WinError 32``/``5`` /
+    ``PermissionError``) for the rarer cross-process race. Without this a
+    foreground write -- e.g. a Picker resume's ``mark_resumed`` -- failed hard
+    with "the process cannot access the file because it is being used by another
+    process". POSIX has no such sharing restriction.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
-    try:
-        os.write(fd, content.encode())
-        os.close(fd)
-        # On Windows, can't rename over existing -- remove first
-        if path.exists():
-            path.unlink()
-        os.rename(tmp, str(path))
-    except BaseException:
+    with _path_write_lock(path):
+        fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
         try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+            os.write(fd, content.encode())
+            os.close(fd)
+            _replace_with_retry(tmp, str(path))
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+
+
+def _replace_with_retry(src: str, dst: str, *, attempts: int = 20,
+                        delay: float = 0.05) -> None:
+    """``os.replace(src, dst)`` with a bounded, jittered retry on a transient
+    Windows sharing violation. Raises the last error if every attempt loses the
+    race."""
+    import random as _random
+    import time as _time
+    for i in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            # WinError 32/5: the target is momentarily held open by a concurrent
+            # reader/writer. Back off briefly and retry -- the holder's op is
+            # short (a read or a temp+replace), so a few retries win the race.
+            # Jitter breaks lockstep with a steadily-looping reader/writer.
+            if i == attempts - 1:
+                raise
+            _time.sleep(delay + _random.uniform(0, delay))
+
+
+def _read_text_with_retry(path: Path, *, attempts: int = 20,
+                          delay: float = 0.05) -> str:
+    """Read a tracking YAML's text, minimizing the reader's handle-hold window
+    (read bytes then close BEFORE parsing) with a bounded retry on a transient
+    Windows sharing violation.
+
+    dotfiles#948 follow-up: a reader that holds the file handle open across the
+    (slow) YAML parse widens the window in which a concurrent ``os.replace``
+    (a foreground save or a background stamp) collides with it -- and the reader
+    itself can momentarily see ``WinError 32``/``5`` while the destination is
+    being swapped. Reading the whole file up front shrinks the collision window
+    to a few milliseconds; the retry covers the rare transient failure. POSIX has
+    no such sharing restriction, so this is effectively a no-op there.
+    """
+    import random as _random
+    import time as _time
+    for i in range(attempts):
+        try:
+            with open(path, encoding="utf-8") as f:
+                return f.read()
+        except PermissionError:
+            if i == attempts - 1:
+                raise
+            _time.sleep(delay + _random.uniform(0, delay))
 
 
 def _parse_pr_mapping(raw: dict, default_repo: str) -> PRRecord:
@@ -591,8 +669,7 @@ def _claim_to_yaml_dict(claim: ResourceClaim) -> dict[str, object]:
 
 def load_record(path: Path) -> WorktreeRecord:
     """Load a worktree tracking record from a YAML file."""
-    with open(path, encoding="utf-8") as f:
-        data = yaml.safe_load(f)
+    data = yaml.safe_load(_read_text_with_retry(path))
 
     title = data.get("title")
     if title == "null" or title is None:
@@ -1150,23 +1227,44 @@ def stamp_session_state(
     summary: str | None = None,
     git_state: str | None = None,
     throttle_secs: float = 30.0,
+    sync: bool = False,
 ) -> bool:
-    """Write the picker's session-render cache back onto a worktree's record.
+    """Persist the picker's session-render cache back onto a worktree's record.
 
-    picker-cache-first-paint (dotfiles#948): the expensive populate pass (and a
-    per-worktree Refresh) call this to persist what the cache-only first paint
-    later reads WITHOUT touching ``events.jsonl`` or scanning processes --
-    ``session_turns`` (turn count), ``session_summary`` (title fallback), and
-    ``git_state`` (last-known git classification). Only the provided fields are
-    updated; ``None`` means "leave as-is" (so a turns-only refresh does not clear
-    a cached summary/state).
+    picker-cache-first-paint (dotfiles#948): the populate pass and a per-worktree
+    Refresh call this to cache ``session_turns`` / ``session_summary`` /
+    ``git_state`` for the cache-only first paint. Only provided fields update;
+    ``None`` means "leave as-is". Writes **only when a value actually changed**
+    (the render cache never ages out on read, so there is no freshness renewal --
+    which also avoids churning every YAML on every populate).
 
-    A best-effort, locked read-modify-write mirroring :func:`stamp_mux_live`:
-    never raises, no-ops when the record is absent. Skips the write entirely when
-    every provided value is unchanged AND the existing freshness stamp is younger
-    than ``throttle_secs`` (bounds YAML churn on a steadily-populated worktree); a
-    value CHANGE always writes. Returns True iff the record was rewritten.
+    **Async by default.** File writes are kept OFF the caller's thread (user
+    interaction / render) and serialized through a single background writer
+    (:data:`_STAMP_QUEUE`), so a frequent background stamp never blocks a
+    keystroke and never collides with a foreground YAML write (a resume's
+    ``mark_resumed``). The mutation is coalesced per worktree and applied by the
+    writer thread. Pass ``sync=True`` to apply inline (tests, or a caller that
+    needs the write durable before it returns). Returns True when it wrote (sync)
+    or when the mutation was enqueued (async); best-effort, never raises.
     """
+    if sync:
+        return _apply_session_state_stamp(
+            worktree_id, turns=turns, summary=summary, git_state=git_state)
+    _STAMP_QUEUE.submit(worktree_id, turns=turns, summary=summary,
+                        git_state=git_state)
+    return True
+
+
+def _apply_session_state_stamp(
+    worktree_id: str, *,
+    turns: int | None = None,
+    summary: str | None = None,
+    git_state: str | None = None,
+) -> bool:
+    """The synchronous read-modify-write for :func:`stamp_session_state` --
+    run by the async writer thread (or inline when ``sync=True``). Serialized
+    per path (``_RecordLock`` -> in-process lock) and best-effort; returns True
+    iff the record was rewritten."""
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         return False
@@ -1184,16 +1282,95 @@ def stamp_session_state(
                 record.git_state = git_state or None
                 changed = True
             if not changed:
-                # Nothing moved: renew freshness only once past the throttle, so
-                # a steadily-populated worktree is not rewritten every pass.
-                if record.session_state_at and not _stamp_older_than(
-                        record.session_state_at, throttle_secs):
-                    return False
+                return False
             record.session_state_at = _now_iso()
             save_record(record)
             return True
     except Exception:
         return False
+
+
+class _StampWriteQueue:
+    """Single-writer async queue for the session-render-cache stamps.
+
+    Per the harness design guidance, YAML writes are kept off the
+    user-interaction/render path and serialized through one background worker: a
+    frequent stamp from the picker's populate/repoll threads never blocks a
+    keystroke, and -- because one thread performs every stamp write -- stamps
+    never race each other. Pending mutations are coalesced per worktree (only the
+    latest merged fields are written), so a burst collapses to a single write.
+    The worker is started lazily on first use and flushed at interpreter exit.
+    """
+
+    def __init__(self) -> None:
+        import queue as _queue
+        self._q: _queue.Queue = _queue.Queue()
+        self._pending: dict[str, dict] = {}
+        self._lock = threading.Lock()
+        self._worker: threading.Thread | None = None
+
+    def _ensure_worker(self) -> None:
+        if self._worker is not None:
+            return
+        with self._lock:
+            if self._worker is not None:
+                return
+            import atexit
+            self._worker = threading.Thread(
+                target=self._run, name="yaml-stamp-writer", daemon=True)
+            self._worker.start()
+            atexit.register(self.flush)
+
+    def submit(self, worktree_id: str, **fields) -> None:
+        provided = {k: v for k, v in fields.items() if v is not None}
+        with self._lock:
+            cur = self._pending.setdefault(worktree_id, {})
+            cur.update(provided)
+        self._q.put(worktree_id)
+        self._ensure_worker()
+
+    def _run(self) -> None:
+        while True:
+            worktree_id = self._q.get()
+            try:
+                self._apply(worktree_id)
+            finally:
+                self._q.task_done()
+
+    def _apply(self, worktree_id: str) -> None:
+        with self._lock:
+            fields = self._pending.pop(worktree_id, None)
+        if not fields:
+            return
+        try:
+            _apply_session_state_stamp(worktree_id, **fields)
+        except Exception:
+            pass
+
+    def flush(self) -> None:
+        """Block until every queued stamp has been applied (tests / shutdown).
+
+        Waits for the worker to drain the queue -- including any write already
+        in flight (so a caller that reads the YAML right after sees the value) --
+        then applies any straggler still pending (e.g. enqueued but the worker
+        never started, as at interpreter exit).
+        """
+        if self._worker is not None:
+            self._q.join()
+        while True:
+            with self._lock:
+                if not self._pending:
+                    return
+                worktree_id = next(iter(self._pending))
+            self._apply(worktree_id)
+
+
+_STAMP_QUEUE = _StampWriteQueue()
+
+
+def flush_stamp_writes() -> None:
+    """Flush any queued session-render-cache stamps (tests / graceful teardown)."""
+    _STAMP_QUEUE.flush()
 
 
 def _stamp_older_than(stamped: str, secs: float) -> bool:
@@ -1392,26 +1569,34 @@ def add_resource_claim(
 # ---------------------------------------------------------------------------
 
 class _RecordLock:
-    """Short-lived file lock for read-modify-write on a tracking YAML.
+    """Short-lived lock for a read-modify-write on a tracking YAML.
 
-    Uses fcntl advisory locks on Unix.  Falls back to no-op on platforms
-    where fcntl is unavailable (Windows) -- the atomic-write pattern still
-    prevents torn files, and concurrent sessions in the same worktree are
-    rare enough that lost updates are acceptable there.
+    Acquires an **in-process** re-entrant per-path lock (``_path_write_lock``) so
+    concurrent read-modify-writes in the SAME process -- the picker's background
+    stamp threads and a foreground resume -- are serialized on every platform
+    (Windows has no ``fcntl``, so this is the real mutual exclusion there and
+    prevents the temp+replace sharing-violation crash). On POSIX it ALSO takes an
+    ``fcntl`` advisory lock on a ``.lock`` sidecar for cross-process exclusion;
+    cross-process races on Windows fall back to the atomic-replace retry.
     """
 
     def __init__(self, yaml_path: Path, timeout: float = 2.0):
+        self._yaml_path = yaml_path
         self._lock_path = yaml_path.with_suffix(".lock")
         self._timeout = timeout
         self._fd: int | None = None
+        self._plock: threading.RLock | None = None
 
     def __enter__(self) -> _RecordLock:
+        # In-process serialization first (the real lock on Windows).
+        self._plock = _path_write_lock(self._yaml_path)
+        self._plock.acquire()
         self._lock_path.parent.mkdir(parents=True, exist_ok=True)
         self._fd = os.open(str(self._lock_path), os.O_CREAT | os.O_RDWR)
         try:
             import fcntl as _fcntl
         except ImportError:
-            # Windows -- no fcntl; proceed unlocked
+            # Windows -- no fcntl; the in-process RLock above is the real lock.
             return self
         import time
         deadline = time.monotonic() + self._timeout
@@ -1421,7 +1606,7 @@ class _RecordLock:
                 return self
             except (OSError, BlockingIOError):
                 if time.monotonic() >= deadline:
-                    # Timeout -- proceed unlocked rather than stall launch
+                    # Timeout -- proceed on the in-process lock alone.
                     return self
                 time.sleep(0.05)
 
@@ -1434,6 +1619,9 @@ class _RecordLock:
                 pass
             os.close(self._fd)
             self._fd = None
+        if self._plock is not None:
+            self._plock.release()
+            self._plock = None
 
 
 def _pending_handoff_predecessor(
