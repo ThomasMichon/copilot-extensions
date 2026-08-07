@@ -15,13 +15,19 @@ import subprocess
 
 from agent_bridge import __main__ as main
 
+# Win32 process-creation constants, resolved with a getattr fallback so this
+# test runs on non-Windows CI (where subprocess lacks these attributes) while
+# still asserting against the real Windows values.
+DETACHED_PROCESS = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+
 
 def test_win32_uses_detached_not_create_no_window(monkeypatch):
     monkeypatch.setattr(main.sys, "platform", "win32")
     flags = main._passive_daemon_creationflags()
-    assert flags & subprocess.DETACHED_PROCESS
+    assert flags & DETACHED_PROCESS
     # CREATE_NO_WINDOW is the headed-console bug under DefTerm -- must NOT be set.
-    assert not (flags & subprocess.CREATE_NO_WINDOW)
+    assert not (flags & CREATE_NO_WINDOW)
 
 
 def test_non_windows_no_flags(monkeypatch):
