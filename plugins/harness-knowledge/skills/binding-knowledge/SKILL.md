@@ -111,6 +111,45 @@ the harness, and it does **not** use `agent-worktrees related add` (that would
 write a repo name into the harness's committed `related.yaml` and break
 statelessness).
 
+When both `--harness-path` and `--knowledge-path` are given, the bind **also
+assembles the personal-plugin overlay** (see step 3b) -- so the operator's
+personal skills/agents load in the harness in one step.
+
+## 3b. Personal-plugin overlay (skills/agents axis, #955)
+
+Copilot loads plugins (skills, agents) from the **launch repo's** settings, but
+the operator's personal skills/agents live as **`.ai` local-marketplace plugins
+in the private knowledge repo** -- not in the shareable harness tree. The bind
+bridges that gap by rendering a machine-local, gitignored
+`<harness>/.github/copilot/settings.local.json` that re-declares the knowledge
+repo's local (`.ai`) marketplace(s) with an **absolute path** into the knowledge
+checkout + the same `enabledPlugins`. Copilot merges `settings.local.json` over
+the committed `settings.json` on launch (local tier wins), so the personal
+plugins load while the harness tree stays name-free.
+
+`bind_knowledge.py` runs this automatically; to (re)assemble it directly:
+
+```
+python skills/binding-knowledge/scripts/assemble_plugins.py \
+  --harness-path "<harness-anchor-path>" \
+  --knowledge-path "<knowledge-path>"
+```
+
+Only **local** (`directory`/`local`) marketplaces are carried across (a remote
+github/git marketplace the harness declares itself or is globally installed).
+The overlay is idempotent and merge-safe: it preserves unmanaged entries and
+refreshes the managed local marketplaces to exactly mirror the knowledge repo.
+
+> **Keep `settings.local.json` gitignored in the harness.** It is machine-local
+> and names the concrete knowledge checkout; add
+> `.github/copilot/settings.local.json` to the harness `.gitignore`.
+
+> **Paired-worktree note (#957).** The bind writes an overlay pointing at the
+> knowledge **anchor**'s `.ai`. In a paired `-harness`/`-knowledge` worktree, the
+> knowledge state lives in the paired worktree (resolve it with
+> `agent-worktrees state-root --pair`); a per-worktree re-assembly pointing there
+> is a natural follow-up when launching in a pair.
+
 ## 4. Verify
 
 ```

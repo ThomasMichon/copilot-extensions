@@ -103,6 +103,7 @@ def bind(
     home: Path,
     harness_path: str = "",
     product_repos: list[tuple[str, str]] | None = None,
+    assemble_plugins: bool = True,
 ) -> dict:
     """Write the machine-local binding. Idempotent. Returns a summary dict."""
     base = Path(home) / f".{harness}"
@@ -126,13 +127,34 @@ def bind(
         encoding="utf-8",
     )
 
-    return {
+    summary = {
         "harness": harness,
         "knowledge_repo": knowledge,
         "knowledge_path": knowledge_path,
         "config": str(cfg),
         "instructions": str(frag),
     }
+
+    # #955: assemble the harness's personal-plugin overlay from the knowledge
+    # repo's .ai local marketplace(s), so the operator's personal skills/agents
+    # load in the name-free harness. Best-effort: a missing/plugin-less knowledge
+    # checkout just yields no overlay; never fails the bind.
+    if assemble_plugins and harness_path and knowledge_path:
+        try:
+            from assemble_plugins import assemble
+        except ImportError:
+            import importlib.util as _ilu
+            _p = Path(__file__).resolve().parent / "assemble_plugins.py"
+            _spec = _ilu.spec_from_file_location("assemble_plugins", _p)
+            _mod = _ilu.module_from_spec(_spec)
+            _spec.loader.exec_module(_mod)
+            assemble = _mod.assemble
+        try:
+            summary["plugins"] = assemble(harness_path, knowledge_path)
+        except Exception as exc:  # noqa: BLE001 -- never fail the bind on plugin assembly
+            summary["plugins_error"] = str(exc)
+
+    return summary
 
 
 def _parse_products(items: list[str] | None) -> list[tuple[str, str]]:
