@@ -247,22 +247,50 @@ class TestCrossAccountAuth:
             return types.SimpleNamespace(returncode=rc, stdout="", stderr="")
 
         monkeypatch.setattr(go, "git", fake_git)
-        assert go.push("origin", "master", cwd=".") is True
+        assert bool(go.push("origin", "master", cwd=".")) is True
         assert calls == [True, False]  # injected first, then plain fallback
 
     def test_push_no_fallback_when_no_injected_auth(self, monkeypatch):
         """When no override was injected, a failed push must NOT silently
-        retry -- it simply returns False."""
+        retry -- it simply returns a falsy PushResult carrying the stderr."""
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
         calls: list[int] = []
 
         def fake_git(*args, **kwargs):
             calls.append(1)
-            return types.SimpleNamespace(returncode=1, stdout="", stderr="")
+            return types.SimpleNamespace(
+                returncode=1, stdout="",
+                stderr="remote: version-consistency violations\n"
+                       "error: failed to push some refs")
 
         monkeypatch.setattr(go, "git", fake_git)
-        assert go.push("origin", "master", cwd=".") is False
+        res = go.push("origin", "master", cwd=".")
+        assert bool(res) is False
         assert len(calls) == 1  # no fallback attempt
+        # #993: the real git stderr is surfaced, and a hook decline is NOT a
+        # fast-forward race, so it must not be retried by the caller.
+        assert "version-consistency" in res.stderr
+        assert res.retryable is False
+
+    def test_push_nonff_failure_is_retryable(self, monkeypatch):
+        """#993: a non-fast-forward rejection IS a race the caller should
+        fetch+rebase+retry -- classified retryable from git's stderr."""
+        monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
+        monkeypatch.setattr(go, "git", lambda *a, **k: types.SimpleNamespace(
+            returncode=1, stdout="",
+            stderr=" ! [rejected]        master -> master (fetch first)\n"
+                   "error: failed to push some refs"))
+        res = go.push("origin", "master", cwd=".")
+        assert bool(res) is False
+        assert res.retryable is True
+
+    def test_push_success_returns_truthy_no_stderr(self, monkeypatch):
+        monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
+        monkeypatch.setattr(go, "git", lambda *a, **k: types.SimpleNamespace(
+            returncode=0, stdout="", stderr=""))
+        res = go.push("origin", "master", cwd=".")
+        assert bool(res) is True
+        assert res.retryable is False
 
     def test_redact_args_strips_extraheader(self):
         cmd = ["git", "-c", "http.extraheader=AUTHORIZATION: basic c2VjcmV0", "push"]
