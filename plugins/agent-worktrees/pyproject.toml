@@ -34,7 +34,7 @@ agent-worktrees = "agent_worktrees.__main__:main"
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0",
+    "pytest>=9.1.1",
 ]
 
 [tool.pytest.ini_options]
