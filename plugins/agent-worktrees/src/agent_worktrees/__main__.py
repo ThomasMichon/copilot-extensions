@@ -14872,6 +14872,17 @@ def main(argv: list[str] | None = None) -> int:
             print("\nCancelled.")
             return 130
 
+    # lease -- Git-ref resource lease store (atomic cross-machine, same-harness).
+    # Manual dispatch: its own argparse subcommands (acquire/renew/release/
+    # inspect/list) with resource kind+key positionals.
+    if args_list[0] == "lease":
+        from . import lease_cli
+        try:
+            return lease_cli.run_lease(args_list[1:])
+        except KeyboardInterrupt:
+            print("\nCancelled.")
+            return 130
+
     # Hook guardrails (manual dispatch: hook name + git passthrough args).
     if args_list[0] == "hook":
         from . import hooks as _hooks
