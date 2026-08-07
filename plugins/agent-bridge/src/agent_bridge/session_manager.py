@@ -69,6 +69,62 @@ def _resolve_acp_model_flags() -> str:
     return result.stdout.strip()
 
 
+def _resolve_relay_launch_env(
+    codespace_name: str, relay_port: int | None
+) -> tuple[str, int | None]:
+    """Resolve ``(prelude, port)`` for a detached CodeSpace launch's relay env
+    (#892 Inc 1).
+
+    Process-boundary first: shell out to ``agent-codespaces relay-launch-env``
+    (from agent-codespaces' **own** venv) so a fix there reaches the dispatch
+    path with **no agent-bridge redeploy** (retires the #733 class). ``relay_port``
+    is the daemon's actually-bound live port (agent-bridge's own signal), injected
+    via ``--relay-port``. Falls back to the in-process import when the binstub is
+    absent or the CLI fails, so relay/auth never regresses while the venvs are
+    still coupled. Returns ``("", None)`` when the relay env is genuinely
+    unavailable (the launch proceeds auth-light), mirroring the prior inline
+    behavior.
+    """
+    binstub = shutil.which("agent-codespaces")
+    if binstub:
+        argv = [binstub, "relay-launch-env", codespace_name]
+        if relay_port is not None:
+            argv += ["--relay-port", str(relay_port)]
+        creationflags = (
+            subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        )
+        try:
+            r = subprocess.run(
+                argv, capture_output=True, text=True, timeout=15,
+                creationflags=creationflags,
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                data = json.loads(r.stdout)
+                return data.get("prelude", ""), data.get("port")
+            log.debug(
+                "agent-codespaces relay-launch-env exited %s -- falling back "
+                "to in-process import", r.returncode,
+            )
+        except Exception:
+            log.debug(
+                "agent-codespaces relay-launch-env CLI failed -- falling back "
+                "to in-process import", exc_info=True,
+            )
+    try:
+        from agent_codespaces.relay_launch import build_relay_launch_env
+
+        prelude, port = build_relay_launch_env(
+            codespace_name, relay_port=relay_port
+        )
+        return prelude, port
+    except Exception:
+        log.info(
+            "CodeSpace relay env unavailable for %s -- launching Session Host "
+            "auth-light", codespace_name,
+        )
+        return "", None
+
+
 # ``agent-codespaces claim`` exits with this code on a live claim conflict
 # (a different, still-alive worktree already controls the CodeSpace). Kept in
 # sync with ``agent_codespaces.__main__._BUSY_EXIT``.
@@ -2232,18 +2288,10 @@ class SessionManager:
                 # falls back to the config port.
                 relay_prelude = ""
                 relay_port = None
-                try:
-                    from agent_codespaces.relay_launch import build_relay_launch_env
-
-                    from .relay_state import get_live_relay_port
-                    relay_prelude, relay_port = build_relay_launch_env(
-                        cs_target["name"], relay_port=get_live_relay_port()
-                    )
-                except Exception:
-                    log.info(
-                        "CodeSpace relay env unavailable for %s -- launching "
-                        "Session Host auth-light", cs_target["name"],
-                    )
+                from .relay_state import get_live_relay_port
+                relay_prelude, relay_port = _resolve_relay_launch_env(
+                    cs_target["name"], get_live_relay_port()
+                )
                 cs_spawner = build_codespace_spawner(
                     cs_target["name"], cs_target["repo"], relay_port=relay_port,
                     unexpected_reap_seconds=self._session_host_unexpected_reap_seconds,
