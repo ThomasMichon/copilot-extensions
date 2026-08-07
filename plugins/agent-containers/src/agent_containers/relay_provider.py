@@ -66,14 +66,16 @@ def _validate(token: str) -> bool:
     return any(secrets.compare_digest(token, t) for t in values)
 
 
-def register_relay(builder) -> None:
-    """Inject the container credential-relay profile into ``builder``.
+def relay_profile() -> dict:
+    """The declarative container relay profile agent-bridge applies over a
+    process boundary (#892 Inc 2).
 
-    ``builder`` is a :class:`credential_relay.registry.RelayBuilder`.
+    Emits the same policy :func:`register_relay` applies in-process -- sources,
+    the Azure resource allowlist, the token-gated actions, and the **token-store
+    file path** -- as plain JSON so agent-bridge can apply it with a file-backed
+    validator instead of importing this module. Derived from the same config so
+    the CLI path and the in-process fallback stay in lockstep.
     """
-    from credential_relay.sources.gh_auth import GhAuthSource
-    from credential_relay.sources.git_credential import GitCredentialSource
-
     resources = DEFAULT_AZURE_RESOURCES
     try:
         from .config import load_config
@@ -83,19 +85,42 @@ def register_relay(builder) -> None:
     except Exception:  # pragma: no cover - config optional
         log.debug("containers relay config unavailable; using defaults")
 
+    return {
+        "sources": ["git-credential", "gh-auth"],
+        "port": None,
+        "ado_host": None,
+        "azure_resources": list(resources),
+        "gated_actions": list(_GATED_ACTIONS),
+        "token_store": str(_TOKENS_FILE),
+    }
+
+
+def register_relay(builder) -> None:
+    """Inject the container credential-relay profile into ``builder``.
+
+    ``builder`` is a :class:`credential_relay.registry.RelayBuilder`. Applies the
+    same profile :func:`relay_profile` emits, but with the **in-process** token
+    validator -- the degrade-safe fallback agent-bridge uses when the
+    ``agent-containers relay-profile`` CLI seam is unavailable (#892 Inc 2).
+    """
+    from credential_relay.sources.gh_auth import GhAuthSource
+    from credential_relay.sources.git_credential import GitCredentialSource
+
+    prof = relay_profile()
+
     # Generic host-credential sources (deduped against codespaces by name).
     builder.add_source(GitCredentialSource())
     builder.add_source(GhAuthSource())
     # Contribute container Azure resources to the merged allowlist (the builder
     # constructs a single AzLoginSource from the union across providers).
-    builder.allow_azure_resources(list(resources))
+    builder.allow_azure_resources(prof["azure_resources"])
 
     # Gate Azure token minting behind the per-container shared secret (file-backed
     # so the separate-process exec wrapper and the relay agree).
-    builder.require_token(_GATED_ACTIONS, _validate)
+    builder.require_token(prof["gated_actions"], _validate)
     log.info(
         "Injected container relay profile (az resources=%s, gated=%s)",
-        resources, _GATED_ACTIONS,
+        prof["azure_resources"], prof["gated_actions"],
     )
 
 

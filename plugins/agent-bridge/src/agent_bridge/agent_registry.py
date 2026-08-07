@@ -24,6 +24,7 @@ import inspect
 import json
 import logging
 import os
+import secrets
 import shutil
 import subprocess
 import sys
@@ -1366,38 +1367,175 @@ def _register_namespace_resolvers(resolver: AgentResolver) -> None:
         )
 
 
+class FileTokenValidator:
+    """A file-backed relay-token validator (#892 Inc 2).
+
+    **Byte-equivalent** to the in-process provider validators
+    (``agent_codespaces.relay_token.validate`` /
+    ``agent_containers.relay_provider._validate``): reads a JSON ``{name: token}``
+    store and accepts ``token`` iff it matches any stored value under
+    :func:`secrets.compare_digest`. An empty token, a missing / unreadable /
+    malformed store, or a non-string stored value never matches. This lets
+    agent-bridge apply a provider's ``get-azure-token`` gate over a **process
+    boundary** -- reading the SAME host-side token file the provider's own
+    ``token_for`` writes -- with no in-process import of the provider. The gate
+    can only regress if this diverges from the providers, so a golden equivalence
+    test pins it against their exact logic across a token matrix.
+    """
+
+    __slots__ = ("_path",)
+
+    def __init__(self, path: str | Path) -> None:
+        self._path = Path(path)
+
+    def __call__(self, token: str) -> bool:
+        if not token:
+            return False
+        try:
+            data = json.loads(self._path.read_text(encoding="utf-8")) or {}
+        except (OSError, json.JSONDecodeError):
+            return False
+        if not isinstance(data, dict):
+            return False
+        for v in data.values():
+            if not isinstance(v, str):
+                continue
+            try:
+                if secrets.compare_digest(token, v):
+                    return True
+            except TypeError:
+                # compare_digest rejects non-ASCII str -- a non-ASCII token can
+                # never match an (ASCII hex) stored secret, so treat it as a
+                # no-match. The providers' validators would *raise* here; both
+                # net to "rejected", so this is a hardening, never a weakening.
+                return False
+        return False
+
+
+def _relay_source_by_name(name: str):
+    """Construct a shared ``credential_relay`` source by its profile name.
+
+    agent-bridge owns the relay, so it builds the named sources itself (rather
+    than importing them from a provider). Unknown names are skipped by the caller.
+    """
+    from credential_relay.sources.gh_auth import GhAuthSource
+    from credential_relay.sources.git_credential import GitCredentialSource
+
+    factories = {
+        "git-credential": GitCredentialSource,
+        "gh-auth": GhAuthSource,
+    }
+    ctor = factories.get(name)
+    return ctor() if ctor is not None else None
+
+
+def _apply_relay_profile(builder, profile: dict) -> None:
+    """Apply a declarative provider relay profile to ``builder`` (#892 Inc 2).
+
+    Mirrors what a provider's in-process ``register_relay`` does, but the token
+    gate is applied via a :class:`FileTokenValidator` bound to the profile's
+    ``token_store`` (the provider's host-side token file) rather than the
+    provider's in-process validator function.
+    """
+    for sname in profile.get("sources", []):
+        src = _relay_source_by_name(sname)
+        if src is not None:
+            builder.add_source(src)
+        else:
+            log.warning("Unknown relay source '%s' in profile -- skipping", sname)
+    builder.set_port(profile.get("port"))          # None -> no-op
+    builder.set_ado_host(profile.get("ado_host"))  # None -> no-op
+    if "azure_resources" in profile:
+        builder.allow_azure_resources(list(profile["azure_resources"] or []))
+    gated = profile.get("gated_actions") or []
+    store = profile.get("token_store")
+    if gated and store:
+        builder.require_token(list(gated), FileTokenValidator(store))
+
+
+def _relay_profile_via_cli(binstub: str) -> dict | None:
+    """Fetch a provider's declarative relay profile via ``<binstub> relay-profile``.
+
+    Returns the parsed profile dict, or ``None`` when the binstub is absent / the
+    call fails / the output is unparseable -- the signal to fall back to the
+    in-process ``register_relay`` import.
+    """
+    exe = shutil.which(binstub)
+    if not exe:
+        return None
+    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    try:
+        r = subprocess.run(
+            [exe, "relay-profile"], capture_output=True, text=True, timeout=20,
+            creationflags=creationflags,
+        )
+    except Exception:
+        log.debug("relay-profile CLI failed for %s", binstub, exc_info=True)
+        return None
+    if r.returncode != 0 or not r.stdout.strip():
+        return None
+    try:
+        data = json.loads(r.stdout)
+        return data if isinstance(data, dict) else None
+    except Exception:
+        log.warning(
+            "relay-profile output unparseable (%s)", binstub, exc_info=True,
+        )
+        return None
+
+
+def _register_provider_relay(
+    builder, binstub: str, import_path: str,
+) -> None:
+    """Register one provider's relay profile: CLI seam first, import fallback."""
+    # Process-boundary first (#892 Inc 2): apply the declarative profile from the
+    # provider's `relay-profile` CLI with a file-backed token validator, so a
+    # provider relay fix reaches the daemon from its OWN venv (no bridge redeploy).
+    profile = _relay_profile_via_cli(binstub)
+    if profile is not None:
+        try:
+            _apply_relay_profile(builder, profile)
+            log.info("Applied credential-relay profile (%s, CLI seam #892)", binstub)
+            return
+        except Exception:
+            log.warning(
+                "Failed applying %s relay profile -- falling back to import",
+                binstub, exc_info=True,
+            )
+    # Fallback: the in-process register_relay import (exact prior behavior),
+    # kept until the vendoring is removed in a later increment.
+    try:
+        import importlib
+
+        mod = importlib.import_module(import_path)
+        mod.register_relay(builder)
+        log.info("Registered credential-relay sources (%s, in-process)", binstub)
+    except ImportError:
+        log.debug("%s not installed -- no relay sources", binstub)
+    except Exception:
+        log.warning(
+            "Failed to register %s relay sources", binstub, exc_info=True,
+        )
+
+
 def register_credential_sources(builder) -> None:
     """Auto-discover and inject credential-relay sources from optional providers.
 
-    Twin of :func:`_register_namespace_resolvers`: each provider plugin exposes a
-    ``relay_provider.register_relay(builder)`` hook that contributes the
-    credential sources (and policy/port) its targets need. agent-bridge owns and
-    runs the relay; providers only inject their per-target profile. Import
-    failures are logged and skipped -- providers are optional.
+    Twin of :func:`_register_namespace_resolvers`: each provider contributes the
+    credential sources (and policy/port/token gate) its targets need. agent-bridge
+    owns and runs the relay; providers only inject their per-target profile. As of
+    #892 Inc 2 this is driven over a **process boundary** (the provider's
+    ``relay-profile`` CLI + a file-backed token validator), with the in-process
+    ``register_relay`` import as the degrade-safe fallback.
 
     ``builder`` is a :class:`credential_relay.registry.RelayBuilder`.
     """
-    # codespace targets -- GitHub Codespaces (agent-codespaces package)
-    try:
-        from agent_codespaces.relay_provider import register_relay
-
-        register_relay(builder)
-        log.info("Registered credential-relay sources (agent-codespaces)")
-    except ImportError:
-        log.debug("agent-codespaces not installed -- no codespace relay sources")
-    except Exception:
-        log.warning("Failed to register agent-codespaces relay sources", exc_info=True)
-
-    # container targets -- local Docker dev containers (agent-containers package)
-    try:
-        from agent_containers.relay_provider import register_relay as register_containers
-
-        register_containers(builder)
-        log.info("Registered credential-relay sources (agent-containers)")
-    except ImportError:
-        log.debug("agent-containers not installed -- no container relay sources")
-    except Exception:
-        log.warning("Failed to register agent-containers relay sources", exc_info=True)
+    _register_provider_relay(
+        builder, "agent-codespaces", "agent_codespaces.relay_provider",
+    )
+    _register_provider_relay(
+        builder, "agent-containers", "agent_containers.relay_provider",
+    )
 
 
 class AgentResolver:

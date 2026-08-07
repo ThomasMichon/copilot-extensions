@@ -548,6 +548,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     ns_ready_p.add_argument("name", help="Codespace name")
 
+    # --- relay-profile (declarative credential-relay seam for agent-bridge #892 Inc 2)
+    sub.add_parser(
+        "relay-profile",
+        help="Print JSON credential-relay profile (sources/port/ado_host/"
+        "azure_resources/gated_actions/token_store) for agent-bridge to apply.",
+    )
+
     sub.add_parser(
         "config-migrate",
         help="Migrate machine-local config schema (adopted-repos.yaml); idempotent",
@@ -630,6 +637,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_namespace_target_repo(args)
         if args.command == "namespace-ensure-ready":
             return _cmd_namespace_ensure_ready(args)
+        if args.command == "relay-profile":
+            return _cmd_relay_profile()
         if args.command == "config-migrate":
             return _cmd_config_migrate()
     except RuntimeError as e:
@@ -3170,6 +3179,19 @@ def _cmd_namespace_ensure_ready(args: argparse.Namespace) -> int:
     except Exception as e:
         print(str(e), file=sys.stderr)
         return 1
+    return 0
+
+
+def _cmd_relay_profile() -> int:
+    """Print the declarative credential-relay profile as JSON (#892 Inc 2).
+
+    The process-boundary seam agent-bridge applies (with a file-backed token
+    validator) instead of importing ``agent_codespaces.relay_provider`` in the
+    bridge venv. Emits the same policy the in-process ``register_relay`` applies.
+    """
+    from .relay_provider import relay_profile
+
+    print(json.dumps(relay_profile()))
     return 0
 
 
