@@ -32,7 +32,7 @@ def _resume_args(**kw):
     return argparse.Namespace(**base)
 
 
-def _patch_resume(monkeypatch):
+def _patch_resume(monkeypatch, *, mux_live=False, live_ids=None):
     plan = {}
     monkeypatch.setattr(m, "_emit_plan", lambda p: plan.update(p))
     monkeypatch.setattr(m.tracking, "mark_resumed", lambda r: None)
@@ -43,6 +43,21 @@ def _patch_resume(monkeypatch):
     monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
     monkeypatch.setattr(m.sessions, "find_latest_session_id_fast",
                         lambda path, sess: "sid-abc-123")
+    # Head-preferred resolver falls through to the fast-latest above for the
+    # plain _Rec (no resolved_head_session); pin it so the tests don't touch
+    # the real filesystem.
+    monkeypatch.setattr(m.sessions, "resolve_resume_target",
+                        lambda rec: "sid-abc-123")
+    # Execution-time liveness verdict (the "one more fresh resolve" after
+    # Enter). Hermetic by default (no live mux); tests override via mux_live.
+    import types as _types
+    _verdict = _types.SimpleNamespace(
+        mux_live=mux_live, mux_clients=(1 if mux_live else 0),
+        live_session_ids=list(live_ids or []), bare=False,
+        active=bool(mux_live or live_ids), source="mux" if mux_live else "none",
+    )
+    monkeypatch.setattr(m.sessions, "verify_worktree_active",
+                        lambda rec: _verdict)
     return plan
 
 
@@ -95,6 +110,78 @@ class TestBareResumePlan:
         rc = m._resolve_resume(_Rec(), cfg, _resume_args())
         assert rc == 0
         assert m._SESSION_BIND_SESSION not in plan["env"]
+
+
+# ── execution-time fallback ladder (fresh re-resolve after Enter) ──────────
+class TestResumeFallbackLadder:
+    """Open / Resume / Bare resume re-resolve the worktree's live truth after
+    Enter: a live wt-<id> mux always reattaches (never fork a live worktree),
+    and the head session is the shared resume target."""
+
+    def _cfg(self):
+        return argparse.Namespace(auto_fast_forward=False, repo_name="test-project")
+
+    def test_live_mux_forces_reattach_over_bare_resume(self, monkeypatch):
+        # Bare resume was chosen, but a live mux exists -> reattach it: the
+        # plan must NOT go to HOME and must NOT carry a bare-resume binding
+        # (which would fork a second Copilot beside the running session).
+        plan = _patch_resume(monkeypatch, mux_live=True)
+        rc = m._resolve_resume(_Rec(), self._cfg(), _resume_args(bare_resume=True))
+        assert rc == 0
+        assert plan["work_dir"] == "/w/wtX"           # worktree, not HOME
+        assert plan["no_mux"] is False                # muxed reattach path
+        assert m._SESSION_BIND_SESSION not in plan["env"]
+
+    def test_live_mux_overrides_no_mux_toggle(self, monkeypatch):
+        # Open/Resume with the no-mux toggle, but a live mux exists -> reattach
+        # the mux rather than launch a second detached Copilot.
+        plan = _patch_resume(monkeypatch, mux_live=True)
+        rc = m._resolve_resume(_Rec(), self._cfg(), _resume_args(no_mux=True))
+        assert rc == 0
+        assert plan["no_mux"] is False
+
+    def test_no_live_mux_preserves_bare_resume(self, monkeypatch):
+        # No live mux -> Bare resume behaves as before (HOME cwd, binding set).
+        plan = _patch_resume(monkeypatch, mux_live=False)
+        rc = m._resolve_resume(_Rec(), self._cfg(), _resume_args(bare_resume=True))
+        assert rc == 0
+        assert plan["work_dir"] == os.path.expanduser("~")
+        assert plan["env"][m._SESSION_BIND_SESSION] == "sid-abc-123"
+
+    def test_no_live_mux_preserves_no_mux_toggle(self, monkeypatch):
+        plan = _patch_resume(monkeypatch, mux_live=False)
+        rc = m._resolve_resume(_Rec(), self._cfg(), _resume_args(no_mux=True))
+        assert rc == 0
+        assert plan["no_mux"] is True
+
+    def test_json_path_skips_ladder(self, monkeypatch):
+        # Programmatic --json (ACP) launches must NOT be touched by the ladder:
+        # verify_worktree_active is never consulted and no_mux is preserved even
+        # if a mux happened to be live.
+        called = {"verify": 0}
+        plan = _patch_resume(monkeypatch, mux_live=True)
+
+        def _spy(rec):
+            called["verify"] += 1
+            import types as _t
+            return _t.SimpleNamespace(mux_live=True, mux_clients=1,
+                                      live_session_ids=[], bare=False,
+                                      active=True, source="mux")
+        monkeypatch.setattr(m.sessions, "verify_worktree_active", _spy)
+        rc = m._resolve_resume(_Rec(), self._cfg(),
+                               _resume_args(no_mux=True, json=True))
+        assert rc == 0
+        assert called["verify"] == 0        # ladder gated out for --json
+        assert plan["no_mux"] is True       # explicit no_mux respected
+
+    def test_head_session_is_the_resume_target(self, monkeypatch):
+        # The shared resume target comes from resolve_resume_target (head-first).
+        plan = _patch_resume(monkeypatch)
+        monkeypatch.setattr(m.sessions, "resolve_resume_target",
+                            lambda rec: "head-sid-999")
+        rc = m._resolve_resume(_Rec(), self._cfg(), _resume_args())
+        assert rc == 0
+        assert any(a == "--resume=head-sid-999" for a in plan["cmd"])
 
 
 # ── reclaim_one executor ───────────────────────────────────────────────────

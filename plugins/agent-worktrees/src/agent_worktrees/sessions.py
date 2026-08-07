@@ -729,6 +729,54 @@ def find_latest_session_id_fast(
     return best_id
 
 
+def session_has_conversation_data(session_id: str | None) -> bool:
+    """True when *session_id*'s on-disk dir exists AND holds real conversation
+    data (``session.db`` or ``events.jsonl``).
+
+    This is the same validity bar ``find_latest_session_id*`` apply: a session
+    directory with only a ``workspace.yaml`` is a stale stub that Copilot CLI
+    rejects with "No session matched", so ``--resume``-ing it would silently
+    cold-start. Callers use this to reject a stub *before* handing an id to
+    ``--resume`` / a ``/resume`` hint.
+    """
+    if not session_id:
+        return False
+    sdir = _session_state_dir() / session_id
+    if not sdir.is_dir():
+        return False
+    return (sdir / "session.db").exists() or (sdir / "events.jsonl").exists()
+
+
+def resolve_resume_target(record) -> str | None:
+    """The concrete session id a resume should reattach to -- freshest first.
+
+    The single execution-time answer to "which session does this worktree
+    resume?", used by the launch executor for Open / Resume / Bare resume so
+    all three agree on one target:
+
+      1. the record's **asserted lifecycle head** (``resolved_head_session``)
+         when it still has on-disk conversation data -- the authoritative
+         "current session" a handoff/cutover may have advanced; then
+      2. the **filesystem-latest** valid session
+         (``find_latest_session_id_fast``) for un-annotated records; else
+      3. ``None`` -- nothing resumable exists (a genuine cold start).
+
+    Preferring the head over pure mtime is what lets Bare resume always surface
+    a ``/resume`` id, and stops an "Open"/"Resume" of a worktree whose newest
+    on-disk dir is a stub from blank-starting when a valid head still exists.
+    Never raises: any lookup hiccup degrades to the fast-latest path.
+    """
+    try:
+        head = getattr(record, "resolved_head_session", None)
+    except Exception:
+        head = None
+    if head and session_has_conversation_data(head):
+        return head
+    return find_latest_session_id_fast(
+        getattr(record, "worktree_path", ""), getattr(record, "sessions", None),
+    )
+
+
 def find_latest_session_id(worktree_path: str) -> str | None:
     """Find the most recent Copilot session ID for a worktree path.
 

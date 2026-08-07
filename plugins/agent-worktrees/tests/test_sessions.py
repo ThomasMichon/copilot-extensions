@@ -1084,3 +1084,92 @@ class TestListWorktreeSessionsLifecycle:
         ):
             out = list_worktree_sessions(rec)
         assert all(s["is_head"] is False for s in out)
+
+
+# ---------------------------------------------------------------------------
+# session_has_conversation_data + resolve_resume_target
+# (execution-time resume fallback ladder -- Open/Resume/Bare resume agree on
+# one target, head-preferred, stub-rejecting)
+# ---------------------------------------------------------------------------
+
+from agent_worktrees.sessions import (  # noqa: E402
+    resolve_resume_target,
+    session_has_conversation_data,
+)
+
+
+class TestSessionHasConversationData:
+    def test_true_with_events_jsonl(self, tmp_session_state_dir: Path):
+        make_session_dir(tmp_session_state_dir, "s-ok", "/tmp/w",
+                         events_lines=[_conv_event("user.message", "hi",
+                                                   "2026-06-01T10:00:00Z")])
+        with patch("agent_worktrees.sessions._session_state_dir",
+                   return_value=tmp_session_state_dir):
+            assert session_has_conversation_data("s-ok") is True
+
+    def test_false_for_stub_dir_without_conversation_data(
+            self, tmp_session_state_dir: Path):
+        # workspace.yaml only -- the stale stub Copilot rejects with
+        # "No session matched".
+        make_session_dir(tmp_session_state_dir, "s-stub", "/tmp/w",
+                         has_events_file=False)
+        with patch("agent_worktrees.sessions._session_state_dir",
+                   return_value=tmp_session_state_dir):
+            assert session_has_conversation_data("s-stub") is False
+
+    def test_false_for_missing_dir_and_empty_id(
+            self, tmp_session_state_dir: Path):
+        with patch("agent_worktrees.sessions._session_state_dir",
+                   return_value=tmp_session_state_dir):
+            assert session_has_conversation_data("nope") is False
+            assert session_has_conversation_data("") is False
+            assert session_has_conversation_data(None) is False
+
+
+class TestResolveResumeTarget:
+    def test_prefers_asserted_head_over_newer_latest(
+            self, tmp_session_state_dir: Path):
+        wt = "/tmp/wt-head"
+        make_session_dir(tmp_session_state_dir, "old", wt,
+                         updated_at="2026-06-01T10:00:00Z",
+                         events_lines=[_conv_event("user.message", "a",
+                                                   "2026-06-01T10:00:00Z")])
+        # 'new' is filesystem-latest, but 'old' is the asserted head.
+        make_session_dir(tmp_session_state_dir, "new", wt,
+                         updated_at="2026-06-01T12:00:00Z",
+                         events_lines=[_conv_event("user.message", "b",
+                                                   "2026-06-01T12:00:00Z")])
+        rec = _make_record("wt-head", wt,
+                           sessions=[SessionEntry("old", "t"),
+                                     SessionEntry("new", "t")])
+        rec.head_session = "old"
+        with patch("agent_worktrees.sessions._session_state_dir",
+                   return_value=tmp_session_state_dir):
+            assert resolve_resume_target(rec) == "old"
+
+    def test_falls_back_to_latest_when_head_is_a_stub(
+            self, tmp_session_state_dir: Path):
+        wt = "/tmp/wt-stubhead"
+        # Head 'h' is a stub (no conversation data) -> rejected; fall through
+        # to the filesystem-latest valid session 'v'.
+        make_session_dir(tmp_session_state_dir, "h", wt, has_events_file=False)
+        make_session_dir(tmp_session_state_dir, "v", wt,
+                         updated_at="2026-06-01T11:00:00Z",
+                         events_lines=[_conv_event("user.message", "b",
+                                                   "2026-06-01T11:00:00Z")])
+        rec = _make_record("wt-stubhead", wt,
+                           sessions=[SessionEntry("v", "t"),
+                                     SessionEntry("h", "t")])
+        rec.head_session = "h"
+        with patch("agent_worktrees.sessions._session_state_dir",
+                   return_value=tmp_session_state_dir):
+            assert resolve_resume_target(rec) == "v"
+
+    def test_none_when_nothing_resumable(self, tmp_session_state_dir: Path):
+        wt = "/tmp/wt-empty"
+        make_session_dir(tmp_session_state_dir, "stub", wt,
+                         has_events_file=False)
+        rec = _make_record("wt-empty", wt, sessions=[SessionEntry("stub", "t")])
+        with patch("agent_worktrees.sessions._session_state_dir",
+                   return_value=tmp_session_state_dir):
+            assert resolve_resume_target(rec) is None
