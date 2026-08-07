@@ -92,3 +92,20 @@ def test_nonzero_returncode_is_failure(tmp_path):
     assert result.ran is True
     assert result.returncode == 3
     assert not result.ok
+
+
+def test_non_utf8_module_output_does_not_crash(tmp_path):
+    # A module can emit non-UTF-8 bytes on stdout (wsl.exe UTF-16 banners,
+    # em-dashes in a cp1252 console). The runner must decode leniently rather
+    # than let a reader thread die with UnicodeDecodeError. See dotfiles #802.
+    code = (
+        "import sys; "
+        "sys.stdout.buffer.write(b'ok \\xc4\\x80 tail'); "
+        "sys.stdout.buffer.flush()"
+    )
+    pkg = _mod_package(tmp_path, plat="linux", command=[sys.executable, "-c", code])
+    result = modules.run_module(pkg, pkg.modules[0], "linux", dry_run=False)
+    assert result.ran is True
+    assert result.returncode == 0
+    assert result.ok
+    assert "ok" in (result.stdout_tail or "")
