@@ -952,3 +952,138 @@ def test_hold_live_leases_skips_unknown_fleet_body(q, client, monkeypatch):
     monkeypatch.setattr(client, "heartbeat", lambda tid, wid: beats.append((tid, wid)))
     assert sup.hold_live_leases() == 0
     assert beats == []
+
+
+# -- local headless-body recovery (confirmed-gone on THIS host, no SSH) --------
+#
+# The local analog of the fleet-body slice above: a headless body embodied on
+# this machine records a `local-body:<bridge-session-id>` recovery handle, so an
+# ended/cancelled body is liveness-recovered instead of orphaning its `spawned`
+# reservation and starving the label's concurrency slot (the #4433 fix).
+
+
+def _local_spawn(handle_session):
+    calls = []
+
+    def spawn(task):
+        calls.append(task["id"])
+        return True, {"session": handle_session, "worktree": None}
+
+    spawn.calls = calls  # type: ignore[attr-defined]
+    return spawn
+
+
+def test_parse_local_body_handle_decodes_session():
+    from agent_dispatch.supervisor import _parse_local_body_handle
+
+    assert _parse_local_body_handle("local-body:brg-9") == "brg-9"
+    # non-local handles (worktree embody, fleet body, synthetic owner, empty)
+    assert _parse_local_body_handle("wt-1") is None
+    assert _parse_local_body_handle("fleet-body:h:brg-1") is None
+    assert _parse_local_body_handle("headless-abc123") is None
+    assert _parse_local_body_handle(None) is None
+    assert _parse_local_body_handle("local-body:") is None
+
+
+def test_recover_gone_local_body_releases_for_reembody(q, client):
+    """A *confirmed-gone* local headless body (no worktree; a `local-body:` bridge
+    handle) is recovered via the local verdict probe: its reservation is released
+    so the next cycle re-embodies it -- freeing the slot instead of orphaning it."""
+    t = q.create("work")
+    spawn = _local_spawn("local-body:brg-1")
+    sup = Supervisor(
+        client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5,
+        local_body_verdict_fn=lambda sid: "gone",
+        # neither the fleet nor the worktree verdict path applies to a local handle:
+        fleet_verdict_fn=lambda host, sid: "live",
+        verdict_fn=lambda *a: "live",
+        nudge=False,
+    )
+    assert sup.poll_once() == [t.id]  # spawn #1 -> SPAWNED w/ local-body handle
+    assert q.latest_reservation(t.id).state == SpawnState.SPAWNED
+    assert q.latest_reservation(t.id).session_handle == "local-body:brg-1"
+
+    # next cycle: recover_gone sees the local body GONE -> releases -> re-embodies
+    assert sup.poll_once() == [t.id]
+    assert spawn.calls == [t.id, t.id]
+    assert q.latest_reservation(t.id).attempt == 2
+
+
+def test_recover_gone_local_body_started_requeues_then_reembodies(q, client):
+    """A local body that died *while holding the task started* is requeued (yield
+    on its behalf, preserving goal + progress_log) AND its reservation released --
+    so re-embody is prompt, not lease-bound."""
+    t = q.create("work")
+    spawn = _local_spawn("local-body:brg-5")
+    sup = Supervisor(
+        client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5,
+        local_body_verdict_fn=lambda sid: "gone", nudge=False,
+    )
+    assert sup.poll_once() == [t.id]                 # spawn #1
+    q.claim_one("local-o", task_id=t.id)             # body claimed + started it
+    q.start(t.id, "local-o")
+    assert q.get(t.id).status == Status.STARTED
+
+    # recover_gone: GONE -> yield (requeue) + release reservation -> re-embody
+    assert sup.poll_once() == [t.id]
+    assert spawn.calls == [t.id, t.id]
+    assert q.latest_reservation(t.id).attempt == 2
+
+
+@pytest.mark.parametrize("verdict", ["live", "unknown"])
+def test_recover_local_body_leaves_live_or_unknown(q, client, verdict):
+    """A local body that is live or can't-tell is never recovered (no double-spawn
+    of an alive body): the reservation is held, no re-spawn."""
+    t = q.create("work")
+    spawn = _local_spawn("local-body:brg-2")
+    sup = Supervisor(
+        client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5,
+        local_body_verdict_fn=lambda sid: verdict, nudge=False,
+    )
+    assert sup.poll_once() == [t.id]
+    assert sup.poll_once() == []  # held -> not re-spawned
+    assert spawn.calls == [t.id]
+    assert q.latest_reservation(t.id).state == SpawnState.SPAWNED
+    assert q.latest_reservation(t.id).attempt == 1
+
+
+def test_hold_live_leases_heartbeats_confirmed_live_local_body(q, client, monkeypatch):
+    """A confirmed-live local body's lease is heartbeated so a live-but-quiet body
+    isn't wrongly re-embodied (its lease can't expire under it)."""
+    t = q.create("work")
+    spawn = _local_spawn("local-body:brg-3")
+    sup = Supervisor(
+        client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5,
+        local_body_verdict_fn=lambda sid: "live", recover=False, nudge=False,
+    )
+    assert sup.poll_once() == [t.id]
+    q.claim_one("local-o", task_id=t.id)
+    q.start(t.id, "local-o")
+
+    beats: list[tuple[str, str]] = []
+    real_hb = client.heartbeat
+    monkeypatch.setattr(
+        client, "heartbeat",
+        lambda tid, wid: beats.append((tid, wid)) or real_hb(tid, wid),
+    )
+    assert sup.hold_live_leases() == 1
+    assert beats == [(t.id, "local-o")]
+
+
+def test_hold_live_leases_skips_unknown_local_body(q, client, monkeypatch):
+    """A can't-tell local body is NOT heartbeated (its lease rides its course; a
+    genuinely-dead body's lease then expires for recovery)."""
+    t = q.create("work")
+    spawn = _local_spawn("local-body:brg-4")
+    sup = Supervisor(
+        client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5,
+        local_body_verdict_fn=lambda sid: "unknown", recover=False, nudge=False,
+    )
+    assert sup.poll_once() == [t.id]
+    q.claim_one("local-o", task_id=t.id)
+    q.start(t.id, "local-o")
+
+    beats: list = []
+    monkeypatch.setattr(client, "heartbeat", lambda tid, wid: beats.append((tid, wid)))
+    assert sup.hold_live_leases() == 0
+    assert beats == []
