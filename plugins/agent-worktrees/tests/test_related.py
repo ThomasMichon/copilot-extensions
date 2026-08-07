@@ -798,3 +798,124 @@ def test_related_lookup_anchors_respects_explicit_repo(monkeypatch):
     anchors, via = cli._related_lookup_anchors(["--repo", "/tmp/cwd"], "/tmp/cwd", "x")
     assert anchors == ["/tmp/cwd"] and via is False
     assert calls["cp"] == 0  # explicit --repo pins the anchor, no fallback
+
+
+# ---------------------------------------------------------------------------
+# related doctor -- diagnose_related (validate related.yaml against reality)
+# ---------------------------------------------------------------------------
+
+def _cfg(**entries: RelatedEntry) -> RelatedConfig:
+    return RelatedConfig(related=dict(entries))
+
+
+def _diag(cfg, *, current="dev6", known=lambda k: True, mavail=True,
+          has=lambda n: False, remote=lambda n: ""):
+    return related.diagnose_related(
+        cfg, current_machine=current, machine_known=known,
+        machines_known_available=mavail, registry_has=has,
+        registry_remote=remote,
+    )
+
+
+def _only(findings, kind):
+    return [f for f in findings if f.kind == kind]
+
+
+def test_doctor_local_unregistered_here_with_remote():
+    """Entry claims a local checkout on THIS machine but repos.yaml lacks it ->
+    the headline warning, with a clone action because a remote is known."""
+    e = RelatedEntry(name="spark", locus=Locus(preferred="local", machines=["dev6"]))
+    findings = _diag(_cfg(spark=e), has=lambda n: False,
+                     remote=lambda n: "https://example/spark.git")
+    f = _only(findings, "local_repo_unregistered")
+    assert len(f) == 1 and f[0].severity == related.SEV_WARNING
+    assert any("clone" in a for a in f[0].suggested_actions)
+    assert any("approval" in a for a in f[0].suggested_actions)  # never auto-remove
+
+
+def test_doctor_local_unregistered_here_no_remote():
+    """No known remote -> the action asks the user to provide a URL."""
+    e = RelatedEntry(name="spark", locus=Locus(preferred="local", machines=["dev6"]))
+    findings = _diag(_cfg(spark=e), remote=lambda n: "")
+    f = _only(findings, "local_repo_unregistered")
+    assert len(f) == 1
+    assert any("provide a remote URL" in a for a in f[0].suggested_actions)
+
+
+def test_doctor_registered_here_is_clean():
+    """Registered on this machine -> no local_repo_unregistered finding."""
+    e = RelatedEntry(name="spark", locus=Locus(preferred="local", machines=["dev6"]))
+    findings = _diag(_cfg(spark=e), has=lambda n: True)
+    assert _only(findings, "local_repo_unregistered") == []
+
+
+def test_doctor_codespace_missing_registry_is_not_flagged():
+    """A codespace locus is provisioned from its venue, not the local registry,
+    so a missing repos.yaml entry there is NOT a defect."""
+    e = RelatedEntry(name="web", locus=Locus(
+        preferred="codespace", codespace={"repo": "org/web-codespaces"}))
+    findings = _diag(_cfg(web=e), has=lambda n: False)
+    assert _only(findings, "local_repo_unregistered") == []
+
+
+def test_doctor_codespace_missing_repo_is_error():
+    e = RelatedEntry(name="web", locus=Locus(preferred="codespace",
+                                             codespace={"machine": "big"}))
+    findings = _diag(_cfg(web=e))
+    f = _only(findings, "codespace_missing_repo")
+    assert len(f) == 1 and f[0].severity == related.SEV_ERROR
+
+
+def test_doctor_container_missing_repo_is_error():
+    e = RelatedEntry(name="web", locus=Locus(preferred="container",
+                                             container={"machines": ["dev6"]}))
+    findings = _diag(_cfg(web=e))
+    assert len(_only(findings, "container_missing_repo")) == 1
+
+
+def test_doctor_unknown_machine_flagged():
+    e = RelatedEntry(name="x", locus=Locus(preferred="local",
+                                           machines=["dev6", "bogus"]))
+    findings = _diag(_cfg(x=e), known=lambda k: k.lower() == "dev6",
+                     has=lambda n: True)
+    f = _only(findings, "unknown_machine")
+    assert len(f) == 1 and "bogus" in f[0].detail
+
+
+def test_doctor_unknown_machine_skipped_when_machines_yaml_unavailable():
+    e = RelatedEntry(name="x", locus=Locus(preferred="local", machines=["bogus"]))
+    findings = _diag(_cfg(x=e), mavail=False, known=lambda k: False,
+                     has=lambda n: True)
+    assert _only(findings, "unknown_machine") == []
+
+
+def test_doctor_crossmachine_unverifiable_is_info():
+    """Local entry targeting only other machines -> info, not an error."""
+    e = RelatedEntry(name="x", locus=Locus(preferred="local", machines=["cloud1"]))
+    findings = _diag(_cfg(x=e), current="dev6", has=lambda n: False)
+    assert _only(findings, "local_repo_unregistered") == []
+    f = _only(findings, "crossmachine_unverifiable")
+    assert len(f) == 1 and f[0].severity == related.SEV_INFO
+
+
+def test_doctor_container_machines_validated():
+    """container.machines keys are validated against machines.yaml too."""
+    e = RelatedEntry(name="x", locus=Locus(
+        preferred="container", container={"repo": "o/x", "machines": ["ghost"]}))
+    findings = _diag(_cfg(x=e), known=lambda k: False)
+    assert len(_only(findings, "unknown_machine")) == 1
+
+
+def test_doctor_empty_locus_is_info():
+    e = RelatedEntry(name="x", locus=Locus())
+    findings = _diag(_cfg(x=e))
+    f = _only(findings, "empty_locus")
+    assert len(f) == 1 and f[0].severity == related.SEV_INFO
+
+
+def test_doctor_local_no_machines_is_available_here():
+    """A bare `preferred: local` (no machines) means available on every machine,
+    so an unregistered repo here is flagged."""
+    e = RelatedEntry(name="x", locus=Locus(preferred="local"))
+    findings = _diag(_cfg(x=e), has=lambda n: False)
+    assert len(_only(findings, "local_repo_unregistered")) == 1

@@ -10212,6 +10212,8 @@ def _related_usage() -> None:
     print("     [--container-machines a,b]                          (container locus)")
     print("  remove <name>                       Unlink (leaves the narrative doc)")
     print("  doc <name>                          Print (scaffold if missing) the narrative")
+    print("  doctor [--json]                     Validate entries (repos exist, machines")
+    print("                                      + venues valid, local checkouts registered)")
     print("  primary [<name>]                    Show or set the primary related repo")
     print("  resolve [<name>]                    How to work on it from here (locus plan)")
     print()
@@ -10437,6 +10439,159 @@ def cmd_state_root_dispatch(argv: list[str]) -> int:
     return 0 if res.path else 3
 
 
+def _hunt_checkout(name: str) -> str | None:
+    """Best-effort: find a local checkout for ``name`` under a known source root.
+
+    Powers the ``local_repo_unregistered`` remediation ("go hunt for it") without
+    a network call: look for a git checkout directory named like the repo under
+    each registry source root. Returns the path if exactly one plausible match is
+    found, else None (ambiguous / not found -> the agent asks the user). Never
+    raises.
+    """
+    try:
+        from . import repos as _repos
+        registry = _repos.read_registry()
+    except Exception:
+        return None
+    plat = cfg.detect_platform()
+    roots: list[Path] = []
+    try:
+        root = registry.srcroot.get(plat) if hasattr(registry, "srcroot") else None
+        if root:
+            roots.append(Path(root))
+    except Exception:
+        pass
+    # Common worktree-adjacent layout: <srcroot> holds anchors directly.
+    candidates: list[Path] = []
+    for root in roots:
+        try:
+            if not root.is_dir():
+                continue
+            for child in root.iterdir():
+                if child.name.lower() == name.lower() and (child / ".git").exists():
+                    candidates.append(child)
+        except Exception:
+            continue
+    # Deduplicate by resolved path.
+    seen: set[str] = set()
+    uniq: list[Path] = []
+    for c in candidates:
+        key = os.path.normcase(str(c.resolve()))
+        if key not in seen:
+            seen.add(key)
+            uniq.append(c)
+    return str(uniq[0]) if len(uniq) == 1 else None
+
+
+def _related_doctor(anchor: str, rest: list[str], json_out: bool) -> int:
+    """Validate the related.yaml at ``anchor`` against reality (report-first).
+
+    Verifies -- on THIS machine -- that each entry points at a validly-existing
+    repo, names only in-system machines, and has provisionable venues; the
+    headline check flags an entry that claims a local checkout the machine's own
+    ``repos.yaml`` can't locate. Never edits related.yaml: removal/clone/register
+    are the agent's follow-up with the user.
+    """
+    from . import related, repos
+
+    anchors = _related_config_source_anchors(anchor)
+    rc = related.read_related_grafted(anchors)
+
+    try:
+        current_machine = cfg.detect_machine(anchor)
+    except Exception:
+        current_machine = ""
+
+    # Valid-machine predicate from machines.yaml (key / alias / hostname / name).
+    machines_known_available = True
+    machine_entries: dict = {}
+    try:
+        machine_entries = cfg.load_machines_yaml(anchor)
+    except Exception:
+        machines_known_available = False
+
+    def _machine_known(key: str) -> bool:
+        if not machines_known_available:
+            return True
+        return cfg.find_machine_entry(machine_entries, key) is not None
+
+    def _registry_has(name: str) -> bool:
+        return repos.find_repo(name) is not None
+
+    def _registry_remote(name: str) -> str:
+        e = repos.find_repo(name)
+        return (e.remote if e else "") or ""
+
+    findings = related.diagnose_related(
+        rc,
+        current_machine=current_machine,
+        machine_known=_machine_known,
+        machines_known_available=machines_known_available,
+        registry_has=_registry_has,
+        registry_remote=_registry_remote,
+    )
+
+    # Best-effort checkout hunt for the headline finding, so the agent can offer
+    # a concrete `repos add` instead of asking the user to locate it blindly.
+    for f in findings:
+        if f.kind == "local_repo_unregistered":
+            found = _hunt_checkout(f.name)
+            if found:
+                f.candidate_path = found
+                f.suggested_actions.insert(
+                    0, f"register the checkout found here: `repos add {f.name} "
+                       f"{found} --class <class>`")
+
+    if json_out:
+        _json_output({
+            "current_machine": current_machine,
+            "machines_yaml_available": machines_known_available,
+            "findings": [
+                {
+                    "name": f.name, "kind": f.kind, "severity": f.severity,
+                    "detail": f.detail, "suggested_actions": f.suggested_actions,
+                    "candidate_path": f.candidate_path,
+                }
+                for f in findings
+            ],
+        })
+    else:
+        _render_related_findings(findings, current_machine)
+
+    # Errors (a venue that literally can't provision) gate the exit code;
+    # warnings/info are for the agent to act on, not a hard failure.
+    has_error = any(f.severity == related.SEV_ERROR for f in findings)
+    return 1 if has_error else 0
+
+
+def _render_related_findings(findings: list, current_machine: str) -> None:
+    """Human render for `related doctor` (grouped by severity)."""
+    from . import related
+    output.header(f"related doctor  (machine: {current_machine or '?'})")
+    if not findings:
+        output.ok("All related entries validate: repos exist, machines and "
+                  "venues are valid.")
+        return
+    order = {related.SEV_ERROR: 0, related.SEV_WARNING: 1, related.SEV_INFO: 2}
+    icon = {related.SEV_ERROR: "✗", related.SEV_WARNING: "⚠️ ",
+            related.SEV_INFO: "•"}
+    for f in sorted(findings, key=lambda x: (order.get(x.severity, 9), x.name)):
+        print(f"  {icon.get(f.severity, '-')} [{f.kind}] {f.detail}")
+        if f.candidate_path:
+            print(f"      found checkout: {f.candidate_path}")
+        for a in f.suggested_actions:
+            print(f"      - {a}")
+    print()
+    errs = sum(1 for f in findings if f.severity == related.SEV_ERROR)
+    warns = sum(1 for f in findings if f.severity == related.SEV_WARNING)
+    infos = sum(1 for f in findings if f.severity == related.SEV_INFO)
+    print(f"  {errs} error(s), {warns} warning(s), {infos} info.")
+    if warns or errs:
+        output.info("Report-only: `related doctor` never edits related.yaml. "
+                    "Resolve each with the user (locate / provide URL / clone / "
+                    "register), and remove an entry only with their approval.")
+
+
 def cmd_related_dispatch(argv: list[str]) -> int:
     """Route related subcommands (per-project related-repos index)."""
     from . import related, repos
@@ -10493,6 +10648,9 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                 loc = e.locus.preferred or "-"
                 print(f"  {e.name:<24} {e.role or '-':<11} locus={loc}{star}")
         return 0
+
+    if sub == "doctor":
+        return _related_doctor(anchor, rest, json_out)
 
     if sub == "show":
         if not rest or rest[0].startswith("-"):
