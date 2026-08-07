@@ -235,3 +235,92 @@ def test_activate_project_for_path_noop_outside_repo(monkeypatch):
     )
 
     m._activate_project_for_path("/not/a/repo")  # must not raise
+
+
+# --- version-supersede self-reap (dotfiles #911) -------------------------
+
+def test_slot_superseded_pure_comparison():
+    root = "/home/u/.agent-worktrees/versions"
+    # A different slot than active, both under versions/ -> superseded.
+    assert m._slot_superseded(f"{root}/dev5", f"{root}/dev4", root) is True
+    # Same slot -> not superseded.
+    assert m._slot_superseded(f"{root}/dev5", f"{root}/dev5", root) is False
+
+
+def test_slot_superseded_non_slot_interpreter_keeps_serving():
+    """A dev/source or system-python interpreter (not under versions/) is never
+    judged superseded -- degrade-safe."""
+    root = "/home/u/.agent-worktrees/versions"
+    assert m._slot_superseded(f"{root}/dev5", "/usr/lib/python3.11", root) is False
+    assert m._slot_superseded(f"{root}/dev5", "/src/checkout/.venv", root) is False
+
+
+def test_slot_superseded_no_partial_prefix_match():
+    """``versions-old`` must not count as under ``versions`` (path-segment safe)."""
+    root = "/home/u/.agent-worktrees/versions"
+    mine = "/home/u/.agent-worktrees/versions-x/dev5"
+    assert m._slot_superseded(f"{root}/dev5", mine, root) is False
+
+
+def test_runtime_superseded_true_when_active_slot_differs(tmp_path):
+    versions = tmp_path / "versions"
+    (versions / "dev4").mkdir(parents=True)
+    (versions / "dev5").mkdir(parents=True)
+    # active .venv realpath -> dev5; this process pretends to run from dev4.
+    active = versions / "dev5"
+    venv = tmp_path / ".venv"
+    try:
+        venv.symlink_to(active, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        # No symlink privilege (Windows non-dev-mode): fall back to a real dir
+        # copy so realpath still resolves under versions/.
+        import shutil as _sh
+        _sh.copytree(active, venv)
+    assert m._runtime_superseded(
+        prefix=str(versions / "dev4"), install_root=tmp_path
+    ) is True
+    assert m._runtime_superseded(
+        prefix=str(versions / "dev5"), install_root=tmp_path
+    ) is False
+
+
+def test_runtime_superseded_degrades_safe_on_missing_root(tmp_path):
+    """No versions/ layout at all -> never superseded (keep serving)."""
+    assert m._runtime_superseded(
+        prefix=str(tmp_path / "whatever"), install_root=tmp_path / "nope"
+    ) is False
+
+
+def test_status_updater_retires_when_runtime_superseded(monkeypatch):
+    """A superseded updater (newer runtime active) retires at once, before
+    claiming a token or writing any bar option (dotfiles #911)."""
+    calls: list[tuple[str, str]] = []
+    # Session is present, but the runtime is superseded -> early return.
+    monkeypatch.setattr(subprocess, "run", _fake_mux([0, 0, 0], calls))
+    monkeypatch.setattr(m, "_runtime_superseded", lambda *a, **k: True)
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    monkeypatch.setattr(time, "sleep", lambda *_a, **_k: None)
+
+    rc = m.cmd_status_updater(_ns())
+
+    assert rc == 0
+    assert calls == []  # no token claim, no @aw_ctx/@aw_seg writes
+
+
+def test_status_updater_loop_exits_when_runtime_becomes_superseded(monkeypatch):
+    """An updater running fine retires on the tick after a newer runtime lands."""
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(subprocess, "run", _fake_mux([0, 0, 0, 0], calls))
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    monkeypatch.setattr(time, "sleep", lambda *_a, **_k: None)
+    # Not superseded at startup; becomes superseded after the first tick.
+    seq = iter([False, False, True])
+    monkeypatch.setattr(m, "_runtime_superseded", lambda *a, **k: next(seq, True))
+
+    rc = m.cmd_status_updater(_ns())
+
+    assert rc == 0
+    # Exactly one disposition write before the supersede retires the loop.
+    assert [c for c in calls if c[0] == "@aw_seg"] == [("@aw_seg", "SEG")]

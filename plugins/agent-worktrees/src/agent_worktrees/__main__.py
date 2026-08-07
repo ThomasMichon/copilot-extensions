@@ -4693,6 +4693,56 @@ def _activate_project_for_path(path: str | None) -> None:
         pass
 
 
+def _slot_superseded(active: str, mine: str, versions_root: str) -> bool:
+    """Pure comparison: is ``mine`` a *different* runtime slot than the active
+    one, with both living under the ``versions/`` slot root?
+
+    Conservative by design -- returns False unless BOTH paths resolve *under*
+    ``versions_root`` (so a dev/source or system-python interpreter, which has no
+    version slot to compare, is never judged superseded). Separator- and
+    case-normalized (``normpath``/``normcase``) so it is correct on Windows
+    (``\\``, case-insensitive) and POSIX alike. Factored out (plain strings, no
+    filesystem) so the decision is unit-testable without symlinked version trees.
+    """
+    def _norm(p: str) -> str:
+        return os.path.normcase(os.path.normpath(p))
+
+    active, mine, versions_root = _norm(active), _norm(mine), _norm(versions_root)
+
+    def _under(p: str) -> bool:
+        return p == versions_root or p.startswith(versions_root + os.sep)
+
+    if not (_under(active) and _under(mine)):
+        return False
+    return mine != active
+
+
+def _runtime_superseded(
+    *, prefix: str | None = None, install_root: Path | None = None
+) -> bool:
+    """True when a newer agent-worktrees runtime has superseded the one running
+    this ``status-updater`` -- i.e. the ``install_dir/.venv`` slot no longer
+    resolves to this process's ``sys.prefix`` (both under ``versions/``).
+
+    A version update swaps the ``.venv`` symlink to a fresh ``versions/<v>`` slot
+    but cannot reap an already-running updater: its mux session is still live (so
+    ``_has_session`` keeps it serving) and a new-version updater only spawns on
+    the next attach/join. Left alone, one updater per (session x version) piles
+    up across every deploy (dotfiles #911 -- observed dev315..dev392 all still
+    running for days). This self-check lets a superseded updater retire on its
+    next tick; the next attach spawns a current-version one. Degrade-safe: any
+    resolution error, or a non-slot interpreter, keeps it serving.
+    """
+    try:
+        root = install_root if install_root is not None else cfg.install_dir()
+        versions_root = os.path.realpath(os.path.join(str(root), "versions"))
+        active = os.path.realpath(os.path.join(str(root), ".venv"))
+        mine = os.path.realpath(prefix if prefix is not None else sys.prefix)
+    except Exception:
+        return False
+    return _slot_superseded(active, mine, versions_root)
+
+
 def cmd_status_updater(args: argparse.Namespace) -> int:
     """Keep a session's status-bar vars fresh without per-render spawns.
 
@@ -4744,6 +4794,12 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
         r = _mux("has-session", "-t", sess)
         return r is not None and r.returncode == 0
 
+    # A newer runtime already active? Then this updater is a leftover from a
+    # pre-update version whose session is still live -- retire immediately rather
+    # than serve stale (dotfiles #911). The next attach spawns a current one.
+    if _runtime_superseded():
+        return 0
+
     def _set(opt: str, val: str) -> None:
         # Session-scoped (no -g): empirically isolated per session on psmux
         # 3.3.6 and tmux 3.4, so concurrent worktree sessions don't clobber
@@ -4776,10 +4832,11 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
         pass
 
     # Disposition (DIRTY/FINAL/WIP/CONVO/...) changes as work happens: refresh
-    # @aw_seg on the interval until the session ends or a newer updater takes
-    # over.  The bar itself does zero process work between updates -- the mux
-    # only re-runs the strftime %H:%M clock.
-    while _has_session() and _owns():
+    # @aw_seg on the interval until the session ends, a newer updater takes
+    # over, or a newer runtime supersedes this one (dotfiles #911).  The bar
+    # itself does zero process work between updates -- the mux only re-runs the
+    # strftime %H:%M clock.
+    while _has_session() and _owns() and not _runtime_superseded():
         try:
             seg = _render_status_segment(
                 path, fetch=False, plain=False, no_title=False,
