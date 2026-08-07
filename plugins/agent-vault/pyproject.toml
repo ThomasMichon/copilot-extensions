@@ -18,7 +18,7 @@ dependencies = []
 # The persistent on-disk credential cache (opt-in) encrypts entries with Fernet.
 # Install with `pip install agent-vault[cache]` (or provide cryptography another
 # way); without it the cache degrades to a safe no-op.
-cache = ["cryptography>=3.4"]
+cache = ["cryptography>=50.0.0"]
 
 [project.scripts]
 agent-vault = "agent_vault.__main__:main"
