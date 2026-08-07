@@ -108,9 +108,32 @@ class ContainerResolver:
         return "container"
 
     async def resolve(self, name: str) -> SpawnTarget:
-        """Resolve a container name to a SpawnTarget over ``docker exec``."""
+        """Resolve a container name to a SpawnTarget over ``docker exec``.
+
+        Thin wrapper over :meth:`resolve_spec` (the agent_bridge-free data path,
+        also the ``namespace-resolve`` CLI seam for #892 Inc 3b). Note the narrow
+        ``resolve(self, name)`` signature -- containers do not support cross-repo
+        dispatch or plugin injection, which agent-bridge honors by introspecting
+        this signature.
+        """
         from agent_bridge.transport import SpawnTarget
 
+        spec = await self.resolve_spec(name)
+        return SpawnTarget(
+            type=spec.get("type", "command"),
+            spawn_command=spec["spawn_command"],
+            user=spec.get("user"),
+        )
+
+    async def resolve_spec(self, name: str) -> dict:
+        """Resolve a container name to a **plain-dict** spawn spec.
+
+        The agent_bridge-free core of :meth:`resolve` -- returns
+        ``{"type","spawn_command","user"}`` using only agent-containers + stdlib,
+        so the ``agent-containers namespace-resolve`` CLI can emit it as JSON and
+        agent-bridge reconstructs the ``SpawnTarget`` across a process boundary
+        (#892 Inc 3b). Raises ``KeyError`` when the container is not in the fleet.
+        """
         config = load_config()
         info = await asyncio.to_thread(get_container, config, name)
         if info is None:
@@ -136,12 +159,21 @@ class ContainerResolver:
         # the gh token at spawn time, keeping it out of the persisted SpawnTarget.
         spawn_cmd = build_wrapper_command(name)
         log.info("Resolved container:%s -> %s", name, " ".join(spawn_cmd))
-        return SpawnTarget(type="command", spawn_command=spawn_cmd, user=user)
+        return {"type": "command", "spawn_command": spawn_cmd, "user": user}
 
     async def list(self) -> list[NamespaceAgentInfo]:
-        """List fleet containers as namespace agent info."""
+        """List fleet containers as namespace agent info (in-process path)."""
         from agent_bridge.agent_registry import NamespaceAgentInfo
 
+        return [NamespaceAgentInfo(**spec) for spec in await self.list_specs()]
+
+    async def list_specs(self) -> list[dict]:
+        """List fleet containers as **plain-dict** agent specs.
+
+        The agent_bridge-free core of :meth:`list` -- the ``namespace-list`` CLI
+        seam emits these as JSON and agent-bridge reconstructs
+        ``NamespaceAgentInfo`` across a process boundary (#892 Inc 3b).
+        """
         config = load_config()
         containers = await asyncio.to_thread(list_containers, config)
         agents = []
@@ -154,15 +186,13 @@ class ContainerResolver:
                 description += f" — leased by {lease.effort}"
             # Map docker state to a coarse ready/stopped signal.
             state = "running" if c.is_running else (c.state or "unknown")
-            agents.append(
-                NamespaceAgentInfo(
-                    name=c.name,
-                    display_name=display,
-                    description=description,
-                    icon="container",
-                    state=state,
-                )
-            )
+            agents.append({
+                "name": c.name,
+                "display_name": display,
+                "description": description,
+                "icon": "container",
+                "state": state,
+            })
         return agents
 
     async def ensure_ready(self, name: str) -> None:

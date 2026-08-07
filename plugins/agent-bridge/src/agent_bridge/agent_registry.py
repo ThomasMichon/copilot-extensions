@@ -377,7 +377,19 @@ class CliNamespaceResolver(NamespaceResolver):
                 f"{self._binstub} {method} unavailable and no in-process "
                 f"fallback resolver for namespace '{self._prefix}:'"
             )
-        return await getattr(self._fallback, method)(*args, **kwargs)
+        fn = getattr(self._fallback, method)
+        # Pass only the kwargs the fallback actually declares -- a provider's
+        # resolver may have a narrower signature than this generic shim (e.g. the
+        # container resolver's ``resolve(self, name)`` accepts no cross-repo /
+        # plugin kwargs), so forwarding them blindly would ``TypeError`` (#892
+        # Inc 3b). Mirrors agent-bridge's own resolve-kwarg introspection.
+        if kwargs:
+            try:
+                params = inspect.signature(fn).parameters
+                kwargs = {k: v for k, v in kwargs.items() if k in params}
+            except (TypeError, ValueError):
+                kwargs = {}
+        return await fn(*args, **kwargs)
 
     async def list(self) -> list[NamespaceAgentInfo]:
         res = await self._run(["namespace-list"])
@@ -392,6 +404,21 @@ class CliNamespaceResolver(NamespaceResolver):
         return await self._fallback_or_raise("list")
 
     async def resolve(
+        self, name: str, *, extra_plugins: "list[PluginRef]" = (),
+        repo: str | None = None, repo_remote: str | None = None,
+    ) -> SpawnTarget:
+        """Resolve via the CLI seam (full-capability signature).
+
+        Declares the cross-repo / plugin kwargs so agent-bridge's resolve-kwarg
+        introspection (``inspect.signature``) offers cross-repo dispatch to this
+        namespace. A provider whose venues do NOT support cross-repo registers
+        via :class:`RestrictedCliNamespaceResolver` (narrower signature) instead.
+        """
+        return await self._resolve_impl(
+            name, extra_plugins=extra_plugins, repo=repo, repo_remote=repo_remote,
+        )
+
+    async def _resolve_impl(
         self, name: str, *, extra_plugins: "list[PluginRef]" = (),
         repo: str | None = None, repo_remote: str | None = None,
     ) -> SpawnTarget:
@@ -448,6 +475,22 @@ class CliNamespaceResolver(NamespaceResolver):
         if self._fallback is not None:
             return await self._fallback.target_repo(name)
         return None
+
+
+class RestrictedCliNamespaceResolver(CliNamespaceResolver):
+    """A :class:`CliNamespaceResolver` for a namespace whose venues do **not**
+    support cross-repo dispatch or plugin injection (#892 Inc 3b).
+
+    Overrides :meth:`resolve` with a **narrow** ``resolve(self, name)`` signature
+    so agent-bridge's resolve-kwarg introspection (``inspect.signature``)
+    correctly reports that ``repo`` / ``repo_remote`` / ``extra_plugins`` are
+    unsupported -- exactly as the underlying in-process resolver (e.g. the
+    container resolver's ``resolve(self, name)``) already signals. The subprocess
+    logic is inherited via :meth:`_resolve_impl`.
+    """
+
+    async def resolve(self, name: str) -> SpawnTarget:  # type: ignore[override]
+        return await self._resolve_impl(name)
 
 
 def parse_agent_registry(data: dict[str, Any]) -> dict[str, AgentConfig]:
@@ -1281,13 +1324,29 @@ def _register_namespace_resolvers(resolver: AgentResolver) -> None:
         )
 
     # container: -- local Docker dev containers (agent-containers package)
+    # #892 Inc 3b: drive the container resolver over the process boundary via the
+    # RESTRICTED shim (containers don't support cross-repo / plugin injection, so
+    # its narrow resolve(name) signature keeps agent-bridge from offering them),
+    # with the in-process ContainerResolver as the degrade-safe fallback.
     try:
         from agent_containers.resolver import ContainerResolver
 
-        resolver.register_namespace_resolver(ContainerResolver())
-        log.info("Registered container: namespace resolver (agent-containers)")
+        resolver.register_namespace_resolver(
+            RestrictedCliNamespaceResolver(
+                "container", "agent-containers", ContainerResolver()
+            )
+        )
+        log.info("Registered container: namespace resolver (CLI seam #892)")
     except ImportError:
-        _log_missing_namespace("agent-containers", "container:")
+        if shutil.which("agent-containers"):
+            resolver.register_namespace_resolver(
+                RestrictedCliNamespaceResolver("container", "agent-containers")
+            )
+            log.info(
+                "Registered container: namespace resolver (CLI-only seam #892)"
+            )
+        else:
+            _log_missing_namespace("agent-containers", "container:")
     except Exception:
         log.warning(
             "Failed to register container: namespace resolver",
