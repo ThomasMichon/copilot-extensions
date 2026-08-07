@@ -3745,6 +3745,9 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
             allow_unsquashed=getattr(args, "allow_unsquashed", False),
         )
 
+        _reminder = _pr_reminder_for(
+            config, "push-changes", ok=bool(success),
+        )
         if use_json:
             yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
             final_status = "pushed"
@@ -3754,11 +3757,16 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
                     final_status = rec.status
                 except Exception:
                     pass
-            _json_output({
+            out = {
                 "worktree_id": worktree_id,
                 "success": success,
                 "status": final_status,
-            })
+            }
+            if _reminder is not None:
+                out["reminder"] = _reminder.as_dict()
+            _json_output(out)
+        elif _reminder is not None:
+            print(_reminder.text(), file=sys.stderr)
 
         return 0 if success else 1
     finally:
@@ -3826,6 +3834,14 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             dry_run=args.dry_run,
         )
 
+        _reminder = _pr_reminder_for(
+            config, "create-pr",
+            state=("created" if result.get("success") else ""),
+            ok=bool(result.get("success")),
+            reason=("" if result.get("success") else result.get("error", "")),
+        )
+        if _reminder is not None:
+            result["reminder"] = _reminder.as_dict()
         if use_json:
             _json_output(result)
         elif result.get("success"):
@@ -3872,6 +3888,8 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
         else:
             output.err(result.get("error", "create-pr failed."))
 
+        if not use_json and _reminder is not None:
+            print(_reminder.text(), file=sys.stderr)
         return 0 if result.get("success") else 1
     finally:
         if ctx is not None:
@@ -4009,6 +4027,28 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
         "applicable_verbs": list(flow.applicable_verbs),
         "summary": flow.summary,
     }
+    # Stay-on-rails reminder: what this repo's flow allows next. Derive a coarse
+    # PR state from the live verdict/merge-state when present so the reminder is
+    # situational. Carried as a JSON `reminder` node and printed in human mode.
+    from . import pr_contract as pc
+    _live = result.get("live") if isinstance(result.get("live"), dict) else {}
+    if result.get("state") == "merged" or _live.get("merge_state") == "merged":
+        _state = pc.PR_STATE_MERGED
+    elif _live.get("conflict"):
+        _state = pc.PR_STATE_CONFLICT
+    elif _live.get("verdict") == "approved":
+        _state = pc.PR_STATE_APPROVED
+    elif _live.get("verdict") in ("changes_requested", "change_requested"):
+        _state = pc.PR_STATE_CHANGES_REQUESTED
+    elif result.get("has_pr"):
+        _state = pc.PR_STATE_AWAITING_REVIEW
+    else:
+        _state = ""
+    _reminder = _pr_reminder_for(
+        config, "pr-status", state=_state, ok=not result.get("error"),
+    )
+    if _reminder is not None:
+        result["reminder"] = _reminder.as_dict()
     # First-class comment threads (opt-in). Fetched before any JSON emit so the
     # machine-readable output carries them too.
     want_threads = getattr(args, "threads", False) or getattr(args, "resolve_threads", False)
@@ -4024,6 +4064,8 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
         output.err(result["error"])
         return 1
     print(f"  flow:     {flow.profile} -- {flow.summary}")
+    if _reminder is not None:
+        print(_reminder.text(), file=sys.stderr)
     if not result.get("has_pr"):
         print(f"{worktree_id}: no PR recorded (direct-push or not yet created).")
         return 0
@@ -9152,6 +9194,36 @@ def _pr_flow_profile(repo: cfg.RepoConfig):
         merge_actor=getattr(prc, "merge_actor", ""),
         conflict_retriggers_review=getattr(prc, "conflict_retriggers_review", True),
     )
+
+
+def _pr_reminder_for(
+    config, verb: str, *, ok: bool = True, state: str = "", reason: str = "",
+):
+    """Build this repo's stay-on-rails PR reminder for ``verb`` (or ``None``).
+
+    Fail-open: any error (no repo, classification failure) yields ``None`` so a
+    reminder never perturbs the verb it rides along with.
+    """
+    from . import pr_contract as pc
+
+    try:
+        flow = _pr_flow_profile(config.default_repo)
+        return pc.pr_reminder(flow, verb, state, ok=ok, reason=reason)
+    except Exception:
+        return None
+
+
+def _emit_pr_reminder(reminder, *, use_json: bool, result: dict | None = None) -> None:
+    """Surface a PR reminder: as a ``reminder`` node in ``result`` (JSON mode)
+    or as a short block on stderr (human mode). No-op when ``reminder`` is None.
+    """
+    if reminder is None:
+        return
+    if use_json:
+        if result is not None:
+            result["reminder"] = reminder.as_dict()
+    else:
+        print(reminder.text(), file=sys.stderr)
 
 
 def cmd_get(args: argparse.Namespace) -> int:
@@ -14482,6 +14554,7 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
     import json as _json
 
     from . import pr_merge as pm
+    from . import pr_contract as pc
     from .providers import ProviderError
 
     if argv and argv[0] in ("--help", "-h", "help"):
@@ -14556,9 +14629,18 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
                     "hint": ("human-merge repo: a human merges (pr-merge N/A); "
                              "OR stale anchor if an auto-merge label was "
                              "expected -- update the anchor and retry"),
+                    "reminder": pc.pr_reminder(
+                        flow, "pr-merge", ok=False,
+                        reason="no merge-consent label bound",
+                    ).as_dict(),
                 }))
             else:
                 output.err(msg)
+                _rem = pc.pr_reminder(
+                    flow, "pr-merge", ok=False,
+                    reason="no merge-consent label bound",
+                )
+                print(_rem.text(), file=sys.stderr)
             return 2
 
         if args.sweep:
