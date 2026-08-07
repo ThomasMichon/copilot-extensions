@@ -17,9 +17,38 @@
 default_branch: main
 remote: origin
 
-# No `pr:` block -> PR mode is OFF: copilot-extensions uses the direct-push
-# workflow (changes land on `main` via `git push origin main`, per
-# CONTRIBUTING.md). There is no automated reviewer here yet; bringing the
-# Intelligence Dampener to this repo (owner-only) is tracked in aperture-labs
-# issue #1102. Add a `pr:` block here (required: true, provider, strategy) once
-# that lands, to mirror aperture-labs.
+# PR workflow (agent-worktrees hook facility + create-pr flow) — REQUIRED.
+#
+# copilot-extensions lands changes through pull requests, not direct pushes to
+# `main`. This is enforced on three layers that agree:
+#
+#   1. This config (`required: true`) — `push-changes` REFUSES direct-to-`main`
+#      and steers every change through `create-pr`. `required` implies
+#      `enabled`, which also arms the plugin's PR-workflow git-hook shims
+#      (installed by `agent-worktrees register`, armed via
+#      `AGENT_WORKTREES_HOOKS=1` for `pr.enabled` repos): they block committing
+#      to `main` from a worktree and block pushing a worktree branch directly.
+#      The legitimate `create-pr` / `push-changes` push bypasses the pre-push
+#      guard via `AGENT_WORKTREES_PR_PUSH=1`.
+#   2. A GitHub repository ruleset ("Copilot review for default branch",
+#      id 18553911) with a `pull_request` rule — the FORMAL branch policy that
+#      blocks direct pushes to `main` server-side, so the enforcement holds even
+#      for a tool/path that predates or bypasses layer 1.
+#   3. The same ruleset's `copilot_code_review` rule auto-requests a
+#      **non-blocking** Copilot review on every PR (review_on_push: true). It is
+#      a review, not a required status check, so it never gates the merge.
+#
+# Flow for every agent (see CONTRIBUTING.md § "Contribution flow"):
+#   copilot-extensions create  ->  edit  ->  create-pr  (auto_open opens the PR)
+#   ->  Copilot posts its review  ->  MANUAL squash-merge:
+#       gh pr merge <#> --squash --delete-branch
+#
+# Merge is deliberately MANUAL (no `automerge_label` bound): the owner merges
+# after giving Copilot's review a chance to land. `head_scheme` defaults to
+# `refspec` (PR head `pr/<slug>`); the shared hooks honor the mediated push.
+pr:
+  enabled: true
+  required: true
+  provider: github
+  auto_open: true
+  strategy: detach
