@@ -170,6 +170,52 @@ def _read_substatus(entry: Path) -> tuple[str, str, bool, str | None, str] | Non
     return intent.strip(), updated_at, idle, rest, rest_at
 
 
+# Bounded tail window (bytes) for the extension-free rest inference below. Sized
+# to comfortably contain a recent turn boundary without ever reading the whole
+# (append-only, unbounded) event log.
+_REST_TAIL_WINDOW = 65536
+
+
+def _infer_rest_from_events(entry: Path) -> str | None:
+    """Coarse, extension-free at-rest inference from a BOUNDED events.jsonl tail.
+
+    The live-pulse extension is the crisp rest source (``session.idle`` /
+    ``awaiting-operator``), but it is **non-load-bearing** (copilot-extensions#228):
+    when it is not loaded the backbone must still report a coarse rest. The
+    ephemeral rest events (``session.idle`` and the ``*.requested`` prompts) never
+    land on disk, but the **turn boundaries do** (``assistant.turn_start`` /
+    ``assistant.turn_end``), so the session's own event log yields a coarse
+    busy/idle -- and only that (``awaiting-operator`` stays extension-only).
+
+    **Bounded by design** (the no-unbounded-sweep invariant): reads only the last
+    :data:`_REST_TAIL_WINDOW` bytes via a random-access seek to the tail, never the
+    whole file, and scans raw bytes (no JSON parse). Returns ``"idle"`` when the
+    most recent turn boundary in the window is a ``turn_end`` (the turn finished ->
+    at rest), ``"busy"`` when it is a ``turn_start`` (a turn is in flight), or None
+    when the window carries no turn boundary (unknown -- never guessed, never
+    swept). Never raises.
+    """
+    events = entry / "events.jsonl"
+    try:
+        size = events.stat().st_size
+        if size <= 0:
+            return None
+        with open(events, "rb") as f:
+            f.seek(max(0, size - _REST_TAIL_WINDOW))
+            tail = f.read()
+    except OSError:
+        return None
+    last: str | None = None
+    for line in tail.split(b"\n"):
+        # Trailing hook/usage events are not turn boundaries -- only the turn
+        # markers move the coarse state, so scan for the LAST of those two.
+        if b'"assistant.turn_end"' in line:
+            last = "idle"
+        elif b'"assistant.turn_start"' in line:
+            last = "busy"
+    return last
+
+
 def _update_activity(
     ctx: SessionContext, norm_path: str, entry: Path, updated_at: str
 ) -> None:
@@ -207,27 +253,32 @@ def _update_activity(
     # The live pulse follows the same newest-session-wins rule as context %: a
     # newer session without a sidecar clears any stale intent from an older one.
     sub = _read_substatus(entry)
+    rest: str | None = None
+    rest_at = ""
     if sub is not None:
         intent, sub_at, idle, rest, rest_at = sub
         ctx.live_intent[norm_path] = intent
         ctx.live_intent_at[norm_path] = sub_at
         ctx.live_intent_idle[norm_path] = idle
-        if rest is not None:
-            ctx.live_rest[norm_path] = rest
-            # Only store a real ISO timestamp; a legacy sidecar (rest derived
-            # from ``idle``) has no restAt, so clear any stale value rather than
-            # record an empty string that violates the live_rest_at contract.
-            if rest_at:
-                ctx.live_rest_at[norm_path] = rest_at
-            else:
-                ctx.live_rest_at.pop(norm_path, None)
-        else:
-            ctx.live_rest.pop(norm_path, None)
-            ctx.live_rest_at.pop(norm_path, None)
     else:
         ctx.live_intent.pop(norm_path, None)
         ctx.live_intent_at.pop(norm_path, None)
         ctx.live_intent_idle.pop(norm_path, None)
+    # REST (copilot-extensions#228): prefer the crisp sidecar value written by the
+    # live-pulse extension; when it is absent (extension not loaded, or a legacy
+    # sidecar without a graded rest) fall back to a COARSE busy/idle inferred from
+    # a BOUNDED events.jsonl tail -- the non-load-bearing backbone. ``restAt`` is
+    # only a real ISO timestamp from the sidecar; the coarse backbone carries none.
+    if rest is None:
+        rest = _infer_rest_from_events(entry)
+        rest_at = ""
+    if rest is not None:
+        ctx.live_rest[norm_path] = rest
+        if rest_at:
+            ctx.live_rest_at[norm_path] = rest_at
+        else:
+            ctx.live_rest_at.pop(norm_path, None)
+    else:
         ctx.live_rest.pop(norm_path, None)
         ctx.live_rest_at.pop(norm_path, None)
 
