@@ -706,6 +706,16 @@ def _worktree_to_dict(
                 d["live_intent_at"] = _iat
             if session_ctx.live_intent_idle.get(norm):
                 d["live_intent_idle"] = True
+        # copilot-extensions#228: the graded REST state (busy/idle/
+        # awaiting-operator), derived from native session events by the
+        # live-pulse extension. Enrichment only -- emitted when present; absent
+        # when the extension isn't loaded (the backbone still reports liveness).
+        _rest = session_ctx.live_rest.get(norm)
+        if _rest:
+            d["live_rest"] = _rest
+            _rat = session_ctx.live_rest_at.get(norm)
+            if _rat:
+                d["live_rest_at"] = _rat
         # Overall-summary slot: prefer the persisted title (curated by
         # finalize/PR or captured by the status-updater/deregister hook), but
         # fall back to the live session summary so a worktree whose title has
