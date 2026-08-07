@@ -22,14 +22,14 @@ import os
 from typing import Any
 
 import httpx
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from agent_index.config import ENDPOINT_ENV, client_url
 from agent_index.query_surface import format_clusters, format_hits
 
 _TIMEOUT = 30.0
 
-mcp = FastMCP(
+mcp = MCPServer(
     "agent-index",
     instructions=(
         "Semantic + lexical search over a harness repo's code, docs, commits, "

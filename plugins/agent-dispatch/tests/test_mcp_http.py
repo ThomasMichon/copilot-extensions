@@ -15,8 +15,9 @@ from tests._helpers import TEST_REPO
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 
 mcp = pytest.importorskip("mcp")
+import httpx2  # noqa: E402
 from mcp import ClientSession  # noqa: E402
-from mcp.client.streamable_http import streamablehttp_client  # noqa: E402
+from mcp.client.streamable_http import streamable_http_client  # noqa: E402
 
 
 def _boot(app):
@@ -58,21 +59,29 @@ def coord(tmp_path):
 
 
 async def _call(url, tool, args, headers=None):
-    async with streamablehttp_client(f"{url}/mcp", headers=headers or {}) as (r, w, _):
-        async with ClientSession(r, w) as s:
-            await s.initialize()
-            res = await s.call_tool(tool, args)
-            return res
+    # mcp 2.0: streamable_http_client returns a 2-tuple and takes headers via an
+    # httpx2 client (30s/read-300s matches the old streamablehttp_client default).
+    async with httpx2.AsyncClient(
+        headers=headers or {}, timeout=httpx2.Timeout(30, read=300), follow_redirects=True
+    ) as http_client:
+        async with streamable_http_client(f"{url}/mcp", http_client=http_client) as (r, w):
+            async with ClientSession(r, w) as s:
+                await s.initialize()
+                res = await s.call_tool(tool, args)
+                return res
 
 
 def test_mcp_endpoint_lists_tools(coord):
     import asyncio
 
     async def go():
-        async with streamablehttp_client(f"{coord}/mcp") as (r, w, _):
-            async with ClientSession(r, w) as s:
-                await s.initialize()
-                return sorted(t.name for t in (await s.list_tools()).tools)
+        async with httpx2.AsyncClient(
+            timeout=httpx2.Timeout(30, read=300), follow_redirects=True
+        ) as http_client:
+            async with streamable_http_client(f"{coord}/mcp", http_client=http_client) as (r, w):
+                async with ClientSession(r, w) as s:
+                    await s.initialize()
+                    return sorted(t.name for t in (await s.list_tools()).tools)
 
     names = asyncio.new_event_loop().run_until_complete(go())
     assert "dispatch_create" in names

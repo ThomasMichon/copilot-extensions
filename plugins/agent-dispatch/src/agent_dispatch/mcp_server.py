@@ -10,7 +10,7 @@ automatically, and no separate credential/bridge wiring.
 
 The tool logic lives in :class:`DispatchTools` (a plain, transport-free object
 taking a client factory + identity resolver) so it is unit-testable without an
-MCP transport; :func:`build_server` wraps those methods as FastMCP tools.
+MCP transport; :func:`build_server` wraps those methods as MCPServer tools.
 
 Requires the optional ``mcp`` extra (``pip install 'agent-dispatch[mcp]'``).
 """
@@ -278,20 +278,20 @@ class DispatchTools:
 
 
 def build_server(tools: DispatchTools | None = None) -> Any:
-    """Build the FastMCP stdio server exposing the dispatch tools.
+    """Build the MCPServer stdio server exposing the dispatch tools.
 
     Imported lazily so the ``mcp`` extra is only required for ``agent-dispatch
     mcp``, not for the CLI/coordinator.
     """
     try:
-        from mcp.server.fastmcp import FastMCP
+        from mcp.server.mcpserver import MCPServer
     except ImportError as exc:  # pragma: no cover -- exercised via the CLI path
         raise RuntimeError(
             "the MCP server requires the 'mcp' extra: pip install 'agent-dispatch[mcp]'"
         ) from exc
 
     t = tools or DispatchTools()
-    mcp = FastMCP("agent-dispatch")
+    mcp = MCPServer("agent-dispatch")
 
     # Register each DispatchTools method as an MCP tool. Explicit wrappers keep
     # the tool schemas (names, params, docstrings) stable and discoverable.

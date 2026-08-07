@@ -17,7 +17,7 @@ Requires the optional ``mcp`` extra; the coordinator mounts this only when it is
 importable (otherwise the REST API still serves).
 """
 
-# NOTE: no ``from __future__ import annotations`` here on purpose -- FastMCP
+# NOTE: no ``from __future__ import annotations`` here on purpose -- MCPServer
 # evaluates each tool's annotations in the function's *module* globals, which
 # can't see ``Context`` imported locally inside ``build_coordinator_mcp``. Real
 # (non-stringized) annotations resolve at def-time via the enclosing scope.
@@ -41,16 +41,21 @@ def _headers_of(ctx: Any) -> dict[str, str]:
 
 
 def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
-    """Build the FastMCP server the coordinator mounts at ``/mcp``.
+    """Build the MCPServer the coordinator mounts at ``/mcp``.
 
     Raises ``RuntimeError`` (via import failure) if the ``mcp`` extra is absent;
     the caller treats that as "don't mount the MCP endpoint".
-    """
-    from mcp.server.fastmcp import Context, FastMCP
 
-    # streamable_http_path="/" so mounting the app at "/mcp" yields the endpoint
-    # at "/mcp" (not "/mcp/mcp").
-    mcp = FastMCP("agent-dispatch-coordinator", stateless_http=True, streamable_http_path="/")
+    Returns the ``MCPServer`` itself (not its ASGI app): mcp 2.0 moved the
+    transport options onto ``streamable_http_app()`` and drives the streamable
+    session manager via ``server.session_manager.run()``, both of which the
+    coordinator needs off this object.
+    """
+    from mcp.server.mcpserver import Context, MCPServer
+
+    # mcp 2.0: stateless/streamable-path options moved off the constructor onto
+    # streamable_http_app() (see coordinator.create_app).
+    mcp = MCPServer("agent-dispatch-coordinator")
 
     def _emit(event_type: str, task: dict) -> None:
         bus.publish({"type": event_type, "task": task})
