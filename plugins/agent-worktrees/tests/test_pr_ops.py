@@ -477,7 +477,7 @@ class TestPRFinalizeAndPush:
         repo = config.default_repo
         ok, err = fin._pr_finalize_precondition(rec, repo, str(wt_path), repo.anchor)
         assert ok is False
-        assert "not on" in err
+        assert "not upstream" in err
 
     def test_precondition_ok_after_create_pr(self, pr_repo):
         from agent_worktrees import finalize as fin

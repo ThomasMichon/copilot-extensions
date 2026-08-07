@@ -181,6 +181,14 @@ def test_precondition_passes_when_squash_merged(refspec_worktree):
     assert err is None
 
 
+def _push_feature_head(env: SimpleNamespace) -> None:
+    """Publish the ``pr/<slug>`` head to origin (an OPEN PR: the feature branch
+    exists on the remote) WITHOUT landing the work on master."""
+    head = _git("rev-parse", "HEAD", cwd=env.clone)
+    _git("push", str(env.origin), f"{head}:refs/heads/{env.slug}", cwd=env.clone)
+    _git("fetch", "origin", cwd=env.clone)
+
+
 def test_precondition_blocks_when_not_upstream(refspec_worktree):
     env = refspec_worktree
     # Do NOT land the work on master; the remote also has no pr/<slug> head.
@@ -192,4 +200,55 @@ def test_precondition_blocks_when_not_upstream(refspec_worktree):
     )
     assert ok is False
     assert err is not None
-    assert "is not on" in err
+    # Detached (default) and neither merged nor branch-on-origin -> guide to
+    # create-pr; never point at a (possibly deleted) feature branch as the fix.
+    assert "not upstream" in err
+    assert "create-pr" in err
+
+
+def test_precondition_passes_when_pr_recorded_merged(refspec_worktree):
+    # The tracked PR is merged (record state) -- squash-safe, branch-independent,
+    # and immune to version-file churn on the moving upstream tip. Neither the
+    # content-on-master check nor a feature branch is needed.
+    env = refspec_worktree
+    _git("fetch", "origin", cwd=env.clone)
+    record, repo = _record_and_repo(env)
+    record.pr.state = "merged"
+
+    ok, err = finalize._pr_finalize_precondition(
+        record, repo, str(env.clone), str(env.clone)
+    )
+    assert ok is True
+    assert err is None
+
+
+def test_detach_accepts_open_feature_branch(refspec_worktree):
+    # Detached mode finalizes BEFORE merge: a feature branch on origin (an open
+    # PR) is a sufficient early ok, even with nothing on master yet.
+    env = refspec_worktree
+    _push_feature_head(env)
+    record, repo = _record_and_repo(env)
+    repo.pr.strategy = "detach"
+
+    ok, err = finalize._pr_finalize_precondition(
+        record, repo, str(env.clone), str(env.clone)
+    )
+    assert ok is True, err
+    assert err is None
+
+
+def test_keepalive_ignores_feature_branch(refspec_worktree):
+    # keep-alive tracks ONLY alignment with origin/<default>: a feature branch on
+    # origin is NOT sufficient. Guide to sync (realign after the PR merges),
+    # never to the feature branch.
+    env = refspec_worktree
+    _push_feature_head(env)
+    record, repo = _record_and_repo(env)
+    repo.pr.strategy = "keep-alive"
+
+    ok, err = finalize._pr_finalize_precondition(
+        record, repo, str(env.clone), str(env.clone)
+    )
+    assert ok is False
+    assert "sync" in err
+    assert "keep-alive" in err

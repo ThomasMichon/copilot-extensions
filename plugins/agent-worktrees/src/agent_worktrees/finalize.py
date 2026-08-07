@@ -909,6 +909,45 @@ def _resolve_content_ref(
     return None
 
 
+def _pr_is_merged(record: tracking.WorktreeRecord, repo) -> bool:
+    """Authoritative, squash-safe check that the tracked PR has merged.
+
+    The durable "did the work land" signal -- **branch-independent** (survives a
+    head branch deleted on merge) and **immune to version-file churn** on the
+    moving upstream tip (the failure that false-blocks an already-merged
+    worktree: its real code matches ``origin/<default>``, but bookkeeping files
+    like ``plugin.json`` / ``marketplace.json`` were re-bumped by *later* PRs, so
+    blob-equivalence against the live tip sees a spurious diff).
+
+    Fast path: a tracking record whose ``pr.state`` is already ``"merged"`` was
+    set from an authoritative observation -- trust it, no network. Otherwise ask
+    the provider (``get_pull().merged``). **Fail-CLOSED**: a missing PR number,
+    no provider/token, or any provider error returns ``False`` so finalize never
+    certifies unmerged work as safe to prune.
+    """
+    pr = getattr(record, "pr", None)
+    if not pr:
+        return False
+    if getattr(pr, "state", "") == "merged":
+        return True
+    number = getattr(pr, "number", None)
+    slug = getattr(pr, "repo", "") or ""
+    if not number or not slug:
+        return False
+    prcfg = repo.pr
+    try:
+        from . import providers
+        provider = providers.get_provider(prcfg.provider)
+        token = providers.account_token_for_slug(slug, prcfg)
+        result = provider.get_pull(
+            slug, int(number),
+            api_base=getattr(prcfg, "api_base", "") or "", token=token,
+        )
+        return bool(getattr(result, "merged", False))
+    except Exception:
+        return False
+
+
 def _pr_finalize_precondition(
     record: tracking.WorktreeRecord,
     repo,
@@ -917,31 +956,32 @@ def _pr_finalize_precondition(
 ) -> tuple[bool, str | None]:
     """Check whether a PR-mode worktree's work is safely upstream.
 
-    Work is safe when the feature branch exists on the remote and the local
-    feature branch has no commits that have not been pushed.  Returns
-    ``(ok, error_message)``.
+    finalize's contract is *safe to prune iff the local work is aligned with
+    ``origin/<default>``* -- it does **not** consult the feature/PR branch,
+    except in ``detach`` mode. Order:
+
+    1. **Fast path (both modes)** -- content already reachable/patch-equivalent
+       on ``origin/<default>`` (git-only, no network).
+    2. **Authoritative (both modes)** -- the tracked PR *merged*
+       (``_pr_is_merged``); squash-safe and independent of the feature branch or
+       version-file churn.
+    3. **``detach`` mode only** -- accept "code is upstream in an OPEN PR" (the
+       feature branch is on the remote) as an *early* ok, because detached
+       finalizes *before* merge. Non-detached (``keep-alive``) never looks at the
+       feature branch: after the PR merges, ``sync``/``pr-merge`` realigns
+       ``worktree/<id>`` to ``origin/<default>`` (FINAL) and finalize affirms.
+
+    Returns ``(ok, error_message)``.
     """
     remote = repo.remote
     feature = record.pr.branch
     cwd = worktree_path if Path(worktree_path).exists() else anchor
     upstream = f"{remote}/{repo.default_branch}"
+    strategy = (getattr(repo.pr, "strategy", "") or "detach").strip().lower()
 
-    # #1045 / #21: If the work's content is already on origin/<default> (the PR
-    # merged), it is safely upstream -- regardless of a stale origin/<feature>
-    # ref (which lags at the pre-merge head after a squash-merge) or a remote
-    # feature branch that was auto-deleted on merge. Check this FIRST so
-    # finalize does not false-block a merged PR and send the user to
-    # push-changes (which would re-push an already-merged branch).
-    #
-    # The content check must run against a ref that actually resolves locally.
-    # In the refspec head scheme (#1815) the local ``pr/<slug>`` branch never
-    # exists (it is only a remote push target), so probing ``feature`` directly
-    # would miss by construction -- and, combined with a remote branch deleted
-    # on merge, false-block. Resolve a durable content ref (feature ->
-    # worktree/<id> -> HEAD) first. Pointing the check at the real worktree
-    # commit also fixes the squash-merge variant: the ancestor strategy no
-    # longer applies, but ``_is_content_on_upstream``'s cherry/blob strategies
-    # then catch the patch-id match.
+    # (1) Fast path: content already on origin/<default>. Resolve a durable ref
+    #     (feature -> worktree/<id> -> HEAD); the refspec head scheme keeps no
+    #     local pr/<slug> branch, so probing ``feature`` alone would miss.
     content_ref = _resolve_content_ref(feature, record.worktree_id, cwd=cwd)
     if (
         content_ref is not None
@@ -950,27 +990,46 @@ def _pr_finalize_precondition(
     ):
         return True, None
 
-    if not git_ops.remote_branch_exists(remote, feature, cwd=cwd):
-        return False, (
-            f"Feature branch '{feature}' is not on '{remote}'. Run "
-            f"'agent-worktrees create-pr' (or push-changes) to push your work "
-            f"upstream before finalizing."
-        )
+    # (2) Authoritative squash-safe signal (both modes): the tracked PR merged.
+    if _pr_is_merged(record, repo):
+        return True, None
 
-    local = git_ops.git("rev-parse", feature, cwd=cwd, check=False)
-    remote_ref = git_ops.git("rev-parse", f"{remote}/{feature}", cwd=cwd, check=False)
-    if local.returncode == 0 and remote_ref.returncode == 0:
-        ahead = git_ops.git(
-            "rev-list", "--count", f"{remote}/{feature}..{feature}",
-            cwd=cwd, check=False,
-        )
-        if ahead.returncode == 0 and ahead.stdout.strip() not in ("", "0"):
-            return False, (
-                f"Feature branch '{feature}' has unpushed commits. Run "
-                f"'agent-worktrees push-changes' to update the PR branch, "
-                f"then finalize."
+    # (3) DETACHED mode only: "code is upstream in an OPEN PR" (feature branch on
+    #     the remote) is an early ok. keep-alive never consults the feature
+    #     branch -- it tracks only alignment with origin/<default>.
+    if strategy == "detach" and git_ops.remote_branch_exists(remote, feature, cwd=cwd):
+        local = git_ops.git("rev-parse", feature, cwd=cwd, check=False)
+        remote_ref = git_ops.git("rev-parse", f"{remote}/{feature}", cwd=cwd, check=False)
+        if local.returncode == 0 and remote_ref.returncode == 0:
+            ahead = git_ops.git(
+                "rev-list", "--count", f"{remote}/{feature}..{feature}",
+                cwd=cwd, check=False,
             )
-    return True, None
+            if ahead.returncode == 0 and ahead.stdout.strip() not in ("", "0"):
+                return False, (
+                    f"Feature branch '{feature}' has unpushed commits. Run "
+                    f"'agent-worktrees push-changes' to update the PR branch, "
+                    f"then finalize."
+                )
+        return True, None
+
+    # (4) Not upstream. Guide by mode -- never point at a (possibly deleted)
+    #     feature branch as the fix.
+    if strategy == "detach":
+        return False, (
+            f"Work for worktree/{record.worktree_id} is not upstream: the "
+            f"tracked PR is not merged and no feature branch is on '{remote}'. "
+            f"Run 'agent-worktrees create-pr' (or push-changes) to put the work "
+            f"in a PR; if the PR already merged, run 'agent-worktrees sync' to "
+            f"realign to {upstream}, then finalize."
+        )
+    return False, (
+        f"Work on worktree/{record.worktree_id} is not yet aligned with "
+        f"'{upstream}' and the tracked PR is not merged. In '{strategy}' mode "
+        f"finalize verifies only alignment with {upstream} (the feature branch "
+        f"is not consulted): once the PR merges, run 'agent-worktrees sync' to "
+        f"realign, then finalize."
+    )
 
 
 def validate_and_finalize(
