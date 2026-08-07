@@ -156,3 +156,103 @@ def test_assemble_claude_convention_source(tmp_path: Path):
     assert summary["count"] == 1
     out = json.loads((h / ".github" / "copilot" / "settings.local.json").read_text())
     assert "kn" in out["extraKnownMarketplaces"]
+
+
+# --- Paired-worktree re-assembly (#1017) --------------------------------------
+
+def _pair_json(harness: Path, knowledge: Path, *, anchor=False):
+    """A `state-root --pair --json` payload with the given role paths."""
+    return {
+        "paired": True,
+        "pair_id": "pair-1",
+        "self": {"worktree_id": "wt-h", "role": "harness", "path": str(harness)},
+        "sibling": {
+            "worktree_id": None if anchor else "wt-k",
+            "role": "knowledge",
+            "path": str(knowledge),
+            "kind": "anchor" if anchor else "worktree",
+            "status": None if anchor else "active",
+        },
+    }
+
+
+def test_pair_paths_maps_roles_regardless_of_position(tmp_path: Path):
+    h, k = tmp_path / "h", tmp_path / "k"
+    # Even when the *self* entry is the knowledge side, roles drive the mapping.
+    data = {
+        "paired": True,
+        "self": {"worktree_id": "wt-k", "role": "knowledge", "path": str(k)},
+        "sibling": {"worktree_id": "wt-h", "role": "harness", "path": str(h)},
+    }
+    harness, knowledge, err = ap.pair_paths_from_resolution(data)
+    assert err is None
+    assert harness == str(h) and knowledge == str(k)
+
+
+def test_pair_paths_unpaired(tmp_path: Path):
+    harness, knowledge, err = ap.pair_paths_from_resolution(
+        {"paired": False, "error": "not paired"})
+    assert harness is None and knowledge is None
+    assert "not paired" in err
+
+
+def test_pair_paths_anchor_kind(tmp_path: Path):
+    h, k = tmp_path / "h", tmp_path / "kanchor"
+    harness, knowledge, err = ap.pair_paths_from_resolution(
+        _pair_json(h, k, anchor=True))
+    assert err is None
+    assert harness == str(h) and knowledge == str(k)
+
+
+def test_pair_paths_missing_role(tmp_path: Path):
+    data = {"paired": True,
+            "self": {"role": "harness", "path": str(tmp_path / "h")},
+            "sibling": {"role": "harness", "path": str(tmp_path / "h2")}}
+    harness, knowledge, err = ap.pair_paths_from_resolution(data)
+    assert harness is None and knowledge is None
+    assert "knowledge" in err
+
+
+def test_assemble_from_pair_renders_against_worktree(tmp_path: Path):
+    k = _knowledge_with_ai(tmp_path)  # knowledge worktree with a `.ai` marketplace
+    h = tmp_path / "harness"
+    h.mkdir()
+    resolver = _fake_resolver(tmp_path, _pair_json(h, k))
+    summary = ap.assemble_from_pair(cwd=h, resolver_cmd=resolver)
+    assert summary.get("paired") is not False
+    assert summary["pair"]["harness_path"] == str(h)
+    assert summary["pair"]["knowledge_path"] == str(k)
+    out = json.loads((h / ".github" / "copilot" / "settings.local.json").read_text())
+    assert "kn-plugins" in out["extraKnownMarketplaces"]
+
+
+def test_assemble_from_pair_unpaired_is_safe(tmp_path: Path):
+    h = tmp_path / "harness"
+    h.mkdir()
+    resolver = _fake_resolver(tmp_path, {"paired": False, "error": "not paired"}, exit_code=3)
+    summary = ap.assemble_from_pair(cwd=h, resolver_cmd=resolver)
+    assert summary["paired"] is False
+    assert "not paired" in summary["error"]
+    # No overlay written when unpaired.
+    assert not (h / ".github" / "copilot" / "settings.local.json").exists()
+
+
+def test_resolve_pair_missing_binary_is_safe(tmp_path: Path):
+    harness, knowledge, err = ap.resolve_pair(
+        cwd=tmp_path, resolver_cmd=["definitely-not-a-real-binary-xyz"])
+    assert harness is None and knowledge is None
+    assert err  # a reason, not a crash
+
+
+def _fake_resolver(tmp_path: Path, payload: dict, *, exit_code: int = 0):
+    """Write a tiny python script that prints `payload` and exits `exit_code`,
+    returned as a resolver_cmd list."""
+    script = tmp_path / f"fake_resolver_{abs(hash(json.dumps(payload, sort_keys=True))) % 10000}.py"
+    script.write_text(
+        "import json,sys\n"
+        f"print(json.dumps({payload!r}))\n"
+        f"sys.exit({exit_code})\n",
+        encoding="utf-8",
+    )
+    import sys as _sys
+    return [_sys.executable, str(script)]

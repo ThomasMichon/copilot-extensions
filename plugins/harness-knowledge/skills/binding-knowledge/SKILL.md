@@ -144,11 +144,23 @@ refreshes the managed local marketplaces to exactly mirror the knowledge repo.
 > and names the concrete knowledge checkout; add
 > `.github/copilot/settings.local.json` to the harness `.gitignore`.
 
-> **Paired-worktree note (#957).** The bind writes an overlay pointing at the
-> knowledge **anchor**'s `.ai`. In a paired `-harness`/`-knowledge` worktree, the
-> knowledge state lives in the paired worktree (resolve it with
-> `agent-worktrees state-root --pair`); a per-worktree re-assembly pointing there
-> is a natural follow-up when launching in a pair.
+> **Paired-worktree re-assembly (#1017).** The bind writes an overlay pointing at
+> the knowledge **anchor**'s `.ai`. In a paired `-harness`/`-knowledge` worktree
+> (the #957 lifecycle), the operator's personal-plugin state lives in the paired
+> knowledge **worktree**. Re-render the overlay against the pair with:
+>
+> ```
+> python skills/binding-knowledge/scripts/assemble_plugins.py --from-pair
+> ```
+>
+> Run from within the paired **harness** worktree, `--from-pair` resolves the pair
+> via `agent-worktrees state-root --pair --json`, maps the two checkouts by role,
+> and points the harness worktree's `settings.local.json` at the paired
+> **knowledge** worktree's `.ai` (falling back cleanly, exit 3, when the current
+> worktree is not part of a resolvable pair -- including the anchor-pair case,
+> which resolves to the knowledge anchor). Wire this into a paired launch so a
+> pair-launched session loads personal plugins from its paired worktree rather
+> than the anchor.
 
 ## 4. Verify
 
