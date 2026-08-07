@@ -250,6 +250,116 @@ class TestCleanupDisposition:
         assert d.cleanable is True and d.bucket == "clean"
 
 
+# --- citadel paired-worktree BOTH-gate (#957) -------------------------------
+
+def _rec_paired(*, status="finalized", pair_kind="worktree",
+                pair_ref="m/citadel-knowledge/wt-k"):
+    r = _rec(status=status)
+    r.pair_id = "p1"
+    r.pair_role = "harness"
+    r.pair_ref = pair_ref
+    r.pair_kind = pair_kind
+    return r
+
+
+class TestPairedBothGate:
+    """cleanup_disposition holds a paired worktree until BOTH halves finalize."""
+
+    def test_finalized_pair_held_when_sibling_not_final(self):
+        rec = _rec_paired()
+        d = prune.cleanup_disposition(
+            rec, _info(S.COMPLETED),
+            paired_sibling_final=lambda r: False,
+        )
+        assert d.cleanable is False and d.bucket == "paired-pending"
+        assert "BOTH paired worktrees finalized" in d.reason
+
+    def test_finalized_pair_cleanable_when_sibling_final(self):
+        rec = _rec_paired()
+        d = prune.cleanup_disposition(
+            rec, _info(S.COMPLETED),
+            paired_sibling_final=lambda r: True,
+        )
+        assert d.cleanable is True and d.bucket == "clean"
+
+    def test_unknown_sibling_holds(self):
+        rec = _rec_paired()
+        d = prune.cleanup_disposition(
+            rec, _info(S.COMPLETED),
+            paired_sibling_final=lambda r: None,
+        )
+        assert d.cleanable is False and d.bucket == "paired-pending"
+        assert "unknown" in d.reason
+
+    def test_merged_pair_held(self):
+        rec = _rec_paired(status="active")
+        rec.prs = [_pr(21, "merged")]
+        d = prune.cleanup_disposition(
+            rec, _info(S.UNUSED),
+            paired_sibling_final=lambda r: False,
+        )
+        assert d.cleanable is False and d.bucket == "paired-pending"
+
+    def test_no_probe_is_backward_compatible(self):
+        # Without a probe injected the gate is inert (existing callers unaffected).
+        rec = _rec_paired()
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
+        assert d.cleanable is True and d.bucket == "clean"
+
+    def test_unpaired_flows_through(self):
+        d = prune.cleanup_disposition(
+            _rec(status="finalized"), _info(S.COMPLETED),
+            paired_sibling_final=lambda r: False,
+        )
+        assert d.cleanable is True and d.bucket == "clean"
+
+    def test_dirty_pair_stays_dirty_not_paired_pending(self):
+        # The gate only downgrades the SAFE path; a dirty worktree is already held.
+        rec = _rec_paired(status="active")
+        d = prune.cleanup_disposition(
+            rec, _info(S.DIRTY, dirty=2),
+            paired_sibling_final=lambda r: False,
+        )
+        assert d.cleanable is False and d.bucket == "dirty"
+
+
+class TestDefaultPairedSiblingFinal:
+    """The default probe resolves the sibling from the tracking dir."""
+
+    def _save(self, tracking_dir, rec):
+        tracking.save_record(rec, tracking_dir / f"{rec.worktree_id}.yaml")
+
+    def test_unpaired_true(self):
+        assert prune.default_paired_sibling_final(_rec()) is True
+
+    def test_anchor_true(self):
+        rec = _rec_paired(pair_kind="anchor")
+        assert prune.default_paired_sibling_final(rec) is True
+
+    def test_sibling_finalized_true(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(tracking.cfg, "tracking_dir", lambda: tmp_path)
+        sib = _rec()
+        sib.worktree_id = "wt-k"
+        sib.status = "finalized"
+        self._save(tmp_path, sib)
+        rec = _rec_paired(pair_ref="m/k/wt-k")
+        assert prune.default_paired_sibling_final(rec) is True
+
+    def test_sibling_not_finalized_false(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(tracking.cfg, "tracking_dir", lambda: tmp_path)
+        sib = _rec()
+        sib.worktree_id = "wt-k"
+        sib.status = "active"
+        self._save(tmp_path, sib)
+        rec = _rec_paired(pair_ref="m/k/wt-k")
+        assert prune.default_paired_sibling_final(rec) is False
+
+    def test_sibling_missing_none(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(tracking.cfg, "tracking_dir", lambda: tmp_path)
+        rec = _rec_paired(pair_ref="m/k/wt-gone")
+        assert prune.default_paired_sibling_final(rec) is None
+
+
 # --- claimed-resource safety (resource-claims) ------------------------------
 
 def _rec_owned(owner_ref, status="active", prs=None):

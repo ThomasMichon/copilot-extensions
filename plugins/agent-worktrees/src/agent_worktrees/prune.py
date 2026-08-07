@@ -40,6 +40,17 @@ from . import git_ops, tracking
 # caller wires the concrete same-machine / cross-fabric resolver.
 ClaimantAliveProbe = Callable[[str], Optional[bool]]
 
+# A paired-sibling-final probe (citadel #957): given a PAIRED worktree record,
+# report whether its -harness/-knowledge sibling is finalized so the pair is safe
+# to prune. Tri-state, mirroring ClaimantAliveProbe:
+#   * True  -- nothing to wait on (anchor pairing, or the sibling is finalized)
+#              -> the BOTH-finalized gate is satisfied
+#   * False -- the sibling worktree exists but is NOT yet finalized -> hold
+#   * None  -- the sibling has no local record (cross-machine / not yet carved)
+#              -> unknown; the caller spares the worktree (safe direction)
+# Injected (not called inline) so the pure assessment stays unit-testable.
+PairedSiblingFinalProbe = Callable[[tracking.WorktreeRecord], bool | None]
+
 # --- Verdict categories -----------------------------------------------------
 #
 # safe == True  (pruning loses nothing):
@@ -201,6 +212,7 @@ def cleanup_disposition(
     include_unused: bool = False,
     include_conversations: bool = False,
     claimant_alive: ClaimantAliveProbe | None = None,
+    paired_sibling_final: PairedSiblingFinalProbe | None = None,
 ) -> CleanupDisposition:
     """Map a prune verdict onto a cleanup action + bucket.
 
@@ -246,6 +258,27 @@ def cleanup_disposition(
             False, "follow-up",
             f"{v.reason} · agent flagged follow-ups pending")
 
+    # citadel paired-worktree BOTH-gate (#957): a paired -harness/-knowledge
+    # worktree is prunable only once BOTH halves are finalized. When the
+    # sibling-final probe is injected and the sibling is not yet finalized
+    # (False) or its state is unknown (None), hold a would-be-SAFE worktree so
+    # cleanup never prunes one half of a live pair, orphaning the other. Mirrors
+    # the follow-up override: only downgrades the clean/SAFE path (a dirty / wip
+    # / open-pr worktree is already non-cleanable, so the gate adds nothing
+    # there). A satisfied probe (True) flows through normally.
+    if rec.is_paired and paired_sibling_final is not None and (
+        rec.status == "finalized" or info.state == S.COMPLETED
+        or v.category in ("merged", "empty")
+    ):
+        sib_final = paired_sibling_final(rec)
+        if sib_final is not True:
+            why = ("sibling not yet finalized" if sib_final is False
+                   else "paired sibling state unknown")
+            return CleanupDisposition(
+                False, "paired-pending",
+                f"{v.reason} · held until BOTH paired worktrees finalized "
+                f"({why})")
+
     if rec.status == "finalized" or info.state == S.COMPLETED:
         return CleanupDisposition(True, "clean", v.reason)
 
@@ -265,6 +298,37 @@ def cleanup_disposition(
     if info.state == S.WIP:
         return CleanupDisposition(False, "wip", v.reason)
     return CleanupDisposition(False, "unmerged", v.reason)
+
+
+def default_paired_sibling_final(
+    rec: tracking.WorktreeRecord,
+) -> bool | None:
+    """Default :data:`PairedSiblingFinalProbe` for the paired-worktree gate.
+
+    Loads the sibling of a paired -harness/-knowledge worktree from the local
+    tracking dir and reports whether the BOTH-finalized gate is satisfied
+    (citadel #957):
+
+    * ``True``  -- no sibling to wait on: the record is unpaired, or paired at a
+      knowledge **anchor** (a non-worktree-class repo has no sibling worktree),
+      or the sibling worktree's record is ``finalized``.
+    * ``False`` -- the sibling worktree exists but is not yet ``finalized``.
+    * ``None``  -- the sibling has no local record (cross-machine / not yet
+      carved) -- unknown; the caller spares the worktree (safe direction).
+
+    Fail-safe: any error resolves to ``None`` (spare).
+    """
+    try:
+        if not rec.is_paired:
+            return True
+        if rec.pair_kind == "anchor":
+            return True
+        sibling = tracking.find_paired_record(rec)
+        if sibling is None:
+            return None
+        return sibling.status == "finalized"
+    except Exception:
+        return None
 
 
 def reconcile_pr_states(
