@@ -12,8 +12,8 @@ A per-target cross-process lock makes that race deterministic: the first
 invocation holds the lock for the lifetime of its SSH operation, and any later
 invocation either
 
-* **blocks** with an actionable :class:`TargetBusyError` naming the in-flight
-  holder (pid / op / age), or
+* **fails fast** with an actionable :class:`TargetBusyError` naming the
+  in-flight holder (pid / op / age), or
 * **takes over** when ``force=True`` -- terminating the prior holder and
   reclaiming the lock.
 
@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass
@@ -89,19 +90,31 @@ def pid_alive(pid: int) -> bool:
 
 
 def _terminate(pid: int, *, grace: float = 3.0) -> None:
-    """Best-effort terminate a local process and wait briefly for it to exit."""
+    """Best-effort terminate a local process tree and wait briefly for exit."""
     if pid <= 0 or not pid_alive(pid):
         return
     if sys.platform == "win32":
-        import ctypes
+        try:
+            subprocess.run(  # noqa: S603, S607
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        except OSError:
+            import ctypes
 
-        PROCESS_TERMINATE = 0x0001
-        handle = ctypes.windll.kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
-        if handle:
-            try:
-                ctypes.windll.kernel32.TerminateProcess(handle, 1)
-            finally:
-                ctypes.windll.kernel32.CloseHandle(handle)
+            PROCESS_TERMINATE = 0x0001
+            handle = ctypes.windll.kernel32.OpenProcess(
+                PROCESS_TERMINATE, False, pid
+            )
+            if handle:
+                try:
+                    ctypes.windll.kernel32.TerminateProcess(handle, 1)
+                finally:
+                    ctypes.windll.kernel32.CloseHandle(handle)
     else:
         import signal
 
@@ -230,7 +243,7 @@ class TargetLock:
         )
 
     def acquire(self, *, force: bool = False) -> TargetLock:
-        """Acquire the lock, blocking-with-error rather than waiting.
+        """Acquire the lock, failing fast rather than waiting.
 
         Reclaims a stale lock (holder pid no longer alive) automatically. If a
         *live* holder exists and ``force`` is False, raises
@@ -267,6 +280,9 @@ class TargetLock:
                         "Force-evicting SSH lock holder pid %d on %s",
                         holder.pid, self.target,
                     )
+                    # TODO(#118): surface a takeover notice from the evicted
+                    # holder before termination so its caller sees "taken over"
+                    # rather than a generic interrupted/killed channel.
                     _terminate(holder.pid)
                     self._force_unlink()
                     continue
