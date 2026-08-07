@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 import yaml
@@ -162,11 +163,39 @@ class TestAdoptTopology:
         assert cfg.topologies["explicit"].machines_yaml is not None
         assert cfg.topologies["explicit"].agents_config is not None
 
-    def test_no_files_raises(self, config_home, tmp_path):
+    def test_no_files_raises(self, config_home, tmp_path, monkeypatch):
         empty = tmp_path / "empty-repo"
         empty.mkdir()
+        # No state-root overlay either.
+        monkeypatch.setattr(
+            "agent_bridge.config._state_root_machines_yaml", lambda repo: None)
         with pytest.raises(FileNotFoundError, match="No machines.yaml"):
             adopt_topology("fail", str(empty))
+
+    def test_discovers_agent_worktrees_canonical_location(self, config_home, tmp_path):
+        # The canonical .agent-worktrees/machines.yaml location (#950) is found.
+        repo = tmp_path / "aw-repo"
+        (repo / ".agent-worktrees").mkdir(parents=True)
+        (repo / ".agent-worktrees" / "machines.yaml").write_text(
+            yaml.dump({"machines": {"m": {}}}))
+        cfg = adopt_topology("aw", str(repo))
+        assert ".agent-worktrees" in cfg.topologies["aw"].machines_yaml
+
+    def test_state_root_overlay_fallback(self, config_home, tmp_path, monkeypatch):
+        # A stateless harness with no machines.yaml redirects to the knowledge
+        # repo's machines.yaml resolved via the state-root overlay (E1e, #947).
+        harness = tmp_path / "citadel-harness"
+        harness.mkdir()
+        knowledge = tmp_path / "citadel-knowledge"
+        (knowledge / ".agent-worktrees").mkdir(parents=True)
+        kmach = knowledge / ".agent-worktrees" / "machines.yaml"
+        kmach.write_text(yaml.dump({"machines": {"dev6": {}}}))
+        monkeypatch.setattr(
+            "agent_bridge.config._state_root_machines_yaml",
+            lambda repo: str(kmach) if Path(repo) == harness else None)
+        cfg = adopt_topology("stateless", str(harness))
+        assert cfg.topologies["stateless"].machines_yaml is not None
+        assert "citadel-knowledge" in cfg.topologies["stateless"].machines_yaml
 
     def test_missing_repo_raises(self, config_home, tmp_path):
         with pytest.raises(FileNotFoundError, match="does not exist"):
@@ -177,6 +206,49 @@ class TestAdoptTopology:
         profile = cfg.topologies["slashes"]
         if profile.machines_yaml:
             assert "\\" not in profile.machines_yaml
+
+
+class TestStateRootMachinesYaml:
+    """_state_root_machines_yaml -- the E1e state-root overlay resolver (#947)."""
+
+    def _fake_which(self, monkeypatch):
+        monkeypatch.setattr("shutil.which", lambda name: "agent-worktrees")
+
+    def _fake_state_root(self, monkeypatch, payload, *, rc=0):
+        import types
+        self._fake_which(monkeypatch)
+        proc = types.SimpleNamespace(returncode=rc, stdout=json.dumps(payload),
+                                     stderr="")
+        monkeypatch.setattr("subprocess.run", lambda *a, **k: proc)
+
+    def test_resolves_knowledge_machines_yaml(self, tmp_path, monkeypatch):
+        from agent_bridge.config import _state_root_machines_yaml
+        knowledge = tmp_path / "knowledge"
+        (knowledge / ".agent-worktrees").mkdir(parents=True)
+        (knowledge / ".agent-worktrees" / "machines.yaml").write_text("machines: {}")
+        self._fake_state_root(monkeypatch, {
+            "state_root": str(knowledge), "requires_external": True, "bound": True,
+        })
+        got = _state_root_machines_yaml(tmp_path / "harness")
+        assert got is not None and "knowledge" in got
+
+    def test_self_hosted_not_redirected(self, tmp_path, monkeypatch):
+        from agent_bridge.config import _state_root_machines_yaml
+        # A self-hosted repo (requires_external False) must NOT be grafted.
+        self._fake_state_root(monkeypatch, {
+            "state_root": str(tmp_path), "requires_external": False, "bound": True,
+        })
+        assert _state_root_machines_yaml(tmp_path / "harness") is None
+
+    def test_no_binstub_returns_none(self, tmp_path, monkeypatch):
+        from agent_bridge.config import _state_root_machines_yaml
+        monkeypatch.setattr("shutil.which", lambda name: None)
+        assert _state_root_machines_yaml(tmp_path) is None
+
+    def test_nonzero_exit_returns_none(self, tmp_path, monkeypatch):
+        from agent_bridge.config import _state_root_machines_yaml
+        self._fake_state_root(monkeypatch, {"error": "unbound"}, rc=3)
+        assert _state_root_machines_yaml(tmp_path) is None
 
 
 class TestRemoveTopology:
