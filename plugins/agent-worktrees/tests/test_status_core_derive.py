@@ -42,6 +42,46 @@ class TestDispositionGlyph:
         assert n["state"] == "FINAL"
 
 
+class TestPairMarker:
+    """citadel #957: a paired -harness/-knowledge row is scannable + carries the
+    pair linkage on the normalized record."""
+
+    def test_paired_gets_link_glyph_and_fields(self):
+        n = derive.norm(
+            _raw(title="Harness work", pair_id="20260806-ab",
+                 pair_role="harness", pair_kind="worktree"),
+            "lambda-core", "win",
+        )
+        assert n["title"].startswith("\u26ad ")   # ⚭ pair marker
+        assert n["is_paired"] is True
+        assert n["pair_id"] == "20260806-ab"
+        assert n["pair_role"] == "harness"
+        assert n["pair_kind"] == "worktree"
+
+    def test_unpaired_has_no_marker_or_fields(self):
+        n = derive.norm(_raw(title="Solo"), "lambda-core", "win")
+        assert not n["title"].startswith("\u26ad")
+        assert n["is_paired"] is False
+        assert n["pair_id"] is None
+        assert n["pair_role"] is None
+        assert n["pair_kind"] is None
+
+    def test_pair_marker_inner_of_orphan_outer_of_follow_up(self):
+        # Marker order: ⚠ (orphan, outermost) · ⚭ (pair) · ✚ (follow-up).
+        n = derive.norm(
+            _raw(title="T", pair_id="p", pair_role="knowledge",
+                 follow_up=True, summary="s", session_bare_orphan=True),
+            "m", "e",
+        )
+        assert n["title"].startswith("\u26a0 \u26ad \u271a ")
+
+    def test_pair_marker_does_not_leak_into_state(self):
+        n = derive.norm(
+            _raw(pair_id="p", pair_role="harness"), "lambda-core", "win"
+        )
+        assert n["state"] == "FINAL"
+
+
 class TestFastPassActive:
     """The classification-absent (fast Phase-1 populate) heuristic must mark a
     live worktree ACTIVE from the CHEAP mux/lock signals, so the picker's Active
