@@ -13,17 +13,22 @@ from agent_dispatch.config import DEFAULT_SWEEP_INTERVAL, client_url, load_confi
 def _isolate_discovery(monkeypatch, tmp_path):
     """Isolate endpoint discovery from ambient state so client_url is deterministic.
 
-    Points the rendezvous run dir at an empty tmp dir and clears the endpoint /
-    Windows-mount overrides, so tests never read a live coordinator's rendezvous
-    file (which would resolve to a 'discovered' URL).
+    Points the rendezvous run dir at an empty tmp dir and clears the endpoint
+    override, so tests never read a live coordinator's rendezvous file (which would
+    resolve to a 'discovered' URL).
+
+    The WSL path also consults the *Windows-side* run dir. **Deleting**
+    ``AGENT_DISPATCH_WINDOWS_MOUNT`` is not enough: it then defaults to ``/mnt/c``
+    and the glob finds a real Windows coordinator's ``endpoint.json`` when the suite
+    runs on a WSL guest of a machine with a live coordinator (#201) -- so the
+    WSL-guest tests read its ephemeral port instead of the default. Point both
+    Windows-side overrides at empty tmp dirs so that discovery deterministically
+    finds nothing and falls back to the fixed default port.
     """
     monkeypatch.setenv("AGENT_DISPATCH_RUN_DIR", str(tmp_path / "run"))
-    for var in (
-        "AGENT_DISPATCH_ENDPOINT",
-        "AGENT_DISPATCH_WINDOWS_RUN_DIR",
-        "AGENT_DISPATCH_WINDOWS_MOUNT",
-    ):
-        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("AGENT_DISPATCH_WINDOWS_RUN_DIR", str(tmp_path / "winrun"))
+    monkeypatch.setenv("AGENT_DISPATCH_WINDOWS_MOUNT", str(tmp_path / "winmount"))
+    monkeypatch.delenv("AGENT_DISPATCH_ENDPOINT", raising=False)
 
 
 def test_sweep_interval_default(monkeypatch):
