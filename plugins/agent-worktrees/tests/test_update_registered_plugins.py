@@ -20,6 +20,15 @@ from agent_worktrees import config as cfg
 from agent_worktrees import reconcile
 
 
+@pytest.fixture(autouse=True)
+def _pin_copilot(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin Copilot resolution to the literal ``copilot`` so the argv assertions
+    in these logic tests are environment-independent. (The real resolver --
+    which may return an absolute path when a bare ``copilot`` is not on PATH --
+    is unit-tested in ``test_reconcile.py``.)"""
+    monkeypatch.setattr(m, "_resolve_copilot", lambda: "copilot")
+
+
 def _install_config(monkeypatch: pytest.MonkeyPatch, anchor: str) -> None:
     repo = cfg.RepoConfig(
         anchor=anchor,
@@ -250,3 +259,4 @@ def test_ordering_plugins_before_services(monkeypatch):
     assert order.index("registered-plugins") < order.index("modules")
     # And the agent-worktrees payload update precedes the registered loop.
     assert order.index("aw-plugin-update") < order.index("registered-plugins")
+

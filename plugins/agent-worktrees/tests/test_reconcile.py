@@ -633,6 +633,8 @@ def test_apply_plan_skips_copilot_when_absent(env, monkeypatch):
     env.write_settings({f"agent-bridge@{MKT}": True})
     # No installed payload -> the plan emits a `copilot plugin install` step.
     monkeypatch.setattr(reconcile.shutil, "which", lambda _c: None)
+    # ...and no fallback copilot binary exists either, so resolution -> None.
+    monkeypatch.setattr(reconcile, "_COPILOT_FALLBACK_PATHS", ())
 
     calls: list = []
     summary = reconcile.apply_plan(
@@ -659,3 +661,69 @@ def test_apply_plan_records_step_failure(env):
     assert summary["executed"][0]["ok"] is False
 
 
+
+
+# ---------------------------------------------------------------------------
+# resolve_copilot -- find (never install) the Copilot CLI executable
+# ---------------------------------------------------------------------------
+
+def test_resolve_copilot_prefers_path(monkeypatch, tmp_path):
+    """A bare ``copilot`` on PATH (via ``shutil.which``) wins."""
+    on_path = tmp_path / "path-copilot"
+    on_path.write_text("#!/bin/sh\n")
+    monkeypatch.setattr(reconcile.shutil, "which", lambda name: str(on_path))
+    monkeypatch.setattr(reconcile, "_COPILOT_FALLBACK_PATHS", ())
+    assert reconcile.resolve_copilot() == str(on_path)
+
+
+def test_resolve_copilot_falls_back_to_autoinstall_location(monkeypatch, tmp_path):
+    """When bare ``copilot`` is not on PATH, use the first executable fallback
+    (the WSL stub's auto-install target)."""
+    monkeypatch.setattr(reconcile.shutil, "which", lambda name: None)
+    missing = tmp_path / "nope" / "copilot"
+    autoinstall = tmp_path / "share" / "gh" / "copilot" / "copilot"
+    autoinstall.parent.mkdir(parents=True)
+    autoinstall.write_text("#!/bin/sh\n")
+    autoinstall.chmod(0o755)
+    monkeypatch.setattr(reconcile, "_COPILOT_FALLBACK_PATHS", (missing, autoinstall))
+    assert reconcile.resolve_copilot() == str(autoinstall)
+
+
+def test_resolve_copilot_skips_non_executable_fallback(monkeypatch, tmp_path):
+    """A fallback that exists but is not executable is not selected."""
+    monkeypatch.setattr(reconcile.shutil, "which", lambda name: None)
+    non_exec = tmp_path / "copilot"
+    non_exec.write_text("x")
+    non_exec.chmod(0o644)
+    monkeypatch.setattr(reconcile, "_COPILOT_FALLBACK_PATHS", (non_exec,))
+    assert reconcile.resolve_copilot() is None
+
+
+def test_resolve_copilot_none_when_nothing_found(monkeypatch):
+    """No PATH entry and no fallback -> None (caller degrades to skip)."""
+    monkeypatch.setattr(reconcile.shutil, "which", lambda name: None)
+    monkeypatch.setattr(reconcile, "_COPILOT_FALLBACK_PATHS", ())
+    assert reconcile.resolve_copilot() is None
+
+
+def test_apply_plan_substitutes_resolved_copilot_path(env, monkeypatch, tmp_path):
+    """When ``copilot`` is not on PATH but the auto-install binary exists, the
+    provision step runs with the resolved absolute path (not skipped)."""
+    env.write_settings({f"agent-bridge@{MKT}": True})
+    # No installed payload -> plan emits `copilot plugin install`.
+    monkeypatch.setattr(reconcile.shutil, "which", lambda _c: None)
+    resolved = tmp_path / "share" / "gh" / "copilot" / "copilot"
+    resolved.parent.mkdir(parents=True)
+    resolved.write_text("#!/bin/sh\n")
+    resolved.chmod(0o755)
+    monkeypatch.setattr(reconcile, "_COPILOT_FALLBACK_PATHS", (resolved,))
+
+    calls: list = []
+    summary = reconcile.apply_plan(
+        env.repo, machine="anywhere", passes=1,
+        runner=lambda argv: calls.append(list(argv)) or 0,
+    )
+    assert len(calls) == 1
+    assert calls[0][0] == str(resolved)
+    assert calls[0][1:] == ["plugin", "install", f"agent-bridge@{MKT}"]
+    assert summary["executed"][0]["ok"] is True
