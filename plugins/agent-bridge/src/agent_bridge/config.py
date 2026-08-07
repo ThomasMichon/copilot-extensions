@@ -150,13 +150,14 @@ def migrate_config(cfg: ServiceConfig) -> ServiceConfig:
 
 
 def _state_root_machines_yaml(repo: Path) -> str | None:
-    """Resolve the bound knowledge repo's ``machines.yaml`` via ``state-root``.
+    """Resolve the bound knowledge repo's ``machines.yaml`` (the knowledge overlay).
 
-    The citadel E1e config-overlay seam (#947): a stateless harness carries no
-    ``machines.yaml`` of its own -- personal topology lives in the bound
-    knowledge repo. This asks ``agent-worktrees state-root`` (run with cwd=repo,
-    the same resolver efforts/visions/logs use) for the knowledge checkout, then
-    searches the conventional ``machines.yaml`` locations under it.
+    The citadel E1e **knowledge overlay** (config-graft, #947): a stateless
+    harness carries no ``machines.yaml`` of its own -- machine topology is personal
+    reference config that lives in the bound knowledge repo. This asks
+    ``agent-worktrees state-root`` (run with cwd=repo) only to LOCATE the knowledge
+    checkout -- the config-READ axis, distinct from where personal state is
+    written -- then searches the conventional ``machines.yaml`` locations under it.
 
     Best-effort + fail-open: a missing ``agent-worktrees`` binstub, a
     non-stateless / unbound repo, or any error yields ``None`` (the caller then
@@ -224,9 +225,9 @@ def adopt_topology(
         raise FileNotFoundError(f"Repo path does not exist: {repo}")
 
     # Auto-discover machines.yaml -- conventional in-repo locations first, then
-    # the state-root overlay (a stateless harness carries no machines.yaml of its
-    # own; personal topology lives in the bound knowledge repo -- citadel E1e,
-    # #947). The .agent-worktrees/ location is the canonical one (#950).
+    # the knowledge overlay (a stateless harness carries no machines.yaml of its
+    # own; machine topology is personal config in the bound knowledge repo --
+    # citadel E1e, #947). The .agent-worktrees/ location is the canonical one (#950).
     if not machines_yaml:
         for candidate in [
             repo / "machines.yaml",
@@ -238,11 +239,12 @@ def adopt_topology(
                 machines_yaml = str(candidate)
                 break
 
-    # State-root overlay fallback: when the repo itself has no machines.yaml but
+    # Knowledge-overlay fallback: when the repo itself has no machines.yaml but
     # is a stateless harness bound to a knowledge repo, resolve the knowledge
-    # repo's machines.yaml via `agent-worktrees state-root` (the same seam
-    # efforts/visions/logs use). Best-effort; a missing binstub / unbound harness
-    # just leaves machines_yaml unset and the FileNotFoundError below fires.
+    # repo's machines.yaml (the config-graft READ axis; the state-root resolver is
+    # only reused to LOCATE the knowledge checkout). Best-effort; a missing binstub
+    # / unbound harness just leaves machines_yaml unset and the FileNotFoundError
+    # below fires.
     if not machines_yaml:
         machines_yaml = _state_root_machines_yaml(repo)
 

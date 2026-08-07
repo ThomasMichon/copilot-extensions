@@ -479,11 +479,12 @@ def load_repo_config(repo_path: Path) -> dict[str, Any] | None:
 def _state_root_config_dir(repo_path: Path) -> Path | None:
     """Resolve the bound knowledge repo's dir when it carries ``codespaces.yaml``.
 
-    The citadel E1e config-overlay seam (#947): a stateless harness carries no
-    ``codespaces.yaml`` of its own -- personal CodeSpace topology lives in the
-    bound knowledge repo. This asks ``agent-worktrees state-root`` (run with
-    cwd=repo_path, the same resolver efforts/visions/logs use) for the knowledge
-    checkout, returning it only when it actually declares a ``codespaces.yaml``.
+    The citadel E1e **knowledge overlay** (config-graft, #947): a stateless
+    harness carries no ``codespaces.yaml`` of its own -- personal CodeSpace
+    topology is reference config that lives in the bound knowledge repo. This asks
+    ``agent-worktrees state-root`` (run with cwd=repo_path) only to LOCATE the
+    knowledge checkout -- the config-READ axis, distinct from where personal state
+    is written -- returning it only when it actually declares a ``codespaces.yaml``.
 
     Best-effort + fail-open: a missing ``agent-worktrees`` binstub, a
     non-stateless / unbound repo, or any error yields ``None``. Never raises.
@@ -614,11 +615,11 @@ def load_merged_config() -> CodespacesConfig:
     defaults_set = False
 
     for entry in adopted:
-        # E1e config-overlay (#947): read codespaces.yaml from the repo itself,
-        # or -- when it has none and is a stateless harness -- from the bound
-        # knowledge repo (its src/provision paths resolve relative to THAT dir).
-        # source_paths stays the adopted repo (entry.path) so generic CodeSpace
-        # plugin settings remain harness-sourced; only the codespaces.yaml
+        # E1e knowledge overlay (config-graft, #947): read codespaces.yaml from
+        # the repo itself, or -- when it has none and is a stateless harness --
+        # from the bound knowledge repo (its src/provision paths resolve relative
+        # to THAT dir). source_paths stays the adopted repo (entry.path) so generic
+        # CodeSpace plugin settings remain harness-sourced; only the codespaces.yaml
         # content + its repo_dir graft to the knowledge overlay.
         config_dir = entry.path
         if not (entry.path / CONFIG_FILENAME).exists():

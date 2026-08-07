@@ -281,7 +281,7 @@ class TestStateRootPairCLI:
 
 
 # ---------------------------------------------------------------------------
-# config_source_anchors -- the E1e state-root config-overlay seam.
+# config_source_anchors -- the E1e knowledge-overlay (config-graft) seam.
 # ---------------------------------------------------------------------------
 
 def test_config_sources_non_stateless_is_base_only(monkeypatch):

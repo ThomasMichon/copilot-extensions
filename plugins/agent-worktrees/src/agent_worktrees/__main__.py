@@ -10614,10 +10614,13 @@ def _related_anchor(rest: list[str]) -> str | None:
 def _related_config_source_anchors(base_anchor: str) -> list[str]:
     """Ordered ``.agent-*`` config-source anchor paths for a related lookup.
 
-    The E1e **state-root config-graft**: the base (harness / launch) anchor plus
-    the bound **knowledge-repo** overlay when the launch repo requires an external
-    state root, so ``related list/show/resolve/doc`` union the harness's base
-    ``related.yaml`` with the knowledge repo's entries. Fail-safe -> ``[base_anchor]``.
+    The E1e **knowledge overlay** (config-graft): the base (harness / launch)
+    anchor plus the bound **knowledge-repo** config overlay when the launch repo
+    requires an external state root, so ``related list/show/resolve/doc`` union
+    the harness's base ``related.yaml`` with the knowledge repo's entries. This is
+    the config-READ axis (distinct from the state-root WRITE destination; it only
+    reuses the state-root resolver to locate the knowledge checkout). Fail-safe ->
+    ``[base_anchor]``.
     """
     try:
         srcs = state_root_mod.config_source_anchors(
@@ -10640,8 +10643,8 @@ def _related_lookup_anchors(
 
     Layers two mechanisms:
 
-    * the **state-root config-graft** -- the base anchor plus the bound
-      knowledge-repo overlay (see :func:`_related_config_source_anchors`); and
+    * the **knowledge overlay** (config-graft) -- the base anchor plus the bound
+      knowledge-repo config overlay (see :func:`_related_config_source_anchors`); and
     * the **control-plane fallback** -- ``related`` is cwd-directional, so running
       a lookup from *inside* a coordinated repo's own checkout reads that repo's
       (usually empty) POV and dead-ends. When ``name`` isn't found across the

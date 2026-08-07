@@ -166,7 +166,7 @@ class TestAdoptTopology:
     def test_no_files_raises(self, config_home, tmp_path, monkeypatch):
         empty = tmp_path / "empty-repo"
         empty.mkdir()
-        # No state-root overlay either.
+        # No knowledge overlay either.
         monkeypatch.setattr(
             "agent_bridge.config._state_root_machines_yaml", lambda repo: None)
         with pytest.raises(FileNotFoundError, match="No machines.yaml"):
@@ -183,7 +183,7 @@ class TestAdoptTopology:
 
     def test_state_root_overlay_fallback(self, config_home, tmp_path, monkeypatch):
         # A stateless harness with no machines.yaml redirects to the knowledge
-        # repo's machines.yaml resolved via the state-root overlay (E1e, #947).
+        # repo's machines.yaml resolved via the knowledge overlay (E1e, #947).
         harness = tmp_path / "citadel-harness"
         harness.mkdir()
         knowledge = tmp_path / "citadel-knowledge"
@@ -209,7 +209,7 @@ class TestAdoptTopology:
 
 
 class TestStateRootMachinesYaml:
-    """_state_root_machines_yaml -- the E1e state-root overlay resolver (#947)."""
+    """_state_root_machines_yaml -- the E1e knowledge-overlay resolver (#947)."""
 
     def _fake_which(self, monkeypatch):
         monkeypatch.setattr("shutil.which", lambda name: "agent-worktrees")

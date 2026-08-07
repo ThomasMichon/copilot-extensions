@@ -1,4 +1,4 @@
-"""End-to-end integration test for the E1e state-root config-overlay (graft).
+"""End-to-end integration test for the E1e knowledge overlay (config-graft).
 
 Flexes the full muscle of the ``.agent-*`` config graft the way a stateless
 harness bound to a knowledge repo actually uses it: a **name-free harness base**

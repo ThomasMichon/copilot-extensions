@@ -203,8 +203,18 @@ def resolve_state_root(
 
 
 # ---------------------------------------------------------------------------
-# Config-source anchors (E1e) -- the state-root config-overlay seam
+# Config-source anchors (E1e) -- the KNOWLEDGE OVERLAY (config-graft) seam
 # ---------------------------------------------------------------------------
+#
+# Terminology (two distinct axes; see the citadel-harness-split effort):
+#   * state-root      -- the personal-state WRITE destination (efforts/logs/
+#                        visions), resolved by ``resolve_state_root`` above.
+#   * knowledge overlay -- the config-graft READ axis: the bound knowledge
+#                        repo's ``.agent-*`` config (related.yaml / machines.yaml
+#                        / codespaces.yaml) extending the harness base.
+# The overlay REUSES the state-root resolver only to LOCATE the knowledge
+# checkout; it is a separate concept from where personal state is written. A
+# self-hosted repo has a state-root (itself) but grafts NO overlay.
 
 @dataclass(frozen=True)
 class ConfigSource:
@@ -215,7 +225,7 @@ class ConfigSource:
     ``machines.yaml``, ...)."""
     origin: str
     """``"harness"`` for the base/launch repo, ``"knowledge"`` for the bound
-    state-root (knowledge) repo overlay."""
+    knowledge repo's config overlay."""
 
 
 def _default_anchor(config: cfg.Config) -> str | None:
@@ -234,15 +244,19 @@ def config_source_anchors(
 ) -> list[ConfigSource]:
     """Ordered ``.agent-*`` config sources for the current launch context.
 
-    This is the **state-root config-overlay** seam (E1e): agent-* tools that read
-    harness config (``related.yaml``, and later ``machines.yaml`` / ``config.yaml``)
-    should union across these anchors instead of assuming the launch repo is the
-    sole config source. The list is in **overlay order** -- the base (harness /
-    launch) anchor first, then the bound **knowledge repo** when the launch repo
-    requires an external state root -- so later sources win on conflict.
+    This is the **knowledge overlay** (config-graft) seam (E1e): agent-* tools
+    that read harness config (``related.yaml``, ``machines.yaml``,
+    ``codespaces.yaml``, ...) should union across these anchors instead of
+    assuming the launch repo is the sole config source. The list is in **overlay
+    order** -- the base (harness / launch) anchor first, then the bound
+    **knowledge repo** when the launch repo requires an external state root -- so
+    later sources win on conflict.
 
-    A normal (self-hosted) repo yields just its own anchor, so grafted readers
-    behave identically to the pre-overlay single-anchor path.
+    This is the config-READ axis, distinct from the **state-root** (the personal-
+    state WRITE destination): it only reuses the state-root resolver to LOCATE the
+    knowledge checkout. A normal (self-hosted) repo yields just its own anchor
+    (no overlay), so grafted readers behave identically to the pre-overlay
+    single-anchor path.
 
     Args:
         config: The layered project config (``cfg.load_config()``).
