@@ -277,13 +277,11 @@ session.on("tool.execution_complete", (event) => {
   state.workSinceNudge++;
 });
 
-// On idle, flush the final intent immediately and mark the pulse idle so the
-// picker greys it: a turn just finished, nothing is actively in flight. The
-// intent text is retained (last thing the agent did) and ages out on its own.
+// On idle, mark the graded rest 'idle' (done-rest: the whole session is
+// quiescent, nothing in flight). setRest persists the sidecar on the transition
+// and keeps the legacy `idle` boolean in sync, so no extra write is needed.
 session.on("session.idle", () => {
-  state.idle = true;
-  setRest("idle");        // done-rest: the whole session is quiescent (#228)
-  if (state.lastIntent) persistSubStatus();
+  setRest("idle");
 });
 
 // Awaiting-operator (#228): the agent parked itself on a human input / form /

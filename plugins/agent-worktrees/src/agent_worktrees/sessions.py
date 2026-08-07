@@ -214,7 +214,13 @@ def _update_activity(
         ctx.live_intent_idle[norm_path] = idle
         if rest is not None:
             ctx.live_rest[norm_path] = rest
-            ctx.live_rest_at[norm_path] = rest_at
+            # Only store a real ISO timestamp; a legacy sidecar (rest derived
+            # from ``idle``) has no restAt, so clear any stale value rather than
+            # record an empty string that violates the live_rest_at contract.
+            if rest_at:
+                ctx.live_rest_at[norm_path] = rest_at
+            else:
+                ctx.live_rest_at.pop(norm_path, None)
         else:
             ctx.live_rest.pop(norm_path, None)
             ctx.live_rest_at.pop(norm_path, None)
