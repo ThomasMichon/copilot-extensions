@@ -125,7 +125,7 @@ it.
 
 If they **differ** (control plane is e.g. `org/my-harness`, account dotfiles is
 `<your-user>/dotfiles`), make the relationship explicit so cross-repo flows can
-find and update the dotfiles repo as a good citizen:
+find and update that account dotfiles repo as a good citizen:
 
 1. **Link it as a related repo** from your control plane (see the
    `agent-worktrees-related` skill):
