@@ -2903,6 +2903,35 @@ def _resolve_resume(
         resume_count=record.resume_count,
     )
 
+    # ── Execution-time fallback ladder (run AFTER the operator hits Enter) ────
+    # Open / Resume / Bare resume all land here, differing only by the
+    # no_mux/bare_resume options carried on the decision. The picker row those
+    # options were chosen from can be stale (cached, or the fleet populate
+    # missed a just-started session), so re-resolve the ONE worktree's live
+    # truth here and let reality -- not the possibly-stale choice -- drive the
+    # launch. Interactive launches only: the programmatic --json/--base (ACP)
+    # paths need clean stdio and their explicit no_mux/no_resume respected, and
+    # an ACP worktree has no mux to reattach anyway.
+    _interactive = not getattr(args, "json", False) and not getattr(args, "base", False)
+    if _interactive and not args.dry_run:
+        try:
+            _verdict = sessions.verify_worktree_active(record)
+        except Exception:
+            _verdict = None
+        # (1) A live ``wt-<id>`` mux always wins: reattach it regardless of the
+        # original choice. Without this, the Open sub-menu's no-mux toggle would
+        # launch a second, detached Copilot beside the live session, and Bare
+        # resume would spawn a bare Copilot in HOME next to it. Clearing both
+        # overrides routes the launcher through its ``has-session`` reattach
+        # branch (which ignores the launch cmd), so the operator lands back in
+        # the running session -- the "never fork a live worktree" invariant.
+        if _verdict is not None and _verdict.mux_live:
+            if getattr(args, "no_mux", False) or getattr(args, "bare_resume", False):
+                print("   ↻ Live mux session found -- reattaching it "
+                      "(overriding the requested launch mode).")
+            args.no_mux = False
+            args.bare_resume = False
+
     # Auto-fast-forward a stale-but-clean worktree before launch so the
     # session (and any setup script) sees an up-to-date tree.  This is a
     # fast-forward only -- a worktree with local commits or uncommitted
@@ -2946,19 +2975,26 @@ def _resolve_resume(
         launch_cmd = _build_launch_cmd(config, args, plan_work_dir, profile=profile)
         merged_env = _build_env(profile, _repo_session_env(config, plan_work_dir))
 
-    # Auto-resume: find the most recent Copilot session for this worktree
-    # and pass --resume=<session-id> so the user picks up where they left off.
+    # Auto-resume target: the ONE session Open / Resume / Bare resume all agree
+    # on -- the record's asserted lifecycle head when it still has on-disk
+    # conversation data, else the filesystem-latest valid session (see
+    # ``sessions.resolve_resume_target``). Resolved once here, freshly, so the
+    # "if there's a head session, always try to resume it" fallback holds for
+    # every entry mode: a plain Resume/Open passes it to ``--resume``; Bare
+    # resume surfaces it as the ``/resume`` id and binds the session back to the
+    # worktree. ``None`` means genuinely nothing to resume (cold start).
+    resume_target = None
+    if not getattr(args, "no_resume", False):
+        resume_target = sessions.resolve_resume_target(record)
+
     no_resume = getattr(args, "no_resume", False) or bare_resume
     if not no_resume:
-        last_session = sessions.find_latest_session_id_fast(
-            record.worktree_path, record.sessions,
-        )
-        if last_session:
+        if resume_target:
             # copilot's --resume[=value] is an optional-value option; the id
             # MUST be attached with '=' or it is treated as a stray operand
             # ("unknown command").
-            launch_cmd.append(f"--resume={last_session}")
-            print(f"   Resuming session: {last_session[:12]}…")
+            launch_cmd.append(f"--resume={resume_target}")
+            print(f"   Resuming session: {resume_target[:12]}…")
         else:
             # Fix B: never auto-resume a foreign ``parent_session`` -- it
             # belongs to a different worktree, so Copilot's resume-auto-cd
@@ -2966,15 +3002,12 @@ def _resolve_resume(
             # parent's directory (worktree id/path mismatch). Hint only.
             _emit_parent_context_hint(record)
     elif bare_resume:
-        # Surface the id the operator will type: the live-locked session (if a
-        # bound process still holds it) else the most-recent one.
-        last_session = sessions.find_latest_session_id_fast(
-            record.worktree_path, record.sessions,
-        )
+        # Surface the id the operator will type: the resolved head session
+        # (prefers the lifecycle head over pure mtime, and is stub-validated).
         print(f"   Bare resume: launching Copilot in {plan_work_dir} "
               f"(no auto-resume, dodges the worktree-cwd start bug).")
-        if last_session:
-            print(f"   Inside Copilot, run:  /resume {last_session}")
+        if resume_target:
+            print(f"   Inside Copilot, run:  /resume {resume_target}")
 
     # Bare resume first creates a temporary session in HOME, then the operator
     # switches to the intended historical session with /resume. Carry a scoped
@@ -2982,11 +3015,11 @@ def _resolve_resume(
     # exactly matches that intended target. This stitches the resumed session
     # back to its worktree without ambient WORKTREE_* identity or accidentally
     # binding the temporary HOME session.
-    if bare_resume and last_session:
+    if bare_resume and resume_target:
         merged_env = dict(merged_env)
         merged_env[_SESSION_BIND_PROJECT] = config.repo_name
         merged_env[_SESSION_BIND_WORKTREE] = record.worktree_id
-        merged_env[_SESSION_BIND_SESSION] = last_session
+        merged_env[_SESSION_BIND_SESSION] = resume_target
 
     print()
 
