@@ -719,9 +719,11 @@ def _worktree_to_dict(
             if session_ctx.live_intent_idle.get(norm):
                 d["live_intent_idle"] = True
         # copilot-extensions#228: the graded REST state (busy/idle/
-        # awaiting-operator), derived from native session events by the
-        # live-pulse extension. Enrichment only -- emitted when present; absent
-        # when the extension isn't loaded (the backbone still reports liveness).
+        # awaiting-operator). The crisp value comes from the live-pulse
+        # extension's sidecar; when that's absent the backbone fills a coarse
+        # busy/idle from a bounded events.jsonl tail -- so live_rest may be
+        # present with NO extension loaded (only awaiting-operator is
+        # extension-only). Enrichment only; emitted when present.
         _rest = session_ctx.live_rest.get(norm)
         if _rest:
             d["live_rest"] = _rest
