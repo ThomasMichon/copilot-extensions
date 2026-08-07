@@ -30,6 +30,7 @@ import json
 import logging
 import secrets
 import shlex
+import sys
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -46,6 +47,58 @@ def _as_list(value: Any) -> list[Any]:
     if isinstance(value, (list, tuple, set)):
         return list(value)
     return [value]
+
+
+def _resolve_provision_command() -> str | None:
+    """Resolve the CodeSpace relay/auth-helper provision command (#892 Inc 1).
+
+    Process-boundary first: shell out to the ``agent-codespaces`` binstub
+    (``provision-command``) so the command comes from agent-codespaces' **own**
+    venv -- a fix there reaches the dispatch path with **no agent-bridge
+    redeploy** (retires the #733 class). Falls back to the in-process import when
+    the binstub is absent or the call fails, so this can never regress the
+    dispatch path while the venvs are still coupled (the vendoring is removed
+    only in a later increment, once every seam is proven). Returns the command
+    string, or ``None`` when unavailable (caller skips the best-effort step).
+    """
+    import shutil
+    import subprocess
+
+    binstub = shutil.which("agent-codespaces")
+    if binstub:
+        creationflags = (
+            subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        )
+        try:
+            r = subprocess.run(
+                [binstub, "provision-command"],
+                capture_output=True, text=True, timeout=15,
+                creationflags=creationflags,
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                return r.stdout
+            log.debug(
+                "agent-codespaces provision-command exited %s -- falling back "
+                "to in-process import", r.returncode,
+            )
+        except Exception:
+            log.debug(
+                "agent-codespaces provision-command CLI failed -- falling back "
+                "to in-process import", exc_info=True,
+            )
+    try:
+        from agent_codespaces.codespace_assets import build_provision_command
+
+        return build_provision_command()
+    except ImportError:
+        log.debug(
+            "agent_codespaces not importable -- skipping relay-helper redeploy "
+            "on the dispatch path"
+        )
+        return None
+    except Exception:
+        log.warning("build_provision_command failed", exc_info=True)
+        return None
 
 
 @dataclass
@@ -323,26 +376,22 @@ class CodeSpaceSpawner:
         # (a failure here must never block the launch -- the launch's own auth
         # verification surfaces a genuinely broken relay).
         if self.boundary == "codespace":
-            try:
-                from agent_codespaces.codespace_assets import build_provision_command
-                prov_rc, _pout, prov_err = await self._transport.run(
-                    build_provision_command(), timeout=30.0,
-                )
-                if prov_rc != 0:
-                    log.warning(
-                        "CodeSpace relay-helper (re)deploy exited %s: %s",
-                        prov_rc, (prov_err or "").strip(),
+            provision_cmd = await asyncio.to_thread(_resolve_provision_command)
+            if provision_cmd:
+                try:
+                    prov_rc, _pout, prov_err = await self._transport.run(
+                        provision_cmd, timeout=30.0,
                     )
-            except ImportError:
-                log.debug(
-                    "agent_codespaces not importable -- skipping relay-helper "
-                    "redeploy on the dispatch path"
-                )
-            except Exception:
-                log.warning(
-                    "CodeSpace relay-helper (re)deploy failed (dispatch path)",
-                    exc_info=True,
-                )
+                    if prov_rc != 0:
+                        log.warning(
+                            "CodeSpace relay-helper (re)deploy exited %s: %s",
+                            prov_rc, (prov_err or "").strip(),
+                        )
+                except Exception:
+                    log.warning(
+                        "CodeSpace relay-helper (re)deploy failed (dispatch path)",
+                        exc_info=True,
+                    )
 
         ts = int(time.time() * 1000)
         safe_sid = re.sub(r"[^A-Za-z0-9_.-]", "_", session_id or "session")[:48]

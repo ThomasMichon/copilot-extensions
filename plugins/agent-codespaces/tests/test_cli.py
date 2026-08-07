@@ -223,3 +223,39 @@ class TestProjectFlag:
         assert cm._chdir_to_project("demo") is False
         assert os.getcwd() == orig
         assert "not found on PATH" in capsys.readouterr().err
+
+
+# --- provision-command / relay-launch-env seams (dotfiles #892 Increment 1) ---
+
+class TestDecouplingSeams:
+    def test_provision_command_prints_bash(self, capsys):
+        with patch(
+            "agent_codespaces.codespace_assets.build_provision_command",
+            return_value="echo provision",
+        ):
+            rc = main(["provision-command"])
+        assert rc == 0
+        assert capsys.readouterr().out.strip() == "echo provision"
+
+    def test_relay_launch_env_prints_json(self, capsys):
+        import json as _json
+
+        with patch(
+            "agent_codespaces.relay_launch.build_relay_launch_env",
+            return_value=("export TOKEN=x", 50123),
+        ) as m:
+            rc = main(["relay-launch-env", "my-cs", "--relay-port", "50123"])
+        assert rc == 0
+        assert _json.loads(capsys.readouterr().out) == {
+            "prelude": "export TOKEN=x", "port": 50123,
+        }
+        m.assert_called_once_with("my-cs", relay_port=50123)
+
+    def test_relay_launch_env_defaults_port_none(self, capsys):
+        with patch(
+            "agent_codespaces.relay_launch.build_relay_launch_env",
+            return_value=("", 9857),
+        ) as m:
+            rc = main(["relay-launch-env", "my-cs"])
+        assert rc == 0
+        m.assert_called_once_with("my-cs", relay_port=None)

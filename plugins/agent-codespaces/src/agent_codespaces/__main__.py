@@ -483,6 +483,29 @@ def main(argv: list[str] | None = None) -> int:
         "(empty when none / opted out).",
     )
 
+    # --- provision-command / relay-launch-env ---------------------------------
+    # Additional process-to-process seams for agent-bridge's CodeSpace dispatch
+    # (#892 Increment 1): the daemon shells out to these instead of importing
+    # ``agent_codespaces`` in the bridge venv, so an agent-codespaces bugfix
+    # reaches the dispatch path from agent-codespaces' OWN venv with no bridge
+    # redeploy (retires the #733 class). Mirror the ``acp-model-flags`` seam.
+    sub.add_parser(
+        "provision-command",
+        help="Print the idempotent bash command that (re)installs the CodeSpace "
+        "relay/auth helpers (the dispatch-path provision step).",
+    )
+    relay_env_p = sub.add_parser(
+        "relay-launch-env",
+        help="Print JSON {prelude, port} for a detached CodeSpace launch's "
+        "relay env (mints/reuses the per-codespace relay token).",
+    )
+    relay_env_p.add_argument("codespace", help="CodeSpace name")
+    relay_env_p.add_argument(
+        "--relay-port", dest="relay_port", type=int, default=None,
+        help="The daemon's actually-bound relay port to inject (defaults to the "
+        "published/config port when omitted).",
+    )
+
     sub.add_parser(
         "config-migrate",
         help="Migrate machine-local config schema (adopted-repos.yaml); idempotent",
@@ -553,6 +576,10 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_version()
         if args.command == "acp-model-flags":
             return _cmd_acp_model_flags()
+        if args.command == "provision-command":
+            return _cmd_provision_command()
+        if args.command == "relay-launch-env":
+            return _cmd_relay_launch_env(args)
         if args.command == "config-migrate":
             return _cmd_config_migrate()
     except RuntimeError as e:
@@ -2978,6 +3005,41 @@ def _cmd_acp_model_flags() -> int:
     from .model_launch import build_model_flags
 
     print(build_model_flags().strip())
+    return 0
+
+
+def _cmd_provision_command() -> int:
+    """Print the CodeSpace relay/auth-helper provision command (#892 Inc 1).
+
+    The process-to-process seam agent-bridge's dispatch path shells out to
+    instead of importing ``agent_codespaces.codespace_assets`` in the bridge
+    venv -- so a fix to the provision command reaches the dispatch path from
+    agent-codespaces' OWN venv with no agent-bridge redeploy (the #733 class).
+    Prints the idempotent bash command to stdout.
+    """
+    from .codespace_assets import build_provision_command
+
+    print(build_provision_command())
+    return 0
+
+
+def _cmd_relay_launch_env(args: argparse.Namespace) -> int:
+    """Print JSON ``{"prelude": <str>, "port": <int>}`` for a detached CodeSpace
+    launch's relay env (#892 Inc 1).
+
+    The process-to-process seam agent-bridge's dispatch path shells out to
+    instead of importing ``agent_codespaces.relay_launch`` in the bridge venv.
+    ``--relay-port`` injects the daemon's actually-bound relay port (the daemon
+    knows its live port; the standalone path cannot). Mints/reuses the
+    per-codespace relay token as a side effect, exactly as the in-process call
+    did.
+    """
+    from .relay_launch import build_relay_launch_env
+
+    prelude, port = build_relay_launch_env(
+        args.codespace, relay_port=getattr(args, "relay_port", None)
+    )
+    print(json.dumps({"prelude": prelude, "port": port}))
     return 0
 
 
