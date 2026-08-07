@@ -1147,7 +1147,10 @@ def _passive_daemon_creationflags() -> int:
     uvicorn's logging writes to a broken stream and startup fails.
     """
     if sys.platform == "win32":
-        return subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]
+        # getattr fallback so this stays importable/testable on non-Windows CI,
+        # where subprocess lacks DETACHED_PROCESS (Win32 value 0x00000008); the
+        # win32 branch is exercised via monkeypatched sys.platform on Linux.
+        return getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
     return 0
 
 
