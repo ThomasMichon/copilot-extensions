@@ -450,6 +450,22 @@ def main(argv: list[str] | None = None) -> int:
              "({entries, summary}) consumed by the registered-pivot renderer",
     )
     pool_p.add_argument(
+        "--stream", dest="stream", action="store_true",
+        help="With --picker-json, emit the registered-pivot NDJSON envelope "
+             "(begin -> row per CodeSpace -> summary -> done) so the pivot "
+             "paints progressively (D2).",
+    )
+    pool_p.add_argument(
+        "--subscribe", dest="subscribe", action="store_true",
+        help="With --stream, hold the channel open and emit live delta/removed "
+             "frames from a periodic pool re-scan so an open pivot updates in "
+             "place (D2).",
+    )
+    pool_p.add_argument(
+        "--interval", dest="interval", type=float, default=5.0,
+        help="Seconds between --subscribe re-scans (default: 5).",
+    )
+    pool_p.add_argument(
         "--budget", type=int, default=None,
         help=f"Account concurrent-core budget (default: {pool_mod.DEFAULT_BUDGET_CORES})",
     )
@@ -2884,6 +2900,80 @@ def _cmd_release_claim(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_pool_stream(
+    args: argparse.Namespace,
+    members,
+    budget,
+    note: str,
+) -> int:
+    """Emit the CodeSpaces pivot as the registered-pivot NDJSON envelope (D2).
+
+    One-shot: ``begin`` -> a ``row`` per CodeSpace -> ``summary`` -> ``done``,
+    one JSON object per flushed line so the pivot paints progressively. With
+    ``--subscribe`` the channel is then held open: every ``--interval`` seconds
+    the pool is re-scanned and the diff vs. the last snapshot is emitted as
+    ``delta`` / ``removed`` frames (whole-row by ``id``), plus a fresh
+    ``summary`` when the budget line changes, so an open pivot live-updates. The
+    loop exits cleanly when the reader closes the pipe (BrokenPipeError) or on
+    interrupt/kill, so the Picker's teardown never orphans it."""
+    out = sys.__stdout__
+
+    def emit(obj: dict) -> bool:
+        try:
+            out.write(json.dumps(obj, default=str) + "\n")
+            out.flush()
+            return True
+        except (BrokenPipeError, OSError):
+            return False
+
+    for frame in pool_mod.picker_stream_frames(members, budget, note=note):
+        if not emit(frame):
+            return 0
+
+    if not getattr(args, "subscribe", False):
+        return 0
+
+    # --subscribe: periodic re-scan + diff -> live delta/removed frames.
+    interval = max(0.5, float(getattr(args, "interval", 5.0) or 5.0))
+    prev = pool_mod.picker_payload(members, budget, note=note)
+    prev_entries = prev["entries"]
+    prev_summary = prev["summary"]
+    budget_cores = args.budget if args.budget is not None else pool_mod.DEFAULT_BUDGET_CORES
+    stale_after = (
+        args.stale_after if args.stale_after is not None
+        else pool_mod.DEFAULT_STALE_AFTER
+    )
+    try:
+        while True:
+            time.sleep(interval)
+            curr = None
+            try:
+                members, budget = pool_mod.build_pool(
+                    budget_cores=budget_cores, stale_after=stale_after,
+                )
+                curr = pool_mod.picker_payload(members, budget, note=note)
+            except Exception:
+                # A transient re-scan failure (e.g. a gh hiccup) must not kill
+                # the live channel -- skip this tick and try again next time.
+                curr = None
+            if curr is None:
+                continue
+            deltas, removed = pool_mod.diff_entries(prev_entries, curr["entries"])
+            for entry in deltas:
+                if not emit({"type": "delta", "entry": entry}):
+                    return 0
+            for rid in removed:
+                if not emit({"type": "removed", "id": rid}):
+                    return 0
+            if curr["summary"] != prev_summary:
+                if not emit({"type": "summary", "summary": curr["summary"]}):
+                    return 0
+            prev_entries = curr["entries"]
+            prev_summary = curr["summary"]
+    except KeyboardInterrupt:
+        return 0
+
+
 def _cmd_pool(args: argparse.Namespace) -> int:
     """Show the CodeSpace pool: per-box disposition + allocation + core budget.
 
@@ -2910,6 +3000,9 @@ def _cmd_pool(args: argparse.Namespace) -> int:
             note = ("\u26a0 " + "; ".join(_msgs)) if _msgs else ""
         except Exception:
             note = ""
+        if getattr(args, "stream", False):
+            # D2: NDJSON streaming envelope (optionally held live via --subscribe).
+            return _cmd_pool_stream(args, members, budget, note)
         print(json.dumps(pool_mod.picker_payload(members, budget, note=note)))
         return 0
 

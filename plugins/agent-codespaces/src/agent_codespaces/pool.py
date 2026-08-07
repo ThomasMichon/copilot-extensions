@@ -418,3 +418,47 @@ def picker_payload(
     summary = dict(budget.to_dict())
     summary["note"] = note or ""
     return {"entries": entries, "summary": summary}
+
+
+def picker_stream_frames(
+    members: list[PoolMember],
+    budget: Budget,
+    *,
+    note: str = "",
+) -> list[dict]:
+    """The one-shot NDJSON envelope (D2) for the CodeSpaces pivot's ``--stream``.
+
+    Reuses :func:`picker_payload` so the streamed rows carry the **identical**
+    entry/summary shape as the non-streaming ``--picker-json`` payload, then
+    frames them as ``begin`` -> a ``row`` per CodeSpace -> ``summary`` ->
+    ``done``. ``begin.count`` is exact: the pool roster is a single ``gh`` call,
+    so the size is known up front. Pure -- the caller flushes each frame."""
+    payload = picker_payload(members, budget, note=note)
+    entries = payload["entries"]
+    frames: list[dict] = [{"type": "begin", "count": len(entries)}]
+    for entry in entries:
+        frames.append({"type": "row", "entry": entry})
+    frames.append({"type": "summary", "summary": payload["summary"]})
+    frames.append({"type": "done", "count": len(entries)})
+    return frames
+
+
+def diff_entries(
+    prev: list[dict],
+    curr: list[dict],
+    *,
+    id_key: str = "id",
+) -> tuple[list[dict], list[str]]:
+    """Diff two entry snapshots by ``id_key`` for a ``subscribe`` live re-scan.
+
+    Returns ``(deltas, removed_ids)`` -- whole-row ``delta`` entries for ids that
+    are new or whose content changed, and the ids present before but gone now.
+    Whole-row granularity (per the effort's Phase B decision) keeps the protocol
+    trivial: the consumer replaces/removes by id. Pure + order-preserving."""
+    prev_by = {str(e.get(id_key)): e for e in prev if e.get(id_key) is not None}
+    curr_by = {str(e.get(id_key)): e for e in curr if e.get(id_key) is not None}
+    deltas = [e for e in curr
+              if e.get(id_key) is not None
+              and prev_by.get(str(e.get(id_key))) != e]
+    removed = [rid for rid in prev_by if rid not in curr_by]
+    return deltas, removed

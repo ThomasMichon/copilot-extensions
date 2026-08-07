@@ -331,3 +331,52 @@ def test_picker_payload_status_stale_and_stopped():
     assert by["s"]["status"] == "STALE"
     assert by["f"]["status"] == "STOPPED"
     assert by["s"]["worktree"] == ""         # unclaimed
+
+
+# --- picker_stream_frames + diff_entries (D2 NDJSON streaming) -------------
+
+def test_picker_stream_frames_envelope_order_and_rows():
+    from agent_codespaces.pool import picker_payload, picker_stream_frames
+    now = time.time()
+    codespaces = [
+        _cs("a", state="Available", machine="premiumLinux", repo="o/web-cs"),
+        _cs("b", state="Shutdown", machine="premiumLinux", repo="o/web-cs"),
+    ]
+    members, budget = build_pool(
+        budget_cores=64, now=now, codespaces=codespaces, leases=[], markers={})
+    frames = picker_stream_frames(members, budget, note="")
+
+    # begin -> row per CodeSpace -> summary -> done.
+    assert frames[0] == {"type": "begin", "count": 2}
+    assert [f["type"] for f in frames] == ["begin", "row", "row", "summary", "done"]
+    assert frames[-1] == {"type": "done", "count": 2}
+    # Streamed rows carry the identical entry shape as the one-shot payload.
+    payload = picker_payload(members, budget, note="")
+    assert [f["entry"] for f in frames if f["type"] == "row"] == payload["entries"]
+    assert frames[3]["summary"] == payload["summary"]
+
+
+def test_picker_stream_frames_empty_pool():
+    from agent_codespaces.pool import picker_stream_frames
+    members, budget = build_pool(budget_cores=64, codespaces=[], leases=[], markers={})
+    frames = picker_stream_frames(members, budget)
+    assert [f["type"] for f in frames] == ["begin", "summary", "done"]
+    assert frames[0]["count"] == 0
+
+
+def test_diff_entries_delta_and_removed():
+    from agent_codespaces.pool import diff_entries
+    prev = [{"id": "a", "status": "STOPPED"}, {"id": "b", "status": "RUNNING"}]
+    curr = [{"id": "a", "status": "RUNNING"}, {"id": "c", "status": "RUNNING"}]
+    deltas, removed = diff_entries(prev, curr)
+    # 'a' changed and 'c' is new -> both are whole-row deltas; 'b' vanished.
+    assert {e["id"] for e in deltas} == {"a", "c"}
+    assert removed == ["b"]
+
+
+def test_diff_entries_no_change_is_empty():
+    from agent_codespaces.pool import diff_entries
+    same = [{"id": "a", "status": "RUNNING"}]
+    deltas, removed = diff_entries(same, [dict(same[0])])
+    assert deltas == []
+    assert removed == []
