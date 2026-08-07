@@ -147,6 +147,89 @@ class TestPulseSessionScan:
         assert ctx.live_intent_at[norm] == "2026-06-01T10:00:00.000Z"
         assert ctx.live_intent_idle[norm] is False
 
+    def test_scan_populates_rest_awaiting_operator(
+        self, tmp_session_state_dir: Path
+    ):
+        """#228: the graded rest state surfaces awaiting-operator ("needs me")."""
+        wt_path = "/tmp/wt-rest-await"
+        make_session_dir(
+            tmp_session_state_dir, "sess-await", wt_path,
+            substatus={"intent": "Waiting on you", "updatedAt": "t",
+                       "idle": False, "rest": "awaiting-operator",
+                       "restAt": "2026-06-01T10:05:00.000Z"},
+        )
+        rec = _make_record("wt-rest-await", wt_path,
+                           sessions=[SessionEntry("sess-await", "t")])
+        with patch("agent_worktrees.sessions._session_state_dir",
+                   return_value=tmp_session_state_dir):
+            ctx = scan_sessions_fast([rec])
+        norm = _normalize_path(wt_path)
+        assert ctx.live_rest[norm] == "awaiting-operator"
+        assert ctx.live_rest_at[norm] == "2026-06-01T10:05:00.000Z"
+
+    def test_scan_populates_rest_idle(self, tmp_session_state_dir: Path):
+        wt_path = "/tmp/wt-rest-idle"
+        make_session_dir(
+            tmp_session_state_dir, "sess-idle", wt_path,
+            substatus={"intent": "Done", "updatedAt": "t", "idle": True,
+                       "rest": "idle", "restAt": "2026-06-01T10:06:00.000Z"},
+        )
+        rec = _make_record("wt-rest-idle", wt_path,
+                           sessions=[SessionEntry("sess-idle", "t")])
+        with patch("agent_worktrees.sessions._session_state_dir",
+                   return_value=tmp_session_state_dir):
+            ctx = scan_sessions_fast([rec])
+        norm = _normalize_path(wt_path)
+        assert ctx.live_rest[norm] == "idle"
+
+    def test_legacy_sidecar_derives_rest_from_idle(
+        self, tmp_session_state_dir: Path
+    ):
+        """A legacy sidecar (no ``rest`` field) derives the coarse rest from
+        ``idle``: idle=True -> "idle"; idle=False -> no rest surfaced."""
+        wt_idle = "/tmp/wt-legacy-idle"
+        make_session_dir(
+            tmp_session_state_dir, "leg-idle", wt_idle,
+            substatus={"intent": "x", "updatedAt": "t", "idle": True},
+        )
+        wt_busy = "/tmp/wt-legacy-busy"
+        make_session_dir(
+            tmp_session_state_dir, "leg-busy", wt_busy,
+            substatus={"intent": "x", "updatedAt": "t", "idle": False},
+        )
+        recs = [
+            _make_record("wt-legacy-idle", wt_idle,
+                         sessions=[SessionEntry("leg-idle", "t")]),
+            _make_record("wt-legacy-busy", wt_busy,
+                         sessions=[SessionEntry("leg-busy", "t")]),
+        ]
+        with patch("agent_worktrees.sessions._session_state_dir",
+                   return_value=tmp_session_state_dir):
+            ctx = scan_sessions_fast(recs)
+        assert ctx.live_rest[_normalize_path(wt_idle)] == "idle"
+        assert _normalize_path(wt_busy) not in ctx.live_rest
+
+    def test_newer_session_without_sidecar_clears_rest(
+        self, tmp_session_state_dir: Path
+    ):
+        wt_path = "/tmp/wt-rest-clear"
+        make_session_dir(
+            tmp_session_state_dir, "old", wt_path,
+            updated_at="2026-06-01T10:00:00.000Z",
+            substatus={"intent": "old", "updatedAt": "old", "idle": True,
+                       "rest": "idle", "restAt": "old"},
+        )
+        make_session_dir(
+            tmp_session_state_dir, "new", wt_path,
+            updated_at="2026-06-01T12:00:00.000Z",
+        )
+        rec = _make_record("wt-rest-clear", wt_path, sessions=[
+            SessionEntry("old", "t"), SessionEntry("new", "t")])
+        with patch("agent_worktrees.sessions._session_state_dir",
+                   return_value=tmp_session_state_dir):
+            ctx = scan_sessions_fast([rec])
+        assert _normalize_path(wt_path) not in ctx.live_rest
+
     def test_newest_session_wins(self, tmp_session_state_dir: Path):
         wt_path = "/tmp/wt-pulse2"
         make_session_dir(

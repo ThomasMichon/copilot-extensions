@@ -96,7 +96,28 @@ const state = {
   longTurnTimer: null,  // fires if the current turn runs past NUDGE_LONG_TURN_MS
   turnsSinceNudge: 0,   // completed root-agent turns since the last nudge (7c)
   lastNudgeAt: 0,       // epoch ms of the last disposition nudge
+  // dotfiles#948 / copilot-extensions#228 -- the graded REST signal (passive,
+  // enrichment-only). "busy" = a turn is running; "idle" = done-rest (the whole
+  // session went quiescent, nothing in flight); "awaiting-operator" = parked on
+  // a human input/permission request (the high-signal "this needs me"). Derived
+  // purely from native session events; the picker reads it from the sidecar.
+  rest: "busy",
+  restAt: null,         // ISO 8601 of the last rest-state transition
 };
+
+// Transition the graded rest state and persist it. awaiting-operator and idle
+// are the "the operator may want to look" states, so they flush promptly (like
+// session.idle already does); a return to "busy" rides the throttled flush.
+// Best-effort; never throws into the event loop.
+function setRest(rest) {
+  if (state.rest === rest) return;
+  state.rest = rest;
+  state.restAt = new Date().toISOString();
+  state.idle = rest === "idle";   // keep the legacy boolean in sync
+  state.dirty = true;
+  if (rest === "idle" || rest === "awaiting-operator") persistSubStatus();
+  else scheduleFlush();
+}
 
 // Persist the sub-status sidecar the picker reads. Best-effort: never throws
 // into the event loop. Writes into the live session's own state dir; a missing
@@ -112,6 +133,8 @@ function persistSubStatus() {
       intent: state.lastIntent,
       updatedAt: state.lastIntentAt,
       idle: state.idle,
+      rest: state.rest,     // "busy" | "idle" | "awaiting-operator" (#228)
+      restAt: state.restAt,
     };
     writeFileSync(join(dir, "substatus.json"), JSON.stringify(payload), "utf-8");
     state.dirty = false;
@@ -198,6 +221,7 @@ session.on("assistant.intent", (event) => {
   state.lastIntentAt = new Date().toISOString();
   state.idle = false;
   state.dirty = true;
+  setRest("busy");        // a fresh intent means the agent is actively working
   scheduleFlush();
 });
 
@@ -209,6 +233,7 @@ session.on("assistant.turn_start", (event) => {
   state.turnCount++;
   state.turnRunning = true;
   state.nudgedThisTurn = false;
+  setRest("busy");        // a turn is running -> not at rest
   if (state.longTurnTimer) clearTimeout(state.longTurnTimer);
   state.longTurnTimer = setTimeout(() => {
     // A single turn has run long -- nudge mid-turn (work guard still applies).
@@ -252,10 +277,30 @@ session.on("tool.execution_complete", (event) => {
   state.workSinceNudge++;
 });
 
-// On idle, flush the final intent immediately and mark the pulse idle so the
-// picker greys it: a turn just finished, nothing is actively in flight. The
-// intent text is retained (last thing the agent did) and ages out on its own.
+// On idle, mark the graded rest 'idle' (done-rest: the whole session is
+// quiescent, nothing in flight). setRest persists the sidecar on the transition
+// and keeps the legacy `idle` boolean in sync, so no extra write is needed.
 session.on("session.idle", () => {
-  state.idle = true;
-  if (state.lastIntent) persistSubStatus();
+  setRest("idle");
 });
+
+// Awaiting-operator (#228): the agent parked itself on a human input / form /
+// permission request -- the high-signal "this needs me" rest state. Set on the
+// request, cleared back to "busy" when it completes (a subsequent session.idle
+// re-marks idle if the agent then went quiescent). Root agent only; best-effort.
+for (const evt of ["user_input.requested", "elicitation.requested",
+                   "permission.requested"]) {
+  session.on(evt, (event) => {
+    if (event.agentId) return;            // sub-agent request -- not the driver
+    setRest("awaiting-operator");
+  });
+}
+for (const evt of ["user_input.completed", "elicitation.completed",
+                   "permission.completed"]) {
+  session.on(evt, (event) => {
+    if (event.agentId) return;
+    // The block cleared; the agent resumes. If it immediately goes quiescent,
+    // session.idle re-marks "idle" out-of-band.
+    if (state.rest === "awaiting-operator") setRest("busy");
+  });
+}

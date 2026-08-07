@@ -62,6 +62,20 @@ class SessionContext:
     live_intent_idle: dict[str, bool] = field(default_factory=dict)
     """normalized_path → whether the pulse's session had gone idle at flush."""
 
+    live_rest: dict[str, str] = field(default_factory=dict)
+    """normalized_path → the graded REST state (copilot-extensions#228): one of
+    ``"busy"`` / ``"idle"`` / ``"awaiting-operator"``.
+
+    Passively derived from native session events by the live-pulse extension
+    (sidecar ``substatus.json``): ``busy`` = a turn is running; ``idle`` =
+    done-rest (the session went quiescent); ``awaiting-operator`` = parked on a
+    human input/permission request ("this needs me"). Enrichment only — absent
+    when the extension isn't loaded; legacy sidecars (no ``rest``) derive it from
+    the ``idle`` boolean."""
+
+    live_rest_at: dict[str, str] = field(default_factory=dict)
+    """normalized_path → ISO timestamp of the last rest-state transition."""
+
     _latest_ts: dict[str, str] = field(default_factory=dict)
     """Internal: tracks latest updated_at per path for summary selection."""
 
@@ -117,15 +131,19 @@ def _read_context_pct(entry: Path) -> int | None:
     return None
 
 
-def _read_substatus(entry: Path) -> tuple[str, str, bool] | None:
-    """Read the live agent-intent pulse from a session's ``substatus.json``.
+def _read_substatus(entry: Path) -> tuple[str, str, bool, str | None, str] | None:
+    """Read the live agent-intent + rest pulse from a session's ``substatus.json``.
 
-    The agent-worktrees live-pulse extension writes this sidecar from the
-    ``assistant.intent`` event stream (root agent only), which is ephemeral and
-    never lands in ``events.jsonl`` -- so this file is the sole on-disk source.
-    Returns ``(intent, updated_at_iso, idle)`` or None when absent/unreadable.
-    Never raises.  This is the derived pulse register; it is deliberately
-    independent of the agent-asserted ``follow_up`` disposition.
+    The agent-worktrees live-pulse extension writes this sidecar from native
+    session events (root agent only) -- the ``assistant.intent`` stream is
+    ephemeral and never lands in ``events.jsonl``, so this file is the sole
+    on-disk source. Returns
+    ``(intent, updated_at_iso, idle, rest, rest_at_iso)`` or None when
+    absent/unreadable, where ``rest`` is the graded rest state
+    (``"busy"``/``"idle"``/``"awaiting-operator"``, copilot-extensions#228) or
+    None on a legacy sidecar (then derived from ``idle``). Never raises. This is
+    the derived pulse register; it is deliberately independent of the
+    agent-asserted ``follow_up`` disposition.
     """
     f = entry / "substatus.json"
     try:
@@ -142,7 +160,14 @@ def _read_substatus(entry: Path) -> tuple[str, str, bool] | None:
     updated_at = data.get("updatedAt")
     updated_at = updated_at if isinstance(updated_at, str) else ""
     idle = bool(data.get("idle"))
-    return intent.strip(), updated_at, idle
+    rest = data.get("rest")
+    rest = rest if isinstance(rest, str) and rest.strip() else None
+    if rest is None:
+        # Legacy sidecar (no graded rest): derive the coarse state from ``idle``.
+        rest = "idle" if idle else None
+    rest_at = data.get("restAt")
+    rest_at = rest_at if isinstance(rest_at, str) else ""
+    return intent.strip(), updated_at, idle, rest, rest_at
 
 
 def _update_activity(
@@ -183,14 +208,28 @@ def _update_activity(
     # newer session without a sidecar clears any stale intent from an older one.
     sub = _read_substatus(entry)
     if sub is not None:
-        intent, sub_at, idle = sub
+        intent, sub_at, idle, rest, rest_at = sub
         ctx.live_intent[norm_path] = intent
         ctx.live_intent_at[norm_path] = sub_at
         ctx.live_intent_idle[norm_path] = idle
+        if rest is not None:
+            ctx.live_rest[norm_path] = rest
+            # Only store a real ISO timestamp; a legacy sidecar (rest derived
+            # from ``idle``) has no restAt, so clear any stale value rather than
+            # record an empty string that violates the live_rest_at contract.
+            if rest_at:
+                ctx.live_rest_at[norm_path] = rest_at
+            else:
+                ctx.live_rest_at.pop(norm_path, None)
+        else:
+            ctx.live_rest.pop(norm_path, None)
+            ctx.live_rest_at.pop(norm_path, None)
     else:
         ctx.live_intent.pop(norm_path, None)
         ctx.live_intent_at.pop(norm_path, None)
         ctx.live_intent_idle.pop(norm_path, None)
+        ctx.live_rest.pop(norm_path, None)
+        ctx.live_rest_at.pop(norm_path, None)
 
 
 def _session_state_dir() -> Path:
