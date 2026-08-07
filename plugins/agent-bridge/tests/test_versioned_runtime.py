@@ -198,6 +198,80 @@ def test_gc_dead_pid_not_protected(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# AV-tolerant reclaim (dotfiles #911): a transient Defender lock (WinError 5)
+# on an old slot's python.exe must be retried + quietly deferred, never a noisy
+# hard failure -- and must NOT wrongly report the slot as removed.
+# ---------------------------------------------------------------------------
+
+def _win_err(winerror: int) -> PermissionError:
+    e = PermissionError("Access is denied")
+    e.winerror = winerror  # emulate a Windows OSError
+    return e
+
+
+def test_is_transient_lock_classification():
+    assert vr._is_transient_lock(_win_err(5)) is True     # access denied
+    assert vr._is_transient_lock(_win_err(32)) is True    # sharing violation
+    assert vr._is_transient_lock(PermissionError()) is True
+    # A non-transient failure (e.g. dir not empty for another reason) is NOT it.
+    assert vr._is_transient_lock(OSError(9, "bad fd")) is False
+
+
+def test_gc_defers_slot_under_transient_lock(tmp_path, monkeypatch, capsys):
+    """A slot Defender is scanning is retried, then deferred -- not removed,
+    not reported as a hard 'could not remove' error."""
+    for v in ("1.0.0", "2.0.0"):
+        _install(tmp_path, v)
+    vr.activate(tmp_path, "2.0.0")
+    monkeypatch.setattr(vr.time, "sleep", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        vr.shutil, "rmtree",
+        lambda *_a, **_k: (_ for _ in ()).throw(_win_err(5)),
+    )
+    removed = vr.gc(tmp_path)
+    assert removed == []                                   # not reported removed
+    assert vr.version_dir(tmp_path, "1.0.0").is_dir()      # left for next sweep
+    err = capsys.readouterr().err
+    assert "deferring" in err                              # calm note...
+    assert "could not remove" not in err                  # ...not an alarm
+
+
+def test_gc_removes_after_transient_then_success(tmp_path, monkeypatch):
+    """If the lock releases within the retry window, the slot is reclaimed."""
+    for v in ("1.0.0", "2.0.0"):
+        _install(tmp_path, v)
+    vr.activate(tmp_path, "2.0.0")
+    monkeypatch.setattr(vr.time, "sleep", lambda *_a, **_k: None)
+    real_rmtree = vr.shutil.rmtree
+    calls = {"n": 0}
+
+    def flaky(path, *a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _win_err(5)     # first attempt: Defender still holding it
+        return real_rmtree(path, *a, **k)
+
+    monkeypatch.setattr(vr.shutil, "rmtree", flaky)
+    removed = vr.gc(tmp_path)
+    assert removed == ["1.0.0"]
+    assert not vr.version_dir(tmp_path, "1.0.0").exists()
+
+
+def test_gc_non_transient_error_still_reported(tmp_path, monkeypatch, capsys):
+    """A genuinely non-transient OSError is still surfaced as an error."""
+    for v in ("1.0.0", "2.0.0"):
+        _install(tmp_path, v)
+    vr.activate(tmp_path, "2.0.0")
+    monkeypatch.setattr(
+        vr.shutil, "rmtree",
+        lambda *_a, **_k: (_ for _ in ()).throw(OSError(9, "bad fd")),
+    )
+    removed = vr.gc(tmp_path)
+    assert removed == []
+    assert "could not remove" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
 # CLI surface
 # ---------------------------------------------------------------------------
 
