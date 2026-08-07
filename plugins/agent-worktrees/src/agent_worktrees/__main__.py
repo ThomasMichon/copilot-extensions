@@ -14385,6 +14385,10 @@ def _pr_watch_usage() -> None:
     print(file=out)
     print("  Overrides: --host URL (api base), --token TOKEN.", file=out)
     print(file=out)
+    print("  One-shot read: `wait ... --timeout 1` returns the current-state", file=out)
+    print("  snapshot (verdict/merge/consent) even on timeout; or use the", file=out)
+    print("  worktree-scoped `pr-status` for the same live state without waiting.", file=out)
+    print(file=out)
     print("  The result payload carries a 'merge' block describing what stands", file=out)
     print("  between the PR and a merge -- act on it after a review lands:", file=out)
     print("    needs_consent   true => approved+unblocked but the merge-consent", file=out)
@@ -14495,9 +14499,31 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
                                      file=sys.stderr),
         )
         if not result.matched:
-            print(_json.dumps({"repo": args.repo, "pr": args.pr, "timed_out": True}))
+            # #3486: a timeout still carries the current-state snapshot (verdict
+            # / merge state / consent / labels) when a poll succeeded, so a
+            # short-timeout pr-watch doubles as a one-shot read. Preserve the
+            # legacy {repo, pr, timed_out} keys and enrich with the snapshot.
+            payload = dict(result.payload) if result.payload else {}
+            payload.setdefault("repo", args.repo)
+            payload.setdefault("pr", args.pr)
+            payload["timed_out"] = True
+            print(_json.dumps(payload))
             if not args.json:
                 print(f"pr-watch: timed out after {args.timeout:g}s", file=sys.stderr)
+                merge = payload.get("merge") or {}
+                if merge:
+                    conflict = " (conflict)" if merge.get("conflict") else ""
+                    print(
+                        f"pr-watch: current state -> verdict "
+                        f"{merge.get('verdict', '?')}, merge "
+                        f"{merge.get('merge_state', '?')}, consent "
+                        f"{merge.get('consent_action', '?')}{conflict}",
+                        file=sys.stderr,
+                    )
+                    print(
+                        "pr-watch: (this is a one-shot read; `pr-status` gives "
+                        "the same live state without waiting)", file=sys.stderr,
+                    )
             return 124
         print(_json.dumps(result.payload))
         if not args.json:
