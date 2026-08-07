@@ -82,6 +82,69 @@ class TestPairMarker:
         assert n["state"] == "FINAL"
 
 
+class TestAnnotatePairs:
+    """citadel #957: the aggregated dual-status data layer over the row set."""
+
+    def _row(self, **kw):
+        return derive.norm(_raw(**kw), "m", "e")
+
+    def test_sibling_summary_both_directions(self):
+        harness = self._row(id="m-win-0000-hhhh", title="H", status="active",
+                            state="active", pair_id="p1", pair_role="harness")
+        knowledge = self._row(id="m-win-0000-kkkk", title="K", status="finalized",
+                              state="completed", pair_id="p1", pair_role="knowledge")
+        derive.annotate_pairs([harness, knowledge])
+        assert harness["pair_sibling"]["role"] == "knowledge"
+        assert knowledge["pair_sibling"]["role"] == "harness"
+
+    def test_unpaired_untouched(self):
+        solo = self._row(id="m-win-0000-ssss", title="S")
+        derive.annotate_pairs([solo])
+        assert "pair_sibling" not in solo
+        assert "pair_attention" not in solo
+
+    def test_sibling_absent_is_none(self):
+        harness = self._row(id="m-win-0000-hhhh", pair_id="p1", pair_role="harness")
+        derive.annotate_pairs([harness])  # sibling not in set
+        assert harness["pair_sibling"] is None
+
+    def test_attention_aggregates_from_sibling(self):
+        # A clean finalized harness whose KNOWLEDGE sibling is dirty -> the pair
+        # wants attention on the harness row too.
+        harness = self._row(id="m-win-0000-hhhh", status="finalized",
+                            state="completed", pair_id="p1", pair_role="harness")
+        knowledge = self._row(id="m-win-0000-kkkk", state="dirty",
+                              pair_id="p1", pair_role="knowledge")
+        derive.annotate_pairs([harness, knowledge])
+        assert harness["pair_attention"] is True
+        assert knowledge["pair_attention"] is True
+
+    def test_attention_from_follow_up(self):
+        h = self._row(id="m-win-0000-hhhh", follow_up=True, summary="x",
+                     pair_id="p1", pair_role="harness")
+        k = self._row(id="m-win-0000-kkkk", status="finalized", state="completed",
+                     pair_id="p1", pair_role="knowledge")
+        derive.annotate_pairs([h, k])
+        assert h["pair_attention"] is True and k["pair_attention"] is True
+
+    def test_no_attention_when_both_clean(self):
+        h = self._row(id="m-win-0000-hhhh", status="finalized", state="completed",
+                     pair_id="p1", pair_role="harness")
+        k = self._row(id="m-win-0000-kkkk", status="finalized", state="completed",
+                     pair_id="p1", pair_role="knowledge")
+        derive.annotate_pairs([h, k])
+        assert h["pair_attention"] is False and k["pair_attention"] is False
+
+    def test_for_machine_annotates(self):
+        h = self._row(id="m-win-0000-hhhh", state="completed", status="finalized",
+                     pair_id="p1", pair_role="harness")
+        k = self._row(id="m-win-0000-kkkk", state="wip",
+                     pair_id="p1", pair_role="knowledge")
+        derive.for_machine([h, k], "m", "e")
+        assert h["pair_sibling"]["role"] == "knowledge"
+        assert h["pair_attention"] is True   # sibling is WIP
+
+
 class TestFastPassActive:
     """The classification-absent (fast Phase-1 populate) heuristic must mark a
     live worktree ACTIVE from the CHEAP mux/lock signals, so the picker's Active

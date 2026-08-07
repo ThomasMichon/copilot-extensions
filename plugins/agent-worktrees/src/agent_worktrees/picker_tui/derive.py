@@ -418,7 +418,61 @@ def norm(w, machine, env):
 
 def for_machine(wts, machine, env):
     here = [w for w in wts if w["machine"] == machine and w["env"] == env]
+    annotate_pairs(here)
     return bucket(here)
+
+
+# citadel paired -harness/-knowledge lifecycle (#957): the "aggregated dual-status"
+# data layer. Given the full row set, cross-reference the two halves of each pair
+# so a renderer can present them as a unit (sibling summary + an aggregate
+# attention flag). Kept pure + additive; the visual indented sub-row nesting is a
+# separate engine change.
+_PAIR_ATTENTION_STATES = frozenset({"WIP", "DIRTY", "ORPHAN"})
+
+
+def _pair_wants_attention(row) -> bool:
+    """True when a row has un-landed work (follow-up flag or a WIP/dirty state)."""
+    return bool(row.get("follow_up")) or row.get("state") in _PAIR_ATTENTION_STATES
+
+
+def annotate_pairs(rows):
+    """Attach each paired row's SIBLING summary + an aggregate attention flag.
+
+    For every row carrying a ``pair_id`` (see :func:`norm`), match it against the
+    other half of the pair within ``rows`` and attach:
+
+    * ``pair_sibling`` -- a compact ``{role, state, tracking, follow_up}`` of the
+      OTHER half, or ``None`` when the sibling is not in this set (e.g. it lives
+      in a different section/machine and wasn't passed in); and
+    * ``pair_attention`` -- ``True`` when EITHER half has un-landed work
+      (a follow-up flag or a WIP/DIRTY/ORPHAN state), so a future renderer can
+      flag the whole pair as needing a look before it is cleaned up.
+
+    Pure + in-place: mutates and returns the same ``rows`` (unpaired rows
+    untouched). Idempotent. Pairs are carved on one machine, so callers annotate
+    a per-machine slice (see :func:`for_machine`).
+    """
+    by_pair: dict[str, list] = {}
+    for r in rows:
+        pid = r.get("pair_id")
+        if pid:
+            by_pair.setdefault(pid, []).append(r)
+    for r in rows:
+        pid = r.get("pair_id")
+        if not pid:
+            continue
+        siblings = [s for s in by_pair.get(pid, ()) if s is not r]
+        sib = siblings[0] if siblings else None
+        r["pair_sibling"] = None if sib is None else {
+            "role": sib.get("pair_role"),
+            "state": sib.get("state"),
+            "tracking": sib.get("tracking"),
+            "follow_up": bool(sib.get("follow_up")),
+        }
+        r["pair_attention"] = _pair_wants_attention(r) or (
+            sib is not None and _pair_wants_attention(sib)
+        )
+    return rows
 
 
 def bucket(wts):
