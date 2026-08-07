@@ -10278,6 +10278,81 @@ def _related_lookup_anchors(
     return anchors, False
 
 
+def _state_root_pair(json_out: bool) -> int:
+    """Resolve the paired (harness/knowledge sibling) worktree of the cwd.
+
+    The citadel paired-worktree resolver (#957): find the current worktree from
+    the cwd, then load its recorded sibling (``pair_ref``). Prints the sibling's
+    checkout path (or a JSON summary). Exit ``3`` when the current directory is
+    not a tracked worktree, or the worktree is unpaired, or the sibling record
+    cannot be loaded -- callers must NOT assume a pair on non-zero.
+    """
+    cwd = os.getcwd()
+    wt_id = tracking.find_worktree_id_by_cwd(cwd)
+    rec = tracking.load_record_by_id(wt_id) if wt_id else None
+    if rec is None:
+        msg = "current directory is not a tracked worktree"
+        if json_out:
+            print(json.dumps({"paired": False, "error": msg}, indent=2))
+        else:
+            print(msg, file=sys.stderr)
+        return 3
+    if not rec.is_paired:
+        msg = f"worktree '{rec.worktree_id}' is not paired"
+        if json_out:
+            print(json.dumps(
+                {"paired": False, "worktree_id": rec.worktree_id, "error": msg},
+                indent=2,
+            ))
+        else:
+            print(msg, file=sys.stderr)
+        return 3
+    sibling = tracking.find_paired_record(rec)
+    if sibling is None:
+        ref = rec.pair_ref or "?"
+        msg = f"paired sibling '{ref}' has no local record on this machine"
+        if json_out:
+            print(json.dumps(
+                {
+                    "paired": True,
+                    "worktree_id": rec.worktree_id,
+                    "pair_id": rec.pair_id,
+                    "pair_role": rec.pair_role,
+                    "pair_ref": rec.pair_ref,
+                    "pair_kind": rec.pair_kind,
+                    "sibling_path": None,
+                    "error": msg,
+                },
+                indent=2,
+            ))
+        else:
+            print(msg, file=sys.stderr)
+        return 3
+    if json_out:
+        print(json.dumps(
+            {
+                "paired": True,
+                "pair_id": rec.pair_id,
+                "self": {
+                    "worktree_id": rec.worktree_id,
+                    "role": rec.pair_role,
+                    "path": rec.worktree_path,
+                },
+                "sibling": {
+                    "worktree_id": sibling.worktree_id,
+                    "role": sibling.pair_role,
+                    "path": sibling.worktree_path,
+                    "kind": rec.pair_kind,
+                    "status": sibling.status,
+                },
+            },
+            indent=2,
+        ))
+    else:
+        print(sibling.worktree_path)
+    return 0
+
+
 def cmd_state_root_dispatch(argv: list[str]) -> int:
     """Resolve the state root (where efforts/visions/logs should be written).
 
@@ -10307,10 +10382,20 @@ def cmd_state_root_dispatch(argv: list[str]) -> int:
              "(target the harness itself or a product repo, ignoring the "
              "stateless binding).",
     )
+    p.add_argument(
+        "--pair", action="store_true",
+        help="Resolve the PAIRED worktree (the citadel -harness/-knowledge "
+             "sibling of the current worktree): print the sibling's checkout "
+             "path, or JSON (pair_id/role/sibling id/role/path/kind) with "
+             "--json. Exit 3 when the current worktree is unpaired/untracked.",
+    )
     try:
         args = p.parse_args(argv)
     except SystemExit as exc:
         return int(exc.code or 0)
+
+    if args.pair:
+        return _state_root_pair(args.json)
 
     config = cfg.load_config()
     res = state_root_mod.resolve_state_root(config, repo_override=args.repo)
