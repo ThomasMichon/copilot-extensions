@@ -88,7 +88,10 @@ class TestRunWait:
         assert res.matched
         assert res.payload["transitions"] == ["conflict"]
 
-    def test_timeout_returns_unmatched(self):
+    def test_timeout_returns_snapshot_payload(self):
+        # #3486: a timeout now carries the current-state snapshot (verdict/merge
+        # block) from the last successful poll, so a short-timeout pr-watch
+        # doubles as a one-shot read instead of a bare timed_out.
         clock = _Clock(step=60.0)
         res = prw.run_wait(
             repo="o/r", pr=1, until=list(pc.DEFAULT_UNTIL), baseline=pc.Baseline(),
@@ -96,7 +99,27 @@ class TestRunWait:
             timeout=1.0, interval=1.0, now=clock.now, sleep=lambda s: None,
         )
         assert res.matched is False
-        assert res.payload == {}
+        assert res.payload["timed_out"] is True
+        assert res.payload["transitions"] == []
+        assert res.payload["pr_state"] == "open"
+        assert res.payload["mergeable"] is True
+        assert "merge" in res.payload  # the live verdict/merge/consent block
+
+    def test_timeout_without_any_snapshot_is_minimal(self):
+        # If every poll errored (no snapshot ever), the timeout payload degrades
+        # to the legacy minimal shape -- no snapshot to report.
+        clock = _Clock(step=60.0)
+
+        def fetch():
+            raise ProviderError("blip", transient=True)
+
+        res = prw.run_wait(
+            repo="o/r", pr=1, until=list(pc.DEFAULT_UNTIL), baseline=pc.Baseline(),
+            fetch=fetch, timeout=1.0, interval=1.0,
+            now=clock.now, sleep=lambda s: None, on_error=lambda e: None,
+        )
+        assert res.matched is False
+        assert res.payload == {"repo": "o/r", "pr": 1, "timed_out": True}
 
     def test_transient_error_retried_then_fires(self):
         calls = {"n": 0}
