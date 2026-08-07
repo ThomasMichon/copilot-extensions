@@ -51,6 +51,26 @@ class TestLocalClaimantAlive:
         assert claimant.local_claimant_alive(
             "lambda-core/aperture-labs/wt-A") is False
 
+    def test_finalized_parent_is_gone(self, tmp_path, monkeypatch):
+        # Citadel E1b (#877): a finalized parent whose dir still exists no longer
+        # protects its children -- the claimant gate reports it gone.
+        _seed_owner(tmp_path, monkeypatch, "aperture-labs", "wt-A")
+        tdir = tmp_path / ".aperture-labs" / "worktrees"
+        rec = tracking.load_record(tdir / "wt-A.yaml")
+        rec.status = "finalized"
+        tracking.save_record(rec, tdir / "wt-A.yaml")
+        assert claimant.local_claimant_alive(
+            "lambda-core/aperture-labs/wt-A") is False
+
+    def test_orphaned_parent_is_gone(self, tmp_path, monkeypatch):
+        _seed_owner(tmp_path, monkeypatch, "aperture-labs", "wt-A")
+        tdir = tmp_path / ".aperture-labs" / "worktrees"
+        rec = tracking.load_record(tdir / "wt-A.yaml")
+        rec.status = "orphaned"
+        tracking.save_record(rec, tdir / "wt-A.yaml")
+        assert claimant.local_claimant_alive(
+            "lambda-core/aperture-labs/wt-A") is False
+
     def test_cross_machine_none(self, tmp_path, monkeypatch):
         monkeypatch.setattr("agent_worktrees.config.load_config",
                             lambda *a, **k: _cfg("lambda-core"))

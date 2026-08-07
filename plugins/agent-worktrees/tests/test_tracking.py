@@ -14,6 +14,7 @@ from agent_worktrees.tracking import (
     create_new_record,
     deregister_session,
     find_paired_record,
+    find_orphaned_children,
     find_worktree_id_by_cwd,
     find_worktree_id_by_session,
     format_claim_ref,
@@ -23,6 +24,7 @@ from agent_worktrees.tracking import (
     mark_resumed,
     parse_claim_ref,
     register_session,
+    release_all_resources,
     resolve_worktree_path,
     save_record,
     set_disposition,
@@ -1098,6 +1100,99 @@ class TestPairedRecordResolution:
         )
         self._save(tmp_tracking_dir, rec)
         assert find_paired_record(rec) is None
+
+
+class TestCascadeAndOrphans:
+    """release_all_resources + find_orphaned_children -- the #877 E1b cascade."""
+
+    def _save(self, tracking_dir: Path, rec: WorktreeRecord) -> None:
+        save_record(rec, tracking_dir / f"{rec.worktree_id}.yaml")
+
+    def _rec(self, wt_id: str, **overrides) -> WorktreeRecord:
+        base = dict(
+            worktree_id=wt_id,
+            branch=f"worktree/{wt_id}",
+            worktree_path=f"/tmp/src/{wt_id}",
+            repo="test-repo",
+            machine="test",
+            platform="wsl",
+            started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00",
+            resume_count=0,
+            title=None,
+            status="active",
+            completed_at=None,
+            sessions=[],
+        )
+        base.update(overrides)
+        return WorktreeRecord(**base)
+
+    def test_release_all_resources_flips_live_claims(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        parent = self._rec("wt-parent", resources=[
+            ResourceClaim(kind="worktree", ref="test/other/wt-child", state="active"),
+            ResourceClaim(kind="worktree", ref="test/other/wt-old", state="released"),
+        ])
+        self._save(tmp_tracking_dir, parent)
+        released = release_all_resources(parent)
+        assert [c.ref for c in released] == ["test/other/wt-child"]
+        # Persisted: reload and confirm both are released now.
+        reloaded = load_record_by_id("wt-parent")
+        assert all(c.state == "released" for c in reloaded.resources)
+        assert reloaded.live_resources == []
+
+    def test_release_all_resources_idempotent(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        parent = self._rec("wt-parent", resources=[
+            ResourceClaim(kind="worktree", ref="test/other/wt-child", state="released"),
+        ])
+        self._save(tmp_tracking_dir, parent)
+        assert release_all_resources(parent) == []
+
+    def test_find_orphaned_children_finalized_and_absent_parents(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        import types
+        # Pin the local machine so the qualified test refs (machine="test") are
+        # judged as same-machine rather than skipped as cross-machine.
+        monkeypatch.setattr("agent_worktrees.config.load_config",
+                            lambda *a, **k: types.SimpleNamespace(machine="test"))
+        # A finalized parent + its child, a live parent + its child, and a child
+        # whose parent record is absent.
+        self._save(tmp_tracking_dir, self._rec("wt-fin", status="finalized"))
+        self._save(tmp_tracking_dir, self._rec("wt-live", status="active"))
+        self._save(tmp_tracking_dir, self._rec(
+            "c-of-fin", owner_ref="test/test-repo/wt-fin"))
+        self._save(tmp_tracking_dir, self._rec(
+            "c-of-live", owner_ref="test/test-repo/wt-live"))
+        self._save(tmp_tracking_dir, self._rec(
+            "c-of-gone", owner_ref="test/test-repo/wt-missing"))
+        self._save(tmp_tracking_dir, self._rec("unowned"))
+
+        orphans = find_orphaned_children(tmp_tracking_dir)
+        ids = {child.worktree_id for child, _ in orphans}
+        assert ids == {"c-of-fin", "c-of-gone"}
+        # The finalized-parent orphan pairs with its parent record; the
+        # absent-parent orphan pairs with None.
+        by_id = {child.worktree_id: parent for child, parent in orphans}
+        assert by_id["c-of-fin"].worktree_id == "wt-fin"
+        assert by_id["c-of-gone"] is None
+
+    def test_find_orphaned_children_skips_cross_machine(
+        self, tmp_tracking_dir: Path, monkeypatch, tmp_path: Path
+    ):
+        import types
+        monkeypatch.setenv("WORKTREE_PROJECT", "test-project")
+        monkeypatch.setattr("agent_worktrees.config.tracking_dir",
+                            lambda: tmp_tracking_dir)
+        monkeypatch.setattr("agent_worktrees.config.load_config",
+                            lambda *a, **k: types.SimpleNamespace(machine="here"))
+        # A child owned by a parent on ANOTHER machine is not judged locally.
+        self._save(tmp_tracking_dir, self._rec(
+            "c-remote", owner_ref="elsewhere/test-repo/wt-remote"))
+        assert find_orphaned_children(tmp_tracking_dir) == []
 
 
 class TestFindWorktreeIdBySession:

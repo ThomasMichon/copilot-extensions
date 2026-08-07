@@ -86,6 +86,14 @@ def local_claimant_alive(owner_ref: str) -> bool | None:
         owner_rec = tracking.load_record(rec_path)
     except Exception:
         return True  # record present but unreadable -> bias to sparing
+    # Citadel E1b cascade (#877): a parent in a TERMINAL status (finalized /
+    # orphaned) is done -- it no longer actively holds its outbound worktree
+    # resources, so its children are orphans. Treat it as gone here so a
+    # finalized-but-not-yet-pruned parent (whose dir still exists) stops pinning
+    # its children as "claimed". The children remain protected by their OWN
+    # git/PR/session prune safety, so nothing with real work is lost.
+    if owner_rec.status in tracking._TERMINAL_OWNER_STATUSES:
+        return False
     if owner_rec.worktree_path and not Path(owner_rec.worktree_path).exists():
         return False  # owner's worktree dir removed -> gone
     return True  # owner still present -> spare
