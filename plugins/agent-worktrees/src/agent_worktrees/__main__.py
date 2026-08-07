@@ -8232,8 +8232,12 @@ def cmd_update(args: argparse.Namespace) -> int:
                 x for x in [r.stdout.strip(), r.stderr.strip()] if x
             )
             output.warn(f"Plugin update returned non-zero:\n{detail}")
-    except FileNotFoundError:
-        output.warn("'copilot' CLI not found -- skipping plugin update")
+    except OSError:
+        # FileNotFoundError (no `copilot` on PATH) or PermissionError /
+        # ENOEXEC -- e.g. under WSL interop a bare `copilot` resolves to a
+        # non-executable Windows entry (dotfiles#990). Skip, don't crash.
+        output.warn("'copilot' CLI not found or not executable -- "
+                    "skipping plugin update")
     except subprocess.TimeoutExpired:
         output.warn("Plugin update timed out -- continuing with installed version")
 
@@ -8331,8 +8335,9 @@ def _refresh_marketplace(marketplace: str) -> None:
         )
         if r.returncode != 0:
             output.warn("Marketplace refresh returned non-zero -- continuing")
-    except FileNotFoundError:
-        output.warn("'copilot' CLI not found -- skipping marketplace refresh")
+    except OSError:
+        output.warn("'copilot' CLI not found or not executable -- "
+                    "skipping marketplace refresh")
     except subprocess.TimeoutExpired:
         output.warn("Marketplace refresh timed out -- continuing")
 
@@ -8358,9 +8363,10 @@ def _update_one_plugin_payload(name: str, marketplace: str) -> str:
             ["copilot", "plugin", verb, ref],
             capture_output=True, text=True, timeout=120,
         )
-    except FileNotFoundError:
-        output.warn("'copilot' CLI not found -- skipping plugin payload update")
-        return "copilot CLI not found"
+    except OSError:
+        output.warn("'copilot' CLI not found or not executable -- "
+                    "skipping plugin payload update")
+        return "copilot CLI not found or not executable"
     except subprocess.TimeoutExpired:
         output.warn(f"Plugin {verb} for {name} timed out -- continuing")
         return "timed out"
@@ -8646,8 +8652,9 @@ def _update_modules(
             else:
                 output.warn(f"Plugin update for {name} returned non-zero "
                             f"(continuing with installed version)")
-        except FileNotFoundError:
-            output.warn("'copilot' CLI not found -- skipping plugin refresh")
+        except OSError:
+            output.warn("'copilot' CLI not found or not executable -- "
+                        "skipping plugin refresh")
         except subprocess.TimeoutExpired:
             output.warn(f"Plugin update for {name} timed out -- "
                         "continuing with installed version")
@@ -13348,8 +13355,30 @@ def _route_to_sibling_plugin(slug: str, project: str | None,
     return subprocess.run(cmd).returncode
 
 
-def _git_toplevel(path: Path) -> Path | None:
-    """Return the git toplevel of ``path`` resolved to its anchor, or None."""
+def _safe_cwd() -> Path | None:
+    """Return ``Path.cwd()``, or ``None`` if the current directory is gone.
+
+    ``os.getcwd()`` raises ``FileNotFoundError`` when the process's working
+    directory has been removed out from under it. This happens when a plugin
+    hook re-invokes this CLI during ``copilot plugin update``: Copilot deletes
+    and re-vendors the payload directory the hook inherited as its cwd, so the
+    hook subprocess ends up with a vanished cwd. Treat that as "no project
+    context" rather than crashing startup (dotfiles#989).
+    """
+    try:
+        return Path.cwd()
+    except OSError:
+        return None
+
+
+def _git_toplevel(path: Path | None) -> Path | None:
+    """Return the git toplevel of ``path`` resolved to its anchor, or None.
+
+    ``path`` may be ``None`` (e.g. ``_safe_cwd()`` returned ``None`` because the
+    caller's cwd was deleted); in that case there is nothing to resolve.
+    """
+    if path is None:
+        return None
     try:
         r = subprocess.run(
             ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
@@ -13443,7 +13472,7 @@ def _cwd_is_inside_project(anchor: Path) -> bool:
     Uses the git toplevel of CWD, resolved to its anchor, compared
     case-insensitively on Windows.
     """
-    top = _git_toplevel(Path.cwd())
+    top = _git_toplevel(_safe_cwd())
     if top is None:
         return False
     return git_ops._normalize_wt_path(str(top)) == git_ops._normalize_wt_path(str(anchor))
@@ -13467,7 +13496,7 @@ def _resolve_active_project(
     """
     if project_override:
         return project_override, _anchor_for_project(project_override)
-    cwd_anchor = _git_toplevel(Path.cwd())
+    cwd_anchor = _git_toplevel(_safe_cwd())
     if cwd_anchor is not None:
         name = _reverse_lookup_project(cwd_anchor)
         if name:
@@ -13522,7 +13551,7 @@ def cmd_help_unrouted(requested: str | None = None) -> int:
         projects = inst.read_projects_registry().get("projects", {})
     except Exception:
         projects = {}
-    cwd_anchor = _git_toplevel(Path.cwd())
+    cwd_anchor = _git_toplevel(_safe_cwd())
 
     matched: str | None = None
     if cwd_anchor is not None:
