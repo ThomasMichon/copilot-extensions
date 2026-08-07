@@ -196,10 +196,14 @@ class PRConfig:
     # - ``self_approve``    -- may the SUBMITTER approve their own PR? An owner
     #   repo may allow it; a reviewer-gated repo forbids it. This (or
     #   ``merge_actor: submitter-direct``) selects the ``pr-self-merge`` profile.
-    # - ``merge_actor``     -- who lands it: ``"submitter-direct"`` (the
-    #   submitter merges), ``"reviewer"`` (the approver merges),
-    #   ``"consent-gate"`` (a consent label triggers the gate), or ``""``
-    #   (derive from ``automerge_label`` / ``self_approve``).
+    # - ``merge_actor``     -- how the merge is performed. **Only
+    #   ``"submitter-direct"`` is consumed as an input today**: it (or
+    #   ``self_approve``) selects the ``pr-self-merge`` profile. The other modes
+    #   a flow can report -- ``reviewer`` (the approver merges) and
+    #   ``consent-gate`` (a consent label triggers the gate) -- are **derived**
+    #   from ``automerge_label`` / ``self_approve`` by ``classify_pr_flow`` and
+    #   are not (yet) accepted here; setting them has no effect. Leave ``""`` to
+    #   derive the mode.
     # - ``conflict_retriggers_review`` -- does a post-approval rebase+push send
     #   the PR back through review? (informs the conflict-path reminder.)
     reviewer: str = ""

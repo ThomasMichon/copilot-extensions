@@ -924,11 +924,14 @@ def pr_reminder(
 
     # Direct-push repo: no PR ceremony at all.
     if flow.profile == PROFILE_DIRECT:
+        # Any PR-landing verb (including ``create-pr`` / ``pr-create``, which do
+        # NOT start with "pr") should point at the sanctioned ``finalize``.
+        _pr_verb = verb.startswith("pr") or verb in ("create-pr", "pr-create")
         return PRReminder(
             profile=flow.profile, verb=verb, state=state, ok=ok,
             headline="direct-push repo -- no PR flow",
             next_step="`finalize` lands the worktree to the default branch",
-            waiting_on=(), use_instead=(("finalize",) if verb.startswith("pr") else ()),
+            waiting_on=(), use_instead=(("finalize",) if _pr_verb else ()),
             cautions=(),
         )
 

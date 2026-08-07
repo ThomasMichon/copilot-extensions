@@ -476,6 +476,14 @@ class TestPRReminder:
         r = pc.pr_reminder(flow, "pr-merge")
         assert "finalize" in (r.next_step + " " + " ".join(r.use_instead))
 
+    def test_direct_repo_create_pr_still_points_at_finalize(self):
+        # create-pr does NOT start with "pr" -- the blocked/direct reminder
+        # must still steer it to the sanctioned finalize verb.
+        flow = pc.classify_pr_flow(enabled=False)
+        for verb in ("create-pr", "pr-create"):
+            r = pc.pr_reminder(flow, verb)
+            assert "finalize" in r.use_instead, verb
+
     def test_conflict_caution_present_when_retriggers_review(self):
         flow = _self_merge_flow(conflict_retriggers_review=True)
         r = pc.pr_reminder(flow, "pr-watch")
