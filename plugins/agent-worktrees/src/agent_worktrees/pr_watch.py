@@ -126,6 +126,7 @@ def run_wait(
 
     deadline = now() + timeout if timeout > 0 else None
     base = baseline
+    last_snap: pc.PRSnapshot | None = None
     while True:
         try:
             snap: pc.PRSnapshot | None = fetch()
@@ -136,6 +137,7 @@ def run_wait(
                 on_error(exc)
             snap = None
         if snap is not None:
+            last_snap = snap
             if on_poll is not None:
                 on_poll(snap)
             if base is None:
@@ -162,7 +164,15 @@ def run_wait(
                     return WaitResult(True, _decorate(events, snap))
 
         if deadline is not None and now() >= deadline:
-            return WaitResult(False)
+            # #3486: on timeout, still return the current-state snapshot -- the
+            # same verdict/merge block a fired transition carries (with an empty
+            # transition list) -- so a short-timeout pr-watch doubles as a
+            # one-shot read instead of emitting a bare, unactionable timed_out.
+            if last_snap is not None:
+                payload = _decorate([], last_snap)
+                payload["timed_out"] = True
+                return WaitResult(False, payload)
+            return WaitResult(False, {"repo": repo, "pr": pr, "timed_out": True})
         if deadline is not None:
             sleep(max(0.0, min(interval, deadline - now())))
         else:
