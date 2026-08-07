@@ -13,7 +13,7 @@ authors = [
     { name = "Thomas Michon" }
 ]
 dependencies = [
-    "fastapi>=0.110",
+    "fastapi>=0.141.1",
     "uvicorn>=0.29",
     "httpx>=0.27",
 ]
