@@ -112,13 +112,48 @@ def _venv_python(name: str) -> Path:
     return base / "bin" / "python"
 
 
+def _dep_fingerprint(name: str) -> str:
+    """Hash the plugin's ``pyproject.toml`` plus any vendored lib pyprojects, so
+    a dependency change forces a venv rebuild. Without this, ``_ensure_venv``
+    reuses a cached venv whose installed deps have drifted -- e.g. a path dep
+    added across a branch rebase is silently absent, masking/introducing
+    failures (a stale venv once produced 28 phantom ``ModuleNotFoundError``s)."""
+    import hashlib
+    pdir = _plugin_dir(name)
+    parts = [pdir / "pyproject.toml"]
+    libs = pdir / "libs"
+    if libs.is_dir():
+        parts += sorted(libs.glob("*/pyproject.toml"))
+    h = hashlib.sha256()
+    for p in parts:
+        try:
+            h.update(p.read_bytes())
+        except OSError:
+            pass
+    return h.hexdigest()
+
+
 def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
     """Create (or reuse) the cached dev venv for ``name`` and return its python."""
     venv = VENV_ROOT / name
     py = _venv_python(name)
+    stamp = venv / ".dep-fingerprint"
+    fingerprint = _dep_fingerprint(name)
     if reinstall and venv.exists():
         shutil.rmtree(venv, ignore_errors=True)
     fresh = not py.exists()
+    # Rebuild a cached venv whose dependency fingerprint has drifted (e.g. a
+    # dependency added across a rebase) -- otherwise the stale venv silently
+    # masks or introduces failures instead of testing the current deps.
+    if not fresh:
+        try:
+            drifted = stamp.read_text(encoding="utf-8").strip() != fingerprint
+        except OSError:
+            drifted = True
+        if drifted:
+            shutil.rmtree(venv, ignore_errors=True)
+            py = _venv_python(name)
+            fresh = True
     if fresh:
         VENV_ROOT.mkdir(parents=True, exist_ok=True)
         subprocess.run([uv, "venv", str(venv)], check=True)
@@ -130,6 +165,7 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
         if spec == ".":
             cmd.append("pytest")   # no dev extra -> ensure a runner is present
         subprocess.run(cmd, cwd=str(_plugin_dir(name)), check=True)
+        stamp.write_text(fingerprint, encoding="utf-8")
     return py
 
 

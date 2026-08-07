@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -689,6 +690,11 @@ def test_resolve_copilot_falls_back_to_autoinstall_location(monkeypatch, tmp_pat
     assert reconcile.resolve_copilot() == str(autoinstall)
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="POSIX execute-bit semantics: Windows ignores chmod(0o644), so an "
+           "existing fallback still reads as executable and is selected.",
+)
 def test_resolve_copilot_skips_non_executable_fallback(monkeypatch, tmp_path):
     """A fallback that exists but is not executable is not selected."""
     monkeypatch.setattr(reconcile.shutil, "which", lambda name: None)
