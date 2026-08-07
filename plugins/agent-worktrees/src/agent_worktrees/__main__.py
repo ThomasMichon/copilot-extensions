@@ -8432,6 +8432,17 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
     return 0
 
 
+def _resolve_copilot() -> str | None:
+    """Resolve a runnable Copilot CLI executable, or ``None``.
+
+    Thin delegate to the shared resolver in ``reconcile`` (used by both this
+    update flow and the session-start provision path). Never installs Copilot --
+    see ``reconcile.resolve_copilot`` (dotfiles#990).
+    """
+    from . import reconcile as _rc
+    return _rc.resolve_copilot()
+
+
 def cmd_update(args: argparse.Namespace) -> int:
     """Update agent-worktrees via the Copilot CLI plugin system.
 
@@ -8450,7 +8461,7 @@ def cmd_update(args: argparse.Namespace) -> int:
     output.info(f"Updating plugin: {plugin_ref}")
     try:
         r = subprocess.run(
-            ["copilot", "plugin", "update", plugin_ref],
+            [_resolve_copilot() or "copilot", "plugin", "update", plugin_ref],
             capture_output=True, text=True, timeout=120,
         )
         if r.returncode == 0:
@@ -8559,7 +8570,7 @@ def _refresh_marketplace(marketplace: str) -> None:
     """
     try:
         r = subprocess.run(
-            ["copilot", "plugin", "marketplace", "update", marketplace],
+            [_resolve_copilot() or "copilot", "plugin", "marketplace", "update", marketplace],
             capture_output=True, text=True, timeout=120,
         )
         if r.returncode != 0:
@@ -8589,7 +8600,7 @@ def _update_one_plugin_payload(name: str, marketplace: str) -> str:
     verb = "update" if installed else "install"
     try:
         r = subprocess.run(
-            ["copilot", "plugin", verb, ref],
+            [_resolve_copilot() or "copilot", "plugin", verb, ref],
             capture_output=True, text=True, timeout=120,
         )
     except OSError:
@@ -8615,7 +8626,7 @@ def _update_one_plugin_payload(name: str, marketplace: str) -> str:
     output.info(f"Plugin install for {name} returned non-zero -- retrying")
     try:
         r2 = subprocess.run(
-            ["copilot", "plugin", "install", ref],
+            [_resolve_copilot() or "copilot", "plugin", "install", ref],
             capture_output=True, text=True, timeout=120,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
@@ -8872,7 +8883,7 @@ def _update_modules(
         plugin_ref = f"{name}@copilot-extensions"
         try:
             r = subprocess.run(
-                ["copilot", "plugin", "update", plugin_ref],
+                [_resolve_copilot() or "copilot", "plugin", "update", plugin_ref],
                 capture_output=True, text=True, timeout=120,
             )
             if r.returncode == 0:

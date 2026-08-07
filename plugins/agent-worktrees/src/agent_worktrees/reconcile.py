@@ -54,6 +54,42 @@ SELF_PLUGIN = "agent-worktrees"
 CACHE_NAME = "plugin-reconcile-cache.json"
 VALID_SCOPES = ("universal", "machine-gated", "none")
 
+# Candidate locations for the Copilot CLI executable when a bare ``copilot`` is
+# not resolvable on PATH. We never *install* Copilot: on WSL the Windows Copilot
+# CLI ships a stub that auto-installs the Linux binary on first run (to
+# ``~/.local/share/gh/copilot/copilot``), but nothing puts that binary on the
+# Linux PATH -- and a bare ``copilot`` there resolves via WSL interop to the
+# non-executable Windows stub (dotfiles#990). Checked in order.
+_COPILOT_FALLBACK_PATHS: tuple[Path, ...] = (
+    Path.home() / ".local" / "bin" / "copilot",
+    Path.home() / ".local" / "share" / "gh" / "copilot" / "copilot",
+)
+
+
+def resolve_copilot() -> str | None:
+    """Resolve a runnable Copilot CLI executable, or ``None``.
+
+    Prefers a real bare ``copilot`` on PATH (``shutil.which`` -- POSIX, so it
+    never appends ``.exe`` and never matches the Windows interop stub), then
+    falls back to the known auto-install locations. Resolving to an absolute
+    path also sidesteps WSL interop resolving ``copilot`` to the non-executable
+    Windows stub. Returns ``None`` when no runnable Copilot CLI is found, so
+    callers degrade to a graceful skip rather than crashing (dotfiles#990).
+
+    This only *finds* Copilot; it never installs it -- the Windows-side stub
+    owns auto-install.
+    """
+    found = shutil.which("copilot")
+    if found:
+        return found
+    for p in _COPILOT_FALLBACK_PATHS:
+        try:
+            if p.is_file() and os.access(p, os.X_OK):
+                return str(p)
+        except OSError:
+            continue
+    return None
+
 # Machine-gate source (pluggable). The reconciler reads the per-plugin allowed
 # machine set from a control-harness manifest. The manifest filename(s) and an
 # optional anchor repo (searched via the repos registry when the current repo
@@ -695,9 +731,12 @@ def apply_plan(
             argv = list(upd.get("argv") or [])
             if not argv:
                 continue
-            if argv[0] == "copilot" and shutil.which("copilot") is None:
-                _log(f"provision: skipping {service} (copilot not on PATH)")
-                continue
+            if argv[0] == "copilot":
+                copilot = resolve_copilot()
+                if copilot is None:
+                    _log(f"provision: skipping {service} (copilot not found)")
+                    continue
+                argv[0] = copilot
             _log(f"provision: {service} [{upd.get('reason', '?')}] -> {' '.join(argv)}")
             try:
                 rc = run(argv)
