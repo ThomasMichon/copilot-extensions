@@ -27,41 +27,67 @@ AZURE_STORAGE_RESOURCE = "https://storage.azure.com/"
 DEFAULT_AZURE_RESOURCES = [ADO_REST_RESOURCE, AZURE_STORAGE_RESOURCE]
 
 
-def register_relay(builder) -> None:
-    """Inject the codespace credential-relay profile into ``builder``.
+def relay_profile() -> dict:
+    """The declarative codespace relay profile agent-bridge applies over a
+    process boundary (#892 Inc 2).
 
-    ``builder`` is a :class:`credential_relay.registry.RelayBuilder`.
+    Emits the same policy `register_relay` applies in-process -- sources, relay
+    port, ADO host, the Azure resource allowlist, the token-gated actions, and
+    the **token-store file path** -- as plain JSON so agent-bridge can apply it
+    with a file-backed validator instead of importing this module. Derived from
+    the same merged config, so the CLI path and the in-process fallback stay in
+    lockstep. Config-unavailable degrades to the relay defaults (port/ado_host
+    ``None`` -> the builder's ``set_*`` are no-ops, exactly as today).
     """
-    from credential_relay.sources.git_credential import GitCredentialSource
-
-    from .relay_token import validate as _validate_codespace_token
-
-    builder.add_source(GitCredentialSource())
+    from .relay_token import _TOKENS_FILE
 
     azure_resources = set(DEFAULT_AZURE_RESOURCES)
-
-    # Honor the configured relay_port + ado_host from codespaces.yaml. The port
-    # must match what the SSH tunnel forwards; the ado_host lets host-less
-    # ``ado-auth-helper get-access-token`` (no scope) requests resolve a default
-    # ADO host instead of being rejected (#64). Additional Azure resources may be
-    # opted in explicitly through credentials.sources.az-login.allowed_resources;
-    # the default remains the narrow ADO REST audience, never an internal org.
+    port: int | None = None
+    ado_host: str | None = None
     try:
         from .config import load_merged_config
 
         creds = load_merged_config().credentials
-        builder.set_port(creds.relay_port)
-        builder.set_ado_host(creds.ado_host)
+        port = creds.relay_port
+        ado_host = creds.ado_host
         az_cfg = creds.sources.get("az-login")
         if az_cfg and az_cfg.enabled:
             azure_resources.update(az_cfg.allowed_resources)
     except Exception:  # pragma: no cover - config optional
         log.debug("codespaces relay config unavailable; using relay defaults")
 
+    return {
+        "sources": ["git-credential"],
+        "port": port,
+        "ado_host": ado_host,
+        "azure_resources": sorted(azure_resources),
+        "gated_actions": ["get-azure-token"],
+        "token_store": str(_TOKENS_FILE),
+    }
+
+
+def register_relay(builder) -> None:
+    """Inject the codespace credential-relay profile into ``builder``.
+
+    ``builder`` is a :class:`credential_relay.registry.RelayBuilder`. Applies the
+    same profile :func:`relay_profile` emits, but with the **in-process** token
+    validator -- this is the degrade-safe fallback agent-bridge uses when the
+    ``agent-codespaces relay-profile`` CLI seam is unavailable (#892 Inc 2).
+    ``set_port(None)`` / ``set_ado_host(None)`` are internally no-ops, so a
+    config-unavailable profile behaves exactly as before.
+    """
+    from credential_relay.sources.git_credential import GitCredentialSource
+
+    from .relay_token import validate as _validate_codespace_token
+
+    prof = relay_profile()
+    builder.add_source(GitCredentialSource())
+    builder.set_port(prof["port"])
+    builder.set_ado_host(prof["ado_host"])
     # Raw Azure/Entra bearer minting stays policy-gated: by default the
     # CodeSpace can ask only for the public ADO REST resource, plus any resources
     # explicitly configured by the adopting repo. The shared relay also serves
     # network-reachable targets, so get-azure-token must stay behind a
     # per-codespace token even though CodeSpaces reach it through an SSH tunnel.
-    builder.allow_azure_resources(sorted(azure_resources))
-    builder.require_token(["get-azure-token"], _validate_codespace_token)
+    builder.allow_azure_resources(prof["azure_resources"])
+    builder.require_token(prof["gated_actions"], _validate_codespace_token)
