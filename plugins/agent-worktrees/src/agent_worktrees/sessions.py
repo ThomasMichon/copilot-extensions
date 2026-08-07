@@ -1560,7 +1560,9 @@ def _stamp_mux_live_quiet(worktree_id: str, live: bool) -> None:
     """Best-effort #4057 cached-liveness stamp; never disturbs the caller."""
     try:
         from . import tracking
-        tracking.stamp_mux_live(worktree_id, live)
+        # sync: this is a lifecycle transition (post-kill), not the render path,
+        # and durability before the next populate is preferred over off-loading.
+        tracking.stamp_mux_live(worktree_id, live, sync=True)
     except Exception:
         pass
 

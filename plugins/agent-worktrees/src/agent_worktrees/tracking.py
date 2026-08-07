@@ -1171,7 +1171,7 @@ def _stamp_liveness(
 
 def stamp_mux_live(
     worktree_id: str, live: bool, *,
-    refresh: bool = False, throttle_secs: float = 60.0,
+    refresh: bool = False, throttle_secs: float = 60.0, sync: bool = False,
 ) -> None:
     """Cache the last-known multiplexer liveness on a worktree's record (#4057).
 
@@ -1184,6 +1184,14 @@ def stamp_mux_live(
     never raises, and no-ops when the record is absent or unchanged (so it adds
     no YAML churn when the liveness has not moved).
 
+    **Async by default** (dotfiles#948 follow-up): every caller is a
+    fire-and-forget cache warm (the action-moment verb set uses the LIVE verdict,
+    not this cached value), and one site -- opening the Actions menu -- runs on
+    the picker's UI thread. So the YAML write is kept off the caller's thread and
+    serialized through the shared single-writer :data:`_STAMP_QUEUE` (coalesced
+    per worktree with the session-state stamp). Pass ``sync=True`` to apply inline
+    (tests, or a caller that needs the write durable before it returns).
+
     ``refresh`` (default False) additionally renews the freshness timestamp when
     the value is UNCHANGED, so a steadily-live worktree observed authoritatively
     (e.g. a repeat Actions-menu verify) keeps a fresh stamp instead of aging past
@@ -1194,10 +1202,14 @@ def stamp_mux_live(
     (it records the transition). ``refresh`` is for low-frequency authoritative
     observation points only -- never the populate hot path.
     """
-    _stamp_liveness(
-        worktree_id, live, live_attr="mux_live", at_attr="mux_live_at",
-        refresh=refresh, throttle_secs=throttle_secs,
-    )
+    if sync:
+        _stamp_liveness(
+            worktree_id, live, live_attr="mux_live", at_attr="mux_live_at",
+            refresh=refresh, throttle_secs=throttle_secs,
+        )
+        return
+    _STAMP_QUEUE.submit_mux(
+        worktree_id, live, refresh=refresh, throttle_secs=throttle_secs)
 
 
 def stamp_bound_live(
@@ -1329,6 +1341,21 @@ class _StampWriteQueue:
         self._q.put(worktree_id)
         self._ensure_worker()
 
+    def submit_mux(self, worktree_id: str, live: bool, *,
+                   refresh: bool, throttle_secs: float) -> None:
+        """Coalesce a cached mux-liveness intent for a worktree (last wins).
+
+        Stored under the reserved ``_mux`` key so it is applied (via the existing
+        sync :func:`_stamp_liveness`) in the same single-writer drain as the
+        session-state fields -- serialized against every other YAML write, off
+        the caller's (UI) thread.
+        """
+        with self._lock:
+            cur = self._pending.setdefault(worktree_id, {})
+            cur["_mux"] = (bool(live), bool(refresh), float(throttle_secs))
+        self._q.put(worktree_id)
+        self._ensure_worker()
+
     def _run(self) -> None:
         while True:
             worktree_id = self._q.get()
@@ -1342,8 +1369,16 @@ class _StampWriteQueue:
             fields = self._pending.pop(worktree_id, None)
         if not fields:
             return
+        mux = fields.pop("_mux", None)
         try:
-            _apply_session_state_stamp(worktree_id, **fields)
+            if fields:
+                _apply_session_state_stamp(worktree_id, **fields)
+            if mux is not None:
+                live, refresh, throttle = mux
+                _stamp_liveness(
+                    worktree_id, live, live_attr="mux_live",
+                    at_attr="mux_live_at", refresh=refresh,
+                    throttle_secs=throttle)
         except Exception:
             pass
 
