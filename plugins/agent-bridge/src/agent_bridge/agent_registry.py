@@ -24,6 +24,9 @@ import inspect
 import json
 import logging
 import os
+import shutil
+import subprocess
+import sys
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -293,6 +296,157 @@ class NamespaceResolver(ABC):
         resolver that hosts a known repo (e.g. a CodeSpace's repository) should
         return it; the default returns ``None`` (no related-repo injection).
         """
+        return None
+
+
+# Cross-plugin exit-code contract for the ``namespace-resolve`` CLI seam
+# (#892 Inc 3): a provider's ``namespace-resolve`` maps its resolver's
+# ``KeyError`` (not found) -> exit 3 and ``ValueError`` (bad state) -> exit 4, so
+# the process boundary preserves those distinct outcomes. Kept in sync with each
+# provider's ``_NS_NOT_FOUND_EXIT`` / ``_NS_BAD_STATE_EXIT``.
+_NS_NOT_FOUND_EXIT = 3
+_NS_BAD_STATE_EXIT = 4
+
+
+class CliNamespaceResolver(NamespaceResolver):
+    """Drive a namespace provider over a **process boundary** (#892 Inc 3).
+
+    Implements the :class:`NamespaceResolver` interface by shelling out to the
+    provider's binstub (``<binstub> namespace-list/-resolve/-target-repo/
+    -ensure-ready``) instead of importing the provider's resolver in the bridge
+    venv -- so a provider fix reaches dispatch from the provider's OWN venv with
+    no agent-bridge redeploy (retires the vendoring-drift class for the resolver
+    seam). Falls back to an in-process ``fallback`` resolver on any *subprocess*
+    failure (binstub absent, unexpected non-zero, unparseable output), so
+    resolution can never regress while the venvs are still coupled. A provider's
+    *legitimate* not-found (exit 3) / bad-state (exit 4) is mapped back to
+    ``KeyError`` / ``ValueError`` -- not treated as a failure -- so the boundary
+    preserves the resolver contract.
+    """
+
+    def __init__(
+        self, prefix: str, binstub: str,
+        fallback: NamespaceResolver | None = None,
+    ) -> None:
+        self._prefix = prefix
+        self._binstub = binstub
+        self._fallback = fallback
+
+    @property
+    def prefix(self) -> str:
+        return self._prefix
+
+    @property
+    def bare_addressable(self) -> bool:
+        if self._fallback is not None:
+            return self._fallback.bare_addressable
+        return True
+
+    async def _run(
+        self, argv: list[str], *, timeout: float = 90.0,
+    ) -> tuple[int, str, str] | None:
+        """Run ``<binstub> <argv...>``; return ``(rc, stdout, stderr)`` or
+        ``None`` when the process could not be launched (binstub absent / spawn
+        error) -- the signal to fall back to the in-process resolver."""
+        exe = shutil.which(self._binstub)
+        if not exe:
+            return None
+
+        def _call() -> subprocess.CompletedProcess[str]:
+            creationflags = (
+                subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            )
+            return subprocess.run(
+                [exe, *argv], capture_output=True, text=True, timeout=timeout,
+                creationflags=creationflags,
+            )
+
+        try:
+            r = await asyncio.to_thread(_call)
+            return r.returncode, r.stdout, r.stderr
+        except Exception:
+            log.debug(
+                "CLI namespace call failed: %s %s", self._binstub, argv,
+                exc_info=True,
+            )
+            return None
+
+    async def _fallback_or_raise(self, method: str, *args, **kwargs):
+        if self._fallback is None:
+            raise RuntimeError(
+                f"{self._binstub} {method} unavailable and no in-process "
+                f"fallback resolver for namespace '{self._prefix}:'"
+            )
+        return await getattr(self._fallback, method)(*args, **kwargs)
+
+    async def list(self) -> list[NamespaceAgentInfo]:
+        res = await self._run(["namespace-list"])
+        if res is not None and res[0] == 0:
+            try:
+                return [NamespaceAgentInfo(**d) for d in json.loads(res[1])]
+            except Exception:
+                log.warning(
+                    "namespace-list output unparseable (%s) -- falling back",
+                    self._binstub, exc_info=True,
+                )
+        return await self._fallback_or_raise("list")
+
+    async def resolve(
+        self, name: str, *, extra_plugins: "list[PluginRef]" = (),
+        repo: str | None = None, repo_remote: str | None = None,
+    ) -> SpawnTarget:
+        argv = ["namespace-resolve", name]
+        if repo:
+            argv += ["--repo", repo]
+        if repo_remote:
+            argv += ["--repo-remote", repo_remote]
+        for p in extra_plugins or ():
+            src = getattr(p, "source", None)
+            if src:
+                argv += ["--stage-plugin", src]
+        res = await self._run(argv)
+        if res is not None:
+            rc, out, err = res
+            if rc == _NS_NOT_FOUND_EXIT:
+                raise KeyError(err.strip() or name)
+            if rc == _NS_BAD_STATE_EXIT:
+                raise ValueError(err.strip() or f"{name} is not spawnable")
+            if rc == 0:
+                try:
+                    spec = json.loads(out)
+                    return SpawnTarget(
+                        type=spec.get("type", "command"),
+                        spawn_command=spec["spawn_command"],
+                        user=spec.get("user"),
+                    )
+                except Exception:
+                    log.warning(
+                        "namespace-resolve output unparseable (%s) -- falling "
+                        "back", self._binstub, exc_info=True,
+                    )
+            # any other non-zero -> a CLI failure, not a resolver outcome
+        return await self._fallback_or_raise(
+            "resolve", name, extra_plugins=extra_plugins, repo=repo,
+            repo_remote=repo_remote,
+        )
+
+    async def ensure_ready(self, name: str) -> None:
+        res = await self._run(["namespace-ensure-ready", name])
+        if res is None:
+            await self._fallback_or_raise("ensure_ready", name)
+            return
+        rc, _out, err = res
+        if rc == 0:
+            return
+        # A ran-but-non-zero ensure-ready is the authoritative "not ready".
+        raise RuntimeError(err.strip() or f"{self._prefix}:{name} is not ready")
+
+    async def target_repo(self, name: str) -> str | None:
+        res = await self._run(["namespace-target-repo", name])
+        if res is not None and res[0] == 0:
+            return res[1].strip() or None
+        if self._fallback is not None:
+            return await self._fallback.target_repo(name)
         return None
 
 
@@ -1093,13 +1247,33 @@ def _register_namespace_resolvers(resolver: AgentResolver) -> None:
     :func:`_log_missing_namespace`.
     """
     # codespace: -- GitHub Codespaces (agent-codespaces package)
+    # #892 Inc 3: drive the resolver over a process boundary (the
+    # `agent-codespaces namespace-*` CLI) via CliNamespaceResolver, so an
+    # agent-codespaces resolver fix reaches dispatch from its OWN venv with no
+    # bridge redeploy. The in-process CodespaceResolver is kept as the
+    # degrade-safe fallback (used only if the binstub is absent / the CLI
+    # misfires) until the vendoring is removed in a later increment.
     try:
         from agent_codespaces.resolver import CodespaceResolver
 
-        resolver.register_namespace_resolver(CodespaceResolver())
-        log.info("Registered codespace: namespace resolver (agent-codespaces)")
+        resolver.register_namespace_resolver(
+            CliNamespaceResolver(
+                "codespace", "agent-codespaces", CodespaceResolver()
+            )
+        )
+        log.info("Registered codespace: namespace resolver (CLI seam #892)")
     except ImportError:
-        _log_missing_namespace("agent-codespaces", "codespace:")
+        # No in-process import, but the CLI seam still works if the binstub is
+        # present -- register a fallback-less shim so dispatch keeps working.
+        if shutil.which("agent-codespaces"):
+            resolver.register_namespace_resolver(
+                CliNamespaceResolver("codespace", "agent-codespaces")
+            )
+            log.info(
+                "Registered codespace: namespace resolver (CLI-only seam #892)"
+            )
+        else:
+            _log_missing_namespace("agent-codespaces", "codespace:")
     except Exception:
         log.warning(
             "Failed to register codespace: namespace resolver",

@@ -259,3 +259,70 @@ class TestDecouplingSeams:
             rc = main(["relay-launch-env", "my-cs"])
         assert rc == 0
         m.assert_called_once_with("my-cs", relay_port=None)
+
+
+# --- namespace-* resolver seam (dotfiles #892 Increment 3) ---------------
+
+class TestNamespaceSeams:
+    def test_namespace_list_json(self, capsys):
+        import json as _json
+
+        async def _list_specs(self):
+            return [{"name": "cs-a", "display_name": "A", "description": "d",
+                     "icon": "codespace", "state": "available", "aliases": []}]
+
+        with patch("agent_codespaces.resolver.CodespaceResolver.list_specs", _list_specs):
+            rc = main(["namespace-list"])
+        assert rc == 0
+        assert _json.loads(capsys.readouterr().out)[0]["name"] == "cs-a"
+
+    def test_namespace_resolve_json_and_argv(self, capsys):
+        import json as _json
+        seen = {}
+
+        async def _spec(self, name, *, extra_plugin_sources=(), repo=None, repo_remote=None):
+            seen["args"] = (name, list(extra_plugin_sources), repo, repo_remote)
+            return {"type": "command", "spawn_command": ["ssh", name], "user": "u"}
+
+        with patch("agent_codespaces.resolver.CodespaceResolver.resolve_spec", _spec):
+            rc = main(["namespace-resolve", "cs-a", "--repo", "o/r",
+                       "--repo-remote", "https://x/r.git", "--stage-plugin", "/p/one"])
+        assert rc == 0
+        assert _json.loads(capsys.readouterr().out)["spawn_command"] == ["ssh", "cs-a"]
+        assert seen["args"] == ("cs-a", ["/p/one"], "o/r", "https://x/r.git")
+
+    def test_namespace_resolve_not_found_exit3(self, capsys):
+        async def _spec(self, name, **kw):
+            raise KeyError(name)
+
+        with patch("agent_codespaces.resolver.CodespaceResolver.resolve_spec", _spec):
+            assert main(["namespace-resolve", "nope"]) == 3
+
+    def test_namespace_resolve_bad_state_exit4(self, capsys):
+        async def _spec(self, name, **kw):
+            raise ValueError("bad state")
+
+        with patch("agent_codespaces.resolver.CodespaceResolver.resolve_spec", _spec):
+            assert main(["namespace-resolve", "cs-a"]) == 4
+
+    def test_namespace_target_repo(self, capsys):
+        async def _tr(self, name):
+            return "owner/name"
+
+        with patch("agent_codespaces.resolver.CodespaceResolver.target_repo", _tr):
+            rc = main(["namespace-target-repo", "cs-a"])
+        assert rc == 0
+        assert capsys.readouterr().out.strip() == "owner/name"
+
+    def test_namespace_ensure_ready_ok_and_fail(self, capsys):
+        async def _ok(self, name):
+            return None
+
+        with patch("agent_codespaces.resolver.CodespaceResolver.ensure_ready", _ok):
+            assert main(["namespace-ensure-ready", "cs-a"]) == 0
+
+        async def _fail(self, name):
+            raise RuntimeError("nope")
+
+        with patch("agent_codespaces.resolver.CodespaceResolver.ensure_ready", _fail):
+            assert main(["namespace-ensure-ready", "cs-a"]) == 1
