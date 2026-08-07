@@ -532,6 +532,18 @@ deploy_package() {
         fi
     fi
 
+    # Vendored plugin-resolution lib (agent-plugin-resolve / module
+    # plugin_resolve). Install it first so the package's dependency is satisfied
+    # from the local path (mirrors config-migrate above).
+    local plugin_resolve_dir="$PLUGIN_DIR/libs/plugin-resolve"
+    if [[ -f "$plugin_resolve_dir/pyproject.toml" ]]; then
+        if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-plugin-resolve \
+                "$plugin_resolve_dir" --quiet; then
+            err "plugin-resolve library install failed"
+            return 1
+        fi
+    fi
+
     if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-worktrees "$PLUGIN_DIR" --quiet; then
         err "Package install failed"
         return 1

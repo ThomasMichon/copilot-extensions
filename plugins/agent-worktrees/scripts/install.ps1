@@ -806,6 +806,22 @@ function Deploy-Package {
         }
     }
 
+    # Vendored plugin-resolution lib (agent-plugin-resolve / module
+    # plugin_resolve). Like config-migrate, install it first so the package's
+    # dependency is satisfied from the local path: the venv build prefers
+    # `python -m pip`, which does NOT honor pyproject's [tool.uv.sources] path,
+    # so the dep must already be present when the main package installs.
+    $pluginResolveDir = Join-Path $PluginDir 'libs\plugin-resolve'
+    if (Test-Path (Join-Path $pluginResolveDir 'pyproject.toml')) {
+        $libRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-plugin-resolve' -PkgDir $pluginResolveDir
+        if ($libRes.ExitCode -ne 0) {
+            Write-ServiceErr "plugin-resolve library install failed (exit $($libRes.ExitCode))"
+            if ($libRes.Output.Trim()) { Write-ServiceErr ("install: " + $libRes.Output.Trim()) }
+            $ErrorActionPreference = $prevEAP
+            return $false
+        }
+    }
+
     $installRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-worktrees' -PkgDir $PluginDir
     $rc = $installRes.ExitCode
     $ErrorActionPreference = $prevEAP
