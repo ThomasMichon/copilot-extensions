@@ -19,7 +19,6 @@ sibling plugin.
 
 from __future__ import annotations
 
-import json
 import os
 import platform
 import sys
@@ -103,15 +102,15 @@ def read_projects(path: Path | None = None) -> dict:
 
 
 def repo_enables_agent_machines(repo_path: Path) -> bool:
-    """True when the repo's copilot settings enable an ``agent-machines`` plugin."""
-    settings = repo_path / ".github" / "copilot" / "settings.json"
-    if not settings.exists():
-        return False
-    try:
-        data = json.loads(settings.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return False
-    enabled = data.get("enabledPlugins") or {}
+    """True when the repo's copilot settings enable an ``agent-machines`` plugin.
+
+    Reads the repo's plugin settings across both the Copilot-native and Claude
+    conventions (native preferred, Claude fallback) via ``plugin_resolve`` so a
+    repo that declares its config in ``.claude/settings.json`` is honored too.
+    """
+    from plugin_resolve import read_repo_settings
+
+    enabled = read_repo_settings(repo_path).enabled
     return any(str(k).startswith("agent-machines") and v for k, v in enabled.items())
 
 
