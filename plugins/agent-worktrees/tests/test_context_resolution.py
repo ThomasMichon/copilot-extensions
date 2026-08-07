@@ -187,6 +187,26 @@ def test_not_in_repo_resolves_nothing(adopted_repo, monkeypatch, tmp_path):
     assert m._resolve_active_project(None) == (None, None)
 
 
+def test_safe_cwd_survives_deleted_directory(monkeypatch):
+    """A vanished cwd degrades to "no project context", never a crash.
+
+    ``os.getcwd()`` raises ``FileNotFoundError`` when the process's working
+    directory has been removed out from under it (e.g. a plugin hook re-invoked
+    during ``copilot plugin update``, whose payload dir Copilot has deleted).
+    The CWD-based resolvers must tolerate that rather than propagate the
+    exception out of ``main()`` (dotfiles#989).
+    """
+    def _boom():
+        raise FileNotFoundError(2, "No such file or directory")
+
+    monkeypatch.setattr(os, "getcwd", _boom)
+
+    assert m._safe_cwd() is None
+    assert m._git_toplevel(None) is None
+    assert m._cwd_is_inside_project(Path("/anything")) is False
+    assert m._resolve_active_project(None) == (None, None)
+
+
 # ---------------------------------------------------------------------------
 # Worktree-id resolution is CWD-only
 # ---------------------------------------------------------------------------
