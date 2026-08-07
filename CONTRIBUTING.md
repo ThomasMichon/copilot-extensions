@@ -1,5 +1,43 @@
 # Contributing to Copilot Extensions
 
+## Contribution flow (PR-required)
+
+**Every change lands through a pull request — direct pushes to `main` are
+blocked.** This is enforced on three layers that agree:
+
+1. **Tooling** — `.agent-worktrees/config.yaml` sets `pr.required: true`, so
+   `agent-worktrees push-changes` refuses direct-to-`main` and the PR-workflow
+   git-hooks block committing to `main` / pushing a worktree branch directly.
+2. **Branch policy** — a GitHub repository ruleset ("Copilot review for default
+   branch") carries a `pull_request` rule (+ `non_fast_forward`) that blocks
+   direct pushes to `main` server-side, for everyone (no bypass).
+3. **Review** — the same ruleset's `copilot_code_review` rule auto-requests a
+   **non-blocking** Copilot review on every PR (it is a review, not a required
+   status check, so it never gates the merge).
+
+### The flow every agent (and human) uses
+
+```bash
+copilot-extensions create            # isolated worktree (no mux/session)
+#   …edit in the returned worktree path…
+copilot-extensions create-pr         # squashes the worktree, pushes pr/<slug>,
+                                     # and (auto_open) opens the GitHub PR
+#   → Copilot posts its review on the PR (non-blocking)
+#   …address anything worth addressing, re-run push-changes to update the PR…
+gh pr merge <#> --squash --delete-branch   # MANUAL merge (you own the merge)
+copilot-extensions finalize          # clean up the worktree
+```
+
+- **Update an open PR** with `copilot-extensions push-changes` (it re-pushes the
+  `pr/<slug>` head; it will NOT land on `main`).
+- **Merge is deliberately manual.** No auto-merge label is bound: open the PR,
+  give Copilot's review a chance to land, then squash-merge it yourself. (0
+  approvals are required by policy — a solo owner can't approve their own PR, and
+  Copilot's review is advisory.)
+- **Never** `git push origin main` or `push-changes` direct-to-`main`; both the
+  tooling and the branch policy reject it. Break-glass (a genuine recovery)
+  means temporarily relaxing the ruleset — not routing around it.
+
 ## Release & Versioning
 
 ### Marketplace architecture
