@@ -59,6 +59,10 @@ def _has_suite(name: str) -> bool:
     return d.is_dir() and tests.is_dir() and any(tests.glob("test_*.py"))
 
 
+def _has_pyproject(name: str) -> bool:
+    return (_plugin_dir(name) / "pyproject.toml").is_file()
+
+
 def _has_dev_extra(name: str) -> bool:
     pyproject = _plugin_dir(name) / "pyproject.toml"
     if not pyproject.is_file():
@@ -158,13 +162,24 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
         VENV_ROOT.mkdir(parents=True, exist_ok=True)
         subprocess.run([uv, "venv", str(venv)], check=True)
     if fresh or reinstall:
-        # Install the plugin editable with its dev extras. cwd = the plugin dir
-        # so uv reads that pyproject's [tool.uv.sources] (vendored path deps).
-        spec = ".[dev]" if _has_dev_extra(name) else "."
-        cmd = [uv, "pip", "install", "--python", str(py), "-e", spec]
-        if spec == ".":
-            cmd.append("pytest")   # no dev extra -> ensure a runner is present
-        subprocess.run(cmd, cwd=str(_plugin_dir(name)), check=True)
+        if _has_pyproject(name):
+            # Install the plugin editable with its dev extras. cwd = the plugin
+            # dir so uv reads that pyproject's [tool.uv.sources] (vendored path
+            # deps).
+            spec = ".[dev]" if _has_dev_extra(name) else "."
+            cmd = [uv, "pip", "install", "--python", str(py), "-e", spec]
+            if spec == ".":
+                cmd.append("pytest")   # no dev extra -> ensure a runner is present
+            subprocess.run(cmd, cwd=str(_plugin_dir(name)), check=True)
+        else:
+            # A pyproject-less plugin (e.g. a skill-script plugin like
+            # harness-knowledge): there is nothing to install editable -- its
+            # tests import the scripts directly (importlib). Just ensure a
+            # pytest runner is present in the venv.
+            subprocess.run(
+                [uv, "pip", "install", "--python", str(py), "pytest"],
+                cwd=str(_plugin_dir(name)), check=True,
+            )
         stamp.write_text(fingerprint, encoding="utf-8")
     return py
 

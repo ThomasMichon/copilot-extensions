@@ -24,12 +24,22 @@ knowledge repo.
 The rendered file MUST be gitignored in the harness tree (it is machine-local
 and names the concrete knowledge checkout) -- keep ``.github/copilot/settings.local.json``
 in the harness ``.gitignore``.
+
+**Paired-worktree re-assembly (#1017).** By default the overlay points at the
+knowledge *anchor*. In a paired ``-harness``/``-knowledge`` worktree (the citadel
+#957 lifecycle) the operator's personal-plugin state lives in the paired
+knowledge *worktree*; ``--from-pair`` re-renders the overlay against the pair
+resolved by ``agent-worktrees state-root --pair`` -- pointing the paired harness
+worktree's overlay at the paired knowledge worktree's ``.ai`` -- so a
+pair-launched session loads personal plugins from the paired worktree.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -172,6 +182,110 @@ def assemble(harness_path: str | Path, knowledge_path: str | Path) -> dict:
     }
 
 
+# --- Paired-worktree re-assembly (#1017) --------------------------------------
+#
+# In a paired ``-harness``/``-knowledge`` worktree (the citadel #957 lifecycle),
+# the operator's personal-plugin state lives in the paired KNOWLEDGE *worktree*,
+# not the knowledge anchor the bind-time overlay points at. ``--from-pair``
+# re-assembles the overlay against the pair resolved by
+# ``agent-worktrees state-root --pair --json`` so a pair-launched harness session
+# loads personal plugins from its paired knowledge worktree. Keyed entirely off
+# ``state-root --pair`` -- no repo name or path is hardcoded.
+
+# Default resolver command; overridable in tests / non-PATH contexts.
+_PAIR_RESOLVER_CMD = ("agent-worktrees", "state-root", "--pair", "--json")
+
+
+def pair_paths_from_resolution(data: dict) -> tuple[str | None, str | None, str | None]:
+    """Map a ``state-root --pair --json`` payload to ``(harness, knowledge, error)``.
+
+    Reads the ``self`` + ``sibling`` entries and picks paths by **role** (not by
+    self/sibling position) so it works whether invoked from the harness or the
+    knowledge side of the pair, and for both worktree- and anchor-kind pairs
+    (an anchor sibling has ``worktree_id: null`` but a real ``path``). On success
+    ``error`` is ``None``; otherwise both paths are ``None`` and ``error`` says why.
+    """
+    if not isinstance(data, dict):
+        return None, None, "pair resolver returned a non-object payload"
+    if not data.get("paired"):
+        return None, None, str(data.get("error") or "current worktree is not paired")
+    by_role: dict[str, str] = {}
+    for entry in (data.get("self"), data.get("sibling")):
+        if not isinstance(entry, dict):
+            continue
+        role = entry.get("role")
+        path = entry.get("path")
+        if isinstance(role, str) and isinstance(path, str) and path:
+            by_role[role] = path
+    harness = by_role.get("harness")
+    knowledge = by_role.get("knowledge")
+    if not harness or not knowledge:
+        return None, None, (
+            "pair resolution did not yield both a harness and a knowledge path "
+            f"(got roles: {sorted(by_role)})"
+        )
+    return harness, knowledge, None
+
+
+def resolve_pair(
+    cwd: str | Path | None = None,
+    *,
+    resolver_cmd: tuple[str, ...] | list[str] | None = None,
+) -> tuple[str | None, str | None, str | None]:
+    """Run the pair resolver from ``cwd`` and return ``(harness, knowledge, error)``.
+
+    Fail-safe: a missing resolver binary, a non-zero exit, or unparseable output
+    all yield ``(None, None, <reason>)`` -- never raises.
+    """
+    cmd = list(resolver_cmd or _PAIR_RESOLVER_CMD)
+    # Resolve the launcher via PATH so a Windows binstub (agent-worktrees.cmd /
+    # .ps1, no .exe) is found -- a bare name would fail subprocess with WinError 2.
+    resolved = shutil.which(cmd[0])
+    if resolved:
+        cmd[0] = resolved
+    try:
+        proc = subprocess.run(
+            cmd, cwd=str(cwd) if cwd else None,
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, None, f"could not run pair resolver ({cmd[0]}): {exc}"
+    out = (proc.stdout or "").strip()
+    data: dict | None = None
+    if out:
+        try:
+            data = json.loads(out)
+        except ValueError:
+            data = None
+    if data is None:
+        # Non-zero with no JSON -> surface stderr; the resolver exits 3 when the
+        # cwd is untracked/unpaired but still prints a JSON body with --json.
+        reason = (proc.stderr or "").strip() or f"pair resolver exited {proc.returncode}"
+        return None, None, reason
+    return pair_paths_from_resolution(data)
+
+
+def assemble_from_pair(
+    cwd: str | Path | None = None,
+    *,
+    resolver_cmd: tuple[str, ...] | list[str] | None = None,
+) -> dict:
+    """Re-assemble the overlay against the current worktree's paired sibling.
+
+    Resolves the pair via ``state-root --pair`` (from ``cwd``, default process
+    cwd), then renders the overlay into the paired HARNESS worktree pointing at
+    the paired KNOWLEDGE worktree's ``.ai``. Returns the ``assemble`` summary
+    with an extra ``pair`` block, or ``{"paired": False, "error": ...}`` when the
+    current worktree is not part of a resolvable pair.
+    """
+    harness, knowledge, error = resolve_pair(cwd, resolver_cmd=resolver_cmd)
+    if error or not harness or not knowledge:
+        return {"paired": False, "error": error or "pair not resolved"}
+    summary = assemble(harness, knowledge)
+    summary["pair"] = {"harness_path": harness, "knowledge_path": knowledge}
+    return summary
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         prog="assemble_plugins",
@@ -180,21 +294,46 @@ def main(argv: list[str] | None = None) -> int:
             "the knowledge repo's .ai local marketplace(s) (idempotent)."
         ),
     )
-    p.add_argument("--harness-path", required=True,
+    p.add_argument("--harness-path",
                    help="Local checkout path of the stateless harness (where "
-                        "settings.local.json is written).")
-    p.add_argument("--knowledge-path", required=True,
+                        "settings.local.json is written). Required unless "
+                        "--from-pair is given.")
+    p.add_argument("--knowledge-path",
                    help="Local checkout path of the knowledge repo (its .ai is "
-                        "the personal-plugin source).")
+                        "the personal-plugin source). Required unless "
+                        "--from-pair is given.")
+    p.add_argument("--from-pair", action="store_true",
+                   help="Re-assemble against the paired -harness/-knowledge "
+                        "worktree of the current directory (resolved via "
+                        "'agent-worktrees state-root --pair'), pointing the "
+                        "overlay at the paired KNOWLEDGE worktree's .ai. Ignores "
+                        "--harness-path/--knowledge-path.")
     p.add_argument("--json", action="store_true", help="Emit the summary as JSON.")
     args = p.parse_args(argv)
 
-    summary = assemble(args.harness_path, args.knowledge_path)
+    if args.from_pair:
+        summary = assemble_from_pair()
+        if summary.get("error"):
+            if args.json:
+                print(json.dumps(summary, indent=2))
+            else:
+                print(f"No paired overlay assembled: {summary['error']}",
+                      file=sys.stderr)
+            return 3
+    else:
+        if not args.harness_path or not args.knowledge_path:
+            p.error("--harness-path and --knowledge-path are required unless "
+                    "--from-pair is given")
+        summary = assemble(args.harness_path, args.knowledge_path)
+
     if args.json:
         print(json.dumps(summary, indent=2))
     else:
         n = summary["count"]
         print(f"Assembled {n} personal plugin(s) into {summary['settings_local']}")
+        if summary.get("pair"):
+            print(f"  from pair: harness {summary['pair']['harness_path']}")
+            print(f"             knowledge {summary['pair']['knowledge_path']}")
         if summary["marketplaces"]:
             print(f"  marketplaces: {', '.join(summary['marketplaces'])}")
         for spec in summary["enabled_plugins"]:
