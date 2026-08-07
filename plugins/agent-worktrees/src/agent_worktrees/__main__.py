@@ -9134,7 +9134,8 @@ def _pr_flow_profile(repo: cfg.RepoConfig):
 
     Wraps :func:`pr_contract.classify_pr_flow` with the repo's ``pr`` binding so
     every surface (``get pr-profile``, ``pr-status``, ``pr-merge``) reports the
-    same profile: ``direct`` | ``pr-human-merge`` | ``pr-agent-merge``.
+    same profile: ``direct`` | ``pr-human-merge`` | ``pr-agent-merge`` |
+    ``pr-self-merge``.
     """
     from . import pr_contract as pc
 
@@ -9144,6 +9145,12 @@ def _pr_flow_profile(repo: cfg.RepoConfig):
         required=prc.required,
         provider=prc.provider,
         automerge_label=getattr(prc, "automerge_label", ""),
+        reviewer=getattr(prc, "reviewer", ""),
+        review_blocking=getattr(prc, "review_blocking", False),
+        review_latency_hint=getattr(prc, "review_latency_hint", ""),
+        self_approve=getattr(prc, "self_approve", False),
+        merge_actor=getattr(prc, "merge_actor", ""),
+        conflict_retriggers_review=getattr(prc, "conflict_retriggers_review", True),
     )
 
 
