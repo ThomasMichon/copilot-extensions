@@ -122,6 +122,8 @@ async def capture_async(
     keys: Optional[list[str]] = None,
     update_state: Optional[str] = None,
     prepare: Optional[Callable[[Any, Any], Awaitable[None]]] = None,
+    pivot: str | None = None,
+    wait_pivot: float = 0.0,
     title: str = "Worktree Picker",
 ) -> dict[str, str]:
     """Render ``source`` headlessly and capture the screen (text + ansi + svg).
@@ -137,6 +139,13 @@ async def capture_async(
       connect spinner and their rows are excluded from the All view).
     - ``keys`` -- keys to send (see Textual key names) to drive the picker to a
       target state before capture.
+    - ``pivot`` -- switch to the pivot (top tab) whose label matches (case-
+      insensitive) before capture, e.g. ``"CodeSpaces"``. Unknown labels are
+      ignored (the default Worktrees pivot is captured). Lets the snapshot tool
+      target any tab, including a contributed one.
+    - ``wait_pivot`` -- when on a registered pivot, poll (up to this many seconds)
+      for its background ``list`` load to finish before capturing, so the snapshot
+      shows real rows instead of a "loading…" spinner. ``0`` disables the wait.
     - ``update_state`` -- force the topbar update indicator (e.g. ``"current"``
       for a clean ✓ instead of a transient "update available").
     - ``prepare`` -- an escape-hatch coroutine awaited with ``(screen, pilot)``
@@ -155,6 +164,8 @@ async def capture_async(
             except Exception:
                 pass
         await pilot.pause()
+        if pivot:
+            await _select_pivot(scr, pilot, pivot, wait_pivot)
         if settle:
             import asyncio
 
@@ -171,6 +182,51 @@ async def capture_async(
             # back during settle, so an early assignment would not stick.
             scr.update_state = update_state
         return capture_screen(scr, title=title)
+
+
+async def _select_pivot(
+    scr: Any, pilot: Any, label: str, wait_pivot: float
+) -> None:
+    """Switch the picker to the pivot whose label matches ``label`` (case-
+    insensitive), then optionally wait for a registered pivot's background
+    ``list`` to finish loading so the capture shows real rows.
+
+    Unknown labels are a no-op (the current pivot is kept). Safe headless helper
+    for the snapshot tool -- never raises."""
+    import asyncio
+
+    try:
+        labels = [str(x).lower() for x in scr.htabs]
+        idx = labels.index(label.strip().lower())
+    except (ValueError, AttributeError):
+        return
+    scr.htab = idx
+    try:
+        scr.sel = scr.default_sel()
+    except Exception:
+        pass
+    try:
+        scr.refresh()
+    except Exception:
+        pass
+    await pilot.pause()
+    if wait_pivot and wait_pivot > 0:
+        deadline = asyncio.get_event_loop().time() + wait_pivot
+        while asyncio.get_event_loop().time() < deadline:
+            try:
+                state = scr._task_state()[0]
+            except Exception:
+                break
+            if state not in ("loading", "idle"):
+                break
+            await asyncio.sleep(0.2)
+            await pilot.pause()
+    # Repaint so newly-loaded rows are composited before the capture reads them.
+    try:
+        scr.refresh()
+    except Exception:
+        pass
+    await pilot.pause()
 
 
 async def capture_frames_async(

@@ -616,7 +616,20 @@ def detect_platform() -> str:
 
 
 def _home() -> Path:
-    """Cross-platform home directory."""
+    """Cross-platform home directory, with a sandbox-root override.
+
+    ``AGENT_HOME`` (when set) replaces ``~/`` as the root under which the whole
+    agent-* state tree lives -- ``~/.agent-worktrees``, ``~/.<project>``,
+    ``~/.copilot/installed-plugins``, the pivots dir, etc. It relocates *only*
+    that harness state, deliberately **not** the real home: ``gh``/``ssh``/git
+    credentials still resolve from the actual ``~/`` (via ``USERPROFILE``/
+    ``HOME``), so a sandbox can run the live stack against real auth without
+    stomping -- or being stomped by -- the active deployment. This is the seam
+    the ``preview-picker`` harness and any isolated test deployment use.
+    """
+    override = os.environ.get("AGENT_HOME", "").strip()
+    if override:
+        return Path(override)
     if platform.system() == "Windows":
         return Path(os.environ.get("USERPROFILE", str(Path.home())))
     return Path.home()

@@ -445,6 +445,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Emit machine-readable JSON (members + budget)",
     )
     pool_p.add_argument(
+        "--picker-json", dest="picker_json", action="store_true",
+        help="Emit the Worktree Picker CodeSpaces-pivot shape "
+             "({entries, summary}) consumed by the registered-pivot renderer",
+    )
+    pool_p.add_argument(
         "--budget", type=int, default=None,
         help=f"Account concurrent-core budget (default: {pool_mod.DEFAULT_BUDGET_CORES})",
     )
@@ -2841,6 +2846,18 @@ def _cmd_pool(args: argparse.Namespace) -> int:
     members, budget = pool_mod.build_pool(
         budget_cores=budget_cores, stale_after=stale_after,
     )
+
+    if getattr(args, "picker_json", False):
+        # Surface the missing-`codespace`-scope remedy as a note (rather than an
+        # empty, opaque list) so the Picker CodeSpaces pivot can render an
+        # actionable banner (#980). Best-effort: never let it break the payload.
+        try:
+            _msgs = _gh_auth_preflight()
+            note = ("\u26a0 " + "; ".join(_msgs)) if _msgs else ""
+        except Exception:
+            note = ""
+        print(json.dumps(pool_mod.picker_payload(members, budget, note=note)))
+        return 0
 
     if args.json_output:
         print(json.dumps({

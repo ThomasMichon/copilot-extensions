@@ -1,12 +1,21 @@
 {
   "label": "CodeSpaces",
   "after": "Worktrees",
-  "list": ["agent-codespaces", "list", "--json"],
+  "scope": "account",
+  "list": ["agent-codespaces", "pool", "--picker-json"],
   "entry": {
-    "id": "name",
-    "title": "name",
-    "subtitle": "repository",
-    "badges": ["state"]
+    "id": "id",
+    "title": "display",
+    "worktree": "worktree",
+    "group": "group"
   },
-  "empty_hint": "No CodeSpaces (is the GitHub CLI authenticated?)."
+  "columns": [
+    {"key": "display", "header": "codespace", "width": 26},
+    {"key": "status", "header": "state", "width": 8, "palette": "state"},
+    {"key": "worktree", "header": "worktree", "width": 10},
+    {"key": "cores", "header": "cores", "width": 5, "align": "r"},
+    {"key": "worktree_title", "header": "task", "width": 34}
+  ],
+  "summary": "{spent_cores}/{total_cores} cores in use \u00b7 {headroom_cores} free \u00b7 {running_count}/{total_count} running   {note}",
+  "empty_hint": "No CodeSpaces (is the GitHub CLI authenticated with the 'codespace' scope?)."
 }
