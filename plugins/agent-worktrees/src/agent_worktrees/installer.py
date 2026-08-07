@@ -363,8 +363,9 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
         output.ok(f"Wrapper: {bd / 'launch-session.sh'}")
 
     # Deploy bootstrap-check scripts (called by sessionStart hook) + the
-    # statelessness_guard (called by the preToolUse hook).
-    for name in ("bootstrap-check.ps1", "bootstrap-check.sh", "statelessness_guard.py"):
+    # statelessness_guard + cross_repo_guard (called by the preToolUse hooks).
+    for name in ("bootstrap-check.ps1", "bootstrap-check.sh",
+                 "statelessness_guard.py", "cross_repo_guard.py"):
         src = scripts / name
         if src.exists():
             shutil.copy2(src, bd / name)
