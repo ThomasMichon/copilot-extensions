@@ -102,6 +102,34 @@ def main(argv: list[str] | None = None) -> int:
         help="Migrate machine-local config schema (~/.agent-containers/containers.yaml)",
     )
 
+    # --- namespace-* (process-boundary resolver seam for agent-bridge, #892 Inc 3b)
+    # The `container:` namespace resolver over a process boundary: agent-bridge
+    # drives these instead of importing `agent_containers.resolver`. Emit plain
+    # JSON (agent_bridge-free); the bridge shim reconstructs SpawnTarget /
+    # NamespaceAgentInfo. Containers do not support cross-repo / plugins, so
+    # namespace-resolve takes only a name (mirrors the resolver's resolve(name)).
+    sub.add_parser(
+        "namespace-list",
+        help="Print JSON list of container agents for the `container:` namespace.",
+    )
+    ns_resolve_p = sub.add_parser(
+        "namespace-resolve",
+        help="Print JSON {type,spawn_command,user} resolving a container name "
+        "(not-found -> exit 3).",
+    )
+    ns_resolve_p.add_argument("name", help="Container name")
+    ns_target_p = sub.add_parser(
+        "namespace-target-repo",
+        help="Print the workspace repo a container hosts (always empty -- "
+        "containers do not drive related-repo plugin injection).",
+    )
+    ns_target_p.add_argument("name", help="Container name")
+    ns_ready_p = sub.add_parser(
+        "namespace-ensure-ready",
+        help="Exit 0 if the container is running/startable, else exit 1.",
+    )
+    ns_ready_p.add_argument("name", help="Container name")
+
     args = parser.parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -140,6 +168,15 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             print(config_migrations.summarize(config_migrations.run_migrations()))
             return 0
+        if args.command == "namespace-list":
+            return _cmd_namespace_list()
+        if args.command == "namespace-resolve":
+            return _cmd_namespace_resolve(args)
+        if args.command == "namespace-target-repo":
+            print("")  # containers do not drive related-repo plugin injection
+            return 0
+        if args.command == "namespace-ensure-ready":
+            return _cmd_namespace_ensure_ready(args)
     except RuntimeError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
@@ -148,10 +185,62 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+# --- namespace-* resolver seam (#892 Inc 3b) -------------------------------
+# Process-boundary form of the `container:` NamespaceResolver: agent-bridge
+# shells out to these instead of importing `agent_containers.resolver`. Emit
+# plain JSON (agent_bridge-free) via the resolver's `*_spec` cores; the bridge
+# shim reconstructs SpawnTarget / NamespaceAgentInfo. not-found -> exit 3 (the
+# bridge maps it back to KeyError). Containers have no bad-state distinction
+# (ensure_ready starts a stopped one), so there is no exit-4 case here.
+_NS_NOT_FOUND_EXIT = 3
+
+
+def _cmd_namespace_list() -> int:
+    """Print a JSON list of `container:` namespace agent specs (#892 Inc 3b)."""
+    import asyncio
+
+    from .resolver import ContainerResolver
+
+    print(json.dumps(asyncio.run(ContainerResolver().list_specs())))
+    return 0
+
+
+def _cmd_namespace_resolve(args: argparse.Namespace) -> int:
+    """Print a JSON spawn spec resolving a container name (#892 Inc 3b).
+
+    A not-found maps to exit 3 (bridge -> ``KeyError``), preserving the
+    resolver's contract across the process boundary.
+    """
+    import asyncio
+
+    from .resolver import ContainerResolver
+
+    try:
+        spec = asyncio.run(ContainerResolver().resolve_spec(args.name))
+    except KeyError as e:
+        print(str(e).strip("'"), file=sys.stderr)
+        return _NS_NOT_FOUND_EXIT
+    print(json.dumps(spec))
+    return 0
+
+
+def _cmd_namespace_ensure_ready(args: argparse.Namespace) -> int:
+    """Exit 0 if the container is running/startable, else 1 (#892 Inc 3b)."""
+    import asyncio
+
+    from .resolver import ContainerResolver
+
+    try:
+        asyncio.run(ContainerResolver().ensure_ready(args.name))
+    except Exception as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    return 0
+
+
 def _cmd_fleet(args: argparse.Namespace) -> int:
     from .lease import get_lease
     from .lifecycle import list_containers
-
     config = load_config()
     containers = list_containers(config)
     if getattr(args, "json", False):
