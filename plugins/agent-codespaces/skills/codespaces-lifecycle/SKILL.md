@@ -48,7 +48,7 @@ agent-bridge send codespace:my-feature-branch-7qv4rv "..." # raw name also works
 | `agent-bridge agents` | List all available agents (local + codespace) |
 | `agent-bridge send codespace:<name> "<prompt>"` | Start a new session (blocks until turn completes) |
 | `agent-bridge send <session-id> "<prompt>"` | Send follow-up prompt on existing session |
-| `agent-bridge send --no-wait <target> "<prompt>"` | Send without waiting — returns session ID immediately |
+| `agent-bridge send --no-wait <target> "<prompt>"` | Deliberate fire-and-forget — returns a session ID without attaching to its feed |
 | `agent-bridge wait <session-id>` | Block until current turn completes |
 | `agent-bridge sessions` | List all sessions with status |
 | `agent-bridge sessions --status idle` | List sessions ready for follow-up |
@@ -65,16 +65,39 @@ the result before continuing.
 powershell(command: 'agent-bridge send "codespace:<name>" "<prompt>"', initial_wait: 120)
 ```
 
-### Async pattern (for long-running tasks)
+### Long-running interactive work
 
-Use `--no-wait` to dispatch and continue working.
+Keep the default attached stream when the operator expects to see progress.
+Long runtime alone is **not** a reason to add `--no-wait`: the bridge collapses
+thoughts and tools into a low-noise live feed and emits liveness markers during
+quiet tool calls.
 
 ```
-powershell(mode: "async", command: 'agent-bridge send --no-wait "codespace:<name>" "<prompt>"')
-# ... continue working ...
-# [system_notification: shell completed]
-powershell(command: 'agent-bridge wait <session-id>', initial_wait: 300)
+powershell(command: 'agent-bridge send "codespace:<name>" "<prompt>"', initial_wait: 300)
 ```
+
+If the outer tool runner backgrounds the still-running command after its
+initial wait, keep following that same tool session rather than declaring the
+dispatch complete.
+
+### Detached pattern (fire-and-forget only)
+
+Use `--no-wait` only when the caller intentionally does not need the result or
+live progress. It exits immediately; no background command remains to produce a
+completion notification, and the remote feed accumulates unread until a caller
+attaches to it.
+
+```
+powershell(command: 'agent-bridge send --no-wait "codespace:<name>" "<prompt>"')
+# Capture the returned session ID.
+powershell(command: 'agent-bridge read <session-id>', initial_wait: 300)
+# `agent-bridge wait <session-id>` is also valid when only the current turn matters.
+```
+
+Do not end the host turn with only "implementation is running" when the result
+is part of the current request. Either keep the original `send` attached, or
+immediately follow with `read`/`wait`. A genuinely detached dispatch needs an
+explicit later monitoring plan.
 
 ### Multi-turn sessions
 
