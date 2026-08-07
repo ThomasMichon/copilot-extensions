@@ -169,3 +169,67 @@ async def test_no_fallback_raises_when_cli_absent():
     with patch("shutil.which", return_value=None):
         with pytest.raises(RuntimeError):
             await r.list()
+
+
+# --- restricted (container) variant + signature-aware fallback (#892 Inc 3b) ---
+
+import inspect  # noqa: E402
+
+from agent_bridge.agent_registry import RestrictedCliNamespaceResolver  # noqa: E402
+
+
+class _NarrowFallback(NamespaceResolver):
+    """A fallback whose resolve(name) takes NO cross-repo/plugin kwargs."""
+
+    def __init__(self):
+        self.calls = []
+
+    @property
+    def prefix(self):
+        return "container"
+
+    async def list(self):
+        self.calls.append("list")
+        return [NamespaceAgentInfo(name="fb-ctr")]
+
+    async def resolve(self, name):
+        self.calls.append("resolve")
+        return SpawnTarget(type="command", spawn_command=["fb"], user=None)
+
+
+def test_restricted_resolve_signature_hides_cross_repo():
+    # agent-bridge introspects resolver.resolve to decide cross-repo support.
+    restricted = inspect.signature(RestrictedCliNamespaceResolver.resolve)
+    assert "repo" not in restricted.parameters
+    assert "extra_plugins" not in restricted.parameters
+    full = inspect.signature(CliNamespaceResolver.resolve)
+    assert "repo" in full.parameters and "extra_plugins" in full.parameters
+
+
+@pytest.mark.asyncio
+async def test_restricted_resolve_uses_cli_name_only():
+    fb = _NarrowFallback()
+    seen = {}
+
+    def _run(argv, **_kw):
+        seen["argv"] = argv
+        return _cp(0, json.dumps({"type": "command", "spawn_command": ["docker", "x"], "user": "u"}))
+
+    with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
+        t = await RestrictedCliNamespaceResolver("container", "agent-containers", fb).resolve("ctr-1")
+    assert t.spawn_command == ["docker", "x"]
+    # name-only argv -- no cross-repo/plugin flags leak to a container provider.
+    assert seen["argv"] == ["/usr/bin/agent-codespaces", "namespace-resolve", "ctr-1"]
+
+
+@pytest.mark.asyncio
+async def test_signature_aware_fallback_drops_unsupported_kwargs():
+    # The core 3b fix: falling back to a NARROW resolver must not TypeError on
+    # repo/extra_plugins -- they are dropped to match the fallback's signature.
+    fb = _NarrowFallback()
+    with patch("shutil.which", _which), patch("subprocess.run", return_value=_cp(1, "", "crash")):
+        t = await CliNamespaceResolver("container", "agent-containers", fb)._resolve_impl(
+            "ctr-1", repo="o/r", repo_remote="https://x", extra_plugins=[SimpleNamespace(source="/p")],
+        )
+    assert t.spawn_command == ["fb"]
+    assert fb.calls == ["resolve"]
