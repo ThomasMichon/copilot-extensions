@@ -72,14 +72,26 @@ def test_stamp_mux_live_writes(tmp_path):
     p = tmp_path / "aaaa.yaml"
     tracking.save_record(_rec(), p)
     with patch("agent_worktrees.config.tracking_dir", return_value=tmp_path):
-        tracking.stamp_mux_live("aaaa", True)
+        tracking.stamp_mux_live("aaaa", True, sync=True)
+    back = tracking.load_record(p)
+    assert back.mux_live is True and back.mux_live_at
+
+
+def test_stamp_mux_live_async_writes_via_queue(tmp_path):
+    """Async (default): the stamp is enqueued and lands after a queue flush --
+    the render/UI thread is not blocked on the YAML write (dotfiles#948)."""
+    p = tmp_path / "aaaa.yaml"
+    tracking.save_record(_rec(), p)
+    with patch("agent_worktrees.config.tracking_dir", return_value=tmp_path):
+        tracking.stamp_mux_live("aaaa", True)  # async by default
+        tracking.flush_stamp_writes()
     back = tracking.load_record(p)
     assert back.mux_live is True and back.mux_live_at
 
 
 def test_stamp_mux_live_noop_when_record_absent(tmp_path):
     with patch("agent_worktrees.config.tracking_dir", return_value=tmp_path):
-        tracking.stamp_mux_live("ghost", True)  # must not raise
+        tracking.stamp_mux_live("ghost", True, sync=True)  # must not raise
     assert not (tmp_path / "ghost.yaml").exists()
 
 
@@ -93,7 +105,7 @@ def test_stamp_no_refresh_keeps_noop_on_unchanged(tmp_path):
     p = tmp_path / "aaaa.yaml"
     tracking.save_record(_rec(mux_live=True, mux_live_at=old), p)
     with patch("agent_worktrees.config.tracking_dir", return_value=tmp_path):
-        tracking.stamp_mux_live("aaaa", True)  # unchanged, no refresh
+        tracking.stamp_mux_live("aaaa", True, sync=True)  # unchanged, no refresh
     assert tracking.load_record(p).mux_live_at == old
 
 
@@ -105,7 +117,8 @@ def test_stamp_refresh_renews_aged_timestamp(tmp_path):
     p = tmp_path / "aaaa.yaml"
     tracking.save_record(_rec(mux_live=True, mux_live_at=old), p)
     with patch("agent_worktrees.config.tracking_dir", return_value=tmp_path):
-        tracking.stamp_mux_live("aaaa", True, refresh=True, throttle_secs=60)
+        tracking.stamp_mux_live("aaaa", True, refresh=True, throttle_secs=60,
+                                sync=True)
     back = tracking.load_record(p)
     assert back.mux_live is True and back.mux_live_at != old
 
@@ -117,7 +130,8 @@ def test_stamp_refresh_throttled_within_window(tmp_path):
     p = tmp_path / "aaaa.yaml"
     tracking.save_record(_rec(mux_live=True, mux_live_at=recent), p)
     with patch("agent_worktrees.config.tracking_dir", return_value=tmp_path):
-        tracking.stamp_mux_live("aaaa", True, refresh=True, throttle_secs=60)
+        tracking.stamp_mux_live("aaaa", True, refresh=True, throttle_secs=60,
+                                sync=True)
     assert tracking.load_record(p).mux_live_at == recent
 
 
@@ -128,7 +142,7 @@ def test_stamp_value_change_always_writes(tmp_path):
     p = tmp_path / "aaaa.yaml"
     tracking.save_record(_rec(mux_live=True, mux_live_at=recent), p)
     with patch("agent_worktrees.config.tracking_dir", return_value=tmp_path):
-        tracking.stamp_mux_live("aaaa", False)
+        tracking.stamp_mux_live("aaaa", False, sync=True)
     back = tracking.load_record(p)
     assert back.mux_live is False and back.mux_live_at != recent
 
@@ -150,7 +164,7 @@ def test_reaper_clears_hint_on_successful_kill(tmp_path):
          patch("agent_worktrees.config.tracking_dir", return_value=tmp_path), \
          patch("agent_worktrees.sessions.kill_tmux_session", return_value=True), \
          patch("agent_worktrees.tracking.stamp_mux_live",
-               side_effect=lambda wt, live: calls.append((wt, live))):
+               side_effect=lambda wt, live, **kw: calls.append((wt, live))):
         res = cli.reap_orphan_mux_sessions(now=1e9)
     assert "aaaa" in res["reaped"]
     assert ("aaaa", False) in calls
@@ -170,7 +184,7 @@ def test_reaper_does_not_clear_hint_when_kill_fails(tmp_path):
          patch("agent_worktrees.config.tracking_dir", return_value=tmp_path), \
          patch("agent_worktrees.sessions.kill_tmux_session", return_value=False), \
          patch("agent_worktrees.tracking.stamp_mux_live",
-               side_effect=lambda wt, live: calls.append((wt, live))):
+               side_effect=lambda wt, live, **kw: calls.append((wt, live))):
         cli.reap_orphan_mux_sessions(now=1e9)
     assert calls == []
 
@@ -183,7 +197,7 @@ def test_restart_copilot_clears_hint_on_graceful_stop():
          patch("agent_worktrees.sessions.graceful_quit_mux_session",
                return_value=True), \
          patch("agent_worktrees.tracking.stamp_mux_live",
-               side_effect=lambda wt, live: calls.append((wt, live))):
+               side_effect=lambda wt, live, **kw: calls.append((wt, live))):
         res = sessions.restart_worktree_copilot("aaaa")
     assert res["method"] == "graceful"
     assert ("aaaa", False) in calls
@@ -193,7 +207,7 @@ def test_restart_copilot_no_session_stamps_false():
     calls = []
     with patch("agent_worktrees.sessions.has_mux_session", return_value=False), \
          patch("agent_worktrees.tracking.stamp_mux_live",
-               side_effect=lambda wt, live: calls.append((wt, live))):
+               side_effect=lambda wt, live, **kw: calls.append((wt, live))):
         res = sessions.restart_worktree_copilot("aaaa")
     assert res["method"] == "none"
     assert ("aaaa", False) in calls
