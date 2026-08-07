@@ -195,6 +195,23 @@ intent signals, needing no cooperation, giving a rapid — if coarse — sense o
 current motion. The disposition is high-signal and slow; the pulse is low-signal
 and fast; neither is faked from the other.
 
+### legible-contribution-contract
+Landing work is **governed by rules that differ per repo** — whether a pull
+request is required, who may approve (and whether the submitter may approve
+their *own* PR), who reviews and roughly how long that takes, who performs the
+merge, and what a post-approval conflict does. The fabric makes those rules
+**legible to the acting agent at the moment of action**: whenever an agent
+drives a step that lands work, the layer performing it states — in that step's
+own output — which contribution contract *this* repo uses and what the correct
+next step is, so an agent never has to *remember*, *guess*, or carry over
+another repo's flow. The guidance is **repo-derived**, not hard-coded to any one
+project's shape, and it **keeps the agent on the sanctioned rails**: it names
+only the fabric's own verbs and the reviewed flow, and never steers toward a
+bypass — a raw provider call, a force/override, a merge that skips review — even
+where an agent technically could. Both a successful step **and a refused one**
+are reminded; a refusal says what to do *within* the rules, not how to skip
+them.
+
 ### resource-claims
 Every worktree carries a **legible claim ledger** — the resources and work it is
 responsible for — answerable in **both directions**: *what does this worktree
@@ -285,6 +302,18 @@ never wholly blind, even with no daemon up.
 Adding, moving, or losing a venue (a CodeSpace, a container, another machine)
 does not change how its agents are addressed: a venue provider makes its agents
 reachable by the fabric's one coordination contract.
+
+### guidance-emitted-at-point-of-action
+Every fabric operation that participates in landing work emits its
+rule-and-next-step guidance **inline, on both its success and its failure
+path**, in whatever register the caller consumes (human prose and
+machine-readable alike). The guidance is a **passive reminder** that rides along
+with the action the agent already took — it never becomes a gate, and it never
+depends on the agent having first asked "what are the rules here?". The floor is
+that an agent acting on a repo it has never seen is told that repo's
+contribution contract by the very commands it runs, and is pointed only at
+sanctioned verbs — so staying on the reviewed rails is the path of least
+resistance, not a discipline the agent must supply.
 
 ### project-addressed-not-cwd-bound
 A layer resolves its **target project** from an explicit name (`--project`, or
@@ -516,3 +545,19 @@ opt-in, pressure changes nothing and the session behaves exactly as before.
   never *act* on it, so a bridge-hosted headless session at the ceiling simply
   dead-ended — the exact "silent no-op" that
   *handoff-orchestrated-above-primitives* names as the failure to avoid.
+- **2026-08-06** — Added §Features/`legible-contribution-contract` and
+  §Behaviors/`guidance-emitted-at-point-of-action`: the fabric makes each repo's
+  PR/landing rules — PR-required?, who approves (and may the submitter approve
+  their own?), who reviews and how long it takes, who merges, what a conflict
+  does — **legible to the acting agent at the moment of action**, emitted inline
+  on **both** a command's success and its refusal, and pointing **only** at
+  sanctioned fabric verbs (never a raw provider call, force/override, or
+  review-skipping merge). Mined from enabling PR flow on a *second* repo with a
+  different contract than the first: agents could no longer assume one repo's
+  shape, and the ground layer already *knew* each repo's flow profile
+  (`classify_pr_flow`) but surfaced it from only one verb — so an agent driving
+  a PR "forgot" the rules mid-flow and mis-sequenced approve/merge/rebase, or
+  fell back to a bypass (`gh pr merge --admin`) the tooling should have steered
+  it away from. Realized as a per-repo policy matrix + a state-aware reminder
+  the pr-* / push-changes verbs emit; tracked in the copilot-extensions PR-flow
+  legibility effort.

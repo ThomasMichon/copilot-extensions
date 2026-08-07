@@ -179,6 +179,35 @@ class PRConfig:
     delete_source_branch: bool = True
     bypass_policy: bool = False
     bypass_reason: str = ""
+    # ── PR-flow legibility matrix (surfaced as agent reminders by the pr-*
+    # verbs via ``pr_contract.pr_reminder``). These describe *who does what* so
+    # a calling agent is reminded of THIS repo's rules + correct next step and
+    # never has to remember or guess the per-repo flow. All optional + defaulted
+    # -> backward-compatible; empty means "derive / unknown" and the classifier
+    # falls back to today's behavior.
+    #
+    # - ``reviewer``        -- who reviews: ``"copilot"`` (a bot PR reviewer),
+    #   ``"agent:<name>"`` (a designated reviewer agent), ``"external"``, or
+    #   ``""`` (none/unknown).
+    # - ``review_blocking`` -- is the review a merge GATE (must approve) rather
+    #   than a non-blocking advisory pass?
+    # - ``review_latency_hint`` -- rough human hint for how long review takes
+    #   (e.g. ``"~2m"``), shown by pr-watch so an agent knows how long to wait.
+    # - ``self_approve``    -- may the SUBMITTER approve their own PR? An owner
+    #   repo may allow it; a reviewer-gated repo forbids it. This (or
+    #   ``merge_actor: submitter-direct``) selects the ``pr-self-merge`` profile.
+    # - ``merge_actor``     -- who lands it: ``"submitter-direct"`` (the
+    #   submitter merges), ``"reviewer"`` (the approver merges),
+    #   ``"consent-gate"`` (a consent label triggers the gate), or ``""``
+    #   (derive from ``automerge_label`` / ``self_approve``).
+    # - ``conflict_retriggers_review`` -- does a post-approval rebase+push send
+    #   the PR back through review? (informs the conflict-path reminder.)
+    reviewer: str = ""
+    review_blocking: bool = False
+    review_latency_hint: str = ""
+    self_approve: bool = False
+    merge_actor: str = ""
+    conflict_retriggers_review: bool = True
 
 
 @dataclass(frozen=True)
@@ -1107,6 +1136,12 @@ def _parse_pr(raw: Any) -> PRConfig:
         delete_source_branch=bool(raw.get("delete_source_branch", True)),
         bypass_policy=bool(raw.get("bypass_policy", False)),
         bypass_reason=str(raw.get("bypass_reason", "")),
+        reviewer=str(raw.get("reviewer", "")).strip(),
+        review_blocking=bool(raw.get("review_blocking", False)),
+        review_latency_hint=str(raw.get("review_latency_hint", "")).strip(),
+        self_approve=bool(raw.get("self_approve", False)),
+        merge_actor=str(raw.get("merge_actor", "")).strip().lower(),
+        conflict_retriggers_review=bool(raw.get("conflict_retriggers_review", True)),
     )
 
 
