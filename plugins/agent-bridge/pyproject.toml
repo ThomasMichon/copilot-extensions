@@ -20,7 +20,7 @@ dependencies = [
     # websockets, watchfiles), and httptools in particular ships no win-arm64
     # wheel and would build from source (MSVC) on headless ARM64 hosts. h11 is
     # a core uvicorn dependency and uvicorn.run() falls back to it by default.
-    "uvicorn>=0.30.0",
+    "uvicorn>=0.52.1",
     # Pure-Python WebSocket support for uvicorn (ACP-over-WS transport in
     # routes/acp_ws.py). wsproto is sans-I/O and depends only on h11 (already a
     # uvicorn core dep), so it adds no native build -- unlike the `websockets`
