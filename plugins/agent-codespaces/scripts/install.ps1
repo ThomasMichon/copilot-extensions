@@ -77,17 +77,27 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED) {
                             try { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop } catch {}
                         }
                     }
-                # Faithful arg forwarding, independent of this script's param() shape.
-                $__selfStageCl = [Environment]::GetCommandLineArgs()
-                $__selfStageFi = [Array]::IndexOf($__selfStageCl, '-File')
-                if ($__selfStageFi -lt 0) { $__selfStageFi = [Array]::IndexOf($__selfStageCl, '-f') }
-                if ($__selfStageFi -ge 0 -and ($__selfStageFi + 2) -le ($__selfStageCl.Length - 1)) {
-                    $__selfStageFwd = @($__selfStageCl[($__selfStageFi + 2)..($__selfStageCl.Length - 1)])
-                } else {
-                    # No args after `-File <path>` (e.g. an init.ps1 entry invoked
-                    # with no action). $args is unavailable in a param()-script
-                    # under StrictMode, so forward nothing rather than throw.
-                    $__selfStageFwd = @()
+                # Faithful arg forwarding, independent of this script's param()
+                # shape AND of the invocation form. Rebuild the child arg list from
+                # $PSBoundParameters (a switch as a bare -Name, else -Name Value), so
+                # the staged re-exec carries the SAME action/flags whether the
+                # installer was launched via `pwsh -File install.ps1 update` OR the
+                # call/`-Command` form `.\install.ps1 update` (the documented
+                # interactive form). The old approach -- slicing args after `-File`
+                # out of GetCommandLineArgs() -- returned NOTHING for the call form,
+                # so the staged child re-ran with the DEFAULT action: a silent no-op
+                # that still reported success (#205). All installer args are declared
+                # params, so nothing is unbound -- and $args is unavailable in a
+                # param()-script under StrictMode, so it is deliberately not consulted.
+                $__selfStageFwd = @()
+                foreach ($__selfStageK in $PSBoundParameters.Keys) {
+                    $__selfStageV = $PSBoundParameters[$__selfStageK]
+                    if ($__selfStageV -is [System.Management.Automation.SwitchParameter]) {
+                        if ($__selfStageV.IsPresent) { $__selfStageFwd += "-$__selfStageK" }
+                    } else {
+                        $__selfStageFwd += "-$__selfStageK"
+                        $__selfStageFwd += [string]$__selfStageV
+                    }
                 }
                 $env:COPILOT_PLUGIN_INSTALL_STAGED = '1'
                 $env:COPILOT_PLUGIN_STAGED_FROM = $__selfStagePayload
