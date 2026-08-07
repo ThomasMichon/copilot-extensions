@@ -48,11 +48,14 @@ truth lives. Consumers never keep a parallel copy; they read this owner and
 Liveness and "what is this agent doing" are produced by agent-worktrees from its
 **own transports** — on-disk session state, the multiplexer and its terminal
 output, the process table, lock state, and SSH for remote worktrees. This
-**poll-and-derive path is the always-on backbone**: it needs no cooperation from
+**derive-on-demand path is the always-on backbone**: it needs no cooperation from
 the agent being observed, **no higher layer, and no in-session extension loaded**.
 It is the reason the fabric stays legible even when nothing else is running — and
 the reason a fragile, slow-to-initialize, or absent in-session extension can never
-drag tracking below *correct*.
+drag tracking below *correct*. Crucially, it reads the **least data possible**:
+random-access straight to the specific resource, and **cursors / watermarks** for
+any *growing* dataset (the event log, the session-state tree) so reads are
+**incremental** — **never a continuous full sweep of an unbounded dataset**.
 
 ### The warm-cache accelerator — optional, on-demand, refcounted, losable
 Derivation can be expensive; the ground layer **may** keep it warm in an
@@ -167,6 +170,14 @@ The **store of record survives** crashes and restarts and can be trusted as the
 truth. The **warm-cache accelerator is expendable** — losing it loses only
 performance, and the store can be re-derived from the underlying transports.
 
+### bounded, incremental derivation — never an unbounded sweep
+Deriving state **must not continuously sweep unbounded datasets** (the whole
+session-state tree, a full event log). The backbone reads the least data possible:
+**random-access straight to the specific resource**, and **cursor/watermark**
+reads that consume only the *delta* of a growing dataset since the last read. Cost
+scales with *what changed*, not with total history — so tracking stays cheap as
+the corpus grows, and a busy machine is never taxed by repeated full scans.
+
 ### IO never blocks interaction or rendering
 Reading or updating tracking state **must not stall** user interaction or the
 render path. Expensive or contended writes happen **off** the interaction/render
@@ -194,6 +205,10 @@ dependency of it.
   handing off *between* agents is agent-bridge's / ACP's domain, not the ground
   layer's. The ground layer *produces* the truth those higher layers coordinate
   over.
+- **No continuous full-scan sweeps of unbounded session data.** Deriving state by
+  repeatedly reading the entire session-state tree or a whole event log is out of
+  bounds; growing datasets are read incrementally by cursor/watermark, and single
+  resources by random access.
 - **Not the presentation surface.** How this state is *displayed and acted on*
   interactively is the Worktree Picker's subject (its own vision); this vision is
   about *owning and serving* the state, not rendering it.
@@ -233,3 +248,8 @@ dependency of it.
   extension loading. Mined from the copilot-sdk event catalog and the existing
   live-pulse extension; motivated by extension-init fragility observed in mainline
   flows.
+- **2026-08-07** — Folded in an upstream copilot-extensions design invariant:
+  **never continuously sweep unbounded datasets** (session-state tree, event log).
+  Sharpened the derivation engine to *bounded, random-access + cursor/watermark
+  incremental* reads and added the matching Behavior + Non-Goal, keeping the
+  extension-free backbone consistent with the org-wide efficiency invariant.
