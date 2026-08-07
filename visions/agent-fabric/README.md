@@ -63,9 +63,11 @@ what each agent is currently doing**, needing no cooperation from the agent — 
 same derivation instinct that already separates conversation from idle.
 A per-plugin child vision refines it at
 [`visions/plugins/agent-worktrees/`](../plugins/agent-worktrees/README.md) — the
-session-tracking & live-state authority: a single-owner live store, polling as the
-always-on backbone, an optional losable warm-cache accelerator, and agent-bridge
-as an *optional* ACP tool/message eventing supplement (never the backbone).
+session-tracking & live-state authority: a single-owner live store, an
+**extension-free polling backbone**, an optional losable warm-cache accelerator,
+and **optional, non-load-bearing** event producers (its own native-session-event
+extension — the crisp rest/idle source — and agent-bridge's ACP tool/message
+eventing), where no in-session extension is ever load-bearing for correctness.
 
 ### agent-bridge — the coordination layer
 Adds **remote agent creation, inspection, and communication** over discoverable
