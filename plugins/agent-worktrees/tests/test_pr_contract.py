@@ -471,6 +471,25 @@ class TestPRReminder:
         assert "pr-watch" in r.use_instead or "pr-status" in r.use_instead
         assert r.next_step  # tells you who merges instead
 
+    def test_pr_merge_refused_on_self_merge_points_at_now(self):
+        # A bare pr-merge on a self-merge repo is a no-op -> steer at `--now`,
+        # never a raw provider merge.
+        flow = _self_merge_flow()
+        r = pc.pr_reminder(flow, "pr-merge", ok=False,
+                           reason="this repo merges directly (self-merge)")
+        assert r.ok is False
+        assert "--now" in r.next_step
+        assert "pr-merge --now" in r.use_instead
+
+    def test_pr_merge_merged_state_points_at_finalize(self):
+        # After the direct self-merge lands, the only sanctioned next step is
+        # cleaning up the worktree.
+        flow = _self_merge_flow()
+        r = pc.pr_reminder(flow, "pr-merge", state=pc.PR_STATE_MERGED, ok=True)
+        assert "finalize" in r.next_step
+        assert r.waiting_on == ()
+
+
     def test_direct_repo_points_at_finalize(self):
         flow = pc.classify_pr_flow(enabled=False)
         r = pc.pr_reminder(flow, "pr-merge")

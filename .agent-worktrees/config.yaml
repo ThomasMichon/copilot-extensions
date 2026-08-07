@@ -44,15 +44,35 @@ remote: origin
 #
 # Flow for every agent (see CONTRIBUTING.md § "Contribution flow"):
 #   copilot-extensions create  ->  edit  ->  create-pr  (auto_open opens the PR)
-#   ->  Copilot posts its review  ->  MANUAL squash-merge:
-#       gh pr merge <#> --squash --delete-branch
+#   ->  Copilot posts its (non-blocking) review  ->  the submitter self-merges:
+#       agent-worktrees pr-merge <#> --now      (direct squash merge)
 #
-# Merge is deliberately MANUAL (no `automerge_label` bound): the owner merges
-# after giving Copilot's review a chance to land. `head_scheme` defaults to
-# `refspec` (PR head `pr/<slug>`); the shared hooks honor the mediated push.
+# This repo is a **submitter-self-merge** repo: it is PR-required, but the only
+# review is a NON-BLOCKING Copilot pass, so the PR author (the owner) approves
+# and merges their own PR directly rather than waiting on a separate human or a
+# consent-label gate. The matrix below makes that contract legible to the pr-*
+# verbs, which classify it as the `pr-self-merge` flow profile:
+#
+#   - no `automerge_label` bound (there is no consent-label gate here);
+#   - `self_approve: true` + `merge_actor: submitter-direct` -> pr-self-merge;
+#   - `reviewer: copilot`, `review_blocking: false` -> the review never gates;
+#   - `pr-merge <#> --now` performs the sanctioned direct squash-merge, so an
+#     agent never falls back to a raw `gh pr merge`.
+#
+# `head_scheme` defaults to `refspec` (PR head `pr/<slug>`); the shared hooks
+# honor the mediated push. Merge does NOT delete the source branch, so
+# `finalize` can affirm the merge against the head.
 pr:
   enabled: true
   required: true
   provider: github
   auto_open: true
   strategy: detach
+  # PR-flow legibility matrix (surfaced as reminders by the pr-* verbs) -->
+  # classifies this repo as `pr-self-merge`.
+  self_approve: true
+  merge_actor: submitter-direct
+  reviewer: copilot
+  review_blocking: false
+  review_latency_hint: "~2m"
+  conflict_retriggers_review: true

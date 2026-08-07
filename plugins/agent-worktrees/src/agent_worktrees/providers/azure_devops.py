@@ -332,6 +332,15 @@ class AzureDevOpsProvider:
             )
         return ""
 
+    def merge_pull(
+        self, repo: str, number: int, *, squash: bool = True, admin: bool = False,
+        api_base: str = "", token: str | None = None,
+    ) -> str:
+        """Not implemented: direct merge (pr-merge --now) is GitHub-only today."""
+        from .base import _unsupported_merge
+        _ = (repo, number, squash, admin, api_base, token)
+        return _unsupported_merge(self.name)
+
     def add_label(
         self, repo: str, number: int, label: str, *, api_base: str = "",
         token: str | None = None,

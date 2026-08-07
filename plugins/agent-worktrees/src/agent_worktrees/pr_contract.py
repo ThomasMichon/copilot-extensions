@@ -956,6 +956,17 @@ def pr_reminder(
                 use_instead=("pr-watch", "pr-status"),
                 cautions=cautions,
             )
+        if verb == "pr-merge" and flow.profile == PROFILE_PR_SELF_MERGE:
+            # Submitter-self-merge repo: `pr-merge` (no `--now`) is a no-op --
+            # point at the sanctioned direct-merge verb, not a bypass.
+            return PRReminder(
+                flow.profile, verb, state, ok,
+                headline=(reason or "this repo merges directly (self-merge)"),
+                next_step="merge now with `pr-merge <#> --now` (squash)",
+                waiting_on=("merged",),
+                use_instead=("pr-merge --now",),
+                cautions=cautions,
+            )
         return PRReminder(
             flow.profile, verb, state, ok,
             headline=headline, next_step=merge,
@@ -993,6 +1004,17 @@ def pr_reminder(
         )
 
     if verb == "pr-merge":
+        if state == PR_STATE_MERGED:
+            # The direct self-merge just landed -- the only sanctioned next step
+            # is cleaning up the worktree.
+            return PRReminder(
+                flow.profile, verb, state, ok,
+                headline="merged",
+                next_step="`finalize` cleans up the worktree now that the PR is merged",
+                waiting_on=(),
+                use_instead=(),
+                cautions=cautions,
+            )
         if flow.profile == PROFILE_PR_SELF_MERGE:
             nxt = "merge now with `pr-merge <#> --now` (squash)"
         else:  # agent-merge consent path

@@ -585,6 +585,15 @@ class GiteaProvider:
             return "gitea: no automerge_label bound to signal merge consent."
         return self.add_label(repo, number, automerge_label, api_base=api_base, token=token)
 
+    def merge_pull(
+        self, repo: str, number: int, *, squash: bool = True, admin: bool = False,
+        api_base: str = "", token: str | None = None,
+    ) -> str:
+        """Not implemented: direct merge (pr-merge --now) is GitHub-only today."""
+        from .base import _unsupported_merge
+        _ = (repo, number, squash, admin, api_base, token)
+        return _unsupported_merge(self.name)
+
     def get_comment_threads(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> ThreadsResult:
