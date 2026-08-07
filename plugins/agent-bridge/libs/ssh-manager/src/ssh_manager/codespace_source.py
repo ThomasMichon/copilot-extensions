@@ -46,10 +46,15 @@ class CodespaceConfigSource:
         codespace_name: str,
         *,
         config_dir: Path | str | None = None,
+        gh_env: dict | None = None,
     ) -> None:
         self._codespace_name = codespace_name
         self._config_dir = Path(config_dir) if config_dir else _DEFAULT_CONFIG_DIR
         self._config: SSHConfig | None = None
+        # Optional environment for the ``gh`` subprocess -- lets agent-codespaces
+        # pin ``gh codespace ssh --config`` to the account that owns this
+        # CodeSpace (multi-account: GH_TOKEN). None => inherit the ambient env.
+        self._gh_env = gh_env
 
     @property
     def codespace_name(self) -> str:
@@ -81,7 +86,7 @@ class CodespaceConfigSource:
             try:
                 result = subprocess.run(
                     args, capture_output=True, text=True, timeout=timeout,
-                    creationflags=_creation_flags(),
+                    creationflags=_creation_flags(), env=self._gh_env,
                 )
             except FileNotFoundError:
                 raise RuntimeError(
