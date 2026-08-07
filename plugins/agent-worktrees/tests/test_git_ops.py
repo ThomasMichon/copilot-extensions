@@ -308,6 +308,60 @@ class TestCrossAccountAuth:
         assert all("c2VjcmV0" not in a for a in err.cmd)
 
 
+class TestFetchTimeout:
+    """#1709: a network ``fetch`` is bounded so an unreachable remote can't
+    hang push-changes / create-pr / pr-status / sync indefinitely."""
+
+    def test_fetch_passes_default_timeout(self, monkeypatch):
+        monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
+        captured = {}
+
+        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None):
+            captured["timeout"] = timeout
+            captured["args"] = args
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(go, "git", fake_git)
+        go.fetch("origin", cwd=".")
+        assert captured["timeout"] == go.DEFAULT_FETCH_TIMEOUT
+        assert captured["args"] == ("fetch", "origin", "--quiet")
+
+    def test_fetch_timeout_override(self, monkeypatch):
+        monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
+        captured = {}
+        monkeypatch.setattr(go, "git", lambda *a, cwd=None, check=True,
+                            capture=True, timeout=None: (
+            captured.__setitem__("timeout", timeout),
+            types.SimpleNamespace(returncode=0, stdout="", stderr=""))[1])
+        go.fetch("origin", cwd=".", timeout=5)
+        assert captured["timeout"] == 5
+
+    def test_fetch_stall_becomes_giterror_not_hang(self, monkeypatch):
+        """A stall past the bound surfaces as a GitError (rc 124) the
+        best-effort callers already handle -- never an unbounded hang."""
+        import subprocess
+        monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
+
+        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None):
+            raise subprocess.TimeoutExpired(cmd=["git", *args], timeout=timeout)
+
+        monkeypatch.setattr(go, "git", fake_git)
+        with pytest.raises(GitError) as exc:
+            go.fetch("origin", cwd=".")
+        assert exc.value.returncode == 124
+        assert "timed out" in str(exc.value)
+
+    def test_fetch_none_timeout_preserves_unbounded(self, monkeypatch):
+        monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
+        captured = {}
+        monkeypatch.setattr(go, "git", lambda *a, cwd=None, check=True,
+                            capture=True, timeout="sentinel": (
+            captured.__setitem__("timeout", timeout),
+            types.SimpleNamespace(returncode=0, stdout="", stderr=""))[1])
+        go.fetch("origin", cwd=".", timeout=None)
+        assert captured["timeout"] is None
+
+
 # ---------------------------------------------------------------------------
 # Data models
 # ---------------------------------------------------------------------------
