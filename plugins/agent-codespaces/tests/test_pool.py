@@ -143,9 +143,41 @@ def test_build_pool_derives_in_use_and_allocation_from_lease():
     (m,) = members
     assert m.disposition == IN_USE
     assert m.holder_effort == "my-effort"
+    assert m.holder_worktree is None
+    assert m.holder_owner == "my-effort"
     assert m.holder_host == "dev6"
     d = m.to_dict()
-    assert d["allocation"] == {"effort": "my-effort", "host": "dev6", "beacon": None}
+    assert d["allocation"] == {
+        "owner": "my-effort", "effort": "my-effort", "worktree": None,
+        "host": "dev6", "beacon": None,
+    }
+
+
+def test_build_pool_surfaces_claim_owner_not_null():
+    """A #897 claim (effort="", owner in worktree) must read as held by its
+    worktree -- not a null allocation (dotfiles #904)."""
+    now = time.time()
+    wt = "/home/me/wt/type-filters-adoption-7qv"
+    claim = Lease(
+        codespace="a", effort="", pid=123, host="cloud1",
+        acquired_at=now, heartbeat_at=now, worktree=wt,
+    )
+    members, _budget = build_pool(
+        now=now, codespaces=[_cs("a")], leases=[claim], markers={},
+    )
+    (m,) = members
+    assert m.disposition == IN_USE
+    # effort is empty on a claim; the owner comes from the worktree.
+    assert m.holder_effort is None
+    assert m.holder_worktree == wt
+    assert m.holder_owner == wt
+    assert m.holder_host == "cloud1"
+    d = m.to_dict()
+    assert d["allocation"]["owner"] == wt
+    assert d["allocation"]["effort"] is None
+    assert d["allocation"]["worktree"] == wt
+    # The key regression guard: a dispatched (claimed) box is NOT null-held.
+    assert d["allocation"]["owner"] is not None
 
 
 def test_build_pool_marks_prunable_as_stale_and_recovered_as_clean():

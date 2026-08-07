@@ -2699,18 +2699,36 @@ def _cmd_release(args: argparse.Namespace) -> int:
     return 1
 
 
+def _short_owner(owner: str) -> str:
+    """A readable owner label: the basename of a worktree path, else as-is.
+
+    A claim's owner is an absolute worktree path (long); an advisory borrow's
+    owner is a short effort name. Show the basename for a path so the ``pool`` /
+    ``leases`` tables stay legible (#904).
+    """
+    if owner and os.path.isabs(owner):
+        return os.path.basename(owner.rstrip("/\\")) or owner
+    return owner
+
+
 def _cmd_leases() -> int:
-    """Show active CodeSpace leases."""
+    """Show active CodeSpace leases (advisory borrows and #897 claims)."""
     from .lease import list_leases
 
     leases = list_leases()
     if not leases:
         print("No active leases.")
         return 0
-    print(f"{'CODESPACE':<40} {'EFFORT':<24} {'HOST':<16} {'PID'}")
+    print(f"{'CODESPACE':<40} {'OWNER':<28} {'KIND':<7} {'HOST':<16} {'PID'}")
     for lease in leases:
+        # A claim keys its owner on ``worktree`` (with ``effort`` empty); an
+        # advisory borrow keys on ``effort``. Show the single owner + which
+        # flavor recorded it, so a dispatched (claimed) CodeSpace is no longer a
+        # blank row (#904).
+        owner = lease.worktree or lease.effort
+        kind = "claim" if lease.worktree else "borrow"
         print(
-            f"{lease.codespace:<40} {lease.effort:<24} "
+            f"{lease.codespace:<40} {_short_owner(owner):<28} {kind:<7} "
             f"{lease.host:<16} {lease.pid}"
         )
     return 0
@@ -2819,12 +2837,13 @@ def _cmd_pool(args: argparse.Namespace) -> int:
         return 0
     print()
     print(f"{'NAME':<38} {'REPO':<30} {'DISPOSITION':<13} "
-          f"{'CORES':<6} {'HOLDER (effort@host)'}")
+          f"{'CORES':<6} {'HOLDER (owner@host)'}")
     print("-" * 110)
     for m in sorted(members, key=lambda x: (x.disposition, x.name)):
         cores = str(m.cores) if m.cores_known else "?"
-        if m.holder_effort:
-            holder = f"{m.holder_effort}@{m.holder_host or '?'}"
+        owner = m.holder_owner
+        if owner:
+            holder = f"{_short_owner(owner)}@{m.holder_host or '?'}"
         elif m.beacon:
             holder = f"(beacon #{m.beacon})"
         else:

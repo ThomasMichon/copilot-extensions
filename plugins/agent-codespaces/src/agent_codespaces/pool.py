@@ -177,14 +177,26 @@ class PoolMember:
     cores_known: bool
     running: bool
     disposition: str
-    # Allocation -- who holds it (None when free). ``effort`` is the borrowing
-    # worktree/effort id; ``host`` the machine the holder runs on; ``beacon`` the
-    # cross-machine 4-hex id when held elsewhere without a local lease.
+    # Allocation -- who holds it (None when free). A hold is one of two lease
+    # flavors (see ``lease.py``): an advisory **borrow** keyed by ``effort``, or
+    # the exclusive #897 **claim** keyed by ``worktree`` (the owner the
+    # agent-bridge Session-Host dispatch path acquires, with ``effort`` empty).
+    # ``owner`` is the single "who holds it" answer (worktree for a claim, else
+    # effort) so a consumer needn't know which flavor recorded the hold -- this
+    # is what fixes a dispatched CodeSpace reading as an unheld/``null``
+    # allocation (#904). ``host`` is the machine the holder runs on; ``beacon``
+    # the cross-machine 4-hex id when held elsewhere without a local lease (#140).
     holder_effort: str | None
+    holder_worktree: str | None
     holder_host: str | None
     beacon: str | None
     marker: str | None
     idle_age: float | None
+
+    @property
+    def holder_owner(self) -> str | None:
+        """The single owner of the hold: the claim worktree, else the effort."""
+        return self.holder_worktree or self.holder_effort
 
     def to_dict(self) -> dict:
         return {
@@ -199,7 +211,9 @@ class PoolMember:
             "running": self.running,
             "disposition": self.disposition,
             "allocation": {
+                "owner": self.holder_owner,
                 "effort": self.holder_effort,
+                "worktree": self.holder_worktree,
                 "host": self.holder_host,
                 "beacon": self.beacon,
             },
@@ -295,7 +309,11 @@ def build_pool(
             cores_known=cores > 0,
             running=running,
             disposition=disposition,
-            holder_effort=lease.effort if lease else None,
+            # Normalize empty strings to None so a claim (effort="") and an
+            # advisory borrow (worktree="") each surface as a clean, single
+            # owner rather than a blank field (#904).
+            holder_effort=(lease.effort or None) if lease else None,
+            holder_worktree=(lease.worktree or None) if lease else None,
             holder_host=lease.host if lease else None,
             beacon=beacon,
             marker=marker,
