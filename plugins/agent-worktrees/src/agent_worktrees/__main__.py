@@ -623,6 +623,15 @@ def _worktree_to_dict(
     # full claim set. Emitted only when present, keeping the envelope lean.
     if rec.owner_ref:
         d["owner_ref"] = rec.owner_ref
+    # citadel paired -harness/-knowledge lifecycle (#957): expose the pair
+    # linkage so the Picker can annotate/aggregate the two rows as a pair.
+    # Emitted only when paired, keeping the envelope lean for the common case.
+    if rec.pair_id:
+        d["pair_id"] = rec.pair_id
+    if rec.pair_role:
+        d["pair_role"] = rec.pair_role
+    if rec.pair_kind:
+        d["pair_kind"] = rec.pair_kind
     if rec.resources:
         d["resources"] = [
             {
