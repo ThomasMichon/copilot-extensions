@@ -181,7 +181,7 @@ def doc_abs_path(anchor: str | Path, entry_or_name: RelatedEntry | str) -> Path:
 
     Resolves the entry's ``doc`` field (or the default ``related/<name>.md``)
     against the in-repo ``.agent-worktrees`` directory. When the entry carries an
-    ``origin_anchor`` (a state-root config-graft overlay entry), the doc resolves
+    ``origin_anchor`` (a knowledge-overlay config-graft entry), the doc resolves
     against **that** anchor -- a knowledge-repo entry's ``doc`` is relative to the
     knowledge checkout, not the harness base it was grafted onto.
     """
@@ -515,10 +515,10 @@ def get_primary(anchor: str | Path) -> str:
 def read_related_grafted(anchors: list[str | Path]) -> RelatedConfig:
     """Union ``related.yaml`` across ordered config-source anchors.
 
-    This is the E1e **state-root config-overlay**: a stateless harness contributes
-    its (name-free) base ``related.yaml`` while the bound **knowledge repo**
-    contributes the real personal entries. ``anchors`` is the overlay order (base
-    first, knowledge overlay last), as produced by
+    This is the E1e **knowledge overlay** (config-graft): a stateless harness
+    contributes its (name-free) base ``related.yaml`` while the bound **knowledge
+    repo** contributes the real personal entries. ``anchors`` is the overlay order
+    (base first, knowledge overlay last), as produced by
     :func:`agent_worktrees.state_root.config_source_anchors`.
 
     Merge semantics: later anchors **overlay** earlier ones -- on a name collision
