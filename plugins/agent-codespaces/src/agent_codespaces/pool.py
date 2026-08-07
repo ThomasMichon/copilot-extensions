@@ -192,6 +192,9 @@ class PoolMember:
     beacon: str | None
     marker: str | None
     idle_age: float | None
+    # The gh ``displayName`` -- a user/tool-assigned FRIENDLY name, distinct from
+    # ``name`` (the durable GitHub-assigned id). Defaults to ``name`` when unset.
+    display_name: str = ""
 
     @property
     def holder_owner(self) -> str | None:
@@ -201,6 +204,7 @@ class PoolMember:
     def to_dict(self) -> dict:
         return {
             "name": self.name,
+            "display_name": self.display_name or self.name,
             "repository": self.repository,
             "branch": self.branch,
             "state": self.state,
@@ -318,6 +322,7 @@ def build_pool(
             beacon=beacon,
             marker=marker,
             idle_age=idle_age,
+            display_name=cs.display_name or "",
         ))
 
     budget = Budget(
@@ -329,3 +334,87 @@ def build_pool(
         unknown_cores_count=unknown_running,
     )
     return members, budget
+
+
+def _short_repo(repository: str) -> str:
+    """The trailing path segment of an ``owner/name`` repo id (display only)."""
+    return repository.rsplit("/", 1)[-1] if repository else repository
+
+
+def picker_payload(
+    members: list[PoolMember],
+    budget: Budget,
+    *,
+    note: str = "",
+) -> dict:
+    """Shape the pool view for the Worktree Picker's **CodeSpaces** pivot (D1).
+
+    Returns the registered-pivot ``{"entries": [...], "summary": {...}}`` payload
+    the extended interop protocol consumes (a summary/header line + a table). Pure
+    presentation over :func:`build_pool`'s output -- no persistence, no I/O -- so
+    it is trivially testable and the CLI wrapper only supplies the live model +
+    an optional ``note`` (e.g. a missing-``codespace``-scope hint, #980).
+
+    Each entry carries picker-friendly fields (identity, disposition, cores,
+    holder) plus **distinct** ``health`` (active health: running vs stopped) and
+    ``use`` (active agent-use: in-use vs free) signals -- derived, no SSH -- so a
+    running-but-idle box reads differently from one an agent is working in. The
+    summary carries the budget accounting plus the optional ``note``.
+    """
+    entries: list[dict] = []
+    for m in sorted(members, key=lambda x: (x.repository, x.disposition, x.name)):
+        if m.holder_effort:
+            holder = f"{m.holder_effort}@{m.holder_host or '?'}"
+        elif m.beacon:
+            holder = f"#{m.beacon}"
+        else:
+            holder = ""
+        friendly = m.display_name or m.name
+        # The claiming worktree's short id: the cross-machine beacon (the 4-hex
+        # borrowing-worktree id) when held elsewhere, else the local lease's
+        # effort id. The Picker correlates this to the worktree's TASK title.
+        worktree = m.beacon or m.holder_effort or ""
+        # A concise uppercase status for the compact table: RUNNING when live,
+        # STALE for an aged recycle candidate, else STOPPED.
+        if m.running:
+            status = "RUNNING"
+        elif m.disposition == STALE:
+            status = "STALE"
+        else:
+            status = "STOPPED"
+        # Grouping key: repo @ account (the account is a shared-pool axis).
+        group = f"{_short_repo(m.repository)} @ {m.account or 'ambient'}"
+        # Second-line fallback (durable id + claim) kept for pivots that opt into
+        # a subtitle; the compact grouped layout uses columns instead.
+        subtitle = m.name if friendly != m.name else ""
+        if m.holder_effort:
+            claim = f"claimed by {m.holder_effort}"
+            claim += f" on {m.holder_host}" if m.holder_host else ""
+            subtitle = f"{subtitle} · {claim}" if subtitle else claim
+        elif m.beacon:
+            held = f"held elsewhere #{m.beacon}"
+            subtitle = f"{subtitle} · {held}" if subtitle else held
+        entries.append({
+            "id": m.name,
+            "name": m.name,            # durable GitHub-assigned id
+            "display": friendly,       # friendly display name (falls back to id)
+            "group": group,            # repo @ account (section grouping)
+            "status": status,          # RUNNING / STALE / STOPPED (compact STATE)
+            "worktree": worktree,      # claiming worktree short id (-> TASK title)
+            "subtitle": subtitle,      # optional 2nd line (durable id + claim)
+            "repository": m.repository,
+            "repo": _short_repo(m.repository),
+            "branch": m.branch,
+            "account": m.account,
+            "disposition": m.disposition,
+            "state": m.state,
+            "cores": str(m.cores) if m.cores_known else "?",
+            "running": m.running,
+            "holder": holder,
+            # health vs. use: two distinct axes (venue-pool Phase 3 / #709).
+            "health": "running" if m.running else "stopped",
+            "use": "in-use" if m.disposition == IN_USE else "free",
+        })
+    summary = dict(budget.to_dict())
+    summary["note"] = note or ""
+    return {"entries": entries, "summary": summary}

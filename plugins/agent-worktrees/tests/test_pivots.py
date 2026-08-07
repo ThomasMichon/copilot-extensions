@@ -388,3 +388,137 @@ def test_shipped_list_pivots_have_runnable_argv():
         assert reg.list_cmd[0].startswith("agent-"), (
             f"{path.name}: list argv[0] {reg.list_cmd[0]!r} is not a plugin binstub"
         )
+
+
+# ---- D1: declarative columns + summary + payload normalization ----------------
+
+
+def test_columns_absent_defaults_empty(tmp_path):
+    _write(tmp_path, "tasks", {"label": "Tasks", "list": ["agent-dispatch", "inbox"]})
+    [p] = pivots.discover_pivots(tmp_path)
+    assert p.columns == ()
+    assert p.summary_template is None
+
+
+def test_parse_columns_and_summary(tmp_path):
+    _write(
+        tmp_path,
+        "codespaces",
+        {
+            "label": "CodeSpaces",
+            "list": ["agent-codespaces", "pool", "--picker-json"],
+            "columns": [
+                {"key": "name", "header": "codespace", "width": 30},
+                {"key": "disposition", "header": "state", "width": 8, "style": "yellow"},
+                {"key": "cores", "align": "r"},
+            ],
+            "summary": "{spent_cores}/{total_cores} cores \u00b7 {headroom_cores} free",
+        },
+    )
+    [p] = pivots.discover_pivots(tmp_path)
+    assert [c.key for c in p.columns] == ["name", "disposition", "cores"]
+    assert p.columns[0].header == "codespace"
+    assert p.columns[0].width == 30
+    assert p.columns[0].align == "l"          # default
+    assert p.columns[1].style == "yellow"
+    assert p.columns[2].header == "cores"     # header defaults to key
+    assert p.columns[2].align == "r"
+    assert p.columns[2].width is None         # unset => renderer-sized
+    assert p.summary_template == "{spent_cores}/{total_cores} cores \u00b7 {headroom_cores} free"
+
+
+def test_bad_column_sinks_only_its_manifest(tmp_path):
+    _write(tmp_path, "ok", {"label": "Ok", "list": ["agent-x", "y"]})
+    _write(
+        tmp_path,
+        "bad_width",
+        {"label": "Bad", "list": ["agent-x", "y"],
+         "columns": [{"key": "a", "width": 0}]},
+    )
+    _write(
+        tmp_path,
+        "bad_align",
+        {"label": "Bad2", "list": ["agent-x", "y"],
+         "columns": [{"key": "a", "align": "middle"}]},
+    )
+    _write(
+        tmp_path,
+        "bad_keyless",
+        {"label": "Bad3", "list": ["agent-x", "y"], "columns": [{"header": "x"}]},
+    )
+    names = {p.name for p in pivots.discover_pivots(tmp_path)}
+    assert names == {"ok"}          # the three malformed manifests are skipped
+
+
+def test_non_string_summary_is_rejected(tmp_path):
+    with pytest.raises(pivots.ManifestError):
+        pivots.parse_manifest(
+            {"label": "X", "list": ["a"], "summary": {"not": "a string"}},
+            name="x", source_path="x",
+        )
+
+
+def test_parse_list_payload_bare_array_backcompat():
+    rows, summary = pivots.parse_list_payload(
+        [{"id": "1"}, {"id": "2"}, "junk", 7]
+    )
+    assert rows == [{"id": "1"}, {"id": "2"}]      # non-dict rows dropped
+    assert summary == {}                            # no summary in array form
+
+
+def test_parse_list_payload_object_form():
+    rows, summary = pivots.parse_list_payload(
+        {"entries": [{"id": "1"}], "summary": {"headroom_cores": 16}}
+    )
+    assert rows == [{"id": "1"}]
+    assert summary == {"headroom_cores": 16}
+
+
+def test_parse_list_payload_malformed_degrades_empty():
+    # A non-list entries / non-dict summary must not raise.
+    rows, summary = pivots.parse_list_payload({"entries": "nope", "summary": 5})
+    assert rows == []
+    assert summary == {}
+    assert pivots.parse_list_payload(None) == ([], {})
+
+
+def test_scope_defaults_machine_and_parses_account(tmp_path):
+    _write(tmp_path, "m", {"label": "M", "list": ["agent-x", "y"]})
+    [p] = pivots.discover_pivots(tmp_path)
+    assert p.scope == "machine"
+    assert p.account_scoped is False
+    _write(tmp_path, "m", {"label": "M", "list": ["agent-x", "y"], "scope": "account"})
+    [p] = pivots.discover_pivots(tmp_path)
+    assert p.scope == "account"
+    assert p.account_scoped is True
+
+
+def test_bad_scope_sinks_only_its_manifest(tmp_path):
+    _write(tmp_path, "ok", {"label": "Ok", "list": ["agent-x", "y"]})
+    _write(tmp_path, "bad", {"label": "Bad", "list": ["agent-x", "y"], "scope": "planet"})
+    assert {p.name for p in pivots.discover_pivots(tmp_path)} == {"ok"}
+
+
+def test_group_field_parses_from_entry(tmp_path):
+    _write(tmp_path, "cs", {"label": "CS", "list": ["agent-x", "y"],
+                            "entry": {"group": "group"}})
+    [p] = pivots.discover_pivots(tmp_path)
+    assert p.group_field == "group"
+    _write(tmp_path, "cs", {"label": "CS", "list": ["agent-x", "y"]})
+    [p] = pivots.discover_pivots(tmp_path)
+    assert p.group_field is None
+
+
+def test_column_palette_parses(tmp_path):
+    _write(tmp_path, "cs", {"label": "CS", "list": ["agent-x", "y"],
+        "columns": [{"key": "status", "palette": "state"}, {"key": "cores"}]})
+    [p] = pivots.discover_pivots(tmp_path)
+    assert p.columns[0].palette == "state"
+    assert p.columns[1].palette is None
+
+
+def test_bad_column_palette_sinks_manifest(tmp_path):
+    _write(tmp_path, "ok", {"label": "Ok", "list": ["agent-x", "y"]})
+    _write(tmp_path, "bad", {"label": "Bad", "list": ["agent-x", "y"],
+        "columns": [{"key": "s", "palette": 5}]})
+    assert {p.name for p in pivots.discover_pivots(tmp_path)} == {"ok"}

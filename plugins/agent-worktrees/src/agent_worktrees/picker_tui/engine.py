@@ -121,6 +121,34 @@ C_STATE = {
 
 PAD = "   "  # inter-column padding (3 spaces -> info breathes)
 
+# Named palettes for a registered pivot's declarative per-value cell colouring
+# (Column.palette). The ``state`` palette REUSES the Worktrees state vocabulary
+# (``C_STATE``) so a contributed pivot's status column reads with the same colours
+# as the worktree list: a CodeSpace ``RUNNING`` shares the ACTIVE blue, ``STALE``
+# the WIP amber, ``STOPPED`` the UNUSED grey, etc. Keys are upper-cased at lookup.
+_STATE_PALETTE = {
+    "RUNNING": C_STATE["ACTIVE"],   # live -> ACTIVE blue
+    "STALE": C_STATE["WIP"],        # aged recycle candidate -> WIP amber
+    "STOPPED": C_STATE["UNUSED"],   # dormant -> UNUSED grey
+    "IN-USE": C_STATE["ACTIVE"],    # disposition axis (reused vocabulary)
+    "IDLE": C_STATE["UNUSED"],
+    "CLEAN": C_STATE["FINAL"],      # rescued/reusable -> FINAL green
+    "PROVISIONING": "yellow",
+    "FAILED": C_WARN,
+}
+_STATE_PALETTE.update(C_STATE)      # also honour raw worktree state names
+_PALETTES = {"state": _STATE_PALETTE}
+
+
+def _palette_style(name, value):
+    """The per-value style for palette ``name`` and cell ``value`` (upper-cased
+    lookup), or ``""`` when the palette or value is unknown."""
+    pal = _PALETTES.get(name or "")
+    if not pal:
+        return ""
+    return pal.get(str(value).strip().upper(), "")
+
+
 # Animated SSH-connect spinner (braille "dots going around").
 SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 C_READY = "green"
@@ -1337,6 +1365,16 @@ class PickerScreen(Widget):
             return display
         return self._machine_key_map().get(display, display)
 
+    def _pivot_scope_key(self):
+        """The runtime cache key + ``{machine}`` value for the current registered
+        pivot. Machine-scoped pivots key off the selected machine identity; an
+        **account-scoped** pivot (a cross-machine shared resource like CodeSpaces)
+        keys off a single constant so its ``list`` runs once, not per machine."""
+        reg = self._reg_pivot()
+        if reg is not None and getattr(reg, "account_scoped", False):
+            return ""
+        return self._pivot_machine_id()
+
     def _pivot_runtime(self, reg):
         """Lazily build (and cache) the background runtime for a registered
         pivot -- it shells out to the pivot's ``list`` CLI off the render path."""
@@ -1714,7 +1752,7 @@ class PickerScreen(Widget):
         reg = self._reg_pivot()
         if reg is None:
             return ("idle", [], "")
-        machine = self._pivot_machine_id()
+        machine = self._pivot_scope_key()
         rt = self._pivot_runtime(reg)
         rt.ensure(machine)
         return rt.get(machine)
@@ -1724,6 +1762,54 @@ class PickerScreen(Widget):
         registered pivot -- the ('T', i) stops index into this."""
         rows = self._task_state()[1]
         return rows if isinstance(rows, list) else []
+
+    def _task_summary(self):
+        """The current registered pivot's summary dict (D1) for the current
+        machine -- the substitution source for its ``summary`` header line.
+        ``{}`` for a built-in pivot or a provider that emitted a bare array.
+        Defensive: a runtime without ``get_summary`` (an older/fixture runtime)
+        degrades to ``{}`` rather than raising."""
+        reg = self._reg_pivot()
+        if reg is None:
+            return {}
+        rt = self._pivot_runtime(reg)
+        getter = getattr(rt, "get_summary", None)
+        if getter is None:
+            return {}
+        return getter(self._pivot_scope_key())
+
+    def _worktree_title_map(self):
+        """``{short-id: title}`` from the Picker's loaded worktree records -- the
+        lookup that correlates an account-scoped pivot's *claiming worktree id*
+        (e.g. a CodeSpace lease's 4-hex beacon) to the owning worktree's title.
+        Keyed by both the 4-hex ``id4`` and the full ``id`` (lower-cased)."""
+        out: dict[str, str] = {}
+        for r in (getattr(self, "data", None) or []):
+            if not isinstance(r, dict):
+                continue
+            title = str(r.get("title") or "")
+            if not title:
+                continue
+            for f in ("id4", "id"):
+                v = r.get(f)
+                if v:
+                    out[str(v).strip().lower()] = title
+        return out
+
+    def _enrich_pivot_rows(self, reg, rows):
+        """Fill each row's ``worktree_title`` from the claiming-worktree
+        correlation (``reg.worktree_field`` value -> owning worktree title), so a
+        columns pivot can show the claimant's TASK. In-place + idempotent;
+        best-effort (no match -> ``""``). A no-op when the pivot declares no
+        ``worktree_field`` or there are no worktree records to match against."""
+        if not reg or not getattr(reg, "worktree_field", None) or not rows:
+            return
+        titles = self._worktree_title_map()
+        for rec in rows:
+            if not isinstance(rec, dict):
+                continue
+            wt = rec.get(reg.worktree_field)
+            rec["worktree_title"] = titles.get(str(wt).strip().lower(), "") if wt else ""
 
     def _task_groups(self):
         """Task rows grouped by the pivot's worktree field for display. Returns
@@ -6069,11 +6155,15 @@ class TasksView:
         """The header line for a registered pivot: a count, a load spinner, or
         the empty/error hint."""
         eng = self._eng
+        account = bool(getattr(reg, "account_scoped", False))
         machine = eng._pivot_machine() or "this machine"
+        # An account-scoped pivot (CodeSpaces) is a cross-machine shared resource:
+        # its status counts items, not "on <machine>".
+        where = "" if account else f" for {machine}"
         t = Text("  ")
         if state == "loading":
             t.append(f"{eng.spin()} ", style=C_LOAD)
-            t.append(f"loading {reg.label.lower()} for {machine}…", style=C_LOAD)
+            t.append(f"loading {reg.label.lower()}{where}…", style=C_LOAD)
         elif state == "error":
             t.append("✗ ", style=C_WARN)
             t.append(f"{reg.label} unavailable: {err or 'command failed'}", style=C_META)
@@ -6081,7 +6171,8 @@ class TasksView:
             t.append(reg.empty_hint, style=C_DIM)
         else:
             t.append("●", style=C_PULSE[eng.pulse])
-            t.append(f" {len(rows)} on {machine}", style=C_LABEL)
+            tail = f" {reg.label.lower()}" if account else f" on {machine}"
+            t.append(f" {len(rows)}{tail}", style=C_LABEL)
         t.append(" " * max(0, width - t.cell_len))
         return t
 
@@ -6108,6 +6199,78 @@ class TasksView:
             t.stylize(C_SEL)
         return t
 
+    # ---- D1: declarative columns + summary rendering ----------------------
+    @staticmethod
+    def _col_width(col) -> int:
+        """The effective render width for a declarative column: the manifest
+        ``width`` when set, else a header-derived fallback (min 6) so a
+        width-less column still renders sanely."""
+        return col.width if col.width else max(6, len(col.header))
+
+    def _summary_line(self, reg, summary, width):
+        """The D1 ``summary`` header line: ``reg.summary_template`` with
+        ``{token}``s filled from the provider's summary dict. Missing tokens
+        degrade to empty (never raises). ``None`` when there is nothing to show."""
+        if not reg.summary_template or not summary:
+            return None
+
+        class _Default(dict):
+            def __missing__(self, k):
+                return ""
+
+        safe = _Default({k: ("" if v is None else str(v)) for k, v in summary.items()})
+        try:
+            text = reg.summary_template.format_map(safe)
+        except (KeyError, IndexError, ValueError):
+            text = reg.summary_template
+        t = Text("  ")
+        t.append(text, style=C_LABEL)
+        t.append(" " * max(0, width - t.cell_len))
+        return t
+
+    def _column_header(self, reg, width):
+        """The column-header row for a columns-declaring pivot."""
+        t = Text(" ")
+        for i, col in enumerate(reg.columns):
+            if i:
+                t.append(PAD)
+            w = self._col_width(col)
+            t.append(_clip(col.header.upper(), w, col.align), style=C_HEADER)
+        t.append(" " * max(0, width - t.cell_len))
+        return t
+
+    def _column_row(self, reg, rec, width, selected):
+        """One entry rendered across the pivot's declarative columns."""
+        t = Text(" ")
+        for i, col in enumerate(reg.columns):
+            if i:
+                t.append(PAD)
+            w = self._col_width(col)
+            val = rec.get(col.key, "")
+            cell = _clip("" if val is None else str(val), w, col.align)
+            # Per-value palette colouring (reusing the picker's own vocabulary)
+            # takes precedence; the column's literal ``style`` is the fallback.
+            style = _palette_style(col.palette, val) or (col.style or "")
+            t.append(cell, style=style)
+        t.append(" " * max(0, width - t.cell_len))
+        if selected:
+            t.stylize(C_SEL)
+        return t
+
+    def _column_subtitle(self, reg, rec, width):
+        """An optional dim second metadata line under a column row (e.g. the
+        claiming worktree + its title). Rendered from ``reg.subtitle_field`` when
+        the entry supplies it; ``None`` otherwise. Non-selectable (decorative)."""
+        if not reg.subtitle_field:
+            return None
+        sub = rec.get(reg.subtitle_field)
+        if not sub:
+            return None
+        t = Text("     ")
+        t.append(str(sub), style=C_DIM)
+        t.append(" " * max(0, width - t.cell_len))
+        return t
+
     def build(self, add, width, sel):
         """Emit the registered-pivot (Tasks) body into ``add`` (the
         ``build_body`` VRow sink). Mirrors the former inline ``build_body``
@@ -6132,17 +6295,58 @@ class TasksView:
         reg = eng._reg_pivot()
         state, rows, err = eng._task_state()
         add(self._status_row(reg, state, rows, err, width))
+        # D1: a declarative summary/header line (e.g. budget headroom), when the
+        # pivot declares a `summary` template and the provider supplied a summary.
+        summary_line = self._summary_line(reg, eng._task_summary(), width)
+        if summary_line is not None:
+            add(summary_line)
         add(Text(""))
-        if state in ("ready", "idle") and rows:
-            li = 0
-            for grp, entries in eng._task_groups():
-                sec = Text(f"  ── {grp} ", style=C_SECTION)
-                sec.append("─" * max(0, width - sec.cell_len), style=C_DIM)
-                add(sec, kind="section", new_section=grp)
-                for _idx, rec in entries:
-                    add(self._row(reg, rec, width, sel == ("T", li)),
-                        stop=("T", li), data=rec)
-                    li += 1
+        if state not in ("ready", "idle") or not rows:
+            return
+        if reg.columns:
+            # Table render. Enrich each row with the claiming worktree's title
+            # (the account-scoped correlation), then render a column header, and
+            # either a flat list or -- when ``group_field`` is set -- grouped
+            # sections (``── repo @ account ──``). An optional dim subtitle line
+            # follows each row.
+            eng._enrich_pivot_rows(reg, rows)
+            add(self._column_header(reg, width), kind="section")
+            if reg.group_field:
+                groups: dict[str, list] = {}
+                order: list[str] = []
+                for li, rec in enumerate(rows):
+                    g = str(rec.get(reg.group_field) or "· ungrouped")
+                    if g not in groups:
+                        groups[g] = []
+                        order.append(g)
+                    groups[g].append((li, rec))
+                for g in order:
+                    sec = Text(f"  ── {g} ", style=C_SECTION)
+                    sec.append("─" * max(0, width - sec.cell_len), style=C_DIM)
+                    add(sec, kind="section", new_section=g)
+                    for li, rec in groups[g]:
+                        add(self._column_row(reg, rec, width, sel == ("T", li)),
+                            stop=("T", li), data=rec)
+                        sub = self._column_subtitle(reg, rec, width)
+                        if sub is not None:
+                            add(sub)
+                return
+            for li, rec in enumerate(rows):
+                add(self._column_row(reg, rec, width, sel == ("T", li)),
+                    stop=("T", li), data=rec)
+                sub = self._column_subtitle(reg, rec, width)
+                if sub is not None:
+                    add(sub)
+            return
+        li = 0
+        for grp, entries in eng._task_groups():
+            sec = Text(f"  ── {grp} ", style=C_SECTION)
+            sec.append("─" * max(0, width - sec.cell_len), style=C_DIM)
+            add(sec, kind="section", new_section=grp)
+            for _idx, rec in entries:
+                add(self._row(reg, rec, width, sel == ("T", li)),
+                    stop=("T", li), data=rec)
+                li += 1
 
 
 class ProfilesView:

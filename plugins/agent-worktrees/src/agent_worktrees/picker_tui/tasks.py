@@ -21,7 +21,7 @@ import subprocess
 import threading
 from collections.abc import Mapping, Sequence
 
-from .pivots import RegisteredPivot, format_template
+from .pivots import RegisteredPivot, format_template, parse_list_payload
 
 #: Hard cap on how long a pivot's ``list``/action command may run.
 LIST_TIMEOUT = 20.0
@@ -51,6 +51,10 @@ class RegisteredPivotRuntime:
         self._lock = threading.Lock()
         # machine -> (state, rows, error). state: loading|ready|error.
         self._cache: dict[object, tuple[str, list, str]] = {}
+        # machine -> summary dict (D1: the header/footer line's substitution
+        # source, e.g. budget headroom). Parallel to ``_cache`` so ``get`` keeps
+        # its 3-tuple contract; ``get_summary`` reads this.
+        self._summaries: dict[object, dict] = {}
         self._inflight: set[object] = set()
 
     # -- listing -------------------------------------------------------------
@@ -74,45 +78,55 @@ class RegisteredPivotRuntime:
                 return ("loading", [], "")
         return ("idle", [], "")
 
+    def get_summary(self, machine: object) -> dict:
+        """The cached summary dict for ``machine`` (D1) -- the substitution source
+        for the pivot's ``summary`` header line. ``{}`` when the provider emitted
+        a bare array (no summary) or nothing has loaded yet."""
+        with self._lock:
+            return dict(self._summaries.get(machine, {}))
+
     def invalidate(self, machine: object = None) -> None:
         """Drop cached results so the next :meth:`ensure` refetches. ``None``
         clears every machine (used after an action mutates the queue)."""
         with self._lock:
             if machine is None:
                 self._cache.clear()
+                self._summaries.clear()
             else:
                 self._cache.pop(machine, None)
+                self._summaries.pop(machine, None)
 
     def _run_list(self, machine: object) -> None:
         ctx = {"machine": "" if machine is None else str(machine)}
-        result = self._exec_list(ctx)
+        state, rows, err, summary = self._exec_list(ctx)
         with self._lock:
-            self._cache[machine] = result
+            self._cache[machine] = (state, rows, err)
+            self._summaries[machine] = summary
             self._inflight.discard(machine)
 
-    def _exec_list(self, ctx: Mapping[str, object]) -> tuple[str, list, str]:
+    def _exec_list(self, ctx: Mapping[str, object]) -> tuple[str, list, str, dict]:
         argv = _resolve_argv(self.pivot.list_cmd, ctx)
         if not argv:
-            return ("error", [], "empty list command")
+            return ("error", [], "empty list command", {})
         try:
             proc = subprocess.run(
                 argv, capture_output=True, text=True, timeout=LIST_TIMEOUT, check=False
             )
         except FileNotFoundError:
-            return ("error", [], f"{argv[0]} not found on PATH")
+            return ("error", [], f"{argv[0]} not found on PATH", {})
         except (OSError, subprocess.SubprocessError) as exc:
-            return ("error", [], str(exc)[:200])
+            return ("error", [], str(exc)[:200], {})
         if proc.returncode != 0:
             detail = (proc.stderr or "").strip().splitlines()
             msg = detail[-1] if detail else f"exit {proc.returncode}"
-            return ("error", [], msg[:200])
+            return ("error", [], msg[:200], {})
         try:
             data = json.loads(proc.stdout or "[]")
         except ValueError:
-            return ("error", [], "list command did not print JSON")
-        rows = data if isinstance(data, list) else []
-        rows = [r for r in rows if isinstance(r, dict)]
-        return ("ready", rows, "")
+            return ("error", [], "list command did not print JSON", {})
+        # D1: accept a bare array (back-compat) OR a {entries, summary} object.
+        rows, summary = parse_list_payload(data)
+        return ("ready", rows, "", summary)
 
     # -- actions -------------------------------------------------------------
 
