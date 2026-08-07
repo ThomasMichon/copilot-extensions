@@ -1622,6 +1622,10 @@ def create_new_record(
     parent_session: str | None = None,
     caller_worktree: str | None = None,
     owner_ref: str | None = None,
+    pair_id: str | None = None,
+    pair_role: str | None = None,
+    pair_ref: str | None = None,
+    pair_kind: str | None = None,
 ) -> WorktreeRecord:
     """Create and save a new worktree tracking record."""
     now = _now_iso()
@@ -1646,6 +1650,10 @@ def create_new_record(
         parent_session=parent_session or None,
         caller_worktree=caller_worktree or None,
         owner_ref=owner_ref or None,
+        pair_id=pair_id or None,
+        pair_role=pair_role or None,
+        pair_ref=pair_ref or None,
+        pair_kind=pair_kind or None,
     )
     path = tracking_path / f"{worktree_id}.yaml"
     save_record(record, path)

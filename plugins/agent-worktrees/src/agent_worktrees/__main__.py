@@ -729,6 +729,138 @@ def _worktree_to_dict(
     return d
 
 
+def _carve_paired_knowledge(
+    config: cfg.Config,
+    *,
+    harness_id: str,
+    timestamp: str,
+    suffix: str,
+    plat: str,
+    plat_short: str,
+) -> dict | None:
+    """Carve/stamp the citadel knowledge-repo PAIR for a stateless harness (#957).
+
+    When the launch repo is a **stateless harness bound to a knowledge repo**
+    (``resolve_state_root`` reports ``requires_external`` + ``bound``), the
+    knowledge repo's state is carved and tracked **together** with the harness
+    worktree so the agent never has to remember to carve it separately:
+
+    * **Worktree-class knowledge repo** -> carve its own worktree (shared
+      ``<ts>-<suffix>`` pair stub, parallel ``worktree/<id>`` branch), write its
+      tracking record cross-stamped back to the harness, and return the
+      ``pair_*`` stamp (``pair_kind="worktree"``) for the HARNESS record.
+    * **Non-worktree-class knowledge repo** (singleton / reference) -> no second
+      worktree; return an ``anchor`` pairing stamp so the pair is recorded and
+      ``state-root --pair`` resolves to the knowledge anchor.
+
+    Returns the ``pair_*`` dict to stamp on the harness record, or ``None`` when
+    no pairing applies (a normal self-hosted repo, or an unbound harness).
+    **Fail-safe:** any error degrades to ``None`` (the harness carve is never
+    affected) with a one-line stderr note. Set ``AGENT_WORKTREES_NO_PAIR`` to
+    disable the carve-both behavior entirely.
+    """
+    if os.environ.get("AGENT_WORKTREES_NO_PAIR"):
+        return None
+    try:
+        res = state_root_mod.resolve_state_root(config)
+    except Exception:
+        return None
+    if not (res.requires_external and res.bound and res.path):
+        return None
+
+    from . import repos as repos_mod
+
+    knowledge_name = res.repo
+    knowledge_anchor = res.path
+    pair_id = f"{timestamp}-{suffix}"
+    harness_ref = tracking.format_claim_ref(
+        config.machine, config.repo_name or "?", harness_id
+    )
+    entry = repos_mod.find_repo(knowledge_name)
+    is_worktree_class = bool(entry) and repos_mod.normalize_class(
+        entry.repo_class
+    ) == "worktree"
+
+    if not is_worktree_class:
+        # Non-worktree-class knowledge -> operate on the anchor (no 2nd carve).
+        anchor_ref = tracking.format_claim_ref(
+            config.machine, knowledge_name, os.path.basename(
+                knowledge_anchor.rstrip("/\\")
+            ) or "anchor",
+        )
+        print(
+            f"Paired knowledge repo '{knowledge_name}' is not worktree-class; "
+            f"pairing at its anchor (no separate worktree).",
+            file=sys.stderr,
+        )
+        return {
+            "pair_id": pair_id,
+            "pair_role": "harness",
+            "pair_ref": anchor_ref,
+            "pair_kind": "anchor",
+        }
+
+    # Worktree-class knowledge -> carve its paired worktree.
+    knowledge_id = f"{config.machine}-{plat_short}-{timestamp}-{suffix}-k"
+    knowledge_branch = f"worktree/{knowledge_id}"
+    knowledge_wt_root = cfg.derive_worktree_root(knowledge_anchor)
+    knowledge_wt_path = str(Path(knowledge_wt_root) / knowledge_id)
+    remote = (entry.remote or "origin") if entry else "origin"
+    default_branch = (entry.default_branch or "main") if entry else "main"
+
+    Path(knowledge_wt_root).mkdir(parents=True, exist_ok=True)
+    print(
+        f"Fetching latest from {remote} for paired knowledge repo "
+        f"'{knowledge_name}'...",
+        file=sys.stderr,
+    )
+    git_ops.git("fetch", remote, "--quiet", cwd=knowledge_anchor, check=False)
+    start_point = git_ops.resolve_start_point(
+        remote, default_branch, cwd=knowledge_anchor
+    )
+    print(
+        f"Creating paired knowledge worktree on branch {knowledge_branch}...",
+        file=sys.stderr,
+    )
+    git_ops.create_worktree(
+        knowledge_anchor, knowledge_wt_path, knowledge_branch, start_point
+    )
+
+    knowledge_ref = tracking.format_claim_ref(
+        config.machine, knowledge_name, knowledge_id
+    )
+    tracking.create_new_record(
+        worktree_id=knowledge_id,
+        branch=knowledge_branch,
+        worktree_path=knowledge_wt_path,
+        repo=knowledge_name,
+        machine=config.machine,
+        platform_name=plat,
+        tracking_path=cfg.tracking_dir(),
+        pair_id=pair_id,
+        pair_role="knowledge",
+        pair_ref=harness_ref,
+        pair_kind="worktree",
+    )
+    # Best-effort permissions + trust for the knowledge worktree.
+    try:
+        permissions.clone_permissions(knowledge_anchor, knowledge_wt_path)
+        permissions.add_trusted_folder(knowledge_wt_path)
+    except Exception:
+        pass
+    activity.log_event(
+        "paired_knowledge_worktree_created",
+        worktree_id=knowledge_id,
+        branch=knowledge_branch,
+    )
+    return {
+        "pair_id": pair_id,
+        "pair_role": "harness",
+        "pair_ref": knowledge_ref,
+        "pair_kind": "worktree",
+    }
+
+
 def _create_worktree_core(
     config: cfg.Config,
     *,
@@ -834,6 +966,32 @@ def _create_worktree_core(
     # Trust the new worktree path
     if permissions.add_trusted_folder(worktree_path):
         print("Added worktree path to trustedFolders.", file=sys.stderr)
+
+    # citadel paired -harness/-knowledge worktree lifecycle (#957): when this is
+    # a stateless harness bound to a knowledge repo, carve/stamp the knowledge
+    # pair together with this worktree and cross-stamp the linkage. Only for
+    # plain session worktrees (never system/bridge), and fully fail-safe -- a
+    # pairing failure never breaks the harness carve.
+    if kind == "session":
+        try:
+            pair_stamp = _carve_paired_knowledge(
+                config,
+                harness_id=worktree_id,
+                timestamp=timestamp,
+                suffix=suffix,
+                plat=plat,
+                plat_short=plat_short,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            print(f"paired-knowledge carve failed (non-fatal): {exc}",
+                  file=sys.stderr)
+            pair_stamp = None
+        if pair_stamp:
+            record.pair_id = pair_stamp.get("pair_id")
+            record.pair_role = pair_stamp.get("pair_role")
+            record.pair_ref = pair_stamp.get("pair_ref")
+            record.pair_kind = pair_stamp.get("pair_kind")
+            tracking.save_record(record)
 
     # Build launch command (for caller to use)
     fake_args = argparse.Namespace(
@@ -10336,6 +10494,48 @@ def _state_root_pair(json_out: bool) -> int:
         else:
             print(msg, file=sys.stderr)
         return 3
+    # Anchor pairing: a non-worktree-class knowledge repo has no sibling record;
+    # resolve to its checkout via the normal state-root resolution.
+    if rec.pair_kind == "anchor":
+        res = state_root_mod.resolve_state_root(cfg.load_config())
+        if not res.path:
+            msg = (res.error
+                   or f"anchor pair '{rec.pair_ref}' could not be resolved")
+            if json_out:
+                print(json.dumps(
+                    {
+                        "paired": True, "pair_id": rec.pair_id,
+                        "pair_ref": rec.pair_ref, "pair_kind": "anchor",
+                        "sibling_path": None, "error": msg,
+                    },
+                    indent=2,
+                ))
+            else:
+                print(msg, file=sys.stderr)
+            return 3
+        if json_out:
+            print(json.dumps(
+                {
+                    "paired": True,
+                    "pair_id": rec.pair_id,
+                    "self": {
+                        "worktree_id": rec.worktree_id,
+                        "role": rec.pair_role,
+                        "path": rec.worktree_path,
+                    },
+                    "sibling": {
+                        "worktree_id": None,
+                        "role": "knowledge",
+                        "path": res.path,
+                        "kind": "anchor",
+                        "status": None,
+                    },
+                },
+                indent=2,
+            ))
+        else:
+            print(res.path)
+        return 0
     sibling = tracking.find_paired_record(rec)
     if sibling is None:
         ref = rec.pair_ref or "?"
