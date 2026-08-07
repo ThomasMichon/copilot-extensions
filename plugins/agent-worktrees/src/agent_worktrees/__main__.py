@@ -652,7 +652,8 @@ def _worktree_to_dict(
         )
         d["cleanup_bucket"] = prune.cleanup_disposition(
             rec, state_info, turn_count=_turns,
-            claimant_alive=_local_claimant_alive).bucket
+            claimant_alive=_local_claimant_alive,
+            paired_sibling_final=prune.default_paired_sibling_final).bucket
         d["ff_eligible"] = (
             git_ops.can_fast_forward(state_info)
             and state_info.state != git_ops.WorktreeState.ACTIVE
@@ -5659,6 +5660,7 @@ def reap_one(
                 include_unused=include_unused,
                 include_conversations=include_conversations,
                 claimant_alive=claimant_mod.resolve_claimant_alive,
+                paired_sibling_final=prune.default_paired_sibling_final,
             )
             if not disp.cleanable:
                 return _result({"ok": False, "removed": False, "skipped": True,
@@ -6635,6 +6637,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
                 include_unused=args.include_unused,
                 include_conversations=include_conversations,
                 claimant_alive=claimant_mod.resolve_claimant_alive,
+                paired_sibling_final=prune.default_paired_sibling_final,
             )
             cleanable = disp.cleanable
             if disp.bucket == "active":
@@ -6644,6 +6647,8 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
             elif disp.bucket == "open-pr":
                 skip_reason = disp.reason
             elif disp.bucket == "closed-unmerged":
+                skip_reason = disp.reason
+            elif disp.bucket == "paired-pending":
                 skip_reason = disp.reason
             elif disp.bucket == "unused" and not cleanable:
                 unused_count += 1
