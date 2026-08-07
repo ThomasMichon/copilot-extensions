@@ -2,6 +2,7 @@
   "label": "CodeSpaces",
   "after": "Worktrees",
   "scope": "account",
+  "stream": true,
   "list": ["agent-codespaces", "pool", "--picker-json"],
   "entry": {
     "id": "id",

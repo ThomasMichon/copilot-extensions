@@ -1414,6 +1414,15 @@ class PickerScreen(Widget):
                 loader.cancel()
             except Exception:
                 pass
+        # D2: tear down any held streaming pivot channel (a ``subscribe`` stream
+        # runs until close) so no ``list --stream`` child is orphaned on exit.
+        for rt in getattr(self, "_pivot_runtimes", {}).values():
+            closer = getattr(rt, "close", None)
+            if callable(closer):
+                try:
+                    closer()
+                except Exception:
+                    pass
 
     def _poll_update_state(self):
         """Refresh the cached update-indicator state from the stage status.
