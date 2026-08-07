@@ -159,10 +159,22 @@ def _machine_from_owner(owner: str | None) -> str | None:
 #: Injectable so tests drive verdicts deterministically.
 FleetVerdictFn = Callable[[str, str], str]
 
+#: A **local-body** liveness verdict resolver: ``(bridge_session_id) ->
+#: 'live' | 'gone' | 'unknown'``. Probes a *local* headless body's agent-bridge
+#: session on this host (no SSH); ``unknown`` is never treated as death.
+#: Injectable so tests drive verdicts deterministically.
+LocalBodyVerdictFn = Callable[[str], str]
+
 #: Prefix stamped on the reservation ``session_handle`` of a headless fleet body,
 #: encoding its recovery handle as ``fleet-body:<host>:<bridge-session-id>`` (see
 #: :meth:`agent_dispatch.fleet.FleetSpawner.__call__`).
 _FLEET_BODY_PREFIX = "fleet-body:"
+
+#: Prefix stamped on the reservation ``session_handle`` of a **local** headless
+#: body, encoding its recovery handle as ``local-body:<bridge-session-id>`` (see
+#: :func:`make_headless_spawn`). Unlike a fleet body there is no host component --
+#: the session lives on *this* machine's agent-bridge daemon.
+_LOCAL_BODY_PREFIX = "local-body:"
 
 
 def _parse_fleet_body_handle(session_handle: str | None) -> tuple[str, str] | None:
@@ -189,6 +201,30 @@ def _default_fleet_verdict(host: str, bridge_session_id: str) -> str:
     from . import embody
 
     return embody.fleet_body_verdict(host, bridge_session_id)
+
+
+def _parse_local_body_handle(session_handle: str | None) -> str | None:
+    """Decode a ``local-body:<bridge-session-id>`` reservation handle.
+
+    Returns the local agent-bridge ``session_id`` for a headless body embodied on
+    *this* machine whose recovery handle was captured at spawn, else ``None`` (a
+    worktree-backed embody, a fleet body, a headless body whose session id could
+    not be captured, or any other handle).
+    """
+    if not session_handle or not session_handle.startswith(_LOCAL_BODY_PREFIX):
+        return None
+    sid = session_handle[len(_LOCAL_BODY_PREFIX):]
+    return sid or None
+
+
+def _default_local_body_verdict(bridge_session_id: str) -> str:
+    """Resolve a *local* headless body's liveness to a tri-state verdict by
+    probing its agent-bridge session on this host (no SSH). Delegates to
+    :func:`agent_dispatch.embody.local_body_verdict`; every probe failure collapses
+    to ``unknown`` (never ``gone``), so recovery never fires on ignorance."""
+    from . import embody
+
+    return embody.local_body_verdict(bridge_session_id)
 
 
 def _tracking():
@@ -258,9 +294,13 @@ def make_headless_spawn(
     supervisor fails the reservation, leaving the task queued).
 
     A headless body is not a parallel worktree, so no worktree handle is recorded
-    -- the supervisor's worktree-keyed lease heartbeat simply does not apply to it
-    (headless sweeps are expected to be bounded, driving their own lifecycle to
-    completion). Reconciliation still settles the reservation when the task
+    -- the supervisor's worktree-keyed lease heartbeat does not apply to it.
+    Instead it records a ``local-body:<bridge-session-id>`` recovery handle, so a
+    body that ends before completing (crash, or an explicit ``agent-bridge end``
+    after a run cancel) is **liveness-recovered**: the supervisor probes the
+    session locally and, on a confirmed-gone verdict, settles the orphaned
+    ``spawned`` reservation -- freeing the label's concurrency slot instead of
+    starving it. Reconciliation still settles the reservation when the task
     reaches a terminal state.
     """
     from . import bridge, embody
@@ -278,12 +318,21 @@ def make_headless_spawn(
                 worker_id=worker_id,
                 prompt=seed,
                 wait=False,
+                json_output=True,
             )
         except bridge.BridgeUnavailable as exc:
             return False, {"error": str(exc)}
         if result.returncode != 0:
             return False, {"error": (result.stderr or "").strip()[:200] or "nonzero exit"}
-        return True, {"session": worker_id, "worktree": None}
+        # Capture the created local agent-bridge session id and encode it as a
+        # `local-body:<sid>` recovery handle so a *gone* body (ended/cancelled)
+        # is liveness-recovered by the supervisor -- freeing its spawn slot --
+        # instead of orphaning its `spawned` reservation forever. When the id
+        # can't be captured, fall back to the opaque worker id (degrade safe:
+        # unprobeable, exactly the pre-fix behavior).
+        sid = embody.parse_fleet_body_session(result)
+        handle = f"{_LOCAL_BODY_PREFIX}{sid}" if sid else worker_id
+        return True, {"session": handle, "worktree": None}
 
     return spawn
 
@@ -350,6 +399,7 @@ class Supervisor:
         liveness_fn: LivenessFn | None = None,
         verdict_fn: VerdictFn | None = None,
         fleet_verdict_fn: FleetVerdictFn | None = None,
+        local_body_verdict_fn: LocalBodyVerdictFn | None = None,
         nudge_fn: NudgeFn | None = None,
         turn_state_fn: TurnStateFn | None = None,
         capacity_gate: Callable[[dict], bool] | None = None,
@@ -391,6 +441,14 @@ class Supervisor:
         #: :meth:`hold_live_leases` (heartbeat a confirmed-live one). Injectable
         #: for tests; ``unknown`` is never treated as death.
         self.fleet_verdict_fn = fleet_verdict_fn or _default_fleet_verdict
+        #: Tri-state verdict resolver for a **local headless body** (probes the
+        #: body's agent-bridge session on this host, no SSH). Used by
+        #: :meth:`recover_gone` (re-embody/free a confirmed-gone local body) and
+        #: :meth:`hold_live_leases` (heartbeat a confirmed-live one). Injectable
+        #: for tests; ``unknown`` is never treated as death.
+        self.local_body_verdict_fn = (
+            local_body_verdict_fn or _default_local_body_verdict
+        )
         #: Nudge sender used by :meth:`nudge_stalled`. Injectable for tests.
         self.nudge_fn = nudge_fn or _default_nudge
         #: When True, the inter-cycle wait in :meth:`serve` is **interruptible by a
@@ -541,6 +599,25 @@ class Supervisor:
                     except DispatchError:
                         pass
                 continue
+            # Local headless body: probe its agent-bridge session on THIS host (no
+            # SSH); heartbeat the lease only on a *confirmed-live* verdict, same as
+            # the fleet path. unknown/gone -> no heartbeat (the lease rides its
+            # course; recover_gone frees a confirmed-gone body).
+            local_sid = _parse_local_body_handle(res.get("session_handle"))
+            if local_sid is not None:
+                if not owner:
+                    continue
+                try:
+                    lverdict = self.local_body_verdict_fn(local_sid)
+                except Exception:  # liveness is best-effort -- never fatal
+                    lverdict = _tracking().UNKNOWN
+                if lverdict == _tracking().LIVE:
+                    try:
+                        self.client.heartbeat(task["id"], owner)
+                        held += 1
+                    except DispatchError:
+                        pass
+                continue
             probe_worktree = worktree or _worktree_from_owner(owner)
             if not probe_worktree or not owner:
                 continue
@@ -646,6 +723,49 @@ class Supervisor:
                             "recovery release failed for reservation %s", res["key"]
                         )
                 continue  # fleet body handled -> don't fall to the worktree path
+            # Local headless body: no worktree handle either, but its recovery
+            # handle is THIS host's agent-bridge session -- probe it locally (no
+            # SSH) and release a *confirmed-gone* body so poll_once re-embodies it.
+            # This is the fix for the orphaned-reservation slot-starve: an
+            # ended/cancelled local headless body (e.g. `agent-bridge end
+            # <session>` after a run cancel) is now settled automatically instead
+            # of holding the label's concurrency slot forever. Same tri-state
+            # safety: only GONE releases; live/unknown never.
+            local_sid = _parse_local_body_handle(res.get("session_handle"))
+            if local_sid is not None:
+                try:
+                    lverdict = self.local_body_verdict_fn(local_sid)
+                except Exception:  # liveness is best-effort -- never fatal
+                    lverdict = tracking.UNKNOWN
+                if lverdict == tracking.GONE:
+                    # Requeue the task if the dead body still holds its lease
+                    # (yield on its behalf, preserving goal + progress_log) so
+                    # re-embody is prompt, then release the reservation. A queued
+                    # task (body died before claiming) needs no yield.
+                    if status in _LEASED and owner:
+                        try:
+                            self.client.yield_task(
+                                task["id"], owner,
+                                note="local body confirmed gone; requeued for re-embody",
+                            )
+                        except DispatchError:
+                            pass  # lease-expiry GC is the backstop requeue
+                    try:
+                        self.client.fail_spawn(
+                            res["key"],
+                            detail=f"local body confirmed gone ({local_sid})",
+                        )
+                        recovered += 1
+                        log.info(
+                            "recovered gone local body for task %s (%s); reservation "
+                            "released for re-embody",
+                            task["id"], res["key"],
+                        )
+                    except DispatchError:
+                        log.exception(
+                            "recovery release failed for reservation %s", res["key"]
+                        )
+                continue  # local body handled -> don't fall to the worktree path
             worktree = res.get("worktree") or _worktree_from_owner(owner)
             if not worktree:
                 continue  # headless / no worktree handle -> not recoverable here

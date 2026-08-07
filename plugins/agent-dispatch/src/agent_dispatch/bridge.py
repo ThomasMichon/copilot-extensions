@@ -80,11 +80,12 @@ def spawn_worker(
     worker_id: str,
     prompt: str | None = None,
     wait: bool = True,
+    json_output: bool = False,
     timeout: float | None = None,
 ) -> subprocess.CompletedProcess:
     """Spawn a worker agent via agent-bridge to claim + execute ``task_id``.
 
-    Runs ``agent-bridge create <agent> "<prompt>" [--no-wait]``. Raises
+    Runs ``agent-bridge [--json] create <agent> "<prompt>" [--no-wait]``. Raises
     :class:`BridgeUnavailable` if the agent-bridge CLI is not on PATH; the caller
     degrades by leaving the task queued.
 
@@ -93,6 +94,13 @@ def spawn_worker(
     headless embody backend, which reuses the CLI autopilot seed so a
     headless-embodied task is driven identically to a CLI-embodied one -- passes
     the seed it wants delivered verbatim.
+
+    ``json_output`` inserts the ``--json`` global flag before ``create`` so the
+    created session id rides stdout as JSON -- the caller then records a recovery
+    handle (the local agent-bridge session id) for liveness-gated auto-recovery
+    of an orphaned reservation (see
+    :func:`agent_dispatch.embody.parse_fleet_body_session` /
+    :func:`agent_dispatch.embody.local_body_verdict`).
     """
     exe = _agent_bridge_launch_prefix()
     if exe is None:
@@ -101,7 +109,10 @@ def spawn_worker(
         prompt = worker_prompt(
             task_id, coordinator_url=coordinator_url, worker_id=worker_id
         )
-    cmd = [*exe, "create", agent, prompt]
+    cmd = [*exe]
+    if json_output:
+        cmd.append("--json")
+    cmd += ["create", agent, prompt]
     if not wait:
         cmd.append("--no-wait")
     return subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which

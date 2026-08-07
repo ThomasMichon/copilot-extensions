@@ -496,3 +496,37 @@ def test_no_capacity_gate_preserves_local_behavior(q, client):
     assert sup.poll_once() == [t.id]
     assert calls == [t.id]
     assert q.latest_reservation(t.id).state == SpawnState.SPAWNED
+
+
+# -- local body verdict (probe THIS host's bridge directly, no SSH) ------------
+
+
+@pytest.mark.parametrize(
+    "rc,stdout,stderr,expected",
+    [
+        (0, '{"status": "running"}', "", "live"),
+        (0, '{"status": "idle"}', "", "live"),          # idle == alive between turns
+        (0, '{"status": "stopped"}', "", "gone"),
+        (0, '{"status": "ended"}', "", "gone"),         # `agent-bridge end` -> gone
+        (0, '{"status": "running", "liveness": "dead"}', "", "gone"),  # liveness wins
+        (1, "", "[FAIL] Session x not found", "gone"),   # absent -> gone
+        (1, "", "connection refused", "unknown"),        # transport -> unknown
+        (0, "not json", "", "unknown"),
+        (0, '{"status": "mystery"}', "", "unknown"),     # unrecognized -> unknown
+    ],
+)
+def test_local_body_verdict_classifies(monkeypatch, rc, stdout, stderr, expected):
+    from agent_dispatch import bridge
+
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["agent-bridge"]
+    )
+    monkeypatch.setattr(embody.subprocess, "run", _fake_status_run(rc, stdout, stderr))
+    assert embody.local_body_verdict("sid-1") == expected
+
+
+def test_local_body_verdict_unknown_without_bridge(monkeypatch):
+    from agent_dispatch import bridge
+
+    monkeypatch.setattr(bridge, "_agent_bridge_launch_prefix", lambda: None)
+    assert embody.local_body_verdict("sid") == "unknown"

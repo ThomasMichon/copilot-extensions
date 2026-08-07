@@ -483,15 +483,49 @@ _FLEET_BODY_ALIVE = frozenset({
 })
 
 
+def _classify_body_status(proc: subprocess.CompletedProcess) -> str:
+    """Classify an ``agent-bridge --json status <session>`` result to a tri-state
+    verdict, shared by the fleet (SSH) and local body probes.
+
+    Mirrors :func:`agent_dispatch.tracking.liveness_verdict`'s safety contract:
+    only a *positive* answer yields GONE; anything ambiguous is UNKNOWN, so
+    recovery never fires on ignorance and cannot double-spawn a live body.
+    """
+    from . import tracking
+
+    if proc.returncode != 0:
+        # A missing session exits non-zero ("[FAIL] Session <id> not found") --
+        # but so could a transport failure. Distinguish: a genuine not-found is
+        # GONE; any other non-zero (unreachable, auth) is UNKNOWN.
+        err = (proc.stderr or "") + (proc.stdout or "")
+        return tracking.GONE if "not found" in err.lower() else tracking.UNKNOWN
+    out = (proc.stdout or "").strip()
+    if not out:
+        return tracking.UNKNOWN
+    try:
+        data = json.loads(out)
+    except json.JSONDecodeError:
+        return tracking.UNKNOWN
+    if not isinstance(data, dict):
+        return tracking.UNKNOWN
+    liveness = str(data.get("liveness") or "").strip().lower()
+    if liveness in {"dead", "gone"}:
+        return tracking.GONE
+    status = str(data.get("status") or "").strip().lower()
+    if status in _FLEET_BODY_TERMINAL:
+        return tracking.GONE
+    if status in _FLEET_BODY_ALIVE:
+        return tracking.LIVE
+    return tracking.UNKNOWN  # unrecognized/lagging -> never recover on ignorance
+
+
 def fleet_body_verdict(
     host: str, session_id: str, *, timeout: float | None = None
 ) -> str:
     """Tri-state liveness of a **headless fleet body** via the pool host's bridge.
 
-    Runs ``ssh <host> agent-bridge --json status <session_id>`` and classifies,
-    mirroring :func:`agent_dispatch.tracking.liveness_verdict`'s safety contract
-    (only a *positive* answer yields GONE; anything ambiguous is UNKNOWN, so
-    recovery never fires on ignorance and cannot double-spawn a live body):
+    Runs ``ssh <host> agent-bridge --json status <session_id>`` and classifies
+    (see :func:`_classify_body_status`):
 
     - **GONE** -- the bridge answers that the session is **absent** (not found,
       non-zero exit) or in a **terminal** status (:data:`_FLEET_BODY_TERMINAL`),
@@ -523,27 +557,35 @@ def fleet_body_verdict(
         )
     except (subprocess.TimeoutExpired, OSError):
         return tracking.UNKNOWN
-    if proc.returncode != 0:
-        # A missing session exits non-zero ("[FAIL] Session <id> not found") --
-        # but so could an ssh/transport failure. Distinguish: a genuine
-        # not-found is GONE; any other non-zero (unreachable, auth) is UNKNOWN.
-        err = (proc.stderr or "") + (proc.stdout or "")
-        return tracking.GONE if "not found" in err.lower() else tracking.UNKNOWN
-    out = (proc.stdout or "").strip()
-    if not out:
+    return _classify_body_status(proc)
+
+
+def local_body_verdict(session_id: str, *, timeout: float | None = None) -> str:
+    """Tri-state liveness of a **local headless body** via *this* host's bridge.
+
+    The local analog of :func:`fleet_body_verdict`: a headless body embodied on
+    this machine (:func:`agent_dispatch.supervisor.make_headless_spawn`) is an
+    agent-bridge ACP session on the *local* daemon, so its liveness is probed by
+    running ``agent-bridge --json status <session_id>`` directly (no SSH). Same
+    tri-state safety contract as the fleet probe -- only a positive not-found /
+    terminal answer yields GONE; any transport/parse failure is UNKNOWN, so
+    recovery never fires on ignorance.
+
+    Returns the string verdict (values match ``tracking.LIVE/GONE/UNKNOWN``).
+    Never raises.
+    """
+    from . import bridge, tracking
+
+    exe = bridge._agent_bridge_launch_prefix()
+    if exe is None or not session_id:
         return tracking.UNKNOWN
+    cmd = [*exe, "--json", "status", session_id]
     try:
-        data = json.loads(out)
-    except json.JSONDecodeError:
+        proc = subprocess.run(  # noqa: S603 -- fixed argv, exe resolved above
+            cmd, check=False, capture_output=True, text=True,
+            timeout=timeout if timeout is not None else 8.0,
+            **no_window_kwargs(),
+        )
+    except (subprocess.TimeoutExpired, OSError):
         return tracking.UNKNOWN
-    if not isinstance(data, dict):
-        return tracking.UNKNOWN
-    liveness = str(data.get("liveness") or "").strip().lower()
-    if liveness in {"dead", "gone"}:
-        return tracking.GONE
-    status = str(data.get("status") or "").strip().lower()
-    if status in _FLEET_BODY_TERMINAL:
-        return tracking.GONE
-    if status in _FLEET_BODY_ALIVE:
-        return tracking.LIVE
-    return tracking.UNKNOWN  # unrecognized/lagging -> never recover on ignorance
+    return _classify_body_status(proc)
