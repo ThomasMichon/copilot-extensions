@@ -14537,6 +14537,9 @@ def _pr_merge_usage() -> None:
     print(file=out)
     print("  <pr>            Consent to one PR (the author path).", file=out)
     print("  --all           Sweep every open PR (transition-helper mode).", file=out)
+    print("  --now           (submitter-self-merge repos only) merge <pr>", file=out)
+    print("                  directly now (squash). Refused where the submitter", file=out)
+    print("                  does not self-merge -- use pr-watch/pr-status there.", file=out)
     print("  --dry-run       Preview classification only; apply nothing.", file=out)
     print("  --loop          (sweep) Repeat until no PR remains eligible.", file=out)
     print("  --interval S    (sweep+loop) Seconds between passes (default 30).", file=out)
@@ -14563,6 +14566,106 @@ def _pr_merge_print_human(summary: dict) -> None:
         else:
             mark = f"skip: {d.get('reason', '')}"
         print(f"  #{d['pr']:<6} {mark:<14} {d.get('title', '')}", file=sys.stderr)
+
+
+def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
+    """Perform (or preview) a direct submitter self-merge -- ``pr-merge --now``.
+
+    Only a **pr-self-merge** repo (the owner of a PR-required repo with a
+    non-blocking bot review) may self-merge: it calls the provider's
+    ``merge_pull`` (a squash merge, ``--admin`` past the non-blocking gate --
+    the OWNER's sanctioned self-merge, the verb itself, never an agent ad-hoc
+    bypass). Any other profile is refused-with-reminder, steering the agent to
+    the sanctioned wait/consent path instead of a direct merge. Returns a shell
+    exit code (0 success, 1 merge failure, 2 refusal/usage).
+    """
+    import json as _json
+
+    from . import pr_contract as pc
+    from .providers import ProviderError, account_token_for_slug, get_provider
+
+    if args.sweep:
+        output.err("pr-merge --now: name a single PR number (not --all).")
+        return 2
+
+    # Only submitter-self-merge repos self-merge. Refuse elsewhere with a
+    # reminder that names the sanctioned path (never a raw provider merge).
+    if flow.profile != pc.PROFILE_PR_SELF_MERGE:
+        reason = (
+            "--now performs a direct submitter self-merge; this repo's PR-flow "
+            f"profile is '{flow.profile}', which does not self-merge"
+        )
+        rem = pc.pr_reminder(flow, "pr-merge", ok=False, reason=reason)
+        if args.json:
+            print(_json.dumps({
+                "repo": args.repo, "pr": args.pr,
+                "error": "--now not applicable to this repo's flow",
+                "flow_profile": flow.profile, "merge_mode": flow.merge_mode,
+                "applied": False, "reminder": rem.as_dict(),
+            }))
+        else:
+            output.err(f"pr-merge --now: {reason}. Nothing merged.")
+            print(rem.text(), file=sys.stderr)
+        return 2
+
+    provider = get_provider(getattr(prcfg, "provider", "gitea") or "gitea")
+    base = (args.host or getattr(prcfg, "api_base", "") or "").strip()
+
+    if not apply:  # --dry-run: preview only, merge nothing.
+        rem = pc.pr_reminder(flow, "pr-merge", ok=True)
+        if args.json:
+            print(_json.dumps({
+                "repo": args.repo, "pr": args.pr, "action": "dry-run",
+                "would": "squash-merge (submitter self-merge)",
+                "flow_profile": flow.profile, "applied": False,
+                "reminder": rem.as_dict(),
+            }))
+        else:
+            output.ok(
+                f"pr-merge --now (dry-run): would squash-merge PR #{args.pr} in "
+                f"{args.repo} directly (submitter self-merge). Nothing merged."
+            )
+            print(rem.text(), file=sys.stderr)
+        return 0
+
+    tok = args.token if args.token is not None else account_token_for_slug(args.repo, prcfg)
+    try:
+        err = provider.merge_pull(
+            args.repo, args.pr, squash=True, admin=True, api_base=base, token=tok,
+        )
+    except ProviderError as exc:
+        err = str(exc)
+
+    if err:
+        rem = pc.pr_reminder(flow, "pr-merge", ok=False,
+                             reason="the direct merge did not complete")
+        if args.json:
+            print(_json.dumps({
+                "repo": args.repo, "pr": args.pr, "action": "merge",
+                "applied": False, "error": err, "flow_profile": flow.profile,
+                "reminder": rem.as_dict(),
+            }))
+        else:
+            output.err(
+                f"pr-merge --now: failed to merge PR #{args.pr} in {args.repo}: {err}"
+            )
+            print(rem.text(), file=sys.stderr)
+        return 1
+
+    rem = pc.pr_reminder(flow, "pr-merge", state=pc.PR_STATE_MERGED, ok=True)
+    if args.json:
+        print(_json.dumps({
+            "repo": args.repo, "pr": args.pr, "action": "merge",
+            "applied": True, "flow_profile": flow.profile,
+            "reminder": rem.as_dict(),
+        }))
+    else:
+        output.ok(
+            f"pr-merge --now: squash-merged PR #{args.pr} in {args.repo} "
+            f"(submitter self-merge). Run `finalize` to clean up the worktree."
+        )
+        print(rem.text(), file=sys.stderr)
+    return 0
 
 
 def cmd_pr_merge_dispatch(argv: list[str]) -> int:
@@ -14596,6 +14699,9 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
     p.add_argument("--max-passes", type=int, default=0, dest="max_passes")
     p.add_argument("--host", default="", help="API base URL override")
     p.add_argument("--token", default=None, help="Provider token override")
+    p.add_argument("--now", action="store_true",
+                   help="(submitter-self-merge repos) merge the PR directly now "
+                        "(squash); refused where the submitter does not self-merge")
     p.add_argument("--json", action="store_true", help="emit the result JSON")
     p.add_argument("--config", default=None)
     try:
@@ -14616,6 +14722,41 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
         repo_cfg = config.default_repo
         prcfg = repo_cfg.pr
         default_branch = repo_cfg.default_branch
+        flow = _pr_flow_profile(repo_cfg)
+
+        # --now: perform the direct submitter self-merge (pr-self-merge repos).
+        if args.now:
+            return _pr_merge_now(args, prcfg, flow, apply=apply)
+
+        # A submitter-self-merge repo has no consent label: bare `pr-merge` is a
+        # no-op here. Refuse-with-reminder and point at the sanctioned `--now`
+        # verb (handled above), NOT the human-merge/stale-anchor path below.
+        if flow.profile == pc.PROFILE_PR_SELF_MERGE:
+            rem = pc.pr_reminder(
+                flow, "pr-merge", ok=False,
+                reason="this repo merges directly (self-merge); bare pr-merge does nothing",
+            )
+            if args.json:
+                print(_json.dumps({
+                    "repo": args.repo,
+                    "error": "self-merge repo: use pr-merge --now",
+                    "flow_profile": flow.profile,
+                    "merge_mode": flow.merge_mode,
+                    "applies": False,
+                    "hint": "submitter-self-merge repo: merge directly with "
+                            "`pr-merge <#> --now`",
+                    "reminder": rem.as_dict(),
+                }))
+            else:
+                output.err(
+                    "pr-merge: this repo's PR-flow profile is 'pr-self-merge' -- "
+                    "the submitter merges directly. Bare pr-merge applies no "
+                    "consent label here; merge now with `pr-merge <#> --now`. "
+                    "Nothing applied."
+                )
+                print(rem.text(), file=sys.stderr)
+            return 2
+
         if not getattr(prcfg, "automerge_label", ""):
             # No merge-consent label bound -> pr-merge cannot apply consent here.
             # Two distinct causes wear the same face; name both and point at the
@@ -14626,7 +14767,7 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
             #   (b) STALE ANCHOR -- a repo that *should* have the binding, whose
             #       checkout hasn't pulled it yet. Refresh the anchor and retry;
             #       do NOT hand-merge or escalate.
-            flow = _pr_flow_profile(repo_cfg)
+            # (pr-self-merge repos are handled above; this path is human-merge.)
             msg = (
                 "pr-merge: no merge-consent label (pr.automerge_label) is bound "
                 f"in this repo's .agent-worktrees/config.yaml on this machine. "

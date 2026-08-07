@@ -152,6 +152,31 @@ class PRProvider(Protocol):
         """
         ...
 
+    def merge_pull(
+        self, repo: str, number: int, *, squash: bool = True, admin: bool = False,
+        api_base: str = "", token: str | None = None,
+    ) -> str:
+        """Directly merge a PR **now** (the submitter-direct self-merge primitive).
+
+        The mechanism behind ``pr-merge <#> --now``: a first-class, provider-generic
+        "merge this PR immediately" for a **submitter-self-merge** repo (the owner
+        of a PR-required repo whose bot review is non-blocking), so an agent never
+        has to fall back to a raw provider CLI. Distinct from
+        :meth:`request_auto_complete`, which signals *consent* and lets a review
+        gate merge later; ``merge_pull`` performs the merge itself.
+
+        - **github** runs ``gh pr merge <n> --squash`` (``--admin`` when ``admin``
+          is set -- the owner's sanctioned self-merge past a non-blocking gate).
+          Deliberately does **not** delete the source branch, so ``finalize`` can
+          still affirm the merge against the (still-present) head.
+        - **gitea / azure-devops** are unsupported today (return a message).
+
+        Returns "" on success, or a human-readable error string. ``--now`` is only
+        offered where the repo's flow profile is ``pr-self-merge``; other profiles
+        refuse with a reminder before ever calling this.
+        """
+        ...
+
     def request_auto_complete(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
         automerge_label: str = "", squash: bool = True,
@@ -213,6 +238,14 @@ def _unsupported_threads(name: str) -> ThreadsResult:
     return _TR(
         supported=False,
         error=f"Provider '{name}' does not support comment-thread reads.",
+    )
+
+
+def _unsupported_merge(name: str) -> str:
+    """The default ``merge_pull`` result for a provider that cannot self-merge."""
+    return (
+        f"Provider '{name}' does not support a direct merge (pr-merge --now is "
+        "GitHub-only today; gitea/azure-devops merge via their own flow)."
     )
 
 
