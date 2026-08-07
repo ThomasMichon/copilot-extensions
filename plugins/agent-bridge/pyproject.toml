@@ -13,7 +13,7 @@ authors = [
     { name = "Thomas Michon" }
 ]
 dependencies = [
-    "fastapi>=0.115.0",
+    "fastapi>=0.141.1",
     # Plain uvicorn (not the [standard] extra) so the HTTP path stays pure
     # Python (h11) on every platform. agent-bridge serves low-traffic localhost
     # SSE -- it uses none of [standard]'s optional speedups (httptools, uvloop,
