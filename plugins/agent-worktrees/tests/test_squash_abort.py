@@ -84,26 +84,27 @@ def test_squash_noop_single_commit(tmp_path: Path):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX hook script")
-def test_squash_failure_surfaces_reason_and_restores(tmp_path: Path):
+def test_squash_bypasses_blocking_client_hook(tmp_path: Path):
+    """#3707: a repo's client-side guard pre-commit hook must NOT block the
+    squash re-commit -- push-changes is the sanctioned lander, and the squashed
+    tree is the sum of already-committed (already-verified) content. The squash
+    runs with ``core.hooksPath`` disabled, so it SUCCEEDS despite a hook that
+    would reject a plain commit."""
     repo = _make_repo(tmp_path)
     _add_commits(repo, 3)
-    orig_head = git_ops.git("rev-parse", "HEAD", cwd=str(repo), check=False).stdout.strip()
     _install_failing_pre_commit_hook(repo)
 
     ok, reason = git_ops.squash_branch("base", "squashed", cwd=str(repo))
 
-    assert ok is False
-    assert reason is not None
-    # the underlying hook diagnostic is surfaced
-    assert "hook" in reason.lower() or "ruff" in reason.lower()
-    # branch restored to original commits (3 ahead, unsquashed, untouched)
-    restored = git_ops.git("rev-parse", "HEAD", cwd=str(repo), check=False).stdout.strip()
-    assert restored == orig_head
+    assert ok is True and reason is None
+    # exactly one commit ahead of base now (the squash landed, hook bypassed)
     cnt = git_ops.git("rev-list", "--count", "base..HEAD", cwd=str(repo), check=False)
-    assert cnt.stdout.strip() == "3"
+    assert cnt.stdout.strip() == "1"
 
 
 def test_squash_bad_upstream_returns_reason(tmp_path: Path):
+    # A GENUINE (non-hook) squash failure still aborts + surfaces the reason
+    # (issue #783), independent of the hook-bypass above.
     repo = _make_repo(tmp_path)
     _add_commits(repo, 2)
     ok, reason = git_ops.squash_branch("no-such-ref", "squashed", cwd=str(repo))
@@ -169,7 +170,12 @@ def test_push_changes_aborts_on_squash_failure(tmp_path: Path, monkeypatch):
 
     repo, wt_id, config = _make_pushable_repo(tmp_path, 3, monkeypatch)
     orig_head = git_ops.git("rev-parse", "HEAD", cwd=str(repo), check=False).stdout.strip()
-    _install_failing_pre_commit_hook(repo)
+    # A GENUINE squash failure (not a client hook -- those are bypassed now per
+    # #3707). Simulate the pre-squash step failing and surfacing a reason.
+    monkeypatch.setattr(
+        finalize.git_ops, "squash_branch",
+        lambda *a, **k: (False, "git commit of the squashed tree failed: boom"),
+    )
 
     # Don't touch a real remote; abort happens before any push anyway.
     monkeypatch.setattr(finalize.git_ops, "fetch", lambda *a, **k: None)
@@ -180,19 +186,21 @@ def test_push_changes_aborts_on_squash_failure(tmp_path: Path, monkeypatch):
 
     assert ok is False
     # original unsquashed commits preserved (still 3 ahead of origin/base),
-    # proving the squash was rolled back and nothing progressed toward a push.
+    # proving nothing progressed toward a push.
     head = git_ops.git("rev-parse", "HEAD", cwd=str(repo), check=False).stdout.strip()
     assert head == orig_head
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX hook script")
 def test_push_changes_surfaces_reason_in_output(tmp_path: Path, monkeypatch, capsys):
     """The user-visible abort output must carry the underlying failure reason,
     not just return it internally (issue #783 acceptance)."""
     from agent_worktrees import finalize
 
     repo, wt_id, config = _make_pushable_repo(tmp_path, 3, monkeypatch)
-    _install_failing_pre_commit_hook(repo)
+    monkeypatch.setattr(
+        finalize.git_ops, "squash_branch",
+        lambda *a, **k: (False, "git commit of the squashed tree failed: boom"),
+    )
     monkeypatch.setattr(finalize.git_ops, "fetch", lambda *a, **k: None)
 
     ok = finalize.push_changes(wt_id, config, allow_unsquashed=False)
@@ -201,7 +209,7 @@ def test_push_changes_surfaces_reason_in_output(tmp_path: Path, monkeypatch, cap
     combined = capsys.readouterr()
     text = (combined.out + combined.err).lower()
     assert "pre-squash failed" in text
-    assert "hook" in text or "reason" in text
+    assert "boom" in text or "reason" in text
     cnt = git_ops.git(
         "rev-list", "--count", "refs/remotes/origin/base..HEAD",
         cwd=str(repo), check=False,
@@ -216,7 +224,10 @@ def test_allow_unsquashed_proceeds_past_squash(tmp_path: Path, monkeypatch):
     from agent_worktrees import finalize
 
     repo, wt_id, config = _make_pushable_repo(tmp_path, 3, monkeypatch)
-    _install_failing_pre_commit_hook(repo)
+    monkeypatch.setattr(
+        finalize.git_ops, "squash_branch",
+        lambda *a, **k: (False, "git commit of the squashed tree failed: boom"),
+    )
     monkeypatch.setattr(finalize.git_ops, "fetch", lambda *a, **k: None)
 
     reached_rebase = {"hit": False}
