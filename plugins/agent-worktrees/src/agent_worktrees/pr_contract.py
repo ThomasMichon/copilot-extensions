@@ -624,6 +624,7 @@ __all__ = [
 PROFILE_DIRECT = "direct"                  # no PR flow: land straight to default branch
 PROFILE_PR_HUMAN_MERGE = "pr-human-merge"  # PR-gated, a human approves/merges
 PROFILE_PR_AGENT_MERGE = "pr-agent-merge"  # PR-gated, author signals merge consent
+PROFILE_PR_SELF_MERGE = "pr-self-merge"    # PR-gated, submitter self-approves + merges directly
 
 #: Every pr-* author verb, for describing applicability.
 _ALL_PR_VERBS = ("create-pr", "pr-watch", "pr-status", "pr-merge", "pr-complete")
@@ -641,9 +642,17 @@ class PRFlowProfile:
     - ``profile``       -- one of the ``PROFILE_*`` tokens.
     - ``requires_pr``   -- direct-to-default-branch is refused (``pr.required``).
     - ``merge_mode``    -- who lands it: ``"direct"`` | ``"human"`` |
-      ``"agent-consent"``.
+      ``"agent-consent"`` | ``"self-direct"``.
     - ``applicable_verbs`` -- pr-* verbs that apply to this repo.
     - ``summary``       -- one-line human description of the flow.
+
+    Legibility matrix (drives :func:`pr_reminder`):
+
+    - ``reviewer`` / ``review_blocking`` / ``review_latency_hint`` -- who
+      reviews, whether it gates the merge, and roughly how long it takes.
+    - ``self_approve`` -- may the submitter approve their own PR.
+    - ``conflict_retriggers_review`` -- a post-approval rebase+push re-reviews.
+    - ``rebase_owner`` -- who keeps the PR mergeable (``"submitter"`` / ``""``).
     """
 
     profile: str
@@ -653,6 +662,12 @@ class PRFlowProfile:
     automerge_label: str
     applicable_verbs: tuple[str, ...]
     summary: str
+    reviewer: str = ""
+    review_blocking: bool = False
+    review_latency_hint: str = ""
+    self_approve: bool = False
+    conflict_retriggers_review: bool = True
+    rebase_owner: str = "submitter"
 
     def applies(self, verb: str) -> bool:
         """True when ``verb`` (e.g. ``"pr-merge"``) is part of this repo's flow."""
@@ -665,6 +680,12 @@ def classify_pr_flow(
     required: bool = False,
     provider: str = "",
     automerge_label: str = "",
+    reviewer: str = "",
+    review_blocking: bool = False,
+    review_latency_hint: str = "",
+    self_approve: bool = False,
+    merge_actor: str = "",
+    conflict_retriggers_review: bool = True,
 ) -> PRFlowProfile:
     """Derive a repo's :class:`PRFlowProfile` from its PR config values.
 
@@ -687,7 +708,22 @@ def classify_pr_flow(
     checkout's anchor is stale looks identical to a genuine human-merge repo.
     Callers that expect agent-merge (e.g. the facility) should confirm the
     anchor is current before treating an empty label as "human-merge".
+
+    A fourth shape, **pr-self-merge**, sits between agent-consent and
+    human-merge: PR-required, but the **submitter self-approves and merges
+    directly** (no consent label, no separate human) -- selected by
+    ``self_approve`` or ``merge_actor == "submitter-direct"``. This is the shape
+    of a PR-required owner repo with a non-blocking bot review; the full pr-*
+    family applies (``pr-merge --now`` performs the direct merge).
     """
+    _matrix = dict(
+        reviewer=reviewer,
+        review_blocking=review_blocking,
+        review_latency_hint=review_latency_hint,
+        self_approve=self_approve,
+        conflict_retriggers_review=conflict_retriggers_review,
+        rebase_owner="submitter",
+    )
     if not enabled:
         return PRFlowProfile(
             profile=PROFILE_DIRECT,
@@ -698,6 +734,12 @@ def classify_pr_flow(
             applicable_verbs=(),
             summary=("Direct-push repo -- no PR flow; finalize lands the "
                      "worktree to the default branch."),
+            reviewer="",
+            review_blocking=False,
+            review_latency_hint=review_latency_hint,
+            self_approve=False,
+            conflict_retriggers_review=False,
+            rebase_owner="",
         )
     if automerge_label:
         return PRFlowProfile(
@@ -712,6 +754,22 @@ def classify_pr_flow(
                 f"consent (label '{automerge_label}') after approval and the "
                 f"review gate merges. Full pr-* family applies."
             ),
+            **_matrix,
+        )
+    if self_approve or merge_actor == "submitter-direct":
+        return PRFlowProfile(
+            profile=PROFILE_PR_SELF_MERGE,
+            requires_pr=required,
+            merge_mode="self-direct",
+            provider=provider,
+            automerge_label="",
+            applicable_verbs=_ALL_PR_VERBS,
+            summary=(
+                f"PR-gated ({provider or 'provider'}); the submitter "
+                f"self-approves and merges directly (`pr-merge <#> --now`). "
+                f"Full pr-* family applies."
+            ),
+            **_matrix,
         )
     return PRFlowProfile(
         profile=PROFILE_PR_HUMAN_MERGE,
@@ -725,4 +783,245 @@ def classify_pr_flow(
             f"(no auto-merge consent label bound). Use create-pr / pr-watch / "
             f"pr-status / pr-complete; pr-merge does not apply here."
         ),
+        **_matrix,
+    )
+
+
+# ---------------------------------------------------------------------------
+# PR-flow reminders -- state-aware "rules + next step" guidance per repo
+# ---------------------------------------------------------------------------
+#
+# A reminder is a **stay-on-the-rails** aid: every pr-* / push-changes verb, on
+# BOTH its success and its error/refusal path, tells the calling agent where it
+# is, which states are allowed next, and which *sanctioned agent-worktrees verb*
+# to use next. It is deliberately a pure transform of a PRFlowProfile (+ the
+# verb, the coarse PR state, and whether the command succeeded).
+#
+# HARD INVARIANT -- no bypass tactics. A reminder MUST NEVER steer an agent to a
+# tool that goes around this flow: no raw provider CLI (`gh pr merge`, `gh api`,
+# `az repos`), no force/override flags (`--force`, `--admin`, `--no-verify`), no
+# direct REST calls. Even though an agent may have general permission to run
+# those, the reminder's whole job is to keep work ON the reviewed rails, so it
+# only ever names agent-worktrees verbs and the sanctioned flow. A refusal says
+# what to do *within* the rules (wait, watch, let the reviewer merge), never how
+# to skip them. This invariant is enforced by ``test_pr_contract`` (a token
+# scan over every reminder's rendered text).
+
+#: Coarse PR states a verb may know it is in (from a snapshot, or "" when
+#: unknown). The reminder tailors "next" / "waiting on" to these.
+PR_STATE_UNKNOWN = ""
+PR_STATE_CREATED = "created"
+PR_STATE_AWAITING_REVIEW = "awaiting-review"
+PR_STATE_APPROVED = "approved"
+PR_STATE_CHANGES_REQUESTED = "changes-requested"
+PR_STATE_CONFLICT = "conflict"
+PR_STATE_MERGED = "merged"
+
+
+@dataclass(frozen=True)
+class PRReminder:
+    """A compact, state-aware reminder of a repo's PR rules + next step.
+
+    Pure data derived from a :class:`PRFlowProfile` (+ the verb, the coarse PR
+    state, and command outcome). Rendered to prose for stdio and to a dict for
+    the ``--json`` ``reminder`` node, so a calling agent never has to remember
+    the per-repo flow -- and is never nudged off the sanctioned rails.
+
+    - ``headline``    -- one line: where you are (or what was refused).
+    - ``next_step``   -- the recommended next action, a sanctioned verb.
+    - ``waiting_on``  -- allowed states you may next be in / waiting for.
+    - ``use_instead`` -- on a refusal, the sanctioned verb(s) to use instead.
+    - ``cautions``    -- gotchas (a rebase re-triggers review, etc.).
+    """
+
+    profile: str
+    verb: str
+    state: str
+    ok: bool
+    headline: str
+    next_step: str
+    waiting_on: tuple[str, ...]
+    use_instead: tuple[str, ...]
+    cautions: tuple[str, ...]
+
+    def as_dict(self) -> dict:
+        return {
+            "profile": self.profile,
+            "verb": self.verb,
+            "state": self.state,
+            "ok": self.ok,
+            "headline": self.headline,
+            "next": self.next_step,
+            "waiting_on": list(self.waiting_on),
+            "use_instead": list(self.use_instead),
+            "cautions": list(self.cautions),
+        }
+
+    def text(self) -> str:
+        """Render a compact multi-line reminder for stdio."""
+        tag = "Reminder" if self.ok else "Reminder (blocked)"
+        lines = [f"{tag} [{self.profile}] {self.headline}"]
+        if self.next_step:
+            lines.append(f"  Next: {self.next_step}")
+        if self.waiting_on:
+            lines.append(f"  Allowed next: {', '.join(self.waiting_on)}")
+        if self.use_instead:
+            lines.append(f"  Use instead: {', '.join(self.use_instead)}")
+        for c in self.cautions:
+            lines.append(f"  Note: {c}")
+        return "\n".join(lines)
+
+
+def _review_phrase(flow: PRFlowProfile) -> str:
+    """Human phrase for the repo's review, or '' when none is configured."""
+    if not flow.reviewer:
+        return ""
+    latency = f" ({flow.review_latency_hint})" if flow.review_latency_hint else ""
+    kind = "blocking" if flow.review_blocking else "non-blocking"
+    return f"{flow.reviewer} review{latency}, {kind}"
+
+
+def _merge_instruction(flow: PRFlowProfile) -> str:
+    """The sanctioned way THIS repo merges -- always an agent-worktrees verb."""
+    if flow.profile == PROFILE_PR_SELF_MERGE:
+        return "self-approve, then merge with `pr-merge <#> --now`"
+    if flow.profile == PROFILE_PR_AGENT_MERGE:
+        label = flow.automerge_label or "the consent label"
+        return (f"after an approval, consent with `pr-merge <#>` (applies "
+                f"'{label}'); the review gate merges")
+    if flow.profile == PROFILE_PR_HUMAN_MERGE:
+        who = flow.reviewer or "a reviewer"
+        return f"{who} approves and merges -- you do not merge here"
+    return "finalize lands the work (no PR)"
+
+
+def _cautions(flow: PRFlowProfile) -> tuple[str, ...]:
+    out: list[str] = []
+    if flow.profile != PROFILE_DIRECT and flow.conflict_retriggers_review:
+        out.append("a post-approval rebase + `push-changes` re-triggers review")
+    if flow.rebase_owner:
+        out.append(f"{flow.rebase_owner} owns rebase + keeping the PR mergeable")
+    return tuple(out)
+
+
+def pr_reminder(
+    flow: PRFlowProfile,
+    verb: str,
+    state: str = "",
+    *,
+    ok: bool = True,
+    reason: str = "",
+) -> PRReminder:
+    """Build a state-aware reminder for ``verb`` under this repo's ``flow``.
+
+    ``ok=False`` marks an error/refusal path: the reminder then leads with the
+    blockage and fills ``use_instead`` with the sanctioned verb(s) to use --
+    never a bypass (see the module HARD INVARIANT).
+    """
+    review = _review_phrase(flow)
+    merge = _merge_instruction(flow)
+    cautions = _cautions(flow)
+
+    # Direct-push repo: no PR ceremony at all.
+    if flow.profile == PROFILE_DIRECT:
+        # Any PR-landing verb (including ``create-pr`` / ``pr-create``, which do
+        # NOT start with "pr") should point at the sanctioned ``finalize``.
+        _pr_verb = verb.startswith("pr") or verb in ("create-pr", "pr-create")
+        return PRReminder(
+            profile=flow.profile, verb=verb, state=state, ok=ok,
+            headline="direct-push repo -- no PR flow",
+            next_step="`finalize` lands the worktree to the default branch",
+            waiting_on=(), use_instead=(("finalize",) if _pr_verb else ()),
+            cautions=(),
+        )
+
+    # ---- error / refusal path (both outcomes are reminded) ----------------
+    if not ok:
+        headline = reason or f"{verb} does not apply to this repo"
+        if verb == "pr-merge" and flow.profile == PROFILE_PR_HUMAN_MERGE:
+            return PRReminder(
+                flow.profile, verb, state, ok,
+                headline=(reason or "you cannot merge in this repo"),
+                next_step=merge,
+                waiting_on=("approved", "merged"),
+                use_instead=("pr-watch", "pr-status"),
+                cautions=cautions,
+            )
+        if verb == "pr-merge" and flow.profile == PROFILE_PR_AGENT_MERGE:
+            return PRReminder(
+                flow.profile, verb, state, ok,
+                headline=(reason or "not eligible for consent yet"),
+                next_step=merge,
+                waiting_on=("approved", "merged"),
+                use_instead=("pr-watch", "pr-status"),
+                cautions=cautions,
+            )
+        return PRReminder(
+            flow.profile, verb, state, ok,
+            headline=headline, next_step=merge,
+            waiting_on=(), use_instead=("pr-status", "pr-watch"),
+            cautions=cautions,
+        )
+
+    # ---- success path -----------------------------------------------------
+    if verb in ("create-pr", "pr-create"):
+        nxt = merge if not review else f"wait for {review}, then {merge}"
+        return PRReminder(
+            flow.profile, verb, state or PR_STATE_CREATED, ok,
+            headline="PR created",
+            next_step=nxt,
+            waiting_on=(review,) if review else (),
+            use_instead=(),
+            cautions=cautions,
+        )
+
+    if verb == "pr-watch":
+        wait = []
+        if review:
+            wait.append(review)
+        wait.append("approval" if (flow.review_blocking
+                                   or flow.profile == PROFILE_PR_HUMAN_MERGE)
+                    else "merge")
+        wait.append("conflict")
+        return PRReminder(
+            flow.profile, verb, state, ok,
+            headline="watching the PR",
+            next_step=merge,
+            waiting_on=tuple(w for w in wait if w),
+            use_instead=(),
+            cautions=cautions,
+        )
+
+    if verb == "pr-merge":
+        if flow.profile == PROFILE_PR_SELF_MERGE:
+            nxt = "merge now with `pr-merge <#> --now` (squash)"
+        else:  # agent-merge consent path
+            nxt = merge
+        return PRReminder(
+            flow.profile, verb, state, ok,
+            headline="merge step",
+            next_step=nxt,
+            waiting_on=("merged",),
+            use_instead=(),
+            cautions=cautions,
+        )
+
+    if verb == "push-changes":
+        return PRReminder(
+            flow.profile, verb, state, ok,
+            headline="pushed to the PR branch",
+            next_step=(f"wait for {review}; then {merge}" if review else merge),
+            waiting_on=(review,) if review else (),
+            use_instead=(),
+            cautions=cautions,
+        )
+
+    # Generic (pr-status / pr-complete / unknown verb).
+    return PRReminder(
+        flow.profile, verb, state, ok,
+        headline=flow.summary,
+        next_step=merge,
+        waiting_on=(review,) if review else (),
+        use_instead=(),
+        cautions=cautions,
     )

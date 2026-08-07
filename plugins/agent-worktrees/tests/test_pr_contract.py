@@ -390,6 +390,137 @@ class TestClassifyPRFlow:
         assert f.profile == pc.PROFILE_PR_HUMAN_MERGE
         assert f.requires_pr is False
 
+    def test_self_merge_when_self_approve(self):
+        f = pc.classify_pr_flow(
+            enabled=True, required=True, provider="github",
+            automerge_label="", self_approve=True,
+            reviewer="copilot", review_blocking=False,
+            review_latency_hint="~2m",
+        )
+        assert f.profile == pc.PROFILE_PR_SELF_MERGE
+        assert f.merge_mode == "self-direct"
+        # pr-merge applies here (the --now direct-merge path).
+        assert f.applies("pr-merge") is True
+        assert f.applies("create-pr") is True
+        assert f.reviewer == "copilot"
+        assert f.review_latency_hint == "~2m"
+        assert f.self_approve is True
+
+    def test_self_merge_when_merge_actor_submitter_direct(self):
+        f = pc.classify_pr_flow(
+            enabled=True, required=True, automerge_label="",
+            merge_actor="submitter-direct",
+        )
+        assert f.profile == pc.PROFILE_PR_SELF_MERGE
+
+    def test_agent_merge_wins_over_self_approve(self):
+        # An explicit consent label keeps the agent-consent shape even if
+        # self_approve is also set (label is the stronger signal).
+        f = pc.classify_pr_flow(
+            enabled=True, required=True, automerge_label="auto-merge",
+            self_approve=True,
+        )
+        assert f.profile == pc.PROFILE_PR_AGENT_MERGE
+
+    def test_matrix_fields_carried(self):
+        f = pc.classify_pr_flow(
+            enabled=True, required=True, automerge_label="auto-merge",
+            reviewer="agent:reviewer", review_blocking=True,
+            conflict_retriggers_review=True,
+        )
+        assert f.reviewer == "agent:reviewer"
+        assert f.review_blocking is True
+        assert f.conflict_retriggers_review is True
+        assert f.rebase_owner == "submitter"
+
+
+# ---------------------------------------------------------------------------
+# PR-flow reminders (pr_reminder) -- state-aware, stay-on-the-rails guidance
+# ---------------------------------------------------------------------------
+
+#: Bypass tokens a reminder must NEVER emit (the module HARD INVARIANT).
+_FORBIDDEN = (
+    "gh pr", "gh api", "gh repo", "az repos", "az pipelines",
+    "--admin", "--force", "--no-verify", "curl ", "git push origin",
+)
+
+
+def _self_merge_flow(**kw):
+    base = dict(enabled=True, required=True, provider="github",
+                automerge_label="", self_approve=True, reviewer="copilot",
+                review_latency_hint="~2m")
+    base.update(kw)
+    return pc.classify_pr_flow(**base)
+
+
+class TestPRReminder:
+    def test_create_pr_self_merge_points_at_pr_merge_now(self):
+        flow = _self_merge_flow()
+        r = pc.pr_reminder(flow, "create-pr")
+        assert r.ok is True
+        assert "pr-merge" in r.next_step and "--now" in r.next_step
+        assert r.waiting_on  # waits on the copilot review
+
+    def test_pr_merge_refused_on_human_merge_offers_sanctioned_alternatives(self):
+        flow = pc.classify_pr_flow(enabled=True, required=True,
+                                   provider="github", automerge_label="",
+                                   reviewer="agent:reviewer")
+        r = pc.pr_reminder(flow, "pr-merge", ok=False,
+                           reason="you cannot merge in this repo")
+        assert r.ok is False
+        assert "pr-watch" in r.use_instead or "pr-status" in r.use_instead
+        assert r.next_step  # tells you who merges instead
+
+    def test_direct_repo_points_at_finalize(self):
+        flow = pc.classify_pr_flow(enabled=False)
+        r = pc.pr_reminder(flow, "pr-merge")
+        assert "finalize" in (r.next_step + " " + " ".join(r.use_instead))
+
+    def test_direct_repo_create_pr_still_points_at_finalize(self):
+        # create-pr does NOT start with "pr" -- the blocked/direct reminder
+        # must still steer it to the sanctioned finalize verb.
+        flow = pc.classify_pr_flow(enabled=False)
+        for verb in ("create-pr", "pr-create"):
+            r = pc.pr_reminder(flow, verb)
+            assert "finalize" in r.use_instead, verb
+
+    def test_conflict_caution_present_when_retriggers_review(self):
+        flow = _self_merge_flow(conflict_retriggers_review=True)
+        r = pc.pr_reminder(flow, "pr-watch")
+        assert any("re-triggers review" in c for c in r.cautions)
+
+    def test_as_dict_shape(self):
+        flow = _self_merge_flow()
+        d = pc.pr_reminder(flow, "create-pr").as_dict()
+        for k in ("profile", "verb", "ok", "next", "waiting_on",
+                  "use_instead", "cautions"):
+            assert k in d
+
+    def test_no_bypass_tactics_in_any_reminder(self):
+        # Scan every (profile x verb x outcome) reminder's rendered text +
+        # structured fields for forbidden bypass tokens.
+        flows = [
+            pc.classify_pr_flow(enabled=False),
+            pc.classify_pr_flow(enabled=True, required=True,
+                                automerge_label="auto-merge", reviewer="agent:r",
+                                review_blocking=True),
+            _self_merge_flow(),
+            pc.classify_pr_flow(enabled=True, required=True, automerge_label="",
+                                reviewer="agent:reviewer"),
+        ]
+        verbs = ("create-pr", "pr-watch", "pr-status", "pr-merge",
+                 "pr-complete", "push-changes")
+        for flow in flows:
+            for verb in verbs:
+                for ok in (True, False):
+                    r = pc.pr_reminder(flow, verb, ok=ok,
+                                       reason="blocked" if not ok else "")
+                    blob = (r.text() + " " + repr(r.as_dict())).lower()
+                    for bad in _FORBIDDEN:
+                        assert bad.lower() not in blob, (
+                            f"reminder for {flow.profile}/{verb} ok={ok} "
+                            f"leaked bypass token {bad!r}: {blob}")
+
 
 # ---------------------------------------------------------------------------
 # approval_required knob (self-complete: eligible without an approval vote)
