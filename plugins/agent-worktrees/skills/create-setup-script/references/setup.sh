@@ -18,6 +18,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Resolve the project from the current directory (git-like). The launcher no
+# longer exports WORKTREE_PROJECT/WORKTREE_ID -- context comes from CWD. The
+# directory-name fallback keeps this working in recovery mode (CLI unavailable).
+PROJECT="$(agent-worktrees get project 2>/dev/null || basename "$PWD")"
+
 # 1. Environment
 export MY_API_KEY="..."
 
@@ -28,7 +33,7 @@ fi
 
 # 3. Banner (skip in ACP mode)
 if [[ "$IS_ACP" != "true" ]]; then
-    echo "[>] Ready: ${WORKTREE_PROJECT:-unknown} on $MACHINE"
+    echo "[>] Ready: ${PROJECT} on $MACHINE"
 fi
 
 # 4. Launch Copilot (REQUIRED -- must be last)
