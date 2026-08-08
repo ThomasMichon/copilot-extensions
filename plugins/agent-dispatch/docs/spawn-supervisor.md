@@ -181,12 +181,13 @@ process per machine-and-environment** reads the registration registry and runs
 each **active** registration in its **own subprocess**, reconciling the running
 set against the registry on every tick.
 
-- **Single-instance.** At startup the daemon wins a **pin-not-failover**
-  election over a `supervisor:<machine>:<env>` scope (the store's schedule-lease
-  primitive). A second daemon for the same scope is refused and **stands down**
-  (exit 3) rather than spawning a rival loop — the *one supervisor per
-  machine-and-environment* guarantee. A double launch (e.g. two `--ensure`
-  registers racing) is self-correcting: the loser stands down.
+- **Single-instance.** At startup the daemon takes a **crash-safe OS lock** on a
+  lock file keyed by the `supervisor:<machine>:<env>` scope. The kernel releases
+  the lock automatically if the daemon dies, so a **restart reacquires cleanly**
+  (no permanent lock), while a *live* second daemon for the same scope is refused
+  and **stands down** (exit 3) rather than spawning a rival loop — the *one
+  supervisor per machine-and-environment* guarantee. A double launch (e.g. two
+  `--ensure` registers racing) is self-correcting: the loser stands down.
 - **Reconcile each tick.** Start a newly-registered unit; **restart** one whose
   spec changed (fingerprint of `kind`+`spec`); **wind down** one that was removed
   or paused (`terminate` its subprocess); **revive** one whose subprocess crashed,

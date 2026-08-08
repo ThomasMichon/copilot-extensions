@@ -110,6 +110,21 @@ class Clock:
         return self.t
 
 
+class FakeLock:
+    def __init__(self, granted: bool = True):
+        self._granted = granted
+        self.acquired = False
+        self.released = False
+
+    def acquire(self) -> bool:
+        if self._granted:
+            self.acquired = True
+        return self._granted
+
+    def release(self) -> None:
+        self.released = True
+
+
 def _reg(rid, **over) -> dict:
     r = {
         "id": rid,
@@ -234,7 +249,8 @@ def test_reconcile_revives_crashed_unit_with_backoff_and_cap():
     clock.t = 5.0
     s2 = d.reconcile_once()
     assert s2.revived == []
-    assert "a" in s2.running  # unit retained, awaiting backoff
+    assert s2.running == []  # crashed proc is not "running"
+    assert "a" in s2.backing_off  # unit retained, awaiting backoff
 
     # t=15: backoff elapsed -> revive again (2nd restart, hits the cap)
     clock.t = 15.0
@@ -265,9 +281,8 @@ def test_reconcile_skips_unsupported_kind():
 
 def test_serve_stands_down_when_scope_already_held():
     client = FakeClient([_reg("a")])
-    client.lease_holder = "someone-else"  # scope already owned
     launcher = FakeLauncher()
-    d = _daemon(client, launcher)
+    d = _daemon(client, launcher, lock=FakeLock(granted=False))
     rc = d.serve(once=True)
     assert rc == 3
     assert launcher.launched == []  # never ran
@@ -276,22 +291,22 @@ def test_serve_stands_down_when_scope_already_held():
 def test_serve_runs_once_and_winds_down():
     client = FakeClient([_reg("a"), _reg("b")])
     launcher = FakeLauncher()
+    lock = FakeLock(granted=True)
     seen = []
-    d = _daemon(client, launcher)
+    d = _daemon(client, launcher, lock=lock)
     rc = d.serve(once=True, on_cycle=seen.append)
     assert rc == 0
     assert set(seen[0].started) == {"a", "b"}
-    # shutdown terminated every unit and released the lease
+    # shutdown terminated every unit and released the singleton lock
     assert launcher.proc_for("a").terminated is True
     assert launcher.proc_for("b").terminated is True
-    assert client.lease_holder is None
+    assert lock.released is True
 
 
 def test_serve_unguarded_skips_election():
     client = FakeClient([_reg("a")])
-    client.lease_holder = "someone-else"
     launcher = FakeLauncher()
-    d = _daemon(client, launcher)
+    d = _daemon(client, launcher, lock=FakeLock(granted=False))
     rc = d.serve(once=True, single_instance=False)
     assert rc == 0
-    assert launcher.proc_for("a")  # ran despite the held lease
+    assert launcher.proc_for("a")  # ran despite a held lock

@@ -33,7 +33,6 @@ import logging
 import subprocess
 import sys
 import time
-import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
@@ -157,7 +156,11 @@ class ReconcileSummary:
     restarted: list[str] = field(default_factory=list)
     revived: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
+    #: Units whose subprocess is currently alive.
     running: list[str] = field(default_factory=list)
+    #: Units tracked but not currently running -- a crashed unit awaiting its
+    #: restart backoff (distinct from ``running`` so status output isn't misleading).
+    backing_off: list[str] = field(default_factory=list)
 
 
 class SupervisorDaemon:
@@ -181,7 +184,7 @@ class SupervisorDaemon:
         poll_interval: float = 5.0,
         restart_backoff: float = 5.0,
         max_restarts: int | None = None,
-        holder: str | None = None,
+        lock: Any | None = None,
     ):
         self.client = client
         self.machine = machine
@@ -194,7 +197,9 @@ class SupervisorDaemon:
         self.restart_backoff = max(0.0, float(restart_backoff))
         #: Cap on automatic restarts of a crash-looping unit (None = unbounded).
         self.max_restarts = max_restarts
-        self.holder = holder or f"supervisord-{uuid.uuid4().hex[:8]}"
+        #: The single-instance lock (injectable for tests). Built lazily from the
+        #: run-dir + scope when first needed, unless one was supplied.
+        self._lock = lock
         self._units: dict[str, ManagedUnit] = {}
 
     # -- registry view -------------------------------------------------------
@@ -305,31 +310,48 @@ class SupervisorDaemon:
             if rid not in self._units:
                 self._start(reg, summary, bucket="started")
 
+        def _alive(u: ManagedUnit) -> bool:
+            return u.proc is not None and u.proc.poll() is None
+
         summary.running = sorted(
-            rid for rid, u in self._units.items() if not u.dead
+            rid for rid, u in self._units.items() if not u.dead and _alive(u)
+        )
+        summary.backing_off = sorted(
+            rid for rid, u in self._units.items() if not u.dead and not _alive(u)
         )
         return summary
 
     # -- serve loop ----------------------------------------------------------
 
+    def _build_lock(self) -> Any:
+        from .config import run_dir
+        from .single_instance import SingleInstance, lock_path_for
+
+        scope = supervisor_lease_scope(self.machine, self.env)
+        return SingleInstance(lock_path_for(run_dir(), scope))
+
     def acquire_singleton(self) -> bool:
         """Win the single-instance election for this (machine, env), or stand down.
 
-        Uses the store's pin-not-failover schedule-lease over a supervisor scope:
-        the first daemon is granted and a second is refused (returns ``False``) and
-        must NOT run -- the *one supervisor per machine-and-environment* guarantee.
+        Uses a crash-safe **OS lock file** over a ``supervisor:<machine>:<env>``
+        scope: the kernel releases the lock automatically if the daemon dies, so a
+        restart reacquires cleanly, while a *live* second daemon is refused
+        (returns ``False``) and must NOT run -- the *one supervisor per
+        machine-and-environment* guarantee, without a crash leaving a permanent
+        lock.
         """
-        scope = supervisor_lease_scope(self.machine, self.env)
-        result = self.client.acquire_schedule_lease(scope, self.holder)
-        return bool(result.get("granted"))
+        if self._lock is None:
+            self._lock = self._build_lock()
+        return bool(self._lock.acquire())
 
     def release_singleton(self) -> None:
-        """Release this daemon's single-instance lease (best-effort)."""
-        scope = supervisor_lease_scope(self.machine, self.env)
+        """Release this daemon's single-instance lock (best-effort)."""
+        if self._lock is None:
+            return
         try:
-            self.client.release_schedule_lease(scope, self.holder)
+            self._lock.release()
         except Exception:  # pragma: no cover -- best-effort
-            log.exception("error releasing supervisor lease")
+            log.exception("error releasing supervisor lock")
 
     def shutdown(self) -> None:
         """Wind down every running unit (best-effort)."""

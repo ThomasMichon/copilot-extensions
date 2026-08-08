@@ -1557,16 +1557,15 @@ def _ensure_supervisor_daemon(args: argparse.Namespace, machine: str | None, env
     no-op. Otherwise it launches one detached. Best-effort and fail-soft -- a
     failure to ensure never fails the register call.
     """
+    from .config import run_dir
+    from .single_instance import is_locked, lock_path_for
     from .supervisor_daemon import supervisor_lease_scope
 
     scope = supervisor_lease_scope(machine, env)
     try:
-        with _client(args) as c:
-            lease = c.get_schedule_lease(scope)
-        if lease:
-            return {"ensured": False, "reason": "already running",
-                    "holder": lease.get("holder")}
-    except Exception:  # noqa: BLE001 -- fail-soft; fall through to a spawn attempt
+        if is_locked(lock_path_for(run_dir(), scope)):
+            return {"ensured": False, "reason": "already running"}
+    except OSError:  # noqa: BLE001 -- fail-soft; fall through to a spawn attempt
         pass
     spawned = _spawn_supervisor_daemon_detached(machine, env)
     return {"ensured": spawned, "reason": "spawned" if spawned else "spawn failed"}
@@ -1584,7 +1583,7 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
     machine, env = _registration_scope(args)
     with _client(args) as c:
         daemon = SupervisorDaemon(
-            c, machine, env, poll_interval=getattr(args, "interval", 5.0) or 5.0
+            c, machine, env, poll_interval=getattr(args, "interval", 5.0)
         )
 
         def _on_cycle(summary) -> None:
@@ -1596,7 +1595,8 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
                 print(
                     f"supervise serve: started={summary.started} "
                     f"stopped={summary.stopped} restarted={summary.restarted} "
-                    f"revived={summary.revived} running={summary.running}",
+                    f"revived={summary.revived} running={summary.running} "
+                    f"backing_off={summary.backing_off}",
                     file=sys.stderr,
                 )
 
@@ -1610,20 +1610,21 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
 def _cmd_supervise_daemon_status(args: argparse.Namespace) -> int:
     """``supervise daemon-status`` -- is a daemon running here, and what would it
     run."""
+    from .config import run_dir
+    from .single_instance import is_locked, lock_path_for
     from .supervisor_daemon import supervisor_lease_scope
 
     machine, env = _registration_scope(args)
     scope = supervisor_lease_scope(machine, env)
+    running = is_locked(lock_path_for(run_dir(), scope))
     with _client(args) as c:
-        lease = c.get_schedule_lease(scope)
         regs = c.list_registrations(machine=machine, env=env, include_paused=True)
     return _emit(
         {
             "scope": scope,
             "machine": machine,
             "env": env,
-            "running": lease is not None,
-            "daemon": lease,
+            "running": running,
             "registrations": regs,
         }
     )
