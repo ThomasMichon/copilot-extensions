@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
+import pytest
+
 
 from agent_codespaces.__main__ import main
 
@@ -237,17 +239,51 @@ class TestFinalizeProgress:
 
 
 class TestProjectFlag:
-    def test_project_flag_triggers_chdir(self, monkeypatch):
+    def test_project_flag_triggers_chdir_on_consuming_verb(self, monkeypatch):
+        # --project applies (chdir) only for a project-consuming verb (config).
         import agent_codespaces.__main__ as cm
 
+        monkeypatch.delenv("AGENT_WORKTREES_PROJECT_ROUTED", raising=False)
         seen = {}
         monkeypatch.setattr(
             cm, "_chdir_to_project",
             lambda p: seen.setdefault("project", p) or True,
         )
-        rc = cm.main(["--project", "demo", "version"])
+        monkeypatch.setattr(cm, "_cmd_config", lambda args: 0)
+        rc = cm.main(["--project", "demo", "config", "show"])
         assert rc == 0
         assert seen["project"] == "demo"
+
+    def test_explicit_project_on_name_addressed_verb_bounces(self, monkeypatch):
+        # An explicit --project on a name-addressed verb (version) fails loud
+        # instead of silently no-op'ing (#1080-style guard).
+        import agent_codespaces.__main__ as cm
+
+        monkeypatch.delenv("AGENT_WORKTREES_PROJECT_ROUTED", raising=False)
+        calls = {"n": 0}
+        monkeypatch.setattr(
+            cm, "_chdir_to_project",
+            lambda p: calls.__setitem__("n", calls["n"] + 1) or True,
+        )
+        with pytest.raises(SystemExit) as ei:
+            cm.main(["--project", "demo", "version"])
+        assert ei.value.code == 2
+        assert calls["n"] == 0  # never chdir'd
+
+    def test_routed_project_on_name_addressed_verb_is_silent(self, monkeypatch):
+        # Router-injected --project on a name-addressed verb stays a silent
+        # no-op (no bounce, no chdir) so `<repo> codespaces version` works.
+        import agent_codespaces.__main__ as cm
+
+        monkeypatch.setenv("AGENT_WORKTREES_PROJECT_ROUTED", "1")
+        calls = {"n": 0}
+        monkeypatch.setattr(
+            cm, "_chdir_to_project",
+            lambda p: calls.__setitem__("n", calls["n"] + 1) or True,
+        )
+        rc = cm.main(["--project", "demo", "version"])
+        assert rc == 0
+        assert calls["n"] == 0
 
     def test_no_project_flag_no_chdir(self, monkeypatch):
         import agent_codespaces.__main__ as cm
