@@ -1,10 +1,14 @@
 """Configuration loading and validation for agent-codespaces.
 
-All configuration lives in adopting repos in ``codespaces.yaml``. The
-runtime directory (``~/.agent-codespaces/``) contains only the adoption
-manifest (``adopted-repos.yaml``) -- a list of repo paths. On every
-start/reload the service reads ``codespaces.yaml`` live from each
-adopted repo and merges in memory.
+Most repos need no config: agent-codespaces derives machine/location defaults,
+the ``/workspaces/<basename>`` checkout, and the git-credential relay by
+convention. Supplementary, CodeSpace-specific config lives **in the adopting
+repo** at the canonical ``.agent-codespaces/config.yaml`` (aligned with the
+sibling ``agent-*`` plugins), with the legacy repo-root ``codespaces.yaml`` still
+read as a back-compat fallback. The runtime directory (``~/.agent-codespaces/``)
+holds only the adoption manifest (``adopted-repos.yaml``) -- a list of repo
+paths. On every start/reload the service reads each repo's config live and
+merges in memory; a CLI run inside a repo also auto-discovers that repo's config.
 """
 
 from __future__ import annotations
@@ -41,7 +45,65 @@ RUNTIME_DIR = _home() / ".agent-codespaces"
 ADOPTED_REPOS_FILE = RUNTIME_DIR / "adopted-repos.yaml"
 SOCKET_DIR = RUNTIME_DIR / "sockets"
 LOG_FILE = RUNTIME_DIR / "agent-codespaces.log"
+
+# In-repo config, aligned with the sibling agent-* plugins' ``.agent-<name>/``
+# convention (e.g. ``.agent-worktrees/config.yaml``). This is the **canonical**
+# home for a repo's CodeSpace config; it carries only the *supplementary*,
+# CodeSpace-specific bits that convention can't derive (workspace_repo/split-repo
+# mapping, devcontainer pin, ado_host, provision hooks). A repo that matches
+# convention (machine defaults, ``/workspaces/<basename>`` checkout, git-credential
+# relay) needs no file at all.
+CONFIG_DIR_NAME = ".agent-codespaces"
+CONFIG_FILE_IN_DIR = "config.yaml"
+CANONICAL_CONFIG_REL = f"{CONFIG_DIR_NAME}/{CONFIG_FILE_IN_DIR}"
+
+# Legacy repo-root config filename, still read as a back-compat fallback.
+# ``agent-codespaces config migrate`` relocates it to CANONICAL_CONFIG_REL.
 CONFIG_FILENAME = "codespaces.yaml"
+
+
+def repo_config_path(repo_path: Path) -> Path | None:
+    """Return a repo's CodeSpace config file, or ``None`` if it has none.
+
+    Prefers the canonical ``.agent-codespaces/config.yaml``; falls back to the
+    legacy repo-root ``codespaces.yaml`` (back-compat). The returned path is the
+    *file*; the repo root (used to resolve provision ``src`` paths) stays
+    ``repo_path`` regardless of which location the file lives in.
+    """
+    canonical = repo_path / CONFIG_DIR_NAME / CONFIG_FILE_IN_DIR
+    if canonical.exists():
+        return canonical
+    legacy = repo_path / CONFIG_FILENAME
+    if legacy.exists():
+        return legacy
+    return None
+
+
+def repo_has_config(repo_path: Path) -> bool:
+    """Whether ``repo_path`` carries a CodeSpace config (canonical or legacy)."""
+    return repo_config_path(repo_path) is not None
+
+
+def cwd_repo_root() -> Path | None:
+    """The git repo root for the current directory, or ``None`` when not in one.
+
+    Backs config **auto-discovery**: a CLI run inside a repo that carries a
+    ``.agent-codespaces/config.yaml`` picks it up without a manual ``config
+    adopt`` (the adoption manifest remains for extra/multi repos and for the
+    detached daemon paths, which pass ``include_cwd=False``).
+    """
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            cwd=Path.cwd(), capture_output=True, text=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0 or not (result.stdout or "").strip():
+        return None
+    return Path(result.stdout.strip()).parent.resolve()
 
 # Standard location GitHub Codespaces clones the account dotfiles repo into.
 # Canonical here (config is the layer both provision.py and the request-folder
@@ -466,10 +528,14 @@ def save_adopted_repos(repos: list[AdoptedRepo]) -> None:
 
 
 def load_repo_config(repo_path: Path) -> dict[str, Any] | None:
-    """Load codespaces.yaml from a single repo. Returns None if missing."""
-    config_file = repo_path / CONFIG_FILENAME
-    if not config_file.exists():
-        log.warning("No %s found in %s", CONFIG_FILENAME, repo_path)
+    """Load a repo's CodeSpace config. Returns None if missing.
+
+    Reads the canonical ``.agent-codespaces/config.yaml`` or the legacy
+    repo-root ``codespaces.yaml`` (see :func:`repo_config_path`).
+    """
+    config_file = repo_config_path(repo_path)
+    if config_file is None:
+        log.warning("No %s found in %s", CANONICAL_CONFIG_REL, repo_path)
         return None
 
     with open(config_file) as f:
@@ -477,19 +543,20 @@ def load_repo_config(repo_path: Path) -> dict[str, Any] | None:
 
 
 def _state_root_config_dir(repo_path: Path) -> Path | None:
-    """Resolve the bound knowledge repo's dir when it carries ``codespaces.yaml``.
+    """Resolve the bound knowledge repo's dir when it carries a CodeSpace config.
 
     The citadel E1e **knowledge overlay** (config-graft, #947): a stateless
-    harness carries no ``codespaces.yaml`` of its own -- personal CodeSpace
+    harness carries no CodeSpace config of its own -- personal CodeSpace
     topology is reference config that lives in the bound knowledge repo. This asks
     ``agent-worktrees state-root`` (run with cwd=repo_path) only to LOCATE the
     knowledge checkout -- the config-READ axis, distinct from where personal state
-    is written -- returning it only when it actually declares a ``codespaces.yaml``.
+    is written -- returning it only when it actually declares a CodeSpace config
+    (canonical ``.agent-codespaces/config.yaml`` or legacy ``codespaces.yaml``).
 
     Best-effort + fail-open: a missing ``agent-worktrees`` binstub, a
     non-stateless / unbound repo, or any error yields ``None``. Never raises.
-    Only the codespaces.yaml *content* + its ``src``/provision ``repo_dir`` graft
-    here; plugin-settings sourcing (``source_paths``) stays the harness's own, so
+    Only the config *content* + its ``src``/provision ``repo_dir`` graft here;
+    plugin-settings sourcing (``source_paths``) stays the harness's own, so
     generic CodeSpace plugins remain harness-sourced.
     """
     import json
@@ -520,7 +587,7 @@ def _state_root_config_dir(repo_path: Path) -> Path | None:
     if not root:
         return None
     kroot = Path(root)
-    return kroot if (kroot / CONFIG_FILENAME).exists() else None
+    return kroot if repo_has_config(kroot) else None
 
 
 def repo_copilot_settings(source_paths: Iterable[Path]) -> dict[str, Any]:
@@ -600,37 +667,51 @@ def _parse_repo_config(raw: dict[str, Any], repo_dir: Path | None = None) -> Rep
     )
 
 
-def load_merged_config() -> CodespacesConfig:
-    """Load and merge config from all adopted repos.
+def load_merged_config(include_cwd: bool = True) -> CodespacesConfig:
+    """Load and merge CodeSpace config from all adopted repos.
 
-    Reads ``codespaces.yaml`` live from each adopted repo path.
-    First repo's values win on conflicts (except credential sources
-    which are unioned).
+    Reads each repo's config (``.agent-codespaces/config.yaml``, or legacy
+    ``codespaces.yaml``) live. First repo's values win on conflicts (except
+    credential sources, which are unioned).
+
+    ``include_cwd`` (default True) also **auto-discovers** the current git repo:
+    if the cwd's repo carries a config and isn't already adopted, it is merged
+    last -- so a CLI run inside a repo picks up its ``.agent-codespaces/config.yaml``
+    with no manual ``config adopt``. Detached daemon paths (relay/resolver) pass
+    ``include_cwd=False`` so they stay driven purely by the adoption manifest.
     """
-    adopted = load_adopted_repos()
-    if not adopted:
+    roots: list[Path] = [entry.path for entry in load_adopted_repos()]
+    if include_cwd:
+        cwd_root = cwd_repo_root()
+        if (
+            cwd_root is not None
+            and cwd_root not in roots
+            and repo_has_config(cwd_root)
+        ):
+            roots.append(cwd_root)
+    if not roots:
         return CodespacesConfig()
 
     merged = CodespacesConfig()
     defaults_set = False
 
-    for entry in adopted:
-        # E1e knowledge overlay (config-graft, #947): read codespaces.yaml from
-        # the repo itself, or -- when it has none and is a stateless harness --
-        # from the bound knowledge repo (its src/provision paths resolve relative
-        # to THAT dir). source_paths stays the adopted repo (entry.path) so generic
-        # CodeSpace plugin settings remain harness-sourced; only the codespaces.yaml
-        # content + its repo_dir graft to the knowledge overlay.
-        config_dir = entry.path
-        if not (entry.path / CONFIG_FILENAME).exists():
-            grafted = _state_root_config_dir(entry.path)
+    for repo_root in roots:
+        # E1e knowledge overlay (config-graft, #947): read the config from the
+        # repo itself, or -- when it has none and is a stateless harness -- from
+        # the bound knowledge repo (its src/provision paths resolve relative to
+        # THAT dir). source_paths stays the repo root so generic CodeSpace plugin
+        # settings remain harness-sourced; only the config content + its repo_dir
+        # graft to the knowledge overlay.
+        config_dir = repo_root
+        if not repo_has_config(repo_root):
+            grafted = _state_root_config_dir(repo_root)
             if grafted is not None:
                 config_dir = grafted
         raw = load_repo_config(config_dir)
         if raw is None:
             continue
 
-        merged.source_paths.append(entry.path)
+        merged.source_paths.append(repo_root)
 
         # Defaults (first wins)
         defaults = raw.get("defaults", {})
@@ -719,7 +800,11 @@ def validate_config(config: CodespacesConfig) -> list[str]:
     issues: list[str] = []
 
     if not config.source_paths:
-        issues.append("No adopted repos with codespaces.yaml found")
+        issues.append(
+            "No CodeSpace config found (no .agent-codespaces/config.yaml in the "
+            "current repo and no adopted repos). Standard repos need none; add "
+            "one only for supplementary CodeSpace-specific config."
+        )
 
     for source_name, source_cfg in config.credentials.sources.items():
         if (

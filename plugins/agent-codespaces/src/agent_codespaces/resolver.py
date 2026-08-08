@@ -226,7 +226,7 @@ class CodespaceResolver:
                 cs.name,
             )
 
-        config = load_merged_config()
+        config = load_merged_config(include_cwd=False)
         # Always spawn against the RAW codespace name (gh requires it), even if
         # the caller addressed it by friendly name. Resolve the launch command
         # per CodeSpace *repository* so a bare address lands in the right checkout

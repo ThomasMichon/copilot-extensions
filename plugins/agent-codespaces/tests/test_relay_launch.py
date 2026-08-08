@@ -52,7 +52,7 @@ def test_build_relay_launch_env(monkeypatch, tmp_path):
     # Empty config dir -> no published live port, so the config port is used.
     monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))
     monkeypatch.setattr("agent_codespaces.config.load_merged_config",
-                        lambda: _Cfg())
+                        lambda *a, **k: _Cfg())
     monkeypatch.setattr("agent_codespaces.relay_token.token_for",
                         lambda name: "minted-tok")
     env, port = rl.build_relay_launch_env("cs-foo")
@@ -73,7 +73,7 @@ def test_build_relay_launch_env_live_port_override(monkeypatch):
         credentials = _Creds()
 
     monkeypatch.setattr("agent_codespaces.config.load_merged_config",
-                        lambda: _Cfg())
+                        lambda *a, **k: _Cfg())
     monkeypatch.setattr("agent_codespaces.relay_token.token_for",
                         lambda name: "minted-tok")
     env, port = rl.build_relay_launch_env("cs-foo", relay_port=51234)
@@ -97,7 +97,7 @@ def test_build_relay_launch_env_preflights_dispatch_relay(monkeypatch):
 
     calls = []
     monkeypatch.setattr("agent_codespaces.config.load_merged_config",
-                        lambda: _Cfg())
+                        lambda *a, **k: _Cfg())
     monkeypatch.setattr("agent_codespaces.relay_token.token_for",
                         lambda name: "minted-tok")
     monkeypatch.setattr(
@@ -145,7 +145,7 @@ def test_build_relay_launch_env_none_falls_back_to_config(monkeypatch, tmp_path)
     # Empty config dir -> no published live port -> config fallback.
     monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))
     monkeypatch.setattr("agent_codespaces.config.load_merged_config",
-                        lambda: _Cfg())
+                        lambda *a, **k: _Cfg())
     monkeypatch.setattr("agent_codespaces.relay_token.token_for",
                         lambda name: "minted-tok")
     env, port = rl.build_relay_launch_env("cs-foo", relay_port=None)
@@ -169,7 +169,7 @@ def test_build_relay_launch_env_none_uses_published_live_port(monkeypatch, tmp_p
     (tmp_path / "relay-port").write_text("52001", encoding="utf-8")
     monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))
     monkeypatch.setattr("agent_codespaces.config.load_merged_config",
-                        lambda: _Cfg())
+                        lambda *a, **k: _Cfg())
     monkeypatch.setattr("agent_codespaces.relay_token.token_for",
                         lambda name: "minted-tok")
     env, port = rl.build_relay_launch_env("cs-foo", relay_port=None)
@@ -260,3 +260,4 @@ def test_effective_relay_port_honors_configured_pin(monkeypatch, tmp_path):
 def test_credentials_config_relay_port_defaults_to_dynamic_sentinel():
     from agent_codespaces.config import CredentialsConfig
     assert CredentialsConfig().relay_port == 0
+
