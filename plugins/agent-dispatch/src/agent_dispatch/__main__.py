@@ -1580,9 +1580,11 @@ def _cmd_recipes_render(args: argparse.Namespace) -> int:
 def _recipe_dedup_key(rendered: Any) -> str:
     """A reserved-work dedup key so re-kicking the same recipe+params collides
     rather than forking the work (the *no-overlapping-live-workers* invariant's
-    dedup-before-create half)."""
-    parts = ":".join(f"{k}={rendered.params[k]}" for k in sorted(rendered.params))
-    return f"recipe:{rendered.recipe}:{parts}"
+    dedup-before-create half). Delegates to the shared registry helper so the CLI
+    and MCP kick paths derive the same key."""
+    from .recipes import dedup_key_for
+
+    return dedup_key_for(rendered)
 
 
 def _recipe_create_namespace(

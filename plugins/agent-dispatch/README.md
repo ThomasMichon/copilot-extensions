@@ -470,8 +470,10 @@ It exposes the queue as tools: `dispatch_create` / `dispatch_find` /
 `dispatch_worktree_status` / `dispatch_claim` / `dispatch_start` /
 `dispatch_yield` / `dispatch_complete` / `dispatch_abandon` /
 `dispatch_heartbeat` / `dispatch_approve` / `dispatch_detach` /
-`dispatch_recover`. `dispatch_create` takes an inline `payload` the coordinator
-spills to a blob when large.
+`dispatch_recover` -- plus the recipe tools `dispatch_recipe_list` /
+`dispatch_recipe_render` / `dispatch_recipe_kick` (kick an ad-hoc loop archetype;
+see **Recipes** above). `dispatch_create` takes an inline `payload` the
+coordinator spills to a blob when large.
 
 ### Two MCP surfaces
 
@@ -482,7 +484,7 @@ There are **two** ways to reach the tools — pick by where the client runs:
 | **Local stdio shim** | `agent-dispatch mcp` | resolved from the caller's **CWD** (like the CLI) | the agent has `agent-dispatch` installed locally in its worktree |
 | **Coordinator-hosted HTTP** | mounted at **`/mcp`** on the coordinator | `X-Agent-Machine` / `X-Agent-Worktree` **request headers** (or explicit tool args) | a remote MCP client (e.g. an `agent-mcp` bridge on another host) that can't resolve local identity |
 
-Both expose the same 16 `dispatch_*` tools and publish the same `task.*` events;
+Both expose the same 20 `dispatch_*` tools and publish the same `task.*` events;
 they only differ in how identity is supplied. The coordinator mounts `/mcp`
 automatically when the `mcp` extra is installed (pass `enable_mcp=False` to
 `create_app` to suppress it); if a bearer token is configured it also guards the

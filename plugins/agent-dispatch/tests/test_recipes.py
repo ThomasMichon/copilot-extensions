@@ -167,3 +167,68 @@ def test_kick_custom_dedup_key_wins(monkeypatch):
     )
     _cmd_recipes_kick(args)
     assert captured["ns"].dedup_key == "custom-key"
+
+
+# -- MCP tools ---------------------------------------------------------------
+
+
+class _FakeClient:
+    """Context-manager stand-in for DispatchClient capturing create() calls."""
+
+    def __init__(self, sink):
+        self._sink = sink
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def create(self, title, **kwargs):
+        self._sink.update(title=title, **kwargs)
+        return {"id": "task-1", "title": title, "status": "queued"}
+
+
+def _tools(sink):
+    from agent_dispatch.mcp_server import DispatchTools
+
+    return DispatchTools(
+        client_factory=lambda: _FakeClient(sink),
+        repo_resolver=lambda: "https://example.com/o/n.git",
+    )
+
+
+def test_mcp_recipe_list_returns_archetypes():
+    out = _tools({}).recipe_list()
+    assert {r["name"] for r in out} == {"reviewer", "conflict-resolution", "goal-driven"}
+
+
+def test_mcp_recipe_render_is_pure():
+    out = _tools({}).recipe_render("reviewer", {"repo": "o/n", "pr": "5"})
+    assert out["title"] == "review o/n#5 to resolution"
+
+
+def test_mcp_recipe_kick_enqueues_with_recipe_fields():
+    sink: dict = {}
+    result = _tools(sink).recipe_kick("reviewer", params={"repo": "o/n", "pr": "5"})
+    assert result["status"] == "queued"
+    assert sink["title"] == "review o/n#5 to resolution"
+    assert sink["repo"] == "https://example.com/o/n.git"  # resolved lane
+    assert sink["source"] == "recipe"
+    assert sink["origin_ref"] == "reviewer"
+    assert "recipe:reviewer" in sink["labels"]
+    assert sink["dedup_key"] == "recipe:reviewer:base=the default branch:pr=5:repo=o/n"
+    assert sink["goal"].startswith("Drive pull request o/n#5")
+
+
+def test_mcp_recipe_kick_missing_param_raises():
+    with pytest.raises(recipes.RecipeError):
+        _tools({}).recipe_kick("reviewer", params={"repo": "o/n"})
+
+
+def test_cli_and_mcp_derive_the_same_dedup_key():
+    from agent_dispatch.__main__ import _recipe_dedup_key
+
+    rendered = recipes.render_recipe("goal-driven", {"goal": "document X"})
+    assert _recipe_dedup_key(rendered) == recipes.dedup_key_for(rendered)
+

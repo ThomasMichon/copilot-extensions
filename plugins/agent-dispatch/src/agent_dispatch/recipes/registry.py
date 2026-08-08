@@ -298,3 +298,14 @@ def render_recipe(name: str, params: dict[str, str]) -> RenderedRecipe:
         labels=labels,
         params={k: values[k] for k in values},
     )
+
+
+def dedup_key_for(rendered: RenderedRecipe) -> str:
+    """A reserved-work dedup key derived from the recipe + its (effective)
+    parameters, so re-kicking the same recipe for the same target **collides**
+    rather than forking the work -- the dedup-before-create half of the
+    *no-overlapping-live-workers* invariant. Single source for the CLI and MCP
+    kick paths.
+    """
+    parts = ":".join(f"{k}={rendered.params[k]}" for k in sorted(rendered.params))
+    return f"recipe:{rendered.recipe}:{parts}"
