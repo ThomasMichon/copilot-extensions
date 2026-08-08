@@ -14,6 +14,7 @@ See ``visions/plugins/agent-dispatch`` (§Concepts/*The recipe*, §Features/
 
 from __future__ import annotations
 
+from .driver import DriverAction, decide, resolution_outcome
 from .registry import (
     REGISTRY,
     Recipe,
@@ -29,13 +30,16 @@ from .registry import (
 
 __all__ = [
     "REGISTRY",
+    "DriverAction",
     "Recipe",
     "RecipeError",
     "RecipeParam",
     "RenderedRecipe",
     "UnknownRecipe",
+    "decide",
     "dedup_key_for",
     "get_recipe",
     "list_recipes",
     "render_recipe",
+    "resolution_outcome",
 ]

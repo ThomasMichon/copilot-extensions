@@ -1850,6 +1850,73 @@ def _cmd_recipes_kick(args: argparse.Namespace) -> int:
     return _cmd_create(create_ns)
 
 
+def _cmd_recipes_drive(args: argparse.Namespace) -> int:
+    """Decide the next loop step for a recipe given a ``--signal`` (the driver's
+    executable rhythm). Prints the action; ``--execute`` performs the SUSPEND
+    (detached hibernation wait) and RESOLVE (drive-to-resolution) legs -- WORK is
+    the agent's own to do."""
+    from .recipes import UnknownRecipe, decide, get_recipe
+    from .recipes.driver import RESOLVE, SUSPEND
+
+    try:
+        recipe = get_recipe(args.name)
+    except UnknownRecipe as exc:
+        print(f"agent-dispatch: {exc}", file=sys.stderr)
+        return 2
+
+    action = decide(recipe, args.signal)
+    report: dict[str, Any] = {"recipe": recipe.name, "signal": args.signal, "action": action.to_dict()}
+
+    if not args.execute:
+        return _emit(report)
+
+    if action.kind == SUSPEND:
+        wait_cmd = list(args.wait_cmd or [])
+        if wait_cmd and wait_cmd[0] == "--":
+            wait_cmd = wait_cmd[1:]
+        if not wait_cmd or not args.resume:
+            report["executed"] = False
+            report["note"] = (
+                "SUSPEND needs --resume <worktree> and a wait command after '--' "
+                "to hand off; nothing executed"
+            )
+            return _emit(report)
+        from .hibernation import RunSpec
+
+        spec = RunSpec(command=tuple(wait_cmd), resume_worktree=args.resume, task_id=args.task)
+        report["executed"] = True
+        report["waiter"] = _spawn_detached_waiter(spec)
+        return _emit(report)
+
+    if action.kind == RESOLVE:
+        from .resolution import plan_resolution
+
+        plan = plan_resolution(action.outcome, base=args.base, source_ref=args.source)
+        results: list[dict] = []
+        instructions: list[str] = []
+        failed = False
+        for step in plan.steps:
+            if step.advisory:
+                instructions.append(step.description)
+                results.append({"kind": step.kind, "ran": False, "advisory": True})
+                continue
+            res = _run_resolution_step(step)
+            results.append(res)
+            if not res["ok"]:
+                failed = True
+                if step.destructive:
+                    break
+        report["executed"] = True
+        report["resolution"] = {**plan.to_dict(), "results": results, "instructions": instructions}
+        _emit(report)
+        return 1 if failed else 0
+
+    # WORK: nothing for the layer to execute -- the agent does the pass.
+    report["executed"] = False
+    report["note"] = "WORK is the agent's to perform; re-run drive with the next signal"
+    return _emit(report)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-dispatch", description="Agent task queue + coordinator"
@@ -2654,6 +2721,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="print the decisions without creating any follow-up task",
     )
     evp.set_defaults(func=_cmd_evaluate)
+
+    dr = rsub.add_parser(
+        "drive",
+        help="decide the next loop step for a recipe given a --signal (the "
+             "executable work/suspend/resolve rhythm); --execute performs the "
+             "suspend + resolve legs",
+    )
+    dr.add_argument("name")
+    dr.add_argument(
+        "--signal", required=True,
+        help="what just happened: 'start', a suspend-on event (e.g. change-updated), "
+             "'work-done'/'idle', or a terminal signal (merged/landed/abandoned/closed)",
+    )
+    dr.add_argument("--resume", metavar="WORKTREE", help="worker to resume on a SUSPEND leg")
+    dr.add_argument("--task", metavar="ID", help="task id, folded into a SUSPEND resume")
+    dr.add_argument("--base", metavar="BRANCH", help="base branch for a RESOLVE unwind")
+    dr.add_argument("--source", metavar="REF", help="change/issue for a RESOLVE reconcile")
+    dr.add_argument(
+        "--execute", action="store_true",
+        help="perform the prescribed action (SUSPEND: spawn the detached waiter; "
+             "RESOLVE: run the unwind). Needs --resume and a '--' wait command for SUSPEND.",
+    )
+    dr.add_argument(
+        "wait_cmd", nargs="*",
+        help="for --execute on a SUSPEND, the blocking wait command after '--'",
+    )
+    dr.set_defaults(func=_cmd_recipes_drive)
 
     return parser
 

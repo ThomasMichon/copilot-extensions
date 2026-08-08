@@ -355,6 +355,37 @@ what you did* -- so a worker carries them even on the ad-hoc, no-service path. S
 [`visions/plugins/agent-dispatch`](../../visions/plugins/agent-dispatch/README.md)
 (§Concepts/*The recipe*, §Features/*loop-recipes* + *recipes-run-ad-hoc*).
 
+### Driving a recipe loop (`agent-dispatch recipes drive`)
+
+A recipe declares the *shape* of a loop; the **driver** is the small state machine
+that turns it into a rhythm. `drive` maps a recipe + a `--signal` (what just
+happened) to the next action:
+
+- **work** -- do a pass (`start`, or a `suspend_on` event like `change-updated`
+  means the world moved and there's something to react to). The agent performs it.
+- **suspend** -- nothing to do until the world moves (`work-done` / `idle`): hand
+  the wait to *hibernate-the-wait* until a `suspend_on` event fires.
+- **resolve** -- a terminal signal (`merged`/`landed`/`goal-met` -> landed;
+  `abandoned`/`closed` -> abandoned): *drive the worktree to resolution* and finish.
+
+```bash
+agent-dispatch recipes drive reviewer --signal start        # -> work
+agent-dispatch recipes drive reviewer --signal work-done    # -> suspend (wait on suspend_on)
+agent-dispatch recipes drive reviewer --signal merged       # -> resolve (landed)
+
+# --execute performs the non-work legs on the substrate:
+agent-dispatch recipes drive reviewer --signal work-done --execute \
+  --resume <machine/worktree> -- agent-worktrees pr-watch 42   # spawn the detached waiter
+agent-dispatch recipes drive reviewer --signal abandoned --execute --base main   # run the unwind
+```
+
+The decision is pure; `--execute` runs the **suspend** leg (spawn the detached
+hibernation waiter -- needs `--resume` + a `--` wait command) and the **resolve**
+leg (the drive-to-resolution unwind). **work** stays the agent's to perform. This
+is the executable seam that composes recipes + `run` + `resolve` into a loop. See
+[`visions/plugins/agent-dispatch`](../../visions/plugins/agent-dispatch/README.md)
+(§Concepts/*The recipe*, §Behaviors/*a-loop-runs-with-or-without-a-service*).
+
 ## Drive the worktree to resolution (`agent-dispatch resolve`)
 
 Finishing a loop -- whether the work **landed** or the worker is **abandoning** it

@@ -379,6 +379,14 @@ is derived from the recipe + params, so re-kicking the same target collides rath
 than forking. Use `--dry-run` to preview the create call. See the plugin README
 (**Recipes**) and `visions/plugins/agent-dispatch` (§*The recipe*).
 
+**Driving the loop** -- `agent-dispatch recipes drive <name> --signal <s>` maps a
+recipe + what-just-happened to the next action: **work** (start / a `suspend_on`
+event), **suspend** (`work-done`/`idle` -> hibernate the wait), or **resolve**
+(`merged`/`abandoned` -> drive-to-resolution). `--execute` runs the suspend leg
+(`--resume <wt> -- <wait-cmd>`, spawns the detached waiter) and the resolve leg
+(`--base <b>`, runs the unwind); **work** stays the agent's to perform. This is
+the seam that composes recipes + `run` + `resolve` into an executable loop.
+
 ### Resolve -- drive your worktree to a clean state when a loop ends
 
 When a loop finishes, drive the worktree to its resolved final state -- landing
