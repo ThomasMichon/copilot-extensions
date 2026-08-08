@@ -2737,8 +2737,7 @@ switch ($Action) {
             if ($RepoDir) {
                 try {
                     $env:PYTHONUTF8 = '1'
-                    $env:WORKTREE_PROJECT = $ProjectName
-                    & $VenvPython -m agent_worktrees deploy-instructions --machine $machine 2>&1 | ForEach-Object { Write-Host "  $_" }
+                    & $VenvPython -m agent_worktrees --project $ProjectName deploy-instructions --machine $machine 2>&1 | ForEach-Object { Write-Host "  $_" }
                 } catch {
                     Write-ServiceWarn "Instruction file deployment skipped: $_"
                 }
@@ -3070,8 +3069,7 @@ switch ($Action) {
             if ($RepoDir) {
                 try {
                     $env:PYTHONUTF8 = '1'
-                    $env:WORKTREE_PROJECT = $ProjectName
-                    & $VenvPython -m agent_worktrees deploy-instructions --machine $updateMachine 2>&1 | ForEach-Object { Write-Host "  $_" }
+                    & $VenvPython -m agent_worktrees --project $ProjectName deploy-instructions --machine $updateMachine 2>&1 | ForEach-Object { Write-Host "  $_" }
                 } catch {
                     Write-ServiceWarn "Instruction file deployment skipped: $_"
                 }

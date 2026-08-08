@@ -72,12 +72,14 @@ class TestProjectName:
         cfg.set_active_project("resolved-project")
         assert cfg.project_name() == "resolved-project"
 
-    def test_env_is_transitional_fallback(self, monkeypatch):
-        # With no active project resolved, the ambient env is honored only as a
-        # transitional bridge (for internal/import-time callers).
+    def test_env_not_honored_when_unresolved(self, monkeypatch):
+        # The transitional $WORKTREE_PROJECT fallback was retired (cwd-resolution
+        # Phase 3): with no active project resolved, ambient env is NOT honored --
+        # project_name() raises rather than silently trusting the environment.
         cfg.set_active_project(None)
-        monkeypatch.setenv("WORKTREE_PROJECT", "test-project")
-        assert cfg.project_name() == "test-project"
+        monkeypatch.setenv("WORKTREE_PROJECT", "stale-env-project")
+        with pytest.raises(RuntimeError, match="No active project"):
+            cfg.project_name()
 
     def test_raises_when_unset(self, monkeypatch):
         cfg.set_active_project(None)
@@ -85,15 +87,14 @@ class TestProjectName:
         with pytest.raises(RuntimeError, match="No active project"):
             cfg.project_name()
 
-    def test_raises_on_invalid_name(self, monkeypatch):
-        cfg.set_active_project(None)
-        monkeypatch.setenv("WORKTREE_PROJECT", "invalid name with spaces!")
+    def test_raises_on_invalid_name(self):
+        cfg.set_active_project("invalid name with spaces!")
         with pytest.raises(ValueError, match="Invalid"):
             cfg.project_name()
 
-    def test_accepts_valid_names(self, monkeypatch):
+    def test_accepts_valid_names(self):
         for name in ["my-project", "dotfiles", "sample_project", "test.123"]:
-            monkeypatch.setenv("WORKTREE_PROJECT", name)
+            cfg.set_active_project(name)
             assert cfg.project_name() == name
 
 
@@ -124,7 +125,7 @@ class TestPathHelpers:
         assert cfg.install_dir().name == ".agent-worktrees"
 
     def test_tracking_dir(self, monkeypatch):
-        monkeypatch.setenv("WORKTREE_PROJECT", "test-proj")
+        cfg.set_active_project("test-proj")
         result = cfg.tracking_dir()
         assert result.name == "worktrees"
         assert ".test-proj" in str(result)
@@ -608,7 +609,7 @@ class TestLayeredConfig:
             }
         )
         monkeypatch.setattr(repos_mod, "read_registry", lambda: registry)
-        monkeypatch.setenv("WORKTREE_PROJECT", "ext")
+        cfg.set_active_project("ext")
 
         missing = tmp_path / "no-machine-config.yaml"  # does not exist
         conf = cfg.load_config(missing)
@@ -619,7 +620,7 @@ class TestLayeredConfig:
 
     def test_no_repo_resolvable_raises(self, tmp_path: Path, monkeypatch):
         # No machine-local repos, empty registry -> cannot resolve any repo.
-        monkeypatch.setenv("WORKTREE_PROJECT", "ext")
+        cfg.set_active_project("ext")
         missing = tmp_path / "absent.yaml"
         with pytest.raises(ValueError, match="No repo could be resolved"):
             cfg.load_config(missing)

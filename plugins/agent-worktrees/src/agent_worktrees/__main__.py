@@ -76,15 +76,16 @@ from .picker import ItemKind, MenuItem, pick
 from .update_stage import cmd_stage_update, discover_plugin_dir
 
 # ── Env var migration helpers ───────────────────────────────────────────
-# Phase 2 of copilot-worktrees extraction: APERTURE_* → WORKTREE_*
+# Phase 2 of copilot-worktrees extraction: APERTURE_* → WORKTREE_* for the
+# operational flags. The APERTURE_* *identity* twins (WORKTREE_ID / WORKTREE_REPO)
+# were retired with the cwd-resolution effort (Phase 3): identity resolves from
+# CWD, never from an ambient env var, so those aliases had zero readers.
 # Read new name first, fall back to old for backward compat.
 
 _ENV_MIGRATION = {
     "WORKTREE_NO_UPDATE": "APERTURE_NO_UPDATE",
     "WORKTREE_NO_MUX": "APERTURE_NO_MUX",
     "WORKTREE_VERBOSE": "APERTURE_PRE_FLIGHT_VERBOSE",
-    "WORKTREE_ID": "APERTURE_WORKTREE_ID",
-    "WORKTREE_REPO": "APERTURE_REPO",
 }
 
 _SESSION_BIND_PROJECT = "AGENT_WORKTREES_BIND_PROJECT"
@@ -15708,16 +15709,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         _project, _assumed = None, None
 
-    if _proj:
-        _project, _assumed = _resolve_active_project(_proj)
-    elif _needs_project:
-        _project, _assumed = _resolve_active_project(None)
-    else:
-        _project, _assumed = None, None
-
     if _project:
         cfg.set_active_project(_project)
-        os.environ["WORKTREE_PROJECT"] = _project
         # git-like `-C`: when --project targets a project the caller is NOT
         # already inside, change to its anchor so every downstream path
         # (worktree-id inference, repo discovery, git subprocesses) resolves
@@ -15730,9 +15723,10 @@ def main(argv: list[str] | None = None) -> int:
             except OSError:
                 pass
 
-    has_project = bool(cfg.active_project()) or bool(
-        os.environ.get("WORKTREE_PROJECT", "").strip()
-    )
+    # Identity is a pure function of CWD + optional --project (threaded in
+    # process via set_active_project); no ambient $WORKTREE_PROJECT is consulted
+    # (cwd-resolution Phase 3).
+    has_project = bool(cfg.active_project())
 
     # No args → launch (with project) or helpful balk (without).
     if not args_list:
