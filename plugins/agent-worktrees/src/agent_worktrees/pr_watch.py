@@ -63,6 +63,7 @@ def decorate_events(
         "pr_state": snap.pr_state,
         "merged": snap.merged,
         "mergeable": snap.mergeable,
+        "checks_state": snap.checks_state,
         "head_sha": snap.head_sha,
         "base_ref": snap.base_ref,
         "cursor": pc.Baseline.from_snapshot(snap).to_cursor(),
@@ -159,6 +160,16 @@ def run_wait(
                 # only a later flip is a real transition.
                 if base.mergeable is None and snap.mergeable is not None:
                     base = replace(base, mergeable=snap.mergeable)
+                # Same for the CI rollup + approval baseline (#225): a cursor-only
+                # re-arm starts them unknown, so adopt the first concrete value
+                # without firing -- only a later regression is a transition.
+                if base.checks_state == "" and snap.checks_state:
+                    base = replace(base, checks_state=snap.checks_state)
+                if base.approved is None:
+                    base = replace(base, approved=(
+                        pc.effective_verdict(
+                            snap.reviews, snap.head_sha, snap.author) == "approved"
+                    ))
                 events = pc.compute_events(base, snap, until)
                 if events:
                     return WaitResult(True, _decorate(events, snap))
