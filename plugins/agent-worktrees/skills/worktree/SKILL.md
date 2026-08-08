@@ -426,6 +426,41 @@ The picker shows 🟢 on worktrees with live Copilot CLI sessions. This
 is detected by scanning `~/.copilot/session-state/` — no hooks or
 external state needed. Dead PIDs are filtered automatically.
 
+## Resource Leases (atomic, cross-machine, same-harness)
+
+`agent-worktrees lease` is the harness's **one atomic primitive** for exclusive,
+cross-machine access to any scarce shared resource — a CodeSpace, a cross-repo
+worktree, a container, a bridge session — so two agents on two machines never
+collide. It is **ref shenanigans only** in the harness's own repo: hidden
+`refs/agent-worktrees/leases/v1/<kind>/<key>` refs updated by atomic
+compare-and-swap (`--force-with-lease`), no branches, no commits, no service, no
+new credential. Each transition appends a synthetic empty-tree metadata commit
+whose **OID is the fencing token**; release appends a **tombstone** (ABA-safe);
+every read strictly validates linear history.
+
+```bash
+agent-worktrees lease acquire <kind> <key> --holder <ref> [--ttl N]  # atomic CAS
+agent-worktrees lease renew   <kind> <key> --token <oid> [--ttl N]   # keep the grip
+agent-worktrees lease release <kind> <key> --token <oid>             # tombstone
+agent-worktrees lease inspect <kind> <key>                           # current record
+agent-worktrees lease list [--kind <kind>]                           # fabric-wide view
+```
+
+- **Holder** = the qualified **ClaimRef** (`machine/project/worktree_id[#session]`),
+  from `agent-worktrees get owner-ref` — directly resolvable for stale-takeover.
+- **Store origin** = the resolved lease store repo, from
+  `agent-worktrees get lease-origin` (the `AGENT_WORKTREES_LEASE_ORIGIN` override,
+  else the bound control-plane/knowledge repo's origin, else the project's default
+  remote). Every agent of one harness resolves the **same** origin — so
+  coordination is **same-harness-scoped by construction**. Pin
+  `AGENT_WORKTREES_LEASE_ORIGIN` to the control-plane (dotfiles) remote so agents
+  in *every* project coordinate through one store.
+- **Two-tier consumers.** `agent-codespaces` uses this as the cross-machine **L2**
+  authority behind its host-local **L1** claim (see `borrowing-codespaces`); a
+  live claim on another machine raises a `ClaimConflict` naming the remote holder.
+- **Degrade-safe.** Only a definitive lease conflict (exit 3) blocks; a missing
+  origin / binstub / token degrades to best-effort, never a hard failure.
+
 ## Lifecycle
 
 ```
