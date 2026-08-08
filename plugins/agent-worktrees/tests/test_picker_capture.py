@@ -158,13 +158,19 @@ def test_svg_capture_is_a_screenshot(monkeypatch, tmp_path):
 
 
 def _awaiting_source():
-    """A fleet with one worktree parked on the operator (live_rest=awaiting)."""
+    """A fleet with one worktree parked on the operator (live_rest=awaiting).
+
+    The state is deliberately ``active`` (blue), NOT ``wip`` (amber): the only
+    amber (#d7af00) in this render must come from the awaiting-operator pulse
+    accent, so the ANSI colour assertion below is a specific signal, not a
+    WIP/state false positive.
+    """
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
     local = ("lambda-core", "Win")
     raws = [
         {"id": "lambda-core-win-20260627-cccc", "title": "Needs a decision",
          "status": "active", "started_at": "2026-06-27T17:00:00",
-         "turn_count": 4, "state": "wip",
+         "turn_count": 4, "state": "active",
          "live_intent": "picking a rendering option",
          "live_intent_at": "2026-06-27T17:59:00", "live_rest": "awaiting-operator",
          "live_rest_at": "2026-06-27T17:59:00"},
@@ -188,8 +194,14 @@ def test_awaiting_operator_renders_marker_and_pulse(monkeypatch, tmp_path):
     text = caps["text"]
     assert "\u23f3" in text                       # the ⏳ marker/glyph
     assert "picking a rendering option" in text   # the persisted intent sub-line
-    # The amber accent (bold #d7af00 == rgb(215,175,0)) is painted for the cue.
-    assert "215;175;0" in caps["ansi"]
+    # Tie the amber accent to the glyph: the awaiting pulse's ⏳ is painted with
+    # bold #d7af00 (rgb 215;175;0), and (state is ``active``, not WIP) that amber
+    # appears ONLY here -- so the SGR colour must sit on the same styled run as
+    # the ⏳ glyph, not merely somewhere in the grid.
+    ansi = caps["ansi"]
+    assert "215;175;0" in ansi
+    assert re.search(r"215;175;0[^\x1b]*\u23f3", ansi), (
+        "the ⏳ pulse glyph is not painted with the awaiting amber accent")
 
 
 def test_capture_is_deterministic(monkeypatch, tmp_path):

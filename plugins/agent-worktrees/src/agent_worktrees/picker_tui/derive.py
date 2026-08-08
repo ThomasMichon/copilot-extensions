@@ -19,10 +19,12 @@ NOW = _dt.datetime.now()
 
 # worktree-status-core live pulse: how long an agent-intent pulse stays "fresh"
 # (rendered bright-dim) before it greys to "stale". copilot-extensions#228: the
-# line NEVER expires -- a worktree where any work happened keeps showing its last
-# reported intent (greyed) so the picker always answers "what was this doing?".
-# The graded ``live_rest`` (busy/idle/awaiting-operator) and this age boundary
-# only pick the COLOUR/glyph, never whether the line renders at all.
+# line no longer expires on AGE -- a worktree where any work happened keeps
+# showing its last reported intent (greyed) so the picker always answers "what
+# was this doing?". The graded ``live_rest`` (busy/idle/awaiting-operator) and
+# this age boundary only pick the COLOUR/glyph, not aging-out; the line is still
+# absent only when there is no intent TEXT to show (or, lacking any graded rest,
+# an unparseable/missing timestamp leaves the freshness unknown).
 _PULSE_FRESH_SECS = 90
 
 
@@ -33,14 +35,17 @@ def _pulse_level(w):
                   ``awaiting-operator``): the standout "this needs me" cue.
     'fresh'    -- a recent intent from an active turn (bright-dim live line).
     'stale'    -- the intent has aged, or its session is idle/at-rest (greyed).
-    None       -- no intent text to show at all.
+    None       -- no intent text to show, OR (absent any graded ``live_rest``)
+                  an unparseable/missing timestamp leaves freshness unknown.
 
-    copilot-extensions#228: the line does NOT expire on age -- a worktree that
-    ever reported an intent keeps showing its last one (greyed), so the graded
-    ``live_rest`` and the age boundary only pick fresh vs. stale, never
-    None-on-age. The crisp ``live_rest`` (busy/idle/awaiting-operator) is
-    preferred for the colour; the intent's own age + idle flag are the coarse
-    fallback when no graded rest is present.
+    copilot-extensions#228: the line does NOT expire on AGE -- a worktree that
+    ever reported an intent keeps showing its last one (greyed) whenever the
+    freshness is knowable, so the graded ``live_rest`` and the age boundary only
+    pick fresh vs. stale, never None-on-age. The crisp ``live_rest``
+    (busy/idle/awaiting-operator) is preferred for the colour and, when present,
+    always yields a level; the intent's own age + idle flag are the coarse
+    fallback when no graded rest is present (and only there can a bad timestamp
+    still drop the line).
 
     The pulse is a *derived* signal (assistant.intent + the rest register); it is
     never conflated with the agent-asserted ``follow_up`` disposition.
