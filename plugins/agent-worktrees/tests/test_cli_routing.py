@@ -230,6 +230,57 @@ def test_router_dispatches_codespaces_project_pinned(monkeypatch):
                         "rest": ["list"]}
 
 
+def test_route_to_sibling_marks_routed_project(monkeypatch, tmp_path):
+    # When --project is injected, the child env carries the routed marker so the
+    # sibling can distinguish a router-injected --project from an explicit one
+    # (#1080). Forwarded argv still carries --project for the plugin to consume.
+    import subprocess as _sp
+
+    stub = tmp_path / "agent-bridge.cmd"
+    stub.write_text("", encoding="utf-8")
+    monkeypatch.setattr(m, "_sibling_binstub", lambda slug: stub)
+    seen = {}
+
+    class _R:
+        returncode = 0
+
+    def _fake_run(cmd, *a, **kw):
+        seen["cmd"] = cmd
+        seen["env"] = kw.get("env")
+        return _R()
+
+    monkeypatch.setattr(_sp, "run", _fake_run)
+    rc = m._route_to_sibling_plugin("bridge", "demo", ["agents"])
+    assert rc == 0
+    assert seen["env"].get("AGENT_WORKTREES_PROJECT_ROUTED") == "1"
+    assert "--project" in seen["cmd"] and "demo" in seen["cmd"]
+
+
+def test_route_to_sibling_no_project_clears_stale_marker(monkeypatch, tmp_path):
+    # A cwd-addressed route (no --project) must NOT set the routed marker, AND
+    # must clear a stale/exported one from the parent env so the child never
+    # treats a user's explicit --project (in rest) as routed (#1080 review).
+    import subprocess as _sp
+
+    stub = tmp_path / "agent-bridge.cmd"
+    stub.write_text("", encoding="utf-8")
+    monkeypatch.setattr(m, "_sibling_binstub", lambda slug: stub)
+    monkeypatch.setenv("AGENT_WORKTREES_PROJECT_ROUTED", "1")  # stale/exported
+    seen = {}
+
+    class _R:
+        returncode = 0
+
+    def _fake_run(cmd, *a, **kw):
+        seen["env"] = kw.get("env")
+        return _R()
+
+    monkeypatch.setattr(_sp, "run", _fake_run)
+    rc = m._route_to_sibling_plugin("bridge", None, ["--project", "x", "sessions"])
+    assert rc == 0
+    assert "AGENT_WORKTREES_PROJECT_ROUTED" not in (seen["env"] or {})
+
+
 def test_canonical_slug_tolerates_pluralization():
     assert m._canonical_slug("bridge") == "bridge"
     assert m._canonical_slug("codespaces") == "codespaces"
