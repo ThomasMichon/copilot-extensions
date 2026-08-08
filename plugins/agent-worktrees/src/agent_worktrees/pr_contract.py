@@ -1139,3 +1139,78 @@ def pr_reminder(
         use_instead=(),
         cautions=cautions,
     )
+
+
+# ---------------------------------------------------------------------------
+# Adopt-time research: read a repo's ACTUAL provider settings, then derive the
+# policy matrix to match (#225). The read lives in the provider; the mapping
+# from live settings -> config policy is pure and provider-neutral, here.
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class RepoPolicy:
+    """A repo's live PR-relevant provider settings (read at adopt time).
+
+    Every field is tri-state (``None`` == the provider couldn't determine it),
+    so a partial read still derives what it can. ``supported`` is False when the
+    provider can't read settings at all; ``error`` carries the reason.
+    """
+
+    supported: bool = True
+    error: str = ""
+    allow_squash: bool | None = None
+    allow_merge_commit: bool | None = None
+    allow_rebase: bool | None = None
+    allow_auto_merge: bool | None = None
+    delete_branch_on_merge: bool | None = None
+    required_approving_reviews: int | None = None
+    has_required_status_checks: bool | None = None
+
+
+def derive_policy_matrix(policy: RepoPolicy) -> dict:
+    """Map live :class:`RepoPolicy` settings onto the config policy matrix (#225).
+
+    Pure: turns "what the provider actually allows" into the repo-overridable
+    ``pr:`` policy keys, so a registered repo's config mirrors reality instead of
+    a guess. Only keys the settings *speak to* are emitted; an unknown setting is
+    omitted (the config default applies). Returns a plain dict ready to drop into
+    the ``pr:`` block.
+    """
+    out: dict = {}
+    if not policy.supported:
+        return out
+
+    # merge_strategy: honor the repo's allowed methods, preferring squash.
+    if policy.allow_squash is not None or policy.allow_merge_commit is not None \
+            or policy.allow_rebase is not None:
+        if policy.allow_squash:
+            out["merge_strategy"] = "squash"
+        elif policy.allow_merge_commit:
+            out["merge_strategy"] = "merge"
+        elif policy.allow_rebase:
+            out["merge_strategy"] = "rebase"
+        # (all three false/unknown -> leave the default)
+
+    # branch_update_strategy: rebase unless the repo forbids rebase merges but
+    # allows merge commits -- a signal it prefers merge-based history.
+    if policy.allow_rebase is False and policy.allow_merge_commit:
+        out["branch_update_strategy"] = "merge"
+
+    # prefer_auto_merge: mirror whether the provider offers native auto-merge.
+    if policy.allow_auto_merge is not None:
+        out["prefer_auto_merge"] = bool(policy.allow_auto_merge)
+
+    # review_blocking: a required approving review OR a required status check
+    # means the review/CI genuinely gates the merge.
+    blocking_signals = []
+    if policy.required_approving_reviews is not None:
+        blocking_signals.append(policy.required_approving_reviews > 0)
+    if policy.has_required_status_checks is not None:
+        blocking_signals.append(bool(policy.has_required_status_checks))
+    if blocking_signals:
+        out["review_blocking"] = any(blocking_signals)
+
+    return out
+
+
+__all__ += ["RepoPolicy", "derive_policy_matrix"]
