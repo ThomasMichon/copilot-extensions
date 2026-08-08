@@ -32,4 +32,8 @@ fi
 "${PY[@]}" "$ROOT/tools/check-runbook-references.py"
 # Keep each plugin's version identical across plugin.json / pyproject.toml /
 # marketplace.json (a one-file bump wedges the Picker's update indicator).
-exec "${PY[@]}" "$ROOT/tools/check-version-consistency.py"
+"${PY[@]}" "$ROOT/tools/check-version-consistency.py"
+# Require a version bump whenever a plugin's content -- or a vendored lib it
+# ships -- changes, so new code never serves under a stale version (the silent
+# stale-deploy gap, dotfiles #1025). Diffs the push against origin/main.
+exec "${PY[@]}" "$ROOT/tools/check-version-bump.py"

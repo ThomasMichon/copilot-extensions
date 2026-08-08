@@ -48,6 +48,13 @@ jobs:
         run: python -m pip install --upgrade pip pyyaml ruff
       - name: Version consistency
         run: python tools/check-version-consistency.py
+      - name: Version bump (touched plugins must bump; PR diff only)
+        # Every plugin whose content -- or a vendored lib it ships -- changes in
+        # the PR must advance its version, else the marketplace serves stale code
+        # under an unchanged version (silent stale deploy, dotfiles #1025).
+        # Scoped to the PR diff so a pre-existing state never blocks unrelated PRs.
+        if: github.event_name == 'pull_request'
+        run: python tools/check-version-bump.py --base ${{ github.event.pull_request.base.sha }}
       - name: Install contract
         run: python tools/check-install-contract.py
       - name: Skills

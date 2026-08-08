@@ -33,3 +33,5 @@ build/
 
 # Cached per-plugin dev venvs built by tools/run-plugin-tests.py
 /.test-venvs/
+
+.venv-tools/
