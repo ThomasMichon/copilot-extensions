@@ -37,6 +37,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .payload import PayloadStore, is_blob_ref
+from .registrations import (
+    RegistrationError,
+    RegistrationRecord,
+    RegistrationStatus,
+    derive_registration_id,
+    validate_registration,
+)
 
 DEFAULT_LEASE_SECONDS = 15 * 60
 #: The tighter lease applied to a claim taken in **evaluation** mode -- the
@@ -580,6 +587,33 @@ class TaskQueue:
                 "  renewed_at REAL NOT NULL,"
                 "  expires_at REAL"
                 ")"
+            )
+            # Supervisor registration registry -- the durable set of units the
+            # host's singleton supervisor runs (a lane to spawn for, a schedule,
+            # an emitter, an evaluator). ``supervise register`` writes a row here
+            # and RETURNS its handle instead of becoming the foreground loop; the
+            # singleton daemon reconciles these rows into subprocesses. ``spec``
+            # is the JSON config the unit's runtime consumes; ``machine``/``env``
+            # scope it to exactly one host's supervisor. See ``registrations.py``.
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS registrations ("
+                "  id TEXT PRIMARY KEY,"
+                "  kind TEXT NOT NULL,"
+                "  spec TEXT NOT NULL,"
+                "  machine TEXT,"
+                "  env TEXT NOT NULL DEFAULT 'default',"
+                "  status TEXT NOT NULL DEFAULT 'active',"
+                "  created_at REAL NOT NULL,"
+                "  updated_at REAL NOT NULL"
+                ")"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_registrations_scope "
+                "ON registrations(machine, env)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_registrations_kind "
+                "ON registrations(kind)"
             )
 
     # -- helpers -------------------------------------------------------------
@@ -1859,6 +1893,148 @@ class TaskQueue:
             row = conn.execute("SELECT * FROM schedules WHERE id = ?", (sid,)).fetchone()
             conn.execute("COMMIT")
         return ScheduleRecord._from_row(row)
+
+    # -- supervisor registrations --------------------------------------------
+
+    @staticmethod
+    def _registration_from_row(row: sqlite3.Row) -> RegistrationRecord:
+        return RegistrationRecord(
+            id=row["id"],
+            kind=row["kind"],
+            spec=json.loads(row["spec"]),
+            machine=row["machine"],
+            env=row["env"],
+            status=row["status"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def register_registration(
+        self,
+        kind: str,
+        spec: dict,
+        *,
+        reg_id: str | None = None,
+        machine: str | None = None,
+        env: str = "default",
+        now: float | None = None,
+    ) -> RegistrationRecord:
+        """Register (or upsert) a supervision unit; return its handle.
+
+        ``kind`` and ``spec`` are validated eagerly (see
+        :func:`registrations.validate_registration`) so a malformed unit is
+        refused here rather than failing every reconcile. The id is the caller's
+        explicit ``reg_id`` or a value **derived deterministically** from
+        ``(kind, machine, env, spec)`` -- so re-registering the same unit
+        **upserts** (idempotent by handle) rather than duplicating it, preserving
+        ``created_at`` and the ``status`` flag across the upsert.
+        """
+        try:
+            validate_registration(kind, spec)
+        except RegistrationError as exc:
+            raise TaskError(str(exc)) from exc
+        env = env or "default"
+        rid = reg_id or derive_registration_id(kind, spec, machine, env)
+        ts = self._now(now)
+        spec_json = json.dumps(spec)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            exists = conn.execute(
+                "SELECT id FROM registrations WHERE id = ?", (rid,)
+            ).fetchone()
+            if exists:
+                conn.execute(
+                    "UPDATE registrations SET kind = ?, spec = ?, machine = ?, "
+                    "env = ?, updated_at = ? WHERE id = ?",
+                    (kind, spec_json, machine, env, ts, rid),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO registrations "
+                    "(id, kind, spec, machine, env, status, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (rid, kind, spec_json, machine, env, RegistrationStatus.ACTIVE, ts, ts),
+                )
+            row = conn.execute(
+                "SELECT * FROM registrations WHERE id = ?", (rid,)
+            ).fetchone()
+            conn.execute("COMMIT")
+        return self._registration_from_row(row)
+
+    def list_registrations(
+        self,
+        *,
+        kind: str | None = None,
+        machine: str | None = None,
+        env: str | None = None,
+        include_paused: bool = True,
+    ) -> list[RegistrationRecord]:
+        """List registrations, optionally filtered by kind / machine / env,
+        ordered by id."""
+        clauses: list[str] = []
+        params: list[object] = []
+        if kind is not None:
+            clauses.append("kind = ?")
+            params.append(kind)
+        if machine is not None:
+            clauses.append("machine = ?")
+            params.append(machine)
+        if env is not None:
+            clauses.append("env = ?")
+            params.append(env)
+        if not include_paused:
+            clauses.append("status != ?")
+            params.append(RegistrationStatus.PAUSED)
+        query = "SELECT * FROM registrations"
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY id"
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [self._registration_from_row(r) for r in rows]
+
+    def get_registration(self, rid: str) -> RegistrationRecord | None:
+        """Return one registration by id, or ``None``."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM registrations WHERE id = ?", (rid,)
+            ).fetchone()
+        return self._registration_from_row(row) if row else None
+
+    def remove_registration(self, rid: str) -> bool:
+        """Delete a registration; return whether a row was removed."""
+        with self._connect() as conn:
+            cur = conn.execute("DELETE FROM registrations WHERE id = ?", (rid,))
+        return cur.rowcount > 0
+
+    def set_registration_status(
+        self, rid: str, status: str, *, now: float | None = None
+    ) -> RegistrationRecord:
+        """Set a registration's lifecycle status (e.g. pause/resume). Raises if
+        the id is unknown or the status is invalid."""
+        if status not in RegistrationStatus.ALL:
+            raise TaskError(
+                f"invalid registration status {status!r}; expected one of "
+                f"{', '.join(sorted(RegistrationStatus.ALL))}"
+            )
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT id FROM registrations WHERE id = ?", (rid,)
+            ).fetchone()
+            if row is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such registration: {rid}")
+            conn.execute(
+                "UPDATE registrations SET status = ?, updated_at = ? WHERE id = ?",
+                (status, ts, rid),
+            )
+            row = conn.execute(
+                "SELECT * FROM registrations WHERE id = ?", (rid,)
+            ).fetchone()
+            conn.execute("COMMIT")
+        return self._registration_from_row(row)
 
     # -- schedule job-leases (single-producer election) ----------------------
 

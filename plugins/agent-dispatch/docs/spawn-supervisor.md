@@ -129,6 +129,50 @@ agent-dispatch reservations list [--task ID] [--state S]
 agent-dispatch reservations fail|settle <key> [--detail ...]
 ```
 
+## Registered supervision (built) — register-and-return
+
+The bare `supervise` above **is the foreground loop** — it holds the terminal
+open. That is the transitional shape. The north star (see the vision Concept
+*the supervisor*, Feature *registered-supervision*, Behavior
+*supervise-registers-and-returns*) is that a caller **registers** a unit with the
+host's **singleton** supervisor and gets back a durable **registration handle**,
+and the call *returns*; exactly one supervisor process per machine-and-environment
+runs every registration, each in its own subprocess.
+
+The registration surface is built as the first increment of that architecture:
+
+```
+agent-dispatch supervise register [--kind KIND] [--id ID] [--spec JSON|@FILE] \
+    [--machine M] [--env E] \
+    # supervised-lane convenience flags (when --spec is omitted):
+    [--repo R | --all-repos] [--label L ...] [--max-concurrent N] \
+    [--max-attempts N] [--label-max-attempts LABEL=N ...] \
+    [--headless-label L ...] [--headless-agent AGENT] [--evaluator SPEC] \
+    [--interval S]
+agent-dispatch supervise status <id>
+agent-dispatch supervise list [--kind KIND] [--machine M] [--env E] [--active]
+agent-dispatch supervise remove <id>
+```
+
+- **`register`** writes a durable **registration** row (kind ∈
+  `supervised-lane | schedule | emitter | evaluator`, plus a `spec` — the config
+  the unit's runtime consumes — scoped to a `machine`+`env`) and **emits the
+  handle**; it does *not* start the loop. The id is the caller's `--id` or a value
+  **derived deterministically** from `(kind, machine, env, spec)`, so
+  re-registering the same unit **upserts** (idempotent by handle) rather than
+  duplicating it, preserving `created_at` and the paused/active status.
+- **`status <id>`** returns one registration; **`list`** enumerates them
+  (filterable by kind / machine / env, `--active` to hide paused ones);
+  **`remove <id>`** drops one.
+- Registrations live in the coordinator's single-writer SQLite (`registrations`
+  table) beside tasks and schedules, reached over the same secured mesh.
+
+> **Increment status.** This increment lands the **registration store + verbs**.
+> The **singleton daemon** that reads the registry and runs each registration in
+> its own subprocess — reconciling on change, winding down on remove — is the next
+> increment; until it lands, the bare `supervise` foreground loop remains the way
+> a lane is actually run.
+
 ### Per-label embody body: CLI-first, headless-ACP opt-in
 
 The supervisor embodies each spawned task as a **mux-wrapped CLI autopilot**
