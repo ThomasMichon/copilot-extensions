@@ -1936,7 +1936,12 @@ class TaskQueue:
         env = env or "default"
         rid = reg_id or derive_registration_id(kind, spec, machine, env)
         ts = self._now(now)
-        spec_json = json.dumps(spec)
+        try:
+            spec_json = json.dumps(spec)
+        except TypeError as exc:
+            raise TaskError(
+                f"registration 'spec' is not JSON-serializable: {exc}"
+            ) from exc
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             exists = conn.execute(

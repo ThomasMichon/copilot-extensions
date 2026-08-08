@@ -761,7 +761,7 @@ def create_app(
         try:
             return asdict(queue.set_registration_status(rid, body.status))
         except TaskError as exc:
-            code = 404 if "no such registration" in str(exc) else 400
+            code = 404 if str(exc).startswith("no such registration") else 400
             raise HTTPException(status_code=code, detail=str(exc)) from exc
 
     # -- schedule job-leases -------------------------------------------------

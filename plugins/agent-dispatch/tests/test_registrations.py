@@ -124,6 +124,14 @@ def test_register_validates_eagerly(q):
     assert "repo" in str(exc.value)
 
 
+def test_register_rejects_non_serializable_spec(q):
+    with pytest.raises(TaskError) as exc:
+        q.register_registration(
+            "supervised-lane", {"repo": TEST_REPO, "bad": {1, 2, 3}}, reg_id="x"
+        )
+    assert "not JSON-serializable" in str(exc.value)
+
+
 def test_list_filters_by_kind_machine_env_and_status(q):
     q.register_registration("supervised-lane", _lane(), reg_id="a", machine="m1")
     q.register_registration(
@@ -272,6 +280,18 @@ def test_cli_build_spec_inline_json():
     )
     spec = _build_registration_spec(args)
     assert spec == {"id": "nightly", "interval_seconds": 3600}
+
+
+def test_cli_build_spec_missing_file_errors():
+    from agent_dispatch.__main__ import _build_registration_spec
+
+    args = _parse(
+        ["supervise", "register", "--kind", "schedule", "--spec",
+         "@/no/such/spec/file.json"]
+    )
+    with pytest.raises(SystemExit) as exc:
+        _build_registration_spec(args)
+    assert "could not read --spec file" in str(exc.value)
 
 
 def test_cli_status_and_remove_take_id():

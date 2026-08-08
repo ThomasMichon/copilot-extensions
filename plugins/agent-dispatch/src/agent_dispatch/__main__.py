@@ -1416,7 +1416,13 @@ def _build_registration_spec(args: argparse.Namespace) -> dict:
     if raw:
         text = raw
         if raw.startswith("@"):
-            text = Path(raw[1:]).expanduser().read_text(encoding="utf-8")
+            try:
+                text = Path(raw[1:]).expanduser().read_text(encoding="utf-8")
+            except OSError as exc:
+                raise SystemExit(
+                    f"supervise register: could not read --spec file "
+                    f"{raw[1:]!r}: {exc}"
+                ) from exc
         try:
             spec = json.loads(text)
         except ValueError as exc:
