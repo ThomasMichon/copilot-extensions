@@ -38,6 +38,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 
+from . import coordination
 from .config import RUNTIME_DIR, ensure_runtime_dir
 
 log = logging.getLogger("agent-codespaces")
@@ -68,6 +69,12 @@ class Lease:
     acquired_at: float
     heartbeat_at: float
     worktree: str = ""
+    # git-ref-resource-leases (Phase 2): the L2 cross-machine fencing token (the
+    # commit OID of the CodeSpace's Git-ref lease) when this claim also holds a
+    # distributed lease. Empty for a legacy record or when L2 is unavailable
+    # (L1-only). Used to renew/release the L2 lease. Default keeps old
+    # ``leases.json`` records loadable via ``Lease(**rec)``.
+    lease_token: str = ""
 
     def age(self) -> float:
         return time.time() - self.heartbeat_at
@@ -248,13 +255,31 @@ def release(target: str, ttl: float = DEFAULT_TTL) -> bool:
 
 
 def heartbeat(codespace: str, ttl: float = DEFAULT_TTL) -> bool:
-    """Refresh the heartbeat on a held lease. Returns True if updated."""
+    """Refresh the heartbeat on a held lease. Returns True if updated.
+
+    Also renews the cross-machine L2 lease (best-effort) and rotates the stored
+    fencing token when one is held -- so a live holder keeps its distributed grip
+    and a crashed holder's L2 lease expires on the store's timer.
+    """
+    with _lease_lock():
+        leases = _prune(_read_leases(), ttl)
+        lease = leases.get(codespace)
+        if not lease:
+            return False
+        token = lease.lease_token
+    new_token = ""
+    if token:
+        res = coordination.renew(codespace, token)
+        if res.ok:
+            new_token = res.token
     with _lease_lock():
         leases = _prune(_read_leases(), ttl)
         lease = leases.get(codespace)
         if not lease:
             return False
         lease.heartbeat_at = time.time()
+        if new_token:
+            lease.lease_token = new_token
         _write_leases(leases)
         return True
 
@@ -439,6 +464,8 @@ def claim(
     force: bool = False,
     ttl: float = DEFAULT_TTL,
     active: set[str] | None = None,
+    holder_ref: str | None = None,
+    coordinate: bool = True,
 ) -> Lease:
     """Acquire an **exclusive** claim on ``codespace`` for worktree ``owner``.
 
@@ -449,11 +476,50 @@ def claim(
     heartbeat, preserves ``acquired_at``). Pass ``active`` (from
     :func:`active_worktree_ids`) so liveness is judged against the real
     worktree set; ``None`` falls back to path-existence + TTL.
+
+    **Two-tier (git-ref-resource-leases Phase 2).** The host-local store above is
+    the same-machine L1 fast path. When ``coordinate`` and a qualified
+    ``holder_ref`` (a ``machine/project/worktree_id[#session]`` ClaimRef) are
+    given, an atomic **cross-machine L2** Git-ref lease is taken via
+    ``agent-worktrees lease`` *before* the local write, so a live claim on
+    **another machine** raises :class:`ClaimConflict` (naming the remote holder)
+    unless ``force``. The L2 network op runs **outside** the local lock (which
+    only guards the fast local file R/W). Degrade-safe: if L2 is not wired /
+    reachable, this falls back to L1-only -- identical to today's behavior.
     """
     if not codespace:
         raise RuntimeError("claim requires a CodeSpace name")
     if not owner:
         raise RuntimeError("claim requires an owner worktree")
+
+    # L2 (cross-machine) acquire/renew, network, *outside* the local lock. Peek
+    # the local store lock-free only to choose renew (we already hold it) vs
+    # acquire (new/takeover) and to carry the prior fencing token.
+    lease_token = ""
+    if coordinate and holder_ref:
+        peek = _read_leases().get(codespace)
+        same_owner = bool(peek and _claim_owner(peek) == owner)
+        prior_token = peek.lease_token if (same_owner and peek) else ""
+        lease_token = prior_token
+        if same_owner and prior_token:
+            res = coordination.renew(codespace, prior_token)
+        else:
+            res = coordination.acquire(codespace, holder_ref)
+        if res.ok:
+            lease_token = res.token
+        elif res.conflict:
+            if not force:
+                raise ClaimConflict(
+                    codespace, res.holder or "(cross-machine)", "(cross-machine)", 0
+                )
+            log.warning(
+                "Forced claim on '%s' over a live cross-machine lease held by "
+                "'%s'; proceeding without the L2 lease.",
+                codespace, res.holder or "?",
+            )
+            lease_token = ""
+        # unavailable -> keep prior_token (renew) or "" (acquire): L1-only.
+
     with _lease_lock():
         leases = _prune(_read_leases(), ttl)
         held = leases.get(codespace)
@@ -481,6 +547,7 @@ def claim(
             acquired_at=keep_acquired,
             heartbeat_at=now,
             worktree=owner,
+            lease_token=lease_token,
         )
         leases[codespace] = lease
         _write_leases(leases)
@@ -488,16 +555,22 @@ def claim(
 
 
 def release_claim(codespace: str, owner: str, ttl: float = DEFAULT_TTL) -> bool:
-    """Release ``codespace``'s claim iff it is owned by ``owner``. Idempotent."""
+    """Release ``codespace``'s claim iff it is owned by ``owner``. Idempotent.
+
+    Also tombstones the cross-machine L2 lease (best-effort) when one was held.
+    """
     with _lease_lock():
         leases = _prune(_read_leases(), ttl)
         held = leases.get(codespace)
         if not held or _claim_owner(held) != owner:
             return False
+        token = held.lease_token
         del leases[codespace]
         _write_leases(leases)
         log.info("Released claim on '%s' (owner '%s')", codespace, owner)
-        return True
+    if token:
+        coordination.release(codespace, token)
+    return True
 
 
 def release_worktree_claims(owner: str, ttl: float = DEFAULT_TTL) -> list[str]:
@@ -505,15 +578,23 @@ def release_worktree_claims(owner: str, ttl: float = DEFAULT_TTL) -> list[str]:
 
     Returns the CodeSpaces released. This is the immediate-release path for
     ``agent-worktrees finalize``; the sweep on the next launch is the safety net.
+    Also tombstones each held cross-machine L2 lease (best-effort).
     """
     with _lease_lock():
         leases = _prune(_read_leases(), ttl)
-        released = [
-            cs for cs, lease in leases.items() if _claim_owner(lease) == owner
-        ]
-        for cs in released:
+        released_tokens = {
+            cs: lease.lease_token
+            for cs, lease in leases.items()
+            if _claim_owner(lease) == owner
+        }
+        for cs in released_tokens:
             del leases[cs]
-        if released:
+        if released_tokens:
             _write_leases(leases)
-            log.info("Released %d claim(s) for worktree '%s'", len(released), owner)
-        return released
+            log.info(
+                "Released %d claim(s) for worktree '%s'", len(released_tokens), owner
+            )
+    for cs, token in released_tokens.items():
+        if token:
+            coordination.release(cs, token)
+    return list(released_tokens)
