@@ -44,18 +44,19 @@ def test_deploy_is_idempotent(tmp_path: Path):
     assert path.stat().st_mtime_ns == mtime, "in-sync file must not be rewritten"
 
 
-def test_matches_worktree_conduct_shape(tmp_path: Path):
-    """The warning rides the exact same delivery as the worktree-conduct guide."""
+def test_delivers_with_ownership_marker(tmp_path: Path):
+    """ext-reload-hang is still delivered as a marked per-project file.
+
+    (Unlike account/worktree-conduct, ext-reload-hang stays on the
+    COPILOT_CUSTOM_INSTRUCTIONS_DIRS mechanism -- the session-conduct hook's
+    cwd-gate returns empty under Bare resume, which is exactly the scenario this
+    warning must cover. It is retired outright when #13494 ships, dotfiles#1055.)
+    """
     proj = tmp_path / ".proj"
-    m._deploy_worktree_conduct(proj)
     m._deploy_ext_reload_warning(proj)
 
-    instr_dir = proj / ".github" / "instructions"
-    conduct = instr_dir / "worktree-conduct.instructions.md"
-    warning = instr_dir / "ext-reload-hang.instructions.md"
-    assert conduct.exists() and warning.exists()
-    # Both sit in the same dir and both lead with the ownership marker.
-    assert conduct.read_text().startswith(m._INSTRUCTION_MARKER)
+    warning = _warning_file(proj)
+    assert warning.exists()
     assert warning.read_text().startswith(m._INSTRUCTION_MARKER)
 
 
