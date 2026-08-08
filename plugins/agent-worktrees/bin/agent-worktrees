@@ -1,15 +1,24 @@
 #!/bin/sh
 # Cross-platform sh-runnable agent-worktrees shim. Lets any POSIX sh -- notably
 # git's bundled sh on Windows, which runs hooks and cannot exec the .cmd/.ps1
-# binstubs -- invoke the CLI. Prefers the POSIX venv console script, then the
-# Windows venv python via -m (the Scripts\agent-worktrees.exe trampoline is
-# stripped by the install contract), then PATH python (#234 defect 2).
+# binstubs -- invoke the CLI. Resolves the runtime slot via the junction-free
+# `current-version` marker (the `.venv` junction is retired; marker model,
+# #581/#285) -- dotfiles #1085. Prefers the slot's POSIX console script, then its
+# Windows python via -m; a legacy `.venv` path covers a host still mid-migration;
+# PATH python is the last resort (#234 defect 2).
 export PYTHONUTF8=1
-_awv="$HOME/.agent-worktrees/.venv"
-if [ -x "$_awv/bin/agent-worktrees" ]; then
-  exec "$_awv/bin/agent-worktrees" "$@"
-elif [ -x "$_awv/Scripts/python.exe" ]; then
-  exec "$_awv/Scripts/python.exe" -m agent_worktrees "$@"
+_awroot="$HOME/.agent-worktrees"
+_awver=""
+if [ -f "$_awroot/current-version" ]; then _awver=$(tr -d ' \t\r\n' < "$_awroot/current-version"); fi
+_awslot="$_awroot/versions/$_awver"
+if [ -n "$_awver" ] && [ -x "$_awslot/bin/agent-worktrees" ]; then
+  exec "$_awslot/bin/agent-worktrees" "$@"
+elif [ -n "$_awver" ] && [ -x "$_awslot/Scripts/python.exe" ]; then
+  exec "$_awslot/Scripts/python.exe" -m agent_worktrees "$@"
+elif [ -x "$_awroot/.venv/bin/agent-worktrees" ]; then
+  exec "$_awroot/.venv/bin/agent-worktrees" "$@"
+elif [ -x "$_awroot/.venv/Scripts/python.exe" ]; then
+  exec "$_awroot/.venv/Scripts/python.exe" -m agent_worktrees "$@"
 else
   exec python -m agent_worktrees "$@"
 fi
