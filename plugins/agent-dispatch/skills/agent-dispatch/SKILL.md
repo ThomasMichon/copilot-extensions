@@ -393,6 +393,23 @@ unwind and a failed reset stops rather than pressing on. `agent-dispatch abandon
 (**Drive the worktree to resolution**) and `visions/plugins/agent-dispatch`
 (§*drive-the-worktree-to-resolution*).
 
+### Hibernate the wait -- hand a blocking wait to the layer
+
+When a loop can only wait on a slow external condition, don't sit on a live
+session. Hand the wait to `run`: it executes the blocking command and, when it
+resolves, resumes the worktree-affinitied worker via an agent-bridge nudge.
+
+```bash
+agent-dispatch run --resume <machine/worktree> --task <id> -- agent-worktrees pr-watch 42
+agent-dispatch run --detach --resume <machine/worktree> -- agent-worktrees pr-watch 42
+```
+
+Everything after `--` is the wait command. `--detach` runs it as a fully detached,
+cheap OS-level waiter (no agent, no tokens) so the expensive worker session can be
+torn down while it waits, then re-woken with its context intact. See the plugin
+README (**Hibernate the wait**) and `visions/plugins/agent-dispatch`
+(§*hibernate-the-wait*).
+
 ### 3. Claim, work, finish
 
 ```bash

@@ -357,6 +357,31 @@ expectation, not a silent one. See
 [`visions/plugins/agent-dispatch`](../../visions/plugins/agent-dispatch/README.md)
 (§Behaviors/*drive-the-worktree-to-resolution*).
 
+## Hibernate the wait (`agent-dispatch run`)
+
+A worker that can only wait on a slow external condition (a review, a build, a PR
+becoming mergeable) shouldn't sit on a live session and its token budget. It hands
+the wait to the layer: `run` executes the blocking command and, when it resolves,
+resumes the worktree-affinitied worker via an agent-bridge nudge.
+
+```bash
+# foreground: run the wait, then nudge the worker to resume:
+agent-dispatch run --resume <machine/worktree> --task <id> -- agent-worktrees pr-watch 42
+
+# detached: the wait runs in a process that outlives this one, so the worker can
+# be torn down (costing nothing) while it waits -- true hibernation:
+agent-dispatch run --detach --resume <machine/worktree> -- agent-worktrees pr-watch 42
+```
+
+Everything after `--` is the blocking wait command (its own flags are never parsed
+as `run` options). With `--detach` the wait is re-exec'd as a fully detached,
+cheap OS-level waiter (no agent, no tokens); the expensive worker session is spun
+down and re-woken with its context intact when the wait returns. The resume is a
+best-effort bridge nudge -- a genuinely-gone worker is handled by liveness
+recovery, not the nudge. See
+[`visions/plugins/agent-dispatch`](../../visions/plugins/agent-dispatch/README.md)
+(§Features/*hibernate-the-wait*).
+
 ## Development
 
 ```bash

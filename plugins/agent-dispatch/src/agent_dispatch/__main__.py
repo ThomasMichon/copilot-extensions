@@ -1608,6 +1608,73 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def _spawn_detached_waiter(spec: Any) -> dict:
+    """Re-exec ``agent-dispatch run`` (without ``--detach``) as a fully detached
+    waiter that outlives this process, so the kicking worker can be torn down
+    while a cheap OS-level process owns the wait and fires the resume."""
+    from . import hibernation
+    from .procutil import detached_kwargs
+
+    argv = hibernation.detached_run_argv(spec, python=sys.executable)
+    proc = subprocess.Popen(  # noqa: S603 -- fixed argv (interpreter + our own module)
+        argv,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        **detached_kwargs(),
+    )
+    return {"pid": proc.pid, "argv": argv}
+
+
+def _cmd_run(args: argparse.Namespace) -> int:
+    """Hand a blocking wait to the layer (*hibernate-the-wait*): run ``-- <cmd>``
+    to completion, then resume the worktree-affinitied worker via agent-bridge.
+    With ``--detach`` the wait runs in a detached process so the worker can be
+    torn down (costing nothing) while it waits."""
+    from . import bridge
+    from .hibernation import RunSpec, run_and_resume
+
+    command = list(args.command or [])
+    if command and command[0] == "--":
+        command = command[1:]
+    if not command:
+        print(
+            "agent-dispatch: run needs a command after '--', e.g. "
+            "`agent-dispatch run --resume <worktree> -- <blocking-cmd>`",
+            file=sys.stderr,
+        )
+        return 2
+
+    spec = RunSpec(
+        command=tuple(command),
+        resume_worktree=args.resume,
+        task_id=args.task,
+        message=args.message,
+    )
+
+    if args.detach:
+        handle = _spawn_detached_waiter(spec)
+        return _emit(
+            {
+                "detached": True,
+                "resume_worktree": spec.resume_worktree,
+                "command": list(spec.command),
+                **handle,
+            }
+        )
+
+    def runner(cmd: tuple[str, ...]) -> int:
+        try:
+            proc = subprocess.run(list(cmd), check=False)  # noqa: S603 -- operator-supplied wait
+            return proc.returncode
+        except (OSError, subprocess.SubprocessError) as exc:
+            print(f"agent-dispatch: run: could not execute the wait: {exc}", file=sys.stderr)
+            return 127
+
+    report = run_and_resume(spec, runner=runner, resumer=bridge.send_nudge)
+    return _emit(report)
+
+
 def _cmd_recipes_list(args: argparse.Namespace) -> int:
     from .recipes import list_recipes
 
@@ -2497,6 +2564,31 @@ def build_parser() -> argparse.ArgumentParser:
              "without it, the plan is printed and nothing runs",
     )
     rvp.set_defaults(func=_cmd_resolve)
+
+    # -- Hibernate-the-wait: hand a blocking wait to the layer -------------
+    rnp = sub.add_parser(
+        "run",
+        help="hand a blocking wait to the layer (hibernate-the-wait): run "
+             "'-- <cmd>' to completion, then resume the worktree-affinitied "
+             "worker via agent-bridge",
+    )
+    rnp.add_argument(
+        "--resume", metavar="WORKTREE",
+        help="the worker (worktree handle) to resume when the wait resolves "
+             "(agent-bridge routes to whichever session is live then)",
+    )
+    rnp.add_argument("--task", metavar="ID", help="task id, folded into the resume nudge")
+    rnp.add_argument("--message", help="override the resume nudge text")
+    rnp.add_argument(
+        "--detach", action="store_true",
+        help="run the wait in a detached process that outlives this one, so the "
+             "kicking worker can be torn down while it waits (true hibernation)",
+    )
+    rnp.add_argument(
+        "command", nargs=argparse.REMAINDER,
+        help="the blocking wait command, after '--' (e.g. -- agent-worktrees pr-watch 42)",
+    )
+    rnp.set_defaults(func=_cmd_run)
 
     return parser
 
