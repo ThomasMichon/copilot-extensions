@@ -199,6 +199,30 @@ class PRProvider(Protocol):
         """
         ...
 
+    def enable_auto_merge(
+        self, repo: str, number: int, *, squash: bool = True,
+        api_base: str = "", token: str | None = None,
+    ) -> str:
+        """Enable the provider's **native CI-gated auto-merge** on a PR (#225).
+
+        The mechanism behind ``pr-merge --now`` when the repo policy sets
+        ``prefer_auto_merge`` (the default): rather than merging immediately,
+        request the provider's native auto-merge so the PR merges on its own once
+        required checks pass -- letting an agent stop watching attentively.
+
+        - **github** runs ``gh pr merge <n> --squash --auto`` (no ``--admin``: it
+          must wait on the checks, not bypass them). The source branch is not
+          deleted, so ``finalize`` can still affirm the eventual merge.
+        - **gitea / azure-devops** are unsupported here today (they merge via
+          their own consent/auto-complete flow); they return a message so the
+          caller falls back to a direct merge.
+
+        Returns "" on success (auto-merge is now armed -- the PR is NOT yet
+        merged), or a human-readable error string (so the caller falls back to an
+        immediate :meth:`merge_pull`).
+        """
+        ...
+
     def get_comment_threads(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> ThreadsResult:
@@ -246,6 +270,15 @@ def _unsupported_merge(name: str) -> str:
     return (
         f"Provider '{name}' does not support a direct merge (pr-merge --now is "
         "GitHub-only today; gitea/azure-devops merge via their own flow)."
+    )
+
+
+def _unsupported_auto_merge(name: str) -> str:
+    """The default ``enable_auto_merge`` result for a provider without native,
+    CLI-drivable auto-merge (so the caller falls back to a direct merge)."""
+    return (
+        f"Provider '{name}' does not support native auto-merge here (GitHub-only "
+        "today; gitea/azure-devops use their own consent/auto-complete flow)."
     )
 
 

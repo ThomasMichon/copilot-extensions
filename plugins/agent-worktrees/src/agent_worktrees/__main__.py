@@ -14794,12 +14794,15 @@ def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
     """Perform (or preview) a direct submitter self-merge -- ``pr-merge --now``.
 
     Only a **pr-self-merge** repo (the owner of a PR-required repo with a
-    non-blocking bot review) may self-merge: it calls the provider's
-    ``merge_pull`` (a squash merge, ``--admin`` past the non-blocking gate --
-    the OWNER's sanctioned self-merge, the verb itself, never an agent ad-hoc
-    bypass). Any other profile is refused-with-reminder, steering the agent to
-    the sanctioned wait/consent path instead of a direct merge. Returns a shell
-    exit code (0 success, 1 merge failure, 2 refusal/usage).
+    non-blocking bot review) may self-merge. Honoring the repo's ``prefer_auto_merge``
+    policy (#225, default on): it first tries the provider's native CI-gated
+    auto-merge (``enable_auto_merge`` -- the PR lands on its own once required
+    checks pass) and falls back to an immediate squash merge (``merge_pull``,
+    ``--admin`` past the non-blocking gate) only where auto-merge is unavailable
+    or ``prefer_auto_merge`` is off. Either way it is the OWNER's sanctioned
+    self-merge verb, never an agent ad-hoc bypass. Any other profile is
+    refused-with-reminder, steering the agent to the sanctioned wait/consent path.
+    Returns a shell exit code (0 success, 1 merge failure, 2 refusal/usage).
     """
     import json as _json
 
@@ -14832,25 +14835,63 @@ def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
 
     provider = get_provider(getattr(prcfg, "provider", "gitea") or "gitea")
     base = (args.host or getattr(prcfg, "api_base", "") or "").strip()
+    prefer_auto = bool(getattr(prcfg, "prefer_auto_merge", True))
 
     if not apply:  # --dry-run: preview only, merge nothing.
         rem = pc.pr_reminder(flow, "pr-merge", ok=True)
+        would = (
+            "request CI-gated native auto-merge (fallback: direct squash-merge)"
+            if prefer_auto else "squash-merge directly (submitter self-merge)"
+        )
         if args.json:
             print(_json.dumps({
                 "repo": args.repo, "pr": args.pr, "action": "dry-run",
-                "would": "squash-merge (submitter self-merge)",
+                "would": would, "prefer_auto_merge": prefer_auto,
                 "flow_profile": flow.profile, "applied": False,
                 "reminder": rem.as_dict(),
             }))
         else:
             output.ok(
-                f"pr-merge --now (dry-run): would squash-merge PR #{args.pr} in "
-                f"{args.repo} directly (submitter self-merge). Nothing merged."
+                f"pr-merge --now (dry-run): would {would} for PR #{args.pr} in "
+                f"{args.repo}. Nothing merged."
             )
             print(rem.text(), file=sys.stderr)
         return 0
 
     tok = args.token if args.token is not None else account_token_for_slug(args.repo, prcfg)
+
+    # Policy: prefer the provider's native CI-gated auto-merge (so the merge
+    # waits on required checks) and fall back to an immediate self-merge only
+    # where the provider offers no auto-merge or it can't be armed (#225).
+    auto_armed = False
+    if prefer_auto:
+        try:
+            auto_err = provider.enable_auto_merge(
+                args.repo, args.pr, squash=True, api_base=base, token=tok,
+            )
+        except ProviderError as exc:
+            auto_err = str(exc)
+        auto_armed = not auto_err
+
+    if auto_armed:
+        # Auto-merge is armed -- the PR is NOT merged yet; it lands when checks
+        # pass. Steer the agent to watch for the merge, not to finalize.
+        rem = pc.pr_reminder(flow, "pr-watch", ok=True)
+        if args.json:
+            print(_json.dumps({
+                "repo": args.repo, "pr": args.pr, "action": "auto-merge",
+                "applied": True, "merged": False, "flow_profile": flow.profile,
+                "reminder": rem.as_dict(),
+            }))
+        else:
+            output.ok(
+                f"pr-merge --now: armed CI-gated auto-merge on PR #{args.pr} in "
+                f"{args.repo} (squash). It merges when required checks pass -- "
+                f"`pr-watch` wakes you on merge or regression."
+            )
+            print(rem.text(), file=sys.stderr)
+        return 0
+
     try:
         err = provider.merge_pull(
             args.repo, args.pr, squash=True, admin=True, api_base=base, token=tok,

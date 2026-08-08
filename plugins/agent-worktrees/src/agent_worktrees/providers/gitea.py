@@ -594,6 +594,15 @@ class GiteaProvider:
         _ = (repo, number, squash, admin, api_base, token)
         return _unsupported_merge(self.name)
 
+    def enable_auto_merge(
+        self, repo: str, number: int, *, squash: bool = True,
+        api_base: str = "", token: str | None = None,
+    ) -> str:
+        """Not implemented: native auto-merge here is GitHub-only today."""
+        from .base import _unsupported_auto_merge
+        _ = (repo, number, squash, api_base, token)
+        return _unsupported_auto_merge(self.name)
+
     def get_comment_threads(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> ThreadsResult:
