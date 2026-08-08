@@ -91,6 +91,10 @@ C_WARN = "red"
 C_PR_MERGED = "green"
 C_HINT = "grey46"         # scroll-hint arrows (subtle)
 C_HINT_ON = "orange1"     # scroll hint when there IS more content that way
+# copilot-extensions#228: the live-pulse sub-line's "needs me" accent -- an amber
+# highlight (vs. the dim ⟳ of a busy/idle pulse) for a session parked on the
+# operator (``live_rest`` == awaiting-operator).
+C_PULSE_AWAIT = "bold #d7af00"
 # Secondary-text shades (de-emphasized foreground). Named so the many ad-hoc
 # grey/style literals scattered through the render methods route through ONE
 # semantic vocabulary instead of bare shade codes (#85 item E). Exact values
@@ -6086,14 +6090,21 @@ class WorktreesView:
                 # worktree-status-core live pulse (#2917): a dim, expiring
                 # sub-line carrying the agent's current intent, derived from
                 # the assistant.intent stream. Decorative (no stop) so it is
-                # never focusable and never affects selection; fresh renders
-                # dim, stale renders dimmer, expired is dropped upstream.
+                # never focusable and never affects selection. copilot-extensions
+                # #228: the line no longer expires -- ``live_pulse`` grades its
+                # colour/glyph: 'awaiting' renders an amber ⏳ ("this needs me"),
+                # 'fresh' a dim ⟳, 'stale' a dimmer ⟳; the last intent lingers
+                # (greyed) so a dormant worktree still shows what it was doing.
                 _pulse = rec.get("live_pulse")
                 _intent = (rec.get("live_intent") or "").strip()
                 if _pulse and _intent:
-                    _pstyle = C_DIM if _pulse == "fresh" else "grey30"
+                    if _pulse == "awaiting":
+                        _pstyle, _pglyph = C_PULSE_AWAIT, "⏳ "
+                    else:
+                        _pstyle = C_DIM if _pulse == "fresh" else "grey30"
+                        _pglyph = "⟳ "
                     pline = Text("      ", style=_pstyle)
-                    pline.append("⟳ ", style=_pstyle)
+                    pline.append(_pglyph, style=_pstyle)
                     pline.append(_clip(_intent, max(1, width - 9), "l"),
                                  style=_pstyle)
                     add(pline)
