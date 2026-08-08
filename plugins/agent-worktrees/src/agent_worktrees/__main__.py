@@ -1708,8 +1708,13 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
             if not yaml_path.exists():
                 return _json_error(f"Worktree not found: {wt_id}")
-            record = tracking.load_record(yaml_path)
-            tracking.mark_resumed(record)
+            # Foreground RMW (#4547): reload + bump the resume stamp under the
+            # blocking record lock so a concurrent Picker liveness sweep can't
+            # clobber the increment (and vice versa). No I/O in the window.
+            with tracking._RecordLock(yaml_path):
+                record = tracking.load_record(yaml_path)
+                tracking.mark_resumed(record, save=False)
+                tracking.save_record(record)
 
             activity.log_event(
                 "worktree_resumed",
@@ -3093,7 +3098,16 @@ def _resolve_resume(
     print(f"🌳 Resuming worktree: {record.worktree_id}")
     print(f"   Path: {record.worktree_path}")
 
-    tracking.mark_resumed(record)
+    # Foreground RMW (#4547): bump the resume stamp under the blocking record
+    # lock. `record` here is the picker's (possibly cached) snapshot, so reload
+    # fresh inside the lock, increment, save, then reflect the two stamped
+    # fields back onto the in-memory record the launch plan below reuses.
+    with tracking._RecordLock(record.yaml_path):
+        fresh = tracking.load_record(record.yaml_path)
+        tracking.mark_resumed(fresh, save=False)
+        tracking.save_record(fresh)
+    record.resume_count = fresh.resume_count
+    record.last_resumed_at = fresh.last_resumed_at
 
     activity.log_event(
         "worktree_resumed",
@@ -3754,14 +3768,20 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
         # --title-only: just set the title, don't push
         if getattr(args, "title_only", False):
             yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
-            if yaml_path.exists():
-                record = tracking.load_record(yaml_path)
-                if args.title:
+            if not yaml_path.exists():
+                output.err(f"Tracking file not found for {worktree_id}")
+                return 1
+            if args.title:
+                # Foreground RMW (#4547): load -> set title -> save under the
+                # blocking record lock (no I/O in the window). Only taken when
+                # there is actually a title to write.
+                with tracking._RecordLock(yaml_path):
+                    record = tracking.load_record(yaml_path)
                     record.title = args.title.replace("\n", " ").strip()
                     tracking.save_record(record)
                 print(f"[OK] Worktree {worktree_id} title updated: {args.title}")
             else:
-                output.err(f"Tracking file not found for {worktree_id}")
+                output.err("--title-only requires --title")
                 return 1
             return 0
 
@@ -4234,13 +4254,18 @@ def cmd_mark_complete(args: argparse.Namespace) -> int:
         )
         tracking.save_record(record, yaml_path)
     else:
-        record = tracking.load_record(yaml_path)
-        if args.title:
-            record.title = args.title.replace("\n", " ").strip()
-        if not args.title_only:
-            tracking.update_status(record, "complete")
-        else:
-            tracking.save_record(record)
+        # Foreground verb (#4547): load -> mutate -> save under the blocking
+        # record lock (no I/O in the window) so a concurrent writer can't clobber
+        # the manual status/title update. Skip the lock when there is nothing to
+        # write (--title-only with no --title).
+        if (not args.title_only) or args.title:
+            with tracking._RecordLock(yaml_path):
+                record = tracking.load_record(yaml_path)
+                if args.title:
+                    record.title = args.title.replace("\n", " ").strip()
+                if not args.title_only:
+                    tracking.update_status(record, "complete", save=False)
+                tracking.save_record(record)
 
     if args.title_only:
         print(f"[OK] Worktree {worktree_id} title updated: {args.title}")
@@ -4287,8 +4312,14 @@ def _cmd_status_write(
             "Cannot annotate an unknown worktree."
         )
         return 1
-    record = tracking.load_record(yaml_path)
-    tracking.set_disposition(record, summary=summary, follow_up=follow_up)
+    # Foreground verb (#4547): the whole load -> set_disposition -> save is a
+    # critical RMW held under the blocking record lock, so a concurrent Picker
+    # best-effort sweep skips rather than clobbering the disposition overlay.
+    with tracking._RecordLock(yaml_path):
+        record = tracking.load_record(yaml_path)
+        tracking.set_disposition(
+            record, summary=summary, follow_up=follow_up, save=False)
+        tracking.save_record(record)
     flag = "follow-ups pending" if record.follow_up else "resolved"
     msg = f"[OK] Worktree {worktree_id[-4:]} disposition: {flag}"
     if record.summary:
@@ -5442,13 +5473,16 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
             return _json_error(f"worktree not found: {wt_id}")
         output.err(f"worktree not found: {wt_id}")
         return 1
-    rec = tracking.load_record(rec_path)
-    claim = tracking.ResourceClaim(
-        kind=kind, ref=ref, created_at=tracking._now_iso(),
-        state=obligations.ACTIVE, note=getattr(args, "note", "") or "",
-    )
-    tracking.add_resource_claim(rec, claim, save=False)
-    tracking.save_record(rec, rec_path)
+    # Foreground verb (#4547): claim add is a critical RMW held under the
+    # blocking record lock (no I/O in the window).
+    with tracking._RecordLock(rec_path):
+        rec = tracking.load_record(rec_path)
+        claim = tracking.ResourceClaim(
+            kind=kind, ref=ref, created_at=tracking._now_iso(),
+            state=obligations.ACTIVE, note=getattr(args, "note", "") or "",
+        )
+        tracking.add_resource_claim(rec, claim, save=False)
+        tracking.save_record(rec, rec_path)
     if args.json:
         _json_output({"worktree_id": wt_id, "kind": kind, "ref": ref,
                       "state": obligations.ACTIVE})
@@ -5473,21 +5507,24 @@ def _claims_release(args: argparse.Namespace, ref: str) -> int:
             return _json_error(f"worktree not found: {wt_id}")
         output.err(f"worktree not found: {wt_id}")
         return 1
-    rec = tracking.load_record(rec_path)
-    match = next((c for c in rec.resources if c.ref == ref), None)
-    if match is None:
-        if args.json:
-            return _json_error(f"no outbound claim with ref: {ref}")
-        output.err(f"no outbound claim with ref: {ref} on {wt_id}")
-        return 1
-    remove = getattr(args, "remove", False)
-    if remove:
-        rec.resources = [c for c in rec.resources if c.ref != ref]
-        action = "removed"
-    else:
-        match.state = "released"
-        action = "released"
-    tracking.save_record(rec, rec_path)
+    # Foreground verb (#4547): claim release is a critical RMW held under the
+    # blocking record lock (no I/O in the window).
+    with tracking._RecordLock(rec_path):
+        rec = tracking.load_record(rec_path)
+        match = next((c for c in rec.resources if c.ref == ref), None)
+        if match is None:
+            if args.json:
+                return _json_error(f"no outbound claim with ref: {ref}")
+            output.err(f"no outbound claim with ref: {ref} on {wt_id}")
+            return 1
+        remove = getattr(args, "remove", False)
+        if remove:
+            rec.resources = [c for c in rec.resources if c.ref != ref]
+            action = "removed"
+        else:
+            match.state = "released"
+            action = "released"
+        tracking.save_record(rec, rec_path)
     if args.json:
         _json_output({"worktree_id": wt_id, "ref": ref, "action": action})
         return 0
@@ -6002,11 +6039,11 @@ def reap_one(
 
     if reconcile_prs and rec.prs:
         lookup = _make_pr_lookup(config)
-        if prune.reconcile_pr_states(rec, lookup):
-            try:
-                tracking.save_record(rec)
-            except OSError:
-                pass
+        # Best-effort reconcile write (#4547): a status-render side effect.
+        # Reconcile unlocked (provider I/O), then re-apply the deltas onto a
+        # fresh snapshot under a best-effort lock so a concurrent foreground
+        # verb is never clobbered; skip on contention (self-heals next pass).
+        prune.reconcile_and_persist_best_effort(rec, lookup)
 
     if rec.worktree_path and Path(rec.worktree_path).exists():
         info = git_ops.classify_worktree(
@@ -6979,11 +7016,11 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
 
         # Heal stale PR state from the provider before assessing (opt-in).
         if pr_lookup is not None and rec.prs:
-            if prune.reconcile_pr_states(rec, pr_lookup):
-                try:
-                    tracking.save_record(rec)
-                except OSError:
-                    pass
+            # Best-effort reconcile write (#4547): reconcile unlocked (provider
+            # I/O), then re-apply the deltas onto a fresh snapshot under a
+            # best-effort lock so a concurrent foreground verb is never
+            # clobbered; skip on contention (self-heals next pass).
+            prune.reconcile_and_persist_best_effort(rec, pr_lookup)
 
         verdict = prune.assess(rec, info, turn_count=turns,
                                claimant_alive=_local_claimant_alive)

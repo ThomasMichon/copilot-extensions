@@ -954,15 +954,50 @@ def set_pr(
     state transition reaches a terminal state, ``closed_at`` is stamped.
     """
     base: dict = {"success": False, "worktree_id": worktree_id}
-    record = _load_record_or_none(worktree_id)
-    if record is None:
-        return {**base, "error": f"No tracking record found for '{worktree_id}'."}
 
     if state is not None and state not in _VALID_PR_STATES:
         return {**base, "error": (
             f"Invalid PR state '{state}'. Expected one of: "
             f"{', '.join(_VALID_PR_STATES)}."
         )}
+
+    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+    if not yaml_path.exists():
+        return {**base, "error": f"No tracking record found for '{worktree_id}'."}
+
+    # Foreground verb (#4547): a critical read-modify-write. Hold the blocking
+    # cross-process record lock across the whole load -> mutate -> save so a
+    # concurrent writer (another CLI verb, or a Picker best-effort sweep) can't
+    # clobber this update last-writer-wins. The window below contains NO
+    # network/git I/O, so the lock is held only briefly -- the guarantee the
+    # criticality-aware lock relies on.
+    with tracking._RecordLock(yaml_path):
+        return _set_pr_locked(
+            base, yaml_path, url=url, number=number, state=state,
+            provider=provider, branch=branch,
+            select_number=select_number, select_branch=select_branch,
+        )
+
+
+def _set_pr_locked(
+    base: dict,
+    yaml_path: Path,
+    *,
+    url: str | None,
+    number: int | None,
+    state: str | None,
+    provider: str | None,
+    branch: str | None,
+    select_number: int | None,
+    select_branch: str | None,
+) -> dict:
+    """The load -> mutate -> save body of :func:`set_pr`, run under the record
+    lock. Split out so the lock scope is exactly the RMW window."""
+    worktree_id = base["worktree_id"]
+    try:
+        record = tracking.load_record(yaml_path)
+    except Exception:
+        return {**base, "error": f"No tracking record found for '{worktree_id}'."}
 
     # Select which PR to update: explicit selector > active > new.
     pr: PRRecord | None

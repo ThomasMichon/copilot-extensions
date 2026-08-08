@@ -148,8 +148,16 @@ def push_changes(
 
     # Set title early so it survives even if push fails
     if title and record:
-        record.title = title.replace("\n", " ").strip()
-        tracking.save_record(record)
+        # Foreground RMW (#4547): persist the title under the blocking record
+        # lock. `record` was loaded unlocked above (it drives the whole push
+        # flow), so reload fresh inside the lock, apply just the title, and save
+        # -- then continue on the fresh snapshot. The window holds no I/O; the
+        # heavy fetch/push below runs AFTER the lock is released.
+        new_title = title.replace("\n", " ").strip()
+        with tracking._RecordLock(yaml_path):
+            record = tracking.load_record(yaml_path)
+            record.title = new_title
+            tracking.save_record(record)
 
     # PR mode: push the feature branch, not master.
     if repo.pr.enabled and record and record.pr and record.pr.branch:

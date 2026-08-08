@@ -1205,13 +1205,23 @@ def find_worktree_id_by_session(session_id: str) -> str | None:
     return next(iter(matches)) if len(matches) == 1 else None
 
 
-def update_status(record: WorktreeRecord, new_status: WorktreeStatus) -> None:
-    """Update a record's status and save it."""
+def update_status(
+    record: WorktreeRecord,
+    new_status: WorktreeStatus,
+    *,
+    save: bool = True,
+) -> None:
+    """Update a record's status and save it.
+
+    ``save=False`` lets a foreground caller do the whole read-modify-write under
+    a single :class:`_RecordLock` (load -> update_status(save=False) -> save),
+    keeping the cross-process lock scoped to the RMW window (#4547)."""
     record.status = new_status
     if new_status in ("finalized", "orphaned", "complete", "pushed"):
         if record.completed_at is None:
             record.completed_at = _now_iso()
-    save_record(record)
+    if save:
+        save_record(record)
 
 
 def set_disposition(
@@ -1219,6 +1229,7 @@ def set_disposition(
     *,
     summary: str | None = None,
     follow_up: bool | None = None,
+    save: bool = True,
 ) -> None:
     """Set the agent-asserted disposition overlay (summary / follow-up) and save.
 
@@ -1233,14 +1244,19 @@ def set_disposition(
     if follow_up is not None:
         record.follow_up = follow_up
     record.status_note_at = _now_iso()
-    save_record(record)
+    if save:
+        save_record(record)
 
 
-def mark_resumed(record: WorktreeRecord) -> None:
-    """Increment resume count and update last_resumed_at."""
+def mark_resumed(record: WorktreeRecord, *, save: bool = True) -> None:
+    """Increment resume count and update last_resumed_at.
+
+    ``save=False`` lets a foreground caller enclose the whole read-modify-write
+    in one :class:`_RecordLock` (#4547)."""
     record.resume_count += 1
     record.last_resumed_at = _now_iso()
-    save_record(record)
+    if save:
+        save_record(record)
 
 
 def _stamp_liveness(
@@ -1862,6 +1878,25 @@ class _RecordLock:
 
     Always check ``acquired`` inside a ``blocking=False`` ``with`` block before
     writing; for the default ``blocking=True`` it is always True.
+
+    **Scope -- keep the lock window to the RMW only (#4547).** Wrap exactly the
+    ``load_record -> mutate -> save_record`` window and **never hold the lock
+    across network or git I/O** (a fetch, push, rebase, or provider call). Two
+    consequences follow:
+
+    - **Foreground CLI verbs** whose RMW is self-contained (``set-pr``,
+      ``set-disposition``, ``mark-complete``, resume's ``mark_resumed``, the
+      resource-claim verbs, ``set-pr --title-only``) load *inside* a blocking
+      lock and save before releasing -- so a best-effort sweep skips while they
+      hold it, completing the cooperative protocol.
+    - **Long I/O-spanning flows** (``create_pr`` / ``_push_changes_pr`` writes
+      that follow a rebase+push, ``finalize``'s terminal status write) load the
+      record once and thread it across heavy I/O by design, so they *cannot* be
+      one short locked RMW. Their write-atomicity is guaranteed by
+      ``_atomic_write`` and their staleness is self-healed by the reconcile
+      guards; they deliberately stay outside the fine lock rather than hold it
+      across I/O. A pre-I/O sub-write (e.g. ``push_changes`` setting the title
+      before the push) is reload-merged under a tight lock instead.
     """
 
     def __init__(self, yaml_path: Path, timeout: float = 2.0, *,

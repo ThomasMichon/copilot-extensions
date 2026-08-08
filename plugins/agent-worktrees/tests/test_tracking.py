@@ -85,6 +85,42 @@ def _hold_lock_worker(yaml_path_str: str, ready_file: str, release_file: str) ->
             time.sleep(0.01)
 
 
+def _best_effort_increment_worker(
+    yaml_path_str: str, iterations: int, hold: float, result_q
+) -> None:
+    """Cross-process best-effort (``blocking=False``) RMW worker (#4547).
+
+    Mirrors a Picker sweep: each iteration tries the lock non-blocking and, when
+    it SKIPS (another writer holds it), simply does nothing that pass -- never a
+    lock-free clobbering write. It reports how many increments it actually
+    applied so the test can assert the final count is EXACTLY the sum of every
+    applied write (blocking + best-effort), i.e. no update from either class was
+    ever lost. Module-level so it runs under the ``spawn`` start method.
+    """
+    import time
+    from pathlib import Path as _Path
+
+    from agent_worktrees.tracking import (
+        _RecordLock,
+        load_record,
+        save_record,
+    )
+
+    path = _Path(yaml_path_str)
+    applied = 0
+    for _ in range(iterations):
+        with _RecordLock(path, blocking=False) as lk:
+            if not lk.acquired:
+                continue  # contended -- skip this pass, like a real sweep
+            record = load_record(path)
+            current = record.resume_count or 0
+            time.sleep(hold)  # widen the read->write window
+            record.resume_count = current + 1
+            save_record(record, path)
+            applied += 1
+    result_q.put(applied)
+
+
 # ---------------------------------------------------------------------------
 # Round-trip serialization
 # ---------------------------------------------------------------------------
@@ -1164,6 +1200,57 @@ class TestRecordLockCrossProcess:
         # And once released, a best-effort acquire succeeds again.
         with _RecordLock(path, blocking=False) as lk:
             assert lk.acquired is True
+
+    def test_blocking_writers_never_lose_while_best_effort_skips(
+        self, tmp_path: Path
+    ):
+        # #4547 (foreground wraps): the cooperative outcome. Critical (blocking)
+        # writers -- the foreground CLI verbs (set-pr, set-disposition,
+        # mark-complete, mark_resumed, claims) now hold a blocking `_RecordLock`
+        # across their RMW -- must EACH land, while best-effort sweeps skip on
+        # contention rather than clobber. Run both classes concurrently and
+        # assert the final count is EXACTLY the sum of every write that reported
+        # applying: no update from either class is ever lost, and a skip writes
+        # nothing.
+        import multiprocessing as mp
+
+        path = self._seed(tmp_path)
+        b_workers, b_iters = 2, 12
+        e_workers, e_iters, hold = 2, 12, 0.003
+        ctx = mp.get_context("spawn")
+        result_q = ctx.Queue()
+
+        blockers = [
+            ctx.Process(
+                target=_lock_increment_worker,
+                args=(str(path), b_iters, hold),
+            )
+            for _ in range(b_workers)
+        ]
+        best_effort = [
+            ctx.Process(
+                target=_best_effort_increment_worker,
+                args=(str(path), e_iters, hold, result_q),
+            )
+            for _ in range(e_workers)
+        ]
+        for p in blockers + best_effort:
+            p.start()
+
+        # Collect best-effort applied counts before joining (avoid a Queue-join
+        # deadlock if a worker's buffered put isn't drained).
+        applied_total = sum(result_q.get(timeout=120) for _ in best_effort)
+
+        for p in blockers + best_effort:
+            p.join(timeout=120)
+            assert p.exitcode == 0, f"worker exited {p.exitcode}"
+
+        final = load_record(path)
+        blocking_total = b_workers * b_iters
+        # Every blocking write landed AND best-effort added exactly what it
+        # reported -- no lost updates from either class, no phantom writes.
+        assert final.resume_count == blocking_total + applied_total
+        assert final.resume_count >= blocking_total
 
 
 class TestFindWorktreeIdByCwd:
