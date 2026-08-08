@@ -12,6 +12,7 @@ from .injectors import (
     build_injector,
     parse_response,
 )
+from .url_secrets import resolve_url
 
 __all__ = [
     "AuthInjector",
@@ -25,4 +26,5 @@ __all__ = [
     "TokenInjector",
     "build_injector",
     "parse_response",
+    "resolve_url",
 ]

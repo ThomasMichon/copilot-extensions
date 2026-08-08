@@ -41,8 +41,21 @@ class HttpTransport(Transport):
     def __init__(self, cfg, injector) -> None:
         super().__init__(cfg, injector)
         self._url = cfg.server.url or ""
+        # Secret ``${name}`` placeholders in the URL are resolved lazily on first
+        # send (spawn/connect time), never at construction -- so config load,
+        # ``validate`` and ``status`` never touch the credential source. No
+        # ``url_secrets`` => nothing to resolve.
+        self._url_resolved = not bool(cfg.server.url_secrets)
         self._session_id: str | None = None
         self._lock = asyncio.Lock()
+
+    async def _ensure_url_resolved(self) -> None:
+        """Resolve any ``${name}`` URL secret placeholders once, before first use."""
+        if self._url_resolved:
+            return
+        from ..auth.url_secrets import resolve_url  # local import: avoid cycle
+        self._url = await resolve_url(self.cfg)
+        self._url_resolved = True
 
     async def _base_headers(self, msg: dict) -> dict[str, str]:
         headers = {
@@ -77,6 +90,7 @@ class HttpTransport(Transport):
             await self._send_locked(msg)
 
     async def _send_locked(self, msg: dict, *, retried: bool = False) -> None:
+        await self._ensure_url_resolved()
         headers = await self._base_headers(msg)
         body = json.dumps(msg).encode("utf-8")
         try:

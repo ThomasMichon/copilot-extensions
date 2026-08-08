@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -102,6 +103,15 @@ class ServerSpec:
     protocol: str = "auto"
     # http
     url: str | None = None
+    # http: secret placeholders in ``url``. A ``${name}`` token in the URL is
+    # resolved at spawn time from the matching source here (an AuthSpec reusing
+    # the auth-injector kinds -- e.g. ``command`` + ``parse: raw`` for
+    # ``vault get "<entry>" password``). This lets a committed config carry a
+    # secret *inside the URL* (e.g. an add-on's secret URL path) by reference,
+    # resolved like any other injected secret -- never committed, never in the
+    # session env -- instead of forcing a machine-local override to hardcode the
+    # full secret URL. See :mod:`agent_mcp.auth.url_secrets`.
+    url_secrets: dict[str, AuthSpec] = field(default_factory=dict)
     # stdio
     command: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
@@ -359,6 +369,24 @@ def _as_command(value: Any) -> list[str]:
     raise ConfigError("server.command must be a string or a list")
 
 
+# Secret placeholders in a ``server.url`` -- ``${name}`` tokens resolved at spawn
+# from ``server.url_secrets``. The name charset is deliberately narrow (word
+# chars, dash, dot) so an accidental ``${`` in a real URL is unlikely to match,
+# and a shell-looking ``${VAR}`` is still recognized.
+URL_SECRET_RE = re.compile(r"\$\{([A-Za-z0-9_.-]+)\}")
+
+
+def url_placeholder_names(url: str | None) -> list[str]:
+    """The ``${name}`` placeholder names referenced in ``url`` (order-preserving,
+    de-duplicated). Empty when ``url`` is None or carries no placeholders."""
+    if not url:
+        return []
+    seen: dict[str, None] = {}
+    for m in URL_SECRET_RE.finditer(url):
+        seen.setdefault(m.group(1), None)
+    return list(seen)
+
+
 def _parse_auth_spec(raw_auth: dict[str, Any]) -> AuthSpec:
     """Build one :class:`AuthSpec` from a parsed ``auth`` mapping."""
     if not isinstance(raw_auth, dict):
@@ -427,10 +455,18 @@ def parse_config(data: dict[str, Any], *, name: str | None = None,
         command = raw_args  # empty -> stdio validation flags the missing launcher
         npm_args = []
 
+    raw_url_secrets = raw_server.get("url_secrets") or {}
+    if not isinstance(raw_url_secrets, dict):
+        raise ConfigError("server.url_secrets must be a mapping of name -> source")
+    url_secrets = {
+        str(k): _parse_auth_spec(v) for k, v in raw_url_secrets.items()
+    }
+
     server = ServerSpec(
         type=str(raw_server.get("type", "http")),
         protocol=str(raw_server.get("protocol", "auto")),
         url=raw_server.get("url"),
+        url_secrets=url_secrets,
         command=command,
         env={str(k): str(v) for k, v in (raw_server.get("env") or {}).items()},
         npm=npm,
@@ -566,6 +602,32 @@ def validate_config(cfg: BridgeConfig) -> list[str]:
         errors.append("server.command or server.npm is required for transport 'stdio'")
     if s.type == "cli" and not s.tools_from:
         errors.append("server.tools_from is required for transport 'cli'")
+
+    # ``server.url_secrets`` -- ``${name}`` placeholders in the URL resolved at
+    # spawn from these sources. Only meaningful for http, and the placeholders
+    # and sources must correspond exactly so a typo surfaces at load, not at
+    # connect. (Validation is static -- it never resolves a secret / touches the
+    # vault; that happens lazily at spawn.)
+    if s.url_secrets and s.type != "http":
+        errors.append("server.url_secrets is only valid for transport 'http'")
+    placeholders = set(url_placeholder_names(s.url))
+    sources = set(s.url_secrets)
+    for missing in sorted(placeholders - sources):
+        errors.append(
+            f"server.url references ${{{missing}}} but server.url_secrets has no "
+            f"'{missing}' source"
+        )
+    for unused in sorted(sources - placeholders):
+        errors.append(
+            f"server.url_secrets defines '{unused}' but server.url has no "
+            f"${{{unused}}} placeholder"
+        )
+    for name, spec in s.url_secrets.items():
+        if spec.kind not in AUTH_KINDS:
+            errors.append(
+                f"server.url_secrets['{name}'].kind '{spec.kind}' must be one of "
+                f"{AUTH_KINDS}"
+            )
 
     # ``server.protocol`` selects the era: a keyword (auto/modern/legacy) or an
     # explicit ``YYYY-MM-DD`` revision. Reject anything else so a typo surfaces
