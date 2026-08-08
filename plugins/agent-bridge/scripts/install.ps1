@@ -907,11 +907,15 @@ function Register-ScheduledTask_ {
 # Start agent-bridge service -- called by scheduled task at logon.
 # Launch via the venv's signed python (-m), never the unsigned console-script
 # trampoline .exe -- Smart App Control blocks unsigned, zero-reputation exes.
-# Junction-free versioned runtime: this is pinned STRAIGHT at the active slot
-# python (versions/<v>/Scripts/python.exe) and this launcher is rewritten on every
-# cutover, so there is no `venv` junction to traverse (RedirectionGuard/WinError
-# 448 can't bite) and gc never removes the active slot out from under it.
-`$launchPy = '$($LinkPython -replace "'", "''")'
+# SINGLE routing point: resolve the active version from the `current-version`
+# marker (the same source of truth the binstub uses), never a pinned path -- so a
+# cutover only rewrites the marker and this launcher (written once) always starts
+# the current slot. No junction/reparse is traversed (marker is a plain file;
+# versions/<v> is a real dir), so RedirectionGuard/WinError 448 can't bite.
+`$root = '$($InstallDir -replace "'", "''")'
+`$launchPy = ''
+try { `$_ver = ([IO.File]::ReadAllText((Join-Path `$root 'current-version'))).Trim(); if (`$_ver) { `$launchPy = Join-Path `$root ('versions\' + `$_ver + '\Scripts\python.exe') } } catch {}
+if (-not (`$launchPy -and (Test-Path -LiteralPath `$launchPy))) { `$launchPy = Get-ChildItem (Join-Path `$root 'versions') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Join-Path `$_.FullName 'Scripts\python.exe' } | Where-Object { Test-Path -LiteralPath `$_ } | Select-Object -Last 1 }
 `$pidFile = '$($PidFile -replace "'", "''")'
 `$logFile = Join-Path (Split-Path `$pidFile) 'agent-bridge.log'
 `$errFile = Join-Path (Split-Path `$pidFile) 'agent-bridge-err.log'
@@ -1090,17 +1094,25 @@ function Write-Binstubs {
 
        Both launch the venv's PSF-signed python via `-m`, never the unsigned
        console-script trampoline .exe that Smart App Control blocks (3077). #>
-    param([Parameter(Mandatory)][string]$PythonExe)
+    param([string]$PythonExe)  # accepted for call-site compatibility; unused (marker-driven)
 
-    # Junction-free versioned runtime: the binstub is pinned STRAIGHT at the
-    # concrete slot python (versions/<v>/Scripts/python.exe) and rewritten on every
-    # cutover -- this IS "hardcode the active version in the binstub", so there is
-    # no `venv` junction to traverse (RedirectionGuard/WinError 448 can't bite) and
-    # no reparse-target resolution to do. gc never removes the active slot, so a
-    # pinned binstub is never left dangling.
+    # SINGLE dynamic router. The binstub reads the `current-version` marker at
+    # every invocation and redirects into versions/<current>/Scripts/python.exe.
+    # It is version-AGNOSTIC (written once), so a cutover only rewrites the marker
+    # and EVERY entry point -- CLI, tool call, scheduled task, internal spawn --
+    # resolves the active version through this one binstub. No junction/reparse is
+    # traversed (the marker is a plain file; versions/<v> is a real dir), so
+    # RedirectionGuard/WinError 448 can't bite. A missing/torn marker falls back to
+    # the newest installed slot (gc never removes the active one).
+    $rootLit = $InstallDir -replace "'", "''"
     $ps1 = @(
         "`$env:PYTHONUTF8 = '1'",
-        "& '$($PythonExe -replace "'", "''")' -m agent_bridge @args",
+        "`$_root = '$rootLit'",
+        "`$_ver = ''",
+        "try { `$_ver = ([IO.File]::ReadAllText((Join-Path `$_root 'current-version'))).Trim() } catch {}",
+        "`$_py = if (`$_ver) { Join-Path `$_root ('versions\' + `$_ver + '\Scripts\python.exe') } else { '' }",
+        "if (-not (`$_py -and (Test-Path -LiteralPath `$_py))) { `$_py = Get-ChildItem (Join-Path `$_root 'versions') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Join-Path `$_.FullName 'Scripts\python.exe' } | Where-Object { Test-Path -LiteralPath `$_ } | Select-Object -Last 1 }",
+        "& `$_py -m agent_bridge @args",
         "exit `$LASTEXITCODE"
     ) -join "`r`n"
     [System.IO.File]::WriteAllText($BinstubPs1, $ps1, (New-Object System.Text.UTF8Encoding($false)))
@@ -1108,11 +1120,14 @@ function Write-Binstubs {
     $cmd = @(
         "@echo off",
         "set `"PYTHONUTF8=1`"",
-        "`"$PythonExe`" -m agent_bridge %*"
+        "set `"_ROOT=$InstallDir`"",
+        "set `"_VER=`"",
+        "if exist `"%_ROOT%\current-version`" set /p _VER=<`"%_ROOT%\current-version`"",
+        "`"%_ROOT%\versions\%_VER%\Scripts\python.exe`" -m agent_bridge %*"
     ) -join "`r`n"
     [System.IO.File]::WriteAllText($BinstubCmd, $cmd)
 
-    Write-Ok "Binstub: $BinstubPs1 (+ .cmd fallback)"
+    Write-Ok "Binstub: $BinstubPs1 (+ .cmd fallback) -- marker-routed"
 }
 
 function Invoke-Install {
