@@ -83,6 +83,34 @@ def _fake_mux(has_session_codes, calls, store=None):
     return fake_run
 
 
+def _fake_mux_transient(has_session_plan, calls, store=None):
+    """Like ``_fake_mux`` but ``has-session`` entries may be the sentinel
+    ``"raise"`` -- modelling a *transient* mux failure (timeout/exception) that
+    ``_mux`` collapses to ``None`` -> ``_session_state() == "unknown"``.  Used to
+    prove the loop tolerates hiccups instead of retiring the bar (dotfiles
+    #915)."""
+    plan = iter(has_session_plan)
+    store = store if store is not None else {}
+
+    def fake_run(argv, **_kw):
+        verb = argv[1]
+        if verb == "has-session":
+            nxt = next(plan, 1)
+            if nxt == "raise":
+                raise subprocess.TimeoutExpired(argv, 15)
+            return subprocess.CompletedProcess(argv, nxt, "", "")
+        if verb == "set-option":
+            store[argv[4]] = argv[5]
+            calls.append((argv[4], argv[5]))
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        if verb == "display-message":
+            key = argv[5].strip("#{}")
+            return subprocess.CompletedProcess(argv, 0, store.get(key, ""), "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    return fake_run
+
+
 def test_status_updater_sets_ctx_once_then_seg_until_gone(monkeypatch):
     calls: list[tuple[str, str]] = []
     # present (initial guard), present (loop iter 1), gone (loop iter 2).
@@ -332,3 +360,147 @@ def test_status_updater_loop_exits_when_runtime_becomes_superseded(monkeypatch):
     assert rc == 0
     # Exactly one disposition write before the supersede retires the loop.
     assert [c for c in calls if c[0] == "@aw_seg"] == [("@aw_seg", "SEG")]
+
+
+# --- transient mux-failure tolerance (dotfiles #915) ---------------------
+
+def test_status_updater_tolerates_transient_then_recovers(monkeypatch):
+    """A transient mux failure mid-loop must NOT retire the bar: the tick is
+    skipped and the loop keeps serving once the mux answers again."""
+    calls: list[tuple[str, str]] = []
+    # startup alive, iter1 alive (SEG), iter2 transient (skip), iter3 alive
+    # (SEG), iter4 gone.
+    monkeypatch.setattr(
+        subprocess, "run",
+        _fake_mux_transient([0, 0, "raise", 0, 1], calls),
+    )
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    monkeypatch.setattr(time, "sleep", lambda *_a, **_k: None)
+
+    rc = m.cmd_status_updater(_ns())
+
+    assert rc == 0
+    # Two disposition writes: the transient tick was skipped, not fatal.
+    assert [c for c in calls if c[0] == "@aw_seg"] == [
+        ("@aw_seg", "SEG"), ("@aw_seg", "SEG"),
+    ]
+
+
+def test_status_updater_startup_tolerates_transient(monkeypatch):
+    """A transient hiccup on the *startup* liveness probe must not abort the
+    updater before it ever paints -- only a definitive ``gone`` bails."""
+    calls: list[tuple[str, str]] = []
+    # startup transient (must proceed), then loop sees gone and exits.
+    monkeypatch.setattr(
+        subprocess, "run", _fake_mux_transient(["raise", 1], calls),
+    )
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    monkeypatch.setattr(time, "sleep", lambda *_a, **_k: None)
+
+    rc = m.cmd_status_updater(_ns())
+
+    assert rc == 0
+    # It proceeded past startup: claimed the token and rendered identity once.
+    assert ("@aw_ctx", "CTX") in calls
+    assert any(c[0] == "@aw_updater" for c in calls)
+
+
+def test_status_updater_exits_after_sustained_transient_failure(monkeypatch):
+    """A genuinely wedged mux (unbroken run of transient failures) eventually
+    retires the updater instead of spinning forever."""
+    calls: list[tuple[str, str]] = []
+    # startup alive, then an unbroken run of transient failures.
+    monkeypatch.setattr(
+        subprocess, "run",
+        _fake_mux_transient([0] + ["raise"] * 40, calls),
+    )
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    monkeypatch.setattr(time, "sleep", lambda *_a, **_k: None)
+
+    rc = m.cmd_status_updater(_ns())
+
+    assert rc == 0
+    # No disposition ever landed (every liveness probe failed), and the loop
+    # terminated rather than hanging.
+    assert [c for c in calls if c[0] == "@aw_seg"] == []
+
+
+# --- sessionStart reseed spawn helper (dotfiles #915) --------------------
+
+def test_spawn_status_updater_noop_on_empty_id():
+    assert m._spawn_status_updater("", "/w/x") is False
+
+
+def test_spawn_status_updater_noop_without_mux(monkeypatch):
+    import shutil
+
+    monkeypatch.setattr(shutil, "which", lambda _x: None)
+    popped: list = []
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: popped.append(a))
+
+    assert m._spawn_status_updater("x", "/w/x") is False
+    assert popped == []
+
+
+def test_spawn_status_updater_noop_when_no_live_session(monkeypatch):
+    import shutil
+
+    monkeypatch.setattr(
+        shutil, "which", lambda x: "/bin/psmux" if x == "psmux" else None)
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda *a, **k: subprocess.CompletedProcess(a, 1, "", ""))
+    popped: list = []
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: popped.append(a))
+
+    assert m._spawn_status_updater("x", "/w/x") is False
+    assert popped == []  # never spawn a loop for a session that isn't under mux
+
+
+def test_spawn_status_updater_spawns_detached_when_session_live(monkeypatch):
+    import shutil
+
+    monkeypatch.setattr(
+        shutil, "which", lambda x: "/bin/psmux" if x == "psmux" else None)
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda *a, **k: subprocess.CompletedProcess(a, 0, "", ""))
+    captured: dict = {}
+
+    def fake_popen(argv, **kw):
+        captured["argv"] = argv
+        captured["kw"] = kw
+        return object()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    assert m._spawn_status_updater("x", "/w/x") is True
+    argv = captured["argv"]
+    assert argv[0] == sys.executable
+    assert argv[1:4] == ["-m", "agent_worktrees", "status-updater"]
+    assert argv[argv.index("--session") + 1] == "wt-x"
+    assert argv[argv.index("--mux") + 1] == "psmux"
+    assert argv[argv.index("--path") + 1] == "/w/x"
+    # Detached: stdio is silenced so the loop never blocks on the hook's pipes.
+    assert captured["kw"].get("stdin") is subprocess.DEVNULL
+
+
+def test_spawn_status_updater_omits_path_when_absent(monkeypatch):
+    import shutil
+
+    monkeypatch.setattr(
+        shutil, "which", lambda x: "/bin/tmux" if x == "tmux" else None)
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda *a, **k: subprocess.CompletedProcess(a, 0, "", ""))
+    captured: dict = {}
+    monkeypatch.setattr(
+        subprocess, "Popen",
+        lambda argv, **kw: captured.update(argv=argv) or object())
+
+    assert m._spawn_status_updater("x", None) is True
+    assert "--path" not in captured["argv"]
+    assert captured["argv"][captured["argv"].index("--mux") + 1] == "tmux"
