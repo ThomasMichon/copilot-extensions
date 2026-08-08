@@ -140,6 +140,26 @@ def owner_ref(explicit: str | None = None, session_id: str | None = None) -> str
     return proc.stdout.strip() or None
 
 
+def harness_identity() -> str | None:
+    """Resolve THIS harness's identity -- the Git-ref lease store origin URL.
+
+    Shells ``agent-worktrees get lease-origin``: the pushable store repo URL that
+    ``lease_config`` derives (the ``AGENT_WORKTREES_LEASE_ORIGIN`` override, else
+    the bound control-plane repo's origin, else the project's default remote).
+    Because every agent of one harness resolves the **same** origin, it is the
+    cross-harness identity for the in-CodeSpace lockfile fence (see ``fence.py``)
+    -- a marker written by a *different* harness carries a different origin.
+
+    Returns None when unresolvable / the binstub is absent -- the degrade-safe
+    signal the fence uses to switch itself off (no identity -> proceed, never a
+    blind block).
+    """
+    proc = _run(["get", "lease-origin"], timeout=10)
+    if proc is None or proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
+
+
 def _parse_token(proc: subprocess.CompletedProcess[str]) -> str:
     try:
         data = json.loads(proc.stdout)

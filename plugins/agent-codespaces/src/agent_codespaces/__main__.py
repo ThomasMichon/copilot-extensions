@@ -831,11 +831,16 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
             explicit=getattr(args, "effort", None),
             session_id=getattr(args, "session_id", None),
         )
+    # Resolve the qualified holder ClaimRef once, for BOTH the cross-machine L2
+    # claim (below) and the cross-harness in-CodeSpace fence (in _run). It is the
+    # marker's holder identity even when L1/L2 claiming is disabled, so hoist it
+    # out of the claim block. Degrade-safe: None when not in a worktree.
+    from . import coordination
+    fence_holder_ref = coordination.owner_ref(
+        session_id=getattr(args, "session_id", None),
+    )
     if claim_owner:
-        from . import coordination
-        holder_ref = coordination.owner_ref(
-            session_id=getattr(args, "session_id", None),
-        )
+        holder_ref = fence_holder_ref
         try:
             claim(
                 args.name, claim_owner,
@@ -985,6 +990,22 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
                 )
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 1.5, 20.0)
+
+        # Cross-harness in-CodeSpace lockfile fence (git-ref-resource-leases
+        # Phase 4). The repo-ref L2 store is same-harness-scoped by construction
+        # -- a *foreign* harness writes to a different store and is invisible to
+        # it. Fence that seam on the resource itself: read ~/.agent-lease inside
+        # the CodeSpace; a fresh marker from a foreign harness refuses the
+        # connect (unless --force-claim), then we drop our own marker. Needs only
+        # the raw SSH channel (a cat/mv), so it runs before relay provisioning
+        # and independent of --no-relay. Degrade-safe: any read/write/identity
+        # failure proceeds.
+        if not await _check_cross_harness_fence(
+            manager, args.name, fence_holder_ref,
+            force=getattr(args, "force_claim", False),
+        ):
+            await manager.disconnect(args.name)
+            return _BUSY_EXIT
 
         if not args.no_relay:
             # Stage 4 (target-auth-env): deploy the CodeSpace-side relay helpers
@@ -1177,6 +1198,85 @@ async def _stage_plugins(manager, name: str, sources: list[str]) -> list[str]:
         except Exception as exc:
             log.warning("Staging %s on %s failed: %s", source, name, exc)
     return dirs
+
+
+async def _check_cross_harness_fence(
+    manager, name: str, holder_ref: str | None, *, force: bool = False,
+) -> bool:
+    """Cross-harness in-CodeSpace lockfile fence (git-ref-resource-leases Ph4).
+
+    Reads the ``~/.agent-lease`` marker inside the CodeSpace and decides whether
+    to proceed. A **fresh** marker from a **foreign** harness (a different lease
+    store origin) is a genuine cross-harness collision the same-harness-scoped
+    ref-CAS store cannot see, so it **refuses** the connect (unless ``force``);
+    an absent / stale / same-harness marker proceeds, after which we drop our
+    own marker (best-effort). All the harness/marker logic lives in ``fence.py``
+    (pure) + ``coordination.harness_identity`` (the identity shell-out); this is
+    the thin SSH-executing wrapper.
+
+    Returns ``True`` to **proceed**, ``False`` to **refuse**. Degrade-safe: no
+    resolvable harness identity, an unreadable marker, or any exec failure all
+    **proceed** -- the fence only *adds* a cross-harness signal, it never becomes
+    a new hard dependency. Disable entirely with
+    ``AGENT_CODESPACES_DISABLE_FENCE``.
+    """
+    if os.environ.get("AGENT_CODESPACES_DISABLE_FENCE"):
+        return True
+
+    from . import coordination, fence
+
+    try:
+        local_harness = coordination.harness_identity()
+    except Exception as exc:
+        log.debug("Cross-harness fence identity on %s unresolved: %s", name, exc)
+        local_harness = None
+    if not local_harness:
+        # No identity -> we cannot tell foreign from own; fence off (proceed).
+        return True
+
+    try:
+        read = await manager.exec_command(
+            name, fence.read_marker_command(), timeout=30.0,
+        )
+        text = read.stdout if read.exit_code == 0 else ""
+    except Exception as exc:
+        log.warning(
+            "Cross-harness fence read on %s failed: %s -- proceeding", name, exc,
+        )
+        return True
+
+    decision = fence.evaluate(local_harness, fence.FenceMarker.parse(text))
+    if decision.refuse:
+        if not force:
+            print(
+                f"[BUSY] CodeSpace '{name}' is held by a DIFFERENT harness "
+                f"(fence marker holder '{decision.foreign_holder or '?'}', "
+                f"harness '{decision.foreign_harness}').\n"
+                f"       Our repo-ref lease store cannot arbitrate across "
+                f"harnesses, so the in-CodeSpace lockfile fences it. Options:\n"
+                f"       - let the other harness finish, or use a different "
+                f"CodeSpace; or\n"
+                f"       - take over with --force-claim (its in-flight work may "
+                f"be disrupted).",
+                file=sys.stderr,
+            )
+            return False
+        log.warning(
+            "Forced connect on %s over a fresh foreign-harness marker "
+            "(holder '%s', harness '%s')",
+            name, decision.foreign_holder or "?", decision.foreign_harness,
+        )
+
+    our = fence.FenceMarker(
+        harness=local_harness, holder=holder_ref or "", written_at=time.time(),
+    )
+    try:
+        await manager.exec_command(
+            name, fence.write_marker_command(our), timeout=30.0,
+        )
+    except Exception as exc:
+        log.warning("Cross-harness fence write on %s failed: %s", name, exc)
+    return True
 
 
 async def _provision_relay_helpers(manager, name: str) -> None:
