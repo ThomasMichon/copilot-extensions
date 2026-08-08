@@ -295,7 +295,10 @@ def test_cli_resolve_subpath(tmp_path, capsys):
     assert vr.main(["--root", str(tmp_path), "resolve", "--subpath", subpath]) == 0
     out = capsys.readouterr().out.strip()
     assert out.endswith(subpath.replace("/", os.sep))
-    assert vr.CURRENT_LINK in out
+    # resolve now returns the concrete slot path (versions/<current>/...),
+    # not a `current` link path.
+    assert vr.VERSIONS_DIR in out
+    assert "1.0.0" in out
 
 
 def test_cli_gc_json(tmp_path, capsys):
@@ -349,23 +352,28 @@ def test_link_name_venv(tmp_path):
     """agent-bridge uses `venv` as the link so its task/binstubs are unchanged."""
     _install(tmp_path, "1.0.0")
     vr.activate(tmp_path, "1.0.0", link_name="venv")
+    # The active version is published by the link-name-agnostic `current-version`
+    # marker, so current_version returns it regardless of the link_name passed.
     assert vr.current_version(tmp_path, "venv") == "1.0.0"
-    # default 'current' link is untouched
-    assert vr.current_version(tmp_path) is None
+    assert vr.current_version(tmp_path) == "1.0.0"
+    # Default mode also (best-effort) lays the historical `venv` link at the slot.
     link = vr.current_link(tmp_path, "venv")
     assert link.name == "venv"
     assert (link / "marker.txt").read_text() == "1.0.0"
 
 
-def test_activate_refuses_real_dir_without_flag(tmp_path):
-    """A legacy real venv dir at the link path is not clobbered by default."""
+def test_activate_leaves_real_dir_without_flag(tmp_path):
+    """A legacy real venv dir at the link path is not clobbered by default: the
+    marker is written (the source of truth) and the real dir is left as-is
+    (best-effort -- a migrated installer passes --no-link; an un-migrated one uses
+    a junction, never a real dir)."""
     _install(tmp_path, "1.0.0")
     legacy = tmp_path / "venv"
     legacy.mkdir()
     (legacy / "python.marker").write_text("legacy", encoding="utf-8")
-    with pytest.raises(FileExistsError):
-        vr.activate(tmp_path, "1.0.0", link_name="venv")
-    # legacy dir untouched
+    vr.activate(tmp_path, "1.0.0", link_name="venv")
+    # marker published; legacy dir untouched
+    assert vr.current_version(tmp_path, "venv") == "1.0.0"
     assert (legacy / "python.marker").read_text() == "legacy"
 
 
