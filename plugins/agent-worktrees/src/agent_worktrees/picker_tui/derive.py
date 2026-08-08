@@ -18,34 +18,54 @@ import datetime as _dt
 NOW = _dt.datetime.now()
 
 # worktree-status-core live pulse: how long an agent-intent pulse stays "fresh"
-# (rendered bright-dim) before it greys to "stale", and when it expires entirely
-# (dropped from the display). A pulse from an idle session is never "fresh" --
-# the turn has ended -- so it renders "stale" until it expires.
+# (rendered bright-dim) before it greys to "stale". copilot-extensions#228: the
+# line no longer expires on AGE -- a worktree where any work happened keeps
+# showing its last reported intent (greyed) so the picker always answers "what
+# was this doing?". The graded ``live_rest`` (busy/idle/awaiting-operator) and
+# this age boundary only pick the COLOUR/glyph, not aging-out; the line is still
+# absent only when there is no intent TEXT to show (or, lacking any graded rest,
+# an unparseable/missing timestamp leaves the freshness unknown).
 _PULSE_FRESH_SECS = 90
-_PULSE_STALE_SECS = 900
 
 
 def _pulse_level(w):
-    """Classify the live agent-intent pulse: 'fresh', 'stale', or None.
+    """Classify the live agent-intent pulse: 'awaiting', 'fresh', 'stale', None.
 
-    'fresh'  -- a recent intent from an active turn (bright-dim live line).
-    'stale'  -- the intent has aged, or its session went idle (greyed line).
-    None     -- no pulse, unparseable timestamp, or expired (no line at all).
+    'awaiting' -- the session is parked on a human (``live_rest`` ==
+                  ``awaiting-operator``): the standout "this needs me" cue.
+    'fresh'    -- a recent intent from an active turn (bright-dim live line).
+    'stale'    -- the intent has aged, or its session is idle/at-rest (greyed).
+    None       -- no intent text to show, OR (absent any graded ``live_rest``)
+                  an unparseable/missing timestamp leaves freshness unknown.
 
-    The pulse is a *derived* signal (assistant.intent); it is never conflated
-    with the agent-asserted ``follow_up`` disposition.
+    copilot-extensions#228: the line does NOT expire on AGE -- a worktree that
+    ever reported an intent keeps showing its last one (greyed) whenever the
+    freshness is knowable, so the graded ``live_rest`` and the age boundary only
+    pick fresh vs. stale, never None-on-age. The crisp ``live_rest``
+    (busy/idle/awaiting-operator) is preferred for the colour and, when present,
+    always yields a level; the intent's own age + idle flag are the coarse
+    fallback when no graded rest is present (and only there can a bad timestamp
+    still drop the line).
+
+    The pulse is a *derived* signal (assistant.intent + the rest register); it is
+    never conflated with the agent-asserted ``follow_up`` disposition.
     """
     intent = (w.get("live_intent") or "").strip()
     if not intent:
         return None
+    rest = (w.get("live_rest") or "").strip()
+    if rest == "awaiting-operator":
+        return "awaiting"
+    if rest == "busy":
+        return "fresh"
+    if rest == "idle":
+        return "stale"
     dt = _parse_pulse_ts(w.get("live_intent_at"))
     if dt is None:
         return None
     age = (NOW - dt).total_seconds()
     if age < 0:
         age = 0
-    if age > _PULSE_STALE_SECS:
-        return None
     if w.get("live_intent_idle") or age > _PULSE_FRESH_SECS:
         return "stale"
     return "fresh"
@@ -324,6 +344,10 @@ def norm(w, machine, env):
     follow_up = bool(w.get("follow_up"))
     # #93: a bare (un-muxed) bound Copilot -- invisible to the mux fleet view.
     bare_orphan = bool(w.get("session_bare_orphan"))
+    # copilot-extensions#228: the graded rest state's standout value -- the
+    # session is parked waiting on a human ("this needs me"). Surfaces both a
+    # scannable title marker (below) and an amber sub-line glyph (engine).
+    awaiting_operator = (w.get("live_rest") or "").strip() == "awaiting-operator"
     # citadel paired -harness/-knowledge lifecycle (#957): this worktree is one
     # half of a carved pair. A scannable link glyph rides on the title so the
     # operator sees the two rows belong together, and the pair fields ride on the
@@ -344,6 +368,11 @@ def norm(w, machine, env):
     # pair id, so an unpaired worktree's title is untouched.
     if is_paired:
         disp_title = f"⚭ {disp_title}"
+    # copilot-extensions#228: the "needs me" marker rides just inside the orphan
+    # marker -- a live session parked on the operator is an act-now signal, more
+    # urgent than a paired/follow-up cue but not the structural orphan hazard.
+    if awaiting_operator:
+        disp_title = f"⏳ {disp_title}"
     # #93: the orphan marker rides outermost (leftmost) -- most scannable, and
     # a bound-but-un-muxed Copilot is the more urgent signal than a follow-up.
     if bare_orphan:
@@ -357,10 +386,14 @@ def norm(w, machine, env):
         "follow_up": follow_up,
         "summary": summary,
         # worktree-status-core live pulse: the derived agent-intent line + its
-        # freshness ('fresh'/'stale'/None). Rendered dim + expiring by the
-        # engine; never the durable disposition.
+        # freshness ('awaiting'/'fresh'/'stale'/None). Rendered dim by the
+        # engine; never the durable disposition. copilot-extensions#228: the
+        # line no longer expires -- ``live_rest`` grades its colour (amber
+        # awaiting-operator, dim busy, grey idle) but never drops it.
         "live_intent": (w.get("live_intent") or "").strip(),
         "live_pulse": _pulse_level(w),
+        "live_rest": (w.get("live_rest") or "").strip(),
+        "awaiting_operator": awaiting_operator,
         "kind": kind,
         "tracking": w.get("status", ""),
         "state": _state(w),
