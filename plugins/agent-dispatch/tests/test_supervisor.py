@@ -581,6 +581,31 @@ def test_recover_gone_releases_stale_reservation_and_respawns(q, client):
     assert q.latest_reservation(t.id).attempt == 2
 
 
+def test_recover_gone_worktree_started_requeues_then_reembodies(q, client):
+    """A worktree embody that died *while holding the task started* is requeued
+    (yield on the gone owner's behalf, preserving goal + progress_log) AND its
+    reservation released -- so re-embody is prompt, NOT lease-bound. Without the
+    on-behalf yield the confirmed-gone owner's task would linger STARTED until the
+    coordinator's lease-expiry GC requeued it (the liveness-not-lease gap this
+    closes, matching the fleet/local body paths)."""
+    t = q.create("work")
+    spawn = _ok_spawn()
+    sup = Supervisor(
+        client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5,
+        verdict_fn=lambda wt, mc, sid: "gone", nudge=False,
+    )
+    assert sup.poll_once() == [t.id]  # spawn #1 -> SPAWNED (worktree wt-1)
+    q.claim_one("m/wt-1", task_id=t.id, machine="m", worktree="wt-1")
+    q.start(t.id, "m/wt-1")
+    assert q.get(t.id).status == Status.STARTED  # leased, NOT requeued by GC
+
+    # recover_gone: GONE -> yield (requeue) + release reservation -> re-embody,
+    # all in one cycle, without waiting out the lease.
+    assert sup.poll_once() == [t.id]
+    assert spawn.calls == [t.id, t.id]
+    assert q.latest_reservation(t.id).attempt == 2
+
+
 @pytest.mark.parametrize("verdict", ["live", "unknown"])
 def test_recover_leaves_live_or_unknown(q, client, verdict):
     """Recovery never fires on a live or can't-tell verdict (the safety guarantee

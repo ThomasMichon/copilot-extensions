@@ -352,8 +352,75 @@ The coordinator only owns the queue; anything that *creates* tasks is a
   `origin_ref=pr/<n>`, lane from the payload's repo remote) and
   `POST /webhook/telemetry` (a **firing** alert -> remediation task,
   `source=telemetry`). Deterministic `dedup_key`s make redelivery safe.
+- **`agent-dispatch evaluate --spec <cfg>`** -- the *evaluator*: pipe one task
+  lifecycle event (stdin or `--event-file`) through a declarative rule set that
+  decides what happens next (emit a follow-up task, or nothing). Hook-like; the
+  judgment half of emitters-and-evaluators. `--dry-run` prints decisions only.
 
 See the plugin README (**Producers**) for the spec/config shapes.
+
+### Recipes -- kick a built-in loop archetype ad-hoc
+
+A **recipe** is a packaged *shape* of long-running work -- **reviewer** (drive a
+PR to merged-or-abandoned), **conflict-resolution** (unstick a stalled change), or
+**goal-driven** (drive an arbitrary goal through PRs). A recipe is directly
+kickable: no standing service, emitter, or evaluator is required -- just a
+coordinator + a worker body.
+
+```bash
+agent-dispatch recipes list                                   # available recipes + params
+agent-dispatch recipes render reviewer --param repo=o/n --param pr=42   # inspect the fields
+agent-dispatch recipes kick reviewer --param repo=o/n --param pr=42 --repo o/n --spawn
+```
+
+`kick` reuses `create` (lane resolution, dedup, `--spawn`/`--spawn-backend`;
+default `embody` so the worker gets a full checkout). A reserved-work `dedup_key`
+is derived from the recipe + params, so re-kicking the same target collides rather
+than forking. Use `--dry-run` to preview the create call. See the plugin README
+(**Recipes**) and `visions/plugins/agent-dispatch` (§*The recipe*).
+
+**Driving the loop** -- `agent-dispatch recipes drive <name> --signal <s>` maps a
+recipe + what-just-happened to the next action: **work** (start / a `suspend_on`
+event), **suspend** (`work-done`/`idle` -> hibernate the wait), or **resolve**
+(`merged`/`abandoned` -> drive-to-resolution). `--execute` runs the suspend leg
+(`--resume <wt> -- <wait-cmd>`, spawns the detached waiter) and the resolve leg
+(`--base <b>`, runs the unwind); **work** stays the agent's to perform. This is
+the seam that composes recipes + `run` + `resolve` into an executable loop.
+
+### Resolve -- drive your worktree to a clean state when a loop ends
+
+When a loop finishes, drive the worktree to its resolved final state -- landing
+verifies clean; abandoning **unwinds to base** and reconciles the source. Run it
+on your **own** worktree:
+
+```bash
+agent-dispatch resolve --outcome landed                                  # verify clean
+agent-dispatch resolve --outcome abandoned --base main --source o/n#42   # preview the unwind
+agent-dispatch resolve --outcome abandoned --base main --execute         # perform it (destructive)
+```
+
+Planning is pure and prints by default; `--execute` performs the (destructive)
+unwind and a failed reset stops rather than pressing on. `agent-dispatch abandon
+--resolve` surfaces the same plan alongside the abandon. See the plugin README
+(**Drive the worktree to resolution**) and `visions/plugins/agent-dispatch`
+(§*drive-the-worktree-to-resolution*).
+
+### Hibernate the wait -- hand a blocking wait to the layer
+
+When a loop can only wait on a slow external condition, don't sit on a live
+session. Hand the wait to `run`: it executes the blocking command and, when it
+resolves, resumes the worktree-affinitied worker via an agent-bridge nudge.
+
+```bash
+agent-dispatch run --resume <machine/worktree> --task <id> -- agent-worktrees pr-watch 42
+agent-dispatch run --detach --resume <machine/worktree> -- agent-worktrees pr-watch 42
+```
+
+Everything after `--` is the wait command. `--detach` runs it as a fully detached,
+cheap OS-level waiter (no agent, no tokens) so the expensive worker session can be
+torn down while it waits, then re-woken with its context intact. See the plugin
+README (**Hibernate the wait**) and `visions/plugins/agent-dispatch`
+(§*hibernate-the-wait*).
 
 ### 3. Claim, work, finish
 

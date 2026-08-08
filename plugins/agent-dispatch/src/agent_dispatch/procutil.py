@@ -30,3 +30,19 @@ def no_window_kwargs() -> dict:
     if os.name == "nt":
         return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)}
     return {}
+
+
+def detached_kwargs() -> dict:
+    """``Popen`` kwargs that fully **detach** a child so it outlives its parent.
+
+    Used to hand a blocking wait to a cheap OS-level waiter process that survives
+    the worker being torn down (the *hibernate-the-wait* substrate). On Windows,
+    ``DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`` cuts the child from the parent
+    console and process group; on POSIX, ``start_new_session=True`` puts it in its
+    own session so a parent exit / signal never reaps it.
+    """
+    if os.name == "nt":
+        detached = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+        new_group = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+        return {"creationflags": detached | new_group}
+    return {"start_new_session": True}
