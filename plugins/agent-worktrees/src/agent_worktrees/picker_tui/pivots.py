@@ -63,6 +63,12 @@ class PivotAction:
     #: then carries the verb's argument template instead of a command. See
     #: ``engine.PickerScreen._internal_pivot_action`` for the handler table.
     internal: str | None = None
+    #: D3 -- optional visibility gate (same shape as a ``WorktreeAction.when``):
+    #: the verb only appears for a row whose entry matches every field (value or
+    #: list of allowed values), e.g. ``{"disposition": "in-use"}`` shows *Release*
+    #: only on an in-use CodeSpace. ``None`` => always shown. Matched by
+    #: :func:`entry_matches` at sub-menu build time.
+    when: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -284,6 +290,9 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
         else:
             run = _as_argv(a.get("run"), where=f"`actions[{i}].run`")
             internal = None
+        a_when = a.get("when")
+        if a_when is not None and not isinstance(a_when, Mapping):
+            raise ManifestError(f"`actions[{i}].when` must be an object when present")
         actions.append(
             PivotAction(
                 key=key,
@@ -292,6 +301,7 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
                 confirm=bool(a.get("confirm", False)),
                 description=str(a.get("description", "")),
                 internal=internal,
+                when=dict(a_when) if isinstance(a_when, Mapping) else None,
             )
         )
 
@@ -482,13 +492,12 @@ def discover_worktree_actions(
     return out
 
 
-def worktree_action_matches(
-    action: "WorktreeAction", rec: Mapping[str, object]
-) -> bool:
-    """True when ``action`` should appear for worktree record ``rec``: its
-    ``when`` is empty, or every ``when`` field matches the record (the record's
-    value, stringified, is among the allowed value(s))."""
-    when = action.when
+def entry_matches(when: Mapping[str, object] | None, rec: Mapping[str, object]) -> bool:
+    """True when ``rec`` satisfies a ``when`` gate: empty/absent gate always
+    matches, else every ``when`` field's value (or list of values) must include
+    the record's stringified value (case-insensitive). Shared by the
+    contributed-``WorktreeAction`` gate and the D3 registered-``PivotAction``
+    gate so both speak the identical ``when`` language."""
     if not when:
         return True
     for field, allowed in when.items():
@@ -497,6 +506,16 @@ def worktree_action_matches(
         if str(rec.get(field)).lower() not in allowed_str:
             return False
     return True
+
+
+def worktree_action_matches(
+    action: "WorktreeAction", rec: Mapping[str, object]
+) -> bool:
+    """True when ``action`` should appear for worktree record ``rec``: its
+    ``when`` is empty, or every ``when`` field matches the record (the record's
+    value, stringified, is among the allowed value(s)). Thin wrapper over
+    :func:`entry_matches`."""
+    return entry_matches(action.when, rec)
 
 
 def parse_config_sections(
@@ -728,6 +747,7 @@ __all__ = [
     "discover_pivots",
     "discover_worktree_actions",
     "ensure_pivots",
+    "entry_matches",
     "format_template",
     "installed_plugins_dir",
     "order_pivots",

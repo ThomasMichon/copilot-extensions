@@ -4521,7 +4521,18 @@ class PickerScreen(Widget):
             if reg is not None and not reg.actions:
                 self.debug = f"{reg.label}: no actions declared"
             return
-        actions = list(reg.actions)
+        # D3: a pivot action may carry a `when` gate, so a verb only appears for
+        # a row whose entry matches (e.g. Release only for an in-use CodeSpace).
+        # Reuse the same matcher the contributed worktree actions use.
+        from . import pivots as _pivots
+
+        actions = [
+            a for a in reg.actions
+            if _pivots.entry_matches(getattr(a, "when", None), rec)
+        ]
+        if not actions:
+            self.debug = f"{reg.label}: no actions for this row"
+            return
 
         def _after(choice):
             if choice is not None:
