@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import patch
 
 
@@ -143,6 +144,64 @@ class TestFinalize:
             rc = main(["finalize", "cs-1", "--delete", "--force"])
         assert rc == 1  # sync failed, but delete still forced
         delete.assert_called_once_with("cs-1", force=True)
+
+
+class TestFinalizeProgress:
+    """The D4 progress-streaming mode (``finalize --picker-progress``) backing
+    the Worktree Picker CodeSpaces **Recycle** verb: stdout is the NDJSON
+    progress envelope, and the recover-first safety contract is preserved."""
+
+    def _run(self, argv: list[str]):
+        """Run ``main(argv)`` capturing the raw ``sys.__stdout__`` envelope
+        (the progress path writes to the real stdout fd, which capsys does not
+        intercept) and return ``(rc, frames)``."""
+        import io
+        import sys
+
+        buf = io.StringIO()
+        with patch.object(sys, "__stdout__", buf):
+            rc = main(argv)
+        frames = [json.loads(ln) for ln in buf.getvalue().splitlines() if ln.strip()]
+        return rc, frames
+
+    def test_recycle_streams_envelope_and_deletes(self):
+        with patch("agent_codespaces.__main__.sync_codespace_sessions",
+                   return_value={"ok": True, "session_count": 2, "detail": "ok"}), \
+             patch("agent_codespaces.__main__.delete_codespace") as delete, \
+             patch("agent_codespaces.__main__._release_lease_quietly"), \
+             patch("agent_codespaces.__main__._clear_status_quietly"):
+            rc, frames = self._run(["finalize", "cs-1", "--delete",
+                                    "--picker-progress"])
+        assert rc == 0
+        delete.assert_called_once_with("cs-1", force=False)
+        # begins with progress, ends with a single terminal `done`.
+        assert frames[0]["type"] == "progress"
+        assert frames[-1] == {"type": "done",
+                              "message": "Recycled cs-1 (recovered + deleted)"}
+        assert not any(f["type"] == "error" for f in frames)
+
+    def test_recycle_aborts_on_failed_recovery_without_force(self):
+        with patch("agent_codespaces.__main__.sync_codespace_sessions",
+                   return_value={"ok": False, "detail": "ssh timeout"}), \
+             patch("agent_codespaces.__main__.delete_codespace") as delete:
+            rc, frames = self._run(["finalize", "cs-1", "--delete",
+                                    "--picker-progress"])
+        assert rc == 1
+        delete.assert_not_called()  # recycle-rescues-first: never destroy unrecovered
+        assert frames[-1]["type"] == "error"
+        assert "Not deleting" in frames[-1]["message"]
+
+    def test_recycle_force_deletes_despite_failed_recovery(self):
+        with patch("agent_codespaces.__main__.sync_codespace_sessions",
+                   return_value={"ok": False, "detail": "unbootable"}), \
+             patch("agent_codespaces.__main__.delete_codespace") as delete, \
+             patch("agent_codespaces.__main__._release_lease_quietly"), \
+             patch("agent_codespaces.__main__._clear_status_quietly"):
+            rc, frames = self._run(["finalize", "cs-1", "--delete", "--force",
+                                    "--picker-progress"])
+        assert rc == 1  # recovery failed, but forced retirement still deletes
+        delete.assert_called_once_with("cs-1", force=True)
+        assert frames[-1]["type"] == "done"
 
 
 # --- Top-level --project (command-surface <repo> <slug> surface) ---

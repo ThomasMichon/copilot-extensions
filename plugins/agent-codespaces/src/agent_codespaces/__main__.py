@@ -254,6 +254,13 @@ def main(argv: list[str] | None = None) -> int:
         "--timeout", type=float, default=300.0,
         help="Seconds for the session pull (default: 300)",
     )
+    finalize_parser.add_argument(
+        "--picker-progress", dest="picker_progress", action="store_true",
+        help="Emit the registered-pivot NDJSON progress envelope "
+             "({\"type\":\"progress\",\"pct\",\"msg\"} lines -> done/error) so the "
+             "Worktree Picker's CodeSpaces Recycle verb can stream live progress "
+             "into its modal (D4).",
+    )
 
     # --- stop ---
     stop_parser = sub.add_parser(
@@ -615,6 +622,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "delete":
             return _cmd_delete(args)
         if args.command == "finalize":
+            if getattr(args, "picker_progress", False):
+                return _cmd_finalize_progress(args)
             return _cmd_finalize(args)
         if args.command == "stop":
             return _cmd_stop(args)
@@ -2531,6 +2540,86 @@ def _cmd_finalize(args: argparse.Namespace) -> int:
     print(f"[WARN] Not marking {args.name} 'recovered' (recovery failed; the box "
           f"is preserved, so retry `finalize {args.name}` later)", file=sys.stderr)
     return 1
+
+
+def _cmd_finalize_progress(args: argparse.Namespace) -> int:
+    """``finalize`` in **progress-streaming** mode (D4) -- the same recover-first
+    close-out as :func:`_cmd_finalize`, but its stdout is the registered-pivot
+    NDJSON progress envelope so the Worktree Picker's CodeSpaces **Recycle** verb
+    can stream live progress into its modal.
+
+    Emits ``{"type":"progress","pct":..,"msg":..}`` lines (one per flushed line,
+    mirroring ``pool --stream``) then a terminal ``{"type":"done","message":..}``
+    or ``{"type":"error","message":..}``. Preserves the safety contract:
+    recovery runs first (recycle-rescues-first); with ``--delete`` a failed
+    recovery aborts unless ``--force`` (so a stale but unrecovered box is never
+    silently destroyed). No stdout ``print`` here -- only the envelope -- so the
+    modal reader sees a clean stream.
+    """
+    from .status import STATE_RECOVERED, set_status
+
+    out = sys.__stdout__
+
+    def emit(obj: dict) -> None:
+        try:
+            out.write(json.dumps(obj, default=str) + "\n")
+            out.flush()
+        except (BrokenPipeError, OSError):
+            pass
+
+    name = args.name
+    try:
+        emit({"type": "progress", "pct": 5.0,
+              "msg": f"Recovering Copilot sessions from {name}\u2026"})
+        res = sync_codespace_sessions(
+            name, timeout=args.timeout, verbose=args.verbose,
+            skip_if_shutdown=not args.delete,
+        )
+        if res.get("ok"):
+            if res.get("skipped"):
+                emit({"type": "progress", "pct": 45.0, "msg": res.get("detail", "")})
+            else:
+                emit({"type": "progress", "pct": 45.0,
+                      "msg": f"Recovered {res.get('session_count', 0)} session(s)"})
+        else:
+            if args.delete and not args.force:
+                emit({"type": "error",
+                      "message": f"Session recovery failed ({res.get('detail')}). "
+                                 "Not deleting -- diagnose first, or re-run with "
+                                 "--force to retire an unrecoverable box."})
+                return 1
+            emit({"type": "progress", "pct": 45.0,
+                  "msg": f"Recovery failed ({res.get('detail')}); continuing"})
+
+        if args.delete:
+            emit({"type": "progress", "pct": 70.0, "msg": f"Deleting {name}\u2026"})
+            delete_codespace(name, force=args.force)
+            _release_lease_quietly(name)
+            _clear_status_quietly(name)
+            emit({"type": "done",
+                  "message": f"Recycled {name} (recovered + deleted)"})
+            return 0 if res.get("ok") else 1
+
+        # Preserve path: stop (idempotent) then mark recovered.
+        emit({"type": "progress", "pct": 70.0,
+              "msg": f"Stopping {name} (preserving)\u2026"})
+        try:
+            stop_codespace(name)
+        except RuntimeError as exc:
+            emit({"type": "progress", "pct": 80.0,
+                  "msg": f"stop warning: {exc}"})
+        if res.get("ok"):
+            set_status(name, STATE_RECOVERED, reason="finalized")
+            _release_lease_quietly(name)
+            emit({"type": "done",
+                  "message": f"{name} finalized -- preserved & reusable"})
+            return 0
+        emit({"type": "error",
+              "message": f"Recovery failed; {name} preserved -- retry later"})
+        return 1
+    except Exception as exc:  # never crash the modal reader
+        emit({"type": "error", "message": str(exc)[:200]})
+        return 1
 
 
 def _cmd_stop(args: argparse.Namespace) -> int:
