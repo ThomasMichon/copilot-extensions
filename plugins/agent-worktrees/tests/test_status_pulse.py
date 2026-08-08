@@ -78,12 +78,16 @@ class TestPulseFreshness:
             "lambda-core", "win")
         assert n["live_pulse"] == "stale"
 
-    def test_expired_drops_the_line(self):
-        expired_iso = _iso(derive.NOW - _dt.timedelta(seconds=derive._PULSE_STALE_SECS + 60))
+    def test_never_expires_shows_last_intent(self):
+        # copilot-extensions#228: a very old intent no longer drops -- a worktree
+        # where work happened keeps showing its last reported intent (greyed as
+        # 'stale'), so the picker always answers "what was this doing?".
+        ancient_iso = _iso(derive.NOW - _dt.timedelta(days=3))
         n = derive.norm(
-            _raw(live_intent="ancient", live_intent_at=expired_iso),
+            _raw(live_intent="ancient", live_intent_at=ancient_iso),
             "lambda-core", "win")
-        assert n["live_pulse"] is None
+        assert n["live_pulse"] == "stale"
+        assert n["live_intent"] == "ancient"
 
     def test_no_pulse_when_absent(self):
         n = derive.norm(_raw(), "lambda-core", "win")
@@ -104,6 +108,67 @@ class TestPulseFreshness:
             "lambda-core", "win")
         assert n["follow_up"] is False
         assert not n["title"].startswith("\u271a")
+
+
+# ---------------------------------------------------------------------------
+# derive layer: the graded rest (live_rest) -> pulse mapping (#228 slice 3)
+# ---------------------------------------------------------------------------
+
+class TestPulseRestGrading:
+    def test_awaiting_operator_pulse(self):
+        # An old timestamp AND awaiting-operator: the rest wins -> 'awaiting'
+        # (the standout "needs me" level), never dropped on age.
+        old_iso = _iso(derive.NOW - _dt.timedelta(hours=6))
+        n = derive.norm(
+            _raw(live_intent="Waiting on you", live_intent_at=old_iso,
+                 live_rest="awaiting-operator"),
+            "lambda-core", "win")
+        assert n["live_pulse"] == "awaiting"
+        assert n["awaiting_operator"] is True
+        assert n["live_rest"] == "awaiting-operator"
+
+    def test_awaiting_operator_title_marker(self):
+        # placement=both: awaiting-operator also rides a scannable ⏳ title
+        # marker, kept just inside the outermost orphan ⚠.
+        n = derive.norm(
+            _raw(live_intent="x", live_rest="awaiting-operator", title="Needs me"),
+            "lambda-core", "win")
+        assert "\u23f3" in n["title"]
+        # Orphan stays outermost when both are present.
+        both = derive.norm(
+            _raw(live_intent="x", live_rest="awaiting-operator",
+                 session_bare_orphan=True, title="Wedged"),
+            "lambda-core", "win")
+        assert both["title"].startswith("\u26a0")
+        assert "\u23f3" in both["title"]
+
+    def test_no_awaiting_marker_when_not_parked(self):
+        n = derive.norm(_raw(live_intent="x", live_rest="busy"), "m", "e")
+        assert "\u23f3" not in n["title"]
+        assert n["awaiting_operator"] is False
+
+    def test_busy_rest_is_fresh(self):
+        # A stale-aged timestamp but a live 'busy' rest -> the crisp rest wins.
+        old_iso = _iso(derive.NOW - _dt.timedelta(seconds=derive._PULSE_FRESH_SECS + 60))
+        n = derive.norm(
+            _raw(live_intent="churning", live_intent_at=old_iso, live_rest="busy"),
+            "lambda-core", "win")
+        assert n["live_pulse"] == "fresh"
+
+    def test_idle_rest_is_stale(self):
+        now_iso = _iso(derive.NOW - _dt.timedelta(seconds=5))
+        n = derive.norm(
+            _raw(live_intent="done", live_intent_at=now_iso, live_rest="idle"),
+            "lambda-core", "win")
+        assert n["live_pulse"] == "stale"
+
+    def test_rest_only_without_intent_has_no_line(self):
+        # The coarse backbone can carry live_rest with NO intent text (extension
+        # not loaded); the sub-line is intent-driven, so there is nothing to show.
+        n = derive.norm(_raw(live_rest="idle"), "lambda-core", "win")
+        assert n["live_pulse"] is None
+        assert n["live_intent"] == ""
+        assert "\u23f3" not in n["title"]
 
 
 # ---------------------------------------------------------------------------
