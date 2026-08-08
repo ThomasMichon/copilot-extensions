@@ -41,7 +41,7 @@ import shutil
 import time
 from pathlib import Path
 
-from . import activity, git_ops, hooks, output, permissions, procs, sessions, tracking
+from . import activity, git_ops, hooks, obligations, output, permissions, procs, sessions, tracking
 from .config import Config
 
 
@@ -1032,11 +1032,78 @@ def _pr_finalize_precondition(
     )
 
 
+def _assert_obligations_settled(
+    record: tracking.WorktreeRecord | None,
+    worktree_id: str,
+    *,
+    abandon: bool,
+) -> bool:
+    """Obligation gate (resource-obligation-settlement Phase 2).
+
+    A worktree answers for the outbound resources it still owns before it may
+    finalize. Reads the **local ledger** (`record.resources`) for **unsettled**
+    (``active``) claims -- a cheap, local, no-traversal balance check (a settled
+    child has already flipped its claim to ``at-rest``/``released``). Behavior by
+    :func:`obligations.gate_mode`:
+
+    * ``off``   -- skip entirely.
+    * ``warn``  -- surface unsettled obligations but **proceed** (the default
+      while the per-kind settlement hooks + reclaim sweep bed in).
+    * ``block`` -- **refuse** (return False) while any obligation is unsettled,
+      unless ``abandon``.
+
+    ``abandon`` overrides a block: it proceeds and re-homes the unsettled
+    obligations (the downstream ``release_all_resources`` marks the claims
+    released and surfaces them for cleanup/adoption). Returns True to proceed,
+    False to block the finalize. Degrade-safe: no record / no resources -> proceed.
+    """
+    if record is None:
+        return True
+    mode = obligations.gate_mode()
+    if mode == obligations.OFF:
+        return True
+    unsettled = [c for c in record.resources if c.is_unsettled]
+    if not unsettled:
+        return True
+
+    def _describe() -> None:
+        for c in unsettled:
+            label = f"  · {c.kind}: {c.ref}"
+            if c.note:
+                label += f" ({c.note})"
+            print(label)
+
+    if mode == obligations.BLOCK and not abandon:
+        output.err(
+            f"Worktree {worktree_id} still owns {len(unsettled)} unsettled "
+            f"resource obligation(s) -- finalize is blocked "
+            f"(AGENT_WORKTREES_OBLIGATION_GATE=block):"
+        )
+        _describe()
+        output.err(
+            "Close each resource out (a cross-repo worktree: finalize it; a "
+            "CodeSpace/container: merge or move its work off-box; a bridge: drive "
+            "it to final), then retry -- or pass --abandon to re-home them."
+        )
+        return False
+
+    verb = "Abandoning" if abandon else "Warning: finalizing with"
+    output.warn(
+        f"{verb} {len(unsettled)} unsettled resource obligation(s) owned by "
+        f"{worktree_id}"
+        + (" -- re-homed for cleanup/adoption:" if abandon else
+           " (gate=warn) -- settle or --abandon them; review/clean:")
+    )
+    _describe()
+    return True
+
+
 def validate_and_finalize(
     worktree_id: str,
     config: Config,
     *,
     dry_run: bool = False,
+    abandon: bool = False,
 ) -> bool:
     """Validate that worktree content is on upstream, then clean up.
 
@@ -1048,6 +1115,10 @@ def validate_and_finalize(
         worktree_id: The worktree identifier.
         config: Loaded project configuration.
         dry_run: If True, preview without side effects.
+        abandon: If True, proceed past the obligation gate even when the worktree
+            still owns **unsettled** outbound resources, re-homing them (marking
+            the claims released + surfacing them) rather than being blocked. The
+            escape hatch for the resource-obligation-settlement finalize gate.
 
     Returns:
         True on success, False if content is not yet on upstream.
@@ -1079,6 +1150,14 @@ def validate_and_finalize(
             worktree_id, config, worktree_path, branch, upstream,
         )
         return True
+
+    # Obligation gate (resource-obligation-settlement Phase 2). A worktree
+    # answers for the outbound resources it still owns before it may finalize.
+    # Runs BEFORE any destructive step so a blocking gate refuses cleanly. Read
+    # is cheap + local (the ledger), no traversal. Warn-first by default; only
+    # AGENT_WORKTREES_OBLIGATION_GATE=block refuses, and --abandon overrides.
+    if not _assert_obligations_settled(record, worktree_id, abandon=abandon):
+        return False
 
     # Fetch to get current upstream state
     print(f"Fetching from {repo.remote}...")
@@ -1285,13 +1364,16 @@ def finalize(
     config: Config,
     *,
     dry_run: bool = False,
+    abandon: bool = False,
 ) -> bool:
     """Legacy wrapper -- runs validate_and_finalize only.
 
     This no longer pushes changes. Use push_changes() + validate_and_finalize()
     for the full two-phase flow.
     """
-    return validate_and_finalize(worktree_id, config, dry_run=dry_run)
+    return validate_and_finalize(
+        worktree_id, config, dry_run=dry_run, abandon=abandon,
+    )
 
 
 def _dry_run_push_preview(

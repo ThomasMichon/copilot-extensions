@@ -3694,6 +3694,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         worktree_id = _resolve_worktree_id(worktree_id)
         success = fin.validate_and_finalize(
             worktree_id, config, dry_run=args.dry_run,
+            abandon=getattr(args, "abandon", False),
         )
 
         if use_json:
@@ -12062,6 +12063,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("worktree_id", nargs="?", default=None)
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--abandon", action="store_true",
+                   help="Finalize past the obligation gate even when the worktree "
+                        "still owns unsettled outbound resources, re-homing them "
+                        "for cleanup/adoption (resource-obligation-settlement).")
     p.add_argument("--json", action="store_true",
                    help="JSON output mode (stdout is JSON only)")
     p.add_argument("--config", default=None)
