@@ -4438,19 +4438,29 @@ def _find_record_for_path(path: str) -> tracking.WorktreeRecord | None:
     return None
 
 
-def _detect_upstream_branch(
-    path: str, remote: str, config_default: str | None,
+def _resolve_remote_default_branch(
+    path: str,
+    remote: str,
+    *,
+    config_default: str | None = None,
+    allow_remote: bool = False,
 ) -> str | None:
-    """Detect the repo's upstream default branch (``main``/``master``/...).
+    """Resolve a repo's default branch from the REMOTE's configuration, never a
+    (possibly stale) local branch. Returns ``None`` if nothing resolves.
 
-    The status segment runs in arbitrary repos, so it cannot trust the
-    ambient project config's default branch (e.g. a ``master`` project
-    binstub polling a ``main`` repo).  Resolution order:
+    Order:
+      1. ``config_default`` if ``<remote>/<config_default>`` still exists (honor
+         a valid explicit hint).
+      2. The local ``<remote>/HEAD`` symbolic ref -- the remote's own default
+         when a clone / ``git remote set-head`` recorded it (fast, offline).
+      3. (``allow_remote`` only) ``git ls-remote --symref <remote> HEAD`` --
+         asks the remote directly, so it works even when the local
+         ``<remote>/HEAD`` was never set. Authoritative source of truth.
+      4. First of ``main`` / ``master`` present as a *remote-tracking* ref
+         (``<remote>/<cand>``) -- main-first, never a local head.
 
-    1. The config default, if ``<remote>/<default>`` actually exists.
-    2. ``<remote>/HEAD`` symbolic ref (the remote's own default).
-    3. First of ``main`` / ``master`` that exists as a remote branch.
-    4. The config default as a last-resort hint (may be stale).
+    Network is used only when ``allow_remote=True`` (step 3), so hot/pollable
+    callers stay cheap and offline by leaving it ``False``. See dotfiles#1046.
     """
     def _has(ref: str) -> bool:
         r = git_ops.git("rev-parse", "--verify", "--quiet", ref,
@@ -4465,11 +4475,43 @@ def _detect_upstream_branch(
     if head.returncode == 0 and head.stdout.strip():
         return head.stdout.strip().rsplit("/", 1)[-1]
 
+    if allow_remote:
+        try:
+            ls = git_ops.git("ls-remote", "--symref", remote, "HEAD",
+                             cwd=path, check=False, timeout=10)
+        except Exception:
+            ls = None
+        if ls is not None and ls.returncode == 0:
+            for line in ls.stdout.splitlines():
+                # Format: "ref: refs/heads/<branch>\tHEAD"
+                line = line.strip()
+                if line.startswith("ref:") and "HEAD" in line:
+                    ref = line[len("ref:"):].split("\t", 1)[0].strip()
+                    if ref.startswith("refs/heads/"):
+                        return ref.rsplit("/", 1)[-1]
+
     for cand in ("main", "master"):
         if _has(f"{remote}/{cand}"):
             return cand
 
-    return config_default
+    return None
+
+
+def _detect_upstream_branch(
+    path: str, remote: str, config_default: str | None,
+) -> str | None:
+    """Detect the repo's upstream default branch (``main``/``master``/...).
+
+    Thin, **offline** wrapper over ``_resolve_remote_default_branch`` for the
+    status segment, which runs in arbitrary repos and polls frequently -- so it
+    must not hit the network and cannot trust the ambient config's default
+    (e.g. a ``master`` project binstub polling a ``main`` repo). Falls back to
+    the config default as a last-resort hint (may be stale) when nothing else
+    resolves.
+    """
+    return _resolve_remote_default_branch(
+        path, remote, config_default=config_default, allow_remote=False,
+    ) or config_default
 
 
 def _resolve_segment_title(
@@ -8284,46 +8326,36 @@ def cmd_register(args: argparse.Namespace) -> int:
     machine = args.machine or cfg.detect_machine(repo_dir)
     plat = cfg.detect_platform()
 
-    # Auto-detect default branch if not specified
+    # Auto-detect default branch if not specified. Respect the REMOTE's
+    # configured default -- never a stale local `master` (dotfiles#1046):
+    # origin/HEAD, else `ls-remote --symref` (authoritative even when the local
+    # origin/HEAD was never set), else a main-first remote-ref probe.
     default_branch = getattr(args, "default_branch", None) or None
     if not default_branch:
-        try:
-            r = subprocess.run(
-                ["git", "-C", str(repo_dir), "symbolic-ref",
-                 "refs/remotes/origin/HEAD"],
-                capture_output=True, text=True, timeout=5,
-            )
+        default_branch = _resolve_remote_default_branch(
+            str(repo_dir), "origin", allow_remote=True)
+    if not default_branch:
+        # No remote signal (remote-less or offline repo) -- probe LOCAL heads,
+        # main-first. Never fall back to the current branch, which is often a
+        # feature branch in worktree workflows and would record the wrong default.
+        for candidate in ("main", "master"):
+            r = git_ops.git("rev-parse", "--verify", "--quiet",
+                            f"refs/heads/{candidate}",
+                            cwd=str(repo_dir), check=False)
             if r.returncode == 0:
-                default_branch = r.stdout.strip().split("/")[-1]
-        except Exception:
-            pass
+                default_branch = candidate
+                break
     if not default_branch:
-        # origin/HEAD unset -- do NOT fall back to the current branch, which is
-        # often a feature branch in worktree workflows and would silently record
-        # the wrong default. Probe for a conventional default branch instead.
-        for candidate in ("master", "main"):
-            try:
-                r = subprocess.run(
-                    ["git", "-C", str(repo_dir), "rev-parse", "--verify",
-                     f"refs/heads/{candidate}"],
-                    capture_output=True, text=True, timeout=5,
-                )
-                if r.returncode == 0:
-                    default_branch = candidate
-                    break
-            except Exception:
-                pass
-    if not default_branch:
-        # No conventional default found -- ask explicitly rather than guessing.
+        # Undeterminable -- ask explicitly rather than guessing.
         output.warn(
             "Could not detect default branch "
-            "(no origin/HEAD, no master or main branch)"
+            "(no remote default, no local main or master branch)"
         )
         branch_input = input("  Default branch name: ").strip()
         if branch_input:
             default_branch = branch_input
         else:
-            default_branch = "master"
+            default_branch = "main"
             output.warn(f"Assuming default branch: {default_branch}")
 
     print(f"  Repo:     {repo_dir}")
