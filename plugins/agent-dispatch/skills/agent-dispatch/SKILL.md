@@ -375,6 +375,24 @@ is derived from the recipe + params, so re-kicking the same target collides rath
 than forking. Use `--dry-run` to preview the create call. See the plugin README
 (**Recipes**) and `visions/plugins/agent-dispatch` (§*The recipe*).
 
+### Resolve -- drive your worktree to a clean state when a loop ends
+
+When a loop finishes, drive the worktree to its resolved final state -- landing
+verifies clean; abandoning **unwinds to base** and reconciles the source. Run it
+on your **own** worktree:
+
+```bash
+agent-dispatch resolve --outcome landed                                  # verify clean
+agent-dispatch resolve --outcome abandoned --base main --source o/n#42   # preview the unwind
+agent-dispatch resolve --outcome abandoned --base main --execute         # perform it (destructive)
+```
+
+Planning is pure and prints by default; `--execute` performs the (destructive)
+unwind and a failed reset stops rather than pressing on. `agent-dispatch abandon
+--resolve` surfaces the same plan alongside the abandon. See the plugin README
+(**Drive the worktree to resolution**) and `visions/plugins/agent-dispatch`
+(§*drive-the-worktree-to-resolution*).
+
 ### 3. Claim, work, finish
 
 ```bash

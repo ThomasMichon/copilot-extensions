@@ -327,6 +327,36 @@ what you did* -- so a worker carries them even on the ad-hoc, no-service path. S
 [`visions/plugins/agent-dispatch`](../../visions/plugins/agent-dispatch/README.md)
 (§Concepts/*The recipe*, §Features/*loop-recipes* + *recipes-run-ad-hoc*).
 
+## Drive the worktree to resolution (`agent-dispatch resolve`)
+
+Finishing a loop -- whether the work **landed** or the worker is **abandoning** it
+-- must leave the worktree in a *clean, resolved final state*, never an orphan
+branch half-done. `resolve` packages that mandate as an inspectable, executable
+plan a worker runs on **its own** worktree:
+
+```bash
+# preview the plan (default -- runs nothing):
+agent-dispatch resolve --outcome landed
+agent-dispatch resolve --outcome abandoned --base main --source owner/name#42
+
+# perform it (the abandon path's unwind is destructive):
+agent-dispatch resolve --outcome abandoned --base main --execute
+```
+
+- **landed** -> a single *verify-clean* check (the merge already resolved it).
+- **abandoned** -> *unwind to base* (`git reset --hard` to the tracked upstream, or
+  `origin/<base>`), *drop untracked* cruft, then a *reconcile-source* instruction
+  (notify the producing effort/issue/PR so nothing downstream believes the work
+  landed). The reconcile step is **advisory**: agent-dispatch coordinates it, it
+  doesn't post on your behalf.
+
+Planning is pure; execution only runs with `--execute`, and a failed destructive
+unwind stops rather than pressing on. `agent-dispatch abandon --resolve` surfaces
+this same plan alongside the abandon so the required unwind is an explicit
+expectation, not a silent one. See
+[`visions/plugins/agent-dispatch`](../../visions/plugins/agent-dispatch/README.md)
+(§Behaviors/*drive-the-worktree-to-resolution*).
+
 ## Development
 
 ```bash

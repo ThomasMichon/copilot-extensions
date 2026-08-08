@@ -959,11 +959,24 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
         dedup_note = f"duplicate of {duplicate_of}"
         reason = f"{reason}; {dedup_note}" if reason else dedup_note
     with _client(args) as c:
-        return _emit(
-            c.abandon(
-                args.task_id, worker_id=args.worker_id, permitted=permitted, reason=reason
-            )
+        result = c.abandon(
+            args.task_id, worker_id=args.worker_id, permitted=permitted, reason=reason
         )
+    if getattr(args, "resolve", False):
+        # Surface the drive-the-worktree-to-resolution plan alongside the abandon
+        # so the required unwind is an explicit, actionable expectation -- never a
+        # silent one. It is NOT auto-run: the destructive unwind stays worker-
+        # driven (`agent-dispatch resolve --execute`), on the worker's OWN tree.
+        from .resolution import plan_resolution
+
+        plan = plan_resolution(
+            "abandoned",
+            base=getattr(args, "base", None),
+            source_ref=duplicate_of,
+            reason=reason,
+        )
+        result = {"abandon": result, "resolution": plan.to_dict()}
+    return _emit(result)
 
 
 def _browse_peer(args: argparse.Namespace, subcommand: str, *, repo: str | None = None) -> int:
@@ -1524,6 +1537,77 @@ def _recipe_param_dicts(recipe: Any) -> list[dict]:
     ]
 
 
+def _run_resolution_step(step: Any, *, cwd: str | None = None) -> dict:
+    """Execute one non-advisory :class:`ResolutionStep` in the caller's worktree.
+
+    Runs the step's fixed ``argv`` (git only) and returns a bounded result. An
+    advisory step is never run here -- the caller reports it as an instruction.
+    """
+    try:
+        proc = subprocess.run(  # noqa: S603 -- fixed git argv from a ResolutionStep
+            list(step.argv), cwd=cwd, check=False, capture_output=True, text=True, timeout=120
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"kind": step.kind, "ran": True, "ok": False, "error": str(exc)}
+    out = (proc.stdout or "").strip()
+    err = (proc.stderr or "").strip()
+    return {
+        "kind": step.kind,
+        "ran": True,
+        "ok": proc.returncode == 0,
+        "returncode": proc.returncode,
+        "output": out[:2000],
+        "error": err[:2000] or None,
+    }
+
+
+def _cmd_resolve(args: argparse.Namespace) -> int:
+    """Drive THIS worktree to a clean, resolved final state (the enforced
+    *drive-the-worktree-to-resolution* invariant). Plans by default; ``--execute``
+    performs the (destructive) unwind on the caller's own workspace."""
+    from .resolution import ResolutionError, plan_resolution
+
+    try:
+        plan = plan_resolution(
+            args.outcome, base=args.base, source_ref=args.source, reason=args.reason
+        )
+    except ResolutionError as exc:
+        print(f"agent-dispatch: {exc}", file=sys.stderr)
+        return 2
+
+    if not args.execute:
+        payload = plan.to_dict()
+        payload["executed"] = False
+        payload["note"] = (
+            "plan only -- re-run with --execute to perform the unwind "
+            "(destructive steps discard working-tree state)"
+        )
+        return _emit(payload)
+
+    results: list[dict] = []
+    instructions: list[str] = []
+    failed = False
+    for step in plan.steps:
+        if step.advisory:
+            instructions.append(step.description)
+            results.append({"kind": step.kind, "ran": False, "advisory": True})
+            continue
+        res = _run_resolution_step(step)
+        results.append(res)
+        if not res["ok"]:
+            failed = True
+            # A failed destructive unwind must not be papered over -- stop so the
+            # worker/operator can look, rather than pressing on into a dirtier
+            # state.
+            if step.destructive:
+                break
+
+    payload = plan.to_dict()
+    payload.update({"executed": True, "results": results, "instructions": instructions})
+    _emit(payload)
+    return 1 if failed else 0
+
+
 def _cmd_recipes_list(args: argparse.Namespace) -> int:
     from .recipes import list_recipes
 
@@ -1874,6 +1958,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="retire the task as a DUPLICATE of REF (an existing task id, PR, or "
              "issue). Self-justifying: implies --permit and records the dedup "
              "reference in the reason, so the decision is never a silent drop.",
+    )
+    p.add_argument(
+        "--resolve", action="store_true",
+        help="also emit the drive-the-worktree-to-resolution plan (the unwind the "
+             "worker must run on its own worktree). Advisory -- runs nothing.",
+    )
+    p.add_argument(
+        "--base", metavar="BRANCH",
+        help="with --resolve, the base branch the worktree unwinds onto "
+             "(default: the branch's tracked upstream)",
     )
     p.set_defaults(func=_cmd_abandon)
 
@@ -2375,6 +2469,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="print the create call the kick would make, without enqueuing it",
     )
     kp.set_defaults(func=_cmd_recipes_kick)
+
+    # -- Drive-the-worktree-to-resolution: the enforced clean-up verb ------
+    rvp = sub.add_parser(
+        "resolve",
+        help="drive THIS worktree to a clean, resolved final state after a loop "
+             "(landed -> verify clean; abandoned -> unwind to base + reconcile source)",
+    )
+    rvp.add_argument(
+        "--outcome", required=True, choices=["landed", "abandoned"],
+        help="how the work ended: 'landed' (merged) or 'abandoned' (unwind to base)",
+    )
+    rvp.add_argument(
+        "--base", metavar="BRANCH",
+        help="base branch to unwind onto for --outcome abandoned "
+             "(default: the branch's tracked upstream)",
+    )
+    rvp.add_argument(
+        "--source", metavar="REF",
+        help="the change/issue this worker was driving, folded into the "
+             "source-reconcile instruction",
+    )
+    rvp.add_argument("--reason", help="abandonment reason (recorded on the plan)")
+    rvp.add_argument(
+        "--execute", action="store_true",
+        help="perform the plan (destructive steps discard working-tree state); "
+             "without it, the plan is printed and nothing runs",
+    )
+    rvp.set_defaults(func=_cmd_resolve)
 
     return parser
 
