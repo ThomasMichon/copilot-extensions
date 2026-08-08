@@ -1,0 +1,235 @@
+"""Tests for the anchor_write_guard preToolUse hook decision logic.
+
+The guard blocks writes into the ANCHOR (main checkout, ``.git`` is a directory)
+of a ``class: worktree`` repo, while always allowing writes into a linked
+worktree (``.git`` is a file) and into singleton/unregistered checkouts.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import time
+from pathlib import Path
+
+import pytest
+
+# The guard ships as a standalone script under scripts/ (deployed to
+# ~/.agent-worktrees/bin/), not as a package module -- load it by path.
+_GUARD_PATH = Path(__file__).resolve().parents[1] / "scripts" / "anchor_write_guard.py"
+_spec = importlib.util.spec_from_file_location("anchor_write_guard", _GUARD_PATH)
+guard = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(guard)
+
+
+def _main_checkout(base: Path, name: str) -> Path:
+    """A main checkout: ``.git`` is a DIRECTORY (the anchor)."""
+    root = base / name
+    (root / ".git").mkdir(parents=True)
+    return root
+
+
+def _linked_worktree(path: Path) -> Path:
+    """A linked worktree: ``.git`` is a FILE (a gitdir pointer)."""
+    path.mkdir(parents=True)
+    (path / ".git").write_text("gitdir: /somewhere/.git/worktrees/x\n",
+                               encoding="utf-8")
+    return path
+
+
+@pytest.fixture
+def anchor(tmp_path: Path) -> list[dict]:
+    """One worktree-class repo whose anchor is a real main checkout on disk."""
+    root = _main_checkout(tmp_path, "myrepo")
+    return [{"name": "myrepo", "path": str(root)}]
+
+
+def _write(tool, path, cwd):
+    return {"toolName": tool, "cwd": str(cwd), "toolArgs": {"path": str(path)}}
+
+
+def _shell(cmd, cwd):
+    return {"toolName": "bash", "cwd": str(cwd), "toolArgs": {"command": cmd}}
+
+
+# --- write-tool blocking ------------------------------------------------------
+
+def test_write_into_anchor_denies(tmp_path, anchor):
+    target = Path(anchor[0]["path"]) / "src" / "x.py"
+    d = guard.decide(_write("create", target, tmp_path), env={},
+                     home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+    assert "myrepo" in d["permissionDecisionReason"]
+    assert "worktree" in d["permissionDecisionReason"].lower()
+
+
+def test_write_into_linked_worktree_allows(tmp_path, anchor):
+    # A sibling worktree sharing the anchor's name PREFIX (myrepo.worktrees/...);
+    # its .git is a file, so it must always pass.
+    wt = _linked_worktree(tmp_path / "myrepo.worktrees" / "wt1")
+    target = wt / "src" / "x.py"
+    assert guard.decide(_write("edit", target, wt), env={}, home=tmp_path,
+                        anchors=anchor) is None
+
+
+def test_write_into_nested_linked_worktree_allows(tmp_path, anchor):
+    # Even a worktree nested INSIDE the anchor path is fine (.git file wins).
+    wt = _linked_worktree(Path(anchor[0]["path"]) / ".worktrees" / "wt1")
+    target = wt / "x.py"
+    assert guard.decide(_write("create", target, wt), env={}, home=tmp_path,
+                        anchors=anchor) is None
+
+
+def test_write_into_unregistered_main_checkout_allows(tmp_path, anchor):
+    # A different main checkout not registered as worktree-class (e.g. a
+    # singleton like SPO.Core) must not be blocked.
+    other = _main_checkout(tmp_path, "singleton-repo")
+    target = other / "x.py"
+    assert guard.decide(_write("create", target, tmp_path), env={},
+                        home=tmp_path, anchors=anchor) is None
+
+
+def test_write_outside_any_repo_allows(tmp_path, anchor):
+    target = tmp_path / "loose" / "x.py"
+    assert guard.decide(_write("create", target, tmp_path), env={},
+                        home=tmp_path, anchors=anchor) is None
+
+
+def test_read_tool_into_anchor_allows(tmp_path, anchor):
+    target = Path(anchor[0]["path"]) / "README.md"
+    p = {"toolName": "view", "cwd": str(tmp_path), "toolArgs": {"path": str(target)}}
+    assert guard.decide(p, env={}, home=tmp_path, anchors=anchor) is None
+
+
+def test_relative_write_path_resolves_against_cwd(tmp_path, anchor):
+    cwd = Path(anchor[0]["path"]) / "src"
+    p = {"toolName": "edit", "cwd": str(cwd), "toolArgs": {"path": "x.py"}}
+    d = guard.decide(p, env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+# --- shell blocking -----------------------------------------------------------
+
+def test_shell_write_into_anchor_denies(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell(f'Set-Content "{gp}\\notes.md" "hi"', tmp_path),
+                     env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_git_commit_into_anchor_denies(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell(f'git -C "{gp}" commit -m x', tmp_path),
+                     env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_read_into_anchor_allows(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    assert guard.decide(_shell(f'cat "{gp}/README.md"', tmp_path),
+                        env={}, home=tmp_path, anchors=anchor) is None
+
+
+def test_shell_write_into_sibling_worktree_allows(tmp_path, anchor):
+    # A write into ``<anchor>.worktrees\...`` shares the anchor's string prefix
+    # but NOT the anchor+separator boundary, so it must not be flagged.
+    gp = anchor[0]["path"]
+    sib = f"{gp}.worktrees\\wt1\\x.py"
+    assert guard.decide(_shell(f'Set-Content "{sib}" "hi"', tmp_path),
+                        env={}, home=tmp_path, anchors=anchor) is None
+
+
+# --- modes + kill switches ----------------------------------------------------
+
+def test_kill_switch_env_allows(tmp_path, anchor):
+    target = Path(anchor[0]["path"]) / "x.py"
+    p = _write("create", target, tmp_path)
+    assert guard.decide(p, env={"ANCHOR_WRITE_GUARD": "off"}, home=tmp_path,
+                        anchors=anchor) is None
+    assert guard.decide(p, env={"CROSS_REPO_GUARD": "off"}, home=tmp_path,
+                        anchors=anchor) is None
+    assert guard.decide(p, env={"ANCHOR_WRITE_GUARD_MODE": "off"}, home=tmp_path,
+                        anchors=anchor) is None
+
+
+def test_mode_warn_returns_additional_context(tmp_path, anchor):
+    target = Path(anchor[0]["path"]) / "x.py"
+    d = guard.decide(_write("create", target, tmp_path),
+                     env={"ANCHOR_WRITE_GUARD_MODE": "warn"}, home=tmp_path,
+                     anchors=anchor)
+    assert d and "additionalContext" in d and "permissionDecision" not in d
+
+
+def test_mode_ask_returns_ask(tmp_path, anchor):
+    target = Path(anchor[0]["path"]) / "x.py"
+    d = guard.decide(_write("create", target, tmp_path),
+                     env={"ANCHOR_WRITE_GUARD_MODE": "ask"}, home=tmp_path,
+                     anchors=anchor)
+    assert d and d["permissionDecision"] == "ask"
+
+
+# --- break-glass --------------------------------------------------------------
+
+def test_active_break_glass_allows(tmp_path, anchor):
+    home = tmp_path / "home"
+    (home / ".agent-worktrees").mkdir(parents=True)
+    (home / ".agent-worktrees" / "allow-edits.json").write_text(json.dumps({
+        "grants": {"myrepo": {"expires_at_ms": (time.time() + 600) * 1000}}
+    }), encoding="utf-8")
+    target = Path(anchor[0]["path"]) / "x.py"
+    assert guard.decide(_write("create", target, tmp_path), env={},
+                        home=home, anchors=anchor) is None
+
+
+def test_expired_break_glass_still_denies(tmp_path, anchor):
+    home = tmp_path / "home"
+    (home / ".agent-worktrees").mkdir(parents=True)
+    (home / ".agent-worktrees" / "allow-edits.json").write_text(json.dumps({
+        "grants": {"myrepo": {"expires_at_ms": (time.time() - 60) * 1000}}
+    }), encoding="utf-8")
+    target = Path(anchor[0]["path"]) / "x.py"
+    d = guard.decide(_write("create", target, tmp_path), env={},
+                     home=home, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+# --- empty set / fail-open ----------------------------------------------------
+
+def test_no_anchors_allows(tmp_path):
+    target = tmp_path / "anything" / "x.py"
+    assert guard.decide(_write("create", target, tmp_path), env={},
+                        home=tmp_path, anchors=[]) is None
+
+
+# --- repos.yaml discovery (stdlib mini-parser) --------------------------------
+
+def test_load_worktree_anchors_filters_by_class(tmp_path):
+    home = tmp_path / "home"
+    (home / ".agent-worktrees").mkdir(parents=True)
+    (home / ".agent-worktrees" / "repos.yaml").write_text(
+        "schema_version: 1\n"
+        "srcroot:\n"
+        "  windows: \"C:\\\\Data\\\\Src\"\n"
+        "repos:\n"
+        "  SPO.Core:\n"
+        "    class: singleton\n"
+        "    windows: \"C:\\\\Core\\\\SPO\"\n"
+        "  copilot-extensions:\n"
+        "    class: worktree\n"
+        "    windows: \"C:\\\\Data\\\\Src\\\\copilot-extensions\"\n"
+        "    linux: \"/home/u/copilot-extensions\"\n"
+        "  other-wt:\n"
+        "    class: worktree\n"
+        "    windows: \"C:\\\\Data\\\\Src\\\\other\"\n",
+        encoding="utf-8")
+    anchors = guard.load_worktree_anchors(home)
+    names = {a["name"] for a in anchors}
+    assert names == {"copilot-extensions", "other-wt"}  # singleton excluded
+    paths = {a["path"] for a in anchors}
+    # Double-backslash unescaped to single; both platform paths surfaced.
+    assert "C:\\Data\\Src\\copilot-extensions" in paths
+    assert "/home/u/copilot-extensions" in paths
+
+
+def test_load_worktree_anchors_missing_file_is_empty(tmp_path):
+    assert guard.load_worktree_anchors(tmp_path / "nope") == []

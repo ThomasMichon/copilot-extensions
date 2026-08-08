@@ -13,6 +13,12 @@
         "powershell": "try { $py=(Get-Command python -ErrorAction SilentlyContinue).Source; $s=\"$env:USERPROFILE\\.agent-worktrees\\bin\\cross_repo_guard.py\"; if ($py -and (Test-Path $s)) { & $py $s } } catch {}; exit 0",
         "bash": "s=\"$HOME/.agent-worktrees/bin/cross_repo_guard.py\"; if command -v python3 >/dev/null 2>&1 && [ -f \"$s\" ]; then python3 \"$s\" || true; fi; exit 0",
         "timeoutSec": 25
+      },
+      {
+        "type": "command",
+        "powershell": "try { $py=(Get-Command python -ErrorAction SilentlyContinue).Source; $s=\"$env:USERPROFILE\\.agent-worktrees\\bin\\anchor_write_guard.py\"; if ($py -and (Test-Path $s)) { & $py $s } } catch {}; exit 0",
+        "bash": "s=\"$HOME/.agent-worktrees/bin/anchor_write_guard.py\"; if command -v python3 >/dev/null 2>&1 && [ -f \"$s\" ]; then python3 \"$s\" || true; fi; exit 0",
+        "timeoutSec": 10
       }
     ],
     "sessionStart": [
