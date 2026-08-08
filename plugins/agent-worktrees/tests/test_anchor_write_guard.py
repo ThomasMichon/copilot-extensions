@@ -18,6 +18,7 @@ import pytest
 # ~/.agent-worktrees/bin/), not as a package module -- load it by path.
 _GUARD_PATH = Path(__file__).resolve().parents[1] / "scripts" / "anchor_write_guard.py"
 _spec = importlib.util.spec_from_file_location("anchor_write_guard", _GUARD_PATH)
+assert _spec and _spec.loader, f"cannot load guard script at {_GUARD_PATH}"
 guard = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(guard)
 
