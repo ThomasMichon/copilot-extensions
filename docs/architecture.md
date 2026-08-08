@@ -273,6 +273,102 @@ fleet bodies record no worktree handle; bounded sweeps settle their reservation
 when the task reaches a terminal state. Details live in
 [agent-dispatch spawn supervisor](../plugins/agent-dispatch/docs/spawn-supervisor.md).
 
+## Resource obligations & accountability
+
+A worktree **answers for every resource it allocated before it may finalize**.
+Anything a worker brings into being on the harness's behalf — a cross-repo
+worktree, a borrowed CodeSpace or container, a bridge session — is an
+**obligation** it carries until that resource is **closed out**. `finalize` is
+the join point where those obligations are asserted clear, so finalizing never
+silently orphans a half-finished CodeSpace, an un-merged cross-repo branch, or a
+bridge session left mid-flight. (Effort: `resource-obligation-settlement`;
+umbrella dotfiles#1081; parent `git-ref-resource-leases`.)
+
+### Disposition — the lien on each outbound claim
+Every outbound resource in a worktree's claim ledger
+(`agent_worktrees.tracking.ResourceClaim`) carries a **disposition** — the three
+values live in `agent_worktrees.obligations`:
+
+- **`active`** — the resource still carries live/unsettled work. **Blocks
+  finalize.** A missing/unknown value normalizes to `active` (adoption-safe: an
+  un-annotated obligation stays conservatively blocking).
+- **`at-rest`** — the *work* is safe (merged / off-box / itself finalized); the
+  resource may persist. **Does not block.**
+- **`released`** — the *claim* is torn down (its lease tombstoned).
+
+The key decoupling: **`at-rest` is a property of the _resource_; `released` is a
+property of the _claim_.** They separate — a CodeSpace can go `at-rest` (work
+safe) and have its claim `released` (freeing it for the next borrower) **without
+being deleted**. For a leaseable resource the disposition also rides the lease
+record's `context` map under the `disposition` key (the store already round-trips
+`context`), so it is **cross-machine visible with no store schema change** — the
+local ledger is the owner's authority, the lease is the cross-machine mirror.
+
+### The finalize gate (warn-first)
+`finalize.validate_and_finalize` runs an obligation gate **before any destructive
+step** (so a blocked finalize leaves the worktree intact). It reads the **local
+ledger** (`record.resources`) for `is_unsettled` (active) claims — a cheap,
+local, **no-traversal** balance check. `obligations.gate_mode()` resolves
+`AGENT_WORKTREES_OBLIGATION_GATE ∈ {off, warn, block}`, default **warn**:
+
+- **`warn`** (default) — surface unsettled obligations but proceed (behavior
+  unchanged until an operator opts in / Phase 4 flips the default).
+- **`block`** — refuse (return False) while any obligation is unsettled, unless
+  `--abandon`, which proceeds and **re-homes** the obligations via the
+  `release_all_resources` cascade (never silently drops).
+- **`off`** — skip.
+
+### Incremental settlement — the recursion collapse
+The cost of proving a footprint safe is paid **continuously**, at each resource's
+own close-out, not in a recursive walk at finalize. Each resource flips its
+**own** disposition when it reaches its close-out; finalize then trusts the
+recorded verdict. This is reference counting on a cross-resource scale — the
+recursion **collapses into local checks**.
+
+- **cross-repo worktree:** the child's `finalize`
+  (`finalize._settle_parent_obligation`) flips the claim its **parent** holds on
+  it to `at-rest` (same-machine parent resolved via the child's
+  `owner_claim_ref` → `project_dir(project)/worktrees/…`; a cross-machine parent
+  defers to the lease mirror / reclaim sweep). The parent's own finalize gate
+  then stops treating the child as unsettled **without re-deriving its state**.
+- **CodeSpace / container:** cleanliness is stamped on ssh disconnect / heartbeat
+  (see below); finalize reads the stamp.
+- **bridge:** flips when the bridge worktree is driven to final.
+
+`tracking.settle_resource_claim(record, ref, disposition)` is the primitive every
+hook calls; `agent-worktrees claims {add,settle,release}` is the operator/hook
+CLI over the ledger CRUD. `claims add --owner-ref <machine/project/worktree_id>`
+journals onto a **cross-project** owner resolved by qualified ref (not the
+caller's cwd) — required for a call-site (e.g. agent-codespaces on CodeSpace
+borrow) whose cwd is the daemon's, not the borrowing worktree's.
+
+### CodeSpace at-rest — the cleanliness predicate & probe
+A CodeSpace reaches `at-rest` when its *work is safe* (merged or off-box), **not**
+when it is deleted. `agent_codespaces.cleanliness` decides this: a **read-only**
+`probe_command()` runs inside the CodeSpace over the existing SSH channel and
+emits `OBLIGATION_PROBE`/`DIRTY`/`AHEAD`/`UNPUSHED_BRANCHES` markers;
+`parse_probe` → `at_rest(gc, in_flight=…)` combines git-cleanliness with
+host-side in-flight knowledge. **Conservative by construction:** anything
+un-probeable reads as **not** at-rest (never settled blind).
+
+**Spike-corrected behaviors (validated against a real CodeSpace, 2026-08-08):**
+the probe scans **every** repo under `/workspaces/*` (a borrowed CodeSpace holds
+both the scaffold and the actual work repo — unpushed work in *any* keeps it
+unsafe), and detects unpushed work with **`git rev-list --count HEAD --not
+--remotes`** (commits reachable from HEAD that exist on **no remote**) rather than
+`@{u}..HEAD`, which reads 0 on a no-upstream branch (a common CodeSpace state)
+and would falsely read clean. The workspace glob must **not** be `shlex.quote`d,
+or the shell treats `*` literally and the probe finds no repo.
+
+### Never-wedge safety net
+A crashed holder that never settles must not freeze its parent forever. The
+**reclaim sweep** (`agent_worktrees.claimant` liveness + reconcile) may flip an
+`active` obligation to **`abandoned`** when the holder is provably gone **and**
+the resource provably safe — GC as the complement to refcounting. The sweep may
+**only** flip to `abandoned`; it never fabricates `at-rest` (that is strictly the
+resource's own verdict). *(Phase 4 — plus flipping the gate default `warn →
+block` once hooks + sweep are proven.)*
+
 ## Where to go next
 
 - [Rollout readiness plan](plans/rollout-readiness.md) · [Fresh dev box validation](plans/fresh-devbox-validation.md)
