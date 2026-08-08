@@ -18,6 +18,48 @@ def test_get_pr_keys_registered():
     assert "pr-provider" in m._GET_KEYS
 
 
+def test_get_lease_origin_key_registered():
+    assert "lease-origin" in m._GET_KEYS
+
+
+def test_resolve_lease_origin_returns_store_url(monkeypatch):
+    from agent_worktrees import lease_config
+
+    monkeypatch.setattr(
+        lease_config, "load_lease_settings",
+        lambda *a, **k: lease_config.LeaseSettings(origin="https://store/x.git"),
+    )
+    assert m._resolve_lease_origin() == "https://store/x.git"
+
+
+def test_resolve_lease_origin_guards_failure(monkeypatch):
+    from agent_worktrees import lease_config
+
+    def _boom(*a, **k):
+        raise lease_config.ConfigError("no origin")
+
+    monkeypatch.setattr(lease_config, "load_lease_settings", _boom)
+    assert m._resolve_lease_origin() == ""
+
+
+def test_get_lease_origin_value(monkeypatch, capsys):
+    import argparse
+
+    from agent_worktrees import config as cfg
+
+    monkeypatch.setenv("WORKTREE_PROJECT", "ext")
+    conf = cfg.Config(
+        srcroot="/s", machine="m", platform="linux", repo_name="ext",
+        repos={"ext": cfg.RepoConfig(anchor="/a", worktree_root="/w")},
+    )
+    monkeypatch.setattr("agent_worktrees.config.load_config", lambda *a, **k: conf)
+    monkeypatch.setattr(m, "_resolve_lease_origin", lambda: "https://store/x.git")
+
+    rc = m.cmd_get(argparse.Namespace(key="lease-origin"))
+    assert rc == 0
+    assert capsys.readouterr().out.strip() == "https://store/x.git"
+
+
 def test_get_pr_keys_values(monkeypatch, capsys):
     import argparse
 

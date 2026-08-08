@@ -12,7 +12,7 @@
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.5.3-dev423",
+      "version": "1.5.3-dev424",
       "source": "plugins/agent-worktrees"
     },
     {
@@ -24,7 +24,7 @@
     {
       "name": "agent-codespaces",
       "description": "GitHub Codespaces lifecycle management, SSH transport, credential relay, and agent-bridge provider integration",
-      "version": "0.3.4-dev106",
+      "version": "0.3.4-dev107",
       "source": "plugins/agent-codespaces"
     },
     {
