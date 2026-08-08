@@ -8664,6 +8664,17 @@ def cmd_update(args: argparse.Namespace) -> int:
     skip_modules = getattr(args, "skip_modules", None)
     _update_modules(plugin_dir, plat, skip_modules, force=force)
 
+    # Step 4.5 -- rebuild the RUNTIME for every other enabled plugin whose
+    # runtime the steps above never touch. ``_update_modules`` only runs the
+    # installer for ``modules.json`` (agent-bridge); agent-worktrees itself is
+    # Step 3. So a runtime plugin like agent-codespaces gets its PAYLOAD
+    # refreshed (Step 1) but its versioned venv rebuild is otherwise deferred to
+    # a later launch reconcile -- meaning `update` (and even `--force`) could
+    # leave it serving stale code under a mismatched version (dotfiles #1025).
+    # This closes that gap: reconcile those runtimes here, version-keyed by
+    # default and force-reinstalled under ``--force``.
+    _reconcile_registered_runtimes(plugin_dir, plat, skip_modules, force=force)
+
     # Step 5 -- fast-forward the managed repo anchor(s) so in-repo config
     # bindings deploy alongside the plugin update (not just on next launch).
     if not getattr(args, "no_anchor_sync", False):
@@ -8810,6 +8821,152 @@ def _update_registered_plugins() -> None:
             output.ok(name if status == "OK" else f"{name} ({status})")
         else:
             output.warn(f"{name}: {status}")
+
+
+def _module_names(plugin_dir: Path) -> set[str]:
+    """The sibling-module names handled by :func:`_update_modules` (``modules.json``).
+
+    These runtimes (e.g. agent-bridge) are deployed by the module step, so the
+    registered-runtime reconcile below must exclude them to avoid a redundant
+    (and, for a daemon, disruptive) second install. Best-effort: an unreadable
+    manifest yields the empty set."""
+    manifest = plugin_dir / "modules.json"
+    try:
+        data = json.loads(manifest.read_text())
+    except Exception:
+        return set()
+    out: set[str] = set()
+    for mod in data.get("modules", []) or []:
+        name = mod.get("name")
+        if name:
+            out.add(str(name))
+    return out
+
+
+def _reconcile_registered_runtimes(
+    plugin_dir: Path,
+    platform: str,
+    skip_modules: list[str] | None = None,
+    *,
+    force: bool = False,
+) -> None:
+    """Rebuild the runtime venv of every enabled plugin the other steps skip.
+
+    ``update`` runs a runtime installer only for agent-worktrees (Step 3) and
+    the ``modules.json`` services (``_update_modules``). Every other enabled
+    runtime plugin -- agent-codespaces, agent-containers, agent-dispatch, … --
+    only gets its PAYLOAD refreshed, and its versioned venv rebuild is deferred
+    to a later launch reconcile (which is version-keyed). So a plain ``update``
+    could leave such a plugin serving stale code, and ``--force`` -- which users
+    reach for precisely to fix that -- never reached them either (dotfiles
+    #1025). This reconciles them here, mirroring the launch-path reconciler:
+
+    * **version-keyed** by default -- run the plugin's ``scripts/install.*
+      update`` only when its deployed runtime version differs from its freshly
+      refreshed payload version (or no runtime is deployed yet);
+    * **forced** under ``--force`` -- run the installer regardless of version,
+      so a same-version content drift (a dev checkout, or a marketplace artifact
+      whose stamp lagged) is repaired. The installer force-reinstalls the
+      package, so fresh bytes always land.
+
+    Best-effort and idempotent: a plugin's failure warns and continues; no
+    resolvable config (a generic install) is a silent no-op. Payload-only
+    plugins (``runtimeScope: none``) and the module/self runtimes are skipped.
+    """
+    from . import reconcile
+
+    try:
+        config = cfg.load_config()
+    except Exception:
+        return
+    repos = config.repos or {}
+    if not repos:
+        return
+
+    # skip_modules semantics mirror _update_modules: [] => skip all.
+    if skip_modules is not None and len(skip_modules) == 0:
+        return
+
+    names: set[str] = set()
+    seen_anchors: set[str] = set()
+    for repo in repos.values():
+        anchor = repo.anchor
+        if not anchor or anchor in seen_anchors:
+            continue
+        seen_anchors.add(anchor)
+        try:
+            names.update(reconcile.read_enabled_plugins(Path(anchor)))
+        except Exception:
+            continue
+
+    # Exclude runtimes handled elsewhere (module services + agent-worktrees) and
+    # any explicitly skipped names.
+    excluded = _module_names(plugin_dir) | {"agent-worktrees"}
+    if skip_modules:
+        excluded |= set(skip_modules)
+    names -= excluded
+    if not names:
+        return
+
+    results: list[tuple[str, str]] = []
+    for name in sorted(names):
+        results.append(
+            (name, _reconcile_one_runtime(name, platform, force=force))
+        )
+
+    acted = [(n, s) for n, s in results if s not in ("SKIPPED (current)", "payload-only")]
+    if acted:
+        output.header("Registered Runtime Reconcile")
+        for name, status in acted:
+            if status.startswith("OK"):
+                output.ok(f"{name} ({status})")
+            else:
+                output.warn(f"{name}: {status}")
+
+
+def _reconcile_one_runtime(name: str, platform: str, *, force: bool) -> str:
+    """Reconcile a single registered plugin's runtime; returns a status string.
+
+    Never raises. ``"payload-only"`` when the plugin has no runtime;
+    ``"SKIPPED (current)"`` when version-keyed and already current; ``"OK …"``
+    on a run; else a short error."""
+    from . import reconcile
+
+    pdir = reconcile.installed_payload_dir(name)
+    if pdir is None:
+        return "payload not installed"
+    scope = reconcile.manifest_runtime_scope(pdir) or "none"
+    if scope == "none":
+        return "payload-only"
+
+    if not force:
+        pver = reconcile.payload_version(pdir)
+        dver = reconcile.runtime_deployed_version(name)
+        if pver and dver and reconcile._versions_equal(dver, pver):
+            return "SKIPPED (current)"
+
+    if platform == "windows":
+        installer = pdir / "scripts" / "install.ps1"
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        if not shell:
+            return "powershell not found"
+        argv = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass",
+                "-File", str(installer), "update"]
+    else:
+        installer = pdir / "scripts" / "install.sh"
+        argv = ["bash", str(installer), "update"]
+    if not installer.exists():
+        return "installer not found"
+
+    output.header(f"Reconciling Runtime: {name}"
+                  + (" (forced)" if force else ""))
+    try:
+        r = subprocess.run(argv, cwd=pdir, timeout=300)
+    except subprocess.TimeoutExpired:
+        return "timed out"
+    except Exception as exc:  # never abort the loop
+        return str(exc)[:120]
+    return "OK" if r.returncode == 0 else f"installer exited {r.returncode}"
 
 
 def _fast_forward_project_anchors() -> None:

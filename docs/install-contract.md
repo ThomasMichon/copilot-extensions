@@ -51,6 +51,19 @@ bypasses the venv sync, binstub/SAC handling, `_build_info.py` stamping,
 manifest, and service restart (see "What NOT to Do" and "Deploying: one command
 — `<repo> update`" in `CONTRIBUTING.md`).
 
+> **Runtime reconcile is version-keyed; `--force` overrides it.** `update` runs a
+> plugin's runtime installer only when its deployed runtime version differs from
+> the freshly-refreshed payload version (an equal version is assumed current and
+> skipped for speed). `--force` re-runs every enabled plugin's runtime installer
+> regardless — the escape hatch for a same-version content drift (a dev checkout,
+> or a marketplace artifact whose version stamp lagged the code). This covers
+> **every** enabled runtime plugin, not just agent-worktrees and the
+> `modules.json` services, so a runtime like agent-codespaces can no longer have
+> its payload refreshed while its venv silently keeps serving stale code
+> (dotfiles #1025). The per-PR **version-bump guard** (`check-version-bump.py`)
+> makes the same-version-drift case rare in the first place, so `--force` stays a
+> last resort.
+
 ### What the marketplace vendors (copied vs loaded)
 
 `copilot plugin update` copies the **entire git-tracked plugin folder** — the
