@@ -219,6 +219,38 @@ def _label_endpoint(args, label_post, applied, id_name):
 
 
 class TestGiteaProvider:
+    def test_combined_status_state_maps_gitea_states(self, monkeypatch):
+        # #225: the combined commit status is normalized onto the pr_contract
+        # vocabulary (failure/error -> failure; pending/warning -> pending; etc).
+        from agent_worktrees.providers import gitea
+        prov = gitea.GiteaProvider()
+
+        def make(state, statuses=(("x",),)):
+            body = json.dumps({"state": state,
+                               "statuses": [{"id": 1}] if statuses else []})
+            monkeypatch.setattr(prov, "_curl",
+                                lambda m, u, t, **kw: (200, body))
+
+        make("failure")
+        assert prov._combined_status_state("o/r", "sha", "https://h/gitea", "t") == "failure"
+        make("error")
+        assert prov._combined_status_state("o/r", "sha", "https://h/gitea", "t") == "failure"
+        make("success")
+        assert prov._combined_status_state("o/r", "sha", "https://h/gitea", "t") == "success"
+        make("pending")
+        assert prov._combined_status_state("o/r", "sha", "https://h/gitea", "t") == "pending"
+        # No statuses attached -> unknown ("").
+        make("pending", statuses=())
+        assert prov._combined_status_state("o/r", "sha", "https://h/gitea", "t") == ""
+
+    def test_combined_status_state_best_effort_on_error(self, monkeypatch):
+        # A non-200 or malformed status read never breaks the snapshot -> "".
+        from agent_worktrees.providers import gitea
+        prov = gitea.GiteaProvider()
+        monkeypatch.setattr(prov, "_curl", lambda m, u, t, **kw: (500, ""))
+        assert prov._combined_status_state("o/r", "sha", "https://h/gitea", "t") == ""
+        assert prov._combined_status_state("o/r", "", "https://h/gitea", "t") == ""  # no sha
+
     def test_create_pull_parses_url_and_number(self, monkeypatch):
         from agent_worktrees.providers import gitea
         body = json.dumps({"html_url": "https://h/gitea/o/r/pulls/42",

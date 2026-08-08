@@ -60,6 +60,23 @@ class TestRunWait:
         assert res.matched
         assert res.payload["transitions"] == ["closed"]
 
+    def test_checks_failed_fires_after_baseline_adopts(self):
+        # #225: unknown checks at arm time are adopted (pending), then a flip to
+        # failure on a later poll wakes the caller.
+        snap0 = _snap(pr_state="open", checks_state="pending")
+        snap1 = _snap(pr_state="open", checks_state="failure")
+        res = self._run([snap0, snap1])
+        assert res.matched
+        assert res.payload["transitions"] == ["checks_failed"]
+        assert res.payload["checks_state"] == "failure"
+
+    def test_checks_already_failed_at_arm_does_not_fire(self):
+        # Armed while already failing -> adopted without firing (changes-from-here).
+        snap0 = _snap(pr_state="open", checks_state="failure")
+        res = self._run([snap0], timeout=0.5)
+        assert not res.matched
+        assert res.payload["timed_out"] is True
+
     def test_auto_baseline_open_does_not_fire_on_existing_review(self):
         # A pre-existing approval at arm time must NOT fire under auto-baseline;
         # the second poll (a NEW approval) should.
@@ -164,6 +181,7 @@ class TestDecorateEvents:
             "repo": "o/r", "pr": 7, "events": events,
             "transitions": ["approved"], "pr_state": "open", "merged": False,
             "mergeable": True, "head_sha": "abc", "base_ref": "master",
+            "checks_state": "",
             "cursor": "r3",
             # Additive merge-readiness block. No consent label bound here, so it
             # degrades to a verdict/merge-state readout with no action to take.

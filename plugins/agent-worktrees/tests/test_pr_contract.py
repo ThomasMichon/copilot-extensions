@@ -121,6 +121,62 @@ class TestComputeEvents:
         events = pc.compute_events(pc.Baseline(), snap, pc.DEFAULT_UNTIL)
         assert [e["event"] for e in events] == ["closed"]
 
+    # --- CI checks + approval dismissal regressions (#225) -----------------
+
+    def test_checks_failed_fires_on_transition_to_failure(self):
+        base = pc.Baseline(checks_state="pending")
+        snap = pc.PRSnapshot(pr_state="open", checks_state="failure")
+        events = pc.compute_events(base, snap, pc.DEFAULT_UNTIL)
+        assert [e["event"] for e in events] == ["checks_failed"]
+        assert events[0]["checks_state"] == "failure"
+
+    def test_checks_failed_not_refired_when_already_failure(self):
+        base = pc.Baseline(checks_state="failure")
+        snap = pc.PRSnapshot(pr_state="open", checks_state="failure")
+        assert pc.compute_events(base, snap, pc.DEFAULT_UNTIL) == []
+
+    def test_checks_unknown_baseline_does_not_fire(self):
+        # "" == not-yet-known: adopted by the caller, never fired here.
+        base = pc.Baseline(checks_state="")
+        snap = pc.PRSnapshot(pr_state="open", checks_state="failure")
+        assert pc.compute_events(base, snap, pc.DEFAULT_UNTIL) == []
+
+    def test_checks_failed_not_fired_after_merge(self):
+        base = pc.Baseline(checks_state="pending")
+        snap = pc.PRSnapshot(pr_state="closed", merged=True, checks_state="failure")
+        assert "checks_failed" not in [
+            e["event"] for e in pc.compute_events(base, snap, pc.DEFAULT_UNTIL)]
+
+    def test_approval_dismissed_fires_on_dismissed_approval(self):
+        # Dismissal flips an existing (already-seen) review's flag, so baseline it.
+        base = pc.Baseline(approved=True, max_review_id=5)
+        snap = pc.PRSnapshot(
+            pr_state="open", head_sha="h",
+            reviews=(_rev(5, "APPROVED", dismissed=True),),
+        )
+        events = pc.compute_events(base, snap, pc.DEFAULT_UNTIL)
+        assert [e["event"] for e in events] == ["approval_dismissed"]
+
+    def test_approval_dismissed_does_not_fire_without_prior_approval(self):
+        base = pc.Baseline(approved=None, max_review_id=5)  # never knew of approval
+        snap = pc.PRSnapshot(
+            pr_state="open", head_sha="h",
+            reviews=(_rev(5, "APPROVED", dismissed=True),),
+        )
+        assert pc.compute_events(base, snap, pc.DEFAULT_UNTIL) == []
+
+    def test_fresh_changes_requested_is_not_approval_dismissed(self):
+        # A reviewer switching to changes-requested fires changes_requested (via
+        # the review-id loop), NOT approval_dismissed (no dismissed approval).
+        base = pc.Baseline(approved=True, max_review_id=5)
+        snap = pc.PRSnapshot(
+            pr_state="open", head_sha="h",
+            reviews=(_rev(5, "APPROVED"), _rev(9, "CHANGES_REQUESTED")),
+        )
+        events = [e["event"] for e in pc.compute_events(base, snap, pc.DEFAULT_UNTIL)]
+        assert events == ["changes_requested"]
+        assert "approval_dismissed" not in events
+
 
 # ---------------------------------------------------------------------------
 # effective_verdict -- head-aware reduction
