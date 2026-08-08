@@ -3768,17 +3768,20 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
         # --title-only: just set the title, don't push
         if getattr(args, "title_only", False):
             yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
-            if yaml_path.exists():
+            if not yaml_path.exists():
+                output.err(f"Tracking file not found for {worktree_id}")
+                return 1
+            if args.title:
                 # Foreground RMW (#4547): load -> set title -> save under the
-                # blocking record lock (no I/O in the window).
+                # blocking record lock (no I/O in the window). Only taken when
+                # there is actually a title to write.
                 with tracking._RecordLock(yaml_path):
                     record = tracking.load_record(yaml_path)
-                    if args.title:
-                        record.title = args.title.replace("\n", " ").strip()
-                        tracking.save_record(record)
+                    record.title = args.title.replace("\n", " ").strip()
+                    tracking.save_record(record)
                 print(f"[OK] Worktree {worktree_id} title updated: {args.title}")
             else:
-                output.err(f"Tracking file not found for {worktree_id}")
+                output.err("--title-only requires --title")
                 return 1
             return 0
 
@@ -4253,14 +4256,16 @@ def cmd_mark_complete(args: argparse.Namespace) -> int:
     else:
         # Foreground verb (#4547): load -> mutate -> save under the blocking
         # record lock (no I/O in the window) so a concurrent writer can't clobber
-        # the manual status/title update.
-        with tracking._RecordLock(yaml_path):
-            record = tracking.load_record(yaml_path)
-            if args.title:
-                record.title = args.title.replace("\n", " ").strip()
-            if not args.title_only:
-                tracking.update_status(record, "complete", save=False)
-            tracking.save_record(record)
+        # the manual status/title update. Skip the lock when there is nothing to
+        # write (--title-only with no --title).
+        if (not args.title_only) or args.title:
+            with tracking._RecordLock(yaml_path):
+                record = tracking.load_record(yaml_path)
+                if args.title:
+                    record.title = args.title.replace("\n", " ").strip()
+                if not args.title_only:
+                    tracking.update_status(record, "complete", save=False)
+                tracking.save_record(record)
 
     if args.title_only:
         print(f"[OK] Worktree {worktree_id} title updated: {args.title}")
