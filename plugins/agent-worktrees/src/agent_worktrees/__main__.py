@@ -8487,6 +8487,45 @@ def cmd_register(args: argparse.Namespace) -> int:
         wsl_path=wsl_path,
     )
 
+    # #282: ensure the repo has a repos.yaml entry so CWD->project discovery
+    # resolves it. projects.yaml is deliberately lean -- it defers identity and
+    # location (anchor / default_branch) to repos.yaml, the single owning store
+    # -- and the reverse-lookup that answers "which project am I in?" keys off
+    # repos.yaml's per-platform anchor. Without an entry a freshly registered
+    # repo is reachable only via its own binstub or --project, never a bare
+    # `agent-worktrees <verb>` from its own directory (the confusing "not adopted
+    # yet -- run register" after register already ran). Record the anchor under
+    # the CURRENT platform (so a WSL adoption is filed under 'wsl', not 'linux'),
+    # merging into any existing entry and preserving a deliberate non-worktree
+    # class (add_repo only upgrades away from the 'reference' default).
+    try:
+        from . import repos as _repos_reg
+        _existing_repo = _repos_reg.find_repo(project)
+        _reg_class = (
+            _existing_repo.repo_class
+            if _existing_repo is not None
+            and _existing_repo.repo_class != "reference"
+            else "worktree"
+        )
+        _reg_remote_url = ""
+        _rru = subprocess.run(
+            ["git", "-C", str(repo_dir), "remote", "get-url", "origin"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if _rru.returncode == 0:
+            _reg_remote_url = _rru.stdout.strip()
+        _repos_reg.add_repo(
+            project,
+            str(repo_dir),
+            repo_class=_reg_class,
+            remote=_reg_remote_url,
+            default_branch=default_branch,
+            agent=expose_agent,
+            plat=plat,
+        )
+    except Exception as _e:
+        output.warn(f"Could not record repos.yaml entry for '{project}': {_e}")
+
     # #537: adopting a repo is the moment to pin its gh account. If the account
     # only resolves by falling back to an org owner that isn't an authenticated
     # gh account, clarify it (prompt / persist an account_map entry) now rather
