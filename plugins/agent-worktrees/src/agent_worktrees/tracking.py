@@ -1256,7 +1256,12 @@ def _stamp_liveness(
     if not yaml_path.exists():
         return
     try:
-        with _RecordLock(yaml_path):
+        # Best-effort background writer (#4547): a Picker sweep's liveness cache.
+        # Skip on contention rather than block a critical updater -- the hint is
+        # idempotent and the next authoritative observation re-stamps it.
+        with _RecordLock(yaml_path, blocking=False) as lk:
+            if not lk.acquired:
+                return
             record = load_record(yaml_path)
             if getattr(record, live_attr) is live and getattr(record, at_attr):
                 if not refresh:
@@ -1389,7 +1394,12 @@ def _apply_session_state_stamp(
     if not yaml_path.exists():
         return False
     try:
-        with _RecordLock(yaml_path):
+        # Best-effort background writer (#4547): the Picker's session-render
+        # cache. Skip on contention so a sweep never blocks a critical updater;
+        # the next populate re-stamps the (idempotent) cache.
+        with _RecordLock(yaml_path, blocking=False) as lk:
+            if not lk.acquired:
+                return False
             record = load_record(yaml_path)
             changed = False
             if turns is not None and record.session_turns != int(turns):
@@ -1831,76 +1841,114 @@ class _RecordLock:
       dropping the other's update). The ``msvcrt`` byte-range lock closes that
       gap so cross-process exclusion holds on Windows too.
 
-    Both platforms degrade gracefully: if the sidecar lock can't be acquired
-    within ``timeout`` we proceed on the in-process lock alone (the atomic
-    temp+replace retry in ``_atomic_write`` remains the last line of defence),
-    rather than blocking a foreground op indefinitely.
+    **Criticality-aware acquisition (#4547).** The caller picks how it competes:
+
+    - ``blocking=True`` (default) -- a **critical writer** (finalize, a lifecycle
+      transition, a handoff). It waits up to ``timeout`` for the sidecar, then
+      **proceeds anyway** on the in-process lock alone (graceful degradation; the
+      atomic temp+replace retry in ``_atomic_write`` is the last line of defence)
+      -- so a critical update is never dropped. ``acquired`` is always True.
+    - ``blocking=False`` -- a **best-effort background writer** (a Picker sweep's
+      liveness/session-state stamp). It makes a **single** non-blocking attempt at
+      both the in-process and the sidecar lock; if either is already held it
+      **skips** -- ``acquired`` is False and the caller must no-op its write this
+      pass (these writers are idempotent and self-heal next sweep). This is the
+      guarantee that an inconsequential sweep never blocks, nor is blocked by, a
+      critical updater.
+
+    Always check ``acquired`` inside a ``blocking=False`` ``with`` block before
+    writing; for the default ``blocking=True`` it is always True.
     """
 
-    def __init__(self, yaml_path: Path, timeout: float = 2.0):
+    def __init__(self, yaml_path: Path, timeout: float = 2.0, *,
+                 blocking: bool = True):
         self._yaml_path = yaml_path
         self._lock_path = yaml_path.with_suffix(".lock")
         self._timeout = timeout
+        self._blocking = blocking
         self._fd: int | None = None
         self._plock: threading.RLock | None = None
-        # Which cross-process backend actually holds the sidecar, so __exit__
-        # releases exactly what __enter__ acquired: "posix", "windows", or None.
+        self._plock_held = False
+        # Which cross-process backend actually holds the sidecar, so release
+        # frees exactly what was acquired: "posix", "windows", or None.
         self._held: str | None = None
+        #: Whether this lock is held (write is safe). Always True for a blocking
+        #: acquire; reflects a successful try for a best-effort one.
+        self.acquired = False
 
     def __enter__(self) -> _RecordLock:
         # In-process serialization first (serializes same-process threads on
         # every platform; the cross-process sidecar lock below adds inter-process
         # exclusion).
         self._plock = _path_write_lock(self._yaml_path)
-        self._plock.acquire()
+        if self._blocking:
+            self._plock.acquire()
+            self._plock_held = True
+        elif self._plock.acquire(blocking=False):
+            self._plock_held = True
+        else:
+            # Another same-process thread holds it -- best-effort skip.
+            return self
+
         self._lock_path.parent.mkdir(parents=True, exist_ok=True)
         self._fd = os.open(str(self._lock_path), os.O_CREAT | os.O_RDWR)
+
+        if self._blocking:
+            self._acquire_sidecar_blocking()
+            self.acquired = True  # proceeds even if the sidecar timed out
+        elif self._sidecar_try():
+            self.acquired = True
+        else:
+            # Sidecar held by another process -- best-effort skip: drop the fd
+            # and the in-process lock so we hold nothing.
+            self._release()
+        return self
+
+    def _sidecar_try(self) -> bool:
+        """One **non-blocking** attempt at the cross-process sidecar lock.
+
+        Returns True (and sets ``_held``) on success, False if it is currently
+        held by another process. On an exotic platform with neither ``fcntl`` nor
+        ``msvcrt`` there is no cross-process backend, so the in-process lock is
+        the ceiling and this returns True (proceed).
+        """
         try:
             import fcntl as _fcntl
         except ImportError:
-            self._acquire_windows()
-            return self
-        import time
-        deadline = time.monotonic() + self._timeout
-        while True:
-            try:
-                _fcntl.flock(self._fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
-                self._held = "posix"
-                return self
-            except (OSError, BlockingIOError):
-                if time.monotonic() >= deadline:
-                    # Timeout -- proceed on the in-process lock alone.
-                    return self
-                time.sleep(0.05)
+            return self._sidecar_try_windows()
+        try:
+            _fcntl.flock(self._fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+            self._held = "posix"
+            return True
+        except (OSError, BlockingIOError):
+            return False
 
-    def _acquire_windows(self) -> None:
-        """Take a mandatory byte-range lock on the sidecar fd (Windows only).
-
-        ``msvcrt.locking(LK_NBLCK, 1)`` locks one byte at the current file
-        position (offset 0 here). It raises ``OSError`` when another process
-        holds the region, so we retry with the same backoff as the POSIX path and
-        fall back to the in-process lock alone on timeout.
-        """
+    def _sidecar_try_windows(self) -> bool:
         try:
             import msvcrt as _msvcrt
         except ImportError:
-            # Neither fcntl nor msvcrt -- exotic platform; in-process lock only.
-            return
+            return True  # no cross-process backend; proceed on the in-process lock
+        try:
+            os.lseek(self._fd, 0, os.SEEK_SET)
+            _msvcrt.locking(self._fd, _msvcrt.LK_NBLCK, 1)
+            self._held = "windows"
+            return True
+        except OSError:
+            return False
+
+    def _acquire_sidecar_blocking(self) -> None:
+        """Retry :meth:`_sidecar_try` until it wins or ``timeout`` elapses; on
+        timeout, return anyway (the caller proceeds on the in-process lock)."""
         import time
         deadline = time.monotonic() + self._timeout
         while True:
-            try:
-                os.lseek(self._fd, 0, os.SEEK_SET)
-                _msvcrt.locking(self._fd, _msvcrt.LK_NBLCK, 1)
-                self._held = "windows"
+            if self._sidecar_try():
                 return
-            except OSError:
-                if time.monotonic() >= deadline:
-                    # Timeout -- proceed on the in-process lock alone.
-                    return
-                time.sleep(0.05)
+            if time.monotonic() >= deadline:
+                return  # degrade to the in-process lock alone
+            time.sleep(0.05)
 
-    def __exit__(self, *_: object) -> None:
+    def _release(self) -> None:
         if self._fd is not None:
             if self._held == "posix":
                 try:
@@ -1918,9 +1966,12 @@ class _RecordLock:
             os.close(self._fd)
             self._fd = None
             self._held = None
-        if self._plock is not None:
+        if self._plock_held and self._plock is not None:
             self._plock.release()
-            self._plock = None
+            self._plock_held = False
+
+    def __exit__(self, *_: object) -> None:
+        self._release()
 
 
 def _pending_handoff_predecessor(
