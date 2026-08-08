@@ -76,3 +76,9 @@ pr:
   review_blocking: false
   review_latency_hint: "~2m"
   conflict_retriggers_review: true
+  # Merge/update policy (#225). This repo's bot review is non-blocking and is a
+  # review, not a required status check, so nothing gates the merge -- the owner
+  # self-merges immediately. Opt out of prefer-auto-merge so `pr-merge --now`
+  # performs the intended immediate squash self-merge rather than arming a
+  # CI-gated auto-merge that has no required check to wait on.
+  prefer_auto_merge: false

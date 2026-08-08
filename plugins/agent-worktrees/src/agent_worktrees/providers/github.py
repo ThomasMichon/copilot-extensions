@@ -207,6 +207,29 @@ class GitHubProvider:
             )
         return ""
 
+    def enable_auto_merge(
+        self, repo: str, number: int, *, squash: bool = True,
+        api_base: str = "", token: str | None = None,
+    ) -> str:
+        """Arm GitHub native auto-merge: ``gh pr merge <n> --squash --auto`` (#225).
+
+        No ``--admin``: auto-merge waits on required checks rather than bypassing
+        them. The source branch is left in place so ``finalize`` can affirm the
+        eventual merge. Returns "" once auto-merge is armed (the PR is NOT yet
+        merged), or an error string so the caller falls back to a direct merge.
+        """
+        _ = api_base
+        args = ["gh", "pr", "merge", str(number), "--repo", repo, "--auto"]
+        if squash:
+            args.append("--squash")
+        proc = run_cli(args, env=self._env(token))
+        if proc.returncode != 0:
+            return (
+                f"gh pr merge --auto failed for {repo}#{number}: "
+                f"{proc.stderr.strip() or proc.stdout.strip()}"
+            )
+        return ""
+
     _THREADS_QUERY = (
         "query($owner:String!,$name:String!,$number:Int!){"
         "repository(owner:$owner,name:$name){pullRequest(number:$number){"

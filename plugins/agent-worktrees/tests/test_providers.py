@@ -640,6 +640,41 @@ class TestGitHubProvider:
         assert "not mergeable" in err
         assert "o/r#7" in err
 
+    def test_enable_auto_merge_builds_auto_squash_no_admin(self, monkeypatch):
+        # #225: native auto-merge is `--auto --squash`, never `--admin` (it must
+        # wait on required checks, not bypass them), and never deletes the branch.
+        from agent_worktrees.providers import github
+        captured = {}
+
+        def fake(args, **kw):
+            captured["args"] = args
+            return _proc(returncode=0)
+
+        monkeypatch.setattr(github, "run_cli", fake)
+        err = github.GitHubProvider().enable_auto_merge("o/r", 7, squash=True)
+        assert err == ""
+        a = captured["args"]
+        assert a[:5] == ["gh", "pr", "merge", "7", "--repo"]
+        assert "--auto" in a and "--squash" in a
+        assert "--admin" not in a and "--delete-branch" not in a
+
+    def test_enable_auto_merge_surfaces_error(self, monkeypatch):
+        from agent_worktrees.providers import github
+        monkeypatch.setattr(
+            github, "run_cli",
+            lambda args, **kw: _proc(returncode=1, stderr="auto-merge disabled"),
+        )
+        err = github.GitHubProvider().enable_auto_merge("o/r", 7)
+        assert "auto-merge disabled" in err
+        assert "o/r#7" in err
+
+    def test_enable_auto_merge_unsupported_on_gitea_and_azure(self):
+        from agent_worktrees.providers import azure_devops, gitea
+        assert "does not support native auto-merge" in \
+            gitea.GiteaProvider().enable_auto_merge("o/r", 7)
+        assert "does not support native auto-merge" in \
+            azure_devops.AzureDevOpsProvider().enable_auto_merge("o/r", 7)
+
     def test_merge_pull_unsupported_on_gitea_and_azure(self):
         # Direct merge (pr-merge --now) is GitHub-only today; the other
         # providers return a non-empty "unsupported" message, never "".
