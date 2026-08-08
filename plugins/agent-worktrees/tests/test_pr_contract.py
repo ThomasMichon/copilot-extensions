@@ -508,6 +508,22 @@ class TestPRReminder:
         r = pc.pr_reminder(flow, "pr-watch")
         assert any("re-triggers review" in c for c in r.cautions)
 
+    def test_create_pr_nudges_manual_reviewer_request(self):
+        # #3581 nudge: a reviewer-gated repo (not self-merge) whose PR review is
+        # triggered by the repo's own process should remind that *requesting* a
+        # reviewer is a manual, org/platform-specific step.
+        flow = pc.classify_pr_flow(enabled=True, required=True, provider="gitea",
+                                   automerge_label="auto-merge",
+                                   reviewer="agent:wheatley")
+        r = pc.pr_reminder(flow, "create-pr")
+        assert any("manual" in c and "reviewer" in c for c in r.cautions)
+
+    def test_create_pr_no_reviewer_nudge_when_no_reviewer(self):
+        flow = pc.classify_pr_flow(enabled=True, required=True, provider="gitea",
+                                   automerge_label="auto-merge")  # reviewer=""
+        r = pc.pr_reminder(flow, "create-pr")
+        assert not any("requesting a reviewer" in c for c in r.cautions)
+
     def test_as_dict_shape(self):
         flow = _self_merge_flow()
         d = pc.pr_reminder(flow, "create-pr").as_dict()

@@ -977,13 +977,26 @@ def pr_reminder(
     # ---- success path -----------------------------------------------------
     if verb in ("create-pr", "pr-create"):
         nxt = merge if not review else f"wait for {review}, then {merge}"
+        c = cautions
+        if flow.reviewer and flow.profile != PROFILE_PR_SELF_MERGE:
+            # #3581 nudge: review is triggered by the repo's own process
+            # (webhook / auto-assign). Actually *requesting* a reviewer is
+            # org- and platform-specific, so it is left to manual action --
+            # surface that so an agent whose PR sits unreviewed knows the next
+            # step is a manual reviewer request, not a tooling gap.
+            c = c + (
+                f"{flow.reviewer} review is triggered by this repo's own "
+                "process; if none appears, requesting a reviewer is a manual, "
+                "org/platform-specific step (not automated here) -- follow the "
+                "repo's contribution process",
+            )
         return PRReminder(
             flow.profile, verb, state or PR_STATE_CREATED, ok,
             headline="PR created",
             next_step=nxt,
             waiting_on=(review,) if review else (),
             use_instead=(),
-            cautions=cautions,
+            cautions=c,
         )
 
     if verb == "pr-watch":
