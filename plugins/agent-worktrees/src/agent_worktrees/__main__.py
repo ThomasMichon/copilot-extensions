@@ -12129,7 +12129,26 @@ repos:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-worktrees",
-        description="Worktree session manager (use --version for build info)",
+        description=(
+            "Worktree session manager. Context resolves from the current "
+            "directory, the way Git does: the target worktree and its anchor "
+            "repo are discovered from CWD, never from ambient environment "
+            "variables or the branch name."
+        ),
+        epilog=(
+            "Global options (accepted before any command):\n"
+            "  -p, --project NAME  Operate as if CWD were project NAME's anchor "
+            "repo. When already inside one of NAME's worktrees, acts on that "
+            "worktree (git '-C' semantics); otherwise resolves against NAME's "
+            "anchor. This is what a project's own binstub injects, and it lets "
+            "you act on another project's worktrees without leaving this one.\n"
+            "  --version           Show build info and exit.\n"
+            "\n"
+            "With neither --project nor a project binstub, context is "
+            "auto-derived from CWD (a managed repo must be discoverable from "
+            "here, like Git's 'not a git repository')."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
