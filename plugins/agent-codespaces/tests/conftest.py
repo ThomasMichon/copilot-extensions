@@ -47,3 +47,8 @@ def _neutralize_l2(monkeypatch):
     # The pool's cross-machine L2 overlay reads via ``list_leases``; neutralize it
     # too (None -> overlay absent) so ``build_pool`` never shells out in units.
     monkeypatch.setattr(coordination, "list_leases", lambda *a, **k: None)
+    # The cross-harness fence (git-ref-resource-leases Phase 4) shells
+    # ``agent-worktrees get lease-origin`` for the harness identity; neutralize
+    # it (None -> no identity -> fence proceeds without shelling out) so the ssh
+    # CLI tests never touch host state. Tests covering the fence opt back in.
+    monkeypatch.setattr(coordination, "harness_identity", lambda *a, **k: None)
