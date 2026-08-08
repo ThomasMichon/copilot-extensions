@@ -466,6 +466,56 @@ class TestSetPRAndStatus:
 # PR-aware finalize + push-changes (#586)
 # ---------------------------------------------------------------------------
 
+class TestPatchId:
+    """#898: squash-invariant patch-id for durable downstream references."""
+
+    def _git(self, cwd, *args):
+        import subprocess
+        subprocess.run(["git", *args], cwd=cwd, check=True,
+                       capture_output=True, text=True)
+
+    def _repo(self, tmp_path):
+        import subprocess
+        d = tmp_path / "r"
+        d.mkdir()
+        self._git(d, "init", "-q")
+        self._git(d, "config", "user.email", "t@t")
+        self._git(d, "config", "user.name", "t")
+        (d / "a.txt").write_text("one\n")
+        self._git(d, "add", "-A")
+        self._git(d, "commit", "-qm", "base")
+        base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=d,
+                              capture_output=True, text=True).stdout.strip()
+        return d, base
+
+    def test_patch_id_is_squash_invariant(self, tmp_path):
+        # The same change content yields the same patch-id whether committed as
+        # two commits or squashed into one -- so a recorder survives the squash.
+        d, base = self._repo(tmp_path)
+        # Two commits carrying the change.
+        (d / "a.txt").write_text("one\ntwo\n")
+        self._git(d, "commit", "-aqm", "c1")
+        (d / "b.txt").write_text("bee\n")
+        self._git(d, "add", "-A")
+        self._git(d, "commit", "-qm", "c2")
+        pid_multi = pr_ops._patch_id(base, "HEAD", cwd=str(d))
+        assert pid_multi  # non-empty
+
+        # Reset to base and apply the SAME net change as one squashed commit.
+        self._git(d, "reset", "--hard", base, "-q")
+        (d / "a.txt").write_text("one\ntwo\n")
+        (d / "b.txt").write_text("bee\n")
+        self._git(d, "add", "-A")
+        self._git(d, "commit", "-qm", "squashed")
+        pid_squash = pr_ops._patch_id(base, "HEAD", cwd=str(d))
+        assert pid_squash == pid_multi  # squash-invariant
+
+    def test_patch_id_empty_on_no_diff_or_bad_base(self, tmp_path):
+        d, base = self._repo(tmp_path)
+        assert pr_ops._patch_id(base, "HEAD", cwd=str(d)) == ""  # no diff
+        assert pr_ops._patch_id("", "HEAD", cwd=str(d)) == ""    # no base
+
+
 class TestReconcileActivePrSelfHeal:
     """#1375/#1703: reconcile heals a zombie open PR whose content already merged."""
 
