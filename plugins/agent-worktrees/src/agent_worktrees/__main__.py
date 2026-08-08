@@ -7660,6 +7660,23 @@ _INSTRUCTION_MARKER = "<!-- managed by agent-worktrees -->"
 # copy of the old file (see :func:`_remove_managed_instruction`).
 
 
+def _remove_managed_file(path: Path, label: str) -> None:
+    """Remove a previously-deployed managed file (idempotent, marker-guarded).
+
+    Only removes a file carrying the agent-worktrees ownership marker, so an
+    unmarked user file is never touched. Used to retire content that has migrated
+    to a sessionStart hook.
+    """
+    if not path.exists():
+        return
+    try:
+        if _INSTRUCTION_MARKER in path.read_text():
+            path.unlink()
+            output.changed(f"removed migrated {label} (now a sessionStart hook)")
+    except OSError:
+        pass
+
+
 def _remove_managed_instruction(proj_dir: Path, name: str) -> None:
     """Remove a previously-deployed managed ``*.instructions.md`` (idempotent).
 
@@ -7667,15 +7684,7 @@ def _remove_managed_instruction(proj_dir: Path, name: str) -> None:
     marker, so an unmarked user file is never touched. Used to retire fragments
     that have migrated to a sessionStart hook.
     """
-    path = proj_dir / ".github" / "instructions" / name
-    if not path.exists():
-        return
-    try:
-        if _INSTRUCTION_MARKER in path.read_text():
-            path.unlink()
-            output.changed(f"removed migrated {name} (now a sessionStart hook)")
-    except OSError:
-        pass
+    _remove_managed_file(proj_dir / ".github" / "instructions" / name, name)
 
 
 def _gh_env_for_repo(target: str) -> tuple[dict[str, str], str | None, bool]:
@@ -7783,38 +7792,28 @@ def _deploy_copilot_instructions(
     proj_dir: Path, entry: cfg.MachineEntry,
     project: str = "",
 ) -> None:
-    """Write or update machine instruction files from the registry.
+    """Retire migrated managed instruction files + clean up legacy artifacts.
 
-    Deploys into the COPILOT_CUSTOM_INSTRUCTIONS_DIRS directory:
+    All the guidance this used to materialize into the
+    COPILOT_CUSTOM_INSTRUCTIONS_DIRS directory now arrives via sessionStart hooks
+    that emit ``additionalContext`` (effort instructions-to-hooks):
 
-    - ``.github/instructions/machine.instructions.md`` -- machine identity,
-      project name, and binstub info.
-    - ``AGENTS.md`` -- discovered as a nested AGENTS.md in custom dirs
-      (machine identity content, same as machine.instructions.md).
+    - machine identity (``machine.instructions.md`` + the nested-discovery
+      ``AGENTS.md``) -> the ``session-machine`` hook / ``machine-context`` command
+      (dotfiles#1056), computed live from ``machines.yaml``;
+    - account- and worktree-conduct -> the ``session-conduct`` hook.
 
-    All files are tagged with an ownership marker so stale files can be
-    identified and cleaned up.
+    So this function no longer *writes* those files; it retires any stale copy we
+    previously deployed (marker-guarded, so unmarked user files are never
+    touched). ``entry`` is retained for call-site compatibility but unused. The
+    ext-reload-hang warning deliberately stays on the file mechanism (its hook
+    cwd-gate fails under Bare resume; dotfiles#1055).
     """
-    raw = cfg.render_copilot_instructions(entry, project=project)
-    content = f"{_INSTRUCTION_MARKER}\n{raw}"
-
-    # Primary: .github/instructions/*.instructions.md (auto-injected)
+    # Machine identity migrated to the session-machine sessionStart hook
+    # (dotfiles#1056): retire the stale per-project file + nested AGENTS.md.
     instr_dir = proj_dir / ".github" / "instructions"
-    instr_dir.mkdir(parents=True, exist_ok=True)
-    instr_path = instr_dir / "machine.instructions.md"
-    if instr_path.exists() and instr_path.read_text() == content:
-        output.skipped("machine.instructions.md already in sync")
-    else:
-        instr_path.write_text(content)
-        output.changed(f"machine.instructions.md -> {instr_path}")
-
-    # Fallback: AGENTS.md (nested discovery)
-    agents_path = proj_dir / "AGENTS.md"
-    if agents_path.exists() and agents_path.read_text() == content:
-        output.skipped("AGENTS.md already in sync")
-    else:
-        agents_path.write_text(content)
-        output.changed(f"AGENTS.md -> {agents_path}")
+    _remove_managed_instruction(proj_dir, "machine.instructions.md")
+    _remove_managed_file(proj_dir / "AGENTS.md", "AGENTS.md")
 
     # worktree-conduct migrated to the session-conduct sessionStart hook
     # (dotfiles#1054): retire any stale per-project file we used to deploy.
@@ -7824,7 +7823,7 @@ def _deploy_copilot_instructions(
     # (dotfiles#1053): retire any stale per-project file we used to deploy.
     _remove_managed_instruction(proj_dir, "account-conduct.instructions.md")
 
-    # Temporary: the ext-reload hang warning rides the same managed deploy.
+    # Temporary: the ext-reload hang warning stays on the file mechanism.
     _deploy_ext_reload_warning(proj_dir)
 
     # Clean up stale ssh.instructions.md from previous versions
@@ -9295,6 +9294,76 @@ def cmd_deploy_instructions(args: argparse.Namespace) -> int:
     _deploy_copilot_instructions(
         proj_dir, registry[machine], project=project,
     )
+    return 0
+
+
+def cmd_machine_context(args: argparse.Namespace) -> int:
+    """sessionStart hook entrypoint: emit machine identity as additionalContext.
+
+    Renders the same machine-identity block that used to be materialized into
+    ``machine.instructions.md`` / the nested ``AGENTS.md`` (dotfiles#1056), but
+    computes it **live** at session start and emits it via the hook -- so it loads
+    under any launch path, with no file on disk. cwd-gated: prints ``{}`` when the
+    session is not inside an agent-worktrees-managed project with a resolvable
+    ``machines.yaml`` entry, so a globally-loaded plugin never leaks machine
+    identity into unrelated repos. Prints exactly one JSON object to stdout.
+    """
+    import json
+
+    def _empty() -> int:
+        print("{}")
+        return 0
+
+    # Resolve the active project from cwd the same way ``main()`` does for
+    # project-requiring commands -- the robust registry/anchor resolver, not
+    # cfg.project_name() (which raises off-project). machine-context is a
+    # _NO_PROJECT_COMMANDS entry (so it dispatches even under Bare resume), so we
+    # must run that resolution ourselves before load_config().
+    try:
+        project, _assumed = _resolve_active_project(None)
+    except Exception:
+        return _empty()
+    if not project:
+        return _empty()
+    try:
+        cfg.set_active_project(project)
+    except Exception:
+        pass
+
+    try:
+        config = cfg.load_config()
+    except Exception:
+        return _empty()
+
+    project = getattr(config, "repo_name", "") or project
+    machine = getattr(config, "machine", "") or ""
+    if not project or not machine:
+        return _empty()
+
+    try:
+        repo_dir = config.default_repo.anchor
+    except Exception:
+        repo_dir = _find_repo_dir()
+    if not repo_dir:
+        return _empty()
+
+    try:
+        registry = cfg.load_machines_yaml(repo_dir)
+    except (FileNotFoundError, ValueError):
+        return _empty()
+
+    entry = cfg.find_machine_entry(registry, machine)
+    if entry is None:
+        return _empty()
+
+    try:
+        raw = cfg.render_copilot_instructions(entry, project=project).rstrip()
+    except Exception:
+        return _empty()
+    if not raw:
+        return _empty()
+
+    print(json.dumps({"additionalContext": raw}))
     return 0
 
 
@@ -12528,9 +12597,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     # deploy-instructions
     p = sub.add_parser("deploy-instructions",
-                       help="Deploy machine.instructions.md from machines.yaml")
+                       help="Retire migrated managed instruction files (machine identity now via the session-machine hook)")
     p.add_argument("--machine", default=None,
                    help="Machine name (auto-detected from config if omitted)")
+
+    # machine-context (sessionStart hook: emit machine identity as additionalContext)
+    sub.add_parser("machine-context",
+                   help="Emit machine identity as sessionStart additionalContext (hook entrypoint; cwd-gated)")
 
     # get (query project paths and config values)
     p = sub.add_parser("get", help="Query project paths and config values")
@@ -13817,6 +13890,7 @@ COMMAND_MAP = {
     "update": cmd_update,
     "install-status": cmd_install_status,
     "deploy-instructions": cmd_deploy_instructions,
+    "machine-context": cmd_machine_context,
     "get": cmd_get,
     "pre-launch": cmd_pre_launch,
     "stage-update": cmd_stage_update,
@@ -14150,7 +14224,7 @@ _NO_PROJECT_COMMANDS = {
     "--version", "-V", "--help", "-h", "repos", "accounts", "install", "register", "hook",
     "picker", "reap-shells", "status-updater", "restart", "register-session",
     "head-session", "conclude-session", "link-succession", "config-migrate",
-    "session-lock",
+    "session-lock", "machine-context",
 }
 
 
