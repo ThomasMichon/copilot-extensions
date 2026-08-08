@@ -289,6 +289,45 @@ Worktree completion is split into two explicit steps:
 
 On push failure, the worktree is preserved and marked `status: orphaned`.
 
+### Resource obligations -- the finalize accountability gate
+
+Before finalize's content validation runs, an **obligation gate**
+(`finalize.validate_and_finalize` → `_assert_obligations_settled`) asserts that
+every outbound resource the worktree still owns is settled. This holds a worktree
+**accountable** for what it allocated (cross-repo worktrees, borrowed CodeSpaces,
+containers, bridge sessions) so finalizing never orphans unfinished work. (Effort
+`resource-obligation-settlement`; the fabric-wide overview is in
+[`../../../docs/architecture.md`](../../../docs/architecture.md#resource-obligations--accountability).)
+
+- **Disposition on the claim ledger.** Each `tracking.ResourceClaim.state` is a
+  disposition `∈ {active, at-rest, released}` (`agent_worktrees.obligations`).
+  `active` (and any missing/unknown value) **blocks**; `at-rest` (resource work
+  safe) and `released` (claim torn down) do not. `at-rest ≠ released` — a resource
+  can be safe yet its claim still held, or released without the resource being
+  destroyed. For a leaseable resource the disposition mirrors onto the lease
+  record's `context` (`disposition` key) for cross-machine visibility.
+- **The gate is cheap + local + warn-first.** It reads only the owner's own
+  `record.resources` for `is_unsettled` claims — O(claims), no traversal — and
+  runs **before any destructive step**. `obligations.gate_mode()`
+  (`AGENT_WORKTREES_OBLIGATION_GATE`) is `warn` by default (surface + proceed);
+  `block` refuses unless `--abandon` (which re-homes via `release_all_resources`);
+  `off` skips.
+- **Incremental settlement (recursion collapse).**
+  `tracking.settle_resource_claim` flips one claim's disposition; the
+  cross-repo-worktree hook `_settle_parent_obligation` runs on a child's finalize
+  and flips the claim its **parent** holds on it to `at-rest` (same-machine parent
+  via `owner_claim_ref` → `project_dir(project)/worktrees/…`), so the parent's
+  gate trusts the recorded verdict instead of recursing.
+- **Ledger CRUD.** `agent-worktrees claims {show,add,settle,release}`.
+  `claims add --owner-ref <machine/project/worktree_id>` journals onto a
+  **cross-project** owner resolved by qualified ref (not the caller's cwd) — for a
+  call-site whose cwd is not the owning worktree (e.g. agent-codespaces journaling
+  a CodeSpace claim from the daemon's cwd). A cross-machine owner-ref defers to
+  the lease mirror.
+- **Never-wedge.** The reclaim sweep (`claimant` liveness) may flip a
+  provably-gone + provably-safe `active` obligation to `abandoned` (never
+  `at-rest`), so a crashed holder cannot freeze its parent. *(Phase 4.)*
+
 ### Recovery Mode
 
 ```bash
