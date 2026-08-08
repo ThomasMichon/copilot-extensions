@@ -62,6 +62,29 @@ def _lock_increment_worker(yaml_path_str: str, iterations: int, hold: float) -> 
             save_record(record, path)
 
 
+def _hold_lock_worker(yaml_path_str: str, ready_file: str, release_file: str) -> None:
+    """Acquire the blocking `_RecordLock` cross-process and hold it until told.
+
+    Signals readiness by creating ``ready_file`` once the lock is held, then
+    spins until ``release_file`` appears before releasing. Module-level so it runs
+    under the ``spawn`` start method. Used to test that a best-effort
+    (``blocking=False``) acquirer SKIPS while the lock is genuinely held by
+    another process (#4547).
+    """
+    import time
+    from pathlib import Path as _Path
+
+    from agent_worktrees.tracking import _RecordLock
+
+    with _RecordLock(_Path(yaml_path_str)):
+        _Path(ready_file).write_text("1")
+        deadline = time.monotonic() + 30
+        while not _Path(release_file).exists():
+            if time.monotonic() > deadline:
+                break
+            time.sleep(0.01)
+
+
 # ---------------------------------------------------------------------------
 # Round-trip serialization
 # ---------------------------------------------------------------------------
@@ -1081,6 +1104,64 @@ class TestRecordLockCrossProcess:
             save_record(rec, path)
         with _RecordLock(path):
             assert load_record(path).resume_count == 5
+
+    def test_blocking_acquire_sets_acquired(self, tmp_path: Path):
+        # The default (critical) acquire always reports acquired=True.
+        path = self._seed(tmp_path)
+        with _RecordLock(path) as lk:
+            assert lk.acquired is True
+
+    def test_best_effort_uncontended_acquires(self, tmp_path: Path):
+        path = self._seed(tmp_path)
+        with _RecordLock(path, blocking=False) as lk:
+            assert lk.acquired is True
+
+    def test_best_effort_skips_and_preserves_when_held(self, tmp_path: Path):
+        # #4547: while a critical (blocking) holder in ANOTHER process owns the
+        # sidecar, a best-effort acquirer must SKIP (acquired=False) rather than
+        # block, and must not corrupt the holder's data.
+        import multiprocessing as mp
+        import time
+
+        path = self._seed(tmp_path)
+        with _RecordLock(path):  # pre-set a sentinel the holder will preserve
+            rec = load_record(path)
+            rec.resume_count = 42
+            save_record(rec, path)
+
+        ready = tmp_path / "ready"
+        release = tmp_path / "release"
+        ctx = mp.get_context("spawn")
+        holder = ctx.Process(
+            target=_hold_lock_worker,
+            args=(str(path), str(ready), str(release)),
+        )
+        holder.start()
+        try:
+            # Wait until the other process genuinely holds the cross-process lock.
+            deadline = time.monotonic() + 60
+            while not ready.exists():
+                assert holder.is_alive(), "holder died before acquiring"
+                assert time.monotonic() < deadline, "holder never acquired"
+                time.sleep(0.02)
+
+            # Best-effort acquire must skip immediately (no block, no acquire).
+            t0 = time.monotonic()
+            with _RecordLock(path, blocking=False) as lk:
+                acquired = lk.acquired
+            elapsed = time.monotonic() - t0
+            assert acquired is False, "best-effort should skip a held lock"
+            assert elapsed < 1.0, "best-effort must not block on a held lock"
+        finally:
+            release.write_text("1")
+            holder.join(timeout=60)
+
+        assert holder.exitcode == 0
+        # The holder's data is intact (best-effort never wrote/clobbered).
+        assert load_record(path).resume_count == 42
+        # And once released, a best-effort acquire succeeds again.
+        with _RecordLock(path, blocking=False) as lk:
+            assert lk.acquired is True
 
 
 class TestFindWorktreeIdByCwd:
