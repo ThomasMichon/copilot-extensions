@@ -5335,6 +5335,14 @@ def cmd_claims(args: argparse.Namespace) -> int:
     worktree id for :func:`_claims_show`.
     """
     target = list(getattr(args, "target", None) or [])
+    if target and target[0] == "add":
+        if len(target) < 3:
+            if args.json:
+                return _json_error("claims add: usage 'add <kind> <ref>'", 2)
+            output.err("claims add: usage 'add <kind> <ref>' "
+                       "(kind: worktree|codespace|container|ssh|workdir|pr)")
+            return 2
+        return _claims_add(args, target[1], target[2])
     if target and target[0] == "release":
         if len(target) < 2:
             if args.json:
@@ -5353,6 +5361,46 @@ def cmd_claims(args: argparse.Namespace) -> int:
         return _claims_settle(args, target[1])
     worktree_id = target[0] if target else None
     return _claims_show(args, worktree_id)
+
+
+def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
+    """Journal a new outbound resource claim on a worktree (Phase 3b-wiring).
+
+    Completes the ledger CRUD (``show``/``add``/``settle``/``release``): records
+    that this worktree owns a resource -- a borrowed CodeSpace, a container, a
+    cross-repo worktree -- so the finalize obligation gate can hold it accountable.
+    The claim starts ``active`` (unsettled). Dedups by ref (re-adding refreshes).
+    The owner worktree is the current one unless ``--worktree`` names another.
+    """
+    valid_kinds = {"worktree", "codespace", "container", "ssh", "workdir", "pr"}
+    if kind not in valid_kinds:
+        msg = (f"claims add: unknown kind {kind!r} "
+               f"(expected one of {', '.join(sorted(valid_kinds))})")
+        if args.json:
+            return _json_error(msg, 2)
+        output.err(msg)
+        return 2
+    config = cfg.load_config()
+    wt_id = _infer_worktree_id(getattr(args, "release_worktree", None), config)
+    rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+    if not rec_path.exists():
+        if args.json:
+            return _json_error(f"worktree not found: {wt_id}")
+        output.err(f"worktree not found: {wt_id}")
+        return 1
+    rec = tracking.load_record(rec_path)
+    claim = tracking.ResourceClaim(
+        kind=kind, ref=ref, created_at=tracking._now_iso(),
+        state=obligations.ACTIVE, note=getattr(args, "note", "") or "",
+    )
+    tracking.add_resource_claim(rec, claim, save=False)
+    tracking.save_record(rec, rec_path)
+    if args.json:
+        _json_output({"worktree_id": wt_id, "kind": kind, "ref": ref,
+                      "state": obligations.ACTIVE})
+        return 0
+    print(f"added outbound claim {kind}:{ref} on {wt_id}")
+    return 0
 
 
 def _claims_release(args: argparse.Namespace, ref: str) -> int:
@@ -12396,12 +12444,14 @@ def build_parser() -> argparse.ArgumentParser:
              "`claims release <ref>` retires one outbound claim.",
     )
     p.add_argument("target", nargs="*", default=None,
-                   help="[worktree_id] to show, OR 'release <ref>' to retire an "
-                        "outbound claim by ref, OR 'settle <ref>' to mark it "
-                        "at-rest (settled) / released")
+                   help="[worktree_id] to show, OR 'add <kind> <ref>' to journal "
+                        "a new outbound claim, OR 'release <ref>' to retire one, "
+                        "OR 'settle <ref>' to mark it at-rest (settled) / released")
     p.add_argument("--remove", action="store_true",
                    help="with release: drop the claim entry entirely instead of "
                         "marking it released")
+    p.add_argument("--note", default="",
+                   help="with add: an optional human label for the claim")
     p.add_argument("--released", action="store_true",
                    help="with settle: mark the claim released rather than at-rest")
     p.add_argument("--worktree", default=None, dest="release_worktree",

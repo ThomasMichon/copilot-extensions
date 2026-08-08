@@ -209,3 +209,91 @@ def test_claims_release_missing_ref(monkeypatch, tmp_path):
     rc = m.cmd_claims(argparse.Namespace(
         target=["release"], remove=False, release_worktree=None, json=True))
     assert rc == 2
+
+
+# --- claims add -------------------------------------------------------------
+
+def _add_args(kind, ref, *, note="", json_=True):
+    return argparse.Namespace(
+        target=["add", kind, ref], note=note, release_worktree=None, json=json_)
+
+
+def test_claims_add_journals_active_claim(monkeypatch, tmp_path, capfd):
+    _seed(tmp_path, monkeypatch)
+    rc = m.cmd_claims(_add_args("codespace", "cs-blue", note="odsp-web"))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["kind"] == "codespace" and out["ref"] == "cs-blue"
+    assert out["state"] == "active"
+    rec = tracking.load_record(tmp_path / "worktrees" / "wt-A.yaml")
+    assert len(rec.resources) == 1
+    c = rec.resources[0]
+    assert c.kind == "codespace" and c.ref == "cs-blue" and c.note == "odsp-web"
+    assert c.is_unsettled and c.created_at  # active + timestamped
+
+
+def test_claims_add_rejects_unknown_kind(monkeypatch, tmp_path):
+    _seed(tmp_path, monkeypatch)
+    rc = m.cmd_claims(_add_args("gizmo", "x"))
+    assert rc == 2
+
+
+def test_claims_add_dedups_by_ref(monkeypatch, tmp_path, capfd):
+    _seed(tmp_path, monkeypatch)
+    m.cmd_claims(_add_args("codespace", "cs-blue"))
+    capfd.readouterr()
+    m.cmd_claims(_add_args("codespace", "cs-blue", note="second"))
+    rec = tracking.load_record(tmp_path / "worktrees" / "wt-A.yaml")
+    assert len(rec.resources) == 1  # refreshed, not duplicated
+
+
+def test_claims_add_missing_operands(monkeypatch, tmp_path):
+    _seed(tmp_path, monkeypatch)
+    rc = m.cmd_claims(argparse.Namespace(
+        target=["add", "codespace"], note="", release_worktree=None, json=True))
+    assert rc == 2
+
+
+# --- claims settle ----------------------------------------------------------
+
+def _settle_args(ref, *, released=False, json_=True):
+    return argparse.Namespace(
+        target=["settle", ref], released=released, release_worktree=None, json=json_)
+
+
+def test_claims_settle_marks_at_rest(monkeypatch, tmp_path, capfd):
+    _seed(tmp_path, monkeypatch,
+          resources=[tracking.ResourceClaim(kind="codespace", ref="cs-blue")])
+    rc = m.cmd_claims(_settle_args("cs-blue"))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["disposition"] == "at-rest"
+    rec = tracking.load_record(tmp_path / "worktrees" / "wt-A.yaml")
+    c = rec.resources[0]
+    assert c.state == "at-rest" and c.is_at_rest and not c.is_unsettled
+    assert c.is_live  # at-rest is still held
+
+
+def test_claims_settle_released(monkeypatch, tmp_path, capfd):
+    _seed(tmp_path, monkeypatch,
+          resources=[tracking.ResourceClaim(kind="codespace", ref="cs-blue")])
+    rc = m.cmd_claims(_settle_args("cs-blue", released=True))
+    assert rc == 0
+    rec = tracking.load_record(tmp_path / "worktrees" / "wt-A.yaml")
+    assert rec.resources[0].state == "released"
+
+
+def test_claims_settle_unknown_ref(monkeypatch, tmp_path):
+    _seed(tmp_path, monkeypatch,
+          resources=[tracking.ResourceClaim(kind="codespace", ref="cs-blue")])
+    rc = m.cmd_claims(_settle_args("cs-red"))
+    assert rc == 1
+
+
+def test_claims_add_then_settle_roundtrip(monkeypatch, tmp_path, capfd):
+    _seed(tmp_path, monkeypatch)
+    m.cmd_claims(_add_args("codespace", "cs-blue"))
+    capfd.readouterr()
+    m.cmd_claims(_settle_args("cs-blue"))
+    rec = tracking.load_record(tmp_path / "worktrees" / "wt-A.yaml")
+    assert rec.resources[0].state == "at-rest"
