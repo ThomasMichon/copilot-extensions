@@ -440,6 +440,7 @@ class TestSaveLoadRoundTrip:
                 branch="feature/fix-auth-abc123",
                 base_sha="abc123",
                 head_sha="def456",
+                patch_id="pid789",
                 url="https://example/pulls/42",
                 number=42,
                 provider="gitea",
@@ -453,6 +454,7 @@ class TestSaveLoadRoundTrip:
         assert loaded.pr.branch == "feature/fix-auth-abc123"
         assert loaded.pr.base_sha == "abc123"
         assert loaded.pr.head_sha == "def456"
+        assert loaded.pr.patch_id == "pid789"
         assert loaded.pr.url == "https://example/pulls/42"
         assert loaded.pr.number == 42
         assert loaded.pr.provider == "gitea"
