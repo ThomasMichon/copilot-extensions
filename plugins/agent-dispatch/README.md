@@ -293,6 +293,34 @@ inbound bearer token, the coordinator URL) is set in an optional JSON config:
 agent-dispatch webhook --config webhook.json --host 127.0.0.1 --port 9331
 ```
 
+### Evaluator -- a producer's lifecycle handler (`agent-dispatch evaluate`)
+
+A producer puts work on the queue; an **evaluator** decides what happens *next* as
+that work progresses -- the *judgment* half of emitters-and-evaluators. It is
+hook-like: it receives one task **lifecycle event** (the coordinator shape
+`{"type": "task.completed", "task": {...}}`) and returns decisions -- emit a
+follow-up task, or nothing. A declarative spec of rules matches on the event and
+mints follow-ups from templates, so a standing domain automates a whole cycle
+(reviewer done -> open a conflict-resolution follow-up; a goal met -> the next
+goal) without a bespoke module.
+
+```bash
+# apply an evaluator to an event read from stdin (a hook/producer pipes it in):
+echo '{"type":"task.completed","task":{"id":"t1","labels":["recipe:reviewer"],"status":"completed","origin_ref":"o/n#42"}}' \
+  | agent-dispatch evaluate --spec evaluator.json --repo o/n
+agent-dispatch evaluate --spec evaluator.json --event-file event.json --dry-run
+```
+
+Spec shape (JSON): a `rules` list, each with `on` (event type, or a list), an
+optional `when` predicate (`labels_any` / `labels_all` / `status` / `source`), and
+an `emit` block that templates the follow-up (`title_template`, `prompt_template`,
+`labels`, `requires`, `dedup_template`, ...). The first matching rule wins; a
+follow-up defaults `source=evaluator`. The **degenerate case is the ad-hoc kick**:
+a one-off task with no evaluator still runs -- an evaluator is opt-in judgment,
+never required. See
+[`visions/plugins/agent-dispatch`](../../visions/plugins/agent-dispatch/README.md)
+(§Concepts/*The evaluator*, §Features/*emitters-and-evaluators*).
+
 ## Recipes (loop archetypes)
 
 A **recipe** is a packaged *shape* of long-running agentic work -- a charter

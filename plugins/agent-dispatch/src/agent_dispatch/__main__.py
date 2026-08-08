@@ -1675,6 +1675,51 @@ def _cmd_run(args: argparse.Namespace) -> int:
     return _emit(report)
 
 
+def _cmd_evaluate(args: argparse.Namespace) -> int:
+    """Feed one task **lifecycle event** through a declarative evaluator and apply
+    its decisions (the *evaluator* half of emitters-and-evaluators). The event
+    JSON is read from ``--event-file`` or stdin; the coordinator shape is
+    ``{"type": "task.completed", "task": {...}}``."""
+    from .producers.evaluator import EvaluatorError, SpecEvaluator, evaluate_and_apply
+
+    try:
+        spec = json.loads(Path(args.spec).expanduser().read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print(f"agent-dispatch: cannot read evaluator spec: {exc}", file=sys.stderr)
+        return 2
+    raw = (
+        Path(args.event_file).expanduser().read_text(encoding="utf-8")
+        if args.event_file
+        else sys.stdin.read()
+    )
+    try:
+        event = json.loads(raw)
+    except ValueError as exc:
+        print(f"agent-dispatch: event is not valid JSON: {exc}", file=sys.stderr)
+        return 2
+    try:
+        evaluator = SpecEvaluator(spec)
+    except EvaluatorError as exc:
+        print(f"agent-dispatch: {exc}", file=sys.stderr)
+        return 2
+
+    if args.dry_run:
+        report = evaluate_and_apply(
+            evaluator, event, creator=lambda *a, **k: {}, repo=args.repo, apply=False
+        )
+        return _emit(report)
+
+    with _client(args) as c:
+        try:
+            report = evaluate_and_apply(
+                evaluator, event, creator=c.create, repo=args.repo, apply=True
+            )
+        except EvaluatorError as exc:
+            print(f"agent-dispatch: {exc}", file=sys.stderr)
+            return 2
+    return _emit(report)
+
+
 def _cmd_recipes_list(args: argparse.Namespace) -> int:
     from .recipes import list_recipes
 
@@ -2589,6 +2634,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="the blocking wait command, after '--' (e.g. -- agent-worktrees pr-watch 42)",
     )
     rnp.set_defaults(func=_cmd_run)
+
+    # -- Evaluator: a producer's lifecycle handler ------------------------
+    evp = sub.add_parser(
+        "evaluate",
+        help="feed one task lifecycle event through a declarative evaluator and "
+             "apply its decisions (emit a follow-up task, or nothing)",
+    )
+    evp.add_argument("--spec", required=True, metavar="FILE", help="evaluator spec (JSON)")
+    evp.add_argument(
+        "--event-file", metavar="FILE",
+        help="lifecycle event JSON (default: read from stdin)",
+    )
+    evp.add_argument(
+        "--repo", help="lane for any emitted follow-up task (a local name or remote URL)"
+    )
+    evp.add_argument(
+        "--dry-run", action="store_true",
+        help="print the decisions without creating any follow-up task",
+    )
+    evp.set_defaults(func=_cmd_evaluate)
 
     return parser
 

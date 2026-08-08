@@ -352,6 +352,10 @@ The coordinator only owns the queue; anything that *creates* tasks is a
   `origin_ref=pr/<n>`, lane from the payload's repo remote) and
   `POST /webhook/telemetry` (a **firing** alert -> remediation task,
   `source=telemetry`). Deterministic `dedup_key`s make redelivery safe.
+- **`agent-dispatch evaluate --spec <cfg>`** -- the *evaluator*: pipe one task
+  lifecycle event (stdin or `--event-file`) through a declarative rule set that
+  decides what happens next (emit a follow-up task, or nothing). Hook-like; the
+  judgment half of emitters-and-evaluators. `--dry-run` prints decisions only.
 
 See the plugin README (**Producers**) for the spec/config shapes.
 
