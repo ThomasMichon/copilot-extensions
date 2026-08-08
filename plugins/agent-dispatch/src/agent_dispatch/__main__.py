@@ -1456,6 +1456,22 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
     with _client(args, ensure=False) as c:
+        evaluator = None
+        spec_path = getattr(args, "evaluator", None)
+        if spec_path:
+            from .producers.evaluator import EvaluatorError, SpecEvaluator
+
+            try:
+                spec = json.loads(Path(spec_path).expanduser().read_text(encoding="utf-8"))
+                evaluator = SpecEvaluator(spec)
+            except (OSError, ValueError, EvaluatorError) as exc:
+                print(f"agent-dispatch supervise: bad --evaluator spec: {exc}", file=sys.stderr)
+                return 2
+            print(
+                "agent-dispatch supervise: evaluator pass enabled -- advancing "
+                "terminal tasks across the loop",
+                file=sys.stderr,
+            )
         sup = Supervisor(
             c,
             spawn_fn=spawn_fn,
@@ -1470,6 +1486,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
             reactive=not getattr(args, "no_reactive", False),
             reactive_interval=getattr(args, "reactive_interval", 2.0) or 2.0,
             capacity_gate=capacity_gate,
+            evaluator=evaluator,
         )
         if args.once:
             return _emit({"spawned": sup.poll_once()})
@@ -2516,8 +2533,14 @@ def build_parser() -> argparse.ArgumentParser:
              "so bounded sweeps embody reliably on a remote pool host with no "
              "human attach. Ignored outside --pool mode.",
     )
+    p.add_argument(
+        "--evaluator", metavar="SPEC",
+        help="path to an evaluator spec (JSON). When set, each cycle feeds every "
+             "newly-terminal task's lifecycle event to the evaluator and applies "
+             "its decisions (emit a follow-up task) -- the service-driven loop-"
+             "advancement pass (emitters-and-evaluators). See 'evaluate'.",
+    )
     p.set_defaults(func=_cmd_supervise)
-
     p = sub.add_parser(
         "reservations", help="inspect / manually control spawn reservations"
     )

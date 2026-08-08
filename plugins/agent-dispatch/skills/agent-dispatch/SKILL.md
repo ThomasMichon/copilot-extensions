@@ -356,6 +356,9 @@ The coordinator only owns the queue; anything that *creates* tasks is a
   lifecycle event (stdin or `--event-file`) through a declarative rule set that
   decides what happens next (emit a follow-up task, or nothing). Hook-like; the
   judgment half of emitters-and-evaluators. `--dry-run` prints decisions only.
+  For the **service-driven** loop, `agent-dispatch supervise --evaluator <cfg>`
+  runs the same rules each cycle over newly-terminal tasks (advancing the loop
+  with no bespoke module; idempotent via the emit's `dedup_key`).
 
 See the plugin README (**Producers**) for the spec/config shapes.
 

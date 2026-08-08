@@ -35,6 +35,7 @@ import logging
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
+from typing import Any
 
 from .client import DispatchClient, DispatchError
 from .queue import SpawnState, Status
@@ -403,6 +404,8 @@ class Supervisor:
         nudge_fn: NudgeFn | None = None,
         turn_state_fn: TurnStateFn | None = None,
         capacity_gate: Callable[[dict], bool] | None = None,
+        evaluator: Any | None = None,
+        evaluate_limit: int = 100,
     ):
         self.client = client
         self.spawn_fn = spawn_fn
@@ -473,6 +476,23 @@ class Supervisor:
         #: dead-letter bound. Default (None) always admits, preserving the local
         #: spawn behavior exactly.
         self.capacity_gate = capacity_gate
+        #: Optional **evaluator** (a producer's lifecycle handler with an
+        #: ``evaluate(event) -> [decision]`` method, e.g.
+        #: :class:`~agent_dispatch.producers.evaluator.SpecEvaluator`). When set,
+        #: :meth:`poll_once` runs :meth:`advance_via_evaluator` each cycle: it feeds
+        #: each newly-terminal task's lifecycle event to the evaluator and applies
+        #: the resulting decisions (emit a follow-up task). This is the
+        #: **service-driven** half of *a-loop-runs-with-or-without-a-service* -- a
+        #: standing supervisor advances a domain's loop across events without a
+        #: bespoke module. Idempotent: emitted follow-ups carry the evaluator's
+        #: ``dedup_key`` (dedup-before-create), and an in-process guard fires each
+        #: task's terminal event at most once.
+        self.evaluator = evaluator
+        #: Max terminal tasks scanned per evaluator pass (newest first).
+        self.evaluate_limit = max(1, int(evaluate_limit))
+        #: Task ids whose terminal lifecycle event has already been dispatched to
+        #: the evaluator this process (dedup_key is the cross-restart guard).
+        self._evaluated: set[str] = set()
 
     # -- helpers -------------------------------------------------------------
 
@@ -955,6 +975,67 @@ class Supervisor:
         ]
         return max(overrides) if overrides else self.max_attempts
 
+    def advance_via_evaluator(self) -> int:
+        """Feed each newly-terminal task's lifecycle event to the evaluator and
+        apply its decisions (the service-driven loop-advancement pass).
+
+        Lists recent terminal tasks in the lane (completed / abandoned), and for
+        each one not yet seen this process, synthesizes the coordinator-shaped
+        lifecycle event ``{"type": "task.completed"|"task.abandoned", "task":
+        {...}}``, runs the evaluator, and applies the returned decisions through
+        :func:`~agent_dispatch.producers.evaluator.apply_decisions` (an ``Emit``
+        creates a follow-up task in this lane). Returns the number of follow-up
+        tasks emitted.
+
+        Best-effort and non-fatal: a bad evaluator or a failed create is logged
+        and skipped, never allowed to abort the supervision cycle. Each task's
+        terminal event fires **at most once per process**; the emitted follow-up's
+        ``dedup_key`` is the durable cross-restart guard against duplicates.
+        """
+        if self.evaluator is None:
+            return 0
+        from .producers.evaluator import apply_decisions
+
+        try:
+            terminal = self.client.list(
+                repo=self.repo,
+                status=[Status.COMPLETED, Status.ABANDONED],
+                limit=self.evaluate_limit,
+            )
+        except DispatchError:
+            log.exception("evaluator pass: listing terminal tasks failed")
+            return 0
+
+        emitted = 0
+        for task in terminal:
+            tid = task.get("id")
+            if not tid or tid in self._evaluated:
+                continue
+            self._evaluated.add(tid)  # fire once per process, success or not
+            event = {"type": f"task.{task.get('status')}", "task": task}
+            try:
+                decisions = self.evaluator.evaluate(event)
+                results = apply_decisions(
+                    decisions, creator=self.client.create, repo=self.repo
+                )
+            except Exception:  # a domain evaluator/create must never crash the loop
+                log.exception("evaluator pass: advancing task %s failed", tid)
+                continue
+            for r in results:
+                if r.get("decision") == "emit" and r.get("created"):
+                    emitted += 1
+                    log.info(
+                        "evaluator pass: task %s (%s) -> emitted follow-up %s",
+                        tid, event["type"], r["created"].get("id"),
+                    )
+        # Bound the in-process guard so a long-lived supervisor doesn't grow it
+        # without limit -- keep the most recent terminal ids (dedup_key still
+        # guards anything evicted).
+        if len(self._evaluated) > 4 * self.evaluate_limit:
+            keep = {t.get("id") for t in terminal if t.get("id")}
+            self._evaluated = keep
+        return emitted
+
     def _failed_spawn_counts(self) -> dict[str, int]:
         """Count FAILED spawn reservations per task id (the dead-letter signal)."""
         counts: dict[str, int] = {}
@@ -983,6 +1064,8 @@ class Supervisor:
         """
         now = time.time() if now is None else now
         self.reconcile()
+        if self.evaluator is not None:
+            self.advance_via_evaluator()
         if self.heartbeat:
             self.hold_live_leases()
         if self.recover:

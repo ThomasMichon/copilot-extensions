@@ -33,6 +33,12 @@ class QueueBackedClient:
     def list(self, *, repo=None, status=None, limit=200, **_kw):
         return [asdict(t) for t in self._q.list(repo=repo, status=status, limit=limit)]
 
+    def create(self, title, *, repo=None, proposed=False, **kwargs):
+        status = Status.PROPOSED if proposed else Status.QUEUED
+        return asdict(
+            self._q.create(title, repo=repo or TEST_REPO, status=status, **kwargs)
+        )
+
     def get(self, task_id):
         t = self._q.get(task_id)
         if t is None:
@@ -1112,3 +1118,131 @@ def test_hold_live_leases_skips_unknown_local_body(q, client, monkeypatch):
     monkeypatch.setattr(client, "heartbeat", lambda tid, wid: beats.append((tid, wid)))
     assert sup.hold_live_leases() == 0
     assert beats == []
+
+
+# -- evaluator pass (service-driven loop advancement) -----------------------
+
+
+def _spec_evaluator(rules):
+    from agent_dispatch.producers.evaluator import SpecEvaluator
+
+    return SpecEvaluator({"rules": rules})
+
+
+_REVIEWER_DONE_RULE = {
+    "on": "task.completed",
+    "when": {"labels_any": ["recipe:reviewer"]},
+    "emit": {
+        "title_template": "unstick follow-up for {title}",
+        "labels": ["recipe:conflict-resolution"],
+        "dedup_template": "eval:conflict:{task_id}",
+    },
+}
+
+
+def _complete(q, title, *, labels=None):
+    t = q.create(title, labels=labels or [])
+    q.claim_one("m/wt-1", task_id=t.id, machine="m", worktree="wt-1")
+    q.start(t.id, "m/wt-1")
+    q.complete(t.id, "m/wt-1")
+    return t
+
+
+def _conflict_followups(q):
+    return [
+        t for t in q.list(repo=TEST_REPO, status="queued")
+        if "recipe:conflict-resolution" in (t.labels or [])
+    ]
+
+
+def test_no_evaluator_pass_is_noop(q, client):
+    sup = Supervisor(client, spawn_fn=_ok_spawn(), repo=TEST_REPO)
+    assert sup.advance_via_evaluator() == 0
+
+
+def test_evaluator_emits_followup_on_completed(q, client):
+    t = _complete(q, "review o/n#42", labels=["recipe:reviewer"])
+    sup = Supervisor(
+        client, spawn_fn=_ok_spawn(), repo=TEST_REPO,
+        evaluator=_spec_evaluator([_REVIEWER_DONE_RULE]),
+    )
+    assert sup.advance_via_evaluator() == 1
+    fus = _conflict_followups(q)
+    assert len(fus) == 1
+    assert fus[0].title == "unstick follow-up for review o/n#42"
+    assert fus[0].dedup_key == f"eval:conflict:{t.id}"
+    assert fus[0].source == "evaluator"
+
+
+def test_evaluator_ignores_non_matching_terminal(q, client):
+    _complete(q, "some other task", labels=["kind:misc"])  # no recipe:reviewer
+    sup = Supervisor(
+        client, spawn_fn=_ok_spawn(), repo=TEST_REPO,
+        evaluator=_spec_evaluator([_REVIEWER_DONE_RULE]),
+    )
+    assert sup.advance_via_evaluator() == 0
+    assert _conflict_followups(q) == []
+
+
+def test_evaluator_fires_each_task_once_per_process(q, client):
+    _complete(q, "review o/n#7", labels=["recipe:reviewer"])
+    sup = Supervisor(
+        client, spawn_fn=_ok_spawn(), repo=TEST_REPO,
+        evaluator=_spec_evaluator([_REVIEWER_DONE_RULE]),
+    )
+    assert sup.advance_via_evaluator() == 1
+    # second pass: the in-process guard skips the already-seen terminal task
+    assert sup.advance_via_evaluator() == 0
+    assert len(_conflict_followups(q)) == 1
+
+
+def test_evaluator_dedup_guards_a_fresh_supervisor(q, client):
+    _complete(q, "review o/n#9", labels=["recipe:reviewer"])
+    ev = [_REVIEWER_DONE_RULE]
+    Supervisor(client, spawn_fn=_ok_spawn(), repo=TEST_REPO,
+               evaluator=_spec_evaluator(ev)).advance_via_evaluator()
+    # a brand-new supervisor (empty in-process guard) re-emits, but the emit's
+    # dedup_key collides -> no duplicate row is created.
+    Supervisor(client, spawn_fn=_ok_spawn(), repo=TEST_REPO,
+               evaluator=_spec_evaluator(ev)).advance_via_evaluator()
+    assert len(_conflict_followups(q)) == 1
+
+
+def test_evaluator_handles_abandoned_event(q, client):
+    t = q.create("drive something", labels=["recipe:goal"])
+    q.abandon(t.id, permitted=True, reason="withdrawn")
+    sup = Supervisor(
+        client, spawn_fn=_ok_spawn(), repo=TEST_REPO,
+        evaluator=_spec_evaluator([{
+            "on": "task.abandoned",
+            "emit": {"title_template": "re-carve {title}",
+                     "dedup_template": "eval:recarve:{task_id}"},
+        }]),
+    )
+    assert sup.advance_via_evaluator() == 1
+    recarves = [t for t in q.list(repo=TEST_REPO, status="queued")
+                if t.title == "re-carve drive something"]
+    assert len(recarves) == 1
+
+
+def test_evaluator_error_does_not_crash_the_cycle(q, client):
+    _complete(q, "review o/n#11", labels=["recipe:reviewer"])
+
+    class _Boom:
+        def evaluate(self, event):
+            raise RuntimeError("evaluator blew up")
+
+    sup = Supervisor(client, spawn_fn=_ok_spawn(), repo=TEST_REPO, evaluator=_Boom())
+    # the pass swallows the error (returns 0) and still marks the task seen
+    assert sup.advance_via_evaluator() == 0
+    assert sup.advance_via_evaluator() == 0  # not retried into a crash loop
+
+
+def test_poll_once_runs_the_evaluator_pass(q, client):
+    _complete(q, "review o/n#13", labels=["recipe:reviewer"])
+    sup = Supervisor(
+        client, spawn_fn=_ok_spawn(), repo=TEST_REPO, max_concurrent=5,
+        evaluator=_spec_evaluator([_REVIEWER_DONE_RULE]),
+    )
+    sup.poll_once()  # the evaluator pass runs inside poll_once
+    assert len(_conflict_followups(q)) == 1
