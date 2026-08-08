@@ -157,17 +157,37 @@ if ($RecoveryMode) {
     exit $LASTEXITCODE
 }
 
-# Runtime resolution. Resolve the venv python WITHOUT traversing the .venv
-# junction: read its reparse target and use the slot python directly. A
-# RedirectionGuard-enforcing process is blocked from *traversing* an unprivileged
-# junction but may still *read* its target (dotfiles #637). Falls back to
-# .venv\Scripts\python.exe (real dir).
+# Runtime resolution (junction-free). The active version is published by a
+# plain-text `current-version` marker; resolve versions\<ver>\Scripts\python.exe
+# directly so nothing traverses a reparse point (a junction is blocked under
+# RedirectionGuard / WinError 448, dotfiles #637; a marker file never is).
+# Fallbacks: the newest installed slot, then a legacy `.venv` (junction target or
+# real dir) for un-migrated installs.
 $RuntimeDir = Join-Path $env:USERPROFILE '.agent-worktrees'
-$_venv = Join-Path $RuntimeDir '.venv'
-$VenvPython = Join-Path $_venv 'Scripts\python.exe'
-try { $_t = (Get-Item -LiteralPath $_venv -Force -ErrorAction Stop).Target; if ($_t) { $VenvPython = Join-Path (@($_t)[0]) 'Scripts\python.exe' } } catch {}
+$VenvPython = $null
+try {
+    $_ver = ([IO.File]::ReadAllText((Join-Path $RuntimeDir 'current-version'))).Trim()
+    if ($_ver) {
+        $_p = Join-Path $RuntimeDir ('versions\' + $_ver + '\Scripts\python.exe')
+        if (Test-Path -LiteralPath $_p) { $VenvPython = $_p }
+    }
+} catch {}
+if (-not $VenvPython) {
+    $VenvPython = Get-ChildItem (Join-Path $RuntimeDir 'versions') -Directory -ErrorAction SilentlyContinue |
+        Sort-Object Name |
+        ForEach-Object { Join-Path $_.FullName 'Scripts\python.exe' } |
+        Where-Object { Test-Path -LiteralPath $_ } |
+        Select-Object -Last 1
+}
+if (-not $VenvPython) {
+    # Legacy `.venv` (junction target or real dir) -- resolve without traversing.
+    $_venv = Join-Path $RuntimeDir '.venv'
+    $_legacy = Join-Path $_venv 'Scripts\python.exe'
+    try { $_t = (Get-Item -LiteralPath $_venv -Force -ErrorAction Stop).Target; if ($_t) { $_legacy = Join-Path (@($_t)[0]) 'Scripts\python.exe' } } catch {}
+    if (Test-Path -LiteralPath $_legacy) { $VenvPython = $_legacy }
+}
 
-if (Test-Path $VenvPython) {
+if ($VenvPython -and (Test-Path -LiteralPath $VenvPython)) {
     Write-SetupLog "Venv resolved: $RuntimeDir"
 } else {
     Write-SetupLog 'Venv not found - aborting' 'ERROR'
