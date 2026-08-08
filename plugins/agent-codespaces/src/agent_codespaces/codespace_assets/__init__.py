@@ -177,6 +177,16 @@ def build_auth_error_policy_command() -> str:
     The command is idempotent (overwrite with identical content on every launch)
     and best-effort (deployment failures are swallowed so connect is never
     blocked by an instruction-file write).
+
+    Deliberately NOT a sessionStart hook (dotfiles#1058, effort
+    instructions-to-hooks): unlike the agent-worktrees fragments that migrated to
+    hooks, this policy applies *only* to a **dispatched/headless agent** launch --
+    exactly the launches that go through this relay prelude -- so there is no
+    launch-path gap to close. A CodeSpace-scoped hook would additionally fire for
+    a human's **interactive** in-CodeSpace copilot session, where the policy is
+    actively wrong (it forbids interactive ``az login`` / ``gh auth login``, which
+    an interactive user should be free to do; there is no stdio/ACP channel to
+    block and no orchestrator to defer to). Keep it here, scoped to the prelude.
     """
     policy_b64 = _compressed_b64(asset_text(_AUTH_ERROR_POLICY))
     deploy = _chunked_payload_pipeline(
