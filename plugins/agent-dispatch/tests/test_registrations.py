@@ -298,3 +298,20 @@ def test_cli_status_and_remove_take_id():
     assert _parse(["supervise", "status", "lane-1"]).id == "lane-1"
     assert _parse(["supervise", "remove", "lane-1"]).id == "lane-1"
     assert _parse(["supervise", "list", "--kind", "schedule"]).kind == "schedule"
+
+
+def test_cli_serve_and_daemon_status_parse():
+    a = _parse(["supervise", "serve", "--machine", "m1", "--env", "prod",
+                "--interval", "3", "--once"])
+    assert a.supervise_command == "serve"
+    assert a.machine == "m1" and a.env == "prod" and a.once is True
+    b = _parse(["supervise", "daemon-status", "--machine", "m1"])
+    assert b.supervise_command == "daemon-status" and b.machine == "m1"
+
+
+def test_cli_register_ensure_flag():
+    a = _parse(["supervise", "register", "--repo", TEST_REPO, "--ensure"])
+    assert a.ensure is True
+    b = _parse(["supervise", "register", "--repo", TEST_REPO])
+    assert b.ensure is False
+

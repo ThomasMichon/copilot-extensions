@@ -143,7 +143,7 @@ The registration surface is built as the first increment of that architecture:
 
 ```
 agent-dispatch supervise register [--kind KIND] [--id ID] [--spec JSON|@FILE] \
-    [--machine M] [--env E] \
+    [--machine M] [--env E] [--ensure] \
     # supervised-lane convenience flags (when --spec is omitted):
     [--repo R | --all-repos] [--label L ...] [--max-concurrent N] \
     [--max-attempts N] [--label-max-attempts LABEL=N ...] \
@@ -152,6 +152,8 @@ agent-dispatch supervise register [--kind KIND] [--id ID] [--spec JSON|@FILE] \
 agent-dispatch supervise status <id>
 agent-dispatch supervise list [--kind KIND] [--machine M] [--env E] [--active]
 agent-dispatch supervise remove <id>
+agent-dispatch supervise serve [--machine M] [--env E] [--interval S] [--once]
+agent-dispatch supervise daemon-status [--machine M] [--env E]
 ```
 
 - **`register`** writes a durable **registration** row (kind ∈
@@ -161,17 +163,50 @@ agent-dispatch supervise remove <id>
   **derived deterministically** from `(kind, machine, env, spec)`, so
   re-registering the same unit **upserts** (idempotent by handle) rather than
   duplicating it, preserving `created_at` and the paused/active status.
+  `--ensure` additionally makes sure the host's singleton daemon is running
+  (starts it detached if not) so the just-registered unit is picked up.
 - **`status <id>`** returns one registration; **`list`** enumerates them
   (filterable by kind / machine / env, `--active` to hide paused ones);
   **`remove <id>`** drops one.
+- **`serve`** runs the **singleton supervisor daemon** in the foreground (see
+  below); **`daemon-status`** reports whether a daemon holds this scope and the
+  registrations it would run.
 - Registrations live in the coordinator's single-writer SQLite (`registrations`
   table) beside tasks and schedules, reached over the same secured mesh.
 
-> **Increment status.** This increment lands the **registration store + verbs**.
-> The **singleton daemon** that reads the registry and runs each registration in
-> its own subprocess — reconciling on change, winding down on remove — is the next
-> increment; until it lands, the bare `supervise` foreground loop remains the way
-> a lane is actually run.
+### The singleton daemon (built) — one master, per-unit subprocesses
+
+`supervise serve` is the **singleton supervisor daemon**: exactly **one master
+process per machine-and-environment** reads the registration registry and runs
+each **active** registration in its **own subprocess**, reconciling the running
+set against the registry on every tick.
+
+- **Single-instance.** At startup the daemon takes a **crash-safe OS lock** on a
+  lock file keyed by the `supervisor:<machine>:<env>` scope. The kernel releases
+  the lock automatically if the daemon dies, so a **restart reacquires cleanly**
+  (no permanent lock), while a *live* second daemon for the same scope is refused
+  and **stands down** (exit 3) rather than spawning a rival loop — the *one
+  supervisor per machine-and-environment* guarantee. A double launch (e.g. two
+  `--ensure` registers racing) is self-correcting: the loser stands down.
+- **Reconcile each tick.** Start a newly-registered unit; **restart** one whose
+  spec changed (fingerprint of `kind`+`spec`); **wind down** one that was removed
+  or paused (`terminate` its subprocess); **revive** one whose subprocess crashed,
+  gated by a restart backoff and bounded by `max_restarts` (a crash-looping unit
+  is left stopped and surfaced, never retried forever).
+- **Isolation.** Each unit is its own child, so one busy or failing unit never
+  blocks its siblings or the master.
+- **Kinds.** This increment realizes the **supervised-lane** unit (it
+  reconstructs the `agent-dispatch supervise` foreground loop from the stored
+  spec). The `schedule` / `emitter` / `evaluator` kinds are **registration types
+  the daemon will run** in a following increment; until then an unsupported kind
+  is logged and skipped, never fatal.
+
+> **Increment status.** The **registration store + verbs** and the **singleton
+> daemon** (reconcile, per-unit subprocesses, single-instance election,
+> crash-revive, wind-down) are built. Folding the non-lane kinds
+> (`schedule`/`emitter`/`evaluator`) into units the daemon runs — subsuming the
+> foreground `supervise --evaluator` flag into a registration — is the next
+> increment. The bare `supervise` foreground loop remains available throughout.
 
 ### Per-label embody body: CLI-first, headless-ACP opt-in
 

@@ -547,18 +547,27 @@ The bare `supervise` above runs the loop in the foreground. The
 `supervise register|status|list|remove` subcommands instead manage durable
 **registrations** — a caller registers a unit (a lane, schedule, emitter, or
 evaluator) with the host's singleton supervisor and gets back a handle, and the
-call *returns* rather than becoming the loop:
+call *returns* rather than becoming the loop. `supervise serve` runs the
+**singleton daemon** that actually runs those registrations:
 
 ```bash
 agent-dispatch supervise register --label autopilot   # register this lane; prints the handle
+agent-dispatch supervise register --label autopilot --ensure   # + start the daemon if needed
 agent-dispatch supervise list                         # what's registered here
 agent-dispatch supervise status <id>                  # inspect one registration
-agent-dispatch supervise remove <id>                  # drop one
+agent-dispatch supervise remove <id>                  # drop one (the daemon winds it down)
+agent-dispatch supervise serve                        # run the singleton daemon (foreground)
+agent-dispatch supervise daemon-status                # is a daemon running here?
 ```
 
-Re-registering the same unit is idempotent (the derived handle identifies it). See
-[`docs/spawn-supervisor.md`](docs/spawn-supervisor.md#registered-supervision-built--register-and-return)
-for the registration model and the singleton-daemon roadmap.
+Exactly **one** daemon per machine-and-environment runs every registration, each
+in its own subprocess, reconciling on change (start / restart-on-spec-change /
+wind-down-on-remove / crash-revive) and single-instance-guarded by a crash-safe OS
+lock (a second daemon stands down; a crashed one's lock is auto-released so a
+restart reclaims it). Re-registering the same unit is idempotent (the derived
+handle identifies it). See
+[`docs/spawn-supervisor.md`](docs/spawn-supervisor.md#the-singleton-daemon-built--one-master-per-unit-subprocesses)
+for the registration + daemon model.
 
 
 **Evaluator pass — advance the loop (`--evaluator <spec>`).** With an evaluator
