@@ -11,13 +11,17 @@ immutable files open) is never edited underneath itself, rollback is a marker
 rewrite (no rebuild), and the concurrent-venv-mutation race that spawns duplicate
 daemons (#123) cannot happen.
 
-There is **no directory junction**. The legacy ``current``/``venv`` junction (a
-reparse point) was blocked by Windows RedirectionGuard with WinError 448
+On **Windows there is no directory junction at all**. The legacy ``current``/``venv``
+junction (a reparse point) was blocked by Windows RedirectionGuard with WinError 448
 ("untrusted mount point") on managed devices whenever the installer *traversed* it
 over a non-interactive logon; a marker file + pinned binstubs need no reparse point
 at all, so those machines work with no special-casing and the legacy real-venv fork
-is retired. ``current_version`` still falls back to reading an old junction target
-during the one-time migration.
+is retired. On **POSIX** the active slot is still published by a plain ``venv``/
+``.venv`` **symlink** (not a reparse point, never blocked by RedirectionGuard) that
+the ``.sh`` binstub, systemd unit, and deploy-manifest resolve *through* -- the
+marker is authoritative and the symlink is the stable runtime-facing path.
+``current_version`` still falls back to reading an old link target during the
+one-time migration.
 
 This is a **stdlib-only** helper deliberately kept *out* of every runtime venv (no
 vendored-lib fan-out): the bootstrapping python at install time runs it as
@@ -184,35 +188,6 @@ def _read_current_marker(root: Path) -> str | None:
 # current link: write (atomic-ish swap)
 # --------------------------------------------------------------------------
 
-def _make_link(link: Path, target: Path) -> None:
-    """Create ``link`` -> ``target`` (dir). Symlink on POSIX, junction on Windows."""
-    if os.name == "nt":
-        _make_junction(link, target)
-    else:
-        os.symlink(target, link, target_is_directory=True)
-
-
-def _make_junction(link: Path, target: Path) -> None:
-    """Create a Windows directory **junction** (needs no privilege, unlike a
-    symlink). Prefers the private ``_winapi.CreateJunction``; falls back to
-    ``cmd /c mklink /J``."""
-    try:
-        import _winapi
-
-        _winapi.CreateJunction(str(target), str(link))  # type: ignore[attr-defined]
-        return
-    except (ImportError, AttributeError, OSError):
-        pass
-    import subprocess
-
-    res = subprocess.run(
-        ["cmd", "/c", "mklink", "/J", str(link), str(target)],
-        capture_output=True, text=True,
-    )
-    if res.returncode != 0:
-        raise OSError(f"mklink /J failed: {res.stderr.strip() or res.stdout.strip()}")
-
-
 def _remove_link(link: Path) -> None:
     """Remove an existing ``current`` link without touching its target contents.
 
@@ -244,22 +219,23 @@ def activate(root: Path, version: str, *, link_name: str = CURRENT_LINK,
     """Mark ``versions/<version>`` as the active runtime.
 
     Always writes the ``current-version`` marker file atomically (temp +
-    ``os.replace``) -- the marker is the source of truth. Two link modes support
-    an incremental migration off the junction while the primitive ships
-    byte-identically in every plugin:
+    ``os.replace``) -- the marker is the source of truth on every OS.
 
-    * ``link_free=True`` (``--no-link``): the junction-free model. Removes any
-      stale legacy ``venv``/``current`` junction; the runtime is selected purely
-      by the marker + the **version-pinned binstubs** the installer rewrites on
-      cutover. This is what a migrated installer passes; it works on
-      RedirectionGuard machines (WinError 448) with no special-casing.
-    * default: backward-compatible. Also (re)creates the ``link_name`` junction so
-      an *un-migrated* installer whose binstubs/task still resolve THROUGH the
-      link keeps working. **Best-effort** -- a junction-create failure (e.g.
-      RedirectionGuard on an untrusted-reparse machine, where such installers run
-      in legacy mode anyway) is swallowed, so activate never hard-fails on the
-      marker having been written. A real dir at the link path (a legacy venv) is
-      left as-is unless ``replace_nonlink`` moves it aside.
+    **Windows is structurally junction-free.** A directory junction is a reparse
+    point that RedirectionGuard (PROCESS_MITIGATION_REDIRECTION_TRUST_POLICY)
+    blocks with WinError 448 ("untrusted mount point") whenever a protected
+    process *traverses* it over a non-interactive logon (the mesh-rollout / SSH
+    path). So on Windows activate **never creates a junction** -- the runtime is
+    selected purely by the marker + the **version-pinned binstubs** the installer
+    rewrites on cutover. Any stale legacy ``venv``/``current`` junction is removed
+    so it can't shadow the marker or dangle. ``--no-link`` (``link_free``) requests
+    the same junction-free behavior on any OS.
+
+    **POSIX keeps a ``venv``/``.venv`` symlink** into the active slot, because the
+    ``.sh`` binstub, systemd unit, and deploy-manifest all resolve *through* that
+    stable path -- and a POSIX symlink is not a reparse point, so RedirectionGuard
+    never applies. A legacy real venv dir at the link path is left as-is unless
+    ``replace_nonlink`` moves it aside on first migration.
 
     Returns the version dir; raises only if the version isn't installed.
     """
@@ -268,16 +244,18 @@ def activate(root: Path, version: str, *, link_name: str = CURRENT_LINK,
         raise FileNotFoundError(f"version not installed: {vdir}")
     root.mkdir(parents=True, exist_ok=True)
 
-    # Publish the active version atomically (source of truth).
+    # Publish the active version atomically (source of truth on every OS).
     dest = root / CURRENT_VERSION_FILE
     tmp = dest.with_name(dest.name + f".tmp-{os.getpid()}")
     tmp.write_text(version + "\n", encoding="utf-8")
     os.replace(tmp, dest)
 
     link = current_link(root, link_name)
-    if link_free:
-        # Junction-free: drop any stale legacy junction so it can't shadow the
-        # marker or dangle. A real dir is left for the installer.
+
+    # Windows (always) and any --no-link caller: junction-free. Drop a stale
+    # legacy junction so it can't shadow the marker; a real dir is left for the
+    # installer to clean up.
+    if os.name == "nt" or link_free:
         if _is_link(link):
             try:
                 _remove_link(link)
@@ -285,17 +263,16 @@ def activate(root: Path, version: str, *, link_name: str = CURRENT_LINK,
                 pass
         return vdir
 
-    # Backward-compat: (re)point the junction at the slot for un-migrated callers.
-    # Best-effort -- never let a junction failure undo the (already-written) marker.
+    # POSIX: (re)point the stable `venv`/`.venv` symlink at the slot so the
+    # binstub / systemd unit / deploy-manifest resolve through it unchanged.
+    # Best-effort -- never let a link failure undo the (already-written) marker.
     try:
         if not _is_link(link) and (link.exists() or link.is_symlink()):
             if not replace_nonlink:
                 return vdir  # legacy real dir occupies the path; leave it be
-            import time as _t
-
-            os.replace(link, link.with_name(f"{link.name}.legacy-{int(_t.time())}"))
+            os.replace(link, link.with_name(f"{link.name}.legacy-{int(time.time())}"))
         _remove_link(link)
-        _make_link(link, vdir)
+        os.symlink(vdir, link, target_is_directory=True)
     except OSError:
         pass
     return vdir
@@ -591,12 +568,14 @@ def main(argv: list[str] | None = None) -> int:
     ap = sub.add_parser("activate", help="publish current-version -> <version>")
     ap.add_argument("version")
     ap.add_argument("--replace-nonlink", action="store_true",
-                    help="if the link path is a real dir (legacy venv), move it "
-                         "aside to <name>.legacy-<ts> before laying the link")
+                    help="POSIX first-migration: if the link path is a real dir "
+                         "(legacy venv), move it aside to <name>.legacy-<ts> before "
+                         "laying the symlink (no effect on Windows, junction-free)")
     ap.add_argument("--no-link", action="store_true",
-                    help="junction-free: write only the current-version marker and "
-                         "remove any stale legacy junction (the runtime is selected "
-                         "by version-pinned binstubs). Migrated installers pass this.")
+                    help="force junction-free on any OS: write only the "
+                         "current-version marker and remove any stale legacy link "
+                         "(the runtime is selected by version-pinned binstubs). "
+                         "Windows is always junction-free regardless.")
     sub.add_parser("current", help="print the active version")
     rp = sub.add_parser("resolve", help="print current/<subpath>")
     rp.add_argument("--subpath", default="")
