@@ -14,6 +14,12 @@ param(
 
 $IsAcp = $CopilotArgs -contains '--acp'
 
+# Resolve the project from the current directory (git-like). The launcher no
+# longer exports WORKTREE_PROJECT/WORKTREE_ID -- context comes from CWD. The
+# directory-name fallback keeps this working in recovery mode (CLI unavailable).
+$Project = (agent-worktrees get project 2>$null)
+if (-not $Project) { $Project = Split-Path -Leaf (Get-Location) }
+
 # 1. Environment setup
 $env:MY_API_KEY = "..."
 
@@ -24,7 +30,7 @@ if (-not $IsAcp) {
 
 # 3. Welcome banner (skip in ACP mode)
 if (-not $IsAcp) {
-    Write-Host "[>] Ready: $env:WORKTREE_PROJECT on $Machine"
+    Write-Host "[>] Ready: $Project on $Machine"
     if ($Recovery) { Write-Host "[!] RECOVERY MODE" }
 }
 

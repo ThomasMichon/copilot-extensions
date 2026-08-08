@@ -58,14 +58,31 @@ repos:
 
 The setup script receives these from the launcher:
 
+### Resolving the project / worktree (from CWD, git-like)
+
+The launcher runs the setup script **with the working directory already set to
+the worktree**, and **no longer exports `WORKTREE_PROJECT` / `WORKTREE_ID`** into
+the environment — context resolves from the current directory, the way Git
+discovers its repo. Resolve the project name from the CLI, with a directory-name
+fallback for recovery mode (when the venv/CLI is unavailable):
+
+```bash
+PROJECT="$(agent-worktrees get project 2>/dev/null || basename "$PWD")"
+```
+```powershell
+$Project = (agent-worktrees get project 2>$null)
+if (-not $Project) { $Project = Split-Path -Leaf (Get-Location) }
+```
+
+Don't read `$WORKTREE_PROJECT` / `$WORKTREE_ID` — those env vars are retired and
+will be empty in a session.
+
 ### Environment variables (set by launch-session)
 
 | Variable | Description |
 |----------|-------------|
-| `WORKTREE_PROJECT` | Project name (e.g., `my-app`) |
-| `WORKTREE_ID` | Current worktree identifier |
-| `WORKTREE_MACHINE` | Machine name (passed via `-Machine` / `--machine`) |
-| `WORKTREE_SETUP_LOG` | Path to the setup log file |
+| `WORKTREE_MACHINE` | Machine name (also passed as the `-Machine` / `--machine` argument) |
+| `WORKTREE_SETUP_LOG` | Path to the setup log file (optional; defaults to none) |
 
 ### Arguments
 
@@ -136,7 +153,9 @@ $IsAcp = $CopilotArgs -contains '--acp'
 
 # Pre-session setup (skip banners in ACP mode)
 if (-not $IsAcp) {
-    Write-Host "[>] Ready: $env:WORKTREE_PROJECT on $Machine"
+    $Project = (agent-worktrees get project 2>$null)
+    if (-not $Project) { $Project = Split-Path -Leaf (Get-Location) }
+    Write-Host "[>] Ready: $Project on $Machine"
 }
 
 # Launch Copilot (REQUIRED -- must be last)
