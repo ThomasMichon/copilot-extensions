@@ -24,6 +24,7 @@ import argparse
 import json
 import sys
 
+from . import obligations
 from .lease_config import ConfigError, load_lease_settings
 from .lease_protocol import ProtocolError
 from .lease_store import (
@@ -47,6 +48,20 @@ def _context(values: list[str]) -> dict[str, str]:
     return result
 
 
+def _with_disposition(context: dict[str, str], disposition: str | None) -> dict[str, str]:
+    """Overlay an explicit ``--disposition`` onto the context map, if given.
+
+    The obligation disposition (resource-obligation-settlement) rides the lease's
+    diagnostic ``context`` under the ``disposition`` key -- so ``--disposition``
+    is sugar for ``--context disposition=<value>``. When ``--disposition`` is
+    omitted, the context (which may carry its own ``disposition=`` KEY=VALUE) is
+    returned unchanged.
+    """
+    if not disposition:
+        return context
+    return obligations.with_disposition(context, disposition)
+
+
 def _print(snapshot: LeaseSnapshot | None, *, pretty: bool) -> None:
     data: object = {"state": "absent"} if snapshot is None else snapshot.to_dict()
     print(json.dumps(data, indent=2 if pretty else None, sort_keys=True))
@@ -57,18 +72,26 @@ def _run(args: argparse.Namespace) -> int:
     store = GitLeaseStore(settings)
     command = args.command
     if command in {"acquire", "borrow"}:
+        context = _with_disposition(_context(args.context), getattr(args, "disposition", None))
         snapshot = store.acquire(
             args.kind,
             args.resource,
             args.holder,
             ttl_seconds=args.ttl,
-            context=_context(args.context),
+            context=context,
             retries=args.retries,
         )
         _print(snapshot, pretty=args.pretty)
         return 0
     if command == "renew":
-        context = _context(args.context) if args.context else None
+        disposition = getattr(args, "disposition", None)
+        # Preserve the store's existing context when neither --context nor
+        # --disposition is given (context=None tells renew to keep it); otherwise
+        # start from --context and overlay --disposition.
+        if args.context or disposition:
+            context = _with_disposition(_context(args.context), disposition)
+        else:
+            context = None
         snapshot = store.renew(
             args.kind,
             args.resource,
@@ -131,10 +154,18 @@ def _parser() -> argparse.ArgumentParser:
             "--context", action="append", default=[], metavar="KEY=VALUE",
             help="bounded non-sensitive diagnostic context",
         )
+        command.add_argument(
+            "--disposition", choices=list(obligations.DISPOSITIONS),
+            help="obligation disposition (rides context: active|at-rest|released)",
+        )
     renew = resource_command("renew", "renew using the current fencing token")
     renew.add_argument("--token", required=True, help="current commit OID fencing token")
     renew.add_argument("--ttl", type=int, help="new TTL in seconds")
     renew.add_argument("--context", action="append", default=[], metavar="KEY=VALUE")
+    renew.add_argument(
+        "--disposition", choices=list(obligations.DISPOSITIONS),
+        help="settle/advance the obligation disposition (active|at-rest|released)",
+    )
     release = resource_command("release", "append a release tombstone")
     release.add_argument("--token", required=True, help="current commit OID fencing token")
     resource_command("inspect", "inspect one lease")
