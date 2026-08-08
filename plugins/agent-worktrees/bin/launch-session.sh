@@ -45,10 +45,30 @@ ls -t "$_SETUP_LOG_DIR"/setup-*.log 2>/dev/null | tail -n +11 | xargs rm -f 2>/d
 setup_log INFO 'launch-session.sh starting'
 LAUNCH_PROJECT="${WORKTREE_PROJECT:-}"
 
-# Runtime resolution
+# Runtime resolution (junction-free). Prefer the `current-version` marker ->
+# versions/<ver>/bin/python; fall back to the newest slot, then a legacy `.venv`
+# (a POSIX symlink into the active slot, still published on POSIX).
 RUNTIME_DIR="$HOME/.agent-worktrees"
 
-if [[ -x "$RUNTIME_DIR/.venv/bin/python" ]]; then
+PYTHON=""
+if [[ -f "$RUNTIME_DIR/current-version" ]]; then
+    _ver="$(tr -d '[:space:]' < "$RUNTIME_DIR/current-version")"
+    if [[ -n "$_ver" && -x "$RUNTIME_DIR/versions/$_ver/bin/python" ]]; then
+        PYTHON="$RUNTIME_DIR/versions/$_ver/bin/python"
+    fi
+fi
+if [[ -z "$PYTHON" && -d "$RUNTIME_DIR/versions" ]]; then
+    for _d in $(ls -1 "$RUNTIME_DIR/versions" 2>/dev/null | sort -r); do
+        if [[ -x "$RUNTIME_DIR/versions/$_d/bin/python" ]]; then
+            PYTHON="$RUNTIME_DIR/versions/$_d/bin/python"; break
+        fi
+    done
+fi
+if [[ -z "$PYTHON" && -x "$RUNTIME_DIR/.venv/bin/python" ]]; then
+    PYTHON="$RUNTIME_DIR/.venv/bin/python"
+fi
+
+if [[ -n "$PYTHON" && -x "$PYTHON" ]]; then
     setup_log INFO "Venv resolved: $RUNTIME_DIR"
 else
     setup_log ERROR 'Venv not found - aborting'
@@ -56,7 +76,6 @@ else
     exit 1
 fi
 
-PYTHON="$RUNTIME_DIR/.venv/bin/python"
 export PYTHONPATH="$RUNTIME_DIR/lib"
 unset PYTHONHOME
 
