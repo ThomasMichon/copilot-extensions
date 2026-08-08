@@ -18,5 +18,20 @@
     {"key": "worktree_title", "header": "task", "width": 34}
   ],
   "summary": "{spent_cores}/{total_cores} cores in use \u00b7 {headroom_cores} free \u00b7 {running_count}/{total_count} running   {note}",
+  "actions": [
+    {
+      "label": "Release",
+      "run": ["agent-codespaces", "release", "{id}"],
+      "when": {"disposition": "in-use"},
+      "confirm": true
+    },
+    {
+      "label": "Recycle",
+      "run": ["agent-codespaces", "finalize", "{id}", "--delete", "--picker-progress"],
+      "when": {"disposition": "stale"},
+      "confirm": true,
+      "progress": true
+    }
+  ],
   "empty_hint": "No CodeSpaces (is the GitHub CLI authenticated with the 'codespace' scope?)."
 }
