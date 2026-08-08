@@ -354,6 +354,60 @@ def _extract_json_object(text: str) -> dict | None:
         return None
 
 
+class RemoteProjectNotProvisioned(RuntimeError):
+    """The target host has no binstub for the requested project.
+
+    Distinguishes an **unprovisioned project** (the remote ``<project>``
+    worktree binstub does not exist on the target -- so the resolve command is
+    a shell "command not found") from a *generic* resolve failure. The former
+    must fail loud (#757): degrading to a direct ``--new`` launch there only
+    produces a misleading ``LAUNCH_ACP: Connection closed`` downstream, whereas
+    a generic failure can still legitimately fall back.
+    """
+
+
+def _looks_unprovisioned_project(project: str | None, stderr: str, exit_code: int) -> bool:
+    """Whether a non-zero remote resolve is a shell "command not found" for the
+    ``<project>`` binstub (i.e. the project isn't provisioned on the target).
+
+    Matches the command-not-found signatures across the shells the mesh uses,
+    pinned to the project token so an *inner* missing command (a different
+    failure) does not masquerade as an unprovisioned project:
+
+    - POSIX ``sh``/``bash``: ``<project>: command not found`` (definitive), or a
+      bare exit 127 whose stderr does not clearly name a *different* missing
+      command.
+    - PowerShell: ``The term '<project>' is not recognized as a name of a
+      cmdlet ...`` / ``CommandNotFoundException``.
+    - ``cmd.exe``: ``'<project>' is not recognized as an internal or external
+      command``.
+    """
+    sl = (stderr or "").lower()
+    pj = (project or "").strip().lower()
+    # Definitive: stderr names the <project> binstub itself as not found.
+    if pj:
+        if "command not found" in sl and pj in sl:
+            return True
+        if (
+            "is not recognized as a name of a cmdlet" in sl
+            or "is not recognized as the name of a cmdlet" in sl
+            or "commandnotfoundexception" in sl
+            or "is not recognized as an internal or external command" in sl
+        ) and pj in sl:
+            return True
+    # POSIX command-not-found fallback (exit 127): treat as the missing
+    # <project> binstub UNLESS stderr clearly implicates a *different* command
+    # (a not-found naming something other than the project token) -- so an inner
+    # missing command doesn't masquerade as an unprovisioned project. Shells
+    # report this as "<cmd>: command not found" (bash) or "<cmd>: not found"
+    # (dash/ash/busybox), so match the broader "not found".
+    if exit_code == 127:
+        if pj and "not found" in sl and pj not in sl:
+            return False
+        return True
+    return False
+
+
 async def _resolve_worktree_remote(
     manager: Any, target: SpawnTarget, *, timeout: float = 120.0,
 ) -> dict:
@@ -412,9 +466,15 @@ async def _resolve_worktree_remote(
     if result.timed_out:
         raise RuntimeError(f"remote worktree resolve timed out after {timeout}s")
     if result.exit_code != 0:
+        stderr = (result.stderr or "").strip()
+        if _looks_unprovisioned_project(target.project, stderr, result.exit_code):
+            raise RemoteProjectNotProvisioned(
+                f"project {target.project!r} is not provisioned on host "
+                f"{target.host!r} (no {target.project!r} worktree binstub there)"
+            )
         raise RuntimeError(
             f"remote worktree resolve failed (exit {result.exit_code}): "
-            f"{result.stderr.strip()[:400]}"
+            f"{stderr[:400]}"
         )
 
     plan = _extract_json_object(result.stdout)
@@ -913,6 +973,21 @@ async def spawn_ssh(
                 ConnectStage.WORKTREE,
                 f"worktree={target.worktree_id or '(unbound)'} cwd={target.cwd or '(none)'}",
             )
+        except RemoteProjectNotProvisioned as exc:
+            # Fail loud, do NOT degrade (#757). Degrading to a direct --new
+            # launch when the project isn't provisioned only surfaces later as a
+            # misleading `LAUNCH_ACP: Connection closed`, hiding the real cause.
+            # Raise a clear, staged error naming the project + host instead.
+            msg = (
+                f"{exc}. Provision {target.project!r} on {target.host!r}, or "
+                f"dispatch from a context whose project is provisioned there "
+                f"(e.g. `<repo> bridge send {target.host} ...` to pin the "
+                f"target project)."
+            )
+            tracker.failed(ConnectStage.WORKTREE, msg, retryable=False)
+            raise ConnectError(
+                ConnectStage.WORKTREE, msg, retryable=False, cause=exc,
+            ) from exc
         except Exception as exc:  # noqa: BLE001 -- non-fatal, see above
             detail = (
                 f"remote worktree resolve failed for {target.host}: {exc}; "

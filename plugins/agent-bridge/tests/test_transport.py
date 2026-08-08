@@ -8,12 +8,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent_bridge.connect import ConnectError, ConnectStage
 from agent_bridge.transport import (
     _ACP_STDIO_LIMIT_BYTES,
     AgentProcess,
     SpawnTarget,
     _build_remote_cmd,
     _extract_json_object,
+    _looks_unprovisioned_project,
     _resolve_remote_existing_cwd,
     _resolve_worktree,
     _resolve_worktree_remote,
@@ -335,6 +337,93 @@ class TestSpawnSsh:
         assert "--worktree-id" not in remote_cmd
 
     @pytest.mark.asyncio
+    async def test_ssh_unprovisioned_project_fails_loud(self, mock_manager):
+        """#757: an unprovisioned project fails loud, not a degraded launch.
+
+        When the remote resolve is a shell "command not found" for the project
+        binstub, spawn_ssh must raise a staged ConnectError(WORKTREE) naming the
+        project + host -- and must NOT degrade to a direct --new launch (which
+        only surfaces later as a misleading LAUNCH_ACP: Connection closed).
+        """
+        target = SpawnTarget(
+            type="ssh", host="cloud1", user="deploy", project="aperture-labs",
+            ssh_shell="pwsh",
+        )
+        notfound = MagicMock()
+        notfound.timed_out = False
+        notfound.exit_code = 1
+        notfound.stdout = ""
+        notfound.stderr = (
+            "aperture-labs: The term 'aperture-labs' is not recognized as a "
+            "name of a cmdlet, function, script file, or operable program."
+        )
+        mock_manager.exec_command = AsyncMock(return_value=notfound)
+
+        with patch("agent_bridge.transport.get_default_manager", return_value=mock_manager):
+            with pytest.raises(ConnectError) as ei:
+                await spawn_ssh(target)
+
+        err = ei.value
+        assert err.stage == ConnectStage.WORKTREE
+        assert err.retryable is False
+        assert "aperture-labs" in err.detail
+        assert "cloud1" in err.detail
+        assert "not provisioned" in err.detail
+        # Crucially: NO degrade -- the direct launch was never attempted.
+        mock_manager.open_stdio_channel.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ssh_unprovisioned_project_posix_exit_127(self, mock_manager):
+        """POSIX command-not-found (exit 127) is also treated as unprovisioned."""
+        target = SpawnTarget(
+            type="ssh", host="dev6", user="deploy", project="aperture-labs",
+            ssh_shell="bash",
+        )
+        notfound = MagicMock()
+        notfound.timed_out = False
+        notfound.exit_code = 127
+        notfound.stdout = ""
+        notfound.stderr = "bash: aperture-labs: command not found"
+        mock_manager.exec_command = AsyncMock(return_value=notfound)
+
+        with patch("agent_bridge.transport.get_default_manager", return_value=mock_manager):
+            with pytest.raises(ConnectError) as ei:
+                await spawn_ssh(target)
+
+        assert ei.value.stage == ConnectStage.WORKTREE
+        mock_manager.open_stdio_channel.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ssh_generic_resolve_failure_still_degrades(self, mock_manager):
+        """A *generic* resolve failure (not command-not-found) still degrades.
+
+        Guards that the #757 fail-loud path is narrow: only an unprovisioned
+        project short-circuits; other resolve failures keep the legacy fallback.
+        """
+        target = SpawnTarget(
+            type="ssh", host="server-a", user="deploy", project="my-project",
+            ssh_shell="bash",
+        )
+        failed = MagicMock()
+        failed.timed_out = False
+        failed.exit_code = 1
+        failed.stdout = ""
+        failed.stderr = "fatal: some internal resolve error"
+        home = MagicMock()
+        home.timed_out = False
+        home.exit_code = 0
+        home.stdout = "/home/deploy\n"
+        home.stderr = ""
+        mock_manager.exec_command = AsyncMock(side_effect=[failed, home])
+
+        with patch("agent_bridge.transport.get_default_manager", return_value=mock_manager):
+            await spawn_ssh(target)
+
+        # Degraded as before: launched with the verified fallback cwd.
+        assert target.cwd == "/home/deploy"
+        mock_manager.open_stdio_channel.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_ssh_project_with_existing_worktree_id_skips_resolve(self, mock_manager):
         """A session roll with persisted cwd should not re-resolve."""
         target = SpawnTarget(
@@ -399,6 +488,70 @@ class TestSpawnSsh:
         # ensure_connected is idempotent -- called twice but manager handles dedup
         assert mock_manager.ensure_connected.call_count == 2
         assert mock_manager.open_stdio_channel.call_count == 2
+
+
+class TestLooksUnprovisionedProject:
+    """Tests for _looks_unprovisioned_project -- the command-not-found detector."""
+
+    def test_powershell_not_recognized(self):
+        assert _looks_unprovisioned_project(
+            "aperture-labs",
+            "The term 'aperture-labs' is not recognized as a name of a cmdlet, "
+            "function, script file, or operable program.",
+            1,
+        )
+
+    def test_cmd_not_recognized(self):
+        assert _looks_unprovisioned_project(
+            "aperture-labs",
+            "'aperture-labs' is not recognized as an internal or external command",
+            1,
+        )
+
+    def test_posix_command_not_found(self):
+        assert _looks_unprovisioned_project(
+            "aperture-labs", "bash: aperture-labs: command not found", 127,
+        )
+
+    def test_posix_exit_127_without_name(self):
+        # POSIX 127 is unambiguous command-not-found even if stderr is empty.
+        assert _looks_unprovisioned_project("aperture-labs", "", 127)
+
+    def test_exit_127_naming_a_different_command_is_not_unprovisioned(self):
+        # A bare 127 whose stderr clearly implicates a *different* missing
+        # command (not the project binstub) must not masquerade (review #272).
+        assert not _looks_unprovisioned_project(
+            "my-project", "bash: git: command not found", 127,
+        )
+
+    def test_exit_127_bare_not_found_different_command(self):
+        # dash/ash/busybox report "<cmd>: not found" (no "command"); a different
+        # inner command must still not masquerade (review #272 follow-up).
+        assert not _looks_unprovisioned_project(
+            "my-project", "git: not found", 127,
+        )
+
+    def test_exit_127_bare_not_found_project(self):
+        # The project binstub itself reported bare "not found" is unprovisioned.
+        assert _looks_unprovisioned_project(
+            "aperture-labs", "aperture-labs: not found", 127,
+        )
+
+    def test_generic_failure_is_not_unprovisioned(self):
+        assert not _looks_unprovisioned_project(
+            "my-project", "fatal: some internal resolve error", 1,
+        )
+
+    def test_inner_command_not_found_does_not_masquerade(self):
+        # A different command missing (not the project binstub) must not match.
+        assert not _looks_unprovisioned_project(
+            "my-project", "git: command not found", 1,
+        )
+
+    def test_missing_project_name_is_safe(self):
+        assert not _looks_unprovisioned_project(
+            None, "something is not recognized as a name of a cmdlet", 1,
+        )
 
 
 class TestExtractJsonObject:
