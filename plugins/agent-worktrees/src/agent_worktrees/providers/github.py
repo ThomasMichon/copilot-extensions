@@ -230,6 +230,73 @@ class GitHubProvider:
             )
         return ""
 
+    def get_repo_policy(
+        self, repo: str, *, default_branch: str = "", api_base: str = "",
+        token: str | None = None,
+    ):
+        """Read GitHub repo settings + branch protection into a ``RepoPolicy``.
+
+        Two reads: ``gh api repos/<repo>`` (merge methods, native auto-merge,
+        delete-branch-on-merge) and, best-effort, the default branch's protection
+        (required approving reviews, required status checks). Never raises: a
+        failed settings read yields ``RepoPolicy(supported=False, error=...)``;
+        an unreadable/absent protection leaves those fields ``None``.
+        """
+        from ..pr_contract import RepoPolicy
+
+        proc = run_cli(
+            ["gh", "api", f"repos/{repo}"], env=self._env(token),
+        )
+        if proc.returncode != 0:
+            return RepoPolicy(
+                supported=False,
+                error=f"gh api repos/{repo} failed: "
+                      f"{proc.stderr.strip() or proc.stdout.strip()}",
+            )
+        try:
+            data = json.loads(proc.stdout)
+        except json.JSONDecodeError as exc:
+            return RepoPolicy(supported=False, error=f"non-JSON repo payload: {exc}")
+
+        def _b(key):
+            v = data.get(key)
+            return bool(v) if isinstance(v, bool) else None
+
+        req_reviews: int | None = None
+        req_checks: bool | None = None
+        if default_branch:
+            pproc = run_cli(
+                ["gh", "api",
+                 f"repos/{repo}/branches/{default_branch}/protection"],
+                env=self._env(token),
+            )
+            if pproc.returncode == 0:
+                try:
+                    prot = json.loads(pproc.stdout)
+                except json.JSONDecodeError:
+                    prot = {}
+                if isinstance(prot, dict):
+                    rpr = prot.get("required_pull_request_reviews")
+                    if isinstance(rpr, dict):
+                        cnt = rpr.get("required_approving_review_count")
+                        req_reviews = int(cnt) if isinstance(cnt, int) else 0
+                    rsc = prot.get("required_status_checks")
+                    req_checks = bool(rsc)
+            elif "Not Found" in (pproc.stderr + pproc.stdout):
+                # No protection configured on the default branch -> nothing gates.
+                req_reviews, req_checks = 0, False
+
+        return RepoPolicy(
+            supported=True,
+            allow_squash=_b("allow_squash_merge"),
+            allow_merge_commit=_b("allow_merge_commit"),
+            allow_rebase=_b("allow_rebase_merge"),
+            allow_auto_merge=_b("allow_auto_merge"),
+            delete_branch_on_merge=_b("delete_branch_on_merge"),
+            required_approving_reviews=req_reviews,
+            has_required_status_checks=req_checks,
+        )
+
     _THREADS_QUERY = (
         "query($owner:String!,$name:String!,$number:Int!){"
         "repository(owner:$owner,name:$name){pullRequest(number:$number){"

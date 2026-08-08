@@ -646,6 +646,15 @@ class GiteaProvider:
         _ = (repo, number, squash, api_base, token)
         return _unsupported_auto_merge(self.name)
 
+    def get_repo_policy(
+        self, repo: str, *, default_branch: str = "", api_base: str = "",
+        token: str | None = None,
+    ):
+        """Not implemented: adopt-time settings research is GitHub-only today."""
+        from .base import _unsupported_repo_policy
+        _ = (repo, default_branch, api_base, token)
+        return _unsupported_repo_policy(self.name)
+
     def get_comment_threads(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> ThreadsResult:

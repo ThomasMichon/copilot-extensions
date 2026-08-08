@@ -800,3 +800,69 @@ def test_claimant_liveness_json_output(monkeypatch, capfd):
     out = _json.loads(capfd.readouterr().out)
     assert out["alive"] is False
     assert out["owner_ref"] == "borealis/aperture-labs/wt-A"
+
+
+def test_pr_research_dispatch_json(monkeypatch, capsys):
+    # #225: pr-research reads live provider settings and prints the derived
+    # policy matrix (read-only), via the config + provider seams.
+    import json as _json
+
+    from agent_worktrees import config as cfg
+    from agent_worktrees import pr_contract as pc
+    from agent_worktrees import providers as prov
+
+    conf = cfg.Config(
+        srcroot="/s", machine="m", platform="linux", repo_name="ext",
+        repos={"ext": cfg.RepoConfig(
+            anchor="/a", worktree_root="/w", default_branch="main",
+            pr=cfg.PRConfig(enabled=True, provider="github"),
+        )},
+    )
+    monkeypatch.setattr("agent_worktrees.config.load_config", lambda *a, **k: conf)
+
+    class _P:
+        def get_repo_policy(self, repo, *, default_branch="", api_base="", token=None):
+            return pc.RepoPolicy(supported=True, allow_squash=True,
+                                 allow_auto_merge=True,
+                                 required_approving_reviews=1)
+
+    monkeypatch.setattr(prov, "get_provider", lambda name: _P())
+    monkeypatch.setattr(prov, "account_token_for_slug", lambda slug, prcfg: "tok")
+
+    rc = m.cmd_pr_research_dispatch(["ThomasMichon/copilot-extensions", "--json"])
+    assert rc == 0
+    out = _json.loads(capsys.readouterr().out.strip())
+    assert out["supported"] is True
+    assert out["suggested_matrix"]["merge_strategy"] == "squash"
+    assert out["suggested_matrix"]["prefer_auto_merge"] is True
+    assert out["suggested_matrix"]["review_blocking"] is True
+
+
+def test_pr_research_dispatch_unsupported_provider(monkeypatch, capsys):
+    import json as _json
+
+    from agent_worktrees import config as cfg
+    from agent_worktrees import pr_contract as pc
+    from agent_worktrees import providers as prov
+
+    conf = cfg.Config(
+        srcroot="/s", machine="m", platform="linux", repo_name="ext",
+        repos={"ext": cfg.RepoConfig(
+            anchor="/a", worktree_root="/w", default_branch="main",
+            pr=cfg.PRConfig(enabled=True, provider="gitea"),
+        )},
+    )
+    monkeypatch.setattr("agent_worktrees.config.load_config", lambda *a, **k: conf)
+
+    class _P:
+        def get_repo_policy(self, repo, *, default_branch="", api_base="", token=None):
+            return pc.RepoPolicy(supported=False, error="unsupported here")
+
+    monkeypatch.setattr(prov, "get_provider", lambda name: _P())
+    monkeypatch.setattr(prov, "account_token_for_slug", lambda slug, prcfg: None)
+
+    rc = m.cmd_pr_research_dispatch(["o/r", "--json"])
+    assert rc == 1
+    out = _json.loads(capsys.readouterr().out.strip())
+    assert out["supported"] is False
+    assert out["suggested_matrix"] == {}

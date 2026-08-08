@@ -223,6 +223,26 @@ class PRProvider(Protocol):
         """
         ...
 
+    def get_repo_policy(
+        self, repo: str, *, default_branch: str = "", api_base: str = "",
+        token: str | None = None,
+    ):
+        """Read a repo's live PR-relevant settings (#225) as a ``RepoPolicy``.
+
+        The adopt-time research primitive: inspect the provider's ACTUAL settings
+        (allowed merge methods, native auto-merge availability, delete-branch-on-
+        merge, required approving reviews, required status checks) so ``register``
+        / ``pr-research`` can prepare the config policy matrix to match reality.
+
+        - **github** reads ``gh api repos/<repo>`` + the default branch's
+          protection.
+        - **gitea / azure-devops** are unsupported today (return a
+          ``RepoPolicy(supported=False)``).
+
+        Never raises: a failed read yields ``RepoPolicy(supported=False, error=...)``.
+        """
+        ...
+
     def get_comment_threads(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> ThreadsResult:
@@ -279,6 +299,17 @@ def _unsupported_auto_merge(name: str) -> str:
     return (
         f"Provider '{name}' does not support native auto-merge here (GitHub-only "
         "today; gitea/azure-devops use their own consent/auto-complete flow)."
+    )
+
+
+def _unsupported_repo_policy(name: str):
+    """The default ``get_repo_policy`` for a provider that can't read settings."""
+    from ..pr_contract import RepoPolicy
+
+    return RepoPolicy(
+        supported=False,
+        error=(f"Provider '{name}' does not support settings reads (adopt-time "
+               "research is GitHub-only today)."),
     )
 
 
