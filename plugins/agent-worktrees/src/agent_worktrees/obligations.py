@@ -56,6 +56,41 @@ _HELD: frozenset[str] = frozenset({ACTIVE, AT_REST})
 _UNSETTLED: frozenset[str] = frozenset({ACTIVE})
 
 
+# ── The finalize gate (Phase 2) ──────────────────────────────────────────────
+
+#: How strictly finalize enforces obligation settlement. ``off`` skips the check
+#: entirely; ``warn`` (the default while the settlement hooks + reclaim sweep bed
+#: in) surfaces unsettled obligations but lets finalize proceed; ``block`` refuses
+#: to finalize while any owned obligation is unsettled (unless abandoned).
+GateMode = Literal["off", "warn", "block"]
+
+OFF: GateMode = "off"
+WARN: GateMode = "warn"
+BLOCK: GateMode = "block"
+
+GATE_MODES: tuple[GateMode, ...] = (OFF, WARN, BLOCK)
+
+#: Operator override of the gate mode. Warn-first by default: flip to ``block``
+#: once the per-kind settlement hooks + the reclaim sweep are proven.
+GATE_ENV = "AGENT_WORKTREES_OBLIGATION_GATE"
+
+DEFAULT_GATE: GateMode = WARN
+
+
+def gate_mode(env: object = None) -> GateMode:
+    """Resolve the finalize gate mode from the environment (default ``warn``).
+
+    ``env`` is an optional mapping (defaults to ``os.environ``). An unset or
+    unrecognized value degrades to the warn-first default, never to ``block`` --
+    the gate never starts *enforcing* by accident.
+    """
+    import os
+
+    source = env if isinstance(env, dict) else os.environ
+    raw = str(source.get(GATE_ENV, "")).strip().lower()
+    return raw if raw in GATE_MODES else DEFAULT_GATE  # type: ignore[return-value]
+
+
 def normalize(value: object) -> Disposition:
     """Coerce an arbitrary value to a known disposition (default ``active``).
 

@@ -92,3 +92,28 @@ def test_with_disposition_stringifies_values():
 def test_roundtrip_with_then_from():
     ctx = ob.with_disposition({"k": "v"}, "at-rest")
     assert ob.from_context(ctx) == ob.AT_REST
+
+
+# ── gate_mode (the finalize gate) ────────────────────────────────────────────
+
+def test_gate_mode_defaults_to_warn():
+    assert ob.gate_mode({}) == ob.WARN
+
+
+@pytest.mark.parametrize("value,expected", [
+    ("off", ob.OFF), ("warn", ob.WARN), ("block", ob.BLOCK),
+    ("BLOCK", ob.BLOCK), ("  warn  ", ob.WARN),
+])
+def test_gate_mode_reads_known_values(value, expected):
+    assert ob.gate_mode({ob.GATE_ENV: value}) == expected
+
+
+@pytest.mark.parametrize("value", ["", "bogus", "enforce", "1"])
+def test_gate_mode_unknown_degrades_to_warn_never_block(value):
+    # An unrecognized value must never silently start *enforcing*.
+    assert ob.gate_mode({ob.GATE_ENV: value}) == ob.WARN
+
+
+def test_gate_mode_reads_os_environ_by_default(monkeypatch):
+    monkeypatch.setenv(ob.GATE_ENV, "block")
+    assert ob.gate_mode() == ob.BLOCK
