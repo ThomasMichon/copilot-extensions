@@ -771,6 +771,152 @@ class TestGitHubProvider:
             err = prov.merge_pull("o/r", 7)
             assert err and "does not support" in err
 
+    # -- get_snapshot (the #277 fix: pr-watch/pr-status/pr-ready on GitHub) --
+
+    @staticmethod
+    def _snapshot_dispatch(*, pr, reviews_pages=None, status=None, check_runs=None):
+        """Build a run_cli fake dispatching the snapshot's gh api reads by URL."""
+        reviews_pages = reviews_pages or [[]]
+
+        def fake(args, **kw):
+            url = args[2] if len(args) > 2 else ""
+            if "/reviews" in url:
+                # page is 1-based in the query string; default to last (empty).
+                page = 1
+                for part in url.split("?", 1)[-1].split("&"):
+                    if part.startswith("page="):
+                        page = int(part.split("=", 1)[1])
+                idx = page - 1
+                body = reviews_pages[idx] if idx < len(reviews_pages) else []
+                return _proc(stdout=json.dumps(body))
+            if "/status" in url:
+                return _proc(stdout=json.dumps(status)) if status is not None \
+                    else _proc(returncode=1, stderr="Not Found")
+            if "/check-runs" in url:
+                return _proc(stdout=json.dumps(check_runs)) if check_runs is not None \
+                    else _proc(returncode=1, stderr="Not Found")
+            # the PR object read
+            return _proc(stdout=json.dumps(pr))
+
+        return fake
+
+    def test_get_snapshot_maps_pr_and_review_fields(self, monkeypatch):
+        from agent_worktrees.providers import github
+        pr = {
+            "state": "open", "merged": False, "mergeable": True,
+            "head": {"sha": "abc123"}, "base": {"ref": "main"},
+            "user": {"login": "author1"}, "title": "Do the thing",
+            "draft": False, "labels": [{"name": "enhancement"}, {"name": "x"}],
+        }
+        reviews = [[
+            {"id": 11, "user": {"login": "rev1"}, "state": "APPROVED",
+             "submitted_at": "2026-01-01T00:00:00Z", "commit_id": "abc123"},
+            {"id": 12, "user": {"login": "rev2"}, "state": "DISMISSED",
+             "submitted_at": "2026-01-02T00:00:00Z", "commit_id": "abc123"},
+        ]]
+        monkeypatch.setattr(github, "run_cli", self._snapshot_dispatch(
+            pr=pr, reviews_pages=reviews,
+            check_runs={"check_runs": [{"status": "completed",
+                                        "conclusion": "success"}]}))
+        snap = github.GitHubProvider().get_snapshot("o/r", 7, token="t")
+        assert snap.pr_state == "open" and snap.merged is False
+        assert snap.head_sha == "abc123" and snap.base_ref == "main"
+        assert snap.author == "author1" and snap.title == "Do the thing"
+        assert snap.mergeable is True and snap.draft is False
+        assert snap.labels == ("enhancement", "x")
+        assert snap.checks_state == "success"
+        assert [(r.id, r.state, r.user) for r in snap.reviews] == [
+            (11, "APPROVED", "rev1"), (12, "DISMISSED", "rev2")]
+        assert snap.reviews[1].dismissed is True
+        # numeric cursor works (a submitted-review high-water mark)
+        assert snap.max_review_id == 11
+
+    def test_get_snapshot_merged_pr_is_closed_and_merged(self, monkeypatch):
+        from agent_worktrees.providers import github
+        pr = {"state": "closed", "merged": True, "head": {"sha": "s"},
+              "base": {"ref": "main"}, "user": {"login": "a"}}
+        monkeypatch.setattr(github, "run_cli",
+                            self._snapshot_dispatch(pr=pr))
+        snap = github.GitHubProvider().get_snapshot("o/r", 7, token="t")
+        assert snap.pr_state == "closed" and snap.merged is True
+
+    def test_get_snapshot_mergeable_null_is_none(self, monkeypatch):
+        # GitHub computes mergeable async; null on a fresh PR -> None (unknown).
+        from agent_worktrees.providers import github
+        pr = {"state": "open", "merged": False, "mergeable": None,
+              "head": {"sha": "s"}, "base": {"ref": "main"}, "user": {"login": "a"}}
+        monkeypatch.setattr(github, "run_cli",
+                            self._snapshot_dispatch(pr=pr))
+        snap = github.GitHubProvider().get_snapshot("o/r", 7, token="t")
+        assert snap.mergeable is None
+
+    def test_get_snapshot_paginates_reviews(self, monkeypatch):
+        from agent_worktrees.providers import github
+        pr = {"state": "open", "merged": False, "head": {"sha": "s"},
+              "base": {"ref": "main"}, "user": {"login": "a"}}
+        # a full first page (100) forces a second read; short second page stops.
+        page1 = [{"id": i, "user": {"login": "u"}, "state": "COMMENTED"}
+                 for i in range(1, 101)]
+        page2 = [{"id": 101, "user": {"login": "u"}, "state": "APPROVED"}]
+        monkeypatch.setattr(github, "run_cli", self._snapshot_dispatch(
+            pr=pr, reviews_pages=[page1, page2]))
+        snap = github.GitHubProvider().get_snapshot("o/r", 7, token="t")
+        assert len(snap.reviews) == 101
+        assert snap.reviews[-1].id == 101 and snap.reviews[-1].state == "APPROVED"
+
+    def test_combined_checks_state_failure_dominates(self, monkeypatch):
+        from agent_worktrees.providers import github
+        prov = github.GitHubProvider()
+
+        def checks(status_state, runs):
+            return self._snapshot_dispatch(
+                pr={}, status={"state": status_state, "statuses": [{"id": 1}]},
+                check_runs={"check_runs": runs})
+
+        # a passing legacy status but a failing check-run -> failure
+        monkeypatch.setattr(github, "run_cli", checks(
+            "success", [{"status": "completed", "conclusion": "failure"}]))
+        assert prov._combined_checks_state("o/r", "sha", "t") == "failure"
+        # an in-progress check-run -> pending
+        monkeypatch.setattr(github, "run_cli", checks(
+            "success", [{"status": "in_progress", "conclusion": None}]))
+        assert prov._combined_checks_state("o/r", "sha", "t") == "pending"
+        # all green across both systems -> success
+        monkeypatch.setattr(github, "run_cli", checks(
+            "success", [{"status": "completed", "conclusion": "success"}]))
+        assert prov._combined_checks_state("o/r", "sha", "t") == "success"
+        # neutral/skipped conclusions don't fail the gate
+        monkeypatch.setattr(github, "run_cli", checks(
+            "success", [{"status": "completed", "conclusion": "skipped"}]))
+        assert prov._combined_checks_state("o/r", "sha", "t") == "success"
+
+    def test_combined_checks_state_none_configured_is_empty(self, monkeypatch):
+        # No statuses and no check-runs -> "" (never fires checks_failed).
+        from agent_worktrees.providers import github
+        prov = github.GitHubProvider()
+        monkeypatch.setattr(github, "run_cli", self._snapshot_dispatch(
+            pr={}, status={"state": "pending", "statuses": []},
+            check_runs={"check_runs": []}))
+        assert prov._combined_checks_state("o/r", "sha", "t") == ""
+        assert prov._combined_checks_state("o/r", "", "t") == ""  # no sha
+
+    def test_get_snapshot_http_error_transient_vs_permanent(self, monkeypatch):
+        from agent_worktrees.providers import github
+        from agent_worktrees.providers.base import ProviderError
+
+        def fail(detail):
+            return lambda args, **kw: _proc(returncode=1, stderr=detail)
+
+        monkeypatch.setattr(github, "run_cli", fail("gh: HTTP 503 Service Unavailable"))
+        with pytest.raises(ProviderError) as ei:
+            github.GitHubProvider().get_snapshot("o/r", 7, token="t")
+        assert ei.value.transient is True
+
+        monkeypatch.setattr(github, "run_cli", fail("gh: HTTP 404 Not Found"))
+        with pytest.raises(ProviderError) as ei2:
+            github.GitHubProvider().get_snapshot("o/r", 7, token="t")
+        assert ei2.value.transient is False
+
 
 class TestAzureDevOpsProvider:
     def test_get_pull_completed_is_merged(self, monkeypatch):
