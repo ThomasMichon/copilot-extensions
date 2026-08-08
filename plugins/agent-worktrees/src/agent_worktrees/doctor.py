@@ -140,6 +140,32 @@ def _read_projects() -> dict[str, dict]:
     return {str(k): (v if isinstance(v, dict) else {}) for k, v in projects.items()}
 
 
+def _anchor_from_project_config(pname: str) -> str:
+    """Best-effort anchor for a project from its own ``config.yaml``.
+
+    projects.yaml is lean (schema v2 dropped ``anchor``), and a project whose
+    ``repos.yaml`` entry is missing has no registry anchor either -- but the
+    per-project machine-local config (``~/.<name>/config.yaml``) still records it
+    under ``repos.<name>.anchor``. This lets ``doctor --fix`` backfill a *usable*
+    repos.yaml path for a ``missing_repo_entry`` instead of a pathless entry
+    (the exact hole that made a bare ``agent-worktrees`` unresolvable from a
+    registered repo's own directory -- #282). Returns "" when unreadable.
+    """
+    try:
+        from . import config as _cfg
+        cfg_path = _cfg.project_dir(pname) / "config.yaml"
+        if not cfg_path.exists():
+            return ""
+        data = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+        if not isinstance(data, dict):
+            return ""
+        repo_block = (data.get("repos") or {}).get(pname) or {}
+        anchor = repo_block.get("anchor") if isinstance(repo_block, dict) else ""
+        return os.path.expanduser(str(anchor)) if anchor else ""
+    except Exception:
+        return ""
+
+
 def _effective_expose_agent(proj: dict) -> bool:
     """A project's effective agent-exposure (absent ``expose_agent`` => True)."""
     val = proj.get("expose_agent")
@@ -431,6 +457,11 @@ def reconcile(fix: bool = False, plat: str | None = None) -> list[Finding]:
     for pname in sorted(projects):
         proj = projects[pname]
         anchor = proj.get("anchor") or ""
+        # projects.yaml is lean and no longer carries anchor; fall back to the
+        # project's own config.yaml so anchor-dependent findings (chiefly the
+        # missing_repo_entry backfill) get a real path rather than "" (#282).
+        if not anchor:
+            anchor = _anchor_from_project_config(pname)
         branch = proj.get("default_branch") or ""
         expose = _effective_expose_agent(proj)
         entry = registry.repos.get(pname)

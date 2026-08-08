@@ -85,6 +85,47 @@ def test_missing_repo_entry_detected_and_fixed(home: Path):
     assert entry.paths.get("linux") == str(repo_dir)
 
 
+def test_missing_repo_entry_backfills_anchor_from_project_config(
+    home: Path, monkeypatch
+):
+    # #282: a LEAN projects.yaml entry (schema v2 -- no anchor) still needs a
+    # usable repos.yaml path on fix. The anchor comes from the project's own
+    # config.yaml (~/.<name>/config.yaml -> repos.<name>.anchor); without the
+    # backfill the fix wrote a PATHLESS entry, leaving CWD->project resolution
+    # broken even after `doctor --fix`.
+    from agent_worktrees import config as cfg
+    repo_dir = home / "src" / "leanproj"
+    repo_dir.mkdir(parents=True)
+    _write_repos(home, "repos: {}\n")
+    # lean entry: no anchor, no default_branch -- only adoption-runtime facts.
+    _write_projects(home, {"leanproj": {"expose_agent": False}})
+    # the authoritative anchor lives in the per-project config.yaml
+    proj_cfg_dir = home / ".leanproj"
+    proj_cfg_dir.mkdir(parents=True, exist_ok=True)
+    (proj_cfg_dir / "config.yaml").write_text(
+        yaml.safe_dump({"repos": {"leanproj": {"anchor": str(repo_dir)}}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: home / f".{name}")
+
+    findings = doctor.diagnose()
+    assert "missing_repo_entry" in _kinds(findings)
+
+    doctor.reconcile(fix=True)
+    entry = repos.find_repo("leanproj")
+    assert entry is not None
+    # the whole point: a real, resolvable path -- not an empty paths dict.
+    assert entry.paths.get("linux") == str(repo_dir)
+    assert entry.repo_class == "worktree"
+
+
+def test_anchor_from_project_config_missing_is_empty(home: Path, monkeypatch):
+    # No config.yaml -> "" (the fix then simply can't backfill, never crashes).
+    from agent_worktrees import config as cfg
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: home / f".{name}")
+    assert doctor._anchor_from_project_config("nope") == ""
+
+
 # ---------------------------------------------------------------------------
 # wrong_class (adopted but reference)
 # ---------------------------------------------------------------------------
