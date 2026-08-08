@@ -735,6 +735,8 @@ def _finish_auto_open(
 def _reconcile_active_pr(
     record: tracking.WorktreeRecord | None,
     config: Config,
+    *,
+    best_effort: bool = False,
 ) -> None:
     """Refresh the active PR's state from the provider (best-effort).
 
@@ -744,6 +746,21 @@ def _reconcile_active_pr(
     reuse and force-push that already-merged branch and open no new PR (#1163).
     Querying the provider and writing back a terminal state makes the active PR
     correctly *terminal* so the append-a-fresh-PR path is taken instead.
+
+    Also self-heals a **zombie open PR** (#1375/#1703): when the provider still
+    reports the PR open but its head is already *contained in the base branch*
+    (its content merged, but the PR object was never flipped -- a Gitea
+    non-atomic merge under load, or a Dampener squash that didn't close the
+    object), reconcile it to ``merged`` so the Picker stops showing a phantom
+    open PR. Only a *definite* containment (0 commits ahead) heals; an unknown
+    result leaves the state untouched.
+
+    ``best_effort`` (set by the Picker's background reconcile sweep) persists the
+    write under a NON-blocking record lock and **skips** on contention -- so an
+    inconsequential sweep never blocks, nor is blocked by, a critical updater
+    (#4547). The state transition is monotonic (open -> terminal), so a skipped
+    persist is simply re-applied on the next sweep. Foreground callers use the
+    default blocking persist.
 
     No-op (falls back to the local state) when there is no active PR, it has no
     number yet, it is already terminal, or the provider is unconfigured/
@@ -759,14 +776,14 @@ def _reconcile_active_pr(
     prcfg = config.default_repo.pr
     provider_name = active.provider or prcfg.provider
     target_repo = active.repo or (record.repo or "")
+    api_base = getattr(prcfg, "api_base", "") or ""
     try:
         from . import providers
 
         provider = providers.get_provider(provider_name)
         token = providers.account_token_for_slug(target_repo, prcfg)
         pull = provider.get_pull(
-            target_repo, active.number,
-            api_base=getattr(prcfg, "api_base", "") or "", token=token,
+            target_repo, active.number, api_base=api_base, token=token,
         )
     except Exception:
         # Provider unconfigured/unreachable -- keep the local state rather than
@@ -783,11 +800,33 @@ def _reconcile_active_pr(
         resolved = state
     else:
         resolved = ""
+
+    # Zombie self-heal (#1375/#1703): the provider says non-terminal, but if the
+    # PR's head is already contained in the base branch its content has merged --
+    # heal to ``merged``. Definite-only: an unknown/False result leaves it open.
+    if not resolved and pull.head_sha and pull.base_ref:
+        try:
+            contained = provider.head_contained_in_base(
+                target_repo, pull.base_ref, pull.head_sha,
+                api_base=api_base, token=token,
+            )
+        except Exception:
+            contained = None
+        if contained is True:
+            resolved = "merged"
+
     if resolved:
         active.state = resolved
         if not active.closed_at:
             active.closed_at = tracking._now_iso()
-        tracking.save_record(record)
+        if best_effort:
+            # Skip the persist on contention -- the monotonic transition is
+            # re-applied next sweep; never block a critical updater.
+            with tracking._RecordLock(record.yaml_path, blocking=False) as lk:
+                if lk.acquired:
+                    tracking.save_record(record)
+        else:
+            tracking.save_record(record)
 
 
 def _live_pr_state(

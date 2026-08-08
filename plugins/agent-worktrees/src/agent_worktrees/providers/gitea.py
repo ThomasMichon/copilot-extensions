@@ -402,7 +402,44 @@ class GiteaProvider:
             number=int(data.get("number", number)),
             state=state,
             merged=merged,
+            head_sha=str((data.get("head") or {}).get("sha", "")),
+            base_ref=str((data.get("base") or {}).get("ref", "")),
         )
+
+    def head_contained_in_base(
+        self, repo: str, base: str, head_sha: str, *, api_base: str = "",
+        token: str | None = None,
+    ) -> bool | None:
+        """True when ``base`` already contains ``head_sha`` (0 commits ahead).
+
+        Compares ``base...head`` via Gitea's compare endpoint. Best-effort: any
+        error, a missing base/head, or an unparseable payload yields ``None`` so
+        the caller does NOT self-heal on uncertainty. Returns True (contained ->
+        the PR's content already merged), False (still ahead), or ``None``.
+        """
+        if not base or not head_sha:
+            return None
+        try:
+            status, body = self._curl(
+                "GET",
+                self._api(api_base, f"/repos/{repo}/compare/{base}...{head_sha}"),
+                token,
+            )
+            if status != 200:
+                return None
+            data = json.loads(body)
+        except (json.JSONDecodeError, OSError):
+            return None
+        if not isinstance(data, dict):
+            return None
+        total = data.get("total_commits")
+        if isinstance(total, int):
+            return total == 0
+        # Fall back to the commits array length when total_commits is absent.
+        commits = data.get("commits")
+        if isinstance(commits, list):
+            return len(commits) == 0
+        return None
 
     def get_snapshot(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
