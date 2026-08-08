@@ -169,6 +169,37 @@ def _rev(ref: str, *, cwd: str) -> str:
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
+def _patch_id(base: str, head: str, *, cwd: str) -> str:
+    """Squash-invariant patch-id of ``base..head`` (#898), or "" on failure.
+
+    ``git diff base..head | git patch-id --stable`` identifies the *change
+    content*, invariant across a squash / rebase / re-commit -- so a downstream
+    recorder (an issue-close comment, a session ref) can bind to something that
+    survives the server-side squash-merge rewriting the commit SHA, instead of a
+    pre-squash SHA that dangles once the work lands. Best-effort: an empty diff or
+    any git error yields "".
+    """
+    if not base:
+        return ""
+    diff = git_ops.git("diff", f"{base}..{head}", cwd=cwd, check=False)
+    if diff.returncode != 0 or not diff.stdout:
+        return ""
+    try:
+        import subprocess
+        pid = subprocess.run(
+            ["git", "patch-id", "--stable"],
+            input=diff.stdout, cwd=cwd, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if pid.returncode != 0:
+        return ""
+    out = pid.stdout.strip()
+    # `git patch-id` prints "<patch-id> <commit-id>"; take the patch-id token.
+    return out.split()[0] if out else ""
+
+
 def _title_from_commits(worktree_path: str, upstream: str) -> str | None:
     """Best-effort worktree title from its own commit history.
 
@@ -498,6 +529,9 @@ def create_pr(
             return {**base, "error": f"Failed to squash worktree commits.{detail}"}
 
     head_sha = _rev("HEAD", cwd=worktree_path)
+    # Squash-invariant reference for downstream recorders (#898): survives the
+    # server-side squash-merge that rewrites the commit SHA.
+    patch_id = _patch_id(base_sha, "HEAD", cwd=worktree_path)
 
     # Effective per-invocation head scheme. In a refspec repo, a *parallel* PR
     # (--new while another PR is still live) cannot use worktree/<id> as its
@@ -569,6 +603,7 @@ def create_pr(
         target_pr.branch = feature_branch
         target_pr.base_sha = base_sha
         target_pr.head_sha = head_sha
+        target_pr.patch_id = patch_id
         if not target_pr.provider:
             target_pr.provider = prcfg.provider
         tracking.save_record(record)
@@ -578,7 +613,7 @@ def create_pr(
     result = {
         **base, "success": True, "state": "open",
         "branch": feature_branch, "remote": remote,
-        "base_sha": base_sha, "head_sha": head_sha,
+        "base_sha": base_sha, "head_sha": head_sha, "patch_id": patch_id,
         "provider": prcfg.provider, "default_branch": repo.default_branch,
         "repo": (target_pr.repo if target_pr else default_pr_repo),
         "pr_count": len(record.prs) if record else 0,
@@ -1280,6 +1315,7 @@ def _pr_to_dict(pr: PRRecord) -> dict:
         "branch": pr.branch,
         "base_sha": pr.base_sha,
         "head_sha": pr.head_sha,
+        "patch_id": pr.patch_id,
         "url": pr.url,
         "number": pr.number,
         "provider": pr.provider,
@@ -1346,14 +1382,18 @@ def _push_existing_feature(
         # target is always non-terminal here (a live match or a fresh record).
         target.state = "open"
         target.head_sha = head_sha
+        # Refresh the squash-invariant patch-id after the re-squash (#898).
+        target.patch_id = _patch_id(
+            target.base_sha, feature_branch, cwd=worktree_path)
         if not target.provider:
             target.provider = prcfg.provider
         tracking.save_record(record)
     base_sha = target.base_sha if target else ""
+    patch_id = target.patch_id if target else ""
     result = {
         **base, "success": True, "state": "open", "rerun": True,
         "branch": feature_branch, "remote": remote,
-        "base_sha": base_sha, "head_sha": head_sha,
+        "base_sha": base_sha, "head_sha": head_sha, "patch_id": patch_id,
         "provider": prcfg.provider, "default_branch": repo.default_branch,
         "repo": (target.repo if target else ""),
         "pr_count": len(record.prs) if record else 0,
