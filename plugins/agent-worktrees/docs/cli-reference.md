@@ -223,8 +223,12 @@ set status-left  '#{@aw_ctx} '          # identity  (machine | env | repo:id4)
 set status-right '#{@aw_seg} %H:%M '     # disposition block + live clock
 ```
 
-The launcher spawns one detached updater per session (psmux via
+Two seams spawn one detached updater per session (psmux via
 `launch-session.ps1`, tmux via `launch-session.sh`):
+
+- the **launcher**, on psmux/tmux create and on every attach/join; and
+- the **`sessionStart` hook** (`register-session` → `_spawn_status_updater`),
+  which re-asserts the updater at the start of every Copilot session.
 
 ```text
 agent-worktrees status-updater --session wt-<id> --mux <psmux|tmux> --path <worktree>
@@ -233,12 +237,28 @@ agent-worktrees status-updater --session wt-<id> --mux <psmux|tmux> --path <work
 It renders **in-process** (paying Python import once, never re-spawning the
 binstub), pushes the static identity into `@aw_ctx` once, and refreshes the
 dynamic disposition into `@aw_seg` every `--interval` seconds (default 15) via
-the cheap native `set-option` verb -- exiting on its own when `has-session`
-shows the session is gone. Between updates the bar does **zero** process work;
-the mux only re-runs the strftime `%H:%M` clock. Non-worktree sessions leave
-the vars unset and render a blank bar. The launcher may (re)spawn the updater
-on every attach/join: an `@aw_updater` token elects a single live instance, so
-older ones self-retire (the cross-platform equivalent of the old `flock`).
+the cheap native `set-option` verb. Between updates the bar does **zero**
+process work; the mux only re-runs the strftime `%H:%M` clock. Non-worktree
+sessions leave the vars unset and render a blank bar.
+
+**Single-instance election + self-healing.** Because both the launcher (on
+every attach/join) and the `sessionStart` hook may (re)spawn an updater, each
+one claims an `@aw_updater` token; a newer updater wins and older ones
+self-retire on their next tick (the cross-platform equivalent of the old
+`flock`). An updater also retires when a **version deploy supersedes its
+runtime** — the `.venv` slot no longer matches its `sys.prefix` — so updaters
+don't pile up one-per-version across deploys (dotfiles #911). The two spawn
+seams are what make that safe: whichever fires next (a launcher attach or the
+next session's `sessionStart`) re-seeds a current-version updater, so a bar left
+dark by a supersede recovers instead of staying blank until a manual attach
+(dotfiles #915).
+
+**Liveness is transient-tolerant.** The loop distinguishes a *definitive*
+"session gone" (`has-session` ran and reported non-zero) from a *transient* mux
+hiccup (a timed-out/errored `has-session` under a busy high-framerate TUI). It
+retires only on a definitive gone, a lost token, a superseding runtime, or a
+sustained run of transient failures (a genuinely wedged mux) — a single timeout
+no longer silently kills the bar for the rest of the session (dotfiles #915).
 
 Flags: `--session` (required), `--mux {psmux,tmux}` (default: auto-detect),
 `--path PATH` (worktree to classify), `--interval N` (seconds, min 2).
