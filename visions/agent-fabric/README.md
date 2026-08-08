@@ -5,7 +5,7 @@
   spanning worktrees, machines, CodeSpaces, and containers.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-07-31
+- **Last revised:** 2026-08-07
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
   `docs/architecture.md`
@@ -259,6 +259,48 @@ duplicate. Two load-bearing properties bind it to the rest of the fabric:
   honors (e.g. a lockfile inside a CodeSpace), refusing a foreign holder while
   staying degrade-safe. This is the backend fence the primitive's own safety model
   recommends.
+
+### resource-accountability
+The claim ledger makes a footprint **legible** and the lease makes access
+**exclusive**; accountability closes the loop by making a worktree **answer for
+everything it allocated before it is allowed to disappear**. The intent: a
+worktree never finalizes while it still owns **unsettled work** on a resource it
+brought into being — a cross-repo worktree it opened, a CodeSpace or container it
+borrowed, a bridge session it drove. Finalize is the **join point** where those
+obligations are asserted clear; **release is gated on settlement** so tearing down
+a claim can never silently orphan the work behind it.
+
+The load-bearing distinction is between the **claim** and the **resource**:
+*at-rest* is a property of the resource (its work is safe — merged, off-box, or
+itself finalized), while *released* is a property of the claim (its lease is torn
+down). They decouple — a CodeSpace can go at-rest (work safe) and have its claim
+released (freeing it for the next borrower) **without being destroyed**; "closed
+out" means *safe*, not *deleted*. Three properties keep this honest and cheap:
+
+- **Settle incrementally, assert locally — never traverse at finalize.** The cost
+  of proving a footprint safe is paid **continuously**, at each resource's own
+  natural close-out moment, not in one expensive recursive walk when finalize runs.
+  A child resource **returns its obligation upward** the instant it settles (a
+  cross-repo worktree flips its parent-visible claim when *its own* finalize
+  succeeds; a CodeSpace/container stamps its cleanliness on each disconnect or
+  heartbeat). Finalize then reads a **cheap local balance** — "do I still hold any
+  unsettled obligation?" — and trusts each child's already-recorded verdict rather
+  than re-deriving the whole tree. This is reference counting on a cross-resource
+  scale: the recursion **collapses into local checks**, so proving a worktree
+  truly final stays fast no matter how deep its footprint.
+- **Never wedge; never lose work.** The gate blocks only a *definitive* unsettled
+  obligation; every ambiguity degrades to a warning, and adoption is warn-first
+  (an un-annotated legacy claim never hard-blocks). A crashed holder that never
+  settles cannot freeze its parent forever: **liveness + a reclaiming sweep** may
+  settle or re-parent an obligation whose owner is provably gone and whose resource
+  is provably safe — the safety-net GC beneath the accountable gate. And an
+  explicit abandon **re-homes** the obligation to a durable owner rather than
+  dropping it, so responsibility survives the worktree that abandoned it.
+- **Answerable in both directions, still.** Because every obligation rides the same
+  claim ledger, the fabric can always answer *what unsettled work does this worktree
+  still owe?* and *which worktree is answerable for this resource?* — the
+  legibility of `resource-claims` extended from "who holds what" to "who still owes
+  what."
 
 ### externally-observable
 Beyond the fabric's own picker legibility, each layer's lifecycle is
@@ -593,3 +635,23 @@ opt-in, pressure changes nothing and the session behaves exactly as before.
   it away from. Realized as a per-repo policy matrix + a state-aware reminder
   the pr-* / push-changes verbs emit; tracked in the copilot-extensions PR-flow
   legibility effort.
+- **2026-08-07** — Added §Concepts/`resource-leasing` and `resource-accountability`.
+  `resource-leasing` names the atomic, cross-machine, same-harness exclusion
+  primitive — **ref-shenanigans-only** compare-and-swap in the harness's own repo
+  (fencing token + tombstone), two-tier local+ref-CAS, degrade-safe, with the
+  cross-harness seam fenced **on the resource itself** — shipped by the
+  git-ref-resource-leases effort (folding David Michon's CAS engine into
+  agent-worktrees core). `resource-accountability` then closes the loop: a worktree
+  **answers for everything it allocated before it may finalize** — release is
+  **gated on settlement**, *at-rest (resource safe)* is decoupled from *released
+  (claim torn down)*, and the "is it truly final?" proof is kept **cheap** by
+  **settling incrementally + asserting locally** (a child returns its obligation
+  upward the moment it settles; finalize reads a local balance and never traverses
+  the tree — reference counting on a cross-resource scale), with a liveness/reclaim
+  sweep beneath so a dead holder never wedges a parent and an abandon **re-homes**
+  the obligation rather than dropping it. Mined from the follow-on question the
+  lease store raised — now that a worktree's whole outbound footprint (CodeSpaces,
+  containers, cross-repo worktrees, bridge sessions) is representable as leases, the
+  ground layer's `finalize` should refuse to let a worktree vanish while it still
+  owes unsettled work on those resources. Tracked in the
+  `resource-obligation-settlement` effort.
