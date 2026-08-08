@@ -47,7 +47,7 @@ def test_get_lease_origin_value(monkeypatch, capsys):
 
     from agent_worktrees import config as cfg
 
-    monkeypatch.setenv("WORKTREE_PROJECT", "ext")
+    cfg.set_active_project("ext")
     conf = cfg.Config(
         srcroot="/s", machine="m", platform="linux", repo_name="ext",
         repos={"ext": cfg.RepoConfig(anchor="/a", worktree_root="/w")},
@@ -65,9 +65,9 @@ def test_get_pr_keys_values(monkeypatch, capsys):
 
     from agent_worktrees import config as cfg
 
-    # cmd_get resolves cfg.project_dir(), which requires WORKTREE_PROJECT;
-    # pin it so the test does not depend on the ambient environment.
-    monkeypatch.setenv("WORKTREE_PROJECT", "ext")
+    # cmd_get resolves cfg.project_dir(), which requires an active project;
+    # pin it in-process so the test does not depend on the ambient environment.
+    cfg.set_active_project("ext")
 
     conf = cfg.Config(
         srcroot="/s", machine="m", platform="linux", repo_name="ext",
@@ -138,7 +138,7 @@ def test_project_requiring_command_no_project_routes_to_help(monkeypatch, capsys
     assert "Could not resolve a project for 'list'" in err
 
 
-def test_project_flag_sets_env_and_bypasses_help(monkeypatch):
+def test_project_flag_bypasses_help(monkeypatch):
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
     called = {}
 
@@ -151,8 +151,10 @@ def test_project_flag_sets_env_and_bypasses_help(monkeypatch):
     rc = m.main(["--project", "demo"])
     assert rc == 0
     assert called.get("launched") is True
+    assert m.cfg.active_project() == "demo"
     import os
-    assert os.environ.get("WORKTREE_PROJECT") == "demo"
+    # identity is threaded in-process, never round-tripped through the env
+    assert "WORKTREE_PROJECT" not in os.environ
 
 
 # ── `<repo> <slug>` command-surface router ───────────────────────────────────
@@ -564,10 +566,12 @@ def test_project_flag_sets_active_project_and_ignores_worktree_id(monkeypatch):
     rc = m.main(["--project", "demo", "status"])
     assert rc == 0
     assert m.cfg.active_project() == "demo"
-    # Exported for legacy shell consumers; the Python resolver reads
-    # cfg.active_project(), not this env var.
-    assert os.environ.get("WORKTREE_PROJECT") == "demo"
-    # No longer scrubbed -- present but irrelevant to CWD-based resolution.
+    # $WORKTREE_PROJECT is no longer exported -- the Python resolver reads
+    # cfg.active_project(), and identity never round-trips through the env
+    # (cwd-resolution Phase 3).
+    assert "WORKTREE_PROJECT" not in os.environ
+    # WORKTREE_ID is no longer scrubbed -- present but irrelevant to CWD-based
+    # resolution.
     assert os.environ.get("WORKTREE_ID") == "caller-session-wt"
     assert os.environ.get("APERTURE_WORKTREE_ID") == "caller-session-wt"
 
@@ -576,8 +580,10 @@ def test_bare_invocation_ignores_inherited_worktree_id(monkeypatch):
     """Without --project, a bare launch resolves context from CWD; the inherited
     WORKTREE_ID is neither consulted nor deleted (it is simply irrelevant)."""
     import os
-    monkeypatch.setenv("WORKTREE_PROJECT", "demo")
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
     monkeypatch.setenv("WORKTREE_ID", "keep-me")
+    # Context comes from CWD resolution (not the retired $WORKTREE_PROJECT).
+    monkeypatch.setattr(m, "_resolve_active_project", lambda proj: ("demo", None))
     monkeypatch.setattr(m, "_is_headless_project", lambda: False)
     monkeypatch.setattr(m, "cmd_launch", lambda argv: 0)
 
@@ -744,7 +750,8 @@ def test_worktree_help_returns_zero(capsys):
 
 
 def test_bare_headless_project_lists_not_launches(monkeypatch):
-    monkeypatch.setenv("WORKTREE_PROJECT", "ext")
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m, "_resolve_active_project", lambda proj: ("ext", None))
     monkeypatch.setattr(m, "_is_headless_project", lambda: True)
     launched = {"v": False}
 
@@ -768,7 +775,8 @@ def test_bare_headless_project_lists_not_launches(monkeypatch):
 
 
 def test_bare_non_headless_project_launches(monkeypatch):
-    monkeypatch.setenv("WORKTREE_PROJECT", "demo")
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m, "_resolve_active_project", lambda proj: ("demo", None))
     monkeypatch.setattr(m, "_is_headless_project", lambda: False)
     launched = {"v": False}
 

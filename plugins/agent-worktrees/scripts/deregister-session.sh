@@ -9,7 +9,7 @@ _log() { printf '[%s] [%s] deregister-session: %s\n' "$(date '+%H:%M:%S')" "$1" 
 
 # Worktree id is resolved from CWD by the Python command (this hook runs in the
 # worktree). WORKTREE_ID is forwarded only if present, for robustness.
-wt_id="${WORKTREE_ID:-${APERTURE_WORKTREE_ID:-}}"
+wt_id="${WORKTREE_ID:-}"
 session_id="${COPILOT_AGENT_SESSION_ID:-}"
 
 if [[ -z "$session_id" ]]; then

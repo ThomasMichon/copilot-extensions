@@ -687,17 +687,13 @@ def project_name() -> str:
 
     Resolution is git-like: the active project is derived from the current
     directory (or an explicit ``--project``) by ``main()`` and threaded in
-    process -- it is **not** read from ``$WORKTREE_PROJECT``. Raises
-    ``RuntimeError`` when no project could be resolved.
+    process -- it is **not** read from ``$WORKTREE_PROJECT`` (the transitional
+    env fallback was retired once the shell layer migrated to CWD/``--project``;
+    cwd-resolution effort Phase 3). Raises ``RuntimeError`` when no project could
+    be resolved -- callers that must render without context (e.g. the ``repos``
+    usage banner) catch it and fall back to the generic binstub name.
     """
     name = (_ACTIVE_PROJECT or "").strip()
-    if not name:
-        # Transitional fallback for internal / import-time callers that run
-        # before main() resolves context (shell installers, module-import
-        # side effects). Command dispatch always sets the active project from
-        # CWD/--project first, so this never overrides CWD-first resolution.
-        # Removed once the shell layer is migrated off $WORKTREE_PROJECT.
-        name = os.environ.get("WORKTREE_PROJECT", "").strip()
     if not name:
         raise RuntimeError(
             "No active project could be resolved. agent-worktrees discovers its "

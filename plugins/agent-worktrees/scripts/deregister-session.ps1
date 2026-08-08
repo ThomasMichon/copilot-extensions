@@ -3,7 +3,7 @@
 
 # Worktree id is resolved from CWD by the Python command (this hook runs in the
 # worktree). WORKTREE_ID is forwarded only if present, for robustness.
-$wt_id = if ($env:WORKTREE_ID) { $env:WORKTREE_ID } else { $env:APERTURE_WORKTREE_ID }
+$wt_id = $env:WORKTREE_ID
 $session_id = $env:COPILOT_AGENT_SESSION_ID
 
 if (-not $session_id) { exit 0 }
