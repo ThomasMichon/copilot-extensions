@@ -9173,6 +9173,9 @@ _GET_KEYS: dict[str, str] = {
     "machine":       "Machine name from config",
     "platform":      "Platform (win/wsl/linux)",
     "project":       "Project name",
+    "owner-ref":     "This worktree's qualified claim ref "
+                     "(machine/project/worktree_id[#session]) -- the cross-machine "
+                     "holder identity for resource leases; empty if not in a worktree",
     "repo-remote":   "Canonical remote URL of this repo (registry remote; falls "
                      "back to git origin) -- the device-independent repo key",
     "pr-enabled":    "Whether PR mode is enabled (true/false)",
@@ -9311,6 +9314,11 @@ def cmd_get(args: argparse.Namespace) -> int:
         "machine":      config.machine,
         "platform":     config.platform,
         "project":      config.repo_name,
+        "owner-ref":    (
+            tracking.format_claim_ref(config.machine, config.repo_name, wt_id,
+                                      session_id)
+            if wt_id else ""
+        ),
         "repo-remote":  _resolve_repo_remote(config, repo),
         "pr-enabled":    "true" if repo.pr.enabled else "false",
         "pr-required":   "true" if repo.pr.required else "false",
