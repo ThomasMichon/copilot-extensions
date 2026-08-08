@@ -17,6 +17,7 @@ from typing import Literal
 import yaml
 
 from . import config as cfg
+from . import obligations
 
 WorktreeStatus = Literal["active", "complete", "pushed", "finalized", "orphaned"]
 
@@ -139,10 +140,15 @@ def _pr_is_terminal(pr: PRRecord) -> bool:
 # already understands so later phases can journal them without a schema change.
 ResourceKind = Literal["worktree", "codespace", "container", "ssh", "workdir", "pr"]
 
-# Claim lifecycle: "active" while the owner still holds the resource, "released"
-# once it explicitly lets go. Unknown/absent degrades to "active" so a stray
-# value never hides a live claim from the reap-safety check.
-_CLAIM_LIVE_STATES: tuple[str, ...] = ("", "active")
+# Claim disposition (resource-obligation-settlement): "active" while unsettled
+# work still rides on the resource, "at-rest" once that work is safe (merged /
+# off-box / itself finalized) but the claim is still held, "released" once the
+# owner explicitly lets go. Unknown/absent degrades to "active" so a stray value
+# never hides a live claim from the reap-safety check. The canonical vocabulary
+# + predicates live in ``obligations``; this tuple is the set of dispositions
+# that still mean "held" (claim not torn down) -- both active and at-rest -- used
+# by ``is_live`` / ``live_resources`` for reap-safety.
+_CLAIM_LIVE_STATES: tuple[str, ...] = ("", "active", "at-rest")
 
 
 @dataclass
@@ -230,13 +236,33 @@ class ResourceClaim:
     kind: str = "worktree"      # ResourceKind
     ref: str = ""               # qualified target ref (kind-specific)
     created_at: str = ""        # ISO timestamp the claim was journaled
-    state: str = "active"       # active | released
+    state: str = "active"       # disposition: active | at-rest | released
     note: str = ""              # optional human label
 
     @property
     def is_live(self) -> bool:
-        """True while the owner still holds this resource (not released)."""
+        """True while the owner still **holds** this resource (not released).
+
+        Both ``active`` and ``at-rest`` are held -- ``at-rest`` means the *work*
+        is settled but the claim itself is not yet torn down. Only ``released``
+        (an explicit hand-back) is not live. Reap-safety reads this.
+        """
         return self.state in _CLAIM_LIVE_STATES
+
+    @property
+    def is_unsettled(self) -> bool:
+        """True when unsettled work still rides on the resource (blocks finalize).
+
+        The gate predicate (resource-obligation-settlement): ``active`` -- and a
+        missing/unknown disposition, conservatively -- blocks; ``at-rest`` and
+        ``released`` do not.
+        """
+        return obligations.blocks_finalize(self.state)
+
+    @property
+    def is_at_rest(self) -> bool:
+        """True when the resource's work is safe but the claim is still held."""
+        return obligations.is_at_rest(self.state)
 
 
 @dataclass
@@ -673,7 +699,7 @@ def _parse_claim_mapping(raw: dict) -> ResourceClaim:
     """Parse one ResourceClaim mapping from a ``resources:`` list item."""
     kind = str(raw.get("kind", "worktree")) or "worktree"
     state_raw = raw.get("state")
-    state = state_raw if state_raw in ("active", "released") else "active"
+    state = state_raw if state_raw in ("active", "at-rest", "released") else "active"
     return ResourceClaim(
         kind=kind,
         ref=str(raw.get("ref", "")),
