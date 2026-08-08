@@ -3059,6 +3059,8 @@ def _cmd_pool(args: argparse.Namespace) -> int:
             holder = f"{_short_owner(owner)}@{m.holder_host or '?'}"
         elif m.beacon:
             holder = f"(beacon #{m.beacon})"
+        elif m.l2_live and m.l2_holder:
+            holder = f"(L2: {pool_mod._short_claim_ref(m.l2_holder)})"
         else:
             holder = ""
         print(f"{m.name:<38} {m.repository:<30} {m.disposition:<13} "

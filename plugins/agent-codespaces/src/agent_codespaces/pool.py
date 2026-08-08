@@ -131,17 +131,24 @@ def derive_disposition(
     marker: str | None,
     idle_age: float | None,
     stale_after: float,
+    has_l2_hold: bool = False,
 ) -> str:
     """Classify one CodeSpace's disposition from its derived signals.
 
     Precedence (first match wins):
       1. terminal-failed gh state            -> FAILED
-      2. a live lease OR a cross-machine beacon -> IN_USE
+      2. a live lease OR a cross-machine beacon/L2 hold -> IN_USE
       3. genuinely still-coming-up gh state  -> PROVISIONING
       4. a ``prunable`` marker               -> STALE
       5. a ``recovered`` marker              -> CLEAN
       6. unheld + idle past the threshold    -> STALE
       7. otherwise                           -> IDLE
+
+    ``has_l2_hold`` is the cross-machine Git-ref lease overlay (a live L2 lease
+    held elsewhere without a local L1 lease) -- the atomic successor to the
+    display-name beacon as the cross-machine in-use truth. Degrade-safe: it is
+    False whenever the L2 store is unreadable, so the classification collapses to
+    the pre-overlay behavior.
 
     Note ``Shutdown`` is NOT provisioning -- a stopped box boots on connect and
     is reusable, so it falls through to the marker/idle classification (a
@@ -150,7 +157,7 @@ def derive_disposition(
     bucket = classify_state(state)
     if bucket == "failed":
         return FAILED
-    if has_live_lease or has_beacon:
+    if has_live_lease or has_beacon or has_l2_hold:
         return IN_USE
     if bucket == "pending" and state != _SHUTDOWN:
         return PROVISIONING
@@ -192,6 +199,15 @@ class PoolMember:
     beacon: str | None
     marker: str | None
     idle_age: float | None
+    # Cross-machine L2 (Git-ref lease) overlay -- a *derived read* over
+    # ``agent-worktrees lease list`` (git-ref-resource-leases Phase 3), never a
+    # store of its own. ``l2_holder`` is the qualified ClaimRef holding the
+    # atomic cross-machine lease, ``l2_live`` whether that lease is unexpired,
+    # ``l2_expires_at`` its deadline. All default to empty/False so a missing or
+    # unreadable L2 store leaves the member exactly as the pre-overlay view.
+    l2_holder: str | None = None
+    l2_live: bool = False
+    l2_expires_at: str = ""
     # The gh ``displayName`` -- a user/tool-assigned FRIENDLY name, distinct from
     # ``name`` (the durable GitHub-assigned id). Defaults to ``name`` when unset.
     display_name: str = ""
@@ -220,6 +236,14 @@ class PoolMember:
                 "worktree": self.holder_worktree,
                 "host": self.holder_host,
                 "beacon": self.beacon,
+            },
+            # Cross-machine L2 lease overlay (derived, degrade-safe). ``holder``
+            # is the ClaimRef holding the atomic Git-ref lease across machines;
+            # ``live`` whether it is unexpired; ``expires_at`` its deadline.
+            "l2": {
+                "holder": self.l2_holder,
+                "live": self.l2_live,
+                "expires_at": self.l2_expires_at or None,
             },
             "eligibility": self.marker or "active",
             "idle_age_s": round(self.idle_age) if self.idle_age is not None else None,
@@ -256,12 +280,19 @@ def build_pool(
     codespaces: list[CodespaceInfo] | None = None,
     leases: list[Lease] | None = None,
     markers: dict[str, str] | None = None,
+    l2_leases: dict | None = None,
 ) -> tuple[list[PoolMember], Budget]:
     """Derive the full pool view (members + budget) from the owning layers.
 
     Pure derivation -- no persistence. The optional ``codespaces`` / ``leases`` /
     ``markers`` args exist for testing; in production they default to a live read
     of ``list_codespaces`` / ``list_leases`` / ``list_status``.
+
+    ``l2_leases`` is the cross-machine Git-ref lease overlay (a ``{key: L2Lease}``
+    map from ``coordination.list_leases``). When omitted it is read live and
+    **degrade-safe** -- an unavailable/unreadable L2 store yields ``None`` and the
+    overlay is simply absent, so the pool view is identical to the pre-overlay
+    behavior. Pass ``{}`` in tests to assert the no-overlay path without shelling.
     """
     import time as _time
 
@@ -272,6 +303,14 @@ def build_pool(
         leases = list_leases()
     if markers is None:
         markers = {s.codespace: s.state for s in list_status()}
+    if l2_leases is None:
+        # Best-effort cross-machine overlay; never let a lease-store failure break
+        # the pool. ``None`` (unavailable) collapses to an empty overlay.
+        try:
+            from . import coordination
+            l2_leases = coordination.list_leases() or {}
+        except Exception:
+            l2_leases = {}
 
     lease_by_cs = {ls.codespace: ls for ls in leases}
 
@@ -284,6 +323,14 @@ def build_pool(
         cores = machine_cores(cs.machine)
         running = is_running(cs.state)
 
+        l2 = l2_leases.get(cs.name)
+        l2_live = bool(l2 and getattr(l2, "live", False))
+        l2_holder = (getattr(l2, "holder", "") or None) if l2 else None
+        l2_expires_at = (getattr(l2, "expires_at", "") or "") if l2 else ""
+        # A live L2 lease held cross-machine (no local L1 lease) is an in-use
+        # signal -- the atomic successor to the display-name beacon.
+        has_l2_hold = l2_live and lease is None
+
         last_used = _iso_to_epoch(cs.last_used_at)
         idle_age = (now - last_used) if (last_used is not None and lease is None) else None
 
@@ -294,6 +341,7 @@ def build_pool(
             marker=marker,
             idle_age=idle_age,
             stale_after=stale_after,
+            has_l2_hold=has_l2_hold,
         )
 
         if running:
@@ -322,6 +370,9 @@ def build_pool(
             beacon=beacon,
             marker=marker,
             idle_age=idle_age,
+            l2_holder=l2_holder,
+            l2_live=l2_live,
+            l2_expires_at=l2_expires_at,
             display_name=cs.display_name or "",
         ))
 
@@ -339,6 +390,17 @@ def build_pool(
 def _short_repo(repository: str) -> str:
     """The trailing path segment of an ``owner/name`` repo id (display only)."""
     return repository.rsplit("/", 1)[-1] if repository else repository
+
+
+def _short_claim_ref(ref: str) -> str:
+    """Render a qualified ClaimRef (``machine/project/worktree[#session]``) as a
+    compact ``worktree@machine`` label for the L2 cross-machine holder column."""
+    if not ref:
+        return ref
+    machine = ref.split("/", 1)[0] if "/" in ref else ""
+    tail = ref.rsplit("/", 1)[-1]
+    worktree = tail.split("#", 1)[0]
+    return f"{worktree}@{machine}" if machine else worktree
 
 
 def picker_payload(
@@ -367,6 +429,9 @@ def picker_payload(
             holder = f"{m.holder_effort}@{m.holder_host or '?'}"
         elif m.beacon:
             holder = f"#{m.beacon}"
+        elif m.l2_live and m.l2_holder:
+            # Held cross-machine via the atomic L2 lease, with no local L1 lease.
+            holder = _short_claim_ref(m.l2_holder)
         else:
             holder = ""
         friendly = m.display_name or m.name
@@ -393,6 +458,9 @@ def picker_payload(
             subtitle = f"{subtitle} · {claim}" if subtitle else claim
         elif m.beacon:
             held = f"held elsewhere #{m.beacon}"
+            subtitle = f"{subtitle} · {held}" if subtitle else held
+        elif m.l2_live and m.l2_holder:
+            held = f"held cross-machine by {_short_claim_ref(m.l2_holder)}"
             subtitle = f"{subtitle} · {held}" if subtitle else held
         entries.append({
             "id": m.name,

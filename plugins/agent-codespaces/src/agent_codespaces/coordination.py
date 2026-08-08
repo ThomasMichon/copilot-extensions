@@ -77,6 +77,24 @@ class L2Result:
         return self.status == "unavailable"
 
 
+@dataclass
+class L2Lease:
+    """A cross-machine L2 lease as seen by a *read-only* pool overlay.
+
+    A projection of one ``agent-worktrees lease`` record onto the fields the
+    pool view needs: the CodeSpace ``key``, its cross-machine ``holder``
+    (a qualified ClaimRef), whether it is still ``live`` (unexpired, not
+    tombstoned), and its ``expires_at`` deadline. Derived, never authoritative
+    -- a missing/failed read simply omits the overlay.
+    """
+
+    key: str
+    holder: str
+    live: bool
+    expires_at: str = ""
+    token: str = ""
+
+
 def _aw() -> str | None:
     return shutil.which("agent-worktrees")
 
@@ -145,6 +163,46 @@ def inspect(key: str, *, origin: str | None = None) -> dict | None:
     if not isinstance(data, dict) or data.get("state") == "absent":
         return None
     return data
+
+
+def list_leases(
+    *, kind: str = KIND, origin: str | None = None
+) -> dict[str, L2Lease] | None:
+    """Read every cross-machine L2 lease of a kind, keyed by resource key.
+
+    Shells ``agent-worktrees lease list --kind <kind>`` and projects each record
+    onto an :class:`L2Lease`. Returns a ``{key: L2Lease}`` map (possibly empty
+    when no leases exist), or **None** when L2 is unavailable / unreadable -- the
+    degrade-safe signal a caller uses to simply omit the overlay. Never raises.
+    """
+    args = ["lease", "list", "--kind", kind]
+    if origin:
+        args += ["--origin", origin]
+    proc = _run(args)
+    if proc is None or proc.returncode != _EXIT_OK:
+        return None
+    try:
+        data = json.loads(proc.stdout)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, list):
+        return None
+    result: dict[str, L2Lease] = {}
+    for rec in data:
+        if not isinstance(rec, dict):
+            continue
+        res = rec.get("resource")
+        key = str(res.get("key", "")) if isinstance(res, dict) else ""
+        if not key:
+            continue
+        result[key] = L2Lease(
+            key=key,
+            holder=str(rec.get("holder", "")),
+            live=bool(rec.get("live", False)),
+            expires_at=str(rec.get("expires_at", "")),
+            token=str(rec.get("token", "")),
+        )
+    return result
 
 
 def acquire(

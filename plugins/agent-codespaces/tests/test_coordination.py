@@ -14,7 +14,7 @@ from agent_codespaces import coordination as coord
 # module (which tests the shim itself) can restore the real implementations.
 _REAL = {
     name: getattr(coord, name)
-    for name in ("owner_ref", "acquire", "renew", "release", "inspect")
+    for name in ("owner_ref", "acquire", "renew", "release", "inspect", "list_leases")
 }
 
 
@@ -107,3 +107,47 @@ def test_owner_ref_unresolvable_is_none(monkeypatch):
 def test_inspect_absent_is_none(monkeypatch):
     monkeypatch.setattr(coord, "_run", lambda *a, **k: _proc(0, json.dumps({"state": "absent"})))
     assert coord.inspect("cs-one") is None
+
+
+def test_list_leases_projects_records_by_key(monkeypatch):
+    rows = [
+        {"resource": {"kind": "codespace", "key": "cs-a"},
+         "holder": "m1/p/w1", "live": True, "expires_at": "2026-08-07T18:00:00Z",
+         "token": "a" * 40},
+        {"resource": {"kind": "codespace", "key": "cs-b"},
+         "holder": "m2/p/w2", "live": False, "expires_at": "2026-08-07T17:00:00Z"},
+    ]
+    monkeypatch.setattr(coord, "_run", lambda *a, **k: _proc(0, json.dumps(rows)))
+    out = coord.list_leases()
+    assert set(out) == {"cs-a", "cs-b"}
+    assert out["cs-a"].holder == "m1/p/w1" and out["cs-a"].live is True
+    assert out["cs-a"].token == "a" * 40
+    assert out["cs-b"].live is False
+
+
+def test_list_leases_empty_is_empty_map(monkeypatch):
+    monkeypatch.setattr(coord, "_run", lambda *a, **k: _proc(0, "[]"))
+    assert coord.list_leases() == {}
+
+
+def test_list_leases_unavailable_is_none(monkeypatch):
+    monkeypatch.setattr(coord, "_run", lambda *a, **k: None)
+    assert coord.list_leases() is None
+
+
+def test_list_leases_nonzero_exit_is_none(monkeypatch):
+    monkeypatch.setattr(coord, "_run", lambda *a, **k: _proc(2, stderr="no origin"))
+    assert coord.list_leases() is None
+
+
+def test_list_leases_malformed_json_is_none(monkeypatch):
+    monkeypatch.setattr(coord, "_run", lambda *a, **k: _proc(0, "not json"))
+    assert coord.list_leases() is None
+
+
+def test_list_leases_skips_keyless_or_nondict_rows(monkeypatch):
+    rows = ["junk", {"holder": "no-resource"}, {"resource": {"kind": "codespace", "key": ""}},
+            {"resource": {"kind": "codespace", "key": "cs-ok"}, "holder": "m/p/w", "live": True}]
+    monkeypatch.setattr(coord, "_run", lambda *a, **k: _proc(0, json.dumps(rows)))
+    out = coord.list_leases()
+    assert set(out) == {"cs-ok"}
