@@ -68,6 +68,12 @@ class PullResult:
     some providers, so ``merged`` is the authoritative "did the work land"
     signal for prune-safety reconciliation.
     """
+    head_sha: str = ""
+    """The PR head commit SHA (when the provider reports it) -- lets a reconcile
+    check whether the head is already contained in the base (a zombie
+    open-but-merged PR, #1375/#1703)."""
+    base_ref: str = ""
+    """The PR base (target) branch ref, e.g. ``master``."""
     label_error: str = ""
     """Non-empty when the PR opened but one or more configured labels could not
     be applied (lookup/attach failure, or a label absent from the repo).
@@ -240,6 +246,30 @@ class PRProvider(Protocol):
           ``RepoPolicy(supported=False)``).
 
         Never raises: a failed read yields ``RepoPolicy(supported=False, error=...)``.
+        """
+        ...
+
+    def head_contained_in_base(
+        self, repo: str, base: str, head_sha: str, *, api_base: str = "",
+        token: str | None = None,
+    ) -> bool | None:
+        """Is ``head_sha`` already contained in ``base`` (i.e. its content merged)?
+
+        The zombie-PR self-heal probe (#1375/#1703): a PR whose merge *content*
+        landed on the default branch but whose PR object was never flipped
+        (Gitea merge non-atomic under load / a Dampener squash that didn't close
+        the object) lingers ``state=open`` and shows as an open PR in the Picker.
+        A head that is 0 commits *ahead* of the base means the base already
+        contains it -- the PR is effectively merged and can be reconciled to a
+        terminal state.
+
+        - **gitea** compares ``base...head`` and returns True when head is 0
+          commits ahead.
+        - other providers are unsupported (return ``None``).
+
+        Returns True (contained), False (still ahead), or ``None`` (unknown /
+        unsupported / read failed) -- so a caller only self-heals on a definite
+        True and otherwise leaves the state untouched.
         """
         ...
 

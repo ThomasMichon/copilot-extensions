@@ -466,6 +466,97 @@ class TestSetPRAndStatus:
 # PR-aware finalize + push-changes (#586)
 # ---------------------------------------------------------------------------
 
+class TestReconcileActivePrSelfHeal:
+    """#1375/#1703: reconcile heals a zombie open PR whose content already merged."""
+
+    def _config(self):
+        return cfg.Config(
+            srcroot="/s", machine="m", platform="linux", repo_name="ext",
+            repos={"ext": cfg.RepoConfig(
+                anchor="/a", worktree_root="/w",
+                pr=cfg.PRConfig(enabled=True, provider="gitea"),
+            )},
+        )
+
+    def _record(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+        rec = tracking.WorktreeRecord(
+            worktree_id="wt-z", branch="worktree/wt-z",
+            worktree_path=str(tmp_path / "wt"), repo="o/r", machine="m",
+            platform="linux", started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
+            status="active", completed_at=None, sessions=None,
+        )
+        rec.pr = tracking.PRRecord(
+            state="open", number=7, branch="pr/x", provider="gitea", repo="o/r")
+        tracking.save_record(rec)
+        return rec
+
+    def _fake_provider(self, *, merged, contained):
+        from agent_worktrees.providers import PullResult
+
+        class _P:
+            name = "gitea"
+
+            def __init__(self):
+                self.contained_calls = []
+
+            def get_pull(self, repo, number, *, api_base="", token=None):
+                return PullResult(number=number, state="open", merged=merged,
+                                  head_sha="abc", base_ref="master")
+
+            def head_contained_in_base(self, repo, base, head_sha, *,
+                                       api_base="", token=None):
+                self.contained_calls.append((base, head_sha))
+                return contained
+
+        return _P()
+
+    def _patch(self, monkeypatch, fake):
+        import agent_worktrees.providers as prov
+        monkeypatch.setattr(prov, "get_provider", lambda name: fake)
+        monkeypatch.setattr(prov, "account_token_for_slug", lambda slug, prcfg: "t")
+
+    def test_zombie_heals_to_merged(self, tmp_path, monkeypatch):
+        rec = self._record(tmp_path, monkeypatch)
+        fake = self._fake_provider(merged=False, contained=True)
+        self._patch(monkeypatch, fake)
+        pr_ops._reconcile_active_pr(rec, self._config())
+        assert rec.active_pr().state == "merged"
+        assert fake.contained_calls == [("master", "abc")]
+        # Persisted to disk.
+        assert tracking.load_record(rec.yaml_path).active_pr().state == "merged"
+
+    def test_still_ahead_stays_open(self, tmp_path, monkeypatch):
+        rec = self._record(tmp_path, monkeypatch)
+        fake = self._fake_provider(merged=False, contained=False)
+        self._patch(monkeypatch, fake)
+        pr_ops._reconcile_active_pr(rec, self._config())
+        assert rec.active_pr().state == "open"
+
+    def test_unknown_containment_leaves_open(self, tmp_path, monkeypatch):
+        rec = self._record(tmp_path, monkeypatch)
+        fake = self._fake_provider(merged=False, contained=None)
+        self._patch(monkeypatch, fake)
+        pr_ops._reconcile_active_pr(rec, self._config())
+        assert rec.active_pr().state == "open"
+
+    def test_provider_merged_flag_short_circuits_probe(self, tmp_path, monkeypatch):
+        rec = self._record(tmp_path, monkeypatch)
+        fake = self._fake_provider(merged=True, contained=None)
+        self._patch(monkeypatch, fake)
+        pr_ops._reconcile_active_pr(rec, self._config())
+        assert rec.active_pr().state == "merged"
+        assert fake.contained_calls == []  # no containment probe when already merged
+
+    def test_best_effort_persists_when_uncontended(self, tmp_path, monkeypatch):
+        rec = self._record(tmp_path, monkeypatch)
+        fake = self._fake_provider(merged=False, contained=True)
+        self._patch(monkeypatch, fake)
+        pr_ops._reconcile_active_pr(rec, self._config(), best_effort=True)
+        assert tracking.load_record(rec.yaml_path).active_pr().state == "merged"
+
+
 class TestPRFinalizeAndPush:
     def test_precondition_fails_before_push(self, pr_repo):
         from agent_worktrees import finalize as fin

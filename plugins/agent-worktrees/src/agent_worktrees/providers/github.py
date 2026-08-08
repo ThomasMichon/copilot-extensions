@@ -503,6 +503,14 @@ class GitHubProvider:
             has_required_status_checks=req_checks,
         )
 
+    def head_contained_in_base(
+        self, repo: str, base: str, head_sha: str, *, api_base: str = "",
+        token: str | None = None,
+    ) -> bool | None:
+        """Not implemented: the zombie-PR containment probe is Gitea-only today."""
+        _ = (repo, base, head_sha, api_base, token)
+        return None
+
     _THREADS_QUERY = (
         "query($owner:String!,$name:String!,$number:Int!){"
         "repository(owner:$owner,name:$name){pullRequest(number:$number){"
