@@ -32,12 +32,12 @@ agent-codespaces works **out of the box** on standard GitHub CodeSpaces by
 - credential relay serving `github.com` **and** Azure DevOps (through the host
   Git Credential Manager -- always on, no config)
 
-So for a repo whose CodeSpaces match convention (e.g. `odsp-microsoft/sunshine`,
-`github/copilot-agent-runtime`), there is **nothing to configure**:
+So for a repo whose CodeSpaces match convention, there is **nothing to
+configure**:
 
 ```bash
-agent-codespaces create odsp-microsoft/sunshine   # just works
-agent-bridge send codespace:<name> "<task>"        # dispatch
+agent-codespaces create <your-org>/<standard-repo>   # just works
+agent-bridge send codespace:<name> "<task>"          # dispatch
 ```
 
 Add config **only** when a repo deviates from convention. The rest of this skill

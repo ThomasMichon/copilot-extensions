@@ -16,31 +16,31 @@ _spec.loader.exec_module(mod)
 
 RELATED = [
     {
-        "name": "odsp-web",
+        "name": "example-web",
         "role": "product",
-        "summary": "ODSP-Web product monorepo.",
+        "summary": "Example web product monorepo.",
         "delegate": "agent-codespaces",
         "locus": {
             "preferred": "codespace",
             "codespace": {
-                "repo": "odsp-microsoft/odsp-web-codespaces",
+                "repo": "example-org/example-web-codespaces",
                 "machine": "largePremiumLinux256gb",
                 "location": "EastUs",
-                "workspace_folder": "/workspaces/odsp-web",
+                "workspace_folder": "/workspaces/example-web",
             },
         },
     },
     {
-        "name": "SPO.Core",
+        "name": "sample-sibling",
         "role": "sibling",
-        "summary": "SPO core.",
+        "summary": "sample sibling.",
         "delegate": "agent-bridge",
         "locus": {"preferred": "local", "codespace": {}},
     },
     {
-        "name": "sunshine",
+        "name": "sample-standard",
         "role": "sibling",
-        "summary": "sunshine.",
+        "summary": "standard convention repo.",
         "delegate": "none",
         "locus": {"preferred": "local", "codespace": {}},
     },
@@ -49,21 +49,21 @@ RELATED = [
 
 def test_filters_only_codespace_delegated():
     rows = mod._codespace_delegated(RELATED)
-    assert [r["name"] for r in rows] == ["odsp-web"]
+    assert [r["name"] for r in rows] == ["example-web"]
     r = rows[0]
-    assert r["vessel"] == "odsp-microsoft/odsp-web-codespaces"
-    assert r["workspace_folder"] == "/workspaces/odsp-web"
+    assert r["vessel"] == "example-org/example-web-codespaces"
+    assert r["workspace_folder"] == "/workspaces/example-web"
     assert r["machine"] == "largePremiumLinux256gb"
 
 
 def test_render_is_brief_markdown():
     md = mod._render(mod._codespace_delegated(RELATED))
     assert md.startswith("## CodeSpace-delegated repos")
-    assert "**odsp-web**" in md
-    assert "/workspaces/odsp-web" in md
+    assert "**example-web**" in md
+    assert "/workspaces/example-web" in md
     # Only the delegated repo appears.
-    assert "SPO.Core" not in md
-    assert "sunshine" not in md
+    assert "sample-sibling" not in md
+    assert "sample-standard" not in md
 
 
 def test_render_survives_missing_codespace_block():

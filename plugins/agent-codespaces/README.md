@@ -30,8 +30,8 @@ standard GitHub CodeSpaces by **convention**:
 - credential relay serving `github.com` **and** Azure DevOps (via the host Git
   Credential Manager)
 
-So `agent-codespaces create odsp-microsoft/sunshine` (or
-`github/copilot-agent-runtime`) just works -- no file to author.
+So `agent-codespaces create <your-org>/<standard-repo>` just works -- no file to
+author.
 
 Add a **supplementary** config only when a repo deviates from convention (a
 split CodeSpaces-vs-product repo, a pinned devcontainer, an ADO host, a
