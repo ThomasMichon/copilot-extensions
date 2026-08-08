@@ -124,6 +124,18 @@ agent-bridge end abc123-def
   `gh codespace list --json name,state -q '[.[] | select(.state == "Available")] | length'`
 - **Throttling:** 30 seconds between create/resume operations.
 
+### Exclusive control: claim + cross-harness fence
+
+A CodeSpace is fronted by a single bridge, so `agent-codespaces` takes an
+**exclusive, worktree-keyed claim** on connect (`ssh --effort` / `claim`): a
+host-local **L1** lock plus an atomic cross-machine **L2** Git-ref lease
+(`agent-worktrees lease`, the same-harness authority) — a live claim on another
+machine raises `[BUSY]`/`ClaimConflict` (take over with `--force-claim`). On top,
+a **cross-harness fence** reads a lockfile inside the CodeSpace (`~/.agent-lease`)
+and **refuses** the connect if a *foreign harness* holds it (the seam the
+same-harness ref store cannot see). All degrade-safe — a missing store / identity
+never blocks. See `borrowing-codespaces` for the full lease + fence model.
+
 ## SSH (Diagnostic Only)
 
 SSH is for diagnostics and one-off commands, **not routine dispatch**.

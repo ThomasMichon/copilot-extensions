@@ -70,17 +70,32 @@ agent-codespaces leases                         # CODESPACE  EFFORT  HOST  PID
   `finalize <name> --delete` **auto-release** the lease. Releasing by effort
   name frees whatever CodeSpace it held.
 
-> **Cross-machine limitation (v1):** the lease store is **per-machine**. A
-> CodeSpace is a cloud resource that could be borrowed from dev6 *and* book2 /
-> cloud1; a host-local file only coordinates the common **same-machine** case.
-> **Planned multi-machine coordination** layers a **cloud-global beacon** on top:
-> since `gh codespace list` is visible from any machine, the borrowing worktree's
-> 4-hex id is suffixed onto the CodeSpace **display name** (`gh codespace edit
-> --display-name`) so any machine sees who holds it with zero SSH; the rich
-> host-local lease stays the source of truth, and a machine seeing a *foreign*
-> suffix can SSH that one machine for detail. (GitHub exposes no arbitrary
-> CodeSpace metadata API — display-name is the only settable cloud-global field.)
-> Until that lands, treat a lease as a same-box advisory only.
+> **Cross-machine coordination (v2 — atomic, shipped):** the host-local lease is
+> the same-machine **L1** fast path; cross-machine exclusion is now an **atomic
+> Git-ref compare-and-swap L2 lease** (`agent-worktrees lease`, the
+> `git-ref-resource-leases` effort) keyed by the CodeSpace, stored as **hidden
+> refs** (`refs/agent-worktrees/leases/v1/*`) in the **harness's own repo** — no
+> branches, no commits, no new service. `agent-codespaces ssh --effort`/`claim`
+> takes the L2 lease *before* the local write, so a live claim on **another
+> machine** raises a `ClaimConflict` naming the remote holder (unless `--force`);
+> `agent-codespaces pool --json` overlays the cross-machine L2 holder per
+> CodeSpace. Holder identity is the qualified **ClaimRef**
+> (`machine/project/worktree_id`). **Degrade-safe:** no store origin / no
+> `agent-worktrees` → L2 is skipped and behavior is exactly the same-box advisory
+> L1. This **supersedes** the earlier planned *display-name beacon* (the atomic
+> ref-CAS is a stronger primitive than a cloud-global name suffix).
+>
+> **Cross-harness fence (v2 — shipped):** the ref-CAS store is
+> **same-harness-scoped by construction** (a *different* harness writes to a
+> different store repo). The one seam it cannot cover — two **different**
+> harnesses contending for one shared CodeSpace — is fenced **on the resource
+> itself**: on connect, `agent-codespaces` reads a lockfile marker inside the
+> CodeSpace (`~/.agent-lease`) naming the writing **harness identity** (its lease
+> store origin URL, from `agent-worktrees get lease-origin`) + the holder ClaimRef
+> + a TTL. A **fresh foreign-harness** marker **refuses** the connect (`[BUSY]`,
+> unless `--force-claim`); an absent / stale / same-harness marker is overwritten
+> with our own. Degrade-safe: no identity / unreadable marker / any failure →
+> proceed. Disable with `AGENT_CODESPACES_DISABLE_FENCE`.
 
 ---
 
