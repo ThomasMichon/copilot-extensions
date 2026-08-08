@@ -200,3 +200,66 @@ def test_deregister_session_worktree_is_optional_for_hook_inference():
         ["deregister-session", "--session-id", "session-1"]
     )
     assert args.worktree_id is None
+
+
+class TestRegisterSessionReseedsStatusUpdater:
+    """sessionStart must re-seed the status-bar updater so an attached
+    long-lived session recovers its bar after a deploy retires the old updater
+    (the launcher only spawns it at psmux create/join) -- dotfiles #915."""
+
+    def test_reseeds_with_payload_cwd(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        _save_record(tmp_tracking_dir, "wt-x", "/tmp/src/wt-x")
+        seen: list[tuple[str, str | None]] = []
+        monkeypatch.setattr(
+            m, "_spawn_status_updater",
+            lambda wt, path: seen.append((wt, path)) or True,
+        )
+        payload = '{"sessionId":"sess-1","cwd":"/tmp/src/wt-x/sub"}'
+        monkeypatch.setattr(m.sys, "stdin", io.StringIO(payload))
+
+        rc = m.cmd_register_session(_args(stdin=True))
+
+        assert rc == 0
+        # Seeds the resolved worktree id against the payload cwd (the worktree).
+        assert seen == [("wt-x", "/tmp/src/wt-x/sub")]
+
+    def test_reseed_falls_back_to_record_path_when_cwd_absent(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        """With an explicit --worktree-id and no payload cwd, the reseed must
+        use the tracking record's path -- never the hook's install-dir cwd."""
+        _save_record(tmp_tracking_dir, "wt-y", "/tmp/src/wt-y")
+        seen: list[tuple[str, str | None]] = []
+        monkeypatch.setattr(
+            m, "_spawn_status_updater",
+            lambda wt, path: seen.append((wt, path)) or True,
+        )
+        monkeypatch.setattr(m.sys, "stdin", io.StringIO(""))
+
+        rc = m.cmd_register_session(
+            _args(worktree_id="wt-y", session_id="sess-2", stdin=True)
+        )
+
+        assert rc == 0
+        assert seen == [("wt-y", "/tmp/src/wt-y")]
+
+    def test_no_reseed_when_registration_is_a_noop(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        """A cwd outside any tracked worktree never registers -- and must never
+        spawn an updater for a session that has no worktree/bar."""
+        _save_record(tmp_tracking_dir, "wt-z", "/tmp/src/wt-z")
+        seen: list = []
+        monkeypatch.setattr(
+            m, "_spawn_status_updater",
+            lambda wt, path: seen.append((wt, path)) or True,
+        )
+        payload = '{"sessionId":"sess-3","cwd":"/tmp/unrelated"}'
+        monkeypatch.setattr(m.sys, "stdin", io.StringIO(payload))
+
+        rc = m.cmd_register_session(_args(stdin=True))
+
+        assert rc == 0
+        assert seen == []
