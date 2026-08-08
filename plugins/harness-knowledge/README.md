@@ -25,10 +25,12 @@ The **`binding-knowledge`** skill drives the setup:
    machine-local** state:
    - `~/.<harness>/config.yaml` → the top-level `knowledge_repo:` pointer the
      state-root resolver reads.
-   - `~/.<harness>/.github/instructions/knowledge-binding.instructions.md` → a
-     managed instructions fragment (loaded via `COPILOT_CUSTOM_INSTRUCTIONS_DIRS`)
+   - `~/.<harness>/knowledge-binding.md` → a managed data fragment **emitted at
+     session start by the harness-knowledge `sessionStart` hook** (dotfiles#1057)
      that labels the concrete harness/knowledge/product paths **for this
-     machine**.
+     machine**. (Previously written into `.github/instructions/` and auto-loaded
+     via `COPILOT_CUSTOM_INSTRUCTIONS_DIRS`; now hook-emitted, so it loads under
+     any launch path with no file in the auto-load dir.)
 5. Verifies the binding resolves.
 
 ## Why machine-local only

@@ -105,11 +105,12 @@ python skills/binding-knowledge/scripts/bind_knowledge.py \
 ```
 
 `--product` (repeatable) labels any coordinated product repos so the assembled
-instructions name them for this machine. The fragment is **machine-local**
-(loaded via `COPILOT_CUSTOM_INSTRUCTIONS_DIRS`) -- it is **never** committed into
-the harness, and it does **not** use `agent-worktrees related add` (that would
-write a repo name into the harness's committed `related.yaml` and break
-statelessness).
+fragment names them for this machine. The fragment is **machine-local**
+(`~/.<harness>/knowledge-binding.md`, **emitted at session start by the
+harness-knowledge `sessionStart` hook** -- dotfiles#1057) -- it is **never**
+committed into the harness, and it does **not** use `agent-worktrees related add`
+(that would write a repo name into the harness's committed `related.yaml` and
+break statelessness).
 
 When both `--harness-path` and `--knowledge-path` are given, the bind **also
 assembles the personal-plugin overlay** (see step 3b) -- so the operator's

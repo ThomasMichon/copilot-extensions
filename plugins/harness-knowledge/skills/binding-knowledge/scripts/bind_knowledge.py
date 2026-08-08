@@ -9,10 +9,13 @@ state, so the shareable harness tree stays generic and name-free:
   1. ``~/.<harness>/config.yaml`` -> set the top-level ``knowledge_repo: <name>``
      pointer (the seam the state-root resolver reads), preserving the rest of the
      file (comments included).
-  2. ``~/.<harness>/.github/instructions/knowledge-binding.instructions.md`` -> a
-     managed instructions fragment (loaded via ``COPILOT_CUSTOM_INSTRUCTIONS_DIRS``)
+  2. ``~/.<harness>/knowledge-binding.md`` -> a managed data fragment emitted at
+     session start by the harness-knowledge ``sessionStart`` hook (dotfiles#1057)
      that LABELS the concrete repos + paths for THIS machine -- harness at X,
-     knowledge at Y, plus any coordinated product repos.
+     knowledge at Y, plus any coordinated product repos. (Previously written into
+     ``.github/instructions/`` and auto-loaded via ``COPILOT_CUSTOM_INSTRUCTIONS_DIRS``;
+     now hook-emitted, so it loads under any launch path with no file in the
+     auto-load dir.)
 
 It never writes into the harness checkout and never touches the committed
 ``related.yaml`` (that would leak a repo name into the shareable tree). Pure +
@@ -78,8 +81,8 @@ def render_instructions(
 
 This machine binds the **stateless harness** `{harness}` to your private
 **knowledge** repo `{knowledge}`. These concrete names/paths live here (machine-local,
-loaded via `COPILOT_CUSTOM_INSTRUCTIONS_DIRS`) and are **never committed** into the
-shareable harness tree.
+emitted at session start by the **harness-knowledge** `sessionStart` hook) and are
+**never committed** into the shareable harness tree.
 
 | Repo | Name | Path (this machine) |
 |------|------|---------------------|
@@ -117,8 +120,20 @@ def bind(
     cfg.write_text(updated, encoding="utf-8")
 
     instr_dir = base / ".github" / "instructions"
-    instr_dir.mkdir(parents=True, exist_ok=True)
-    frag = instr_dir / "knowledge-binding.instructions.md"
+    # Migrated (dotfiles#1057): the binding is now emitted at session start by the
+    # harness-knowledge sessionStart hook, so write it as plugin-internal data
+    # (~/.<harness>/knowledge-binding.md) -- NOT into .github/instructions/, which
+    # the CLI auto-loads via COPILOT_CUSTOM_INSTRUCTIONS_DIRS (that would
+    # double-deliver). Retire any stale copy of the old auto-loaded file.
+    old_frag = instr_dir / "knowledge-binding.instructions.md"
+    if old_frag.exists():
+        try:
+            if MANAGED_MARKER in old_frag.read_text(encoding="utf-8"):
+                old_frag.unlink()
+        except OSError:
+            pass
+
+    frag = base / "knowledge-binding.md"
     frag.write_text(
         render_instructions(
             harness, harness_path or f"<{harness} checkout>",
