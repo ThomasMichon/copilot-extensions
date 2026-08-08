@@ -251,6 +251,42 @@ class TestGiteaProvider:
         assert prov._combined_status_state("o/r", "sha", "https://h/gitea", "t") == ""
         assert prov._combined_status_state("o/r", "", "https://h/gitea", "t") == ""  # no sha
 
+    def test_head_contained_in_base_detects_merged_content(self, monkeypatch):
+        # #1375/#1703: 0 commits ahead => base already contains head => merged.
+        from agent_worktrees.providers import gitea
+        prov = gitea.GiteaProvider()
+
+        def curl(state_body):
+            monkeypatch.setattr(prov, "_curl", lambda m, u, t, **kw: (200, state_body))
+
+        curl(json.dumps({"total_commits": 0}))
+        assert prov.head_contained_in_base(
+            "o/r", "master", "abc", api_base="https://h/gitea", token="t") is True
+        curl(json.dumps({"total_commits": 3}))
+        assert prov.head_contained_in_base(
+            "o/r", "master", "abc", api_base="https://h/gitea", token="t") is False
+        # Falls back to the commits array length when total_commits is absent.
+        curl(json.dumps({"commits": []}))
+        assert prov.head_contained_in_base(
+            "o/r", "master", "abc", api_base="https://h/gitea", token="t") is True
+
+    def test_head_contained_in_base_unknown_on_error_or_missing(self, monkeypatch):
+        from agent_worktrees.providers import gitea
+        prov = gitea.GiteaProvider()
+        # Missing base/head -> None (never self-heal on nothing).
+        assert prov.head_contained_in_base("o/r", "", "abc") is None
+        assert prov.head_contained_in_base("o/r", "master", "") is None
+        # Non-200 / unparseable -> None.
+        monkeypatch.setattr(prov, "_curl", lambda m, u, t, **kw: (404, ""))
+        assert prov.head_contained_in_base(
+            "o/r", "master", "abc", api_base="https://h/gitea", token="t") is None
+
+    def test_head_contained_in_base_unsupported_on_github_and_azure(self):
+        from agent_worktrees.providers import azure_devops, github
+        assert github.GitHubProvider().head_contained_in_base("o/r", "main", "abc") is None
+        assert azure_devops.AzureDevOpsProvider().head_contained_in_base(
+            "o/r", "main", "abc") is None
+
     def test_create_pull_parses_url_and_number(self, monkeypatch):
         from agent_worktrees.providers import gitea
         body = json.dumps({"html_url": "https://h/gitea/o/r/pulls/42",

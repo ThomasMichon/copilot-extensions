@@ -359,6 +359,14 @@ class AzureDevOpsProvider:
         _ = (repo, default_branch, api_base, token)
         return _unsupported_repo_policy(self.name)
 
+    def head_contained_in_base(
+        self, repo: str, base: str, head_sha: str, *, api_base: str = "",
+        token: str | None = None,
+    ) -> bool | None:
+        """Not implemented: the zombie-PR containment probe is Gitea-only today."""
+        _ = (repo, base, head_sha, api_base, token)
+        return None
+
     def add_label(
         self, repo: str, number: int, label: str, *, api_base: str = "",
         token: str | None = None,

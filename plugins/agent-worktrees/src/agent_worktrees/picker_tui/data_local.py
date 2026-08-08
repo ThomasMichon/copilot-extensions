@@ -102,7 +102,7 @@ def reconcile_prs() -> int:
         if tracking._pr_is_terminal(active):
             continue
         try:
-            pr_ops._reconcile_active_pr(rec, config)
+            pr_ops._reconcile_active_pr(rec, config, best_effort=True)
         except Exception:
             continue
         new_active = rec.active_pr()

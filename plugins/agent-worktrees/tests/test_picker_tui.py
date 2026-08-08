@@ -2403,7 +2403,7 @@ def test_reconcile_prs_counts_terminal_transitions(monkeypatch):
     monkeypatch.setattr(data_local.tracking, "list_records",
                         lambda p, platform_filter=None: recs)
 
-    def fake_reconcile(rec, config):
+    def fake_reconcile(rec, config, *, best_effort=False):
         if rec.active_pr() is open_pr:        # provider reports it merged
             open_pr.state = "merged"
 
