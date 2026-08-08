@@ -36,9 +36,11 @@ class GitCleanliness:
 
     ``known`` is False when the probe could not evaluate the repo (no workspace
     repo found, git error, unparseable output) -- the conservative "cannot prove
-    safe" signal. ``dirty`` = uncommitted changes; ``ahead`` = unpushed commits on
-    HEAD vs its upstream; ``unpushed_branches`` = local branches carrying commits
-    not on their upstream (work parked off the pushed line).
+    safe" signal. ``dirty`` = uncommitted changes in **any** workspace repo;
+    ``ahead`` = commits reachable from HEAD that exist on **no remote** (summed
+    across repos -- local-only work on the checked-out line, well-defined even
+    with no upstream); ``unpushed_branches`` = local branches (across repos)
+    carrying commits on no remote (work parked off the pushed line).
     """
 
     known: bool = False
@@ -75,31 +77,56 @@ def at_rest(gc: GitCleanliness, *, in_flight: bool) -> bool:
 def probe_command(workspace_glob: str = "/workspaces/*") -> str:
     """Shell command (run inside the CodeSpace) that emits cleanliness signals.
 
-    Discovers the first git repo under ``workspace_glob`` and prints
-    ``OBLIGATION_PROBE=1`` plus ``DIRTY``/``AHEAD``/``UNPUSHED_BRANCHES`` as
-    KEY=VALUE lines. Swallows all errors and prints nothing on failure (so the
-    parser degrades to ``known=False``). Read-only: never mutates the repo.
+    Scans **every** git repo under ``workspace_glob`` (not just the first --
+    a borrowed CodeSpace typically holds both the scaffold repo and the actual
+    work repo, and unpushed work in *any* of them keeps the CodeSpace unsafe)
+    and prints ``OBLIGATION_PROBE=1`` plus the aggregated ``DIRTY`` /
+    ``AHEAD`` / ``UNPUSHED_BRANCHES`` KEY=VALUE lines:
+
+    * ``DIRTY``   -- ``1`` if **any** repo has uncommitted changes.
+    * ``AHEAD``   -- total commits reachable from **HEAD** that exist on **no
+      remote** (``git rev-list --count HEAD --not --remotes``), summed across
+      repos. This is the accountability-correct "local-only work on the checked-
+      out line" -- unlike ``@{u}..HEAD`` it is well-defined even when the branch
+      has **no upstream** (a common CodeSpace state), where ``@{u}`` errors to 0
+      and would falsely read as clean.
+    * ``UNPUSHED_BRANCHES`` -- count of local branches (across all repos) that
+      carry commits on no remote (``<branch> --not --remotes`` > 0) -- work
+      parked off the pushed line.
+
+    Emits nothing when no repo is found (the parser then degrades to
+    ``known=False``). Read-only: never mutates a repo.
+
+    ``workspace_glob`` is interpolated **unquoted** so the shell expands ``*``
+    (``shopt -s nullglob`` makes an unmatched glob vanish rather than pass a
+    literal). It is a trusted, code-supplied value (the default or an internal
+    override), never user input -- do **not** ``shlex.quote`` it, or the glob is
+    single-quoted and never expands (which silently disabled the probe on every
+    real CodeSpace).
     """
-    glob = shlex.quote(workspace_glob)
-    # A single defensive bash pipeline: find a repo, compute the three signals.
-    return (
-        "bash -lc " + shlex.quote(
-            'set -o pipefail 2>/dev/null; '
-            f'd=$(for g in {glob}/.git; do [ -e "$g" ] && dirname "$g" && break; done); '
-            '[ -z "$d" ] && exit 0; '
-            'cd "$d" || exit 0; '
-            'echo "' + _MARK_KNOWN + '=1"; '
-            'if [ -n "$(git status --porcelain 2>/dev/null)" ]; then '
-            'echo "' + _MARK_DIRTY + '=1"; else echo "' + _MARK_DIRTY + '=0"; fi; '
-            'a=$(git rev-list --count "@{u}..HEAD" 2>/dev/null || echo 0); '
-            'echo "' + _MARK_AHEAD + '=${a:-0}"; '
-            'n=0; '
-            'for b in $(git for-each-ref --format="%(refname:short)" refs/heads 2>/dev/null); do '
-            'c=$(git rev-list --count "$b@{u}..$b" 2>/dev/null || echo 0); '
-            '[ "${c:-0}" -gt 0 ] && n=$((n+1)); done; '
-            'echo "' + _MARK_UNPUSHED_BRANCHES + '=$n"'
-        )
+    # A single defensive bash pipeline: enumerate every repo, aggregate signals.
+    inner = (
+        'shopt -s nullglob 2>/dev/null; '
+        'found=0; dirty=0; ahead=0; nbr=0; '
+        f'for g in {workspace_glob}/.git; do '
+        'd=$(dirname "$g"); '
+        'git -C "$d" rev-parse --git-dir >/dev/null 2>&1 || continue; '
+        'found=1; '
+        '[ -n "$(git -C "$d" status --porcelain 2>/dev/null)" ] && dirty=1; '
+        'a=$(git -C "$d" rev-list --count HEAD --not --remotes 2>/dev/null || echo 0); '
+        'ahead=$((ahead + ${a:-0})); '
+        'for b in $(git -C "$d" for-each-ref --format="%(refname:short)" '
+        'refs/heads 2>/dev/null); do '
+        'c=$(git -C "$d" rev-list --count "$b" --not --remotes 2>/dev/null || echo 0); '
+        '[ "${c:-0}" -gt 0 ] && nbr=$((nbr+1)); done; '
+        'done; '
+        '[ "$found" = 0 ] && exit 0; '
+        'echo "' + _MARK_KNOWN + '=1"; '
+        'echo "' + _MARK_DIRTY + '=$dirty"; '
+        'echo "' + _MARK_AHEAD + '=$ahead"; '
+        'echo "' + _MARK_UNPUSHED_BRANCHES + '=$nbr"'
     )
+    return "bash -lc " + shlex.quote(inner)
 
 
 def _int(value: str) -> int:

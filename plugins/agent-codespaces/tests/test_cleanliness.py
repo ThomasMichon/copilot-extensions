@@ -51,7 +51,7 @@ def test_at_rest_false_when_dirty_even_if_not_in_flight():
 
 def test_probe_command_is_readonly_and_emits_markers():
     cmd = cl.probe_command()
-    assert "git status --porcelain" in cmd
+    assert "status --porcelain" in cmd
     assert "OBLIGATION_PROBE" in cmd
     # Read-only: no mutating git verbs.
     for bad in ("git push", "git commit", "git reset", "git checkout", "rm "):
@@ -60,6 +60,31 @@ def test_probe_command_is_readonly_and_emits_markers():
 
 def test_probe_command_honors_workspace_glob():
     assert "/custom/ws" in cl.probe_command("/custom/ws")
+
+
+def test_probe_command_glob_is_unquoted_so_it_expands():
+    # Regression: the glob must NOT be single-quoted inside the script body, or
+    # bash treats `*` literally and the probe finds no repo on every real
+    # CodeSpace (silently known=False). Assert the bare glob appears and is not
+    # wrapped in single quotes right around the `*`.
+    cmd = cl.probe_command("/workspaces/*")
+    assert "/workspaces/*/.git" in cmd
+    assert "'/workspaces/*'" not in cmd
+
+
+def test_probe_command_scans_all_repos_and_uses_not_remotes():
+    # The hardened probe aggregates across repos (a for-loop, not first-match)
+    # and uses `--not --remotes` (well-defined without an upstream) rather than
+    # the `@{u}` framing that reads 0 on a no-upstream branch.
+    cmd = cl.probe_command()
+    assert "--not --remotes" in cmd
+    assert "@{u}" not in cmd
+    assert "found=1" in cmd  # loop marks a repo was seen
+
+
+def test_probe_command_uses_nullglob():
+    # An unmatched glob must vanish (nullglob), not pass a literal path.
+    assert "nullglob" in cl.probe_command()
 
 
 # ── parse_probe ──────────────────────────────────────────────────────────────
@@ -125,7 +150,7 @@ async def test_probe_cleanliness_clean(monkeypatch):
     mgr = _FakeManager(stdout="OBLIGATION_PROBE=1\nDIRTY=0\nAHEAD=0\nUNPUSHED_BRANCHES=0\n")
     gc = await cl.probe_cleanliness(mgr, "cs")
     assert cl.is_git_clean(gc)
-    assert any("git status --porcelain" in c for c in mgr.calls)
+    assert any("status --porcelain" in c for c in mgr.calls)
 
 
 @pytest.mark.asyncio
