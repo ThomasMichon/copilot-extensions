@@ -5322,6 +5322,67 @@ def test_registered_pivot_action_menu_runs_and_invalidates(tmp_path, monkeypatch
     asyncio.run(run())
 
 
+def test_registered_pivot_conditional_actions_filter_by_when(tmp_path, monkeypatch):
+    """D3: a pivot action's `when` gate hides the verb for rows that don't match
+    and shows it for rows that do -- so the sub-menu is row-specific."""
+    import json
+    from agent_worktrees.picker_tui import pivots as pivots_mod
+
+    d = tmp_path / "pivots"
+    d.mkdir()
+    manifest = {
+        "label": "Pool",
+        "after": "Worktrees",
+        "list": ["true"],
+        "entry": {"id": "id", "title": "display"},
+        "actions": [
+            {"key": "info", "label": "Details", "run": ["echo", "{id}"]},
+            {"key": "release", "label": "Release", "run": ["echo", "{id}"],
+             "when": {"disposition": "in-use"}},
+            {"key": "recycle", "label": "Recycle", "run": ["echo", "{id}"],
+             "when": {"disposition": ["stale", "clean"]}},
+        ],
+    }
+    (d / "pool.json").write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+
+    rows = [
+        {"id": "held", "display": "in-use box", "disposition": "in-use"},
+        {"id": "old", "display": "stale box", "disposition": "stale"},
+    ]
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            _seed_fake_tasks(scr, rows)
+            scr.htab = scr.htabs.index("Pool")
+
+            # Row 0 (in-use): Details + Release, NOT Recycle.
+            scr.sel = ("T", 0)
+            await pilot.pause()
+            scr._open_task_menu()
+            await pilot.pause()
+            menu = _task_menu(scr)
+            assert menu is not None
+            assert [a.label for a in menu._actions] == ["Details", "Release"]
+            await pilot.press("escape")
+            await pilot.pause()
+
+            # Row 1 (stale): Details + Recycle, NOT Release.
+            scr.sel = ("T", 1)
+            await pilot.pause()
+            scr._open_task_menu()
+            await pilot.pause()
+            menu = _task_menu(scr)
+            assert menu is not None
+            assert [a.label for a in menu._actions] == ["Details", "Recycle"]
+
+    asyncio.run(run())
+
+
 def test_registered_pivot_switch_pivot_cycles_left_rail(tmp_path, monkeypatch):
     from agent_worktrees.picker_tui import pivots as pivots_mod
 

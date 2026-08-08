@@ -540,3 +540,40 @@ def test_bad_stream_flags_sink_only_their_manifest(tmp_path, bad):
     _write(tmp_path, "ok", {"label": "Ok", "list": ["agent-x", "y"]})
     _write(tmp_path, "bad", {"label": "Bad", "list": ["agent-x", "y"], **bad})
     assert {p.name for p in pivots.discover_pivots(tmp_path)} == {"ok"}
+
+
+def test_action_when_defaults_none_and_parses(tmp_path):
+    _write(tmp_path, "m", {"label": "M", "list": ["agent-x", "y"], "actions": [
+        {"label": "Always", "run": ["do"]},
+        {"label": "Release", "run": ["rel", "{id}"], "when": {"disposition": "in-use"}},
+    ]})
+    [p] = pivots.discover_pivots(tmp_path)
+    assert p.actions[0].when is None
+    assert p.actions[1].when == {"disposition": "in-use"}
+
+
+def test_bad_action_when_sinks_only_its_manifest(tmp_path):
+    _write(tmp_path, "ok", {"label": "Ok", "list": ["agent-x", "y"]})
+    _write(tmp_path, "bad", {"label": "Bad", "list": ["agent-x", "y"],
+        "actions": [{"label": "X", "run": ["do"], "when": "in-use"}]})
+    assert {p.name for p in pivots.discover_pivots(tmp_path)} == {"ok"}
+
+
+def test_entry_matches_gate():
+    assert pivots.entry_matches(None, {"disposition": "in-use"}) is True
+    assert pivots.entry_matches({}, {"disposition": "in-use"}) is True
+    # single value (case-insensitive) + record miss.
+    assert pivots.entry_matches({"disposition": "in-use"}, {"disposition": "IN-USE"}) is True
+    assert pivots.entry_matches({"disposition": "in-use"}, {"disposition": "stale"}) is False
+    # list of allowed values; every field must match.
+    assert pivots.entry_matches({"status": ["stale", "stopped"]}, {"status": "STALE"}) is True
+    assert pivots.entry_matches(
+        {"status": ["stale"], "use": "free"}, {"status": "stale", "use": "in-use"}) is False
+
+
+def test_action_when_matches_via_worktree_action_wrapper():
+    # The generalized matcher still backs the WorktreeAction gate.
+    a = pivots.WorktreeAction(key="k", label="L", run=("x",), source="s",
+                              when={"state": "FINAL"})
+    assert pivots.worktree_action_matches(a, {"state": "FINAL"}) is True
+    assert pivots.worktree_action_matches(a, {"state": "WIP"}) is False
