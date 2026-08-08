@@ -1764,11 +1764,24 @@ class _RecordLock:
 
     Acquires an **in-process** re-entrant per-path lock (``_path_write_lock``) so
     concurrent read-modify-writes in the SAME process -- the picker's background
-    stamp threads and a foreground resume -- are serialized on every platform
-    (Windows has no ``fcntl``, so this is the real mutual exclusion there and
-    prevents the temp+replace sharing-violation crash). On POSIX it ALSO takes an
-    ``fcntl`` advisory lock on a ``.lock`` sidecar for cross-process exclusion;
-    cross-process races on Windows fall back to the atomic-replace retry.
+    stamp threads and a foreground resume -- are serialized on every platform.
+    It ALSO takes a real **cross-process** advisory lock on a ``.lock`` sidecar so
+    that two *separate* processes (e.g. two Picker reconcilers, or a Picker and a
+    foreground CLI) can't interleave their read -> modify -> write and clobber one
+    another's update:
+
+    - **POSIX** -- ``fcntl.flock(LOCK_EX)`` on the sidecar fd.
+    - **Windows** -- ``msvcrt.locking(LK_NBLCK)`` on the sidecar fd. Windows has
+      no ``fcntl``; before dotfiles#1860 the Windows path held ONLY the
+      in-process RLock, which is a no-op across processes, so concurrent Picker
+      reconcilers' RMW cycles clobbered each other (last-writer-wins silently
+      dropping the other's update). The ``msvcrt`` byte-range lock closes that
+      gap so cross-process exclusion holds on Windows too.
+
+    Both platforms degrade gracefully: if the sidecar lock can't be acquired
+    within ``timeout`` we proceed on the in-process lock alone (the atomic
+    temp+replace retry in ``_atomic_write`` remains the last line of defence),
+    rather than blocking a foreground op indefinitely.
     """
 
     def __init__(self, yaml_path: Path, timeout: float = 2.0):
@@ -1777,9 +1790,14 @@ class _RecordLock:
         self._timeout = timeout
         self._fd: int | None = None
         self._plock: threading.RLock | None = None
+        # Which cross-process backend actually holds the sidecar, so __exit__
+        # releases exactly what __enter__ acquired: "posix", "windows", or None.
+        self._held: str | None = None
 
     def __enter__(self) -> _RecordLock:
-        # In-process serialization first (the real lock on Windows).
+        # In-process serialization first (serializes same-process threads on
+        # every platform; the cross-process sidecar lock below adds inter-process
+        # exclusion).
         self._plock = _path_write_lock(self._yaml_path)
         self._plock.acquire()
         self._lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1787,13 +1805,14 @@ class _RecordLock:
         try:
             import fcntl as _fcntl
         except ImportError:
-            # Windows -- no fcntl; the in-process RLock above is the real lock.
+            self._acquire_windows()
             return self
         import time
         deadline = time.monotonic() + self._timeout
         while True:
             try:
                 _fcntl.flock(self._fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+                self._held = "posix"
                 return self
             except (OSError, BlockingIOError):
                 if time.monotonic() >= deadline:
@@ -1801,15 +1820,51 @@ class _RecordLock:
                     return self
                 time.sleep(0.05)
 
+    def _acquire_windows(self) -> None:
+        """Take a mandatory byte-range lock on the sidecar fd (Windows only).
+
+        ``msvcrt.locking(LK_NBLCK, 1)`` locks one byte at the current file
+        position (offset 0 here). It raises ``OSError`` when another process
+        holds the region, so we retry with the same backoff as the POSIX path and
+        fall back to the in-process lock alone on timeout.
+        """
+        try:
+            import msvcrt as _msvcrt
+        except ImportError:
+            # Neither fcntl nor msvcrt -- exotic platform; in-process lock only.
+            return
+        import time
+        deadline = time.monotonic() + self._timeout
+        while True:
+            try:
+                os.lseek(self._fd, 0, os.SEEK_SET)
+                _msvcrt.locking(self._fd, _msvcrt.LK_NBLCK, 1)
+                self._held = "windows"
+                return
+            except OSError:
+                if time.monotonic() >= deadline:
+                    # Timeout -- proceed on the in-process lock alone.
+                    return
+                time.sleep(0.05)
+
     def __exit__(self, *_: object) -> None:
         if self._fd is not None:
-            try:
-                import fcntl as _fcntl
-                _fcntl.flock(self._fd, _fcntl.LOCK_UN)
-            except (ImportError, OSError):
-                pass
+            if self._held == "posix":
+                try:
+                    import fcntl as _fcntl
+                    _fcntl.flock(self._fd, _fcntl.LOCK_UN)
+                except (ImportError, OSError):
+                    pass
+            elif self._held == "windows":
+                try:
+                    import msvcrt as _msvcrt
+                    os.lseek(self._fd, 0, os.SEEK_SET)
+                    _msvcrt.locking(self._fd, _msvcrt.LK_UNLCK, 1)
+                except (ImportError, OSError):
+                    pass
             os.close(self._fd)
             self._fd = None
+            self._held = None
         if self._plock is not None:
             self._plock.release()
             self._plock = None
