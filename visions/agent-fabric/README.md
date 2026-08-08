@@ -230,6 +230,36 @@ worktree originated it. The ledger makes a worktree's true footprint
 first-class: a resource is never an anonymous orphan, and a worktree is never a
 black box about what it is using elsewhere.
 
+### resource-leasing
+Where `resource-claims` makes a worktree's footprint **legible**, resource
+**leasing** makes exclusive access to a scarce shared resource **collision-free
+by construction** — one atomic primitive so two agents on two machines never
+grab the same CodeSpace, cross-repo worktree, container, or bridge session at
+once. The intent is deliberately minimal: the lease lives as **ref shenanigans
+only** in the harness's **own** repository — a hidden ref per resource, moved by
+atomic **compare-and-swap** — with **no branches, no commits, no working-tree
+writes, no new service, and no new credential**. Acquisition is atomic mutual
+exclusion; the winning transition mints a **fencing token** a holder must present
+to renew or release, and release leaves a **tombstone** so a stale token can
+never silently re-win. The holder is the worktree's own **claim ref**, so the
+atomic-acquire and liveness-for-takeover mechanisms **compose** rather than
+duplicate. Two load-bearing properties bind it to the rest of the fabric:
+
+- **Same-harness by construction, degrade-safe by default.** Because the store is
+  the harness's own control-plane repo, only agents sharing that origin arbitrate
+  the same resource — coordination scope is free and principled, not a bolt-on
+  check. Every layer above stays optional: with no store, no token, or no network
+  the lease **degrades to a best-effort local advisory**, never a hard dependency;
+  only a *definitive* conflict is allowed to block.
+- **Two-tier, and fenced on the resource for the cross-harness seam.** A fast
+  same-machine local lock is the L1 path; the ref-CAS is the L2 authority only at
+  the cross-machine boundary. Genuine **cross-harness** contention (two different
+  people's harnesses on one shared resource) is out of any single repo's reach, so
+  the fence moves **onto the resource itself** — a marker the resource carries and
+  honors (e.g. a lockfile inside a CodeSpace), refusing a foreign holder while
+  staying degrade-safe. This is the backend fence the primitive's own safety model
+  recommends.
+
 ### externally-observable
 Beyond the fabric's own picker legibility, each layer's lifecycle is
 **externally observable** through a **backend-agnostic telemetry seam**: a layer
