@@ -199,6 +199,14 @@ stamps `predecessor.successor` / `successor.predecessor` and moves the head to
 it. This is the moment the successor's (fresh) id first exists; a plain
 `concluded`/sunset predecessor expects no successor and is skipped.
 
+Beyond the head bookkeeping, `register_session` also **re-seeds this session's
+mux status-bar updater** (`_spawn_status_updater` → a detached
+`status-updater` for `wt-<id>`). This is a best-effort, off-mux-safe side
+effect that lets an attached long-lived session recover its status bar after a
+deploy retires the prior updater, independent of a psmux/tmux attach/join — see
+[cli-reference.md § Off the paint path](cli-reference.md#off-the-paint-path-status-updater-psmux--tmux)
+(dotfiles #915). It is idempotent via the `@aw_updater` token guard.
+
 **Cross-layer write interface — `conclude-session` / `link-succession`.** A
 higher layer in its own venv cannot import `tracking.py`, so the two writes a
 handoff needs are exposed as CLIs alongside the `head-session` read:
