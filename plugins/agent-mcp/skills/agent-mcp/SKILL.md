@@ -163,6 +163,55 @@ auth:
     target_env: UNIFI_API_KEY
 ```
 
+## Secret in the URL (`server.url_secrets`)
+
+Some upstreams carry the secret **in the URL itself** rather than a header — e.g.
+an add-on that gates access on a secret URL path (`/private_<token>`). For those,
+a `${name}` placeholder in `server.url` is resolved at **spawn time** from a
+matching `server.url_secrets` source. Each source is an ordinary auth block
+(same kinds as above — typically `command` + `parse: raw`), so the secret is
+fetched on demand and never committed or exported into the session env. This
+lets a committed config carry a secret URL **by reference** instead of forcing a
+machine-local override to hardcode the full secret URL.
+
+```yaml
+server:
+  type: http
+  # Whole URL from one secret (the vault entry stores the full URL):
+  url: "${ha_url}"
+  url_secrets:
+    ha_url:
+      kind: command
+      parse: raw
+      command: ["vault", "get", "My Vault/HA MCP Add-on", "password"]
+```
+
+You can also interpolate just **part** of the path (store only the token in the
+vault):
+
+```yaml
+server:
+  type: http
+  url: "http://homeassistant.example:9583/${ha_path}"
+  url_secrets:
+    ha_path:
+      kind: command
+      parse: raw
+      command: ["vault", "get", "My Vault/HA MCP Add-on", "secret-path"]
+```
+
+Rules:
+
+- Only valid for `type: http`. Every `${name}` in the URL must have a matching
+  `url_secrets` source, and vice versa — a mismatch is a load-time config error.
+- Resolution is **lazy** (first connect), so `agent-mcp validate` / `status`
+  never touch the credential source. If the source can't be resolved at connect
+  (e.g. the vault is locked), the bridge fails loudly rather than connecting to a
+  half-formed URL.
+- Prefer this over a machine-local override whenever the secret is the *only*
+  per-host difference — the committed config then works on every host with no
+  override file.
+
 ## Decorator stack
 
 Beyond transport + auth, a bridge can apply an ordered **decorator stack** — MCP

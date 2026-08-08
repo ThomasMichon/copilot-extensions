@@ -34,6 +34,16 @@ class AuthInjector:
         """Environment overrides for a stdio child process (empty if none)."""
         return {}
 
+    async def acquire_secret(self) -> str | None:
+        """The raw resolved secret string (no header/env formatting), or None.
+
+        Used to interpolate a secret into a non-credential position -- e.g. a
+        ``${name}`` placeholder inside ``server.url`` (see
+        :mod:`agent_mcp.auth.url_secrets`). The default has no secret; token
+        injectors return their acquired token.
+        """
+        return None
+
     async def invalidate(self) -> None:
         """Drop any cached credential so the next call re-acquires."""
         return None
@@ -95,6 +105,10 @@ class TokenInjector(AuthInjector, abc.ABC):
         if self._cached is None:
             self._cached = await self._acquire()
         return self._cached
+
+    async def acquire_secret(self) -> str | None:
+        """The raw acquired token (for URL/secret interpolation, not injection)."""
+        return await self._get()
 
     async def invalidate(self) -> None:
         self._cached = None
