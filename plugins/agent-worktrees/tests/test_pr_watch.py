@@ -292,11 +292,30 @@ class TestBuildFetch:
         assert captured["api_base"] == "https://override"
         assert captured["token"] == "ovtok"
 
-    def test_unsupported_provider_fails_fast(self):
+    def test_github_provider_now_supported(self, monkeypatch):
+        # #277: github implements get_snapshot, so build_fetch returns a working
+        # fetcher instead of failing fast. (Regression guard for the fix.)
+        from agent_worktrees.providers import github as ghmod
+        pr = {"state": "open", "merged": False, "mergeable": True,
+              "head": {"sha": "s"}, "base": {"ref": "main"},
+              "user": {"login": "a"}, "title": "T"}
+        monkeypatch.setattr(
+            ghmod, "run_cli",
+            lambda args, **kw: _proc(stdout=json.dumps(pr))
+            if (len(args) > 2 and args[2].endswith("/pulls/5"))
+            else _proc(stdout="[]"),
+        )
         prcfg = cfg.PRConfig(provider="github")
         fetch = prw.build_fetch(prcfg, "o/r", 5, token="x")
+        snap = fetch()
+        assert snap.pr_state == "open" and snap.title == "T"
+
+    def test_unsupported_snapshot_helper_still_fails_fast(self):
+        # A future provider with no get_snapshot still fails fast via the base
+        # default (rather than hanging pr-watch on a guaranteed failure).
+        from agent_worktrees.providers.base import _unsupported_snapshot
         with pytest.raises(ProviderError, match="does not support snapshot"):
-            fetch()
+            _unsupported_snapshot("futureprovider")
 
 
 # ---------------------------------------------------------------------------
