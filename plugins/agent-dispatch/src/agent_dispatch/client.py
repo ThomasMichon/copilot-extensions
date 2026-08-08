@@ -390,6 +390,54 @@ class DispatchClient:
     def get_schedule_lease(self, scope: str) -> dict | None:
         return self._unwrap(self._http.get(f"/schedule-leases/{scope}"))
 
+    # -- supervisor registrations -------------------------------------------
+
+    def register_registration(
+        self,
+        kind: str,
+        spec: dict,
+        *,
+        reg_id: str | None = None,
+        machine: str | None = None,
+        env: str = "default",
+    ) -> dict:
+        body = {
+            "kind": kind,
+            "spec": spec,
+            "id": reg_id,
+            "machine": machine,
+            "env": env,
+        }
+        return self._unwrap(self._http.post("/registrations", json=body))
+
+    def list_registrations(
+        self,
+        *,
+        kind: str | None = None,
+        machine: str | None = None,
+        env: str | None = None,
+        include_paused: bool = True,
+    ) -> list[dict]:
+        params: dict[str, object] = {"include_paused": include_paused}
+        if kind is not None:
+            params["kind"] = kind
+        if machine is not None:
+            params["machine"] = machine
+        if env is not None:
+            params["env"] = env
+        return self._unwrap(self._http.get("/registrations", params=params))
+
+    def get_registration(self, rid: str) -> dict:
+        return self._unwrap(self._http.get(f"/registrations/{rid}"))
+
+    def remove_registration(self, rid: str) -> dict:
+        return self._unwrap(self._http.delete(f"/registrations/{rid}"))
+
+    def set_registration_status(self, rid: str, status: str) -> dict:
+        return self._unwrap(
+            self._http.post(f"/registrations/{rid}/status", json={"status": status})
+        )
+
     def stream_events(self) -> Iterator[dict]:
         """Yield task events from the coordinator's SSE stream (blocking)."""
         with self._http.stream("GET", "/events") as resp:
