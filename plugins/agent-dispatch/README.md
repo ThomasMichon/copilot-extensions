@@ -293,6 +293,40 @@ inbound bearer token, the coordinator URL) is set in an optional JSON config:
 agent-dispatch webhook --config webhook.json --host 127.0.0.1 --port 9331
 ```
 
+## Recipes (loop archetypes)
+
+A **recipe** is a packaged *shape* of long-running agentic work -- a charter
+template plus the suspend/resume rhythm and the resolution it drives toward. Three
+archetypes ship in-box: **reviewer** (drive a pull request to merged-or-abandoned),
+**conflict-resolution** (take the last mile of a stalled change), and
+**goal-driven** (drive an arbitrary goal through PRs). A recipe is a *first-class,
+directly-invokable* capability: you can kick a one-off from the CLI with only a
+coordinator + a worker body -- no standing service, emitter, or evaluator is
+required (the "recipes run ad-hoc" path).
+
+```bash
+agent-dispatch recipes list                       # the available recipes + their params
+agent-dispatch recipes describe reviewer          # full descriptor (templates, suspend-on, resolution)
+
+# render a recipe's fields without creating anything (inspect / dry-read):
+agent-dispatch recipes render reviewer --param repo=owner/name --param pr=42
+
+# carve an ad-hoc task from a recipe (and, with --spawn, embody a worker to drive it):
+agent-dispatch recipes kick reviewer --param repo=owner/name --param pr=42 --repo owner/name --spawn
+agent-dispatch recipes kick reviewer --param repo=owner/name --param pr=42 --dry-run   # preview the create call
+```
+
+`kick` reuses the ordinary `create` path, so it inherits lane resolution, dedup,
+and the `--spawn`/`--spawn-backend` embodiment (default `embody`: a CLI autopilot
+in a fresh worktree with a full checkout -- the right body for a recipe). A
+**reserved-work `dedup_key`** is derived from the recipe + its parameters, so
+re-kicking the same recipe for the same target collides rather than forking the
+work (override with `--dedup-key`). The rendered charter reaffirms the two safety
+invariants -- *drive the worktree to a clean resolved state on abandon* and *report
+what you did* -- so a worker carries them even on the ad-hoc, no-service path. See
+[`visions/plugins/agent-dispatch`](../../visions/plugins/agent-dispatch/README.md)
+(§Concepts/*The recipe*, §Features/*loop-recipes* + *recipes-run-ad-hoc*).
+
 ## Development
 
 ```bash

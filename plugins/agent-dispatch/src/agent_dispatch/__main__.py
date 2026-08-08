@@ -1488,6 +1488,170 @@ def _cmd_reservations(args: argparse.Namespace) -> int:
     return 2
 
 
+# ---- Loop recipes -----------------------------------------------------------
+#
+# A recipe is a packaged loop archetype (reviewer / conflict-resolution /
+# goal-driven). `recipes list|describe|render` are pure introspection; `recipes
+# kick` renders a recipe into an ordinary task and reuses `_cmd_create` (so the
+# same dedup / spawn / lane resolution applies) -- the ad-hoc "recipes run without
+# a wrapper service" path. See visions/plugins/agent-dispatch (§Concepts/*The
+# recipe*, §Features/*loop-recipes* + *recipes-run-ad-hoc*).
+
+
+def _parse_recipe_params(pairs: list[str] | None) -> dict[str, str]:
+    """Parse repeated ``--param KEY=VALUE`` into a dict."""
+    out: dict[str, str] = {}
+    for item in pairs or []:
+        if "=" not in item:
+            raise ValueError(f"--param must be KEY=VALUE, got {item!r}")
+        key, value = item.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ValueError(f"--param has an empty key: {item!r}")
+        out[key] = value
+    return out
+
+
+def _recipe_param_dicts(recipe: Any) -> list[dict]:
+    return [
+        {
+            "name": p.name,
+            "required": p.required,
+            "default": p.default,
+            "description": p.description,
+        }
+        for p in recipe.params
+    ]
+
+
+def _cmd_recipes_list(args: argparse.Namespace) -> int:
+    from .recipes import list_recipes
+
+    return _emit(
+        [
+            {
+                "name": r.name,
+                "summary": r.summary,
+                "params": _recipe_param_dicts(r),
+                "suspend_on": list(r.suspend_on),
+                "resolution": r.resolution,
+            }
+            for r in list_recipes()
+        ]
+    )
+
+
+def _cmd_recipes_describe(args: argparse.Namespace) -> int:
+    from .recipes import UnknownRecipe, get_recipe
+
+    try:
+        r = get_recipe(args.name)
+    except UnknownRecipe as exc:
+        print(f"agent-dispatch: {exc}", file=sys.stderr)
+        return 2
+    return _emit(
+        {
+            "name": r.name,
+            "summary": r.summary,
+            "params": _recipe_param_dicts(r),
+            "title_template": r.title_template,
+            "goal_template": r.goal_template,
+            "done_criteria": r.done_criteria,
+            "charter_template": r.charter_template,
+            "suspend_on": list(r.suspend_on),
+            "resolution": r.resolution,
+            "requires": list(r.requires),
+            "labels": list(r.labels),
+        }
+    )
+
+
+def _cmd_recipes_render(args: argparse.Namespace) -> int:
+    from .recipes import RecipeError, render_recipe
+
+    try:
+        rendered = render_recipe(args.name, _parse_recipe_params(args.param))
+    except (RecipeError, ValueError) as exc:
+        print(f"agent-dispatch: {exc}", file=sys.stderr)
+        return 2
+    return _emit(rendered.to_dict())
+
+
+def _recipe_dedup_key(rendered: Any) -> str:
+    """A reserved-work dedup key so re-kicking the same recipe+params collides
+    rather than forking the work (the *no-overlapping-live-workers* invariant's
+    dedup-before-create half)."""
+    parts = ":".join(f"{k}={rendered.params[k]}" for k in sorted(rendered.params))
+    return f"recipe:{rendered.recipe}:{parts}"
+
+
+def _recipe_create_namespace(
+    args: argparse.Namespace, rendered: Any
+) -> argparse.Namespace:
+    """Build a ``create``-shaped namespace from a rendered recipe so ``kick`` can
+    reuse ``_cmd_create`` verbatim (dedup, spawn, lane resolution)."""
+    return argparse.Namespace(
+        # recipe-derived
+        title=rendered.title,
+        prompt=rendered.prompt,
+        goal=rendered.goal,
+        done_criteria=rendered.done_criteria,
+        require=list(rendered.requires) or None,
+        label=list(rendered.labels),
+        dedup_key=getattr(args, "dedup_key", None) or _recipe_dedup_key(rendered),
+        source="recipe",
+        origin_ref=rendered.recipe,
+        # spawn passthrough (a recipe worker wants a full checkout -> embody body)
+        spawn=getattr(args, "spawn", False),
+        spawn_backend=getattr(args, "spawn_backend", "embody"),
+        spawn_agent=getattr(args, "spawn_agent", "task-worker"),
+        run_async=getattr(args, "run_async", False),
+        verify_timeout=getattr(args, "verify_timeout", 0),
+        # lane / client passthrough
+        repo=getattr(args, "repo", None),
+        url=getattr(args, "url", None),
+        token=getattr(args, "token", None),
+        # create knobs left at their defaults (a recipe kick uses none of these)
+        proposed=False,
+        claim=False,
+        exclude=None,
+        affinity=None,
+        payload_ref=None,
+        payload_inline=None,
+        payload_file=None,
+        target_machine=None,
+        target_worktree=None,
+        target_repo=None,
+        not_before=0.0,
+        machine=getattr(args, "machine", None),
+        worktree=getattr(args, "worktree", None),
+    )
+
+
+def _cmd_recipes_kick(args: argparse.Namespace) -> int:
+    from .recipes import RecipeError, render_recipe
+
+    try:
+        rendered = render_recipe(args.name, _parse_recipe_params(args.param))
+    except (RecipeError, ValueError) as exc:
+        print(f"agent-dispatch: {exc}", file=sys.stderr)
+        return 2
+
+    create_ns = _recipe_create_namespace(args, rendered)
+    if getattr(args, "dry_run", False):
+        preview = rendered.to_dict()
+        preview.update(
+            {
+                "dry_run": True,
+                "dedup_key": create_ns.dedup_key,
+                "spawn": create_ns.spawn,
+                "spawn_backend": create_ns.spawn_backend,
+            }
+        )
+        return _emit(preview)
+    return _cmd_create(create_ns)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-dispatch", description="Agent task queue + coordinator"
@@ -2145,6 +2309,70 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("health", help="check coordinator health")
     p.set_defaults(func=lambda args: _emit(_client(args, ensure=False).health()))
+
+    # -- Loop recipes: list / describe / render / kick --------------------
+    rp = sub.add_parser(
+        "recipes",
+        help="loop recipes -- the packaged shapes of long-running agentic work "
+             "(reviewer / conflict-resolution / goal-driven), kickable ad-hoc",
+    )
+    rsub = rp.add_subparsers(dest="recipes_command", required=True)
+
+    lp = rsub.add_parser("list", help="list the available recipes")
+    lp.set_defaults(func=_cmd_recipes_list)
+
+    dp = rsub.add_parser("describe", help="show a recipe's full descriptor")
+    dp.add_argument("name", help="recipe name (see 'recipes list')")
+    dp.set_defaults(func=_cmd_recipes_describe)
+
+    rr = rsub.add_parser(
+        "render",
+        help="render a recipe with parameters (prints the fields; creates nothing)",
+    )
+    rr.add_argument("name")
+    rr.add_argument(
+        "--param", action="append", metavar="KEY=VALUE",
+        help="a recipe parameter (repeatable), e.g. --param repo=owner/name --param pr=42",
+    )
+    rr.set_defaults(func=_cmd_recipes_render)
+
+    kp = rsub.add_parser(
+        "kick",
+        help="carve an ad-hoc task from a recipe (optionally spawn a worker to "
+             "drive it) -- the no-wrapper-service path",
+    )
+    kp.add_argument("name")
+    kp.add_argument(
+        "--param", action="append", metavar="KEY=VALUE",
+        help="a recipe parameter (repeatable)",
+    )
+    kp.add_argument(
+        "--repo",
+        help="lane (repo) for the task: a local repo name or remote URL "
+             "(default: the calling repo)",
+    )
+    kp.add_argument("--dedup-key", help="override the derived reserved-work dedup key")
+    kp.add_argument(
+        "--spawn", action="store_true",
+        help="after creating, spawn a worker to drive the loop (best effort)",
+    )
+    kp.add_argument(
+        "--spawn-backend", choices=["bridge", "embody"], default="embody",
+        help="how to embody the worker: 'embody' (default) = a CLI autopilot in a "
+             "fresh worktree with a full checkout (the right body for a recipe); "
+             "'bridge' = a headless ACP worker",
+    )
+    kp.add_argument("--spawn-agent", default="task-worker")
+    kp.add_argument(
+        "--async", dest="run_async", action="store_true",
+        help="with --spawn, don't wait for the worker (fire-and-forget)",
+    )
+    kp.add_argument("--verify-timeout", type=int, default=0)
+    kp.add_argument(
+        "--dry-run", action="store_true",
+        help="print the create call the kick would make, without enqueuing it",
+    )
+    kp.set_defaults(func=_cmd_recipes_kick)
 
     return parser
 

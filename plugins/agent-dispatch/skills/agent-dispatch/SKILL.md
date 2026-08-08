@@ -355,6 +355,26 @@ The coordinator only owns the queue; anything that *creates* tasks is a
 
 See the plugin README (**Producers**) for the spec/config shapes.
 
+### Recipes -- kick a built-in loop archetype ad-hoc
+
+A **recipe** is a packaged *shape* of long-running work -- **reviewer** (drive a
+PR to merged-or-abandoned), **conflict-resolution** (unstick a stalled change), or
+**goal-driven** (drive an arbitrary goal through PRs). A recipe is directly
+kickable: no standing service, emitter, or evaluator is required -- just a
+coordinator + a worker body.
+
+```bash
+agent-dispatch recipes list                                   # available recipes + params
+agent-dispatch recipes render reviewer --param repo=o/n --param pr=42   # inspect the fields
+agent-dispatch recipes kick reviewer --param repo=o/n --param pr=42 --repo o/n --spawn
+```
+
+`kick` reuses `create` (lane resolution, dedup, `--spawn`/`--spawn-backend`;
+default `embody` so the worker gets a full checkout). A reserved-work `dedup_key`
+is derived from the recipe + params, so re-kicking the same target collides rather
+than forking. Use `--dry-run` to preview the create call. See the plugin README
+(**Recipes**) and `visions/plugins/agent-dispatch` (§*The recipe*).
+
 ### 3. Claim, work, finish
 
 ```bash
