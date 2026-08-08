@@ -623,8 +623,8 @@ deploy_wrappers() {
         ok "Wrapper: pane-wrapper.sh"
     fi
 
-    # Deploy hook scripts: sessionStart (bootstrap-check + project-hooks + register-session + anchor-hygiene-check + provision-check) + preToolUse (statelessness_guard.py)
-    for script in bootstrap-check.ps1 bootstrap-check.sh project-hooks.ps1 project-hooks.sh register-session.ps1 register-session.sh deregister-session.ps1 deregister-session.sh anchor-hygiene-check.ps1 anchor-hygiene-check.sh provision-check.ps1 provision-check.sh statelessness_guard.py; do
+    # Deploy hook scripts: sessionStart (session-conduct + bootstrap-check + project-hooks + register-session + anchor-hygiene-check + provision-check) + preToolUse (statelessness_guard.py)
+    for script in session-conduct.ps1 session-conduct.sh bootstrap-check.ps1 bootstrap-check.sh project-hooks.ps1 project-hooks.sh register-session.ps1 register-session.sh deregister-session.ps1 deregister-session.sh anchor-hygiene-check.ps1 anchor-hygiene-check.sh provision-check.ps1 provision-check.sh statelessness_guard.py; do
         local script_src="$SCRIPT_DIR/$script"
         if [[ -f "$script_src" ]]; then
             tmp="$(mktemp "$BIN_DIR/$script.XXXXXX")"
@@ -634,6 +634,19 @@ deploy_wrappers() {
             ok "Hook: $script"
         fi
     done
+
+    # Deploy the session-conduct data fragments (scripts/conduct/*.md) that the
+    # session-conduct sessionStart hook emits as additionalContext, cwd-gated.
+    # Replaces the per-project *.instructions.md deploy for these generic
+    # fragments (dotfiles#1053 / effort instructions-to-hooks).
+    if [[ -d "$SCRIPT_DIR/conduct" ]]; then
+        mkdir -p "$BIN_DIR/conduct"
+        for frag in "$SCRIPT_DIR/conduct"/*.md; do
+            [[ -f "$frag" ]] || continue
+            cp -f "$frag" "$BIN_DIR/conduct/$(basename "$frag")"
+            ok "Conduct: $(basename "$frag")"
+        done
+    fi
 
     # Deploy default setup scripts to ~/.agent-worktrees/scripts/ (used when a
     # repo lacks its own tools/setup/setup.sh). The agent-bridge launch plan

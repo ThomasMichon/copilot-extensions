@@ -7684,57 +7684,32 @@ def _deploy_worktree_conduct(proj_dir: Path) -> None:
         output.changed(f"worktree-conduct.instructions.md -> {path}")
 
 
-# account-conduct: static multi-account gh hygiene guidance, deployed as a
-# managed custom-instruction (a sibling of worktree-conduct) so ad-hoc `gh`
-# ops in any launched session use the account that can access the target repo.
-# Generic (not machine-specific); the account catalog itself is resolved at
-# runtime via `agent-worktrees repos account-for` / `accounts`.
-_ACCOUNT_CONDUCT = """# GitHub account conduct (multi-account gh)
-
-Multiple `gh` accounts may be logged in on this machine -- e.g. an
-enterprise-managed (EMU) account and a personal account that own different
-GitHub orgs/repos. Ad-hoc `gh` calls (`gh issue`, `gh label`, `gh api`,
-GraphQL) use whichever account is **active** in the keyring; if the active
-account can't access the target repo the call fails with a confusing
-`GraphQL: Could not resolve to a Repository` -- while `gh pr` REST ops often
-still work, so the symptom misleads.
-
-`gh`'s **active account is global per-machine** (`hosts.yml`), shared across
-every session -- so `gh auth switch` is **racy** on a shared box: a concurrent
-switch by another session flips it under you. **Don't depend on / mutate the
-active account for ad-hoc `gh`; inject the resolved account's token instead**
-(side-effect-free, race-safe):
-
-- **Preferred** -- let agent-worktrees resolve + inject for you:
-  `agent-worktrees repos gh <owner/repo> -- <gh args>`
-  (e.g. `agent-worktrees repos gh <owner/repo> -- issue create ...`).
-- By hand (equivalent):
-  `GH_TOKEN=$(gh auth token --user $(agent-worktrees repos account-for <owner/repo>)) gh <args>`
-- `agent-worktrees` commands (`create-pr`, `pr-merge`, ...) already inject
-  per-account tokens; `agent-worktrees accounts list` shows the catalog.
-
-`gh auth switch --user <login>` is a **last-resort** fallback (interactive
-human), not the mechanism agents should use -- it mutates shared global state.
-"""
+# account-conduct: MIGRATED to the session-conduct sessionStart hook
+# (dotfiles#1053 / effort instructions-to-hooks). The guidance text now lives in
+# ``plugins/agent-worktrees/scripts/conduct/account-conduct.md`` and is emitted
+# as ``additionalContext`` by the session-conduct hook -- cwd-gated to managed
+# projects and launch-path-independent -- instead of being materialized into
+# ``~/.{project}/.github/instructions/`` and loaded via
+# COPILOT_CUSTOM_INSTRUCTIONS_DIRS. The deploy path now only retires any stale
+# copy of the old file (see :func:`_remove_managed_instruction`).
 
 
-def _deploy_account_conduct(proj_dir: Path) -> None:
-    """Deploy the static multi-account gh conduct instruction (idempotent).
+def _remove_managed_instruction(proj_dir: Path, name: str) -> None:
+    """Remove a previously-deployed managed ``*.instructions.md`` (idempotent).
 
-    Mirrors :func:`_deploy_worktree_conduct`: writes a marked
-    ``account-conduct.instructions.md`` into the project's custom-instructions
-    dir so the CLI loads it into every agent-worktrees-launched session. Never
-    touches unmarked user files.
+    Marker-guarded: only removes a file carrying the agent-worktrees ownership
+    marker, so an unmarked user file is never touched. Used to retire fragments
+    that have migrated to a sessionStart hook.
     """
-    content = f"{_INSTRUCTION_MARKER}\n{_ACCOUNT_CONDUCT}"
-    instr_dir = proj_dir / ".github" / "instructions"
-    instr_dir.mkdir(parents=True, exist_ok=True)
-    path = instr_dir / "account-conduct.instructions.md"
-    if path.exists() and path.read_text() == content:
-        output.skipped("account-conduct.instructions.md already in sync")
-    else:
-        path.write_text(content)
-        output.changed(f"account-conduct.instructions.md -> {path}")
+    path = proj_dir / ".github" / "instructions" / name
+    if not path.exists():
+        return
+    try:
+        if _INSTRUCTION_MARKER in path.read_text():
+            path.unlink()
+            output.changed(f"removed migrated {name} (now a sessionStart hook)")
+    except OSError:
+        pass
 
 
 def _gh_env_for_repo(target: str) -> tuple[dict[str, str], str | None, bool]:
@@ -7876,8 +7851,9 @@ def _deploy_copilot_instructions(
     # not machine-specific) rides the same managed deploy.
     _deploy_worktree_conduct(proj_dir)
 
-    # account-conduct: multi-account gh hygiene for ad-hoc gh ops (generic).
-    _deploy_account_conduct(proj_dir)
+    # account-conduct migrated to the session-conduct sessionStart hook
+    # (dotfiles#1053): retire any stale per-project file we used to deploy.
+    _remove_managed_instruction(proj_dir, "account-conduct.instructions.md")
 
     # Temporary: the ext-reload hang warning rides the same managed deploy.
     _deploy_ext_reload_warning(proj_dir)
