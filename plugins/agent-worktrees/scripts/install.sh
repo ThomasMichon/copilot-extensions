@@ -623,8 +623,8 @@ deploy_wrappers() {
         ok "Wrapper: pane-wrapper.sh"
     fi
 
-    # Deploy hook scripts: sessionStart (session-conduct + bootstrap-check + project-hooks + register-session + anchor-hygiene-check + provision-check) + preToolUse (statelessness_guard.py)
-    for script in session-conduct.ps1 session-conduct.sh session-machine.ps1 session-machine.sh bootstrap-check.ps1 bootstrap-check.sh project-hooks.ps1 project-hooks.sh register-session.ps1 register-session.sh deregister-session.ps1 deregister-session.sh anchor-hygiene-check.ps1 anchor-hygiene-check.sh provision-check.ps1 provision-check.sh statelessness_guard.py; do
+    # Deploy hook scripts: sessionStart (session-conduct + session-machine + bootstrap-check + project-hooks + register-session + anchor-hygiene-check + provision-check) + preToolUse guards (statelessness_guard + cross_repo_guard + anchor_write_guard)
+    for script in session-conduct.ps1 session-conduct.sh session-machine.ps1 session-machine.sh bootstrap-check.ps1 bootstrap-check.sh project-hooks.ps1 project-hooks.sh register-session.ps1 register-session.sh deregister-session.ps1 deregister-session.sh anchor-hygiene-check.ps1 anchor-hygiene-check.sh provision-check.ps1 provision-check.sh statelessness_guard.py cross_repo_guard.py anchor_write_guard.py; do
         local script_src="$SCRIPT_DIR/$script"
         if [[ -f "$script_src" ]]; then
             tmp="$(mktemp "$BIN_DIR/$script.XXXXXX")"
