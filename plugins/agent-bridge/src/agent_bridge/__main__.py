@@ -2029,6 +2029,44 @@ def _set_project_override(project: str | None) -> None:
     _PROJECT_OVERRIDE = project.strip() if project and project.strip() else None
 
 
+# Verbs that actually consume the top-level ``--project`` (they feed it into the
+# remote worktree resolve via ``_sender_repo()``). Every other verb is
+# fleet-global and ignores ``--project`` -- see ``_guard_project_scope``.
+_PROJECT_CONSUMING_VERBS = frozenset({"send", "create"})
+
+
+def _guard_project_scope(parser: argparse.ArgumentParser,
+                         args: argparse.Namespace) -> None:
+    """Fail loud on an *explicit* ``--project`` for a verb that won't use it.
+
+    ``--project`` is meaningful only for the project-addressed verbs
+    (``send``/``create``); on a fleet-global verb (``agents``/``machines``/
+    ``sessions``/…) it is a no-op. Silently swallowing an explicitly-passed
+    ``--project`` is a foot-gun for agentic callers, so we bounce instead
+    (#1080) -- but ONLY when the flag was user-typed.
+
+    The ``<repo> <slug>`` router injects ``--project`` *uniformly* for the
+    project-consuming slugs (incl. on their fleet-global verbs) and marks it
+    ``AGENT_WORKTREES_PROJECT_ROUTED=1``; a *routed* no-op stays silent so the
+    uniform ``<repo> <slug>`` surface (e.g. ``<repo> bridge agents``) keeps
+    working. The marker is consumed here so it never leaks to child processes.
+    """
+    routed = os.environ.pop("AGENT_WORKTREES_PROJECT_ROUTED", None) == "1"
+    if getattr(args, "project", None) is None:
+        return
+    if routed:
+        return
+    command = getattr(args, "command", None)
+    if command in _PROJECT_CONSUMING_VERBS:
+        return
+    parser.error(
+        f"--project {args.project!r} is not meaningful for "
+        f"'{command or '(no command)'}': it scopes only the project-addressed "
+        f"verbs ({'/'.join(sorted(_PROJECT_CONSUMING_VERBS))}). Remove "
+        f"--project, or use one of those verbs."
+    )
+
+
 def _get_caller_id() -> str | None:
     """Read caller identity from the current worktree (CWD).
 
@@ -3035,8 +3073,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Scope project-addressed verbs (send/create) to REPO instead of "
              "the caller's cwd project: the remote worktree resolve targets "
              "REPO. Injected by the `<repo> <slug>` router (e.g. `<repo> "
-             "bridge send <machine>`). A harmless no-op for fleet-global verbs "
-             "(agents/machines/sessions).",
+             "bridge send <machine>`). Passing it explicitly on a fleet-global "
+             "verb (agents/machines/sessions) is an error, not a silent no-op.",
     )
 
     sub = parser.add_subparsers(dest="command")
@@ -3572,6 +3610,9 @@ def main(argv: list[str] | None = None) -> None:
     # A top-level --project (e.g. injected by the `<repo> <slug>` router) pins
     # the target project for the project-addressed verbs; see _sender_repo().
     _set_project_override(getattr(args, "project", None))
+    # Bounce an *explicit* --project on a verb that won't use it (#1080), instead
+    # of silently ignoring it. Router-injected --project stays a silent no-op.
+    _guard_project_scope(parser, args)
 
     logging.basicConfig(
         level=logging.INFO,

@@ -14292,15 +14292,29 @@ def _route_to_sibling_plugin(slug: str, project: str | None,
         )
         return 1
     forwarded: list[str] = []
+    child_env = os.environ.copy()
     if project:
         forwarded += ["--project", project]
+        # Mark this --project as ROUTER-INJECTED (synthetic), so the sibling can
+        # distinguish it from a user-typed explicit --project. The router injects
+        # --project uniformly for _PROJECT_ARG_SLUGS, including on that plugin's
+        # fleet-global verbs where it's a no-op; the sibling tolerates a *routed*
+        # no-op silently but should bounce an *explicit* one (#1080).
+        child_env["AGENT_WORKTREES_PROJECT_ROUTED"] = "1"
+    else:
+        # Authoritative: the marker means "THIS route injected --project". Never
+        # let a stale/exported marker from the parent env leak to the child --
+        # otherwise the child would treat a user's explicit --project (forwarded
+        # in `rest`) as routed and silently ignore it (#1080). Don't trust
+        # ambient env for identity.
+        child_env.pop("AGENT_WORKTREES_PROJECT_ROUTED", None)
     forwarded += list(rest)
     if platform.system() == "Windows":
         pwsh = shutil.which("pwsh") or shutil.which("powershell") or "pwsh"
         cmd = [pwsh, "-NoProfile", "-NoLogo", "-File", str(stub), *forwarded]
     else:
         cmd = [str(stub), *forwarded]
-    return subprocess.run(cmd).returncode
+    return subprocess.run(cmd, env=child_env).returncode
 
 
 def _safe_cwd() -> Path | None:
