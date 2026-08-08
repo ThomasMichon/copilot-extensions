@@ -82,6 +82,43 @@ status). Substance in the plugin; keep the narrative thin.
    versioned source of truth. Reference them rather than duplicating detail that
    drifts.
 
+## README & documentation standard (every plugin)
+
+A plugin's `README.md` is its entry point — the #1 cause of "usage isn't clear" is a
+README that lists features without setting expectations. This applies to **any** plugin
+(harness, agent, skill, or runtime), and mirrors the agency-microsoft
+[`plugin-eval`](https://github.com/agency-microsoft/.github-private/tree/main/plugins/plugin-eval)
+quality rubric (structural checks + LLM-as-judge dimensions). Every README must give a
+coherent narrative covering five things, in order:
+
+| # | Requirement | Section |
+|---|-------------|---------|
+| 1 | What the plugin is **for** | Title + one-line `>` purpose + a 1–2 paragraph intro (state the `-harness`/`-agent` role if applicable). |
+| 2 | What it **does** & how to **use** it | **What it does (and how to use it)** — a table of entry points (skills + trigger phrases, agents `@name`, commands) + a short usage walkthrough / concrete example. |
+| 3 | What it **depends on / assumes** | **What this plugin provides — and what it doesn't** (Provides / Does NOT provide-delegated / Assumes) + **Dependencies & assumptions**. |
+| 4 | Pointer to an **inventory** | **What's in this plugin** — one line per skill/agent/script/reference; note the SKILL.md files are the source of truth for behavior. |
+| 5 | **Issues / contributing** | **Troubleshooting, contributing & issues** — top 2–3 failure modes + fixes; how to contribute (the repo's PR flow); where to file issues. |
+
+Non-negotiables:
+
+- **Set expectations honestly.** The *"provides — and what it doesn't"* section is the
+  fix for unclear usage: name what the plugin **delegates**, leaves **manual**, or only
+  **partially** does. A `-harness` plugin especially must state which config/artifacts it
+  **produces** vs. **assumes** — an operator should never discover after install that
+  "set up X" silently required hand-writing three config files.
+- **Declare real dependencies in `plugin.json`.** If a skill *cannot function* without
+  another plugin's sub-agent/MCP/skill, that is a **hard dependency**
+  (`dependencies: [{ "name": "<plugin>" }]`, adding `"marketplace"` + the root
+  `allowCrossMarketplaceDependenciesOn` entry for cross-marketplace), not merely a
+  "recommended companion." Every `@sub-agent` / MCP a README mentions is either a declared
+  dependency or an explicitly-documented optional companion with graceful degradation.
+- **No dead references** — every file/skill/plugin you link must exist.
+- **Bump the manifest + marketplace catalog version together** on any change (README
+  included).
+
+`reviewing-customizations` checks structural coherence; this section is the content bar it
+can't fully see.
+
 ## Structure
 
 ```
