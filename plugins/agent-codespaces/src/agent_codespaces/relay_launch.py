@@ -154,7 +154,7 @@ def build_relay_launch_env(
     from .config import load_merged_config
     from .relay_token import token_for
 
-    cfg = load_merged_config()
+    cfg = load_merged_config(include_cwd=False)
     if relay_port is not None:
         port = int(relay_port)
     else:

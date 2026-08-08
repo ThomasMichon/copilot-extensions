@@ -37,10 +37,16 @@ from . import relay_launch
 from . import pool as pool_mod
 from .config import (
     ADOPTED_REPOS_FILE,
+    CANONICAL_CONFIG_REL,
+    CONFIG_DIR_NAME,
+    CONFIG_FILE_IN_DIR,
+    CONFIG_FILENAME,
     RUNTIME_DIR,
     AdoptedRepo,
     load_adopted_repos,
     load_merged_config,
+    repo_config_path,
+    repo_has_config,
     save_adopted_repos,
     validate_config,
 )
@@ -204,10 +210,15 @@ def main(argv: list[str] | None = None) -> int:
     config_sub.add_parser("adopt", help="Register current repo for config")
     config_sub.add_parser("show", help="Show resolved config")
     config_sub.add_parser("validate", help="Validate config")
+    config_sub.add_parser(
+        "migrate",
+        help="Relocate a legacy repo-root codespaces.yaml to "
+             ".agent-codespaces/config.yaml",
+    )
     config_init_p = config_sub.add_parser(
         "init",
-        help="Scaffold codespaces.yaml in the current repo, deriving defaults "
-             "from your existing CodeSpaces (gh codespace list)",
+        help="Scaffold .agent-codespaces/config.yaml in the current repo "
+             "(supplementary-only; most repos need none)",
     )
     config_init_p.add_argument(
         "--from-codespace", dest="from_codespace", default=None,
@@ -215,11 +226,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     config_init_p.add_argument(
         "--force", action="store_true",
-        help="Overwrite an existing codespaces.yaml",
+        help="Overwrite an existing .agent-codespaces/config.yaml",
     )
     config_init_p.add_argument(
         "--adopt", action="store_true",
-        help="Also register the repo (run adopt) after writing the file",
+        help="(Deprecated no-op) init now always auto-adopts",
     )
 
     # --- delete ---
@@ -1910,6 +1921,8 @@ def _cmd_config(args: argparse.Namespace) -> int:
         return _config_show()
     if args.config_command == "validate":
         return _config_validate()
+    if args.config_command == "migrate":
+        return _config_migrate_file()
     if args.config_command == "init":
         return _config_init(
             from_codespace=args.from_codespace,
@@ -1917,7 +1930,7 @@ def _cmd_config(args: argparse.Namespace) -> int:
             also_adopt=args.adopt,
         )
     print(
-        "Usage: agent-codespaces config {init|adopt|show|validate}",
+        "Usage: agent-codespaces config {init|adopt|show|validate|migrate}",
         file=sys.stderr,
     )
     return 1
@@ -2130,76 +2143,70 @@ def _derive_codespaces_defaults(
 
 
 def _render_codespaces_yaml(defaults: dict | None) -> str:
-    """Render a codespaces.yaml. If defaults is None, emit a generic template."""
-    if defaults:
-        machine = defaults["machine_type"]
-        repo = defaults["repository"]
-        ws = defaults.get("workspace_folder")
-        if ws:
-            workspace_line = f"  workspace_folder: {ws}\n"
-        else:
-            # Could not discover it cheaply -- emit a TODO, never a wrong guess.
-            workspace_line = (
-                "  # workspace_folder: /workspaces/<your-checkout>   # TODO: set "
-                "to the repo\n  # checkout path INSIDE the CodeSpace. This is the "
-                "dir `cd $WORKING_DIRECTORY`\n  # lands in -- often NOT the "
-                "CodeSpaces repo name. Find it with:\n"
-                "  #   gh codespace ssh -c <name> -- 'echo $WORKING_DIRECTORY'\n"
-            )
-        repo_block = (
-            f"\nrepos:\n  {repo}:\n    machine_type: {machine}\n"
-            if repo else ""
-        )
-        ws_status = ws if ws else "UNKNOWN (left as a TODO -- set it manually)"
-        derived_note = (
-            f"# Derived from your existing CodeSpace "
-            f"'{defaults['source_name']}'.\n"
-            f"# workspace_folder: {ws_status}\n"
-        )
-    else:
-        machine = "largePremiumLinux"
-        workspace_line = "  workspace_folder: /workspaces/<your-repo>\n"
-        repo_block = (
-            "\n# repos:\n#   <your-org>/<your-repo>:\n"
-            "#     machine_type: largePremiumLinux256gb\n"
-        )
-        derived_note = (
-            "# No existing CodeSpaces found -- this is a generic template. "
-            "Fill in the\n# placeholders below.\n"
-        )
+    """Render a ``.agent-codespaces/config.yaml``.
 
-    return (
-        "# codespaces.yaml -- agent-codespaces configuration\n"
-        "# All org/account/URL values live HERE, in your own repo -- never in\n"
-        "# the copilot-extensions plugin.\n"
-        f"{derived_note}\n"
-        "defaults:\n"
-        f"  machine_type: {machine}\n"
-        "  location: EastUs\n"
-        "  ssh_user: vscode\n"
-        f"{workspace_line}"
-        "  # dotfiles_repo: <your-user>/<your-dotfiles>\n"
-        "\n"
-        "credentials:\n"
-        "  relay_port: 9857\n"
-        "  # ado_host: <your-org>.visualstudio.com   # for bare get-access-token\n"
-        "  sources:\n"
-        "    git-credential:\n"
-        "      enabled: true\n"
-        "      allowed_hosts:\n"
-        '        - "github.com"\n'
-        '        - "*.github.com"\n'
-        '        - "dev.azure.com"\n'
-        '        - "*.visualstudio.com"\n'
-        "    gh-auth:\n"
-        "      enabled: true\n"
-        "      allowed_hosts:\n"
-        '        - "github.com"\n'
-        "    # az-login:\n"
-        "    #   enabled: true                    # ADO REST + Storage are defaults\n"
-        "    #   allowed_resources:               # add exact extra resources only\n"
-        '    #     - "https://graph.microsoft.com/"\n'
-        f"{repo_block}"
+    The file is **supplementary-only**: it carries just the CodeSpace-specific
+    bits convention can't derive. A repo that matches convention (machine
+    defaults, ``/workspaces/<basename>`` checkout, git-credential relay for
+    github.com + ADO) needs no file at all -- so the template leads with that and
+    keeps every block commented unless a discovered CodeSpace supplies a value.
+    """
+    header = (
+        "# .agent-codespaces/config.yaml -- SUPPLEMENTARY CodeSpace config.\n"
+        "#\n"
+        "# Most repos need NO file here. agent-codespaces derives by convention:\n"
+        "#   * machine_type=largePremiumLinux, location=EastUs\n"
+        "#   * checkout at /workspaces/<repo-basename>\n"
+        "#   * git-credential relay serving github.com AND Azure DevOps (via GCM)\n"
+        "# Add a block below ONLY when your repo deviates (e.g. a split\n"
+        "# CodeSpaces-vs-product repo, a pinned devcontainer, an ADO host, or a\n"
+        "# provision hook). All org/account/URL values live HERE, in your repo --\n"
+        "# never in the copilot-extensions plugin.\n"
+    )
+
+    if defaults:
+        repo = defaults.get("repository")
+        machine = defaults["machine_type"]
+        ws = defaults.get("workspace_folder")
+        derived = (
+            f"# Derived from your CodeSpace '{defaults['source_name']}'.\n"
+        )
+        # Only emit a repos: block when the discovered machine differs from the
+        # convention default, or a non-convention workspace folder was found.
+        basename = repo.split("/")[-1] if repo else ""
+        conv_ws = f"/workspaces/{basename.removesuffix('-codespaces')}" if basename else ""
+        lines: list[str] = []
+        if machine and machine != "largePremiumLinux":
+            lines.append(f"    machine_type: {machine}")
+        if ws and ws != conv_ws:
+            lines.append(f"    workspace_folder: {ws}")
+        elif basename.endswith("-codespaces"):
+            # A split repo: record the product mapping so agents land right.
+            product = basename.removesuffix("-codespaces")
+            lines.append(f"    workspace_repo: {product}   # -> /workspaces/{product}")
+        if lines and repo:
+            repo_block = f"\nrepos:\n  {repo}:\n" + "\n".join(lines) + "\n"
+        else:
+            repo_block = (
+                f"\n# This repo matches convention -- no overrides needed.\n"
+                f"# Add a repos: block only if that changes:\n"
+                f"# repos:\n#   {repo or '<org>/<repo>'}:\n"
+                f"#     workspace_repo: <product>   # only for split *-codespaces repos\n"
+            )
+        return header + derived + repo_block
+
+    return header + (
+        "\n# No existing CodeSpaces detected. Uncomment and adapt ONLY what you\n"
+        "# need; delete the rest.\n"
+        "#\n"
+        "# repos:\n"
+        "#   <org>/<repo>-codespaces:\n"
+        "#     workspace_repo: <product>          # split repo -> /workspaces/<product>\n"
+        "#     machine_type: largePremiumLinux256gb\n"
+        "#     devcontainer_path: .devcontainer/devcontainer.json  # pin if repo ships >1\n"
+        "#\n"
+        "# credentials:\n"
+        "#   ado_host: <your-org>.visualstudio.com   # only for bare ADO get-access-token\n"
     )
 
 
@@ -2304,12 +2311,24 @@ def _account_login_remedy(login: str) -> str:
 def _config_init(
     *, from_codespace: str | None, force: bool, also_adopt: bool
 ) -> int:
-    """Scaffold codespaces.yaml, deriving defaults from existing CodeSpaces."""
-    repo_root = _resolve_repo_root()
-    config_file = repo_root / "codespaces.yaml"
+    """Scaffold ``.agent-codespaces/config.yaml``, deriving from existing CodeSpaces.
 
-    if config_file.exists() and not force:
-        print(f"codespaces.yaml already exists at {config_file}")
+    Most repos need no file at all -- the scaffold is supplementary-only. Writing
+    it also auto-adopts the repo (so the detached daemon picks it up); pass a
+    repo that matches convention and you can simply skip this entirely.
+    """
+    repo_root = _resolve_repo_root()
+    canonical = repo_root / CONFIG_DIR_NAME / CONFIG_FILE_IN_DIR
+    legacy = repo_root / CONFIG_FILENAME
+
+    if legacy.exists() and not canonical.exists():
+        print(f"A legacy {CONFIG_FILENAME} exists at {legacy}.")
+        print(f"Run `agent-codespaces config migrate` to move it to "
+              f"{CANONICAL_CONFIG_REL}.")
+        return 0
+
+    if canonical.exists() and not force:
+        print(f"{CANONICAL_CONFIG_REL} already exists at {canonical}")
         print("Use --force to overwrite, or edit it directly.")
         return 0
 
@@ -2331,9 +2350,10 @@ def _config_init(
         return 1
 
     content = _render_codespaces_yaml(defaults)
-    config_file.write_text(content, encoding="utf-8")
+    canonical.parent.mkdir(parents=True, exist_ok=True)
+    canonical.write_text(content, encoding="utf-8")
 
-    print(f"Wrote {config_file}")
+    print(f"Wrote {canonical}")
     if defaults:
         print(f"  Derived from CodeSpace: {defaults['source_name']}")
         print(f"  repository:        {defaults['repository']}")
@@ -2341,42 +2361,30 @@ def _config_init(
         ws = defaults.get("workspace_folder")
         if ws:
             print(f"  workspace_folder:  {ws}  (discovered from a live CodeSpace)")
-        else:
-            print(
-                "  workspace_folder:  NOT set -- no Available CodeSpace to read "
-                "$WORKING_DIRECTORY from."
-            )
-            print(
-                "                     Left as a TODO in the file. Set it to your "
-                "checkout path"
-            )
-            print(
-                "                     (often NOT the CodeSpaces repo name, e.g. "
-                "<repo> vs <repo>-codespaces)."
-            )
     else:
-        print("  No existing CodeSpaces detected -- wrote a generic template.")
-        print("  Edit the placeholders before adopting.")
+        print("  No existing CodeSpaces detected -- wrote a supplementary-only "
+              "template (most repos can delete it).")
 
-    if also_adopt:
-        print()
-        return _config_adopt()
-    print("\nReview the file, then run: agent-codespaces config adopt")
-    return 0
+    # Auto-adopt: the file is only consulted by the detached daemon via the
+    # adoption manifest, and a manual `config adopt` step was pure friction.
+    print()
+    return _config_adopt()
 
 
 def _config_adopt() -> int:
     """Register the current repo for config."""
     repo_root = _resolve_repo_root()
 
-    config_file = repo_root / "codespaces.yaml"
-
-    if not config_file.exists():
-        print(f"ERROR: No codespaces.yaml found in {repo_root}", file=sys.stderr)
+    if not repo_has_config(repo_root):
         print(
-            "Run `agent-codespaces config init` to scaffold one "
-            "(it derives defaults from your existing CodeSpaces), "
-            "then re-run adopt.",
+            f"ERROR: No {CANONICAL_CONFIG_REL} (or legacy {CONFIG_FILENAME}) "
+            f"found in {repo_root}",
+            file=sys.stderr,
+        )
+        print(
+            "Standard repos need no config -- adopt only a repo that carries "
+            "supplementary CodeSpace config. Run `agent-codespaces config init` "
+            "to scaffold one.",
             file=sys.stderr,
         )
         return 1
@@ -2394,7 +2402,43 @@ def _config_adopt() -> int:
     ))
     save_adopted_repos(repos)
     print(f"Adopted: {repo_root}")
+    print(f"Config:   {repo_config_path(repo_root)}")
     print(f"Manifest: {ADOPTED_REPOS_FILE}")
+    return 0
+
+
+def _config_migrate_file() -> int:
+    """Relocate a legacy repo-root ``codespaces.yaml`` to the canonical location.
+
+    Moves ``<repo>/codespaces.yaml`` -> ``<repo>/.agent-codespaces/config.yaml``
+    (idempotent). Content is copied verbatim; adoption is unaffected (the manifest
+    tracks the repo root, not the file). A no-op when the repo already uses the
+    canonical location or carries no config.
+    """
+    repo_root = _resolve_repo_root()
+    canonical = repo_root / CONFIG_DIR_NAME / CONFIG_FILE_IN_DIR
+    legacy = repo_root / CONFIG_FILENAME
+
+    if canonical.exists():
+        if legacy.exists():
+            print(f"Both {CANONICAL_CONFIG_REL} and legacy {CONFIG_FILENAME} "
+                  f"exist. The canonical file wins; remove {legacy} when ready.")
+            return 0
+        print(f"Already migrated: {canonical}")
+        return 0
+
+    if not legacy.exists():
+        print(f"No legacy {CONFIG_FILENAME} to migrate in {repo_root} "
+              "(nothing to do).")
+        return 0
+
+    canonical.parent.mkdir(parents=True, exist_ok=True)
+    canonical.write_text(legacy.read_text(encoding="utf-8"), encoding="utf-8")
+    legacy.unlink()
+    print(f"Migrated {legacy}")
+    print(f"      -> {canonical}")
+    print("Commit the move; adoption is unchanged (the manifest tracks the repo "
+          "root, not the file).")
     return 0
 
 

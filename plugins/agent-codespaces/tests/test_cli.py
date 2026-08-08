@@ -53,13 +53,42 @@ class TestCLI:
         )
         rc = main(["config", "validate"])
         assert rc == 1
-        assert "No adopted repos" in capsys.readouterr().out
+        assert "No CodeSpace config found" in capsys.readouterr().out
 
     def test_list_json_empty(self, capsys):
         with patch("agent_codespaces.__main__.list_codespaces", return_value=[]):
             rc = main(["list", "--json"])
         assert rc == 0
         assert "[]" in capsys.readouterr().out
+
+    def test_config_migrate_relocates_legacy(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "codespaces.yaml").write_text("defaults:\n  machine_type: big\n")
+        monkeypatch.setattr(
+            "agent_codespaces.__main__._resolve_repo_root", lambda: repo
+        )
+        rc = main(["config", "migrate"])
+        assert rc == 0
+        canonical = repo / ".agent-codespaces" / "config.yaml"
+        assert canonical.exists()
+        assert "machine_type: big" in canonical.read_text()
+        assert not (repo / "codespaces.yaml").exists()
+        assert "Migrated" in capsys.readouterr().out
+
+    def test_config_migrate_noop_without_legacy(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        monkeypatch.setattr(
+            "agent_codespaces.__main__._resolve_repo_root", lambda: repo
+        )
+        rc = main(["config", "migrate"])
+        assert rc == 0
+        assert "nothing to do" in capsys.readouterr().out.lower()
 
     def test_status_runs(self, tmp_path, monkeypatch, capsys):
         runtime = tmp_path / ".agent-codespaces"

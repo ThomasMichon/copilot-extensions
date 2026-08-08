@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+"""emit-codespace-map -- agent-codespaces sessionStart additionalContext.
+
+Emits a brief, persistent map of the repos that are **delegated to CodeSpaces**
+so every session knows -- without being told -- which repos have no local
+checkout and must be worked in a GitHub CodeSpace (via agent-codespaces /
+agent-bridge) rather than edited in place.
+
+The map is derived, never hardcoded: it reads ``agent-worktrees related list
+--json`` and keeps the entries whose ``delegate`` is ``agent-codespaces`` (the
+same registration ``agent-worktrees related resolve <name>`` and the
+``codespace:<name>`` dispatcher consume). Each row surfaces the CodeSpaces
+vessel repo, the in-CodeSpace checkout folder, and the machine, so a session can
+dispatch correctly at a glance.
+
+Output contract (Copilot CLI sessionStart hook): a single JSON object on stdout
+-- ``{"additionalContext": "<markdown>"}`` when there is at least one
+CodeSpace-delegated repo, else ``{}``. cwd-gated to a managed agent-worktrees
+project so nothing leaks into unrelated repos. Never raises: any error degrades
+to ``{}``.
+"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+
+
+def _emit_empty() -> None:
+    print("{}")
+    raise SystemExit(0)
+
+
+def _aw(*args: str) -> str | None:
+    """Run ``agent-worktrees`` (via this interpreter's ``-m``) and return stdout."""
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "agent_worktrees", *args],
+            capture_output=True, text=True, timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout
+
+
+def _codespace_delegated(related: list[dict]) -> list[dict]:
+    rows = []
+    for entry in related:
+        if (entry.get("delegate") or "").strip() != "agent-codespaces":
+            continue
+        locus = entry.get("locus") or {}
+        cs = locus.get("codespace") or {}
+        rows.append({
+            "name": entry.get("name", "?"),
+            "summary": (entry.get("summary") or "").strip(),
+            "vessel": cs.get("repo", ""),
+            "workspace_folder": cs.get("workspace_folder", ""),
+            "machine": cs.get("machine", ""),
+        })
+    return rows
+
+
+def _render(rows: list[dict]) -> str:
+    lines = [
+        "## CodeSpace-delegated repos (agent-codespaces)",
+        "",
+        "These repos have **no local checkout on this machine** -- work them in a "
+        "GitHub CodeSpace via `agent-codespaces` + `agent-bridge`, never by editing "
+        "a local path. Dispatch with "
+        "`agent-bridge send codespace:<name> \"<task>\"` (reuse a Shutdown "
+        "CodeSpace; it auto-starts on connect). Full plan: "
+        "`agent-worktrees related resolve <name>`.",
+        "",
+    ]
+    for r in rows:
+        bits = []
+        if r["vessel"]:
+            bits.append(f"vessel `{r['vessel']}`")
+        if r["workspace_folder"]:
+            bits.append(f"checkout `{r['workspace_folder']}`")
+        if r["machine"]:
+            bits.append(f"machine `{r['machine']}`")
+        detail = f" -- {', '.join(bits)}" if bits else ""
+        lines.append(f"- **{r['name']}**{detail}")
+    return "\n".join(lines).strip()
+
+
+def main() -> None:
+    # cwd-gate: only emit inside a managed agent-worktrees project.
+    project = (_aw("get", "project") or "").strip()
+    if not project:
+        _emit_empty()
+
+    raw = _aw("related", "list", "--json")
+    if not raw:
+        _emit_empty()
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        _emit_empty()
+
+    rows = _codespace_delegated(data.get("related") or [])
+    if not rows:
+        _emit_empty()
+
+    print(json.dumps({"additionalContext": _render(rows)}))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception:
+        print("{}")

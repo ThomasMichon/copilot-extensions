@@ -1,0 +1,64 @@
+# .agent-codespaces/config.yaml -- SUPPLEMENTARY CodeSpace config (reference example)
+#
+# Most repos need NO file here. agent-codespaces derives by convention:
+#   * machine_type=largePremiumLinux, location=EastUs
+#   * in-CodeSpace checkout at /workspaces/<repo-basename>
+#   * git-credential relay serving github.com AND Azure DevOps (via host GCM)
+#
+# Add ONLY the blocks that deviate from convention; delete the rest. All
+# org/account/URL values live HERE, in your own repo -- never hardcoded in the
+# copilot-extensions plugin. Field-by-field docs: the codespaces-setup SKILL.md
+# "Config Reference" section.
+#
+# Location: this file is the canonical in-repo home, aligned with the sibling
+# agent-* plugins (e.g. .agent-worktrees/config.yaml). A legacy repo-root
+# codespaces.yaml is still read as a fallback -- relocate it with
+# `agent-codespaces config migrate`.
+
+# --- defaults (override convention only if needed) -------------------------
+# defaults:
+#   machine_type: largePremiumLinux256gb   # bigger default VM for every CodeSpace
+#   location: WestUs2
+#   # Your ACCOUNT-WIDE dotfiles repo -- the single repo GitHub clones into every
+#   # CodeSpace (set at github.com/settings/codespaces; no API to read it, so
+#   # declare it once here). Should host an install.sh, run by connect-time
+#   # housekeeping after sync. Not per-repo.
+#   dotfiles_repo: <your-user>/dotfiles
+
+# --- credentials (relay is on by default for github.com + ADO) -------------
+# credentials:
+#   # Default Azure DevOps host for bare `get-access-token` requests that carry
+#   # no host (npm/nuget via ado-auth-helper). Unset = such requests are rejected.
+#   ado_host: <your-org>.visualstudio.com
+#   sources:
+#     az-login:                 # Optional EXTRA Azure token resources.
+#       enabled: true           # ADO REST + Storage are allowed by default.
+#       allowed_resources:      # Add only the exact public resources you need.
+#         - "https://graph.microsoft.com/"
+
+# --- per-repo overrides (the common case: a split *-codespaces repo) --------
+# Keys are the CodeSpaces repository (owner/name).
+repos:
+  <your-org>/<your-repo>-codespaces:
+    # This CodeSpaces repo hosts the <your-repo> product checkout. Recording the
+    # directional "consume-from" link (mirrors agent-worktrees' related repos)
+    # makes agents launched for this CodeSpace land in /workspaces/<your-repo>
+    # rather than the (wrong) /workspaces/<your-repo>-codespaces.
+    workspace_repo: <your-repo>           # -> workspace_folder = /workspaces/<your-repo>
+    # machine_type: largePremiumLinux256gb   # only if this repo needs a bigger VM
+    # workspace_folder: /workspaces/<checkout>   # explicit override if the
+    #                                            # checkout isn't /workspaces/<basename>
+    # Which devcontainer to build from when this repo ships more than one (e.g. a
+    # local-Docker config alongside the CodeSpaces one). agent-codespaces only
+    # passes --devcontainer-path when the repo actually has multiple configs, so
+    # this keeps headless `create` non-interactive without affecting other repos.
+    # An agent can still override per-create: `agent-codespaces create --devcontainer-path ...`.
+    # devcontainer_path: .devcontainer/devcontainer.json
+    # Repo-specific provisioning -- deployed into the CodeSpace by
+    # agent-codespaces on SSH connect (by-convention hook).
+    # provision:
+    #   files:
+    #     - src: path/in/your/repo/hook.sh
+    #       dest: ~/.bashrc.d/hook.sh
+    #   on_connect:
+    #     - "grep -qF hook.sh ~/.bashrc || echo '. ~/.bashrc.d/hook.sh' >> ~/.bashrc"

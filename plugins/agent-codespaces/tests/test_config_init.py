@@ -107,46 +107,60 @@ class TestDeriveDefaults:
 
 
 class TestRenderYaml:
-    def test_generic_template_is_valid_yaml_with_placeholders(self):
+    def test_supplementary_template_is_valid_yaml(self):
         text = _render_codespaces_yaml(None)
         data = yaml.safe_load(text)
-        assert data["defaults"]["machine_type"] == "largePremiumLinux"
-        assert "<your-repo>" in data["defaults"]["workspace_folder"]
-        # repos block is commented out in the generic template
-        assert data.get("repos") is None
+        # Supplementary-only: an all-commented template parses to nothing.
+        assert data is None
+        # Leads with the zero-config convention message.
+        assert "Most repos need NO file" in text
+        assert "workspace_repo" in text
 
-    def test_derived_with_discovered_workspace(self):
+    def test_derived_split_repo_emits_workspace_repo(self):
         defaults = {
-            "repository": "my-org/my-codespaces-repo",
-            "machine_type": "largePremiumLinux256gb",
-            "workspace_folder": "/workspaces/my-app",
-            "source_name": "feature-b",
-        }
-        text = _render_codespaces_yaml(defaults)
-        data = yaml.safe_load(text)
-        assert data["defaults"]["workspace_folder"] == "/workspaces/my-app"
-        assert data["repos"]["my-org/my-codespaces-repo"][
-            "machine_type"
-        ] == "largePremiumLinux256gb"
-
-    def test_derived_without_workspace_leaves_no_active_value(self):
-        defaults = {
-            "repository": "my-org/my-codespaces-repo",
-            "machine_type": "largePremiumLinux256gb",
+            "repository": "my-org/my-app-codespaces",
+            "machine_type": "largePremiumLinux",   # convention default
             "workspace_folder": None,
             "source_name": "feature-b",
         }
         text = _render_codespaces_yaml(defaults)
         data = yaml.safe_load(text)
-        # workspace_folder must NOT be set to a guessed value
-        assert "workspace_folder" not in data["defaults"]
-        # but a TODO comment should guide the user
-        assert "WORKING_DIRECTORY" in text
+        # A split *-codespaces repo records the product mapping so agents land
+        # in /workspaces/<product>, not /workspaces/<repo>-codespaces.
+        assert data["repos"]["my-org/my-app-codespaces"][
+            "workspace_repo"
+        ] == "my-app"
+
+    def test_derived_nonconvention_machine_and_workspace(self):
+        defaults = {
+            "repository": "my-org/my-app-codespaces",
+            "machine_type": "largePremiumLinux256gb",
+            "workspace_folder": "/workspaces/custom",
+            "source_name": "feature-b",
+        }
+        text = _render_codespaces_yaml(defaults)
+        data = yaml.safe_load(text)
+        repo = data["repos"]["my-org/my-app-codespaces"]
+        assert repo["machine_type"] == "largePremiumLinux256gb"
+        assert repo["workspace_folder"] == "/workspaces/custom"
+
+    def test_convention_repo_needs_no_overrides(self):
+        # A repo that fully matches convention emits only commented guidance.
+        defaults = {
+            "repository": "my-org/my-app",
+            "machine_type": "largePremiumLinux",
+            "workspace_folder": "/workspaces/my-app",
+            "source_name": "feature-b",
+        }
+        text = _render_codespaces_yaml(defaults)
+        data = yaml.safe_load(text)
+        assert data is None or "repos" not in data
+        assert "matches convention" in text
 
     def test_no_internal_identifiers_in_output(self):
         forbidden = _forbidden_identifiers()
         for d in (None, {
-            "repository": "my-org/my-codespaces-repo",
+            "repository": "my-org/my-app-codespaces",
             "machine_type": "largePremiumLinux256gb",
             "workspace_folder": "/workspaces/my-app",
             "source_name": "x",
@@ -159,5 +173,5 @@ class TestRenderYaml:
             for bad in forbidden:
                 assert bad not in text, (
                     f"internal identifier {bad!r} leaked into the generated "
-                    "codespaces.yaml scaffold"
+                    "config scaffold"
                 )

@@ -130,6 +130,70 @@ class TestLoadRepoConfig:
         result = load_repo_config(tmp_path)
         assert result is None
 
+    def test_loads_canonical_in_repo(self, tmp_path):
+        cfg_dir = tmp_path / ".agent-codespaces"
+        cfg_dir.mkdir()
+        (cfg_dir / "config.yaml").write_text(
+            yaml.safe_dump({"defaults": {"machine_type": "canon"}})
+        )
+        result = load_repo_config(tmp_path)
+        assert result is not None
+        assert result["defaults"]["machine_type"] == "canon"
+
+    def test_canonical_wins_over_legacy(self, tmp_path):
+        _write_codespaces_yaml(tmp_path, {"defaults": {"machine_type": "legacy"}})
+        cfg_dir = tmp_path / ".agent-codespaces"
+        cfg_dir.mkdir()
+        (cfg_dir / "config.yaml").write_text(
+            yaml.safe_dump({"defaults": {"machine_type": "canon"}})
+        )
+        from agent_codespaces.config import repo_config_path
+        assert repo_config_path(tmp_path) == cfg_dir / "config.yaml"
+        assert load_repo_config(tmp_path)["defaults"]["machine_type"] == "canon"
+
+
+class TestCwdAutoDiscovery:
+    def test_cwd_repo_config_merged_when_unadopted(
+        self, config_dir, monkeypatch
+    ):
+        # A repo carrying a canonical config, NOT adopted, is picked up from cwd.
+        repo = config_dir / "product"
+        cfg_dir = repo / ".agent-codespaces"
+        cfg_dir.mkdir(parents=True)
+        (cfg_dir / "config.yaml").write_text(
+            yaml.safe_dump({"defaults": {"machine_type": "from-cwd"}})
+        )
+        monkeypatch.setattr(
+            "agent_codespaces.config.cwd_repo_root", lambda: repo
+        )
+        cfg = load_merged_config()
+        assert cfg.default_machine_type == "from-cwd"
+        assert repo in cfg.source_paths
+
+    def test_include_cwd_false_ignores_cwd(self, config_dir, monkeypatch):
+        repo = config_dir / "product"
+        cfg_dir = repo / ".agent-codespaces"
+        cfg_dir.mkdir(parents=True)
+        (cfg_dir / "config.yaml").write_text(
+            yaml.safe_dump({"defaults": {"machine_type": "from-cwd"}})
+        )
+        monkeypatch.setattr(
+            "agent_codespaces.config.cwd_repo_root", lambda: repo
+        )
+        cfg = load_merged_config(include_cwd=False)
+        assert cfg.source_paths == []
+
+    def test_convention_repo_zero_config(self, config_dir, monkeypatch):
+        # A repo with NO config yields an empty merged config (pure convention).
+        monkeypatch.setattr(
+            "agent_codespaces.config.cwd_repo_root",
+            lambda: config_dir / "no-config-repo",
+        )
+        cfg = load_merged_config()
+        assert cfg.source_paths == []
+        # Convention defaults still apply.
+        assert cfg.default_machine_type == "largePremiumLinux"
+
 
 class TestAdoptedRepos:
     def test_roundtrip(self, config_dir):
@@ -385,7 +449,7 @@ class TestValidation:
     def test_no_sources_warning(self):
         config = CodespacesConfig()
         issues = validate_config(config)
-        assert any("No adopted repos" in i for i in issues)
+        assert any("No CodeSpace config found" in i for i in issues)
 
     def test_enabled_source_no_hosts(self):
         config = CodespacesConfig(

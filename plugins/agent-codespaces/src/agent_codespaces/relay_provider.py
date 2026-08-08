@@ -47,7 +47,7 @@ def relay_profile() -> dict:
     try:
         from .config import load_merged_config
 
-        creds = load_merged_config().credentials
+        creds = load_merged_config(include_cwd=False).credentials
         port = creds.relay_port
         ado_host = creds.ado_host
         az_cfg = creds.sources.get("az-login")

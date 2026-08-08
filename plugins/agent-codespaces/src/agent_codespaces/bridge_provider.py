@@ -68,7 +68,7 @@ def build_agent_configs(
     if codespaces is None:
         codespaces = list_codespaces()
 
-    config = load_merged_config()
+    config = load_merged_config(include_cwd=False)
 
     agents = []
     for cs in codespaces:

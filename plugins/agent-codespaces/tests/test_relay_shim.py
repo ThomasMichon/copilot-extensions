@@ -98,7 +98,7 @@ class TestRegisterRelay:
 
         merged = cfg.CodespacesConfig()
         merged.credentials.ado_host = "example.visualstudio.com"
-        monkeypatch.setattr(cfg, "load_merged_config", lambda: merged)
+        monkeypatch.setattr(cfg, "load_merged_config", lambda *a, **k: merged)
 
         b = RelayBuilder()
         register_relay(b)
@@ -119,7 +119,7 @@ class TestRegisterRelay:
             enabled=True,
             allowed_resources=["https://graph.microsoft.com/"],
         )
-        monkeypatch.setattr(cfg, "load_merged_config", lambda: merged)
+        monkeypatch.setattr(cfg, "load_merged_config", lambda *a, **k: merged)
 
         b = RelayBuilder()
         register_relay(b)
@@ -137,7 +137,7 @@ class TestRegisterRelay:
         from credential_relay import RelayBuilder
 
         merged = cfg.CodespacesConfig()  # ado_host defaults to None
-        monkeypatch.setattr(cfg, "load_merged_config", lambda: merged)
+        monkeypatch.setattr(cfg, "load_merged_config", lambda *a, **k: merged)
         monkeypatch.delenv("CODESPACES_ADO_HOST", raising=False)
 
         b = RelayBuilder()
@@ -859,3 +859,4 @@ class TestGitCredentialCache:
         assert result.returncode == 0
         assert result.stdout == self.RESPONSE
         assert "fresh-token" in next(cache_dir.glob("*.gitcred")).read_text(encoding="utf-8")
+

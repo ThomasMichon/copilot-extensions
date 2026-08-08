@@ -89,7 +89,7 @@ def _patched(monkeypatch):
             "agent_codespaces.resolver.list_codespaces", lambda: [_cs()],
         )
         monkeypatch.setattr(
-            "agent_codespaces.resolver.load_merged_config", lambda: config,
+            "agent_codespaces.resolver.load_merged_config", lambda *a, **k: config,
         )
     return _apply
 
@@ -154,3 +154,4 @@ class TestResolveCrossRepo:
             repo_remote="https://example.com/x/some-other-repo",
         )
         assert "/workspaces/some-other-repo" in _remote_cmd(target.spawn_command)
+
