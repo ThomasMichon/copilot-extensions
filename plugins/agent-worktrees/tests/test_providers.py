@@ -707,6 +707,61 @@ class TestGitHubProvider:
         assert "does not support native auto-merge" in \
             azure_devops.AzureDevOpsProvider().enable_auto_merge("o/r", 7)
 
+    def test_get_repo_policy_reads_settings_and_protection(self, monkeypatch):
+        # #225: adopt-time research reads repo merge settings + branch protection.
+        from agent_worktrees.providers import github
+
+        repo_json = json.dumps({
+            "allow_squash_merge": True, "allow_merge_commit": False,
+            "allow_rebase_merge": False, "allow_auto_merge": True,
+            "delete_branch_on_merge": True,
+        })
+        prot_json = json.dumps({
+            "required_pull_request_reviews": {"required_approving_review_count": 1},
+            "required_status_checks": {"contexts": ["ci"]},
+        })
+
+        def fake(args, **kw):
+            if args[:2] == ["gh", "api"] and args[2].endswith("/protection"):
+                return _proc(stdout=prot_json)
+            return _proc(stdout=repo_json)
+
+        monkeypatch.setattr(github, "run_cli", fake)
+        pol = github.GitHubProvider().get_repo_policy("o/r", default_branch="main")
+        assert pol.supported is True
+        assert pol.allow_squash is True and pol.allow_merge_commit is False
+        assert pol.allow_auto_merge is True
+        assert pol.required_approving_reviews == 1
+        assert pol.has_required_status_checks is True
+
+    def test_get_repo_policy_no_protection_is_ungated(self, monkeypatch):
+        from agent_worktrees.providers import github
+        repo_json = json.dumps({"allow_squash_merge": True})
+
+        def fake(args, **kw):
+            if args[2].endswith("/protection"):
+                return _proc(returncode=1, stderr="Not Found")
+            return _proc(stdout=repo_json)
+
+        monkeypatch.setattr(github, "run_cli", fake)
+        pol = github.GitHubProvider().get_repo_policy("o/r", default_branch="main")
+        assert pol.required_approving_reviews == 0
+        assert pol.has_required_status_checks is False
+
+    def test_get_repo_policy_read_failure_unsupported(self, monkeypatch):
+        from agent_worktrees.providers import github
+        monkeypatch.setattr(
+            github, "run_cli",
+            lambda args, **kw: _proc(returncode=1, stderr="gone"))
+        pol = github.GitHubProvider().get_repo_policy("o/r")
+        assert pol.supported is False and "gone" in pol.error
+
+    def test_get_repo_policy_unsupported_on_gitea_and_azure(self):
+        from agent_worktrees.providers import azure_devops, gitea
+        assert gitea.GiteaProvider().get_repo_policy("o/r").supported is False
+        assert azure_devops.AzureDevOpsProvider().get_repo_policy("o/r").supported is False
+
+
     def test_merge_pull_unsupported_on_gitea_and_azure(self):
         # Direct merge (pr-merge --now) is GitHub-only today; the other
         # providers return a non-empty "unsupported" message, never "".

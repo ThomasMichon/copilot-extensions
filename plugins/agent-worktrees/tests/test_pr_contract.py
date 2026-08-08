@@ -510,6 +510,52 @@ class TestClassifyPRFlow:
 
 
 # ---------------------------------------------------------------------------
+# Adopt-time research: RepoPolicy -> policy matrix mapping (#225)
+# ---------------------------------------------------------------------------
+
+class TestDerivePolicyMatrix:
+    def test_unsupported_yields_empty(self):
+        assert pc.derive_policy_matrix(pc.RepoPolicy(supported=False)) == {}
+
+    def test_squash_preferred_when_allowed(self):
+        m = pc.derive_policy_matrix(pc.RepoPolicy(
+            allow_squash=True, allow_merge_commit=True, allow_rebase=True))
+        assert m["merge_strategy"] == "squash"
+
+    def test_merge_when_squash_disallowed(self):
+        m = pc.derive_policy_matrix(pc.RepoPolicy(
+            allow_squash=False, allow_merge_commit=True, allow_rebase=False))
+        assert m["merge_strategy"] == "merge"
+        # rebase disallowed + merge allowed -> branch update via merge.
+        assert m["branch_update_strategy"] == "merge"
+
+    def test_rebase_only(self):
+        m = pc.derive_policy_matrix(pc.RepoPolicy(
+            allow_squash=False, allow_merge_commit=False, allow_rebase=True))
+        assert m["merge_strategy"] == "rebase"
+
+    def test_prefer_auto_merge_mirrors_setting(self):
+        assert pc.derive_policy_matrix(
+            pc.RepoPolicy(allow_auto_merge=True))["prefer_auto_merge"] is True
+        assert pc.derive_policy_matrix(
+            pc.RepoPolicy(allow_auto_merge=False))["prefer_auto_merge"] is False
+
+    def test_review_blocking_from_required_reviews_or_checks(self):
+        assert pc.derive_policy_matrix(
+            pc.RepoPolicy(required_approving_reviews=1))["review_blocking"] is True
+        assert pc.derive_policy_matrix(
+            pc.RepoPolicy(required_approving_reviews=0,
+                          has_required_status_checks=False))["review_blocking"] is False
+        assert pc.derive_policy_matrix(
+            pc.RepoPolicy(required_approving_reviews=0,
+                          has_required_status_checks=True))["review_blocking"] is True
+
+    def test_unknown_settings_omitted(self):
+        # All-None settings speak to nothing -> no keys emitted (defaults apply).
+        assert pc.derive_policy_matrix(pc.RepoPolicy()) == {}
+
+
+# ---------------------------------------------------------------------------
 # PR-flow reminders (pr_reminder) -- state-aware, stay-on-the-rails guidance
 # ---------------------------------------------------------------------------
 

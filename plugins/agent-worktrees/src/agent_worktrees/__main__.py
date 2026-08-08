@@ -12645,6 +12645,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Block until a PR moves (run 'pr-watch' for usage)")
     sub.add_parser("pr-merge",
                    help="Signal merge consent on an approved PR (run 'pr-merge' for usage)")
+    sub.add_parser("pr-research",
+                   help="Inspect a repo's provider settings -> policy matrix (read-only)")
     sub.add_parser("pr", help="Author-side PR command family (run 'pr' for usage)")
 
     # pre-launch (two-pass self-update protocol)
@@ -15228,6 +15230,99 @@ def _pr_usage() -> None:
     print("  status   Read tracked PR metadata (= pr-status)", file=out)
     print("  complete Reconcile the worktree after merge (= pr-complete)", file=out)
     print("  ready    Move a PR out of draft, ready-for-review (= pr-ready)", file=out)
+    print("  research Inspect the repo's provider settings -> policy matrix "
+          "(= pr-research)", file=out)
+
+
+def cmd_pr_research_dispatch(argv: list[str]) -> int:
+    """Route ``pr-research`` -- read the repo's live provider settings and derive
+    the policy matrix to match (#225). Read-only: it PRINTS the suggested ``pr:``
+    policy keys (never writes config), so an operator/agent can align the config
+    with the repo's real settings instead of a guess.
+    """
+    import json as _json
+
+    from . import pr_contract as pc
+    from .providers import ProviderError, account_token_for_slug, get_provider
+
+    if argv and argv[0] in ("--help", "-h", "help"):
+        print("Usage: <project> pr-research <owner/name> [--default-branch B] "
+              "[--host URL] [--token T] [--json]", file=sys.stderr)
+        print(file=sys.stderr)
+        print("Read the repo's live provider settings (allowed merge methods, "
+              "native auto-merge,", file=sys.stderr)
+        print("delete-branch-on-merge, required reviews/checks) and derive the "
+              "repo-overridable", file=sys.stderr)
+        print("`pr:` policy matrix to match. Read-only -- prints a suggestion; "
+              "writes nothing.", file=sys.stderr)
+        return 0
+
+    p = argparse.ArgumentParser(prog="pr-research", add_help=True)
+    p.add_argument("repo", type=_pr_parse_repo, help="owner/name")
+    p.add_argument("--default-branch", default="", dest="default_branch",
+                   help="branch to read protection from (defaults to repo config)")
+    p.add_argument("--host", default="", help="API base URL override")
+    p.add_argument("--token", default=None, help="Provider token override")
+    p.add_argument("--json", action="store_true", help="emit the result JSON")
+    p.add_argument("--config", default=None)
+    try:
+        args = p.parse_args(argv)
+    except SystemExit as exc:
+        return int(exc.code or 0)
+
+    try:
+        config = cfg.load_config(Path(args.config) if args.config else None)
+        repo_cfg = config.default_repo
+        prcfg = repo_cfg.pr
+        provider = get_provider(getattr(prcfg, "provider", "gitea") or "gitea")
+        base = (args.host or getattr(prcfg, "api_base", "") or "").strip()
+        branch = args.default_branch or repo_cfg.default_branch or ""
+        tok = args.token if args.token is not None else \
+            account_token_for_slug(args.repo, prcfg)
+        policy = provider.get_repo_policy(
+            args.repo, default_branch=branch, api_base=base, token=tok)
+    except ProviderError as exc:
+        output.err(f"pr-research: {exc}")
+        return 1
+    except Exception as exc:  # config / resolution failure
+        output.err(f"pr-research: {exc}")
+        return 1
+
+    matrix = pc.derive_policy_matrix(policy)
+    settings = {
+        "supported": policy.supported,
+        "allow_squash": policy.allow_squash,
+        "allow_merge_commit": policy.allow_merge_commit,
+        "allow_rebase": policy.allow_rebase,
+        "allow_auto_merge": policy.allow_auto_merge,
+        "delete_branch_on_merge": policy.delete_branch_on_merge,
+        "required_approving_reviews": policy.required_approving_reviews,
+        "has_required_status_checks": policy.has_required_status_checks,
+    }
+    if args.json:
+        print(_json.dumps({
+            "repo": args.repo, "provider": getattr(prcfg, "provider", ""),
+            "supported": policy.supported, "error": policy.error,
+            "settings": settings, "suggested_matrix": matrix,
+        }))
+        return 0 if policy.supported else 1
+
+    if not policy.supported:
+        output.err(f"pr-research: {policy.error}")
+        return 1
+    output.header(f"PR-policy research: {args.repo}")
+    print("  Live settings:")
+    for k, v in settings.items():
+        if k == "supported":
+            continue
+        print(f"    {k}: {v}")
+    print("  Suggested pr: policy (drop into .agent-worktrees/config.yaml):")
+    if matrix:
+        for k, v in matrix.items():
+            print(f"    {k}: {str(v).lower() if isinstance(v, bool) else v}")
+    else:
+        print("    (no confident derivation -- keep the defaults)")
+    return 0
 
 
 # pr <verb> namespace -> canonical top-level verb (or manual dispatcher).
@@ -15249,6 +15344,8 @@ def cmd_pr_dispatch(argv: list[str]) -> int:
         return cmd_pr_watch_dispatch(argv[1:])
     if verb == "merge":
         return cmd_pr_merge_dispatch(argv[1:])
+    if verb == "research":
+        return cmd_pr_research_dispatch(argv[1:])
     canonical = _PR_NAMESPACE.get(verb)
     if not canonical:
         output.err(f"Unknown pr subcommand: {verb}")
@@ -15466,6 +15563,15 @@ def main(argv: list[str] | None = None) -> int:
     if args_list[0] == "pr-merge":
         try:
             return cmd_pr_merge_dispatch(args_list[1:])
+        except KeyboardInterrupt:
+            print("\nCancelled.")
+            return 130
+
+    # pr-research -- read the repo's live provider settings -> policy matrix
+    # (#225). Read-only manual dispatch (owner/name).
+    if args_list[0] == "pr-research":
+        try:
+            return cmd_pr_research_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130
