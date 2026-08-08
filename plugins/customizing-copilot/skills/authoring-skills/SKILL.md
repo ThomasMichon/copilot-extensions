@@ -208,6 +208,25 @@ Always-on context injected into every prompt.
 
 Suppress with `--no-custom-instructions`.
 
+> **Static instructions dir vs. a dynamic `sessionStart` hook.** The
+> `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` row is a **static** delivery: a plugin
+> deploys `*.instructions.md` files into a directory and the launcher injects the
+> dir path, so the *same bytes* load into every session for that project. When the
+> guidance is **computed at session start** or must be **targeted by which repo
+> the session is in**, a plugin `sessionStart` **hook** that emits
+> `{"additionalContext": "..."}` is the better delivery (see *Hooks →
+> sessionStart context injection* below): the hook runs a script that can read
+> live state and the session's `cwd`, so a single globally-installed plugin injects
+> *different* context per repo -- something a fixed instructions dir cannot do. It
+> also removes the launcher's `COPILOT_CUSTOM_INSTRUCTIONS_DIRS`-injection
+> dependency, so the context loads under **any** launch path (interactive, resumed,
+> or a bare `copilot` the launcher didn't wrap). Prefer the static dir for truly
+> fixed, always-identical text; reach for the hook when the payload is dynamic,
+> conditional, or repo-scoped. Because hook `additionalContext` is capped (10 KB,
+> joined across hooks) and shares the context budget, keep the injected text lean:
+> inline only what every turn needs and **point at a file** (a backtick faux-link
+> the agent reads on demand) for the rest.
+
 **Avoid auto-load in AGENTS.md:** Copilot follows valid Markdown links in
 custom-instruction files and auto-loads them. Reference docs with backtick code
 spans (`` `docs/tools.md` ``), not `[text](path)` links, so Copilot reads files
@@ -271,8 +290,9 @@ for cloud agent, on the default branch).
 
 Configure events in **camelCase** (native, fields camelCase) or **PascalCase**
 (VS Code / Claude-compatible, fields snake_case). Command hooks are the default;
-**`http`** hooks POST the payload to a URL, and **`prompt`** hooks (sessionStart
-only) auto-submit text or a slash command.
+**`http`** hooks POST the payload to a URL, and **`prompt`** hooks (`sessionStart`
+only, and **new interactive sessions only** -- not resume, not `-p`) auto-submit
+text or a slash command.
 
 | Event | Fires when | Output |
 |-------|-----------|--------|
@@ -310,6 +330,61 @@ only) auto-submit text or a slash command.
 > non-interactive mode. Waking an idle session asynchronously (callbacks, peer
 > messaging, scheduled prompts) still needs `session.send()` (an extension) or
 > the runtime's own scheduled prompts -- not a hook.
+
+### Plugin-contributed hooks
+
+A plugin ships hooks in a **`hooks.json`** (or `hooks/hooks.json`) at the root of
+its install dir, same `{ "version": 1, "hooks": { ... } }` format as a repo's
+`.github/hooks/*.json`. The runtime **combines** hooks from all sources (policy,
+repo, user, plugins); when an event appears in several sources every entry runs.
+Two consequences shape how a plugin author writes them:
+
+- **A plugin hook fires for every session the plugin loads into** -- there is no
+  per-repo `matcher` on `sessionStart`. A repo-scoped plugin's hooks fire only in
+  its repo, but a **globally**-installed plugin's `sessionStart` hook fires in
+  *every* repo. So the hook **script must self-gate**: read the payload's `cwd`
+  (and `source`) from stdin and decide whether -- and what -- to emit. This
+  cwd-gating is what lets one plugin **target its emission at the calling repo**
+  (the whole premise of using a hook to replace a per-project instructions dir).
+- **Reference the plugin's own files by absolute path.** The hook's `cwd` is the
+  *session's* directory, not the plugin's, so a plugin hook typically shells to a
+  script under its install dir (`~/.copilot/installed-plugins/<marketplace>/<plugin>/...`)
+  or a deployed sidecar under `~/.<tool>/bin/`, guarded by a `Test-Path` / `[ -f ]`
+  existence check so a partial install fails open. Keep it under the perf budget
+  below; do expensive work in a background process and have the hook read a cheap
+  state file.
+
+### sessionStart context injection
+
+`sessionStart` is the declarative replacement for a deployed
+`COPILOT_CUSTOM_INSTRUCTIONS_DIRS` instructions dir: a command hook reads the
+start payload from stdin and writes `{"additionalContext": "<guidance>"}`, and the
+string is injected into the session as context -- **dynamically computed, and
+targeted by `cwd`**. Unlike a **`prompt`**-type `sessionStart` hook (new
+interactive sessions only -- not resume, not `-p`), the `additionalContext`
+mechanism also applies on **resume**, so it can carry the always-on guidance an
+instructions file used to. Shape:
+
+```bash
+# sessionStart hook: read cwd from stdin, emit repo-targeted guidance
+payload=$(cat); cwd=$(printf '%s' "$payload" | jq -r .cwd)
+case "$cwd" in
+  *"/my-repo"*) printf '{"additionalContext":%s}' "$(jq -Rs . < guidance.md)" ;;
+  *)            printf '{}' ;;   # not our repo -- inject nothing
+esac
+```
+
+Discipline (context is a **shared, capped** resource -- 10 KB across all hooks):
+
+- **Inline only what every turn needs**; for the rest, inject a short pointer -- a
+  one-line summary plus a **backtick faux-link** to a file the agent reads on
+  demand (`` `~/.my-tool/notes.md` ``) -- rather than pasting the whole document.
+- **Self-gate hard.** Emit `{}` (not a partial nudge) when the session isn't in a
+  repo you own; a globally-installed plugin otherwise leaks its guidance into
+  every unrelated repo.
+- **Prefer this over a fixed instructions dir** when the guidance is dynamic
+  (machine/account/state-derived), conditional, or repo-scoped; keep the static
+  dir for genuinely always-identical text.
 
 ### Script I/O
 
