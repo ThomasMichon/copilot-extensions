@@ -9,14 +9,36 @@ used (the resolve_token None case).
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
 from urllib.parse import quote
 
-from ..pr_contract import Comment, CommentThread, ThreadsResult
+from ..pr_contract import Comment, CommentThread, PRSnapshot, Review, ThreadsResult
 from .base import ProviderError, PRScope, PullResult, run_cli
 
-if TYPE_CHECKING:
-    from ..pr_contract import PRSnapshot
+
+# HTTP statuses worth retrying (network / 5xx / 429 / 408); 4xx (auth / not-found
+# / bad-request) is permanent. gh surfaces the upstream status in its stderr as
+# "HTTP <code>", so a snapshot read classifies retryability by scanning for one
+# of these markers (mirrors gitea's numeric ``_is_transient``).
+_GH_TRANSIENT_HTTP = ("http 408", "http 429", "http 500", "http 502",
+                      "http 503", "http 504")
+
+
+def _gh_detail_is_transient(detail: str) -> bool:
+    """True when a ``gh`` failure string names a retryable condition.
+
+    Scans the CLI error text for a transient HTTP status marker or a network-level
+    hiccup (timeout / connection reset). Everything else -- a 4xx, a bad token, a
+    missing PR -- is permanent, so ``pr-watch`` fails fast instead of hanging the
+    full timeout on a guaranteed failure.
+    """
+    low = detail.lower()
+    if any(marker in low for marker in _GH_TRANSIENT_HTTP):
+        return True
+    return any(
+        sig in low
+        for sig in ("timeout", "timed out", "connection reset",
+                    "connection refused", "temporarily unavailable", "eof")
+    )
 
 
 class GitHubProvider:
@@ -128,10 +150,194 @@ class GitHubProvider:
     def get_snapshot(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> PRSnapshot:
-        """Not implemented: pr-watch/pr-status snapshot reads are gitea-only today."""
-        from .base import _unsupported_snapshot
-        _ = (repo, number, api_base, token)
-        return _unsupported_snapshot(self.name)
+        """Fetch the full review/mergeability/lifecycle snapshot for pr-watch.
+
+        Mirrors the gitea provider over GitHub's REST API (whose ``pulls`` shape
+        is near-identical): one read of the PR object (state, merged, mergeable,
+        head sha, base ref, author, title, draft, labels) plus the paginated
+        reviews list -- the REST ``/pulls/{n}/reviews`` endpoint, so each review
+        carries the **numeric** ``id`` the watch cursor keys off (``gh pr view``
+        only exposes GraphQL node ids). ``checks_state`` folds together GitHub's
+        two independent signals -- legacy commit *statuses* and Actions
+        *check-runs* -- into the provider-neutral vocabulary.
+
+        ``api_base`` is unused (GitHub Enterprise hosts are addressed via ``gh``'s
+        own ``GH_HOST`` config, not a per-call base), kept for signature parity.
+        """
+        _ = api_base
+        proc = run_cli(
+            ["gh", "api", f"/repos/{repo}/pulls/{number}"], env=self._env(token),
+        )
+        if proc.returncode != 0:
+            detail = (proc.stderr.strip() or proc.stdout.strip())
+            raise ProviderError(
+                f"gh PR #{number} snapshot failed for {repo}: {detail}",
+                transient=_gh_detail_is_transient(detail),
+            )
+        try:
+            pr = json.loads(proc.stdout)
+        except json.JSONDecodeError as exc:
+            raise ProviderError(f"gh returned non-JSON PR payload: {exc}") from exc
+        if not isinstance(pr, dict):
+            raise ProviderError(f"unexpected gh PR payload for {repo}#{number}")
+
+        # GitHub computes ``mergeable`` asynchronously and reports it null on a
+        # freshly-opened PR; only a real bool is a known state (else None). It
+        # reflects **merge conflicts** only -- a policy block (failing required
+        # checks/reviews) leaves mergeable True, which is why checks_state and
+        # the reviews are read separately.
+        mergeable_raw = pr.get("mergeable")
+        labels = tuple(
+            str(lbl.get("name", ""))
+            for lbl in (pr.get("labels") or [])
+            if isinstance(lbl, dict) and lbl.get("name")
+        )
+        head_sha = str((pr.get("head") or {}).get("sha", ""))
+        # REST ``state`` is only open|closed; ``merged`` is a separate bool (a
+        # merged PR is closed+merged).
+        return PRSnapshot(
+            pr_state="closed" if str(pr.get("state", "")).lower() == "closed" else "open",
+            merged=bool(pr.get("merged", False)),
+            head_sha=head_sha,
+            base_ref=str((pr.get("base") or {}).get("ref", "")),
+            reviews=self._all_review_objs(repo, number, token),
+            author=str((pr.get("user") or {}).get("login", "")),
+            mergeable=mergeable_raw if isinstance(mergeable_raw, bool) else None,
+            checks_state=self._combined_checks_state(repo, head_sha, token),
+            labels=labels,
+            title=str(pr.get("title", "")),
+            draft=bool(pr.get("draft", False)),
+        )
+
+    def _all_review_objs(
+        self, repo: str, number: int, token: str | None
+    ) -> tuple[Review, ...]:
+        """Fetch every review as ``pr_contract.Review``s, paging the endpoint.
+
+        GitHub's REST ``/pulls/{n}/reviews`` paginates (default 30) in ascending
+        id order; the watcher keys off the highest review id, so a missed later
+        page would make the newest reviews invisible and hang the wait. Pages at
+        an explicit ``per_page`` until a short/empty page. Best-effort: a page
+        that fails to read stops paging with what was gathered rather than
+        breaking the whole snapshot.
+        """
+        reviews: list[Review] = []
+        page = 1
+        page_size = 100
+        while True:
+            proc = run_cli(
+                [
+                    "gh", "api",
+                    f"/repos/{repo}/pulls/{number}/reviews"
+                    f"?per_page={page_size}&page={page}",
+                ],
+                env=self._env(token),
+            )
+            if proc.returncode != 0:
+                break
+            try:
+                batch = json.loads(proc.stdout or "[]")
+            except json.JSONDecodeError:
+                break
+            if not isinstance(batch, list) or not batch:
+                break
+            for r in batch:
+                if not isinstance(r, dict):
+                    continue
+                rid = r.get("id")
+                if not isinstance(rid, int):
+                    continue
+                state = str(r.get("state", "")).upper()
+                reviews.append(
+                    Review(
+                        id=rid,
+                        state=state,
+                        user=str((r.get("user") or {}).get("login", "")),
+                        submitted_at=str(r.get("submitted_at", "") or ""),
+                        commit_id=str(r.get("commit_id", "") or ""),
+                        dismissed=(state == "DISMISSED"),
+                    )
+                )
+            if len(batch) < page_size:
+                break
+            page += 1
+        return tuple(reviews)
+
+    def _combined_checks_state(
+        self, repo: str, sha: str, token: str | None
+    ) -> str:
+        """Provider-neutral CI rollup for ``sha`` over BOTH GitHub check systems.
+
+        GitHub reports CI two independent ways and a repo may use either or both:
+        legacy commit **statuses** (``/commits/{sha}/status``) and Actions
+        **check-runs** (``/commits/{sha}/check-runs``). This folds them into the
+        ``pr_contract`` vocabulary -- ``success`` | ``failure`` | ``pending`` |
+        ``""`` (nothing configured / unknown) -- with **failure dominating
+        pending dominating success**. Never raises: an unreadable endpoint
+        contributes nothing (a fully-unreadable pair yields ``""``, which never
+        fires ``checks_failed``), so a transient hiccup can't break the snapshot.
+        """
+        if not sha:
+            return ""
+        any_signal = False
+        failure = False
+        pending = False
+
+        # 1. Legacy combined commit status.
+        proc = run_cli(
+            ["gh", "api", f"/repos/{repo}/commits/{sha}/status"],
+            env=self._env(token),
+        )
+        if proc.returncode == 0:
+            try:
+                data = json.loads(proc.stdout or "{}")
+            except json.JSONDecodeError:
+                data = {}
+            if isinstance(data, dict):
+                statuses = data.get("statuses")
+                if isinstance(statuses, list) and statuses:
+                    any_signal = True
+                    raw = str(data.get("state", "")).strip().lower()
+                    if raw in ("failure", "error"):
+                        failure = True
+                    elif raw == "pending":
+                        pending = True
+
+        # 2. Actions check-runs.
+        cproc = run_cli(
+            ["gh", "api", f"/repos/{repo}/commits/{sha}/check-runs"],
+            env=self._env(token),
+        )
+        if cproc.returncode == 0:
+            try:
+                cdata = json.loads(cproc.stdout or "{}")
+            except json.JSONDecodeError:
+                cdata = {}
+            runs = cdata.get("check_runs") if isinstance(cdata, dict) else None
+            if isinstance(runs, list) and runs:
+                any_signal = True
+                for run in runs:
+                    if not isinstance(run, dict):
+                        continue
+                    status = str(run.get("status", "")).strip().lower()
+                    if status != "completed":
+                        pending = True
+                        continue
+                    conclusion = str(run.get("conclusion", "")).strip().lower()
+                    # neutral / success / skipped don't fail the gate; the rest do.
+                    if conclusion in (
+                        "failure", "timed_out", "action_required", "cancelled",
+                        "startup_failure", "stale",
+                    ):
+                        failure = True
+
+        if not any_signal:
+            return ""
+        if failure:
+            return "failure"
+        if pending:
+            return "pending"
+        return "success"
 
     def add_label(
         self, repo: str, number: int, label: str, *, api_base: str = "",
