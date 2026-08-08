@@ -530,16 +530,28 @@ agent-dispatch supervise --label autopilot            # loop; only spawn opted-i
 agent-dispatch supervise --all-repos --max-concurrent 3
 agent-dispatch supervise --label sweep --headless-label sweep   # embody 'sweep' headless-ACP
 agent-dispatch supervise --pool host-a,host-b --origin origin --headless --label sweep
+agent-dispatch supervise --evaluator eval.json        # + advance loops across terminal events
 agent-dispatch reservations list --state spawned      # what's in flight
 agent-dispatch reservations fail <key>                # release a confirmed-dead spawn
 ```
 
-Each cycle **reconciles** (settles reservations of terminal tasks) then **polls**
-(reserve → embody → record, up to `--max-concurrent`). It also **heartbeats the
-lease of every confirmed-alive worker** so a quiet-but-alive session isn't wrongly
-re-queued (disable with `--no-heartbeat`). Auto-recovery of a *dead*-but-non-terminal
-embody needs confirmed-death detection and is deferred (see the design doc); until
-then a dead embody's task is *held* and surfaced for `reservations fail`.
+Each cycle **reconciles** (settles reservations of terminal tasks), optionally runs
+the **evaluator pass**, then **polls** (reserve → embody → record, up to
+`--max-concurrent`). It also **heartbeats the lease of every confirmed-alive
+worker** so a quiet-but-alive session isn't wrongly re-queued (disable with
+`--no-heartbeat`). Auto-recovery of a *dead*-but-non-terminal embody needs
+confirmed-death detection and is deferred (see the design doc); until then a dead
+embody's task is *held* and surfaced for `reservations fail`.
+
+**Evaluator pass — advance the loop (`--evaluator <spec>`).** With an evaluator
+spec, each cycle feeds every **newly-terminal** task's lifecycle event
+(`task.completed` / `task.abandoned`) to the evaluator (§ Evaluator) and applies
+its decisions — emitting a follow-up task. This is the **service-driven** half of
+*a-loop-runs-with-or-without-a-service*: a standing supervisor advances a domain's
+loop (reviewer done → conflict-resolution follow-up; goal met → the next goal)
+with no bespoke module. It's idempotent — each task fires once per process and the
+emitted follow-up's `dedup_key` guards duplicates across restarts — and best-effort
+(a bad evaluator or failed create is logged, never crashing the cycle).
 
 Tasks embody as a mux-wrapped **CLI autopilot** by default. Mark **self-contained
 sweep** labels with `--headless-label L` (repeatable, `--headless-agent` to name the
