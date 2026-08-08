@@ -668,6 +668,12 @@ class PRFlowProfile:
     self_approve: bool = False
     conflict_retriggers_review: bool = True
     rebase_owner: str = "submitter"
+    # Merge/update policy (repo-overridable; #225) -- reported by every pr-*
+    # surface so an agent knows THIS repo's update/merge defaults at the point
+    # of action.
+    branch_update_strategy: str = "rebase"   # rebase | merge
+    merge_strategy: str = "squash"           # squash | merge | rebase
+    prefer_auto_merge: bool = True
 
     def applies(self, verb: str) -> bool:
         """True when ``verb`` (e.g. ``"pr-merge"``) is part of this repo's flow."""
@@ -686,6 +692,9 @@ def classify_pr_flow(
     self_approve: bool = False,
     merge_actor: str = "",
     conflict_retriggers_review: bool = True,
+    branch_update_strategy: str = "rebase",
+    merge_strategy: str = "squash",
+    prefer_auto_merge: bool = True,
 ) -> PRFlowProfile:
     """Derive a repo's :class:`PRFlowProfile` from its PR config values.
 
@@ -723,6 +732,9 @@ def classify_pr_flow(
         self_approve=self_approve,
         conflict_retriggers_review=conflict_retriggers_review,
         rebase_owner="submitter",
+        branch_update_strategy=branch_update_strategy,
+        merge_strategy=merge_strategy,
+        prefer_auto_merge=prefer_auto_merge,
     )
     if not enabled:
         return PRFlowProfile(
@@ -895,12 +907,25 @@ def _merge_instruction(flow: PRFlowProfile) -> str:
     return "finalize lands the work (no PR)"
 
 
+def _policy_phrase(flow: PRFlowProfile) -> str:
+    """One-line update/merge policy for this repo (#225), or '' for direct."""
+    if flow.profile == PROFILE_DIRECT:
+        return ""
+    merge = f"merge via {flow.merge_strategy}"
+    if flow.prefer_auto_merge:
+        merge += " (prefer CI-gated auto-merge)"
+    return f"policy: update branch via {flow.branch_update_strategy}, {merge}"
+
+
 def _cautions(flow: PRFlowProfile) -> tuple[str, ...]:
     out: list[str] = []
     if flow.profile != PROFILE_DIRECT and flow.conflict_retriggers_review:
         out.append("a post-approval rebase + `push-changes` re-triggers review")
     if flow.rebase_owner:
         out.append(f"{flow.rebase_owner} owns rebase + keeping the PR mergeable")
+    policy = _policy_phrase(flow)
+    if policy:
+        out.append(policy)
     return tuple(out)
 
 
