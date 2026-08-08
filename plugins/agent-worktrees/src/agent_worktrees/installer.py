@@ -363,8 +363,10 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
         output.ok(f"Wrapper: {bd / 'launch-session.sh'}")
 
     # Deploy bootstrap-check scripts (called by sessionStart hook) + the
+    # session-conduct injector (sessionStart additionalContext) + the
     # statelessness_guard + cross_repo_guard (called by the preToolUse hooks).
-    for name in ("bootstrap-check.ps1", "bootstrap-check.sh",
+    for name in ("session-conduct.ps1", "session-conduct.sh",
+                 "bootstrap-check.ps1", "bootstrap-check.sh",
                  "statelessness_guard.py", "cross_repo_guard.py"):
         src = scripts / name
         if src.exists():
@@ -372,6 +374,16 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
             if platform.system() != "Windows" and name.endswith(".sh"):
                 (bd / name).chmod(0o755)
             output.ok(f"Bootstrap: {bd / name}")
+
+    # Deploy the session-conduct data fragments (scripts/conduct/*.md) that the
+    # session-conduct sessionStart hook emits as additionalContext (cwd-gated).
+    conduct_src = scripts / "conduct"
+    if conduct_src.is_dir():
+        conduct_dst = bd / "conduct"
+        conduct_dst.mkdir(parents=True, exist_ok=True)
+        for frag in sorted(conduct_src.glob("*.md")):
+            shutil.copy2(frag, conduct_dst / frag.name)
+            output.ok(f"Conduct: {conduct_dst / frag.name}")
 
     # Deploy default setup scripts (used when repos lack their own)
     sd = install_dir() / "scripts"

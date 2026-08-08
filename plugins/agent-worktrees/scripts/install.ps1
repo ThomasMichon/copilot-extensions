@@ -1052,13 +1052,27 @@ function Deploy-Wrappers {
         Write-ServiceOk "Wrapper: $wrapper"
     }
 
-    # Deploy hook scripts: sessionStart (bootstrap-check + project-hooks + register/deregister-session + anchor-hygiene-check + provision-check) + preToolUse (statelessness_guard.py)
-    foreach ($script in @('bootstrap-check.ps1', 'bootstrap-check.sh', 'project-hooks.ps1', 'project-hooks.sh', 'register-session.ps1', 'register-session.sh', 'deregister-session.ps1', 'deregister-session.sh', 'anchor-hygiene-check.ps1', 'anchor-hygiene-check.sh', 'provision-check.ps1', 'provision-check.sh', 'statelessness_guard.py')) {
+    # Deploy hook scripts: sessionStart (session-conduct + bootstrap-check + project-hooks + register/deregister-session + anchor-hygiene-check + provision-check) + preToolUse (statelessness_guard.py)
+    foreach ($script in @('session-conduct.ps1', 'session-conduct.sh', 'bootstrap-check.ps1', 'bootstrap-check.sh', 'project-hooks.ps1', 'project-hooks.sh', 'register-session.ps1', 'register-session.sh', 'deregister-session.ps1', 'deregister-session.sh', 'anchor-hygiene-check.ps1', 'anchor-hygiene-check.sh', 'provision-check.ps1', 'provision-check.sh', 'statelessness_guard.py')) {
         $src = Join-Path $ScriptDir $script
         $dst = Join-Path $BinDir $script
         if (Test-Path $src) {
             Copy-Item $src $dst -Force
             Write-ServiceOk "Hook: $script"
+        }
+    }
+
+    # Deploy the session-conduct data fragments (scripts/conduct/*.md) that the
+    # session-conduct sessionStart hook emits as additionalContext, cwd-gated.
+    # This replaces the per-project *.instructions.md deploy for these generic
+    # fragments (dotfiles#1053 / effort instructions-to-hooks).
+    $ConductSrc = Join-Path $ScriptDir 'conduct'
+    if (Test-Path $ConductSrc) {
+        $ConductDst = Join-Path $BinDir 'conduct'
+        Ensure-InstallDir $ConductDst
+        foreach ($frag in (Get-ChildItem -Path $ConductSrc -Filter '*.md' -File)) {
+            Copy-Item $frag.FullName (Join-Path $ConductDst $frag.Name) -Force
+            Write-ServiceOk "Conduct: $($frag.Name)"
         }
     }
 
