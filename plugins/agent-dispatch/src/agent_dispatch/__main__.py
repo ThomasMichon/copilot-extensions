@@ -24,6 +24,7 @@ from . import __version__
 from . import config as _config
 from .client import DispatchClient, DispatchError
 from .config import Config, client_token, client_url, shared_token, shared_url
+from .registrations import RegistrationKind
 
 
 def _emit(value: Any) -> int:
@@ -1383,13 +1384,165 @@ def _parse_label_max_attempts(items: list[str] | None) -> dict[str, int]:
     return out
 
 
+def _registration_scope(args: argparse.Namespace) -> tuple[str | None, str]:
+    """Resolve the (machine, env) a registration is scoped to.
+
+    ``--machine`` / ``--env`` win; otherwise the machine is this host's resolved
+    alias and the env is ``AGENT_DISPATCH_ENV`` (default ``"default"``). This is
+    the *one supervisor per machine-and-environment* the registration binds to.
+    """
+    import os
+
+    from . import remote_dispatch
+
+    machine = getattr(args, "machine", None) or remote_dispatch.local_machine()
+    env = (
+        getattr(args, "env", None)
+        or os.environ.get("AGENT_DISPATCH_ENV")
+        or "default"
+    )
+    return machine, env
+
+
+def _build_registration_spec(args: argparse.Namespace) -> dict:
+    """Assemble the ``spec`` dict a registration stores from the register args.
+
+    An explicit ``--spec`` (inline JSON or ``@path``) is used verbatim for any
+    kind; otherwise a ``supervised-lane`` spec is built from the convenience lane
+    flags (repo/labels/limits/evaluator) so the singleton daemon can later
+    reconstruct the supervise invocation from the stored row.
+    """
+    raw = getattr(args, "spec", None)
+    if raw:
+        text = raw
+        if raw.startswith("@"):
+            try:
+                text = Path(raw[1:]).expanduser().read_text(encoding="utf-8")
+            except OSError as exc:
+                raise SystemExit(
+                    f"supervise register: could not read --spec file "
+                    f"{raw[1:]!r}: {exc}"
+                ) from exc
+        try:
+            spec = json.loads(text)
+        except ValueError as exc:
+            raise SystemExit(f"supervise register: bad --spec JSON: {exc}") from exc
+        if not isinstance(spec, dict):
+            raise SystemExit("supervise register: --spec must be a JSON object")
+        return spec
+
+    kind = getattr(args, "kind", None) or "supervised-lane"
+    if kind != "supervised-lane":
+        raise SystemExit(
+            f"supervise register: --spec is required for kind {kind!r}"
+        )
+
+    all_repos = bool(getattr(args, "all_repos", False))
+    spec: dict = {}
+    if all_repos:
+        spec["all_repos"] = True
+    else:
+        repo = _scope_repo(args)
+        if not repo:
+            raise SystemExit(
+                "supervise register: could not resolve a lane; pass --repo or "
+                "--all-repos"
+            )
+        spec["repo"] = repo
+    labels = [label for label in (getattr(args, "label", None) or []) if label]
+    if labels:
+        spec["labels"] = labels
+    spec["max_concurrent"] = getattr(args, "max_concurrent", 1)
+    spec["max_attempts"] = getattr(args, "max_attempts", 3)
+    lma = _parse_label_max_attempts(getattr(args, "label_max_attempts", None))
+    if lma:
+        spec["label_max_attempts"] = lma
+    headless = [
+        label for label in (getattr(args, "headless_label", None) or []) if label
+    ]
+    if headless:
+        spec["headless_labels"] = headless
+    if getattr(args, "headless_agent", None):
+        spec["headless_agent"] = args.headless_agent
+    if getattr(args, "evaluator", None):
+        spec["evaluator"] = args.evaluator
+    spec["interval"] = getattr(args, "interval", 30.0)
+    return spec
+
+
+def _cmd_supervise_register(args: argparse.Namespace) -> int:
+    """``supervise register`` -- add a durable registration and RETURN its handle.
+
+    This is the *supervise-registers-and-returns* behavior: registering supervised
+    work writes a registration row and completes, emitting the registration info
+    back to the caller, instead of becoming the foreground loop. The singleton
+    supervisor daemon (a later increment) is what runs the registered unit.
+    """
+    kind = getattr(args, "kind", None) or "supervised-lane"
+    spec = _build_registration_spec(args)
+    machine, env = _registration_scope(args)
+    with _client(args) as c:
+        return _emit(
+            c.register_registration(
+                kind,
+                spec,
+                reg_id=getattr(args, "id", None),
+                machine=machine,
+                env=env,
+            )
+        )
+
+
+def _cmd_supervise_status(args: argparse.Namespace) -> int:
+    """``supervise status <id>`` -- query a registration by its handle."""
+    with _client(args) as c:
+        return _emit(c.get_registration(args.id))
+
+
+def _cmd_supervise_list(args: argparse.Namespace) -> int:
+    """``supervise list`` -- list registrations on this (or a filtered) scope."""
+    machine = getattr(args, "machine", None)
+    env = getattr(args, "env", None)
+    with _client(args) as c:
+        return _emit(
+            c.list_registrations(
+                kind=getattr(args, "kind", None),
+                machine=machine,
+                env=env,
+                include_paused=not getattr(args, "active", False),
+            )
+        )
+
+
+def _cmd_supervise_remove(args: argparse.Namespace) -> int:
+    """``supervise remove <id>`` -- drop a registration by its handle."""
+    with _client(args) as c:
+        return _emit(c.remove_registration(args.id))
+
+
 def _cmd_supervise(args: argparse.Namespace) -> int:
     """Run the embody spawn supervisor over the lane (once, or as a loop).
 
     Turns queued (optionally label-gated) tasks into host embody autopilots,
     exactly once each, via the atomic spawn reservation. See the ``supervisor``
     module for the spawn-at-most-once safety model.
+
+    A ``supervise <register|status|list|remove>`` subcommand instead manages
+    durable **registrations** (the *registered-supervision* surface): registering
+    adds a unit and returns its handle rather than becoming this loop. The bare
+    ``supervise`` (no subcommand) remains the transitional foreground loop until
+    the singleton daemon subsumes it.
     """
+    sub = getattr(args, "supervise_command", None)
+    if sub == "register":
+        return _cmd_supervise_register(args)
+    if sub == "status":
+        return _cmd_supervise_status(args)
+    if sub == "list":
+        return _cmd_supervise_list(args)
+    if sub == "remove":
+        return _cmd_supervise_remove(args)
+
     from .supervisor import (
         Supervisor,
         make_embody_spawn,
@@ -2541,6 +2694,72 @@ def build_parser() -> argparse.ArgumentParser:
              "advancement pass (emitters-and-evaluators). See 'evaluate'.",
     )
     p.set_defaults(func=_cmd_supervise)
+    # Registration management subcommands (registered-supervision). Optional: the
+    # bare `supervise` (no subcommand) remains the transitional foreground loop,
+    # while `supervise register|status|list|remove` manage durable registrations
+    # that the singleton supervisor daemon runs. See the vision Behavior
+    # *supervise-registers-and-returns*.
+    sup_sub = p.add_subparsers(dest="supervise_command")
+    rp = sup_sub.add_parser(
+        "register",
+        help="add a durable supervision registration and RETURN its handle "
+             "(does not run the loop; the singleton supervisor runs it)",
+    )
+    rp.add_argument(
+        "--kind", choices=sorted(RegistrationKind.ALL), default="supervised-lane",
+        help="the unit kind to register (default: supervised-lane)",
+    )
+    rp.add_argument(
+        "--id", help="explicit registration id (default: derived deterministically "
+                     "from kind+scope+spec, so re-registering upserts)",
+    )
+    rp.add_argument(
+        "--spec", metavar="JSON|@FILE",
+        help="the unit's spec as inline JSON or @path; required for non-lane "
+             "kinds. For supervised-lane, omit it to build the spec from the lane "
+             "convenience flags below.",
+    )
+    rp.add_argument("--machine", help="scope the registration to this machine "
+                    "(default: this host's resolved alias)")
+    rp.add_argument("--env", help="scope the registration to this environment "
+                    "(default: $AGENT_DISPATCH_ENV or 'default')")
+    # supervised-lane convenience flags (used when --spec is omitted)
+    rp.add_argument("--repo", help="lane to supervise (default: the calling repo)")
+    rp.add_argument("--all-repos", action="store_true",
+                    help="supervise every lane (no repo scope)")
+    rp.add_argument("--label", action="append",
+                    help="only spawn queued tasks carrying this label (repeatable)")
+    rp.add_argument("--max-concurrent", type=int, default=1,
+                    help="cap on in-flight spawns (default: 1)")
+    rp.add_argument("--max-attempts", type=int, default=3,
+                    help="dead-letter a task after this many failed spawn attempts "
+                         "(default: 3; 0 = retry forever)")
+    rp.add_argument("--label-max-attempts", action="append", metavar="LABEL=N",
+                    help="per-label override of --max-attempts (repeatable)")
+    rp.add_argument("--headless-label", action="append", metavar="LABEL",
+                    help="embody tasks carrying this label as a headless "
+                         "agent-bridge ACP session (repeatable)")
+    rp.add_argument("--headless-agent", metavar="AGENT",
+                    help="agent-bridge agent name for headless embody bodies")
+    rp.add_argument("--evaluator", metavar="SPEC",
+                    help="path to an evaluator spec (JSON) folded into the lane spec")
+    rp.add_argument("--interval", type=float, default=30.0,
+                    help="serve loop poll interval in seconds (default: 30)")
+    rp.set_defaults(func=_cmd_supervise)
+    rp = sup_sub.add_parser("status", help="query a registration by its handle")
+    rp.add_argument("id", help="registration id")
+    rp.set_defaults(func=_cmd_supervise)
+    rp = sup_sub.add_parser("list", help="list registrations")
+    rp.add_argument("--kind", choices=sorted(RegistrationKind.ALL),
+                    help="filter by kind")
+    rp.add_argument("--machine", help="filter by machine")
+    rp.add_argument("--env", help="filter by environment")
+    rp.add_argument("--active", action="store_true",
+                    help="only active (non-paused) registrations")
+    rp.set_defaults(func=_cmd_supervise)
+    rp = sup_sub.add_parser("remove", help="remove a registration by its handle")
+    rp.add_argument("id", help="registration id")
+    rp.set_defaults(func=_cmd_supervise)
     p = sub.add_parser(
         "reservations", help="inspect / manually control spawn reservations"
     )

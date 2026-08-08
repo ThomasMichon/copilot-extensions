@@ -543,6 +543,24 @@ worker** so a quiet-but-alive session isn't wrongly re-queued (disable with
 confirmed-death detection and is deferred (see the design doc); until then a dead
 embody's task is *held* and surfaced for `reservations fail`.
 
+The bare `supervise` above runs the loop in the foreground. The
+`supervise register|status|list|remove` subcommands instead manage durable
+**registrations** — a caller registers a unit (a lane, schedule, emitter, or
+evaluator) with the host's singleton supervisor and gets back a handle, and the
+call *returns* rather than becoming the loop:
+
+```bash
+agent-dispatch supervise register --label autopilot   # register this lane; prints the handle
+agent-dispatch supervise list                         # what's registered here
+agent-dispatch supervise status <id>                  # inspect one registration
+agent-dispatch supervise remove <id>                  # drop one
+```
+
+Re-registering the same unit is idempotent (the derived handle identifies it). See
+[`docs/spawn-supervisor.md`](docs/spawn-supervisor.md#registered-supervision-built--register-and-return)
+for the registration model and the singleton-daemon roadmap.
+
+
 **Evaluator pass — advance the loop (`--evaluator <spec>`).** With an evaluator
 spec, each cycle feeds every **newly-terminal** task's lifecycle event
 (`task.completed` / `task.abandoned`) to the evaluator (§ Evaluator) and applies

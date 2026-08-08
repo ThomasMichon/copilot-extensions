@@ -177,6 +177,18 @@ class ReleaseLeaseBody(BaseModel):
     force: bool = False
 
 
+class RegistrationBody(BaseModel):
+    kind: str
+    spec: dict
+    id: str | None = None
+    machine: str | None = None
+    env: str = "default"
+
+
+class RegistrationStatusBody(BaseModel):
+    status: str
+
+
 class SatelliteRegisterBody(BaseModel):
     machine: str
     worktrees: list[str] = Field(default_factory=list)
@@ -697,6 +709,60 @@ def create_app(
             return asdict(queue.set_schedule_paused(sid, False))
         except TaskError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    # -- supervisor registrations --------------------------------------------
+
+    @app.post("/registrations")
+    def register_registration(body: RegistrationBody) -> dict:
+        """Register (or upsert) a supervision unit; return its handle. 400 on a
+        malformed kind/spec."""
+        try:
+            return asdict(
+                queue.register_registration(
+                    body.kind,
+                    body.spec,
+                    reg_id=body.id,
+                    machine=body.machine,
+                    env=body.env,
+                )
+            )
+        except TaskError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/registrations")
+    def list_registrations(
+        kind: str | None = None,
+        machine: str | None = None,
+        env: str | None = None,
+        include_paused: bool = True,
+    ) -> list[dict]:
+        return [
+            asdict(r)
+            for r in queue.list_registrations(
+                kind=kind, machine=machine, env=env, include_paused=include_paused
+            )
+        ]
+
+    @app.get("/registrations/{rid}")
+    def get_registration(rid: str) -> dict:
+        rec = queue.get_registration(rid)
+        if rec is None:
+            raise HTTPException(status_code=404, detail="no such registration")
+        return asdict(rec)
+
+    @app.delete("/registrations/{rid}")
+    def remove_registration(rid: str) -> dict:
+        if not queue.remove_registration(rid):
+            raise HTTPException(status_code=404, detail="no such registration")
+        return {"removed": True, "id": rid}
+
+    @app.post("/registrations/{rid}/status")
+    def set_registration_status(rid: str, body: RegistrationStatusBody) -> dict:
+        try:
+            return asdict(queue.set_registration_status(rid, body.status))
+        except TaskError as exc:
+            code = 404 if str(exc).startswith("no such registration") else 400
+            raise HTTPException(status_code=code, detail=str(exc)) from exc
 
     # -- schedule job-leases -------------------------------------------------
 
