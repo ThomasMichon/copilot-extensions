@@ -180,6 +180,60 @@ class TestReconcile:
         assert rec.prs[0].state == "open"  # unchanged
 
 
+class TestReconcileAndPersistBestEffort:
+    """reconcile_and_persist_best_effort must heal PR state to disk WITHOUT
+    clobbering a concurrent update the stale-base ``rec`` never saw (#4547)."""
+
+    def _seed(self, tmp_path):
+        from pathlib import Path
+        path = Path(tmp_path) / "wt-1.yaml"
+        tracking.save_record(_rec(status="active", prs=[_pr(50, "open")]), path)
+        return path
+
+    def test_heals_pr_state_to_disk(self, tmp_path):
+        path = self._seed(tmp_path)
+        rec = tracking.load_record(path)
+        lookup = lambda repo, n: _FakePull(state="closed", merged=True, number=n)
+        changes = prune.reconcile_and_persist_best_effort(
+            rec, lookup, rec_path=path)
+        assert changes == [(50, "open", "merged")]
+        # In-memory rec (used by the caller's assessment) is healed...
+        assert rec.prs[0].state == "merged"
+        # ...and the heal reached disk.
+        assert tracking.load_record(path).prs[0].state == "merged"
+
+    def test_preserves_concurrent_update_on_stale_base(self, tmp_path):
+        # The reviewer's scenario: `rec` is loaded (and threaded across
+        # git/network work) BEFORE the reconcile. Meanwhile another writer
+        # updates an UNRELATED field on disk. Persisting the reconcile must not
+        # roll that concurrent update back -- the deltas are re-applied onto a
+        # fresh reload, not the stale snapshot.
+        path = self._seed(tmp_path)
+        rec = tracking.load_record(path)  # stale base (no title)
+
+        # Concurrent foreground writer sets a title on disk.
+        other = tracking.load_record(path)
+        other.title = "concurrent-title"
+        tracking.save_record(other, path)
+
+        lookup = lambda repo, n: _FakePull(state="closed", merged=True, number=n)
+        prune.reconcile_and_persist_best_effort(rec, lookup, rec_path=path)
+
+        on_disk = tracking.load_record(path)
+        assert on_disk.prs[0].state == "merged"  # reconcile landed
+        assert on_disk.title == "concurrent-title"  # concurrent update survived
+
+    def test_no_changes_no_write(self, tmp_path):
+        path = self._seed(tmp_path)
+        rec = tracking.load_record(path)
+        # Provider agrees the PR is still open -> no changes -> no persist.
+        before = path.read_text()
+        lookup = lambda repo, n: _FakePull(state="open", merged=False, number=n)
+        assert prune.reconcile_and_persist_best_effort(
+            rec, lookup, rec_path=path) == []
+        assert path.read_text() == before  # untouched
+
+
 # --- cleanup_disposition ----------------------------------------------------
 
 class TestCleanupDisposition:
