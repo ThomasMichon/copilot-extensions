@@ -1778,6 +1778,34 @@ class TestResourceClaimState:
     def test_released_not_live(self):
         assert not ResourceClaim(ref="x", state="released").is_live
 
+    def test_at_rest_is_still_held_but_settled(self):
+        # at-rest: the work is safe, but the claim is still held (live) and no
+        # longer blocks finalize.
+        c = ResourceClaim(ref="x", state="at-rest")
+        assert c.is_live          # still held
+        assert c.is_at_rest
+        assert not c.is_unsettled  # settled -> does not block finalize
+
+    def test_active_is_unsettled_blocks(self):
+        assert ResourceClaim(ref="x").is_unsettled
+        assert ResourceClaim(ref="x", state="active").is_unsettled
+
+    def test_released_is_neither_held_nor_unsettled(self):
+        c = ResourceClaim(ref="x", state="released")
+        assert not c.is_live and not c.is_unsettled and not c.is_at_rest
+
+    def test_at_rest_state_round_trips_through_yaml(self, tmp_path: Path):
+        path = tmp_path / "wt.yaml"
+        path.write_text(
+            "worktree_id: w\nbranch: b\nworktree_path: /tmp/w\nrepo: r\n"
+            "machine: m\nplatform: wsl\nstarted_at: t\nlast_resumed_at: t\n"
+            "resume_count: 0\ntitle: null\nstatus: active\ncompleted_at: null\n"
+            "resources:\n- kind: codespace\n  ref: cs-1\n  state: at-rest\n"
+        )
+        loaded = load_record(path)
+        assert loaded.resources[0].state == "at-rest"
+        assert loaded.resources[0].is_at_rest and not loaded.resources[0].is_unsettled
+
     def test_unknown_state_degrades_to_live(self, tmp_path: Path):
         # An unknown persisted state loads back as "active" (never hidden).
         path = tmp_path / "wt.yaml"
