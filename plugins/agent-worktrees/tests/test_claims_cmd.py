@@ -254,6 +254,83 @@ def test_claims_add_missing_operands(monkeypatch, tmp_path):
     assert rc == 2
 
 
+# --- claims add --owner-ref (cross-project resolution, 3b-wiring/2) ----------
+
+def _add_ownerref_args(kind, ref, owner_ref, *, note="", json_=True):
+    return argparse.Namespace(
+        target=["add", kind, ref], note=note, release_worktree=None,
+        claim_owner_ref=owner_ref, json=json_)
+
+
+def _seed_ownerref(tmp_path, monkeypatch, *, machine="lambda-core"):
+    """Seed a borrowing-worktree record in ITS OWN project dir, and point the
+    'current' cwd at a DIFFERENT project (the daemon-cwd gotcha)."""
+    import types
+    # The borrowing worktree lives in project 'odsp-web'.
+    owner_proj_dir = tmp_path / ".odsp-web"
+    owner_wt_dir = owner_proj_dir / "worktrees"
+    owner_wt_dir.mkdir(parents=True, exist_ok=True)
+    wdir = tmp_path / "borrower"
+    wdir.mkdir(exist_ok=True)
+    tracking.create_new_record(
+        "wt-borrower", "worktree/wt-borrower", str(wdir), "odsp-web",
+        machine, "wsl", owner_wt_dir,
+    )
+    # The 'current' project (daemon cwd) is a different one entirely.
+    cur_tdir = tmp_path / ".dotfiles" / "worktrees"
+    cur_tdir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr("agent_worktrees.config.tracking_dir", lambda: cur_tdir)
+    monkeypatch.setattr("agent_worktrees.config.project_dir",
+                        lambda name=None: tmp_path / f".{name}")
+    monkeypatch.setattr("agent_worktrees.config.load_config",
+                        lambda *a, **k: types.SimpleNamespace(machine=machine))
+    monkeypatch.setattr(m, "_inbound_claims",
+                        lambda machine, wid, cwd: {"available": False,
+                                                   "reason": "stubbed"})
+    return owner_wt_dir
+
+
+def test_claims_add_owner_ref_lands_on_cross_project_record(monkeypatch, tmp_path, capfd):
+    owner_wt_dir = _seed_ownerref(tmp_path, monkeypatch)
+    rc = m.cmd_claims(_add_ownerref_args(
+        "codespace", "cs-xyz", "lambda-core/odsp-web/wt-borrower", note="borrow"))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["worktree_id"] == "wt-borrower" and out["ref"] == "cs-xyz"
+    # Landed on the BORROWING project's record, not the current (dotfiles) one.
+    rec = tracking.load_record(owner_wt_dir / "wt-borrower.yaml")
+    assert [c.ref for c in rec.resources] == ["cs-xyz"]
+    assert rec.resources[0].is_unsettled  # active
+    # The current-project tracking dir got NOTHING.
+    assert not list((tmp_path / ".dotfiles" / "worktrees").glob("*.yaml"))
+
+
+def test_claims_add_owner_ref_cross_machine_defers(monkeypatch, tmp_path, capfd):
+    _seed_ownerref(tmp_path, monkeypatch)
+    rc = m.cmd_claims(_add_ownerref_args(
+        "codespace", "cs-remote", "other-box/odsp-web/wt-borrower"))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out.get("deferred") is True and out["reason"] == "cross-machine-owner"
+    # No local ledger write anywhere.
+    assert not list((tmp_path / ".odsp-web" / "worktrees").glob("*.yaml")) or \
+        all(not tracking.load_record(p).resources
+            for p in (tmp_path / ".odsp-web" / "worktrees").glob("*.yaml"))
+
+
+def test_claims_add_owner_ref_rejects_unqualified(monkeypatch, tmp_path):
+    _seed_ownerref(tmp_path, monkeypatch)
+    rc = m.cmd_claims(_add_ownerref_args("codespace", "cs-x", "just-an-id"))
+    assert rc == 2
+
+
+def test_claims_add_owner_ref_missing_record(monkeypatch, tmp_path):
+    _seed_ownerref(tmp_path, monkeypatch)
+    rc = m.cmd_claims(_add_ownerref_args(
+        "codespace", "cs-x", "lambda-core/odsp-web/no-such-wt"))
+    assert rc == 1  # resolved to a same-machine path that doesn't exist
+
+
 # --- claims settle ----------------------------------------------------------
 
 def _settle_args(ref, *, released=False, json_=True):
