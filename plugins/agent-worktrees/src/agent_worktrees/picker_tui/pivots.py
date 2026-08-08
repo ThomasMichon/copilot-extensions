@@ -69,6 +69,13 @@ class PivotAction:
     #: only on an in-use CodeSpace. ``None`` => always shown. Matched by
     #: :func:`entry_matches` at sub-menu build time.
     when: Mapping[str, object] | None = None
+    #: D4 -- opt into **progress reporting**. When True the action's stdout is the
+    #: NDJSON progress envelope (``{"type":"progress","pct":..,"msg":..}`` lines,
+    #: then ``{"type":"done"}`` / ``{"type":"error"}``); the picker renders it live
+    #: in the modal ``ProgressScreen`` instead of blocking on a single sync call.
+    #: Default off => the original synchronous run (result in the status line).
+    #: Ignored for an ``internal`` action.
+    progress: bool = False
 
 
 @dataclass(frozen=True)
@@ -293,6 +300,9 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
         a_when = a.get("when")
         if a_when is not None and not isinstance(a_when, Mapping):
             raise ManifestError(f"`actions[{i}].when` must be an object when present")
+        a_progress = a.get("progress", False)
+        if not isinstance(a_progress, bool):
+            raise ManifestError(f"`actions[{i}].progress` must be a boolean when present")
         actions.append(
             PivotAction(
                 key=key,
@@ -302,6 +312,7 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
                 description=str(a.get("description", "")),
                 internal=internal,
                 when=dict(a_when) if isinstance(a_when, Mapping) else None,
+                progress=a_progress,
             )
         )
 

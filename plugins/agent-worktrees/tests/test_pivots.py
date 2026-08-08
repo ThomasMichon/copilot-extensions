@@ -577,3 +577,20 @@ def test_action_when_matches_via_worktree_action_wrapper():
                               when={"state": "FINAL"})
     assert pivots.worktree_action_matches(a, {"state": "FINAL"}) is True
     assert pivots.worktree_action_matches(a, {"state": "WIP"}) is False
+
+
+def test_action_progress_defaults_off_and_parses(tmp_path):
+    _write(tmp_path, "m", {"label": "M", "list": ["agent-x", "y"], "actions": [
+        {"label": "Info", "run": ["do"]},
+        {"label": "Recycle", "run": ["rec", "{id}"], "progress": True},
+    ]})
+    [p] = pivots.discover_pivots(tmp_path)
+    assert p.actions[0].progress is False
+    assert p.actions[1].progress is True
+
+
+def test_bad_action_progress_sinks_only_its_manifest(tmp_path):
+    _write(tmp_path, "ok", {"label": "Ok", "list": ["agent-x", "y"]})
+    _write(tmp_path, "bad", {"label": "Bad", "list": ["agent-x", "y"],
+        "actions": [{"label": "X", "run": ["do"], "progress": "yes"}]})
+    assert {p.name for p in pivots.discover_pivots(tmp_path)} == {"ok"}

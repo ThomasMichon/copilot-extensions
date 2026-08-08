@@ -444,6 +444,120 @@ class RegisteredPivotRuntime:
             return (False, (detail[-1] if detail else f"exit {proc.returncode}")[:200])
         return (True, (proc.stdout or "").strip()[:200])
 
+    def run_action_stream(
+        self,
+        action,
+        ctx: Mapping[str, object],
+        on_frame,
+        should_cancel=None,
+    ) -> tuple[bool, str]:
+        """Run a **progress-reporting** action (D4): Popen the action argv and
+        consume its NDJSON progress envelope, calling ``on_frame(pct, msg)`` for
+        each ``{"type":"progress","pct":..,"msg":..}`` line. Terminal frames are
+        ``{"type":"done"[,"message"]}`` (success) and ``{"type":"error",
+        "message":..}`` (failure). Returns ``(ok, final_message)`` and never
+        raises, so the caller can surface the outcome once the modal closes.
+
+        ``should_cancel`` (optional callable) is polled between frames; when it
+        returns truthy the child is killed and the run reports cancellation. The
+        child is tracked like a streaming ``list`` (via :meth:`_spawn_stream`), so
+        :meth:`close` also tears it down on picker exit. Falls back to treating a
+        non-envelope exit as a plain sync result so a mis-declared ``progress``
+        action still completes."""
+        argv = _resolve_argv(action.run, ctx)
+        if not argv:
+            return (False, "empty action command")
+        try:
+            proc = self._spawn_stream(argv)
+        except FileNotFoundError:
+            return (False, f"{argv[0]} not found on PATH")
+        except Exception as exc:
+            return (False, str(exc)[:200])
+
+        # A blocked stdout readline can't observe ``should_cancel`` between
+        # frames, so a background poller actively kills the child when cancel is
+        # requested (or the runtime is closing) -- the kill closes the pipe and
+        # unblocks the reader promptly, even for a hung action.
+        stop_poll = threading.Event()
+
+        def _poll_cancel() -> None:
+            while not stop_poll.wait(0.15):
+                if (should_cancel is not None and should_cancel()) or self._closed.is_set():
+                    _kill_proc_tree(proc)
+                    return
+
+        poller: threading.Thread | None = None
+        if should_cancel is not None:
+            poller = threading.Thread(target=_poll_cancel, daemon=True)
+            poller.start()
+
+        ok = False
+        done = False
+        final_msg = ""
+        saw_envelope = False
+        raw_lines: list[str] = []
+        try:
+            for raw in proc.stdout:  # type: ignore[union-attr]
+                if (should_cancel is not None and should_cancel()) or self._closed.is_set():
+                    break
+                raw_lines.append(raw)
+                obj = _parse_ndjson_line(raw)
+                if obj is None:
+                    continue
+                typ = obj.get("type")
+                if typ == "progress":
+                    saw_envelope = True
+                    pct = obj.get("pct")
+                    try:
+                        pct = float(pct) if pct is not None else None
+                    except (TypeError, ValueError):
+                        pct = None
+                    try:
+                        on_frame(pct, str(obj.get("msg") or ""))
+                    except Exception:
+                        pass
+                elif typ == "done":
+                    saw_envelope = True
+                    ok = True
+                    done = True
+                    final_msg = str(obj.get("message") or obj.get("msg") or "done")
+                    break
+                elif typ == "error":
+                    saw_envelope = True
+                    ok = False
+                    done = True
+                    final_msg = str(obj.get("message") or obj.get("error") or "error")
+                    break
+        except Exception as exc:
+            final_msg = str(exc)[:200]
+        finally:
+            stop_poll.set()
+            cancelled = (should_cancel is not None and should_cancel()) or self._closed.is_set()
+            if cancelled and not done:
+                _kill_proc_tree(proc)
+            try:
+                _, stderr = proc.communicate(timeout=5)
+            except Exception:
+                _kill_proc_tree(proc)
+                try:
+                    _, stderr = proc.communicate(timeout=5)
+                except Exception:
+                    stderr = ""
+            self._untrack(proc)
+
+        if cancelled and not done:
+            return (False, "cancelled")
+        if done:
+            return (ok, final_msg[:200])
+        # No terminal envelope frame. Fall back to the process exit + output so a
+        # non-progress CLI (or one that only printed a blob) still resolves.
+        rc = proc.returncode
+        if saw_envelope or rc == 0:
+            tail = "".join(raw_lines).strip().splitlines()
+            return (rc == 0, (tail[-1] if tail else final_msg)[:200])
+        detail = (stderr or "").strip().splitlines()
+        return (False, (detail[-1] if detail else f"exit {rc}")[:200])
+
 
 def run_config_section(action, ctx: Mapping[str, object]) -> tuple[bool, str]:
     """Run a contributed :class:`~picker_tui.pivots.ConfigSection` against

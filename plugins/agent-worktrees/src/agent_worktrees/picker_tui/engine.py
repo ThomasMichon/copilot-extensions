@@ -1532,6 +1532,9 @@ class PickerScreen(Widget):
         p = self.progress
         if not p.get("armed", True):
             return
+        if p.get("kind") == "action-stream":
+            # Driven by the D4 reader thread, not the mock walker.
+            return
         if self.executor is not None:
             self._poll_executor()
             return
@@ -3507,6 +3510,27 @@ class PickerScreen(Widget):
 
     def _key_progress(self, key):
         p = self.progress
+        # D4 progress-reporting action: Esc/q cancels a running action (kills the
+        # child via the recorded cancel callback); Enter/Esc closes a finished
+        # one. Its own reader thread invalidated the pivot cache on completion.
+        if p.get("kind") == "action-stream":
+            if key in ("escape", "q") or (p["done"] and key in ("enter", "space")):
+                if not p["done"]:
+                    cancel = p.get("cancel")
+                    if callable(cancel):
+                        cancel()
+                verb = p["verb"]
+                if p["done"] and not p.get("error"):
+                    state, tail = "done", p.get("msg") or ""
+                elif p.get("error"):
+                    state, tail = "failed", p.get("error") or ""
+                else:
+                    state, tail = "cancelled", ""
+                self.progress = None
+                if self.sel not in self.stops():
+                    self.sel = self.default_sel()
+                self.debug = f"{verb} {state}" + (f" · {tail[:80]}" if tail else "")
+            return
         # Unarmed: the extra confirm gate (beyond-clean cleanup). Enter proceeds,
         # Esc cancels without touching anything.
         if not p.get("armed", True):
@@ -4554,7 +4578,9 @@ class PickerScreen(Widget):
     def _run_task_action(self, reg, action, rec):
         """Execute one task action, then invalidate the cached list so the row
         reflects the new state on the next fetch. An INTERNAL (navigation) action
-        is dispatched in-process and does NOT invalidate the cache (#1425)."""
+        is dispatched in-process and does NOT invalidate the cache (#1425). A
+        ``progress`` action (D4) streams into the modal ProgressScreen instead of
+        the sync status-line path."""
         ctx = self._task_action_ctx(reg, rec)
         title = rec.get(reg.title_field) or rec.get(reg.id_field) or "task"
         if action.internal:
@@ -4565,6 +4591,9 @@ class PickerScreen(Widget):
                 self.sel = self.default_sel()
             if not ok:
                 self.debug = f"{action.label} failed · {msg or 'see logs'}"
+            return
+        if getattr(action, "progress", False):
+            self._run_task_action_progress(reg, action, ctx, title)
             return
         rt = self._pivot_runtime(reg)
         ok, msg = rt.run_action(action, ctx)
@@ -4577,6 +4606,56 @@ class PickerScreen(Widget):
             self.debug = f"{action.label} · {title}" + (f" — {short}" if short else "")
         else:
             self.debug = f"{action.label} failed · {short or 'see command output'}"
+
+    def _run_task_action_progress(self, reg, action, ctx, title):
+        """Run a D4 progress-reporting pivot action: stream its NDJSON progress
+        into the modal :class:`ProgressScreen`.
+
+        Builds an ``action-stream`` progress dict the screen renders live (verb +
+        message + optional pct bar), spawns a daemon reader that drives the
+        pivot runtime's :meth:`RegisteredPivotRuntime.run_action_stream`, and
+        updates the dict in place per frame. A late reader (the run the operator
+        already closed) is dropped by identity. Esc cancels via the recorded
+        ``cancel`` callback; the cache is invalidated on completion so the row
+        reflects the mutation."""
+        import threading as _threading
+
+        rt = self._pivot_runtime(reg)
+        cancel_ev = _threading.Event()
+        prog = {
+            "kind": "action-stream",
+            "verb": action.label,
+            "title": str(title),
+            "msg": "starting…",
+            "pct": None,
+            "done": False,
+            "error": "",
+            "armed": True,
+            "items": [],
+            "cancel": cancel_ev.set,
+        }
+        self.progress = prog
+
+        def _on_frame(pct, msg):
+            if self.progress is prog:
+                if pct is not None:
+                    prog["pct"] = max(0.0, min(100.0, pct))
+                if msg:
+                    prog["msg"] = msg
+
+        def _worker():
+            ok, msg = rt.run_action_stream(
+                action, ctx, _on_frame, should_cancel=cancel_ev.is_set)
+            rt.invalidate()
+            if self.progress is prog:
+                prog["done"] = True
+                if not ok:
+                    prog["error"] = msg or "failed"
+                elif msg:
+                    prog["msg"] = msg
+
+        _threading.Thread(target=_worker, daemon=True).start()
+        self._open_progress()
 
     def _scope_label(self):
         return "All machines" if self.is_all() else \
@@ -5586,6 +5665,8 @@ class ProgressScreen(ModalScreen[None]):
             # direct engine poke in a unit test). Render empty; the interval
             # dismisses us on its next tick.
             return Panel(Text(""), border_style=C_DIM, width=68)
+        if p.get("kind") == "action-stream":
+            return self._action_stream_panel(p)
         items = p["items"]
         done = sum(1 for it in items if it["state"] in ("done", "failed"))
         failed = sum(1 for it in items if it["state"] == "failed")
@@ -5661,6 +5742,41 @@ class ProgressScreen(ModalScreen[None]):
         body.append_text(btns)
         return Panel(body, title=f"{verb} · {p['scope']}",
                      border_style=C_BAND, width=68)
+
+    def _action_stream_panel(self, p) -> Panel:
+        """Render a D4 progress-reporting action's live state: verb, latest
+        message, an optional pct bar, and a Working…/Close button."""
+        eng = self._eng
+        verb = p.get("verb", "Action")
+        body = Text()
+        if p.get("done"):
+            if p.get("error"):
+                body.append(f" ✗ failed · {str(p['error'])[:60]}\n\n", style=C_WARN)
+            else:
+                body.append(" ✓ done\n\n", style=C_READY)
+        else:
+            body.append(f" {eng.spin()} working…\n\n", style=C_HEADER)
+        title = str(p.get("title") or "")
+        if title:
+            body.append(f" {title[:60]}\n", style=C_META)
+        pct = p.get("pct")
+        if isinstance(pct, (int, float)):
+            filled = round(max(0.0, min(100.0, pct)) / 100 * 40)
+            bar = Text(" [")
+            bar.append("█" * filled, style=C_READY)
+            bar.append("·" * (40 - filled), style=C_DIM)
+            bar.append(f"] {pct:5.1f}%")
+            body.append_text(bar)
+            body.append("\n")
+        msg = str(p.get("msg") or "")
+        if msg:
+            body.append(f" {msg[:62]}\n", style="white")
+        body.append("\n")
+        btn = Text(" ")
+        btn.append(" Close " if p.get("done") else " Cancel ",
+                   style=C_BTN_SEL if p.get("done") else C_BTN)
+        body.append_text(btn)
+        return Panel(body, title=verb, border_style=C_BAND, width=68)
 
     def _refresh(self) -> None:
         if self._eng.progress is not None:
