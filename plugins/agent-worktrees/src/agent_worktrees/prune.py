@@ -374,3 +374,48 @@ def reconcile_pr_states(
             changes.append((pr.number, pr.state, new_state))
             pr.state = new_state
     return changes
+
+
+def reconcile_and_persist_best_effort(
+    rec: tracking.WorktreeRecord,
+    lookup: Callable[[str, int], "object | None"],
+    *,
+    rec_path: "object | None" = None,
+) -> list[tuple[int, str, str]]:
+    """Reconcile PR states from the provider, then persist without lost updates.
+
+    Used by the status-render sweeps (``reap_one`` / ``cleanup``) whose ``rec``
+    was loaded -- and threaded across git/network work -- long before this call.
+    Persisting that stale-base snapshot directly would clobber any concurrent
+    foreground update, even though the write itself is atomic. So this:
+
+    1. runs :func:`reconcile_pr_states` on ``rec`` UNLOCKED (the provider lookup
+       is the only I/O, and it must never happen under the lock), mutating
+       ``rec`` in place so the caller's in-memory assessment sees the healed
+       state; then
+    2. re-applies just the reconciled ``(number -> new_state)`` deltas onto a
+       FRESHLY reloaded snapshot **inside a best-effort** ``_RecordLock`` and
+       saves that -- so a concurrent writer's other fields are preserved.
+
+    Best-effort: on lock contention (a foreground verb holds it) or an OS write
+    error the persist is skipped; the reconcile is idempotent and self-heals on
+    the next sweep. Returns the change list (possibly empty).
+    """
+    changes = reconcile_pr_states(rec, lookup)
+    if not changes:
+        return changes
+    path = rec_path if rec_path is not None else rec.yaml_path
+    try:
+        with tracking._RecordLock(path, blocking=False) as lk:
+            if not lk.acquired:
+                return changes  # contended -- skip; self-heals next sweep
+            fresh = tracking.load_record(path)
+            by_number = {p.number: p for p in fresh.prs if p.number is not None}
+            for number, _old_state, new_state in changes:
+                target = by_number.get(number)
+                if target is not None:
+                    target.state = new_state
+            tracking.save_record(fresh, path)
+    except OSError:
+        pass
+    return changes

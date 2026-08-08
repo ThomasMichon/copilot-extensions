@@ -6034,16 +6034,11 @@ def reap_one(
 
     if reconcile_prs and rec.prs:
         lookup = _make_pr_lookup(config)
-        if prune.reconcile_pr_states(rec, lookup):
-            # Best-effort reconcile write (#4547): a status-render side effect,
-            # so skip on lock contention rather than clobber a concurrent
-            # foreground verb -- the provider heal self-repeats on the next pass.
-            try:
-                with tracking._RecordLock(rec.yaml_path, blocking=False) as lk:
-                    if lk.acquired:
-                        tracking.save_record(rec)
-            except OSError:
-                pass
+        # Best-effort reconcile write (#4547): a status-render side effect.
+        # Reconcile unlocked (provider I/O), then re-apply the deltas onto a
+        # fresh snapshot under a best-effort lock so a concurrent foreground
+        # verb is never clobbered; skip on contention (self-heals next pass).
+        prune.reconcile_and_persist_best_effort(rec, lookup)
 
     if rec.worktree_path and Path(rec.worktree_path).exists():
         info = git_ops.classify_worktree(
@@ -7016,16 +7011,11 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
 
         # Heal stale PR state from the provider before assessing (opt-in).
         if pr_lookup is not None and rec.prs:
-            if prune.reconcile_pr_states(rec, pr_lookup):
-                # Best-effort reconcile write (#4547): skip on lock contention
-                # rather than clobber a concurrent foreground verb; the provider
-                # heal self-repeats on the next assessment pass.
-                try:
-                    with tracking._RecordLock(rec.yaml_path, blocking=False) as lk:
-                        if lk.acquired:
-                            tracking.save_record(rec)
-                except OSError:
-                    pass
+            # Best-effort reconcile write (#4547): reconcile unlocked (provider
+            # I/O), then re-apply the deltas onto a fresh snapshot under a
+            # best-effort lock so a concurrent foreground verb is never
+            # clobbered; skip on contention (self-heals next pass).
+            prune.reconcile_and_persist_best_effort(rec, pr_lookup)
 
         verdict = prune.assess(rec, info, turn_count=turns,
                                claimant_alive=_local_claimant_alive)
