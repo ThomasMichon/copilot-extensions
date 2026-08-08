@@ -42,15 +42,19 @@ ALL_TRANSITIONS = (
     "commented",          # a comment-only review was submitted (not the author's)
     "conflict",           # the PR became un-mergeable (mergeable true -> false)
     "mergeable",          # the PR became mergeable again (mergeable false -> true)
+    "checks_failed",      # a required CI check rolled up to failure (#225)
+    "approval_dismissed", # an approving review was dismissed (#225)
     "merged",             # the PR became merged
     "closed",             # the PR closed without merging
 )
 
 #: The actionable default: everything that needs the author's attention -- a
-#: review by someone else, a merge-state change, or the PR landing/closing.
-#: Bare ``commented`` is excluded (noisy) but available via ``any``.
+#: review by someone else, a merge-state change, a CI/approval regression, or
+#: the PR landing/closing. Bare ``commented`` is excluded (noisy) but available
+#: via ``any``.
 DEFAULT_UNTIL = (
-    "changes_requested", "approved", "conflict", "mergeable", "merged", "closed",
+    "changes_requested", "approved", "conflict", "mergeable",
+    "checks_failed", "approval_dismissed", "merged", "closed",
 )
 
 #: Provider-neutral review state (uppercased) -> transition name.  A provider
@@ -104,6 +108,11 @@ class PRSnapshot:
     """Provider mergeability flag: True (ready), False (conflict/blocked), or
     None when the provider hasn't computed it yet (some compute it async, so a
     just-opened PR can briefly report None)."""
+    checks_state: str = ""
+    """Provider-neutral CI rollup for the head commit (#225): ``"success"`` |
+    ``"failure"`` | ``"pending"`` | ``""`` (unknown / no checks configured). A
+    provider that doesn't report it leaves ``""`` -- which never fires a
+    ``checks_failed`` transition, so the field is additive and safe."""
     labels: tuple[str, ...] = ()
     title: str = ""
     draft: bool = False
@@ -187,6 +196,16 @@ class Baseline:
     diffs against.  ``None`` means "not yet known" -- the wait loop adopts the
     first concrete value without firing.  Deliberately **not** encoded in the
     cursor (tri-state, recomputed cheaply next poll)."""
+    checks_state: str = ""
+    """The arm-time CI rollup a ``checks_failed`` transition diffs against (#225).
+    ``""`` means "not yet known"; the wait loop adopts the first concrete value
+    without firing (only a later flip *into* failure is a transition). Not
+    encoded in the cursor (recomputed each poll)."""
+    approved: bool | None = None
+    """Whether the PR had an effective approval at arm time (#225). ``None`` means
+    "not yet known"; the wait loop adopts the first concrete value without firing.
+    A True->dismissed regression fires ``approval_dismissed``. Not encoded in the
+    cursor."""
 
     @classmethod
     def from_snapshot(cls, snap: PRSnapshot) -> Baseline:
@@ -195,6 +214,11 @@ class Baseline:
             merged=snap.merged,
             closed=snap.pr_state == "closed",
             mergeable=snap.mergeable,
+            checks_state=snap.checks_state,
+            approved=(
+                effective_verdict(snap.reviews, snap.head_sha, snap.author)
+                == "approved"
+            ),
         )
 
     def to_cursor(self) -> str:
@@ -272,6 +296,33 @@ def compute_events(
             events.append({"event": "conflict"})
         elif baseline.mergeable is False and snap.mergeable is True and "mergeable" in want:
             events.append({"event": "mergeable"})
+
+        # CI checks regressed to failure (#225): fire only on a transition INTO
+        # failure from a KNOWN non-failure state. An unknown baseline (``""`` ==
+        # not yet known, e.g. a cursor-only re-arm) is adopted by the caller
+        # without firing -- so an already-failed check at arm time does not alert
+        # ("changes from here on"), exactly like the ``None`` mergeable baseline.
+        if (
+            baseline.checks_state not in ("", "failure")
+            and snap.checks_state == "failure"
+            and "checks_failed" in want
+        ):
+            events.append({"event": "checks_failed", "checks_state": snap.checks_state})
+
+        # An approving review was DISMISSED (#225): the approval regressed and a
+        # dismissed approval is present. Distinct from a fresh changes-requested
+        # review (which fires ``changes_requested`` via the review-id loop above,
+        # and leaves no dismissed approval), so the two never double-fire.
+        if baseline.approved is True and "approval_dismissed" in want:
+            snap_approved = (
+                effective_verdict(snap.reviews, snap.head_sha, snap.author)
+                == "approved"
+            )
+            dismissed_approval = any(
+                r.dismissed and r.state.upper() == "APPROVED" for r in snap.reviews
+            )
+            if not snap_approved and dismissed_approval:
+                events.append({"event": "approval_dismissed"})
 
     if snap.merged and not baseline.merged and "merged" in want:
         events.append({"event": "merged"})
@@ -1032,6 +1083,9 @@ def pr_reminder(
                                    or flow.profile == PROFILE_PR_HUMAN_MERGE)
                     else "merge")
         wait.append("conflict")
+        # #225: pr-watch also wakes on CI/approval regressions, so name them as
+        # states the caller may next be alerted to.
+        wait.extend(("checks_failed", "approval_dismissed"))
         return PRReminder(
             flow.profile, verb, state, ok,
             headline="watching the PR",
