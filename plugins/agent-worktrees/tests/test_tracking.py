@@ -9,6 +9,7 @@ from agent_worktrees.tracking import (
     ResourceClaim,
     SessionEntry,
     WorktreeRecord,
+    _RecordLock,
     _atomic_write,
     add_resource_claim,
     create_new_record,
@@ -30,6 +31,36 @@ from agent_worktrees.tracking import (
     set_disposition,
     update_status,
 )
+
+
+def _lock_increment_worker(yaml_path_str: str, iterations: int, hold: float) -> None:
+    """Cross-process worker for the ``_RecordLock`` lost-update test.
+
+    Each iteration does a full read-modify-write of ``resume_count`` under
+    ``_RecordLock``, with a small hold between read and write to widen the race
+    window. Module-level (picklable) so it runs under the ``spawn`` start method
+    on both POSIX (fcntl sidecar) and Windows (msvcrt sidecar). Without a real
+    cross-process lock the interleaved writers clobber one another and the final
+    count falls short of ``workers * iterations`` -- exactly regression #1860.
+    """
+    import time
+    from pathlib import Path as _Path
+
+    from agent_worktrees.tracking import (
+        _RecordLock,
+        load_record,
+        save_record,
+    )
+
+    path = _Path(yaml_path_str)
+    for _ in range(iterations):
+        with _RecordLock(path):
+            record = load_record(path)
+            current = record.resume_count or 0
+            time.sleep(hold)  # widen the read->write window
+            record.resume_count = current + 1
+            save_record(record, path)
+
 
 # ---------------------------------------------------------------------------
 # Round-trip serialization
@@ -983,6 +1014,73 @@ class TestAtomicWrite:
         target.write_text("old")
         _atomic_write(target, "new")
         assert target.read_text() == "new"
+
+
+class TestRecordLockCrossProcess:
+    """_RecordLock must serialize read-modify-write ACROSS processes (#1860).
+
+    The picker's concurrent reconcilers (reconcile_prs / reconcile_bound_live /
+    the stamp writers) and a foreground CLI can RMW the same tracking YAML from
+    separate processes. Before #1860 the Windows path held only an in-process
+    ``threading.RLock`` (a no-op across processes), so cross-process writers
+    clobbered one another. This exercises the real sidecar lock -- ``fcntl`` on
+    POSIX, ``msvcrt`` on Windows -- under ``spawn`` (true separate processes on
+    both platforms, so the in-process RLock cannot mask a missing sidecar lock).
+    """
+
+    def _seed(self, tmp_path: Path) -> Path:
+        path = tmp_path / "wt-lock.yaml"
+        rec = WorktreeRecord(
+            worktree_id="wt-lock",
+            branch="worktree/wt-lock",
+            worktree_path="/tmp/wt-lock",
+            repo="test-repo",
+            machine="test-machine",
+            platform="wsl",
+            started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00",
+            resume_count=0,
+            title=None,
+            status="active",
+            completed_at=None,
+            sessions=None,
+        )
+        save_record(rec, path)
+        return path
+
+    def test_no_lost_updates_across_processes(self, tmp_path: Path):
+        import multiprocessing as mp
+
+        path = self._seed(tmp_path)
+        workers, iterations, hold = 4, 12, 0.003
+        ctx = mp.get_context("spawn")
+        procs = [
+            ctx.Process(
+                target=_lock_increment_worker,
+                args=(str(path), iterations, hold),
+            )
+            for _ in range(workers)
+        ]
+        for p in procs:
+            p.start()
+        for p in procs:
+            p.join(timeout=120)
+            assert p.exitcode == 0, f"worker exited {p.exitcode}"
+
+        final = load_record(path)
+        assert final.resume_count == workers * iterations
+
+    def test_lock_acquire_release_reentrant_in_process(self, tmp_path: Path):
+        # A second _RecordLock on the SAME path from the SAME thread must not
+        # self-deadlock (the in-process guard is a re-entrant RLock); the sidecar
+        # is opened per-context and released cleanly.
+        path = self._seed(tmp_path)
+        with _RecordLock(path):
+            rec = load_record(path)
+            rec.resume_count = 5
+            save_record(rec, path)
+        with _RecordLock(path):
+            assert load_record(path).resume_count == 5
 
 
 class TestFindWorktreeIdByCwd:
