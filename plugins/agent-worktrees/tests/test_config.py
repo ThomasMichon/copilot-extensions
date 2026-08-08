@@ -167,6 +167,10 @@ class TestDataModels:
         assert pr.delete_source_branch is True
         assert pr.bypass_policy is False
         assert pr.bypass_reason == ""
+        # Merge/update policy defaults (#225).
+        assert pr.branch_update_strategy == "rebase"
+        assert pr.merge_strategy == "squash"
+        assert pr.prefer_auto_merge is True
 
 
 # ---------------------------------------------------------------------------
@@ -272,6 +276,37 @@ class TestPRConfigParsing:
         )
         pr = cfg.load_config(cfgfile).repos["ext"].pr
         assert pr.required is False
+
+    def test_merge_update_policy_parsed(self, tmp_path: Path):
+        # #225: the merge/update policy defaults are repo-overridable.
+        cfgfile = tmp_path / "config.yaml"
+        self._write(
+            cfgfile,
+            "    pr:\n"
+            "      enabled: true\n"
+            "      branch_update_strategy: merge\n"
+            "      merge_strategy: merge\n"
+            "      prefer_auto_merge: false\n",
+        )
+        pr = cfg.load_config(cfgfile).repos["ext"].pr
+        assert pr.branch_update_strategy == "merge"
+        assert pr.merge_strategy == "merge"
+        assert pr.prefer_auto_merge is False
+
+    def test_merge_update_policy_normalizes_bad_values(self, tmp_path: Path):
+        # An unrecognized enum falls back to the default (no crash, no garbage).
+        cfgfile = tmp_path / "config.yaml"
+        self._write(
+            cfgfile,
+            "    pr:\n"
+            "      enabled: true\n"
+            "      branch_update_strategy: bogus\n"
+            "      merge_strategy: FANCY\n",
+        )
+        pr = cfg.load_config(cfgfile).repos["ext"].pr
+        assert pr.branch_update_strategy == "rebase"
+        assert pr.merge_strategy == "squash"
+        assert pr.prefer_auto_merge is True  # absent -> default
 
     def test_review_vocabulary_binding_defaults_empty(self, tmp_path: Path):
         # Binding-absent: the pr-* family fields default empty (no-op / no crash).
