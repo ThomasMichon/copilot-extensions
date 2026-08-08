@@ -44,3 +44,6 @@ def _neutralize_l2(monkeypatch):
         coordination, "release",
         lambda *a, **k: coordination.L2Result("unavailable"),
     )
+    # The pool's cross-machine L2 overlay reads via ``list_leases``; neutralize it
+    # too (None -> overlay absent) so ``build_pool`` never shells out in units.
+    monkeypatch.setattr(coordination, "list_leases", lambda *a, **k: None)

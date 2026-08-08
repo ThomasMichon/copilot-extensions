@@ -206,6 +206,114 @@ def test_build_pool_ages_idle_box_to_stale_via_last_used():
     assert by["fresh"] == IDLE
 
 
+# --- cross-machine L2 (Git-ref lease) overlay ----------------------------
+
+def _l2(key, holder="m2/proj/wt-9#s", live=True, expires_at="2026-08-07T18:00:00Z"):
+    from agent_codespaces.coordination import L2Lease
+    return L2Lease(key=key, holder=holder, live=live, expires_at=expires_at)
+
+
+def test_build_pool_l2_hold_marks_in_use_without_local_lease():
+    """A live L2 lease held cross-machine (no local L1 lease) reads as in-use."""
+    now = time.time()
+    members, _ = build_pool(
+        now=now, codespaces=[_cs("a")], leases=[], markers={},
+        l2_leases={"a": _l2("a", holder="tmichon-cloud1/odsp-web/wt-abc#s1")},
+    )
+    (m,) = members
+    assert m.disposition == IN_USE
+    assert m.l2_live is True
+    assert m.l2_holder == "tmichon-cloud1/odsp-web/wt-abc#s1"
+    d = m.to_dict()
+    assert d["l2"] == {
+        "holder": "tmichon-cloud1/odsp-web/wt-abc#s1",
+        "live": True,
+        "expires_at": "2026-08-07T18:00:00Z",
+    }
+
+
+def test_build_pool_dead_l2_lease_does_not_force_in_use():
+    """A released/expired (non-live) L2 lease is overlaid but not in-use."""
+    now = time.time()
+    members, _ = build_pool(
+        now=now, codespaces=[_cs("a")], leases=[], markers={},
+        l2_leases={"a": _l2("a", live=False)},
+    )
+    (m,) = members
+    assert m.disposition == IDLE          # not forced in-use
+    assert m.l2_live is False
+    assert m.l2_holder == "m2/proj/wt-9#s"
+
+
+def test_build_pool_no_l2_overlay_when_empty():
+    """An empty overlay (``{}``) leaves the member exactly as pre-overlay."""
+    members, _ = build_pool(
+        codespaces=[_cs("a")], leases=[], markers={}, l2_leases={},
+    )
+    (m,) = members
+    assert m.disposition == IDLE
+    assert m.l2_live is False
+    assert m.l2_holder is None
+    assert m.to_dict()["l2"] == {"holder": None, "live": False, "expires_at": None}
+
+
+def test_build_pool_l2_overlay_defaults_to_live_read(monkeypatch):
+    """When ``l2_leases`` is omitted, build_pool reads via coordination
+    (degrade-safe -- None collapses to no overlay)."""
+    from agent_codespaces import coordination
+    monkeypatch.setattr(
+        coordination, "list_leases",
+        lambda *a, **k: {"a": _l2("a", holder="tmichon-book2/odsp-web/wt-z#s")},
+    )
+    members, _ = build_pool(codespaces=[_cs("a")], leases=[], markers={})
+    (m,) = members
+    assert m.disposition == IN_USE
+    assert m.l2_holder == "tmichon-book2/odsp-web/wt-z#s"
+
+
+def test_build_pool_l2_read_failure_is_degrade_safe(monkeypatch):
+    """A raising ``list_leases`` never breaks the pool -- overlay simply absent."""
+    from agent_codespaces import coordination
+
+    def boom(*a, **k):
+        raise RuntimeError("store unreachable")
+
+    monkeypatch.setattr(coordination, "list_leases", boom)
+    members, _ = build_pool(codespaces=[_cs("a")], leases=[], markers={})
+    (m,) = members
+    assert m.disposition == IDLE
+    assert m.l2_holder is None
+
+
+def test_build_pool_local_lease_takes_precedence_over_l2_owner():
+    """When both an L1 lease and an L2 lease exist, the local allocation still
+    names the L1 owner; the L2 block is an additive overlay."""
+    now = time.time()
+    lease = Lease(codespace="a", effort="mine", pid=1, host="dev6",
+                  acquired_at=now, heartbeat_at=now)
+    members, _ = build_pool(
+        now=now, codespaces=[_cs("a")], leases=[lease], markers={},
+        l2_leases={"a": _l2("a", holder="tmichon-dev6/odsp-web/wt-a#s")},
+    )
+    (m,) = members
+    assert m.disposition == IN_USE
+    assert m.holder_owner == "mine"       # L1 allocation unchanged
+    assert m.l2_live is True              # L2 overlay still present
+
+
+def test_picker_payload_l2_holder_rendered_when_no_local_lease():
+    from agent_codespaces.pool import picker_payload
+    now = time.time()
+    members, budget = build_pool(
+        now=now, codespaces=[_cs("a", repo="o/web-cs")], leases=[], markers={},
+        l2_leases={"a": _l2("a", holder="tmichon-cloud1/odsp-web/wt-abc#s1")},
+    )
+    e = picker_payload(members, budget)["entries"][0]
+    assert e["use"] == "in-use"
+    assert e["holder"] == "wt-abc@tmichon-cloud1"
+    assert "held cross-machine by wt-abc@tmichon-cloud1" in e["subtitle"]
+
+
 def _iso(epoch: float) -> str:
     from datetime import datetime, timezone
     return datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat().replace(
