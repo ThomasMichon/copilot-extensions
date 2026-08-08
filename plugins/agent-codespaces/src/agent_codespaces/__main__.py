@@ -613,10 +613,11 @@ def main(argv: list[str] | None = None) -> int:
     # A top-level --project (e.g. injected by the `<repo> <slug>` router) means
     # "resolve as if the cwd were inside REPO's checkout" -- chdir to REPO's
     # checkout so repo-root discovery (_resolve_repo_root / codespaces.yaml)
-    # targets it. Best-effort: an unresolvable project warns but never blocks a
-    # name/CodeSpace-addressed verb (accept-and-ignore for project-irrelevant
-    # commands).
-    if getattr(args, "project", None):
+    # targets it. Only the project-consuming verbs (config) actually read from
+    # the cwd; on a name/CodeSpace-addressed verb an *explicit* --project bounces
+    # (fail loud, #1080) while a router-injected one stays a silent no-op.
+    # Best-effort otherwise: an unresolvable project warns but never blocks.
+    if _guard_project_scope(parser, args):
         _chdir_to_project(args.project)
 
     if not args.command:
@@ -1934,6 +1935,51 @@ def _cmd_config(args: argparse.Namespace) -> int:
         file=sys.stderr,
     )
     return 1
+
+
+# Verbs that actually consume the top-level ``--project``: their cwd/repo-root
+# discovery (``_resolve_repo_root`` -> ``codespaces.yaml``, exercised by
+# ``config init``/``config adopt``) targets the project's checkout. Every other
+# verb is name/CodeSpace-addressed or reads the merged adopted-repo config, so it
+# ignores ``--project`` -- see ``_guard_project_scope``.
+_PROJECT_CONSUMING_VERBS = frozenset({"config"})
+
+
+def _guard_project_scope(parser: argparse.ArgumentParser,
+                         args: argparse.Namespace) -> bool:
+    """Decide whether the top-level ``--project`` applies, bouncing misuse.
+
+    Returns True iff ``--project`` should be applied (the caller then chdirs via
+    ``_chdir_to_project``); False for a silent no-op.
+
+    ``--project`` is meaningful only for the project-consuming verbs
+    (``config``): on a name/CodeSpace-addressed verb it does nothing useful.
+    Silently swallowing an *explicitly*-passed ``--project`` is a foot-gun for
+    agentic callers, so we bounce instead (mirrors agent-bridge #1080) -- but
+    ONLY when the flag was user-typed.
+
+    The ``<repo> <slug>`` router injects ``--project`` *uniformly* for the
+    project-consuming slugs (incl. on their name-addressed verbs) and marks it
+    ``AGENT_WORKTREES_PROJECT_ROUTED=1``; a *routed* no-op stays silent so the
+    uniform ``<repo> codespaces …`` surface (e.g. ``<repo> codespaces ssh
+    <name>``) keeps working. The marker is consumed here so it never leaks to
+    child processes.
+    """
+    routed = os.environ.pop("AGENT_WORKTREES_PROJECT_ROUTED", None) == "1"
+    if getattr(args, "project", None) is None:
+        return False
+    command = getattr(args, "command", None)
+    if command in _PROJECT_CONSUMING_VERBS:
+        return True
+    if routed:
+        return False
+    parser.error(
+        f"--project {args.project!r} is not meaningful for "
+        f"'{command or '(no command)'}': it scopes only the project-consuming "
+        f"verbs ({'/'.join(sorted(_PROJECT_CONSUMING_VERBS))}). Remove "
+        f"--project, or use one of those verbs."
+    )
+    return False  # unreachable: parser.error() exits; keeps type-checkers happy
 
 
 def _chdir_to_project(project: str) -> bool:
