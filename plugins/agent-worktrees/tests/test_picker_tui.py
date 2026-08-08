@@ -5322,6 +5322,103 @@ def test_registered_pivot_action_menu_runs_and_invalidates(tmp_path, monkeypatch
     asyncio.run(run())
 
 
+def test_progress_action_stream_key_closes_and_cancels():
+    """D4 unit: _key_progress on an action-stream run closes a finished run and
+    cancels a running one (invoking the recorded cancel callback)."""
+    from agent_worktrees.picker_tui import engine as eng_mod
+
+    scr = eng_mod.PickerScreen.__new__(eng_mod.PickerScreen)
+    scr.debug = ""
+    scr.sel = ("T", 0)
+    scr.stops = lambda: [("T", 0)]
+    # Finished run: Enter closes it, clearing progress.
+    scr.progress = {"kind": "action-stream", "verb": "Recycle", "done": True,
+                    "msg": "recycled", "error": "", "cancel": lambda: None,
+                    "items": []}
+    scr._key_progress("enter")
+    assert scr.progress is None
+    assert "Recycle done" in scr.debug
+
+    # Running run: Esc cancels, invoking the cancel callback + clearing progress.
+    cancelled = {"v": False}
+    scr.progress = {"kind": "action-stream", "verb": "Recycle", "done": False,
+                    "msg": "working", "error": "",
+                    "cancel": lambda: cancelled.__setitem__("v", True),
+                    "items": []}
+    scr._key_progress("escape")
+    assert cancelled["v"] is True
+    assert scr.progress is None
+    assert "cancelled" in scr.debug
+
+
+def test_registered_pivot_progress_action_streams_into_modal(tmp_path, monkeypatch):
+    """D4 integration: a `progress: true` pivot action streams its NDJSON progress
+    into the live ProgressScreen (action-stream kind), reaching done."""
+    import json
+    import sys
+    from agent_worktrees.picker_tui import pivots as pivots_mod
+
+    script = tmp_path / "recycle.py"
+    script.write_text(
+        "import sys, json\n"
+        "def emit(o):\n"
+        "    sys.stdout.write(json.dumps(o)+'\\n'); sys.stdout.flush()\n"
+        "emit({'type':'progress','pct':10,'msg':'draining'})\n"
+        "emit({'type':'progress','pct':100,'msg':'gone'})\n"
+        "emit({'type':'done','message':'recycled'})\n",
+        encoding="utf-8",
+    )
+    d = tmp_path / "pivots"
+    d.mkdir()
+    manifest = {
+        "label": "Pool",
+        "after": "Worktrees",
+        "list": ["true"],
+        "entry": {"id": "id", "title": "display"},
+        "actions": [
+            {"key": "recycle", "label": "Recycle", "progress": True,
+             "run": [sys.executable, str(script)]},
+        ],
+    }
+    (d / "pool.json").write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+
+    rows = [{"id": "old", "display": "stale box", "disposition": "stale"}]
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            scr.htab = scr.htabs.index("Pool")
+            await pilot.pause()
+            reg = scr._reg_pivot()
+            # A real runtime (not the _FakeRuntime) so run_action_stream exists.
+            from agent_worktrees.picker_tui import tasks as tasks_mod
+            scr._pivot_runtimes[reg.name] = tasks_mod.RegisteredPivotRuntime(reg)
+
+            # Run the progress action; it routes to the action-stream modal.
+            scr._run_task_action(reg, reg.actions[0], rows[0])
+            await pilot.pause()
+            assert scr.progress is not None
+            assert scr.progress.get("kind") == "action-stream"
+
+            for _ in range(200):
+                if scr.progress and scr.progress.get("done"):
+                    break
+                await pilot.pause()
+                await asyncio.sleep(0.05)
+            assert scr.progress["done"] is True
+            assert not scr.progress.get("error")
+            assert scr.progress.get("pct") == 100.0
+
+            scr._key_progress("enter")
+            assert scr.progress is None
+
+    asyncio.run(run())
+
+
 def test_registered_pivot_conditional_actions_filter_by_when(tmp_path, monkeypatch):
     """D3: a pivot action's `when` gate hides the verb for rows that don't match
     and shows it for rows that do -- so the sub-menu is row-specific."""
