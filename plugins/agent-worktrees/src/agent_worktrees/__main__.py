@@ -4866,6 +4866,80 @@ def _runtime_superseded(
     return _slot_superseded(active, mine, versions_root)
 
 
+def _spawn_status_updater(worktree_id: str, path: str | None) -> bool:
+    """Detached-spawn the status-bar updater for ``wt-<worktree_id>``.
+
+    The updater is the background loop that keeps a muxed session's status bar
+    fresh (identity in ``@aw_ctx`` once, git disposition in ``@aw_seg`` each
+    tick).  Historically it was spawned *only* by the launcher at psmux
+    create/join (``Start-StatusUpdater`` in launch-session.ps1).  That single
+    seam left long-lived attached sessions with no way to re-seed their updater
+    after it retired -- e.g. a version deploy makes every running updater
+    ``_runtime_superseded``-retire (dotfiles #911), and an attached session is
+    never re-run through the launcher, so its bar goes dark until the next
+    manual attach.  Reseeding from the ``sessionStart`` hook (``cmd_register_
+    session``) closes that gap: every new Copilot session re-asserts its own
+    updater, cross-platform (one Python seam behind both the ps1 and bash
+    hooks) and independent of psmux attach/join (dotfiles #915).
+
+    Idempotent by construction: the updater's ``@aw_updater`` token guard elects
+    a single live instance, so a duplicate spawned here retires on its next
+    tick.  Best-effort and cheap: it no-ops (returns ``False``) unless a mux is
+    present *and* a live ``wt-<id>`` session exists (so a bare / non-mux session
+    never spawns a pointless loop), and never raises into the hook path.
+    """
+    import shutil
+    import subprocess
+
+    if not worktree_id:
+        return False
+    sess = f"wt-{worktree_id}"
+    try:
+        mux = "psmux" if shutil.which("psmux") else (
+            "tmux" if shutil.which("tmux") else None)
+        if not mux:
+            return False
+        mux_bin = shutil.which(mux) or mux
+        # Only seed when this session is actually under mux -- a bare/non-mux
+        # Copilot has no status bar to feed, and spawning a loop that would
+        # immediately see "gone" is wasteful.
+        r = subprocess.run(
+            [mux_bin, "has-session", "-t", sess],
+            capture_output=True, text=True, timeout=10,
+        )
+        if r.returncode != 0:
+            return False
+
+        argv = [sys.executable, "-m", "agent_worktrees", "status-updater",
+                "--session", sess, "--mux", mux]
+        if path:
+            argv += ["--path", path]
+
+        kwargs: dict = {
+            "stdin": subprocess.DEVNULL,
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+        }
+        if os.name == "nt":
+            # Fully detach on Windows: no console window, own process group, and
+            # break away from the job so it outlives the hook process.
+            DETACHED_PROCESS = 0x00000008
+            CREATE_NEW_PROCESS_GROUP = 0x00000200
+            CREATE_NO_WINDOW = 0x08000000
+            CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+            kwargs["creationflags"] = (
+                DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+                | CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB
+            )
+        else:
+            kwargs["start_new_session"] = True  # setsid: survive the hook exit
+
+        subprocess.Popen(argv, **kwargs)  # detached: fixed, trusted argv
+        return True
+    except Exception:
+        return False
+
+
 def cmd_status_updater(args: argparse.Namespace) -> int:
     """Keep a session's status-bar vars fresh without per-render spawns.
 
@@ -4913,9 +4987,22 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
         except Exception:
             return None
 
-    def _has_session() -> bool:
+    def _session_state() -> str:
+        """Tri-state liveness: ``alive`` | ``gone`` | ``unknown``.
+
+        ``unknown`` distinguishes a *transient* mux failure (a timed-out or
+        errored ``has-session`` -> ``_mux`` returned ``None``) from a definitive
+        "session is gone" (the mux ran and reported non-zero).  The loop must
+        NOT retire on a transient hiccup -- under a busy high-framerate TUI the
+        mux can momentarily fail to answer within the timeout, and treating that
+        as "gone" silently kills the bar for the rest of the session (dotfiles
+        #915).  Only a definitive ``gone`` (or a long run of ``unknown``s) ends
+        the loop.
+        """
         r = _mux("has-session", "-t", sess)
-        return r is not None and r.returncode == 0
+        if r is None:
+            return "unknown"
+        return "alive" if r.returncode == 0 else "gone"
 
     # A newer runtime already active? Then this updater is a leftover from a
     # pre-update version whose session is still live -- retire immediately rather
@@ -4929,7 +5016,9 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
         # each other's bar.
         _mux("set-option", "-t", sess, opt, val)
 
-    if not _has_session():
+    # Bail only on a *definitive* absence -- a transient mux hiccup at startup
+    # must not abort the updater before it ever paints (dotfiles #915).
+    if _session_state() == "gone":
         return 0
 
     # Single-instance guard.  The launcher may (re)spawn an updater on every
@@ -4959,7 +5048,28 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
     # over, or a newer runtime supersedes this one (dotfiles #911).  The bar
     # itself does zero process work between updates -- the mux only re-runs the
     # strftime %H:%M clock.
-    while _has_session() and _owns() and not _runtime_superseded():
+    #
+    # Transient mux failures (``_session_state() == "unknown"``) are tolerated:
+    # they do NOT retire the updater, they only skip that tick's liveness proof.
+    # The loop exits only on a definitive ``gone``, a lost ownership token, a
+    # superseding runtime, or ``_MAX_TRANSIENT_STRIKES`` consecutive unknowns
+    # (a genuinely wedged mux -- ~strikes*interval seconds of silence), so a
+    # busy-TUI timeout can no longer silently kill the bar (dotfiles #915).
+    _MAX_TRANSIENT_STRIKES = 20
+    strikes = 0
+    while True:
+        state = _session_state()
+        if state == "gone":
+            break
+        if state == "unknown":
+            strikes += 1
+            if strikes >= _MAX_TRANSIENT_STRIKES:
+                break
+            time.sleep(interval)
+            continue
+        strikes = 0  # a live answer resets the transient run
+        if not _owns() or _runtime_superseded():
+            break
         try:
             seg = _render_status_segment(
                 path, fetch=False, plain=False, no_title=False,
@@ -12995,6 +13105,26 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         worktree_id=wt_id,
         session_id=session_id,
     )
+    # Re-seed the status-bar updater for this session's mux (best-effort, no-op
+    # off-mux).  The launcher spawns it at psmux create/join, but an attached
+    # long-lived session is never re-run through the launcher -- so after a
+    # deploy retires the old updater (dotfiles #911) the bar stays dark.  The
+    # sessionStart hook re-asserts it every session; the @aw_updater token guard
+    # keeps it single-instance (dotfiles #915).
+    #
+    # The updater renders the worktree the ``--path`` points at, so prefer the
+    # hook payload's cwd (the worktree); fall back to the tracking record when
+    # cwd is absent (e.g. wt_id came from the env, bare-resume path) so we never
+    # hand the updater the plugin install dir.
+    upd_path = cwd
+    if not upd_path:
+        try:
+            rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+            if rec_path.exists():
+                upd_path = tracking.load_record(rec_path).worktree_path
+        except Exception:
+            upd_path = None
+    _spawn_status_updater(wt_id, upd_path)
     return 0
 
 
