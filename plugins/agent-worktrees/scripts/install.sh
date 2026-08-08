@@ -1441,8 +1441,8 @@ case "$ACTION" in
             deploy_git_hooks_path
 
             if [[ -n "$REPO_DIR" ]]; then
-                WORKTREE_PROJECT="$PROJECT_NAME" PYTHONUTF8=1 \
-                    "$VENV_PYTHON" -m agent_worktrees deploy-instructions --machine "$machine" 2>&1 \
+                PYTHONUTF8=1 \
+                    "$VENV_PYTHON" -m agent_worktrees --project "$PROJECT_NAME" deploy-instructions --machine "$machine" 2>&1 \
                     | sed 's/^/  /' || warn "Instruction file deployment skipped"
             fi
         fi
@@ -1698,8 +1698,8 @@ case "$ACTION" in
 
             if [[ -n "$REPO_DIR" ]]; then
                 update_machine="$(resolve_machine)"
-                WORKTREE_PROJECT="$PROJECT_NAME" PYTHONUTF8=1 \
-                    "$VENV_PYTHON" -m agent_worktrees deploy-instructions --machine "$update_machine" 2>&1 \
+                PYTHONUTF8=1 \
+                    "$VENV_PYTHON" -m agent_worktrees --project "$PROJECT_NAME" deploy-instructions --machine "$update_machine" 2>&1 \
                     | sed 's/^/  /' || warn "Instruction file deployment skipped"
             fi
         fi

@@ -12,7 +12,7 @@ $ErrorActionPreference = 'SilentlyContinue'
 $python = "$env:USERPROFILE\.agent-worktrees\.venv\Scripts\python.exe"
 if (-not (Test-Path $python)) { exit 0 }
 
-$wt_id = if ($env:WORKTREE_ID) { $env:WORKTREE_ID } else { $env:APERTURE_WORKTREE_ID }
+$wt_id = $env:WORKTREE_ID
 
 # Read the hook payload from stdin (only when redirected, so a manual run
 # in an interactive console does not block on ReadToEnd).
