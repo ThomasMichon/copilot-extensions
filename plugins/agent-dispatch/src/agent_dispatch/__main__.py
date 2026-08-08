@@ -1482,15 +1482,16 @@ def _cmd_supervise_register(args: argparse.Namespace) -> int:
     spec = _build_registration_spec(args)
     machine, env = _registration_scope(args)
     with _client(args) as c:
-        return _emit(
-            c.register_registration(
-                kind,
-                spec,
-                reg_id=getattr(args, "id", None),
-                machine=machine,
-                env=env,
-            )
+        rec = c.register_registration(
+            kind,
+            spec,
+            reg_id=getattr(args, "id", None),
+            machine=machine,
+            env=env,
         )
+    if getattr(args, "ensure", False):
+        rec = {**rec, "daemon": _ensure_supervisor_daemon(args, machine, env)}
+    return _emit(rec)
 
 
 def _cmd_supervise_status(args: argparse.Namespace) -> int:
@@ -1520,6 +1521,114 @@ def _cmd_supervise_remove(args: argparse.Namespace) -> int:
         return _emit(c.remove_registration(args.id))
 
 
+def _spawn_supervisor_daemon_detached(machine: str | None, env: str) -> bool:
+    """Best-effort: launch the singleton supervisor daemon as a detached child.
+
+    Runs ``agent-dispatch supervise serve`` for this (machine, env) fully detached
+    so it outlives this CLI process. If a daemon is already running the new child's
+    single-instance election stands it down cleanly (pin-not-failover), so a double
+    launch is self-correcting. Returns whether the spawn was issued.
+    """
+    from .procutil import detached_kwargs
+
+    argv = [sys.executable, "-m", "agent_dispatch", "supervise", "serve"]
+    if machine:
+        argv += ["--machine", machine]
+    if env:
+        argv += ["--env", env]
+    try:
+        subprocess.Popen(  # noqa: S603
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            **detached_kwargs(),
+        )
+        return True
+    except OSError as exc:  # pragma: no cover -- launch failure is environmental
+        print(f"supervise register: could not ensure daemon: {exc}", file=sys.stderr)
+        return False
+
+
+def _ensure_supervisor_daemon(args: argparse.Namespace, machine: str | None, env: str) -> dict:
+    """Ensure a singleton supervisor daemon is running for this (machine, env).
+
+    Checks the supervisor lease first; if a daemon already holds it, this is a
+    no-op. Otherwise it launches one detached. Best-effort and fail-soft -- a
+    failure to ensure never fails the register call.
+    """
+    from .supervisor_daemon import supervisor_lease_scope
+
+    scope = supervisor_lease_scope(machine, env)
+    try:
+        with _client(args) as c:
+            lease = c.get_schedule_lease(scope)
+        if lease:
+            return {"ensured": False, "reason": "already running",
+                    "holder": lease.get("holder")}
+    except Exception:  # noqa: BLE001 -- fail-soft; fall through to a spawn attempt
+        pass
+    spawned = _spawn_supervisor_daemon_detached(machine, env)
+    return {"ensured": spawned, "reason": "spawned" if spawned else "spawn failed"}
+
+
+def _cmd_supervise_serve(args: argparse.Namespace) -> int:
+    """``supervise serve`` -- run the singleton supervisor daemon (foreground).
+
+    One master per (machine, env): reads the registration registry and runs each
+    active registration in its own subprocess, reconciling on every tick.
+    Single-instance-guarded -- a second daemon for the same scope stands down.
+    """
+    from .supervisor_daemon import SupervisorDaemon
+
+    machine, env = _registration_scope(args)
+    with _client(args) as c:
+        daemon = SupervisorDaemon(
+            c, machine, env, poll_interval=getattr(args, "interval", 5.0) or 5.0
+        )
+
+        def _on_cycle(summary) -> None:
+            changed = (
+                summary.started or summary.stopped or summary.restarted
+                or summary.revived
+            )
+            if changed:
+                print(
+                    f"supervise serve: started={summary.started} "
+                    f"stopped={summary.stopped} restarted={summary.restarted} "
+                    f"revived={summary.revived} running={summary.running}",
+                    file=sys.stderr,
+                )
+
+        return daemon.serve(
+            once=getattr(args, "once", False),
+            single_instance=not getattr(args, "no_single_instance", False),
+            on_cycle=_on_cycle,
+        )
+
+
+def _cmd_supervise_daemon_status(args: argparse.Namespace) -> int:
+    """``supervise daemon-status`` -- is a daemon running here, and what would it
+    run."""
+    from .supervisor_daemon import supervisor_lease_scope
+
+    machine, env = _registration_scope(args)
+    scope = supervisor_lease_scope(machine, env)
+    with _client(args) as c:
+        lease = c.get_schedule_lease(scope)
+        regs = c.list_registrations(machine=machine, env=env, include_paused=True)
+    return _emit(
+        {
+            "scope": scope,
+            "machine": machine,
+            "env": env,
+            "running": lease is not None,
+            "daemon": lease,
+            "registrations": regs,
+        }
+    )
+
+
 def _cmd_supervise(args: argparse.Namespace) -> int:
     """Run the embody spawn supervisor over the lane (once, or as a loop).
 
@@ -1542,6 +1651,10 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
         return _cmd_supervise_list(args)
     if sub == "remove":
         return _cmd_supervise_remove(args)
+    if sub == "serve":
+        return _cmd_supervise_serve(args)
+    if sub == "daemon-status":
+        return _cmd_supervise_daemon_status(args)
 
     from .supervisor import (
         Supervisor,
@@ -2745,6 +2858,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="path to an evaluator spec (JSON) folded into the lane spec")
     rp.add_argument("--interval", type=float, default=30.0,
                     help="serve loop poll interval in seconds (default: 30)")
+    rp.add_argument("--ensure", action="store_true",
+                    help="after registering, ensure the singleton supervisor daemon "
+                         "is running for this (machine, env) -- start it detached if "
+                         "not (best-effort; a running daemon is a no-op)")
     rp.set_defaults(func=_cmd_supervise)
     rp = sup_sub.add_parser("status", help="query a registration by its handle")
     rp.add_argument("id", help="registration id")
@@ -2759,6 +2876,32 @@ def build_parser() -> argparse.ArgumentParser:
     rp.set_defaults(func=_cmd_supervise)
     rp = sup_sub.add_parser("remove", help="remove a registration by its handle")
     rp.add_argument("id", help="registration id")
+    rp.set_defaults(func=_cmd_supervise)
+    rp = sup_sub.add_parser(
+        "serve",
+        help="run the singleton supervisor daemon (foreground): reconcile the "
+             "registration registry into per-unit subprocesses, one master per "
+             "(machine, env), single-instance-guarded",
+    )
+    rp.add_argument("--machine", help="scope: this machine (default: resolved alias)")
+    rp.add_argument("--env", help="scope: this environment "
+                    "(default: $AGENT_DISPATCH_ENV or 'default')")
+    rp.add_argument("--interval", type=float, default=5.0,
+                    help="reconcile poll interval in seconds (default: 5)")
+    rp.add_argument("--once", action="store_true",
+                    help="reconcile a single time and exit (still lease-guarded)")
+    rp.add_argument("--no-single-instance", action="store_true",
+                    help="skip the singleton election (deliberately unguarded; "
+                         "for tests / diagnostics only)")
+    rp.set_defaults(func=_cmd_supervise)
+    rp = sup_sub.add_parser(
+        "daemon-status",
+        help="show whether a supervisor daemon holds this (machine, env) scope "
+             "and the registrations it would run",
+    )
+    rp.add_argument("--machine", help="scope: this machine (default: resolved alias)")
+    rp.add_argument("--env", help="scope: this environment "
+                    "(default: $AGENT_DISPATCH_ENV or 'default')")
     rp.set_defaults(func=_cmd_supervise)
     p = sub.add_parser(
         "reservations", help="inspect / manually control spawn reservations"
