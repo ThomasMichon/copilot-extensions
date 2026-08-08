@@ -1715,6 +1715,33 @@ def add_resource_claim(
     return claim
 
 
+def settle_resource_claim(
+    record: WorktreeRecord,
+    ref: str,
+    disposition: str = obligations.AT_REST,
+    *,
+    save: bool = True,
+    path: Path | None = None,
+) -> ResourceClaim | None:
+    """Set the disposition of one outbound claim by ``ref`` (Phase 3 settlement).
+
+    Flips the matching claim's ``state`` to ``disposition`` (default ``at-rest``:
+    the resource's work is safe but the claim is still held) so the owner's
+    finalize gate no longer treats it as unsettled. This is the **incremental
+    settlement** primitive every hook calls when a resource reaches its own
+    close-out. Returns the settled claim, or ``None`` when no claim matches the
+    ref (a no-op, degrade-safe). Idempotent -- re-settling to the same value is
+    harmless.
+    """
+    match = next((c for c in record.resources if c.ref == ref), None)
+    if match is None:
+        return None
+    match.state = obligations.normalize(disposition)
+    if save:
+        save_record(record, path)
+    return match
+
+
 # Terminal statuses for the CASCADE/orphan model (citadel E1b, #877): a parent
 # in one of these states has finished its work, so the outbound worktree
 # resources it owned are no longer actively held -- its children are orphans

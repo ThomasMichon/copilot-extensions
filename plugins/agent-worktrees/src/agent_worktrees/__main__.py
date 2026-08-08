@@ -68,6 +68,7 @@ from . import claimant as claimant_mod
 from . import config as cfg
 from . import finalize as fin
 from . import installer as inst
+from . import obligations
 from . import services as svc
 from . import state_root as state_root_mod
 from . import validate as val
@@ -5342,6 +5343,14 @@ def cmd_claims(args: argparse.Namespace) -> int:
                        'Usage: claims release <ref> [--remove]')
             return 2
         return _claims_release(args, target[1])
+    if target and target[0] == "settle":
+        if len(target) < 2:
+            if args.json:
+                return _json_error("claims settle: missing <ref>", 2)
+            output.err('claims settle: missing <ref>. '
+                       'Usage: claims settle <ref> [--released]')
+            return 2
+        return _claims_settle(args, target[1])
     worktree_id = target[0] if target else None
     return _claims_show(args, worktree_id)
 
@@ -5381,6 +5390,41 @@ def _claims_release(args: argparse.Namespace, ref: str) -> int:
         _json_output({"worktree_id": wt_id, "ref": ref, "action": action})
         return 0
     print(f"{action} outbound claim {ref} on {wt_id}")
+    return 0
+
+
+def _claims_settle(args: argparse.Namespace, ref: str) -> int:
+    """Settle one outbound resource claim's disposition by ref (Phase 3).
+
+    Flips the matching claim to ``at-rest`` (default -- the resource's work is
+    safe but the claim is still held) or ``released`` with ``--released``. This
+    is the operator/hook entry point to the incremental-settlement primitive
+    (`tracking.settle_resource_claim`) that lets a worktree's finalize gate stop
+    treating the resource as unsettled. The owner worktree is the current one
+    unless ``--worktree`` names another.
+    """
+    config = cfg.load_config()
+    wt_id = _infer_worktree_id(getattr(args, "release_worktree", None), config)
+    rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+    if not rec_path.exists():
+        if args.json:
+            return _json_error(f"worktree not found: {wt_id}")
+        output.err(f"worktree not found: {wt_id}")
+        return 1
+    rec = tracking.load_record(rec_path)
+    disposition = (
+        obligations.RELEASED if getattr(args, "released", False) else obligations.AT_REST
+    )
+    settled = tracking.settle_resource_claim(rec, ref, disposition, path=rec_path)
+    if settled is None:
+        if args.json:
+            return _json_error(f"no outbound claim with ref: {ref}")
+        output.err(f"no outbound claim with ref: {ref} on {wt_id}")
+        return 1
+    if args.json:
+        _json_output({"worktree_id": wt_id, "ref": ref, "disposition": disposition})
+        return 0
+    print(f"settled outbound claim {ref} on {wt_id} -> {disposition}")
     return 0
 
 
@@ -12353,12 +12397,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("target", nargs="*", default=None,
                    help="[worktree_id] to show, OR 'release <ref>' to retire an "
-                        "outbound claim by ref")
+                        "outbound claim by ref, OR 'settle <ref>' to mark it "
+                        "at-rest (settled) / released")
     p.add_argument("--remove", action="store_true",
                    help="with release: drop the claim entry entirely instead of "
                         "marking it released")
+    p.add_argument("--released", action="store_true",
+                   help="with settle: mark the claim released rather than at-rest")
     p.add_argument("--worktree", default=None, dest="release_worktree",
-                   help="with release: the owner worktree (default: current)")
+                   help="with release/settle: the owner worktree (default: current)")
     p.add_argument("--json", action="store_true",
                    help="JSON output mode (stdout is JSON only)")
 

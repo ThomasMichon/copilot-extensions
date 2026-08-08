@@ -1032,6 +1032,55 @@ def _pr_finalize_precondition(
     )
 
 
+def _settle_parent_obligation(
+    record: tracking.WorktreeRecord,
+    config: Config,
+    worktree_id: str,
+) -> None:
+    """Settle the claim this worktree's PARENT holds on it, on finalize (Ph3).
+
+    A worktree that finalizes has proven its own work safe, so it flips the
+    outbound claim its **parent** carries (the parent's ledger entry whose
+    ``ref`` is this worktree's qualified ClaimRef) to ``at-rest`` -- the
+    incremental settlement that lets the parent's own finalize gate stop
+    treating this child as unsettled without re-deriving its state (the
+    recursion collapse).
+
+    Same-machine only: when the parent lives on **this** machine its tracking
+    YAML is directly updatable (``~/.{project}/worktrees/{id}.yaml``); a
+    cross-machine parent settles later via the lease disposition mirror / the
+    reclaim sweep. Fully best-effort and degrade-safe -- any failure (no
+    owner_ref, unresolved/foreign parent, no matching claim, I/O error) is a
+    silent no-op and never perturbs the finalize.
+    """
+    try:
+        owner = record.owner_claim_ref  # parsed ClaimRef of the parent, or None
+        if owner is None or not owner.is_qualified:
+            return
+        if owner.machine != config.machine:
+            return  # cross-machine parent -> lease mirror / sweep handles it
+        from . import config as cfg
+        parent_path = (
+            cfg.project_dir(owner.project) / "worktrees" / f"{owner.worktree_id}.yaml"
+        )
+        if not parent_path.exists():
+            return
+        parent = tracking.load_record(parent_path)
+        child_ref = tracking.format_claim_ref(
+            config.machine, config.repo_name, worktree_id
+        )
+        settled = tracking.settle_resource_claim(
+            parent, child_ref, obligations.AT_REST, path=parent_path,
+        )
+        if settled is not None:
+            output.ok(
+                f"Settled parent {owner.worktree_id}'s claim on this worktree "
+                f"(-> at-rest)"
+            )
+    except Exception:  # never let settlement perturb finalize
+        return
+
+
 def _assert_obligations_settled(
     record: tracking.WorktreeRecord | None,
     worktree_id: str,
@@ -1340,6 +1389,16 @@ def validate_and_finalize(
                     if c.note:
                         label += f" ({c.note})"
                     print(label)
+
+            # Obligation settlement, upward (resource-obligation-settlement Ph3):
+            # this worktree finalizing means its OWN work is safe, so settle the
+            # claim its PARENT holds on it -- flip the parent-visible claim to
+            # at-rest so the parent's finalize gate stops treating this child as
+            # unsettled. This is the recursion-collapse: the parent never
+            # re-derives the child's state, it trusts this flip. Best-effort +
+            # same-machine only (a cross-machine parent settles via the lease
+            # disposition mirror / reclaim sweep). Never blocks the finalize.
+            _settle_parent_obligation(record, config, worktree_id)
 
         activity.log_event(
             "worktree_finalized",
