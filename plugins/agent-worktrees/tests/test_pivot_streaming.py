@@ -157,3 +157,91 @@ def test_subscribe_live_delta_then_close_tears_down(tmp_path):
     # Teardown kills the held child promptly and leaves nothing tracked.
     rt.close()
     assert rt._procs == []
+
+
+# --- D4: run_action_stream (progress-reporting actions) --------------------
+
+_ACTION_PROVIDER = r'''
+import sys, json, time
+mode = sys.argv[1]
+
+def emit(o):
+    sys.stdout.write(json.dumps(o) + "\n")
+    sys.stdout.flush()
+
+if mode == "progress":
+    emit({"type": "progress", "pct": 0, "msg": "starting"})
+    emit({"type": "progress", "pct": 50, "msg": "halfway"})
+    emit({"type": "progress", "pct": 100, "msg": "finishing"})
+    emit({"type": "done", "message": "recycled"})
+elif mode == "error":
+    emit({"type": "progress", "pct": 10, "msg": "trying"})
+    emit({"type": "error", "message": "boom"})
+elif mode == "plain":
+    print("just a blob")   # no envelope
+elif mode == "hang":
+    emit({"type": "progress", "pct": 5, "msg": "working"})
+    for _ in range(300):
+        time.sleep(0.1)
+'''
+
+
+class _Action:
+    def __init__(self, run):
+        self.run = tuple(run)
+
+
+def _action_pivot(tmp_path):
+    return pivots.parse_manifest(
+        {"label": "P", "list": ["true"], "entry": {"id": "id"}},
+        name="p", source_path=str(tmp_path),
+    )
+
+
+def _action(tmp_path, mode):
+    script = tmp_path / "fake_action.py"
+    script.write_text(_ACTION_PROVIDER, encoding="utf-8")
+    return _Action([sys.executable, str(script), mode])
+
+
+def test_run_action_stream_reports_progress_then_done(tmp_path):
+    rt = tasks.RegisteredPivotRuntime(_action_pivot(tmp_path))
+    frames = []
+    ok, msg = rt.run_action_stream(
+        _action(tmp_path, "progress"), {}, lambda pct, m: frames.append((pct, m)))
+    assert ok is True
+    assert msg == "recycled"
+    assert frames[0] == (0.0, "starting")
+    assert (50.0, "halfway") in frames
+    assert frames[-1] == (100.0, "finishing")
+
+
+def test_run_action_stream_surfaces_error_frame(tmp_path):
+    rt = tasks.RegisteredPivotRuntime(_action_pivot(tmp_path))
+    ok, msg = rt.run_action_stream(_action(tmp_path, "error"), {}, lambda p, m: None)
+    assert ok is False
+    assert "boom" in msg
+
+
+def test_run_action_stream_plain_output_falls_back(tmp_path):
+    rt = tasks.RegisteredPivotRuntime(_action_pivot(tmp_path))
+    # No envelope, exit 0 -> treated as success with the output tail.
+    ok, msg = rt.run_action_stream(_action(tmp_path, "plain"), {}, lambda p, m: None)
+    assert ok is True
+
+
+def test_run_action_stream_cancellation(tmp_path):
+    rt = tasks.RegisteredPivotRuntime(_action_pivot(tmp_path))
+    seen = []
+    cancel = {"v": False}
+
+    def on_frame(pct, m):
+        seen.append((pct, m))
+        cancel["v"] = True  # cancel right after the first frame
+
+    ok, msg = rt.run_action_stream(
+        _action(tmp_path, "hang"), {}, on_frame, should_cancel=lambda: cancel["v"])
+    assert ok is False
+    assert msg == "cancelled"
+    assert rt._procs == []  # child killed + untracked
+
