@@ -65,6 +65,21 @@ worker; those belong to the layers around it. Its transport posture matches the
 rest of the fabric's control plane: it is reached **over the fabric's secured
 mesh**, never a raw public listener (see the parent vision's transport rule).
 
+### The supervisor — the singleton that runs registered work
+Where the coordinator is the single-writer **store**, the **supervisor** is the
+single-writer **runtime**: exactly **one supervisor per machine-and-environment**
+owns *running* the registered work on that host. It is the one place where
+registered intent becomes live processes — the **schedules**, the **emitters**,
+the **evaluators**, and the **spawn** of claimable tasks — each delegated to its
+own **subprocess** so a busy or failing unit never blocks its siblings or the
+master. A domain plugs into a host by **registering** its work with that host's
+supervisor, not by launching a rival loop; the singleton is the single point that
+reconciles every registration against what is actually running, and supervises the
+liveness of what it started. Like the coordinator it does **only** its own job —
+scheduling, emitting, evaluating, spawning, and keeping those alive — and it is
+reached over the fabric's secured mesh, never a public listener. The coordinator
+answers *what work exists*; the supervisor answers *what is running it here*.
+
 ### Worker identity — the worktree
 A worker's durable identity is the **worktree it occupies** (the same identity
 the ground layer owns), not a per-agent account. A claim is stamped to a
@@ -269,6 +284,21 @@ concurrency limit is the ceiling; *buildup-is-a-health-signal*'s escalate-or-dem
 is how the queue reacts **within** it. A bounded pool of broadly-chartered workers
 is the default posture, not an unbounded swarm of narrow ones.
 
+### registered-supervision
+Supervision is **registered, not run in the foreground**. A caller hands the
+host's singleton supervisor a **registration** — a lane to spawn for, a schedule,
+an emitter, an evaluator — and immediately gets back a durable **registration
+handle**; the call **returns** rather than becoming the loop. The registration is
+the caller's durable token: it can **query the unit's status** at any later time,
+or **remove** it, without holding a process open. The singleton owns the
+*running*; the caller owns the *registration*. This is what turns a machine's
+supervision into a **managed, inspectable, revocable set of units** rather than a
+scatter of foreground loops each tied to the terminal that launched it.
+Registering the same unit twice is **idempotent** (the handle identifies it), so a
+re-register reconciles the unit rather than duplicating it. Each registered unit
+runs in its **own subprocess**, so one unit's load or failure is isolated from the
+others and from the master.
+
 ## Behaviors
 
 ### fire-and-forget-not-driven
@@ -429,6 +459,21 @@ evaluator to advance it across events. The service tier is how *recurring* or
 The minimum viable deployment is a **coordinator plus a worker body**, so the
 reviewer, conflict-resolution, and goal-driven loops are equally available to a
 full automated deployment and to a bare host that has none of it.
+
+### supervise-registers-and-returns
+Registering supervised work **adds the registration and completes**, emitting the
+registration info back to the caller — it never blocks as the loop. Exactly **one**
+supervisor process per machine-and-environment services **all** registrations on
+that host; a second registration **attaches to that same singleton** (starting it
+if it is not already running) rather than spawning a rival loop. Querying a unit's
+status and removing it are their own operations against the registration handle, so
+a caller inspects or revokes work long after the registering call returned. A
+removed registration's running work is **wound down** by the singleton; a
+registration whose unit keeps failing is surfaced through the same *observable
+lifecycle* as any other work, never silently dropped. This is the behavioral face
+of *registered-supervision*: the terminal that registers a schedule, an emitter, an
+evaluator, or a supervised lane does not become that work's host — the machine's one
+supervisor does.
 
 ## Non-Goals / Boundaries
 
