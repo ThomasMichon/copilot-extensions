@@ -413,6 +413,35 @@ get the typed TS signatures for just the tools it needs, then writes `run_code`.
 The full interface is embedded inline only when the catalog is at/below
 `interface_limit` (default 40).
 
+**Prerequisites — when code-mode pays off.** code-mode is worth the indirection
+only when the upstream MCP has **all** of: (1) genuinely **chained** calls (one
+tool's output feeds the next), (2) **large intermediate payloads** better filtered
+in-snippet than surfaced, (3) a **catalog large enough** that `find_tool`
+discovery earns its keep, and (4) **predictable, documented output shapes.**
+
+Criterion (4) is the one most integrations forget, and it is a hard gate. The generated
+`Tools` interface types **inputs only** — every method is rendered
+`name(args: <from inputSchema>): Promise<any>`. MCP tools seldom carry an
+`outputSchema`, and the renderer ignores it regardless, so **return shapes are
+untyped**. In a snippet the model must therefore know each tool's result shape
+*in advance*; a direct tool call does not (it sees the result and adapts). The
+auto-parse convention also differs **per call**: a *lone* JSON text result is
+auto-parsed to an object, but a *multi-item* content result arrives as the raw
+MCP content array (`[{ type: "text", text: "…" }]`) the snippet must unwrap and
+`JSON.parse` itself. Against undocumented shapes, chained snippets fail blind —
+often on the *second* tool after the first was probed — and the probe rounds
+erase the round-trip win.
+
+The remedy is to **schematize the output first**: put a
+[`transform`](#transform--reshape-tool-results) decorator **innermost** that
+`pick`/`extract`/`drop`s each read tool's result into a small, stable, *named*
+shape, and document that shape in the consuming sub-agent's `.agent.md`. Then
+code-mode snippets are written against a known contract. Without a `transform`
+companion for an undocumented upstream, prefer **direct tool calls** behind a
+plain `tools:` filter — the model-sees-then-adapts loop is the more reliable
+default, and additive code-mode (`expose: ["*"]`) over blind shapes mostly adds a
+tool the model can't use confidently.
+
 ### `storage` — relay large I/O through a stream buffer
 
 Keep big payloads out of the model's context:

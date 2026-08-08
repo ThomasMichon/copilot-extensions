@@ -193,7 +193,7 @@ decorators:
 | `filter` | Prune `tools/list` and reject calls to hidden tools (`allow`/`deny` globs). |
 | `rename` | Rewrite tool names/descriptions (`namespace`/`prefix`/`suffix`/regex `patterns`); routes calls back to real names. |
 | `defer` | Expose `find_tool`/`execute_tool` (+`load_tools` in lazy mode) over a large catalog. The UniFi MCP pattern. |
-| `code-mode` | Expose a `run_code` tool with a generated TypeScript `Tools` interface; snippets run in Node and chain tool calls. Adds `find_tool` for typed signatures on big catalogs. Needs Node on `PATH`. |
+| `code-mode` | Expose a `run_code` tool with a generated TypeScript `Tools` interface; snippets run in Node and chain tool calls. Adds `find_tool` for typed signatures on big catalogs. Needs Node on `PATH`. **Best only when calls chain, payloads are large, *and* output shapes are documented — see [prerequisites](#is-an-mcp-a-good-code-mode-candidate-prerequisites); pair with `transform` when they aren't.** |
 | `storage` | Externalize large outputs to `mcpstream://…` handles; rehydrate handle inputs; `read_stream` fetches them. **Field-level `rules:`** target specific tool input/output JSON paths, attach a summary (count + schema + head, or a command), and rewrite a stream-mode input param's schema to a URL. |
 | `transform` | Reshape tool results per tool: `extract`/`pick`/`drop` dotted paths (literal-dotted keys like ADO `fields.System.Title` supported) or a `command` (jq-style) filter. |
 | `gate` | Allow/deny a tool **per-call** by a **preflight** upstream lookup + boolean predicate (`all`/`any`/`not`; `in`/`matches`/`equals`/`contains`/`exists` over `[*]`/dotted paths). Deny → `stub`/`drop`/`error`; fail-closed on preflight error. For rules whose signal is out-of-band for the gated tool. |
@@ -203,6 +203,40 @@ order: `defer`/`code-mode` outermost, then `rename`, then `filter`, with
 `storage` innermost. The legacy `tools:` filter still works (applied as an
 implicit `filter`). Full reference + per-decorator options:
 [README → Decorator stack](../../README.md#decorator-stack).
+
+### Is an MCP a good `code-mode` candidate? (prerequisites)
+
+`code-mode` is not a free win — reach for it only when **all four** hold:
+
+1. **Chained calls** — one tool's output feeds the next (resolve → fetch →
+   filter). One-shot tools (a single search with server-side filtering) gain
+   nothing.
+2. **Large intermediate payloads** — better filtered inside the snippet than
+   dumped into context.
+3. **A catalog big enough** that typed discovery (`find_tool`) earns its keep
+   (roughly `interface_limit`, 40+).
+4. **Predictable, documented output shapes.** ← the easy one to miss.
+
+Criterion **4** is the gate. The generated `Tools` interface types **inputs
+only** (from each tool's `inputSchema`); every method returns **`Promise<any>`**
+— MCP tools rarely ship an `outputSchema`, and the renderer ignores it if they
+do. So in a snippet the model must commit to a result shape *before it runs*,
+with no types to lean on. Direct tool calls sidestep this (the model sees each
+result and adapts turn-by-turn); `code-mode` cannot. Result-shape surprises also
+vary *per tool*: a **lone** JSON text result is auto-parsed to an object, but a
+**multi-item** content result arrives as the raw MCP content array
+(`[{type:"text", text:"…"}]`) that the snippet must unwrap and `JSON.parse`
+itself. With undocumented shapes, every snippet becomes a guess (or burns a probe
+round), erasing the round-trip savings.
+
+**Fix — pair `code-mode` with `transform`.** When outputs are undocumented or
+messy, add a `transform` decorator **innermost** (upstream end) that
+`pick`/`extract`/`drop`s each read tool's result into a small, **stable, named**
+schema — then document that schema in the sub-agent's `.agent.md`. Now snippets
+are written against a known shape, payloads shrink (helps 2), and `code-mode`
+delivers. Without a `transform` companion for undocumented upstreams, prefer
+**direct tool calls** (a plain `tools:` allow/deny filter) — they are the more
+reliable default.
 
 ## Commands
 
