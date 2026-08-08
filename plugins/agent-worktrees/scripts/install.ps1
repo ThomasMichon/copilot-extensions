@@ -283,8 +283,7 @@ $LinkDir          = $VenvDir
 $LinkPython       = $VenvPython
 $VersionedRuntime = $false
 $SrcVersion       = $null
-if (($env:COPILOT_EXT_NO_VERSIONED -ne '1') -and
-    ($env:AGENT_WORKTREES_VERSIONED -notin @('0', 'false', 'no', 'off'))) {
+if ($true) {  # always versioned (junction-free marker model; COPILOT_EXT_NO_VERSIONED retired)
     $pyprojForVer = if ($PluginDir) { Join-Path $PluginDir 'pyproject.toml' } else { $null }
     if ($pyprojForVer -and (Test-Path $pyprojForVer)) {
         $vl = Select-String -Path $pyprojForVer -Pattern '^\s*version\s*=' | Select-Object -First 1
@@ -294,6 +293,8 @@ if (($env:COPILOT_EXT_NO_VERSIONED -ne '1') -and
         $VersionedRuntime = $true
         $VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
         $VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
+        $LinkDir = $VenvDir
+        $LinkPython = $VenvPython
     }
 }
 
@@ -316,7 +317,7 @@ function Invoke-VersionedActivate {
     }
     Invoke-VersionedMarkComplete
     $prev = (& $py $vr --root $InstallDir --link-name '.venv' current 2>$null); $prev = ("$prev").Trim()
-    & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --replace-nonlink 2>&1 |
+    & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
         ForEach-Object { Write-ServiceChanged $_ }
     if ($LASTEXITCODE -ne 0) {
         Write-ServiceErr "Failed to activate versioned venv (.venv -> versions/$SrcVersion)"
@@ -1109,8 +1110,10 @@ rem Context resolves from CWD / --project (git-like); the binstub names its
 rem project via --project, not an ambient env var.
 rem Resolve the .venv reparse target and launch the slot python directly, never
 rem traversing the junction (blocked under RedirectionGuard) -- dotfiles #637.
-set "_PY=%USERPROFILE%\.agent-worktrees\.venv\Scripts\python.exe"
-for /f "tokens=2 delims=[]" %%i in ('dir /a:l "%USERPROFILE%\.agent-worktrees" 2^>nul ^| findstr /i /c:".venv"') do set "_PY=%%i\Scripts\python.exe"
+set "_ROOT=%USERPROFILE%\.agent-worktrees"
+set "_VER="
+if exist "%_ROOT%\current-version" set /p _VER=<"%_ROOT%\current-version"
+set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
 if not exist "%_PY%" goto :_aw_fallback
 "%_PY%" -m agent_worktrees --project $ProjectName %*
 exit /b %ERRORLEVEL%
@@ -1138,7 +1141,11 @@ $_venv = "$env:USERPROFILE\.agent-worktrees\.venv"
 # Resolve the .venv reparse target and launch the slot python directly, never
 # traversing the junction (blocked under RedirectionGuard) -- dotfiles #637.
 $_py = "$_venv\Scripts\python.exe"
-try { $_t = (Get-Item -LiteralPath $_venv -Force -ErrorAction Stop).Target; if ($_t) { $_py = Join-Path (@($_t)[0]) 'Scripts\python.exe' } } catch {}
+$_root = Split-Path $_venv
+$_ver = ''
+try { $_ver = ([IO.File]::ReadAllText((Join-Path $_root 'current-version'))).Trim() } catch {}
+$_py = if ($_ver) { Join-Path $_root ('versions\' + $_ver + '\Scripts\python.exe') } else { '' }
+if (-not ($_py -and (Test-Path -LiteralPath $_py))) { $_py = Get-ChildItem (Join-Path $_root 'versions') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Join-Path $_.FullName 'Scripts\python.exe' } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Last 1 }
 if (Test-Path $_py) {
     & $_py -m agent_worktrees --project '%%PROJECT%%' @args
     exit $LASTEXITCODE

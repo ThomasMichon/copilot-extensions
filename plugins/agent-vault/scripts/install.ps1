@@ -234,8 +234,7 @@ $LinkDir          = $VenvDir
 $LinkPython       = $VenvPython
 $VersionedRuntime = $false
 $SrcVersion       = $null
-if (($env:COPILOT_EXT_NO_VERSIONED -ne '1') -and
-    ($env:AGENT_VAULT_VERSIONED -notin @('0', 'false', 'no', 'off'))) {
+if ($true) {  # always versioned (junction-free marker model; COPILOT_EXT_NO_VERSIONED retired)
     $pyprojForVer = Join-Path $PluginDir 'pyproject.toml'
     if (Test-Path $pyprojForVer) {
         $vl = Select-String -Path $pyprojForVer -Pattern '^\s*version\s*=' | Select-Object -First 1
@@ -245,6 +244,8 @@ if (($env:COPILOT_EXT_NO_VERSIONED -ne '1') -and
         $VersionedRuntime = $true
         $VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
         $VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
+        $LinkDir = $VenvDir
+        $LinkPython = $VenvPython
     }
 }
 # === end install-contract:v3 versioned-venv ===
@@ -297,7 +298,7 @@ function Invoke-VersionedActivate {
     }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
-    & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --replace-nonlink 2>&1 |
+    & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
         ForEach-Object { Write-Step $_ }
     if ($LASTEXITCODE -ne 0) {
         Write-Fail "Failed to activate versioned venv (.venv -> versions/$SrcVersion)"
@@ -584,15 +585,21 @@ function Write-Binstubs {
     # Resolve the .venv link's reparse target and launch the slot python DIRECTLY,
     # never *traversing* the junction (a RedirectionGuard-enforcing process is
     # blocked from that but may still *read* the target) -- dotfiles #637. The .ps1
-    # reads (Get-Item .venv).Target; the .cmd parses `dir /a:l`. Plain-dir falls back.
+    # reads the current-version marker; the .cmd reads the same marker. Newest slot falls back.
     $stubVenv = Split-Path (Split-Path $PythonExe)
     $stubRoot = Split-Path $stubVenv
+    if ((Split-Path -Leaf $stubRoot) -eq 'versions') { $stubRoot = Split-Path $stubRoot }
 
     $ps1 = @(
         "`$env:PYTHONUTF8 = '1'",
         "`$_venv = '$stubVenv'",
         "`$_py = Join-Path `$_venv 'Scripts\python.exe'",
-        "try { `$_t = (Get-Item -LiteralPath `$_venv -Force -ErrorAction Stop).Target; if (`$_t) { `$_py = Join-Path (@(`$_t)[0]) 'Scripts\python.exe' } } catch {}",
+        "`$_root = Split-Path `$_venv
+if ((Split-Path -Leaf `$_root) -eq 'versions') { `$_root = Split-Path `$_root }
+`$_ver = ''
+try { `$_ver = ([IO.File]::ReadAllText((Join-Path `$_root 'current-version'))).Trim() } catch {}
+`$_py = if (`$_ver) { Join-Path `$_root ('versions\' + `$_ver + '\Scripts\python.exe') } else { '' }
+if (-not (`$_py -and (Test-Path -LiteralPath `$_py))) { `$_py = Get-ChildItem (Join-Path `$_root 'versions') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Join-Path `$_.FullName 'Scripts\python.exe' } | Where-Object { Test-Path -LiteralPath `$_ } | Select-Object -Last 1 }",
         "& `$_py -m agent_vault @args",
         "exit `$LASTEXITCODE"
     ) -join "`r`n"
@@ -601,8 +608,10 @@ function Write-Binstubs {
     $cmd = @(
         "@echo off",
         "set `"PYTHONUTF8=1`"",
-        "set `"_PY=$stubVenv\Scripts\python.exe`"",
-        "for /f `"tokens=2 delims=[]`" %%i in ('dir /a:l `"$stubRoot`" 2^>nul ^| findstr /i /c:`".venv`"') do set `"_PY=%%i\Scripts\python.exe`"",
+        "set `"_ROOT=$stubRoot`"",
+        "set `"_VER=`"",
+        "if exist `"%_ROOT%\current-version`" set /p _VER=<`"%_ROOT%\current-version`"",
+        "set `"_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe`"",
         "`"%_PY%`" -m agent_vault %*"
     ) -join "`r`n"
     [System.IO.File]::WriteAllText($BinstubCmd, $cmd, $utf8NoBom)
@@ -776,7 +785,12 @@ function Register-AgentVaultTask {
     # task is re-registered every install/update and `gc` keeps the current slot,
     # so this tracks the active version. Plain-dir `.venv` keeps $LinkPython.
     $taskPy = $LinkPython
-    try { $_t = (Get-Item -LiteralPath $LinkDir -Force -ErrorAction Stop).Target; if ($_t) { $taskPy = Join-Path (@($_t)[0]) 'Scripts\python.exe' } } catch {}
+    $_root = Split-Path $LinkDir
+    if ((Split-Path -Leaf $_root) -eq 'versions') { $_root = Split-Path $_root }
+    $_ver = ''
+    try { $_ver = ([IO.File]::ReadAllText((Join-Path $_root 'current-version'))).Trim() } catch {}
+    $taskPy = if ($_ver) { Join-Path $_root ('versions\' + $_ver + '\Scripts\python.exe') } else { '' }
+    if (-not ($taskPy -and (Test-Path -LiteralPath $taskPy))) { $taskPy = Get-ChildItem (Join-Path $_root 'versions') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Join-Path $_.FullName 'Scripts\python.exe' } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Last 1 }
     $action = New-ScheduledTaskAction `
         -Execute 'conhost.exe' `
         -Argument "--headless `"$taskPy`" -m agent_vault.service --foreground --persistent" `

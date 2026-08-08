@@ -209,17 +209,20 @@ if ($env:OS -eq 'Windows_NT') {
 # venv). Opt out with COPILOT_EXT_NO_VERSIONED=1 (falls back to a plain in-place
 # `.venv`). The scripts/versioned_runtime.py primitive owns the swap + migration.
 $LinkDir = $VenvDir                       # stable path the binstub/manifest reference
-$VersionedRuntime = $env:COPILOT_EXT_NO_VERSIONED -ne '1'
+$LinkPython = $VenvPython
+$VersionedRuntime = $true  # always versioned (junction-free marker model; COPILOT_EXT_NO_VERSIONED retired)
 $SrcVersion = $null
 $pyprojForVer = Join-Path $PluginDir 'pyproject.toml'
 if (Test-Path $pyprojForVer) {
     $vl = Select-String -Path $pyprojForVer -Pattern '^\s*version\s*=' | Select-Object -First 1
     if ($vl) { $SrcVersion = ($vl.Line -replace '.*=\s*"([^"]+)".*', '$1') }
 }
-if ($VersionedRuntime -and $SrcVersion) {
+if ($SrcVersion) {
     $VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
     if ($env:OS -eq 'Windows_NT') { $VenvPython = Join-Path $VenvDir 'Scripts\python.exe' }
     else { $VenvPython = Join-Path $VenvDir 'bin/python' }
+    $LinkDir = $VenvDir
+    $LinkPython = $VenvPython
 } else {
     $VersionedRuntime = $false
 }
@@ -512,7 +515,7 @@ if ($VersionedRuntime) {
         exit 1
     }
     Invoke-VersionedMarkComplete
-    & $VenvPython $VrScript --root $InstallDir --link-name '.venv' activate $SrcVersion --replace-nonlink 2>&1 | Out-Null
+    & $VenvPython $VrScript --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Fail "Failed to activate versioned venv (.venv -> versions/$SrcVersion)"
         exit 1
@@ -553,8 +556,10 @@ if ($env:OS -eq 'Windows_NT') {
     $stubContent = @"
 @echo off
 set "PYTHONUTF8=1"
-set "_PY=%USERPROFILE%\.agent-machines\.venv\Scripts\python.exe"
-for /f "tokens=2 delims=[]" %%i in ('dir /a:l "%USERPROFILE%\.agent-machines" 2^>nul ^| findstr /i /c:".venv"') do set "_PY=%%i\Scripts\python.exe"
+set "_ROOT=%USERPROFILE%\.agent-machines"
+set "_VER="
+if exist "%_ROOT%\current-version" set /p _VER=<"%_ROOT%\current-version"
+set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
 "%_PY%" -m agent_machines %*
 "@
     [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)

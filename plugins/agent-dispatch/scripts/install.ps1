@@ -262,8 +262,7 @@ $LinkDir          = $VenvDir
 $LinkPython       = $VenvPython
 $VersionedRuntime = $false
 $SrcVersion       = $null
-if (($env:COPILOT_EXT_NO_VERSIONED -ne '1') -and
-    ($env:AGENT_DISPATCH_VERSIONED -notin @('0', 'false', 'no', 'off'))) {
+if ($true) {  # always versioned (junction-free marker model; COPILOT_EXT_NO_VERSIONED retired)
     $pyprojForVer = Join-Path $PluginDir 'pyproject.toml'
     if (Test-Path $pyprojForVer) {
         $vl = Select-String -Path $pyprojForVer -Pattern '^\s*version\s*=' | Select-Object -First 1
@@ -274,6 +273,8 @@ if (($env:COPILOT_EXT_NO_VERSIONED -ne '1') -and
         $VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
         if ($env:OS -eq 'Windows_NT') { $VenvPython = Join-Path $VenvDir 'Scripts\python.exe' }
         else { $VenvPython = Join-Path $VenvDir 'bin/python' }
+        $LinkDir = $VenvDir
+        $LinkPython = $VenvPython
     }
 }
 # === end install-contract:v3 versioned-venv ===
@@ -302,7 +303,7 @@ function Invoke-VersionedActivate {
     }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
-    & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --replace-nonlink 2>&1 |
+    & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
         ForEach-Object { Write-Step $_ }
     if ($LASTEXITCODE -ne 0) {
         Write-Fail "Failed to activate versioned venv (.venv -> versions/$SrcVersion)"
@@ -663,8 +664,10 @@ function Install-Runtime {
         $stubContent = @"
 @echo off
 set "PYTHONUTF8=1"
-set "_PY=%USERPROFILE%\.agent-dispatch\.venv\Scripts\python.exe"
-for /f "tokens=2 delims=[]" %%i in ('dir /a:l "%USERPROFILE%\.agent-dispatch" 2^>nul ^| findstr /i /c:".venv"') do set "_PY=%%i\Scripts\python.exe"
+set "_ROOT=%USERPROFILE%\.agent-dispatch"
+set "_VER="
+if exist "%_ROOT%\current-version" set /p _VER=<"%_ROOT%\current-version"
+set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
 "%_PY%" -m agent_dispatch %*
 "@
         [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
@@ -1129,7 +1132,13 @@ if (Test-Path `$envFile) {
 `$_venv = '$($LinkDir -replace "'","''")'
 `$_py = '$($LinkPython -replace "'","''")'
 `$_slot = ''
-try { `$_t = (Get-Item -LiteralPath `$_venv -Force -ErrorAction Stop).Target; if (`$_t) { `$_slot = @(`$_t)[0]; `$_py = Join-Path `$_slot 'Scripts\python.exe' } } catch {}
+`$_root = Split-Path `$_venv
+if ((Split-Path -Leaf `$_root) -eq 'versions') { `$_root = Split-Path `$_root }
+`$_ver = ''
+try { `$_ver = ([IO.File]::ReadAllText((Join-Path `$_root 'current-version'))).Trim() } catch {}
+`$_slot = if (`$_ver) { Join-Path `$_root ('versions\' + `$_ver) } else { '' }
+`$_py = if (`$_slot) { Join-Path `$_slot 'Scripts\python.exe' } else { '' }
+if (-not (`$_py -and (Test-Path -LiteralPath `$_py))) { `$_py = Get-ChildItem (Join-Path `$_root 'versions') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Join-Path `$_.FullName 'Scripts\python.exe' } | Where-Object { Test-Path -LiteralPath `$_ } | Select-Object -Last 1; `$_slot = if (`$_py) { Split-Path (Split-Path `$_py) } else { '' } }
 # A busy/locked log must NEVER block the coordinator launch. Prefer the canonical
 # serve-service.log; if it cannot be opened for append (a stale or concurrent
 # process still holds the handle), fall back to a VERSION- and pid-aware file so
@@ -1543,7 +1552,13 @@ if (`$extra) { `$argsList += (`$extra -split '\s+') }
 `$_venv = '$($LinkDir -replace "'","''")'
 `$_py = '$($LinkPython -replace "'","''")'
 `$_slot = ''
-try { `$_t = (Get-Item -LiteralPath `$_venv -Force -ErrorAction Stop).Target; if (`$_t) { `$_slot = @(`$_t)[0]; `$_py = Join-Path `$_slot 'Scripts\python.exe' } } catch {}
+`$_root = Split-Path `$_venv
+if ((Split-Path -Leaf `$_root) -eq 'versions') { `$_root = Split-Path `$_root }
+`$_ver = ''
+try { `$_ver = ([IO.File]::ReadAllText((Join-Path `$_root 'current-version'))).Trim() } catch {}
+`$_slot = if (`$_ver) { Join-Path `$_root ('versions\' + `$_ver) } else { '' }
+`$_py = if (`$_slot) { Join-Path `$_slot 'Scripts\python.exe' } else { '' }
+if (-not (`$_py -and (Test-Path -LiteralPath `$_py))) { `$_py = Get-ChildItem (Join-Path `$_root 'versions') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Join-Path `$_.FullName 'Scripts\python.exe' } | Where-Object { Test-Path -LiteralPath `$_ } | Select-Object -Last 1; `$_slot = if (`$_py) { Split-Path (Split-Path `$_py) } else { '' } }
 # A busy/locked log must NEVER block the supervisor launch -- prefer the canonical
 # supervise-service.log, else a VERSION- and pid-aware fallback (see serve-service).
 function Resolve-WritableLog([string]`$primary, [string]`$slot) {
