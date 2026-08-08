@@ -123,6 +123,18 @@ plugin you changed.
 > push if any plugin's `plugin.json` / `pyproject.toml` / `marketplace.json`
 > versions disagree — the guard added after #65 bumped only `pyproject.toml` and
 > wedged the Picker's "Update available" indicator into a permanent loop.
+>
+> **Enforced by `tools/check-version-bump.py`** (pre-push + CI, PR-diff scoped):
+> it fails the push/PR if a plugin's content changed **without** a version bump.
+> A change to **any file under `plugins/<p>/`** (its `src/`, `skills/`,
+> `agents/`, own `docs/`, tests, manifests) requires bumping `<p>`; a change to a
+> **shared, vendored `libs/<lib>/`** requires bumping **every** plugin that
+> vendors it (a lib change reaches every consumer's payload — see
+> `check-vendored-libs-sync.py`). This closes the silent stale-deploy gap where
+> new code ships under an unchanged version and the version-gated runtime install
+> never redeploys it (dotfiles #1025). Repo-root files not vendored into any
+> plugin (`tools/`, `.github/`, repo-root `docs/`, `CONTRIBUTING.md`,
+> `README.md`) need no bump. Build artifacts under a plugin are ignored.
 
 **agent-worktrees:**
 
