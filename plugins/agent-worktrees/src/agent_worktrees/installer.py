@@ -366,6 +366,7 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
     # session-conduct injector (sessionStart additionalContext) + the
     # statelessness_guard + cross_repo_guard (called by the preToolUse hooks).
     for name in ("session-conduct.ps1", "session-conduct.sh",
+                 "session-machine.ps1", "session-machine.sh",
                  "bootstrap-check.ps1", "bootstrap-check.sh",
                  "statelessness_guard.py", "cross_repo_guard.py"):
         src = scripts / name
@@ -910,10 +911,13 @@ def show_install_status() -> None:
         active = sum(1 for y in yamls if "status: active" in y.read_text())
         output.ok(f"{active} active worktree(s), {len(yamls)} total")
 
-    # Copilot instructions -- context-aware check
-    instr_path = proj_dir / ".github" / "instructions" / "machine.instructions.md"
-    agents_path = proj_dir / "AGENTS.md"
-    # Check if machines.yaml is configured for this project
+    # Machine identity is delivered live via the session-machine sessionStart
+    # hook (dotfiles#1056), not a deployed machine.instructions.md / AGENTS.md.
+    # Report the hook injector's presence instead of the retired files.
+    machine_hook = bin_dir() / (
+        "session-machine.ps1" if platform.system() == "Windows"
+        else "session-machine.sh"
+    )
     _has_machines_yaml = False
     try:
         _reg = read_projects_registry()
@@ -924,22 +928,13 @@ def show_install_status() -> None:
     except Exception:
         pass
 
-    if _has_machines_yaml:
-        # machines.yaml exists -- instruction files should be deployed
-        if instr_path.exists() and agents_path.exists():
-            output.ok("machine.instructions.md + AGENTS.md deployed")
-        elif instr_path.exists():
-            output.ok("machine.instructions.md deployed (AGENTS.md missing)")
-        elif agents_path.exists():
-            output.warn("AGENTS.md deployed but machine.instructions.md missing (run update)")
+    if machine_hook.exists():
+        if _has_machines_yaml:
+            output.ok("machine identity via session-machine hook (machines.yaml configured)")
         else:
-            output.err("instruction files missing (run install or update)")
+            output.skipped("session-machine hook present (no machines.yaml -- emits nothing)")
     else:
-        # No machines.yaml -- instruction files are optional
-        if instr_path.exists() or agents_path.exists():
-            output.ok("machine instruction files present")
-        else:
-            output.skipped("machine instructions not configured (no machines.yaml)")
+        output.warn("session-machine hook missing (run install or update)")
 
 
 # ── Projects registry ───────────────────────────────────────────────────
