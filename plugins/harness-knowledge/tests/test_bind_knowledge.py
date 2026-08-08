@@ -60,12 +60,44 @@ def test_bind_writes_pointer_and_fragment(tmp_path: Path):
     summary = bk.bind("citadel-harness", "citadel-knowledge", "C:/k",
                       home=home, harness_path="C:/h")
     cfg = home / ".citadel-harness" / "config.yaml"
-    frag = home / ".citadel-harness" / ".github" / "instructions" / "knowledge-binding.instructions.md"
+    # Migrated (dotfiles#1057): the fragment is now plugin-internal data at
+    # ~/.<harness>/knowledge-binding.md (NOT the auto-loaded .github/instructions/),
+    # emitted at session start by the harness-knowledge hook.
+    frag = home / ".citadel-harness" / "knowledge-binding.md"
+    old_frag = home / ".citadel-harness" / ".github" / "instructions" / "knowledge-binding.instructions.md"
     assert cfg.exists() and frag.exists()
+    assert not old_frag.exists(), "the fragment must not land in the auto-loaded instructions dir"
     assert "knowledge_repo: citadel-knowledge" in cfg.read_text()
     assert "repo_name: citadel-harness" in cfg.read_text()  # seeded
     assert bk.MANAGED_MARKER in frag.read_text()
     assert summary["knowledge_repo"] == "citadel-knowledge"
+
+
+def test_bind_retires_stale_auto_loaded_fragment(tmp_path: Path):
+    # A prior bind wrote the auto-loaded file; re-binding retires it (marker-guarded).
+    home = tmp_path / "home"
+    old_dir = home / ".citadel-harness" / ".github" / "instructions"
+    old_dir.mkdir(parents=True)
+    old_frag = old_dir / "knowledge-binding.instructions.md"
+    old_frag.write_text(f"{bk.MANAGED_MARKER}\n# stale binding\n", encoding="utf-8")
+
+    bk.bind("citadel-harness", "kn", "C:/k", home=home, harness_path="C:/h")
+
+    assert not old_frag.exists(), "stale auto-loaded fragment must be retired on re-bind"
+    assert (home / ".citadel-harness" / "knowledge-binding.md").exists()
+
+
+def test_bind_leaves_unmarked_user_instructions(tmp_path: Path):
+    # An unmarked user file in the instructions dir must never be deleted.
+    home = tmp_path / "home"
+    old_dir = home / ".citadel-harness" / ".github" / "instructions"
+    old_dir.mkdir(parents=True)
+    user_file = old_dir / "knowledge-binding.instructions.md"
+    user_file.write_text("# my own notes, not ours\n", encoding="utf-8")
+
+    bk.bind("citadel-harness", "kn", "C:/k", home=home, harness_path="C:/h")
+
+    assert user_file.exists(), "an unmarked user file must never be deleted"
 
 
 def test_bind_preserves_existing_config(tmp_path: Path):
