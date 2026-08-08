@@ -703,6 +703,104 @@ class TestHeadlessConfig:
 
 
 # ---------------------------------------------------------------------------
+# E1e config.yaml knowledge overlay (#947)
+# ---------------------------------------------------------------------------
+
+class TestKnowledgeConfigOverlay:
+    """The knowledge repo's config.yaml grafts portable operator prefs for a
+    stateless harness -- a tier between the in-repo base and machine-local."""
+
+    def _registry(self, monkeypatch, **name_to_anchor):
+        from agent_worktrees import repos as repos_mod
+        registry = repos_mod.ReposRegistry(repos={
+            name: repos_mod.RepoEntry(
+                name=name, repo_class="worktree",
+                paths={"windows": str(a), "wsl": str(a), "linux": str(a)},
+            )
+            for name, a in name_to_anchor.items()
+        })
+        monkeypatch.setattr(repos_mod, "read_registry", lambda: registry)
+
+    def _mk_harness(self, tmp_path, *, stateless=True):
+        h = tmp_path / "harness"
+        h.mkdir()
+        body = "pr:\n  enabled: true\n"
+        if stateless:
+            body = "stateless: true\n" + body
+        (h / cfg.INREPO_CONFIG_DIRNAME).mkdir(parents=True)
+        (h / cfg.INREPO_CONFIG_DIRNAME / "config.yaml").write_text(body, encoding="utf-8")
+        return h
+
+    def _mk_knowledge(self, tmp_path, body):
+        k = tmp_path / "knowledge"
+        k.mkdir()
+        (k / cfg.INREPO_CONFIG_DIRNAME).mkdir(parents=True)
+        (k / cfg.INREPO_CONFIG_DIRNAME / "config.yaml").write_text(body, encoding="utf-8")
+        return k
+
+    def test_overlay_grafts_prefs_for_stateless_harness(self, tmp_path, monkeypatch):
+        h = self._mk_harness(tmp_path, stateless=True)
+        k = self._mk_knowledge(tmp_path, "headless: true\nnew_picker: false\n")
+        self._registry(monkeypatch, harness=h, knowledge=k)
+        # machine-local: binds the knowledge repo, does NOT set the prefs.
+        mfile = tmp_path / "machine.yaml"
+        mfile.write_text(
+            "repo_name: harness\nmachine: m\nplatform: wsl\n"
+            "knowledge_repo: knowledge\n"
+            f"repos:\n  harness:\n    anchor: {h}\n    worktree_root: /tmp/wt\n",
+            encoding="utf-8")
+        conf = cfg.load_config(mfile)
+        assert conf.headless is True        # from the knowledge overlay
+        assert conf.new_picker is False     # from the knowledge overlay
+
+    def test_machine_local_wins_over_overlay(self, tmp_path, monkeypatch):
+        h = self._mk_harness(tmp_path, stateless=True)
+        k = self._mk_knowledge(tmp_path, "headless: true\n")
+        self._registry(monkeypatch, harness=h, knowledge=k)
+        mfile = tmp_path / "machine.yaml"
+        mfile.write_text(
+            "repo_name: harness\nmachine: m\nplatform: wsl\n"
+            "knowledge_repo: knowledge\nheadless: false\n"
+            f"repos:\n  harness:\n    anchor: {h}\n    worktree_root: /tmp/wt\n",
+            encoding="utf-8")
+        # machine-local headless:false beats the knowledge overlay's true.
+        assert cfg.load_config(mfile).headless is False
+
+    def test_non_stateless_harness_ignores_overlay(self, tmp_path, monkeypatch):
+        h = self._mk_harness(tmp_path, stateless=False)  # NOT stateless
+        k = self._mk_knowledge(tmp_path, "headless: true\n")
+        self._registry(monkeypatch, harness=h, knowledge=k)
+        mfile = tmp_path / "machine.yaml"
+        mfile.write_text(
+            "repo_name: harness\nmachine: m\nplatform: wsl\n"
+            "knowledge_repo: knowledge\n"
+            f"repos:\n  harness:\n    anchor: {h}\n    worktree_root: /tmp/wt\n",
+            encoding="utf-8")
+        # Not stateless -> overlay never consulted -> default false.
+        assert cfg.load_config(mfile).headless is False
+
+    def test_overlay_excludes_machine_specifics(self, tmp_path, monkeypatch):
+        # Even if the knowledge config.yaml sets srcroot, it must NOT graft.
+        h = self._mk_harness(tmp_path, stateless=True)
+        k = self._mk_knowledge(tmp_path, "srcroot: /knowledge/src\nheadless: true\n")
+        self._registry(monkeypatch, harness=h, knowledge=k)
+        mfile = tmp_path / "machine.yaml"
+        mfile.write_text(
+            "repo_name: harness\nmachine: m\nplatform: wsl\nsrcroot: /machine/src\n"
+            "knowledge_repo: knowledge\n"
+            f"repos:\n  harness:\n    anchor: {h}\n    worktree_root: /tmp/wt\n",
+            encoding="utf-8")
+        conf = cfg.load_config(mfile)
+        assert conf.srcroot == "/machine/src"   # machine-specific, not grafted
+        assert conf.headless is True            # a pref key, grafted
+
+    def test_helper_fail_open_unbound(self, tmp_path, monkeypatch):
+        # _load_knowledge_overlay_config returns {} when nothing is bound.
+        self._registry(monkeypatch)
+        assert cfg._load_knowledge_overlay_config({}, {}, "harness", "wsl") == {}
+
+
+# ---------------------------------------------------------------------------
 # auto_fast_forward parsing
 # ---------------------------------------------------------------------------
 

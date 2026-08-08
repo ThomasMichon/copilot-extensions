@@ -719,23 +719,31 @@ def inrepo_config_path(anchor: str | Path) -> Path:
 def load_config(path: Path | None = None) -> Config:
     """Load and parse the layered project config.
 
-    Merges three tiers (highest precedence wins):
+    Merges these tiers (highest precedence wins):
 
     1. ``~/.<project>/config.yaml`` (machine-local; ``path``) -- per-machine,
        per-repo overrides and machine paths. **Optional**: a repo designed for
        this system carries its settings in-repo and needs no machine-local
        file; machine-local config is the adapter that makes *foreign* repos
        compatible.
+    1b. **Knowledge overlay (E1e, #947)** -- for a **stateless harness** bound to
+       a knowledge repo, the knowledge repo's ``config.yaml`` contributes portable
+       **operator-preference** keys (``copilot_profiles``/``headless``/
+       ``auto_fast_forward``/``new_picker``) as a tier BETWEEN the in-repo base and
+       machine-local, so those prefs can be versioned in the knowledge repo while
+       machine-local stays minimal. Machine-specifics + the binding never graft;
+       ``{}`` (no effect) for a normal repo.
     2. ``<anchor>/.agent-worktrees/config.yaml`` (in-repo; the repo's own
        committed config -- the base for its settings).
     3. ``~/.agent-worktrees/config.yaml`` (global; machine-wide defaults).
 
     Top-level fields (``srcroot``/``machine``/``platform``/``copilot_profiles``
     /``headless``/``auto_fast_forward``) resolve machine-local > global >
-    detected. Per-repo settings merge in-repo flat settings < machine-local
-    ``repos.<name>`` block (the global tier carries no per-repo settings).
-    Anchors come from the machine-local file or, when absent, from
-    ``~/.agent-worktrees/repos.yaml``.
+    detected -- with the knowledge overlay inserted just under machine-local for
+    the portable operator-preference keys only. Per-repo settings merge in-repo
+    flat settings < machine-local ``repos.<name>`` block (the global tier carries
+    no per-repo settings). Anchors come from the machine-local file or, when
+    absent, from ``~/.agent-worktrees/repos.yaml``.
 
     Args:
         path: Machine-local config path. Uses the default if None.
@@ -787,6 +795,16 @@ def load_config(path: Path | None = None) -> Config:
         machine_raw.get("repo_name")
         or global_raw.get("repo_name")
         or _project_name_safe()
+    )
+
+    # E1e config.yaml knowledge overlay (#947): when the launch repo is a
+    # STATELESS harness bound to a knowledge repo, layer the knowledge repo's
+    # config.yaml as a tier BETWEEN the in-repo base and machine-local -- but only
+    # for portable operator-preference keys (never machine-specifics or the
+    # binding). Gated + fail-open -> ``{}`` for a normal (non-stateless) repo, so
+    # the hot config path is unchanged off the stateless track.
+    knowledge_raw = _load_knowledge_overlay_config(
+        machine_raw, global_raw, repo_name, platform
     )
 
     machine_repos = machine_raw.get("repos") or {}
@@ -848,12 +866,13 @@ def load_config(path: Path | None = None) -> Config:
             "  pwsh -File <repo>/plugins/agent-worktrees/scripts/install.ps1 install"
         )
 
-    # copilot_profiles: machine-local if present, else global.
-    profiles_raw = (
-        machine_raw.get("copilot_profiles")
-        if "copilot_profiles" in machine_raw
-        else global_raw.get("copilot_profiles", [])
-    )
+    # copilot_profiles: machine-local > knowledge overlay > global.
+    if "copilot_profiles" in machine_raw:
+        profiles_raw = machine_raw.get("copilot_profiles")
+    elif "copilot_profiles" in knowledge_raw:
+        profiles_raw = knowledge_raw.get("copilot_profiles")
+    else:
+        profiles_raw = global_raw.get("copilot_profiles", [])
 
     return Config(
         srcroot=srcroot,
@@ -868,15 +887,27 @@ def load_config(path: Path | None = None) -> Config:
         ),
         copilot_profiles=_parse_profiles(profiles_raw or []),
         headless=bool(
-            machine_raw.get("headless", global_raw.get("headless", False))
+            machine_raw.get(
+                "headless",
+                knowledge_raw.get("headless", global_raw.get("headless", False)),
+            )
         ),
         auto_fast_forward=bool(
             machine_raw.get(
-                "auto_fast_forward", global_raw.get("auto_fast_forward", True)
+                "auto_fast_forward",
+                knowledge_raw.get(
+                    "auto_fast_forward",
+                    global_raw.get("auto_fast_forward", True),
+                ),
             )
         ),
         new_picker=bool(
-            machine_raw.get("new_picker", global_raw.get("new_picker", True))
+            machine_raw.get(
+                "new_picker",
+                knowledge_raw.get(
+                    "new_picker", global_raw.get("new_picker", True)
+                ),
+            )
         ),
     )
 
@@ -963,6 +994,69 @@ def _resolve_anchor_from_registry(name: str, platform: str) -> str | None:
         return entry.local_path(platform) or None
     except Exception:
         return None
+
+
+# E1e config.yaml knowledge overlay (#947): the portable operator-preference keys
+# that graft from the bound knowledge repo's config.yaml. Deliberately NARROW --
+# only machine-independent preferences. Machine-specifics (srcroot / machine /
+# platform / repo_name), the machine-local binding (knowledge_repo), and per-repo
+# ``repos.<name>`` blocks are intentionally EXCLUDED (a shared knowledge repo must
+# not dictate a machine's paths, its own binding, or another repo's settings).
+_KNOWLEDGE_OVERLAY_TOP_KEYS: tuple[str, ...] = (
+    "copilot_profiles", "headless", "auto_fast_forward", "new_picker",
+)
+
+
+def _load_knowledge_overlay_config(
+    machine_raw: dict[str, Any], global_raw: dict[str, Any],
+    repo_name: str, platform: str,
+) -> dict[str, Any]:
+    """The E1e config.yaml **knowledge overlay** tier (portable operator prefs).
+
+    Returns the bound knowledge repo's ``config.yaml`` filtered to
+    :data:`_KNOWLEDGE_OVERLAY_TOP_KEYS` when the launch repo is a **stateless
+    harness** bound to a knowledge repo; ``{}`` otherwise. This lets portable
+    operator preferences live (versioned) in the knowledge repo as a tier between
+    the harness in-repo base and the machine-local config, so machine-local stays
+    minimal (just the binding + true machine-specifics).
+
+    This is the config-READ knowledge overlay for ``config.yaml`` itself. Gated +
+    fail-open: a non-stateless launch repo, an unbound harness, an unregistered
+    knowledge repo, or any error yields ``{}`` -- so the hot config path is
+    byte-identical off the stateless track.
+    """
+    try:
+        knowledge_repo = (
+            machine_raw.get("knowledge_repo")
+            or global_raw.get("knowledge_repo")
+            or ""
+        ).strip()
+        if not knowledge_repo:
+            return {}
+        # Gate on the LAUNCH repo declaring itself stateless (requires an external
+        # state root) -- read from its own in-repo config.
+        machine_repos = machine_raw.get("repos")
+        launch_anchor = None
+        if isinstance(machine_repos, dict):
+            block = machine_repos.get(repo_name)
+            if isinstance(block, dict):
+                launch_anchor = block.get("anchor")
+        launch_anchor = launch_anchor or _resolve_anchor_from_registry(
+            repo_name, platform
+        )
+        if not launch_anchor:
+            return {}
+        inrepo = _load_inrepo_config(launch_anchor)
+        if not (inrepo.get("stateless")
+                or inrepo.get("requires_external_state_root")):
+            return {}
+        kpath = _resolve_anchor_from_registry(knowledge_repo, platform)
+        if not kpath:
+            return {}
+        kcfg = _load_inrepo_config(kpath)
+        return {k: kcfg[k] for k in _KNOWLEDGE_OVERLAY_TOP_KEYS if k in kcfg}
+    except Exception:
+        return {}
 
 
 def _resolve_adoption_defaults_from_registry(
