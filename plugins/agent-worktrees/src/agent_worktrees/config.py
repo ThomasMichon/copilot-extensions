@@ -212,6 +212,27 @@ class PRConfig:
     self_approve: bool = False
     merge_actor: str = ""
     conflict_retriggers_review: bool = True
+    # ── Merge/update policy defaults (repo-overridable; #225). Express the
+    # facility's default PR-flow policy so every pr-* surface reports it and the
+    # update/merge paths honor it. All optional + defaulted -> backward
+    # compatible. Provider-neutral: each provider maps the policy or reports
+    # "unsupported" and falls back.
+    #
+    # - ``branch_update_strategy`` -- how a PR branch is brought current against
+    #   a moved base: ``"rebase"`` (default; linear history, the tool's
+    #   squash-then-force-push model) or ``"merge"`` (merge the base in, for a
+    #   repo that forbids force-pushes / rebases).
+    # - ``merge_strategy`` -- how the final merge is performed: ``"squash"``
+    #   (default) | ``"merge"`` | ``"rebase"``. Honors a repo that only allows a
+    #   subset of methods. (Distinct from the ADO auto-complete ``squash`` knob
+    #   above, which shapes ADO's native completion options.)
+    # - ``prefer_auto_merge`` -- when True (default), pr-merge prefers the
+    #   provider's CI-gated native auto-merge/auto-complete over an immediate
+    #   merge, so the merge waits on required checks; falls back to a direct
+    #   merge where the provider offers no auto-merge.
+    branch_update_strategy: str = "rebase"
+    merge_strategy: str = "squash"
+    prefer_auto_merge: bool = True
 
 
 @dataclass(frozen=True)
@@ -1220,6 +1241,13 @@ def _parse_pr(raw: Any) -> PRConfig:
         return ()
 
     labels = _str_tuple(raw.get("labels", ()))
+
+    def _choice(value: Any, allowed: tuple[str, ...], default: str) -> str:
+        """Normalize a config enum to one of ``allowed`` (case-insensitive),
+        falling back to ``default`` for a missing or unrecognized value."""
+        s = str(value).strip().lower()
+        return s if s in allowed else default
+
     head_scheme = str(raw.get("head_scheme", "refspec")).strip().lower()
     if head_scheme not in ("snapshot", "refspec"):
         # A present-but-garbage value signals misconfiguration -- fall back to
@@ -1254,6 +1282,13 @@ def _parse_pr(raw: Any) -> PRConfig:
         self_approve=bool(raw.get("self_approve", False)),
         merge_actor=str(raw.get("merge_actor", "")).strip().lower(),
         conflict_retriggers_review=bool(raw.get("conflict_retriggers_review", True)),
+        branch_update_strategy=_choice(
+            raw.get("branch_update_strategy", "rebase"), ("rebase", "merge"),
+            "rebase"),
+        merge_strategy=_choice(
+            raw.get("merge_strategy", "squash"), ("squash", "merge", "rebase"),
+            "squash"),
+        prefer_auto_merge=bool(raw.get("prefer_auto_merge", True)),
     )
 
 

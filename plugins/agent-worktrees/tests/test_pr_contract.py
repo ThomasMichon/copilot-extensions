@@ -433,6 +433,25 @@ class TestClassifyPRFlow:
         assert f.conflict_retriggers_review is True
         assert f.rebase_owner == "submitter"
 
+    def test_policy_defaults_carried(self):
+        # #225: the merge/update policy is carried onto every non-direct profile.
+        f = pc.classify_pr_flow(
+            enabled=True, required=True, automerge_label="auto-merge",
+        )
+        assert f.branch_update_strategy == "rebase"
+        assert f.merge_strategy == "squash"
+        assert f.prefer_auto_merge is True
+
+    def test_policy_overrides_carried(self):
+        f = pc.classify_pr_flow(
+            enabled=True, required=True, automerge_label="auto-merge",
+            branch_update_strategy="merge", merge_strategy="merge",
+            prefer_auto_merge=False,
+        )
+        assert f.branch_update_strategy == "merge"
+        assert f.merge_strategy == "merge"
+        assert f.prefer_auto_merge is False
+
 
 # ---------------------------------------------------------------------------
 # PR-flow reminders (pr_reminder) -- state-aware, stay-on-the-rails guidance
@@ -507,6 +526,27 @@ class TestPRReminder:
         flow = _self_merge_flow(conflict_retriggers_review=True)
         r = pc.pr_reminder(flow, "pr-watch")
         assert any("re-triggers review" in c for c in r.cautions)
+
+    def test_policy_caution_surfaced_at_point_of_action(self):
+        # #225: the repo's update/merge policy is surfaced in the reminder so an
+        # agent sees it at the moment of action.
+        flow = pc.classify_pr_flow(
+            enabled=True, required=True, automerge_label="auto-merge",
+            branch_update_strategy="rebase", merge_strategy="squash",
+            prefer_auto_merge=True,
+        )
+        for verb in ("create-pr", "pr-watch", "pr-merge", "push-changes"):
+            r = pc.pr_reminder(flow, verb)
+            assert any("policy:" in c and "rebase" in c and "squash" in c
+                       for c in r.cautions), verb
+        # prefer_auto_merge is reflected in the phrasing.
+        r = pc.pr_reminder(flow, "pr-watch")
+        assert any("auto-merge" in c for c in r.cautions)
+
+    def test_policy_caution_absent_on_direct_repo(self):
+        flow = pc.classify_pr_flow(enabled=False)
+        r = pc.pr_reminder(flow, "pr-merge")
+        assert not any("policy:" in c for c in r.cautions)
 
     def test_create_pr_nudges_manual_reviewer_request(self):
         # #3581 nudge: a reviewer-gated repo (not self-merge) whose PR review is
