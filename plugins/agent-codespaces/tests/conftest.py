@@ -17,3 +17,30 @@ def _disable_codespace_claim(monkeypatch):
     and mocking the ``lease`` seam.
     """
     monkeypatch.setenv("AGENT_CODESPACES_DISABLE_CLAIM", "1")
+
+
+@pytest.fixture(autouse=True)
+def _neutralize_l2(monkeypatch):
+    """Neutralize the cross-machine L2 lease layer (git-ref-resource-leases) in
+    unit tests by default, so nothing shells out to ``agent-worktrees lease`` /
+    ``get owner-ref`` (real subprocess + host state). ``owner_ref`` resolves to
+    None (holder unknown -> L2 skipped) and every lease op reports UNAVAILABLE
+    (the degrade-safe path), so claim/release/heartbeat behave exactly as the
+    L1-only broker. Tests that specifically cover L2 opt back in by re-patching
+    these seams after this fixture runs.
+    """
+    from agent_codespaces import coordination
+
+    monkeypatch.setattr(coordination, "owner_ref", lambda *a, **k: None)
+    monkeypatch.setattr(
+        coordination, "acquire",
+        lambda *a, **k: coordination.L2Result("unavailable"),
+    )
+    monkeypatch.setattr(
+        coordination, "renew",
+        lambda *a, **k: coordination.L2Result("unavailable"),
+    )
+    monkeypatch.setattr(
+        coordination, "release",
+        lambda *a, **k: coordination.L2Result("unavailable"),
+    )

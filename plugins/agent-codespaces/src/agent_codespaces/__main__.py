@@ -422,6 +422,13 @@ def main(argv: list[str] | None = None) -> int:
         "--force-claim", dest="force_claim", action="store_true",
         help="Evict another live worktree's claim and take over.",
     )
+    claim_p.add_argument(
+        "--holder-ref", dest="holder_ref", default=None,
+        help="Qualified ClaimRef (machine/project/worktree_id[#session]) of the "
+             "cross-machine L2 lease holder. Defaults to the calling worktree; a "
+             "dispatched caller (e.g. the bridge daemon) passes the original "
+             "caller's ref so the distributed lease is keyed to the real owner.",
+    )
 
     release_claim_p = sub.add_parser(
         "release-claim",
@@ -825,11 +832,16 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
             session_id=getattr(args, "session_id", None),
         )
     if claim_owner:
+        from . import coordination
+        holder_ref = coordination.owner_ref(
+            session_id=getattr(args, "session_id", None),
+        )
         try:
             claim(
                 args.name, claim_owner,
                 force=getattr(args, "force_claim", False),
                 active=active_worktree_ids(),
+                holder_ref=holder_ref,
             )
         except ClaimConflict as exc:
             print(
@@ -2868,11 +2880,21 @@ def _cmd_claim(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 0
+    from . import coordination
+    # Cross-machine holder identity: an explicit --holder-ref (a dispatched
+    # caller, e.g. the bridge daemon, passes the original caller's qualified
+    # ClaimRef), else resolved from the calling worktree. None -> L2 skipped
+    # (degrade-safe, L1-only).
+    holder_ref = coordination.owner_ref(
+        explicit=getattr(args, "holder_ref", None),
+        session_id=getattr(args, "session_id", None),
+    )
     try:
         lease = claim(
             args.codespace, owner,
             force=getattr(args, "force_claim", False),
             active=active_worktree_ids(),
+            holder_ref=holder_ref,
         )
     except ClaimConflict as exc:
         print(f"[BUSY] {exc} Use --force-claim to take over.", file=sys.stderr)
