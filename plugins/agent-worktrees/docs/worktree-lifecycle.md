@@ -68,6 +68,45 @@ The tracking state (seen in `list` / the picker) and its status-bar block:
 may hold planning or conversation. See
 [cli-reference.md § status-segment](cli-reference.md) for the bar detail.
 
+### The status core — an orthogonal disposition layer
+
+The tracking state above is **git-derived** (what the tree/branch look like). Over
+it rides a second, independent layer — the **status core** — that answers *"does
+this worktree still need a human?"* even when git says it's clean. It has two
+parts:
+
+- **Asserted disposition** (written by the agent/operator via
+  `agent-worktrees status`): a **`follow_up`** flag plus a one-line **`summary`**.
+  This is the durable "I'm done" / "there's more to do" signal. `--follow-up`
+  raises it, `--resolved` clears it, `--summary "…"` sets the line
+  (`agent-dispatch focus "…"` writes the same field).
+- **Live pulse** (derived, never asserted): `live_intent` / `live_pulse` /
+  `live_rest` — a dim, self-refreshing line from the session's intent stream. It
+  is presentation only and **never** sets `follow_up`.
+
+The crucial rule: **`follow_up` is orthogonal to state, and it gates cleanup.** A
+worktree can be `finalized`/`completed` (git says "done, prune me") yet still
+carry `follow_up=true` — its cleanup bucket is then downgraded from the auto-prune
+**`clean`** verdict to the review-class **`follow-up`** bucket, so cleanup/gc leave
+it alone. Two common cases:
+
+- **Genuinely more to do** — the flag is correct; resume and land it (or file an
+  issue and clear the flag).
+- **Stale flag** — the work is actually done but the agent finalized *without*
+  running `status --resolved`. The worktree looks done but won't reap. The fix is
+  a "landing pass": confirm nothing remains, then clear the flag.
+
+**Title sigils.** The picker prefixes scannable glyphs onto a worktree's title,
+independent of the state column:
+
+| Sigil | Meaning |
+|-------|---------|
+| `✚` | `follow_up` flag set (needs attention / not auto-prunable) |
+| `⏳` | live session parked **awaiting the operator** ("this needs me") |
+| `⚠` | bound-but-un-muxed Copilot (a **bare orphan** session) |
+| `⚭` | one half of a carved **pair** (harness/knowledge) |
+| `[system]` / `[delegate]` / `[acp]` | origin/interface tag (see [picker.md](picker.md)) |
+
 ## 1. Create
 
 | Way | Command | Use when |
@@ -203,6 +242,69 @@ disposition), recover it via
 [`references/pr-workflow.md` § Recovering a PR after teardown](../skills/worktree/references/pr-workflow.md).
 When in doubt, just `create` a fresh worktree and continue there.
 
+## 5. What's cleanable, and what's never reaped
+
+"Can this worktree be removed?" is **not** the same question as its tracking
+state. The authoritative answer is the **maintenance disposition** — a bucket
+each worktree falls into, graded SAFE / REVIEW / UNSAFE (neutral buckets carry no
+chip). `list --json --classify` and the picker's Maintenance view emit it.
+
+| Disposition | Buckets | Cleanup behavior |
+|-------------|---------|------------------|
+| **SAFE** | `clean` (landed on default branch) | Auto-prunable — `cleanup --clean` removes it. |
+| **REVIEW** | `unused`, `conversation`, `follow-up`, `closed-unmerged`, `gone` | Cleanable but **confirmed first** (the flag/opt-in gate) — never silently purged. |
+| **UNSAFE** | `dirty`, `wip`, `unmerged`, `orphan`, `active` | **Never** auto-pruned — it holds un-landed work or is in use. |
+| neutral | `open-pr` (healthy, in review), `unknown` (remote too old to classify) | No chip; not offered for cleanup. |
+
+Two things move a worktree *out* of SAFE even when git says it's clean: an
+**`open-pr`** (a healthy end state — leave it), and the **`follow_up`** flag,
+which downgrades `clean` → the REVIEW `follow-up` bucket (see § The status core).
+
+### The reaping surface — which command clears what
+
+`cleanup` is only one of several reapers; each targets a different kind of
+residue, and each **spares anything in use**:
+
+| Command | Reaps | Spares |
+|---------|-------|--------|
+| `cleanup --clean` | `completed`/`gone` (SAFE); `--include-unused` / `--include-conversations` opt into those REVIEW buckets | live-session worktrees, and any UNSAFE bucket |
+| `gc` | tracked reap (the cleanup verdict) **+ leaked system/bridge worktrees + on-disk orphan dirs + git prune** | see the managed-reap invariant below |
+| `reap-sessions` | leaked `wt-<id>` mux sessions whose worktree is finalized/gone/untracked **and** idle past grace | **attached, active, or recently-busy** sessions |
+| `reap-shells` | orphaned launcher shells (pwsh/python scaffolding stranded by a force-closed terminal) | anything with a live descendant; reports-only unless `--yes` |
+| `remove-system <id>` | one **system worktree** by id (the manual escape hatch) | — (explicit, targeted) |
+
+### System worktrees (`sys-*`, `[system]`/`[delegate]`)
+
+Worktrees whose `kind` is **`system`** or **`bridge`** — Neuron Forge / agent-bridge
+sessions, and background/scheduled agents (e.g. per-task writer worktrees) — are
+**deliberately exempt from routine `cleanup`**: they're owned and torn down by
+their service, and hidden behind the picker's Toggle-hidden (see
+[picker.md § Worktree types & visibility](picker.md)). When a service crashes or
+finalizes without tearing its worktree down, they **leak**, and because their
+tracking status stays `active` (never marked complete) `gc`'s managed sweep
+records them as `not-final-or-unused` and keeps them — so they can accumulate.
+Clear a *provably dead* one with **`remove-system <id>`** (verify it isn't a live
+session first); the durable fix is for the owning service to `remove-system` on
+task completion.
+
+### The managed-reap invariant — what `gc` will never touch
+
+A **system/bridge** worktree is reaped only when **all** hold: it is **FINAL or
+UNUSED** (work done or never happened), has **no live process** (no live mux, no
+**attached** client, no live Copilot session), carries **no `follow_up` flag**,
+and has been **idle past the grace window** (≈1h, so a just-created worktree
+isn't yanked out from under a daemon). Anything else is spared, with an
+inspectable reason: `follow-up`, `attached`, `live-mux`, `live-session`,
+`not-final-or-unused`, `activity-unknown`, or `idle-grace`. In short — **`gc`
+never reaps un-landed work, a flagged follow-up, or anything in use**, which is
+why running it after resolving follow-ups only removes what genuinely landed.
+
+> **Never reap a "literally active" worktree.** A live session you did not spawn
+> — an operator's **attached** terminal, or an autonomous session mid-task — is
+> hands-off. The reapers already spare it (the `attached` / `live-session`
+> skips); don't defeat that by hand. `cleanup` prints `⚠️ Skipping … active
+> Copilot session in use` for exactly these — believe it.
+
 ## Command map
 
 | Stage | Direct-push | PR mode |
@@ -212,7 +314,8 @@ When in doubt, just `create` a fresh worktree and continue there.
 | Land | `push-changes --title` | `create-pr` → `pr-watch` → `pr-merge` → `pr-complete` |
 | Draft/hold | — | `create-pr --draft` → `pr-ready` |
 | Inspect | `status` | `pr-status` |
-| Clean up | `finalize` → `cleanup` | `finalize` → `cleanup` |
+| Clean up | `finalize` → `cleanup` / `gc` | `finalize` → `pr-complete` → `cleanup` / `gc` |
+| Reap residue | `reap-sessions` (mux) · `reap-shells` (launchers) · `remove-system <id>` (system worktree) | same |
 
 ## See also
 
