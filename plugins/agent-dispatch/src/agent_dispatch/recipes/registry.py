@@ -116,14 +116,19 @@ _RESOLUTION_CLAUSE = (
     "your worktree to a clean, resolved state: a merged change, or a workspace "
     "reset to its base branch so nothing is left half-done. If you abandon, say "
     "why and reconcile the source (the change/issue you were sent for) so nothing "
-    "downstream believes the work landed. Report what you ultimately did."
+    "downstream believes the work landed. You can do this with "
+    "`agent-dispatch resolve --outcome landed|abandoned` (add `--execute` to "
+    "perform the unwind). Report what you ultimately did."
 )
 
 _SUSPEND_CLAUSE = (
     "You may reach a natural checkpoint where you are waiting on something outside "
     "your control (an update to the change, a review, a build). At such a point, "
-    "record your progress and suspend rather than busy-waiting; you will be "
-    "resumed with your context intact when the world moves."
+    "record your progress and suspend rather than busy-waiting: hand the wait to "
+    "the layer with `agent-dispatch run --detach --resume <your-worktree> -- "
+    "<blocking-wait-command>`, which tears your session down while a cheap waiter "
+    "owns the wait and resumes you -- with your context intact -- when the world "
+    "moves."
 )
 
 

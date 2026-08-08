@@ -52,6 +52,15 @@ def test_render_explicit_base_overrides_default():
     assert "the default branch" not in r.prompt
 
 
+def test_charter_points_at_the_concrete_hibernate_and_resolve_verbs():
+    # a recipe worker is told to use the real `run` (hibernate) and `resolve`
+    # verbs, not just the abstract "suspend / drive to resolution" idea
+    for name in ("reviewer", "conflict-resolution", "goal-driven"):
+        r = recipes.get_recipe(name)
+        assert "agent-dispatch run --detach" in r.charter_template
+        assert "agent-dispatch resolve" in r.charter_template
+
+
 def test_render_missing_required_param_raises_listing_them():
     with pytest.raises(recipes.RecipeError) as exc:
         recipes.render_recipe("reviewer", {"repo": "o/n"})
