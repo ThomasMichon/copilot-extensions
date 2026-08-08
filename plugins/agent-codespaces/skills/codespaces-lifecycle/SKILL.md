@@ -192,7 +192,7 @@ agent-codespaces version
 ## Creating and Deleting
 
 ```bash
-# Create a CodeSpace on a repo + run on_create provisioning from codespaces.yaml
+# Create a CodeSpace on a repo + run on_create provisioning from config
 agent-codespaces create <owner/repo>
 agent-codespaces create <owner/repo> --branch <branch> --display-name <name>
 agent-codespaces create <owner/repo> --no-wait        # don't wait / skip provisioning
@@ -205,9 +205,10 @@ agent-codespaces cleanup
 agent-codespaces cleanup --dry-run
 ```
 
-CodeSpace creation uses `gh codespace create` with defaults from
-`codespaces.yaml`. Per-repo overrides (machine type, location) apply
-automatically based on the target repository.
+CodeSpace creation uses `gh codespace create` with defaults by convention
+(`largePremiumLinux`/`EastUs`); per-repo overrides from
+`.agent-codespaces/config.yaml` (machine type, location) apply automatically
+based on the target repository.
 
 ## Finalize — graceful close-out with session recovery
 
@@ -363,7 +364,7 @@ targets. For day-to-day dispatch, prefer `codespace:<name>`.
   `agent-codespaces ssh <name> --remote-cmd "echo ok" --no-relay`.
   Check `agent-bridge status` and `~/.agent-bridge/agent-bridge-err.log`.
 - **Session fails on start** -- check `~/.agent-bridge/agent-bridge-err.log`.
-  Common cause: wrong `ssh_user` in `codespaces.yaml`.
+  Common cause: wrong `ssh_user` in `.agent-codespaces/config.yaml`.
 - **Credential relay not working** -- ensure relay port (9857) is not
   blocked. Check that `--no-relay` was not accidentally passed.
 - **Quota exceeded** -- creating or connecting to a CodeSpace (a Shutdown one

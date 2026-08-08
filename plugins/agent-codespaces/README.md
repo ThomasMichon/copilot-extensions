@@ -15,40 +15,59 @@ A copilot-extensions plugin that provides:
   git-credential, gh-auth, az-login)
 - **Agent-bridge provider** -- register CodeSpaces as dynamic agents in
   agent-bridge for inter-agent communication
+- **Session context map** -- a `sessionStart` hook injects a brief
+  `additionalContext` map of the repos delegated to CodeSpaces (derived from
+  `agent-worktrees related list`), so every session knows which repos have no
+  local checkout and must be worked via a CodeSpace
 
 ## Configuration
 
-All configuration lives in the **adopting repo** in a `codespaces.yaml` file.
-The service reads config live from adopted repos -- no generated intermediate
-config.
+**Most repos need no config at all.** agent-codespaces works out of the box on
+standard GitHub CodeSpaces by **convention**:
+
+- machine `largePremiumLinux`, location `EastUs`
+- in-CodeSpace checkout at `/workspaces/<repo-basename>`
+- credential relay serving `github.com` **and** Azure DevOps (via the host Git
+  Credential Manager)
+
+So `agent-codespaces create <your-org>/<standard-repo>` just works -- no file to
+author.
+
+Add a **supplementary** config only when a repo deviates from convention (a
+split CodeSpaces-vs-product repo, a pinned devcontainer, an ADO host, a
+provision hook). It lives in the **adopting repo**, in the canonical in-repo
+location aligned with the sibling `agent-*` plugins:
+
+```
+<repo>/.agent-codespaces/config.yaml
+```
+
+Scaffold and adopt it in one step from inside the repo:
+
+```bash
+agent-codespaces config init      # writes .agent-codespaces/config.yaml (+ auto-adopts)
+```
+
+Running a command inside a repo that carries the file **auto-discovers** it (no
+manual `config adopt`); adoption persists it for the detached daemon and for
+extra/multi-repo setups. A **legacy** repo-root `codespaces.yaml` is still read
+as a fallback -- relocate it with `agent-codespaces config migrate`.
 
 ```yaml
-# codespaces.yaml
-defaults:
-  machine_type: largePremiumLinux
-  location: EastUs
+# .agent-codespaces/config.yaml -- SUPPLEMENTARY, in-repo. Add ONLY what
+# deviates from convention; everything omitted is derived.
+repos:
+  org/my-app-codespaces:
+    workspace_repo: my-app          # split repo -> agents land in /workspaces/my-app
+    machine_type: largePremiumLinux256gb
+    devcontainer_path: .devcontainer/devcontainer.json   # pin if repo ships >1
 
 credentials:
-  sources:
-    git-credential:
-      enabled: true
-      allowed_hosts:
-        - "*.visualstudio.com"
-        - "dev.azure.com"
-    gh-auth:
-      enabled: true
-      allowed_hosts:
-        - "github.com"
-    # az-login:                        # Azure token relay (disabled by default)
-    #   enabled: false
-    #   allowed_resources:
-    #     - "https://management.azure.com/"
-
-repos:
-  org/my-repo:
-    machine_type: largePremiumLinux256gb
-    location: EastUs
+  ado_host: my-org.visualstudio.com   # only for bare ADO get-access-token
 ```
+
+> The service reads config live from the repo -- no generated intermediate
+> config. All org/account/URL values live in **your** repo, never in the plugin.
 
 ## CLI
 
@@ -58,9 +77,11 @@ agent-codespaces ssh --stdio <name>   # Structured SSH for agent-bridge
 agent-codespaces list                 # List active CodeSpaces
 agent-codespaces create <owner/repo>  # Create a CodeSpace + run provisioning
 agent-codespaces delete <name>        # Delete a CodeSpace (--force to skip prompt)
-agent-codespaces config adopt         # Register repo for config
-agent-codespaces config init          # Scaffold codespaces.yaml from your CodeSpaces
+agent-codespaces config init          # Scaffold .agent-codespaces/config.yaml (+ auto-adopt)
+agent-codespaces config adopt         # Register a repo's config for the daemon
+agent-codespaces config migrate       # Relocate legacy codespaces.yaml -> .agent-codespaces/config.yaml
 agent-codespaces config show          # Show resolved config
+agent-codespaces config validate      # Validate resolved config
 agent-codespaces bridge register      # Register CodeSpaces as bridge agents
 agent-codespaces cleanup              # Remove stale local state (SSH configs, sockets)
 agent-codespaces status               # Service + relay + tunnel state
@@ -77,9 +98,10 @@ agent-codespaces create <owner/repo> \
   --no-wait                     # don't wait / skip provisioning
 ```
 
-Machine type and location come from `codespaces.yaml` (per-repo overrides
-apply). After the CodeSpace is Available, `on_create` provisioning hooks from
-`codespaces.yaml` run automatically.
+Machine type and location default by convention (`largePremiumLinux` / `EastUs`)
+and can be overridden per-repo in `.agent-codespaces/config.yaml`. After the
+CodeSpace is Available, any `on_create` provisioning hooks from that config run
+automatically.
 
 ### `bridge` options
 
@@ -183,9 +205,9 @@ To avoid the failure mode where a missing/expired credential causes a CodeSpace
 ## Local identifier guard
 
 This is a **public** repo, so internal org/account/repo names and personal
-aliases must never land in it. The generated `codespaces.yaml` scaffold is
-checked for such leaks by `tests/test_config_init.py`, and the whole working
-tree by [`tools/check-no-internal-identifiers.py`](../../tools/check-no-internal-identifiers.py)
+aliases must never land in it. The generated `.agent-codespaces/config.yaml`
+scaffold is checked for such leaks by `tests/test_config_init.py`, and the whole
+working tree by [`tools/check-no-internal-identifiers.py`](../../tools/check-no-internal-identifiers.py)
 (wire it up as a git `pre-push` hook).
 
 A denylist that *named* those identifiers would itself leak them, so it is
