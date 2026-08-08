@@ -23,7 +23,7 @@ def _args(**over):
 
 
 def _prcfg(**over):
-    base = dict(provider="github", api_base="")
+    base = dict(provider="github", api_base="", prefer_auto_merge=False)
     base.update(over)
     return SimpleNamespace(**base)
 
@@ -37,15 +37,22 @@ def _self_merge_flow():
 class _FakeProvider:
     name = "github"
 
-    def __init__(self, err=""):
+    def __init__(self, err="", auto_err="unsupported"):
         self._err = err
+        self._auto_err = auto_err
         self.calls = []
+        self.auto_calls = []
 
     def merge_pull(self, repo, number, *, squash=True, admin=False,
                    api_base="", token=None):
         self.calls.append(dict(repo=repo, number=number, squash=squash,
                                admin=admin))
         return self._err
+
+    def enable_auto_merge(self, repo, number, *, squash=True,
+                          api_base="", token=None):
+        self.auto_calls.append(dict(repo=repo, number=number, squash=squash))
+        return self._auto_err
 
 
 def _patch_provider(monkeypatch, provider):
@@ -106,3 +113,58 @@ def test_now_json_success_shape(monkeypatch, capsys):
     assert out["applied"] is True
     assert out["action"] == "merge"
     assert out["reminder"]["profile"] == "pr-self-merge"
+
+
+# --- prefer_auto_merge policy (#225) ---------------------------------------
+
+def test_prefer_auto_merge_arms_native_auto_merge(monkeypatch, capsys):
+    # prefer_auto_merge=True + provider supports it -> arm auto-merge, do NOT
+    # perform an immediate merge; report pending (not merged) + steer to watch.
+    import json as _json
+    fake = _FakeProvider(auto_err="")  # auto-merge succeeds
+    _patch_provider(monkeypatch, fake)
+    rc = m._pr_merge_now(_args(json=True), _prcfg(prefer_auto_merge=True),
+                         _self_merge_flow(), apply=True)
+    assert rc == 0
+    assert fake.auto_calls == [dict(repo="o/r", number=7, squash=True)]
+    assert fake.calls == []  # no immediate merge
+    out = _json.loads(capsys.readouterr().out.strip())
+    assert out["action"] == "auto-merge"
+    assert out["merged"] is False
+    assert out["applied"] is True
+
+
+def test_prefer_auto_merge_falls_back_to_direct_when_unsupported(monkeypatch):
+    # prefer_auto_merge=True but auto-merge can't be armed -> fall back to the
+    # immediate admin squash merge (never leaves the PR un-merged).
+    fake = _FakeProvider(auto_err="auto-merge not allowed on this repo")
+    _patch_provider(monkeypatch, fake)
+    rc = m._pr_merge_now(_args(), _prcfg(prefer_auto_merge=True),
+                         _self_merge_flow(), apply=True)
+    assert rc == 0
+    assert fake.auto_calls  # attempted
+    assert fake.calls == [dict(repo="o/r", number=7, squash=True, admin=True)]
+
+
+def test_prefer_auto_merge_off_merges_directly(monkeypatch):
+    # prefer_auto_merge=False -> straight to the immediate merge, no auto attempt.
+    fake = _FakeProvider(auto_err="")
+    _patch_provider(monkeypatch, fake)
+    rc = m._pr_merge_now(_args(), _prcfg(prefer_auto_merge=False),
+                         _self_merge_flow(), apply=True)
+    assert rc == 0
+    assert fake.auto_calls == []
+    assert fake.calls == [dict(repo="o/r", number=7, squash=True, admin=True)]
+
+
+def test_prefer_auto_merge_dry_run_previews_auto(monkeypatch, capsys):
+    import json as _json
+    fake = _FakeProvider(auto_err="")
+    _patch_provider(monkeypatch, fake)
+    rc = m._pr_merge_now(_args(json=True), _prcfg(prefer_auto_merge=True),
+                         _self_merge_flow(), apply=False)
+    assert rc == 0
+    assert fake.auto_calls == [] and fake.calls == []  # dry-run touches nothing
+    out = _json.loads(capsys.readouterr().out.strip())
+    assert out["prefer_auto_merge"] is True
+    assert "auto-merge" in out["would"]
