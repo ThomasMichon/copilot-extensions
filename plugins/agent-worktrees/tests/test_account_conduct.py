@@ -44,6 +44,21 @@ def test_per_project_deploy_retired():
     assert hasattr(m, "_remove_managed_instruction")
 
 
+def _conduct_dir() -> Path:
+    return Path(m.__file__).resolve().parents[2] / "scripts" / "conduct"
+
+
+def test_worktree_conduct_fragment_migrated():
+    # worktree-conduct migrated to the conduct/ injector too (dotfiles#1054):
+    # the fragment ships and the per-project deploy helper is gone.
+    frag = _conduct_dir() / "worktree-conduct.md"
+    assert frag.exists(), "worktree-conduct guidance must ship as a conduct fragment"
+    text = frag.read_text(encoding="utf-8")
+    assert not text.lstrip().startswith(m._INSTRUCTION_MARKER)
+    assert "agent-worktrees status" in text
+    assert not hasattr(m, "_deploy_worktree_conduct")
+
+
 def test_remove_managed_instruction_removes_marked(tmp_path: Path):
     proj = tmp_path / ".proj"
     path = _conduct_file(proj)

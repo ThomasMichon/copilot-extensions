@@ -7641,47 +7641,13 @@ def _validate_machine_registry(
 # Ownership marker embedded in generated instruction files
 _INSTRUCTION_MARKER = "<!-- managed by agent-worktrees -->"
 
-# worktree-status-core: static worktree-conduct guidance deployed as a managed
-# custom-instruction so agents keep the Worktree Picker honest about where the
-# operator's attention is owed. Generic (not machine-specific); realizes the
-# agent-fabric vision's disposition-is-asserted-pulse-is-derived behavior.
-_WORKTREE_CONDUCT = """# Worktree status conduct
-
-Keep the Worktree Picker honest about where the operator's attention is owed.
-Only *you* know whether a worktree is truly done or still has follow-ups -- git
-and process state cannot tell. Annotate THIS worktree's disposition with
-`agent-worktrees status`:
-
-- **Finalizing for real?** Make `agent-worktrees finalize` the **last** thing you
-  do -- do not re-open work after it, and do not flag follow-ups. A one-line
-  "all done" (optionally offering more) is fine; the worktree is prune-able.
-- **Stopping with work left?** Run
-  `agent-worktrees status --follow-up --summary "<what's left>"`. Leftover
-  temporary state, or an external-repo change not yet pushed / merged / deployed,
-  **counts as a follow-up**.
-- **Just answered a question?** If nothing consequential started, leave it
-  (it stays `CONVO`). If the conversation began a plan or changed state, flag it:
-  `agent-worktrees status --follow-up --summary "<what's underway>"`.
-- **Direction changed or you learned more?** Periodically re-summarize:
-  `agent-worktrees status --summary "<current focus>"` -- add/keep `--follow-up`
-  while work is owed, or clear it with `--resolved` once nothing is left.
-
-The summary is one line; latest wins. Flag conservatively but honestly: an
-unflagged worktree reads as *resolved and safe to prune*.
-"""
-
-
-def _deploy_worktree_conduct(proj_dir: Path) -> None:
-    """Deploy the static worktree-status conduct instruction (idempotent)."""
-    content = f"{_INSTRUCTION_MARKER}\n{_WORKTREE_CONDUCT}"
-    instr_dir = proj_dir / ".github" / "instructions"
-    instr_dir.mkdir(parents=True, exist_ok=True)
-    path = instr_dir / "worktree-conduct.instructions.md"
-    if path.exists() and path.read_text() == content:
-        output.skipped("worktree-conduct.instructions.md already in sync")
-    else:
-        path.write_text(content)
-        output.changed(f"worktree-conduct.instructions.md -> {path}")
+# worktree-status-core: MIGRATED to the session-conduct sessionStart hook
+# (dotfiles#1054 / effort instructions-to-hooks). The guidance text now lives in
+# ``plugins/agent-worktrees/scripts/conduct/worktree-conduct.md`` and is emitted
+# as ``additionalContext`` by the cwd-gated session-conduct hook, instead of
+# being materialized into ``~/.{project}/.github/instructions/``. The deploy path
+# now only retires any stale copy of the old file (see
+# :func:`_remove_managed_instruction`).
 
 
 # account-conduct: MIGRATED to the session-conduct sessionStart hook
@@ -7793,11 +7759,14 @@ Workarounds for the hang itself: launch from `~/` then `/resume`, or run with
 def _deploy_ext_reload_warning(proj_dir: Path) -> None:
     """Deploy the temporary ext-reload hang warning (idempotent).
 
-    Mirrors :func:`_deploy_worktree_conduct`: writes a marked
-    ``ext-reload-hang.instructions.md`` into the project's custom-instructions
-    dir so the CLI loads it into agent-worktrees-launched sessions. Temporary
-    until github/copilot-agent-runtime#13494 ships everywhere; never touches
-    unmarked user files.
+    Writes a marked ``ext-reload-hang.instructions.md`` into the project's
+    custom-instructions dir so the CLI loads it into agent-worktrees-launched
+    sessions. Unlike account/worktree-conduct (migrated to the session-conduct
+    sessionStart hook), this warning stays on the COPILOT_CUSTOM_INSTRUCTIONS_DIRS
+    mechanism: the hook's cwd-gate returns empty under Bare resume, which is
+    exactly the scenario this warning must cover. Temporary -- retired outright
+    when github/copilot-agent-runtime#13494 ships everywhere (dotfiles#1055);
+    never touches unmarked user files.
     """
     content = f"{_INSTRUCTION_MARKER}\n{_EXT_RELOAD_WARNING}"
     instr_dir = proj_dir / ".github" / "instructions"
@@ -7847,9 +7816,9 @@ def _deploy_copilot_instructions(
         agents_path.write_text(content)
         output.changed(f"AGENTS.md -> {agents_path}")
 
-    # worktree-status-core: the static worktree-conduct instruction (generic,
-    # not machine-specific) rides the same managed deploy.
-    _deploy_worktree_conduct(proj_dir)
+    # worktree-conduct migrated to the session-conduct sessionStart hook
+    # (dotfiles#1054): retire any stale per-project file we used to deploy.
+    _remove_managed_instruction(proj_dir, "worktree-conduct.instructions.md")
 
     # account-conduct migrated to the session-conduct sessionStart hook
     # (dotfiles#1053): retire any stale per-project file we used to deploy.
