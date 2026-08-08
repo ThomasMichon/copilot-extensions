@@ -225,8 +225,7 @@ $LinkDir          = $VenvDir
 $LinkPython       = $VenvPython
 $VersionedRuntime = $false
 $SrcVersion       = $null
-if (($env:COPILOT_EXT_NO_VERSIONED -ne '1') -and
-    ($env:AGENT_CODESPACES_VERSIONED -notin @('0', 'false', 'no', 'off'))) {
+if ($true) {  # always versioned (junction-free marker model; COPILOT_EXT_NO_VERSIONED retired)
     $pyprojForVer = Join-Path $PluginDir 'pyproject.toml'
     if (Test-Path $pyprojForVer) {
         $vl = Select-String -Path $pyprojForVer -Pattern '^\s*version\s*=' | Select-Object -First 1
@@ -236,6 +235,8 @@ if (($env:COPILOT_EXT_NO_VERSIONED -ne '1') -and
         $VersionedRuntime = $true
         $VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
         $VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
+        $LinkDir = $VenvDir
+        $LinkPython = $VenvPython
     }
 }
 
@@ -258,7 +259,7 @@ function Invoke-VersionedActivate {
     }
     Invoke-VersionedMarkComplete
     $prev = (& $py $vr --root $InstallDir --link-name '.venv' current 2>$null); $prev = ("$prev").Trim()
-    & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --replace-nonlink 2>&1 |
+    & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
         ForEach-Object { Write-ServiceChanged $_ }
     if ($LASTEXITCODE -ne 0) {
         Write-ServiceErr "Failed to activate versioned venv (.venv -> versions/$SrcVersion)"
@@ -619,7 +620,11 @@ function Deploy-Binstub {
 $env:PYTHONUTF8 = '1'
 $_venv = "$env:USERPROFILE\.agent-codespaces\.venv"
 $_py = Join-Path $_venv 'Scripts\python.exe'
-try { $_t = (Get-Item -LiteralPath $_venv -Force -ErrorAction Stop).Target; if ($_t) { $_py = Join-Path (@($_t)[0]) 'Scripts\python.exe' } } catch {}
+$_root = Split-Path $_venv
+$_ver = ''
+try { $_ver = ([IO.File]::ReadAllText((Join-Path $_root 'current-version'))).Trim() } catch {}
+$_py = if ($_ver) { Join-Path $_root ('versions\' + $_ver + '\Scripts\python.exe') } else { '' }
+if (-not ($_py -and (Test-Path -LiteralPath $_py))) { $_py = Get-ChildItem (Join-Path $_root 'versions') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Join-Path $_.FullName 'Scripts\python.exe' } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Last 1 }
 & $_py -m agent_codespaces @args
 exit $LASTEXITCODE
 '@
@@ -629,8 +634,10 @@ exit $LASTEXITCODE
     $stubContent = @"
 @echo off
 set "PYTHONUTF8=1"
-set "_PY=%USERPROFILE%\.agent-codespaces\.venv\Scripts\python.exe"
-for /f "tokens=2 delims=[]" %%i in ('dir /a:l "%USERPROFILE%\.agent-codespaces" 2^>nul ^| findstr /i /c:".venv"') do set "_PY=%%i\Scripts\python.exe"
+set "_ROOT=%USERPROFILE%\.agent-codespaces"
+set "_VER="
+if exist "%_ROOT%\current-version" set /p _VER=<"%_ROOT%\current-version"
+set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
 "%_PY%" -m agent_codespaces %*
 "@
     [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
