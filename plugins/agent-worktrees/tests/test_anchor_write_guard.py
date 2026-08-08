@@ -131,6 +131,52 @@ def test_shell_read_into_anchor_allows(tmp_path, anchor):
                         env={}, home=tmp_path, anchors=anchor) is None
 
 
+# -- cwd-scoped git mutation (no path named) -- the incident-class case --------
+
+def test_shell_git_commit_from_anchor_cwd_denies(tmp_path, anchor):
+    # ``git commit`` with cwd INSIDE the anchor mutates it without naming a path.
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell("git commit -m x", gp), env={}, home=tmp_path,
+                     anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_git_add_from_anchor_subdir_denies(tmp_path, anchor):
+    cwd = Path(anchor[0]["path"]) / "src"
+    d = guard.decide(_shell("git add -A", cwd), env={}, home=tmp_path,
+                     anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_git_commit_from_worktree_cwd_allows(tmp_path, anchor):
+    # Same command from a LINKED worktree cwd (.git file) is fine.
+    wt = _linked_worktree(tmp_path / "myrepo.worktrees" / "wt1")
+    assert guard.decide(_shell("git commit -m x", wt), env={}, home=tmp_path,
+                        anchors=anchor) is None
+
+
+def test_shell_git_dashC_worktree_from_anchor_cwd_allows(tmp_path, anchor):
+    # ``git -C <worktree>`` run FROM the anchor cwd targets the worktree, not the
+    # anchor -- the ``-C`` redirect is left to the (path-literal) scan.
+    wt = _linked_worktree(tmp_path / "myrepo.worktrees" / "wt2")
+    d = guard.decide(_shell(f'git -C "{wt}" commit -m x', anchor[0]["path"]),
+                     env={}, home=tmp_path, anchors=anchor)
+    assert d is None
+
+
+def test_shell_git_read_from_anchor_cwd_allows(tmp_path, anchor):
+    # A read-only git command from the anchor cwd is fine (no write verb).
+    assert guard.decide(_shell("git status", anchor[0]["path"]),
+                        env={}, home=tmp_path, anchors=anchor) is None
+
+
+def test_shell_git_commit_from_unrelated_cwd_allows(tmp_path, anchor):
+    # cwd is not a worktree-class anchor -> not our business.
+    other = _main_checkout(tmp_path, "singleton-repo")
+    assert guard.decide(_shell("git commit -m x", other),
+                        env={}, home=tmp_path, anchors=anchor) is None
+
+
 def test_shell_write_into_sibling_worktree_allows(tmp_path, anchor):
     # A write into ``<anchor>.worktrees\...`` shares the anchor's string prefix
     # but NOT the anchor+separator boundary, so it must not be flagged.

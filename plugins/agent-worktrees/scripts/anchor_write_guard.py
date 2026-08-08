@@ -93,6 +93,20 @@ _WRITE_VERBS = re.compile(
 
 _IS_WIN = os.name == "nt"
 
+# A git mutation whose target repo is the shell's CWD (no ``-C <path>`` redirect).
+# Such a command run FROM a worktree-class anchor mutates the anchor WITHOUT ever
+# naming its path, so the literal-path scan can't see it -- the cwd-based check
+# below catches it. A ``git -C <path>`` command names its target explicitly and
+# is left to the literal-path scan (so ``git -C <worktree>`` from the anchor cwd
+# still correctly targets the worktree, not the anchor).
+_GIT_CWD_WRITE = re.compile(
+    r"\bgit\s+(?!-C\b)(?:[a-z-]+\s+)*?"
+    r"(?:add|commit|apply|checkout|switch|reset|restore|clean|rm|mv|stash|"
+    r"merge|rebase|pull|cherry-pick|revert|init)\b",
+    re.IGNORECASE,
+)
+_GIT_DASH_C = re.compile(r"\bgit\s+-C\b", re.IGNORECASE)
+
 
 def _truthy_off(v: str | None) -> bool:
     return (v or "").strip().lower() in {"off", "0", "false", "no"}
@@ -305,6 +319,21 @@ def evaluate(tool: str, args: dict, cwd: str, anchors: list[dict]) -> dict | Non
         cmd = _pick(args, CMD_ARG_KEYS)
         if not cmd or not _WRITE_VERBS.search(cmd):
             return None  # pure reads into an anchor are allowed
+        # (a) cwd-based: a repo-scoped git mutation (e.g. ``git commit``,
+        # ``git add``) run WITH cwd inside a worktree-class anchor mutates it
+        # without ever naming the path -- the literal scan below can't see that.
+        # Gated to CWD-scoped git verbs (no ``-C`` redirect) to stay precise:
+        # a linked worktree cwd (.git file) is exempt, and ``git -C <path>`` is
+        # left to the literal scan.
+        if _GIT_CWD_WRITE.search(cmd) and not _GIT_DASH_C.search(cmd):
+            root = find_repo_root(cwd)
+            if root is not None and not is_linked_worktree(root):
+                a = canon_anchor.get(_canon(str(root)))
+                if a is not None:
+                    return {**a, "reason": _deny_reason(a["name"], a["path"])}
+        # (b) literal-path: a command that writes into an anchor by (absolute)
+        # path, regardless of cwd (e.g. ``git -C "<anchor>" commit`` or
+        # ``Set-Content "<anchor>\x"`` from elsewhere).
         cmd_norm = (cmd.replace("/", os.sep) if _IS_WIN else cmd)
         hay = os.path.normcase(cmd_norm) if _IS_WIN else cmd_norm
         flags = re.IGNORECASE if _IS_WIN else 0
