@@ -645,10 +645,12 @@ class Supervisor:
         - ``gone``    -> the embody is provably absent (its worktree is empty, or a
           different session reused it). Release the reservation (``fail_spawn``) so
           the next :meth:`poll_once` can re-reserve and re-embody; the replacement
-          resumes from the task's ``progress_log``. A still-leased task is requeued
-          (fenced) by the coordinator's own liveness GC, so it becomes
-          spawn-eligible; a task whose embody died *before* it claimed is already
-          queued.
+          resumes from the task's ``progress_log``. A still-leased task is first
+          **requeued on the gone owner's behalf** (an on-behalf ``yield_task``,
+          across worktree, fleet, and local bodies alike) so re-embody is prompt
+          rather than waiting out the lease -- the coordinator's own lease-expiry
+          GC is only the backstop. A task whose embody died *before* it claimed is
+          already queued.
         - ``live``    -> leave it (:meth:`hold_live_leases` heartbeats it).
         - ``unknown`` -> leave it. A still-starting-up worker, or an unreachable
           bridge, is **never** treated as death -- recovery never fires on
@@ -778,6 +780,22 @@ class Supervisor:
             if verdict != tracking.GONE:
                 continue  # live or unknown -> never recover on ignorance
             try:
+                # Requeue the task if the gone owner still holds its lease -- yield
+                # on its behalf (preserving goal + progress_log) so re-embody is
+                # PROMPT instead of waiting out the lease. This matches the fleet/
+                # local body paths above; without it a confirmed-gone worktree
+                # owner's task lingers LEASED (not spawn-eligible) until the
+                # coordinator's lease-expiry GC requeues it -- a lease-window where
+                # the replacement is needlessly delayed (the liveness-not-lease
+                # gap). A queued task (embody died before claiming) needs no yield.
+                if status in _LEASED and owner:
+                    try:
+                        self.client.yield_task(
+                            task["id"], owner,
+                            note="worktree owner confirmed gone; requeued for re-embody",
+                        )
+                    except DispatchError:
+                        pass  # lease-expiry GC is the backstop requeue
                 self.client.fail_spawn(
                     res["key"], detail=f"owner confirmed gone ({worktree})"
                 )

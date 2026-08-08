@@ -16,8 +16,13 @@ opt-in modules driven by declarative specs:
 
 Both talk to the coordinator through the ordinary :class:`DispatchClient`, so
 they need no privileged access -- a producer is just any client that can POST.
+
+An **evaluator** (:mod:`agent_dispatch.producers.evaluator`) is the companion
+handler: it receives a task's lifecycle event and decides what happens next
+(emit a follow-up task, or nothing) -- the *judgment* half of the
+emitters-and-evaluators contract.
 """
 
 from __future__ import annotations
 
-__all__ = ["schedule", "webhook"]
+__all__ = ["evaluator", "schedule", "webhook"]

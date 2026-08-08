@@ -959,11 +959,24 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
         dedup_note = f"duplicate of {duplicate_of}"
         reason = f"{reason}; {dedup_note}" if reason else dedup_note
     with _client(args) as c:
-        return _emit(
-            c.abandon(
-                args.task_id, worker_id=args.worker_id, permitted=permitted, reason=reason
-            )
+        result = c.abandon(
+            args.task_id, worker_id=args.worker_id, permitted=permitted, reason=reason
         )
+    if getattr(args, "resolve", False):
+        # Surface the drive-the-worktree-to-resolution plan alongside the abandon
+        # so the required unwind is an explicit, actionable expectation -- never a
+        # silent one. It is NOT auto-run: the destructive unwind stays worker-
+        # driven (`agent-dispatch resolve --execute`), on the worker's OWN tree.
+        from .resolution import plan_resolution
+
+        plan = plan_resolution(
+            "abandoned",
+            base=getattr(args, "base", None),
+            source_ref=duplicate_of,
+            reason=reason,
+        )
+        result = {"abandon": result, "resolution": plan.to_dict()}
+    return _emit(result)
 
 
 def _browse_peer(args: argparse.Namespace, subcommand: str, *, repo: str | None = None) -> int:
@@ -1488,6 +1501,422 @@ def _cmd_reservations(args: argparse.Namespace) -> int:
     return 2
 
 
+# ---- Loop recipes -----------------------------------------------------------
+#
+# A recipe is a packaged loop archetype (reviewer / conflict-resolution /
+# goal-driven). `recipes list|describe|render` are pure introspection; `recipes
+# kick` renders a recipe into an ordinary task and reuses `_cmd_create` (so the
+# same dedup / spawn / lane resolution applies) -- the ad-hoc "recipes run without
+# a wrapper service" path. See visions/plugins/agent-dispatch (§Concepts/*The
+# recipe*, §Features/*loop-recipes* + *recipes-run-ad-hoc*).
+
+
+def _parse_recipe_params(pairs: list[str] | None) -> dict[str, str]:
+    """Parse repeated ``--param KEY=VALUE`` into a dict."""
+    out: dict[str, str] = {}
+    for item in pairs or []:
+        if "=" not in item:
+            raise ValueError(f"--param must be KEY=VALUE, got {item!r}")
+        key, value = item.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ValueError(f"--param has an empty key: {item!r}")
+        out[key] = value
+    return out
+
+
+def _recipe_param_dicts(recipe: Any) -> list[dict]:
+    return [
+        {
+            "name": p.name,
+            "required": p.required,
+            "default": p.default,
+            "description": p.description,
+        }
+        for p in recipe.params
+    ]
+
+
+def _run_resolution_step(step: Any, *, cwd: str | None = None) -> dict:
+    """Execute one non-advisory :class:`ResolutionStep` in the caller's worktree.
+
+    Runs the step's fixed ``argv`` (git only) and returns a bounded result. An
+    advisory step is never run here -- the caller reports it as an instruction.
+    """
+    try:
+        proc = subprocess.run(  # noqa: S603 -- fixed git argv from a ResolutionStep
+            list(step.argv), cwd=cwd, check=False, capture_output=True, text=True, timeout=120
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"kind": step.kind, "ran": True, "ok": False, "error": str(exc)}
+    out = (proc.stdout or "").strip()
+    err = (proc.stderr or "").strip()
+    return {
+        "kind": step.kind,
+        "ran": True,
+        "ok": proc.returncode == 0,
+        "returncode": proc.returncode,
+        "output": out[:2000],
+        "error": err[:2000] or None,
+    }
+
+
+def _cmd_resolve(args: argparse.Namespace) -> int:
+    """Drive THIS worktree to a clean, resolved final state (the enforced
+    *drive-the-worktree-to-resolution* invariant). Plans by default; ``--execute``
+    performs the (destructive) unwind on the caller's own workspace."""
+    from .resolution import ResolutionError, plan_resolution
+
+    try:
+        plan = plan_resolution(
+            args.outcome, base=args.base, source_ref=args.source, reason=args.reason
+        )
+    except ResolutionError as exc:
+        print(f"agent-dispatch: {exc}", file=sys.stderr)
+        return 2
+
+    if not args.execute:
+        payload = plan.to_dict()
+        payload["executed"] = False
+        payload["note"] = (
+            "plan only -- re-run with --execute to perform the unwind "
+            "(destructive steps discard working-tree state)"
+        )
+        return _emit(payload)
+
+    results: list[dict] = []
+    instructions: list[str] = []
+    failed = False
+    for step in plan.steps:
+        if step.advisory:
+            instructions.append(step.description)
+            results.append({"kind": step.kind, "ran": False, "advisory": True})
+            continue
+        res = _run_resolution_step(step)
+        results.append(res)
+        if not res["ok"]:
+            failed = True
+            # A failed destructive unwind must not be papered over -- stop so the
+            # worker/operator can look, rather than pressing on into a dirtier
+            # state.
+            if step.destructive:
+                break
+
+    payload = plan.to_dict()
+    payload.update({"executed": True, "results": results, "instructions": instructions})
+    _emit(payload)
+    return 1 if failed else 0
+
+
+def _spawn_detached_waiter(spec: Any) -> dict:
+    """Re-exec ``agent-dispatch run`` (without ``--detach``) as a fully detached
+    waiter that outlives this process, so the kicking worker can be torn down
+    while a cheap OS-level process owns the wait and fires the resume."""
+    from . import hibernation
+    from .procutil import detached_kwargs
+
+    argv = hibernation.detached_run_argv(spec, python=sys.executable)
+    proc = subprocess.Popen(  # noqa: S603 -- fixed argv (interpreter + our own module)
+        argv,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        **detached_kwargs(),
+    )
+    return {"pid": proc.pid, "argv": argv}
+
+
+def _cmd_run(args: argparse.Namespace) -> int:
+    """Hand a blocking wait to the layer (*hibernate-the-wait*): run ``-- <cmd>``
+    to completion, then resume the worktree-affinitied worker via agent-bridge.
+    With ``--detach`` the wait runs in a detached process so the worker can be
+    torn down (costing nothing) while it waits."""
+    from . import bridge
+    from .hibernation import RunSpec, run_and_resume
+
+    command = list(args.command or [])
+    if command and command[0] == "--":
+        command = command[1:]
+    if not command:
+        print(
+            "agent-dispatch: run needs a command after '--', e.g. "
+            "`agent-dispatch run --resume <worktree> -- <blocking-cmd>`",
+            file=sys.stderr,
+        )
+        return 2
+
+    spec = RunSpec(
+        command=tuple(command),
+        resume_worktree=args.resume,
+        task_id=args.task,
+        message=args.message,
+    )
+
+    if args.detach:
+        handle = _spawn_detached_waiter(spec)
+        return _emit(
+            {
+                "detached": True,
+                "resume_worktree": spec.resume_worktree,
+                "command": list(spec.command),
+                **handle,
+            }
+        )
+
+    def runner(cmd: tuple[str, ...]) -> int:
+        try:
+            proc = subprocess.run(list(cmd), check=False)  # noqa: S603 -- operator-supplied wait
+            return proc.returncode
+        except (OSError, subprocess.SubprocessError) as exc:
+            print(f"agent-dispatch: run: could not execute the wait: {exc}", file=sys.stderr)
+            return 127
+
+    report = run_and_resume(spec, runner=runner, resumer=bridge.send_nudge)
+    return _emit(report)
+
+
+def _cmd_evaluate(args: argparse.Namespace) -> int:
+    """Feed one task **lifecycle event** through a declarative evaluator and apply
+    its decisions (the *evaluator* half of emitters-and-evaluators). The event
+    JSON is read from ``--event-file`` or stdin; the coordinator shape is
+    ``{"type": "task.completed", "task": {...}}``."""
+    from .producers.evaluator import EvaluatorError, SpecEvaluator, evaluate_and_apply
+
+    try:
+        spec = json.loads(Path(args.spec).expanduser().read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print(f"agent-dispatch: cannot read evaluator spec: {exc}", file=sys.stderr)
+        return 2
+    raw = (
+        Path(args.event_file).expanduser().read_text(encoding="utf-8")
+        if args.event_file
+        else sys.stdin.read()
+    )
+    try:
+        event = json.loads(raw)
+    except ValueError as exc:
+        print(f"agent-dispatch: event is not valid JSON: {exc}", file=sys.stderr)
+        return 2
+    try:
+        evaluator = SpecEvaluator(spec)
+    except EvaluatorError as exc:
+        print(f"agent-dispatch: {exc}", file=sys.stderr)
+        return 2
+
+    if args.dry_run:
+        report = evaluate_and_apply(
+            evaluator, event, creator=lambda *a, **k: {}, repo=args.repo, apply=False
+        )
+        return _emit(report)
+
+    with _client(args) as c:
+        try:
+            report = evaluate_and_apply(
+                evaluator, event, creator=c.create, repo=args.repo, apply=True
+            )
+        except EvaluatorError as exc:
+            print(f"agent-dispatch: {exc}", file=sys.stderr)
+            return 2
+    return _emit(report)
+
+
+def _cmd_recipes_list(args: argparse.Namespace) -> int:
+    from .recipes import list_recipes
+
+    return _emit(
+        [
+            {
+                "name": r.name,
+                "summary": r.summary,
+                "params": _recipe_param_dicts(r),
+                "suspend_on": list(r.suspend_on),
+                "resolution": r.resolution,
+            }
+            for r in list_recipes()
+        ]
+    )
+
+
+def _cmd_recipes_describe(args: argparse.Namespace) -> int:
+    from .recipes import UnknownRecipe, get_recipe
+
+    try:
+        r = get_recipe(args.name)
+    except UnknownRecipe as exc:
+        print(f"agent-dispatch: {exc}", file=sys.stderr)
+        return 2
+    return _emit(
+        {
+            "name": r.name,
+            "summary": r.summary,
+            "params": _recipe_param_dicts(r),
+            "title_template": r.title_template,
+            "goal_template": r.goal_template,
+            "done_criteria": r.done_criteria,
+            "charter_template": r.charter_template,
+            "suspend_on": list(r.suspend_on),
+            "resolution": r.resolution,
+            "requires": list(r.requires),
+            "labels": list(r.labels),
+        }
+    )
+
+
+def _cmd_recipes_render(args: argparse.Namespace) -> int:
+    from .recipes import RecipeError, render_recipe
+
+    try:
+        rendered = render_recipe(args.name, _parse_recipe_params(args.param))
+    except (RecipeError, ValueError) as exc:
+        print(f"agent-dispatch: {exc}", file=sys.stderr)
+        return 2
+    return _emit(rendered.to_dict())
+
+
+def _recipe_dedup_key(rendered: Any) -> str:
+    """A reserved-work dedup key so re-kicking the same recipe+params collides
+    rather than forking the work (the *no-overlapping-live-workers* invariant's
+    dedup-before-create half). Delegates to the shared registry helper so the CLI
+    and MCP kick paths derive the same key."""
+    from .recipes import dedup_key_for
+
+    return dedup_key_for(rendered)
+
+
+def _recipe_create_namespace(
+    args: argparse.Namespace, rendered: Any
+) -> argparse.Namespace:
+    """Build a ``create``-shaped namespace from a rendered recipe so ``kick`` can
+    reuse ``_cmd_create`` verbatim (dedup, spawn, lane resolution)."""
+    return argparse.Namespace(
+        # recipe-derived
+        title=rendered.title,
+        prompt=rendered.prompt,
+        goal=rendered.goal,
+        done_criteria=rendered.done_criteria,
+        require=list(rendered.requires) or None,
+        label=list(rendered.labels),
+        dedup_key=getattr(args, "dedup_key", None) or _recipe_dedup_key(rendered),
+        source="recipe",
+        origin_ref=rendered.recipe,
+        # spawn passthrough (a recipe worker wants a full checkout -> embody body)
+        spawn=getattr(args, "spawn", False),
+        spawn_backend=getattr(args, "spawn_backend", "embody"),
+        spawn_agent=getattr(args, "spawn_agent", "task-worker"),
+        run_async=getattr(args, "run_async", False),
+        verify_timeout=getattr(args, "verify_timeout", 0),
+        # lane / client passthrough
+        repo=getattr(args, "repo", None),
+        url=getattr(args, "url", None),
+        token=getattr(args, "token", None),
+        # create knobs left at their defaults (a recipe kick uses none of these)
+        proposed=False,
+        claim=False,
+        exclude=None,
+        affinity=None,
+        payload_ref=None,
+        payload_inline=None,
+        payload_file=None,
+        target_machine=None,
+        target_worktree=None,
+        target_repo=None,
+        not_before=0.0,
+        machine=getattr(args, "machine", None),
+        worktree=getattr(args, "worktree", None),
+    )
+
+
+def _cmd_recipes_kick(args: argparse.Namespace) -> int:
+    from .recipes import RecipeError, render_recipe
+
+    try:
+        rendered = render_recipe(args.name, _parse_recipe_params(args.param))
+    except (RecipeError, ValueError) as exc:
+        print(f"agent-dispatch: {exc}", file=sys.stderr)
+        return 2
+
+    create_ns = _recipe_create_namespace(args, rendered)
+    if getattr(args, "dry_run", False):
+        preview = rendered.to_dict()
+        preview.update(
+            {
+                "dry_run": True,
+                "dedup_key": create_ns.dedup_key,
+                "spawn": create_ns.spawn,
+                "spawn_backend": create_ns.spawn_backend,
+            }
+        )
+        return _emit(preview)
+    return _cmd_create(create_ns)
+
+
+def _cmd_recipes_drive(args: argparse.Namespace) -> int:
+    """Decide the next loop step for a recipe given a ``--signal`` (the driver's
+    executable rhythm). Prints the action; ``--execute`` performs the SUSPEND
+    (detached hibernation wait) and RESOLVE (drive-to-resolution) legs -- WORK is
+    the agent's own to do."""
+    from .recipes import UnknownRecipe, decide, get_recipe
+    from .recipes.driver import RESOLVE, SUSPEND
+
+    try:
+        recipe = get_recipe(args.name)
+    except UnknownRecipe as exc:
+        print(f"agent-dispatch: {exc}", file=sys.stderr)
+        return 2
+
+    action = decide(recipe, args.signal)
+    report: dict[str, Any] = {"recipe": recipe.name, "signal": args.signal, "action": action.to_dict()}
+
+    if not args.execute:
+        return _emit(report)
+
+    if action.kind == SUSPEND:
+        wait_cmd = list(args.wait_cmd or [])
+        if wait_cmd and wait_cmd[0] == "--":
+            wait_cmd = wait_cmd[1:]
+        if not wait_cmd or not args.resume:
+            report["executed"] = False
+            report["note"] = (
+                "SUSPEND needs --resume <worktree> and a wait command after '--' "
+                "to hand off; nothing executed"
+            )
+            return _emit(report)
+        from .hibernation import RunSpec
+
+        spec = RunSpec(command=tuple(wait_cmd), resume_worktree=args.resume, task_id=args.task)
+        report["executed"] = True
+        report["waiter"] = _spawn_detached_waiter(spec)
+        return _emit(report)
+
+    if action.kind == RESOLVE:
+        from .resolution import plan_resolution
+
+        plan = plan_resolution(action.outcome, base=args.base, source_ref=args.source)
+        results: list[dict] = []
+        instructions: list[str] = []
+        failed = False
+        for step in plan.steps:
+            if step.advisory:
+                instructions.append(step.description)
+                results.append({"kind": step.kind, "ran": False, "advisory": True})
+                continue
+            res = _run_resolution_step(step)
+            results.append(res)
+            if not res["ok"]:
+                failed = True
+                if step.destructive:
+                    break
+        report["executed"] = True
+        report["resolution"] = {**plan.to_dict(), "results": results, "instructions": instructions}
+        _emit(report)
+        return 1 if failed else 0
+
+    # WORK: nothing for the layer to execute -- the agent does the pass.
+    report["executed"] = False
+    report["note"] = "WORK is the agent's to perform; re-run drive with the next signal"
+    return _emit(report)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-dispatch", description="Agent task queue + coordinator"
@@ -1708,6 +2137,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="retire the task as a DUPLICATE of REF (an existing task id, PR, or "
              "issue). Self-justifying: implies --permit and records the dedup "
              "reference in the reason, so the decision is never a silent drop.",
+    )
+    p.add_argument(
+        "--resolve", action="store_true",
+        help="also emit the drive-the-worktree-to-resolution plan (the unwind the "
+             "worker must run on its own worktree). Advisory -- runs nothing.",
+    )
+    p.add_argument(
+        "--base", metavar="BRANCH",
+        help="with --resolve, the base branch the worktree unwinds onto "
+             "(default: the branch's tracked upstream)",
     )
     p.set_defaults(func=_cmd_abandon)
 
@@ -2145,6 +2584,170 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("health", help="check coordinator health")
     p.set_defaults(func=lambda args: _emit(_client(args, ensure=False).health()))
+
+    # -- Loop recipes: list / describe / render / kick --------------------
+    rp = sub.add_parser(
+        "recipes",
+        help="loop recipes -- the packaged shapes of long-running agentic work "
+             "(reviewer / conflict-resolution / goal-driven), kickable ad-hoc",
+    )
+    rsub = rp.add_subparsers(dest="recipes_command", required=True)
+
+    lp = rsub.add_parser("list", help="list the available recipes")
+    lp.set_defaults(func=_cmd_recipes_list)
+
+    dp = rsub.add_parser("describe", help="show a recipe's full descriptor")
+    dp.add_argument("name", help="recipe name (see 'recipes list')")
+    dp.set_defaults(func=_cmd_recipes_describe)
+
+    rr = rsub.add_parser(
+        "render",
+        help="render a recipe with parameters (prints the fields; creates nothing)",
+    )
+    rr.add_argument("name")
+    rr.add_argument(
+        "--param", action="append", metavar="KEY=VALUE",
+        help="a recipe parameter (repeatable), e.g. --param repo=owner/name --param pr=42",
+    )
+    rr.set_defaults(func=_cmd_recipes_render)
+
+    kp = rsub.add_parser(
+        "kick",
+        help="carve an ad-hoc task from a recipe (optionally spawn a worker to "
+             "drive it) -- the no-wrapper-service path",
+    )
+    kp.add_argument("name")
+    kp.add_argument(
+        "--param", action="append", metavar="KEY=VALUE",
+        help="a recipe parameter (repeatable)",
+    )
+    kp.add_argument(
+        "--repo",
+        help="lane (repo) for the task: a local repo name or remote URL "
+             "(default: the calling repo)",
+    )
+    kp.add_argument("--dedup-key", help="override the derived reserved-work dedup key")
+    kp.add_argument(
+        "--spawn", action="store_true",
+        help="after creating, spawn a worker to drive the loop (best effort)",
+    )
+    kp.add_argument(
+        "--spawn-backend", choices=["bridge", "embody"], default="embody",
+        help="how to embody the worker: 'embody' (default) = a CLI autopilot in a "
+             "fresh worktree with a full checkout (the right body for a recipe); "
+             "'bridge' = a headless ACP worker",
+    )
+    kp.add_argument("--spawn-agent", default="task-worker")
+    kp.add_argument(
+        "--async", dest="run_async", action="store_true",
+        help="with --spawn, don't wait for the worker (fire-and-forget)",
+    )
+    kp.add_argument("--verify-timeout", type=int, default=0)
+    kp.add_argument(
+        "--dry-run", action="store_true",
+        help="print the create call the kick would make, without enqueuing it",
+    )
+    kp.set_defaults(func=_cmd_recipes_kick)
+
+    # -- Drive-the-worktree-to-resolution: the enforced clean-up verb ------
+    rvp = sub.add_parser(
+        "resolve",
+        help="drive THIS worktree to a clean, resolved final state after a loop "
+             "(landed -> verify clean; abandoned -> unwind to base + reconcile source)",
+    )
+    rvp.add_argument(
+        "--outcome", required=True, choices=["landed", "abandoned"],
+        help="how the work ended: 'landed' (merged) or 'abandoned' (unwind to base)",
+    )
+    rvp.add_argument(
+        "--base", metavar="BRANCH",
+        help="base branch to unwind onto for --outcome abandoned "
+             "(default: the branch's tracked upstream)",
+    )
+    rvp.add_argument(
+        "--source", metavar="REF",
+        help="the change/issue this worker was driving, folded into the "
+             "source-reconcile instruction",
+    )
+    rvp.add_argument("--reason", help="abandonment reason (recorded on the plan)")
+    rvp.add_argument(
+        "--execute", action="store_true",
+        help="perform the plan (destructive steps discard working-tree state); "
+             "without it, the plan is printed and nothing runs",
+    )
+    rvp.set_defaults(func=_cmd_resolve)
+
+    # -- Hibernate-the-wait: hand a blocking wait to the layer -------------
+    rnp = sub.add_parser(
+        "run",
+        help="hand a blocking wait to the layer (hibernate-the-wait): run "
+             "'-- <cmd>' to completion, then resume the worktree-affinitied "
+             "worker via agent-bridge",
+    )
+    rnp.add_argument(
+        "--resume", metavar="WORKTREE",
+        help="the worker (worktree handle) to resume when the wait resolves "
+             "(agent-bridge routes to whichever session is live then)",
+    )
+    rnp.add_argument("--task", metavar="ID", help="task id, folded into the resume nudge")
+    rnp.add_argument("--message", help="override the resume nudge text")
+    rnp.add_argument(
+        "--detach", action="store_true",
+        help="run the wait in a detached process that outlives this one, so the "
+             "kicking worker can be torn down while it waits (true hibernation)",
+    )
+    rnp.add_argument(
+        "command", nargs=argparse.REMAINDER,
+        help="the blocking wait command, after '--' (e.g. -- agent-worktrees pr-watch 42)",
+    )
+    rnp.set_defaults(func=_cmd_run)
+
+    # -- Evaluator: a producer's lifecycle handler ------------------------
+    evp = sub.add_parser(
+        "evaluate",
+        help="feed one task lifecycle event through a declarative evaluator and "
+             "apply its decisions (emit a follow-up task, or nothing)",
+    )
+    evp.add_argument("--spec", required=True, metavar="FILE", help="evaluator spec (JSON)")
+    evp.add_argument(
+        "--event-file", metavar="FILE",
+        help="lifecycle event JSON (default: read from stdin)",
+    )
+    evp.add_argument(
+        "--repo", help="lane for any emitted follow-up task (a local name or remote URL)"
+    )
+    evp.add_argument(
+        "--dry-run", action="store_true",
+        help="print the decisions without creating any follow-up task",
+    )
+    evp.set_defaults(func=_cmd_evaluate)
+
+    dr = rsub.add_parser(
+        "drive",
+        help="decide the next loop step for a recipe given a --signal (the "
+             "executable work/suspend/resolve rhythm); --execute performs the "
+             "suspend + resolve legs",
+    )
+    dr.add_argument("name")
+    dr.add_argument(
+        "--signal", required=True,
+        help="what just happened: 'start', a suspend-on event (e.g. change-updated), "
+             "'work-done'/'idle', or a terminal signal (merged/landed/abandoned/closed)",
+    )
+    dr.add_argument("--resume", metavar="WORKTREE", help="worker to resume on a SUSPEND leg")
+    dr.add_argument("--task", metavar="ID", help="task id, folded into a SUSPEND resume")
+    dr.add_argument("--base", metavar="BRANCH", help="base branch for a RESOLVE unwind")
+    dr.add_argument("--source", metavar="REF", help="change/issue for a RESOLVE reconcile")
+    dr.add_argument(
+        "--execute", action="store_true",
+        help="perform the prescribed action (SUSPEND: spawn the detached waiter; "
+             "RESOLVE: run the unwind). Needs --resume and a '--' wait command for SUSPEND.",
+    )
+    dr.add_argument(
+        "wait_cmd", nargs="*",
+        help="for --execute on a SUSPEND, the blocking wait command after '--'",
+    )
+    dr.set_defaults(func=_cmd_recipes_drive)
 
     return parser
 

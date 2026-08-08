@@ -153,6 +153,84 @@ class DispatchTools:
         with self._client_factory() as c:
             return c.sweep(repo=self._scope_repo(repo), limit=limit)
 
+    # -- recipes -------------------------------------------------------------
+
+    def recipe_list(self) -> list[dict]:
+        """List the built-in loop recipes -- the packaged shapes of long-running
+        agentic work (reviewer / conflict-resolution / goal-driven) -- with their
+        parameters, suspend-on events, and resolution target."""
+        from .recipes import list_recipes
+
+        return [
+            {
+                "name": r.name,
+                "summary": r.summary,
+                "params": [
+                    {
+                        "name": p.name,
+                        "required": p.required,
+                        "default": p.default,
+                        "description": p.description,
+                    }
+                    for p in r.params
+                ],
+                "suspend_on": list(r.suspend_on),
+                "resolution": r.resolution,
+            }
+            for r in list_recipes()
+        ]
+
+    def recipe_render(self, name: str, params: dict[str, str] | None = None) -> dict:
+        """Render a recipe with parameters into the fields of a task -- creates
+        nothing. Use it to inspect exactly what ``recipe_kick`` would enqueue."""
+        from .recipes import render_recipe
+
+        return render_recipe(name, params or {}).to_dict()
+
+    def recipe_kick(
+        self,
+        name: str,
+        *,
+        params: dict[str, str] | None = None,
+        repo: str | None = None,
+        dedup_key: str | None = None,
+        target_machine: str | None = None,
+        target_worktree: str | None = None,
+        target_repo: str | None = None,
+        proposed: bool = False,
+    ) -> dict:
+        """Carve an ad-hoc task from a recipe (the "recipes run without a wrapper
+        service" path). Renders the recipe and enqueues it via ``create``,
+        deriving a reserved-work ``dedup_key`` from the recipe + params so
+        re-kicking the same target **collides rather than forking**. This
+        *enqueues* the task; embodying a worker to drive the loop is the
+        supervisor/host's job (exactly as with ``create``)."""
+        from .recipes import dedup_key_for, render_recipe
+
+        rendered = render_recipe(name, params or {})
+        lane = self._scope_repo(repo)
+        if not lane:
+            raise ValueError(
+                "could not resolve the repo (lane); pass repo=<local name|remote URL>"
+            )
+        with self._client_factory() as c:
+            return c.create(
+                rendered.title,
+                repo=lane,
+                prompt=rendered.prompt,
+                proposed=proposed,
+                requires=list(rendered.requires),
+                labels=list(rendered.labels),
+                dedup_key=dedup_key or dedup_key_for(rendered),
+                goal=rendered.goal,
+                done_criteria=rendered.done_criteria,
+                source="recipe",
+                origin_ref=rendered.recipe,
+                target_machine=target_machine,
+                target_worktree=target_worktree,
+                target_repo=target_repo,
+            )
+
     def list(
         self,
         status: str | None = None,
@@ -299,6 +377,9 @@ def build_server(tools: DispatchTools | None = None) -> Any:
     mcp.tool(name="dispatch_approve")(t.approve)
     mcp.tool(name="dispatch_find")(t.find)
     mcp.tool(name="dispatch_sweep")(t.sweep)
+    mcp.tool(name="dispatch_recipe_list")(t.recipe_list)
+    mcp.tool(name="dispatch_recipe_render")(t.recipe_render)
+    mcp.tool(name="dispatch_recipe_kick")(t.recipe_kick)
     mcp.tool(name="dispatch_list")(t.list)
     mcp.tool(name="dispatch_show")(t.show)
     mcp.tool(name="dispatch_events")(t.events)

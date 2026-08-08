@@ -166,6 +166,91 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
         """The dedup corpus for the lane: every non-abandoned task, newest first."""
         return [asdict(t) for t in queue.sweep(repo=_repo(ctx, repo), limit=limit)]
 
+    # -- recipes -------------------------------------------------------------
+
+    @mcp.tool(name="dispatch_recipe_list")
+    def recipe_list() -> list[dict]:
+        """List the built-in loop recipes (reviewer / conflict-resolution /
+        goal-driven) with their parameters, suspend-on events, and resolution."""
+        from .recipes import list_recipes
+
+        return [
+            {
+                "name": r.name,
+                "summary": r.summary,
+                "params": [
+                    {
+                        "name": p.name,
+                        "required": p.required,
+                        "default": p.default,
+                        "description": p.description,
+                    }
+                    for p in r.params
+                ],
+                "suspend_on": list(r.suspend_on),
+                "resolution": r.resolution,
+            }
+            for r in list_recipes()
+        ]
+
+    @mcp.tool(name="dispatch_recipe_render")
+    def recipe_render(name: str, params: dict[str, str] | None = None) -> dict:
+        """Render a recipe with parameters into the fields of a task (creates
+        nothing) -- inspect what ``dispatch_recipe_kick`` would enqueue."""
+        from .recipes import RecipeError, render_recipe
+
+        try:
+            return render_recipe(name, params or {}).to_dict()
+        except RecipeError as exc:
+            return {"error": str(exc)}
+
+    @mcp.tool(name="dispatch_recipe_kick")
+    def recipe_kick(
+        ctx: Context,
+        name: str,
+        params: dict[str, str] | None = None,
+        repo: str | None = None,
+        dedup_key: str | None = None,
+        target_machine: str | None = None,
+        target_worktree: str | None = None,
+        target_repo: str | None = None,
+        proposed: bool = False,
+    ) -> dict:
+        """Carve an ad-hoc task from a recipe (the no-wrapper-service path).
+
+        Renders the recipe and enqueues it, deriving a reserved-work
+        ``dedup_key`` from the recipe + params so re-kicking the same target
+        **collides rather than forking**. Enqueues only; embodying a worker to
+        drive the loop is the supervisor/host's job (as with ``create``)."""
+        from .recipes import RecipeError, dedup_key_for, render_recipe
+
+        try:
+            rendered = render_recipe(name, params or {})
+        except RecipeError as exc:
+            return {"error": str(exc)}
+        lane = _repo(ctx, repo)
+        if not lane:
+            return {"error": "no repo (lane): send X-Agent-Repo or pass repo=<remote URL>"}
+        make = queue.propose if proposed else queue.create
+        task = make(
+            rendered.title,
+            repo=lane,
+            prompt=rendered.prompt,
+            requires=list(rendered.requires),
+            labels=list(rendered.labels),
+            dedup_key=dedup_key or dedup_key_for(rendered),
+            goal=rendered.goal,
+            done_criteria=rendered.done_criteria,
+            source="recipe",
+            origin_ref=rendered.recipe,
+            target_machine=target_machine,
+            target_worktree=target_worktree,
+            target_repo=target_repo,
+        )
+        result = asdict(task)
+        _emit("task.proposed" if proposed else "task.created", result)
+        return result
+
     @mcp.tool(name="dispatch_list")
     def list_tasks(
         ctx: Context,

@@ -6,7 +6,7 @@
   version-control remote or minting an account per agent.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-07-31
+- **Last revised:** 2026-08-07
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's `plugins/agent-dispatch/` (skill `agent-dispatch`, `pick-and-claim`)
 
@@ -111,6 +111,42 @@ A task moves through a small set of states from *drafted* → *ready* → *claim
 exclusively while it decides whether to accept, decline (returning it with a
 "not me" so it isn't re-offered the same task), or retire it as a duplicate.
 
+### The recipe — a packaged loop archetype
+The common **shapes** of long-running agentic work ship with the layer as named,
+reusable **recipes**, rather than being re-derived by every consumer. A recipe is
+a **charter template plus wiring**: the goal-loop working contract specialized for
+a class of work, the domain events it **suspends** on, and the **resolution** it
+drives toward. Three archetypes are first-class:
+
+1. **reviewer** — for a given change (a pull request, a branch diff), loop until
+   the change is merged or abandoned: review, post feedback or approve, suspend on
+   a verdict, resume when the change updates or the reviewer must own the merge.
+   The reviewer always has the full target-repo source (a local checkout,
+   container, or codespace) and acts through the repo's own review/merge tools.
+2. **conflict-resolution** — for a change some *other* system opened but nobody is
+   driving, take the last mile: check out the branch, rebase, resolve conflicts,
+   answer review/build state, suspend while updates settle, resume on the next
+   state change, and declare done when it lands or is abandoned.
+3. **goal-driven** — for an arbitrary purpose against one or more target repos
+   (fix a bug, document a package, reconcile a plan), stay within the goal's
+   bounds and drive it through one or more pull requests — handling conflicts and
+   review feedback — until the goal is met or abandoned.
+
+A consumer **selects and parameterizes** a recipe rather than hand-rolling a loop,
+and may **extend** one where its domain needs more. One reviewer recipe serves an
+automated review service, an ad-hoc review of a single check-in, and a batch of
+target pull requests alike — one shape, many tenants.
+
+### The evaluator — a producer's lifecycle handler
+A producer puts work on the queue; an **evaluator** is its companion **handler**
+that decides what happens *next* as that work progresses. Like a hook, an
+evaluator receives a task's **lifecycle events** and chooses the follow-through —
+emit a follow-up task, update domain state, or confirm completion. Producers wire
+a domain's *world* into the queue; evaluators wire its *judgment* into the loop —
+so a standing domain automates a whole cycle without the layer needing a bespoke
+module per domain. The **degenerate case is the ad-hoc kick**: a one-off task with
+no evaluator still runs, supervised locally and reporting its own outcome.
+
 ## Features
 
 ### durable-claimable-work
@@ -181,6 +217,57 @@ telemetry system it runs. This keeps the coordinator process **self-contained**
 (only the layer's own code runs in it) while still making its lifecycle fully
 consumable: the integration is **process-to-process over a declared transport**,
 not a shared runtime.
+
+### loop-recipes
+The layer ships the **shapes** of long-running agentic work — **reviewer**,
+**conflict-resolution**, **goal-driven** — as reusable, parameterized recipes (see
+*The recipe*). A consumer selects and configures a loop instead of re-implementing
+one; a recipe fixes the suspend/resume rhythm and the resolution target for its
+class of work, and the consumer supplies the specifics (which repo, which goal,
+which target change). Extension is expected where a domain needs more, but the
+default is **reuse**: the same recipe is the engine behind a standing service and
+a one-off alike.
+
+### recipes-run-ad-hoc
+A loop recipe is a **directly-invokable** capability, not something that only
+exists inside a standing domain service. A one-off — "review this change to
+merge," "unstick this stalled change," "drive this goal to a pull request" — can
+be **kicked from the command line** needing nothing more than a **coordinator, a
+worker body, and the recipe**. No standing service, emitter, evaluator, or
+per-domain deployment is a precondition; that machinery is how a *recurring* or
+*at-scale* domain grows, never a gate. The minimum viable deployment is small on
+purpose, so the loops are equally available to a full automated deployment and to
+a bare host that has none of it.
+
+### hibernate-the-wait
+A worker that must wait on a slow external condition does not sit holding a live
+process. It **hands the wait to the layer**: the layer runs the blocking step
+asynchronously, **spins the worker's session down**, owns the await, and
+**resumes the same worktree-affinitied worker** when the condition resolves. A
+suspended worker then costs **no running process** — a reviewer parked for days
+pending an update, or a goal-driven worker waiting on a merge, consumes nothing
+while it waits yet wakes with its context intact. This is the mechanism beneath
+*resumable-goal*'s suspend/resume: the worker posts what it is waiting for and is
+torn down, rather than blocking a live process on an internal wait.
+
+### emitters-and-evaluators
+Work enters and advances through a **paired contract** layered on *the four
+production modes*: an **emitter** is a producer with a body the layer supervises
+(a webhook receiver that turns an event into a task; a scheduled check that emits
+when a threshold trips), and an **evaluator** is its companion handler that reacts
+to a task's lifecycle events and chooses the next step (see *The evaluator*).
+Together they let a domain plug its world and its judgment into the queue without
+a bespoke module. Pushing and polling tasks directly stays available — that simply
+keeps the lifecycle responsibility with the caller instead of an evaluator — and
+the ad-hoc kick is the degenerate "one task, no evaluator" case.
+
+### bounded-concurrency-wide-charters
+The pool of concurrently embodied workers is **capped** — a deliberate ceiling
+that protects the compute/token budget — and throughput scales by giving each
+worker a **wider charter** rather than by exceeding the cap. The supervisor's
+concurrency limit is the ceiling; *buildup-is-a-health-signal*'s escalate-or-demote
+is how the queue reacts **within** it. A bounded pool of broadly-chartered workers
+is the default posture, not an unbounded swarm of narrow ones.
 
 ## Behaviors
 
@@ -306,6 +393,43 @@ ground/coordination layers; the queue adds only the **task** and its lifecycle.
 (The fabric-wide *derive-don't-duplicate / single-owning-layer* rule, applied to
 this layer.)
 
+### drive-the-worktree-to-resolution
+An embodied task **always** leaves its worktree in a **clean, resolved final
+state**. Landing the work resolves it; so does abandonment — but abandonment means
+**unwinding** the workspace to its base (a reset to the tracked upstream) so it
+reads clean and is prunable, never leaving an orphan branch nobody owns.
+Abandonment also **reconciles the source**: the producing domain (or effort/issue)
+is notified so its own records stop believing the work landed. The queue's promise
+that work never silently piles up extends to the **workspaces** that work runs in —
+resolution of the goal and resolution of its worktree happen together — and a
+worker that gives up part-way is expected to drive its own worktree to that clean
+state before it lets go.
+
+### no-overlapping-live-workers
+Two live workers never hold **overlapping** work. When a goal is re-carved so a new
+task covers scope a previous worker held — most commonly after an abandon
+reconciles an omission back onto the queue, or on a reassignment — the
+**predecessor is gone before the successor starts**: its session has ended and its
+worktree has been torn down. Two mechanisms make this hold without racing:
+**reserved-work dedup** (*dedup-before-create*) stops the overlap from being carved
+at all, and the claim's **liveness** plus the supervisor's **teardown**
+(*liveness-not-lease*) keep a superseded worker from lingering beside its
+replacement. Workers are still expected to tolerate a *minor* collision gracefully,
+which makes this a **safety margin** rather than a timing-critical lock: correctness
+does not hinge on perfect timing, yet the layer refuses to leave a zombie worker
+running next to the one that supersedes it.
+
+### a-loop-runs-with-or-without-a-service
+The same recipe runs two ways, and neither requires the other. **Ad-hoc**: a person
+or agent kicks a one-off and the *local* supervisor watches it to resolution, the
+worker reporting back what it did — no standing service, emitter, or evaluator.
+**Service-driven**: a standing domain wires an emitter to carve the work and an
+evaluator to advance it across events. The service tier is how *recurring* or
+*at-scale* work is automated; it is never a precondition for running a single loop.
+The minimum viable deployment is a **coordinator plus a worker body**, so the
+reviewer, conflict-resolution, and goal-driven loops are equally available to a
+full automated deployment and to a bare host that has none of it.
+
 ## Non-Goals / Boundaries
 
 - **Not the live-conversation layer.** Driving or messaging a running agent
@@ -417,3 +541,19 @@ this layer.)
   'embody'`). Its realization (the CWD-neutral `--project`-named embody spawn) had
   shipped without the leaf vision claiming the intent; this binds it so any effort
   carved from the agent-dispatch delta inherits it.
+- **2026-08-07** — Extended for the **loop-recipe / ad-hoc / hibernation** intent:
+  added §Concepts/*The recipe — a packaged loop archetype* (reviewer /
+  conflict-resolution / goal-driven) and *The evaluator — a producer's lifecycle
+  handler*; the *loop-recipes*, *recipes-run-ad-hoc*, *hibernate-the-wait*,
+  *emitters-and-evaluators*, and *bounded-concurrency-wide-charters* features; and
+  the *drive-the-worktree-to-resolution*, *no-overlapping-live-workers*, and
+  *a-loop-runs-with-or-without-a-service* behaviors. States that the layer ships the
+  *shapes* of long-running work as reusable recipes runnable **ad-hoc** (coordinator
+  + worker body + recipe, no standing service required), that a waiting worker is
+  **hibernated** (process torn down, resumed on the awaited event) rather than left
+  holding a process, that producers pair with **evaluators** to advance a loop
+  across lifecycle events, that an abandoned worker **drives its worktree to a clean
+  resolved state** and reconciles its source, that two live workers never hold
+  overlapping work, and that concurrency is **capped** while charters stay wide.
+  Mirrors the intent captured in the downstream fabric vision from the operator's
+  loop-recipe design conversation; the implementing work then closes this delta.

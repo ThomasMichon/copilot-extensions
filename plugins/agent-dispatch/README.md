@@ -293,6 +293,154 @@ inbound bearer token, the coordinator URL) is set in an optional JSON config:
 agent-dispatch webhook --config webhook.json --host 127.0.0.1 --port 9331
 ```
 
+### Evaluator -- a producer's lifecycle handler (`agent-dispatch evaluate`)
+
+A producer puts work on the queue; an **evaluator** decides what happens *next* as
+that work progresses -- the *judgment* half of emitters-and-evaluators. It is
+hook-like: it receives one task **lifecycle event** (the coordinator shape
+`{"type": "task.completed", "task": {...}}`) and returns decisions -- emit a
+follow-up task, or nothing. A declarative spec of rules matches on the event and
+mints follow-ups from templates, so a standing domain automates a whole cycle
+(reviewer done -> open a conflict-resolution follow-up; a goal met -> the next
+goal) without a bespoke module.
+
+```bash
+# apply an evaluator to an event read from stdin (a hook/producer pipes it in):
+echo '{"type":"task.completed","task":{"id":"t1","labels":["recipe:reviewer"],"status":"completed","origin_ref":"o/n#42"}}' \
+  | agent-dispatch evaluate --spec evaluator.json --repo o/n
+agent-dispatch evaluate --spec evaluator.json --event-file event.json --dry-run
+```
+
+Spec shape (JSON): a `rules` list, each with `on` (event type, or a list), an
+optional `when` predicate (`labels_any` / `labels_all` / `status` / `source`), and
+an `emit` block that templates the follow-up (`title_template`, `prompt_template`,
+`labels`, `requires`, `dedup_template`, ...). The first matching rule wins; a
+follow-up defaults `source=evaluator`. The **degenerate case is the ad-hoc kick**:
+a one-off task with no evaluator still runs -- an evaluator is opt-in judgment,
+never required. See
+[`visions/plugins/agent-dispatch`](../../visions/plugins/agent-dispatch/README.md)
+(§Concepts/*The evaluator*, §Features/*emitters-and-evaluators*).
+
+## Recipes (loop archetypes)
+
+A **recipe** is a packaged *shape* of long-running agentic work -- a charter
+template plus the suspend/resume rhythm and the resolution it drives toward. Three
+archetypes ship in-box: **reviewer** (drive a pull request to merged-or-abandoned),
+**conflict-resolution** (take the last mile of a stalled change), and
+**goal-driven** (drive an arbitrary goal through PRs). A recipe is a *first-class,
+directly-invokable* capability: you can kick a one-off from the CLI with only a
+coordinator + a worker body -- no standing service, emitter, or evaluator is
+required (the "recipes run ad-hoc" path).
+
+```bash
+agent-dispatch recipes list                       # the available recipes + their params
+agent-dispatch recipes describe reviewer          # full descriptor (templates, suspend-on, resolution)
+
+# render a recipe's fields without creating anything (inspect / dry-read):
+agent-dispatch recipes render reviewer --param repo=owner/name --param pr=42
+
+# carve an ad-hoc task from a recipe (and, with --spawn, embody a worker to drive it):
+agent-dispatch recipes kick reviewer --param repo=owner/name --param pr=42 --repo owner/name --spawn
+agent-dispatch recipes kick reviewer --param repo=owner/name --param pr=42 --dry-run   # preview the create call
+```
+
+`kick` reuses the ordinary `create` path, so it inherits lane resolution, dedup,
+and the `--spawn`/`--spawn-backend` embodiment (default `embody`: a CLI autopilot
+in a fresh worktree with a full checkout -- the right body for a recipe). A
+**reserved-work `dedup_key`** is derived from the recipe + its parameters, so
+re-kicking the same recipe for the same target collides rather than forking the
+work (override with `--dedup-key`). The rendered charter reaffirms the two safety
+invariants -- *drive the worktree to a clean resolved state on abandon* and *report
+what you did* -- so a worker carries them even on the ad-hoc, no-service path. See
+[`visions/plugins/agent-dispatch`](../../visions/plugins/agent-dispatch/README.md)
+(§Concepts/*The recipe*, §Features/*loop-recipes* + *recipes-run-ad-hoc*).
+
+### Driving a recipe loop (`agent-dispatch recipes drive`)
+
+A recipe declares the *shape* of a loop; the **driver** is the small state machine
+that turns it into a rhythm. `drive` maps a recipe + a `--signal` (what just
+happened) to the next action:
+
+- **work** -- do a pass (`start`, or a `suspend_on` event like `change-updated`
+  means the world moved and there's something to react to). The agent performs it.
+- **suspend** -- nothing to do until the world moves (`work-done` / `idle`): hand
+  the wait to *hibernate-the-wait* until a `suspend_on` event fires.
+- **resolve** -- a terminal signal (`merged`/`landed`/`goal-met` -> landed;
+  `abandoned`/`closed` -> abandoned): *drive the worktree to resolution* and finish.
+
+```bash
+agent-dispatch recipes drive reviewer --signal start        # -> work
+agent-dispatch recipes drive reviewer --signal work-done    # -> suspend (wait on suspend_on)
+agent-dispatch recipes drive reviewer --signal merged       # -> resolve (landed)
+
+# --execute performs the non-work legs on the substrate:
+agent-dispatch recipes drive reviewer --signal work-done --execute \
+  --resume <machine/worktree> -- agent-worktrees pr-watch 42   # spawn the detached waiter
+agent-dispatch recipes drive reviewer --signal abandoned --execute --base main   # run the unwind
+```
+
+The decision is pure; `--execute` runs the **suspend** leg (spawn the detached
+hibernation waiter -- needs `--resume` + a `--` wait command) and the **resolve**
+leg (the drive-to-resolution unwind). **work** stays the agent's to perform. This
+is the executable seam that composes recipes + `run` + `resolve` into a loop. See
+[`visions/plugins/agent-dispatch`](../../visions/plugins/agent-dispatch/README.md)
+(§Concepts/*The recipe*, §Behaviors/*a-loop-runs-with-or-without-a-service*).
+
+## Drive the worktree to resolution (`agent-dispatch resolve`)
+
+Finishing a loop -- whether the work **landed** or the worker is **abandoning** it
+-- must leave the worktree in a *clean, resolved final state*, never an orphan
+branch half-done. `resolve` packages that mandate as an inspectable, executable
+plan a worker runs on **its own** worktree:
+
+```bash
+# preview the plan (default -- runs nothing):
+agent-dispatch resolve --outcome landed
+agent-dispatch resolve --outcome abandoned --base main --source owner/name#42
+
+# perform it (the abandon path's unwind is destructive):
+agent-dispatch resolve --outcome abandoned --base main --execute
+```
+
+- **landed** -> a single *verify-clean* check (the merge already resolved it).
+- **abandoned** -> *unwind to base* (`git reset --hard` to the tracked upstream, or
+  `origin/<base>`), *drop untracked* cruft, then a *reconcile-source* instruction
+  (notify the producing effort/issue/PR so nothing downstream believes the work
+  landed). The reconcile step is **advisory**: agent-dispatch coordinates it, it
+  doesn't post on your behalf.
+
+Planning is pure; execution only runs with `--execute`, and a failed destructive
+unwind stops rather than pressing on. `agent-dispatch abandon --resolve` surfaces
+this same plan alongside the abandon so the required unwind is an explicit
+expectation, not a silent one. See
+[`visions/plugins/agent-dispatch`](../../visions/plugins/agent-dispatch/README.md)
+(§Behaviors/*drive-the-worktree-to-resolution*).
+
+## Hibernate the wait (`agent-dispatch run`)
+
+A worker that can only wait on a slow external condition (a review, a build, a PR
+becoming mergeable) shouldn't sit on a live session and its token budget. It hands
+the wait to the layer: `run` executes the blocking command and, when it resolves,
+resumes the worktree-affinitied worker via an agent-bridge nudge.
+
+```bash
+# foreground: run the wait, then nudge the worker to resume:
+agent-dispatch run --resume <machine/worktree> --task <id> -- agent-worktrees pr-watch 42
+
+# detached: the wait runs in a process that outlives this one, so the worker can
+# be torn down (costing nothing) while it waits -- true hibernation:
+agent-dispatch run --detach --resume <machine/worktree> -- agent-worktrees pr-watch 42
+```
+
+Everything after `--` is the blocking wait command (its own flags are never parsed
+as `run` options). With `--detach` the wait is re-exec'd as a fully detached,
+cheap OS-level waiter (no agent, no tokens); the expensive worker session is spun
+down and re-woken with its context intact when the wait returns. The resume is a
+best-effort bridge nudge -- a genuinely-gone worker is handled by liveness
+recovery, not the nudge. See
+[`visions/plugins/agent-dispatch`](../../visions/plugins/agent-dispatch/README.md)
+(§Features/*hibernate-the-wait*).
+
 ## Development
 
 ```bash
@@ -436,8 +584,10 @@ It exposes the queue as tools: `dispatch_create` / `dispatch_find` /
 `dispatch_worktree_status` / `dispatch_claim` / `dispatch_start` /
 `dispatch_yield` / `dispatch_complete` / `dispatch_abandon` /
 `dispatch_heartbeat` / `dispatch_approve` / `dispatch_detach` /
-`dispatch_recover`. `dispatch_create` takes an inline `payload` the coordinator
-spills to a blob when large.
+`dispatch_recover` -- plus the recipe tools `dispatch_recipe_list` /
+`dispatch_recipe_render` / `dispatch_recipe_kick` (kick an ad-hoc loop archetype;
+see **Recipes** above). `dispatch_create` takes an inline `payload` the
+coordinator spills to a blob when large.
 
 ### Two MCP surfaces
 
@@ -448,7 +598,7 @@ There are **two** ways to reach the tools — pick by where the client runs:
 | **Local stdio shim** | `agent-dispatch mcp` | resolved from the caller's **CWD** (like the CLI) | the agent has `agent-dispatch` installed locally in its worktree |
 | **Coordinator-hosted HTTP** | mounted at **`/mcp`** on the coordinator | `X-Agent-Machine` / `X-Agent-Worktree` **request headers** (or explicit tool args) | a remote MCP client (e.g. an `agent-mcp` bridge on another host) that can't resolve local identity |
 
-Both expose the same 16 `dispatch_*` tools and publish the same `task.*` events;
+Both expose the same 20 `dispatch_*` tools and publish the same `task.*` events;
 they only differ in how identity is supplied. The coordinator mounts `/mcp`
 automatically when the `mcp` extra is installed (pass `enable_mcp=False` to
 `create_app` to suppress it); if a bearer token is configured it also guards the

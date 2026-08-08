@@ -86,7 +86,7 @@ def test_mcp_endpoint_lists_tools(coord):
     names = asyncio.new_event_loop().run_until_complete(go())
     assert "dispatch_create" in names
     assert "dispatch_claim" in names
-    assert len(names) == 17
+    assert len(names) == 20
 
 
 def test_mcp_create_visible_over_rest(coord):
