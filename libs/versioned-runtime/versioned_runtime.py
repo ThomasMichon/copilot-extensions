@@ -2,25 +2,35 @@
 """Immutable per-version runtime layout manager (dotfiles #581).
 
 Never mutate a runtime venv in place. Each version installs into its own immutable
-directory under ``<root>/versions/<version>``; the active version is named by a
-``<root>/current`` **directory junction** (Windows) / **symlink** (POSIX). Switching
-versions is an atomic-ish swap of that link, not a file rewrite -- so a running
-daemon (which already holds its own immutable files open) is never edited underneath
-itself, rollback is a link swap (no rebuild), and the concurrent-venv-mutation race
-that spawns duplicate daemons (#123) cannot happen.
+directory under ``<root>/versions/<version>``; the active version is published by a
+``<root>/current-version`` **plain-text marker file**. Switching versions writes the
+marker (atomic temp + rename) and the installer rewrites its **version-pinned
+binstubs** (and scheduled task / deploy manifest) to point straight at
+``versions/<version>/...`` -- so a running daemon (which already holds its own
+immutable files open) is never edited underneath itself, rollback is a marker
+rewrite (no rebuild), and the concurrent-venv-mutation race that spawns duplicate
+daemons (#123) cannot happen.
+
+There is **no directory junction**. The legacy ``current``/``venv`` junction (a
+reparse point) was blocked by Windows RedirectionGuard with WinError 448
+("untrusted mount point") on managed devices whenever the installer *traversed* it
+over a non-interactive logon; a marker file + pinned binstubs need no reparse point
+at all, so those machines work with no special-casing and the legacy real-venv fork
+is retired. ``current_version`` still falls back to reading an old junction target
+during the one-time migration.
 
 This is a **stdlib-only** helper deliberately kept *out* of every runtime venv (no
 vendored-lib fan-out): the bootstrapping python at install time runs it as
 ``python versioned_runtime.py <cmd> ...``. It owns only the ``versions/`` +
-``current`` layout; venv *creation* and package install stay in the per-plugin
-installer, which points them at the slot this returns.
+``current-version`` layout; venv *creation* and package install stay in the
+per-plugin installer, which points them at the slot this returns.
 
 Commands (all take ``--root <dir>``; ``--json`` for machine output)::
 
     slot     <version>              ensure versions/<version> exists; print its path
-    activate <version>              atomically point current -> versions/<version>
-    current                         print the active version (via the current link)
-    resolve  [--subpath P]          print current/<P> (e.g. the venv python path)
+    activate <version>              publish current-version -> <version> (marker)
+    current                         print the active version (from the marker)
+    resolve  [--subpath P]          print versions/<current>/<P> (the concrete slot)
     list                            list installed versions (+ which is current)
     gc [--keep V ...] [--protect-pids]   remove version dirs that are not current,
                                     not kept, and (with --protect-pids) not held by
@@ -43,6 +53,12 @@ from pathlib import Path
 CURRENT_LINK = "current"
 VERSIONS_DIR = "versions"
 RUNNING_VERSION_FILE = "running-version.json"
+# The active version is published as a plain-text marker file (no reparse point),
+# replacing the legacy `current`/`venv` directory junction. A marker file is
+# never blocked by RedirectionGuard (WinError 448 "untrusted mount point") the
+# way traversing a junction is, and the runtime is selected by version-pinned
+# binstubs the installer rewrites on cutover -- so no junction is needed at all.
+CURRENT_VERSION_FILE = "current-version"
 
 
 # --------------------------------------------------------------------------
@@ -137,15 +153,31 @@ def _link_target(link: Path) -> Path | None:
 
 
 def current_version(root: Path, link_name: str = CURRENT_LINK) -> str | None:
-    """The active version name (the basename of the ``current`` link target)."""
-    target = _link_target(current_link(root, link_name))
-    if target is None:
-        return None
-    name = target.name
-    # Only trust it if it actually lives under versions/ and exists.
-    if version_dir(root, name).exists():
+    """The active version name.
+
+    Reads the ``current-version`` marker file -- a plain text file, so it is
+    never blocked by RedirectionGuard/WinError 448 the way *traversing* a
+    junction is. During migration off the legacy ``current``/``venv`` junction
+    model, falls back to reading a still-present junction's target so a
+    half-upgraded root still resolves its live version. Only trusts a name whose
+    ``versions/<name>`` slot exists.
+    """
+    name = _read_current_marker(root)
+    if name is None:
+        # Legacy fallback: a pre-marker root still carrying the old junction.
+        target = _link_target(current_link(root, link_name))
+        name = target.name if target is not None else None
+    if name and version_dir(root, name).exists():
         return name
     return None
+
+
+def _read_current_marker(root: Path) -> str | None:
+    try:
+        txt = (root / CURRENT_VERSION_FILE).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return txt or None
 
 
 # --------------------------------------------------------------------------
@@ -208,63 +240,64 @@ def _remove_link(link: Path) -> None:
 
 
 def activate(root: Path, version: str, *, link_name: str = CURRENT_LINK,
-             replace_nonlink: bool = False) -> Path:
-    """Point the ``link_name`` link at ``versions/<version>``.
+             replace_nonlink: bool = False, link_free: bool = False) -> Path:
+    """Mark ``versions/<version>`` as the active runtime.
 
-    POSIX: create a temp symlink and ``os.replace`` it over the link -- an
-    atomic rename, so a concurrent reader sees either the old or the new target,
-    never a missing link. Windows: junctions can't be atomically replaced, so
-    remove + recreate; the window only affects a *new* resolution (the running
-    daemon holds its own immutable files), and callers retry. Returns the version
-    dir. Raises if the version isn't installed.
+    Always writes the ``current-version`` marker file atomically (temp +
+    ``os.replace``) -- the marker is the source of truth. Two link modes support
+    an incremental migration off the junction while the primitive ships
+    byte-identically in every plugin:
 
-    ``link_name`` lets a runtime keep its historical path name as the selector
-    (agent-bridge uses ``venv`` so its scheduled task/binstubs/cutover resolve
-    through the junction unchanged). If the link path is currently a **real
-    directory** (a legacy, pre-versioned venv), this refuses unless
-    ``replace_nonlink`` is set, in which case the real dir is moved aside to
-    ``<name>.legacy-<ts>`` first (the caller must ensure no process holds it open
-    -- e.g. the daemon is stopped or already cut over to the new version).
+    * ``link_free=True`` (``--no-link``): the junction-free model. Removes any
+      stale legacy ``venv``/``current`` junction; the runtime is selected purely
+      by the marker + the **version-pinned binstubs** the installer rewrites on
+      cutover. This is what a migrated installer passes; it works on
+      RedirectionGuard machines (WinError 448) with no special-casing.
+    * default: backward-compatible. Also (re)creates the ``link_name`` junction so
+      an *un-migrated* installer whose binstubs/task still resolve THROUGH the
+      link keeps working. **Best-effort** -- a junction-create failure (e.g.
+      RedirectionGuard on an untrusted-reparse machine, where such installers run
+      in legacy mode anyway) is swallowed, so activate never hard-fails on the
+      marker having been written. A real dir at the link path (a legacy venv) is
+      left as-is unless ``replace_nonlink`` moves it aside.
+
+    Returns the version dir; raises only if the version isn't installed.
     """
     vdir = version_dir(root, version)
     if not vdir.is_dir():
         raise FileNotFoundError(f"version not installed: {vdir}")
-    link = current_link(root, link_name)
     root.mkdir(parents=True, exist_ok=True)
 
-    # Legacy real dir occupying the link path (first migration to the versioned
-    # layout). Never recurse-delete it implicitly; move it aside on request.
-    #
-    # #637: check ``_is_link`` (lstat-based, never traverses) FIRST so it can
-    # short-circuit before ``link.exists()``. ``Path.exists()`` does an
-    # ``os.stat`` that *traverses* the junction, which RedirectionGuard
-    # (PROCESS_MITIGATION_REDIRECTION_TRUST_POLICY) blocks with WinError 448
-    # ("untrusted mount point") over a non-interactive network logon -- i.e. when
-    # the installer runs over SSH. For an existing junction we skip this block
-    # entirely, so ``exists()`` must not be evaluated. A real dir has no reparse
-    # point, so ``exists()`` is safe once ``_is_link`` is known False.
-    if not _is_link(link) and (link.exists() or link.is_symlink()):
-        if not replace_nonlink:
-            raise FileExistsError(
-                f"{link} is a real directory, not a link; pass replace_nonlink "
-                f"to move it aside and lay the versioned link"
-            )
-        import time as _t
+    # Publish the active version atomically (source of truth).
+    dest = root / CURRENT_VERSION_FILE
+    tmp = dest.with_name(dest.name + f".tmp-{os.getpid()}")
+    tmp.write_text(version + "\n", encoding="utf-8")
+    os.replace(tmp, dest)
 
-        aside = link.with_name(f"{link.name}.legacy-{int(_t.time())}")
-        os.replace(link, aside)
-
-    if os.name != "nt":
-        tmp = link.with_name(link.name + ".tmp")
-        if tmp.is_symlink() or tmp.exists():
-            tmp.unlink()
-        os.symlink(vdir, tmp, target_is_directory=True)
-        os.replace(tmp, link)  # atomic
+    link = current_link(root, link_name)
+    if link_free:
+        # Junction-free: drop any stale legacy junction so it can't shadow the
+        # marker or dangle. A real dir is left for the installer.
+        if _is_link(link):
+            try:
+                _remove_link(link)
+            except OSError:
+                pass
         return vdir
 
-    # Windows: remove + recreate the junction.
-    _remove_link(link)
-    _make_link(link, vdir)
+    # Backward-compat: (re)point the junction at the slot for un-migrated callers.
+    # Best-effort -- never let a junction failure undo the (already-written) marker.
+    try:
+        if not _is_link(link) and (link.exists() or link.is_symlink()):
+            if not replace_nonlink:
+                return vdir  # legacy real dir occupies the path; leave it be
+            import time as _t
+
+            os.replace(link, link.with_name(f"{link.name}.legacy-{int(_t.time())}"))
+        _remove_link(link)
+        _make_link(link, vdir)
+    except OSError:
+        pass
     return vdir
 
 
@@ -555,11 +588,15 @@ def main(argv: list[str] | None = None) -> int:
                     help="if the slot exists but lacks a valid completion marker "
                          "(a failed/partial prior build), remove it first so a "
                          "fresh venv is built (dotfiles #935)")
-    ap = sub.add_parser("activate", help="point current -> versions/<version>")
+    ap = sub.add_parser("activate", help="publish current-version -> <version>")
     ap.add_argument("version")
     ap.add_argument("--replace-nonlink", action="store_true",
                     help="if the link path is a real dir (legacy venv), move it "
                          "aside to <name>.legacy-<ts> before laying the link")
+    ap.add_argument("--no-link", action="store_true",
+                    help="junction-free: write only the current-version marker and "
+                         "remove any stale legacy junction (the runtime is selected "
+                         "by version-pinned binstubs). Migrated installers pass this.")
     sub.add_parser("current", help="print the active version")
     rp = sub.add_parser("resolve", help="print current/<subpath>")
     rp.add_argument("--subpath", default="")
@@ -596,7 +633,8 @@ def main(argv: list[str] | None = None) -> int:
                            clean_incomplete=args.clean_incomplete)), args.json)
         elif args.cmd == "activate":
             vdir = activate(root, args.version, link_name=link_name,
-                            replace_nonlink=args.replace_nonlink)
+                            replace_nonlink=args.replace_nonlink,
+                            link_free=args.no_link)
             _emit({"activated": args.version, "path": str(vdir)}
                   if args.json else str(vdir), args.json)
         elif args.cmd == "current":
@@ -606,8 +644,12 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             _emit({"current": cur} if args.json else (cur or ""), args.json)
         elif args.cmd == "resolve":
-            link = current_link(root, link_name)
-            out = link / args.subpath if args.subpath else link
+            cur = current_version(root, link_name)
+            if cur is None:
+                print("no active version", file=sys.stderr)
+                return 1
+            base = version_dir(root, cur)
+            out = base / args.subpath if args.subpath else base
             _emit(str(out), args.json)
         elif args.cmd == "list":
             vs = list_versions(root)

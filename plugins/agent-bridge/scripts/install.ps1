@@ -231,63 +231,59 @@ if ($env:OS -eq 'Windows_NT') {
     $VenvPython = Join-Path $VenvDir 'bin/python'
 }
 
-# === install-contract:v3 versioned-venv (agent-bridge: venv-as-junction) ===
-# Immutable per-version runtime (#581). Build the venv into versions/<version>
-# and make the historical `venv` path a junction (Windows) / symlink (POSIX) into
-# it, so the binstubs, scheduled task, deploy-manifest, and `agent-bridge deploy`
-# cutover -- all of which reference `venv` -- resolve through the link unchanged.
-# Only *where* the venv physically lives and *when* the link is swapped change; a
-# version bump builds a fresh slot beside the serving one and atomically swaps the
-# link (never mutates a live daemon's venv), and rollback is a link swap.
+# === install-contract:v3 versioned-venv (agent-bridge: junction-free) ===
+# Immutable per-version runtime (#581), JUNCTION-FREE. The venv ALWAYS builds into
+# versions/<version> and the active version is published by a plain-text
+# `current-version` marker (versioned_runtime.py) -- there is NO `venv` directory
+# junction. The binstubs, scheduled-task launcher, and deploy manifest are pinned
+# straight at the concrete slot python and REWRITTEN on every cutover, so nothing
+# needs to traverse a reparse point (which RedirectionGuard blocks with WinError
+# 448 on managed devices) and the legacy real-venv fork (COPILOT_EXT_NO_VERSIONED)
+# is retired. A version bump builds a fresh slot beside the serving one (never
+# mutates a live daemon's venv); rollback is "leave the marker on the previous
+# slot"; gc prunes unreferenced slots.
 #
-# $LinkDir / $LinkPython  -> the stable `venv` path the binstubs/task/manifest
-#                            resolve THROUGH (runtime-facing; never a versions/<v>
-#                            absolute a `gc` could later remove).
-# $VenvDir / $VenvPython   -> the build+health-gate target (the versions/<v> slot).
-#
-# In legacy mode Link == Venv, so every reference is byte-for-byte the old
-# behavior. Gated behind AGENT_BRIDGE_VERSIONED (default ON); COPILOT_EXT_NO_VERSIONED=1 force-disables. The stdlib-only
-# scripts/versioned_runtime.py primitive owns the swap + legacy migration + gc.
-$LinkDir          = $VenvDir
-$LinkPython       = $VenvPython
-$VersionedRuntime = $false
-$SrcVersion       = $null
-$vrGateOn = ($env:COPILOT_EXT_NO_VERSIONED -ne '1') -and
-            ($env:AGENT_BRIDGE_VERSIONED -notin @('0', 'false', 'no', 'off'))
-if ($vrGateOn) {
-    $pyprojForVer = Join-Path $PluginDir 'pyproject.toml'
-    if (Test-Path $pyprojForVer) {
-        $vl = Select-String -Path $pyprojForVer -Pattern '^\s*version\s*=' | Select-Object -First 1
-        if ($vl) { $SrcVersion = ($vl.Line -replace '.*=\s*"([^"]+)".*', '$1') }
-    }
-    if ($SrcVersion) {
-        $VersionedRuntime = $true
-        $VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
-        if ($env:OS -eq 'Windows_NT') { $VenvPython = Join-Path $VenvDir 'Scripts\python.exe' }
-        else { $VenvPython = Join-Path $VenvDir 'bin/python' }
-    }
+# $VenvDir / $VenvPython -> the build+health-gate target (the versions/<v> slot).
+# $LinkDir / $LinkPython -> the runtime-facing python the binstubs/task/manifest
+#                           are pinned at. Junction-free, so these ARE the slot
+#                           (Link == Venv); rewritten to the new slot on cutover.
+$SrcVersion = $null
+$pyprojForVer = Join-Path $PluginDir 'pyproject.toml'
+if (Test-Path $pyprojForVer) {
+    $vl = Select-String -Path $pyprojForVer -Pattern '^\s*version\s*=' | Select-Object -First 1
+    if ($vl) { $SrcVersion = ($vl.Line -replace '.*=\s*"([^"]+)".*', '$1') }
 }
+if (-not $SrcVersion) {
+    Write-Fail 'Cannot determine plugin version from pyproject.toml (required for the versioned runtime).'
+    exit 1
+}
+$VersionedRuntime = $true
+$VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
+if ($env:OS -eq 'Windows_NT') { $VenvPython = Join-Path $VenvDir 'Scripts\python.exe' }
+else { $VenvPython = Join-Path $VenvDir 'bin/python' }
+$LinkDir    = $VenvDir
+$LinkPython = $VenvPython
 # === end install-contract:v3 versioned-venv ===
 
 # -- Helpers -----------------------------------------------------------------
 
 # === install-contract:v3 versioned-venv helpers (agent-bridge) ===
 function Invoke-VersionedActivate {
-    <# Swap the stable `venv` link to this version's freshly-built slot. Runs the
-       stdlib-only primitive via the slot's own python. First migration moves a
-       legacy real `venv` aside to venv.legacy-<ts> (--replace-nonlink); the
-       caller MUST have stopped/cut-over any daemon holding the old venv first.
-       No-op (returns $true) in legacy mode. #>
+    <# Publish this freshly-built slot as the active version (junction-free): the
+       primitive writes the `current-version` marker and removes any stale legacy
+       `venv` junction. Runs the stdlib-only primitive via the slot's own python.
+       The caller MUST have already repointed the binstubs/task/manifest at the
+       slot (and stopped/cut-over any daemon on the old slot). #>
     if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $ScriptDir 'versioned_runtime.py'
     $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
-    & $py $vr --root $InstallDir --link-name 'venv' activate $SrcVersion --replace-nonlink 2>&1 |
+    & $py $vr --root $InstallDir --link-name 'venv' activate $SrcVersion --no-link 2>&1 |
         ForEach-Object { Write-Step $_ }
     if ($LASTEXITCODE -ne 0) {
-        Write-Fail "Failed to activate versioned venv (venv -> versions/$SrcVersion)"
+        Write-Fail "Failed to activate runtime version $SrcVersion (current-version marker)"
         return $false
     }
-    Write-Ok "Runtime version $SrcVersion active (venv -> versions/$SrcVersion)"
+    Write-Ok "Runtime version $SrcVersion active (current-version -> $SrcVersion)"
     return $true
 }
 
@@ -911,15 +907,11 @@ function Register-ScheduledTask_ {
 # Start agent-bridge service -- called by scheduled task at logon.
 # Launch via the venv's signed python (-m), never the unsigned console-script
 # trampoline .exe -- Smart App Control blocks unsigned, zero-reputation exes.
-# This is the stable `venv` path (a junction to the active versions/<v> slot in
-# the immutable-versioned layout), never a versions/<v> absolute a `gc` could
-# remove.
+# Junction-free versioned runtime: this is pinned STRAIGHT at the active slot
+# python (versions/<v>/Scripts/python.exe) and this launcher is rewritten on every
+# cutover, so there is no `venv` junction to traverse (RedirectionGuard/WinError
+# 448 can't bite) and gc never removes the active slot out from under it.
 `$launchPy = '$($LinkPython -replace "'", "''")'
-# Resolve the `venv` junction's target and launch the slot python DIRECTLY, so a
-# RedirectionGuard-enforcing task context never *traverses* the junction (it may
-# still *read* its target) -- dotfiles #637. Plain-dir venv keeps `$launchPy as-is.
-`$_venv = '$($LinkDir -replace "'", "''")'
-try { `$_t = (Get-Item -LiteralPath `$_venv -Force -ErrorAction Stop).Target; if (`$_t) { `$launchPy = Join-Path (@(`$_t)[0]) 'Scripts\python.exe' } } catch {}
 `$pidFile = '$($PidFile -replace "'", "''")'
 `$logFile = Join-Path (Split-Path `$pidFile) 'agent-bridge.log'
 `$errFile = Join-Path (Split-Path `$pidFile) 'agent-bridge-err.log'
@@ -1100,20 +1092,15 @@ function Write-Binstubs {
        console-script trampoline .exe that Smart App Control blocks (3077). #>
     param([Parameter(Mandatory)][string]$PythonExe)
 
-    # Resolve the venv link's reparse target and launch the slot python DIRECTLY,
-    # never *traversing* the `venv` junction: a RedirectionGuard-enforcing process
-    # is blocked from traversing an unprivileged junction but may still *read* its
-    # target (dotfiles #637). The .ps1 reads (Get-Item venv).Target; the .cmd parses
-    # `dir /a:l`. A plain-dir venv falls through to the default.
-    $stubVenv = Split-Path (Split-Path $PythonExe)
-    $stubRoot = Split-Path $stubVenv
-
+    # Junction-free versioned runtime: the binstub is pinned STRAIGHT at the
+    # concrete slot python (versions/<v>/Scripts/python.exe) and rewritten on every
+    # cutover -- this IS "hardcode the active version in the binstub", so there is
+    # no `venv` junction to traverse (RedirectionGuard/WinError 448 can't bite) and
+    # no reparse-target resolution to do. gc never removes the active slot, so a
+    # pinned binstub is never left dangling.
     $ps1 = @(
         "`$env:PYTHONUTF8 = '1'",
-        "`$_venv = '$stubVenv'",
-        "`$_py = Join-Path `$_venv 'Scripts\python.exe'",
-        "try { `$_t = (Get-Item -LiteralPath `$_venv -Force -ErrorAction Stop).Target; if (`$_t) { `$_py = Join-Path (@(`$_t)[0]) 'Scripts\python.exe' } } catch {}",
-        "& `$_py -m agent_bridge @args",
+        "& '$($PythonExe -replace "'", "''")' -m agent_bridge @args",
         "exit `$LASTEXITCODE"
     ) -join "`r`n"
     [System.IO.File]::WriteAllText($BinstubPs1, $ps1, (New-Object System.Text.UTF8Encoding($false)))
@@ -1121,9 +1108,7 @@ function Write-Binstubs {
     $cmd = @(
         "@echo off",
         "set `"PYTHONUTF8=1`"",
-        "set `"_PY=$stubVenv\Scripts\python.exe`"",
-        "for /f `"tokens=2 delims=[]`" %%i in ('dir /a:l `"$stubRoot`" 2^>nul ^| findstr /i /c:`"venv`"') do set `"_PY=%%i\Scripts\python.exe`"",
-        "`"%_PY%`" -m agent_bridge %*"
+        "`"$PythonExe`" -m agent_bridge %*"
     ) -join "`r`n"
     [System.IO.File]::WriteAllText($BinstubCmd, $cmd)
 
