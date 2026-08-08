@@ -5364,6 +5364,32 @@ def cmd_claims(args: argparse.Namespace) -> int:
     return _claims_show(args, worktree_id)
 
 
+def _resolve_owner_ref_record_path(
+    owner_ref: str, config: cfg.Config,
+) -> tuple[Path | None, str, str | None]:
+    """Resolve a qualified owner-ref to a local tracking record path.
+
+    Returns ``(path, worktree_id, error)``. For a **same-machine** qualified ref
+    ``machine/project/worktree_id`` the path is
+    ``project_dir(project)/worktrees/{worktree_id}.yaml`` -- the same
+    cross-project machinery ``finalize._settle_parent_obligation`` uses -- so a
+    call-site whose cwd is NOT the owning worktree (e.g. agent-codespaces
+    journaling a CodeSpace claim from the daemon's cwd) lands on the right
+    record regardless of the current project. A **cross-machine** owner-ref
+    yields ``(None, worktree_id, None)`` (no error): its ledger lives on that
+    machine and settles via the lease disposition mirror, not here. A malformed
+    / non-qualified ref yields an ``error``.
+    """
+    parsed = tracking.parse_claim_ref(owner_ref)
+    if parsed is None or not parsed.is_qualified:
+        return (None, "", f"--owner-ref must be a qualified "
+                          f"machine/project/worktree_id ref (got {owner_ref!r})")
+    if parsed.machine != config.machine:
+        return (None, parsed.worktree_id, None)  # cross-machine -> lease mirror
+    path = cfg.project_dir(parsed.project) / "worktrees" / f"{parsed.worktree_id}.yaml"
+    return (path, parsed.worktree_id, None)
+
+
 def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
     """Journal a new outbound resource claim on a worktree (Phase 3b-wiring).
 
@@ -5371,7 +5397,13 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
     that this worktree owns a resource -- a borrowed CodeSpace, a container, a
     cross-repo worktree -- so the finalize obligation gate can hold it accountable.
     The claim starts ``active`` (unsettled). Dedups by ref (re-adding refreshes).
-    The owner worktree is the current one unless ``--worktree`` names another.
+
+    The owner worktree is the current one unless ``--worktree`` names another in
+    the current project, or ``--owner-ref <machine/project/worktree_id>`` names
+    one cross-project (resolved by qualified ref -> ``project_dir/worktrees``,
+    same-machine; a cross-machine owner-ref defers to the lease mirror). The
+    owner-ref path is for a call-site whose cwd is not the borrowing worktree
+    (e.g. agent-codespaces journaling a CodeSpace claim from the daemon's cwd).
     """
     valid_kinds = {"worktree", "codespace", "container", "ssh", "workdir", "pr"}
     if kind not in valid_kinds:
@@ -5382,8 +5414,29 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
         output.err(msg)
         return 2
     config = cfg.load_config()
-    wt_id = _infer_worktree_id(getattr(args, "release_worktree", None), config)
-    rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+    owner_ref = getattr(args, "claim_owner_ref", None)
+    if owner_ref:
+        rec_path, wt_id, err = _resolve_owner_ref_record_path(owner_ref, config)
+        if err:
+            if args.json:
+                return _json_error(err, 2)
+            output.err(err)
+            return 2
+        if rec_path is None:
+            # Cross-machine owner -- its ledger is remote; the lease mirror owns
+            # the disposition. Not an error: a no-op locally, surfaced for the
+            # caller (agent-codespaces) to mirror via the lease --disposition.
+            msg = (f"owner-ref {owner_ref} is on another machine -- claim "
+                   f"deferred to the lease mirror (no local ledger write)")
+            if args.json:
+                _json_output({"worktree_id": wt_id, "kind": kind, "ref": ref,
+                              "deferred": True, "reason": "cross-machine-owner"})
+                return 0
+            output.warn(msg)
+            return 0
+    else:
+        wt_id = _infer_worktree_id(getattr(args, "release_worktree", None), config)
+        rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
     if not rec_path.exists():
         if args.json:
             return _json_error(f"worktree not found: {wt_id}")
@@ -12457,6 +12510,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="with settle: mark the claim released rather than at-rest")
     p.add_argument("--worktree", default=None, dest="release_worktree",
                    help="with release/settle: the owner worktree (default: current)")
+    p.add_argument("--owner-ref", default=None, dest="claim_owner_ref",
+                   help="with add: journal onto the owner named by this qualified "
+                        "ref (machine/project/worktree_id) instead of the current "
+                        "project's cwd-inferred worktree -- resolves cross-project "
+                        "on THIS machine (a cross-machine owner is deferred to the "
+                        "lease mirror). For a call-site (e.g. agent-codespaces on "
+                        "CodeSpace borrow) whose cwd is not the borrowing worktree.")
     p.add_argument("--json", action="store_true",
                    help="JSON output mode (stdout is JSON only)")
 
