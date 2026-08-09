@@ -34,6 +34,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from .procutil import no_window_kwargs
@@ -65,21 +66,10 @@ def _spec_fingerprint(reg: dict) -> str:
     )
 
 
-def build_command(reg: dict, *, python: str | None = None) -> list[str]:
-    """Build the subprocess argv that runs one registration.
-
-    Only ``supervised-lane`` is realized this increment: it reconstructs the
-    ``agent-dispatch supervise`` foreground loop from the stored spec. Other kinds
-    raise :class:`UnsupportedKind` (the daemon logs and skips them) until the next
-    increment folds them in.
-    """
-    kind = reg.get("kind")
-    spec = reg.get("spec") or {}
-    if kind != RegistrationKind.SUPERVISED_LANE:
-        raise UnsupportedKind(
-            f"daemon cannot yet run registration kind {kind!r}; skipping"
-        )
-    argv = [python or sys.executable, "-m", "agent_dispatch", "supervise"]
+def _lane_flags(spec: dict) -> list[str]:
+    """The ``supervise`` lane flags shared by the supervised-lane and evaluator
+    kinds (both drive the embody supervisor loop over a lane)."""
+    argv: list[str] = []
     if spec.get("all_repos"):
         argv.append("--all-repos")
     elif spec.get("repo"):
@@ -94,10 +84,79 @@ def build_command(reg: dict, *, python: str | None = None) -> list[str]:
         argv += ["--headless-label", str(label)]
     if spec.get("headless_agent"):
         argv += ["--headless-agent", str(spec["headless_agent"])]
-    if spec.get("evaluator"):
-        argv += ["--evaluator", str(spec["evaluator"])]
     argv += ["--interval", str(spec.get("interval", 30.0))]
     return argv
+
+
+def build_command(
+    reg: dict,
+    *,
+    python: str | None = None,
+    materialize: Callable[[str, dict], str] | None = None,
+) -> list[str]:
+    """Build the subprocess argv that runs one registration.
+
+    Each **kind** maps to an ``agent-dispatch`` runtime the daemon drives:
+
+    - ``supervised-lane`` -> the embody supervisor loop (``supervise`` + lane flags);
+    - ``evaluator``      -> the same loop with ``--evaluator`` (subsumes the
+      foreground ``supervise --evaluator`` flag), the evaluator spec materialized
+      to a file;
+    - ``schedule``       -> the timer producer (``schedule serve``) over a
+      one-entry spec materialized to a file (a *self-run emitter*, dedup-keyed
+      ``sched:<id>:<epoch>`` by the producer);
+    - ``emitter``        -> the reactive producer (``webhook``) over a config
+      materialized to a file (dedup-keyed by the producer).
+
+    Kinds that carry an inline spec dict need a ``materialize(name, spec) -> path``
+    callback (the daemon supplies one that writes a per-registration file);
+    building such a command without it raises. An unknown kind raises
+    :class:`UnsupportedKind`.
+    """
+    kind = reg.get("kind")
+    spec = reg.get("spec") or {}
+    base = [python or sys.executable, "-m", "agent_dispatch"]
+
+    def _need_materialize(name: str, payload: dict) -> str:
+        if materialize is None:
+            raise UnsupportedKind(
+                f"registration kind {kind!r} needs a spec file but no materializer "
+                "was provided"
+            )
+        return materialize(name, payload)
+
+    if kind == RegistrationKind.SUPERVISED_LANE:
+        return base + ["supervise", *_lane_flags(spec)]
+
+    if kind == RegistrationKind.EVALUATOR:
+        eval_ref = spec.get("evaluator")
+        if spec.get("evaluator_spec") is not None:
+            eval_ref = _need_materialize("evaluator", spec["evaluator_spec"])
+        if not eval_ref:
+            raise UnsupportedKind(
+                "evaluator registration needs 'evaluator_spec' (inline) or "
+                "'evaluator' (a path)"
+            )
+        return base + ["supervise", "--evaluator", str(eval_ref), *_lane_flags(spec)]
+
+    if kind == RegistrationKind.SCHEDULE:
+        entry = spec.get("schedules") and spec or {"schedules": [spec]}
+        path = _need_materialize("schedule", entry)
+        argv = base + ["schedule", "serve", path]
+        if spec.get("interval") or (isinstance(entry, dict) and entry.get("interval")):
+            argv += ["--interval", str(spec.get("interval") or entry.get("interval"))]
+        return argv
+
+    if kind == RegistrationKind.EMITTER:
+        path = _need_materialize("emitter", spec)
+        argv = base + ["webhook", "--config", path]
+        argv += ["--host", str(spec.get("host", "127.0.0.1"))]
+        argv += ["--port", str(spec.get("port", 9331))]
+        return argv
+
+    raise UnsupportedKind(
+        f"daemon cannot run registration kind {kind!r}; skipping"
+    )
 
 
 class ProcHandle(Protocol):
@@ -213,10 +272,36 @@ class SupervisorDaemon:
 
     # -- unit lifecycle ------------------------------------------------------
 
+    def _spec_dir(self) -> Path:
+        from .config import run_dir
+
+        scope = supervisor_lease_scope(self.machine, self.env)
+        slug = scope.replace(":", "-")
+        d = Path(run_dir()) / "supervisor" / slug
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def _materializer(self, reg: dict) -> Callable[[str, dict], str]:
+        """A per-registration spec writer: persist an inline spec dict to a stable
+        file under the run dir so the kind's runtime (a subprocess) can read it.
+
+        The path is deterministic per (registration id, name), so a restart
+        rewrites the same file rather than leaking new ones.
+        """
+        rid = reg["id"]
+
+        def materialize(name: str, payload: dict) -> str:
+            safe = "".join(c if c.isalnum() or c in "._-" else "-" for c in rid)
+            path = self._spec_dir() / f"{safe}.{name}.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            return str(path)
+
+        return materialize
+
     def _start(self, reg: dict, summary: ReconcileSummary, *, bucket: str) -> None:
         rid = reg["id"]
         try:
-            cmd = build_command(reg)
+            cmd = build_command(reg, materialize=self._materializer(reg))
         except UnsupportedKind as exc:
             log.warning("skipping registration %s: %s", rid, exc)
             summary.skipped.append(rid)
