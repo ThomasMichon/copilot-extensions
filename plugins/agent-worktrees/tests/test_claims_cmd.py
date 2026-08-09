@@ -367,6 +367,43 @@ def test_claims_settle_unknown_ref(monkeypatch, tmp_path):
     assert rc == 1
 
 
+def _settle_ownerref_args(ref, owner_ref, *, released=False, json_=True):
+    return argparse.Namespace(
+        target=["settle", ref], released=released, release_worktree=None,
+        claim_owner_ref=owner_ref, json=json_)
+
+
+def test_claims_settle_owner_ref_lands_on_cross_project_record(monkeypatch, tmp_path, capfd):
+    owner_wt_dir = _seed_ownerref(tmp_path, monkeypatch)
+    # First journal an active claim onto the borrowing record via owner-ref.
+    m.cmd_claims(_add_ownerref_args(
+        "codespace", "cs-xyz", "lambda-core/odsp-web/wt-borrower"))
+    capfd.readouterr()
+    # Now settle it via owner-ref (disconnect-hook path).
+    rc = m.cmd_claims(_settle_ownerref_args(
+        "cs-xyz", "lambda-core/odsp-web/wt-borrower"))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["disposition"] == "at-rest" and out["worktree_id"] == "wt-borrower"
+    rec = tracking.load_record(owner_wt_dir / "wt-borrower.yaml")
+    assert rec.resources[0].state == "at-rest" and not rec.resources[0].is_unsettled
+
+
+def test_claims_settle_owner_ref_cross_machine_defers(monkeypatch, tmp_path, capfd):
+    _seed_ownerref(tmp_path, monkeypatch)
+    rc = m.cmd_claims(_settle_ownerref_args(
+        "cs-remote", "other-box/odsp-web/wt-borrower"))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out.get("deferred") is True and out["reason"] == "cross-machine-owner"
+
+
+def test_claims_settle_owner_ref_rejects_unqualified(monkeypatch, tmp_path):
+    _seed_ownerref(tmp_path, monkeypatch)
+    rc = m.cmd_claims(_settle_ownerref_args("cs-x", "just-an-id"))
+    assert rc == 2
+
+
 def test_claims_add_then_settle_roundtrip(monkeypatch, tmp_path, capfd):
     _seed(tmp_path, monkeypatch)
     m.cmd_claims(_add_args("codespace", "cs-blue"))
