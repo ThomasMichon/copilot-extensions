@@ -1698,6 +1698,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                         else "session",
                         parent_session=getattr(args, "parent_session", None),
                         caller_worktree=getattr(args, "caller_worktree", None),
+                        owner_ref=getattr(args, "owner_ref", None),
                     )
                 except RuntimeError as e:
                     return _json_error(str(e))
@@ -3325,6 +3326,7 @@ def _resolve_new(
         config, profile=profile, no_mux=getattr(args, "no_mux", False),
         parent_session=getattr(args, "parent_session", None),
         caller_worktree=getattr(args, "caller_worktree", None),
+        owner_ref=getattr(args, "owner_ref", None),
     )
     _emit_plan({
         "action": "exec",
@@ -12268,6 +12270,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="With --new: the caller worktree id that requested this "
                         "(bridge) worktree, recorded so the Picker can jump back "
                         "to it (#2178).")
+    p.add_argument("--owner-ref", default=None, dest="owner_ref",
+                   help="With --new: qualified ref "
+                        "(machine/project/worktree_id[#session]) of the worktree "
+                        "that owns this one as an outbound resource -- stamps the "
+                        "new worktree's owner_ref so its finalize settles the "
+                        "owner's claim (resource-obligation-settlement). For a "
+                        "bridge spawn, the dispatching (caller) worktree's ref.")
     p.add_argument("copilot_args", nargs="*", default=[])
 
     # post-exit (run post-exit checks after Copilot exits)

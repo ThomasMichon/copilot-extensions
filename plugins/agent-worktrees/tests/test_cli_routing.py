@@ -13,6 +13,20 @@ def test_extract_project_flag_space():
     assert rest == ["list"]
 
 
+def test_resolve_new_accepts_owner_ref():
+    # resource-obligation-settlement 3c: `resolve --new --owner-ref` stamps the
+    # bridge/child worktree's owner_ref so its finalize settles the owner's claim
+    # (parity with `create --owner-ref`).
+    args = m.build_parser().parse_args(
+        ["resolve", "--json", "--new", "--owner-ref", "mach/proj/wt-caller"])
+    assert args.owner_ref == "mach/proj/wt-caller"
+
+
+def test_resolve_owner_ref_defaults_none():
+    args = m.build_parser().parse_args(["resolve", "--json", "--new"])
+    assert getattr(args, "owner_ref", "MISSING") is None
+
+
 def test_get_pr_keys_registered():
     assert "pr-enabled" in m._GET_KEYS
     assert "pr-provider" in m._GET_KEYS
