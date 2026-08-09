@@ -152,7 +152,7 @@ def test_build_command_supervised_lane():
     reg = _reg("a", spec={
         "repo": TEST_REPO, "labels": ["x", "y"], "max_concurrent": 2,
         "max_attempts": 5, "headless_labels": ["y"], "headless_agent": "task-worker",
-        "evaluator": "eval.json", "interval": 15.0,
+        "interval": 15.0,
     })
     cmd = build_command(reg, python="PY")
     assert cmd[:4] == ["PY", "-m", "agent_dispatch", "supervise"]
@@ -160,7 +160,8 @@ def test_build_command_supervised_lane():
     assert cmd.count("--label") == 2
     assert "--max-concurrent" in cmd and "2" in cmd
     assert "--headless-label" in cmd and "--headless-agent" in cmd
-    assert "--evaluator" in cmd and "eval.json" in cmd
+    # a supervised-lane does NOT run an evaluator -- that is the 'evaluator' kind
+    assert "--evaluator" not in cmd
 
 
 def test_build_command_all_repos():
@@ -169,9 +170,62 @@ def test_build_command_all_repos():
     assert "--repo" not in cmd
 
 
+def test_build_command_evaluator_inline_spec():
+    reg = _reg("e", kind="evaluator", spec={
+        "evaluator_spec": {"states": {}}, "all_repos": True, "labels": ["dampener"],
+    })
+    materialized = {}
+
+    def mat(name, payload):
+        materialized[name] = payload
+        return f"/run/{name}.json"
+
+    cmd = build_command(reg, python="PY", materialize=mat)
+    assert cmd[:4] == ["PY", "-m", "agent_dispatch", "supervise"]
+    assert "--evaluator" in cmd and "/run/evaluator.json" in cmd
+    assert "--all-repos" in cmd
+    assert materialized["evaluator"] == {"states": {}}
+
+
+def test_build_command_evaluator_path_ref():
+    reg = _reg("e", kind="evaluator", spec={"evaluator": "eval.json", "repo": TEST_REPO})
+    cmd = build_command(reg, python="PY")  # no materializer needed for a path ref
+    assert "--evaluator" in cmd and "eval.json" in cmd
+
+
+def test_build_command_schedule():
+    reg = _reg("s", kind="schedule",
+               spec={"id": "nightly", "repo": TEST_REPO, "interval_seconds": 3600})
+    captured = {}
+
+    def mat(name, payload):
+        captured[name] = payload
+        return f"/run/{name}.json"
+
+    cmd = build_command(reg, python="PY", materialize=mat)
+    assert cmd[:5] == ["PY", "-m", "agent_dispatch", "schedule", "serve"]
+    assert "/run/schedule.json" in cmd
+    # wrapped as a one-entry spec the timer producer consumes
+    assert captured["schedule"] == {"schedules": [reg["spec"]]}
+
+
+def test_build_command_emitter():
+    reg = _reg("m", kind="emitter", spec={"url": "http://x", "port": 9400})
+    cmd = build_command(reg, python="PY", materialize=lambda n, p: f"/run/{n}.json")
+    assert cmd[:4] == ["PY", "-m", "agent_dispatch", "webhook"]
+    assert "--config" in cmd and "/run/emitter.json" in cmd
+    assert "--port" in cmd and "9400" in cmd
+
+
+def test_build_command_needs_materializer_for_inline_spec():
+    reg = _reg("s", kind="schedule", spec={"id": "n", "repo": TEST_REPO})
+    with pytest.raises(UnsupportedKind):
+        build_command(reg, python="PY")  # no materializer -> refused
+
+
 def test_build_command_rejects_unsupported_kind():
     with pytest.raises(UnsupportedKind):
-        build_command(_reg("a", kind="schedule", spec={"id": "n"}))
+        build_command(_reg("a", kind="totally-unknown", spec={"x": 1}))
 
 
 def test_lease_scope_format():
@@ -267,7 +321,7 @@ def test_reconcile_revives_crashed_unit_with_backoff_and_cap():
 
 
 def test_reconcile_skips_unsupported_kind():
-    client = FakeClient([_reg("a", kind="schedule", spec={"id": "n"})])
+    client = FakeClient([_reg("a", kind="totally-unknown", spec={"x": 1})])
     launcher = FakeLauncher()
     d = _daemon(client, launcher)
     summary = d.reconcile_once()

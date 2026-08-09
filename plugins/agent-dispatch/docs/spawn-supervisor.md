@@ -195,18 +195,24 @@ set against the registry on every tick.
   is left stopped and surfaced, never retried forever).
 - **Isolation.** Each unit is its own child, so one busy or failing unit never
   blocks its siblings or the master.
-- **Kinds.** This increment realizes the **supervised-lane** unit (it
-  reconstructs the `agent-dispatch supervise` foreground loop from the stored
-  spec). The `schedule` / `emitter` / `evaluator` kinds are **registration types
-  the daemon will run** in a following increment; until then an unsupported kind
-  is logged and skipped, never fatal.
+- **Kinds.** Every registration kind is a runtime the daemon drives in its own
+  subprocess: **supervised-lane** → the `agent-dispatch supervise` embody loop;
+  **evaluator** → that loop with `--evaluator` (subsumes the foreground
+  `supervise --evaluator` flag), the evaluator spec materialized to a file;
+  **schedule** → the timer producer (`schedule serve`) over a one-entry spec (a
+  *self-run emitter*, dedup-keyed `sched:<id>:<epoch>` by the producer);
+  **emitter** → the reactive producer (`webhook`) over a config, on the spec's
+  `host`/`port`, dedup-keyed by the producer. Each registration's inline spec is
+  **materialized** to a per-registration file under the run dir so its subprocess
+  can read it. A kind the daemon can't build a command for is logged and skipped,
+  never fatal.
 
-> **Increment status.** The **registration store + verbs** and the **singleton
-> daemon** (reconcile, per-unit subprocesses, single-instance election,
-> crash-revive, wind-down) are built. Folding the non-lane kinds
-> (`schedule`/`emitter`/`evaluator`) into units the daemon runs — subsuming the
-> foreground `supervise --evaluator` flag into a registration — is the next
-> increment. The bare `supervise` foreground loop remains available throughout.
+> **Increment status.** The **registration store + verbs**, the **singleton
+> daemon** (reconcile, per-unit subprocesses, crash-safe OS-lock single-instance,
+> crash-revive, wind-down), and **all four kinds** (supervised-lane, evaluator,
+> schedule, emitter) are built — the daemon runs each as its own subprocess,
+> subsuming the foreground `supervise --evaluator` flag into an evaluator
+> registration. The bare `supervise` foreground loop remains available.
 
 ### Per-label embody body: CLI-first, headless-ACP opt-in
 
