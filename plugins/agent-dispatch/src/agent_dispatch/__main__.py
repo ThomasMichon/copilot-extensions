@@ -1465,6 +1465,11 @@ def _build_registration_spec(args: argparse.Namespace) -> dict:
     if getattr(args, "headless_agent", None):
         spec["headless_agent"] = args.headless_agent
     if getattr(args, "evaluator", None):
+        if kind != "evaluator":
+            raise SystemExit(
+                "supervise register: --evaluator is only valid with "
+                "--kind evaluator (a supervised-lane does not run an evaluator)"
+            )
         spec["evaluator"] = args.evaluator
     spec["interval"] = getattr(args, "interval", 30.0)
     if kind == "evaluator" and not spec.get("evaluator"):

@@ -59,6 +59,26 @@ class RegistrationError(ValueError):
     """Raised when a registration's kind or spec is malformed."""
 
 
+def _schedule_entry(spec: dict, *, strict: bool) -> dict:
+    """The single schedule entry a schedule registration carries.
+
+    A schedule spec is either a bare entry, or ``{"schedules": [entry]}``. When a
+    ``schedules`` field is present it must be a non-empty list of objects; a
+    malformed one raises :class:`RegistrationError` under ``strict`` (validation),
+    and falls back to the spec itself otherwise (best-effort id derivation).
+    """
+    scheds = spec.get("schedules")
+    if scheds is None:
+        return spec
+    if isinstance(scheds, list) and scheds and isinstance(scheds[0], dict):
+        return scheds[0]
+    if strict:
+        raise RegistrationError(
+            "schedule 'schedules' must be a non-empty list of objects"
+        )
+    return spec
+
+
 @dataclass
 class RegistrationRecord:
     """A read-only snapshot of a registered supervision unit.
@@ -109,7 +129,7 @@ def validate_registration(kind: str, spec: dict) -> None:
         # 'sched:<id>:<epoch>') and a lane to emit into.
         if not spec:
             raise RegistrationError("schedule registration needs a non-empty spec")
-        entry = spec["schedules"][0] if spec.get("schedules") else spec
+        entry = _schedule_entry(spec, strict=True)
         if not entry.get("id"):
             raise RegistrationError("schedule registration needs an 'id'")
         if not entry.get("repo"):
@@ -120,10 +140,15 @@ def validate_registration(kind: str, spec: dict) -> None:
     elif kind == RegistrationKind.EVALUATOR:
         if not spec:
             raise RegistrationError("evaluator registration needs a non-empty spec")
-        if spec.get("evaluator_spec") is None and not spec.get("evaluator"):
+        eval_spec = spec.get("evaluator_spec")
+        if eval_spec is None and not spec.get("evaluator"):
             raise RegistrationError(
                 "evaluator registration needs 'evaluator_spec' (inline) or "
                 "'evaluator' (a path)"
+            )
+        if eval_spec is not None and not isinstance(eval_spec, dict):
+            raise RegistrationError(
+                "evaluator 'evaluator_spec' must be a JSON object"
             )
         if not spec.get("repo") and not spec.get("all_repos"):
             raise RegistrationError(
@@ -147,7 +172,7 @@ def _scope_key(kind: str, spec: dict) -> str:
     elif kind == RegistrationKind.EVALUATOR:
         base = "all-repos" if spec.get("all_repos") else str(spec.get("repo") or "eval")
     elif kind == RegistrationKind.SCHEDULE:
-        entry = spec["schedules"][0] if spec.get("schedules") else spec
+        entry = _schedule_entry(spec, strict=False)
         base = str(entry.get("id") or kind)
     else:
         base = str(spec.get("id") or spec.get("name") or kind)

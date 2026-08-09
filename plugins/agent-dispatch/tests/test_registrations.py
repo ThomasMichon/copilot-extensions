@@ -72,6 +72,12 @@ def test_validate_accepts_each_kind():
         (RegistrationKind.EVALUATOR, {}, "non-empty"),
         (RegistrationKind.EVALUATOR, {"all_repos": True}, "evaluator_spec"),
         (RegistrationKind.EVALUATOR, {"evaluator": "e.json"}, "needs a 'repo'"),
+        (RegistrationKind.EVALUATOR, {"evaluator_spec": "not-a-dict", "all_repos": True},
+         "must be a JSON object"),
+        (RegistrationKind.SCHEDULE, {"schedules": "nope", "id": "x", "repo": "r"},
+         "non-empty list of objects"),
+        (RegistrationKind.SCHEDULE, {"schedules": [], "id": "x", "repo": "r"},
+         "non-empty list of objects"),
     ],
 )
 def test_validate_rejects_malformed(kind, spec, needle):
@@ -345,5 +351,16 @@ def test_cli_build_spec_evaluator_requires_evaluator():
     args = _parse(["supervise", "register", "--kind", "evaluator", "--all-repos"])
     with pytest.raises(SystemExit):
         _build_registration_spec(args)  # no --evaluator and no --spec
+
+
+def test_cli_build_spec_rejects_evaluator_on_lane():
+    from agent_dispatch.__main__ import _build_registration_spec
+
+    args = _parse(
+        ["supervise", "register", "--repo", TEST_REPO, "--evaluator", "e.json"]
+    )
+    with pytest.raises(SystemExit) as exc:
+        _build_registration_spec(args)  # --evaluator on a supervised-lane is rejected
+    assert "only valid with" in str(exc.value)
 
 
