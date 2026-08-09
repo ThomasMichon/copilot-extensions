@@ -8937,6 +8937,17 @@ def cmd_update(args: argparse.Namespace) -> int:
         if result.returncode != 0:
             return result.returncode
 
+    # Step 3.5 -- reconcile EVERY registered project binstub against the current
+    # template, no matter which project's lens invoked `update`. Step 3's installer
+    # and the global stub only refresh the current project + the global launcher, so
+    # a binstub-template migration (e.g. the Windows .venv -> current-version marker
+    # move, #1085/#1106) would otherwise leave *other* projects' binstubs stale until
+    # each was re-registered. `update` owns fleet-wide binstub health.
+    try:
+        inst.reconcile_binstubs()
+    except Exception as e:  # noqa: BLE001 -- a stub refresh must never fail update
+        output.warn(f"Binstub reconcile skipped: {e}")
+
     # Step 4 -- update registered sibling modules (agent-bridge, etc.)
     skip_modules = getattr(args, "skip_modules", None)
     _update_modules(plugin_dir, plat, skip_modules, force=force)
