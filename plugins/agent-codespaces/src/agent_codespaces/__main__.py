@@ -885,6 +885,22 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
             # Never let a claim-bookkeeping error block a connect.
             print(f"[WARN] CodeSpace claim skipped: {exc}", file=sys.stderr)
 
+        # Journal the CodeSpace as an outbound obligation on the BORROWING
+        # worktree so its finalize gate holds it accountable
+        # (resource-obligation-settlement Ph3b-wiring/2). Best-effort +
+        # degrade-safe: resolves the owner by its qualified holder-ref (not the
+        # caller's cwd -- a dispatched ssh runs in the daemon's cwd). Settled to
+        # at-rest on a clean disconnect (below). A missing holder-ref / binstub /
+        # cross-machine owner is a silent no-op. Journaled for any claimed
+        # connect (a clean disconnect immediately settles it to at-rest, so an
+        # ephemeral probe leaves only harmless at-rest provenance).
+        if fence_holder_ref:
+            if coordination.journal_obligation(args.name, fence_holder_ref):
+                log.info(
+                    "Journaled CodeSpace %s as an obligation on %s",
+                    args.name, fence_holder_ref,
+                )
+
     # Credential relay state. The relay reverse-forward now has its own
     # supervised ``ssh -N -R`` channel, so it is not piggybacked on the
     # coordination connection's port_forwards.
@@ -1171,6 +1187,16 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
             )
             raise
         finally:
+            # Settle the CodeSpace obligation on the borrowing worktree if its
+            # work is at-rest (resource-obligation-settlement Ph3b-wiring/2).
+            # Runs while the SSH channel is still up (before disconnect), so the
+            # read-only cleanliness probe can execute. Best-effort + degrade-safe:
+            # un-probeable / dirty / no holder-ref -> the obligation stays active
+            # (never settled blind).
+            if fence_holder_ref:
+                await _settle_codespace_on_disconnect(
+                    manager, args.name, fence_holder_ref,
+                )
             if relay_forward is not None:
                 await relay_forward.stop()
             await manager.disconnect(args.name)
@@ -1179,6 +1205,43 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         return asyncio.run(_run_with_cleanup())
     finally:
         target_lock.release()
+
+
+async def _settle_codespace_on_disconnect(
+    manager, name: str, holder_ref: str | None,
+) -> bool:
+    """Probe cleanliness + settle the CodeSpace obligation on disconnect.
+
+    The incremental-settlement hook for a borrowed CodeSpace
+    (resource-obligation-settlement Ph3b-wiring/2): run the read-only
+    ``cleanliness`` probe over the still-open SSH channel and, on a *definitive*
+    at-rest verdict (git clean AND no in-flight dispatch), settle the borrowing
+    worktree's claim to ``at-rest`` via ``coordination.settle_obligation``
+    (``agent-worktrees claims settle <name> --owner-ref <holder_ref>``).
+
+    ``in_flight`` is host-side knowledge: at disconnect this connection is the
+    one that was driving the box, and the exclusive claim precludes a concurrent
+    driver, so it is ``False`` here. Fully best-effort + degrade-safe (any probe
+    / settle failure leaves the obligation ``active`` -- never settled blind,
+    never raises). Returns ``True`` only on a confirmed settle.
+    """
+    from . import cleanliness, coordination
+    try:
+        gc = await cleanliness.probe_cleanliness(manager, name)
+    except Exception:
+        return False
+    if not cleanliness.at_rest(gc, in_flight=False):
+        log.info(
+            "CodeSpace %s not at-rest on disconnect (known=%s dirty=%s ahead=%s "
+            "unpushed_branches=%s) -- obligation stays active",
+            name, gc.known, gc.dirty, gc.ahead, gc.unpushed_branches,
+        )
+        return False
+    if coordination.settle_obligation(name, holder_ref):
+        log.info("Settled CodeSpace %s obligation on %s -> at-rest",
+                 name, holder_ref)
+        return True
+    return False
 
 
 async def _stage_plugins(manager, name: str, sources: list[str]) -> list[str]:

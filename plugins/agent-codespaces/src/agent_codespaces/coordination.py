@@ -140,6 +140,61 @@ def owner_ref(explicit: str | None = None, session_id: str | None = None) -> str
     return proc.stdout.strip() or None
 
 
+def journal_obligation(name: str, holder_ref: str | None) -> bool:
+    """Journal a CodeSpace obligation onto the BORROWING worktree's ledger.
+
+    On borrow, shells ``agent-worktrees claims add codespace <name> --owner-ref
+    <holder_ref>`` so the finalize obligation gate can hold the borrowing
+    worktree accountable for the CodeSpace (resource-obligation-settlement
+    Ph3b-wiring/2). The ``--owner-ref`` (the qualified holder ClaimRef this
+    connect already resolved) makes it land on the RIGHT worktree even when the
+    caller's cwd is the daemon's, not the borrowing worktree.
+
+    Best-effort + degrade-safe: no holder_ref, no binstub, a cross-machine owner
+    (deferred to the lease mirror), or any error -> ``False`` (never raises,
+    never blocks the connect). Idempotent (``claims add`` dedups by ref).
+    """
+    if not holder_ref or not holder_ref.strip():
+        return False
+    proc = _run(
+        ["claims", "add", KIND, name, "--owner-ref", holder_ref.strip(), "--json"],
+    )
+    if proc is None:
+        return False
+    if proc.returncode != 0:
+        log.debug("claims add for %s degraded (exit %s): %s",
+                  name, proc.returncode, (proc.stderr or "").strip())
+        return False
+    return True
+
+
+def settle_obligation(
+    name: str, holder_ref: str | None, *, released: bool = False,
+) -> bool:
+    """Settle the borrowing worktree's CodeSpace obligation to ``at-rest``.
+
+    On a definitive at-rest verdict (see ``cleanliness.at_rest``) at ssh
+    disconnect / heartbeat, shells ``agent-worktrees claims settle <name>
+    --owner-ref <holder_ref>`` (``--released`` to hand the claim back entirely)
+    so the borrowing worktree's finalize gate stops treating the CodeSpace as
+    unsettled. Same ``--owner-ref`` resolution + degrade-safety as
+    :func:`journal_obligation`. Returns ``True`` only on a confirmed settle.
+    """
+    if not holder_ref or not holder_ref.strip():
+        return False
+    args = ["claims", "settle", name, "--owner-ref", holder_ref.strip(), "--json"]
+    if released:
+        args.append("--released")
+    proc = _run(args)
+    if proc is None:
+        return False
+    if proc.returncode != 0:
+        log.debug("claims settle for %s degraded (exit %s): %s",
+                  name, proc.returncode, (proc.stderr or "").strip())
+        return False
+    return True
+
+
 def harness_identity() -> str | None:
     """Resolve THIS harness's identity -- the Git-ref lease store origin URL.
 
