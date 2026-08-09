@@ -75,6 +75,58 @@ def test_renew_ok_rotates_token(monkeypatch):
     assert res.ok and res.token == new
 
 
+# --- obligation journaling / settlement (Ph3b-wiring/2) ----------------------
+
+def test_journal_obligation_shells_claims_add(monkeypatch):
+    seen = {}
+    def fake_run(args, **kw):
+        seen["args"] = args
+        return _proc(0, json.dumps({"worktree_id": "wt-b", "ref": "cs-one"}))
+    monkeypatch.setattr(coord, "_run", fake_run)
+    assert coord.journal_obligation("cs-one", "m/p/wt-b") is True
+    assert seen["args"] == [
+        "claims", "add", "codespace", "cs-one", "--owner-ref", "m/p/wt-b", "--json"]
+
+
+def test_journal_obligation_no_holder_ref_is_noop(monkeypatch):
+    monkeypatch.setattr(coord, "_run",
+                        lambda *a, **k: pytest.fail("should not shell"))
+    assert coord.journal_obligation("cs-one", None) is False
+    assert coord.journal_obligation("cs-one", "  ") is False
+
+
+def test_journal_obligation_degrades_on_error(monkeypatch):
+    monkeypatch.setattr(coord, "_run", lambda *a, **k: _proc(2, stderr="boom"))
+    assert coord.journal_obligation("cs-one", "m/p/wt-b") is False
+    monkeypatch.setattr(coord, "_run", lambda *a, **k: None)  # no binstub
+    assert coord.journal_obligation("cs-one", "m/p/wt-b") is False
+
+
+def test_settle_obligation_shells_claims_settle(monkeypatch):
+    seen = {}
+    def fake_run(args, **kw):
+        seen["args"] = args
+        return _proc(0, json.dumps({"disposition": "at-rest"}))
+    monkeypatch.setattr(coord, "_run", fake_run)
+    assert coord.settle_obligation("cs-one", "m/p/wt-b") is True
+    assert seen["args"] == [
+        "claims", "settle", "cs-one", "--owner-ref", "m/p/wt-b", "--json"]
+
+
+def test_settle_obligation_released_flag(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(coord, "_run",
+                        lambda args, **k: (seen.update(args=args), _proc(0, "{}"))[1])
+    assert coord.settle_obligation("cs-one", "m/p/wt-b", released=True) is True
+    assert "--released" in seen["args"]
+
+
+def test_settle_obligation_degrades(monkeypatch):
+    monkeypatch.setattr(coord, "_run", lambda *a, **k: _proc(1, stderr="no claim"))
+    assert coord.settle_obligation("cs-one", "m/p/wt-b") is False
+    assert coord.settle_obligation("cs-one", None) is False
+
+
 def test_renew_conflict_is_reported(monkeypatch):
     monkeypatch.setattr(coord, "_run", lambda *a, **k: _proc(3, stderr="lease lost"))
     assert coord.renew("cs-one", "a" * 40).conflict

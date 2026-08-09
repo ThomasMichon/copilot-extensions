@@ -5540,11 +5540,36 @@ def _claims_settle(args: argparse.Namespace, ref: str) -> int:
     is the operator/hook entry point to the incremental-settlement primitive
     (`tracking.settle_resource_claim`) that lets a worktree's finalize gate stop
     treating the resource as unsettled. The owner worktree is the current one
-    unless ``--worktree`` names another.
+    unless ``--worktree`` names another in the current project, or
+    ``--owner-ref <machine/project/worktree_id>`` names one cross-project
+    (resolved by qualified ref -> ``project_dir/worktrees``, same-machine; a
+    cross-machine owner-ref defers to the lease mirror). The owner-ref path is
+    for a hook whose cwd is not the owning worktree (e.g. agent-codespaces
+    settling a CodeSpace claim on disconnect from the daemon's cwd).
     """
     config = cfg.load_config()
-    wt_id = _infer_worktree_id(getattr(args, "release_worktree", None), config)
-    rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+    owner_ref = getattr(args, "claim_owner_ref", None)
+    if owner_ref:
+        rec_path, wt_id, err = _resolve_owner_ref_record_path(owner_ref, config)
+        if err:
+            if args.json:
+                return _json_error(err, 2)
+            output.err(err)
+            return 2
+        if rec_path is None:
+            # Cross-machine owner -- the lease disposition mirror owns it; a
+            # no-op locally (surfaced for the caller to mirror via the lease).
+            if args.json:
+                _json_output({"worktree_id": wt_id, "ref": ref,
+                              "deferred": True, "reason": "cross-machine-owner"})
+                return 0
+            output.warn(
+                f"owner-ref {owner_ref} is on another machine -- settle deferred "
+                f"to the lease mirror (no local ledger write)")
+            return 0
+    else:
+        wt_id = _infer_worktree_id(getattr(args, "release_worktree", None), config)
+        rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
     if not rec_path.exists():
         if args.json:
             return _json_error(f"worktree not found: {wt_id}")
@@ -12578,12 +12603,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--worktree", default=None, dest="release_worktree",
                    help="with release/settle: the owner worktree (default: current)")
     p.add_argument("--owner-ref", default=None, dest="claim_owner_ref",
-                   help="with add: journal onto the owner named by this qualified "
-                        "ref (machine/project/worktree_id) instead of the current "
-                        "project's cwd-inferred worktree -- resolves cross-project "
-                        "on THIS machine (a cross-machine owner is deferred to the "
-                        "lease mirror). For a call-site (e.g. agent-codespaces on "
-                        "CodeSpace borrow) whose cwd is not the borrowing worktree.")
+                   help="with add/settle: journal/settle onto the owner named by "
+                        "this qualified ref (machine/project/worktree_id) instead "
+                        "of the current project's cwd-inferred worktree -- resolves "
+                        "cross-project on THIS machine (a cross-machine owner is "
+                        "deferred to the lease mirror). For a call-site (e.g. "
+                        "agent-codespaces on CodeSpace borrow/disconnect) whose cwd "
+                        "is not the borrowing worktree.")
     p.add_argument("--json", action="store_true",
                    help="JSON output mode (stdout is JSON only)")
 
