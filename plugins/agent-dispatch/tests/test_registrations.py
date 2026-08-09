@@ -49,9 +49,14 @@ def q(tmp_path):
 def test_validate_accepts_each_kind():
     validate_registration(RegistrationKind.SUPERVISED_LANE, {"repo": TEST_REPO})
     validate_registration(RegistrationKind.SUPERVISED_LANE, {"all_repos": True})
-    validate_registration(RegistrationKind.SCHEDULE, {"id": "nightly"})
+    validate_registration(RegistrationKind.SCHEDULE, {"id": "nightly", "repo": TEST_REPO})
     validate_registration(RegistrationKind.EMITTER, {"url": "http://x"})
-    validate_registration(RegistrationKind.EVALUATOR, {"states": {}})
+    validate_registration(
+        RegistrationKind.EVALUATOR, {"evaluator_spec": {}, "all_repos": True}
+    )
+    validate_registration(
+        RegistrationKind.EVALUATOR, {"evaluator": "eval.json", "repo": TEST_REPO}
+    )
 
 
 @pytest.mark.parametrize(
@@ -61,8 +66,12 @@ def test_validate_accepts_each_kind():
         (RegistrationKind.SUPERVISED_LANE, [], "JSON object"),
         (RegistrationKind.SUPERVISED_LANE, {}, "needs a 'repo'"),
         (RegistrationKind.SCHEDULE, {}, "non-empty"),
+        (RegistrationKind.SCHEDULE, {"repo": TEST_REPO}, "needs an 'id'"),
+        (RegistrationKind.SCHEDULE, {"id": "n"}, "needs a 'repo'"),
         (RegistrationKind.EMITTER, {}, "non-empty"),
         (RegistrationKind.EVALUATOR, {}, "non-empty"),
+        (RegistrationKind.EVALUATOR, {"all_repos": True}, "evaluator_spec"),
+        (RegistrationKind.EVALUATOR, {"evaluator": "e.json"}, "needs a 'repo'"),
     ],
 )
 def test_validate_rejects_malformed(kind, spec, needle):
@@ -138,7 +147,8 @@ def test_list_filters_by_kind_machine_env_and_status(q):
         "supervised-lane", _lane(repo=OTHER_REPO), reg_id="b", machine="m2"
     )
     q.register_registration(
-        "schedule", {"id": "nightly"}, reg_id="c", machine="m1", env="prod"
+        "schedule", {"id": "nightly", "repo": TEST_REPO}, reg_id="c",
+        machine="m1", env="prod",
     )
     assert [r.id for r in q.list_registrations()] == ["a", "b", "c"]
     assert [r.id for r in q.list_registrations(kind="schedule")] == ["c"]
@@ -314,4 +324,26 @@ def test_cli_register_ensure_flag():
     assert a.ensure is True
     b = _parse(["supervise", "register", "--repo", TEST_REPO])
     assert b.ensure is False
+
+
+def test_cli_build_spec_evaluator_convenience():
+    from agent_dispatch.__main__ import _build_registration_spec
+
+    args = _parse(
+        ["supervise", "register", "--kind", "evaluator", "--all-repos",
+         "--evaluator", "eval.json", "--label", "dampener"]
+    )
+    spec = _build_registration_spec(args)
+    assert spec["evaluator"] == "eval.json"
+    assert spec["all_repos"] is True
+    assert spec["labels"] == ["dampener"]
+
+
+def test_cli_build_spec_evaluator_requires_evaluator():
+    from agent_dispatch.__main__ import _build_registration_spec
+
+    args = _parse(["supervise", "register", "--kind", "evaluator", "--all-repos"])
+    with pytest.raises(SystemExit):
+        _build_registration_spec(args)  # no --evaluator and no --spec
+
 

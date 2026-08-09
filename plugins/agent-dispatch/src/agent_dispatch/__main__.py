@@ -1432,7 +1432,7 @@ def _build_registration_spec(args: argparse.Namespace) -> dict:
         return spec
 
     kind = getattr(args, "kind", None) or "supervised-lane"
-    if kind != "supervised-lane":
+    if kind not in ("supervised-lane", "evaluator"):
         raise SystemExit(
             f"supervise register: --spec is required for kind {kind!r}"
         )
@@ -1467,6 +1467,11 @@ def _build_registration_spec(args: argparse.Namespace) -> dict:
     if getattr(args, "evaluator", None):
         spec["evaluator"] = args.evaluator
     spec["interval"] = getattr(args, "interval", 30.0)
+    if kind == "evaluator" and not spec.get("evaluator"):
+        raise SystemExit(
+            "supervise register --kind evaluator: pass --evaluator <spec-path> "
+            "(or --spec with an inline 'evaluator_spec')"
+        )
     return spec
 
 

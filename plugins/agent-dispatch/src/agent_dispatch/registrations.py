@@ -105,14 +105,31 @@ def validate_registration(kind: str, spec: dict) -> None:
                 "'all_repos': true"
             )
     elif kind == RegistrationKind.SCHEDULE:
+        # A schedule is a self-run emitter: it needs an id (its dedup namespace,
+        # 'sched:<id>:<epoch>') and a lane to emit into.
         if not spec:
             raise RegistrationError("schedule registration needs a non-empty spec")
+        entry = spec["schedules"][0] if spec.get("schedules") else spec
+        if not entry.get("id"):
+            raise RegistrationError("schedule registration needs an 'id'")
+        if not entry.get("repo"):
+            raise RegistrationError("schedule registration needs a 'repo' (the lane)")
     elif kind == RegistrationKind.EMITTER:
         if not spec:
             raise RegistrationError("emitter registration needs a non-empty spec")
     elif kind == RegistrationKind.EVALUATOR:
         if not spec:
             raise RegistrationError("evaluator registration needs a non-empty spec")
+        if spec.get("evaluator_spec") is None and not spec.get("evaluator"):
+            raise RegistrationError(
+                "evaluator registration needs 'evaluator_spec' (inline) or "
+                "'evaluator' (a path)"
+            )
+        if not spec.get("repo") and not spec.get("all_repos"):
+            raise RegistrationError(
+                "evaluator registration needs a 'repo' (the lane) or "
+                "'all_repos': true"
+            )
 
 
 def _scope_key(kind: str, spec: dict) -> str:
@@ -127,6 +144,11 @@ def _scope_key(kind: str, spec: dict) -> str:
         if isinstance(labels, str):
             labels = [labels]
         base = lane if not labels else f"{lane}-{'-'.join(sorted(str(x) for x in labels))}"
+    elif kind == RegistrationKind.EVALUATOR:
+        base = "all-repos" if spec.get("all_repos") else str(spec.get("repo") or "eval")
+    elif kind == RegistrationKind.SCHEDULE:
+        entry = spec["schedules"][0] if spec.get("schedules") else spec
+        base = str(entry.get("id") or kind)
     else:
         base = str(spec.get("id") or spec.get("name") or kind)
     slug = re.sub(r"[^a-z0-9]+", "-", base.lower()).strip("-")

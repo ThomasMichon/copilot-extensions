@@ -564,8 +564,11 @@ Exactly **one** daemon per machine-and-environment runs every registration, each
 in its own subprocess, reconciling on change (start / restart-on-spec-change /
 wind-down-on-remove / crash-revive) and single-instance-guarded by a crash-safe OS
 lock (a second daemon stands down; a crashed one's lock is auto-released so a
-restart reclaims it). Re-registering the same unit is idempotent (the derived
-handle identifies it). See
+restart reclaims it). All four kinds are daemon-run: **supervised-lane** and
+**evaluator** drive the embody loop (the latter subsuming `supervise
+--evaluator`), **schedule** runs the timer producer, **emitter** runs the webhook
+producer — each dedup-keyed so a re-emit never doubles a task. Re-registering the
+same unit is idempotent (the derived handle identifies it). See
 [`docs/spawn-supervisor.md`](docs/spawn-supervisor.md#the-singleton-daemon-built--one-master-per-unit-subprocesses)
 for the registration + daemon model.
 
