@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "copilot-extensions-configurator"
+version = "0.1.0-dev0"
+description = "Standalone, out-of-plugin installer & configurator for the copilot-extensions harness."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "Thomas Michon" }]
+# Textual is the visual-wizard toolkit the Phase 4 configurator uses; declared
+# now so the packaging/venv is validated against the real dependency, even
+# though the Phase 0 skeleton does not yet import it.
+dependencies = [
+    "textual>=0.80",
+]
+
+[project.scripts]
+configurator = "configurator.__main__:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 99

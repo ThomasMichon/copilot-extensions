@@ -18,6 +18,29 @@ servers** so those same host credentials reach your tools.
 
 Plugins, one marketplace. Install what you need; they compose.
 
+## Quick start — one-line setup
+
+Bootstrap a machine into a working harness with the standalone **Configurator**
+— an out-of-plugin app that installs the prerequisites and the core, then adopts
+your first repo (it must run *before* the plugins do, so it is delivered
+**outside** the plugin pipe):
+
+**Windows (PowerShell):**
+
+```powershell
+iex (irm https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/configurator/bootstrap.ps1)
+```
+
+**macOS / Linux:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/configurator/bootstrap.sh | bash
+```
+
+See [`configurator/`](configurator/). *(Building out under
+[#352](https://github.com/ThomasMichon/copilot-extensions/issues/352) — a Phase 0
+skeleton today; prerequisite install + core install land next.)*
+
 | Plugin | Type | What it gives you |
 |--------|------|-------------------|
 | [agent-worktrees](plugins/agent-worktrees/) | Session tool | Each Copilot CLI session runs in its own git worktree — no branch conflicts, no stale state. Install this first. |
