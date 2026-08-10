@@ -92,6 +92,35 @@ _WRITE_VERBS = re.compile(
 _CACHE_TTL_S = 300.0
 _IS_WIN = os.name == "nt"
 
+# --- Shell write-into-repo detection (segment + command-position based) --------
+# Fire ONLY when a guarded-repo path is an actual *write target*, never when it
+# merely appears in the command text (a ``$var=`` assignment, a ``cd`` argument,
+# or a quoted data payload like ``--body`` prose). Fd-dup redirects (``2>&1``)
+# are NOT writes. Mirrors anchor_write_guard's detection (dotfiles#1144).
+_SHELL_SEP = re.compile(r"\|\||&&|[;|&\n\r]")
+_WRITE_CMD_START = re.compile(
+    r"""^\s*["']?(?:
+        set-content|add-content|out-file|new-item|remove-item|move-item|
+        copy-item|clear-content|rename-item|set-itemproperty|tee-object|
+        tee|cp|mv|rm|touch|mkdir|dd|truncate|patch|sed\s+-i
+    )\b""",
+    re.IGNORECASE | re.VERBOSE,
+)
+_GIT_START = re.compile(r"^\s*[\"']?git\b", re.IGNORECASE)
+_GIT_WRITE_SUB = re.compile(
+    r"\b(?:add|commit|apply|checkout|switch|reset|restore|clean|rm|mv|stash|"
+    r"merge|rebase|pull|cherry-pick|revert|init)\b",
+    re.IGNORECASE,
+)
+_GIT_DASH_C_FLAG = re.compile(r"(?:^|\s)-C\b", re.IGNORECASE)
+
+
+def _root_token(root_str: str) -> str:
+    """Regex for a repo root as a whole path token: the root itself OR a path
+    INTO it, with a terminator so a sibling dir sharing the string prefix is not
+    matched."""
+    return re.escape(root_str) + r"(?:[\\/][^\s\"';|&]*)?(?=[\"'\s;|&]|$)"
+
 
 def _truthy_off(v: str | None) -> bool:
     return (v or "").strip().lower() in {"off", "0", "false", "no"}
@@ -401,6 +430,45 @@ def load_guarded_roots(root: str, home: Path) -> list[dict]:
 
 # --- Core evaluation ----------------------------------------------------------
 
+def _shell_hit(cmd: str, cwd: str, guarded: list[dict]) -> dict | None:
+    """Return a guarded-repo hit for a shell command that WRITES into a guarded
+    repo, or None. Fires only on a real write target (redirect target /
+    command-position write verb argument / git mutation via ``-C <repo>`` or the
+    cwd), never a path merely mentioned in an assignment, ``cd``, or a quoted
+    data payload (dotfiles#1144)."""
+    if not _WRITE_VERBS.search(cmd):
+        return None
+    for seg in _SHELL_SEP.split(cmd):
+        seg_hay = os.path.normcase(seg.replace("/", os.sep)) if _IS_WIN else seg
+        at_write_cmd = bool(_WRITE_CMD_START.match(seg))
+        is_git = bool(_GIT_START.match(seg))
+        git_write = is_git and bool(_GIT_WRITE_SUB.search(seg))
+        has_dash_c = is_git and bool(_GIT_DASH_C_FLAG.search(seg))
+        for g in guarded:
+            gp = g.get("path")
+            if not gp:
+                continue
+            root_str = _canon(gp)
+            tok = _root_token(root_str)
+            reason = _deny_reason(g, "(a shell command writes into it).")
+            # 1. A file redirect whose target is the repo (excludes fd dups).
+            if re.search(r">>?(?!\s*&)\s*[\"']?" + tok, seg_hay):
+                return {**g, "reason": reason}
+            # 2. A write cmdlet/verb at COMMAND POSITION with the repo as an arg.
+            if at_write_cmd and re.search(tok, seg_hay):
+                return {**g, "reason": reason}
+            # 3. A git mutation targeting the repo: ``-C <repo>`` or (no ``-C``)
+            #    a repo-scoped git write from a cwd inside it.
+            if git_write:
+                if has_dash_c:
+                    if re.search(r"(?:^|\s)-C\s+[\"']?" + tok, seg_hay,
+                                 re.IGNORECASE):
+                        return {**g, "reason": reason}
+                elif cwd and is_inside(cwd, gp):
+                    return {**g, "reason": reason}
+    return None
+
+
 def evaluate(tool: str, args: dict, cwd: str, guarded: list[dict]) -> dict | None:
     """Return the guarded repo hit (with a ``reason``), or None to allow."""
     if not guarded:
@@ -417,27 +485,9 @@ def evaluate(tool: str, args: dict, cwd: str, guarded: list[dict]) -> dict | Non
         return None
     if tool in SHELL_TOOLS:
         cmd = _pick(args, CMD_ARG_KEYS)
-        if not cmd or not _WRITE_VERBS.search(cmd):
-            return None  # pure reads into a guarded repo are allowed
-        cmd_norm = (cmd.replace("/", os.sep) if _IS_WIN else cmd)
-        for g in guarded:
-            gp = g.get("path")
-            if not gp:
-                continue
-            root_str = _canon(gp)
-            flags = re.IGNORECASE if _IS_WIN else 0
-            for m in re.finditer(re.escape(root_str) + r"[\\/][^\s\"']+",
-                                 os.path.normcase(cmd_norm) if _IS_WIN else cmd_norm,
-                                 flags):
-                if is_inside(m.group(0), gp):
-                    return {**g, "reason": _deny_reason(
-                        g, "(a shell command writes into it).")}
-            # Also catch a bare guarded-root literal (mkdir/rm of the root dir).
-            hay = os.path.normcase(cmd_norm) if _IS_WIN else cmd_norm
-            if root_str in hay:
-                return {**g, "reason": _deny_reason(
-                    g, "(a shell command writes into it).")}
-        return None
+        if not cmd:
+            return None
+        return _shell_hit(cmd, cwd, guarded)
     return None
 
 

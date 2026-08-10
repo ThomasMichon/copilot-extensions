@@ -93,19 +93,42 @@ _WRITE_VERBS = re.compile(
 
 _IS_WIN = os.name == "nt"
 
-# A git mutation whose target repo is the shell's CWD (no ``-C <path>`` redirect).
-# Such a command run FROM a worktree-class anchor mutates the anchor WITHOUT ever
-# naming its path, so the literal-path scan can't see it -- the cwd-based check
-# below catches it. A ``git -C <path>`` command names its target explicitly and
-# is left to the literal-path scan (so ``git -C <worktree>`` from the anchor cwd
-# still correctly targets the worktree, not the anchor).
-_GIT_CWD_WRITE = re.compile(
-    r"\bgit\s+(?!-C\b)(?:[a-z-]+\s+)*?"
-    r"(?:add|commit|apply|checkout|switch|reset|restore|clean|rm|mv|stash|"
+# --- Shell write-into-anchor detection (segment + command-position based) -----
+# The shell heuristic must fire ONLY when an anchor path is an actual *write
+# target*, never when it merely appears in the command text (a ``$var=``
+# assignment, a ``cd`` argument, or a quoted data payload like ``--body`` prose).
+# So we split the command into simple-command *segments* and, per segment, look
+# for: a file redirect whose target is the anchor; a write cmdlet/verb at
+# *command position* (segment start) with the anchor as an argument; or a git
+# mutation targeting the anchor (``-C <anchor>`` or, with no ``-C``, the shell
+# cwd). Fd-dup redirects (``2>&1``) are NOT writes and are excluded.
+
+# Statement separators that end one simple command and start the next. A rough
+# split (quote-unaware) -- over-splitting only makes the heuristic *less*
+# trigger-happy, which is the safe direction for a false-positive fix.
+_SHELL_SEP = re.compile(r"\|\||&&|[;|&\n\r]")
+
+# A write cmdlet / POSIX verb at the START of a segment (after optional
+# whitespace and one optional opening quote). Command-position is the key: a
+# write verb buried mid-segment (e.g. inside a ``--body`` string) is NOT a
+# command and must not trigger.
+_WRITE_CMD_START = re.compile(
+    r"""^\s*["']?(?:
+        set-content|add-content|out-file|new-item|remove-item|move-item|
+        copy-item|clear-content|rename-item|set-itemproperty|tee-object|
+        tee|cp|mv|rm|touch|mkdir|dd|truncate|patch|sed\s+-i
+    )\b""",
+    re.IGNORECASE | re.VERBOSE,
+)
+# A git command at segment start, and the write subcommands that mutate a repo.
+_GIT_START = re.compile(r"^\s*[\"']?git\b", re.IGNORECASE)
+_GIT_WRITE_SUB = re.compile(
+    r"\b(?:add|commit|apply|checkout|switch|reset|restore|clean|rm|mv|stash|"
     r"merge|rebase|pull|cherry-pick|revert|init)\b",
     re.IGNORECASE,
 )
-_GIT_DASH_C = re.compile(r"\bgit\s+-C\b", re.IGNORECASE)
+# A ``-C`` (git change-directory) flag anywhere in a git segment.
+_GIT_DASH_C_FLAG = re.compile(r"(?:^|\s)-C\b", re.IGNORECASE)
 
 
 def _truthy_off(v: str | None) -> bool:
@@ -296,6 +319,63 @@ def _deny_reason(name: str, path: str) -> str:
 
 # --- Core evaluation ----------------------------------------------------------
 
+def _anchor_token(root_str: str) -> str:
+    """Regex for the anchor path as a whole path token: the root itself OR a
+    path INTO it (``<root><sep><subpath>``), requiring a terminator right after
+    so a sibling worktree dir sharing only the string prefix
+    (``<repo>.worktrees\\...``) is NOT matched."""
+    return re.escape(root_str) + r"(?:[\\/][^\s\"';|&]*)?(?=[\"'\s;|&]|$)"
+
+
+def _shell_hit(cmd: str, cwd: str, anchors: list[dict]) -> dict | None:
+    """Return an anchor hit for a shell command that WRITES into an anchor, or
+    None. Fires only on a real write target (redirect target / command-position
+    write verb argument / git mutation via ``-C <anchor>`` or the cwd), never a
+    path merely mentioned in an assignment, ``cd``, or a quoted data payload."""
+    # Cheap early-out: no write-ish token anywhere -> definitely a read.
+    if not _WRITE_VERBS.search(cmd):
+        return None
+    # Which anchor (if any) the shell's cwd sits inside -- for a repo-scoped git
+    # mutation that names no path. A linked worktree cwd (.git is a file) is
+    # exempt.
+    cwd_anchor: str | None = None
+    root = find_repo_root(cwd)
+    if root is not None and not is_linked_worktree(root):
+        cwd_anchor = _canon(str(root))
+
+    for seg in _SHELL_SEP.split(cmd):
+        seg_hay = os.path.normcase(seg.replace("/", os.sep)) if _IS_WIN else seg
+        at_write_cmd = bool(_WRITE_CMD_START.match(seg))
+        is_git = bool(_GIT_START.match(seg))
+        git_write = is_git and bool(_GIT_WRITE_SUB.search(seg))
+        has_dash_c = is_git and bool(_GIT_DASH_C_FLAG.search(seg))
+        for a in anchors:
+            gp = a.get("path")
+            if not gp:
+                continue
+            root_str = _canon(gp)
+            tok = _anchor_token(root_str)
+            # 1. A file redirect whose target is the anchor. ``>>?(?!\s*&)``
+            #    excludes fd-dup redirects (``2>&1``, ``1>&2``) -- those are not
+            #    file writes.
+            if re.search(r">>?(?!\s*&)\s*[\"']?" + tok, seg_hay):
+                return {**a, "reason": _deny_reason(a["name"], a["path"])}
+            # 2. A write cmdlet/verb at COMMAND POSITION with the anchor as an
+            #    argument (e.g. ``Set-Content "<anchor>\x"``, ``rm <anchor>``).
+            if at_write_cmd and re.search(tok, seg_hay):
+                return {**a, "reason": _deny_reason(a["name"], a["path"])}
+            # 3. A git mutation targeting this anchor: ``git -C <anchor> commit``,
+            #    or (no ``-C``) a repo-scoped git write from a cwd inside it.
+            if git_write:
+                if has_dash_c:
+                    if re.search(r"(?:^|\s)-C\s+[\"']?" + tok, seg_hay,
+                                 re.IGNORECASE):
+                        return {**a, "reason": _deny_reason(a["name"], a["path"])}
+                elif cwd_anchor is not None and cwd_anchor == root_str:
+                    return {**a, "reason": _deny_reason(a["name"], a["path"])}
+    return None
+
+
 def evaluate(tool: str, args: dict, cwd: str, anchors: list[dict]) -> dict | None:
     """Return the anchor hit (with a ``reason``), or None to allow."""
     if not anchors:
@@ -317,41 +397,9 @@ def evaluate(tool: str, args: dict, cwd: str, anchors: list[dict]) -> dict | Non
 
     if tool in SHELL_TOOLS:
         cmd = _pick(args, CMD_ARG_KEYS)
-        if not cmd or not _WRITE_VERBS.search(cmd):
-            return None  # pure reads into an anchor are allowed
-        # (a) cwd-based: a repo-scoped git mutation (e.g. ``git commit``,
-        # ``git add``) run WITH cwd inside a worktree-class anchor mutates it
-        # without ever naming the path -- the literal scan below can't see that.
-        # Gated to CWD-scoped git verbs (no ``-C`` redirect) to stay precise:
-        # a linked worktree cwd (.git file) is exempt, and ``git -C <path>`` is
-        # left to the literal scan.
-        if _GIT_CWD_WRITE.search(cmd) and not _GIT_DASH_C.search(cmd):
-            root = find_repo_root(cwd)
-            if root is not None and not is_linked_worktree(root):
-                a = canon_anchor.get(_canon(str(root)))
-                if a is not None:
-                    return {**a, "reason": _deny_reason(a["name"], a["path"])}
-        # (b) literal-path: a command that writes into an anchor by (absolute)
-        # path, regardless of cwd (e.g. ``git -C "<anchor>" commit`` or
-        # ``Set-Content "<anchor>\x"`` from elsewhere).
-        cmd_norm = (cmd.replace("/", os.sep) if _IS_WIN else cmd)
-        hay = os.path.normcase(cmd_norm) if _IS_WIN else cmd_norm
-        flags = re.IGNORECASE if _IS_WIN else 0
-        for a in anchors:
-            gp = a.get("path")
-            if not gp:
-                continue
-            root_str = _canon(gp)
-            # Match the anchor as a whole path token: the root itself (e.g.
-            # ``git -C "<anchor>" commit``) OR a path INTO it
-            # (``<anchor><sep><subpath>``), but require a terminator (quote /
-            # whitespace / end) right after so a sibling worktree dir that only
-            # shares the anchor's string prefix (``<repo>.worktrees\...``) is
-            # NOT matched.
-            pat = re.escape(root_str) + r"(?:[\\/][^\s\"']*)?(?=[\"'\s]|$)"
-            if re.search(pat, hay, flags):
-                return {**a, "reason": _deny_reason(a["name"], a["path"])}
-        return None
+        if not cmd:
+            return None
+        return _shell_hit(cmd, cwd, anchors)
 
     return None
 

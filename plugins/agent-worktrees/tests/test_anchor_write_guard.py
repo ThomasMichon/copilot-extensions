@@ -186,6 +186,73 @@ def test_shell_write_into_sibling_worktree_allows(tmp_path, anchor):
                         env={}, home=tmp_path, anchors=anchor) is None
 
 
+# -- false-positive regressions (dotfiles#1144) --------------------------------
+# The anchor path merely *appearing* in a command (an assignment, a cd, a quoted
+# data payload) alongside a write-ish token must NOT be denied -- only a real
+# write *target* is.
+
+def test_shell_readonly_git_with_fd_redirect_and_anchor_in_var_allows(
+    tmp_path, anchor
+):
+    # Repro 1: a read-only `git fetch`/`git log` where the anchor path is only in
+    # a `$var=`/`cd`, and the sole "write" token is the `>` of a `2>&1` fd dup.
+    gp = anchor[0]["path"]
+    cmd = (f'$a="{gp}"; cd $a; git fetch origin --quiet 2>&1 | Out-Null; '
+           f'git --no-pager log origin/main --oneline -5')
+    assert guard.decide(_shell(cmd, tmp_path), env={}, home=tmp_path,
+                        anchors=anchor) is None
+
+
+def test_shell_fd_dup_redirect_is_not_a_write(tmp_path, anchor):
+    # `2>&1` / `1>&2` are fd dups, not file writes -- even with the anchor named
+    # in an inert position.
+    gp = anchor[0]["path"]
+    assert guard.decide(_shell(f'cat "{gp}\\README.md" 2>&1', tmp_path),
+                        env={}, home=tmp_path, anchors=anchor) is None
+
+
+def test_shell_anchor_in_quoted_body_payload_allows(tmp_path, anchor):
+    # Repro 2: `gh issue create` whose --body PROSE mentions the anchor path and
+    # write verbs (Set-Content, git commit) as data, not commands.
+    gp = anchor[0]["path"]
+    body = (f'A read-only `git fetch ... 2>&1` in `{gp}` was denied. '
+            f'A genuine `Set-Content "{gp}\\x"` / `git commit` must still deny.')
+    cmd = f'gh issue create --repo o/r --title "bug" --body "{body}"'
+    assert guard.decide(_shell(cmd, tmp_path), env={}, home=tmp_path,
+                        anchors=anchor) is None
+
+
+def test_shell_cd_into_anchor_then_read_allows(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    assert guard.decide(_shell(f'cd "{gp}"; git status', tmp_path),
+                        env={}, home=tmp_path, anchors=anchor) is None
+
+
+def test_shell_stderr_redirect_to_anchor_file_still_denies(tmp_path, anchor):
+    # A real fd-to-FILE redirect INTO the anchor (`2> <anchor>\err.log`) is a
+    # write and must still be denied (only fd-dup `>&` is exempt).
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell(f'some-tool 2> "{gp}\\err.log"', tmp_path),
+                     env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_redirect_into_anchor_still_denies(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell(f'echo hi > "{gp}\\note.txt"', tmp_path),
+                     env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_write_verb_not_at_command_position_allows(tmp_path, anchor):
+    # A write cmdlet name appearing mid-segment as an argument value (not at
+    # command position) with the anchor in a quoted arg must not trigger.
+    gp = anchor[0]["path"]
+    cmd = f'echo "run Set-Content on {gp} later"'
+    assert guard.decide(_shell(cmd, tmp_path), env={}, home=tmp_path,
+                        anchors=anchor) is None
+
+
 # --- modes + kill switches ----------------------------------------------------
 
 def test_kill_switch_env_allows(tmp_path, anchor):
