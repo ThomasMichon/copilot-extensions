@@ -8,11 +8,12 @@ $ErrorActionPreference = 'SilentlyContinue'
 $InstallDir = Join-Path $env:USERPROFILE '.agent-worktrees'
 $LibDir     = Join-Path $InstallDir 'lib'
 $PkgDst     = Join-Path $LibDir 'agent_worktrees'
-$VenvPython = Join-Path $InstallDir '.venv\Scripts\python.exe'
+$_r         = Join-Path $InstallDir 'bin\resolve-runtime.ps1'
+$VenvPython = if (Test-Path -LiteralPath $_r) { . $_r; $AwPy } else { $null }
 $Manifest   = Join-Path $InstallDir 'deploy-manifest.json'
 
 # --- Not installed: hint only (install needs interactive machine selection) ---
-if (-not (Test-Path $VenvPython)) {
+if (-not $VenvPython) {
     Write-Host ''
     Write-Host '[agent-worktrees] Runtime not installed.' -ForegroundColor Yellow
     Write-Host '  Ask Copilot to ''set up agent-worktrees'' to bootstrap the runtime.' -ForegroundColor DarkGray

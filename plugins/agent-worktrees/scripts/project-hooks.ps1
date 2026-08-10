@@ -6,8 +6,9 @@
 $ErrorActionPreference = 'SilentlyContinue'
 
 # Resolve the project from CWD (git-like); this hook runs in the worktree.
-$python = "$env:USERPROFILE\.agent-worktrees\.venv\Scripts\python.exe"
-if (-not (Test-Path $python)) { exit 0 }
+$_r = Join-Path $env:USERPROFILE '.agent-worktrees\bin\resolve-runtime.ps1'
+$python = if (Test-Path -LiteralPath $_r) { . $_r; $AwPy } else { $null }
+if (-not $python) { exit 0 }
 $env:PYTHONPATH = ''
 $ProjectName = (& $python -m agent_worktrees get project 2>$null | Select-Object -First 1)
 if (-not $ProjectName) { exit 0 }

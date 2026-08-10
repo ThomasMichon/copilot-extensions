@@ -5,7 +5,9 @@
 
 set -euo pipefail
 
-PYTHON="$HOME/.agent-worktrees/.venv/bin/python"
+_awresolve="$HOME/.agent-worktrees/bin/resolve-runtime.sh"
+[ -f "$_awresolve" ] && . "$_awresolve"
+PYTHON="${AW_PY:-}"
 if [[ ! -x "$PYTHON" ]]; then
     exit 0
 fi

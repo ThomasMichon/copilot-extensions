@@ -15,7 +15,9 @@ _log() { printf '[%s] [%s] register-session: %s\n' "$(date '+%H:%M:%S')" "$1" "$
 
 wt_id="${WORKTREE_ID:-}"
 
-PYTHON="$HOME/.agent-worktrees/.venv/bin/python"
+_awresolve="$HOME/.agent-worktrees/bin/resolve-runtime.sh"
+[ -f "$_awresolve" ] && . "$_awresolve"
+PYTHON="${AW_PY:-}"
 if [[ ! -x "$PYTHON" ]]; then
     _log SKIP "venv python not found"
     exit 0

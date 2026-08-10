@@ -8,8 +8,9 @@ $session_id = $env:COPILOT_AGENT_SESSION_ID
 
 if (-not $session_id) { exit 0 }
 
-$python = "$env:USERPROFILE\.agent-worktrees\.venv\Scripts\python.exe"
-if (-not (Test-Path $python)) { exit 0 }
+$_r = Join-Path $env:USERPROFILE '.agent-worktrees\bin\resolve-runtime.ps1'
+$python = if (Test-Path -LiteralPath $_r) { . $_r; $AwPy } else { $null }
+if (-not $python) { exit 0 }
 
 $env:PYTHONPATH = ''  # package is installed in the venv (no lib/ shadow)
 $deregArgs = @('-m', 'agent_worktrees', 'deregister-session', '--session-id', $session_id)

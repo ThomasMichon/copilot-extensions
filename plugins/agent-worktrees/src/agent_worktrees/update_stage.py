@@ -13,7 +13,8 @@ then **joins** (waits for) this stage and **applies** any pending update *after*
 the Picker closes and *before* the psmux/Copilot handoff.
 
 Critical safety constraint (why stage != apply): the Picker (``resolve``) runs
-from the **installed runtime venv** ``~/.agent-worktrees/.venv``. This stage
+from the **installed runtime slot** ``~/.agent-worktrees/versions/<ver>`` (resolved
+via the junction-free ``current-version`` marker; #1106). This stage
 only touches the **marketplace payload dir**
 (``~/.copilot/installed-plugins/copilot-extensions/agent-worktrees``) via
 ``copilot plugin update`` -- it never rewrites the running venv -- so it is safe
