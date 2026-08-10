@@ -243,14 +243,101 @@ def _write_cache(path: Path, roots: list[dict]) -> None:
         pass  # a cache-write failure just means we recompute next time
 
 
+def _slot_python(slot: Path) -> Path:
+    """The runtime python inside a ``versions/<ver>`` slot, per platform."""
+    if os.name == "nt":
+        return slot / "Scripts" / "python.exe"
+    return slot / "bin" / "python"
+
+
+def _strip_nt_prefix(target: str) -> str:
+    """Strip a leading NT object-namespace prefix from a junction/symlink target.
+
+    A junction created by PowerShell ``New-Item -ItemType Junction`` reports its
+    target as ``\\??\\C:\\...`` (and some APIs as ``\\\\?\\C:\\...``); such a path
+    is not usable as a normal filesystem path. ``mklink /J`` yields a clean one.
+    """
+    for pfx in ("\\??\\", "\\\\?\\"):
+        if target.startswith(pfx):
+            return target[len(pfx):]
+    return target
+
+
+def _runtime_argv(root: Path | None = None) -> list[str] | None:
+    """An argv prefix that runs the agent-worktrees CLI, WITHOUT the PATH binstubs.
+
+    The binstubs are fragile for a subprocess (#1089): ``shutil.which`` prefers
+    the ``.cmd`` over the robust ``.ps1`` on Windows, and that ``.cmd`` parses the
+    ``~/.agent-worktrees/.venv`` junction target and breaks (WinError 3) on a
+    ``\\??\\``-prefixed target -- which silently disabled this guard. Resolve the
+    runtime slot python directly instead, matching the binstubs' own authoritative
+    ``current-version`` marker model (junction-free; dotfiles #581/#1085).
+
+    Order: ``current-version`` marker -> ``versions/<ver>`` slot python; else the
+    newest ``versions/*`` slot; else the legacy ``.venv`` reparse target (read,
+    never traversed -- dotfiles #637 -- with any ``\\??\\``/``\\\\?\\`` prefix
+    stripped); else a PATH binstub as a last-resort belt.
+    """
+    root = root or (Path(os.path.expanduser("~")) / ".agent-worktrees")
+
+    # 1. current-version marker (authoritative; junction-free).
+    try:
+        ver = (root / "current-version").read_text("utf-8").strip()
+    except OSError:
+        ver = ""
+    if ver:
+        p = _slot_python(root / "versions" / ver)
+        if p.exists():
+            return [str(p), "-m", "agent_worktrees"]
+
+    # 2. newest versions/* slot that has a python.
+    try:
+        slots = sorted((root / "versions").iterdir())
+    except OSError:
+        slots = []
+    for slot in reversed(slots):
+        p = _slot_python(slot)
+        if p.exists():
+            return [str(p), "-m", "agent_worktrees"]
+
+    # 3. legacy .venv reparse target (read the link, never traverse it).
+    try:
+        target = _strip_nt_prefix(os.readlink(str(root / ".venv")))
+    except OSError:
+        target = ""
+    if target:
+        p = _slot_python(Path(target))
+        if p.exists():
+            return [str(p), "-m", "agent_worktrees"]
+
+    # 4. last-resort belt: a PATH binstub (rarely reached).
+    exe = shutil.which("agent-worktrees")
+    return [exe] if exe else None
+
+
+_RUNTIME_UNRESOLVED_WARNED = False
+
+
 def _run_related(args: list[str], cwd: str) -> str | None:
     """Run ``agent-worktrees related <args>`` and return stdout, or None."""
-    exe = shutil.which("agent-worktrees")
-    if not exe:
+    argv = _runtime_argv()
+    if not argv:
+        global _RUNTIME_UNRESOLVED_WARNED
+        if not _RUNTIME_UNRESOLVED_WARNED:
+            _RUNTIME_UNRESOLVED_WARNED = True
+            # Make the fail-open VISIBLE: the guard denies nothing when it cannot
+            # discover guarded roots, so surface that protection is off rather
+            # than silently allowing writes (#1089).
+            print(
+                "cross-repo-guard: could not locate the agent-worktrees runtime "
+                "python; guarded-repo discovery is unavailable, so the "
+                "write-routing guard is INACTIVE (fail-open) this session.",
+                file=sys.stderr,
+            )
         return None
     try:
         proc = subprocess.run(
-            [exe, "related", *args], cwd=cwd,
+            [*argv, "related", *args], cwd=cwd,
             capture_output=True, text=True, timeout=20,
         )
     except (OSError, subprocess.SubprocessError):

@@ -138,6 +138,64 @@ def test_expired_break_glass_still_denies(tmp_path, guarded):
     assert d and d["permissionDecision"] == "deny"
 
 
+# --- runtime resolution (#1089: no dependence on the fragile PATH binstub) -----
+
+def test_strip_nt_prefix():
+    assert guard._strip_nt_prefix("\\??\\C:\\slot") == "C:\\slot"
+    assert guard._strip_nt_prefix("\\\\?\\C:\\slot") == "C:\\slot"
+    assert guard._strip_nt_prefix("C:\\slot") == "C:\\slot"
+
+
+def _make_slot(root: Path, ver: str) -> Path:
+    """Create versions/<ver> with a runtime python and return that python path."""
+    py = guard._slot_python(root / "versions" / ver)
+    py.parent.mkdir(parents=True, exist_ok=True)
+    py.write_text("", encoding="utf-8")
+    return py
+
+
+def test_runtime_argv_prefers_current_version(tmp_path):
+    root = tmp_path / ".agent-worktrees"
+    _make_slot(root, "1.5.3-dev100")  # older slot present too
+    py = _make_slot(root, "1.5.3-dev200")
+    (root / "current-version").write_text("1.5.3-dev200", encoding="utf-8")
+    assert guard._runtime_argv(root) == [str(py), "-m", "agent_worktrees"]
+
+
+def test_runtime_argv_falls_back_to_newest_slot_without_marker(tmp_path):
+    root = tmp_path / ".agent-worktrees"
+    _make_slot(root, "1.5.3-dev100")
+    py = _make_slot(root, "1.5.3-dev200")
+    # No current-version marker -> newest slot wins.
+    assert guard._runtime_argv(root) == [str(py), "-m", "agent_worktrees"]
+
+
+def test_runtime_argv_ignores_stale_marker_pointing_at_missing_slot(tmp_path):
+    root = tmp_path / ".agent-worktrees"
+    py = _make_slot(root, "1.5.3-dev100")
+    (root / "current-version").write_text("1.5.3-dev999", encoding="utf-8")  # gone
+    # Marker slot has no python -> fall through to the newest present slot.
+    assert guard._runtime_argv(root) == [str(py), "-m", "agent_worktrees"]
+
+
+def test_runtime_argv_none_when_no_runtime(tmp_path, monkeypatch):
+    root = tmp_path / ".agent-worktrees"
+    root.mkdir()
+    monkeypatch.setattr(guard.shutil, "which", lambda _n: None)
+    assert guard._runtime_argv(root) is None
+
+
+def test_run_related_warns_once_when_runtime_unresolved(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(guard, "_runtime_argv", lambda: None)
+    guard._RUNTIME_UNRESOLVED_WARNED = False
+    assert guard._run_related(["list", "--json"], str(tmp_path)) is None
+    first = capsys.readouterr().err
+    assert "INACTIVE" in first and "cross-repo-guard" in first
+    # A second call does not re-warn (one-time).
+    assert guard._run_related(["list", "--json"], str(tmp_path)) is None
+    assert capsys.readouterr().err == ""
+
+
 # --- empty guarded set / fail-open --------------------------------------------
 
 def test_no_guarded_repos_allows(tmp_path):
