@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-vault"
-version = "0.1.0-dev37"
+version = "0.1.0-dev38"
 description = "Local KeePassXC-backed secret store for Copilot CLI agents."
 readme = "README.md"
 license = "MIT"
@@ -22,6 +22,9 @@ cache = ["cryptography>=50.0.0"]
 
 [project.scripts]
 agent-vault = "agent_vault.__main__:main"
+
+[project.entry-points."agent_vault.extensions"]
+core-delegation = "agent_vault.core_ext:register"
 
 [tool.setuptools.packages.find]
 where = ["src"]

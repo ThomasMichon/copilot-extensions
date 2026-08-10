@@ -91,6 +91,19 @@ a tunnel. This rung is always an **opt-in** boundary-crossing mechanism; per the
 vision's standing non-goal, **no plugin ever *requires* a tunnel or a broker** to
 be installed or reached on its own host.
 
+**Reusable client primitive — `core-delegation`.** A plugin that ships a thin
+**host adapter** and delegates its heavy **core** (a remote engine, or a
+container running the same daemon protocol) across this rung can compose the
+[`core-delegation`](../../libs/core-delegation/README.md) library instead of
+hand-rolling a client: it discovers the core with
+[local-endpoint-discovery](local-endpoint-discovery.md), narrows to a transport
+dialable in-context, ships the request as the same newline-framed JSON the daemon
+already speaks (with an optional bearer token attached — token-bind), and returns
+`None` to **fall through** when no core is wired. That fall-through is what keeps
+the rung opt-in: absent a wired core, the built-in transports and the plugin's
+own user-mode path still serve the request unchanged (§`standalone-reachability`,
+§`degrade-gracefully`).
+
 ## The named-pipe / UDS-with-Python caveat
 
 The old reflex — "Python HTTP can't do sockets, so bind TCP" — is mostly a myth
