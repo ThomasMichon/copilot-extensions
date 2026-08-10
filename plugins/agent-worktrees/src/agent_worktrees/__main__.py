@@ -902,6 +902,59 @@ def _carve_paired_knowledge(
     }
 
 
+def _journal_owner_reciprocal_claim(
+    config: cfg.Config, worktree_id: str, owner_ref: str | None,
+) -> bool:
+    """Journal the reciprocal ``worktree`` claim onto an owner's ledger (Ph3c).
+
+    A worktree created with an ``owner_ref`` is another worktree's outbound
+    resource. This writes the **forward** half of that bidirectional link -- a
+    ``worktree``-kind :class:`ResourceClaim` on the *owner*'s record whose ``ref``
+    is this worktree's qualified ClaimRef -- so the owner's finalize gate sees
+    the obligation and the child's finalize ``_settle_parent_obligation`` has a
+    matching claim to settle. Without it the link is half-formed (backward
+    ``owner_ref`` set, but the owner holds no claim), so settlement is a silent
+    no-op.
+
+    Same-machine owner -> written here; a **cross-machine** owner defers to the
+    lease mirror (``_resolve_owner_ref_record_path`` returns no local path).
+    Fully best-effort: any failure returns ``False`` and never raises (so it
+    can never break a worktree carve). Idempotent -- ``add_resource_claim``
+    dedups by ref, so a ``run``-driven create that also journals is harmless.
+    Returns ``True`` only when a claim was written.
+    """
+    if not owner_ref:
+        return False
+    try:
+        owner_path, _owner_wt, _err = _resolve_owner_ref_record_path(
+            owner_ref, config,
+        )
+        if owner_path is None or not owner_path.exists():
+            return False
+        child_ref = tracking.format_claim_ref(
+            config.machine, config.repo_name, worktree_id,
+        )
+        owner_rec = tracking.load_record(owner_path)
+        tracking.add_resource_claim(
+            owner_rec,
+            tracking.ResourceClaim(
+                kind="worktree", ref=child_ref,
+                created_at=tracking._now_iso(), state=obligations.ACTIVE,
+            ),
+            save=False,
+        )
+        tracking.save_record(owner_rec, owner_path)
+        print(
+            f"Journaled this worktree as an obligation on {owner_ref}.",
+            file=sys.stderr,
+        )
+        return True
+    except Exception as exc:  # never let journaling break the carve
+        print(f"owner-claim journaling failed (non-fatal): {exc}",
+              file=sys.stderr)
+        return False
+
+
 def _create_worktree_core(
     config: cfg.Config,
     *,
@@ -1007,6 +1060,12 @@ def _create_worktree_core(
     # Trust the new worktree path
     if permissions.add_trusted_folder(worktree_path):
         print("Added worktree path to trustedFolders.", file=sys.stderr)
+
+    # resource-obligation-settlement (Phase 3c): a worktree created WITH an
+    # ``owner_ref`` is another worktree's outbound resource, so journal the
+    # reciprocal ``worktree`` claim onto that owner's ledger (see
+    # ``_journal_owner_reciprocal_claim``).
+    _journal_owner_reciprocal_claim(config, worktree_id, owner_ref)
 
     # citadel paired -harness/-knowledge worktree lifecycle (#957): when this is
     # a stateless harness bound to a knowledge repo, carve/stamp the knowledge
