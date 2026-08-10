@@ -1208,6 +1208,17 @@ def validate_and_finalize(
         )
         return True
 
+    # Seal the worktree's durable identity (title + session registry) from
+    # session-state BEFORE any teardown, so a finalized/pruned worktree never
+    # reads as "(untitled)" with no session linkage -- even when the
+    # best-effort register/deregister-session hooks were bypassed (a dispatched
+    # or crashed session, a bare-resume cwd). Gap-filling + silent; mutates the
+    # in-memory ``record`` so the later update_status(save) preserves it.
+    try:
+        tracking.seal_worktree_identity(record)
+    except Exception:
+        pass
+
     # Obligation gate (resource-obligation-settlement Phase 2). A worktree
     # answers for the outbound resources it still owns before it may finalize.
     # Runs BEFORE any destructive step so a blocking gate refuses cleanly. Read
