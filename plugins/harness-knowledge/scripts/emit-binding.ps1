@@ -14,10 +14,12 @@ $ErrorActionPreference = 'SilentlyContinue'
 
 function Emit-Empty { Write-Output '{}'; exit 0 }
 
-$python = "$env:USERPROFILE\.agent-worktrees\.venv\Scripts\python.exe"
-if (-not (Test-Path $python)) { Emit-Empty }
-$env:PYTHONPATH = ''
-$project = (& $python -m agent_worktrees get project 2>$null | Select-Object -First 1)
+# Resolve the harness project via the agent-worktrees BINSTUB (its own marker),
+# never by reaching into its runtime venv (#1106).
+$aw = (Get-Command agent-worktrees -ErrorAction SilentlyContinue).Source
+if (-not $aw) { $aw = Join-Path $env:USERPROFILE '.local\bin\agent-worktrees.cmd' }
+if (-not (Test-Path -LiteralPath $aw)) { Emit-Empty }
+$project = (& $aw get project 2>$null | Select-Object -First 1)
 if (-not $project) { Emit-Empty }
 
 $frag = Join-Path $env:USERPROFILE ".$project\knowledge-binding.md"
