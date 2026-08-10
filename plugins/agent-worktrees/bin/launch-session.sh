@@ -10,6 +10,19 @@ SETUP_LOG="${WORKTREE_SETUP_LOG:-${APERTURE_SETUP_LOG:-$_SETUP_LOG_DIR/setup-$$.
 export WORKTREE_SETUP_LOG="$SETUP_LOG"
 export APERTURE_SETUP_LOG="$SETUP_LOG"  # backward compat
 
+# ---------------------------------------------------------------------------
+# Launch-flow correlation id -- minted once per launcher run and threaded
+# through the whole flow (activity marks, the mux server env, and thus the
+# in-pane session hooks) so one launch is reconstructable via
+# `agent-worktrees activity --launch-id`. Best-effort, dependency-free.
+# ---------------------------------------------------------------------------
+if [[ -r /proc/sys/kernel/random/uuid ]]; then
+    LAUNCH_ID="$(tr -d '-' < /proc/sys/kernel/random/uuid | cut -c1-12)"
+else
+    LAUNCH_ID="$(printf '%08x%x' "$(date +%s 2>/dev/null || echo 0)" "$$")"
+fi
+export WORKTREE_LAUNCH_ID="$LAUNCH_ID"
+
 setup_log() {
     local level="$1" msg="$2"
     printf '[%s] [%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$level" "$msg" >> "$SETUP_LOG" 2>/dev/null || true
@@ -100,6 +113,7 @@ activity_log() {
     done
     ( "$PYTHON" -m agent_worktrees activity-log "$event" \
         --worktree-id "$wt" --source launcher \
+        ${LAUNCH_ID:+--launch-id "$LAUNCH_ID"} \
         "${fields[@]+"${fields[@]}"}" >/dev/null 2>&1 & ) || true
 }
 
@@ -473,6 +487,14 @@ if [[ "$ACTION" == "exec" ]]; then
         NO_MUX="1"
     fi
 
+    # Durable launcher-start mark (Tier-A). Fires once WORKTREE_ID + mux mode
+    # are known, before the (possibly hanging) mux/handoff step, so a launcher
+    # that dies mid-flow still leaves a persistent trace. Records the mux mode
+    # and links to the verbose Tier-B setup log via setup_log=.
+    activity_log launcher_started "$WORKTREE_ID" \
+        "mux=$([[ "$NO_MUX" == "1" ]] && echo none || echo tmux)" \
+        "setup_log=$SETUP_LOG"
+
     # Worktree ID stays a LOCAL (non-exported) shell var: the launcher uses it
     # for the tmux session name, activity log, handoff, and post-exit, but it is
     # NOT exported into the child Copilot session. In-session tools resolve the
@@ -598,6 +620,9 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
         if [[ -n "${SETUP_LOG:-}" ]]; then
             TMUX_ENV_FLAGS+=(-e "WORKTREE_SETUP_LOG=$SETUP_LOG")
             TMUX_ENV_FLAGS+=(-e "APERTURE_SETUP_LOG=$SETUP_LOG")
+        fi
+        if [[ -n "${LAUNCH_ID:-}" ]]; then
+            TMUX_ENV_FLAGS+=(-e "WORKTREE_LAUNCH_ID=$LAUNCH_ID")
         fi
         if [[ -n "$ENV_EXPORTS" ]]; then
             while IFS= read -r line; do
