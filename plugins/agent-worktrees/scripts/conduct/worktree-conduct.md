@@ -18,6 +18,17 @@ and process state cannot tell. Annotate THIS worktree's disposition with
 - **Direction changed or you learned more?** Periodically re-summarize:
   `agent-worktrees status --summary "<current focus>"` -- add/keep `--follow-up`
   while work is owed, or clear it with `--resolved` once nothing is left.
+- **End of a substantive turn?** Before you hand control back, refresh the
+  one-line summary so the Picker reflects the latest state:
+  `agent-worktrees status --summary "<where things stand>"` (with
+  `--follow-up`/`--resolved` as appropriate). This is the highest-signal status
+  the Picker has -- keep it current rather than leaving it for finalize.
 
 The summary is one line; latest wins. Flag conservatively but honestly: an
 unflagged worktree reads as *resolved and safe to prune*.
+
+> `finalize` also **seals a fallback identity** -- it backfills the worktree's
+> title and session registry from session-state so a pruned worktree is never
+> left "(untitled)". That is only a safety net for sessions that never asserted
+> anything; your `status --summary` is the real signal, so don't rely on the
+> seal in place of keeping the disposition honest.

@@ -2036,6 +2036,69 @@ def _pending_handoff_predecessor(
     return None
 
 
+def seal_worktree_identity(record: WorktreeRecord | None) -> dict:
+    """Deterministically seal a worktree's durable identity from session-state.
+
+    The per-session hooks (``register-session`` / ``deregister-session``) are
+    best-effort: a dispatched or crashed session, a bare-resume cwd, or a
+    startup that never fully initialized hooks can leave a worktree with an
+    empty ``sessions`` registry *and* a ``null`` title -- so the Picker renders
+    it as "(untitled)" with no way to tell what it was for. ``finalize`` calls
+    this as a **backstop** so a finalized/pruned worktree always retains a
+    human-readable title and its session linkage, independent of when
+    session-state is later reaped.
+
+    Gap-filling and idempotent: it only populates an **empty** registry and an
+    **unset** title, never overwriting an asserted title or existing sessions.
+    It **mutates ``record`` in place** (so a caller that later saves the same
+    object -- e.g. ``update_status(record, "finalized")`` -- preserves the seal)
+    and also persists immediately. Reuses the sanctioned session-state sweep
+    (``sessions.backfill_sessions``) and the Picker's own title derivation
+    (``sessions.scan_sessions_fast``), so a sealed title matches what the Picker
+    would otherwise show live. Never raises.
+
+    Returns ``{"sessions": N, "titled": bool}`` describing what was filled.
+    """
+    from . import sessions as _sessions
+
+    result = {"sessions": 0, "titled": False}
+    if record is None or not record.worktree_path:
+        return result
+
+    # Pass 1 -- session registry (only when empty).
+    if not record.sessions:
+        try:
+            ids = _sessions.backfill_sessions([record]).get(record.worktree_id, [])
+        except Exception:
+            ids = []
+        if ids:
+            record.sessions = [
+                SessionEntry(session_id=sid, started_at="") for sid in ids
+            ]
+            result["sessions"] = len(ids)
+
+    # Pass 2 -- title slot (only when missing). Same derivation the Picker reads.
+    if not (record.title and record.title != "null"):
+        summary = ""
+        try:
+            ctx = _sessions.scan_sessions_fast([record])
+            summary = ctx.latest_summary.get(
+                _sessions._normalize_path(record.worktree_path), ""
+            )
+        except Exception:
+            summary = ""
+        if summary and summary != "null":
+            record.title = summary
+            result["titled"] = True
+
+    if result["sessions"] or result["titled"]:
+        try:
+            save_record(record)
+        except Exception:
+            pass
+    return result
+
+
 def register_session(
     worktree_id: str,
     session_id: str,
