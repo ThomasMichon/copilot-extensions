@@ -8,11 +8,13 @@ set -euo pipefail
 INSTALL_DIR="$HOME/.agent-worktrees"
 LIB_DIR="$INSTALL_DIR/lib"
 PKG_DST="$LIB_DIR/agent_worktrees"
-VENV_PYTHON="$INSTALL_DIR/.venv/bin/python"
+_awresolve="$INSTALL_DIR/bin/resolve-runtime.sh"
+[ -f "$_awresolve" ] && . "$_awresolve"
+VENV_PYTHON="${AW_PY:-}"
 MANIFEST="$INSTALL_DIR/deploy-manifest.json"
 
 # --- Not installed: hint only ---
-if [[ ! -f "$VENV_PYTHON" ]]; then
+if [[ ! -x "$VENV_PYTHON" ]]; then
     echo ''
     echo -e '\033[33m[agent-worktrees] Runtime not installed.\033[0m'
     echo -e "\033[90m  Ask Copilot to 'set up agent-worktrees' to bootstrap the runtime.\033[0m"

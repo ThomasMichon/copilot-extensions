@@ -17,7 +17,9 @@ if [[ -z "$session_id" ]]; then
     exit 0
 fi
 
-PYTHON="$HOME/.agent-worktrees/.venv/bin/python"
+_awresolve="$HOME/.agent-worktrees/bin/resolve-runtime.sh"
+[ -f "$_awresolve" ] && . "$_awresolve"
+PYTHON="${AW_PY:-}"
 if [[ ! -x "$PYTHON" ]]; then
     _log SKIP "venv python not found"
     exit 0

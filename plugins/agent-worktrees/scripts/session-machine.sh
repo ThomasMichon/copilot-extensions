@@ -10,7 +10,9 @@
 
 set -uo pipefail
 
-PY="$HOME/.agent-worktrees/.venv/bin/python"
+_awresolve="$HOME/.agent-worktrees/bin/resolve-runtime.sh"
+[ -f "$_awresolve" ] && . "$_awresolve"
+PY="${AW_PY:-}"
 [[ -x "$PY" ]] || { printf '{}'; exit 0; }
 out="$(PYTHONPATH="" "$PY" -m agent_worktrees machine-context 2>/dev/null || true)"
 if [[ -n "$out" ]]; then printf '%s' "$out"; else printf '{}'; fi

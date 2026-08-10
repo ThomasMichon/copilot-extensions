@@ -6,20 +6,16 @@ set "PYTHONHOME="
 rem Runtime resolution
 set "RUNTIME_DIR=%USERPROFILE%\.agent-worktrees"
 
-rem Junction-free resolution: the active version is published by a plain-text
-rem `current-version` marker -> versions\<ver>\Scripts\python.exe (nothing
-rem traverses a reparse point, blocked under RedirectionGuard, dotfiles #637).
-rem Fallbacks: newest installed slot, then a legacy `.venv` (junction/real dir).
+rem Junction-free resolution (marker-only): the active version is published by a
+rem plain-text `current-version` marker -> versions\<ver>\Scripts\python.exe
+rem (nothing traverses a reparse point, blocked under RedirectionGuard, dotfiles
+rem #637, and prone to drift). Fallback: newest installed slot only -- the
+rem `.venv` link is retired (#1106).
 set "PYTHON="
 set "_VER="
 if exist "%RUNTIME_DIR%\current-version" set /p _VER=<"%RUNTIME_DIR%\current-version"
 if defined _VER if exist "%RUNTIME_DIR%\versions\%_VER%\Scripts\python.exe" set "PYTHON=%RUNTIME_DIR%\versions\%_VER%\Scripts\python.exe"
 if not defined PYTHON if exist "%RUNTIME_DIR%\versions" for /f "delims=" %%d in ('dir /b /ad /o-n "%RUNTIME_DIR%\versions" 2^>nul') do if not defined PYTHON if exist "%RUNTIME_DIR%\versions\%%d\Scripts\python.exe" set "PYTHON=%RUNTIME_DIR%\versions\%%d\Scripts\python.exe"
-if not defined PYTHON if exist "%RUNTIME_DIR%\.venv" (
-    rem Legacy `.venv` (junction target or real dir), resolved without traversing.
-    set "PYTHON=%RUNTIME_DIR%\.venv\Scripts\python.exe"
-    for /f "tokens=2 delims=[]" %%i in ('dir /a:l "%RUNTIME_DIR%" 2^>nul ^| findstr /i /c:".venv"') do set "PYTHON=%%i\Scripts\python.exe"
-)
 if not defined PYTHON (
     echo ERROR: Venv not found. Run the installer first. >&2
     exit /b 1

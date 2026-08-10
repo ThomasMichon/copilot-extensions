@@ -58,9 +58,9 @@ ls -t "$_SETUP_LOG_DIR"/setup-*.log 2>/dev/null | tail -n +11 | xargs rm -f 2>/d
 setup_log INFO 'launch-session.sh starting'
 LAUNCH_PROJECT="${WORKTREE_PROJECT:-}"
 
-# Runtime resolution (junction-free). Prefer the `current-version` marker ->
-# versions/<ver>/bin/python; fall back to the newest slot, then a legacy `.venv`
-# (a POSIX symlink into the active slot, still published on POSIX).
+# Runtime resolution (junction-free, marker-only). Prefer the `current-version`
+# marker -> versions/<ver>/bin/python; fall back to the newest slot only -- the
+# `.venv` symlink is retired (#1106).
 RUNTIME_DIR="$HOME/.agent-worktrees"
 
 PYTHON=""
@@ -76,9 +76,6 @@ if [[ -z "$PYTHON" && -d "$RUNTIME_DIR/versions" ]]; then
             PYTHON="$RUNTIME_DIR/versions/$_d/bin/python"; break
         fi
     done
-fi
-if [[ -z "$PYTHON" && -x "$RUNTIME_DIR/.venv/bin/python" ]]; then
-    PYTHON="$RUNTIME_DIR/.venv/bin/python"
 fi
 
 if [[ -n "$PYTHON" && -x "$PYTHON" ]]; then

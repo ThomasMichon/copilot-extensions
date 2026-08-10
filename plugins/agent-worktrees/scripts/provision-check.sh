@@ -22,7 +22,9 @@ if [[ "${WORKTREE_NO_RECONCILE:-}" == "1" || "${WORKTREE_NO_PROVISION:-}" == "1"
     exit 0
 fi
 
-PYTHON="$HOME/.agent-worktrees/.venv/bin/python"
+_awresolve="$HOME/.agent-worktrees/bin/resolve-runtime.sh"
+[ -f "$_awresolve" ] && . "$_awresolve"
+PYTHON="${AW_PY:-}"
 if [[ ! -x "$PYTHON" ]]; then exit 0; fi
 
 # Read-only preview: does anything need provisioning? (No throttle side effects.)

@@ -4,8 +4,9 @@
 
 $ErrorActionPreference = 'Stop'
 
-$venvPython = "$env:USERPROFILE\.agent-worktrees\.venv\Scripts\python.exe"
-if (-not (Test-Path $venvPython)) { exit 0 }
+$_r = Join-Path $env:USERPROFILE '.agent-worktrees\bin\resolve-runtime.ps1'
+$venvPython = if (Test-Path -LiteralPath $_r) { . $_r; $AwPy } else { $null }
+if (-not $venvPython) { exit 0 }
 
 $env:PYTHONPATH = ''  # package is installed in the venv (no lib/ shadow)
 try {

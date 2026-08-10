@@ -207,7 +207,11 @@ def _wsl_install_present(distro: str | None) -> bool | None:
     wsl_exe = shutil.which("wsl.exe") or shutil.which("wsl")
     if not wsl_exe:
         return None
-    probe = 'test -x "$HOME/.agent-worktrees/.venv/bin/agent-worktrees"'
+    probe = (
+        'v="$(cat "$HOME/.agent-worktrees/current-version" 2>/dev/null)"; '
+        'test -x "$HOME/.agent-worktrees/versions/$v/bin/agent-worktrees" '
+        '-o -x "$HOME/.agent-worktrees/versions/$v/bin/python"'
+    )
     argv = [wsl_exe]
     if distro:
         argv += ["-d", distro]

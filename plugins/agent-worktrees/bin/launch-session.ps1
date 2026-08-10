@@ -166,12 +166,12 @@ if ($RecoveryMode) {
     exit $LASTEXITCODE
 }
 
-# Runtime resolution (junction-free). The active version is published by a
-# plain-text `current-version` marker; resolve versions\<ver>\Scripts\python.exe
-# directly so nothing traverses a reparse point (a junction is blocked under
-# RedirectionGuard / WinError 448, dotfiles #637; a marker file never is).
-# Fallbacks: the newest installed slot, then a legacy `.venv` (junction target or
-# real dir) for un-migrated installs.
+# Runtime resolution (junction-free, marker-only). The active version is
+# published by a plain-text `current-version` marker; resolve
+# versions\<ver>\Scripts\python.exe directly so nothing traverses a reparse
+# point (a junction is blocked under RedirectionGuard / WinError 448, dotfiles
+# #637, and prone to drift; a marker file never is). Fallback: the newest
+# installed slot only -- the `.venv` link is retired (#1106).
 $RuntimeDir = Join-Path $env:USERPROFILE '.agent-worktrees'
 $VenvPython = $null
 try {
@@ -187,13 +187,6 @@ if (-not $VenvPython) {
         ForEach-Object { Join-Path $_.FullName 'Scripts\python.exe' } |
         Where-Object { Test-Path -LiteralPath $_ } |
         Select-Object -Last 1
-}
-if (-not $VenvPython) {
-    # Legacy `.venv` (junction target or real dir) -- resolve without traversing.
-    $_venv = Join-Path $RuntimeDir '.venv'
-    $_legacy = Join-Path $_venv 'Scripts\python.exe'
-    try { $_t = (Get-Item -LiteralPath $_venv -Force -ErrorAction Stop).Target; if ($_t) { $_legacy = Join-Path (@($_t)[0]) 'Scripts\python.exe' } } catch {}
-    if (Test-Path -LiteralPath $_legacy) { $VenvPython = $_legacy }
 }
 
 if ($VenvPython -and (Test-Path -LiteralPath $VenvPython)) {

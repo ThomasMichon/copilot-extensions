@@ -6,7 +6,9 @@
 set -euo pipefail
 
 # Resolve the project from CWD (git-like); this hook runs in the worktree.
-PYTHON="$HOME/.agent-worktrees/.venv/bin/python"
+_awresolve="$HOME/.agent-worktrees/bin/resolve-runtime.sh"
+[ -f "$_awresolve" ] && . "$_awresolve"
+PYTHON="${AW_PY:-}"
 if [[ ! -x "$PYTHON" ]]; then exit 0; fi
 project="$(PYTHONPATH="" "$PYTHON" -m agent_worktrees get project 2>/dev/null || true)"
 if [[ -z "$project" ]]; then exit 0; fi

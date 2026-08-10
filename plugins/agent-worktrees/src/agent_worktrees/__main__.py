@@ -4952,22 +4952,30 @@ def _runtime_superseded(
     *, prefix: str | None = None, install_root: Path | None = None
 ) -> bool:
     """True when a newer agent-worktrees runtime has superseded the one running
-    this ``status-updater`` -- i.e. the ``install_dir/.venv`` slot no longer
-    resolves to this process's ``sys.prefix`` (both under ``versions/``).
+    this ``status-updater`` -- i.e. the active ``versions/<current-version>``
+    slot (published by the marker) no longer resolves to this process's
+    ``sys.prefix`` (both under ``versions/``).
 
-    A version update swaps the ``.venv`` symlink to a fresh ``versions/<v>`` slot
-    but cannot reap an already-running updater: its mux session is still live (so
-    ``_has_session`` keeps it serving) and a new-version updater only spawns on
-    the next attach/join. Left alone, one updater per (session x version) piles
-    up across every deploy (dotfiles #911 -- observed dev315..dev392 all still
-    running for days). This self-check lets a superseded updater retire on its
-    next tick; the next attach spawns a current-version one. Degrade-safe: any
-    resolution error, or a non-slot interpreter, keeps it serving.
+    A version update publishes a fresh ``versions/<v>`` slot via the
+    ``current-version`` marker (junction-free; #1106) but cannot reap an
+    already-running updater: its mux session is still live (so ``_has_session``
+    keeps it serving) and a new-version updater only spawns on the next
+    attach/join. Left alone, one updater per (session x version) piles up across
+    every deploy (dotfiles #911 -- observed dev315..dev392 all still running for
+    days). This self-check lets a superseded updater retire on its next tick; the
+    next attach spawns a current-version one. Degrade-safe: any resolution error,
+    a missing marker, or a non-slot interpreter keeps it serving.
     """
     try:
         root = install_root if install_root is not None else cfg.install_dir()
         versions_root = os.path.realpath(os.path.join(str(root), "versions"))
-        active = os.path.realpath(os.path.join(str(root), ".venv"))
+        try:
+            ver = (Path(str(root)) / "current-version").read_text("utf-8").strip()
+        except OSError:
+            ver = ""
+        if not ver:
+            return False  # no marker -> cannot determine; keep serving
+        active = os.path.realpath(os.path.join(str(root), "versions", ver))
         mine = os.path.realpath(prefix if prefix is not None else sys.prefix)
     except Exception:
         return False

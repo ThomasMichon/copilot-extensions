@@ -23,8 +23,9 @@ function Emit-Empty {
 }
 
 # --- cwd gate: only inside an agent-worktrees-managed project ---
-$python = "$env:USERPROFILE\.agent-worktrees\.venv\Scripts\python.exe"
-if (-not (Test-Path $python)) { Emit-Empty }
+$_r = Join-Path $env:USERPROFILE '.agent-worktrees\bin\resolve-runtime.ps1'
+$python = if (Test-Path -LiteralPath $_r) { . $_r; $AwPy } else { $null }
+if (-not $python) { Emit-Empty }
 $env:PYTHONPATH = ''
 $project = (& $python -m agent_worktrees get project 2>$null | Select-Object -First 1)
 if (-not $project) { Emit-Empty }

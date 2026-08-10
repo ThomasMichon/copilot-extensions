@@ -19,8 +19,9 @@ $ErrorActionPreference = 'SilentlyContinue'
 if ($env:WORKTREE_NO_RECONCILE -eq '1' -or $env:WORKTREE_NO_PROVISION -eq '1') { exit 0 }
 
 $InstallDir = Join-Path $env:USERPROFILE '.agent-worktrees'
-$VenvPython = Join-Path $InstallDir '.venv\Scripts\python.exe'
-if (-not (Test-Path $VenvPython)) { exit 0 }
+$_r = Join-Path $InstallDir 'bin\resolve-runtime.ps1'
+$VenvPython = if (Test-Path -LiteralPath $_r) { . $_r; $AwPy } else { $null }
+if (-not $VenvPython) { exit 0 }
 
 $env:PYTHONPATH = ''  # package is installed in the venv (no lib/ shadow)
 

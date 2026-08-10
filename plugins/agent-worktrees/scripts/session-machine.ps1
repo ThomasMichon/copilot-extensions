@@ -12,8 +12,9 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
-$python = "$env:USERPROFILE\.agent-worktrees\.venv\Scripts\python.exe"
-if (-not (Test-Path $python)) { Write-Output '{}'; exit 0 }
+$_r = Join-Path $env:USERPROFILE '.agent-worktrees\bin\resolve-runtime.ps1'
+$python = if (Test-Path -LiteralPath $_r) { . $_r; $AwPy } else { $null }
+if (-not $python) { Write-Output '{}'; exit 0 }
 $env:PYTHONPATH = ''
 $out = (& $python -m agent_worktrees machine-context 2>$null | Select-Object -First 1)
 if ($out) { Write-Output $out } else { Write-Output '{}' }

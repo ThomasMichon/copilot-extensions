@@ -1342,8 +1342,30 @@ def tracking_dir() -> Path:
 
 
 def venv_python() -> Path:
-    """Return the path to the venv's Python interpreter (shared runtime)."""
-    base = install_dir() / ".venv"
-    if platform.system() == "Windows":
-        return base / "Scripts" / "python.exe"
-    return base / "bin" / "python"
+    """Path to the active runtime slot's Python interpreter.
+
+    Junction-free: resolve the ``current-version`` marker ->
+    ``versions/<ver>/{Scripts/python.exe|bin/python}`` directly (the ``.venv``
+    link is retired; #1106). Falls back to the newest installed slot, then to the
+    marker-less ``versions/<ver>`` path even if it does not yet exist (so callers
+    that expect a path -- not existence -- still get the canonical location).
+    """
+    root = install_dir()
+    win = platform.system() == "Windows"
+    sub = ("Scripts", "python.exe") if win else ("bin", "python")
+    try:
+        ver = (root / "current-version").read_text("utf-8").strip()
+    except OSError:
+        ver = ""
+    if ver:
+        p = root / "versions" / ver / sub[0] / sub[1]
+        if p.exists():
+            return p
+    versions = root / "versions"
+    if versions.is_dir():
+        for slot in sorted(versions.iterdir(), reverse=True):
+            p = slot / sub[0] / sub[1]
+            if p.exists():
+                return p
+    # No installed slot -- return the canonical (marker or empty) slot path.
+    return root / "versions" / (ver or "") / sub[0] / sub[1]

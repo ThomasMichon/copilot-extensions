@@ -325,14 +325,14 @@ print((entry.local_path() if entry else "") or "")
 fi
 
 _versioned_activate() {
-    # CLI (no daemon): health-gate the freshly-built slot, swap the stable `.venv`
-    # symlink onto it (first migration moves a legacy real `.venv` aside), then gc
-    # old slots keeping current + previous-good. Returns non-zero on failure. No-op
-    # in legacy mode.
+    # CLI (no daemon): health-gate the freshly-built slot, publish the
+    # `current-version` marker (junction-free, `--no-link`: no `.venv` symlink is
+    # laid; the marker is the SINGLE source of truth and any stale legacy link is
+    # removed -- #1106), then gc old slots keeping current + previous-good.
+    # Returns non-zero on failure. No-op in legacy mode.
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
     local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py="$VENV_DIR/bin/python"
-    [[ -x "$py" ]] || py="$LINK_DIR/bin/python"
+    local py="$VENV_PYTHON"
     [[ -x "$py" ]] || return 0
     if ! PYTHONPATH= "$VENV_PYTHON" -c 'import agent_worktrees' 2>/dev/null; then
         err "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
@@ -341,15 +341,15 @@ _versioned_activate() {
     _versioned_mark_complete
     local prev
     prev="$("$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo "")"
-    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink; then
-        err "Failed to activate versioned venv (.venv -> versions/$SRC_VERSION)"
+    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --no-link; then
+        err "Failed to activate runtime version (marker -> versions/$SRC_VERSION)"
         return 1
     fi
-    ok "Runtime version $SRC_VERSION active (.venv -> versions/$SRC_VERSION)"
+    ok "Runtime version $SRC_VERSION active (marker -> versions/$SRC_VERSION)"
     if [[ -n "$prev" ]]; then
-        "$LINK_DIR/bin/python" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids --keep "$prev" 2>&1 | sed 's/^/  → gc: /' || true
+        "$VENV_PYTHON" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids --keep "$prev" 2>&1 | sed 's/^/  → gc: /' || true
     else
-        "$LINK_DIR/bin/python" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids 2>&1 | sed 's/^/  → gc: /' || true
+        "$VENV_PYTHON" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids 2>&1 | sed 's/^/  → gc: /' || true
     fi
     return 0
 }
@@ -624,7 +624,7 @@ deploy_wrappers() {
     fi
 
     # Deploy hook scripts: sessionStart (session-conduct + session-machine + bootstrap-check + project-hooks + register-session + anchor-hygiene-check + provision-check) + preToolUse guards (statelessness_guard + cross_repo_guard + anchor_write_guard)
-    for script in session-conduct.ps1 session-conduct.sh session-machine.ps1 session-machine.sh bootstrap-check.ps1 bootstrap-check.sh project-hooks.ps1 project-hooks.sh register-session.ps1 register-session.sh deregister-session.ps1 deregister-session.sh anchor-hygiene-check.ps1 anchor-hygiene-check.sh provision-check.ps1 provision-check.sh statelessness_guard.py cross_repo_guard.py anchor_write_guard.py; do
+    for script in resolve-runtime.ps1 resolve-runtime.sh session-conduct.ps1 session-conduct.sh session-machine.ps1 session-machine.sh bootstrap-check.ps1 bootstrap-check.sh project-hooks.ps1 project-hooks.sh register-session.ps1 register-session.sh deregister-session.ps1 deregister-session.sh anchor-hygiene-check.ps1 anchor-hygiene-check.sh provision-check.ps1 provision-check.sh statelessness_guard.py cross_repo_guard.py anchor_write_guard.py; do
         local script_src="$SCRIPT_DIR/$script"
         if [[ -f "$script_src" ]]; then
             tmp="$(mktemp "$BIN_DIR/$script.XXXXXX")"
@@ -726,7 +726,7 @@ BINSTUB_HEAD
 export PYTHONUTF8=1
 # Context resolves from CWD / --project (git-like); the binstub names its
 # project via --project, not an ambient env var.
-_AW="\$HOME/.agent-worktrees/.venv/bin/agent-worktrees"
+_AW="\$HOME/.local/bin/agent-worktrees"
 if [[ -x "\$_AW" ]]; then
     exec "\$_AW" --project "$PROJECT_NAME" "\$@"
 fi
