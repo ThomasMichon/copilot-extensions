@@ -27,6 +27,7 @@ the remaining headroom). ``budget-not-exceeded`` and ``reuse-over-recreate``
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -170,6 +171,26 @@ def derive_disposition(
     return IDLE
 
 
+def _holder_worktree_gone(worktree_path: str | None) -> bool:
+    """True when a #897 **claim**'s owner worktree PATH is positively gone.
+
+    A cheap, host-local check (no subprocess): the host-local ``leases.json``
+    only records claims made on THIS host, so the claim's worktree path is local
+    -- an absolute path no longer on disk means the owning worktree was
+    finalized/pruned while the lease lingered (an **orphaned** lock). Conservative
+    (biased toward alive): a non-path/legacy owner (an advisory borrow's effort)
+    or an unreadable path is treated alive, so a live hold is never false-flagged,
+    and a cross-machine hold (which rides the beacon/L2 overlay, not a local
+    lease) is never seen here at all.
+    """
+    if not worktree_path or not os.path.isabs(worktree_path):
+        return False
+    try:
+        return not os.path.exists(worktree_path)
+    except OSError:
+        return False
+
+
 @dataclass
 class PoolMember:
     """One CodeSpace as a pool citizen: identity + disposition + allocation."""
@@ -211,6 +232,11 @@ class PoolMember:
     # The gh ``displayName`` -- a user/tool-assigned FRIENDLY name, distinct from
     # ``name`` (the durable GitHub-assigned id). Defaults to ``name`` when unset.
     display_name: str = ""
+    # Worktree-lock legibility (venue-pool Phase 3 / 3b): True when this box is
+    # held by a #897 claim whose owner worktree is positively **gone** (an
+    # orphaned lock -- the lease lingers past the worktree's finalize/prune). A
+    # derived, host-local fact (see :func:`_holder_worktree_gone`); default False.
+    orphaned: bool = False
 
     @property
     def holder_owner(self) -> str | None:
@@ -374,6 +400,8 @@ def build_pool(
             l2_live=l2_live,
             l2_expires_at=l2_expires_at,
             display_name=cs.display_name or "",
+            # 3b: flag an orphaned claim (holder worktree positively gone).
+            orphaned=_holder_worktree_gone(lease.worktree if lease else None),
         ))
 
     budget = Budget(
@@ -390,6 +418,16 @@ def build_pool(
 def _short_repo(repository: str) -> str:
     """The trailing path segment of an ``owner/name`` repo id (display only)."""
     return repository.rsplit("/", 1)[-1] if repository else repository
+
+
+def _worktree_dir_id(worktree_path: str | None) -> str:
+    """A #897 claim owner's worktree **dir name** (its id) from its absolute
+    path, for the pivot's ``worktree`` column -- so a claim-held box shows WHICH
+    worktree locks it (3b). ``""`` for a non-path/empty owner (an advisory
+    borrow surfaces via its effort id instead)."""
+    if not worktree_path or not os.path.isabs(worktree_path):
+        return ""
+    return os.path.basename(worktree_path.rstrip("/\\"))
 
 
 def _short_claim_ref(ref: str) -> str:
@@ -444,8 +482,10 @@ def picker_payload(
         friendly = m.display_name or m.name
         # The claiming worktree's short id: the cross-machine beacon (the 4-hex
         # borrowing-worktree id) when held elsewhere, else the local lease's
-        # effort id. The Picker correlates this to the worktree's TASK title.
-        worktree = m.beacon or m.holder_effort or ""
+        # effort id, else a #897 claim's owner worktree dir name (3b -- so a
+        # claim-held box surfaces WHICH worktree locks it, not a blank). The
+        # Picker correlates this to the worktree's TASK title.
+        worktree = m.beacon or m.holder_effort or _worktree_dir_id(m.holder_worktree)
         # A concise uppercase status for the compact table: RUNNING when live,
         # STALE for an aged recycle candidate, else STOPPED.
         if m.running:
@@ -469,6 +509,10 @@ def picker_payload(
         elif m.l2_live and m.l2_holder:
             held = f"held cross-machine by {_short_claim_ref(m.l2_holder)}"
             subtitle = f"{subtitle} · {held}" if subtitle else held
+        if m.orphaned:
+            # 3b: make the stale lock legible on the fallback subtitle too.
+            gone = "\u26a0 holder worktree gone (orphaned lock)"
+            subtitle = f"{subtitle} · {gone}" if subtitle else gone
         entries.append({
             "id": m.name,
             "name": m.name,            # durable GitHub-assigned id
@@ -489,6 +533,12 @@ def picker_payload(
             # health vs. use: two distinct axes (venue-pool Phase 3 / #709).
             "health": "running" if m.running else "stopped",
             "use": "in-use" if m.disposition == IN_USE else "free",
+            # 3b: an ORPHANED lock (holder worktree gone) reads distinctly in the
+            # `use` column via ``occupancy`` (-> magenta ORPHAN palette), while
+            # ``disposition`` stays in-use so the Release verb still offers to
+            # free the stale lock. ``orphaned`` is the raw signal for gating.
+            "orphaned": m.orphaned,
+            "occupancy": "orphan" if m.orphaned else m.disposition,
         })
     summary = dict(budget.to_dict())
     summary["note"] = note or ""
