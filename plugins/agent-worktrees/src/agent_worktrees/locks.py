@@ -65,6 +65,18 @@ def _pid_alive(pid: int) -> bool:
         return False
 
 
+def pid_alive(pid: int) -> bool:
+    """Public alias of :func:`_pid_alive` -- "does this pid exist right now?".
+
+    Exposed for callers outside this module that need a **direct** liveness
+    probe rather than a lock read (e.g. the launcher-shell reaper asking whether
+    a candidate's parent terminal is still running). Deliberately fail-open: an
+    unprovable pid reads as alive, so a caller using this as a safety veto
+    over-spares rather than over-kills.
+    """
+    return _pid_alive(pid)
+
+
 def process_start_time(pid: int) -> str | None:
     """A stable, per-process **start-time identity token** for ``pid``, or None.
 
