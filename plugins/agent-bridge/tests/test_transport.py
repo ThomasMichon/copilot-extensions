@@ -36,6 +36,13 @@ class TestSpawnTargetSerialization:
         assert restored.cwd == "/tmp/test"
         assert restored.host is None
 
+    def test_roundtrip_caller_owner_ref(self):
+        # Ph3c: the caller's qualified ClaimRef survives DB serialization.
+        target = SpawnTarget(type="local", cwd="/c",
+                             caller_owner_ref="lc/proj/wt-caller")
+        restored = SpawnTarget.from_json(target.to_json())
+        assert restored.caller_owner_ref == "lc/proj/wt-caller"
+
     def test_roundtrip_ssh(self):
         target = SpawnTarget(
             type="ssh",
@@ -1179,6 +1186,52 @@ class TestLocalResolveBridgeFallback:
         assert out == plan
         assert "--caller-worktree" in calls[0]
         assert "lc-win-caller-1" in calls[0]
+
+    @pytest.mark.asyncio
+    async def test_local_new_sends_owner_ref(self):
+        # resource-obligation-settlement Ph3c: the caller's qualified ClaimRef is
+        # passed as --owner-ref so the bridge worktree records its owner.
+        plan = {"launch": {"worktree_id": "wt-1", "work_dir": "/d"}}
+        target = SpawnTarget(type="local", cwd="/c", project="proj",
+                             caller_owner_ref="lc/proj/wt-caller")
+        calls = []
+
+        async def fake_exec(*argv, **kw):
+            calls.append(argv)
+            return self._proc(0, json.dumps(plan).encode())
+
+        with patch("os.path.exists", return_value=True), \
+             patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+            out = await _resolve_worktree(target, {})
+
+        assert out == plan
+        assert "--owner-ref" in calls[0]
+        assert "lc/proj/wt-caller" in calls[0]
+
+    @pytest.mark.asyncio
+    async def test_local_retries_bare_when_owner_ref_unknown(self):
+        # A stale runtime rejects --owner-ref -> retry drops all new extras.
+        plan = {"launch": {"worktree_id": "wt-1", "work_dir": "/d"}}
+        target = SpawnTarget(type="local", cwd="/c", project="proj",
+                             caller_owner_ref="lc/proj/wt-caller")
+        results = [
+            self._proc(2, b"", b"unrecognized arguments: --owner-ref"),
+            self._proc(0, json.dumps(plan).encode()),
+        ]
+        calls = []
+
+        async def fake_exec(*argv, **kw):
+            calls.append(argv)
+            return results[len(calls) - 1]
+
+        with patch("os.path.exists", return_value=True), \
+             patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+            out = await _resolve_worktree(target, {})
+
+        assert out == plan
+        assert len(calls) == 2
+        assert "--owner-ref" in calls[0]
+        assert "--owner-ref" not in calls[1]
 
     @pytest.mark.asyncio
     async def test_local_retries_bare_when_caller_flag_unknown(self):

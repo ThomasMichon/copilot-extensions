@@ -359,6 +359,7 @@ async def start_session(req: StartSessionRequest, request: Request):
             target, agent_name=req.agent, caller_id=req.caller_id,
             mcp_servers=req.mcp_servers,
             copilot_args=req.copilot_args,
+            caller_owner_ref=req.caller_owner_ref,
         )
     except DaemonDrainingError as exc:
         raise HTTPException(status_code=503, detail=str(exc))

@@ -521,6 +521,7 @@ class BridgeClient:
         target_dir: str | None = None,
         caller_id: str | None = None,
         sender_repo: str | None = None,
+        caller_owner_ref: str | None = None,
         force_new: bool = False,
         worktree_id: str | None = None,
         reclaim: bool = False,
@@ -542,6 +543,8 @@ class BridgeClient:
             body["caller_id"] = caller_id
         if sender_repo:
             body["sender_repo"] = sender_repo
+        if caller_owner_ref:
+            body["caller_owner_ref"] = caller_owner_ref
         if force_new:
             body["force_new"] = True
         if worktree_id:

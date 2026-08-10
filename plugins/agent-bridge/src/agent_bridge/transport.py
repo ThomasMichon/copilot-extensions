@@ -106,6 +106,10 @@ class SpawnTarget:
     worktree_id: str | None = None  # resume a specific worktree
     caller_worktree: str | None = None  # #2178: caller worktree that requested a
     #                                     bridge spawn (recorded on the new worktree)
+    caller_owner_ref: str | None = None  # resource-obligation-settlement Ph3c: the
+    #                                      caller's qualified ClaimRef, stamped as
+    #                                      the bridge worktree's owner_ref so its
+    #                                      finalize settles the caller's obligation
     spawn_command: list[str] | None = None  # raw command for provider agents
     codespace: dict | None = None  # structured CodeSpace metadata (#177): {name,
     #                                repo, acp_command, workspace_folder} -- lets
@@ -281,6 +285,8 @@ async def _resolve_worktree(
         new_extra.append("--bridge")
         if target.caller_worktree:
             new_extra.extend(["--caller-worktree", target.caller_worktree])
+        if target.caller_owner_ref:
+            new_extra.extend(["--owner-ref", target.caller_owner_ref])
 
     async def _run(extra: list[str]):
         argv = base_args + extra
@@ -298,13 +304,14 @@ async def _resolve_worktree(
 
     # A bridge-spawned new worktree is agent-owned -> mark it kind=bridge so the
     # Picker hides it by default and routine cleanup leaves it alone. A stale
-    # local agent-worktrees runtime won't recognize --bridge / --caller-worktree
-    # (argparse exits non-zero); detect that and retry without the extras so the
-    # spawn still resolves (the worktree just isn't bridge-marked / caller-linked).
+    # local agent-worktrees runtime won't recognize --bridge / --caller-worktree /
+    # --owner-ref (argparse exits non-zero); detect that and retry without the
+    # extras so the spawn still resolves (the worktree just isn't bridge-marked /
+    # caller-linked / owner-stamped).
     returncode, stdout, stderr = await _run(new_extra)
     if (creating_new and returncode != 0 and new_extra
             and any(f in stderr.decode(errors="replace")
-                    for f in ("--bridge", "--caller-worktree"))):
+                    for f in ("--bridge", "--caller-worktree", "--owner-ref"))):
         log.info("local agent-worktrees lacks new resolve flags; retrying bare")
         returncode, stdout, stderr = await _run([])
 
@@ -444,6 +451,8 @@ async def _resolve_worktree_remote(
         new_extra.append("--bridge")
         if target.caller_worktree:
             new_extra.extend(["--caller-worktree", target.caller_worktree])
+        if target.caller_owner_ref:
+            new_extra.extend(["--owner-ref", target.caller_owner_ref])
 
     async def _run(extra: list[str]):
         cmd = " ".join(shlex.quote(a) for a in base_args + extra)
@@ -453,13 +462,14 @@ async def _resolve_worktree_remote(
     # A bridge-spawned new worktree is agent-owned -> mark it kind=bridge so the
     # remote Picker hides it by default and routine cleanup leaves it alone.
     # An older remote agent-worktrees won't recognize --bridge / --caller-worktree
-    # (argparse exits non-zero); detect that and retry without the extras so a
-    # version-skewed remote still spawns. Mirrors the data_ssh --classify fallback.
+    # / --owner-ref (argparse exits non-zero); detect that and retry without the
+    # extras so a version-skewed remote still spawns. Mirrors the data_ssh
+    # --classify fallback.
     result = await _run(new_extra)
     if (creating_new and not result.timed_out and result.exit_code != 0
             and new_extra
             and any(f in (result.stderr or "")
-                    for f in ("--bridge", "--caller-worktree"))):
+                    for f in ("--bridge", "--caller-worktree", "--owner-ref"))):
         log.info("remote %s lacks new resolve flags; retrying bare", target.host)
         result = await _run([])
 
