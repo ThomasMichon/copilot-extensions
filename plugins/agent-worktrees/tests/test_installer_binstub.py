@@ -93,6 +93,50 @@ def test_windows_binstubs_resolve_via_current_version_marker(monkeypatch, tmp_pa
         assert "\\.venv\\" not in content, f"{name} must not resolve through .venv"
 
 
+def test_binstub_content_is_independent_of_live_install_state(monkeypatch, tmp_path: Path):
+    """Binstub generation must be hermetic (#349).
+
+    The emitted launcher is a *static* template whose runtime slot is resolved at
+    **execution** time (via the junction-free ``current-version`` marker), so its
+    content must never vary with the machine's live ``~/.agent-worktrees`` state.
+    The historical bug: ``deploy_binstubs`` snapshotted the live install dir /
+    ``.venv`` / marker at **generation** time, so two runs during an in-flight
+    ``update`` (versioned-runtime GC + ``.venv`` repointing mid-swap) emitted
+    *different* content for the same file -- coupling the tests to churning
+    machine state and making them flaky.
+
+    Regression guard: generate the binstubs twice with every live-runtime
+    accessor (``install_dir`` / ``venv_dir`` / ``bin_dir``) monkeypatched at two
+    *different* bogus roots. A hermetic generator ignores them entirely, so the
+    output must be byte-identical across both runs. If a future change ever reads
+    live install state back into the generated content, the two roots diverge and
+    this test fails."""
+    lb = tmp_path / "bin"
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+
+    def _generate_under(install_root: Path) -> dict[str, bytes]:
+        # Point every live-runtime accessor at a distinct, bogus root. A hermetic
+        # generator must not consult any of them when building binstub content.
+        monkeypatch.setattr(inst, "install_dir", lambda: install_root)
+        monkeypatch.setattr(inst, "venv_dir", lambda: install_root / ".venv")
+        monkeypatch.setattr(inst, "bin_dir", lambda: install_root / "bin")
+        assert inst.deploy_binstubs(repo_dir=tmp_path, project="demoproj") is True
+        return {
+            name.name: name.read_bytes()
+            for name, _ in inst._project_binstub_specs("demoproj")
+        }
+
+    first = _generate_under(tmp_path / "install-A")
+    second = _generate_under(tmp_path / "install-B")
+
+    assert first == second, "binstub content must not depend on live install state"
+    # And it must be the marker-based resolver, not a live-state snapshot.
+    if platform.system() == "Windows":
+        content = first["demoproj.cmd"].decode()
+        assert "current-version" in content
+        assert "\\.venv\\" not in content
+
+
 def test_deploy_binstubs_writes_ps1_on_windows(monkeypatch, tmp_path: Path):
     """On Windows ``register``/``deploy_binstubs`` must emit the ``.ps1`` primary
     (pwsh prefers it), not just the ``.cmd`` fallback -- the omission was the
