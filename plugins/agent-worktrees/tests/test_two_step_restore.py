@@ -49,8 +49,8 @@ def _patch_resume(monkeypatch, *, mux_live=False, live_ids=None):
         m.tracking, "load_record",
         lambda p: _types.SimpleNamespace(resume_count=1,
                                          last_resumed_at="2026-01-01T00:00:00"))
-    monkeypatch.setattr(m.tracking, "save_record", lambda r: None)
-    monkeypatch.setattr(m.tracking, "mark_resumed", lambda r, save=True: None)
+    monkeypatch.setattr(m.tracking, "save_record", lambda r, path=None: None)
+    monkeypatch.setattr(m.tracking, "mark_resumed", lambda r, *, save=True: None)
     monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: None)
     monkeypatch.setattr(m, "_build_launch_cmd",
                         lambda cfg, args, wd, profile=None: ["copilot"])
