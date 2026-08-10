@@ -132,6 +132,25 @@ def _effective_seg(seg: str) -> str:
     return seg
 
 
+# An in-command ``cd <repo>`` moves the effective cwd for following segments, so
+# ``cd <guarded>; git commit`` writes the guarded repo even when the tool cwd is
+# elsewhere -- track it (mirrors anchor_write_guard).
+_CD_SEG = re.compile(
+    r"^\s*(?:cd|chdir|pushd|set-location|sl)\s+(?:-\S+\s+)*[\"']?([^\"';|&]+)",
+    re.IGNORECASE,
+)
+
+
+def _cd_target(eff_seg: str, base: str) -> str | None:
+    m = _CD_SEG.match(eff_seg)
+    if not m:
+        return None
+    raw = m.group(1).strip().strip("\"'").rstrip()
+    if not raw or "$" in raw or "%" in raw or raw.startswith("~"):
+        return None
+    return raw if os.path.isabs(raw) else os.path.join(base, raw)
+
+
 def _root_token(root_str: str) -> str:
     """Regex for a repo root as a whole path token: the root itself OR a path
     INTO it, with a terminator so a sibling dir sharing the string prefix is not
@@ -455,6 +474,7 @@ def _shell_hit(cmd: str, cwd: str, guarded: list[dict]) -> dict | None:
     data payload (dotfiles#1144)."""
     if not _WRITE_VERBS.search(cmd):
         return None
+    eff_cwd = cwd
     for seg in _SHELL_SEP.split(cmd):
         seg_hay = os.path.normcase(seg.replace("/", os.sep)) if _IS_WIN else seg
         eff = _effective_seg(seg)
@@ -475,15 +495,23 @@ def _shell_hit(cmd: str, cwd: str, guarded: list[dict]) -> dict | None:
             # 2. A write cmdlet/verb at COMMAND POSITION with the repo as an arg.
             if at_write_cmd and re.search(tok, seg_hay):
                 return {**g, "reason": reason}
-            # 3. A git mutation targeting the repo: ``-C <repo>`` or (no ``-C``)
-            #    a repo-scoped git write from a cwd inside it.
-            if git_write:
-                if has_dash_c:
-                    if re.search(r"(?:^|\s)-C\s+[\"']?" + tok, seg_hay,
-                                 re.IGNORECASE):
-                        return {**g, "reason": reason}
-                elif cwd and is_inside(cwd, gp):
-                    return {**g, "reason": reason}
+            # 3a. A git mutation naming the repo via ``-C <repo>``.
+            if git_write and has_dash_c and re.search(
+                r"(?:^|\s)-C\s+[\"']?" + tok, seg_hay, re.IGNORECASE
+            ):
+                return {**g, "reason": reason}
+        # 3b. A repo-scoped git write (no ``-C``) targets the EFFECTIVE cwd --
+        #     catches ``cd <guarded>; git commit``.
+        if git_write and not has_dash_c and eff_cwd:
+            for g in guarded:
+                gp = g.get("path")
+                if gp and is_inside(eff_cwd, gp):
+                    return {**g, "reason": _deny_reason(
+                        g, "(a shell command writes into it).")}
+        # Follow an in-command ``cd`` to a resolvable path for later segments.
+        nd = _cd_target(eff, eff_cwd)
+        if nd:
+            eff_cwd = nd
     return None
 
 
