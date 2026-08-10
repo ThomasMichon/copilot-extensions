@@ -1115,6 +1115,9 @@ set "_VER="
 if exist "%_ROOT%\current-version" set /p _VER=<"%_ROOT%\current-version"
 set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
 if not exist "%_PY%" goto :_aw_fallback
+rem Mark this binstub-injected --project as ROUTED so the CLI treats
+rem it as a silent no-op on global verbs (repos/accounts/...) -- #1080.
+set "AGENT_WORKTREES_PROJECT_ROUTED=1"
 "%_PY%" -m agent_worktrees --project $ProjectName %*
 exit /b %ERRORLEVEL%
 :_aw_fallback
@@ -1147,8 +1150,15 @@ try { $_ver = ([IO.File]::ReadAllText((Join-Path $_root 'current-version'))).Tri
 $_py = if ($_ver) { Join-Path $_root ('versions\' + $_ver + '\Scripts\python.exe') } else { '' }
 if (-not ($_py -and (Test-Path -LiteralPath $_py))) { $_py = Get-ChildItem (Join-Path $_root 'versions') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Join-Path $_.FullName 'Scripts\python.exe' } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Last 1 }
 if (Test-Path $_py) {
-    & $_py -m agent_worktrees --project '%%PROJECT%%' @args
-    exit $LASTEXITCODE
+    $_savedRouted = $env:AGENT_WORKTREES_PROJECT_ROUTED
+    $env:AGENT_WORKTREES_PROJECT_ROUTED = '1'
+    try {
+        & $_py -m agent_worktrees --project '%%PROJECT%%' @args
+        $_rc = $LASTEXITCODE
+    } finally {
+        if ($null -eq $_savedRouted) { Remove-Item Env:AGENT_WORKTREES_PROJECT_ROUTED -ErrorAction SilentlyContinue } else { $env:AGENT_WORKTREES_PROJECT_ROUTED = $_savedRouted }
+    }
+    exit $_rc
 }
 $_savedProj = $env:WORKTREE_PROJECT
 $env:WORKTREE_PROJECT = '%%PROJECT%%'

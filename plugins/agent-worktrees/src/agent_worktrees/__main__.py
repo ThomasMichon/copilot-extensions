@@ -14737,6 +14737,52 @@ _NO_PROJECT_COMMANDS = {
 }
 
 
+# Machine-global verbs where ``--project`` can NEVER matter: the pure registries
+# / info (``repos``/``accounts``), the cross-project ``picker``, and
+# ``--version``/``--help``. A HAND-TYPED ``--project`` on these is silently
+# ignored today (accept-and-ignore) -- the #1080 foot-gun -- so we bounce it.
+# Deliberately a CONSERVATIVE subset of ``_NO_PROJECT_COMMANDS``: the other
+# no-project verbs (``install``/``register``/``restart``/``status-updater``/
+# ``session-*``) MAY consume an explicit ``--project``, so they are left to
+# accept-and-ignore rather than risk bouncing a legitimate service/setup call.
+_PROJECT_IRRELEVANT_COMMANDS = frozenset({
+    "repos", "accounts", "picker", "--version", "-V", "--help", "-h",
+})
+
+
+def _guard_project_scope(project_override: str | None,
+                         command: str | None) -> int | None:
+    """Bounce a *hand-typed* ``--project`` on a project-irrelevant verb.
+
+    Returns an exit code for ``main()`` to return (bounce), or ``None`` to
+    proceed. ``--project`` is meaningful only for project-scoped verbs; on a
+    machine-global verb (``repos``/``accounts``/``picker``/``--version``/
+    ``--help``) it does nothing. Silently swallowing an *explicitly*-typed
+    ``--project`` is a foot-gun for agentic callers, so we bounce -- but ONLY
+    when it was user-typed.
+
+    The ``<repo>`` binstub injects ``--project`` on EVERY invocation (incl. these
+    global verbs, e.g. ``dotfiles repos``) and marks it
+    ``AGENT_WORKTREES_PROJECT_ROUTED=1``; a *routed* ``--project`` stays a silent
+    no-op so those binstub commands keep working. The marker is consumed here so
+    it never leaks to child processes (mirrors agent-bridge/#1080).
+    """
+    routed = os.environ.pop("AGENT_WORKTREES_PROJECT_ROUTED", None) == "1"
+    if not project_override:
+        return None
+    if routed:
+        return None
+    if command in _PROJECT_IRRELEVANT_COMMANDS:
+        print(
+            f"agent-worktrees: --project {project_override!r} is not meaningful "
+            f"for '{command}': it is a machine-global command that ignores the "
+            f"active project. Remove --project.",
+            file=sys.stderr,
+        )
+        return 2
+    return None
+
+
 def _anchor_for_project(name: str) -> Path | None:
     """Return the anchor checkout path for project *name*, or ``None``.
 
@@ -15915,6 +15961,16 @@ def main(argv: list[str] | None = None) -> int:
         elif _canon is not None:
             _sib_project = _proj if _canon in _PROJECT_ARG_SLUGS else None
             return _route_to_sibling_plugin(_canon, _sib_project, args_list[1:])
+
+    # Bounce a *hand-typed* --project on a project-irrelevant global verb
+    # (repos/accounts/picker/--version/--help) instead of silently ignoring it
+    # (#1080); a binstub/router-injected --project (AGENT_WORKTREES_PROJECT_ROUTED)
+    # stays a silent no-op so `<repo> repos` etc. keep working. Runs after the
+    # sibling router (siblings return above) and consumes the marker regardless,
+    # so it never leaks to child processes spawned by worktrees verbs.
+    _guard_rc = _guard_project_scope(_proj, args_list[0] if args_list else None)
+    if _guard_rc is not None:
+        return _guard_rc
 
     # Only auto-derive from CWD for project-requiring commands (skip the git
     # subprocess for global no-project commands and bare flags).
