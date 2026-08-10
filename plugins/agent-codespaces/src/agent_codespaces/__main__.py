@@ -3268,7 +3268,7 @@ def _cmd_pool_stream(
     args: argparse.Namespace,
     members,
     budget,
-    note: str,
+    banner: str,
 ) -> int:
     """Emit the CodeSpaces pivot as the registered-pivot NDJSON envelope (D2).
 
@@ -3290,7 +3290,7 @@ def _cmd_pool_stream(
         except (BrokenPipeError, OSError):
             return False
 
-    for frame in pool_mod.picker_stream_frames(members, budget, note=note):
+    for frame in pool_mod.picker_stream_frames(members, budget, banner=banner):
         if not emit(frame):
             return 0
 
@@ -3299,7 +3299,7 @@ def _cmd_pool_stream(
 
     # --subscribe: periodic re-scan + diff -> live delta/removed frames.
     interval = max(0.5, float(getattr(args, "interval", 5.0) or 5.0))
-    prev = pool_mod.picker_payload(members, budget, note=note)
+    prev = pool_mod.picker_payload(members, budget, banner=banner)
     prev_entries = prev["entries"]
     prev_summary = prev["summary"]
     budget_cores = args.budget if args.budget is not None else pool_mod.DEFAULT_BUDGET_CORES
@@ -3315,7 +3315,7 @@ def _cmd_pool_stream(
                 members, budget = pool_mod.build_pool(
                     budget_cores=budget_cores, stale_after=stale_after,
                 )
-                curr = pool_mod.picker_payload(members, budget, note=note)
+                curr = pool_mod.picker_payload(members, budget, banner=banner)
             except Exception:
                 # A transient re-scan failure (e.g. a gh hiccup) must not kill
                 # the live channel -- skip this tick and try again next time.
@@ -3356,18 +3356,19 @@ def _cmd_pool(args: argparse.Namespace) -> int:
     )
 
     if getattr(args, "picker_json", False):
-        # Surface the missing-`codespace`-scope remedy as a note (rather than an
-        # empty, opaque list) so the Picker CodeSpaces pivot can render an
-        # actionable banner (#980). Best-effort: never let it break the payload.
+        # Surface the missing-`codespace`-scope remedy as a prominent, actionable
+        # **banner** (rather than an empty, opaque list) so the Picker CodeSpaces
+        # pivot renders an unmissable notice with the exact `gh auth refresh`
+        # remedy (#980). Best-effort: never let it break the payload.
         try:
             _msgs = _gh_auth_preflight()
-            note = ("\u26a0 " + "; ".join(_msgs)) if _msgs else ""
+            banner = " \u00b7 ".join(_msgs) if _msgs else ""
         except Exception:
-            note = ""
+            banner = ""
         if getattr(args, "stream", False):
             # D2: NDJSON streaming envelope (optionally held live via --subscribe).
-            return _cmd_pool_stream(args, members, budget, note)
-        print(json.dumps(pool_mod.picker_payload(members, budget, note=note)))
+            return _cmd_pool_stream(args, members, budget, banner)
+        print(json.dumps(pool_mod.picker_payload(members, budget, banner=banner)))
         return 0
 
     if args.json_output:
