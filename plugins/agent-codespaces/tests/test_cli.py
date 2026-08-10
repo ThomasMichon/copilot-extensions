@@ -269,6 +269,34 @@ class TestPoolScopeBanner:
         assert "banner_text" not in self._payload(capsys)["summary"]
 
 
+class TestCreateScopeGate:
+    """`create` fails fast (#980) when the ambient gh token lacks the
+    `codespace` scope, before any create work -- rather than 403/404-ing minutes
+    in after provisioning starts."""
+
+    def test_create_blocked_when_scope_missing(self, capsys):
+        import agent_codespaces.__main__ as m
+        with patch.object(m, "_ambient_codespace_scope",
+                          return_value=(False, "run: gh auth refresh -s codespace")), \
+             patch.object(m, "create_codespace") as create:
+            rc = main(["create", "owner/repo"])
+        assert rc == 3
+        create.assert_not_called()          # gated BEFORE any create work
+        assert "Refusing to create" in capsys.readouterr().err
+
+    def test_create_proceeds_when_scope_ok(self):
+        import agent_codespaces.__main__ as m
+        # Scope OK -> the gate passes; stub the create so we only prove the gate
+        # doesn't block (return early via --no-wait).
+        info = type("I", (), {"name": "cs-new"})()
+        with patch.object(m, "_ambient_codespace_scope", return_value=(True, "")), \
+             patch.object(m, "load_merged_config", return_value={}), \
+             patch.object(m, "create_codespace", return_value=info) as create:
+            rc = main(["create", "owner/repo", "--no-wait"])
+        assert rc == 0
+        create.assert_called_once()
+
+
 # --- Top-level --project (command-surface <repo> <slug> surface) ---
 
 

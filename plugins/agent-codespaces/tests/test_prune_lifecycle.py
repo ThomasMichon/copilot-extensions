@@ -235,7 +235,8 @@ def test_reclaim_unknown_error_returns_none(store):
 
 def test_create_retries_after_reclaim(store):
     info = _info("new-cs", "Available")
-    with patch("agent_codespaces.__main__.load_merged_config", return_value=object()), \
+    with patch("agent_codespaces.__main__._ambient_codespace_scope", return_value=(True, "")), \
+         patch("agent_codespaces.__main__.load_merged_config", return_value=object()), \
          patch("agent_codespaces.__main__._reclaim_for_quota", return_value="pruned x"), \
          patch(
              "agent_codespaces.__main__.create_codespace",
@@ -247,7 +248,8 @@ def test_create_retries_after_reclaim(store):
 
 
 def test_create_quota_no_reclaim_fails(store):
-    with patch("agent_codespaces.__main__.load_merged_config", return_value=object()), \
+    with patch("agent_codespaces.__main__._ambient_codespace_scope", return_value=(True, "")), \
+         patch("agent_codespaces.__main__.load_merged_config", return_value=object()), \
          patch("agent_codespaces.__main__._reclaim_for_quota", return_value=None), \
          patch(
              "agent_codespaces.__main__.create_codespace",
