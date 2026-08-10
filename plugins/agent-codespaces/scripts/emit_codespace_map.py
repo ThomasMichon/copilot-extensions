@@ -23,8 +23,9 @@ to ``{}``.
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
-import sys
 
 
 def _emit_empty() -> None:
@@ -32,11 +33,33 @@ def _emit_empty() -> None:
     raise SystemExit(0)
 
 
+def _aw_binstub() -> str | None:
+    """Locate the ``agent-worktrees`` binstub (its own marker-resolving launcher).
+
+    Cross-plugin calls go through the OTHER plugin's binstub, never by reaching
+    into its runtime venv -- the binstub resolves agent-worktrees' own
+    ``current-version`` marker (#1106). PATH first, then the conventional
+    ``~/.local/bin`` install location.
+    """
+    exe = shutil.which("agent-worktrees")
+    if exe:
+        return exe
+    local = os.path.join(os.path.expanduser("~"), ".local", "bin")
+    for name in ("agent-worktrees.cmd", "agent-worktrees"):
+        cand = os.path.join(local, name)
+        if os.path.exists(cand):
+            return cand
+    return None
+
+
 def _aw(*args: str) -> str | None:
-    """Run ``agent-worktrees`` (via this interpreter's ``-m``) and return stdout."""
+    """Run ``agent-worktrees`` via its own binstub and return stdout."""
+    exe = _aw_binstub()
+    if not exe:
+        return None
     try:
         proc = subprocess.run(
-            [sys.executable, "-m", "agent_worktrees", *args],
+            [exe, *args],
             capture_output=True, text=True, timeout=20,
         )
     except (OSError, subprocess.SubprocessError):

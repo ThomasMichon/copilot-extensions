@@ -1,7 +1,7 @@
 {
   "name": "harness-knowledge",
   "description": "Binds a stateless Copilot CLI control harness to its private knowledge repo, harness-first: clone the harness, then this plugin asks for (or creates) the knowledge repo, writes the machine-local knowledge_repo pointer, registers both repos, and assembles a machine-local instructions fragment labeling the concrete harness/knowledge/product paths -- so the shareable harness tree stays generic and name-free. Ships the binding-knowledge setup skill.",
-  "version": "0.1.0-dev4",
+  "version": "0.1.0-dev5",
   "author": {
     "name": "Thomas Michon"
   },
