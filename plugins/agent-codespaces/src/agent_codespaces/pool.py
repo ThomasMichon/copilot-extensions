@@ -21,8 +21,8 @@ stale, plus the transient provisioning / failed) and its **allocation** (repo,
 holding effort/worktree, machine), and across the pool a **budget** (the
 account's concurrent-core ceiling, what running CodeSpaces spend against it, and
 the remaining headroom). ``budget-not-exceeded`` and ``reuse-over-recreate``
-(Phase 2 / #708) consume this; the Worktree Picker's CodeSpaces pivot (Phase 3 /
-#709) renders it.
+(Phase 2 / #708) are the :func:`plan_allocation` planner in this module; the
+Worktree Picker's CodeSpaces pivot (Phase 3 / #709) renders the derived view.
 """
 
 from __future__ import annotations
@@ -32,6 +32,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 
+from .config import _repo_matches_codespace
 from .lease import Lease, list_leases
 from .lifecycle import CodespaceInfo, classify_state, list_codespaces
 from .status import STATE_PRUNABLE, STATE_RECOVERED, list_status
@@ -413,6 +414,161 @@ def build_pool(
         unknown_cores_count=unknown_running,
     )
     return members, budget
+
+
+# --- Allocation planner (Phase 2 / #708): reuse-before-create, budget-bounded ---
+# The pure decision core a venue request consults BEFORE creating a CodeSpace:
+# prefer reusing a suitable idle/clean box; respect the concurrent-core budget;
+# with no headroom recycle a stale box; else surface the pressure. Side-effect
+# free -- it decides, the caller acts.
+
+ALLOC_REUSE = "reuse"        # reuse an existing suitable idle/clean box (named)
+ALLOC_CREATE = "create"      # no reuse candidate + headroom -> create a fresh box
+ALLOC_RECYCLE = "recycle"    # no headroom -> recycle a stale box (named), then allocate
+ALLOC_PRESSURE = "pressure"  # no reuse, no headroom, nothing recyclable -> surface it
+
+
+@dataclass
+class AllocationDecision:
+    """The resolved venue-request decision (see :func:`plan_allocation`)."""
+
+    action: str
+    # The box to REUSE, or the stale box to RECYCLE; None for CREATE/PRESSURE.
+    codespace: str | None
+    reason: str
+    # For RECYCLE only: the follow-on activation once the recycle frees budget --
+    # ``reuse`` (a stopped reuse candidate exists) with ``then_codespace`` named,
+    # else ``create``.
+    then: str | None = None
+    then_codespace: str | None = None
+    # Budget context echoed for legible callers/logs.
+    headroom_cores: int = 0
+    needed_cores: int = 0
+
+    def to_dict(self) -> dict:
+        d: dict = {
+            "action": self.action,
+            "codespace": self.codespace,
+            "reason": self.reason,
+            "headroom_cores": self.headroom_cores,
+            "needed_cores": self.needed_cores,
+        }
+        if self.then is not None:
+            d["then"] = self.then
+            d["then_codespace"] = self.then_codespace
+        return d
+
+
+def plan_allocation(
+    members: list[PoolMember],
+    budget: Budget,
+    *,
+    repo: str,
+    new_cores: int = 0,
+) -> AllocationDecision:
+    """Resolve a venue request for ``repo`` to a reuse/create/recycle/pressure
+    decision -- the pure core of ``reuse-before-create`` + ``budget-not-exceeded``
+    (Phase 2 / #708).
+
+    Precedence (first match wins):
+      1. **Reuse** a suitable idle/clean box for ``repo``. A *running* candidate
+         costs no extra budget and is always chosen first; a *stopped* one (boots
+         on connect, spends its cores) is chosen only when it fits the headroom.
+      2. Else **create** a fresh box when the intended machine (``new_cores``)
+         fits the headroom.
+      3. Else (no headroom) **recycle** a running *stale* box to reclaim its cores,
+         then reuse-a-stopped-candidate / create -- but only when the reclaim
+         actually makes the activation fit.
+      4. Else **pressure**: the pool is full and nothing is recyclable -- surface
+         it (``N/M cores``) rather than silently over-provision or fail opaquely.
+
+    Pure + side-effect-free (a planner, not an executor). ``new_cores`` is the
+    intended new box's core cost; ``0``/unknown is treated as a conservative ``1``
+    so a full pool still blocks a create. Budget-correct: no returned action
+    pushes ``spent`` past the ceiling.
+    """
+    needed = new_cores if new_cores > 0 else 1
+    headroom = budget.headroom_cores
+
+    matching = [m for m in members if _repo_matches_codespace(repo, m.repository)]
+    reusable = [m for m in matching if m.disposition in (IDLE, CLEAN)]
+
+    def _reuse_key(m: PoolMember) -> tuple:
+        return (
+            0 if m.running else 1,               # running first (0 extra cores)
+            0 if m.disposition == CLEAN else 1,  # a rescued clean box over a bare idle
+            m.idle_age if m.idle_age is not None else 0.0,  # freshest first
+            m.name,
+        )
+
+    reusable.sort(key=_reuse_key)
+
+    # 1. Reuse a running candidate -- always fits (already spending its cores).
+    running_reuse = next((m for m in reusable if m.running), None)
+    if running_reuse is not None:
+        return AllocationDecision(
+            action=ALLOC_REUSE, codespace=running_reuse.name,
+            reason=(f"reusing running {running_reuse.disposition} CodeSpace "
+                    f"'{running_reuse.name}' for {repo} "
+                    f"(no new create, no extra budget)"),
+            headroom_cores=headroom, needed_cores=0,
+        )
+
+    # A stopped reuse candidate boots on connect -> costs its cores.
+    stopped_reuse = next((m for m in reusable if not m.running), None)
+    stopped_cost = (
+        (stopped_reuse.cores if stopped_reuse.cores > 0 else 1)
+        if stopped_reuse is not None else 0
+    )
+
+    # 2. Reuse a stopped candidate, or create fresh, when it fits the headroom.
+    if stopped_reuse is not None and headroom >= stopped_cost:
+        return AllocationDecision(
+            action=ALLOC_REUSE, codespace=stopped_reuse.name,
+            reason=(f"reusing stopped {stopped_reuse.disposition} CodeSpace "
+                    f"'{stopped_reuse.name}' for {repo} (boots on connect; "
+                    f"{stopped_cost} core(s) fit the {headroom}-core headroom)"),
+            headroom_cores=headroom, needed_cores=stopped_cost,
+        )
+    if headroom >= needed:
+        return AllocationDecision(
+            action=ALLOC_CREATE, codespace=None,
+            reason=(f"no reusable CodeSpace for {repo}; creating fresh "
+                    f"({needed} core(s) fit the {headroom}-core headroom)"),
+            headroom_cores=headroom, needed_cores=needed,
+        )
+
+    # 3. No headroom -- recycle a running stale box to reclaim its cores. Prefer
+    # the activation needing the least reclaim: reuse a stopped candidate if one
+    # exists, else a fresh create.
+    if stopped_reuse is not None:
+        follow, follow_cs, follow_cost = "reuse", stopped_reuse.name, stopped_cost
+    else:
+        follow, follow_cs, follow_cost = "create", None, needed
+
+    stale = [m for m in members if m.disposition == STALE and m.running]
+    stale.sort(key=lambda m: (-(m.idle_age or 0.0), -m.cores, m.name))
+    for m in stale:
+        if headroom + m.cores >= follow_cost:
+            then_verb = (f"reuse '{follow_cs}'" if follow == "reuse"
+                         else "create a fresh box")
+            return AllocationDecision(
+                action=ALLOC_RECYCLE, codespace=m.name,
+                reason=(f"pool full ({budget.spent_cores}/{budget.total_cores} "
+                        f"cores); recycle stale '{m.name}' (+{m.cores} cores) "
+                        f"then {then_verb} for {repo}"),
+                then=follow, then_codespace=follow_cs,
+                headroom_cores=headroom, needed_cores=follow_cost,
+            )
+
+    # 4. Nothing recyclable frees enough -- surface the pressure.
+    return AllocationDecision(
+        action=ALLOC_PRESSURE, codespace=None,
+        reason=(f"pool full: {budget.spent_cores}/{budget.total_cores} cores in "
+                f"use, {headroom} free; no idle/clean box to reuse and no stale "
+                f"box to recycle for {repo}"),
+        headroom_cores=headroom, needed_cores=needed,
+    )
 
 
 def _short_repo(repository: str) -> str:

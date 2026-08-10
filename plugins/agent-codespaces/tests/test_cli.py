@@ -286,15 +286,117 @@ class TestCreateScopeGate:
 
     def test_create_proceeds_when_scope_ok(self):
         import agent_codespaces.__main__ as m
-        # Scope OK -> the gate passes; stub the create so we only prove the gate
-        # doesn't block (return early via --no-wait).
+        from agent_codespaces.pool import build_pool
+        # Scope OK + an empty pool -> the planner returns CREATE, so `create`
+        # proceeds. Stub create so we only prove neither gate blocks (--no-wait).
         info = type("I", (), {"name": "cs-new"})()
+        empty = build_pool(budget_cores=64, codespaces=[], leases=[], markers={})
         with patch.object(m, "_ambient_codespace_scope", return_value=(True, "")), \
              patch.object(m, "load_merged_config", return_value={}), \
+             patch.object(m.pool_mod, "build_pool", return_value=empty), \
              patch.object(m, "create_codespace", return_value=info) as create:
             rc = main(["create", "owner/repo", "--no-wait"])
         assert rc == 0
         create.assert_called_once()
+
+
+class TestCreateReuseGuard:
+    """`create` consults the reuse-before-create / budget planner (Phase 2 /
+    #708) before spending an account slot: it declines to create when a suitable
+    idle box exists or the pool is at budget, and `--force-create` bypasses it."""
+
+    def _decision(self, **kw):
+        from agent_codespaces.pool import AllocationDecision
+        return AllocationDecision(**kw)
+
+    def test_reuse_decision_declines_to_create(self, capsys):
+        import agent_codespaces.__main__ as m
+        from agent_codespaces.pool import ALLOC_REUSE
+        d = self._decision(action=ALLOC_REUSE, codespace="web1",
+                           reason="reusing running idle CodeSpace 'web1'")
+        with patch.object(m, "_ambient_codespace_scope", return_value=(True, "")), \
+             patch.object(m, "load_merged_config", return_value={}), \
+             patch.object(m.pool_mod, "build_pool", return_value=([], None)), \
+             patch.object(m.pool_mod, "plan_allocation", return_value=d), \
+             patch.object(m, "create_codespace") as create:
+            rc = main(["create", "owner/repo"])
+        assert rc == 0
+        create.assert_not_called()                    # reuse -> no new box
+        assert capsys.readouterr().out.strip().endswith("web1")  # box to reuse
+
+    def test_pressure_decision_refuses_with_exit_4(self, capsys):
+        import agent_codespaces.__main__ as m
+        from agent_codespaces.pool import ALLOC_PRESSURE
+        d = self._decision(action=ALLOC_PRESSURE, codespace=None,
+                           reason="pool full: 64/64 cores in use")
+        with patch.object(m, "_ambient_codespace_scope", return_value=(True, "")), \
+             patch.object(m, "load_merged_config", return_value={}), \
+             patch.object(m.pool_mod, "build_pool", return_value=([], None)), \
+             patch.object(m.pool_mod, "plan_allocation", return_value=d), \
+             patch.object(m, "create_codespace") as create:
+            rc = main(["create", "owner/repo"])
+        assert rc == 4
+        create.assert_not_called()
+        assert "pool full" in capsys.readouterr().err
+
+    def test_force_create_bypasses_the_guard(self):
+        import agent_codespaces.__main__ as m
+        from agent_codespaces.pool import ALLOC_REUSE
+        # A REUSE decision would normally block -- but --force-create never even
+        # consults the planner, so create runs.
+        info = type("I", (), {"name": "cs-new"})()
+        d = self._decision(action=ALLOC_REUSE, codespace="web1", reason="reuse")
+        with patch.object(m, "_ambient_codespace_scope", return_value=(True, "")), \
+             patch.object(m, "load_merged_config", return_value={}), \
+             patch.object(m.pool_mod, "plan_allocation", return_value=d) as plan, \
+             patch.object(m, "create_codespace", return_value=info) as create:
+            rc = main(["create", "owner/repo", "--no-wait", "--force-create"])
+        assert rc == 0
+        create.assert_called_once()
+        plan.assert_not_called()                      # guard skipped entirely
+
+    def test_planner_failure_degrades_to_plain_create(self):
+        import agent_codespaces.__main__ as m
+        # Any planner error must not wedge a legit create -- it proceeds.
+        info = type("I", (), {"name": "cs-new"})()
+        with patch.object(m, "_ambient_codespace_scope", return_value=(True, "")), \
+             patch.object(m, "load_merged_config", return_value={}), \
+             patch.object(m.pool_mod, "build_pool", side_effect=RuntimeError("gh down")), \
+             patch.object(m, "create_codespace", return_value=info) as create:
+            rc = main(["create", "owner/repo", "--no-wait"])
+        assert rc == 0
+        create.assert_called_once()
+
+
+class TestAllocateCommand:
+    """`agent-codespaces allocate <repo>` surfaces the venue-request decision
+    (Phase 2 / #708) -- advisory, JSON or human, exit 4 on pressure."""
+
+    def test_allocate_json_emits_decision(self, capsys):
+        import agent_codespaces.__main__ as m
+        from agent_codespaces.pool import ALLOC_REUSE, AllocationDecision
+        d = AllocationDecision(action=ALLOC_REUSE, codespace="web1",
+                               reason="reusing 'web1'")
+        with patch.object(m, "load_merged_config", return_value={}), \
+             patch.object(m.pool_mod, "build_pool", return_value=([], None)), \
+             patch.object(m.pool_mod, "plan_allocation", return_value=d):
+            rc = main(["allocate", "owner/repo", "--json"])
+        assert rc == 0
+        out = json.loads(capsys.readouterr().out.strip())
+        assert out["action"] == "reuse"
+        assert out["codespace"] == "web1"
+
+    def test_allocate_pressure_exits_4(self, capsys):
+        import agent_codespaces.__main__ as m
+        from agent_codespaces.pool import ALLOC_PRESSURE, AllocationDecision
+        d = AllocationDecision(action=ALLOC_PRESSURE, codespace=None,
+                               reason="pool full")
+        with patch.object(m, "load_merged_config", return_value={}), \
+             patch.object(m.pool_mod, "build_pool", return_value=([], None)), \
+             patch.object(m.pool_mod, "plan_allocation", return_value=d):
+            rc = main(["allocate", "owner/repo"])
+        assert rc == 4
+        assert "pressure" in capsys.readouterr().out
 
 
 # --- Top-level --project (command-surface <repo> <slug> surface) ---
