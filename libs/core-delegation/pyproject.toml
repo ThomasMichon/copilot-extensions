@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-core-delegation"
+version = "0.1.0-dev1"
+description = "Generic client transport to delegate a Copilot CLI plugin's heavy core over a tokened, discovered IPC seam"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Thomas Michon" }
+]
+# No runtime dependencies beyond stdlib -- pure library. Discovery is provided by
+# endpoint-rendezvous, which a consuming package vendors alongside this module (so
+# there is no distribution dependency to resolve for a standalone plugin install).
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 99
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106"]  # asserts + fake tokens are the point in tests
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
