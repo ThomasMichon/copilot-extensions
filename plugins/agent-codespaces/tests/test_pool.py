@@ -409,6 +409,67 @@ def test_picker_stream_frames_carry_banner():
     assert summ and summ[0]["summary"]["banner_text"] == "scope missing"
 
 
+def test_orphaned_claim_flagged_when_worktree_path_gone(tmp_path):
+    """3b: a #897 claim whose owner worktree PATH is gone reads as **orphaned** --
+    ``occupancy`` becomes ``orphan`` (magenta in the pivot) while ``disposition``
+    stays in-use (so Release still offers to free the stale lock), and the
+    ``worktree`` column surfaces the claim's worktree dir id."""
+    from agent_codespaces.pool import picker_payload
+    now = time.time()
+    gone = str(tmp_path / "worktrees" / "tmichon-cloud1-win-DEAD-9f3a")  # never created
+    claim = Lease(codespace="held", effort="", pid=1, host="dev6",
+                  acquired_at=now, heartbeat_at=now, worktree=gone)
+    members, budget = build_pool(
+        budget_cores=64, now=now, codespaces=[_cs("held", state="Available")],
+        leases=[claim], markers={},
+    )
+    m = members[0]
+    assert m.disposition == IN_USE       # a lease exists -> still in-use
+    assert m.orphaned is True            # ...but its worktree is positively gone
+    e = picker_payload(members, budget)["entries"][0]
+    assert e["orphaned"] is True
+    assert e["occupancy"] == "orphan"    # -> the magenta ORPHAN palette cell
+    assert e["disposition"] == IN_USE    # unchanged: Release verb still gates on
+    assert e["worktree"] == "tmichon-cloud1-win-DEAD-9f3a"  # which lock is stale
+
+
+def test_live_claim_not_flagged_orphaned(tmp_path):
+    """A claim whose owner worktree still exists on disk is NOT orphaned;
+    ``occupancy`` mirrors the disposition and the worktree dir id surfaces."""
+    from agent_codespaces.pool import picker_payload
+    now = time.time()
+    live = tmp_path / "worktrees" / "tmichon-cloud1-win-LIVE-1a2b"
+    live.mkdir(parents=True)
+    claim = Lease(codespace="held", effort="", pid=1, host="dev6",
+                  acquired_at=now, heartbeat_at=now, worktree=str(live))
+    members, budget = build_pool(
+        budget_cores=64, now=now, codespaces=[_cs("held", state="Available")],
+        leases=[claim], markers={},
+    )
+    assert members[0].orphaned is False
+    e = picker_payload(members, budget)["entries"][0]
+    assert e["orphaned"] is False
+    assert e["occupancy"] == IN_USE      # mirrors disposition when not orphaned
+    assert e["worktree"] == "tmichon-cloud1-win-LIVE-1a2b"
+
+
+def test_advisory_borrow_never_orphaned():
+    """An advisory borrow (effort owner, no worktree path) is never orphan-flagged
+    -- ``_holder_worktree_gone`` only positively-kills an absolute-path owner."""
+    from agent_codespaces.pool import picker_payload
+    now = time.time()
+    borrow = Lease(codespace="held", effort="my-effort", pid=1, host="dev6",
+                   acquired_at=now, heartbeat_at=now)  # worktree="" (advisory)
+    members, budget = build_pool(
+        budget_cores=64, now=now, codespaces=[_cs("held", state="Available")],
+        leases=[borrow], markers={},
+    )
+    assert members[0].orphaned is False
+    e = picker_payload(members, budget)["entries"][0]
+    assert e["occupancy"] == IN_USE
+    assert e["worktree"] == "my-effort"  # advisory borrow surfaces via effort id
+
+
 def test_picker_payload_friendly_name_and_subtitle():
     import time as _t
     from agent_codespaces.pool import picker_payload
