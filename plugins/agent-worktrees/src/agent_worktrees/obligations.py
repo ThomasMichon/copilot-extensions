@@ -28,14 +28,22 @@ from __future__ import annotations
 from typing import Literal
 
 #: The disposition of an outbound resource obligation.
-Disposition = Literal["active", "at-rest", "released"]
+Disposition = Literal["active", "at-rest", "released", "abandoned"]
 
 ACTIVE: Disposition = "active"
 AT_REST: Disposition = "at-rest"
 RELEASED: Disposition = "released"
+#: The reclaim sweep's verdict (Phase 4): the claim's holder is **provably gone**
+#: and its resource **provably safe**, so the never-wedge sweep reclaimed the
+#: obligation and re-homed it to a durable owner rather than let it freeze the
+#: owner's finalize forever. Distinct from ``released`` (a *clean* hand-back) and
+#: from ``at-rest`` (the resource's *own* safe verdict) -- ``abandoned`` records
+#: an *involuntary* reclaim (worth surfacing/auditing). Does not block finalize;
+#: not held. Only the sweep assigns it (never a resource's own hook).
+ABANDONED: Disposition = "abandoned"
 
 #: Every recognized disposition value.
-DISPOSITIONS: tuple[Disposition, ...] = (ACTIVE, AT_REST, RELEASED)
+DISPOSITIONS: tuple[Disposition, ...] = (ACTIVE, AT_REST, RELEASED, ABANDONED)
 
 #: The diagnostic-context key the lease record carries the disposition under.
 #: The lease store already round-trips ``context`` (a str->str map) through
@@ -47,12 +55,13 @@ CONTEXT_KEY = "disposition"
 #: Canonical dispositions that mean the owner still **holds** the resource (claim
 #: not torn down) -- both ``active`` and ``at-rest``. Inputs are normalized to a
 #: canonical value before membership is checked, so the empty/unknown legacy case
-#: (which normalizes to ``active``) is held.
+#: (which normalizes to ``active``) is held. ``released`` and ``abandoned`` are
+#: not held (the claim is torn down / reclaimed).
 _HELD: frozenset[str] = frozenset({ACTIVE, AT_REST})
 
 #: Canonical dispositions that **block finalize** -- unsettled work still rides on
 #: the resource. Inputs normalize first, so a missing/unknown value (-> ``active``)
-#: is conservatively blocking.
+#: is conservatively blocking. ``at-rest``/``released``/``abandoned`` do not block.
 _UNSETTLED: frozenset[str] = frozenset({ACTIVE})
 
 
@@ -122,6 +131,28 @@ def is_at_rest(value: object) -> bool:
 
 def is_released(value: object) -> bool:
     return normalize(value) == RELEASED
+
+
+def is_abandoned(value: object) -> bool:
+    """True when the reclaim sweep abandoned this obligation (Phase 4)."""
+    return normalize(value) == ABANDONED
+
+
+# ── The never-wedge reclaim sweep (Phase 4) ──────────────────────────────────
+
+def should_abandon(*, gone: bool | None, safe: bool | None) -> bool:
+    """Decide whether the reclaim sweep may abandon an obligation.
+
+    The never-wedge belt beneath the accountable gate: an ``active`` obligation
+    may be reclaimed **only** when its holder is **provably gone** (``gone is
+    True``) **and** its resource is **provably safe** (``safe is True``). Both
+    are tri-state (``True`` / ``False`` / ``None``=unconfirmed); anything short
+    of a definitive *gone-and-safe* leaves the obligation alone -- an
+    unconfirmed holder or an unproven-safe resource is **never** reclaimed (the
+    network / a missing probe must never turn "unknown" into "abandon"). This
+    mirrors the claimant tri-state contract: unknown is spare.
+    """
+    return gone is True and safe is True
 
 
 def from_context(context: object) -> Disposition:

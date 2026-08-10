@@ -5465,6 +5465,8 @@ def cmd_claims(args: argparse.Namespace) -> int:
                        'Usage: claims settle <ref> [--released]')
             return 2
         return _claims_settle(args, target[1])
+    if target and target[0] == "sweep":
+        return _claims_sweep(args)
     worktree_id = target[0] if target else None
     return _claims_show(args, worktree_id)
 
@@ -5663,6 +5665,112 @@ def _claims_settle(args: argparse.Namespace, ref: str) -> int:
         _json_output({"worktree_id": wt_id, "ref": ref, "disposition": disposition})
         return 0
     print(f"settled outbound claim {ref} on {wt_id} -> {disposition}")
+    return 0
+
+
+def _load_claim_child_record(
+    ref: str, config: cfg.Config,
+) -> tuple[tracking.WorktreeRecord | None, bool]:
+    """Load the tracking record for a worktree-claim's child ref (same-machine).
+
+    Returns ``(record_or_None, judgeable)``. ``judgeable`` is False for a
+    cross-machine child (this machine cannot see it -- the sweep must defer to
+    the lease mirror). A same-machine child that has no local record yields
+    ``(None, True)`` -- judgeable, and gone.
+    """
+    parsed = tracking.parse_claim_ref(ref)
+    if parsed is None:
+        return (None, False)
+    if parsed.machine and parsed.machine != config.machine:
+        return (None, False)  # cross-machine -> not judgeable here
+    if parsed.machine and parsed.project:
+        path = (cfg.project_dir(parsed.project) / "worktrees"
+                / f"{parsed.worktree_id}.yaml")
+    else:  # bare/same-repo ref
+        path = cfg.tracking_dir() / f"{parsed.worktree_id}.yaml"
+    if not path.exists():
+        return (None, True)
+    try:
+        return (tracking.load_record(path), True)
+    except Exception:
+        return (None, False)
+
+
+def _claims_sweep(args: argparse.Namespace) -> int:
+    """Never-wedge reclaim sweep over local ledgers (resource-obligation Ph4).
+
+    Scans every local worktree record and, for each **active** ``worktree``-kind
+    obligation whose child is **provably gone AND provably safe**, flips it to
+    ``abandoned`` so a crashed/missed settlement can never freeze the owner's
+    finalize forever. The per-claim verdict is conservative and same-machine:
+
+    * **gone** -- the child's local record is absent, or its status is terminal
+      (``finalized``/``orphaned``); an active child (a live holder may still be
+      working) is *not* gone. A cross-machine child is not judgeable here
+      (deferred to the lease mirror) and is left alone.
+    * **safe** -- only a **finalized** child is provably safe (its finalize
+      verified content upstream). An ``orphaned`` child (push failed) is *unsafe*;
+      an absent/active child is *unproven* -- both leave the obligation intact.
+
+    So the sweep reclaims exactly the "child finalized but the parent's claim
+    was never flipped" gap (a missed/failed ``_settle_parent_obligation``),
+    never abandoning on a guess. **Dry-run by default**; ``--apply`` writes.
+    (Process-liveness of an active holder + cross-machine reclaim are future
+    work; today an active or cross-machine claim is spared.)
+    """
+    config = cfg.load_config()
+    apply = getattr(args, "apply", False)
+    from . import claimant as claimant_mod
+
+    def gone_of(ref: str) -> bool | None:
+        # Reuse the same-machine claimant-liveness resolver (record absent /
+        # terminal status / worktree dir removed -> gone; cross-machine -> None).
+        alive = claimant_mod.local_claimant_alive(ref)
+        return None if alive is None else (not alive)
+
+    def safe_of(claim: tracking.ResourceClaim) -> bool | None:
+        if claim.kind != "worktree":
+            return None  # only a worktree child is provable within agent-worktrees
+        child, judgeable = _load_claim_child_record(claim.ref, config)
+        if not judgeable or child is None:
+            return None
+        if child.status == "finalized":
+            return True
+        if child.status == "orphaned":
+            return False
+        # active/pushed (a crashed holder whose dir may be gone): proving safety
+        # needs a branch-merged check against the child's project upstream --
+        # deferred as a follow-up. Unproven -> spare.
+        return None
+
+    reclaimed: list[dict[str, str]] = []
+    tdir = cfg.tracking_dir()
+    for rec in tracking.list_records(tdir):
+        # Compute candidates without saving; apply-mode persists per record.
+        before = {c.ref: c.state for c in rec.resources}
+        flipped = tracking.sweep_abandoned_obligations(
+            rec, gone_of=gone_of, safe_of=safe_of, save=apply,
+        )
+        for c in flipped:
+            reclaimed.append({"owner": rec.worktree_id, "kind": c.kind,
+                              "ref": c.ref})
+        if flipped and not apply:
+            # dry-run: restore in-memory state we mutated (no save happened)
+            for c in rec.resources:
+                if c.ref in before:
+                    c.state = before[c.ref]
+
+    if args.json:
+        _json_output({"applied": apply, "reclaimed": reclaimed,
+                      "count": len(reclaimed)})
+        return 0
+    if not reclaimed:
+        print("claims sweep: no abandonable obligations found.")
+        return 0
+    verb = "Abandoned" if apply else "Would abandon (dry-run; pass --apply)"
+    print(f"{verb} {len(reclaimed)} obligation(s):")
+    for r in reclaimed:
+        print(f"  · {r['owner']}: {r['kind']} {r['ref']}")
     return 0
 
 
@@ -12711,10 +12819,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("target", nargs="*", default=None,
                    help="[worktree_id] to show, OR 'add <kind> <ref>' to journal "
                         "a new outbound claim, OR 'release <ref>' to retire one, "
-                        "OR 'settle <ref>' to mark it at-rest (settled) / released")
+                        "OR 'settle <ref>' to mark it at-rest (settled) / released, "
+                        "OR 'sweep' to reclaim provably-gone+safe obligations "
+                        "(never-wedge)")
     p.add_argument("--remove", action="store_true",
                    help="with release: drop the claim entry entirely instead of "
                         "marking it released")
+    p.add_argument("--apply", action="store_true",
+                   help="with sweep: write the abandonments (default: dry-run "
+                        "preview only)")
     p.add_argument("--note", default="",
                    help="with add: an optional human label for the claim")
     p.add_argument("--released", action="store_true",
