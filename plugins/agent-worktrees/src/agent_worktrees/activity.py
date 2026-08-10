@@ -17,6 +17,8 @@ Events are intentionally high-level:
 
   worktree_created          a new worktree + branch was created
   worktree_resumed          an existing worktree was resumed via the picker
+  launcher_started          the session launcher began a launch flow (carries
+                            launch_id + the setup-log path)
   session_started           a Copilot session registered against a worktree
   session_ended             a Copilot session deregistered
   copilot_exited            the Copilot process exited (launcher)
@@ -28,7 +30,11 @@ Events are intentionally high-level:
                             (running inside it, or a live session was detected)
   worktree_reaped           cleanup removed a worktree's dir/branch/session
 
-Every record carries ``worktree_id`` and (where known) ``session_id``.
+Every record carries ``worktree_id`` and (where known) ``session_id`` and
+``launch_id``. ``launch_id`` is a short correlation token minted once at
+launcher entry and threaded through the whole flow (launcher -> mux env ->
+session hooks -> post-exit), so ``agent-worktrees activity --launch-id <id>``
+returns one launch flow deterministically rather than by timestamp guesswork.
 
 Logging must never break the worktree lifecycle: every public function
 swallows its own exceptions.
@@ -66,6 +72,7 @@ def log_event(
     *,
     worktree_id: str | None = None,
     session_id: str | None = None,
+    launch_id: str | None = None,
     source: str = "python",
     **fields: object,
 ) -> None:
@@ -75,6 +82,9 @@ def log_event(
         event: One of the documented event names (see module docstring).
         worktree_id: The worktree this event concerns.
         session_id: The Copilot session id, if known.
+        launch_id: The launch-flow correlation id, if known. Minted once at
+            launcher entry and threaded through the flow so every record of one
+            launch shares it (``agent-worktrees activity --launch-id``).
         source: Originating component ("python" or "launcher").
         **fields: Extra context (branch, reason, exit_code, ...). ``None``
             values are dropped.
@@ -87,6 +97,7 @@ def log_event(
             "event": event,
             "worktree_id": worktree_id,
             "session_id": session_id,
+            "launch_id": launch_id,
             "pid": os.getpid(),
             "host": _HOSTNAME,
             "source": source,
@@ -191,6 +202,7 @@ def read_events(
     *,
     since: datetime | None = None,
     worktree_id: str | None = None,
+    launch_id: str | None = None,
     event: str | None = None,
     limit: int | None = None,
 ) -> list[dict]:
@@ -210,6 +222,8 @@ def read_events(
                 except Exception:
                     continue
                 if worktree_id and rec.get("worktree_id") != worktree_id:
+                    continue
+                if launch_id and rec.get("launch_id") != launch_id:
                     continue
                 if event and rec.get("event") != event:
                     continue
@@ -237,7 +251,7 @@ def _fmt_local(ts_iso: str) -> str:
 
 
 # Context fields worth surfacing in the human-readable table, in order.
-_EXTRA_KEYS = ("reason", "branch", "exit_code", "resume_count", "state", "mux")
+_EXTRA_KEYS = ("reason", "branch", "exit_code", "resume_count", "state", "mux", "launch_id")
 
 
 def render_events(events: list[dict]) -> str:
@@ -278,6 +292,7 @@ def cmd_activity(args) -> int:
     events = read_events(
         since=since,
         worktree_id=getattr(args, "worktree_id", None),
+        launch_id=getattr(args, "launch_id", None),
         event=getattr(args, "event", None),
         limit=getattr(args, "lines", None),
     )
@@ -309,6 +324,7 @@ def cmd_activity_log(args) -> int:
         event,
         worktree_id=getattr(args, "worktree_id", None),
         session_id=getattr(args, "session_id", None),
+        launch_id=getattr(args, "launch_id", None),
         source=getattr(args, "source", None) or "launcher",
         **fields,
     )
