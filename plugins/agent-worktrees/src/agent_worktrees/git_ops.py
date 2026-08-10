@@ -864,6 +864,16 @@ def _active_gh_account() -> str | None:
     return accounts[0] if len(accounts) == 1 else None
 
 
+def active_gh_account() -> str | None:
+    """Public accessor for the **active** ``gh`` account login (or None).
+
+    Thin wrapper over the cached internal resolver so other modules -- notably
+    the PR token path -- can apply the same "owner == active account" guard the
+    git auth-args path uses, without reaching for a private symbol.
+    """
+    return _active_gh_account()
+
+
 def list_gh_accounts() -> list[str]:
     """Return the logins of all authenticated ``gh`` accounts (may be empty).
 

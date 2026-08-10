@@ -63,12 +63,52 @@ class TestAccountTokenForSlug:
             "agent_worktrees.repos.account_for_github_slug",
             lambda slug: "host-acct",
         )
+        # Owner differs from the active gh account -> the cross-account mint path.
+        monkeypatch.setattr(
+            "agent_worktrees.git_ops.active_gh_account", lambda: None,
+        )
         monkeypatch.setattr(
             "agent_worktrees.git_ops.gh_token_for_account",
             lambda account: "gh-tok" if account == "host-acct" else None,
         )
         prcfg = cfg.PRConfig(provider="github")
         assert base.account_token_for_slug("example-org/proj", prcfg) == "gh-tok"
+
+    def test_owner_is_active_account_uses_ambient_auth(self, monkeypatch):
+        # When the repo's account IS the active gh account, don't mint/inject a
+        # `--user` token (it can be stale and 401) -- fall through to None so the
+        # provider uses gh's dynamic ambient auth. Regression for the pr-* 401.
+        monkeypatch.setattr(
+            "agent_worktrees.repos.account_for_github_slug",
+            lambda slug: "Host-Acct",
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.git_ops.active_gh_account", lambda: "host-acct",
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.git_ops.gh_token_for_account",
+            lambda account: pytest.fail(
+                "must not mint a --user token when owner == active account"),
+        )
+        prcfg = cfg.PRConfig(provider="github")
+        assert base.account_token_for_slug("example-org/proj", prcfg) is None
+
+    def test_cross_account_still_mints_user_token(self, monkeypatch):
+        # A genuinely different owner still mints that account's token so the PR
+        # authenticates as the owning identity.
+        monkeypatch.setattr(
+            "agent_worktrees.repos.account_for_github_slug",
+            lambda slug: "other-acct",
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.git_ops.active_gh_account", lambda: "host-acct",
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.git_ops.gh_token_for_account",
+            lambda account: "minted" if account == "other-acct" else None,
+        )
+        prcfg = cfg.PRConfig(provider="github")
+        assert base.account_token_for_slug("example-org/proj", prcfg) == "minted"
 
     def test_non_github_provider_is_none(self, monkeypatch):
         # v1 is github-only: other providers keep ambient-auth behavior.
@@ -91,6 +131,9 @@ class TestAccountTokenForSlug:
         monkeypatch.setattr(
             "agent_worktrees.repos.account_for_github_slug",
             lambda slug: "host-acct",
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.git_ops.active_gh_account", lambda: None,
         )
         monkeypatch.setattr(
             "agent_worktrees.git_ops.gh_token_for_account", lambda account: None,
