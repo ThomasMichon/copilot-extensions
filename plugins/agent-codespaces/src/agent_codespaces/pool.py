@@ -408,6 +408,8 @@ def picker_payload(
     budget: Budget,
     *,
     note: str = "",
+    banner: str = "",
+    banner_level: str = "warn",
 ) -> dict:
     """Shape the pool view for the Worktree Picker's **CodeSpaces** pivot (D1).
 
@@ -422,6 +424,11 @@ def picker_payload(
     ``use`` (active agent-use: in-use vs free) signals -- derived, no SSH -- so a
     running-but-idle box reads differently from one an agent is working in. The
     summary carries the budget accounting plus the optional ``note``.
+
+    A non-empty ``banner`` sets the summary's reserved ``banner_text`` /
+    ``banner_level`` keys, which the picker renders as a **prominent** styled
+    alert line (distinct from the plain ``{note}`` summary token) -- the
+    actionable missing-``codespace``-scope notice (#980).
     """
     entries: list[dict] = []
     for m in sorted(members, key=lambda x: (x.repository, x.disposition, x.name)):
@@ -485,6 +492,9 @@ def picker_payload(
         })
     summary = dict(budget.to_dict())
     summary["note"] = note or ""
+    if banner:
+        summary["banner_text"] = banner
+        summary["banner_level"] = banner_level or "warn"
     return {"entries": entries, "summary": summary}
 
 
@@ -493,15 +503,20 @@ def picker_stream_frames(
     budget: Budget,
     *,
     note: str = "",
+    banner: str = "",
+    banner_level: str = "warn",
 ) -> list[dict]:
     """The one-shot NDJSON envelope (D2) for the CodeSpaces pivot's ``--stream``.
 
     Reuses :func:`picker_payload` so the streamed rows carry the **identical**
-    entry/summary shape as the non-streaming ``--picker-json`` payload, then
-    frames them as ``begin`` -> a ``row`` per CodeSpace -> ``summary`` ->
-    ``done``. ``begin.count`` is exact: the pool roster is a single ``gh`` call,
-    so the size is known up front. Pure -- the caller flushes each frame."""
-    payload = picker_payload(members, budget, note=note)
+    entry/summary shape as the non-streaming ``--picker-json`` payload (including
+    any ``banner`` in the summary), then frames them as ``begin`` -> a ``row``
+    per CodeSpace -> ``summary`` -> ``done``. ``begin.count`` is exact: the pool
+    roster is a single ``gh`` call, so the size is known up front. Pure -- the
+    caller flushes each frame."""
+    payload = picker_payload(
+        members, budget, note=note, banner=banner, banner_level=banner_level,
+    )
     entries = payload["entries"]
     frames: list[dict] = [{"type": "begin", "count": len(entries)}]
     for entry in entries:

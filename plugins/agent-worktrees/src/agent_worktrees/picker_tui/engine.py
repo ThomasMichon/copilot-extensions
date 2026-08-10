@@ -6375,6 +6375,29 @@ class TasksView:
         t.append(" " * max(0, width - t.cell_len))
         return t
 
+    def _banner_line(self, summary, width):
+        """A prominent alert line rendered from the provider's summary payload:
+        the reserved ``banner_text`` (+ optional ``banner_level``:
+        info|warn|error). Distinct from the D1 ``summary`` template line -- a
+        styled, unmissable notice (e.g. an actionable missing-``codespace``-scope
+        remedy, #980). ``None`` when the summary carries no banner."""
+        if not summary:
+            return None
+        text = summary.get("banner_text")
+        if not text:
+            return None
+        level = str(summary.get("banner_level") or "warn").strip().lower()
+        icon, style = {
+            "error": ("\u2717", f"bold {C_WARN}"),   # cross mark -> red (error)
+            "warn": ("\u26a0", "#d7af00"),            # warning sign -> amber
+            "info": ("\u2139", C_LABEL),              # info source -> grey
+        }.get(level, ("\u26a0", "#d7af00"))
+        t = Text("  ")
+        t.append(f"{icon} ", style=style)
+        t.append(str(text), style=style)
+        t.append(" " * max(0, width - t.cell_len))
+        return t
+
     def _column_header(self, reg, width):
         """The column-header row for a columns-declaring pivot."""
         t = Text(" ")
@@ -6442,6 +6465,13 @@ class TasksView:
         reg = eng._reg_pivot()
         state, rows, err = eng._task_state()
         add(self._status_row(reg, state, rows, err, width))
+        # A prominent provider alert (e.g. the actionable missing-`codespace`-
+        # scope remedy, #980), rendered from the summary's reserved banner_* keys
+        # -- placed above the D1 summary line so it is unmissable, and shown even
+        # when the list is empty (the scope-gap case).
+        banner_line = self._banner_line(eng._task_summary(), width)
+        if banner_line is not None:
+            add(banner_line)
         # D1: a declarative summary/header line (e.g. budget headroom), when the
         # pivot declares a `summary` template and the provider supplied a summary.
         summary_line = self._summary_line(reg, eng._task_summary(), width)
