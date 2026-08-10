@@ -235,6 +235,40 @@ class TestFinalizeProgress:
         assert frames[-1]["type"] == "done"
 
 
+class TestPoolScopeBanner:
+    """`pool --picker-json` surfaces the missing-`codespace`-scope remedy as a
+    structured **banner** in the summary payload (#980), so the Picker CodeSpaces
+    tab renders an actionable alert instead of an opaque empty list."""
+
+    def _empty_pool(self):
+        from agent_codespaces.pool import build_pool
+        return build_pool(budget_cores=64, codespaces=[], leases=[], markers={})
+
+    def _payload(self, capsys):
+        return json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+
+    def test_scope_missing_emits_banner(self, capsys):
+        import agent_codespaces.__main__ as m
+        with patch.object(m.pool_mod, "build_pool", return_value=self._empty_pool()), \
+             patch.object(m, "_gh_auth_preflight",
+                          return_value=["gh token is missing the 'codespace' "
+                                        "scope -- run: gh auth refresh -h "
+                                        "github.com -s codespace"]):
+            rc = main(["pool", "--picker-json"])
+        assert rc == 0
+        summary = self._payload(capsys)["summary"]
+        assert "codespace" in summary["banner_text"]
+        assert summary["banner_level"] == "warn"
+
+    def test_scope_ok_emits_no_banner(self, capsys):
+        import agent_codespaces.__main__ as m
+        with patch.object(m.pool_mod, "build_pool", return_value=self._empty_pool()), \
+             patch.object(m, "_gh_auth_preflight", return_value=[]):
+            rc = main(["pool", "--picker-json"])
+        assert rc == 0
+        assert "banner_text" not in self._payload(capsys)["summary"]
+
+
 # --- Top-level --project (command-surface <repo> <slug> surface) ---
 
 

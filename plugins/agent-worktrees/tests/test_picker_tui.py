@@ -5168,6 +5168,69 @@ def test_registered_pivot_columns_and_summary_render(tmp_path, monkeypatch):
     asyncio.run(run())
 
 
+def test_registered_pivot_banner_renders(tmp_path, monkeypatch):
+    """#980: a provider that puts ``banner_text`` in its summary payload gets a
+    prominent alert line rendered above the list -- shown even when the entry
+    list is EMPTY (the missing-``codespace``-scope case, where the pivot would
+    otherwise look like an opaque empty tab)."""
+    from agent_worktrees.picker_tui import pivots as pivots_mod
+
+    d = tmp_path / "pivots"
+    d.mkdir()
+    _write_codespaces_manifest(d)
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+
+    banner = "gh token is missing the 'codespace' scope -- run: gh auth refresh"
+    summary = {
+        "spent_cores": 0, "total_cores": 64, "headroom_cores": 64,
+        "banner_text": banner, "banner_level": "warn",
+    }
+
+    async def run():
+        app = PickerApp(_fixture_source(), live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            reg = scr.registered_pivots[0]
+            # No entries: the scope-gap case (gh returns an empty roster).
+            scr._pivot_runtimes[reg.name] = _FakeRuntimeSummary([], summary)
+            scr.htab = scr.htabs.index("CodeSpaces")
+            scr.sel = scr.default_sel()
+            scr.refresh()
+            await pilot.pause()
+
+            plain = pcap.screen_to_text(scr)
+            # The banner (with its actionable remedy) is unmissable despite the
+            # empty list.
+            assert "codespace' scope" in plain
+            assert "gh auth refresh" in plain
+
+    asyncio.run(run())
+
+
+def test_banner_line_helper_levels():
+    """``_banner_line`` renders only when the summary carries ``banner_text``,
+    and maps ``banner_level`` to an icon (⚠ warn / ✗ error / ℹ info)."""
+    # Resolve the render component that owns _banner_line regardless of its
+    # exact class name (it lives beside _summary_line).
+    import agent_worktrees.picker_tui.engine as eng_mod
+    holder = None
+    for obj in vars(eng_mod).values():
+        if isinstance(obj, type) and hasattr(obj, "_banner_line") and hasattr(obj, "_summary_line"):
+            holder = obj
+            break
+    assert holder is not None
+    inst = holder.__new__(holder)
+    assert inst._banner_line({}, 80) is None
+    assert inst._banner_line({"banner_text": ""}, 80) is None
+    warn = inst._banner_line({"banner_text": "scope missing"}, 80)
+    assert warn is not None and "\u26a0" in warn.plain and "scope missing" in warn.plain
+    err = inst._banner_line({"banner_text": "boom", "banner_level": "error"}, 80)
+    assert "\u2717" in err.plain
+    info = inst._banner_line({"banner_text": "fyi", "banner_level": "info"}, 80)
+    assert "\u2139" in info.plain
+
+
 def test_screenshot_pivot_selection_and_wait(tmp_path, monkeypatch):
     """The snapshot tool can target a specific pivot and wait for its registered
     ``list`` to load, so a headless capture shows the CodeSpaces tab with real

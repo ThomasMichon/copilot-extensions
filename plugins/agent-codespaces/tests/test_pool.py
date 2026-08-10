@@ -380,6 +380,35 @@ def test_picker_payload_note_passthrough():
     assert "codespace" in payload["summary"]["note"]
 
 
+def test_picker_payload_banner_sets_reserved_summary_keys():
+    """#980: a non-empty ``banner`` rides the summary's reserved ``banner_text`` /
+    ``banner_level`` keys (which the picker renders as a prominent alert), and is
+    absent when no banner is supplied."""
+    from agent_codespaces.pool import picker_payload
+    members, budget = build_pool(budget_cores=64, codespaces=[], leases=[], markers={})
+    # No banner -> no reserved keys.
+    plain = picker_payload(members, budget)
+    assert "banner_text" not in plain["summary"]
+    assert "banner_level" not in plain["summary"]
+    # With a banner -> reserved keys carry the text + (defaulted) level.
+    msg = "gh token is missing the 'codespace' scope -- run: gh auth refresh"
+    p = picker_payload(members, budget, banner=msg)
+    assert p["summary"]["banner_text"] == msg
+    assert p["summary"]["banner_level"] == "warn"
+    p2 = picker_payload(members, budget, banner="boom", banner_level="error")
+    assert p2["summary"]["banner_level"] == "error"
+
+
+def test_picker_stream_frames_carry_banner():
+    """The D2 stream envelope's ``summary`` frame carries the same banner as the
+    one-shot payload (so a streamed/live pivot shows the scope alert too)."""
+    from agent_codespaces.pool import picker_stream_frames
+    members, budget = build_pool(budget_cores=64, codespaces=[], leases=[], markers={})
+    frames = picker_stream_frames(members, budget, banner="scope missing")
+    summ = [f for f in frames if f["type"] == "summary"]
+    assert summ and summ[0]["summary"]["banner_text"] == "scope missing"
+
+
 def test_picker_payload_friendly_name_and_subtitle():
     import time as _t
     from agent_codespaces.pool import picker_payload
