@@ -376,11 +376,21 @@ def account_token_for_slug(slug: str | None, prcfg) -> str | None:
 
     1. an explicitly configured ``pr.token_command`` / ``pr.token_env`` (the
        vault/env binding) always wins -- unchanged from :func:`resolve_token`;
-    2. else, for the **github** provider only, the repo's resolved account
-       (``repos.account_for_github_slug`` -- explicit ``account:`` override or
-       the derived owner of ``slug``) mints a ``gh`` token
-       (``gh auth token --user <account>`` via ``git_ops.gh_token_for_account``);
+    2. else, for the **github** provider only, when the repo's resolved account
+       differs from the **active** ``gh`` account, mint that account's token
+       (``gh auth token --user <account>`` via ``git_ops.gh_token_for_account``)
+       so a cross-account PR authenticates as the owning identity;
     3. else None -- the provider uses its ambient CLI auth exactly as before.
+
+    **Owner == active account: no override.** When the repo's account *is* the
+    active ``gh`` account, do NOT mint and inject a ``--user`` token: ``gh``
+    already authenticates as that user via its active credential (``gh auth
+    token`` / GCM), and the separately-addressed ``--user`` token can be a
+    stale/rotated value that returns 401 while the active token is valid. So we
+    fall through to None and let the provider use gh's dynamic ambient auth.
+    This mirrors the git auth-args path, which skips injection for the same
+    reason (git_ops, #900) -- keeping PR auth dynamic rather than pinned to a
+    possibly-stale minted token.
 
     v1 is GitHub-only: non-github providers (and github repos with no
     resolvable account) fall straight through to today's behavior, so this is
@@ -395,6 +405,10 @@ def account_token_for_slug(slug: str | None, prcfg) -> str | None:
 
     account = repos.account_for_github_slug(slug)
     if not account:
+        return None
+    # Owner == active gh account -> use ambient auth, not a stale minted token.
+    active = git_ops.active_gh_account()
+    if active and active.casefold() == account.casefold():
         return None
     return git_ops.gh_token_for_account(account)
 
