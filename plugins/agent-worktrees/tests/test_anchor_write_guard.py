@@ -280,6 +280,17 @@ def test_shell_cd_into_anchor_subdir_then_git_write_denies(tmp_path, anchor):
     assert d and d["permissionDecision"] == "deny"
 
 
+def test_shell_cmd_style_cd_slash_d_into_anchor_denies(tmp_path, anchor):
+    # CMD `cd /d <path>` (SHELL_TOOLS includes cmd): the /d flag must be skipped,
+    # not captured as the directory target.
+    gp = anchor[0]["path"]
+    d = guard.decide(
+        {"toolName": "cmd", "cwd": str(tmp_path),
+         "toolArgs": {"command": f'cd /d "{gp}" && git commit -m x'}},
+        env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
 def test_shell_cd_into_anchor_then_read_still_allows(tmp_path, anchor):
     gp = anchor[0]["path"]
     assert guard.decide(_shell(f'cd "{gp}"; git status', tmp_path),

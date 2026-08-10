@@ -136,7 +136,8 @@ def _effective_seg(seg: str) -> str:
 # ``cd <guarded>; git commit`` writes the guarded repo even when the tool cwd is
 # elsewhere -- track it (mirrors anchor_write_guard).
 _CD_SEG = re.compile(
-    r"^\s*(?:cd|chdir|pushd|set-location|sl)\s+(?:-\S+\s+)*[\"']?([^\"';|&]+)",
+    r"^\s*(?:cd|chdir|pushd|set-location|sl)\s+"
+    r"(?:(?:-{1,2}\S+|/[A-Za-z])\s+)*[\"']?([^\"';|&]+)",
     re.IGNORECASE,
 )
 

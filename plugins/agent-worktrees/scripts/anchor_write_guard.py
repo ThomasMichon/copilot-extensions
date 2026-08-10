@@ -157,7 +157,8 @@ def _effective_seg(seg: str) -> str:
 # segments, so ``cd <anchor>; git commit`` writes the anchor even though the
 # tool's own cwd is elsewhere -- track it so that vector is not a blind spot.
 _CD_SEG = re.compile(
-    r"^\s*(?:cd|chdir|pushd|set-location|sl)\s+(?:-\S+\s+)*[\"']?([^\"';|&]+)",
+    r"^\s*(?:cd|chdir|pushd|set-location|sl)\s+"
+    r"(?:(?:-{1,2}\S+|/[A-Za-z])\s+)*[\"']?([^\"';|&]+)",
     re.IGNORECASE,
 )
 
