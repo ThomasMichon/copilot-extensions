@@ -22,6 +22,8 @@ Events are intentionally high-level:
   session_started           a Copilot session registered against a worktree
   session_ended             a Copilot session deregistered
   copilot_exited            the Copilot process exited (launcher)
+  pane_exited               the wrapped pane command exited (pane wrapper) --
+                            the only mark carrying the mux pane's real exit_code
   mux_attached              a tmux/psmux session was attached/joined (launcher)
   mux_detached              the attach returned -- user detached or session ended
   changes_pushed            worktree content was pushed to the default branch

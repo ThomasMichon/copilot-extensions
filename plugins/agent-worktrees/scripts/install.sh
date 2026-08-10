@@ -1511,7 +1511,7 @@ case "$ACTION" in
         fi
 
         # Remove wrappers + terminal-integration scripts
-        for wrapper in launch-session.cmd launch-session.sh \
+        for wrapper in launch-session.cmd launch-session.sh pane-wrapper.sh \
                        session-options.sh apply-mux-keybinds.sh; do
             rm -f "$BIN_DIR/$wrapper"
         done
