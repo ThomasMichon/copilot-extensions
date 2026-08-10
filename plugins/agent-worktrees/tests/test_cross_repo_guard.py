@@ -86,6 +86,59 @@ def test_shell_read_into_guarded_allows(tmp_path, guarded):
     assert guard.decide(p, env={}, home=tmp_path, guarded_roots=guarded) is None
 
 
+# -- false-positive regressions (dotfiles#1144), mirrored from anchor guard ----
+
+def test_shell_readonly_git_with_fd_redirect_and_path_in_var_allows(
+    tmp_path, guarded
+):
+    gp = guarded[0]["path"]
+    cmd = f'$a="{gp}"; cd $a; git fetch origin --quiet 2>&1 | Out-Null; git log'
+    assert guard.decide(_shell(cmd, tmp_path), env={},
+                        home=tmp_path, guarded_roots=guarded) is None
+
+
+def test_shell_guarded_path_in_quoted_body_allows(tmp_path, guarded):
+    gp = guarded[0]["path"]
+    body = f'mentions `{gp}` and `Set-Content` and `git commit` as prose'
+    cmd = f'gh issue create --repo o/r --body "{body}"'
+    assert guard.decide(_shell(cmd, tmp_path), env={},
+                        home=tmp_path, guarded_roots=guarded) is None
+
+
+def test_shell_fd_dup_redirect_is_not_a_write(tmp_path, guarded):
+    gp = guarded[0]["path"]
+    assert guard.decide(_shell(f'cat "{gp}\\x" 2>&1', tmp_path), env={},
+                        home=tmp_path, guarded_roots=guarded) is None
+
+
+def test_shell_git_read_dashC_guarded_allows(tmp_path, guarded):
+    gp = guarded[0]["path"]
+    assert guard.decide(_shell(f'git -C "{gp}" log --oneline', tmp_path),
+                        env={}, home=tmp_path, guarded_roots=guarded) is None
+
+
+def test_shell_git_commit_from_guarded_cwd_denies(tmp_path, guarded):
+    # A repo-scoped git write with cwd inside the guarded repo (no path named).
+    gp = guarded[0]["path"]
+    d = guard.decide(_shell("git commit -m x", gp), env={},
+                     home=tmp_path, guarded_roots=guarded)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_redirect_into_guarded_still_denies(tmp_path, guarded):
+    gp = guarded[0]["path"]
+    d = guard.decide(_shell(f'echo hi > "{gp}\\note.txt"', tmp_path),
+                     env={}, home=tmp_path, guarded_roots=guarded)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_sudo_prefixed_write_into_guarded_denies(tmp_path, guarded):
+    gp = guarded[0]["path"]
+    d = guard.decide(_shell(f'sudo rm -rf "{gp}/src"', tmp_path),
+                     env={}, home=tmp_path, guarded_roots=guarded)
+    assert d and d["permissionDecision"] == "deny"
+
+
 # --- modes + kill switches ----------------------------------------------------
 
 def test_mode_off_env_allows(tmp_path, guarded):
