@@ -13,9 +13,12 @@ set -uo pipefail
 
 emit_empty() { printf '{}'; exit 0; }
 
-PY="$HOME/.agent-worktrees/.venv/bin/python"
-[[ -x "$PY" ]] || emit_empty
-project="$(PYTHONPATH="" "$PY" -m agent_worktrees get project 2>/dev/null || true)"
+# Resolve the harness project via the agent-worktrees BINSTUB (its own marker),
+# never by reaching into its runtime venv (#1106).
+AW="$(command -v agent-worktrees || true)"
+[[ -n "$AW" ]] || AW="$HOME/.local/bin/agent-worktrees"
+[[ -x "$AW" ]] || emit_empty
+project="$("$AW" get project 2>/dev/null || true)"
 [[ -n "$project" ]] || emit_empty
 
 frag="$HOME/.$project/knowledge-binding.md"

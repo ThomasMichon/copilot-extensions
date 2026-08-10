@@ -10,8 +10,11 @@ $ErrorActionPreference = 'SilentlyContinue'
 
 function Emit-Empty { Write-Output '{}'; exit 0 }
 
-$python = "$env:USERPROFILE\.agent-worktrees\.venv\Scripts\python.exe"
-if (-not (Test-Path $python)) { Emit-Empty }
+$_root = Join-Path $env:USERPROFILE '.agent-codespaces'
+$_ver = ''
+try { $_ver = ([IO.File]::ReadAllText((Join-Path $_root 'current-version'))).Trim() } catch {}
+$python = if ($_ver) { Join-Path $_root ("versions\$_ver\Scripts\python.exe") } else { '' }
+if (-not ($python -and (Test-Path -LiteralPath $python))) { Emit-Empty }
 
 $script = Join-Path $PSScriptRoot 'emit_codespace_map.py'
 if (-not (Test-Path $script)) { Emit-Empty }
