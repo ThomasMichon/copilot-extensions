@@ -17,11 +17,32 @@ set +e
 MIN_RUNTIME="${WORKTREE_PANE_MIN_RUNTIME:-3}"
 WAIT_TIMEOUT="${WORKTREE_PANE_WAIT_TIMEOUT:-60}"
 
+# Optional leading `--aw-wt <id>`: the worktree id for the pane_exited activity
+# mark. Consumed here so it is never forwarded to the wrapped command.
+AW_WT=""
+if [[ "${1:-}" == "--aw-wt" ]]; then
+    AW_WT="${2:-}"
+    shift 2
+fi
+
 START_TIME=$(date +%s)
 "$@"
 EXIT_CODE=$?
 END_TIME=$(date +%s)
 RUNTIME=$((END_TIME - START_TIME))
+
+# Durable pane-exit mark (Tier-A): the only place the mux pane's real exit code
+# is observable (the launcher can't see it -- the child ran inside the pane).
+# Best-effort, fully detached, fail-silent -- must never delay pane teardown.
+# Correlates to the launch flow via WORKTREE_LAUNCH_ID (inherited from the mux
+# server env). Fires on every exit path, before the interrupt/clean shortcuts.
+if command -v agent-worktrees >/dev/null 2>&1; then
+    ( agent-worktrees activity-log pane_exited --source launcher \
+        ${AW_WT:+--worktree-id "$AW_WT"} \
+        ${WORKTREE_LAUNCH_ID:+--launch-id "$WORKTREE_LAUNCH_ID"} \
+        --field "exit_code=$EXIT_CODE" --field "runtime=$RUNTIME" \
+        >/dev/null 2>&1 & ) || true
+fi
 
 # Intentional interrupt -- exit silently so post-exit finalization runs
 if [[ $EXIT_CODE -eq 130 ]]; then
