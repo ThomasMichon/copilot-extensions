@@ -122,7 +122,7 @@ def test_binstub_content_is_independent_of_live_install_state(monkeypatch, tmp_p
         monkeypatch.setattr(inst, "bin_dir", lambda: install_root / "bin")
         assert inst.deploy_binstubs(repo_dir=tmp_path, project="demoproj") is True
         return {
-            name.name: name.read_text()
+            name.name: name.read_bytes()
             for name, _ in inst._project_binstub_specs("demoproj")
         }
 
@@ -132,7 +132,7 @@ def test_binstub_content_is_independent_of_live_install_state(monkeypatch, tmp_p
     assert first == second, "binstub content must not depend on live install state"
     # And it must be the marker-based resolver, not a live-state snapshot.
     if platform.system() == "Windows":
-        content = first["demoproj.cmd"]
+        content = first["demoproj.cmd"].decode()
         assert "current-version" in content
         assert "\\.venv\\" not in content
 
