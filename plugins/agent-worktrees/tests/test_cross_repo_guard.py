@@ -125,6 +125,21 @@ def test_shell_git_commit_from_guarded_cwd_denies(tmp_path, guarded):
     assert d and d["permissionDecision"] == "deny"
 
 
+def test_shell_cd_into_guarded_then_git_commit_denies(tmp_path, guarded):
+    # `cd <guarded>; git commit` from an unrelated tool cwd must be caught.
+    gp = guarded[0]["path"]
+    d = guard.decide(_shell(f'cd "{gp}"; git commit -m x', tmp_path),
+                     env={}, home=tmp_path, guarded_roots=guarded)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_cd_variable_target_does_not_move_cwd(tmp_path, guarded):
+    gp = guarded[0]["path"]
+    cmd = f'$a="{gp}"; cd $a; git commit -m x'
+    assert guard.decide(_shell(cmd, tmp_path), env={},
+                        home=tmp_path, guarded_roots=guarded) is None
+
+
 def test_shell_redirect_into_guarded_still_denies(tmp_path, guarded):
     gp = guarded[0]["path"]
     d = guard.decide(_shell(f'echo hi > "{gp}\\note.txt"', tmp_path),

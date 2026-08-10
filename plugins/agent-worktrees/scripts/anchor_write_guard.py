@@ -152,6 +152,30 @@ def _effective_seg(seg: str) -> str:
     return seg
 
 
+# A command-position directory change (``cd``/``pushd``/``Set-Location``). An
+# in-command ``cd <anchor>`` moves the effective cwd for the *following*
+# segments, so ``cd <anchor>; git commit`` writes the anchor even though the
+# tool's own cwd is elsewhere -- track it so that vector is not a blind spot.
+_CD_SEG = re.compile(
+    r"^\s*(?:cd|chdir|pushd|set-location|sl)\s+"
+    r"(?:(?:-{1,2}\S+|/[A-Za-z])\s+)*[\"']?([^\"';|&]+)",
+    re.IGNORECASE,
+)
+
+
+def _cd_target(eff_seg: str, base: str) -> str | None:
+    """If ``eff_seg`` is a command-position ``cd`` to a *resolvable* path, return
+    the new cwd; else None. A path with a shell variable (``$x``/``%x%``/``~``)
+    is unresolvable -> None (so ``cd $a`` never moves the effective cwd)."""
+    m = _CD_SEG.match(eff_seg)
+    if not m:
+        return None
+    raw = m.group(1).strip().strip("\"'").rstrip()
+    if not raw or "$" in raw or "%" in raw or raw.startswith("~"):
+        return None
+    return raw if os.path.isabs(raw) else os.path.join(base, raw)
+
+
 def _truthy_off(v: str | None) -> bool:
     return (v or "").strip().lower() in {"off", "0", "false", "no"}
 
@@ -348,21 +372,29 @@ def _anchor_token(root_str: str) -> str:
     return re.escape(root_str) + r"(?:[\\/][^\s\"';|&]*)?(?=[\"'\s;|&]|$)"
 
 
+def _cwd_anchor_dict(path: str, canon_anchor: dict) -> dict | None:
+    """The anchor dict whose repo-root contains ``path``, or None. A linked
+    worktree cwd (.git is a file) is exempt. Used for a repo-scoped git write
+    that names no path -- the target is the (effective) cwd's repo."""
+    root = find_repo_root(path)
+    if root is None or is_linked_worktree(root):
+        return None
+    return canon_anchor.get(_canon(str(root)))
+
+
 def _shell_hit(cmd: str, cwd: str, anchors: list[dict]) -> dict | None:
     """Return an anchor hit for a shell command that WRITES into an anchor, or
     None. Fires only on a real write target (redirect target / command-position
-    write verb argument / git mutation via ``-C <anchor>`` or the cwd), never a
-    path merely mentioned in an assignment, ``cd``, or a quoted data payload."""
+    write verb argument / git mutation via ``-C <anchor>`` or the effective cwd),
+    never a path merely mentioned in an assignment, ``cd``, or a quoted data
+    payload."""
     # Cheap early-out: no write-ish token anywhere -> definitely a read.
     if not _WRITE_VERBS.search(cmd):
         return None
-    # Which anchor (if any) the shell's cwd sits inside -- for a repo-scoped git
-    # mutation that names no path. A linked worktree cwd (.git is a file) is
-    # exempt.
-    cwd_anchor: str | None = None
-    root = find_repo_root(cwd)
-    if root is not None and not is_linked_worktree(root):
-        cwd_anchor = _canon(str(root))
+    canon_anchor = {_canon(a["path"]): a for a in anchors if a.get("path")}
+    # Effective cwd -- starts at the tool's cwd and follows in-command ``cd``s so
+    # a repo-scoped git write (no ``-C``) is attributed to the right repo.
+    eff_cwd = cwd
 
     for seg in _SHELL_SEP.split(cmd):
         seg_hay = os.path.normcase(seg.replace("/", os.sep)) if _IS_WIN else seg
@@ -378,23 +410,29 @@ def _shell_hit(cmd: str, cwd: str, anchors: list[dict]) -> dict | None:
             root_str = _canon(gp)
             tok = _anchor_token(root_str)
             # 1. A file redirect whose target is the anchor. ``>>?(?!\s*&)``
-            #    excludes fd-dup redirects (``2>&1``, ``1>&2``) -- those are not
-            #    file writes.
+            #    excludes fd-dup redirects (``2>&1``, ``1>&2``) -- not writes.
             if re.search(r">>?(?!\s*&)\s*[\"']?" + tok, seg_hay):
                 return {**a, "reason": _deny_reason(a["name"], a["path"])}
             # 2. A write cmdlet/verb at COMMAND POSITION with the anchor as an
             #    argument (e.g. ``Set-Content "<anchor>\x"``, ``rm <anchor>``).
             if at_write_cmd and re.search(tok, seg_hay):
                 return {**a, "reason": _deny_reason(a["name"], a["path"])}
-            # 3. A git mutation targeting this anchor: ``git -C <anchor> commit``,
-            #    or (no ``-C``) a repo-scoped git write from a cwd inside it.
-            if git_write:
-                if has_dash_c:
-                    if re.search(r"(?:^|\s)-C\s+[\"']?" + tok, seg_hay,
-                                 re.IGNORECASE):
-                        return {**a, "reason": _deny_reason(a["name"], a["path"])}
-                elif cwd_anchor is not None and cwd_anchor == root_str:
-                    return {**a, "reason": _deny_reason(a["name"], a["path"])}
+            # 3a. A git mutation naming the anchor via ``-C <anchor>``.
+            if git_write and has_dash_c and re.search(
+                r"(?:^|\s)-C\s+[\"']?" + tok, seg_hay, re.IGNORECASE
+            ):
+                return {**a, "reason": _deny_reason(a["name"], a["path"])}
+        # 3b. A repo-scoped git write (no ``-C``) targets the EFFECTIVE cwd's
+        #     repo -- catches ``cd <anchor>; git commit`` as well as a session
+        #     already inside the anchor.
+        if git_write and not has_dash_c:
+            a = _cwd_anchor_dict(eff_cwd, canon_anchor)
+            if a is not None:
+                return {**a, "reason": _deny_reason(a["name"], a["path"])}
+        # Follow an in-command ``cd`` to a resolvable path for later segments.
+        nd = _cd_target(eff, eff_cwd)
+        if nd:
+            eff_cwd = nd
     return None
 
 
