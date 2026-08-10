@@ -58,12 +58,25 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
 import yaml
 
-from . import activity, git_ops, output, permissions, pr_ops, procs, prune, reclaim, sessions, tracking
+from . import (
+    activity,
+    git_ops,
+    locks,
+    output,
+    permissions,
+    pr_ops,
+    procs,
+    prune,
+    reclaim,
+    sessions,
+    tracking,
+)
 from . import claimant as claimant_mod
 from . import config as cfg
 from . import finalize as fin
@@ -6362,17 +6375,39 @@ _LAUNCHER_REAP_VETOES = (
 # Descendant image names that mark a LIVE session under a launcher shell ->
 # spare it. Deliberately broad: over-sparing is safe, over-reaping is not.
 _LIVE_DESCENDANT_NAMES = ("copilot", "node", "tmux", "psmux")
+# Concrete process images the enumerators must snapshot **in addition to**
+# _LAUNCHER_SHELL_NAMES, purely so the live-descendant veto above can see them.
+# They are never reap candidates (the candidate loop gates on
+# _LAUNCHER_SHELL_NAMES); they exist only to make the parent/child table
+# complete. Without them the veto is dead code: a launcher whose foreground
+# child is `psmux attach-session` looked childless, so an attached, working
+# session was reaped out from under its terminal -- killing the launcher shell
+# while its mux client kept rendering, leaving the pane painted but the console
+# handed back to the parent shell.
+_LIVE_DESCENDANT_IMAGES = frozenset({
+    "copilot.exe", "node.exe", "tmux.exe", "psmux.exe",
+    "copilot", "node", "tmux", "psmux",
+})
 
 
 def select_orphan_launcher_shells(
     procs: list[dict], *, now: float, idle_grace_secs: float, self_pid: int,
+    pid_alive: Callable[[int], bool] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Pure predicate: partition launcher shells into (reap, skipped).
 
     ``procs`` is a list of process dicts with keys ``pid``, ``ppid``, ``name``,
     ``cmdline``, ``create_epoch`` (float|None), ``session_id`` (int). Pure and
-    deterministic -- no process I/O -- so the full safety predicate is unit
-    testable. ``skipped`` entries carry a ``reason`` for legibility.
+    deterministic -- no process I/O of its own -- so the full safety predicate is
+    unit testable. ``skipped`` entries carry a ``reason`` for legibility.
+
+    ``pid_alive`` is the **injected** parent-liveness probe. ``procs`` is a
+    filtered snapshot (launcher shells plus live-descendant witnesses), so
+    membership in it cannot answer "is this pid alive?": a launcher started from
+    ``cmd.exe``/``bash``/Windows Terminal has a parent that was never enumerated
+    and so looks parentless, i.e. an orphan. Callers with a real process table
+    pass a probe (``locks.pid_alive``); when it is ``None`` the check degrades to
+    the snapshot-membership test, which keeps this function pure for tests.
     """
     by_pid = {int(p["pid"]): p for p in procs if p.get("pid") is not None}
     children: dict[int, list[int]] = {}
@@ -6434,7 +6469,9 @@ def select_orphan_launcher_shells(
             skipped.append({"pid": pid, "reason": "live-descendant"})  # (3)
             continue
         ppid = int(p.get("ppid", -1) or -1)
-        if ppid > 0 and ppid in by_pid:
+        parent_alive = (ppid in by_pid if pid_alive is None
+                        else (ppid > 0 and bool(pid_alive(ppid))))
+        if ppid > 0 and parent_alive:
             skipped.append({"pid": pid, "reason": "parent-alive"})  # (5)
             continue
         ce = p.get("create_epoch")
@@ -6449,11 +6486,13 @@ def select_orphan_launcher_shells(
 
 
 def _enumerate_launcher_shells() -> list[dict] | None:
-    """Snapshot pwsh/powershell/python processes with command lines.
+    """Snapshot launcher shells **plus live-session witness processes**.
 
     Returns a list of ``{pid, ppid, name, cmdline, create_epoch, session_id}``
     dicts, or ``None`` if enumeration is unavailable. Best-effort and never
-    raises; only the shell images we might reap are returned.
+    raises. The witness images (``_LIVE_DESCENDANT_IMAGES``: psmux/tmux/copilot/
+    node) are included so :func:`select_orphan_launcher_shells` can see a live
+    child; they are never reap candidates themselves.
     """
     if platform.system() == "Windows":
         return _enumerate_launcher_shells_windows()
@@ -6461,9 +6500,12 @@ def _enumerate_launcher_shells() -> list[dict] | None:
 
 
 def _enumerate_launcher_shells_windows() -> list[dict] | None:
+    names = sorted(n for n in (_LAUNCHER_SHELL_NAMES | _LIVE_DESCENDANT_IMAGES)
+                   if n.endswith(".exe"))
+    where = " OR ".join(f"Name='{n}'" for n in names)
     ps = (
         "Get-CimInstance Win32_Process -Filter "
-        "\"Name='pwsh.exe' OR Name='powershell.exe' OR Name='python.exe'\" | "
+        f"\"{where}\" | "
         "Select-Object ProcessId,ParentProcessId,Name,CommandLine,SessionId,"
         "@{n='Create';e={try{([DateTimeOffset]$_.CreationDate)"
         ".ToUnixTimeSeconds()}catch{$null}}} | ConvertTo-Json -Compress -Depth 3"
@@ -6519,7 +6561,7 @@ def _enumerate_launcher_shells_posix() -> list[dict] | None:
             comm = (entry / "comm").read_text(errors="ignore").strip().lower()
         except OSError:
             continue
-        if comm not in _LAUNCHER_SHELL_NAMES:
+        if comm not in _LAUNCHER_SHELL_NAMES and comm not in _LIVE_DESCENDANT_IMAGES:
             continue
         try:
             cmdline = (entry / "cmdline").read_bytes().replace(b"\x00", b" ").decode(
@@ -6566,6 +6608,13 @@ def reap_orphan_launcher_shells(
     layer in :func:`select_orphan_launcher_shells` are candidates, and none are
     killed unless ``dry_run=False``. ``processes`` may be injected for testing.
 
+    Parent liveness is probed against the **real** process table
+    (:func:`locks.pid_alive`) whenever this function did the enumeration itself,
+    so a launcher whose terminal is a non-enumerated image (``cmd.exe``,
+    ``bash``, Windows Terminal) is correctly seen as parented rather than
+    orphaned. Injected ``processes`` keep the snapshot-membership fallback, so
+    tests stay hermetic and deterministic.
+
     Returns::
 
         {"available": bool,                # False when enumeration is impossible
@@ -6575,12 +6624,14 @@ def reap_orphan_launcher_shells(
          "errors":     [{"pid","reason"}]}
     """
     now = time.time() if now is None else now
-    proc_list = processes if processes is not None else _enumerate_launcher_shells()
+    injected = processes is not None
+    proc_list = processes if injected else _enumerate_launcher_shells()
     if proc_list is None:
         return {"available": False, "reaped": [], "candidates": [],
                 "skipped": [], "errors": []}
     reap, skipped = select_orphan_launcher_shells(
-        proc_list, now=now, idle_grace_secs=idle_grace_secs, self_pid=os.getpid())
+        proc_list, now=now, idle_grace_secs=idle_grace_secs, self_pid=os.getpid(),
+        pid_alive=None if injected else locks.pid_alive)
     reaped: list[int] = []
     errors: list[dict] = []
     for p in reap:
