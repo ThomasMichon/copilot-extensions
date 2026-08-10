@@ -36,6 +36,36 @@ def test_pid_alive_self_and_dead():
     assert locks._pid_alive(-1) is False
 
 
+def test_pid_alive_is_public_alias():
+    assert locks.pid_alive(os.getpid()) is True
+    assert locks.pid_alive(999_999_999) is False
+
+
+# ── fail-open: only a definitive "no such process" reads as dead ──
+#
+# _pid_alive doubles as the launcher-shell reaper's parent-liveness veto, where a
+# false "dead" gets a LIVE process killed. An access-denied answer proves the pid
+# exists (you cannot be denied access to a process that isn't there), so it must
+# read alive -- as must any error we can't interpret.
+
+def test_pid_alive_permission_denied_reads_alive():
+    with patch.object(locks.platform, "system", return_value="Linux"), \
+            patch.object(locks.os, "kill", side_effect=PermissionError()):
+        assert locks._pid_alive(4242) is True
+
+
+def test_pid_alive_no_such_process_reads_dead():
+    with patch.object(locks.platform, "system", return_value="Linux"), \
+            patch.object(locks.os, "kill", side_effect=ProcessLookupError()):
+        assert locks._pid_alive(4242) is False
+
+
+def test_pid_alive_unknown_oserror_reads_alive():
+    with patch.object(locks.platform, "system", return_value="Linux"), \
+            patch.object(locks.os, "kill", side_effect=OSError("nope")):
+        assert locks._pid_alive(4242) is True
+
+
 # ── write_lock / read_lock round-trip ──
 
 def test_write_read_roundtrip(tmp_path):

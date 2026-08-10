@@ -87,6 +87,36 @@ def test_live_descendant_is_spared():
     assert _reasons(skipped)[200] == "live-descendant"
 
 
+def test_mux_client_child_spares_the_launcher():
+    """The regression this veto exists for: a launcher whose foreground child is
+    a `psmux attach-session` client is an ATTACHED, working session -> spared.
+
+    The mux client is the only child a joined session's launcher has (the pane's
+    Copilot lives under the mux *server*, a different tree), so if the snapshot
+    omits mux images the launcher looks childless and gets killed -- orphaning
+    the client and handing the console back to the terminal's base shell."""
+    procs = [
+        _p(210),
+        {"pid": 211, "ppid": 210, "name": "psmux.exe",
+         "cmdline": "psmux.exe attach-session -t wt-demo",
+         "create_epoch": OLD, "session_id": 1},
+    ]
+    reap, skipped = _select(procs)
+    assert reap == []
+    assert _reasons(skipped)[210] == "live-descendant"
+
+
+def test_witness_image_is_never_itself_a_candidate():
+    """Enumerating mux/Copilot images to power the veto must not make them
+    reapable -- only _LAUNCHER_SHELL_NAMES are ever candidates."""
+    procs = [
+        {"pid": 220, "ppid": 999999, "name": "psmux.exe",
+         "cmdline": "psmux.exe attach-session -t wt-launch-session",
+         "create_epoch": OLD, "session_id": 1},
+    ]
+    reap, skipped = _select(procs)
+    assert reap == [] and 220 not in _reasons(skipped)
+
 def test_parent_alive_is_spared():
     procs = [
         _p(300, ppid=301),
@@ -97,6 +127,27 @@ def test_parent_alive_is_spared():
     # 300 spared (parent alive); 301 itself is a launcher whose parent (1) is
     # absent -> 301 is the reap candidate.
     assert 300 in _reasons(skipped) and _reasons(skipped)[300] == "parent-alive"
+
+
+def test_parent_alive_probe_spares_launcher_under_non_enumerated_terminal():
+    """A launcher started from cmd.exe/bash/Windows Terminal has a parent that
+    is NOT in the (filtered) snapshot. Snapshot membership therefore cannot mean
+    "dead" -- with a real liveness probe the launcher is correctly parented."""
+    procs = [_p(310, ppid=311)]  # 311 (the terminal) is not enumerated
+    reap, skipped = cli.select_orphan_launcher_shells(
+        procs, now=NOW, idle_grace_secs=3600.0, self_pid=424242,
+        pid_alive=lambda pid: pid == 311)
+    assert reap == []
+    assert _reasons(skipped)[310] == "parent-alive"
+
+
+def test_parent_dead_probe_still_reaps():
+    """The probe must not blanket-spare: a genuinely exited parent still reaps."""
+    procs = [_p(320, ppid=321)]
+    reap, _ = cli.select_orphan_launcher_shells(
+        procs, now=NOW, idle_grace_secs=3600.0, self_pid=424242,
+        pid_alive=lambda pid: False)
+    assert [p["pid"] for p in reap] == [320]
 
 
 def test_service_session_zero_is_spared():
@@ -195,6 +246,54 @@ def test_reaper_unavailable_when_enumeration_none(monkeypatch):
     monkeypatch.setattr(cli, "_enumerate_launcher_shells", lambda: None)
     out = cli.reap_orphan_launcher_shells()
     assert out["available"] is False
+
+
+# ── Enumeration must surface the witnesses the veto depends on ──────────────
+
+def test_windows_enumeration_queries_witness_images(monkeypatch):
+    """The live-descendant veto is only as good as the snapshot feeding it: if
+    the process query omits the mux/Copilot images, the veto is dead code."""
+    seen: dict = {}
+
+    class _Res:
+        stdout = "[]"
+
+    def _run(cmd, **kw):
+        seen["cmd"] = cmd
+        return _Res()
+
+    monkeypatch.setattr(cli.subprocess, "run", _run)
+    cli._enumerate_launcher_shells_windows()
+    query = seen["cmd"][-1]
+    for image in ("pwsh.exe", "python.exe", "psmux.exe", "tmux.exe",
+                  "copilot.exe", "node.exe"):
+        assert f"Name='{image}'" in query
+
+
+def test_posix_enumeration_keeps_witness_images():
+    """The POSIX filter uses the same two sets, so /proc walks admit witnesses."""
+    assert "psmux" in cli._LIVE_DESCENDANT_IMAGES
+    assert "copilot" in cli._LIVE_DESCENDANT_IMAGES
+    # …and every enumerated witness is matched by the veto's substring list.
+    for image in cli._LIVE_DESCENDANT_IMAGES:
+        assert any(m in image for m in cli._LIVE_DESCENDANT_NAMES)
+
+
+def test_real_enumeration_uses_a_live_parent_probe(monkeypatch):
+    """Wiring guard: self-enumerated runs probe real pids; injected process
+    lists stay hermetic (no probe), so tests never depend on the host's pids."""
+    captured: dict = {}
+    real_select = cli.select_orphan_launcher_shells
+
+    def _spy(procs, **kw):
+        captured.setdefault("probes", []).append(kw.get("pid_alive"))
+        return real_select(procs, **kw)
+
+    monkeypatch.setattr(cli, "select_orphan_launcher_shells", _spy)
+    monkeypatch.setattr(cli, "_enumerate_launcher_shells", lambda: [])
+    cli.reap_orphan_launcher_shells()
+    cli.reap_orphan_launcher_shells(processes=[_p(100)], now=NOW)
+    assert captured["probes"] == [cli.locks.pid_alive, None]
 
 
 def test_reap_shells_registered_as_no_project_command():
