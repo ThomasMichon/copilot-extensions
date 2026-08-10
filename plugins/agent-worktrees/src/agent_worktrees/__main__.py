@@ -13367,12 +13367,16 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Read the Copilot sessionStart JSON payload from stdin")
     sp.add_argument("--pid", type=int, default=None,
                     help="PID of the Copilot process (diagnostic only)")
+    sp.add_argument("--launch-id", dest="launch_id", default=None,
+                    help="Launch-flow correlation id (from WORKTREE_LAUNCH_ID)")
 
     sp = sub.add_parser("deregister-session",
                         help="Mark a Copilot session as ended on a worktree")
     sp.add_argument("--worktree-id", default=None,
                     help="Worktree ID (resolved from cwd or launch binding when omitted)")
     sp.add_argument("--session-id", required=True, help="Copilot session ID")
+    sp.add_argument("--launch-id", dest="launch_id", default=None,
+                    help="Launch-flow correlation id (from WORKTREE_LAUNCH_ID)")
 
     # backfill-sessions (one-time registry population)
     sub.add_parser("backfill-sessions",
@@ -13481,6 +13485,8 @@ def build_parser() -> argparse.ArgumentParser:
                          "30m, or an ISO date). Default: all retained.")
     sp.add_argument("--worktree-id", default=None,
                     help="Filter to a single worktree id")
+    sp.add_argument("--launch-id", dest="launch_id", default=None,
+                    help="Filter to a single launch flow (correlation id)")
     sp.add_argument("--event", default=None,
                     help="Filter to a single event type")
     sp.add_argument("--lines", type=int, default=None,
@@ -13496,6 +13502,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("event", help="Event name")
     sp.add_argument("--worktree-id", default=None)
     sp.add_argument("--session-id", default=None)
+    sp.add_argument("--launch-id", dest="launch_id", default=None,
+                    help="Launch-flow correlation id")
     sp.add_argument("--source", default="launcher")
     sp.add_argument("--field", action="append", default=[],
                     help="Extra context as key=value (repeatable)")
@@ -13631,6 +13639,7 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         "session_started",
         worktree_id=wt_id,
         session_id=session_id,
+        launch_id=getattr(args, "launch_id", None) or os.environ.get("WORKTREE_LAUNCH_ID"),
     )
     # Re-seed the status-bar updater for this session's mux (best-effort, no-op
     # off-mux).  The launcher spawns it at psmux create/join, but an attached
@@ -13713,6 +13722,7 @@ def cmd_deregister_session(args: argparse.Namespace) -> int:
         "session_ended",
         worktree_id=wt_id,
         session_id=session_id,
+        launch_id=getattr(args, "launch_id", None) or os.environ.get("WORKTREE_LAUNCH_ID"),
     )
     return 0
 

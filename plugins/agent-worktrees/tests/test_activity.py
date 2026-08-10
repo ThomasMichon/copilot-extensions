@@ -145,6 +145,45 @@ def test_cmd_activity_log_appends(patch_install_dir: Path):
     assert rec["source"] == "launcher"
 
 
+def test_log_event_records_launch_id(patch_install_dir: Path):
+    activity.log_event("launcher_started", worktree_id="wt-1", launch_id="abc123")
+    rec = activity.read_events()[0]
+    assert rec["launch_id"] == "abc123"
+    # launch_id spine key present (None) when not supplied
+    activity.log_event("session_started", worktree_id="wt-1")
+    assert activity.read_events()[-1]["launch_id"] is None
+
+
+def test_read_events_filters_by_launch_id(patch_install_dir: Path):
+    activity.log_event("launcher_started", worktree_id="wt-1", launch_id="flow-a")
+    activity.log_event("mux_attached", worktree_id="wt-1", launch_id="flow-a", mux="create")
+    activity.log_event("launcher_started", worktree_id="wt-2", launch_id="flow-b")
+
+    flow_a = activity.read_events(launch_id="flow-a")
+    assert len(flow_a) == 2
+    assert {r["event"] for r in flow_a} == {"launcher_started", "mux_attached"}
+    assert len(activity.read_events(launch_id="flow-b")) == 1
+    # launch_id composes with other filters
+    assert len(activity.read_events(launch_id="flow-a", event="mux_attached")) == 1
+
+
+def test_cmd_activity_log_forwards_launch_id(patch_install_dir: Path):
+    class Args:
+        event = "launcher_started"
+        worktree_id = "wt-1"
+        session_id = None
+        launch_id = "corr-9"
+        source = "launcher"
+        field = ("mux=psmux", "setup_log=/tmp/setup-1.log")
+
+    rc = activity.cmd_activity_log(Args())
+    assert rc == 0
+    rec = activity.read_events()[0]
+    assert rec["launch_id"] == "corr-9"
+    assert rec["mux"] == "psmux"
+    assert rec["setup_log"] == "/tmp/setup-1.log"
+
+
 def test_cmd_activity_invalid_since(patch_install_dir: Path, capsys):
     class Args:
         since = "nonsense"

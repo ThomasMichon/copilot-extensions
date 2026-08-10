@@ -145,6 +145,18 @@ core of the principles above; a reviewer checks a change against these.
   baked into the primitive's owner. A layer must not draw a higher layer's
   orchestration concern inward. (Serves *Vision agent-fabric
   §Behaviors/handoff-orchestrated-above-primitives*.)
+- **Lifecycle logging is durable, fail-silent, parity-equal, and joinable.**
+  High-level worktree/session lifecycle events go through the single
+  `activity.log_event` writer (or its `activity-log` binstub) into the durable,
+  self-pruning **activity log** — never a hand-formatted line, and never a write
+  that can raise into the flow it observes. The Windows and POSIX launchers emit
+  the **same** marks at the same points (a one-platform mark is a parity defect),
+  each flow stage that can fail emits symmetric **start + end** marks, and one
+  launch flow is tied together by a **`launch_id`** stamped on every record so a
+  trace is reconstructable across process boundaries rather than guessed by
+  timestamp. Verbose per-launch detail is quarantined to the ephemeral setup-log
+  tier. (Serves *Vision plugins/agent-worktrees* — owns the event log + lifecycle
+  hooks; see [`lifecycle-activity-logging.md`](lifecycle-activity-logging.md).)
 - **Session discovery never sweeps the state root.** Linking a worktree to its
   Copilot session(s) resolves subfolders of the session-state root by **exact
   session id** (via the worktree session registry), never by enumerating the
@@ -172,6 +184,7 @@ the exemplars, and the vision it serves):
 | [project-scoped-invocation](project-scoped-invocation.md) | Reach any layer against an explicitly named project (`--project`), CWD-independently, and the per-project `<repo>` binstub as a uniform `<repo> <layer> …` dispatcher over the agent-* fleet |
 | [durable-vs-versioned-runtime](durable-vs-versioned-runtime.md) | When a plugin carries an expensive, warm, stateful runtime (heavy stack + loaded model) that must outlive routine service cutovers: a durable runtime + warm daemon on its own lifecycle, decoupled from the swappable versioned runtime, config-resolved + capability-matched per host |
 | [session-state-access](session-state-access.md) | How worktree↔session discovery stays O(worktrees) at any history size: resolve session-state by exact id via the registry, quarantine the unbounded directory sweep to one explicit user/agent-initiated backfill/recovery verb |
+| [lifecycle-activity-logging](lifecycle-activity-logging.md) | How worktree/session lifecycle events stay a reconstructable trace: the durable-coarse activity log vs. the ephemeral-verbose setup log, one fail-silent writer, cross-platform parity, symmetric start/end marks, and a per-launch `launch_id` correlation key |
 
 The **runtime deploy contract** (venv + binstub + manifest, `uv`, marketplace-vs-
 runtime split) is its own established pattern doc:

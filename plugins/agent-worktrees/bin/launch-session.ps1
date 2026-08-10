@@ -30,6 +30,15 @@ $script:SetupLog = Join-Path $script:SetupLogDir "setup-$PID.log"
 $env:WORKTREE_SETUP_LOG = $script:SetupLog
 $env:APERTURE_SETUP_LOG = $script:SetupLog  # backward compat
 
+# ---------------------------------------------------------------------------
+# Launch-flow correlation id -- minted once per launcher run and threaded
+# through the whole flow (activity marks, the psmux server env, and thus the
+# in-pane session hooks) so one launch is reconstructable via
+# `agent-worktrees activity --launch-id`. Mirrors launch-session.sh.
+# ---------------------------------------------------------------------------
+$script:LaunchId = ([guid]::NewGuid().ToString('N').Substring(0, 12))
+$env:WORKTREE_LAUNCH_ID = $script:LaunchId
+
 function Write-SetupLog {
     param([string]$Message, [string]$Level = 'INFO')
     $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'
@@ -197,6 +206,31 @@ if ($VenvPython -and (Test-Path -LiteralPath $VenvPython)) {
 
 $env:PYTHONPATH = Join-Path $RuntimeDir 'lib'
 $env:PYTHONHOME = $null
+
+# Append a high-level lifecycle event to the persistent Tier-A activity log,
+# at parity with launch-session.sh's activity_log(). Best-effort and fully
+# detached -- a diagnostic write must never block or fail the launch (the
+# fail-silent logging invariant). Extra context is passed as key=value pairs
+# (forwarded as --field). $LaunchId is stamped on every record for correlation.
+function Write-ActivityLog {
+    param(
+        [Parameter(Mandatory)][string]$EventName,
+        [string]$WorktreeId,
+        [string[]]$Fields
+    )
+    if ([string]::IsNullOrWhiteSpace($WorktreeId)) { return }
+    if (-not ($VenvPython -and (Test-Path -LiteralPath $VenvPython))) { return }
+    try {
+        $alArgs = @('-m', 'agent_worktrees', 'activity-log', $EventName,
+                    '--worktree-id', $WorktreeId, '--source', 'launcher')
+        if ($script:LaunchId) { $alArgs += @('--launch-id', $script:LaunchId) }
+        foreach ($kv in $Fields) { if ($kv) { $alArgs += @('--field', $kv) } }
+        Start-Process -FilePath $VenvPython -ArgumentList $alArgs `
+            -WindowStyle Hidden -ErrorAction Stop | Out-Null
+    } catch {
+        Write-SetupLog "activity-log '$EventName' failed: $($_.Exception.Message)" 'WARN'
+    }
+}
 
 function Invoke-AwPostExit {
     param([string]$WorktreeId)
@@ -604,6 +638,15 @@ if ($noMux) {
     Write-SetupLog 'Mux disabled; launching directly'
 }
 
+# Durable launcher-start mark (Tier-A), at parity with launch-session.sh. Fires
+# once the worktree id + mux mode are known, before the (possibly hanging)
+# psmux/handoff step, so a launcher that dies mid-flow still leaves a persistent
+# trace. Records the mux mode and links to the verbose Tier-B setup log.
+Write-ActivityLog -Event 'launcher_started' -WorktreeId $plan.worktree_id -Fields @(
+    "mux=$(if ($noMux) { 'none' } else { 'psmux' })",
+    "setup_log=$script:SetupLog"
+)
+
 $psmuxCmd = Get-Command psmux -ErrorAction SilentlyContinue
 
 # Resolve psmux to a *launchable* executable path. WinGet installs psmux as a
@@ -788,6 +831,7 @@ if (-not $noMux -and $psmuxCmd) {
             exit 0
         }
         Write-Host "Joining existing session: $sessName"
+        Write-ActivityLog -Event 'mux_attached' -WorktreeId $plan.worktree_id -Fields @('mux=join')
         Reset-SshConptyViewport
         # Re-stamp per-session options on (re)connect so a long-lived session
         # picks up the current bar without us owning the global config.
@@ -829,6 +873,7 @@ if (-not $noMux -and $psmuxCmd) {
     }
     $mergedEnv['WORKTREE_SETUP_LOG'] = [string]$script:SetupLog
     $mergedEnv['APERTURE_SETUP_LOG'] = [string]$script:SetupLog
+    if ($script:LaunchId) { $mergedEnv['WORKTREE_LAUNCH_ID'] = [string]$script:LaunchId }
 
     $envFlags = @()
     foreach ($kv in $mergedEnv.GetEnumerator()) {
@@ -866,6 +911,7 @@ if (-not $noMux -and $psmuxCmd) {
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "Failed to create psmux session. Falling back to direct launch."
     } else {
+        Write-ActivityLog -Event 'mux_attached' -WorktreeId $plan.worktree_id -Fields @('mux=create')
         # Session created: stamp per-session options + start its status-bar
         # updater (one per session, before any nested-create early-exit so the
         # bar populates either way).
@@ -892,9 +938,11 @@ if (-not $noMux -and $psmuxCmd) {
         # We're back — either the user detached or the session ended.
         # Only run post-exit if the session is truly gone.
         Write-SetupLog "psmux attach returned, checking session state"
+        Write-ActivityLog -Event 'mux_detached' -WorktreeId $plan.worktree_id
         $null = & $script:AwPsmuxBin has-session -t $sessName 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-SetupLog "psmux session gone, running post-exit checks"
+            Write-ActivityLog -Event 'copilot_exited' -WorktreeId $plan.worktree_id -Fields @('mux=psmux')
 
             # Post-exit finalization
             if ($plan.post_exit -and $plan.worktree_id) {
@@ -933,6 +981,7 @@ try {
         Write-SetupLog "Session interrupted (Ctrl+C)"
     }
 } finally {
+    Write-ActivityLog -Event 'copilot_exited' -WorktreeId $plan.worktree_id -Fields @('mux=none', "exit_code=$copilotExit")
     # ── Post-exit finalization ───────────────────────────────────────────
     if ($plan.post_exit -and $plan.worktree_id) {
         $postExitCode = Invoke-AwPostExit $plan.worktree_id
