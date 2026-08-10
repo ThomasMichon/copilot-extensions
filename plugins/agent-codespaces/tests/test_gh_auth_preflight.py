@@ -57,3 +57,69 @@ def test_preflight_clean_when_all_scoped():
         run.return_value = MagicMock(returncode=0, stdout=status, stderr="")
         msgs = m._gh_auth_preflight()
     assert msgs == []
+
+
+# --- _ambient_codespace_scope (focused ambient gate check, #980) ---------
+
+def test_ambient_scope_ok_when_present():
+    with patch("subprocess.run") as run:
+        run.return_value = MagicMock(returncode=0, stdout=_STATUS, stderr="")
+        ok, remedy = m._ambient_codespace_scope()
+    assert ok is True and remedy == ""
+
+
+def test_ambient_scope_missing_when_absent():
+    status = _STATUS.replace("'codespace', ", "")  # strip the scope everywhere
+    with patch("subprocess.run") as run:
+        run.return_value = MagicMock(returncode=0, stdout=status, stderr="")
+        ok, remedy = m._ambient_codespace_scope()
+    assert ok is False and "gh auth refresh" in remedy
+
+
+def test_ambient_scope_unauthenticated():
+    with patch("subprocess.run") as run:
+        run.return_value = MagicMock(returncode=1, stdout="", stderr="not logged in")
+        ok, remedy = m._ambient_codespace_scope()
+    assert ok is False and "gh auth login" in remedy
+
+
+def test_ambient_scope_degrades_to_ok_when_gh_unrunnable():
+    """A gh that can't be run (FileNotFound/timeout) must NOT block an op."""
+    with patch("subprocess.run", side_effect=FileNotFoundError()):
+        ok, remedy = m._ambient_codespace_scope()
+    assert ok is True and remedy == ""
+
+
+# --- _require_codespace_scope gate + doctor (#980) ------------------------
+
+def test_require_scope_proceeds_when_ok():
+    with patch.object(m, "_ambient_codespace_scope", return_value=(True, "")):
+        assert m._require_codespace_scope("create") is None
+
+
+def test_require_scope_blocks_when_missing(capsys):
+    with patch.object(m, "_ambient_codespace_scope",
+                      return_value=(False, "run: gh auth refresh -s codespace")):
+        rc = m._require_codespace_scope("create a CodeSpace")
+    assert rc == 3
+    err = capsys.readouterr().err
+    assert "Refusing to create a CodeSpace" in err and "gh auth refresh" in err
+
+
+def test_require_scope_escape_hatch(monkeypatch):
+    monkeypatch.setenv("AGENT_CODESPACES_SKIP_SCOPE_CHECK", "1")
+    with patch.object(m, "_ambient_codespace_scope", return_value=(False, "x")):
+        assert m._require_codespace_scope("create") is None
+
+
+def test_doctor_exit_zero_when_clean(capsys):
+    with patch.object(m, "_gh_auth_preflight", return_value=[]):
+        assert m._cmd_doctor() == 0
+    assert "[OK]" in capsys.readouterr().out
+
+
+def test_doctor_exit_nonzero_on_issues(capsys):
+    with patch.object(m, "_gh_auth_preflight",
+                      return_value=["gh token is missing the 'codespace' scope"]):
+        assert m._cmd_doctor() == 1
+    assert "codespace" in capsys.readouterr().err

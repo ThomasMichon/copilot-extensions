@@ -519,6 +519,13 @@ def main(argv: list[str] | None = None) -> int:
     # --- status ---
     sub.add_parser("status", help="Show service status")
 
+    # --- doctor ---
+    sub.add_parser(
+        "doctor",
+        help="Check gh auth + the 'codespace' scope every CodeSpace op needs; "
+             "print remedies and exit non-zero when any account lacks it (#980)",
+    )
+
     # --- version ---
     sub.add_parser("version", help="Show version")
 
@@ -665,6 +672,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_wait(args)
         if args.command == "status":
             return _cmd_status()
+        if args.command == "doctor":
+            return _cmd_doctor()
         if args.command == "version":
             return _cmd_version()
         if args.command == "acp-model-flags":
@@ -2342,6 +2351,28 @@ def _parse_gh_account_scopes(status_text: str) -> dict[str, set[str]]:
     return accounts
 
 
+def _gh_auth_status() -> tuple[int, str]:
+    """Run ``gh auth status`` once -> ``(returncode, combined stdout+stderr)``.
+
+    The single shared ``gh`` invocation behind both the multi-account
+    :func:`_gh_auth_preflight` and the ambient :func:`_ambient_codespace_scope`
+    gate (so there is one call site, not two). Sentinel return codes for a gh
+    that cannot run -- ``-1`` (gh not found) and ``-2`` (timed out) -- let each
+    caller map the can't-check case to its own guidance.
+    """
+    import subprocess as sp
+    try:
+        r = sp.run(
+            ["gh", "auth", "status"],
+            capture_output=True, text=True, timeout=20,
+        )
+    except FileNotFoundError:
+        return -1, ""
+    except sp.TimeoutExpired:
+        return -2, ""
+    return r.returncode, (r.stdout or "") + (r.stderr or "")
+
+
 def _gh_auth_preflight() -> list[str]:
     """Check gh auth + codespace scope. Returns a list of guidance messages
     (empty if all good).
@@ -2351,24 +2382,17 @@ def _gh_auth_preflight() -> list[str]:
     per-account remedy (its ``accounts.yaml`` login flow when recorded) so a
     cross-account list/ssh doesn't fail with a misleading 403/404 (#247/#190).
     """
-    import subprocess as sp
-
     from . import gh_account
 
     msgs: list[str] = []
-    try:
-        result = sp.run(
-            ["gh", "auth", "status"],
-            capture_output=True, text=True, timeout=20,
-        )
-    except FileNotFoundError:
+    rc, combined = _gh_auth_status()
+    if rc == -1:
         return ["gh CLI not found -- install from https://cli.github.com/ "
                 "then run: gh auth login"]
-    except sp.TimeoutExpired:
+    if rc == -2:
         return ["gh auth status timed out -- check your network / gh install."]
 
-    combined = (result.stdout or "") + (result.stderr or "")
-    if result.returncode != 0 or "not logged" in combined.lower():
+    if rc != 0 or "not logged" in combined.lower():
         msgs.append("gh is not authenticated -- run: gh auth login")
         return msgs
 
@@ -2396,6 +2420,79 @@ def _gh_auth_preflight() -> list[str]:
                 f"-- run: gh auth refresh -h github.com -u {login} -s codespace"
             )
     return msgs
+
+
+def _ambient_codespace_scope() -> tuple[bool, str]:
+    """``(ok, remedy)`` for the **ambient** gh token's ``codespace`` scope -- the
+    scope every ``gh codespace`` op needs. Focused (ambient account only, unlike
+    :func:`_gh_auth_preflight` which also checks each mapped account) so a
+    connect/mutating gate fails only on the account the op will actually use.
+
+    **Degrade-safe: biased toward OK.** When ``gh auth status`` can't be run or
+    read, returns ``(True, "")`` so the guard never blocks a legit op on an
+    unreadable status (the underlying ``gh codespace`` call remains the real
+    backstop). ``ok=False`` only on a positively-confirmed missing scope /
+    unauthenticated ambient token.
+    """
+    rc, combined = _gh_auth_status()
+    if rc < 0:
+        return True, ""  # gh can't be run/read -> don't block
+    if rc != 0 or "not logged" in combined.lower():
+        return False, ("gh is not authenticated -- run: "
+                       "gh auth login -h github.com -s codespace")
+    if "codespace" not in combined.lower():
+        return False, ("gh token is missing the 'codespace' scope (needed for "
+                       "CodeSpace operations) -- run: "
+                       "gh auth refresh -h github.com -s codespace")
+    return True, ""
+
+
+def _require_codespace_scope(op: str) -> int | None:
+    """Fail-fast gate before a mutating CodeSpace op (#980).
+
+    When the ambient gh token lacks the ``codespace`` scope, a ``gh codespace``
+    call would otherwise fail with an opaque 403/404 *after* doing work; this
+    surfaces the exact remedy up front instead. Returns an exit code the caller
+    propagates (``if (rc := _require_codespace_scope("create")) is not None:
+    return rc``), or ``None`` to proceed. Escape hatch:
+    ``AGENT_CODESPACES_SKIP_SCOPE_CHECK`` bypasses so the guard never wedges a
+    legit op (mirrors the ``AGENT_CODESPACES_DISABLE_CLAIM`` pattern).
+    """
+    if os.environ.get("AGENT_CODESPACES_SKIP_SCOPE_CHECK"):
+        return None
+    ok, remedy = _ambient_codespace_scope()
+    if ok:
+        return None
+    print(f"[gh] {remedy}", file=sys.stderr)
+    print(
+        f"Refusing to {op}: the gh 'codespace' scope is required (a "
+        f"`gh codespace` call would fail with an opaque 403/404). Fix the above "
+        f"and retry, or run `agent-codespaces doctor` to recheck. "
+        f"(Set AGENT_CODESPACES_SKIP_SCOPE_CHECK=1 to bypass.)",
+        file=sys.stderr,
+    )
+    return 3
+
+
+def _cmd_doctor() -> int:
+    """Check gh auth + the ``codespace`` scope for the ambient account and every
+    account the pool/connect paths route to (#980).
+
+    Prints each finding with its exact ``gh auth refresh`` remedy and exits
+    **non-zero** when any account is unauthenticated or missing the scope -- so
+    setup/CI (and ``codespaces-setup``) can gate on it -- else prints an all-clear
+    and exits 0. Read-only; never mutates auth.
+    """
+    msgs = _gh_auth_preflight()
+    if not msgs:
+        print("[OK] gh is authenticated with the 'codespace' scope "
+              "(ambient + all mapped accounts).")
+        return 0
+    print("[gh] CodeSpace auth issue(s) -- `gh codespace` ops will fail until "
+          "resolved:", file=sys.stderr)
+    for m in msgs:
+        print(f"  - {m}", file=sys.stderr)
+    return 1
 
 
 def _account_login_remedy(login: str) -> str:
@@ -2999,6 +3096,12 @@ def _cmd_create(args: argparse.Namespace) -> int:
     limit) and retry once, so a busy account self-heals instead of hard-failing.
     """
     from ssh_manager import ConnectionManager
+
+    # #980: fail-fast if the gh 'codespace' scope is missing -- a create without
+    # it fails confusingly minutes in (after provisioning starts). Best-effort +
+    # escape-hatchable so it never wedges a legit create.
+    if (rc := _require_codespace_scope("create a CodeSpace")) is not None:
+        return rc
 
     config = load_merged_config()
     print(f"Creating CodeSpace for {args.repo}...")
