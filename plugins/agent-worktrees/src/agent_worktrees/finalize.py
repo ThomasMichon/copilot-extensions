@@ -1104,10 +1104,10 @@ def _assert_obligations_settled(
     :func:`obligations.gate_mode`:
 
     * ``off``   -- skip entirely.
-    * ``warn``  -- surface unsettled obligations but **proceed** (the default
-      while the per-kind settlement hooks + reclaim sweep bed in).
+    * ``warn``  -- surface unsettled obligations but **proceed**.
     * ``block`` -- **refuse** (return False) while any obligation is unsettled,
-      unless ``abandon``.
+      unless ``abandon`` (the default, now that the per-kind settlement hooks +
+      reclaim sweep are proven).
 
     ``abandon`` overrides a block: it proceeds and re-homes the unsettled
     obligations (the downstream ``release_all_resources`` marks the claims
@@ -1134,7 +1134,8 @@ def _assert_obligations_settled(
         output.err(
             f"Worktree {worktree_id} still owns {len(unsettled)} unsettled "
             f"resource obligation(s) -- finalize is blocked "
-            f"(AGENT_WORKTREES_OBLIGATION_GATE=block):"
+            f"(obligation gate=block, the default; "
+            f"AGENT_WORKTREES_OBLIGATION_GATE=warn/off relaxes it):"
         )
         _describe()
         output.err(
@@ -1222,8 +1223,8 @@ def validate_and_finalize(
     # Obligation gate (resource-obligation-settlement Phase 2). A worktree
     # answers for the outbound resources it still owns before it may finalize.
     # Runs BEFORE any destructive step so a blocking gate refuses cleanly. Read
-    # is cheap + local (the ledger), no traversal. Warn-first by default; only
-    # AGENT_WORKTREES_OBLIGATION_GATE=block refuses, and --abandon overrides.
+    # is cheap + local (the ledger), no traversal. Enforcing (block) by default;
+    # AGENT_WORKTREES_OBLIGATION_GATE=warn/off relaxes it, and --abandon overrides.
     if not _assert_obligations_settled(record, worktree_id, abandon=abandon):
         return False
 

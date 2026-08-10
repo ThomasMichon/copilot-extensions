@@ -170,6 +170,31 @@ ready yet."
 | **Previous push-changes failed** (network, rebase conflict) | Fix the issue, then retry `agent-worktrees push-changes` |
 | **Unsure what state the worktree is in** | `agent-worktrees status` first, then decide |
 
+### Finalize is gated on outbound resource obligations
+
+`finalize` holds a worktree **accountable** for what it allocated. If this
+worktree still owns **unsettled** outbound resources -- a cross-repo worktree, a
+borrowed CodeSpace/container, or a bridge session it brought into being -- the
+**obligation gate blocks finalize by default** (`AGENT_WORKTREES_OBLIGATION_GATE`
+is `block`), refusing *before* any destructive step so the worktree stays intact.
+The error lists each unsettled obligation. Resolve it -- don't bypass:
+
+- **A cross-repo worktree you created** -- finalize *it* first; its finalize
+  flips this worktree's claim to `at-rest` automatically (no manual step).
+- **A borrowed CodeSpace/container** -- merge or move its work off-box, then
+  disconnect (the disconnect hook stamps it `at-rest`), or run
+  `agent-codespaces finalize <name>`.
+- **A bridge session** -- drive its worktree to final.
+- **A crashed/gone holder that never settled** -- `agent-worktrees claims sweep`
+  (dry-run) then `--apply` reclaims provably-gone-and-safe obligations.
+- **Genuinely need to finalize anyway** -- `agent-worktrees finalize --abandon`
+  proceeds and **re-homes** the obligations for cleanup/adoption (always logged).
+  Use it deliberately, not as a reflex.
+
+Inspect the ledger any time with `agent-worktrees claims show`. (Relax the gate
+for a session with `AGENT_WORKTREES_OBLIGATION_GATE=warn` -- surface but proceed
+-- but prefer settling the resource.)
+
 ### When the user says "finalize", "wrap up", "sign off", or "done with this"
 
 They mean: push changes and clean up. Run both steps:
