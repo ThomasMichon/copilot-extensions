@@ -244,6 +244,24 @@ def test_shell_redirect_into_anchor_still_denies(tmp_path, anchor):
     assert d and d["permissionDecision"] == "deny"
 
 
+def test_shell_sudo_prefixed_write_into_anchor_denies(tmp_path, anchor):
+    # A wrapper prefix (sudo) before the write verb must not be a blind spot.
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell(f'sudo rm -rf "{gp}/src"', tmp_path),
+                     env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_env_assignment_prefixed_git_write_from_anchor_cwd_denies(
+    tmp_path, anchor
+):
+    # A leading env-assignment (VAR=...) before `git commit` must still be seen.
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell("GIT_AUTHOR_NAME=x git commit -m y", gp),
+                     env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
 def test_shell_write_verb_not_at_command_position_allows(tmp_path, anchor):
     # A write cmdlet name appearing mid-segment as an argument value (not at
     # command position) with the anchor in a quoted arg must not trigger.

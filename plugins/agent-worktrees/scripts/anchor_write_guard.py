@@ -130,6 +130,27 @@ _GIT_WRITE_SUB = re.compile(
 # A ``-C`` (git change-directory) flag anywhere in a git segment.
 _GIT_DASH_C_FLAG = re.compile(r"(?:^|\s)-C\b", re.IGNORECASE)
 
+# Leading benign prefixes to strip so a write verb after them is still seen at
+# "command position": env-assignments (``VAR=val``) and wrapper commands
+# (``sudo``, ``env``, ``nohup``, ...). Wrapper *flags* that take a separate arg
+# (e.g. ``sudo -u user``) are a known best-effort gap for this backstop.
+_SEG_STRIP = re.compile(
+    r"^\s*(?:[A-Za-z_]\w*=(?:\"[^\"]*\"|'[^']*'|\S*)"
+    r"|(?:sudo|doas|env|nohup|command|builtin|exec|time|xargs))(?:\s+|$)",
+    re.IGNORECASE,
+)
+
+
+def _effective_seg(seg: str) -> str:
+    """Strip leading env-assignments + wrapper commands so a write verb after
+    them is still detected at command position (``sudo cp ...``,
+    ``VAR=x git commit``)."""
+    prev = None
+    while seg != prev:
+        prev = seg
+        seg = _SEG_STRIP.sub("", seg, count=1)
+    return seg
+
 
 def _truthy_off(v: str | None) -> bool:
     return (v or "").strip().lower() in {"off", "0", "false", "no"}
@@ -345,8 +366,9 @@ def _shell_hit(cmd: str, cwd: str, anchors: list[dict]) -> dict | None:
 
     for seg in _SHELL_SEP.split(cmd):
         seg_hay = os.path.normcase(seg.replace("/", os.sep)) if _IS_WIN else seg
-        at_write_cmd = bool(_WRITE_CMD_START.match(seg))
-        is_git = bool(_GIT_START.match(seg))
+        eff = _effective_seg(seg)
+        at_write_cmd = bool(_WRITE_CMD_START.match(eff))
+        is_git = bool(_GIT_START.match(eff))
         git_write = is_git and bool(_GIT_WRITE_SUB.search(seg))
         has_dash_c = is_git and bool(_GIT_DASH_C_FLAG.search(seg))
         for a in anchors:

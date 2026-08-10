@@ -114,6 +114,23 @@ _GIT_WRITE_SUB = re.compile(
 )
 _GIT_DASH_C_FLAG = re.compile(r"(?:^|\s)-C\b", re.IGNORECASE)
 
+# Leading benign prefixes to strip so a write verb after them is still seen at
+# command position (``sudo rm ...``, ``VAR=x git commit``). Wrapper flags that
+# take a separate arg (``sudo -u user``) are a known best-effort gap.
+_SEG_STRIP = re.compile(
+    r"^\s*(?:[A-Za-z_]\w*=(?:\"[^\"]*\"|'[^']*'|\S*)"
+    r"|(?:sudo|doas|env|nohup|command|builtin|exec|time|xargs))(?:\s+|$)",
+    re.IGNORECASE,
+)
+
+
+def _effective_seg(seg: str) -> str:
+    prev = None
+    while seg != prev:
+        prev = seg
+        seg = _SEG_STRIP.sub("", seg, count=1)
+    return seg
+
 
 def _root_token(root_str: str) -> str:
     """Regex for a repo root as a whole path token: the root itself OR a path
@@ -440,8 +457,9 @@ def _shell_hit(cmd: str, cwd: str, guarded: list[dict]) -> dict | None:
         return None
     for seg in _SHELL_SEP.split(cmd):
         seg_hay = os.path.normcase(seg.replace("/", os.sep)) if _IS_WIN else seg
-        at_write_cmd = bool(_WRITE_CMD_START.match(seg))
-        is_git = bool(_GIT_START.match(seg))
+        eff = _effective_seg(seg)
+        at_write_cmd = bool(_WRITE_CMD_START.match(eff))
+        is_git = bool(_GIT_START.match(eff))
         git_write = is_git and bool(_GIT_WRITE_SUB.search(seg))
         has_dash_c = is_git and bool(_GIT_DASH_C_FLAG.search(seg))
         for g in guarded:

@@ -132,6 +132,13 @@ def test_shell_redirect_into_guarded_still_denies(tmp_path, guarded):
     assert d and d["permissionDecision"] == "deny"
 
 
+def test_shell_sudo_prefixed_write_into_guarded_denies(tmp_path, guarded):
+    gp = guarded[0]["path"]
+    d = guard.decide(_shell(f'sudo rm -rf "{gp}/src"', tmp_path),
+                     env={}, home=tmp_path, guarded_roots=guarded)
+    assert d and d["permissionDecision"] == "deny"
+
+
 # --- modes + kill switches ----------------------------------------------------
 
 def test_mode_off_env_allows(tmp_path, guarded):
