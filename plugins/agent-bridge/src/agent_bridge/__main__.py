@@ -2263,6 +2263,7 @@ def _start_agent_session(
         resp = client.start_session(
             agent=agent_name, caller_id=caller_id,
             sender_repo=_sender_repo(), force_new=force_new,
+            caller_owner_ref=_worktrees_get("owner-ref"),
         )
     except BridgeClientError as exc:
         # Session-lifecycle head guard: a create into an existing worktree whose

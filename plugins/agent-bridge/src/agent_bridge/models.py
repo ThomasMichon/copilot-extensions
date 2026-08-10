@@ -134,6 +134,11 @@ class StartSessionRequest(BaseModel):
     caller_id: str | None = None  # caller identity for session affinity
     sender_repo: str | None = None  # caller's repo (agent-worktrees `get project`
     #                                 in the CLI cwd) -- bare-venue default source
+    caller_owner_ref: str | None = None  # resource-obligation-settlement Ph3c: the
+    #                                      caller's qualified ClaimRef (agent-worktrees
+    #                                      `get owner-ref`), stamped as the bridge
+    #                                      worktree's owner_ref so its finalize
+    #                                      settles the caller's obligation
     force_new: bool = False  # skip caller_id reuse and always create a fresh session
     # Break-glass override for the session-lifecycle head guard (agent-fabric
     # `single-current-session-per-worktree`). When targeting an *existing*

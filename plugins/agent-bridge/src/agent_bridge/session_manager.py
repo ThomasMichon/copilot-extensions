@@ -2129,6 +2129,7 @@ class SessionManager:
         permission_callback: Any | None = None,
         mcp_servers: list[dict[str, Any]] | None = None,
         copilot_args: list[str] | None = None,
+        caller_owner_ref: str | None = None,
     ) -> Session:
         """Create and start a new agent session.
 
@@ -2168,6 +2169,15 @@ class SessionManager:
         # convention); a non-worktree caller simply won't resolve in the Picker.
         if caller_id and not target.caller_worktree:
             target = replace(target, caller_worktree=caller_id)
+        # resource-obligation-settlement Ph3c: carry the caller's qualified
+        # ClaimRef onto the target so the worktree-resolve stamps it as the
+        # bridge worktree's owner_ref (via `resolve --new --owner-ref`). The
+        # carve then journals the reciprocal `worktree` claim on the caller, so
+        # the caller's finalize gate sees the bridge session as an obligation and
+        # the bridge worktree's finalize settles it (Phase 3a). Best-effort:
+        # None (a non-worktree caller / stale runtime) simply skips it.
+        if caller_owner_ref and not target.caller_owner_ref:
+            target = replace(target, caller_owner_ref=caller_owner_ref)
         session_id = str(uuid.uuid4())[:12]
         name = _generate_name()
         now = time.time()
