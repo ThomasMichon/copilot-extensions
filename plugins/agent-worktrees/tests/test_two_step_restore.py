@@ -8,6 +8,7 @@ the load-bearing pure logic behind the outage workaround.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 
 from agent_worktrees import __main__ as m
@@ -18,8 +19,10 @@ from agent_worktrees.picker_tui import derive, maintenance
 class _Rec:
     worktree_id = "wtX"
     worktree_path = "/w/wtX"
+    yaml_path = "/w/wtX.yaml"
     branch = "worktree/wtX"
     resume_count = 0
+    last_resumed_at = None
     sessions: list = []
     parent_session = None
 
@@ -35,7 +38,19 @@ def _resume_args(**kw):
 def _patch_resume(monkeypatch, *, mux_live=False, live_ids=None):
     plan = {}
     monkeypatch.setattr(m, "_emit_plan", lambda p: plan.update(p))
-    monkeypatch.setattr(m.tracking, "mark_resumed", lambda r: None)
+    import types as _types
+    # Foreground resume RMW-under-lock (#4547): _resolve_resume opens a
+    # _RecordLock on record.yaml_path, reloads a fresh record, marks it resumed,
+    # and saves it. Make that block hermetic (no real lock / filesystem): a
+    # no-op lock, a load_record returning a stamped stand-in, and a no-op save.
+    monkeypatch.setattr(m.tracking, "_RecordLock",
+                        lambda *a, **k: contextlib.nullcontext())
+    monkeypatch.setattr(
+        m.tracking, "load_record",
+        lambda p: _types.SimpleNamespace(resume_count=1,
+                                         last_resumed_at="2026-01-01T00:00:00"))
+    monkeypatch.setattr(m.tracking, "save_record", lambda r, path=None: None)
+    monkeypatch.setattr(m.tracking, "mark_resumed", lambda r, *, save=True: None)
     monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: None)
     monkeypatch.setattr(m, "_build_launch_cmd",
                         lambda cfg, args, wd, profile=None: ["copilot"])
@@ -50,7 +65,6 @@ def _patch_resume(monkeypatch, *, mux_live=False, live_ids=None):
                         lambda rec: "sid-abc-123")
     # Execution-time liveness verdict (the "one more fresh resolve" after
     # Enter). Hermetic by default (no live mux); tests override via mux_live.
-    import types as _types
     _verdict = _types.SimpleNamespace(
         mux_live=mux_live, mux_clients=(1 if mux_live else 0),
         live_session_ids=list(live_ids or []), bare=False,
