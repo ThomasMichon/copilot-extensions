@@ -350,6 +350,12 @@ def main(argv: list[str] | None = None) -> int:
         "--timeout", type=float, default=300.0,
         help="Seconds to wait for the CodeSpace to become Available",
     )
+    create_parser.add_argument(
+        "--force-create", dest="force_create", action="store_true",
+        help="Skip the reuse-before-create / budget guard (Phase 2 / #708) and "
+             "create a new box even when a suitable idle box exists or the pool "
+             "is at its core budget.",
+    )
 
     # --- bridge ---
     bridge_parser = sub.add_parser(
@@ -495,6 +501,34 @@ def main(argv: list[str] | None = None) -> int:
         help=f"Account concurrent-core budget (default: {pool_mod.DEFAULT_BUDGET_CORES})",
     )
     pool_p.add_argument(
+        "--stale-after", type=float, default=None,
+        help="Seconds an unheld running box may idle before it ages to 'stale' "
+             f"(default: {int(pool_mod.DEFAULT_STALE_AFTER)})",
+    )
+
+    # --- allocate (reuse-before-create decision: Phase 2 / #708) ---
+    allocate_p = sub.add_parser(
+        "allocate",
+        help="Resolve a venue request for a repo to a reuse/create/recycle/"
+             "pressure decision (reuse-before-create, budget-bounded). Advisory "
+             "-- it decides, the caller acts.",
+    )
+    allocate_p.add_argument("repo", help="Repository (owner/name) the venue is for")
+    allocate_p.add_argument(
+        "--json", dest="json_output", action="store_true",
+        help="Emit the machine-readable decision "
+             "({action, codespace, reason, ...})",
+    )
+    allocate_p.add_argument(
+        "--new-cores", dest="new_cores", type=int, default=None,
+        help="Cores a fresh box would spend (default: derived from the repo's "
+             "configured machine tier). Governs the budget-fit check.",
+    )
+    allocate_p.add_argument(
+        "--budget", type=int, default=None,
+        help=f"Account concurrent-core budget (default: {pool_mod.DEFAULT_BUDGET_CORES})",
+    )
+    allocate_p.add_argument(
         "--stale-after", type=float, default=None,
         help="Seconds an unheld running box may idle before it ages to 'stale' "
              f"(default: {int(pool_mod.DEFAULT_STALE_AFTER)})",
@@ -668,6 +702,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_release_claim(args)
         if args.command == "pool":
             return _cmd_pool(args)
+        if args.command == "allocate":
+            return _cmd_allocate(args)
         if args.command == "wait":
             return _cmd_wait(args)
         if args.command == "status":
@@ -3104,6 +3140,42 @@ def _cmd_create(args: argparse.Namespace) -> int:
         return rc
 
     config = load_merged_config()
+
+    # Phase 2 (#708): reuse-before-create + budget-not-exceeded. Consult the pool
+    # planner before spending an account slot -- prefer reusing a suitable idle
+    # box, and refuse to over-provision past the core budget. Degrade-safe: any
+    # planner failure falls through to a plain create (never wedge a legit
+    # create). ``--force-create`` skips the guard entirely.
+    if not getattr(args, "force_create", False):
+        try:
+            _members, _budget = pool_mod.build_pool()
+            decision = pool_mod.plan_allocation(
+                _members, _budget, repo=args.repo,
+                new_cores=_intended_cores(config, args.repo),
+            )
+        except Exception:
+            decision = None
+        if decision is not None and decision.action == pool_mod.ALLOC_REUSE:
+            print(f"[reuse] {decision.reason}")
+            print(
+                f"A suitable idle CodeSpace already exists -- reuse "
+                f"'{decision.codespace}' (ssh/borrow) instead of creating a new "
+                f"box, or pass --force-create to create anyway.",
+                file=sys.stderr,
+            )
+            print(decision.codespace)   # machine-readable: the box to reuse
+            return 0
+        if decision is not None and decision.action == pool_mod.ALLOC_PRESSURE:
+            print(f"[pressure] {decision.reason}", file=sys.stderr)
+            print(
+                "Free budget (finalize/prune a box) or pass --force-create to "
+                "override.",
+                file=sys.stderr,
+            )
+            return _ALLOC_PRESSURE_EXIT
+        # CREATE / RECYCLE -> proceed; a RECYCLE's reclaim is handled by the
+        # on-quota retry below.
+
     print(f"Creating CodeSpace for {args.repo}...")
 
     def _create():
@@ -3439,6 +3511,58 @@ def _cmd_pool_stream(
             prev_summary = curr["summary"]
     except KeyboardInterrupt:
         return 0
+
+
+def _intended_cores(config, repo: str) -> int:
+    """Cores a *new* box for ``repo`` would spend -- the machine tier ``create``
+    would pick (the repo's ``machine_type`` else the config default), mapped to a
+    core count. Feeds the budget-fit check in ``allocate`` / the ``create`` guard.
+    Best-effort: an unresolvable tier yields 0 (the planner then treats it as a
+    conservative 1)."""
+    try:
+        from .config import RepoConfig
+        repo_config = config.repos.get(repo, RepoConfig())
+        machine_type = repo_config.machine_type or config.default_machine_type
+        return pool_mod.machine_cores(machine_type or "")
+    except Exception:
+        return 0
+
+
+# Exit code for a venue request that cannot be satisfied (pool at budget, nothing
+# recyclable) -- so a scripted `allocate && create` gate can branch on pressure.
+_ALLOC_PRESSURE_EXIT = 4
+
+
+def _cmd_allocate(args: argparse.Namespace) -> int:
+    """Resolve a venue request for ``repo`` to a reuse/create/recycle/pressure
+    decision (Phase 2 / #708) -- the reuse-before-create, budget-bounded planner.
+
+    Advisory + read-only: it *decides* (which box to reuse, whether to create,
+    which stale box to recycle, or that the pool is full), the caller acts. Exit
+    ``0`` for an actionable decision; ``_ALLOC_PRESSURE_EXIT`` (4) for pressure so
+    a scripted gate can branch.
+    """
+    config = load_merged_config()
+    new_cores = (
+        args.new_cores if args.new_cores is not None
+        else _intended_cores(config, args.repo)
+    )
+    budget_cores = args.budget if args.budget is not None else pool_mod.DEFAULT_BUDGET_CORES
+    stale_after = (
+        args.stale_after if args.stale_after is not None
+        else pool_mod.DEFAULT_STALE_AFTER
+    )
+    members, budget = pool_mod.build_pool(
+        budget_cores=budget_cores, stale_after=stale_after,
+    )
+    decision = pool_mod.plan_allocation(
+        members, budget, repo=args.repo, new_cores=new_cores,
+    )
+    if args.json_output:
+        print(json.dumps(decision.to_dict()))
+    else:
+        print(f"[{decision.action}] {decision.reason}")
+    return _ALLOC_PRESSURE_EXIT if decision.action == pool_mod.ALLOC_PRESSURE else 0
 
 
 def _cmd_pool(args: argparse.Namespace) -> int:
