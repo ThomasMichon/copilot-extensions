@@ -306,12 +306,13 @@ containers, bridge sessions) so finalizing never orphans unfinished work. (Effor
   can be safe yet its claim still held, or released without the resource being
   destroyed. For a leaseable resource the disposition mirrors onto the lease
   record's `context` (`disposition` key) for cross-machine visibility.
-- **The gate is cheap + local + warn-first.** It reads only the owner's own
-  `record.resources` for `is_unsettled` claims — O(claims), no traversal — and
+- **The gate is cheap + local + enforcing by default.** It reads only the owner's
+  own `record.resources` for `is_unsettled` claims — O(claims), no traversal — and
   runs **before any destructive step**. `obligations.gate_mode()`
-  (`AGENT_WORKTREES_OBLIGATION_GATE`) is `warn` by default (surface + proceed);
-  `block` refuses unless `--abandon` (which re-homes via `release_all_resources`);
-  `off` skips.
+  (`AGENT_WORKTREES_OBLIGATION_GATE`) is `block` by default (refuse unless
+  `--abandon`, which re-homes via `release_all_resources`); `warn` relaxes it to
+  surface + proceed; `off` skips. (A value the operator *set* but we don't
+  recognize degrades to `warn`, never enforcing on a typo.)
 - **Incremental settlement (recursion collapse).**
   `tracking.settle_resource_claim` flips one claim's disposition; the
   cross-repo-worktree hook `_settle_parent_obligation` runs on a child's finalize

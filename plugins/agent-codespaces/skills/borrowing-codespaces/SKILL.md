@@ -70,6 +70,16 @@ agent-codespaces leases                         # CODESPACE  EFFORT  HOST  PID
   `finalize <name> --delete` **auto-release** the lease. Releasing by effort
   name frees whatever CodeSpace it held.
 
+> **A borrowed CodeSpace is an obligation on the borrowing worktree.** On borrow,
+> `agent-codespaces ssh` journals an `active` `codespace` claim onto the borrowing
+> worktree's ledger (resource-obligation-settlement); on **disconnect** the
+> cleanliness probe stamps it **`at-rest`** when the box has no unpushed/unmerged
+> work. That claim is why the worktree's `agent-worktrees finalize` **blocks by
+> default** while the CodeSpace still carries live work — settle it (disconnect a
+> clean box, or `agent-codespaces finalize <name>`) before finalizing the
+> worktree, or `finalize --abandon` to re-home it deliberately. Inspect with
+> `agent-worktrees claims show`.
+
 > **Cross-machine coordination (v2 — atomic, shipped):** the host-local lease is
 > the same-machine **L1** fast path; cross-machine exclusion is now an **atomic
 > Git-ref compare-and-swap L2 lease** (`agent-worktrees lease`, the

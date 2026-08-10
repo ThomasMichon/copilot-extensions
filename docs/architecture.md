@@ -304,18 +304,19 @@ record's `context` map under the `disposition` key (the store already round-trip
 `context`), so it is **cross-machine visible with no store schema change** — the
 local ledger is the owner's authority, the lease is the cross-machine mirror.
 
-### The finalize gate (warn-first)
+### The finalize gate (enforcing by default)
 `finalize.validate_and_finalize` runs an obligation gate **before any destructive
 step** (so a blocked finalize leaves the worktree intact). It reads the **local
 ledger** (`record.resources`) for `is_unsettled` (active) claims — a cheap,
 local, **no-traversal** balance check. `obligations.gate_mode()` resolves
-`AGENT_WORKTREES_OBLIGATION_GATE ∈ {off, warn, block}`, default **warn**:
+`AGENT_WORKTREES_OBLIGATION_GATE ∈ {off, warn, block}`, default **block**:
 
-- **`warn`** (default) — surface unsettled obligations but proceed (behavior
-  unchanged until an operator opts in / Phase 4 flips the default).
-- **`block`** — refuse (return False) while any obligation is unsettled, unless
-  `--abandon`, which proceeds and **re-homes** the obligations via the
-  `release_all_resources` cascade (never silently drops).
+- **`block`** (default) — refuse (return False) while any obligation is
+  unsettled, unless `--abandon`, which proceeds and **re-homes** the obligations
+  via the `release_all_resources` cascade (never silently drops).
+- **`warn`** — surface unsettled obligations but proceed (the pre-Phase-4
+  behavior; an operator can opt back into it). A value the operator *set* but we
+  don't recognize also degrades here, so a typo never enforces.
 - **`off`** — skip.
 
 ### Incremental settlement — the recursion collapse
@@ -366,8 +367,8 @@ A crashed holder that never settles must not freeze its parent forever. The
 `active` obligation to **`abandoned`** when the holder is provably gone **and**
 the resource provably safe — GC as the complement to refcounting. The sweep may
 **only** flip to `abandoned`; it never fabricates `at-rest` (that is strictly the
-resource's own verdict). *(Phase 4 — plus flipping the gate default `warn →
-block` once hooks + sweep are proven.)*
+resource's own verdict). *(Phase 4 complete — the gate default is now `block`,
+enforcing accountability; `warn`/`off` relax it.)*
 
 ## Where to go next
 

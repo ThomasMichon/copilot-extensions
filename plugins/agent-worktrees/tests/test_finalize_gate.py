@@ -47,11 +47,13 @@ def test_warn_mode_proceeds_and_lists(monkeypatch, capsys):
     assert "unsettled" in combined and "cs-0" in combined
 
 
-def test_warn_is_the_default_mode(monkeypatch):
+def test_block_is_the_default_mode(monkeypatch, capsys):
     monkeypatch.delenv(ob.GATE_ENV, raising=False)
     rec = _record("active")
-    # Default (warn) proceeds.
-    assert _assert_obligations_settled(rec, "wt", abandon=False) is True
+    # Default is now block: an unsettled obligation refuses finalize.
+    assert _assert_obligations_settled(rec, "wt", abandon=False) is False
+    out = capsys.readouterr()
+    assert "blocked" in (out.err + out.out).lower()
 
 
 def test_block_mode_refuses_unsettled(monkeypatch, capsys):

@@ -96,8 +96,11 @@ def test_roundtrip_with_then_from():
 
 # ── gate_mode (the finalize gate) ────────────────────────────────────────────
 
-def test_gate_mode_defaults_to_warn():
-    assert ob.gate_mode({}) == ob.WARN
+def test_gate_mode_defaults_to_block():
+    assert ob.gate_mode({}) == ob.BLOCK
+    # An explicitly-empty / whitespace value is "unset" -> shipped default.
+    assert ob.gate_mode({ob.GATE_ENV: ""}) == ob.BLOCK
+    assert ob.gate_mode({ob.GATE_ENV: "   "}) == ob.BLOCK
 
 
 @pytest.mark.parametrize("value,expected", [
@@ -108,9 +111,10 @@ def test_gate_mode_reads_known_values(value, expected):
     assert ob.gate_mode({ob.GATE_ENV: value}) == expected
 
 
-@pytest.mark.parametrize("value", ["", "bogus", "enforce", "1"])
+@pytest.mark.parametrize("value", ["bogus", "enforce", "1"])
 def test_gate_mode_unknown_degrades_to_warn_never_block(value):
-    # An unrecognized value must never silently start *enforcing*.
+    # A value the operator *set* but that we don't recognize must never silently
+    # start *enforcing* -- it degrades to warn, not the block default.
     assert ob.gate_mode({ob.GATE_ENV: value}) == ob.WARN
 
 
