@@ -262,6 +262,68 @@ def test_shell_env_assignment_prefixed_git_write_from_anchor_cwd_denies(
     assert d and d["permissionDecision"] == "deny"
 
 
+# -- in-command `cd <anchor>` moves the effective cwd (dotfiles#1144 follow-up) --
+
+def test_shell_cd_into_anchor_then_git_commit_denies(tmp_path, anchor):
+    # The tool cwd is elsewhere, but `cd <anchor>` inside the command makes the
+    # subsequent `git commit` write the anchor. Must be caught.
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell(f'cd "{gp}"; git commit -m x', tmp_path),
+                     env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_cd_into_anchor_subdir_then_git_write_denies(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell(f'cd "{gp}\\src" && git add -A', tmp_path),
+                     env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_cmd_style_cd_slash_d_into_anchor_denies(tmp_path, anchor):
+    # CMD `cd /d <path>` (SHELL_TOOLS includes cmd): the /d flag must be skipped,
+    # not captured as the directory target.
+    gp = anchor[0]["path"]
+    d = guard.decide(
+        {"toolName": "cmd", "cwd": str(tmp_path),
+         "toolArgs": {"command": f'cd /d "{gp}" && git commit -m x'}},
+        env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_cd_into_anchor_then_read_still_allows(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    assert guard.decide(_shell(f'cd "{gp}"; git status', tmp_path),
+                        env={}, home=tmp_path, anchors=anchor) is None
+
+
+def test_shell_cd_variable_target_does_not_move_cwd(tmp_path, anchor):
+    # `cd $a` is unresolvable, so it must NOT be treated as moving into the
+    # anchor -- otherwise the read-only repro would falsely deny again.
+    gp = anchor[0]["path"]
+    cmd = f'$a="{gp}"; cd $a; git commit -m x'
+    # cwd is elsewhere and the cd target is a variable -> not attributable.
+    assert guard.decide(_shell(cmd, tmp_path), env={},
+                        home=tmp_path, anchors=anchor) is None
+
+
+def test_shell_cd_into_then_out_of_anchor_allows(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    cmd = f'cd "{gp}"; cd ..; git commit -m x'
+    assert guard.decide(_shell(cmd, tmp_path), env={},
+                        home=tmp_path, anchors=anchor) is None
+
+
+def test_shell_cd_into_sibling_worktree_then_git_write_allows(tmp_path, anchor):
+    # `cd <anchor>.worktrees\wt` is NOT inside the anchor -> git write there is
+    # fine.
+    gp = anchor[0]["path"]
+    _linked_worktree(tmp_path / "myrepo.worktrees" / "wt9")
+    wt = f"{gp}.worktrees\\wt9"
+    assert guard.decide(_shell(f'cd "{wt}"; git commit -m x', tmp_path),
+                        env={}, home=tmp_path, anchors=anchor) is None
+
+
 def test_shell_write_verb_not_at_command_position_allows(tmp_path, anchor):
     # A write cmdlet name appearing mid-segment as an argument value (not at
     # command position) with the anchor in a quoted arg must not trigger.
