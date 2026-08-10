@@ -14909,42 +14909,71 @@ _NO_PROJECT_COMMANDS = {
 # no-project verbs (``install``/``register``/``restart``/``status-updater``/
 # ``session-*``) MAY consume an explicit ``--project``, so they are left to
 # accept-and-ignore rather than risk bouncing a legitimate service/setup call.
+# Machine-global verbs where ``--project`` has no effect: the pure registries /
+# info (``repos``/``accounts``), the cross-project ``picker``, and
+# ``--version``/``--help``. Passing ``--project`` to these does nothing;
+# silently swallowing it is a minor foot-gun, but a HARD failure here is far
+# worse: the ``<repo>`` binstub injects ``--project`` on every invocation, and an
+# older, already-deployed binstub can't be expected to opt in to any marker. So
+# the guard is a *soft, non-fatal note*, fired only when the project name is
+# unregistered (a real binstub always injects a REGISTERED project, so normal
+# ``<repo> repos`` etc. never warn -- no binstub/env cooperation required).
 _PROJECT_IRRELEVANT_COMMANDS = frozenset({
     "repos", "accounts", "picker", "--version", "-V", "--help", "-h",
 })
 
 
-def _guard_project_scope(project_override: str | None,
-                         command: str | None) -> int | None:
-    """Bounce a *hand-typed* ``--project`` on a project-irrelevant verb.
+def _is_registered_project(name: str) -> bool:
+    """True if *name* is a known adopted project or a registered repo.
 
-    Returns an exit code for ``main()`` to return (bounce), or ``None`` to
-    proceed. ``--project`` is meaningful only for project-scoped verbs; on a
-    machine-global verb (``repos``/``accounts``/``picker``/``--version``/
-    ``--help``) it does nothing. Silently swallowing an *explicitly*-typed
-    ``--project`` is a foot-gun for agentic callers, so we bounce -- but ONLY
-    when it was user-typed.
-
-    The ``<repo>`` binstub injects ``--project`` on EVERY invocation (incl. these
-    global verbs, e.g. ``dotfiles repos``) and marks it
-    ``AGENT_WORKTREES_PROJECT_ROUTED=1``; a *routed* ``--project`` stays a silent
-    no-op so those binstub commands keep working. The marker is consumed here so
-    it never leaks to child processes (mirrors agent-bridge/#1080).
+    A real project binstub only ever injects a REGISTERED project as
+    ``--project``, so this is how the guard tells a legitimate (binstub-injected
+    or real) project name from a likely hand-typed mistake -- without requiring
+    any binstub or environment cooperation.
     """
-    routed = os.environ.pop("AGENT_WORKTREES_PROJECT_ROUTED", None) == "1"
+    try:
+        if name in inst.read_projects_registry().get("projects", {}):
+            return True
+    except Exception:
+        pass
+    try:
+        from . import repos as _repos
+        if name in _repos.read_registry().repos:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _guard_project_scope(project_override: str | None,
+                         command: str | None) -> None:
+    """Softly note a likely-mistaken ``--project`` on a machine-global verb.
+
+    ``--project`` has no effect on a machine-global verb
+    (``repos``/``accounts``/``picker``/``--version``/``--help``). Rather than
+    silently ignore an explicit one, emit a **soft, non-fatal** stderr note --
+    but ONLY when the project name is not registered, since a real project
+    binstub always injects a registered project. This never blocks and needs no
+    binstub/env cooperation, so an older deployed binstub keeps working
+    unchanged. (An earlier revision hard-bounced and relied on an
+    ``AGENT_WORKTREES_PROJECT_ROUTED`` binstub marker; that broke stale binstubs
+    on global verbs -- see the follow-up to #1108.)
+    """
+    # Defensive hygiene: never let a stray routed marker (set by the sibling
+    # router in other flows) leak to child processes spawned by this verb.
+    os.environ.pop("AGENT_WORKTREES_PROJECT_ROUTED", None)
     if not project_override:
-        return None
-    if routed:
-        return None
-    if command in _PROJECT_IRRELEVANT_COMMANDS:
-        print(
-            f"agent-worktrees: --project {project_override!r} is not meaningful "
-            f"for '{command}': it is a machine-global command that ignores the "
-            f"active project. Remove --project.",
-            file=sys.stderr,
-        )
-        return 2
-    return None
+        return
+    if command not in _PROJECT_IRRELEVANT_COMMANDS:
+        return
+    if _is_registered_project(project_override):
+        return
+    print(
+        f"note: --project {project_override!r} has no effect on the "
+        f"machine-global command '{command}' and is not a known project; "
+        f"ignoring it.",
+        file=sys.stderr,
+    )
 
 
 def _anchor_for_project(name: str) -> Path | None:
@@ -16126,15 +16155,12 @@ def main(argv: list[str] | None = None) -> int:
             _sib_project = _proj if _canon in _PROJECT_ARG_SLUGS else None
             return _route_to_sibling_plugin(_canon, _sib_project, args_list[1:])
 
-    # Bounce a *hand-typed* --project on a project-irrelevant global verb
-    # (repos/accounts/picker/--version/--help) instead of silently ignoring it
-    # (#1080); a binstub/router-injected --project (AGENT_WORKTREES_PROJECT_ROUTED)
-    # stays a silent no-op so `<repo> repos` etc. keep working. Runs after the
-    # sibling router (siblings return above) and consumes the marker regardless,
-    # so it never leaks to child processes spawned by worktrees verbs.
-    _guard_rc = _guard_project_scope(_proj, args_list[0] if args_list else None)
-    if _guard_rc is not None:
-        return _guard_rc
+    # --project has no effect on a machine-global verb (repos/accounts/picker/
+    # --version/--help). Softly note a likely-mistaken explicit one (only when it
+    # names an unregistered project) -- never bounce, and never require any
+    # binstub/env cooperation, so older deployed binstubs keep working. Runs
+    # after the sibling router (siblings return above).
+    _guard_project_scope(_proj, args_list[0] if args_list else None)
 
     # Only auto-derive from CWD for project-requiring commands (skip the git
     # subprocess for global no-project commands and bare flags).
