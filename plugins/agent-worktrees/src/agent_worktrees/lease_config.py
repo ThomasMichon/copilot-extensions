@@ -2,17 +2,20 @@
 
 The lease store coordinates exclusive, cross-machine access to scarce shared
 resources (CodeSpaces, cross-repo worktrees, containers, bridges) through atomic
-compare-and-swap on Git refs in the **harness's own repository** -- no branches,
-no file commits, no working-tree writes, no new service, no new credential.
+compare-and-swap on Git refs -- no branches, no file commits, no working-tree
+writes, no new service, no new credential. The store repo is **the bound
+knowledge repo when one is set** (a stateless harness is shared across users, so
+per-user lease refs live in each operator's own knowledge repo, never in the
+shared harness), else the launch repo's own repository (the self-hosted /
+single-user case). See :func:`_resolve_store_target`.
 
 This adapts David Michon's standalone ``agent-leases`` config
 (ThomasMichon/copilot-extensions#180) to agent-worktrees:
 
-* the store repo is **control-plane-derived** -- the bound knowledge/control-plane
-  repo's origin when the launch project is a stateless sub-project (so headless
-  projects coordinate through the shared harness repo), else the current
-  project's default-repo remote -- instead of a separate ``origin`` config key,
-  and
+* the store repo is **control-plane-derived** -- the bound knowledge repo's
+  origin when one is set (so a shared harness never collects per-user lease
+  refs), else the current project's default-repo remote -- instead of a separate
+  ``origin`` config key, and
 * the ref namespace defaults to the **hidden** ``refs/agent-worktrees/leases/v1``
   (invisible to branch/tag UX) instead of a ``refs/heads/`` branch namespace.
 
@@ -113,21 +116,27 @@ def _resolve_store_target(
     1. an explicit ``origin`` argument or the ``AGENT_WORKTREES_LEASE_ORIGIN``
        env -- a pushable URL used as-is (no auth context; the ambient credential
        helper authenticates);
-    2. the bound **control-plane / knowledge repo** (``config.knowledge_repo``),
-       if any -- so a *headless sub-project* driven from the control-plane (e.g.
-       copilot-extensions bound to dotfiles, which has no store of its own)
-       coordinates through the **shared** harness repo rather than its own
-       project remote. Its checkout is resolved via the repos registry (the same
-       redirect ``machines.yaml`` resolution uses) and its origin drives
-       account-scoped auth. Guarded -- any resolution failure falls through;
-    3. otherwise the **current project's default repo**: its anchor checkout +
-       configured remote, whose URL is the store origin and whose (remote, cwd)
-       drive account-scoped auth.
+    2. the bound **knowledge repo** (``config.knowledge_repo``), if any -- a
+       stateless harness (``citadel-harness`` and the like) is **shared across
+       users**, so its own repo must never accrue per-user lease refs; the
+       machine-bound knowledge repo (the operator's private state repo, e.g.
+       ``dotfiles``) is the per-user home for them. When a knowledge repo is
+       bound it is therefore **authoritative** for the lease store: its checkout
+       is resolved via the repos registry (the same redirect ``machines.yaml``
+       resolution uses) and its origin drives account-scoped auth. If a bound
+       knowledge repo cannot be resolved this **raises** rather than falling back
+       to the launch/harness repo -- silently polluting a shared harness with
+       per-user (and cross-user-mixed) lease refs is exactly what this redirect
+       exists to prevent. (Cross-user coordination through a *shared* store is a
+       deliberate future extension, not this fall-back.)
+    3. otherwise -- no knowledge repo bound -- the **current project's default
+       repo**: its anchor checkout + configured remote, whose URL is the store
+       origin and whose (remote, cwd) drive account-scoped auth.
 
-    Steps 2 and 3 coincide when the harness repo is launched **directly** (it is
-    its own state home, so ``knowledge_repo`` is empty and the default repo *is*
-    the control plane) -- the redirect only changes the target for a stateless
-    sub-project bound to a separate knowledge repo.
+    Step 3 is the self-hosted / single-user path: the launch repo is its own
+    state home (``knowledge_repo`` empty) so its own repo *is* the store -- fully
+    backward compatible. The redirect (step 2) only diverges the target for a
+    harness bound to a separate knowledge repo.
     """
     override = origin or os.environ.get(ORIGIN_ENV)
     if override and override.strip():
@@ -140,14 +149,34 @@ def _resolve_store_target(
 
     knowledge = (conf.knowledge_repo or "").strip()
     if knowledge:
+        # A bound knowledge repo is AUTHORITATIVE: never silently fall back to
+        # the launch/harness repo (a shared stateless harness must not collect
+        # per-user lease refs). Any resolution failure raises with remediation.
+        _hint = (
+            f"register it (agent-worktrees repos add {knowledge} <path>) or set "
+            f"{ORIGIN_ENV}/--origin. Refusing to fall back to the harness repo "
+            "(a shared harness must not collect per-user lease refs)."
+        )
         try:
             kanchor = cfg._resolve_anchor_from_registry(knowledge, conf.platform)
-            if kanchor:
-                kurl = git_ops._remote_url("origin", cwd=kanchor)
-                if kurl:
-                    return kurl, "origin", str(kanchor)
-        except Exception:
-            pass
+        except Exception as exc:
+            raise ConfigError(
+                f"lease store: the bound knowledge repo {knowledge!r} could not "
+                f"be resolved from the repos registry ({exc}); {_hint}"
+            ) from exc
+        if not kanchor:
+            raise ConfigError(
+                f"lease store: the bound knowledge repo {knowledge!r} is not in "
+                f"the repos registry on this machine; {_hint}"
+            )
+        kurl = git_ops._remote_url("origin", cwd=kanchor)
+        if not kurl:
+            raise ConfigError(
+                f"lease store: the bound knowledge repo {knowledge!r} (at "
+                f"{kanchor}) has no resolvable 'origin' remote URL; fix its "
+                f"origin remote or set {ORIGIN_ENV}/--origin."
+            )
+        return kurl, "origin", str(kanchor)
 
     repo = conf.default_repo
     anchor = repo.anchor

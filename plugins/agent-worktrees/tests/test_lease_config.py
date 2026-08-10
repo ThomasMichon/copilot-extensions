@@ -75,9 +75,12 @@ def test_knowledge_repo_redirects_before_current_project(
     assert anchor == "/anchors/dotfiles"
 
 
-def test_knowledge_repo_resolution_failure_falls_through_to_default_repo(
+def test_knowledge_repo_resolution_failure_raises_not_fall_through(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # A bound knowledge repo is AUTHORITATIVE: if it cannot be resolved we must
+    # NOT silently fall back to the launch/harness repo (that would pollute a
+    # shared harness with per-user lease refs). Instead, raise.
     monkeypatch.delenv(ORIGIN_ENV, raising=False)
     monkeypatch.setattr(
         cfg, "load_config", lambda: _fake_config(knowledge_repo="dotfiles")
@@ -87,16 +90,36 @@ def test_knowledge_repo_resolution_failure_falls_through_to_default_repo(
         cfg, "_resolve_anchor_from_registry", lambda name, platform: None
     )
 
-    def fake_remote_url(remote: str, *, cwd: str) -> str | None:
-        assert str(cwd) == "/anchors/self"
-        return "https://github.com/owner/self.git"
+    def fail_remote_url(remote: str, *, cwd: str) -> str | None:
+        raise AssertionError(
+            "must not fall back to the harness/default repo when a knowledge "
+            "repo is bound"
+        )
 
-    monkeypatch.setattr(git_ops, "_remote_url", fake_remote_url)
+    monkeypatch.setattr(git_ops, "_remote_url", fail_remote_url)
 
-    url, remote, anchor = _resolve_store_target()
-    assert url == "https://github.com/owner/self.git"
-    assert remote == "origin"
-    assert anchor == "/anchors/self"
+    with pytest.raises(ConfigError, match="knowledge repo"):
+        _resolve_store_target()
+
+
+def test_knowledge_repo_no_origin_remote_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The knowledge checkout resolves but has no 'origin' remote URL -> raise
+    # (still no fall-back to the harness repo).
+    monkeypatch.delenv(ORIGIN_ENV, raising=False)
+    monkeypatch.setattr(
+        cfg, "load_config", lambda: _fake_config(knowledge_repo="dotfiles")
+    )
+    monkeypatch.setattr(
+        cfg,
+        "_resolve_anchor_from_registry",
+        lambda name, platform: "/anchors/dotfiles" if name == "dotfiles" else None,
+    )
+    monkeypatch.setattr(git_ops, "_remote_url", lambda remote, *, cwd: None)
+
+    with pytest.raises(ConfigError, match="knowledge repo"):
+        _resolve_store_target()
 
 
 def test_no_knowledge_repo_uses_current_project(
