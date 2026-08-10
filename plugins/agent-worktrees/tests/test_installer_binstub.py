@@ -114,7 +114,7 @@ def test_binstub_content_is_independent_of_live_install_state(monkeypatch, tmp_p
     lb = tmp_path / "bin"
     monkeypatch.setattr(inst, "local_bin", lambda: lb)
 
-    def _generate_under(install_root: Path) -> dict[str, str]:
+    def _generate_under(install_root: Path) -> dict[str, bytes]:
         # Point every live-runtime accessor at a distinct, bogus root. A hermetic
         # generator must not consult any of them when building binstub content.
         monkeypatch.setattr(inst, "install_dir", lambda: install_root)
