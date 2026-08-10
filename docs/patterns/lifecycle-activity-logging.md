@@ -76,6 +76,16 @@ Every flow stage that can fail emits a **start** mark and a terminal
 or the process died mid-stage. A stage that only logs its happy-path completion
 cannot be distinguished from one that never ran.
 
+**The exit code lives where the child does.** When Copilot runs inside a
+multiplexer pane, the launcher cannot observe its exit status — the child is a
+grandchild under the mux server, not a child of the launcher. The **pane
+wrapper** (`pane-wrapper.sh` / `pane-wrapper.ps1`) is the one component that
+does see it, so it emits the `pane_exited` mark carrying `exit_code` + `runtime`.
+Both platforms ship a pane wrapper for exactly this parity; the launcher's
+own `copilot_exited` still fires, but `pane_exited` is the authoritative
+exit-code source on the mux paths (the no-mux direct path carries `exit_code` on
+`copilot_exited` itself, since there the launcher *is* the parent).
+
 ### 5. Correlation by `launch_id`
 
 `pid` is **not** a flow key — each stage runs in a different process. One launch

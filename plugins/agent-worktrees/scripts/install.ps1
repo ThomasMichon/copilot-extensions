@@ -1053,6 +1053,15 @@ function Deploy-Wrappers {
         Write-ServiceOk "Wrapper: $wrapper"
     }
 
+    # Deploy the pane wrapper (records the pane_exited exit code inside psmux
+    # panes + shows a crash diagnostic). Optional -- mirrors install.sh's
+    # pane-wrapper.sh handling; absence just falls back to the verbatim command.
+    $paneSrc = Join-Path $PluginDir "bin\pane-wrapper.ps1"
+    if (Test-Path $paneSrc) {
+        Copy-Item $paneSrc (Join-Path $BinDir 'pane-wrapper.ps1') -Force
+        Write-ServiceOk "Wrapper: pane-wrapper.ps1"
+    }
+
     # Deploy hook scripts: sessionStart (session-conduct + session-machine + bootstrap-check + project-hooks + register/deregister-session + anchor-hygiene-check + provision-check) + preToolUse guards (statelessness_guard + cross_repo_guard + anchor_write_guard)
     foreach ($script in @('session-conduct.ps1', 'session-conduct.sh', 'session-machine.ps1', 'session-machine.sh', 'bootstrap-check.ps1', 'bootstrap-check.sh', 'project-hooks.ps1', 'project-hooks.sh', 'register-session.ps1', 'register-session.sh', 'deregister-session.ps1', 'deregister-session.sh', 'anchor-hygiene-check.ps1', 'anchor-hygiene-check.sh', 'provision-check.ps1', 'provision-check.sh', 'statelessness_guard.py', 'cross_repo_guard.py', 'anchor_write_guard.py')) {
         $src = Join-Path $ScriptDir $script
@@ -2823,7 +2832,7 @@ switch ($Action) {
         }
 
         # Remove wrappers
-        foreach ($wrapper in @('launch-session.cmd', 'launch-session.ps1')) {
+        foreach ($wrapper in @('launch-session.cmd', 'launch-session.ps1', 'pane-wrapper.ps1')) {
             $path = Join-Path $BinDir $wrapper
             if (Test-Path $path) { Remove-Item $path -Force }
         }

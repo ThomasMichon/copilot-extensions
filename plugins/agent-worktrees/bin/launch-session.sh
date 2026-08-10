@@ -632,11 +632,13 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
             done <<< "$ENV_EXPORTS"
         fi
 
-        # Pane wrapper — catches exit codes, shows diagnostics on crash,
-        # and always exits 0 so remain-on-exit doesn't trap the pane.
+        # Pane wrapper — catches exit codes, records the pane_exited activity
+        # mark, shows diagnostics on crash, and always exits 0 so
+        # remain-on-exit doesn't trap the pane. `--aw-wt` carries the worktree
+        # id for the mark and is consumed by the wrapper (not forwarded).
         PANE_WRAPPER="$HOME/.agent-worktrees/bin/pane-wrapper.sh"
         if [[ -r "$PANE_WRAPPER" ]]; then
-            PANE_CMD=("${CLEAN_ENV[@]}" bash "$PANE_WRAPPER" "${CMD_ARRAY[@]}")
+            PANE_CMD=("${CLEAN_ENV[@]}" bash "$PANE_WRAPPER" --aw-wt "${WORKTREE_ID:-}" "${CMD_ARRAY[@]}")
         else
             setup_log WARN "pane wrapper missing at $PANE_WRAPPER; using direct command"
             PANE_CMD=("${CLEAN_ENV[@]}" "${CMD_ARRAY[@]}")

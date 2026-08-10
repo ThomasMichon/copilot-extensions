@@ -898,11 +898,33 @@ if (-not $noMux -and $psmuxCmd) {
     # The new session is independent — it shouldn't inherit the parent's
     # nesting state even though we're creating it from inside a psmux pane.
     Write-SetupLog "psmux: pane command: $($cmd -join ' ')"
+
+    # Route the pane through pane-wrapper.ps1 so the child's real exit code is
+    # observable (recorded as a pane_exited activity mark) and a crash shows a
+    # diagnostic before the pane closes -- the Windows counterpart of the Linux
+    # pane-wrapper.sh path. The wrapper uses $args (no param block) and invokes
+    # the child via `& $exe @args`, so the verbatim `pwsh -File … --allow-all`
+    # form is preserved through both this prefix and psmux's outer `-Command`
+    # wrap (validated). `-AwWt <id>` (added only when known) is consumed by the
+    # wrapper, never forwarded to Copilot. If the wrapper is missing, fall back
+    # to the verbatim command unchanged.
+    $paneCmd = $cmd
+    $paneWrapper = Join-Path $PSScriptRoot 'pane-wrapper.ps1'
+    if (Test-Path -LiteralPath $paneWrapper) {
+        $wrapPrefix = @('pwsh.exe', '-NoProfile', '-NoLogo', '-File', $paneWrapper)
+        if (-not [string]::IsNullOrWhiteSpace($plan.worktree_id)) {
+            $wrapPrefix += @('-AwWt', [string]$plan.worktree_id)
+        }
+        $paneCmd = $wrapPrefix + $cmd
+    } else {
+        Write-SetupLog "pane wrapper missing at $paneWrapper; using verbatim command" 'WARN'
+    }
+
     $savedPsmuxSession = $env:PSMUX_SESSION; $env:PSMUX_SESSION = $null
     $savedTmux = $env:TMUX; $env:TMUX = $null
     $savedTmuxPane = $env:TMUX_PANE; $env:TMUX_PANE = $null
     try {
-        & $script:AwPsmuxBin new-session -d -s $sessName -c $plan.work_dir @envFlags @cmd
+        & $script:AwPsmuxBin new-session -d -s $sessName -c $plan.work_dir @envFlags @paneCmd
     } finally {
         $env:PSMUX_SESSION = $savedPsmuxSession
         $env:TMUX = $savedTmux
