@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import tempfile
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -264,6 +265,11 @@ class ResourceClaim:
     def is_at_rest(self) -> bool:
         """True when the resource's work is safe but the claim is still held."""
         return obligations.is_at_rest(self.state)
+
+    @property
+    def is_abandoned(self) -> bool:
+        """True when the reclaim sweep abandoned this obligation (Phase 4)."""
+        return obligations.is_abandoned(self.state)
 
 
 @dataclass
@@ -703,7 +709,8 @@ def _parse_claim_mapping(raw: dict) -> ResourceClaim:
     """Parse one ResourceClaim mapping from a ``resources:`` list item."""
     kind = str(raw.get("kind", "worktree")) or "worktree"
     state_raw = raw.get("state")
-    state = state_raw if state_raw in ("active", "at-rest", "released") else "active"
+    state = state_raw if state_raw in (
+        "active", "at-rest", "released", "abandoned") else "active"
     return ResourceClaim(
         kind=kind,
         ref=str(raw.get("ref", "")),
@@ -1770,6 +1777,48 @@ def settle_resource_claim(
     if save:
         save_record(record, path)
     return match
+
+
+def sweep_abandoned_obligations(
+    record: WorktreeRecord,
+    *,
+    gone_of: Callable[[str], bool | None],
+    safe_of: Callable[[ResourceClaim], bool | None],
+    save: bool = True,
+    path: Path | None = None,
+) -> list[ResourceClaim]:
+    """Reclaim ``active`` obligations whose holder is gone AND resource safe (Ph4).
+
+    The never-wedge sweep: for each ``active`` outbound claim on ``record``, the
+    injected resolvers report whether the claim's resource holder is **provably
+    gone** (``gone_of(ref)`` -- tri-state ``True``/``False``/``None``) and whether
+    the resource is **provably safe** (``safe_of(claim)`` -- tri-state). A claim
+    is flipped to ``abandoned`` **only** on a definitive *gone-and-safe* verdict
+    (:func:`obligations.should_abandon`); an unconfirmed holder or unproven-safe
+    resource is left untouched (unknown is spare -- the sweep never fabricates an
+    ``at-rest``/``released`` verdict and never abandons on a guess). Resolvers own
+    the per-kind + same-vs-cross-machine policy (e.g. defer cross-machine to the
+    lease mirror by returning ``None``). Returns the claims it abandoned (empty on
+    a no-op). Best-effort: a resolver that raises is treated as ``None`` (spare).
+    """
+    reclaimed: list[ResourceClaim] = []
+    for c in record.resources:
+        if not c.is_unsettled:  # only active (blocking) obligations
+            continue
+        try:
+            gone = gone_of(c.ref)
+        except Exception:
+            gone = None
+        try:
+            safe = safe_of(c)
+        except Exception:
+            safe = None
+        if obligations.should_abandon(gone=gone, safe=safe):
+            c.state = obligations.ABANDONED
+            reclaimed.append(c)
+    if reclaimed and save:
+        save_record(record, path)
+    return reclaimed
 
 
 # Terminal statuses for the CASCADE/orphan model (citadel E1b, #877): a parent
