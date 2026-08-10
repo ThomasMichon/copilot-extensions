@@ -67,7 +67,9 @@ fi
 # -- Environment ----------------------------------------------------------
 # Resolve the project from CWD (git-like); fall back to the directory name if
 # the CLI is unavailable (e.g. recovery mode).
-_AW_PY="$HOME/.agent-worktrees/.venv/bin/python"
+_awresolve="$HOME/.agent-worktrees/bin/resolve-runtime.sh"
+[ -f "$_awresolve" ] && . "$_awresolve"
+_AW_PY="${AW_PY:-}"
 PROJECT=""
 if [[ -x "$_AW_PY" ]]; then
     PROJECT="$(PYTHONPATH="" "$_AW_PY" -m agent_worktrees get project 2>/dev/null || true)"

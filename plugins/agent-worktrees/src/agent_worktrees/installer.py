@@ -365,7 +365,8 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
     # Deploy bootstrap-check scripts (called by sessionStart hook) + the
     # session-conduct injector (sessionStart additionalContext) + the preToolUse
     # guards: statelessness_guard + cross_repo_guard + anchor_write_guard.
-    for name in ("session-conduct.ps1", "session-conduct.sh",
+    for name in ("resolve-runtime.ps1", "resolve-runtime.sh",
+                 "session-conduct.ps1", "session-conduct.sh",
                  "session-machine.ps1", "session-machine.sh",
                  "bootstrap-check.ps1", "bootstrap-check.sh",
                  "statelessness_guard.py", "cross_repo_guard.py",
@@ -490,11 +491,10 @@ def _project_binstub_specs(project: str) -> list[tuple[Path, str]]:
             "# the caller's session, so it names its project via --project (not an ambient",
             "# env var), leaving the live session env untouched. Recovery (venv missing)",
             "# passes the project to launch-session via a scoped, restored WORKTREE_PROJECT.",
-            '$_venv = "$env:USERPROFILE\\.agent-worktrees\\.venv"',
             "# Resolve the runtime slot python via the junction-free current-version marker",
-            "# (the .venv junction is retired on Windows -- #637/#1085/#1106).",
-            '$_py = "$_venv\\Scripts\\python.exe"',
-            "$_root = Split-Path $_venv",
+            "# (the .venv junction is retired -- #637/#1085/#1106).",
+            "$_root = Join-Path $env:USERPROFILE '.agent-worktrees'",
+            "$_py = ''",
             "$_ver = ''",
             "try { $_ver = ([IO.File]::ReadAllText((Join-Path $_root 'current-version'))).Trim() } catch {}",
             "$_py = if ($_ver) { Join-Path $_root ('versions\\' + $_ver + '\\Scripts\\python.exe') } else { '' }",
@@ -522,7 +522,7 @@ def _project_binstub_specs(project: str) -> list[tuple[Path, str]]:
         "export PYTHONUTF8=1\n"
         "# Context resolves from CWD / --project (git-like); the binstub\n"
         "# names its project via --project, not an ambient env var.\n"
-        '_AW="$HOME/.agent-worktrees/.venv/bin/agent-worktrees"\n'
+        '_AW="$HOME/.local/bin/agent-worktrees"\n'
         'if [[ -x "$_AW" ]]; then\n'
         f'    exec "$_AW" --project {project} "$@"\n'
         'fi\n'
@@ -691,30 +691,33 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
     # copied by install.ps1). register/adopt/update run *through* this stub and
     # then call deploy_binstubs; if the content differs, _write_binstub_if_changed
     # rewrites the executing file mid-run and corrupts cmd.exe's byte-offset read.
+    # IMPORTANT: this must stay byte-identical (newline-normalized) to the global
+    # stub deployed by install.ps1/install.sh -- register/adopt/update run
+    # *through* this stub, and if the content differs, _write_binstub_if_changed
+    # rewrites the executing file mid-run and corrupts cmd.exe's byte-offset read.
+    # To GUARANTEE identity we deploy the SAME static `bin/` file the native
+    # installers copy (single source of truth) rather than a hand-duplicated
+    # string -- both are the junction-free, marker-only resolver (#1106).
+    _bin_assets = Path(repo_dir) / "plugins" / "agent-worktrees" / "bin"
+    if not (_bin_assets / "agent-worktrees.cmd").exists():
+        # Fallback: the bin/ dir ships alongside this package's source
+        # (installer.py -> agent_worktrees -> src -> plugins/agent-worktrees/bin).
+        _alt = Path(__file__).resolve().parent.parent.parent / "bin"
+        if (_alt / "agent-worktrees.cmd").exists():
+            _bin_assets = _alt
     if is_windows:
-        wm_content = (
-            "@echo off\r\n"
-            'set "PYTHONUTF8=1"\r\n'
-            "rem Resolve the .venv reparse target and launch the slot python directly, never\r\n"
-            "rem traversing the junction (blocked under RedirectionGuard) -- dotfiles #637.\r\n"
-            'set "_PY=%USERPROFILE%\\.agent-worktrees\\.venv\\Scripts\\python.exe"\r\n'
-            "for /f \"tokens=2 delims=[]\" %%i in ('dir /a:l \"%USERPROFILE%\\.agent-worktrees\" 2^>nul ^| findstr /i /c:\".venv\"') do set \"_PY=%%i\\Scripts\\python.exe\"\r\n"
-            '"%_PY%" -m agent_worktrees %*\r\n'
-            "exit /b %ERRORLEVEL%\r\n"
-        )
-        dst = lb / "agent-worktrees.cmd"
-        _write_binstub_if_changed(dst, wm_content)
-        output.ok(f"Binstub: {dst}")
+        src = _bin_assets / "agent-worktrees.cmd"
+        if src.exists():
+            dst = lb / "agent-worktrees.cmd"
+            _write_binstub_if_changed(dst, src.read_text(encoding="utf-8"))
+            output.ok(f"Binstub: {dst}")
     else:
-        wm_content = (
-            "#!/usr/bin/env bash\n"
-            "export PYTHONUTF8=1\n"
-            'exec "$HOME/.agent-worktrees/.venv/bin/agent-worktrees" "$@"\n'
-        )
-        dst = lb / "agent-worktrees"
-        _write_binstub_if_changed(dst, wm_content)
-        dst.chmod(0o755)
-        output.ok(f"Binstub: {dst}")
+        src = _bin_assets / "agent-worktrees"
+        if src.exists():
+            dst = lb / "agent-worktrees"
+            _write_binstub_if_changed(dst, src.read_text(encoding="utf-8"))
+            dst.chmod(0o755)
+            output.ok(f"Binstub: {dst}")
 
     return True
 

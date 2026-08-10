@@ -15,7 +15,9 @@ set -uo pipefail
 emit_empty() { printf '{}'; exit 0; }
 
 # --- cwd gate: only inside an agent-worktrees-managed project ---
-PY="$HOME/.agent-worktrees/.venv/bin/python"
+_awresolve="$HOME/.agent-worktrees/bin/resolve-runtime.sh"
+[ -f "$_awresolve" ] && . "$_awresolve"
+PY="${AW_PY:-}"
 [[ -x "$PY" ]] || emit_empty
 project="$(PYTHONPATH="" "$PY" -m agent_worktrees get project 2>/dev/null || true)"
 [[ -n "$project" ]] || emit_empty

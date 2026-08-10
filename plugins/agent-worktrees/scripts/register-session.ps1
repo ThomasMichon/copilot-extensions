@@ -9,8 +9,9 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
-$python = "$env:USERPROFILE\.agent-worktrees\.venv\Scripts\python.exe"
-if (-not (Test-Path $python)) { exit 0 }
+$_r = Join-Path $env:USERPROFILE '.agent-worktrees\bin\resolve-runtime.ps1'
+$python = if (Test-Path -LiteralPath $_r) { . $_r; $AwPy } else { $null }
+if (-not $python) { exit 0 }
 
 $wt_id = $env:WORKTREE_ID
 

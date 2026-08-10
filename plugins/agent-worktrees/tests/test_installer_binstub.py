@@ -70,12 +70,12 @@ def test_windows_binstubs_avoid_unsigned_trampoline(monkeypatch, tmp_path: Path)
         assert "agent-worktrees.exe" not in content
 
 
-def test_windows_binstubs_resolve_junction_target_not_traverse(monkeypatch, tmp_path: Path):
-    """RedirectionGuard (dotfiles #637) blocks a protected process from *traversing*
-    an unprivileged .venv junction, though it may still *read* its target. So the
-    Windows binstubs must resolve .venv's reparse target and launch the slot python
-    DIRECTLY: the .cmd via a `dir /a:l` reparse-listing parse, the .ps1 via
-    `(Get-Item .venv).Target`. A plain-dir `.venv` falls through to the default."""
+def test_windows_binstubs_resolve_via_current_version_marker(monkeypatch, tmp_path: Path):
+    """The Windows binstubs resolve the runtime SOLELY via the junction-free
+    ``current-version`` marker -> ``versions\\<ver>\\Scripts\\python.exe`` (#1106).
+    They must NOT parse/traverse a ``.venv`` reparse point (the old ``dir /a:l``
+    junction-target parse is retired -- it broke on ``\\??\\`` targets and drifted,
+    dotfiles #1089)."""
     if platform.system() != "Windows":
         import pytest
         pytest.skip("Windows-only binstub content")
@@ -84,16 +84,13 @@ def test_windows_binstubs_resolve_junction_target_not_traverse(monkeypatch, tmp_
 
     assert inst.deploy_binstubs(repo_dir=tmp_path, project="demoproj") is True
 
-    for name in ("agent-worktrees.cmd", "demoproj.cmd"):
+    for name in ("agent-worktrees.cmd", "demoproj.cmd", "demoproj.ps1"):
         content = (lb / name).read_text()
-        assert "dir /a:l" in content, f"{name} must resolve the .venv reparse target (#637)"
-        assert "#637" in content
-    for name in ("demoproj.ps1",):
-        content = (lb / name).read_text()
-        assert ".Target" in content and "Join-Path (@($_t)[0])" in content, (
-            f"{name} must resolve the .venv reparse target (#637)"
-        )
-        assert "#637" in content
+        assert "current-version" in content, f"{name} must resolve via the marker"
+        assert "versions" in content
+        # The retired junction-target parse must be gone.
+        assert "dir /a:l" not in content, f"{name} must not parse a .venv junction"
+        assert "\\.venv\\" not in content, f"{name} must not resolve through .venv"
 
 
 def test_deploy_binstubs_writes_ps1_on_windows(monkeypatch, tmp_path: Path):
