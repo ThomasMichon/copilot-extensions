@@ -9,7 +9,6 @@ time `scripts/stamp_build_info.py` bakes it (plus git provenance) into
 
 from __future__ import annotations
 
-import importlib
 import importlib.metadata
 
 import agent_dispatch

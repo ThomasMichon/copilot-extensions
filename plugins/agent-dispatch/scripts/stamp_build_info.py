@@ -27,16 +27,28 @@ from pathlib import Path
 
 
 def _read_pyproject_version(plugin_dir: Path) -> str:
+    """Version from the ``[project]`` table of pyproject.toml, or ``""``.
+
+    Scoped to ``[project]`` so a ``version`` key in some later ``[tool.*]`` table
+    can't be mistaken for the package version. Returns an empty string on any
+    failure so the caller stamps an empty version -- which makes
+    ``_resolve_version`` fall through to package metadata rather than misreport a
+    bogus literal.
+    """
     pyproject = plugin_dir / "pyproject.toml"
     try:
         lines = pyproject.read_text(encoding="utf-8").splitlines()
     except OSError:
-        return "0.0.0"
+        return ""
+    in_project = False
     for line in lines:
         stripped = line.strip()
-        if stripped.startswith("version"):
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_project = stripped == "[project]"
+            continue
+        if in_project and stripped.startswith("version"):
             return stripped.split("=", 1)[1].strip().strip('"').strip("'")
-    return "0.0.0"
+    return ""
 
 
 def _git(git_dir: Path | None, *args: str) -> str:
@@ -59,17 +71,19 @@ def stamp(package_dir: Path, plugin_dir: Path, git_dir: Path | None) -> Path:
     branch = _git(git_dir, "rev-parse", "--abbrev-ref", "HEAD")
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     source = str(git_dir or plugin_dir).replace("\\", "/")
+    # Emit each value with ``!r`` so quotes/backslashes/newlines in a value
+    # (odd branch name, unusual install path) can never produce invalid Python.
     content = (
         '"""Build provenance -- auto-generated at deploy time. Do not edit."""\n'
         "\n"
         "from __future__ import annotations\n"
         "\n"
         "BUILD_INFO: dict[str, str] = {\n"
-        f'    "version": "{version}",\n'
-        f'    "commit": "{commit}",\n'
-        f'    "branch": "{branch}",\n'
-        f'    "build_timestamp": "{ts}",\n'
-        f'    "source": "{source}",\n'
+        f"    'version': {version!r},\n"
+        f"    'commit': {commit!r},\n"
+        f"    'branch': {branch!r},\n"
+        f"    'build_timestamp': {ts!r},\n"
+        f"    'source': {source!r},\n"
         "}\n"
     )
     out = package_dir / "_build_info.py"
