@@ -1096,3 +1096,29 @@ def test_classify_all_overwrite_redoes_explicit(tmp_path: Path, monkeypatch):
     changed = related.classify_all(tmp_path, overwrite=True)
     assert {c["name"] for c in changed} == {"ado-tools"}
     assert related.read_related(tmp_path).related["ado-tools"].ownership == "internal"
+
+
+def test_cli_owners_is_global_via_control_plane(tmp_path: Path, monkeypatch):
+    """`related owners` reads the CONTROL-PLANE index regardless of cwd (so an
+    ambient consumer gets the owned set from anywhere), never raising the
+    cwd-anchor guard."""
+    from agent_worktrees import __main__ as cli
+    cp = tmp_path / "control-plane"; cp.mkdir()
+    _patch_registry(monkeypatch, {
+        "mine": "https://github.com/me/mine.git",
+        "org": "https://github.com/some-org/org.git",
+    }, logins=("me",))
+    related.write_related(cp, RelatedConfig(related={
+        "mine": RelatedEntry(name="mine", ownership="owned"),
+        "org": RelatedEntry(name="org", ownership="internal"),
+    }))
+    monkeypatch.setattr(related, "find_control_plane_anchor", lambda: str(cp))
+    # No --repo, and _related_anchor would not resolve a project here: the
+    # control-plane path must still answer.
+    monkeypatch.setattr(cli, "_related_anchor", lambda rest: None)
+    captured: dict = {}
+    monkeypatch.setattr(cli, "_json_output", lambda payload: captured.update(payload))
+    rc = cli.cmd_related_dispatch(["owners", "--json"])
+    assert rc == 0
+    assert captured["source"] == "control-plane"
+    assert [t["name"] for t in captured["owned"]] == ["mine"]

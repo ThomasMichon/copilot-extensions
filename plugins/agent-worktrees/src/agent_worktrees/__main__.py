@@ -11370,7 +11370,8 @@ def _related_usage() -> None:
     print("  resolve [<name>]                    How to work on it from here (locus plan)")
     print("  classify [<name>|--all] [--overwrite]   Derive ownership from gh accounts +")
     print("                                      remote and persist (unset entries only)")
-    print("  owners [--json]                     List wholly-owned targets (ownership=owned)")
+    print("  owners [--json]                     List wholly-owned targets "
+          "(ownership=owned) from the control-plane index")
     print()
     print("Any command takes [--repo PATH] to target a specific checkout")
     print("(default: the git repo containing the current directory).")
@@ -11819,6 +11820,32 @@ def cmd_related_dispatch(argv: list[str]) -> int:
         _related_usage()
         return 0
 
+    # `owners` is a GLOBAL query -- the operator's wholly-owned targets live in
+    # the control-plane index (the authority), independent of the session's cwd.
+    # Resolve it directly and read only that (no cwd union, which could let a
+    # stale anchor override a fresher one), so it works from ANY cwd -- exactly
+    # what an ambient consumer like the AI-attribution hook needs. Handled before
+    # the cwd-anchor guard so a neutral cwd (no adopted project) still answers.
+    if sub == "owners":
+        json_out = "--json" in rest
+        try:
+            cp = related.find_control_plane_anchor()
+        except Exception:
+            cp = None
+        base = cp or _related_anchor(rest)   # fall back to cwd if no control plane
+        owners = (related.owned_targets_grafted(_related_config_source_anchors(base))
+                  if base else [])
+        if json_out:
+            _json_output({"owned": owners, "count": len(owners),
+                          "source": "control-plane" if cp else "cwd"})
+        elif not owners:
+            print("No wholly-owned related targets (ownership=owned).")
+        else:
+            output.header("Wholly-owned targets")
+            for t in owners:
+                print(f"  {t['name']:<24} {t['slug'] or t['remote'] or '-'}")
+        return 0
+
     anchor = _related_anchor(rest)
     if not anchor:
         output.err(
@@ -12171,21 +12198,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                 print(f"  {c['name']:<24} {c['before']} -> {c['after']}")
         return 0
 
-    if sub == "owners":
-        anchors = _related_config_source_anchors(anchor)
-        # Grafted (base + knowledge overlay) merged view, so a later anchor that
-        # reclassifies a repo correctly overrides -- incl. demoting it out of
-        # 'owned'. See related.owned_targets_grafted.
-        owners = related.owned_targets_grafted(anchors)
-        if json_out:
-            _json_output({"owned": owners, "count": len(owners)})
-        elif not owners:
-            print("No wholly-owned related targets (ownership=owned).")
-        else:
-            output.header("Wholly-owned targets")
-            for t in owners:
-                print(f"  {t['name']:<24} {t['slug'] or t['remote'] or '-'}")
-        return 0
+
 
     output.err(f"Unknown related subcommand: {sub}")
     _related_usage()
@@ -14975,7 +14988,7 @@ def _git_toplevel(path: Path | None) -> Path | None:
 # now it resolves from CWD, or from the ``--project`` a project binstub injects,
 # and balks helpfully when neither is available.
 _NO_PROJECT_COMMANDS = {
-    "--version", "-V", "--help", "-h", "repos", "accounts", "install", "register", "hook",
+    "--version", "-V", "--help", "-h", "repos", "accounts", "related", "install", "register", "hook",
     "picker", "reap-shells", "status-updater", "restart", "register-session",
     "head-session", "conclude-session", "link-succession", "config-migrate",
     "session-lock", "machine-context",
