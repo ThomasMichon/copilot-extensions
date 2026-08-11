@@ -10,12 +10,14 @@ dependency on a git checkout of this repo.
 ## Context
 
 Teammates share the same ADO org and the same CodeSpaces repo
-(configured per-team in their adopted repo's `codespaces.yaml`) but each
+(configured per-team, when it deviates from convention, in their adopted repo's
+`.agent-codespaces/config.yaml`) but each
 maintains their own **control-harness repo** (referred to throughout docs as
 `my-control-harness`). That repo:
 
 - is adopted by agent-worktrees (gives it a project binstub + worktree root),
-- holds `machines.yaml`, `acp-agents.json`, and `codespaces.yaml`, and
+- holds `machines.yaml`, `acp-agents.json`, and (only when it deviates from
+  convention) a `.agent-codespaces/config.yaml`, and
 - doubles as the **CodeSpaces dotfiles repo** (provisioned into each CodeSpace).
 
 ## Target install topology
@@ -49,7 +51,7 @@ The agent-bridge venv additionally imports `agent_codespaces` (for the
 | 7 | 🟡 | A personal project name leaks into teammate-facing strings | Genericize to `my-control-harness`; generic installer error/migration text; fix `~/.<personal-project>` temp-path bug |
 | 8 | 🟡 | Repo AGENTS.md still says "two plugins" | Update to three plugins throughout |
 | 9 | 🟡 | `agent-codespaces create`/`cleanup` undocumented | Document in README + codespaces-lifecycle SKILL |
-| 10 | ⚪ | Codespace examples must stay generic | All org/repo/URL values live in the adopted repo's `codespaces.yaml`, never in this repo |
+| 10 | ⚪ | Codespace examples must stay generic | All org/repo/URL values live in the adopted repo's `.agent-codespaces/config.yaml`, never in this repo |
 | 11 | ⚪ | Marketplace under personal account | Confirm teammate read access to `ThomasMichon/copilot-extensions` |
 
 ## Phases

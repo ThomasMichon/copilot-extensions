@@ -253,8 +253,9 @@ the whole system. In examples it's called `my-control-harness`. It:
 
 - is **adopted by agent-worktrees** (gets a project binstub + worktree root),
 - holds the **topology** the bridge reads — `machines.yaml` (machines + SSH) and
-  `acp-agents.json` (agents), plus `codespaces.yaml` (Codespace defaults +
-  credential-relay policy) and `containers.yaml` (local dev-container fleet
+  `acp-agents.json` (agents), plus a supplementary `.agent-codespaces/config.yaml`
+  (Codespace overrides + credential-relay policy; most repos need none) and
+  `containers.yaml` (local dev-container fleet
   defaults), and
 - doubles as the **Codespaces dotfiles repo**, so the same repo provisions each
   CodeSpace.
