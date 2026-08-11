@@ -85,7 +85,7 @@ state is **not** license to reap.
   protection. Fixed in **agent-worktrees ≥ 1.5.3-dev476** — the off-hot-path
   populate/doctor sweep now reconciles `mux_live` alongside `bound_live`. On older
   builds, **verify liveness against the live scan before reaping.**
-- **Before any bulk `gc --clean`**, confirm no target is in a live mux
+- **Before any bulk `<project> worktrees cleanup --clean`**, confirm no target is in a live mux
   (`psmux list-sessions` / `tmux list-sessions`) or holds a live lock. When in doubt, prefer **per-item
   `<project> worktrees cleanup --worktree-id <id> --clean`** (add `--include-unused` for a
   no-commit/no-turn shell) — it re-checks prune-safety and refuses an active
