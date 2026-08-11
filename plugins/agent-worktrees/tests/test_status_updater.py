@@ -18,6 +18,7 @@ import time
 import pytest
 
 from agent_worktrees import __main__ as m
+from agent_worktrees import update_stage as us
 
 
 def _ns(**kw):
@@ -504,3 +505,142 @@ def test_spawn_status_updater_omits_path_when_absent(monkeypatch):
     assert m._spawn_status_updater("x", None) is True
     assert "--path" not in captured["argv"]
     assert captured["argv"][captured["argv"].index("--mux") + 1] == "tmux"
+
+
+def test_spawn_status_updater_roots_child_at_home_not_payload(monkeypatch):
+    """The detached updater must NOT inherit the spawner's cwd (the plugin
+    payload dir under the hook/launcher): a child holding the payload as its cwd
+    blocks ``copilot plugin update`` on Windows (os error 32).  It is rooted at
+    HOME instead."""
+    import os as _os
+    import shutil
+
+    monkeypatch.setattr(
+        shutil, "which", lambda x: "/bin/psmux" if x == "psmux" else None)
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda *a, **k: subprocess.CompletedProcess(a, 0, "", ""))
+    captured: dict = {}
+    monkeypatch.setattr(
+        subprocess, "Popen",
+        lambda argv, **kw: captured.update(kw=kw) or object())
+
+    assert m._spawn_status_updater("x", "/w/x") is True
+    assert captured["kw"].get("cwd") == _os.path.expanduser("~")
+
+
+# --- spawn debounce: don't leak a pair of updaters (dotfiles #911) --------
+
+def _fake_mux_store(has_session_codes, calls, store):
+    """A fake mux whose display-message reads back a pre-seeded ``store`` so a
+    debounce probe sees an existing owner token/prefix."""
+    codes = iter(has_session_codes)
+
+    def fake_run(argv, **_kw):
+        verb = argv[1]
+        if verb == "has-session":
+            return subprocess.CompletedProcess(argv, next(codes, 1), "", "")
+        if verb == "set-option":
+            store[argv[4]] = argv[5]
+            calls.append((argv[4], argv[5]))
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        if verb == "display-message":
+            key = argv[5].strip("#{}")
+            return subprocess.CompletedProcess(argv, 0, store.get(key, ""), "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    return fake_run
+
+
+def test_status_updater_debounces_live_current_owner(monkeypatch):
+    """A second spawn retires immediately (no token claim, no bar writes) when a
+    live updater already owns the session on the *current* runtime."""
+    calls: list[tuple[str, str]] = []
+    store = {"@aw_updater": "99999", "@aw_updater_prefix": "/slot/current"}
+    monkeypatch.setattr(subprocess, "run", _fake_mux_store([0], calls, store))
+    monkeypatch.setattr(us, "_pid_alive", lambda _pid: True)
+    # Not superseded for either the no-arg self-check or the owner-prefix check.
+    monkeypatch.setattr(m, "_runtime_superseded", lambda *a, **k: False)
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    monkeypatch.setattr(time, "sleep", lambda *_a, **_k: None)
+
+    rc = m.cmd_status_updater(_ns())
+
+    assert rc == 0
+    # Debounced before claiming: no @aw_updater token, no bar options written.
+    assert calls == []
+
+
+def test_status_updater_replaces_superseded_owner(monkeypatch):
+    """A live but *superseded* owner (mid-deploy) is replaced, not deferred to --
+    the reseed must keep the bar alive after a deploy (dotfiles #915)."""
+    calls: list[tuple[str, str]] = []
+    store = {"@aw_updater": "99999", "@aw_updater_prefix": "/slot/old"}
+    monkeypatch.setattr(subprocess, "run", _fake_mux_store([0, 0, 1], calls, store))
+    monkeypatch.setattr(us, "_pid_alive", lambda _pid: True)
+    # No-arg self-check: not superseded (proceed); owner-prefix check: superseded.
+    monkeypatch.setattr(
+        m, "_runtime_superseded",
+        lambda *a, prefix=None, **k: prefix is not None)
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    monkeypatch.setattr(time, "sleep", lambda *_a, **_k: None)
+
+    rc = m.cmd_status_updater(_ns())
+
+    assert rc == 0
+    # It proceeded: claimed the token and published its own runtime prefix.
+    assert any(c[0] == "@aw_updater" for c in calls)
+    assert any(c[0] == "@aw_updater_prefix" for c in calls)
+
+
+def test_status_updater_replaces_dead_owner(monkeypatch):
+    """A stale token pointing at a dead pid never blocks a spawn."""
+    calls: list[tuple[str, str]] = []
+    store = {"@aw_updater": "99999", "@aw_updater_prefix": "/slot/current"}
+    monkeypatch.setattr(subprocess, "run", _fake_mux_store([0, 0, 1], calls, store))
+    monkeypatch.setattr(us, "_pid_alive", lambda _pid: False)  # owner dead
+    monkeypatch.setattr(m, "_runtime_superseded", lambda *a, **k: False)
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    monkeypatch.setattr(time, "sleep", lambda *_a, **_k: None)
+
+    rc = m.cmd_status_updater(_ns())
+
+    assert rc == 0
+    assert any(c[0] == "@aw_updater" for c in calls)  # proceeded to claim
+
+
+def test_status_updater_replaces_owner_without_published_prefix(monkeypatch):
+    """A pre-upgrade owner (live pid but no @aw_updater_prefix) is replaced, not
+    deferred to -- so the one-time upgrade transition can't wedge a dark bar."""
+    calls: list[tuple[str, str]] = []
+    store = {"@aw_updater": "99999"}  # note: no @aw_updater_prefix
+    monkeypatch.setattr(subprocess, "run", _fake_mux_store([0, 0, 1], calls, store))
+    monkeypatch.setattr(us, "_pid_alive", lambda _pid: True)
+    monkeypatch.setattr(m, "_runtime_superseded", lambda *a, **k: False)
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    monkeypatch.setattr(time, "sleep", lambda *_a, **_k: None)
+
+    rc = m.cmd_status_updater(_ns())
+
+    assert rc == 0
+    assert any(c[0] == "@aw_updater" for c in calls)  # proceeded to claim
+
+
+def test_status_updater_publishes_runtime_prefix_on_claim(monkeypatch):
+    """The updater publishes its own ``sys.prefix`` so a later spawn can tell a
+    current owner (defer) from a superseded one (replace)."""
+    import os as _os
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(subprocess, "run", _fake_mux([0, 0, 1], calls))
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    monkeypatch.setattr(time, "sleep", lambda *_a, **_k: None)
+
+    rc = m.cmd_status_updater(_ns())
+
+    assert rc == 0
+    assert ("@aw_updater_prefix", _os.path.realpath(sys.prefix)) in calls
