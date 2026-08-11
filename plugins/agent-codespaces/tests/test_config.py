@@ -194,6 +194,31 @@ class TestCwdAutoDiscovery:
         # Convention defaults still apply.
         assert cfg.default_machine_type == "largePremiumLinux"
 
+    def test_credentials_feed_token_env_parsed(self, config_dir, monkeypatch):
+        # dotfiles#1221: credentials.feed_token_env is read from config so the
+        # launch prelude exports env-token feed auth (npm/nuget/rush).
+        repo = config_dir / "product"
+        cfg_dir = repo / ".agent-codespaces"
+        cfg_dir.mkdir(parents=True)
+        (cfg_dir / "config.yaml").write_text(
+            yaml.safe_dump(
+                {"credentials": {"feed_token_env": ["ODSP_NPM_AUTH_TOKEN"]}}
+            )
+        )
+        monkeypatch.setattr(
+            "agent_codespaces.config.cwd_repo_root", lambda: repo
+        )
+        cfg = load_merged_config()
+        assert cfg.credentials.feed_token_env == ["ODSP_NPM_AUTH_TOKEN"]
+
+    def test_credentials_feed_token_env_default_empty(self, config_dir, monkeypatch):
+        monkeypatch.setattr(
+            "agent_codespaces.config.cwd_repo_root",
+            lambda: config_dir / "no-config-repo",
+        )
+        cfg = load_merged_config()
+        assert cfg.credentials.feed_token_env == []
+
 
 class TestAdoptedRepos:
     def test_roundtrip(self, config_dir):

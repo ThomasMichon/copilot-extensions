@@ -91,12 +91,50 @@ def build_relay_portmap_write(relay_port: int) -> str:
     )
 
 
+# CodeSpace-side ADO auth helper (installed by
+# ``codespace_assets.build_provision_command`` and symlinked onto PATH at
+# ``~/.local/bin/ado-auth-helper``). Its ``get-access-token`` mints a raw ADO
+# bearer over the relay for non-git feed clients (npm/nuget/rush) -- the same
+# host identity the git relay uses. We use it to populate env-token feed-auth
+# vars, which the git relay alone does not satisfy (dotfiles#1221).
+ADO_AUTH_HELPER = "$HOME/.local/bin/ado-auth-helper"
+
+
+def build_feed_token_exports(var_names) -> str:
+    """POSIX snippet exporting each feed-token env var from the ADO auth helper.
+
+    The credential relay only wires **git** auth. A tool that authenticates to an
+    Azure Artifacts feed via a static env token -- e.g. a Rush ``.npmrc`` line
+    ``//<feed>/:_authToken=${ODSP_NPM_AUTH_TOKEN}`` -- otherwise stays anonymous
+    (E401), because nothing populates that var. For every name in *var_names*
+    emit ``export <NAME>="$(<helper> get-access-token 2>/dev/null || true)";`` so
+    it resolves to a fresh, relay-minted ADO bearer at launch, bridging the
+    working relay to npm/nuget feed auth (dotfiles#1221).
+
+    Best-effort: a missing helper yields an empty value (no worse than today).
+    The helper needs ``LC_GIT_CREDENTIAL_RELAY`` (exported just above in the
+    prelude), so callers MUST emit this AFTER the relay exports. Minted at
+    launch, so it is fresh for the session (the token is short-lived; a run that
+    outlives it re-borrows on the next launch, matching the relay's own model).
+    """
+    out = ""
+    for name in var_names or ():
+        if not name:
+            continue
+        out += (
+            f'export {name}="$({ADO_AUTH_HELPER} get-access-token '
+            '2>/dev/null || true)"; '
+        )
+    return out
+
+
 def build_relay_env(
     relay_port: int,
     relay_token: str | None,
     *,
     use_relay: bool,
     ado_host: str | None = None,
+    feed_token_env: list[str] | None = None,
 ) -> str:
     """Build the CodeSpace launch-prelude env string.
 
@@ -108,7 +146,11 @@ def build_relay_env(
     rather than starting an interactive broker in a headless ACP session. When
     ``use_relay``, also publishes a port-mapping file so the auth helpers can
     rediscover this relay channel by liveness probe even if the env is not
-    inherited by a later tool shell (see :func:`build_relay_portmap_write`).
+    inherited by a later tool shell (see :func:`build_relay_portmap_write`), and
+    -- for any ``feed_token_env`` var names -- exports a feed-auth token minted
+    from the ADO auth helper so env-token feed auth (npm/nuget/rush) works over
+    the relay (dotfiles#1221). The feed-token exports come LAST so they can use
+    the just-exported ``LC_GIT_CREDENTIAL_RELAY``.
     """
     from .codespace_assets import build_auth_error_policy_command
 
@@ -127,6 +169,7 @@ def build_relay_env(
                 f"{shlex.quote(ado_host)}; "
             )
         env += build_relay_portmap_write(relay_port)
+        env += build_feed_token_exports(feed_token_env)
     return env
 
 
@@ -173,6 +216,7 @@ def build_relay_launch_env(
             token,
             use_relay=True,
             ado_host=getattr(cfg.credentials, "ado_host", None),
+            feed_token_env=getattr(cfg.credentials, "feed_token_env", None),
         ),
         port,
     )
