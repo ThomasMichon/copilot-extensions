@@ -1012,6 +1012,7 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         relay_token,
         use_relay=not args.no_relay,
         ado_host=getattr(config.credentials, "ado_host", None),
+        feed_token_env=getattr(config.credentials, "feed_token_env", None),
     )
 
     manager = ConnectionManager()
