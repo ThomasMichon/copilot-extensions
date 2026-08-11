@@ -19,6 +19,11 @@ import sys
 from . import __version__
 from .catalog import load_catalog
 from .core_install import core_status, install_command, install_core
+from .harness_state import (
+    build_projects,
+    build_repos,
+    user_enabled_plugins,
+)
 from .model import Model, build_model, coverage, effective_prereqs
 from .prereqs import current_os, detect_baseline, missing
 from .provision import apply as provision_apply
@@ -194,10 +199,123 @@ def _cmd_plugins(rest: list[str]) -> int:
     if head in ("--prereqs", "-p"):
         _print_prereqs(model)
         return 0
+    if head in ("--status", "-s"):
+        _print_plugins_status(model)
+        return 0
     if head.startswith("-"):
         print(f"error: unknown option {head!r} for `plugins`.")
         return 2
     return _print_plugin_detail(model, head)
+
+
+def _print_plugins_status(model: Model) -> None:
+    """Known plugins (from the catalog/marketplace) vs. what is enabled in the
+    user-global Copilot settings, with the marketplace each is enabled from."""
+    enabled = {e.name: e for e in user_enabled_plugins() if e.enabled}
+    print()
+    print(f"  {_BANNER} — plugin install/enablement status")
+    print(f"  {len(enabled)} plugins enabled user-global")
+    print()
+    width = max((len(ep.plugin.name) for ep in model.plugins), default=0)
+    for ep in sorted(model.plugins,
+                     key=lambda e: (KIND_ORDER.get(e.plugin.kind, 99), e.plugin.name)):
+        name = ep.plugin.name
+        e = enabled.get(name)
+        if e:
+            mark, state = "✓", f"enabled @{e.marketplace}"
+        else:
+            mark, state = "·", "not enabled user-global"
+        print(f"    {mark} {name.ljust(width)}  [{ep.plugin.kind}]  {state}")
+    # Enabled plugins the catalog doesn't know about (other marketplaces).
+    known = model.names
+    extra = sorted(e.qualified for n, e in enabled.items() if n not in known)
+    if extra:
+        print()
+        print(f"  + {len(extra)} more enabled from other marketplaces "
+              "(not copilot-extensions plugins):")
+        for q in extra[:12]:
+            print(f"      {q}")
+        if len(extra) > 12:
+            print(f"      … and {len(extra) - 12} more")
+    print()
+
+
+def _cmd_projects(rest: list[str]) -> int:
+    projects = build_projects()
+    if rest and not rest[0].startswith("-"):
+        name = rest[0]
+        proj = next((p for p in projects if p.name == name), None)
+        if proj is None:
+            print(f"error: unknown project {name!r}. "
+                  f"Known: {', '.join(p.name for p in projects)}")
+            return 2
+        print()
+        print(f"  project: {proj.name}")
+        print(f"    config dir:     {proj.config_dir or '?'}")
+        print(f"    expose agent:   {proj.expose_agent}")
+        print(f"    knowledge repo: {proj.knowledge_repo or '(none linked)'}")
+        print(f"    profiles:       {proj.profiles}")
+        if proj.repo:
+            print(f"    checkout:       {proj.repo.path or '?'}  [{proj.repo.klass}]")
+            print(f"    remote:         {proj.repo.remote or '?'}")
+            print(f"    pr model:       {proj.repo.pr_model}")
+        print(f"    enabled plugins: {len(proj.enabled_plugins)}")
+        for q in list(proj.enabled_plugins)[:20]:
+            print(f"      - {q}")
+        if len(proj.enabled_plugins) > 20:
+            print(f"      … and {len(proj.enabled_plugins) - 20} more")
+        print()
+        return 0
+    print()
+    print(f"  {_BANNER} — Projects  (harness repos with binstubs + profiles)")
+    print(f"  {len(projects)} registered")
+    print()
+    width = max((len(p.name) for p in projects), default=0)
+    for p in projects:
+        klass = p.repo.klass if p.repo else "?"
+        kr = f" · knowledge:{p.knowledge_repo}" if p.knowledge_repo else ""
+        print(f"    {p.name.ljust(width)}  [{klass}]  "
+              f"profiles:{p.profiles}  plugins:{len(p.enabled_plugins)}{kr}")
+    print()
+    print("  `configurator projects <name>` for detail.")
+    print()
+    return 0
+
+
+def _cmd_repos(rest: list[str]) -> int:
+    repos = build_repos()
+    if rest and not rest[0].startswith("-"):
+        name = rest[0]
+        repo = next((r for r in repos if r.name == name), None)
+        if repo is None:
+            print(f"error: unknown repo {name!r}. Known: {', '.join(r.name for r in repos)}")
+            return 2
+        print()
+        print(f"  repo: {repo.name}{'  (project)' if repo.is_project else ''}")
+        print(f"    worktree mode: {repo.worktree_mode}")
+        print(f"    agent mode:    {'agent-guarded' if repo.agent else 'no-agent'}")
+        print(f"    ownership:     {repo.account or '(none)'}")
+        print(f"    pr model:      {repo.pr_model}")
+        print(f"    remote:        {repo.remote or '?'}")
+        print(f"    checkout:      {repo.path or '?'}")
+        print(f"    tags:          {', '.join(repo.tags) or '(none)'}")
+        print()
+        return 0
+    print()
+    print(f"  {_BANNER} — Repos  (every known repo; * = also a project)")
+    print(f"  {len(repos)} registered")
+    print()
+    width = max((len(r.name) for r in repos), default=0)
+    for r in repos:
+        star = "*" if r.is_project else " "
+        agent = "agent" if r.agent else "no-agent"
+        print(f"   {star}{r.name.ljust(width)}  [{r.worktree_mode}·{agent}·{r.pr_model}]"
+              f"  {r.account or '-'}")
+        print(f"    {' ' * width}   {r.path or '?'}")
+    print()
+    print("  `configurator repos <name>` for detail.")
+    print()
+    return 0
 
 
 def _prereq_line(s) -> str:
@@ -315,13 +433,20 @@ def main(argv: list[str] | None = None) -> int:
         print("  plugins <name>         show one plugin's prereqs / config / steps")
         print("  plugins --prereqs      the de-duplicated union of all prerequisites")
         print("  plugins --reconcile    coverage of the discovered membership by the catalog")
+        print("  plugins --status       known plugins vs. what is enabled user-global")
+        print("  projects [<name>]      registered projects (harness repos: binstubs + profiles)")
+        print("  repos [<name>]         every known repo + its config-state indicators")
         print()
-        print("Phase 2 adds restart-aware prerequisite provisioning and drives the")
-        print("harness's own core install; later phases add repo adoption/discovery,")
-        print("the visual configurator, and presets (issue #352).")
+        print("Phase 2 provisions prerequisites + drives the core install; Phase 3")
+        print("adds the Manager state views (projects/repos/plugin enablement); later")
+        print("phases add the visual configurator and presets (issue #352).")
         return 0
     if args and args[0] == "plugins":
         return _cmd_plugins(args[1:])
+    if args and args[0] == "projects":
+        return _cmd_projects(args[1:])
+    if args and args[0] == "repos":
+        return _cmd_repos(args[1:])
     if args and args[0] == "doctor":
         return _cmd_doctor()
     if args and args[0] == "setup":
