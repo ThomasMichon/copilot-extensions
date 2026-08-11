@@ -211,6 +211,7 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
         params: dict[str, str] | None = None,
         repo: str | None = None,
         dedup_key: str | None = None,
+        labels: list[str] | None = None,
         target_machine: str | None = None,
         target_worktree: str | None = None,
         target_repo: str | None = None,
@@ -220,8 +221,10 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
 
         Renders the recipe and enqueues it, deriving a reserved-work
         ``dedup_key`` from the recipe + params so re-kicking the same target
-        **collides rather than forking**. Enqueues only; embodying a worker to
-        drive the loop is the supervisor/host's job (as with ``create``)."""
+        **collides rather than forking**. Extra ``labels`` are merged with the
+        recipe's own (e.g. route the task onto a supervisor pool with
+        ``["general"]``). Enqueues only; embodying a worker to drive the loop is
+        the supervisor/host's job (as with ``create``)."""
         from .recipes import RecipeError, dedup_key_for, render_recipe
 
         try:
@@ -231,13 +234,14 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
         lane = _repo(ctx, repo)
         if not lane:
             return {"error": "no repo (lane): send X-Agent-Repo or pass repo=<remote URL>"}
+        merged_labels = list(dict.fromkeys([*rendered.labels, *(labels or [])]))
         make = queue.propose if proposed else queue.create
         task = make(
             rendered.title,
             repo=lane,
             prompt=rendered.prompt,
             requires=list(rendered.requires),
-            labels=list(rendered.labels),
+            labels=merged_labels,
             dedup_key=dedup_key or dedup_key_for(rendered),
             goal=rendered.goal,
             done_criteria=rendered.done_criteria,

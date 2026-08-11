@@ -2105,7 +2105,7 @@ def _recipe_create_namespace(
         goal=rendered.goal,
         done_criteria=rendered.done_criteria,
         require=list(rendered.requires) or None,
-        label=list(rendered.labels),
+        label=list(dict.fromkeys([*rendered.labels, *(getattr(args, "label", None) or [])])),
         dedup_key=getattr(args, "dedup_key", None) or _recipe_dedup_key(rendered),
         source="recipe",
         origin_ref=rendered.recipe,
@@ -3087,6 +3087,12 @@ def build_parser() -> argparse.ArgumentParser:
              "(default: the calling repo)",
     )
     kp.add_argument("--dedup-key", help="override the derived reserved-work dedup key")
+    kp.add_argument(
+        "--label", action="append", metavar="LABEL",
+        help="extra label(s) to stamp on the kicked task (repeatable), merged "
+             "with the recipe's own labels -- e.g. route the task onto a "
+             "supervisor pool with '--label general'",
+    )
     kp.add_argument(
         "--spawn", action="store_true",
         help="after creating, spawn a worker to drive the loop (best effort)",
