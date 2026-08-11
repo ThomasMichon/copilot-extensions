@@ -166,7 +166,7 @@ flowchart LR
     subgraph Repo["my-control-harness (your control repo)"]
       MY["machines.yaml<br/>(machines + SSH)"]
       AG["acp-agents.json<br/>(agent definitions)"]
-      CY["codespaces.yaml<br/>(Codespace defaults + relay policy)"]
+      CY[".agent-codespaces/config.yaml<br/>(Codespace overrides + relay policy)"]
       CN["containers.yaml<br/>(fleet defaults)"]
     end
     MY --> WT["agent-worktrees<br/>(terminal/SSH targets)"]
@@ -180,8 +180,11 @@ flowchart LR
 - `agent-worktrees register` → project binstub + worktree root.
 - `agent-bridge config adopt` → a topology profile pointing at `machines.yaml`
   + `acp-agents.json`.
-- `agent-codespaces config adopt` → registers the repo so `codespaces.yaml` is
-  read live on every operation.
+- `agent-codespaces config adopt` → registers a repo that carries a
+  supplementary `.agent-codespaces/config.yaml` so it is read live on every
+  operation. **Most repos need no config** — machine/location defaults, the
+  `/workspaces/<basename>` checkout, and the git-credential relay are all
+  convention-derived; adopt only a repo that deviates.
 - `agent-containers` reads `containers.yaml` (resolved via
   `$AGENT_CONTAINERS_CONFIG`, `./containers.yaml`, or
   `~/.agent-containers/containers.yaml`) — keep it in the control repo to share
@@ -194,7 +197,7 @@ flowchart LR
 
 See [machine-config](../plugins/agent-bridge/docs/machine-config.md) for the
 file formats and [codespaces-setup](../plugins/agent-codespaces/skills/codespaces-setup/SKILL.md)
-for `codespaces.yaml`.
+for `.agent-codespaces/config.yaml`.
 
 ## Credential relay
 

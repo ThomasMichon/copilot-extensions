@@ -2,7 +2,8 @@
 
 Mirrors agent-bridge #1080 for agent-codespaces: ``--project`` is meaningful
 only for the project-consuming verbs (``config``, whose ``init``/``adopt``
-read the repo-root/``codespaces.yaml`` from the cwd). On a name/CodeSpace-
+read the repo's ``.agent-codespaces/config.yaml`` from the cwd). On a
+name/CodeSpace-
 addressed verb an *explicit* (user-typed) ``--project`` bounces instead of
 silently no-op'ing, while a router-injected one (marked
 ``AGENT_WORKTREES_PROJECT_ROUTED=1``) stays a silent no-op so the uniform

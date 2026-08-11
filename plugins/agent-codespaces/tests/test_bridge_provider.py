@@ -68,7 +68,7 @@ class TestBuildAgentConfigs:
         from agent_codespaces.config import CodespacesConfig
 
         # Hermetic (#73): force the no-config default (no workspace_folder)
-        # instead of reading the machine's real codespaces.yaml, so the built
+        # instead of reading the machine's real repo config, so the built
         # command deterministically uses the env-var workspace expression.
         with patch(
             "agent_codespaces.config.load_merged_config",

@@ -226,8 +226,9 @@ class RepoConfig:
 class ProvisionFile:
     """A file an adopting repo deploys into the CodeSpace on connect.
 
-    ``src`` is resolved relative to the repo that declares it (the dir
-    containing the ``codespaces.yaml``). ``dest`` is the remote path and
+    ``src`` is resolved relative to the repo that declares it (the repo root,
+    regardless of whether the config lives at ``.agent-codespaces/config.yaml``
+    or the legacy ``codespaces.yaml``). ``dest`` is the remote path and
     may start with ``~``.
     """
 
@@ -239,7 +240,7 @@ class ProvisionFile:
 
 @dataclass
 class ProvisionConfig:
-    """By-convention provisioning hook declared in ``codespaces.yaml``.
+    """By-convention provisioning hook declared in the repo config.
 
     Lets an adopting repo deploy its own files (e.g. shell env snippets)
     and run setup commands on every ``agent-codespaces ssh`` connect,
@@ -311,8 +312,8 @@ class CodespacesConfig:
     provision: ProvisionConfig = field(default_factory=lambda: ProvisionConfig())
 
     # Operator-declared CodeSpace-scoped plugins (the control-plane's own
-    # `codespace_plugins:` list in codespaces.yaml). Same entry shape as a
-    # harness plugin's `codespacePlugins` manifest array
+    # `codespace_plugins:` list in .agent-codespaces/config.yaml). Same entry
+    # shape as a harness plugin's `codespacePlugins` manifest array
     # (``{source, enable?, forWorkspaceRepo?}``) -- resolved by
     # ``codespace_plugins.resolve_codespace_plugins`` alongside the ones swept
     # from installed harness plugins. This is where an operator declares the

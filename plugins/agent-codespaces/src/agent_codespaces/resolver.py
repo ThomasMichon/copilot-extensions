@@ -112,8 +112,8 @@ def _build_spawn_command(
 ) -> list[str]:
     """Build the spawn command for a codespace agent.
 
-    The ``acp_command`` is read from ``codespaces.yaml`` defaults and
-    passed as ``--remote-cmd`` to ``agent-codespaces ssh --stdio``.
+    The ``acp_command`` is read from ``.agent-codespaces/config.yaml`` defaults
+    and passed as ``--remote-cmd`` to ``agent-codespaces ssh --stdio``.
 
     ``stage_plugins`` are related-repo plugin sources (from agent-bridge) that
     the ``ssh`` transport stages onto the CodeSpace and folds into the launch as
