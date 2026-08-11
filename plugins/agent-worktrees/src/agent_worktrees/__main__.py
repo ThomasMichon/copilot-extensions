@@ -11614,6 +11614,13 @@ def cmd_state_root_dispatch(argv: list[str]) -> int:
              "path, or JSON (pair_id/role/sibling id/role/path/kind) with "
              "--json. Exit 3 when the current worktree is unpaired/untracked.",
     )
+    p.add_argument(
+        "--conduct", action="store_true",
+        help="Emit the sessionStart \"the user's state repo\" definition "
+             "(Markdown) binding the term to the resolved checkout, for the "
+             "session-conduct hook. Always exits 0 (prints an unbound notice "
+             "when no state repo is bound).",
+    )
     try:
         args = p.parse_args(argv)
     except SystemExit as exc:
@@ -11624,6 +11631,10 @@ def cmd_state_root_dispatch(argv: list[str]) -> int:
 
     config = cfg.load_config()
     res = state_root_mod.resolve_state_root(config, repo_override=args.repo)
+
+    if args.conduct:
+        print(state_root_mod.state_repo_definition(res))
+        return 0
 
     if args.json:
         print(json.dumps(res.as_dict(), indent=2))
