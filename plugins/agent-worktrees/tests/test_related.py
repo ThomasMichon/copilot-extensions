@@ -125,6 +125,110 @@ def test_grafted_list_role_filter(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
+# Installed-plugin config-graft: plugins contribute related entries by install
+# ---------------------------------------------------------------------------
+
+def _make_installed_plugin(root: Path, marketplace: str, name: str,
+                           cfg: RelatedConfig, *, manifest: str = "plugin.json"):
+    """Create a fake installed plugin under root/<marketplace>/<name>/."""
+    plugin_dir = root / marketplace / name
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    if manifest == "plugin.json":
+        (plugin_dir / "plugin.json").write_text("{}", encoding="utf-8")
+    elif manifest == ".claude-plugin":
+        (plugin_dir / ".claude-plugin").mkdir(exist_ok=True)
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            "{}", encoding="utf-8")
+    # else: no manifest (negative case)
+    _write_related(plugin_dir, cfg)
+    return plugin_dir
+
+
+def test_installed_plugin_related_anchors_discovers_and_filters(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    root = tmp_path / "installed-plugins"
+    # (a) nested layout with plugin.json manifest
+    p1 = _make_installed_plugin(
+        root, "dev-tmichon", "odsp-web-harness",
+        RelatedConfig(related={"odsp-web": RelatedEntry(
+            name="odsp-web", role="product", delegate="agent-codespaces")}))
+    # (b) nested layout with .claude-plugin manifest
+    p2 = _make_installed_plugin(
+        root, "acme", "other-harness",
+        RelatedConfig(related={"other": RelatedEntry(name="other", role="tooling")}),
+        manifest=".claude-plugin")
+    # (c) ships related.yaml but NO manifest -> must be ignored
+    _make_installed_plugin(
+        root, "acme", "not-a-plugin",
+        RelatedConfig(related={"nope": RelatedEntry(name="nope")}),
+        manifest="none")
+
+    monkeypatch.setenv(related.INSTALLED_PLUGINS_ENV, str(root))
+    anchors = related.installed_plugin_related_anchors()
+    assert set(anchors) == {str(p1), str(p2)}  # (c) excluded, deterministic set
+    assert anchors == sorted(anchors)          # deterministic order
+
+
+def test_installed_plugin_related_anchors_empty_when_root_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv(related.INSTALLED_PLUGINS_ENV, str(tmp_path / "nope"))
+    assert related.installed_plugin_related_anchors() == []
+
+
+def test_grafted_plugin_is_lowest_precedence_and_primary_ignored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    root = tmp_path / "installed-plugins"
+    # plugin contributes odsp-web AND (wrongly) a primary -- primary must be ignored
+    plugin = _make_installed_plugin(
+        root, "dev-tmichon", "odsp-web-harness",
+        RelatedConfig(primary="odsp-web", related={
+            "odsp-web": RelatedEntry(name="odsp-web", role="product",
+                                     summary="from plugin",
+                                     delegate="agent-codespaces"),
+            "vessel": RelatedEntry(name="vessel", role="tooling")}))
+    monkeypatch.setenv(related.INSTALLED_PLUGINS_ENV, str(root))
+
+    base = tmp_path / "harness"
+    knowledge = tmp_path / "knowledge"
+    _write_related(base, RelatedConfig(primary="base-primary"))
+    # user/knowledge overrides the plugin's odsp-web entry wholesale
+    _write_related(knowledge, RelatedConfig(related={
+        "odsp-web": RelatedEntry(name="odsp-web", role="product",
+                                 summary="from knowledge")}))
+
+    # anchor order as _related_config_source_anchors builds it: plugin, base, knowledge
+    merged = related.read_related_grafted([str(plugin), base, knowledge])
+
+    # union: plugin-only entry survives; collision resolves to knowledge
+    assert set(merged.related) == {"odsp-web", "vessel"}
+    assert merged.related["odsp-web"].summary == "from knowledge"   # user overrides plugin
+    assert merged.related["odsp-web"].origin_anchor == str(knowledge)
+    # plugin-only entry is contributed purely by being installed
+    assert merged.related["vessel"].origin_anchor == str(plugin)
+    # a plugin's primary is NEVER adopted; the base primary stands
+    assert merged.primary == "base-primary"
+
+
+def test_grafted_plugin_only_entry_resolves_when_no_user_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    root = tmp_path / "installed-plugins"
+    plugin = _make_installed_plugin(
+        root, "dev-tmichon", "odsp-web-harness",
+        RelatedConfig(related={"odsp-web": RelatedEntry(
+            name="odsp-web", role="product", delegate="agent-codespaces")}))
+    monkeypatch.setenv(related.INSTALLED_PLUGINS_ENV, str(root))
+    base = tmp_path / "harness"
+    _write_related(base, RelatedConfig(primary="base-primary"))
+    # merely installing the plugin makes odsp-web resolvable
+    e = related.get_related_grafted([str(plugin), base], "odsp-web")
+    assert e is not None and e.delegate == "agent-codespaces"
+
+
+# ---------------------------------------------------------------------------
 # Parsers / normalizers
 # ---------------------------------------------------------------------------
 
