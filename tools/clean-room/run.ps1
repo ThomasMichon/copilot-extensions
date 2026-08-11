@@ -3,12 +3,17 @@
   Drive the copilot-extensions clean-room install-flow validation (Docker).
 
 .DESCRIPTION
-  Builds a "fresh machine" image, captures a one-time device-code Copilot login
-  into a cached ":authed" image, then drives a PERSISTENT container: it runs the
+  Builds a "fresh machine" image and drives a PERSISTENT container: it runs the
   in-container validate.sh driver (optionally stopping after a chosen phase) and
   can drop you into an INTERACTIVE SHELL in the same box for headed `copilot`
   smoke tests -- Copilot CLI does not fully enable every feature in `-p`/ACP, so
   the rig automates what it can and hands off for the rest.
+
+  Auth is AUTOMATIC by default: the runner grabs a Copilot token from the host
+  `gh` (COPILOT_GITHUB_TOKEN) and injects it into the container, so there is NO
+  interactive device-code step and no need to pre-build an ":authed" image. The
+  selected gh account must have Copilot entitlement. Use -NoToken to fall back to
+  the one-time device-code login committed to a cached ":authed" image.
 
   Two image variants:
     base     -- stock toolchain present (git, python, node, uv). The default;
@@ -59,6 +64,13 @@ param(
     [ValidateSet('none','shell','down')]
     [string]$Then = 'none',
     [string]$NpmRegistry = '',
+    # Auth: by default the runner injects a Copilot token grabbed from the host
+    # `gh` (COPILOT_GITHUB_TOKEN) so NO interactive device-code login is needed.
+    # -TokenAccount picks which gh account (must have Copilot entitlement);
+    # empty = the active account. Set -NoToken to force the device-code :authed
+    # image path instead.
+    [string]$TokenAccount = '',
+    [switch]$NoToken,
     [string]$MarketplaceRepo = 'ThomasMichon/copilot-extensions',
     [string]$MarketplaceName = 'copilot-extensions',
     [string]$PrimaryPlugin   = 'agent-codespaces',
@@ -114,12 +126,44 @@ function Invoke-Auth {
     Write-Host "cached $AuthTag" -ForegroundColor Green
 }
 
+# Resolve a Copilot token from the host (unless -NoToken). Precedence:
+#   $env:COPILOT_GITHUB_TOKEN  >  gh auth token [--user $TokenAccount]
+# The CLI accepts COPILOT_GITHUB_TOKEN / GH_TOKEN / GITHUB_TOKEN; we use the
+# first. Returns $null when none is available (caller falls back to :authed).
+function Resolve-CopilotToken {
+    if ($NoToken) { return $null }
+    if ($env:COPILOT_GITHUB_TOKEN) { return $env:COPILOT_GITHUB_TOKEN }
+    $ghArgs = @('auth','token')
+    if ($TokenAccount) { $ghArgs += @('--user', $TokenAccount) }
+    $t = (& gh @ghArgs 2>$null | Select-Object -First 1)
+    if ($t) { return $t.Trim() }
+    return $null
+}
+
 # Start a FRESH persistent container (idle), with the scenario + out dir mounted
 # and CR_* in its environment (inherited by every `docker exec`).
+#
+# Auth: prefer a host-grabbed Copilot token injected as COPILOT_GITHUB_TOKEN
+# (no interactive step; runs against the plain unauthed image). Fall back to the
+# committed device-code :authed image only when no token is available.
 function Start-Container {
-    if (-not (Test-Image $AuthTag)) {
-        Write-Host "no $AuthTag image yet -- running auth first." -ForegroundColor Yellow
-        Invoke-Auth
+    $token = Resolve-CopilotToken
+    $tokenArgs = @()
+    if ($token) {
+        if (-not (Test-Image $BaseTag)) { Invoke-Build }
+        $img = $BaseTag
+        $acct = if ($TokenAccount) { $TokenAccount } else { 'active gh account' }
+        Write-Host "auth: injecting COPILOT_GITHUB_TOKEN from host gh ($acct) -- no device-code needed" -ForegroundColor DarkGray
+        # Pass the value through the runner's env (name-only -e) so the token is
+        # not on the docker CLI args; the container keeps its own copy for exec.
+        $env:COPILOT_GITHUB_TOKEN = $token
+        $tokenArgs = @('-e', 'COPILOT_GITHUB_TOKEN')
+    } else {
+        if (-not (Test-Image $AuthTag)) {
+            Write-Host "no host token and no $AuthTag image -- running device-code auth." -ForegroundColor Yellow
+            Invoke-Auth
+        }
+        $img = $AuthTag
     }
     docker rm -f $Container 2>$null | Out-Null
     New-Item -ItemType Directory -Force -Path $Results | Out-Null
@@ -133,7 +177,9 @@ function Start-Container {
         -e "CR_PRIMARY_PLUGIN=$PrimaryPlugin" `
         -e "CR_EXPECT_DEPS=$ExpectDeps" `
         -e "CR_REPORT=/home/operator/out/cr-report.json" `
-        --entrypoint sleep $AuthTag infinity | Out-Null
+        @tokenArgs `
+        --entrypoint sleep $img infinity | Out-Null
+    if ($token) { Remove-Item Env:\COPILOT_GITHUB_TOKEN -ErrorAction SilentlyContinue }
     Write-Host "container $Container up (results -> $Results)" -ForegroundColor DarkGray
 }
 
@@ -177,5 +223,5 @@ switch ($Mode) {
     'run'   { Invoke-Run }
     'shell' { Invoke-Shell }
     'down'  { Invoke-Down }
-    'all'   { Invoke-Build; if (-not (Test-Image $AuthTag)) { Invoke-Auth }; Invoke-Run }
+    'all'   { Invoke-Build; Invoke-Run }
 }
