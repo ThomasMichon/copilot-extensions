@@ -108,8 +108,9 @@ def test_cli_parses_run_and_captures_command_after_dashdash():
     a = _args(["run", "--resume", "m/wt-1", "--", "sleep", "60"])
     assert a.func is _cmd_run
     assert a.resume == "m/wt-1"
-    # REMAINDER captures the leading '--' too; the handler strips it
-    assert a.command[-2:] == ["sleep", "60"]
+    # The verbatim command after '--' is captured cross-version via _dashdash_tail
+    # (was args.command/REMAINDER, which raised on 3.11 for the drive sibling; #383).
+    assert a._dashdash_tail == ["sleep", "60"]
 
 
 # -- CLI: foreground run -----------------------------------------------------
