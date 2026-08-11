@@ -382,6 +382,23 @@ is derived from the recipe + params, so re-kicking the same target collides rath
 than forking. Use `--dry-run` to preview the create call. See the plugin README
 (**Recipes**) and `visions/plugins/agent-dispatch` (§*The recipe*).
 
+**Route a kicked loop onto a supervisor pool with `--label`.** `kick` accepts a
+repeatable `--label` (merged after, and de-duplicated with, the recipe's own
+labels). This is how you feed a **standing, label-gated supervisor pool** instead
+of spawning a one-off body: enqueue the kicked task under the pool's opt-in label
+and let a pool slot claim it -- no `--spawn` needed.
+
+```bash
+# a persistent pool watches one label, e.g. AGENT_DISPATCH_SUPERVISE_LABELS=general
+agent-dispatch recipes kick goal-driven \
+  --param goal="fix the flaky retry in the uploader" --param repos=o/n \
+  --label general        # a 'general'-pool slot claims + drives it to a PR
+```
+
+Because a label-gated supervisor claims **only** tasks carrying its label, a pool
+scoped to a dedicated label (`general`) is a clean **positive opt-in**: it never
+picks up system tasks that carry their own labels (reviews, scheduled sweeps).
+
 **Driving the loop** -- `agent-dispatch recipes drive <name> --signal <s>` maps a
 recipe + what-just-happened to the next action: **work** (start / a `suspend_on`
 event), **suspend** (`work-done`/`idle` -> hibernate the wait), or **resolve**

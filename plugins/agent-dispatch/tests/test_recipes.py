@@ -178,6 +178,41 @@ def test_kick_custom_dedup_key_wins(monkeypatch):
     assert captured["ns"].dedup_key == "custom-key"
 
 
+def test_kick_merges_extra_labels_after_recipe_labels(monkeypatch):
+    """`--label` stamps extra labels (e.g. to route the task onto a supervisor
+    pool), merged after -- and de-duplicated with -- the recipe's own labels."""
+    captured = {}
+    monkeypatch.setattr(
+        "agent_dispatch.__main__._cmd_create",
+        lambda ns: captured.setdefault("ns", ns) or 0,
+    )
+    args = _args(
+        [
+            "recipes", "kick", "goal-driven",
+            "--param", "goal=Fix the widget",
+            "--label", "general", "--label", "kind:goal",  # second is already a recipe label
+        ]
+    )
+    _cmd_recipes_kick(args)
+    label = captured["ns"].label
+    # recipe's own labels lead, the new pool label is appended, no duplicates
+    assert label[0] == "recipe:goal-driven"
+    assert "kind:goal" in label
+    assert "general" in label
+    assert label.count("kind:goal") == 1
+    assert label.count("general") == 1
+
+
+def test_kick_without_labels_is_recipe_labels_only(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        "agent_dispatch.__main__._cmd_create",
+        lambda ns: captured.setdefault("ns", ns) or 0,
+    )
+    _cmd_recipes_kick(_args(["recipes", "kick", "goal-driven", "--param", "goal=x"]))
+    assert captured["ns"].label == ["recipe:goal-driven", "kind:goal"]
+
+
 # -- MCP tools ---------------------------------------------------------------
 
 
@@ -233,6 +268,17 @@ def test_mcp_recipe_kick_enqueues_with_recipe_fields():
 def test_mcp_recipe_kick_missing_param_raises():
     with pytest.raises(recipes.RecipeError):
         _tools({}).recipe_kick("reviewer", params={"repo": "o/n"})
+
+
+def test_mcp_recipe_kick_merges_extra_labels():
+    sink: dict = {}
+    _tools(sink).recipe_kick(
+        "goal-driven", params={"goal": "Fix the widget"}, labels=["general", "kind:goal"]
+    )
+    labels = sink["labels"]
+    assert labels[0] == "recipe:goal-driven"
+    assert "general" in labels
+    assert labels.count("kind:goal") == 1  # de-duplicated with the recipe's own
 
 
 def test_cli_and_mcp_derive_the_same_dedup_key():

@@ -194,6 +194,7 @@ class DispatchTools:
         params: dict[str, str] | None = None,
         repo: str | None = None,
         dedup_key: str | None = None,
+        labels: list[str] | None = None,
         target_machine: str | None = None,
         target_worktree: str | None = None,
         target_repo: str | None = None,
@@ -202,9 +203,11 @@ class DispatchTools:
         """Carve an ad-hoc task from a recipe (the "recipes run without a wrapper
         service" path). Renders the recipe and enqueues it via ``create``,
         deriving a reserved-work ``dedup_key`` from the recipe + params so
-        re-kicking the same target **collides rather than forking**. This
-        *enqueues* the task; embodying a worker to drive the loop is the
-        supervisor/host's job (exactly as with ``create``)."""
+        re-kicking the same target **collides rather than forking**. Extra
+        ``labels`` are merged with the recipe's own (e.g. route the task onto a
+        supervisor pool with ``["general"]``). This *enqueues* the task; embodying
+        a worker to drive the loop is the supervisor/host's job (exactly as with
+        ``create``)."""
         from .recipes import dedup_key_for, render_recipe
 
         rendered = render_recipe(name, params or {})
@@ -213,6 +216,7 @@ class DispatchTools:
             raise ValueError(
                 "could not resolve the repo (lane); pass repo=<local name|remote URL>"
             )
+        merged_labels = list(dict.fromkeys([*rendered.labels, *(labels or [])]))
         with self._client_factory() as c:
             return c.create(
                 rendered.title,
@@ -220,7 +224,7 @@ class DispatchTools:
                 prompt=rendered.prompt,
                 proposed=proposed,
                 requires=list(rendered.requires),
-                labels=list(rendered.labels),
+                labels=merged_labels,
                 dedup_key=dedup_key or dedup_key_for(rendered),
                 goal=rendered.goal,
                 done_criteria=rendered.done_criteria,
