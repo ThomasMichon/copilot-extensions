@@ -8263,76 +8263,18 @@ def _gh_env_for_repo(target: str) -> tuple[dict[str, str], str | None, bool]:
 
 
 # ── Temporary: extension-reload "Loading…/Resuming…" hang warning ──────────
-# A per-project custom-instruction warning about the CAR extension-reload
-# generation-race hang (github/copilot-agent-runtime#13492; fix: #13494).
-# Delivered exactly like the worktree-conduct guide: a marked *.instructions.md
-# in the project's COPILOT_CUSTOM_INSTRUCTIONS_DIRS dir (~/.{project}/.github/
-# instructions/), which the CLI loads into every agent-worktrees-launched
-# session. (The global ~/.copilot/instructions/**/*.instructions.md dir is NOT
-# honored by CLI 1.0.78 -- files there never load even with valid frontmatter --
-# so that approach was dropped in favor of the proven custom-dir mechanism.) No
-# frontmatter needed: the custom-dir loader applies the file wholesale, same as
-# worktree-conduct.
+# A warning about the CAR extension-reload generation-race hang
+# (github/copilot-agent-runtime#13492; fix: #13494). Migrated off the per-project
+# COPILOT_CUSTOM_INSTRUCTIONS_DIRS file to the ``session-ext-reload`` sessionStart
+# hook (dotfiles#1055): the canonical text now lives in
+# ``scripts/ext-reload-hang.md`` (deployed to ~/.agent-worktrees/bin/ and emitted
+# as additionalContext). That hook is NOT strictly cwd-gated -- it also fires at
+# cwd=~/ so it reaches a **Bare resume** session, the exact scenario this warning
+# covers, which is why it could not ride the cwd-gated session-conduct injector.
 #
-# TEMPORARY: remove this whole feature (constant, helper, call site, cleanup
-# entry, and test) once the #13494 fix has shipped and rolled out everywhere.
-_EXT_RELOAD_WARNING = """# Known CLI bug: extension-reload "Loading…/Resuming…" hang (temporary)
-
-Applies while running Copilot CLI with worktree-based plugins that load at least
-one extension, on a CLI build predating the fix for
-github/copilot-agent-runtime#13492 (fix: github/copilot-agent-runtime#13494).
-
-A generation race in extension reload can leave the `extensions` env-loading
-participant incomplete, so startup never finishes. Account for:
-
-1. A newly launched **headed** session with a queued startup prompt can hang on
-   "Loading…" with the prompt queued **indefinitely** (it never submits). This
-   hits headed agents kicked via agent-dispatch -- verify a dispatched headed
-   session actually reached an interactive/ready state before assuming its
-   startup prompt ran.
-
-2. A user- or machine-**resumed headed** session can hang on "Resuming…"
-   indefinitely unless it is started with **Bare resume**. Bare resume launches
-   Copilot with its working directory set to `~/` (home) instead of the
-   worktree, purely to keep the cwd off the repo for the brief startup window
-   that trips the race. The launch **still exports the usual env overrides**
-   (including `COPILOT_CUSTOM_INSTRUCTIONS_DIRS`), so per-project custom
-   instructions still load, and once started you are free to `cd` into the
-   worktree. Caveat while the pane's cwd is still `~/`: `agent-*` commands that
-   infer the worktree from the cwd will misbehave -- **`cd` into your worktree
-   directory first** before running any `agent-worktrees` / `agent-*` command.
-
-3. Extensions may reload several times during a single startup, emitting
-   duplicate / conflicting "extension ready" notifications -- treat repeated
-   ready signals from one startup as expected noise, not separate successful
-   loads.
-
-Workarounds for the hang itself: launch from `~/` then `/resume`, or run with
-`--no-experimental` (disables extensions).
-"""
-
-
-def _deploy_ext_reload_warning(proj_dir: Path) -> None:
-    """Deploy the temporary ext-reload hang warning (idempotent).
-
-    Writes a marked ``ext-reload-hang.instructions.md`` into the project's
-    custom-instructions dir so the CLI loads it into agent-worktrees-launched
-    sessions. Unlike account/worktree-conduct (migrated to the session-conduct
-    sessionStart hook), this warning stays on the COPILOT_CUSTOM_INSTRUCTIONS_DIRS
-    mechanism: the hook's cwd-gate returns empty under Bare resume, which is
-    exactly the scenario this warning must cover. Temporary -- retired outright
-    when github/copilot-agent-runtime#13494 ships everywhere (dotfiles#1055);
-    never touches unmarked user files.
-    """
-    content = f"{_INSTRUCTION_MARKER}\n{_EXT_RELOAD_WARNING}"
-    instr_dir = proj_dir / ".github" / "instructions"
-    instr_dir.mkdir(parents=True, exist_ok=True)
-    path = instr_dir / "ext-reload-hang.instructions.md"
-    if path.exists() and path.read_text() == content:
-        output.skipped("ext-reload-hang.instructions.md already in sync")
-    else:
-        path.write_text(content)
-        output.changed(f"ext-reload-hang.instructions.md -> {path}")
+# TEMPORARY: retire the whole feature (fragment, both session-ext-reload scripts,
+# their hooks.json entry + installer copy, and the retirement call below) once the
+# #13494 fix has shipped and rolled out everywhere.
 
 
 def _deploy_copilot_instructions(
@@ -8353,8 +8295,9 @@ def _deploy_copilot_instructions(
     So this function no longer *writes* those files; it retires any stale copy we
     previously deployed (marker-guarded, so unmarked user files are never
     touched). ``entry`` is retained for call-site compatibility but unused. The
-    ext-reload-hang warning deliberately stays on the file mechanism (its hook
-    cwd-gate fails under Bare resume; dotfiles#1055).
+    ext-reload-hang warning is now delivered via the ``session-ext-reload``
+    sessionStart hook too (dotfiles#1055), so its per-project file is retired here
+    as well.
     """
     # Machine identity migrated to the session-machine sessionStart hook
     # (dotfiles#1056): retire the stale per-project file + nested AGENTS.md.
@@ -8370,8 +8313,9 @@ def _deploy_copilot_instructions(
     # (dotfiles#1053): retire any stale per-project file we used to deploy.
     _remove_managed_instruction(proj_dir, "account-conduct.instructions.md")
 
-    # Temporary: the ext-reload hang warning stays on the file mechanism.
-    _deploy_ext_reload_warning(proj_dir)
+    # Temporary: the ext-reload hang warning migrated to the session-ext-reload
+    # sessionStart hook (dotfiles#1055); retire any stale per-project file.
+    _remove_managed_instruction(proj_dir, "ext-reload-hang.instructions.md")
 
     # Clean up stale ssh.instructions.md from previous versions
     ssh_instr_path = instr_dir / "ssh.instructions.md"
