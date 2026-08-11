@@ -283,3 +283,29 @@ def test_clean_record_off_box_safe_tristate():
 def test_list_cleanliness_unavailable_is_none(monkeypatch):
     monkeypatch.setattr(coord, "_run", lambda *a, **k: _proc(2, stderr="no origin"))
     assert coord.list_cleanliness() is None
+
+
+# ── owner_ref resolution order (Ph6: explicit > ambient env > cwd shell) ──────
+
+def test_owner_ref_explicit_wins_over_env(monkeypatch):
+    monkeypatch.setenv("AGENT_WORKTREES_OWNER_REF", "env/p/w")
+    # explicit short-circuits before env and before any _run
+    assert coord.owner_ref(explicit="  exp/p/w  ") == "exp/p/w"
+
+
+def test_owner_ref_prefers_ambient_env_without_shelling(monkeypatch):
+    monkeypatch.setenv("AGENT_WORKTREES_OWNER_REF", "  dev6/proj/wt  ")
+    # the autouse fixture already makes _run fail loudly; env must be read first
+    assert coord.owner_ref() == "dev6/proj/wt"
+
+
+def test_owner_ref_falls_back_to_cwd_shell_when_no_env(monkeypatch):
+    monkeypatch.delenv("AGENT_WORKTREES_OWNER_REF", raising=False)
+    monkeypatch.setattr(coord, "_run", lambda *a, **k: _proc(0, "shell/p/w\n"))
+    assert coord.owner_ref() == "shell/p/w"
+
+
+def test_owner_ref_blank_env_falls_through_to_shell(monkeypatch):
+    monkeypatch.setenv("AGENT_WORKTREES_OWNER_REF", "   ")
+    monkeypatch.setattr(coord, "_run", lambda *a, **k: _proc(0, "shell/p/w\n"))
+    assert coord.owner_ref() == "shell/p/w"
