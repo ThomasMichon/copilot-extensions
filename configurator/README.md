@@ -9,12 +9,28 @@ that must work *before* the plugins do.
 
 > **Status: Phase 1 — plugin-knowledge model.** On top of the Phase 0
 > out-of-plugin skeleton, the Configurator now carries a **dependency-free
-> declarative model** of every plugin (prerequisites, managed config, and "what
-> to do" to make each ready). The remaining work — prerequisite provisioning,
-> core install, repo adoption/discovery, the visual configurator, and presets —
-> is being built out under umbrella issue
+> **Status: Phase 2 — prerequisites & core install.** On top of the Phase 1
+> plugin-knowledge model, the Configurator now **detects** the baseline
+> prerequisites, **plans/provisions** the missing ones (restart-aware), and
+> **drives the harness's own** agent-worktrees core install (idempotent; heals a
+> partial install). The remaining work — repo adoption/discovery, the visual
+> configurator, and presets — is being built out under umbrella issue
 > [#352](https://github.com/ThomasMichon/copilot-extensions/issues/352) and the
 > vision [`visions/installer/`](../visions/installer/README.md).
+
+## Set up the harness
+
+```bash
+uv run python -m configurator doctor        # report prerequisites + the core install
+uv run python -m configurator setup         # plan provisioning + core install (dry-run)
+uv run python -m configurator setup --apply # actually provision + drive the real installer
+```
+
+`doctor` is read-only; `setup` is **dry-run by default** and only changes the
+machine with `--apply`. Provisioning is restart-aware (it tells you to restart
+your shell after a PATH change) and idempotent (re-running heals a partial
+install). The core install is never reimplemented — the Configurator locates and
+calls agent-worktrees' own `install.{ps1,sh}`.
 
 ## One-line bootstrap
 
