@@ -1315,3 +1315,52 @@ class TestAgentWorktreesPython:
         got = _agent_worktrees_python()
         assert got == want
         assert ".venv" not in got
+
+
+class TestLocalResolvePassesProject:
+    """The local worktree resolve passes the target project as the global
+    --project flag -- the ambient $WORKTREE_PROJECT identity fallback was retired
+    (cwd-resolution Phase 3), and a bridge resolve runs from a neutral daemon cwd
+    outside the repo, so --project is required."""
+
+    def _proc(self, returncode, stdout=b"", stderr=b""):
+        p = MagicMock()
+        p.returncode = returncode
+        p.communicate = AsyncMock(return_value=(stdout, stderr))
+        return p
+
+    @pytest.mark.asyncio
+    async def test_project_flag_precedes_resolve(self):
+        plan = {"launch": {"worktree_id": "wt-1", "work_dir": "/d"}}
+        target = SpawnTarget(type="local", cwd="/c", project="aperture-labs")
+        calls = []
+
+        async def fake_exec(*argv, **kw):
+            calls.append(list(argv))
+            return self._proc(0, json.dumps(plan).encode())
+
+        with patch("os.path.exists", return_value=True), \
+             patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+            await _resolve_worktree(target, {})
+
+        argv = calls[0]
+        assert "--project" in argv
+        assert argv[argv.index("--project") + 1] == "aperture-labs"
+        # global flag comes before the subcommand
+        assert argv.index("--project") < argv.index("resolve")
+
+    @pytest.mark.asyncio
+    async def test_no_project_flag_when_projectless(self):
+        plan = {"launch": {"worktree_id": "wt-1", "work_dir": "/d"}}
+        target = SpawnTarget(type="local", cwd="/c")  # no project -> cwd discovery
+        calls = []
+
+        async def fake_exec(*argv, **kw):
+            calls.append(list(argv))
+            return self._proc(0, json.dumps(plan).encode())
+
+        with patch("os.path.exists", return_value=True), \
+             patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+            await _resolve_worktree(target, {})
+
+        assert "--project" not in calls[0]
