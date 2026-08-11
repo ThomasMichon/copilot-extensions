@@ -92,7 +92,7 @@ state is **not** license to reap.
   populate/doctor sweep now reconciles `mux_live` alongside `bound_live`. On older
   builds, **verify liveness against the live scan before reaping.**
 - **Before any bulk `gc --clean`**, confirm no target is in a live mux
-  (`psmux ls` / `tmux ls`) or holds a live lock. When in doubt, prefer **per-item
+  (`psmux list-sessions` / `tmux list-sessions`) or holds a live lock. When in doubt, prefer **per-item
   `<project> cleanup --worktree-id <id> --clean`** (add `--include-unused` for a
   no-commit/no-turn shell) — it re-checks prune-safety and refuses an active
   session, so you can target exactly the intended (e.g. unused / titleless)
