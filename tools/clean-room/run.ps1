@@ -55,7 +55,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('build','auth','run','shell','down','all')]
+    [ValidateSet('build','auth','run','shell','down','bridge-register','bridge-unregister','all')]
     [string]$Mode = 'run',
     [ValidateSet('base','pristine')]
     [string]$Image = 'base',
@@ -88,6 +88,7 @@ $Dockerfile = if ($Image -eq 'pristine') { 'Dockerfile.pristine' } else { 'Docke
 $BaseTag    = "copilot-cleanroom:$Image"
 $AuthTag    = if ($Image -eq 'base') { 'copilot-cleanroom:authed' } else { "copilot-cleanroom:$Image-authed" }
 $Container  = "cr-$Image"
+$AgentName  = "cleanroom-$Image"   # agent-bridge agent + provider name for this box
 
 if (-not $ResultsDir) { $ResultsDir = $env:CR_RESULTS_DIR }
 if (-not $ResultsDir) {
@@ -217,11 +218,31 @@ function Invoke-Down {
     Write-Host "removed $Container" -ForegroundColor Green
 }
 
+# Register the running container as an agent-bridge agent so you can drive the
+# in-container Copilot with `agent-bridge send $AgentName "<prompt>"`. Uses the
+# runtime provider API (a `docker exec ... copilot --acp --stdio` command agent);
+# a static acp-agents.json cannot express a raw docker-exec transport.
+function Invoke-BridgeRegister {
+    Ensure-Container
+    $py = (Get-Command python -ErrorAction SilentlyContinue) ?? (Get-Command python3 -ErrorAction SilentlyContinue)
+    if (-not $py) { throw "python not found on PATH (needed to call the agent-bridge provider API)" }
+    & $py.Source (Join-Path $Here 'bridge_register.py') register --container $Container --name $AgentName
+    if ($LASTEXITCODE -ne 0) { throw "bridge registration failed" }
+    Write-Host "drive it:  agent-bridge send $AgentName `"<prompt>`"" -ForegroundColor Green
+}
+function Invoke-BridgeUnregister {
+    $py = (Get-Command python -ErrorAction SilentlyContinue) ?? (Get-Command python3 -ErrorAction SilentlyContinue)
+    if (-not $py) { throw "python not found on PATH" }
+    & $py.Source (Join-Path $Here 'bridge_register.py') unregister --name $AgentName
+}
+
 switch ($Mode) {
     'build' { Invoke-Build }
     'auth'  { Invoke-Auth }
     'run'   { Invoke-Run }
     'shell' { Invoke-Shell }
     'down'  { Invoke-Down }
+    'bridge-register'   { Invoke-BridgeRegister }
+    'bridge-unregister' { Invoke-BridgeUnregister }
     'all'   { Invoke-Build; Invoke-Run }
 }
