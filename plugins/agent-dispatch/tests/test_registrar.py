@@ -201,6 +201,29 @@ def test_env_migration_general_pool_roundtrips_to_expected_args():
     assert _flag_val(args, "--headless-agent") == "general-loop-worker"
 
 
+def test_env_migration_bad_number_raises_registrar_error():
+    with pytest.raises(RegistrarError, match="MAX_CONCURRENT"):
+        declaration_from_env(
+            "x", {"AGENT_DISPATCH_SUPERVISE_MAX_CONCURRENT": "two"}
+        )
+    with pytest.raises(RegistrarError, match="INTERVAL"):
+        declaration_from_env("x", {"AGENT_DISPATCH_SUPERVISE_INTERVAL": "soon"})
+
+
+def test_env_migration_extra_headless_agent_fallback():
+    # No dedicated HEADLESS_AGENT var, but --headless-agent in EXTRA_ARGS -> used.
+    d = declaration_from_env(
+        "x",
+        {
+            "AGENT_DISPATCH_SUPERVISE_LABELS": "l",
+            "AGENT_DISPATCH_SUPERVISE_HEADLESS_LABELS": "l",
+            "AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS": "--headless-agent custom-worker",
+        },
+    )
+    assert d.body.type == "headless"
+    assert d.body.agent == "custom-worker"
+
+
 def test_with_owner_stamps_only_when_absent():
     d = load_declaration({"name": "x"})
     assert d.with_owner("repo:foo").owner == "repo:foo"

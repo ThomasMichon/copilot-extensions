@@ -341,10 +341,28 @@ def load_declaration(data: Mapping) -> ProfileDeclaration:
 
 _ENV_PREFIX = "AGENT_DISPATCH_SUPERVISE_"
 
-#: EXTRA_ARGS flags the env form used to carry fleet/scope options -- parsed on
-#: migration so a legacy profile converts losslessly.
-_EXTRA_FLAG_KEYS = ("--all-repos", "--no-heartbeat", "--no-reactive", "--headless")
+#: EXTRA_ARGS value flags (take an argument) parsed on migration so a legacy
+#: profile converts losslessly. The bare flags (--all-repos, --no-heartbeat,
+#: --no-reactive, --headless) are matched directly in :func:`_parse_extra_args`.
 _EXTRA_VALUE_KEYS = ("--repo", "--pool", "--origin", "--headless-agent", "--evaluator")
+
+
+def _env_int(raw: str | None, *, key: str, default: int) -> int:
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise RegistrarError(f"{key}: expected an integer, got {raw!r}") from exc
+
+
+def _env_float(raw: str | None, *, key: str, default: float) -> float:
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise RegistrarError(f"{key}: expected a number, got {raw!r}") from exc
 
 
 def declaration_from_env(name: str, env: Mapping[str, str]) -> ProfileDeclaration:
@@ -375,21 +393,23 @@ def declaration_from_env(name: str, env: Mapping[str, str]) -> ProfileDeclaratio
                 raise RegistrarError(f"LABEL_MAX_ATTEMPTS: N must be int, got {num!r}") from exc
 
     extra = _parse_extra_args((g("EXTRA_ARGS") or "").split())
+    # The dedicated HEADLESS_AGENT var wins; an EXTRA_ARGS --headless-agent is a fallback.
+    agent = headless_agent or extra["headless_agent"]
     body_type = "headless" if (headless_labels or extra["headless"]) else "embody"
 
     data: dict[str, object] = {
         "name": name,
         "labels": list(labels),
-        "repos": extra["repo"] or ("all" if extra["all_repos"] else "all"),
-        "concurrency": int(g("MAX_CONCURRENT") or 1),
-        "interval": float(g("INTERVAL") or 30.0),
-        "max_attempts": int(g("MAX_ATTEMPTS") or 3),
+        "repos": extra["repo"] or "all",
+        "concurrency": _env_int(g("MAX_CONCURRENT"), key="MAX_CONCURRENT", default=1),
+        "interval": _env_float(g("INTERVAL"), key="INTERVAL", default=30.0),
+        "max_attempts": _env_int(g("MAX_ATTEMPTS"), key="MAX_ATTEMPTS", default=3),
         "label_max_attempts": label_max,
         "heartbeat": not extra["no_heartbeat"],
         "reactive": not extra["no_reactive"],
         "body": {
             "type": body_type,
-            **({"agent": headless_agent} if headless_agent else {}),
+            **({"agent": agent} if agent else {}),
             **({"headless_labels": list(headless_labels)} if headless_labels else {}),
         },
     }
@@ -414,6 +434,7 @@ def _parse_extra_args(tokens: list[str]) -> dict[str, object]:
         "repo": None,
         "pool": [],
         "origin": None,
+        "headless_agent": None,
         "evaluator": None,
     }
     i = 0
@@ -435,6 +456,8 @@ def _parse_extra_args(tokens: list[str]) -> dict[str, object]:
                 out["pool"] = [p for p in val.replace(",", " ").split() if p]
             elif tok == "--origin":
                 out["origin"] = val
+            elif tok == "--headless-agent":
+                out["headless_agent"] = val
             elif tok == "--evaluator":
                 out["evaluator"] = val
             i += 1
