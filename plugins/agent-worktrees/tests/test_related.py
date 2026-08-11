@@ -919,3 +919,206 @@ def test_doctor_local_no_machines_is_available_here():
     e = RelatedEntry(name="x", locus=Locus(preferred="local"))
     findings = _diag(_cfg(x=e), has=lambda n: False)
     assert len(_only(findings, "local_repo_unregistered")) == 1
+
+
+# ---------------------------------------------------------------------------
+# Ownership: schema round-trip, normalization, derivation, query, backfill
+# ---------------------------------------------------------------------------
+
+def test_ownership_roundtrips(tmp_path: Path):
+    cfg = RelatedConfig(related={
+        "mine": RelatedEntry(name="mine", ownership="owned", owner="me"),
+        "org": RelatedEntry(name="org", ownership="internal"),
+    })
+    related.write_related(tmp_path, cfg)
+    got = related.read_related(tmp_path)
+    assert got.related["mine"].ownership == "owned"
+    assert got.related["mine"].owner == "me"
+    assert got.related["org"].ownership == "internal"
+    # Emitted YAML is valid + carries the fields.
+    data = yaml.safe_load(related.related_path(tmp_path).read_text(encoding="utf-8"))
+    assert data["related"]["mine"]["ownership"] == "owned"
+    assert data["related"]["mine"]["owner"] == "me"
+
+
+def test_normalize_ownership_drops_unknown():
+    assert related.normalize_ownership("OWNED") == "owned"
+    assert related.normalize_ownership("  internal ") == "internal"
+    assert related.normalize_ownership("public") == ""   # not in VALID_OWNERSHIP
+    assert related.normalize_ownership(None) == ""
+
+
+def test_read_drops_bogus_ownership(tmp_path: Path):
+    related.related_path(tmp_path).parent.mkdir(parents=True, exist_ok=True)
+    related.related_path(tmp_path).write_text(
+        "related:\n  x:\n    ownership: bogus\n    owner: me\n", encoding="utf-8")
+    e = related.read_related(tmp_path).related["x"]
+    assert e.ownership == ""       # bogus dropped
+    assert e.owner == "me"         # owner preserved
+
+
+def test_no_ownership_emits_nothing(tmp_path: Path):
+    cfg = RelatedConfig(related={"x": RelatedEntry(name="x", role="tooling")})
+    related.write_related(tmp_path, cfg)
+    data = yaml.safe_load(related.related_path(tmp_path).read_text(encoding="utf-8"))
+    assert "ownership" not in data["related"]["x"]
+    assert "owner" not in data["related"]["x"]
+
+
+def test_upsert_merges_ownership(tmp_path: Path):
+    related.upsert_related(tmp_path, RelatedEntry(name="x", role="tooling"))
+    related.upsert_related(tmp_path, RelatedEntry(name="x", ownership="owned",
+                                                  owner="me"))
+    e = related.get_related(tmp_path, "x")
+    assert e.role == "tooling"     # preserved
+    assert e.ownership == "owned"  # added
+    assert e.owner == "me"
+
+
+def _patch_registry(monkeypatch, remotes: dict[str, str], logins=("me",)):
+    """Stub repos.find_repo/github_owner-driving state + operator logins."""
+    from agent_worktrees import repos
+
+    def _find(name):
+        if name not in remotes:
+            return None
+        return repos.RepoEntry(name=name, remote=remotes[name])
+
+    monkeypatch.setattr(repos, "find_repo", _find)
+    monkeypatch.setattr(related, "_operator_logins",
+                        lambda: {l.casefold() for l in logins})
+
+
+def test_classify_owned_from_operator_login(monkeypatch):
+    _patch_registry(monkeypatch, {
+        "dotfiles": "https://github.com/me/dotfiles.git"}, logins=("me",))
+    assert related.classify_ownership("dotfiles") == ("owned", "me")
+
+
+def test_classify_ado_is_internal(monkeypatch):
+    _patch_registry(monkeypatch, {
+        "ado-tools": "https://example.visualstudio.com/Team/_git/ado-tools"})
+    own, _owner = related.classify_ownership("ado-tools")
+    assert own == "internal"
+
+
+def test_classify_dev_azure_is_internal(monkeypatch):
+    _patch_registry(monkeypatch, {
+        "x": "https://dev.azure.com/org/proj/_git/x"})
+    assert related.classify_ownership("x")[0] == "internal"
+
+
+def test_classify_public_github_org_unclassified(monkeypatch):
+    _patch_registry(monkeypatch, {
+        "web": "https://github.com/some-org/web.git"}, logins=("me",))
+    assert related.classify_ownership("web")[0] == ""   # operator curates
+
+
+def test_classify_unknown_repo_unclassified(monkeypatch):
+    _patch_registry(monkeypatch, {}, logins=("me",))
+    assert related.classify_ownership("ghost") == ("", "")
+
+
+def test_effective_ownership_explicit_wins(monkeypatch):
+    # ADO repo derives 'internal', but an explicit 'owned' overrides.
+    _patch_registry(monkeypatch, {
+        "ado-tools": "https://example.visualstudio.com/Team/_git/ado-tools"})
+    e_owned = RelatedEntry(name="ado-tools", ownership="owned")
+    e_unset = RelatedEntry(name="ado-tools")
+    assert related.effective_ownership(e_owned) == "owned"
+    assert related.effective_ownership(e_unset) == "internal"
+
+
+def test_owned_targets_lists_owned_only(tmp_path: Path, monkeypatch):
+    _patch_registry(monkeypatch, {
+        "dotfiles": "https://github.com/me/dotfiles.git",
+        "ado-tools": "https://example.visualstudio.com/Team/_git/ado-tools",
+        "web": "https://github.com/some-org/web.git",
+    }, logins=("me",))
+    cfg = RelatedConfig(related={
+        "dotfiles": RelatedEntry(name="dotfiles"),                 # derived owned
+        "ado-tools": RelatedEntry(name="ado-tools", ownership="owned"),  # explicit
+        "web": RelatedEntry(name="web"),                          # unclassified
+    })
+    related.write_related(tmp_path, cfg)
+    owned = {t["name"] for t in related.owned_targets(tmp_path)}
+    assert owned == {"dotfiles", "ado-tools"}
+    # slug is owner/name for github; empty for ADO.
+    by_name = {t["name"]: t for t in related.owned_targets(tmp_path)}
+    assert by_name["dotfiles"]["slug"] == "me/dotfiles"
+    assert by_name["ado-tools"]["slug"] == ""
+
+
+def test_owned_targets_grafted_overlay_demotes(tmp_path: Path, monkeypatch):
+    """A later (overlay) anchor that reclassifies an ``owned`` repo to
+    ``internal`` must drop it from the grafted owned set (overlay precedence)."""
+    _patch_registry(monkeypatch, {
+        "shared": "https://github.com/me/shared.git"}, logins=("me",))
+    base = tmp_path / "base"; overlay = tmp_path / "overlay"
+    base.mkdir(); overlay.mkdir()
+    related.write_related(base, RelatedConfig(related={
+        "shared": RelatedEntry(name="shared", ownership="owned")}))
+    # Single-anchor view: owned.
+    assert [t["name"] for t in related.owned_targets(base)] == ["shared"]
+    # Overlay demotes it -> grafted view drops it.
+    related.write_related(overlay, RelatedConfig(related={
+        "shared": RelatedEntry(name="shared", ownership="internal")}))
+    grafted = related.owned_targets_grafted([base, overlay])
+    assert grafted == []
+
+
+def test_classify_all_fills_unset_only(tmp_path: Path, monkeypatch):
+    _patch_registry(monkeypatch, {
+        "dotfiles": "https://github.com/me/dotfiles.git",
+        "ado-tools": "https://example.visualstudio.com/Team/_git/ado-tools",
+    }, logins=("me",))
+    cfg = RelatedConfig(related={
+        "dotfiles": RelatedEntry(name="dotfiles"),
+        "ado-tools": RelatedEntry(name="ado-tools", ownership="owned"),  # curated
+    })
+    related.write_related(tmp_path, cfg)
+    changed = related.classify_all(tmp_path)
+    names = {c["name"] for c in changed}
+    assert names == {"dotfiles"}   # only the unset one
+    got = related.read_related(tmp_path)
+    assert got.related["dotfiles"].ownership == "owned"
+    assert got.related["ado-tools"].ownership == "owned"  # untouched curation
+
+
+def test_classify_all_overwrite_redoes_explicit(tmp_path: Path, monkeypatch):
+    _patch_registry(monkeypatch, {
+        "ado-tools": "https://example.visualstudio.com/Team/_git/ado-tools",
+    }, logins=("me",))
+    # Explicitly (mis)marked owned; --overwrite re-derives to internal.
+    cfg = RelatedConfig(related={
+        "ado-tools": RelatedEntry(name="ado-tools", ownership="owned")})
+    related.write_related(tmp_path, cfg)
+    changed = related.classify_all(tmp_path, overwrite=True)
+    assert {c["name"] for c in changed} == {"ado-tools"}
+    assert related.read_related(tmp_path).related["ado-tools"].ownership == "internal"
+
+
+def test_cli_owners_is_global_via_control_plane(tmp_path: Path, monkeypatch):
+    """`related owners` reads the CONTROL-PLANE index regardless of cwd (so an
+    ambient consumer gets the owned set from anywhere), never raising the
+    cwd-anchor guard."""
+    from agent_worktrees import __main__ as cli
+    cp = tmp_path / "control-plane"; cp.mkdir()
+    _patch_registry(monkeypatch, {
+        "mine": "https://github.com/me/mine.git",
+        "org": "https://github.com/some-org/org.git",
+    }, logins=("me",))
+    related.write_related(cp, RelatedConfig(related={
+        "mine": RelatedEntry(name="mine", ownership="owned"),
+        "org": RelatedEntry(name="org", ownership="internal"),
+    }))
+    monkeypatch.setattr(related, "find_control_plane_anchor", lambda: str(cp))
+    # No --repo, and _related_anchor would not resolve a project here: the
+    # control-plane path must still answer.
+    monkeypatch.setattr(cli, "_related_anchor", lambda rest: None)
+    captured: dict = {}
+    monkeypatch.setattr(cli, "_json_output", lambda payload: captured.update(payload))
+    rc = cli.cmd_related_dispatch(["owners", "--json"])
+    assert rc == 0
+    assert captured["source"] == "control-plane"
+    assert [t["name"] for t in captured["owned"]] == ["mine"]

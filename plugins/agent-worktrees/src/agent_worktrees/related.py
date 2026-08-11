@@ -76,6 +76,25 @@ VALID_ROLES = ("product", "dependency", "consumer", "tooling", "docs", "sibling"
 # How work is handed off to the agent that owns a related repo.
 VALID_DELEGATES = ("agent-bridge", "agent-codespaces", "none")
 
+# Ownership relationship of a related repo, from the operator's POV. This is
+# **expected-behavior metadata** (e.g. it drives the AI-attribution decision:
+# an authored increment in an ``owned`` -- or non-public ``internal`` -- target
+# needs no acknowledgement, an ``external`` one does). It is **derived ONCE at
+# registration** from the operator's own gh account logins + the repo's remote
+# (see :func:`classify_ownership`), then persisted here and treated as
+# authoritative -- consumers read this manifest instead of re-inspecting live gh
+# accounts. An explicit value always wins over the derivation (e.g. an ADO repo
+# the operator wholly owns is marked ``owned`` even though the ADO-host default
+# is ``internal``).
+#   owned     -- the operator wholly owns the target (their own gh namespace, or
+#                an explicitly-owned repo). No AI-acknowledgement on authored
+#                increments.
+#   internal  -- org-internal, not owned (e.g. an enterprise ADO org repo). No
+#                acknowledgement on authored increments, but not the operator's.
+#   external  -- public/external, not owned. Authored increments are
+#                acknowledged.
+VALID_OWNERSHIP = ("owned", "internal", "external")
+
 # Locus "kinds" -- where work on a related repo actually happens.
 VALID_LOCUS_KINDS = ("local", "machine", "codespace", "container")
 
@@ -129,6 +148,13 @@ class RelatedEntry:
     doc: str = ""                       # relative to ``.agent-worktrees/``
     locus: Locus = field(default_factory=Locus)
     delegate: str = ""                  # the ``via`` value; see VALID_DELEGATES
+    # Ownership relationship (one of VALID_OWNERSHIP) + the resolving operator
+    # account. Derived once at registration (:func:`classify_ownership`) and
+    # then authoritative; an explicit value in related.yaml always wins. Empty
+    # ``ownership`` means "not classified" -- consumers fall back to judging the
+    # target themselves. See VALID_OWNERSHIP for the AI-attribution semantics.
+    ownership: str = ""
+    owner: str = ""                     # resolving operator account login (optional)
     # Plugins this control plane side-loads when delegating work to the related
     # repo (the *related-repo* plugin lane -- distinct from a CodeSpace's own
     # ``codespacePlugins``). Each item is a normalized ``{"source": str,
@@ -206,6 +232,17 @@ def normalize_role(value: str | None) -> str:
 def normalize_delegate(value: str | None) -> str:
     """Lower-case and strip a delegate target (the ``via`` value)."""
     return (value or "").strip().lower()
+
+
+def normalize_ownership(value: str | None) -> str:
+    """Lower-case and strip an ownership value; unknown values are dropped.
+
+    Only members of :data:`VALID_OWNERSHIP` are kept -- an unrecognized value
+    normalizes to ``""`` (unclassified) so a typo never silently asserts a
+    wrong AI-attribution posture.
+    """
+    v = (value or "").strip().lower()
+    return v if v in VALID_OWNERSHIP else ""
 
 
 def parse_preferred(value: str | None) -> tuple[str, str]:
@@ -332,6 +369,8 @@ def read_related(anchor: str | Path) -> RelatedConfig:
                 doc=str(entry.get("doc", "")).strip(),
                 locus=_parse_locus(entry.get("locus")),
                 delegate=_parse_delegate(entry.get("delegate")),
+                ownership=normalize_ownership(entry.get("ownership")),
+                owner=str(entry.get("owner", "")).strip(),
                 plugins=_parse_plugins(entry.get("plugins")),
             )
 
@@ -391,7 +430,7 @@ def write_related(anchor: str | Path, cfg: RelatedConfig) -> None:
         "# <repo>/.agent-worktrees/related.yaml",
         "# Directional, per-project related-repos index (this repo's POV).",
         "# Keys are names in the global repos registry (~/.agent-worktrees/repos.yaml);",
-        "# this file adds relationship + locus + delegate only -- never checkout paths.",
+        "# this file adds relationship + locus + delegate + ownership -- never checkout paths.",
         "",
     ]
 
@@ -413,6 +452,10 @@ def write_related(anchor: str | Path, cfg: RelatedConfig) -> None:
             _emit_locus(lines, entry.locus, "    ")
             if entry.delegate:
                 lines.append(f"    delegate: {{ via: {_quote(entry.delegate)} }}")
+            if entry.ownership:
+                lines.append(f"    ownership: {_quote(entry.ownership)}")
+            if entry.owner:
+                lines.append(f"    owner: {_quote(entry.owner)}")
             if entry.plugins:
                 lines.append("    plugins:")
                 for p in entry.plugins:
@@ -603,6 +646,10 @@ def upsert_related(anchor: str | Path, entry: RelatedEntry) -> RelatedConfig:
             existing.locus.container = entry.locus.container
         if entry.delegate:
             existing.delegate = entry.delegate
+        if entry.ownership:
+            existing.ownership = entry.ownership
+        if entry.owner:
+            existing.owner = entry.owner
     write_related(anchor, cfg)
     return cfg
 
@@ -620,6 +667,131 @@ def remove_related(anchor: str | Path, name: str) -> bool:
         cfg.primary = ""
     write_related(anchor, cfg)
     return True
+
+
+# ---------------------------------------------------------------------------
+# Ownership classification (derive once at registration; then authoritative)
+# ---------------------------------------------------------------------------
+
+def _operator_logins() -> set[str]:
+    """The operator's own gh account logins (case-folded), from the accounts
+    catalog. These are the namespaces the operator *wholly owns*.
+
+    Reading the static ``accounts.yaml`` catalog is NOT "looking at live gh" --
+    it is the recorded identity metadata. The one-time, at-registration
+    consultation the ownership model calls for is this comparison; the result is
+    baked into related.yaml so consumers never re-derive.
+    """
+    try:
+        from . import accounts
+        return {a.login.casefold() for a in accounts.list_accounts() if a.login}
+    except Exception:
+        return set()
+
+
+def _is_ado_remote(remote: str) -> bool:
+    """Whether a remote is an Azure DevOps / VSTS host (org-internal)."""
+    import re
+    r = (remote or "").lower()
+    return bool(re.search(r"(\.visualstudio\.com|(^|//|@)[^/]*dev\.azure\.com)", r))
+
+
+def classify_ownership(name: str) -> tuple[str, str]:
+    """Best-effort derive ``(ownership, owner)`` for a registered repo ``name``.
+
+    Consulted **once at registration** (and by ``related classify`` backfill);
+    the result is persisted to related.yaml and thereafter authoritative. Only
+    the confident cases are asserted -- ambiguous ones return ``("", ...)`` so a
+    human curates rather than the tool guessing wrong:
+
+    * gh owner is one of the operator's own account logins -> ``owned``.
+    * an Azure DevOps host -> ``internal`` (org-internal; the operator can
+      override to ``owned`` for a repo they wholly own, e.g. their own ADO
+      plugin marketplace).
+    * otherwise -> ``""`` (unclassified) -- e.g. a public github repo the
+      operator merely accesses via an account; visibility/ownership can't be
+      told from the remote, so leave it for the operator to set.
+
+    ``owner`` is the resolving operator account login when derivable (else "").
+    """
+    from . import repos
+    reg = repos.find_repo(name)
+    remote = reg.remote if reg else ""
+    owner_ns = repos.github_owner(remote)
+    if owner_ns and owner_ns.casefold() in _operator_logins():
+        return "owned", owner_ns
+    if _is_ado_remote(remote):
+        # org-internal by host; owner account (if any) via the org map.
+        return "internal", (repos.resolve_account(reg) or "")
+    return "", (repos.resolve_account(reg) or "")
+
+
+def effective_ownership(entry: RelatedEntry) -> str:
+    """The authoritative ownership for an entry: its explicit value if set,
+    else the best-effort derivation from the registry. Never raises."""
+    if entry.ownership:
+        return entry.ownership
+    try:
+        return classify_ownership(entry.name)[0]
+    except Exception:
+        return ""
+
+
+def owned_targets(anchor: str | Path) -> list[dict[str, str]]:
+    """Return the related entries whose effective ownership is ``owned``, each as
+    ``{"name", "remote", "slug", "ownership"}`` -- the wholly-owned targets a
+    consumer (e.g. the AI-attribution hook) should treat as the operator's own
+    space. ``slug`` is the ``owner/name`` for a github remote (else "")."""
+    return _owned_from_entries(read_related(anchor).related)
+
+
+def owned_targets_grafted(anchors: list[str | Path]) -> list[dict[str, str]]:
+    """Grafted variant of :func:`owned_targets`: computes owned targets from the
+    config-source **merged** view (base + knowledge overlay), so a later anchor
+    that *reclassifies* a repo (e.g. demotes ``owned`` -> ``internal``) correctly
+    drops it -- which a per-anchor union cannot express."""
+    return _owned_from_entries(read_related_grafted(anchors).related)
+
+
+def _owned_from_entries(entries: dict[str, RelatedEntry]) -> list[dict[str, str]]:
+    from . import repos
+    out: list[dict[str, str]] = []
+    for name, entry in sorted(entries.items()):
+        if effective_ownership(entry) != "owned":
+            continue
+        reg = repos.find_repo(name)
+        remote = reg.remote if reg else ""
+        owner_ns = repos.github_owner(remote) or ""
+        slug = f"{owner_ns}/{name}" if owner_ns else ""
+        out.append({"name": name, "remote": remote, "slug": slug,
+                    "ownership": "owned"})
+    return out
+
+
+def classify_all(anchor: str | Path, *, overwrite: bool = False) -> list[dict[str, str]]:
+    """Backfill ownership for every related entry from the derivation, persisting
+    the result. By default only fills **unset** entries (leaving any explicit
+    curation intact); ``overwrite=True`` re-derives all. Returns a per-entry
+    changelog of ``{"name", "before", "after"}`` for entries that changed."""
+    cfg = read_related(anchor)
+    changed: list[dict[str, str]] = []
+    for name, entry in cfg.related.items():
+        if entry.ownership and not overwrite:
+            continue
+        derived, owner = classify_ownership(name)
+        if not derived:
+            continue
+        before = entry.ownership
+        if derived == before and (owner == entry.owner or not owner):
+            continue
+        entry.ownership = derived
+        if owner and not entry.owner:
+            entry.owner = owner
+        changed.append({"name": name, "before": before or "(unset)",
+                        "after": derived})
+    if changed:
+        write_related(anchor, cfg)
+    return changed
 
 
 # ---------------------------------------------------------------------------
