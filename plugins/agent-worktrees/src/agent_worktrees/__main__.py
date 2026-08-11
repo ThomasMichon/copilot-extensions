@@ -11356,6 +11356,7 @@ def _related_usage() -> None:
     print("  show <name> [--json]                Show a related repo (+ registry context)")
     print("  add <name>                          Link a related repo + scaffold its doc")
     print("     [--role R] [--summary S] [--doc PATH] [--delegate D]")
+    print("     [--ownership owned|internal|external] [--owner ACCOUNT]")
     print("     [--locus L] [--machines a,b] [--primary] [--no-scaffold]")
     print("     [--cs-repo R] [--cs-machine M] [--cs-location L]")
     print("     [--cs-workspace DIR]                                (codespace locus)")
@@ -11367,12 +11368,18 @@ def _related_usage() -> None:
     print("                                      + venues valid, local checkouts registered)")
     print("  primary [<name>]                    Show or set the primary related repo")
     print("  resolve [<name>]                    How to work on it from here (locus plan)")
+    print("  classify [<name>|--all] [--overwrite]   Derive ownership from gh accounts +")
+    print("                                      remote and persist (unset entries only)")
+    print("  owners [--json]                     List wholly-owned targets "
+          "(ownership=owned) from the control-plane index")
     print()
     print("Any command takes [--repo PATH] to target a specific checkout")
     print("(default: the git repo containing the current directory).")
     print()
     print("Locus (where work happens): local | machine:<key> | codespace | container")
     print("Delegate (how to hand off): agent-bridge | agent-codespaces | agent-containers | none")
+    print("Ownership (attribution posture): owned | internal | external "
+          "(derived once at registration, then authoritative)")
 
 
 def _related_opt(rest: list[str], flag: str, default: str | None = None) -> str | None:
@@ -11813,6 +11820,32 @@ def cmd_related_dispatch(argv: list[str]) -> int:
         _related_usage()
         return 0
 
+    # `owners` is a GLOBAL query -- the operator's wholly-owned targets live in
+    # the control-plane index (the authority), independent of the session's cwd.
+    # Resolve it directly and read only that (no cwd union, which could let a
+    # stale anchor override a fresher one), so it works from ANY cwd -- exactly
+    # what an ambient consumer like the AI-attribution hook needs. Handled before
+    # the cwd-anchor guard so a neutral cwd (no adopted project) still answers.
+    if sub == "owners":
+        json_out = "--json" in rest
+        try:
+            cp = related.find_control_plane_anchor()
+        except Exception:
+            cp = None
+        base = cp or _related_anchor(rest)   # fall back to cwd if no control plane
+        owners = (related.owned_targets_grafted(_related_config_source_anchors(base))
+                  if base else [])
+        if json_out:
+            _json_output({"owned": owners, "count": len(owners),
+                          "source": "control-plane" if cp else "cwd"})
+        elif not owners:
+            print("No wholly-owned related targets (ownership=owned).")
+        else:
+            output.header("Wholly-owned targets")
+            for t in owners:
+                print(f"  {t['name']:<24} {t['slug'] or t['remote'] or '-'}")
+        return 0
+
     anchor = _related_anchor(rest)
     if not anchor:
         output.err(
@@ -11835,6 +11868,8 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                     {
                         "name": e.name, "role": e.role, "summary": e.summary,
                         "doc": e.doc, "delegate": e.delegate,
+                        "ownership": related.effective_ownership(e),
+                        "owner": e.owner,
                         "locus": {
                             "preferred": e.locus.preferred,
                             "machines": e.locus.machines,
@@ -11874,6 +11909,9 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             _json_output({
                 "name": e.name, "role": e.role, "summary": e.summary,
                 "doc": e.doc, "delegate": e.delegate,
+                "ownership": related.effective_ownership(e),
+                "ownership_explicit": e.ownership,
+                "owner": e.owner,
                 "locus": {
                     "preferred": e.locus.preferred,
                     "machines": e.locus.machines,
@@ -11889,6 +11927,11 @@ def cmd_related_dispatch(argv: list[str]) -> int:
         output.header(f"Related: {e.name}")
         print(f"  role:     {e.role or '-'}")
         print(f"  summary:  {e.summary or '-'}")
+        _own = related.effective_ownership(e)
+        if _own:
+            _osrc = "explicit" if e.ownership else "derived"
+            print(f"  ownership: {_own} ({_osrc})"
+                  + (f"  owner={e.owner}" if e.owner else ""))
         print(f"  locus:    {e.locus.preferred or '-'}"
               + (f"  machines={e.locus.machines}" if e.locus.machines else "")
               + (f"  codespace={e.locus.codespace}" if e.locus.codespace else "")
@@ -11940,7 +11983,18 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                 container=container,
             ),
             delegate=related.normalize_delegate(_related_opt(rest, "--delegate", "")),
+            ownership=related.normalize_ownership(_related_opt(rest, "--ownership", "")),
+            owner=(_related_opt(rest, "--owner", "") or "").strip(),
         )
+        # Derive the ownership posture ONCE, here at registration, when the
+        # operator did not state it explicitly -- baked into related.yaml and
+        # thereafter authoritative (consumers never re-inspect live gh accounts).
+        if not entry.ownership:
+            derived, owner = related.classify_ownership(name)
+            if derived:
+                entry.ownership = derived
+            if owner and not entry.owner:
+                entry.owner = owner
         if repos.find_repo(name) is None:
             output.warn(
                 f"'{name}' is not in the repos registry. Link recorded anyway; "
@@ -12058,6 +12112,8 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                 "editing_model": resn.editing_model,
                 "base_repo": base_repo,
                 "account": repos.resolve_account(reg),
+                "ownership": related.effective_ownership(entry),
+                "owner": entry.owner,
                 "delegate_via": resn.delegate_via,
                 "current_machine": current_machine,
                 "steps": resn.steps,
@@ -12092,6 +12148,57 @@ def cmd_related_dispatch(argv: list[str]) -> int:
         for s in resn.steps:
             print(f"    - {s}")
         return 0
+
+    if sub == "classify":
+        target = rest[0] if rest and not rest[0].startswith("-") else None
+        overwrite = "--overwrite" in rest
+        if target and target != "--all":
+            derived, owner = related.classify_ownership(target)
+            existing = related.get_related(anchor, target)
+            if existing is None:
+                output.err(f"'{target}' is not a related repo.")
+                return 1
+            if existing.ownership and not overwrite:
+                if json_out:
+                    _json_output({"name": target, "ownership": existing.ownership,
+                                  "owner": existing.owner, "changed": False,
+                                  "reason": "already set (use --overwrite)"})
+                else:
+                    output.info(f"'{target}' ownership already set to "
+                                f"'{existing.ownership}' (use --overwrite to re-derive).")
+                return 0
+            if not derived:
+                if json_out:
+                    _json_output({"name": target, "ownership": "", "changed": False,
+                                  "reason": "underivable -- set explicitly with --ownership"})
+                else:
+                    output.warn(f"Could not derive ownership for '{target}' from its "
+                                f"remote -- set it explicitly with "
+                                f"`related add {target} --ownership <owned|internal|external>`.")
+                return 0
+            related.upsert_related(anchor, related.RelatedEntry(
+                name=target, ownership=derived, owner=owner))
+            if json_out:
+                _json_output({"name": target, "ownership": derived, "owner": owner,
+                              "changed": True})
+            else:
+                output.ok(f"'{target}' ownership = {derived}"
+                          + (f" (owner {owner})" if owner else ""))
+            return 0
+        # --all (or bare): backfill every entry.
+        changed = related.classify_all(anchor, overwrite=overwrite)
+        if json_out:
+            _json_output({"changed": changed, "count": len(changed)})
+        elif not changed:
+            output.info("No ownership changes (all entries classified, or "
+                        "underivable). Pass --overwrite to re-derive explicit ones.")
+        else:
+            output.header("Ownership classified")
+            for c in changed:
+                print(f"  {c['name']:<24} {c['before']} -> {c['after']}")
+        return 0
+
+
 
     output.err(f"Unknown related subcommand: {sub}")
     _related_usage()
@@ -14881,7 +14988,7 @@ def _git_toplevel(path: Path | None) -> Path | None:
 # now it resolves from CWD, or from the ``--project`` a project binstub injects,
 # and balks helpfully when neither is available.
 _NO_PROJECT_COMMANDS = {
-    "--version", "-V", "--help", "-h", "repos", "accounts", "install", "register", "hook",
+    "--version", "-V", "--help", "-h", "repos", "accounts", "related", "install", "register", "hook",
     "picker", "reap-shells", "status-updater", "restart", "register-session",
     "head-session", "conclude-session", "link-succession", "config-migrate",
     "session-lock", "machine-context",

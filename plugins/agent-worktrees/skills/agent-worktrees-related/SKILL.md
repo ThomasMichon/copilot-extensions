@@ -85,6 +85,16 @@ related:
     (often *not* the venue `repo` name).
 - **`delegate.via`** -- how to hand work to the agent that owns the repo:
   `agent-bridge`, `agent-codespaces`, `agent-containers`, or `none`.
+- **`ownership`** -- the operator's ownership posture toward the repo:
+  `owned` (the operator wholly owns it -- their own gh namespace, or explicitly
+  marked), `internal` (org-internal, not owned -- e.g. an enterprise ADO org repo),
+  or `external` (public/external, not owned). **Derived once at registration**
+  from the operator's own gh account logins + the repo's remote, then treated as
+  **authoritative** -- consumers (e.g. the AI-attribution decision) read this
+  manifest instead of re-inspecting live `gh` accounts. An explicit value always
+  wins over the derivation, so an ADO repo the operator wholly owns is marked
+  `owned` even though the ADO-host default is `internal`. `owner` records the
+  resolving operator account when derivable.
 - **`primary`** -- the default repo (used by `related resolve` with no name).
 
 ## CLI
@@ -101,13 +111,18 @@ related doc <name>                       Print (scaffold if missing) the narrati
 related doctor [--json]                  Validate entries against reality (report-first)
 related primary [<name>]                 Show or set the primary
 related resolve [<name>]                 How to work on it from here (see working-cross-repo)
+related classify [<name>|--all] [--overwrite]   Derive ownership + persist (unset only)
+related owners [--json]                  List wholly-owned targets (ownership=owned)
 ```
 
 `add` options: `--role R`, `--summary S`, `--doc PATH`, `--delegate D`,
+`--ownership owned|internal|external`, `--owner ACCOUNT`,
 `--locus L`, `--machines a,b`, `--primary`, `--no-scaffold`; for a codespace
 locus `--cs-repo R --cs-machine M --cs-location L --cs-workspace DIR`; and for a
 container locus `--container-repo R --container-workspace DIR
---container-machines a,b`.
+--container-machines a,b`. When `--ownership` is omitted, `add` derives it once
+from the repo's remote + the operator's gh accounts (the only place live gh
+accounts are consulted); `related classify` backfills existing entries.
 
 ## Validating the index -- `related doctor` (and how to act on it)
 
