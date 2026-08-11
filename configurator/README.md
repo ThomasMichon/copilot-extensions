@@ -46,11 +46,20 @@ iex (irm https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/
 curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/configurator/bootstrap.sh | bash
 ```
 
-The bootstrap fetches this `configurator/` payload and runs it. Phase 0 assumes
+The bootstrap fetches this `configurator/` payload and **version-installs** it
+under the same convention as the harness's other installers — an immutable
+`~/.configurator/versions/<version>/` slot, a plain-text
+`~/.configurator/current-version` marker, and a `~/.local/bin/configurator`
+binstub (`.cmd`/`.ps1` on Windows) — then launches it. Re-running the one-liner is
+**version-gated** (a no-op when already current). After the first run, invoke
+`configurator …` directly (ensure `~/.local/bin` is on `PATH`). Phase 0 assumes
 `git` and `uv` are already present; automatic prerequisite provisioning (and
 restart prompts) lands in Phase 2
 ([#355](https://github.com/ThomasMichon/copilot-extensions/issues/355)). Set
-`CONFIGURATOR_REF` to fetch a ref other than `main`.
+`CONFIGURATOR_REF` to fetch a ref other than `main`, or `CONFIGURATOR_ROOT` to
+relocate the install root. Inspect/repair the versioned install with
+`configurator self-install` (dry-run) / `--apply`, and see it in `configurator
+doctor`.
 
 ## Manage the harness (state views)
 
