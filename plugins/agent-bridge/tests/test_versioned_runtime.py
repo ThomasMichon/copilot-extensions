@@ -9,6 +9,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -27,11 +28,19 @@ def _load():
 vr = _load()
 
 
-def _install(root: Path, version: str) -> Path:
-    """Create versions/<version> as a stand-in venv dir with a marker file."""
+def _install(root: Path, version: str, *, age_days: float = 30.0) -> Path:
+    """Create versions/<version> as a stand-in venv dir with a marker file.
+
+    Backdates the slot mtime by ``age_days`` (default 30) so it sits past gc's
+    recency floor -- most gc tests assert reap behavior and predate the floor.
+    Pass ``age_days=0`` to create a fresh (young, floor-protected) slot.
+    """
     d = vr.version_dir(root, version)
     d.mkdir(parents=True, exist_ok=True)
     (d / "marker.txt").write_text(version, encoding="utf-8")
+    if age_days:
+        past = time.time() - age_days * 86400.0
+        os.utime(d, (past, past))
     return d
 
 
@@ -195,6 +204,22 @@ def test_gc_dead_pid_not_protected(tmp_path):
     )
     removed = vr.gc(tmp_path, protect_pids=True)
     assert removed == ["1.0.0"]     # dead pid -> no protection
+
+
+def test_gc_min_age_floor_protects_recent_slot(tmp_path):
+    # A just-superseded slot can still be referenced by another runtime's
+    # path-pinned launch command, which --protect-pids can't see. The recency
+    # floor keeps it until it ages out (the dev14-prune incident).
+    _install(tmp_path, "1.0.0", age_days=0)   # young, just superseded
+    _install(tmp_path, "2.0.0")               # current (old)
+    vr.activate(tmp_path, "2.0.0")
+    # Default floor protects the young non-current slot...
+    assert vr.gc(tmp_path) == []
+    assert vr.version_dir(tmp_path, "1.0.0").is_dir()
+    # ...and an explicit min_age_days=0 disables the floor and reaps it.
+    removed = vr.gc(tmp_path, min_age_days=0)
+    assert removed == ["1.0.0"]
+    assert not vr.version_dir(tmp_path, "1.0.0").exists()
 
 
 # ---------------------------------------------------------------------------

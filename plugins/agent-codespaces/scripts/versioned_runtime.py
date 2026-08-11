@@ -36,9 +36,11 @@ Commands (all take ``--root <dir>``; ``--json`` for machine output)::
     current                         print the active version (from the marker)
     resolve  [--subpath P]          print versions/<current>/<P> (the concrete slot)
     list                            list installed versions (+ which is current)
-    gc [--keep V ...] [--protect-pids]   remove version dirs that are not current,
-                                    not kept, and (with --protect-pids) not held by
-                                    a live pid recorded in running-version.json
+    gc [--keep V ...] [--protect-pids] [--min-age-days N]
+                                    remove version dirs that are not current,
+                                    not kept, not younger than N days, and (with
+                                    --protect-pids) not held by a live pid
+                                    recorded in running-version.json
 
 Exit code is 0 on success, non-zero on error; errors print to stderr.
 """
@@ -404,16 +406,46 @@ def _rmtree_deferrable(d: Path, *, label: str) -> bool:
     return False
 
 
+# Default minimum age (days) before a non-current, unprotected version slot is
+# eligible for GC. A recently-superseded slot can still be referenced by ANOTHER
+# runtime that baked its absolute versioned path into a stored launch command
+# (e.g. an agent-bridge codespace session/agent pinned to
+# ``versions/<v>/Scripts/python.exe``) -- a cross-runtime reference that
+# ``--protect-pids`` (which only sees THIS runtime's recorded pids) cannot know
+# about. Pruning such a slot orphans that reference and crash-loops the other
+# runtime (the dev14-prune incident, dotfiles#1221 follow-up). An age floor keeps
+# a just-superseded slot around long enough for those references to age out,
+# without unbounded growth (current + the previous-good are always kept anyway).
+DEFAULT_GC_MIN_AGE_DAYS = 7.0
+
+
+def _slot_age_days(root: Path, version: str) -> float:
+    """Age of a version slot in days (from its dir mtime ~= install time).
+
+    A slot we cannot stat is treated as infinitely old (eligible) so a genuinely
+    broken/half-present dir is still collectable.
+    """
+    try:
+        mtime = version_dir(root, version).stat().st_mtime
+    except OSError:
+        return float("inf")
+    return max(0.0, (time.time() - mtime) / 86400.0)
+
+
 def gc(root: Path, keep: list[str] | None = None,
-       protect_pids: bool = False, link_name: str = CURRENT_LINK) -> list[str]:
+       protect_pids: bool = False, link_name: str = CURRENT_LINK,
+       min_age_days: float = DEFAULT_GC_MIN_AGE_DAYS) -> list[str]:
     """Remove version dirs that are not protected. Returns the removed names.
 
     Never removes: the ``current`` version, any name in ``keep`` (e.g. the
-    previous-good for rollback), and -- when ``protect_pids`` -- any version whose
-    directory a still-live recorded pid may be running from. Live-pid protection
-    is coarse (we cannot map a pid to its version dir portably), so if *any* live
-    pid is recorded we conservatively keep ``current`` (already kept) and skip GC
-    of the most recent non-current version too, leaving a safe rollback target.
+    previous-good for rollback), any version whose slot is younger than
+    ``min_age_days`` (recency protection -- see :data:`DEFAULT_GC_MIN_AGE_DAYS`),
+    and -- when ``protect_pids`` -- any version whose directory a still-live
+    recorded pid may be running from. Live-pid protection is coarse (we cannot
+    map a pid to its version dir portably), so if *any* live pid is recorded we
+    conservatively keep ``current`` (already kept) and skip GC of the most recent
+    non-current version too, leaving a safe rollback target. Pass
+    ``min_age_days=0`` to disable the age floor.
     """
     keep_set = set(keep or [])
     cur = current_version(root, link_name)
@@ -430,6 +462,10 @@ def gc(root: Path, keep: list[str] | None = None,
     removed: list[str] = []
     for v in list_versions(root):
         if v in keep_set:
+            continue
+        # Recency floor: never reap a slot younger than min_age_days -- another
+        # runtime may still hold a path-pinned reference to it (see the constant).
+        if min_age_days > 0 and _slot_age_days(root, v) < min_age_days:
             continue
         d = version_dir(root, v)
         if _rmtree_deferrable(d, label="gc"):
@@ -585,6 +621,12 @@ def main(argv: list[str] | None = None) -> int:
                     help="version(s) to preserve (repeatable)")
     gp.add_argument("--protect-pids", action="store_true",
                     help="also protect versions a live recorded pid may run from")
+    gp.add_argument("--min-age-days", type=float,
+                    default=DEFAULT_GC_MIN_AGE_DAYS,
+                    help="minimum slot age (days) before an unprotected version "
+                         "is eligible for removal; a recently-superseded slot may "
+                         "still be referenced by another runtime's pinned launch "
+                         "path (default: %(default)s; 0 disables)")
     gp.add_argument("--toss-incomplete", action="store_true",
                     help="also remove non-current slots lacking a completion "
                          "marker (failed/partial builds; dotfiles #935)")
@@ -640,7 +682,7 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"{'*' if v == cur else ' '} {v}")
         elif args.cmd == "gc":
             removed = gc(root, keep=args.keep, protect_pids=args.protect_pids,
-                         link_name=link_name)
+                         link_name=link_name, min_age_days=args.min_age_days)
             if args.toss_incomplete:
                 removed = list(removed) + toss_incomplete(root, link_name)
             _emit({"removed": removed} if args.json else removed, args.json)
