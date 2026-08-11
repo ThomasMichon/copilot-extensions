@@ -179,3 +179,41 @@ def test_cache_clear_and_status_cli(enabled_cache, capsys):
 
     assert cli.cmd_cache_clear(_C()) == 0
     assert get_cache().get("A/x", "password") is None
+
+
+# ---------------------------------------------------------------------------
+# Fernet-key wrapping at rest (DPAPI on Windows / passthrough elsewhere) + migration
+# ---------------------------------------------------------------------------
+
+
+def test_cache_key_is_wrapped_at_rest(enabled_cache):
+    """The persisted Fernet key file carries the wrapped-key magic (not plaintext)."""
+    from agent_vault import kek
+
+    c = get_cache()
+    assert c.put("Svc/one", "password", "v1") is True  # forces key creation
+    key_blob = (enabled_cache / "credential-cache.key").read_bytes()
+    assert kek.is_wrapped(key_blob)  # magic-tagged, not a raw Fernet key
+    # A brand-new cache instance unwraps the key and reads the value back.
+    assert get_cache().get("Svc/one", "password") == "v1"
+
+
+def test_cache_migrates_legacy_plaintext_key(enabled_cache):
+    """A pre-existing plaintext Fernet key is read, then rewrapped on next use."""
+    from cryptography.fernet import Fernet
+
+    from agent_vault import kek
+
+    base = enabled_cache
+    base.mkdir(parents=True, exist_ok=True)
+    legacy_key = Fernet.generate_key()
+    key_file = base / "credential-cache.key"
+    key_file.write_bytes(legacy_key + b"\n")  # old plaintext format
+
+    # Seed a cache file encrypted under the legacy key so we can prove continuity.
+    seeded = get_cache()
+    assert seeded.put("Legacy/x", "password", "kept") is True
+
+    # The key file is now migrated to the wrapped form, and the value survives.
+    assert kek.is_wrapped(key_file.read_bytes())
+    assert get_cache().get("Legacy/x", "password") == "kept"

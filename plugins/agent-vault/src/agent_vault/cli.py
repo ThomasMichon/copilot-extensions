@@ -1105,6 +1105,7 @@ def cmd_seal(args):
 
 def cmd_unseal(args):
     import base64
+    import binascii
 
     if not ensure_service():
         print("Error: service unreachable", file=sys.stderr)
@@ -1112,13 +1113,22 @@ def cmd_unseal(args):
     blob = _read_seal_input(args)
     if blob is None:
         return 1
+    try:
+        sealed = blob.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        print("Error: sealed input is not valid text (expected base64)", file=sys.stderr)
+        return 1
     resp = send_command({
         "action": "unseal",
         "name": args.name,
-        "sealed": blob.decode("utf-8", "strict").strip(),
+        "sealed": sealed,
     }, timeout=15.0)
     if resp and resp.get("ok"):
-        sys.stdout.buffer.write(base64.b64decode(resp["data"]))
+        try:
+            sys.stdout.buffer.write(base64.b64decode(resp["data"]))
+        except (KeyError, binascii.Error, ValueError):
+            print("Error: malformed service response", file=sys.stderr)
+            return 1
         return 0
     error = resp.get("error", "unknown") if resp else "service unreachable"
     print(f"Error: {error}", file=sys.stderr)

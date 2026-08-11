@@ -664,8 +664,9 @@ class VaultService:
                 return {"ok": True, "data": _b64.b64encode(plaintext).decode()}
             except _kek.KekError as exc:
                 return {"ok": False, "error": str(exc)}
-            except Exception as exc:  # report cleanly to the client
-                return {"ok": False, "error": f"{action} failed: {exc}"}
+            except Exception as exc:  # log server-side, return a stable message
+                log.warning("Action %r failed: %s", action, exc)
+                return {"ok": False, "error": f"{action} failed"}
 
         handler = get_registry().action(action)
         if handler is not None:

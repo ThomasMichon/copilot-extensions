@@ -135,6 +135,11 @@ Tamper/wrong-key detection is built in (AES-256-GCM); `unseal` fails cleanly if 
 KEK is missing or the blob was altered. The KEK name is bound as authenticated data,
 so a blob sealed under one name won't unseal under another.
 
+> **Requires `cryptography`** (the AES-256-GCM backend) -- the same optional dep as
+> the persistent cache. Install it via the `kek` (or `cache`) extra, e.g.
+> `uv pip install cryptography`; without it `seal`/`unseal` return a clear error.
+> The KEK *wrapping* (DPAPI on Windows) needs no extra dependency.
+
 ## SUDO_ASKPASS (Linux / WSL)
 
 Wire the vault as sudo's askpass provider so `sudo -A` sources the password from

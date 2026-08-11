@@ -53,20 +53,15 @@ def _dpapi(protect: bool, data: bytes) -> bytes:
     class DATA_BLOB(ctypes.Structure):
         _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
 
-    def _to_blob(b: bytes) -> DATA_BLOB:
-        buf = ctypes.create_string_buffer(b, len(b))
-        return DATA_BLOB(len(b), ctypes.cast(buf, ctypes.POINTER(ctypes.c_char)))
-
-    def _from_blob(blob: DATA_BLOB) -> bytes:
-        n = int(blob.cbData)
-        out = ctypes.string_at(blob.pbData, n)
-        ctypes.windll.kernel32.LocalFree(blob.pbData)
-        return out
+    # Keep the input buffer alive in THIS scope for the whole API call -- a
+    # DATA_BLOB only borrows the pointer, so the backing buffer must outlive the
+    # CryptProtect/Unprotect call (else ctypes may free it underneath us).
+    in_buf = ctypes.create_string_buffer(data, len(data))
+    in_blob = DATA_BLOB(len(data), ctypes.cast(in_buf, ctypes.POINTER(ctypes.c_char)))
+    out_blob = DATA_BLOB()
 
     crypt32 = ctypes.windll.crypt32
     CRYPTPROTECT_UI_FORBIDDEN = 0x1  # never pop UI
-    in_blob = _to_blob(data)
-    out_blob = DATA_BLOB()
     fn = crypt32.CryptProtectData if protect else crypt32.CryptUnprotectData
     ok = fn(
         ctypes.byref(in_blob), None, None, None, None,
@@ -75,7 +70,11 @@ def _dpapi(protect: bool, data: bytes) -> bytes:
     if not ok:
         err = ctypes.GetLastError()
         raise KekError(f"DPAPI {'protect' if protect else 'unprotect'} failed (error {err})")
-    return _from_blob(out_blob)
+    try:
+        return ctypes.string_at(out_blob.pbData, int(out_blob.cbData))
+    finally:
+        ctypes.windll.kernel32.LocalFree(out_blob.pbData)
+        del in_buf  # explicit: keep the buffer referenced until here
 
 
 def wrap_bytes(data: bytes) -> bytes:
@@ -190,8 +189,8 @@ def _aesgcm(kek: bytes):
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     except ImportError as exc:  # pragma: no cover - env-dependent
         raise KekError(
-            "the 'cryptography' package is required for seal/unseal "
-            "(pip install cryptography)"
+            "the 'cryptography' package is required for seal/unseal -- install it "
+            "(e.g. `uv pip install cryptography`) or the agent-vault 'kek' extra"
         ) from exc
     return AESGCM(kek)
 
