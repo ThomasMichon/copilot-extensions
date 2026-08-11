@@ -216,7 +216,10 @@ def state_repo_definition(res: StateRoot) -> str:
 
     The returned string is a self-contained paragraph (no trailing newline);
     the hook merges it into ``additionalContext`` ahead of any static conduct
-    fragments.
+    fragments. When a knowledge repo is bound (``source == "knowledge_repo"``)
+    the harness and the state repo are distinct checkouts, so the definition
+    also carries a **write-routing** clause: shared-harness changes go in the
+    harness repo, everything else in the user's state repo.
     """
     if res.path:
         if res.source == "knowledge_repo":
@@ -225,7 +228,7 @@ def state_repo_definition(res: StateRoot) -> str:
             where = f"the '{res.repo}' repo"
         else:
             where = "your current repo (self-hosted)"
-        return (
+        text = (
             f"**The user's state repo** is `{res.path}` — {where}. It is the "
             "checkout where the user's personal state and reference data live: "
             "efforts, logs, visions, and skill reference data such as "
@@ -233,6 +236,22 @@ def state_repo_definition(res: StateRoot) -> str:
             "review-persona guidance. Whenever a skill refers to \"the user's "
             "state repo,\" read and write those paths under this checkout."
         )
+        # When a knowledge repo is bound, the shared harness and the user's
+        # state repo are two DISTINCT checkouts -- so tell the agent which
+        # changes belong where. (For a self-hosted repo there is only one
+        # checkout, so this routing guidance would be noise.)
+        if res.source == "knowledge_repo":
+            text += (
+                " **Where changes go:** changes to the **shared harness** itself "
+                "— its generic, name-free configuration, skills, agents, "
+                "AGENTS.md, and docs (anything that benefits everyone using the "
+                "harness) — belong in the harness repo (your current checkout). "
+                "Everything else — the user's personal state and data (the "
+                "efforts / logs / visions / preferences / personal skills / "
+                "reference data above) — belongs in the user's state repo named "
+                "above."
+            )
+        return text
     return (
         "**The user's state repo** — the checkout where the user's personal "
         "state and reference data (efforts, logs, visions, and skill reference "
