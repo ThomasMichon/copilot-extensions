@@ -52,6 +52,28 @@ restart prompts) lands in Phase 2
 ([#355](https://github.com/ThomasMichon/copilot-extensions/issues/355)). Set
 `CONFIGURATOR_REF` to fetch a ref other than `main`.
 
+## Manage the harness (state views)
+
+Once set up, the Configurator is also the ongoing **Manager** — a read-only
+window (today) onto the real config state, read from the files the harness
+already writes:
+
+```bash
+uv run python -m configurator projects        # harness repos (binstubs + profiles)
+uv run python -m configurator projects <name> # config dir, linked knowledge repo, profiles, enabled plugins
+uv run python -m configurator repos           # every known repo + indicators
+uv run python -m configurator repos <name>    # worktree mode · agent mode · pr model · ownership · remote
+uv run python -m configurator plugins --status  # known plugins vs. what is enabled user-global
+```
+
+**Projects** are the repos promoted to first-class harness projects (worthy of
+binstubs + profiles, in `projects.yaml`); **Repos** are everything else in the
+registry. The views expose worktree mode, agent mode, PR model, ownership, the
+linked knowledge repo, and per-project enabled plugins. Config *editing* (linking
+a knowledge repo, per-plugin config, adoption) is being built out under Phase 3/4
+([#356](https://github.com/ThomasMichon/copilot-extensions/issues/356) /
+[#357](https://github.com/ThomasMichon/copilot-extensions/issues/357)).
+
 ## Plugin-knowledge model (Phase 1)
 
 The Configurator learns **which** plugins exist dynamically from the marketplace
