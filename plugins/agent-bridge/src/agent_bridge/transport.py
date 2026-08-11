@@ -310,7 +310,16 @@ async def _resolve_worktree(
     if target.project:
         env["WORKTREE_PROJECT"] = target.project
 
-    base_args = [python, "-m", "agent_worktrees", "resolve", "--json", "--no-resume"]
+    # Pass the project as the global --project flag (before the subcommand).
+    # agent-worktrees resolves the project from cwd or --project ONLY -- the
+    # ambient $WORKTREE_PROJECT identity fallback was retired (cwd-resolution
+    # Phase 3). A bridge resolve runs from a neutral daemon cwd that is not
+    # inside the target repo, so without --project it fails "could not resolve a
+    # project".
+    base_args = [python, "-m", "agent_worktrees"]
+    if target.project:
+        base_args += ["--project", target.project]
+    base_args += ["resolve", "--json", "--no-resume"]
     creating_new = not target.worktree_id
     if target.worktree_id:
         base_args.extend(["--worktree-id", target.worktree_id])
