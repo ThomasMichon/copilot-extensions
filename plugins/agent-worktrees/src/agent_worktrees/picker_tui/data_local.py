@@ -184,8 +184,10 @@ def reconcile_bound_live() -> int:
     # is never re-observed and persists a stale ``false`` for a genuinely live
     # mux (dotfiles#1205). Reconciling it on this off-hot-path sweep, mirroring
     # bound liveness, closes that gap. Mux presence is a definitive local check
-    # (the session exists or it does not), so -- unlike the bound scan -- there
-    # is no Unknown state to guard against.
+    # (the session exists or it does not) when the batch SUCCEEDS -- no partial
+    # Unknown per record, unlike the bound scan's unattributable bindings. But a
+    # batch that raises is itself Unknown: it is guarded below (``mux_scan_ok``)
+    # so a transient failure never clears a cached ``mux_live=True`` to False.
     try:
         mux_map = sessions.mux_status_many([r.worktree_id for r in records])
         mux_scan_ok = True
