@@ -1,30 +1,24 @@
 ---
 name: repairing-worktrees
 description: >
-  Diagnose and repair worktree/session health for a project via the
-  agent-worktrees `doctor` command — corrupt tracking records, empty session
-  registries, stale status, orphaned empty session shells, and cwd/path
-  misalignment — and safely clean up / reap worktrees without reaping a live
-  session. Use when asked to:
-  - 'repair worktrees'
-  - 'repair sessions'
+  Diagnose and repair worktree/session health via the agent-worktrees `doctor`
+  command (corrupt records, empty registries, stale status, orphaned session
+  shells, cwd/path misalignment), and safely clean up / reap / close out
+  worktrees without reaping a live session. Use when asked to:
+  - 'repair worktrees' / 'repair sessions'
+  - 'worktree / session doctor'
   - 'fix corrupt tracking records'
-  - 'worktree doctor'
-  - 'session doctor'
   - 'clean up empty sessions'
-  - 'clean up worktrees'
-  - 'organize / backfill worktrees'
-  - 'backfill worktree status'
-  - 'backfill sessions'
-  - 'worktree health check'
-  - 'why is a worktree showing 0 turns'
-  - 'picker shows wrong session'
+  - 'clean up / organize / backfill worktrees'
+  - 'backfill worktree status' / 'backfill sessions'
+  - 'close out a worktree' / 'release worktree claims'
+  - "what did this worktree touch / its footprint"
+  - 'why is a worktree showing 0 turns' / 'picker shows wrong session'
   - 'worktree shows active but only offers Resume'
-  - 'reclaim an orphaned Copilot'
-  - "can't resume — active process lock"
-  For pruning finished worktree *directories* use `gc`/`cleanup`; for orphaned
-  mux tabs use `reap-sessions`. This skill covers record + session-state health,
-  and the liveness rules that keep cleanup from reaping a live session.
+  - 'reclaim an orphaned Copilot' / "can't resume — active process lock"
+  For pruning worktree *directories* use `gc`/`cleanup`; for orphaned mux tabs
+  use `reap-sessions`. Covers record + session-state health and liveness-safe
+  cleanup.
 ---
 
 # Repairing worktrees & sessions
@@ -121,6 +115,51 @@ resolve by hand:
 - **Clean residual stale locks:** after the process is gone, a dead-PID
   `inuse.<pid>.lock` can linger and keep the session looking busy. Remove **only**
   locks whose PID is confirmed dead (validate the PID first), then resume.
+
+## Deep close-out — investigate a worktree's footprint, and let it self-close
+
+Before reaping a worktree, remember it may own **claims and off-machine state**:
+it may have dug into a **CodeSpace**, a **cross-repo worktree**, one or more
+**cross-repo PRs**, borrowed containers, or other shared spaces. Reaping it
+blindly orphans those. Close-out is deeper than the local git/liveness check.
+
+- **Check the claim ledger — but do not trust it alone.**
+  ```
+  <project> claims <worktree_id>          # outbound resources it owns + inbound tasks
+  ```
+  `finalize` is claim-aware (its gate blocks on unreleased outbound claims), and
+  `claims release <ref>` / `claims settle <ref>` / `claims sweep --apply` retire
+  them. **But the ledger is best-effort and relatively new:** many older
+  worktrees show `(none)` even though they really did touch a CodeSpace or a
+  cross-repo PR — those actions predate consistent claim-journaling. An empty
+  ledger is *not* proof of an empty footprint.
+- **Deep-investigate what it actually touched.** Corroborate the ledger against
+  the worktree's own history and artifacts:
+  ```
+  <project> recent-messages --worktree <id>      # quick peek at recent work
+  <project> head-session --worktree <id>         # resolve its head session id
+  <project> session-transcript <session_id>      # full transcript of what it did
+  ```
+  plus its effort file, and its branch's cross-repo footprint (CodeSpaces it
+  connected to, `<other-repo>` worktrees/PRs it opened). **Be willing to dig into
+  those dependent spaces** and verify each is closed out (PR merged/closed,
+  CodeSpace done/stopped, cross-repo worktree finalized, container lease
+  released) *before* reaping the owner.
+- **Best: let the worktree drive its own close-out — "just ask" it.** The
+  worktree holds context the ledger never captured, so rather than reconstructing
+  its footprint by hand, resume it and have it wrap up: release/settle its claims,
+  land or close its cross-repo PRs, disconnect its CodeSpace, finalize its
+  cross-repo worktrees. Hand it a close-out task via agent-bridge / embodiment:
+  ```
+  <project> embody --worktree-id <id> --seed "Close yourself out: land or close \
+    any cross-repo PRs, disconnect any CodeSpace, finalize any cross-repo \
+    worktrees, release your claims, then finalize."
+  # or dispatch the same to its owning agent: `<repo> bridge send <machine> "…"`
+  ```
+  Let the worktree confirm it is fully wrapped up, *then* finalize/reap it. Only
+  fall back to manual `claims release`/`sweep` for a worktree that genuinely
+  cannot be resumed (its session is gone) or whose obligations are provably
+  gone-and-safe.
 
 ## Notes
 
