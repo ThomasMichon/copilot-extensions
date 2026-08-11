@@ -690,6 +690,20 @@ def _enrich(result: Any) -> Any:
 
 
 def _cmd_claim(args: argparse.Namespace) -> int:
+    # The positional is the TASK id (consistent with start/complete/yield/abandon,
+    # which all take the task id first); ``--task`` is kept as a back-compat alias.
+    # The owner/worker id -- rarely needed, since identity resolves from CWD -- is
+    # the explicit ``--worker``/``--as`` flag. This removes the old ambiguity where
+    # a bare ``claim <id>`` bound <id> to the worker slot and silently leased an
+    # arbitrary task under it.
+    task_id = args.task_id or args.task
+    if args.task_id and args.task and args.task_id != args.task:
+        print(
+            f"agent-dispatch claim: conflicting task ids (positional '{args.task_id}' "
+            f"vs --task '{args.task}'). Pass the task id once.",
+            file=sys.stderr,
+        )
+        return 2
     machine, worktree = _identity(args)
     repo = _scope_repo(args)
     if not repo:
@@ -702,7 +716,7 @@ def _cmd_claim(args: argparse.Namespace) -> int:
             repo=repo,
             machine=machine,
             worktree=worktree,
-            task_id=args.task,
+            task_id=task_id,
             lease_seconds=args.lease_seconds,
             evaluation=getattr(args, "evaluation", False),
         )
@@ -2337,12 +2351,22 @@ def build_parser() -> argparse.ArgumentParser:
         "claim", help="atomically lease one eligible task (identity auto-resolved from CWD)"
     )
     p.add_argument(
-        "worker_id", nargs="?", help="owner id (default: composed from machine/worktree)"
+        "task_id", nargs="?",
+        help="claim THIS specific task id (optional; default: any eligible task). "
+             "First-positional task id, consistent with start/complete/yield/abandon.",
     )
     p.add_argument("--machine", help="override the resolved machine (targeting identity)")
     p.add_argument("--worktree", help="override the resolved worktree id (targeting identity)")
+    p.add_argument(
+        "--worker", "--as", dest="worker_id",
+        help="explicit owner/worker id to claim as (rarely needed; default: "
+             "composed from machine/worktree). Was the bare positional, now a flag "
+             "so it can't be confused with the task id.",
+    )
     p.add_argument("--capability", action="append", help="advertised capability (repeatable)")
-    p.add_argument("--task", help="claim this specific task id (if eligible)")
+    p.add_argument(
+        "--task", help="alias for the positional task id (back-compat)",
+    )
     p.add_argument(
         "--repo",
         help="lane to claim from (local name or remote URL). Default: the calling "
