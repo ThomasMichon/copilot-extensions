@@ -15650,7 +15650,7 @@ def _pr_watch_usage() -> None:
 
 def _pr_parse_repo(value: str) -> str:
     if value.count("/") != 1 or not all(value.split("/")):
-        raise ValueError("repo must be 'owner/name'")
+        raise ValueError("repo must be a 'owner/name' (or ADO 'project/repo') slug")
     return value
 
 
@@ -15695,7 +15695,8 @@ def _classify_pr_operands(operands: list[str]) -> tuple[str | None, int | None]:
             pr = int(tok)
         else:
             raise ValueError(
-                f"unrecognized argument {tok!r} (expected owner/name or a PR number)"
+                f"unrecognized argument {tok!r} (expected a repo slug "
+                "-- owner/name or ADO project/repo -- or a PR number)"
             )
     return repo, pr
 

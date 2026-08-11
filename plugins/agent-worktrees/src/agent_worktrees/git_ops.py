@@ -759,21 +759,21 @@ def _parse_github_owner(url: str) -> str | None:
 
 
 def slug_from_url(url: str | None) -> str | None:
-    """Parse the hosting ``owner/name`` slug from a remote *URL*, or None.
+    """Parse the hosting repo slug from a remote *URL*, or None.
 
-    The pure URL-parsing core of :func:`remote_slug` (which resolves a remote
-    *name* to its URL first). Parses the last two path components (dropping a
-    trailing ``.git``), so it works for both https and ssh forms and for
-    self-hosted hosts with a path prefix, and yields the **provider-correct**
-    slug for Azure DevOps (``{project}/{repo}``), e.g.:
+    The provider-correct repo identifier -- GitHub ``owner/name`` or Azure
+    DevOps ``project/repo``. The pure URL-parsing core of :func:`remote_slug`
+    (which resolves a remote *name* to its URL first). Parses the last two path
+    components (dropping a trailing ``.git``), so it works for both https and
+    ssh forms and for self-hosted hosts with a path prefix, e.g.:
 
         https://host/gitea/example-user/aperture-labs.git -> example-user/aperture-labs
         git@github.com:owner/repo.git                -> owner/repo
         https://{org}.visualstudio.com/{proj}/_git/{repo} -> {proj}/{repo}
 
-    This is the value a PR provider needs (the API is keyed on owner/name),
-    as opposed to the local project name. Accepts a URL string (callers that
-    have only a remote *name* should use :func:`remote_slug`).
+    This is the value a PR provider needs (the API is keyed on the provider
+    repo slug), as opposed to the local project name. Accepts a URL string
+    (callers that have only a remote *name* should use :func:`remote_slug`).
     """
     if not url:
         return None
@@ -799,11 +799,13 @@ def slug_from_url(url: str | None) -> str | None:
 
 
 def remote_slug(remote: str, *, cwd: str | Path) -> str | None:
-    """Return the hosting ``owner/name`` slug for the remote *named* ``remote``.
+    """Return the hosting repo slug for the remote *named* ``remote``.
 
-    Resolves the remote name (e.g. ``origin``) to its configured URL in ``cwd``,
-    then defers to :func:`slug_from_url` for the provider-correct parse. Callers
-    that already hold a remote URL should call :func:`slug_from_url` directly.
+    The provider-correct repo identifier (GitHub ``owner/name`` or Azure DevOps
+    ``project/repo``). Resolves the remote name (e.g. ``origin``) to its
+    configured URL in ``cwd``, then defers to :func:`slug_from_url` for the
+    parse. Callers that already hold a remote URL should call
+    :func:`slug_from_url` directly.
     """
     return slug_from_url(_remote_url(remote, cwd=cwd))
 
