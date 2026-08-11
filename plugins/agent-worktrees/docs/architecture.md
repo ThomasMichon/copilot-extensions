@@ -5,8 +5,8 @@
 ```
 Plugin layer (Copilot CLI)              Runtime layer (Python CLI)
   plugin.json                             ~/.agent-worktrees/
-  hooks.json  -- sessionStart hook          .venv/           Python venv
-  skills/     -- skills loaded                lib/agent_worktrees/  Python package
+  hooks.json  -- sessionStart hook          versions/<v>/    Python venv slots (immutable)
+  skills/     -- skills loaded                current-version  marker -> active slot
                  into every session           bin/             launch-session, bootstrap-check
                                               projects.yaml    registry of adopted repos
                                               repos.yaml       repos registry + source roots
@@ -31,8 +31,8 @@ After full installation and project registration:
 
 ```
 ~/.agent-worktrees/                 # Shared runtime (one per machine)
-  .venv/                            #   Python virtual environment
-  lib/agent_worktrees/              #   Python package
+  versions/<v>/                     #   Immutable per-version venv slots
+  current-version                   #   Plain-text marker -> the active slot
   bin/                              #   Shell wrappers
     launch-session.{ps1,cmd,sh}     #     Session launcher
     bootstrap-check.{ps1,sh}        #     Session-start health check

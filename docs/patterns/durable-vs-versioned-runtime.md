@@ -7,8 +7,8 @@
 ## Problem
 
 Most runtime plugins have exactly one runtime: the **versioned** venv the installer
-swaps on every version bump (immutable, junction/symlink-selected — see the
-install-contract). But some plugins carry a runtime component whose environment is
+rebuilds on every version bump (immutable, `current-version`-marker-selected — see
+the install-contract). But some plugins carry a runtime component whose environment is
 **expensive to build and slow to warm** — a heavy dependency stack (e.g. torch +
 transformers) and a **loaded model** — that must **outlive routine version cutovers
 of the light service**. If that stack lived in the versioned venv, every routine
@@ -21,9 +21,9 @@ only where the heavy work is hosted.
 Split the plugin into **two runtimes on separate lifecycles**:
 
 - **The versioned runtime** — the light, swappable service/CLI in the standard
-  versioned venv (`~/.<plugin>/versions/<v>` selected by the `current` junction).
-  It carries **none** of the heavy stack; a routine `install`/`update` swaps only
-  this runtime + junction.
+  versioned venv (`~/.<plugin>/versions/<v>` selected by the `current-version`
+  marker). It carries **none** of the heavy stack; a routine `install`/`update`
+  rebuilds only this runtime and republishes the marker.
 - **The durable runtime** — a **persistent venv outside the versioned tree** (a
   stable `AGENT_<NAME>_..._HOME`, e.g. `~/.agent-index/engine/.venv`) holding the
   heavy stack, supervised as a **warm, always-on daemon** (its own scheduled
@@ -32,9 +32,9 @@ Split the plugin into **two runtimes on separate lifecycles**:
 
 Binding rules that make the split real:
 
-- **`update` never touches the durable runtime.** The service cutover swaps the
-  versioned venv + junction and **leaves the durable venv and its warm daemon
-  untouched** — no heavy rebuild, no model reload. Re-registering the daemon must
+- **`update` never touches the durable runtime.** The service cutover republishes
+the versioned venv's `current-version` marker and **leaves the durable venv and
+its warm daemon untouched** — no heavy rebuild, no model reload. Re-registering the daemon must
   not restart an already-warm one.
 - **The durable runtime updates only by its own explicit path.** A dedicated verb
   (e.g. `engine-update`) rebuilds/upgrades the durable venv **and** restarts its

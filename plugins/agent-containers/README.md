@@ -76,8 +76,9 @@ Two parts:
    the agent-bridge installer (provides the `container:` resolver). See
    `_register_namespace_resolvers` in `agent_bridge.agent_registry`.
 2. **CLI binstub** — run this plugin's own `scripts/init.ps1` (Windows) or
-   `scripts/init.sh` (Linux/WSL) once per machine. It creates
-   `~/.agent-containers/.venv` (package installed via `uv pip install`) and the
+   `scripts/init.sh` (Linux/WSL) once per machine. It builds a versioned runtime
+   under `~/.agent-containers/versions/<v>/` (package installed via
+   `uv pip install`, published by the `current-version` marker) and the
    `~/.local/bin/agent-containers` binstub. This is the canonical owner of the
    binstub (parallel to agent-codespaces). See the `copilot-extensions-setup`
    skill, section 7.

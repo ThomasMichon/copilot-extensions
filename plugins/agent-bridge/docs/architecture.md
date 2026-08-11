@@ -358,7 +358,7 @@ protects the *installer* from being killed by the very drain it triggers.
 
 **Verifying a redeploy: the manifest version is not proof the daemon runs it.**
 The deploy manifest (`~/.agent-bridge/deploy-manifest.json`) and the versioned
-runtime slot (`versions/<v>/`, with the venv symlinked to it) are written when
+runtime slot (`versions/<v>/`, published by the `current-version` marker) are written when
 the *files* land — which can happen without the running **process** being
 restarted (e.g. a marketplace auto-sync that swaps files but defers the
 restart, or a `stop`/`start` where the old process had already exited). A daemon

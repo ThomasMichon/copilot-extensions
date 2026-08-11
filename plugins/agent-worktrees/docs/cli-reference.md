@@ -246,7 +246,7 @@ every attach/join) and the `sessionStart` hook may (re)spawn an updater, each
 one claims an `@aw_updater` token; a newer updater wins and older ones
 self-retire on their next tick (the cross-platform equivalent of the old
 `flock`). An updater also retires when a **version deploy supersedes its
-runtime** — the `.venv` slot no longer matches its `sys.prefix` — so updaters
+runtime** — the active version slot no longer matches its `sys.prefix` — so updaters
 don't pile up one-per-version across deploys (dotfiles #911). The two spawn
 seams are what make that safe: whichever fires next (a launcher attach or the
 next session's `sessionStart`) re-seeds a current-version updater, so a bar left

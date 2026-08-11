@@ -48,8 +48,9 @@ copilot plugin install agent-worktrees@copilot-extensions
 the `sessionStart` hook) into `~/.copilot/installed-plugins/`. agent-worktrees
 is a **Python package** (`plugins/agent-worktrees/src/agent_worktrees`); the init
 script below deploys its **runtime** — it builds a venv with `uv venv` and
-installs the package with `uv pip install <plugin_dir>` under
-`~/.agent-worktrees/.venv`, then drops the `agent-worktrees` binstub in
+installs the package with `uv pip install <plugin_dir>` into a versioned slot
+under `~/.agent-worktrees/versions/<v>/` (published by the `current-version`
+marker), then drops the marker-routed `agent-worktrees` binstub in
 `~/.local/bin`. (`uv` is bootstrapped automatically if missing; nothing here
 uses `uvx`/`pipx`.) So a full update is always two steps: `copilot plugin
 update` (payload) **then** the init script (runtime).
