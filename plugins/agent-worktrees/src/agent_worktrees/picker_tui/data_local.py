@@ -188,8 +188,10 @@ def reconcile_bound_live() -> int:
     # is no Unknown state to guard against.
     try:
         mux_map = sessions.mux_status_many([r.worktree_id for r in records])
+        mux_scan_ok = True
     except Exception:
         mux_map = {}
+        mux_scan_ok = False  # Unknown this pass -- never clear a cached positive
     changed = 0
     for rec in records:
         was_visible = _fresh_bound_live_hint(rec) is True
@@ -208,17 +210,20 @@ def reconcile_bound_live() -> int:
         # renews its freshness (throttled); a false->true or true->false is a
         # real ACTIVE-visibility transition, so it counts toward ``changed`` and
         # reloads the picker. A mux that is absent and was already false is left
-        # untouched -- no YAML churn on the fleet's idle records.
-        info = mux_map.get(rec.worktree_id)
-        mux_present = bool(info and getattr(info, "exists", False))
-        if mux_present:
-            if rec.mux_live is not True:
+        # untouched -- no YAML churn on the fleet's idle records. Skipped
+        # entirely when the mux batch failed (Unknown), so a transient scan
+        # error never clears a cached ``mux_live=True`` to False.
+        if mux_scan_ok:
+            info = mux_map.get(rec.worktree_id)
+            mux_present = bool(info and getattr(info, "exists", False))
+            if mux_present:
+                if rec.mux_live is not True:
+                    changed += 1
+                tracking.stamp_mux_live(
+                    rec.worktree_id, True, refresh=True, sync=True)
+            elif rec.mux_live is True:
+                tracking.stamp_mux_live(rec.worktree_id, False, sync=True)
                 changed += 1
-            tracking.stamp_mux_live(
-                rec.worktree_id, True, refresh=True, sync=True)
-        elif rec.mux_live is True:
-            tracking.stamp_mux_live(rec.worktree_id, False, sync=True)
-            changed += 1
     return changed
 
 

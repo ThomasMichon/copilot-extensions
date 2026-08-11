@@ -290,20 +290,31 @@ from types import SimpleNamespace  # noqa: E402
 from agent_worktrees.picker_tui import data_local  # noqa: E402
 
 
-def _reconcile_mux(records, *, mux_present_ids, bound_ids=(), tmp_path):
-    """Run reconcile_bound_live with a stubbed bound scan + stubbed mux batch."""
+def _reconcile_mux(records, *, mux_present_ids, bound_ids=(), tmp_path,
+                   mux_raises=False):
+    """Run reconcile_bound_live with a stubbed bound scan + stubbed mux batch.
+
+    The mux stub mirrors the real ``sessions.mux_status_many``: it returns an
+    entry for EVERY requested worktree id (``exists=False`` when absent), not
+    just the present ones -- so a test can't accidentally rely on missing-key
+    vs explicit-negative behaviour."""
     for rec in records:
         tracking.save_record(rec, tmp_path / f"{rec.worktree_id}.yaml")
     loaded = [tracking.load_record(tmp_path / f"{r.worktree_id}.yaml")
               for r in records]
-    mux_map = {wt: SimpleNamespace(exists=True, clients=1)
-               for wt in mux_present_ids}
+
+    def _mux_batch(ids):
+        if mux_raises:
+            raise RuntimeError("mux scan blew up")
+        return {wt: SimpleNamespace(exists=(wt in mux_present_ids), clients=1)
+                for wt in ids}
+
     with patch("agent_worktrees.config.tracking_dir", return_value=tmp_path), \
          patch("agent_worktrees.config.detect_platform", return_value="wsl"), \
          patch("agent_worktrees.tracking.list_records", return_value=loaded), \
          patch("agent_worktrees.reclaim.resolve_bound_copilots",
                return_value=[{"worktree_id": w} for w in bound_ids]), \
-         patch("agent_worktrees.sessions.mux_status_many", return_value=mux_map):
+         patch("agent_worktrees.sessions.mux_status_many", side_effect=_mux_batch):
         return data_local.reconcile_bound_live()
 
 
@@ -353,3 +364,16 @@ def test_reconcile_mux_present_already_true_renews_but_no_transition(tmp_path):
     changed = _reconcile_mux([rec], mux_present_ids={"aaaa"}, tmp_path=tmp_path)
     assert changed == 0
     assert tracking.load_record(tmp_path / "aaaa.yaml").mux_live_at != old
+
+
+def test_reconcile_mux_scan_failure_does_not_clear_cached_true(tmp_path):
+    """A transient mux-batch failure is Unknown, NOT proof the mux is gone: a
+    cached mux_live=True must survive the pass (mirrors the bound scan-failure
+    rule) rather than being cleared to False for every record."""
+    (tmp_path / "wt-a").mkdir()
+    rec = _rec("aaaa", path=str(tmp_path / "wt-a"),
+               mux_live=True, mux_live_at=datetime.now().isoformat())
+    changed = _reconcile_mux([rec], mux_present_ids=set(), tmp_path=tmp_path,
+                             mux_raises=True)
+    assert changed == 0
+    assert tracking.load_record(tmp_path / "aaaa.yaml").mux_live is True
