@@ -41,7 +41,8 @@ robust across `copilot` versions and records the CLI surface + full logs it saw.
 ## Prerequisites
 
 - Docker (Linux containers). `docker --version` should work.
-- A GitHub account entitled to Copilot (for the one-time device-code login).
+- A `gh` login (or a `COPILOT_GITHUB_TOKEN`/PAT) for a **Copilot-entitled**
+  account — injected automatically so no in-container login is needed.
 
 > **Governed machines / internal npm feed.** On a corp-governed box the public
 > `registry.npmjs.org` is TLS-blocked, so the in-image `npm install -g
@@ -79,16 +80,22 @@ into the *same* box to run the real interactive `copilot` — Copilot CLI does n
 fully enable every feature in `-p`/ACP, so the rig automates what it can and
 hands off for the rest. The container stays up until `-Mode down`.
 
-**Auth is a one-time step.** `-Mode auth` (or the auto-prompt on first `run`)
-opens an interactive Copilot session in the container; run `/login` if you're
-not prompted, authorize the device code in your browser, then `/exit`. The
-wrapper `docker commit`s the result to `copilot-cleanroom:authed` (base) /
-`copilot-cleanroom:pristine-authed` (pristine) so subsequent runs reuse the
-login. Re-run `auth` when the token expires.
+**Auth is automatic.** By default the runner grabs a Copilot token from your host
+`gh` and injects it into the container as `COPILOT_GITHUB_TOKEN`, so there is
+**no interactive device-code step** and no need to pre-build an `:authed` image —
+`run`/`shell` work against the plain image directly. The selected account must
+have Copilot entitlement. Options:
+- `-TokenAccount <user>` (`--token-account` on `run.sh`) picks which `gh` account
+  (default: the active one).
+- Set `$env:COPILOT_GITHUB_TOKEN` yourself (e.g. a fine-grained PAT with the
+  **Copilot Requests** permission) and it is used as-is.
+- `-NoToken` (`--no-token`) falls back to the one-time device-code login
+  committed to a cached `:authed` image (`-Mode auth`); re-run `auth` when it
+  expires.
 
-> **Credential hygiene:** the base/pristine images (`Dockerfile*`) are
-> credential-free and safe to rebuild/share. Only the local `:authed` images
-> hold your session — never push them to a registry.
+> **Credential hygiene:** the token is passed via the runner's environment (not
+> on the docker CLI args) and lives only in the disposable container. The
+> base/pristine images stay credential-free; never push an `:authed` image.
 
 Results land in a **machine-local dir outside the repo** — by default
 `%LOCALAPPDATA%\copilot-cleanroom\runs\<timestamp>\` (Windows) or

@@ -22,6 +22,8 @@ IMAGE=base
 UNTIL=6
 THEN=none
 NPM_REGISTRY="${CR_NPM_REGISTRY:-}"
+TOKEN_ACCOUNT=""
+NO_TOKEN=0
 MODE=run
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -29,8 +31,10 @@ while [ $# -gt 0 ]; do
         --until) UNTIL="$2"; shift 2 ;;
         --then)  THEN="$2"; shift 2 ;;
         --npm-registry) NPM_REGISTRY="$2"; shift 2 ;;
+        --token-account) TOKEN_ACCOUNT="$2"; shift 2 ;;
+        --no-token) NO_TOKEN=1; shift ;;
         build|auth|run|shell|down|all) MODE="$1"; shift ;;
-        *) echo "usage: $0 [--image base|pristine] [--until N] [--then shell|down] [--npm-registry URL] {build|auth|run|shell|down|all}" >&2; exit 2 ;;
+        *) echo "usage: $0 [--image base|pristine] [--until N] [--then shell|down] [--npm-registry URL] [--token-account USER] [--no-token] {build|auth|run|shell|down|all}" >&2; exit 2 ;;
     esac
 done
 
@@ -72,8 +76,29 @@ do_auth() {
     docker rm -f cr-auth >/dev/null
     echo "cached $AUTH_TAG"
 }
+# Resolve a Copilot token from the host (unless --no-token): $COPILOT_GITHUB_TOKEN
+# then `gh auth token [--user ACCT]`. Empty when none is available.
+resolve_token() {
+    [ "$NO_TOKEN" = 1 ] && return 0
+    if [ -n "${COPILOT_GITHUB_TOKEN:-}" ]; then echo "$COPILOT_GITHUB_TOKEN"; return 0; fi
+    if [ -n "$TOKEN_ACCOUNT" ]; then gh auth token --user "$TOKEN_ACCOUNT" 2>/dev/null | head -1; else gh auth token 2>/dev/null | head -1; fi
+}
 start_container() {
-    img_exists "$AUTH_TAG" || { echo "no $AUTH_TAG yet -- authing first"; do_auth; }
+    # Auth: prefer a host-grabbed Copilot token (COPILOT_GITHUB_TOKEN) -- no
+    # interactive step, runs against the plain unauthed image. Fall back to the
+    # committed device-code :authed image only when no token is available.
+    local token img; token="$(resolve_token)"
+    local token_args=()
+    if [ -n "$token" ]; then
+        img_exists "$BASE_TAG" || do_build
+        img="$BASE_TAG"
+        echo "auth: injecting COPILOT_GITHUB_TOKEN from host gh (${TOKEN_ACCOUNT:-active gh account}) -- no device-code needed"
+        export COPILOT_GITHUB_TOKEN="$token"   # value from env, not on the docker CLI args
+        token_args=(-e COPILOT_GITHUB_TOKEN)
+    else
+        img_exists "$AUTH_TAG" || { echo "no host token and no $AUTH_TAG -- device-code auth"; do_auth; }
+        img="$AUTH_TAG"
+    fi
     docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
     mkdir -p "$RESULTS"
     docker run -d --name "$CONTAINER" \
@@ -84,7 +109,9 @@ start_container() {
         -e "CR_PRIMARY_PLUGIN=${CR_PRIMARY_PLUGIN:-agent-codespaces}" \
         -e "CR_EXPECT_DEPS=${CR_EXPECT_DEPS:-agent-bridge agent-worktrees}" \
         -e "CR_REPORT=/home/operator/out/cr-report.json" \
-        --entrypoint sleep "$AUTH_TAG" infinity >/dev/null
+        "${token_args[@]}" \
+        --entrypoint sleep "$img" infinity >/dev/null
+    [ -n "$token" ] && unset COPILOT_GITHUB_TOKEN
     echo "container $CONTAINER up (results -> $RESULTS)"
 }
 ensure_container() { is_running "$CONTAINER" || start_container; }
@@ -116,5 +143,5 @@ case "$MODE" in
     run)   do_run ;;
     shell) do_shell ;;
     down)  do_down ;;
-    all)   do_build; img_exists "$AUTH_TAG" || do_auth; do_run ;;
+    all)   do_build; do_run ;;
 esac
