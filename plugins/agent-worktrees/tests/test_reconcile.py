@@ -733,3 +733,75 @@ def test_apply_plan_substitutes_resolved_copilot_path(env, monkeypatch, tmp_path
     assert calls[0][0] == str(resolved)
     assert calls[0][1:] == ["plugin", "install", f"agent-bridge@{MKT}"]
     assert summary["executed"][0]["ok"] is True
+
+
+# ---------------------------------------------------------------------------
+# hook_shims_drifted -- bin/ shim currency, independent of runtime version
+# (dotfiles #1171: a version-match quick-skip must not leave bin/ shims stale)
+# ---------------------------------------------------------------------------
+
+def _make_hook_layout(home: Path, plugin_dir: Path, *, deploy: bool = True):
+    """Create a payload scripts/ set and (optionally) the deployed bin/ copy."""
+    scripts = plugin_dir / "scripts"
+    scripts.mkdir(parents=True, exist_ok=True)
+    bin_dir = home / ".agent-worktrees" / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    for name in reconcile.HOOK_SHIM_FILES:
+        (scripts / name).write_text(f"# payload {name}\n", encoding="utf-8")
+        if deploy:
+            (bin_dir / name).write_text(f"# payload {name}\n", encoding="utf-8")
+    return scripts, bin_dir
+
+
+def test_hook_shims_drifted_false_when_identical(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(reconcile, "_home", lambda: home)
+    plugin_dir = tmp_path / "plugin"
+    _make_hook_layout(home, plugin_dir, deploy=True)
+    assert reconcile.hook_shims_drifted(plugin_dir) is False
+
+
+def test_hook_shims_drifted_true_when_shim_missing(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(reconcile, "_home", lambda: home)
+    plugin_dir = tmp_path / "plugin"
+    _, bin_dir = _make_hook_layout(home, plugin_dir, deploy=True)
+    # Simulate a payload that added a new shim never deployed to bin/ (the
+    # resolve-runtime.ps1 / #1106 case that broke the sessionStart reseed).
+    (bin_dir / "resolve-runtime.ps1").unlink()
+    assert reconcile.hook_shims_drifted(plugin_dir) is True
+
+
+def test_hook_shims_drifted_true_when_content_differs(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(reconcile, "_home", lambda: home)
+    plugin_dir = tmp_path / "plugin"
+    _, bin_dir = _make_hook_layout(home, plugin_dir, deploy=True)
+    # Deployed register-session.ps1 still on the retired .venv path.
+    (bin_dir / "register-session.ps1").write_text(
+        "$python = \"$env:USERPROFILE\\.agent-worktrees\\.venv\\...\"\n",
+        encoding="utf-8",
+    )
+    assert reconcile.hook_shims_drifted(plugin_dir) is True
+
+
+def test_hook_shims_drifted_skips_payload_absent_shim(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(reconcile, "_home", lambda: home)
+    plugin_dir = tmp_path / "plugin"
+    scripts, _ = _make_hook_layout(home, plugin_dir, deploy=True)
+    # A shim not shipped by this payload must not count as drift.
+    (scripts / "provision-check.sh").unlink()
+    assert reconcile.hook_shims_drifted(plugin_dir) is False
+
+
+def test_hook_shims_drifted_false_when_dirs_absent(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(reconcile, "_home", lambda: home)
+    # No scripts/ and no bin/ -> nothing to compare, never force a redeploy.
+    assert reconcile.hook_shims_drifted(tmp_path / "plugin") is False

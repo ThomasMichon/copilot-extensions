@@ -249,6 +249,65 @@ def runtime_deployed_version(name: str, home: Path | None = None) -> str | None:
     return str(v) if v else None
 
 
+# Hook shims deployed to ``~/.agent-worktrees/bin/`` by install.ps1's
+# ``Deploy-Wrappers`` (and install.sh). These deploy INDEPENDENTLY of the
+# runtime version: a payload can add a new shim (e.g. ``resolve-runtime.ps1``,
+# #1106) or rewrite one while the runtime devN version is unchanged -- or a
+# partial/interrupted path can bump the runtime slot without redeploying them.
+# Keep this list in sync with ``Deploy-Wrappers`` in ``scripts/install.ps1``.
+HOOK_SHIM_FILES = (
+    "resolve-runtime.ps1", "resolve-runtime.sh",
+    "session-conduct.ps1", "session-conduct.sh",
+    "session-machine.ps1", "session-machine.sh",
+    "bootstrap-check.ps1", "bootstrap-check.sh",
+    "project-hooks.ps1", "project-hooks.sh",
+    "register-session.ps1", "register-session.sh",
+    "deregister-session.ps1", "deregister-session.sh",
+    "anchor-hygiene-check.ps1", "anchor-hygiene-check.sh",
+    "provision-check.ps1", "provision-check.sh",
+    "statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py",
+)
+
+
+def hook_shims_drifted(plugin_dir: Path, home: Path | None = None) -> bool:
+    """True if any deployed ``bin/`` hook shim is missing or differs from the payload.
+
+    The ``cmd_update`` quick-skip compares only the runtime *version*, but the
+    ``bin/`` hook shims deploy independently of it. A payload can add a new shim
+    (``resolve-runtime.ps1``, #1106) or rewrite one while the runtime devN
+    version is unchanged, and a partial/interrupted deploy can bump the runtime
+    slot without redeploying the shims -- so a version-match skip can leave the
+    shims stale. That is the failure behind an empty Mux status bar: the
+    sessionStart reseed shim early-exits on the retired ``.venv`` python and
+    never re-asserts the status-updater (dotfiles #1171). This check lets the
+    skip branch re-deploy on shim drift, mirroring the LIVE Windows-Terminal
+    carve-out already there.
+
+    Compared by content (bytes). A shim absent from the payload is skipped (not
+    every shim exists on every payload); a shim present in the payload but
+    missing or differing in ``bin/`` is drift. Any unreadable file counts as
+    drift (safer to redeploy than to skip). Returns ``False`` when either
+    directory is absent (nothing to compare -> never force a redeploy).
+    """
+    scripts = plugin_dir / "scripts"
+    bin_dir = runtime_dir(SELF_PLUGIN, home) / "bin"
+    if not scripts.is_dir() or not bin_dir.is_dir():
+        return False
+    for name in HOOK_SHIM_FILES:
+        src = scripts / name
+        if not src.exists():
+            continue
+        dst = bin_dir / name
+        if not dst.exists():
+            return True
+        try:
+            if src.read_bytes() != dst.read_bytes():
+                return True
+        except OSError:
+            return True
+    return False
+
+
 def _pid_alive(pid: int) -> bool:
     """Best-effort: is a process with ``pid`` currently running?
 
