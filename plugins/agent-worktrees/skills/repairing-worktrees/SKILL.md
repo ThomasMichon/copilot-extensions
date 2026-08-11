@@ -119,7 +119,7 @@ resolve by hand:
 ## Deep close-out — investigate a worktree's footprint, and let it self-close
 
 Before reaping a worktree, remember it may own **claims and off-machine state**:
-it may have dug into a **CodeSpace**, a **cross-repo worktree**, one or more
+it may have dug into a **Codespace**, a **cross-repo worktree**, one or more
 **cross-repo PRs**, borrowed containers, or other shared spaces. Reaping it
 blindly orphans those. Close-out is deeper than the local git/liveness check.
 
@@ -130,7 +130,7 @@ blindly orphans those. Close-out is deeper than the local git/liveness check.
   `finalize` is claim-aware (its gate blocks on unreleased outbound claims), and
   `claims release <ref>` / `claims settle <ref>` / `claims sweep --apply` retire
   them. **But the ledger is best-effort and relatively new:** many older
-  worktrees show `(none)` even though they really did touch a CodeSpace or a
+  worktrees show `(none)` even though they really did touch a Codespace or a
   cross-repo PR — those actions predate consistent claim-journaling. An empty
   ledger is *not* proof of an empty footprint.
 - **Deep-investigate what it actually touched.** Corroborate the ledger against
@@ -140,10 +140,10 @@ blindly orphans those. Close-out is deeper than the local git/liveness check.
   <project> head-session --worktree <id>         # resolve its head session id
   <project> session-transcript <session_id>      # full transcript of what it did
   ```
-  plus its effort file, and its branch's cross-repo footprint (CodeSpaces it
+  plus its effort file, and its branch's cross-repo footprint (Codespaces it
   connected to, `<other-repo>` worktrees/PRs it opened). **Be willing to dig into
   those dependent spaces** and verify each is closed out (PR merged/closed,
-  CodeSpace done/stopped, cross-repo worktree finalized, container lease
+  Codespace done/stopped, cross-repo worktree finalized, container lease
   released) *before* reaping the owner.
 - **Best: file a durable close-out *task* and let worktrees resolve async.**
   Rather than reconstruct each footprint by hand, queue a close-out task with a
@@ -154,12 +154,12 @@ blindly orphans those. Close-out is deeper than the local git/liveness check.
   agent-dispatch create "Close out <id>" \
     --target-worktree <id> --dedup-key closeout:<id> \
     --goal "Wind down cleanly — everything filed or built out as efforts" \
-    --done-criteria "cross-repo PRs landed/closed; CodeSpaces disconnected; \
+    --done-criteria "cross-repo PRs landed/closed; Codespaces disconnected; \
       cross-repo worktrees finalized; claims released; worktree finalized" \
     --prompt "Close out worktree <id>. Investigate what it touched (its claims \
-      ledger, session transcript, effort files, cross-repo PRs/CodeSpaces). File \
+      ledger, session transcript, effort files, cross-repo PRs/Codespaces). File \
       or build out any unfinished work as efforts, land or close cross-repo PRs, \
-      disconnect CodeSpaces, finalize cross-repo worktrees, release/settle your \
+      disconnect Codespaces, finalize cross-repo worktrees, release/settle your \
       claims, then finalize."
   ```
   **Dedup first** (`agent-dispatch find` / `sweep`) so you file one close-out per
@@ -172,7 +172,7 @@ blindly orphans those. Close-out is deeper than the local git/liveness check.
   an agent-dispatch verb (agent-dispatch merely *uses* it as a spawn backend):
   ```
   <project> embody --worktree-id <id> --seed "Close yourself out: land or close \
-    any cross-repo PRs, disconnect any CodeSpace, finalize any cross-repo \
+    any cross-repo PRs, disconnect any Codespace, finalize any cross-repo \
     worktrees, release your claims, then finalize."
   # or dispatch the same to its owning agent: `<repo> bridge send <machine> "…"`
   ```
