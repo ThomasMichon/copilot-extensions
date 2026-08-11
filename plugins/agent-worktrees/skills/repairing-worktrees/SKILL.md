@@ -165,7 +165,8 @@ blindly orphans those. Close-out is deeper than the local git/liveness check.
   **Dedup first** (`agent-dispatch find` / `sweep`) so you file one close-out per
   worktree; workers then `claim` → `start` → `complete` it on their own cadence.
   `--spawn` (with `--spawn-backend bridge` or `embody`) kicks a worker
-  immediately; otherwise the task waits in the queue for async pickup.
+  immediately; otherwise the task waits in the queue for async pickup — prefer the
+  **queued** path (see the headed-resume caveat below).
 - **Or drive one now (synchronous).** To close a single worktree immediately,
   embody its session directly — `embody` is **agent-worktrees'** embodiment verb
   (it resumes a detached session and auto-registers with **agent-bridge**), not
@@ -176,6 +177,18 @@ blindly orphans those. Close-out is deeper than the local git/liveness check.
     worktrees, release your claims, then finalize."
   # or dispatch the same to its owning agent: `<repo> bridge send <machine> "…"`
   ```
+  > ⚠️ **Headed-resume hang caveat.** `embody` — and `--spawn-backend embody`, or
+  > any headed `--spawn` — resumes a **headed** Copilot session, which can hang on
+  > "Loading…/Resuming…" with the seeded close-out prompt queued but **never
+  > submitted** while the CLI extension-reload bug
+  > (github/copilot-agent-runtime#13492) is outstanding. So **never assume a
+  > spawned/embodied close-out actually ran**: confirm the session reached an
+  > interactive/ready state (or that its dispatch task advanced to
+  > `started`/`completed`) before trusting it. Prefer **filing the task queued**
+  > (no eager `--spawn`) so a healthy worker claims it. `--no-experimental`
+  > sidesteps the hang by disabling extensions — but that also disables the very
+  > plugins close-out needs (agent-worktrees, `claims`, cross-repo helpers), so it
+  > is rarely viable here.
   Let the worktree confirm it is fully wrapped up, *then* finalize/reap it. Only
   fall back to manual `claims release`/`sweep` for a worktree that genuinely
   cannot be resumed (its session is gone) or whose obligations are provably
