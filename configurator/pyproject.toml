@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "copilot-extensions-configurator"
-version = "0.1.0-dev3"
+version = "0.1.0-dev4"
 description = "Standalone, out-of-plugin installer & configurator for the copilot-extensions harness."
 readme = "README.md"
 license = "MIT"
@@ -18,6 +18,9 @@ dependencies = [
     # Read the installer-owned catalog (data/plugins.toml). tomllib is stdlib on
     # 3.11+; tomli backports it for 3.10.
     "tomli>=2 ; python_version < '3.11'",
+    # Read the harness's own YAML registries/config (repos.yaml, projects.yaml,
+    # per-project config.yaml) for the Manager state views.
+    "pyyaml>=6",
 ]
 
 [project.scripts]
