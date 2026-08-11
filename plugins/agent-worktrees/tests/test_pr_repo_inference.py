@@ -38,13 +38,13 @@ class TestSlugFromUrl:
          "example-user/aperture-labs"),
         ("https://host/deep/path/org/proj.git/", "org/proj"),
         # Azure DevOps https: {project}/_git/{repo} -> project/repo.
-        ("https://your-org.visualstudio.com/Developer/_git/dev.tmichon",
-         "Developer/dev.tmichon"),
-        ("https://dev.azure.com/your-org/Developer/_git/dev.tmichon",
-         "Developer/dev.tmichon"),
+        ("https://your-org.visualstudio.com/Developer/_git/example-repo",
+         "Developer/example-repo"),
+        ("https://dev.azure.com/your-org/Developer/_git/example-repo",
+         "Developer/example-repo"),
         # Azure DevOps ssh (v3/{org}/{project}/{repo}) has no _git segment.
-        ("git@ssh.dev.azure.com:v3/your-org/Developer/dev.tmichon",
-         "Developer/dev.tmichon"),
+        ("git@ssh.dev.azure.com:v3/your-org/Developer/example-repo",
+         "Developer/example-repo"),
     ])
     def test_parses_provider_correct_slug(self, url, slug):
         assert git_ops.slug_from_url(url) == slug
@@ -83,7 +83,7 @@ class TestClassifyPrOperands:
 
     def test_ado_project_repo_slug(self):
         assert m._classify_pr_operands(
-            ["Developer/dev.tmichon", "2333486"]) == ("Developer/dev.tmichon", 2333486)
+            ["Developer/example-repo", "2333486"]) == ("Developer/example-repo", 2333486)
 
     def test_rejects_bad_slug(self):
         with pytest.raises(ValueError):
@@ -114,14 +114,14 @@ class TestInferActiveRepoSlug:
     def test_github_remote(self, monkeypatch):
         monkeypatch.setattr(
             m, "_resolve_repo_remote",
-            lambda config, repo: "https://github.com/tmichon_microsoft/dotfiles.git")
-        assert m._infer_active_repo_slug(self._config()) == "tmichon_microsoft/dotfiles"
+            lambda config, repo: "https://github.com/example-user/example-repo.git")
+        assert m._infer_active_repo_slug(self._config()) == "example-user/example-repo"
 
     def test_ado_remote(self, monkeypatch):
         monkeypatch.setattr(
             m, "_resolve_repo_remote",
-            lambda config, repo: "https://onedrive.visualstudio.com/Developer/_git/dev.tmichon")
-        assert m._infer_active_repo_slug(self._config()) == "Developer/dev.tmichon"
+            lambda config, repo: "https://your-org.visualstudio.com/Developer/_git/example-repo")
+        assert m._infer_active_repo_slug(self._config()) == "Developer/example-repo"
 
     def test_none_when_remote_empty(self, monkeypatch):
         monkeypatch.setattr(m, "_resolve_repo_remote", lambda config, repo: "")
@@ -196,7 +196,6 @@ class TestPrWatchDispatcherInference:
     def test_infers_when_repo_omitted(self, monkeypatch, capsys):
         # `pr-watch wait 123` -> repo inferred; None here -> exit 2.
         monkeypatch.setattr(cfg, "load_config", lambda *a, **k: MagicMock())
-        monkeypatch.setattr(m, "_pr_watch_prcfg", lambda config_path: MagicMock())
         calls = {"n": 0}
 
         def _infer(config):
