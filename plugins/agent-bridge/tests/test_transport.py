@@ -13,6 +13,7 @@ from agent_bridge.transport import (
     _ACP_STDIO_LIMIT_BYTES,
     AgentProcess,
     SpawnTarget,
+    _agent_worktrees_python,
     _build_remote_cmd,
     _extract_json_object,
     _looks_unprovisioned_project,
@@ -1258,3 +1259,59 @@ class TestLocalResolveBridgeFallback:
         assert "--caller-worktree" in calls[0] and "--bridge" in calls[0]
         assert "--caller-worktree" not in calls[1]
         assert "--bridge" not in calls[1]
+
+
+class TestAgentWorktreesPython:
+    """_agent_worktrees_python resolves the junction-free current-version marker
+    (the retired .venv junction must not be traversed -- #581/#1085/#1106)."""
+
+    def _make_slot(self, root, ver):
+        import os
+        import sys
+        rel = ("Scripts", "python.exe") if sys.platform == "win32" else ("bin", "python")
+        slot = os.path.join(str(root), ".agent-worktrees", "versions", ver, *rel)
+        os.makedirs(os.path.dirname(slot), exist_ok=True)
+        with open(slot, "w") as fh:
+            fh.write("")
+        return slot
+
+    def test_resolves_via_current_version_marker(self, tmp_path, monkeypatch):
+        import os
+        want = self._make_slot(tmp_path, "1.5.3-dev467")
+        self._make_slot(tmp_path, "1.5.3-dev400")  # older slot present too
+        awroot = os.path.join(str(tmp_path), ".agent-worktrees")
+        with open(os.path.join(awroot, "current-version"), "w") as fh:
+            fh.write("1.5.3-dev467\n")
+        monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path) if p == "~" else p)
+        assert _agent_worktrees_python() == want
+
+    def test_falls_back_to_newest_slot_without_marker(self, tmp_path, monkeypatch):
+        import os
+        self._make_slot(tmp_path, "1.5.3-dev400")
+        want = self._make_slot(tmp_path, "1.5.3-dev467")  # newest by lexical order
+        monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path) if p == "~" else p)
+        assert _agent_worktrees_python() == want
+
+    def test_raises_when_no_runtime(self, tmp_path, monkeypatch):
+        import os
+        os.makedirs(os.path.join(str(tmp_path), ".agent-worktrees"), exist_ok=True)
+        monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path) if p == "~" else p)
+        with pytest.raises(RuntimeError, match="agent-worktrees runtime interpreter not found"):
+            _agent_worktrees_python()
+
+    def test_never_returns_the_retired_venv_when_a_slot_exists(self, tmp_path, monkeypatch):
+        import os
+        import sys
+        # A stale .venv junction remnant must be ignored in favor of the marker slot.
+        rel = ("Scripts", "python.exe") if sys.platform == "win32" else ("bin", "python")
+        venv = os.path.join(str(tmp_path), ".agent-worktrees", ".venv", *rel)
+        os.makedirs(os.path.dirname(venv), exist_ok=True)
+        open(venv, "w").close()
+        want = self._make_slot(tmp_path, "1.5.3-dev467")
+        awroot = os.path.join(str(tmp_path), ".agent-worktrees")
+        with open(os.path.join(awroot, "current-version"), "w") as fh:
+            fh.write("1.5.3-dev467\n")
+        monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path) if p == "~" else p)
+        got = _agent_worktrees_python()
+        assert got == want
+        assert ".venv" not in got

@@ -36,7 +36,7 @@ from .models import (
     ServiceConfig,
     SessionStatus,
 )
-from .transport import SpawnTarget, spawn
+from .transport import SpawnTarget, spawn, _agent_worktrees_python
 
 log = logging.getLogger("agent-bridge")
 
@@ -400,21 +400,19 @@ async def _cleanup_worktree(target: SpawnTarget, turn_count: int) -> None:
 
     # 0-turn session: run cleanup --clean --include-unused to remove
     # all accumulated unused worktrees (including this one)
-    home = os.path.expanduser("~")
-    aw_venv = os.path.join(home, ".agent-worktrees", ".venv")
-    aw_lib = os.path.join(home, ".agent-worktrees", "lib")
-
-    if sys.platform == "win32":
-        python = os.path.join(aw_venv, "Scripts", "python.exe")
-    else:
-        python = os.path.join(aw_venv, "bin", "python")
-
-    if not os.path.exists(python):
-        log.warning("Cannot cleanup worktree %s: agent-worktrees venv not found", worktree_id)
+    # Resolve the agent-worktrees runtime interpreter via the junction-free
+    # current-version marker (the .venv junction is retired; see
+    # _agent_worktrees_python).
+    try:
+        python = _agent_worktrees_python()
+    except RuntimeError as exc:
+        log.warning("Cannot cleanup worktree %s: %s", worktree_id, exc)
         return
 
     env = os.environ.copy()
-    env["PYTHONPATH"] = aw_lib
+    aw_lib = os.path.join(os.path.expanduser("~"), ".agent-worktrees", "lib")
+    if os.path.isdir(aw_lib):
+        env["PYTHONPATH"] = aw_lib
     env["PYTHONUTF8"] = "1"
     env["WORKTREE_PROJECT"] = target.project
 

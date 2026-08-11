@@ -230,6 +230,54 @@ def _wrap_batch_for_windows(
     return args
 
 
+def _agent_worktrees_python() -> str:
+    """Absolute path to the agent-worktrees runtime interpreter.
+
+    Resolves the junction-free ``current-version`` marker
+    (``~/.agent-worktrees/current-version`` -> ``versions/<ver>/``), exactly as
+    the agent-worktrees binstub does. The ``.venv`` junction is retired (marker
+    model, #581/#1085/#1106) and nothing may traverse that reparse point. Falls
+    back to the newest ``versions/`` slot, then -- best-effort, for un-migrated
+    hosts -- the legacy ``.venv``. Raises ``RuntimeError`` when no interpreter is
+    found.
+    """
+    root = os.path.join(os.path.expanduser("~"), ".agent-worktrees")
+    rel = ("Scripts", "python.exe") if sys.platform == "win32" else ("bin", "python")
+
+    # Preferred: the current-version marker.
+    ver = ""
+    try:
+        with open(os.path.join(root, "current-version"), encoding="utf-8") as fh:
+            ver = fh.read().strip()
+    except OSError:
+        ver = ""
+    if ver:
+        cand = os.path.join(root, "versions", ver, *rel)
+        if os.path.exists(cand):
+            return cand
+
+    # Fallback: the newest versions/ slot (lexical order, matching the binstub).
+    try:
+        slots = sorted(os.listdir(os.path.join(root, "versions")))
+    except OSError:
+        slots = []
+    for name in reversed(slots):
+        cand = os.path.join(root, "versions", name, *rel)
+        if os.path.exists(cand):
+            return cand
+
+    # Legacy fallback: the retired .venv junction (un-migrated hosts only).
+    legacy = os.path.join(root, ".venv", *rel)
+    if os.path.exists(legacy):
+        return legacy
+
+    raise RuntimeError(
+        "agent-worktrees runtime interpreter not found under "
+        f"{os.path.join(root, 'versions')} (current-version={ver or 'unset'}); "
+        "is agent-worktrees installed?"
+    )
+
+
 async def _resolve_worktree(
     target: SpawnTarget, env: dict[str, str],
 ) -> dict:
@@ -241,28 +289,21 @@ async def _resolve_worktree(
 
     Returns the parsed JSON plan dict.
     """
-    # Replicate the binstub's Python + PYTHONPATH setup
-    home = os.path.expanduser("~")
-    aw_venv = os.path.join(home, ".agent-worktrees", ".venv")
-    aw_lib = os.path.join(home, ".agent-worktrees", "lib")
+    # Resolve the agent-worktrees runtime interpreter via the junction-free
+    # current-version marker (the .venv junction is retired; see
+    # _agent_worktrees_python). Calls the module directly (not the .cmd binstub)
+    # to avoid console-allocation issues in a headless background service.
+    python = _agent_worktrees_python()
 
-    if sys.platform == "win32":
-        python = os.path.join(aw_venv, "Scripts", "python.exe")
-    else:
-        python = os.path.join(aw_venv, "bin", "python")
-
-    if not os.path.exists(python):
-        raise RuntimeError(
-            f"agent-worktrees venv not found at {python}"
-        )
-
-    # Set PYTHONPATH so agent_worktrees module is importable,
-    # and WORKTREE_PROJECT so it resolves the right project config.
-    # Clear VIRTUAL_ENV/PYTHONHOME to avoid the bridge's own venv
-    # polluting the agent-worktrees subprocess (they may use different
-    # Python versions).
+    # Clear VIRTUAL_ENV/PYTHONHOME so the bridge's own venv doesn't pollute the
+    # agent-worktrees subprocess (they may use different Python versions), and set
+    # WORKTREE_PROJECT so it resolves the right project config. The versioned
+    # runtime bundles its own site-packages, so no PYTHONPATH is needed; a legacy
+    # host that still carries ~/.agent-worktrees/lib gets it for compatibility.
     env = dict(env)
-    env["PYTHONPATH"] = aw_lib
+    _aw_lib = os.path.join(os.path.expanduser("~"), ".agent-worktrees", "lib")
+    if os.path.isdir(_aw_lib):
+        env["PYTHONPATH"] = _aw_lib
     env["PYTHONUTF8"] = "1"
     env.pop("VIRTUAL_ENV", None)
     env.pop("PYTHONHOME", None)
