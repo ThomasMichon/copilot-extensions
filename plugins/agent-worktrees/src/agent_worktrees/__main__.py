@@ -11430,10 +11430,25 @@ def _related_config_source_anchors(base_anchor: str) -> list[str]:
     except Exception:
         anchors = []
     if not anchors:
-        return [base_anchor]
-    if os.path.abspath(anchors[0]) != os.path.abspath(base_anchor):
+        anchors = [base_anchor]
+    elif os.path.abspath(anchors[0]) != os.path.abspath(base_anchor):
         anchors.insert(0, base_anchor)
-    return anchors
+    # Installed-plugin config-graft: plugins that ship
+    # ``.agent-worktrees/related.yaml`` are the LOWEST-precedence layer, so they
+    # go ahead of the base/knowledge anchors (later anchors overlay earlier ones).
+    # Merely installing e.g. ``odsp-web-harness`` then contributes the odsp-web
+    # CodeSpace locus, which any base/knowledge/user entry can still override.
+    try:
+        from . import related as _related_mod
+        existing = {os.path.abspath(a) for a in anchors}
+        plugin_anchors = [
+            p
+            for p in _related_mod.installed_plugin_related_anchors()
+            if os.path.abspath(p) not in existing
+        ]
+    except Exception:
+        plugin_anchors = []
+    return [*plugin_anchors, *anchors]
 
 
 def _related_lookup_anchors(
