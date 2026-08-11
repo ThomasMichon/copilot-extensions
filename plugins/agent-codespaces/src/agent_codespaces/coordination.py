@@ -43,10 +43,29 @@ _EXIT_CONFLICT = 3  # LeaseConflict / LeaseLost
 #: The resource kind used for CodeSpace leases in the shared namespace.
 KIND = "codespace"
 
+#: A SEPARATE git-ref record kind carrying a per-CodeSpace **cleanliness
+#: verdict** (venue-pool Phase 3 / codespace-clean-beacon). Distinct from the
+#: ``codespace`` exclusion lease so it can describe an **unheld** box (the
+#: recycle case): "is all work off-box (nothing uncommitted/unpushed) as of the
+#: last agent that left this box?". Published proactively at ssh-disconnect /
+#: ``verify`` so the pool can read it **without SSH** and the picker can gate a
+#: destructive Recycle on a fresh, known-clean verdict.
+KIND_CLEAN = "codespace-clean"
+
 # L2 lease TTL (seconds). Short enough that a crashed holder's grip frees on the
 # store's timer without manual cleanup; refreshed by ``heartbeat``. Independent
 # of the L1 TTL (which is effort-scoped and much longer).
 DEFAULT_L2_TTL = 3600
+
+# Cleanliness-beacon TTL (seconds). Deliberately modest: a stale beacon must NOT
+# outlive its trust window and falsely enable a Recycle. A box only becomes
+# Recycle-eligible once ``stale`` (unheld + idle past the ~24h threshold), by
+# which point a beacon this short has expired -> the pool reads it as ``unknown``
+# -> the picker hides Recycle and offers ``Verify`` (a fresh on-demand probe).
+# So the passive beacon only auto-enables Recycle for a box retired within this
+# window of a clean disconnect; everything else is Verify-gated (safe by
+# default). Must stay <= the store's 604800s ceiling.
+DEFAULT_CLEAN_TTL = 6 * 3600
 
 
 @dataclass
@@ -349,3 +368,170 @@ def release(key: str, token: str, *, origin: str | None = None) -> L2Result:
         # Someone else already moved the ref (took over / released); nothing owed.
         return L2Result("conflict", detail=(proc.stderr or "").strip())
     return L2Result("unavailable", detail=(proc.stderr or "").strip())
+
+
+# --- Cleanliness beacon (per-box git-safety verdict, read without SSH) --------
+
+
+@dataclass
+class CleanRecord:
+    """A CodeSpace's last-published git-cleanliness verdict, read from the store.
+
+    A read-only projection of one ``codespace-clean`` git-ref record's free-form
+    ``context`` onto the safety fields the pool needs. ``live`` is whether the
+    record is still within its TTL (an expired verdict is not trusted). ``known``
+    mirrors the probe's own ``known`` (False when the last probe could not
+    evaluate the box). ``clean`` is the definitive "all work off-box" verdict
+    (nothing uncommitted, nothing unpushed). ``at`` is when it was published;
+    ``by`` who published it.
+    """
+
+    key: str
+    known: bool
+    clean: bool
+    dirty: bool
+    ahead: int
+    unpushed_branches: int
+    at: str
+    by: str
+    live: bool
+
+    @property
+    def off_box_safe(self) -> bool | None:
+        """The pool's tri-state safety verdict: True (safe to delete), False
+        (work still on-box), or None (unknown -- no fresh/known verdict).
+
+        Conservative: only a **live** and **known** record yields a definite
+        True/False; anything else (expired, unknown, absent) is None so the
+        picker hides the destructive Recycle and offers Verify instead."""
+        if not (self.live and self.known):
+            return None
+        return self.clean
+
+
+def _clean_holder(explicit: str | None = None) -> str:
+    """A valid, informative ``--holder`` for a cleanliness publish.
+
+    Prefers the caller's qualified ClaimRef (who is leaving the box), else the
+    harness lease-origin identity, else a stable sentinel -- so a publish never
+    fails ``validate_holder`` for lack of an identity."""
+    if explicit and explicit.strip():
+        return explicit.strip()[:256]
+    ref = owner_ref()
+    if ref:
+        return ref[:256]
+    return "cleanliness-probe"
+
+
+def publish_cleanliness(
+    name: str,
+    *,
+    known: bool,
+    clean: bool,
+    dirty: bool,
+    ahead: int,
+    unpushed_branches: int,
+    holder: str | None = None,
+    at: str | None = None,
+    ttl: int | None = DEFAULT_CLEAN_TTL,
+    origin: str | None = None,
+) -> bool:
+    """Publish a CodeSpace's git-cleanliness verdict to the ``codespace-clean``
+    git-ref store so the pool can read it **without SSH**.
+
+    Shells ``agent-worktrees lease acquire codespace-clean <name> --holder <ref>
+    --ttl N --context ...``. Fully **best-effort + degrade-safe**: no binstub,
+    L2 not wired, or a still-live prior record (``conflict``) -> ``False`` (the
+    existing recent verdict simply stands). Never raises, never blocks a
+    disconnect/finalize. Returns ``True`` only on a confirmed write.
+
+    A ``conflict`` is safe to drop: a box is only Recycle-eligible once it is
+    ``stale`` (unheld, idle past the ~24h threshold), by which point any prior
+    record (TTL << 24h) has expired, so the last writer before staleness wins
+    and no live foreign record can pin a falsely-clean verdict onto a
+    recycle-eligible box.
+    """
+    import datetime as _dt
+
+    stamp = at or _dt.datetime.now(_dt.timezone.utc).isoformat()
+    context = [
+        f"known={'1' if known else '0'}",
+        f"clean={'1' if clean else '0'}",
+        f"dirty={'1' if dirty else '0'}",
+        f"ahead={int(ahead)}",
+        f"unpushed_branches={int(unpushed_branches)}",
+        f"at={stamp}",
+    ]
+    args = ["lease", "acquire", KIND_CLEAN, name, "--holder", _clean_holder(holder)]
+    if ttl is not None:
+        args += ["--ttl", str(ttl)]
+    for kv in context:
+        args += ["--context", kv]
+    if origin:
+        args += ["--origin", origin]
+    proc = _run(args)
+    if proc is None:
+        return False
+    if proc.returncode == _EXIT_OK:
+        return True
+    log.debug("cleanliness publish for %s degraded (exit %s): %s",
+              name, proc.returncode, (proc.stderr or "").strip())
+    return False
+
+
+def _clean_bool(value: object) -> bool:
+    """Coerce a context value (``"1"``/``"0"``/``True``/...) to bool."""
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes"}
+
+
+def _clean_int(value: object) -> int:
+    try:
+        return int(str(value).strip())
+    except (ValueError, TypeError):
+        return 0
+
+
+def list_cleanliness(*, origin: str | None = None) -> dict[str, CleanRecord] | None:
+    """Read every ``codespace-clean`` verdict, keyed by CodeSpace name.
+
+    Shells ``agent-worktrees lease list --kind codespace-clean`` and projects
+    each record's free-form ``context`` (+ ``live``) onto a :class:`CleanRecord`.
+    Returns a ``{name: CleanRecord}`` map (possibly empty), or **None** when the
+    store is unavailable/unreadable -- the degrade-safe signal the pool uses to
+    simply omit the overlay (Recycle then stays Verify-gated). Never raises.
+    """
+    args = ["lease", "list", "--kind", KIND_CLEAN]
+    if origin:
+        args += ["--origin", origin]
+    proc = _run(args)
+    if proc is None or proc.returncode != _EXIT_OK:
+        return None
+    try:
+        data = json.loads(proc.stdout)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, list):
+        return None
+    result: dict[str, CleanRecord] = {}
+    for rec in data:
+        if not isinstance(rec, dict):
+            continue
+        res = rec.get("resource")
+        key = str(res.get("key", "")) if isinstance(res, dict) else ""
+        if not key:
+            continue
+        ctx = rec.get("context") if isinstance(rec.get("context"), dict) else {}
+        result[key] = CleanRecord(
+            key=key,
+            known=_clean_bool(ctx.get("known")),
+            clean=_clean_bool(ctx.get("clean")),
+            dirty=_clean_bool(ctx.get("dirty")),
+            ahead=_clean_int(ctx.get("ahead")),
+            unpushed_branches=_clean_int(ctx.get("unpushed_branches")),
+            at=str(ctx.get("at", "")),
+            by=str(rec.get("holder", "")),
+            live=bool(rec.get("live", False)),
+        )
+    return result

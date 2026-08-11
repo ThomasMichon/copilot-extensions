@@ -47,6 +47,13 @@ def _neutralize_l2(monkeypatch):
     # The pool's cross-machine L2 overlay reads via ``list_leases``; neutralize it
     # too (None -> overlay absent) so ``build_pool`` never shells out in units.
     monkeypatch.setattr(coordination, "list_leases", lambda *a, **k: None)
+    # The pool's cleanliness-beacon overlay reads via ``list_cleanliness`` and
+    # publishes via ``publish_cleanliness`` (both shell ``agent-worktrees lease``);
+    # neutralize them (None -> overlay absent; publish no-op) so ``build_pool`` and
+    # the disconnect/finalize paths never shell out in units. Tests covering the
+    # beacon opt back in by re-patching these seams after this fixture runs.
+    monkeypatch.setattr(coordination, "list_cleanliness", lambda *a, **k: None)
+    monkeypatch.setattr(coordination, "publish_cleanliness", lambda *a, **k: False)
     # The cross-harness fence (git-ref-resource-leases Phase 4) shells
     # ``agent-worktrees get lease-origin`` for the harness identity; neutralize
     # it (None -> no identity -> fence proceeds without shelling out) so the ssh

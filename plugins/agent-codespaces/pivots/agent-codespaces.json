@@ -14,6 +14,7 @@
     {"key": "display", "header": "codespace", "width": 26},
     {"key": "health", "header": "health", "width": 8, "palette": "state"},
     {"key": "occupancy", "header": "use", "width": 8, "palette": "state"},
+    {"key": "safe", "header": "safe", "width": 8, "palette": "state"},
     {"key": "worktree", "header": "worktree", "width": 10},
     {"key": "cores", "header": "cores", "width": 5, "align": "r"},
     {"key": "worktree_title", "header": "task", "width": 30}
@@ -29,8 +30,14 @@
     {
       "label": "Recycle",
       "run": ["agent-codespaces", "finalize", "{id}", "--delete", "--picker-progress"],
-      "when": {"disposition": "stale"},
+      "when": {"disposition": "stale", "safe": "yes"},
       "confirm": true,
+      "progress": true
+    },
+    {
+      "label": "Verify",
+      "run": ["agent-codespaces", "verify", "{id}"],
+      "when": {"disposition": "stale", "safe": ["unknown", "no"]},
       "progress": true
     }
   ],
