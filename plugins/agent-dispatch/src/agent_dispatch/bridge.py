@@ -62,7 +62,7 @@ def worker_prompt(task_id: str, *, coordinator_url: str, worker_id: str) -> str:
         f"You are an agent-dispatch task worker (worker id: {worker_id}). "
         f"A task has been queued for you on the coordinator at {coordinator_url}. "
         f"Steps: (1) read it with `agent-dispatch show {task_id}`; "
-        f"(2) claim it with `agent-dispatch claim {worker_id} --task {task_id}` "
+        f"(2) claim it with `agent-dispatch claim {task_id} --worker {worker_id}` "
         f"(add `--capability <cap>` for each capability the task requires); "
         f"(3) `agent-dispatch start {task_id} {worker_id}`, do the work described "
         f"in the task's prompt/payload, then "

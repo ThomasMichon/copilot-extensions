@@ -81,12 +81,23 @@ def test_parser_create_goal_flags_default_none():
 
 
 def test_parser_claim_flags():
+    # The bare positional is now the TASK id (consistent with start/complete/yield);
+    # the owner/worker id moved to the explicit --worker/--as flag.
     args = build_parser().parse_args(
-        ["claim", "w1", "--capability", "review", "--lease-seconds", "60"]
+        ["claim", "t1", "--capability", "review", "--lease-seconds", "60"]
     )
-    assert args.worker_id == "w1"
+    assert args.task_id == "t1"
+    assert args.worker_id is None
     assert args.capability == ["review"]
     assert args.lease_seconds == 60
+
+
+def test_parser_claim_worker_flag():
+    # Explicit owner override via --worker (and its --as alias).
+    a = build_parser().parse_args(["claim", "--worker", "m/wt"])
+    assert a.worker_id == "m/wt" and a.task_id is None
+    b = build_parser().parse_args(["claim", "t1", "--as", "m/wt"])
+    assert b.worker_id == "m/wt" and b.task_id == "t1"
 
 
 def test_parser_requires_subcommand():
@@ -106,8 +117,9 @@ def test_parser_create_spawn_flags():
 
 
 def test_parser_claim_task_flag():
-    args = build_parser().parse_args(["claim", "w1", "--task", "t9"])
-    assert args.task == "t9"
+    # `--task` remains a back-compat alias for the positional task id.
+    args = build_parser().parse_args(["claim", "--task", "t9"])
+    assert args.task == "t9" and args.task_id is None
 
 
 def test_parser_consume_flags():
@@ -595,6 +607,43 @@ def test_complete_resolves_owner_from_identity(monkeypatch, capsys):
     args = build_parser().parse_args(["complete", "T5"])
     assert args.func(args) == 0
     assert completed == {"task_id": "T5", "worker_id": "lambda-core/wt-7"}
+
+
+def test_claim_positional_is_the_task(monkeypatch, capsys):
+    """`claim <id>` targets THAT task (positional == task id), not the worker."""
+    from agent_dispatch import __main__, identity
+
+    seen = {}
+
+    class _C:
+        def claim(self, **kw):
+            seen.update(kw)
+            return {"id": kw.get("task_id"), "owner": "m/wt", "status": "claimed"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+    monkeypatch.setattr(__main__, "_client", lambda args: _C())
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+
+    args = build_parser().parse_args(["claim", "abc123"])
+    assert args.func(args) == 0
+    assert seen["task_id"] == "abc123"
+    assert seen["worker_id"] is None  # owner resolves from CWD, not the positional
+
+
+def test_claim_conflicting_task_ids_errors(monkeypatch, capsys):
+    """A positional task id that disagrees with --task is refused (exit 2)."""
+    from agent_dispatch import __main__
+
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+    args = build_parser().parse_args(["claim", "aaa", "--task", "bbb"])
+    assert args.func(args) == 2
+    assert "conflicting task ids" in capsys.readouterr().err
 
 
 class _PickupClient:

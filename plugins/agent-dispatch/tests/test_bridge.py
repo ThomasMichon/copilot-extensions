@@ -53,7 +53,7 @@ def test_worker_prompt_mentions_task_and_verbs():
     assert "abc123" in prompt
     assert "w9" in prompt
     assert "http://c" in prompt
-    assert "agent-dispatch claim w9 --task abc123" in prompt
+    assert "agent-dispatch claim abc123 --worker w9" in prompt
 
 
 def test_spawn_worker_unavailable_when_no_bridge(monkeypatch):

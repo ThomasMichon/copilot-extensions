@@ -463,6 +463,8 @@ agent-dispatch create "Add narration track" --require logger --dedup-key seg42
 agent-dispatch worktree-status           # this worktree's inbox: tasks assigned to + owned by it
 agent-dispatch inbox                      # machine-scoped, cross-lane pickable tasks (default: proposed)
 agent-dispatch claim                     # lease my assigned/eligible task (identity auto-resolved)
+agent-dispatch claim  <task-id>          # claim THAT specific task (positional = task id, like the verbs below)
+agent-dispatch claim  <task-id> --worker <owner>   # ...as an explicit owner (rarely needed; default: CWD identity)
 agent-dispatch start  <id>  <owner>
 agent-dispatch complete <id> <owner> --result-ref pr/123
 agent-dispatch list --status queued
@@ -506,7 +508,7 @@ agent-dispatch create "Summarize PR 42" --spawn --spawn-agent task-worker --asyn
 ```
 
 The worker is instructed to claim the specific task by id
-(`agent-dispatch claim <id> --task <task>`). If the `agent-bridge` CLI isn't on
+(`agent-dispatch claim <task> --worker <id>`). If the `agent-bridge` CLI isn't on
 PATH, `--spawn` **degrades gracefully** — the task is simply left queued for any
 worker to claim, so agent-dispatch stays usable without a bridge.
 

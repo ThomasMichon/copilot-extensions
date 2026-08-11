@@ -195,14 +195,17 @@ def test_fleet_seed_drives_origin_over_ssh_with_explicit_owner():
         "t42", origin="brain", owner="fleet-t42-abc123", worker_id="fleet-t42-abc123"
     )
     # every lifecycle verb reaches the origin over ssh, with the explicit owner
-    assert "ssh brain agent-dispatch claim --task t42 fleet-t42-abc123" in seed
+    assert "ssh brain agent-dispatch claim --task t42 --worker fleet-t42-abc123" in seed
     assert "ssh brain agent-dispatch start t42 fleet-t42-abc123" in seed
     assert "ssh brain agent-dispatch complete t42 fleet-t42-abc123 --result-ref" in seed
     assert "ssh brain agent-dispatch progress t42 fleet-t42-abc123" in seed
     # Contract-net evaluation window (dev55) over the SSH mesh: evaluation claim,
     # then accept / decline (yield --exclude-self) / retire (abandon --duplicate-of),
     # all carrying the explicit owner.
-    assert "ssh brain agent-dispatch claim --task t42 fleet-t42-abc123 --evaluation" in seed
+    assert (
+        "ssh brain agent-dispatch claim --task t42 --worker fleet-t42-abc123 --evaluation"
+        in seed
+    )
     assert "ssh brain agent-dispatch yield t42 fleet-t42-abc123 --exclude-self machine" in seed
     assert (
         "ssh brain agent-dispatch abandon t42 --worker-id fleet-t42-abc123 --duplicate-of"
@@ -234,7 +237,7 @@ def test_spawn_fleet_embodied_worker_builds_ssh_embody_argv(monkeypatch):
     assert "--driver agent-dispatch" in remote
     assert "--json" in remote
     # the seed rides inside the (shlex-quoted) remote command
-    assert "ssh brain agent-dispatch claim --task t7 fleet-t7-xyz" in remote
+    assert "ssh brain agent-dispatch claim --task t7 --worker fleet-t7-xyz" in remote
 
 
 def test_spawn_fleet_embodied_worker_requires_ssh(monkeypatch):
@@ -293,7 +296,7 @@ def test_spawn_fleet_headless_worker_builds_ssh_agent_bridge_argv(monkeypatch):
     assert remote.startswith("agent-bridge --json create board-worker ")
     assert "--no-wait" in remote
     # the SAME fleet seed as the CLI body rides inside the remote command
-    assert "ssh brain agent-dispatch claim --task t7 fleet-t7-xyz" in remote
+    assert "ssh brain agent-dispatch claim --task t7 --worker fleet-t7-xyz" in remote
     assert "ssh brain agent-dispatch complete t7 fleet-t7-xyz --result-ref" in remote
 
 
