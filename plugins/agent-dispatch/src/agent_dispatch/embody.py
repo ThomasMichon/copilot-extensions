@@ -287,7 +287,7 @@ def fleet_autopilot_worker_prompt(
         f"commit to running it. Steps: "
         f"(1) read it: `ssh {origin} agent-dispatch show {task_id}`; "
         f"(2) claim it for evaluation: `ssh {origin} agent-dispatch claim --task "
-        f"{task_id} {owner} --evaluation` (add `--capability <cap>` for each "
+        f"{task_id} --worker {owner} --evaluation` (add `--capability <cap>` for each "
         f"capability the task requires) -- this takes a SHORT evaluation lease, "
         f"not the full work lease; "
         f"(3) **EVALUATE before committing** -- while you hold the evaluation "
