@@ -28,12 +28,23 @@ param(
     [string]$PrimaryPlugin   = 'agent-codespaces',
     [string]$ExpectDeps      = 'agent-bridge agent-worktrees',
     [string]$BaseTag  = 'copilot-cleanroom:base',
-    [string]$AuthTag  = 'copilot-cleanroom:authed'
+    [string]$AuthTag  = 'copilot-cleanroom:authed',
+    # Where run artifacts (report + logs) land. Defaults to a MACHINE-LOCAL dir
+    # OUTSIDE any repo checkout -- run artifacts are per-run state and must never
+    # be written into the (possibly anchor) repo tree. Override with -ResultsDir
+    # or $env:CR_RESULTS_DIR.
+    [string]$ResultsDir = ''
 )
 $ErrorActionPreference = 'Stop'
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Results = Join-Path $Here 'results'
+if (-not $ResultsDir) { $ResultsDir = $env:CR_RESULTS_DIR }
+if (-not $ResultsDir) {
+    $root = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $HOME '.local\state' }
+    $ResultsDir = Join-Path $root ("copilot-cleanroom\runs\" + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+}
+$Results = $ResultsDir
 New-Item -ItemType Directory -Force -Path $Results | Out-Null
+Write-Host "results -> $Results" -ForegroundColor DarkGray
 
 function Test-Image($tag) { return [bool](docker images -q $tag 2>$null) }
 

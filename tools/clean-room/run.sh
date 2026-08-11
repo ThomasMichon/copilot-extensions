@@ -6,10 +6,19 @@
 #   ./run.sh run                # run against the cached :authed image
 #
 # Env overrides: CR_MARKETPLACE_REPO CR_MARKETPLACE_NAME CR_PRIMARY_PLUGIN
-#                CR_EXPECT_DEPS
+#                CR_EXPECT_DEPS CR_RESULTS_DIR
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RESULTS="$HERE/results"; mkdir -p "$RESULTS"
+# Run artifacts land in a MACHINE-LOCAL dir OUTSIDE any repo checkout -- they are
+# per-run state and must never be written into the (possibly anchor) repo tree.
+# Override with $CR_RESULTS_DIR.
+if [ -n "${CR_RESULTS_DIR:-}" ]; then
+    RESULTS="$CR_RESULTS_DIR"
+else
+    RESULTS="${XDG_STATE_HOME:-$HOME/.local/state}/copilot-cleanroom/runs/$(date +%Y%m%d-%H%M%S)"
+fi
+mkdir -p "$RESULTS"
+echo "results -> $RESULTS"
 BASE_TAG="${CR_BASE_TAG:-copilot-cleanroom:base}"
 AUTH_TAG="${CR_AUTH_TAG:-copilot-cleanroom:authed}"
 MODE="${1:-run}"

@@ -18,6 +18,6 @@
     "skills/"
   ],
   "hooks": "hooks.json",
-  "version": "1.5.3-dev470",
+  "version": "1.5.3-dev471",
   "runtimeScope": "universal"
 }
