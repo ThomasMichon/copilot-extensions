@@ -14,8 +14,8 @@ from configurator.catalog import (
     find_repo_root,
     load_catalog,
     published_prereq_names,
-    reconcile,
 )
+from configurator.model import coverage
 from configurator.__main__ import main
 
 
@@ -86,33 +86,23 @@ def test_plugins_command_unknown_name_errors(capsys):
     assert "unknown plugin" in capsys.readouterr().out
 
 
-# ── reconcile against a real checkout (only when running inside one) ─────────
+# ── coverage against a real checkout (only when running inside one) ─────────
 
-def test_reconcile_against_checkout_is_clean():
-    """When the tests run inside a copilot-extensions checkout, the catalog must
-    stay in sync with the marketplace and with each plugin's published prereqs.
-
-    This is the forcing function for "the installer knows about the plugins": if
-    a plugin is added/removed/renamed, or a service.yaml prereq drifts, update
-    ``data/plugins.toml`` to match.
+def test_coverage_against_checkout_has_no_errors():
+    """Inside a checkout, membership is *discovered*, so uncatalogued plugins are
+    allowed (inference handles them). What must never happen: a phantom catalog
+    entry (authored but not discovered) or a published service.yaml prereq the
+    catalog fails to carry. Those are the forcing functions that keep the
+    knowledge overlay honest.
     """
     root = find_repo_root()
     if root is None:
-        # Fine — the catalog stands alone; nothing to reconcile against here.
-        return
-    report = reconcile(load_catalog(), root)
-    assert report is not None
-    assert not report.missing_from_catalog, (
-        f"plugins in the marketplace but missing from the catalog: "
-        f"{report.missing_from_catalog}"
-    )
-    assert not report.unknown_in_marketplace, (
-        f"catalog names not in the marketplace (phantom/renamed): "
-        f"{report.unknown_in_marketplace}"
-    )
-    assert not report.published_prereq_gaps, (
-        f"published service.yaml prereqs missing from the catalog: "
-        f"{report.published_prereq_gaps}"
+        return  # no checkout — discovery would go remote; skip the local assertion
+    cov = coverage(repo_root=root, allow_remote=False)
+    assert cov.source_kind == "checkout"
+    assert not cov.phantom, f"catalog names not in the marketplace (phantom/renamed): {cov.phantom}"
+    assert not cov.published_prereq_gaps, (
+        f"published service.yaml prereqs missing from the catalog: {cov.published_prereq_gaps}"
     )
 
 

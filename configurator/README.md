@@ -38,24 +38,32 @@ restart prompts) lands in Phase 2
 
 ## Plugin-knowledge model (Phase 1)
 
-The Configurator carries its **own** declarative catalog of every plugin —
-prerequisites, the config each manages, and the ordered "what to do" to make it
-ready — in [`src/configurator/data/plugins.toml`](src/configurator/data/plugins.toml),
-read by [`catalog.py`](src/configurator/catalog.py). Inspect it:
+The Configurator learns **which** plugins exist dynamically from the marketplace
+— a nearby checkout when present, otherwise the remote published marketplace ref
+(the same ref the bootstrap fetches; override with `CONFIGURATOR_REF`). Its
+installer-owned catalog
+([`src/configurator/data/plugins.toml`](src/configurator/data/plugins.toml), read
+by [`catalog.py`](src/configurator/catalog.py) + composed in
+[`model.py`](src/configurator/model.py)) is a **knowledge overlay** on that
+membership: `kind`, the ordered "what to do" steps, and any prereqs beyond what a
+plugin publishes. A discovered plugin with no catalog entry is kept with
+**inferred defaults**, so the installer never breaks on a newly-added plugin.
 
 ```bash
-uv run python -m configurator plugins              # list what the installer knows
+uv run python -m configurator plugins              # effective model (discovered + overlay)
 uv run python -m configurator plugins agent-worktrees   # one plugin's prereqs/config/steps
 uv run python -m configurator plugins --prereqs    # de-duplicated union of prerequisites
-uv run python -m configurator plugins --reconcile  # cross-check vs a nearby checkout
+uv run python -m configurator plugins --reconcile  # coverage: uncovered / phantom / prereq drift
 ```
 
-This resolves **DQ2** in favor of an installer-side catalog: it imports no
-plugin code and requires no plugin to publish anything installer-specific, yet
-`--reconcile` opportunistically cross-checks it against metadata plugins already
-publish for their own reasons (the marketplace entry, `scripts/service.yaml`
-prereqs) when a checkout is present — the forcing function that keeps the catalog
-honest. A contract test asserts the boundary holds in both directions.
+This resolves **DQ2** in favor of an installer-side catalog **over dynamic
+membership**: it imports no plugin code and requires no plugin to publish
+anything installer-specific, yet it reads metadata plugins already publish for
+their own reasons (the marketplace entry, `scripts/service.yaml` prereqs). Because
+membership is discovered there is no frozen list to police — `--reconcile` is a
+*coverage* report (uncovered = discovered but not authored, running on inference;
+phantom = authored but not discovered), not a hard gate. A contract test asserts
+the one-way boundary holds in both directions.
 
 ## Boundary: one-way, dependency-free
 
