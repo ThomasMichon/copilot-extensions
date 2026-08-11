@@ -112,8 +112,17 @@ def reconcile_prs() -> int:
 
 
 def reconcile_bound_live() -> int:
-    """Off-hot-path: reconcile each local worktree's cached ``bound_live`` signal
-    against the authoritative machine-wide bound-Copilot scan (#4057 / #1416).
+    """Off-hot-path: reconcile each local worktree's cached ``bound_live`` AND
+    ``mux_live`` signals against the authoritative machine-wide scans (#4057 /
+    #1416 / dotfiles#1205).
+
+    Despite the name (kept for its call sites), this sweep now reconciles BOTH
+    liveness hints in one records pass: the bound-Copilot signal (below) and the
+    ``mux_live`` signal. ``mux_live`` is otherwise only stamped at discrete
+    lifecycle events, so a ``wt-<id>`` mux that appears AFTER its last event-time
+    stamp (e.g. a psmux startup-restore landing minutes after resume) would
+    persist a stale ``false`` for a genuinely live mux; recomputing it here --
+    mirroring bound liveness -- keeps it honest (dotfiles#1205).
 
     A bare-resumed Copilot (cwd=home) is invisible to BOTH the registered-session
     lock scan (its session was never registered under the worktree) and the mux
@@ -167,6 +176,24 @@ def reconcile_bound_live() -> int:
     # pass; hold off on clearing positives so a transient miss can't flap a live
     # session to non-ACTIVE.
     had_unresolved = any(b.get("worktree_id") is None for b in bound)
+    # Batch the wt-<id> mux presence check for the SAME record set so we can
+    # reconcile the cached ``mux_live`` hint here too. ``mux_live`` is otherwise
+    # only stamped at discrete lifecycle events (launch/Enter verify, Stop,
+    # confirmed teardown), so a mux that appears AFTER its last event-time stamp
+    # -- e.g. a psmux startup-restore that lands seconds/minutes after resume --
+    # is never re-observed and persists a stale ``false`` for a genuinely live
+    # mux (dotfiles#1205). Reconciling it on this off-hot-path sweep, mirroring
+    # bound liveness, closes that gap. Mux presence is a definitive local check
+    # (the session exists or it does not) when the batch SUCCEEDS -- no partial
+    # Unknown per record, unlike the bound scan's unattributable bindings. But a
+    # batch that raises is itself Unknown: it is guarded below (``mux_scan_ok``)
+    # so a transient failure never clears a cached ``mux_live=True`` to False.
+    try:
+        mux_map = sessions.mux_status_many([r.worktree_id for r in records])
+        mux_scan_ok = True
+    except Exception:
+        mux_map = {}
+        mux_scan_ok = False  # Unknown this pass -- never clear a cached positive
     changed = 0
     for rec in records:
         was_visible = _fresh_bound_live_hint(rec) is True
@@ -179,6 +206,25 @@ def reconcile_bound_live() -> int:
             # transition; idle worktrees that were never bound stay untouched).
             tracking.stamp_bound_live(rec.worktree_id, False)
             if was_visible:
+                changed += 1
+        # mux liveness (mirror of the bound transition logic): observe a mux
+        # that appeared or vanished since the last event-time stamp. A live mux
+        # renews its freshness (throttled); a false->true or true->false is a
+        # real ACTIVE-visibility transition, so it counts toward ``changed`` and
+        # reloads the picker. A mux that is absent and was already false is left
+        # untouched -- no YAML churn on the fleet's idle records. Skipped
+        # entirely when the mux batch failed (Unknown), so a transient scan
+        # error never clears a cached ``mux_live=True`` to False.
+        if mux_scan_ok:
+            info = mux_map.get(rec.worktree_id)
+            mux_present = bool(info and getattr(info, "exists", False))
+            if mux_present:
+                if rec.mux_live is not True:
+                    changed += 1
+                tracking.stamp_mux_live(
+                    rec.worktree_id, True, refresh=True, sync=True)
+            elif rec.mux_live is True:
+                tracking.stamp_mux_live(rec.worktree_id, False, sync=True)
                 changed += 1
     return changed
 
