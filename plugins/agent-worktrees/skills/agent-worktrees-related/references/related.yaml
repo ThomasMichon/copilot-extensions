@@ -24,9 +24,18 @@ related:
                    workspace_folder: /workspaces/example-web,
                    machines: [dev6] }
     delegate: { via: agent-codespaces }   # agent-bridge | agent-codespaces | agent-containers | none
+    # Ownership posture (drives e.g. the AI-attribution decision). Derived ONCE
+    # at registration from the operator's own gh account logins + the remote,
+    # then authoritative; an explicit value always wins over the derivation.
+    #   owned    -- operator wholly owns it (own gh namespace, or marked so)
+    #   internal -- Microsoft-internal, not owned (e.g. an ADO org repo)
+    #   external -- public/external, not owned (authored increments get attribution)
+    ownership: external
+    owner: some-org                       # resolving operator account (optional)
   copilot-extensions:
     role: tooling
     summary: "Source of the plugins this control plane drives."
     doc: related/copilot-extensions.md
     locus: { preferred: machine:dev6, machines: [dev6, cloud1] }
     delegate: { via: agent-bridge }
+    ownership: owned                       # operator's own gh namespace
