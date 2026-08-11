@@ -1,4 +1,4 @@
 # The container-side scripts MUST stay LF -- CRLF breaks the shebang / `bash -lc`
 # execution inside the Linux clean-room image.
 *.sh   text eol=lf
-Dockerfile text eol=lf
+Dockerfile* text eol=lf

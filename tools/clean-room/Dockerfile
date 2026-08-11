@@ -29,14 +29,19 @@ RUN curl -fsSL https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/b
 # The GitHub Copilot CLI (agentic `copilot` command). Pinned loosely; the
 # harness records the exact version it ran against.
 #
-# NPM_REGISTRY lets a GOVERNED machine point npm at its internal feed. On a
-# corp-governed box the public registry.npmjs.org is blocked at the TLS layer
-# (handshake failure), so pass the same governed feed the host uses, e.g.:
-#   docker build --build-arg NPM_REGISTRY=https://packagefeedproxy.microsoft.io/npm/ ...
-# run.ps1/run.sh forward it automatically (auto-detected from host `npm config`).
+# NPM_REGISTRY is a BUILD-TIME convenience ONLY, used to install the Copilot CLI
+# prereq. On a corp-governed box the public registry.npmjs.org is blocked at the
+# TLS layer, so an internal npm feed must be passed to install Copilot, e.g.:
+#   docker build --build-arg NPM_REGISTRY=https://<your-internal-npm-feed>/ ...
+# This is NOT part of the experiment and is NOT inherited into the operator's
+# runtime environment -- it only lets `npm install -g @github/copilot` succeed
+# (Copilot is a GIVEN prereq). The runner does NOT auto-forward the host's npm
+# config: silently inheriting the host feed would bias the fresh-machine
+# experiment, so a feed is passed only when set explicitly (see run.ps1/run.sh).
 ARG NPM_REGISTRY=https://registry.npmjs.org/
 RUN npm config set registry "$NPM_REGISTRY" \
-    && npm install -g @github/copilot
+    && npm install -g @github/copilot \
+    && npm config delete registry
 
 # A non-root operator, mirroring a real login (stock ~/.profile puts
 # ~/.local/bin on PATH *only if it already exists at login* -- exactly the
