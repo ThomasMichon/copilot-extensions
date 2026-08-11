@@ -9101,7 +9101,16 @@ def cmd_update(args: argparse.Namespace) -> int:
     force = getattr(args, "force", False)
     aw_payload_ver = _reconcile.payload_version(plugin_dir)
     aw_deployed_ver = _reconcile.runtime_deployed_version("agent-worktrees")
-    if (not force) and aw_payload_ver and aw_payload_ver == aw_deployed_ver:
+    version_match = (
+        (not force) and aw_payload_ver and aw_payload_ver == aw_deployed_ver
+    )
+    # The bin/ hook shims deploy independently of the runtime version, so a
+    # version match is NOT proof they are current -- a payload can add a new
+    # shim (resolve-runtime.ps1, #1106) or a partial deploy can bump the runtime
+    # slot without redeploying them, silently breaking the sessionStart reseed
+    # (empty Mux status bar, dotfiles #1171). Don't quick-skip on shim drift.
+    hooks_drifted = bool(version_match) and _reconcile.hook_shims_drifted(plugin_dir)
+    if version_match and not hooks_drifted:
         output.ok(f"Runtime already at {aw_deployed_ver} -- skipping installer "
                   "(use --force to re-deploy)")
         # The full installer is skipped, but LIVE Windows Terminal state drifts
@@ -9114,6 +9123,11 @@ def cmd_update(args: argparse.Namespace) -> int:
         if plat == "windows":
             _refresh_terminal_profiles()
     else:
+        if hooks_drifted:
+            output.warn(
+                f"Runtime already at {aw_deployed_ver}, but deployed hook shims "
+                "have drifted from the payload -- re-deploying (bin/ hook shims "
+                "deploy independently of the runtime version; dotfiles #1171)")
         if plat == "windows":
             installer = plugin_dir / "scripts" / "install.ps1"
             shell = shutil.which("pwsh") or shutil.which("powershell")
