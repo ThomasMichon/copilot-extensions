@@ -16,6 +16,10 @@
 # Compatible with PowerShell 5.1+ and pwsh 7+.
 
 $ErrorActionPreference = 'SilentlyContinue'
+# PS 5.1 (the powershell.exe fallback) decodes a BOM-less UTF-8 file as the ANSI
+# codepage and writes stdout as ANSI; force UTF-8 on both sides so the warning's
+# non-ASCII glyphs (…, —) survive into the emitted additionalContext.
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
 function Emit-Empty {
     Write-Output '{}'
@@ -37,7 +41,7 @@ if ($cwd -ine $homeDir) {
     if (-not $project) { Emit-Empty }
 }
 
-$t = (Get-Content -Raw -LiteralPath $warn)
+$t = [System.IO.File]::ReadAllText($warn, [System.Text.Encoding]::UTF8)
 if (-not $t) { Emit-Empty }
 Write-Output (@{ additionalContext = $t.TrimEnd() } | ConvertTo-Json -Compress -Depth 3)
 exit 0
