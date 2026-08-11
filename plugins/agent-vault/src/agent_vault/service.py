@@ -642,6 +642,31 @@ class VaultService:
             # hosts. Independent of KeePassXC -- no vault unlock required.
             return git_credential_action({**request, "allow_prompt": self._request_ctx.allow_prompt})
 
+        if action in ("seal", "unseal", "kek-list"):
+            # Envelope KEK ops. The KEK is DPAPI/file-backed (independent of the
+            # KeePass master password), so these work on a locked vault; the raw
+            # KEK never leaves the daemon -- only ciphertext/plaintext cross the
+            # wire (both base64 over the JSON transport).
+            import base64 as _b64
+
+            from . import kek as _kek
+            try:
+                if action == "kek-list":
+                    return {"ok": True, "keks": _kek.list_keks()}
+                name = request.get("name", "")
+                if not name:
+                    return {"ok": False, "error": "name required"}
+                if action == "seal":
+                    data = _b64.b64decode(request.get("data", ""))
+                    return {"ok": True, "sealed": _kek.seal(name, data)}
+                # unseal
+                plaintext = _kek.unseal(name, request.get("sealed", ""))
+                return {"ok": True, "data": _b64.b64encode(plaintext).decode()}
+            except _kek.KekError as exc:
+                return {"ok": False, "error": str(exc)}
+            except Exception as exc:  # report cleanly to the client
+                return {"ok": False, "error": f"{action} failed: {exc}"}
+
         handler = get_registry().action(action)
         if handler is not None:
             ext_ctx = ActionContext(

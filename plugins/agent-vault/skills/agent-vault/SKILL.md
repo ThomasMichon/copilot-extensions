@@ -4,7 +4,7 @@ description: >
   Store and fetch secrets from a local KeePassXC-backed vault -- API keys, SSH
   keys, tokens, and account credentials -- on demand, without hardcoding them,
   committing them, or exporting them into the environment. Covers the CLI verbs
-  (get/has/search/add/set-password/import-key/export-key), the on-demand fetch
+  (get/has/search/add/set-password/import-key/export-key/seal/unseal), the on-demand fetch
   discipline, first-run database configuration, and wiring the vault as a
   SUDO_ASKPASS provider for `sudo -A` on Linux/WSL.
   Trigger phrases include:
@@ -110,6 +110,30 @@ agent-vault start | stop               # service lifecycle (auto-starts on deman
 agent-vault import-key "SSH/deploy" ~/.ssh/id_ed25519   # stores key + .pub as attachments
 agent-vault export-key "SSH/deploy" ~/.ssh key_name     # restores the pair to a directory
 ```
+
+### Sealing secrets at rest (envelope KEK)
+
+For a consumer that keeps its **own** on-disk cache (e.g. a short-lived token) and
+just needs to encrypt it at rest without hardcoding a key, the vault provides an
+**envelope key-encryption-key (KEK)**. `seal`/`unseal` run inside the service, so the
+raw KEK never leaves it -- only ciphertext/plaintext cross the wire. The KEK is
+generated once per name and wrapped at rest: **DPAPI** (per-OS-user) on Windows, a
+`0600` file on POSIX. Because it's independent of the KeePass master password,
+seal/unseal work on a **locked** vault (no unlock needed).
+
+```bash
+# Seal a token (stdin) under a named KEK (auto-created on first use) -> base64
+printf '%s' "$TOKEN" | agent-vault seal spark > token.sealed
+
+# Unseal it back to stdout later (any process, same OS user)
+agent-vault unseal spark --in token.sealed        # -> the original token
+
+agent-vault kek-list                              # list KEK names
+```
+
+Tamper/wrong-key detection is built in (AES-256-GCM); `unseal` fails cleanly if the
+KEK is missing or the blob was altered. The KEK name is bound as authenticated data,
+so a blob sealed under one name won't unseal under another.
 
 ## SUDO_ASKPASS (Linux / WSL)
 
