@@ -25,7 +25,7 @@ description: >
 
 `agent-worktrees doctor` is the single repeatable primitive for worktree/session
 health. It is **per-project** (run it through each project's binstub, e.g.
-`dotfiles doctor`, `aperture-labs doctor`) and **read-only by default**.
+`dotfiles worktrees doctor`, `aperture-labs worktrees doctor`) and **read-only by default**.
 
 ## What it checks/repairs
 
@@ -46,17 +46,17 @@ health. It is **per-project** (run it through each project's binstub, e.g.
 
 1. **Report first** (safe, no writes), for each project you manage:
    ```
-   <project> doctor            # e.g. dotfiles doctor
-   <project> doctor --json     # machine-readable
+   <project> worktrees doctor            # e.g. dotfiles worktrees doctor
+   <project> worktrees doctor --json     # machine-readable
    ```
 2. **Apply non-destructive repairs** (integrity, backfill, stale status):
    ```
-   <project> doctor --fix
+   <project> worktrees doctor --fix
    ```
 3. **Also GC empty session shells** (destructive; only after reviewing the
    report count):
    ```
-   <project> doctor --fix --gc-sessions
+   <project> worktrees doctor --fix --gc-sessions
    ```
 
 Run it per project (`dotfiles`, `aperture-labs`, …) — the command scopes to the
@@ -87,7 +87,7 @@ state is **not** license to reap.
   builds, **verify liveness against the live scan before reaping.**
 - **Before any bulk `gc --clean`**, confirm no target is in a live mux
   (`psmux list-sessions` / `tmux list-sessions`) or holds a live lock. When in doubt, prefer **per-item
-  `<project> cleanup --worktree-id <id> --clean`** (add `--include-unused` for a
+  `<project> worktrees cleanup --worktree-id <id> --clean`** (add `--include-unused` for a
   no-commit/no-turn shell) — it re-checks prune-safety and refuses an active
   session, so you can target exactly the intended (e.g. unused / titleless)
   worktrees without risking a live-mux sibling.
@@ -103,12 +103,12 @@ resolve by hand:
 
 - **Reclaim the orphan, then resume fresh:**
   ```
-  <project> reclaim --worktree-id <id> --bare-only        # dry run — lists targets
-  <project> reclaim --worktree-id <id> --bare-only --yes  # reap bare orphans
+  <project> worktrees reclaim --worktree-id <id> --bare-only        # dry run — lists targets
+  <project> worktrees reclaim --worktree-id <id> --bare-only --yes  # reap bare orphans
   ```
   A Copilot that is **mux-homed but its mux has died** is *not* `--bare-only` (its
   cwd is the worktree, homing `mux`); target it with
-  `<project> reclaim --worktree-id <id> --yes` (no `--bare-only`).
+  `<project> worktrees reclaim --worktree-id <id> --yes` (no `--bare-only`).
 - **Windows has no `remux`** (ConPTY cannot adopt a running process) — the
   `reclaim` → resume-fresh path above is the only route; do not expect to reattach
   a bare Copilot in place.
@@ -125,7 +125,7 @@ blindly orphans those. Close-out is deeper than the local git/liveness check.
 
 - **Check the claim ledger — but do not trust it alone.**
   ```
-  <project> claims <id>                  # outbound resources it owns + inbound tasks
+  <project> worktrees claims <id>                  # outbound resources it owns + inbound tasks
   ```
   `finalize` is claim-aware (its gate blocks on unreleased outbound claims), and
   `claims release <ref>` / `claims settle <ref>` / `claims sweep --apply` retire
@@ -136,9 +136,9 @@ blindly orphans those. Close-out is deeper than the local git/liveness check.
 - **Deep-investigate what it actually touched.** Corroborate the ledger against
   the worktree's own history and artifacts:
   ```
-  <project> recent-messages --worktree <id>      # quick peek at recent work
-  <project> head-session --worktree <id>         # resolve its head session id
-  <project> session-transcript <session_id>      # full transcript of what it did
+  <project> worktrees recent-messages --worktree <id>      # quick peek at recent work
+  <project> worktrees head-session --worktree <id>         # resolve its head session id
+  <project> worktrees session-transcript <session_id>      # full transcript of what it did
   ```
   plus its effort file, and its branch's cross-repo footprint (Codespaces it
   connected to, `<other-repo>` worktrees/PRs it opened). **Be willing to dig into
@@ -172,7 +172,7 @@ blindly orphans those. Close-out is deeper than the local git/liveness check.
   (it resumes a detached session and auto-registers with **agent-bridge**), not
   an agent-dispatch verb (agent-dispatch merely *uses* it as a spawn backend):
   ```
-  <project> embody --worktree-id <id> --seed "Close yourself out: land or close \
+  <project> worktrees embody --worktree-id <id> --seed "Close yourself out: land or close \
     any cross-repo PRs, disconnect any Codespace, finalize any cross-repo \
     worktrees, release your claims, then finalize."
   # or dispatch the same to its owning agent: `<repo> bridge send <machine> "…"`
