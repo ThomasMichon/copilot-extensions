@@ -655,6 +655,22 @@ function Install-Runtime {
     $ErrorActionPreference = $prevEAP
     Remove-ConsoleTrampolines -VenvDir $VenvDir
 
+    # -- stamp build provenance (version from pyproject -- the single source of
+    # truth -- plus git commit/branch) into the deployed package, so the runtime
+    # reports its version without importlib.metadata. Best-effort; mirrors
+    # agent-worktrees' stamp_build_info. --
+    try {
+        $pkgDir = & $VenvPython -c "import agent_dispatch, os; print(os.path.dirname(agent_dispatch.__file__))" 2>$null
+        if ($pkgDir -and (Test-Path $pkgDir)) {
+            $repoRoot = (Resolve-Path (Join-Path $PluginDir '..\..')).Path
+            & $VenvPython (Join-Path $PSScriptRoot 'stamp_build_info.py') `
+                --package-dir $pkgDir --plugin-dir $PluginDir --git-dir $repoRoot 2>&1 |
+                ForEach-Object { Write-Step $_ }
+        }
+    } catch {
+        Write-Warn "Build-info stamp skipped: $($_.Exception.Message)"
+    }
+
     # -- binstub (.cmd on Windows -- see init history; POSIX shell elsewhere) --
     $stubName = 'agent-dispatch'
     if ($env:OS -eq 'Windows_NT') {

@@ -494,6 +494,16 @@ _ensure_runtime() {
         _ok 'Package installed: agent-dispatch (base -- `agent-dispatch mcp` server unavailable on this platform)'
     fi
 
+    # -- stamp build provenance (version from pyproject -- the single source of
+    # truth -- plus git commit/branch) into the deployed package, so the runtime
+    # reports its version without importlib.metadata. Best-effort; mirrors
+    # agent-worktrees' stamp_build_info. --
+    if pkg_dir="$("$VENV_PYTHON" -c 'import agent_dispatch, os; print(os.path.dirname(agent_dispatch.__file__))' 2>/dev/null)" && [[ -n "$pkg_dir" ]]; then
+        repo_root="$(cd "$PLUGIN_DIR/../.." && pwd)"
+        "$VENV_PYTHON" "$SCRIPT_DIR/stamp_build_info.py" \
+            --package-dir "$pkg_dir" --plugin-dir "$PLUGIN_DIR" --git-dir "$repo_root" >/dev/null 2>&1 || true
+    fi
+
     cat > "$STUB" << 'STUBEOF'
 #!/usr/bin/env bash
 export PYTHONUTF8=1
