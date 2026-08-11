@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-index"
-version = "0.1.0-dev24"
+version = "0.1.0-dev25"
 description = "Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem."
 readme = "README.md"
 license = "MIT"
@@ -59,8 +59,11 @@ engine = [
     "torch",
     # jina-v2-base-code loads via trust_remote_code; transformers 5.x broke that
     # custom modeling path (#114). Pin below 5 so every host gets the newest
-    # working 4.x -- a compat ceiling, not a capability downgrade.
-    "transformers>=5.14.1,<6",
+    # working 4.x -- a compat ceiling, not a capability downgrade. (Dependabot
+    # regressed this to >=5.14.1,<6 in #163; the <5 ceiling is enforced in
+    # .github/dependabot.yml so it cannot be lifted again while the default model
+    # is jina-v2-base-code.)
+    "transformers>=4.40,<5",
     "sentence-transformers",
 ]
 

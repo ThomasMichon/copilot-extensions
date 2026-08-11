@@ -32,6 +32,13 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "deps"
+    ignore:
+      # jina-v2-base-code (the default embedding model) loads via
+      # trust_remote_code and its custom modeling path breaks on transformers
+      # 5.x (#114). Hold the <5 ceiling until the default model changes -- do
+      # not let Dependabot lift it again (regressed once in #163).
+      - dependency-name: "transformers"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: "uv"
     directory: "/plugins/agent-logger"
     schedule:
