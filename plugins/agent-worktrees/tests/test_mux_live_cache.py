@@ -276,3 +276,80 @@ def test_batch_available_ignores_hint():
         active = cli._build_active_paths([rec], session_ctx=_empty_ctx())
     assert active == {"/tmp/a"}  # live batch wins over the false hint
     m_has.assert_not_called()
+
+
+# ── reconcile_bound_live also reconciles the cached mux_live hint (dotfiles#1205) ──
+#
+# mux_live is otherwise only stamped at discrete lifecycle events, so a wt-<id>
+# mux that appears AFTER its last event-time stamp (a psmux startup-restore that
+# lands after resume) persists a stale ``false``. The off-hot-path sweep now
+# recomputes mux presence for the same record set, mirroring bound liveness.
+
+from types import SimpleNamespace  # noqa: E402
+
+from agent_worktrees.picker_tui import data_local  # noqa: E402
+
+
+def _reconcile_mux(records, *, mux_present_ids, bound_ids=(), tmp_path):
+    """Run reconcile_bound_live with a stubbed bound scan + stubbed mux batch."""
+    for rec in records:
+        tracking.save_record(rec, tmp_path / f"{rec.worktree_id}.yaml")
+    loaded = [tracking.load_record(tmp_path / f"{r.worktree_id}.yaml")
+              for r in records]
+    mux_map = {wt: SimpleNamespace(exists=True, clients=1)
+               for wt in mux_present_ids}
+    with patch("agent_worktrees.config.tracking_dir", return_value=tmp_path), \
+         patch("agent_worktrees.config.detect_platform", return_value="wsl"), \
+         patch("agent_worktrees.tracking.list_records", return_value=loaded), \
+         patch("agent_worktrees.reclaim.resolve_bound_copilots",
+               return_value=[{"worktree_id": w} for w in bound_ids]), \
+         patch("agent_worktrees.sessions.mux_status_many", return_value=mux_map):
+        return data_local.reconcile_bound_live()
+
+
+def test_reconcile_stamps_mux_live_true_when_mux_appears_after_stamp(tmp_path):
+    """dotfiles#1205 core case: a worktree stamped mux_live=False at resume time
+    whose wt-<id> mux was (re)created AFTER that stamp is re-observed live by the
+    sweep, flipping the stale false-negative to True."""
+    (tmp_path / "wt-a").mkdir()
+    old = (datetime.now() - timedelta(seconds=300)).isoformat()
+    rec = _rec("aaaa", path=str(tmp_path / "wt-a"),
+               mux_live=False, mux_live_at=old)
+    changed = _reconcile_mux([rec], mux_present_ids={"aaaa"}, tmp_path=tmp_path)
+    assert changed >= 1
+    assert tracking.load_record(tmp_path / "aaaa.yaml").mux_live is True
+
+
+def test_reconcile_clears_mux_live_true_to_false_when_mux_gone(tmp_path):
+    """A worktree whose cached mux_live=True but whose mux has since torn down is
+    stamped False (a real ACTIVE-visibility transition)."""
+    (tmp_path / "wt-a").mkdir()
+    rec = _rec("aaaa", path=str(tmp_path / "wt-a"),
+               mux_live=True, mux_live_at=datetime.now().isoformat())
+    changed = _reconcile_mux([rec], mux_present_ids=set(), tmp_path=tmp_path)
+    assert changed >= 1
+    assert tracking.load_record(tmp_path / "aaaa.yaml").mux_live is False
+
+
+def test_reconcile_leaves_never_muxed_untouched(tmp_path):
+    """mux_live None + no mux -> no write, so the fleet's idle YAMLs are not
+    rewritten (mirrors the bound Unknown-never-persisted rule)."""
+    (tmp_path / "wt-a").mkdir()
+    rec = _rec("aaaa", path=str(tmp_path / "wt-a"))  # mux_live None
+    changed = _reconcile_mux([rec], mux_present_ids=set(), tmp_path=tmp_path)
+    assert changed == 0
+    text = (tmp_path / "aaaa.yaml").read_text(encoding="utf-8")
+    assert "mux_live" not in text
+
+
+def test_reconcile_mux_present_already_true_renews_but_no_transition(tmp_path):
+    """A steadily-muxed worktree already True is not a transition (the mux arm
+    adds nothing to ``changed``), but its freshness is renewed once aged past the
+    throttle so the populate hint never expires while genuinely live."""
+    (tmp_path / "wt-a").mkdir()
+    old = (datetime.now() - timedelta(seconds=300)).isoformat()
+    rec = _rec("aaaa", path=str(tmp_path / "wt-a"),
+               mux_live=True, mux_live_at=old)
+    changed = _reconcile_mux([rec], mux_present_ids={"aaaa"}, tmp_path=tmp_path)
+    assert changed == 0
+    assert tracking.load_record(tmp_path / "aaaa.yaml").mux_live_at != old
