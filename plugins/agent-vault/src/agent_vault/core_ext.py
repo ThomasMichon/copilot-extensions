@@ -44,6 +44,18 @@ from .coredelegation import delegate
 CORE_ENDPOINT_ENV = "AGENT_VAULT_CORE_ENDPOINT"
 #: Optional bearer token attached to each delegated request.
 CORE_TOKEN_ENV = "AGENT_VAULT_CORE_TOKEN"  # noqa: S105 -- an env var name, not a secret
+#: Upper bound (seconds) on a single delegated-core round-trip, overridable.
+CORE_TIMEOUT_ENV = "AGENT_VAULT_CORE_TIMEOUT"
+
+# The core is an *optional* peer. Several CLI paths call the vault with
+# ``timeout=None`` (unbounded) because the local daemon may legitimately block on
+# an interactive GUI unlock the operator is watching. A *remote/containerized*
+# core has no such local dialog, so an unbounded wait there would let a wired but
+# misbehaving core **hang the whole CLI** -- the opposite of the vision's
+# ``degrade-gracefully`` behavior (a failing optional peer must degrade a feature,
+# never the whole service). So the delegated-core round-trip is always bounded to
+# a finite cap, independent of the caller's own (possibly unbounded) timeout.
+DEFAULT_CORE_TIMEOUT = 30.0
 
 
 def core_runtime_dir() -> Path:
@@ -59,16 +71,37 @@ def core_runtime_dir() -> Path:
     return Path.home() / ".agent-vault" / "core"
 
 
+def _core_timeout(requested: float | None) -> float:
+    """Bound a delegated-core round-trip to a finite cap.
+
+    Returns the smaller of the caller's ``requested`` timeout and the configured
+    cap (``AGENT_VAULT_CORE_TIMEOUT``, default :data:`DEFAULT_CORE_TIMEOUT`). An
+    unbounded (``None``) or oversized request is clamped to the cap, so a wired
+    but hanging core can never block the standalone CLI -- it fails fast and the
+    request falls through / surfaces an error instead of hanging.
+    """
+    try:
+        cap = float(os.environ.get(CORE_TIMEOUT_ENV) or DEFAULT_CORE_TIMEOUT)
+    except (TypeError, ValueError):
+        cap = DEFAULT_CORE_TIMEOUT
+    if cap <= 0:
+        cap = DEFAULT_CORE_TIMEOUT
+    if requested is None:
+        return cap
+    return min(requested, cap)
+
+
 def core_transport(request, timeout, ctx):
     """A :data:`~agent_vault.extensions.ClientTransport`: delegate to a wired core.
 
     Returns the core's response dict, or ``None`` to fall through when no core is
-    wired or reachable.
+    wired or reachable. The round-trip is always time-bounded (see
+    :func:`_core_timeout`) so an optional core never hangs the standalone CLI.
     """
     return delegate(
         "agent-vault-core",
         request,
-        timeout=timeout,
+        timeout=_core_timeout(timeout),
         token=os.environ.get(CORE_TOKEN_ENV) or None,
         override=os.environ.get(CORE_ENDPOINT_ENV) or None,
         runtime_dir=core_runtime_dir(),
