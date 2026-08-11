@@ -202,6 +202,46 @@ def resolve_state_root(
     )
 
 
+def state_repo_definition(res: StateRoot) -> str:
+    """Return the sessionStart **"the user's state repo"** definition (Markdown).
+
+    This is the single, authoritative binding of the term *"the user's state
+    repo"* that agent-worktrees injects into session context (via the
+    ``session-conduct`` sessionStart hook, ``state-root --conduct``). Downstream
+    plugins/skills refer to "the user's state repo" in **plain prose** and never
+    invoke agent-worktrees themselves; this injection binds the term to the
+    concrete resolved checkout so those references resolve. When agent-worktrees
+    is not installed nothing is injected, and the prose degrades to its plain
+    meaning (the checkout where the user keeps their personal state).
+
+    The returned string is a self-contained paragraph (no trailing newline);
+    the hook merges it into ``additionalContext`` ahead of any static conduct
+    fragments.
+    """
+    if res.path:
+        if res.source == "knowledge_repo":
+            where = "your machine's bound knowledge repo"
+        elif res.source == "explicit":
+            where = f"the '{res.repo}' repo"
+        else:
+            where = "your current repo (self-hosted)"
+        return (
+            f"**The user's state repo** is `{res.path}` — {where}. It is the "
+            "checkout where the user's personal state and reference data live: "
+            "efforts, logs, visions, and skill reference data such as "
+            "ownership.yml, weekly-updates/, icm/, on-call/, backlog/, and "
+            "review-persona guidance. Whenever a skill refers to \"the user's "
+            "state repo,\" read and write those paths under this checkout."
+        )
+    return (
+        "**The user's state repo** — the checkout where the user's personal "
+        "state and reference data (efforts, logs, visions, and skill reference "
+        "data) belong — is not bound on this machine yet. A skill that needs to "
+        "read or write \"the user's state repo\" should stop and ask the user "
+        "to bind one (harness setup) before writing personal state."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Config-source anchors (E1e) -- the KNOWLEDGE OVERLAY (config-graft) seam
 # ---------------------------------------------------------------------------

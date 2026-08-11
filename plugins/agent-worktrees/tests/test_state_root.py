@@ -320,3 +320,39 @@ def test_config_sources_unbound_stateless_is_base_only(fake_checkouts):
         base_anchor="/repos/harness",
     )
     assert [s.anchor for s in srcs] == ["/repos/harness"]
+
+
+# ---------------------------------------------------------------------------
+# state_repo_definition -- the sessionStart "the user's state repo" injection.
+# ---------------------------------------------------------------------------
+
+def test_state_repo_definition_self_hosted_names_path_and_current_repo():
+    res = sr.StateRoot("/work/tree", "launch_repo", "dotfiles", False, False, True)
+    text = sr.state_repo_definition(res)
+    assert "**The user's state repo**" in text
+    assert "`/work/tree`" in text
+    assert "self-hosted" in text
+    assert "\n" not in text  # single self-contained paragraph
+
+
+def test_state_repo_definition_stateless_names_knowledge_repo():
+    res = sr.StateRoot("/repos/knowledge", "knowledge_repo", "kn", True, True, True)
+    text = sr.state_repo_definition(res)
+    assert "`/repos/knowledge`" in text
+    assert "bound knowledge repo" in text
+
+
+def test_state_repo_definition_explicit_names_repo():
+    res = sr.StateRoot("/repos/x", "explicit", "x", False, False, True)
+    text = sr.state_repo_definition(res)
+    assert "`/repos/x`" in text
+    assert "'x'" in text
+
+
+def test_state_repo_definition_unbound_has_no_path_and_warns():
+    res = sr.StateRoot(None, "knowledge_repo", "", True, True, False,
+                       error="unbound")
+    text = sr.state_repo_definition(res)
+    assert "not bound on this machine" in text
+    assert "`" not in text  # no backtick-quoted path when unresolved
+    assert "**The user's state repo**" in text

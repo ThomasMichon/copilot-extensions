@@ -23,21 +23,27 @@ project="$(PYTHONPATH="" "$PY" -m agent_worktrees get project 2>/dev/null || tru
 [[ -n "$project" ]] || emit_empty
 
 # --- collect + JSON-encode deployed conduct fragments ---
+# Dynamic: the "the user's state repo" definition (binds the term to the
+# resolved checkout so downstream plugins can refer to it in plain prose).
+defn="$(PYTHONPATH="" "$PY" -m agent_worktrees state-root --conduct 2>/dev/null || true)"
 dir="$HOME/.agent-worktrees/bin/conduct"
-[[ -d "$dir" ]] || emit_empty
 
-PYTHONPATH="" "$PY" - "$dir" <<'PYEOF'
+PYTHONPATH="" "$PY" - "$dir" "$defn" <<'PYEOF'
 import json, os, sys
 
 d = sys.argv[1]
+defn = sys.argv[2] if len(sys.argv) > 2 else ""
 parts = []
-for name in sorted(os.listdir(d)):
-    if not name.endswith(".md"):
-        continue
-    with open(os.path.join(d, name), encoding="utf-8") as fh:
-        text = fh.read().rstrip()
-    if text:
-        parts.append(text)
+if defn.strip():
+    parts.append(defn.strip())
+if os.path.isdir(d):
+    for name in sorted(os.listdir(d)):
+        if not name.endswith(".md"):
+            continue
+        with open(os.path.join(d, name), encoding="utf-8") as fh:
+            text = fh.read().rstrip()
+        if text:
+            parts.append(text)
 
 print(json.dumps({"additionalContext": "\n\n".join(parts)}) if parts else "{}")
 PYEOF
