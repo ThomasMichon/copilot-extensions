@@ -255,9 +255,10 @@ $DefaultPort = 9847
 # unchanged. LinkDir/LinkPython is the stable `.venv` path (runtime-facing, never
 # a versions/<v> absolute a `gc` could remove); VenvDir/VenvPython is the
 # versions/<v> slot (build + health-gate + the firewall -Program, which needs the
-# RESOLVED image path the running daemon reports). Legacy mode: Link == Venv.
-# Gated behind AGENT_DISPATCH_VERSIONED=0 (default ON); COPILOT_EXT_NO_VERSIONED=1
-# force-disables. scripts/versioned_runtime.py owns the swap + migration + gc.
+# RESOLVED image path the running daemon reports). ALWAYS versioned -- the env
+# opt-out (COPILOT_EXT_NO_VERSIONED / AGENT_DISPATCH_VERSIONED) and the legacy
+# in-place fork are retired; the code below reads neither var.
+# scripts/versioned_runtime.py owns the swap + migration + gc.
 $LinkDir          = $VenvDir
 $LinkPython       = $VenvPython
 $VersionedRuntime = $false

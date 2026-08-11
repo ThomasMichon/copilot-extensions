@@ -170,22 +170,22 @@ MANIFEST_PATH="$INSTALL_DIR/deploy-manifest.json"
 # Immutable per-version runtime (#581): build into versions/<version> and make the
 # `.venv` path a symlink into it, so the binstub + manifest resolve through the
 # link. CLI (no daemon). LINK_DIR = stable `.venv`; VENV_DIR = the versions/<v>
-# slot. Legacy mode: LINK_DIR == VENV_DIR. Gated behind AGENT_SSH_VERSIONED
-# (default ON); scripts/versioned_runtime.py owns the swap + migration + gc.
+# slot. ALWAYS versioned -- the env opt-out (COPILOT_EXT_NO_VERSIONED /
+# AGENT_SSH_VERSIONED) and the legacy in-place fork are retired;
+# scripts/versioned_runtime.py owns the swap + migration + gc.
 LINK_DIR="$VENV_DIR"
 LINK_PYTHON="$VENV_PYTHON"
-VERSIONED_RUNTIME=0
+VERSIONED_RUNTIME=1
 SRC_VERSION=""
-if [[ "${COPILOT_EXT_NO_VERSIONED:-}" != "1" && ! "${AGENT_SSH_VERSIONED:-}" =~ ^(0|false|no|off)$ ]]; then
-    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then
-        SRC_VERSION="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" | head -n1)"
-    fi
-    if [[ -n "$SRC_VERSION" ]]; then
-        VERSIONED_RUNTIME=1
-        VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
-        VENV_PYTHON="$VENV_DIR/bin/python"
-    fi
+if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then
+    SRC_VERSION="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" | head -n1)"
 fi
+if [[ -z "$SRC_VERSION" ]]; then
+    echo "[FAIL] Cannot determine plugin version from pyproject.toml (required for the versioned runtime)." >&2
+    exit 1
+fi
+VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
+VENV_PYTHON="$VENV_DIR/bin/python"
 
 _versioned_activate() {
     # CLI (no daemon): health-gate the slot, swap the `.venv` symlink onto it

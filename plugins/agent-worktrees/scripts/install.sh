@@ -289,24 +289,23 @@ VENV_BIN="$VENV_DIR/bin/agent-worktrees"
 # and make the historical `.venv` path a symlink into it, so the binstub,
 # wrappers, and deploy-manifest resolve through the link unchanged. agent-worktrees
 # is a CLI (no daemon), so no process to drain. LINK_DIR is the stable `.venv` path;
-# VENV_DIR is the versions/<v> slot (build + health-gate). Legacy mode: LINK_DIR ==
-# VENV_DIR. Gated behind AGENT_WORKTREES_VERSIONED=0 (default ON);
-# scripts/versioned_runtime.py owns the swap + migration + gc.
+# VENV_DIR is the versions/<v> slot (build + health-gate). ALWAYS versioned -- the
+# env opt-out (COPILOT_EXT_NO_VERSIONED / AGENT_WORKTREES_VERSIONED) and the legacy
+# in-place fork are retired; scripts/versioned_runtime.py owns the swap + migration + gc.
 LINK_DIR="$VENV_DIR"
 LINK_PYTHON="$VENV_PYTHON"
-VERSIONED_RUNTIME=0
+VERSIONED_RUNTIME=1
 SRC_VERSION=""
-if [[ "${COPILOT_EXT_NO_VERSIONED:-}" != "1" && ! "${AGENT_WORKTREES_VERSIONED:-}" =~ ^(0|false|no|off)$ ]]; then
-    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then
-        SRC_VERSION="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" | head -n1)"
-    fi
-    if [[ -n "$SRC_VERSION" ]]; then
-        VERSIONED_RUNTIME=1
-        VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
-        VENV_PYTHON="$VENV_DIR/bin/python"
-        VENV_BIN="$VENV_DIR/bin/agent-worktrees"
-    fi
+if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then
+    SRC_VERSION="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" | head -n1)"
 fi
+if [[ -z "$SRC_VERSION" ]]; then
+    echo "[FAIL] Cannot determine plugin version from pyproject.toml (required for the versioned runtime)." >&2
+    exit 1
+fi
+VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
+VENV_PYTHON="$VENV_DIR/bin/python"
+VENV_BIN="$VENV_DIR/bin/agent-worktrees"
 
 # Layered project config deliberately omits machine paths. During marketplace
 # update the cwd is the installed payload, so resolve the adopted repo's anchor

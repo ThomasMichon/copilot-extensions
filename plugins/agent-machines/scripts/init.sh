@@ -179,18 +179,18 @@ VENV_PYTHON="$VENV_DIR/bin/python"
 # marker is authoritative (on Windows there is no junction at all -- a reparse
 # point was blocked by RedirectionGuard/WinError 448 on managed devices). A version
 # bump builds a new slot beside the old one and republishes the marker (never
-# mutates a live venv). Opt out with COPILOT_EXT_NO_VERSIONED=1.
-# scripts/versioned_runtime.py owns the marker publish + migration.
+# mutates a live venv). ALWAYS versioned -- the COPILOT_EXT_NO_VERSIONED opt-out
+# and the legacy in-place fork are retired. scripts/versioned_runtime.py owns the
+# marker publish + migration.
 LINK_DIR="$VENV_DIR"                        # stable path the binstub/manifest reference
 VERSIONED_RUNTIME=1
-[[ "${COPILOT_EXT_NO_VERSIONED:-}" == "1" ]] && VERSIONED_RUNTIME=0
 SRC_VERSION="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || true)"
-if [[ "$VERSIONED_RUNTIME" -eq 1 && -n "$SRC_VERSION" ]]; then
-    VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
-    VENV_PYTHON="$VENV_DIR/bin/python"
-else
-    VERSIONED_RUNTIME=0
+if [[ -z "$SRC_VERSION" ]]; then
+    echo "[FAIL] Cannot determine plugin version from pyproject.toml (required for the versioned runtime)." >&2
+    exit 1
 fi
+VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
+VENV_PYTHON="$VENV_DIR/bin/python"
 # === end install-contract:v3 versioned-venv ===
 
 _bootstrap_python() {

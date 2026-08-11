@@ -199,21 +199,21 @@ SYSTEMD_UNIT="agent-bridge.service"
 # reference `venv` -- resolve through the link unchanged. LINK_DIR is the stable
 # `venv` path (runtime-facing, never a versions/<v> absolute a `gc` could
 # remove); VENV_DIR is redirected to the versions/<v> slot (build + health-gate).
-# In legacy mode LINK_DIR == VENV_DIR (byte-for-byte the old behavior). Gated
-# behind AGENT_BRIDGE_VERSIONED=0 (default ON) until validated; the stdlib-only
+# ALWAYS versioned -- the env opt-out (COPILOT_EXT_NO_VERSIONED /
+# AGENT_BRIDGE_VERSIONED) and the legacy in-place fork are retired; a symlink is
+# not a reparse point, so the model needs no opt-out. The stdlib-only
 # scripts/versioned_runtime.py owns the swap + legacy migration + gc.
 LINK_DIR="$VENV_DIR"
-VERSIONED_RUNTIME=0
+VERSIONED_RUNTIME=1
 SRC_VERSION=""
-if [[ "${COPILOT_EXT_NO_VERSIONED:-}" != "1" && ! "${AGENT_BRIDGE_VERSIONED:-}" =~ ^(0|false|no|off)$ ]]; then
-    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then
-        SRC_VERSION="$(grep -m1 '^version' "$PLUGIN_DIR/pyproject.toml" | sed 's/.*"\(.*\)".*/\1/')"
-    fi
-    if [[ -n "$SRC_VERSION" ]]; then
-        VERSIONED_RUNTIME=1
-        VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
-    fi
+if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then
+    SRC_VERSION="$(grep -m1 '^version' "$PLUGIN_DIR/pyproject.toml" | sed 's/.*"\(.*\)".*/\1/')"
 fi
+if [[ -z "$SRC_VERSION" ]]; then
+    echo "[FAIL] Cannot determine plugin version from pyproject.toml (required for the versioned runtime)." >&2
+    exit 1
+fi
+VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
 # === end install-contract:v3 versioned-venv ===
 
 # Ensure ~/.local/bin is on PATH

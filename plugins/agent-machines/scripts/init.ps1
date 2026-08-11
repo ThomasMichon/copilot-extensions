@@ -207,9 +207,9 @@ if ($env:OS -eq 'Windows_NT') {
 # binstub + deploy-manifest resolve the active slot straight from the marker. On
 # POSIX a `.venv` symlink (not a reparse point) still publishes the active slot,
 # but the marker is authoritative. A version bump builds a new slot beside the old
-# one and republishes the marker (never mutates a live venv). The version opt-out
-# is retired on Windows (always versioned). scripts/versioned_runtime.py owns the
-# marker publish + migration.
+# one and republishes the marker (never mutates a live venv). The
+# COPILOT_EXT_NO_VERSIONED opt-out is fully retired -- always versioned.
+# scripts/versioned_runtime.py owns the marker publish + migration.
 $LinkDir = $VenvDir                       # stable path the binstub/manifest reference
 $LinkPython = $VenvPython
 $VersionedRuntime = $true  # always versioned (junction-free marker model; COPILOT_EXT_NO_VERSIONED retired)
