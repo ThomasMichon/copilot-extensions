@@ -33,8 +33,8 @@ while [ $# -gt 0 ]; do
         --npm-registry) NPM_REGISTRY="$2"; shift 2 ;;
         --token-account) TOKEN_ACCOUNT="$2"; shift 2 ;;
         --no-token) NO_TOKEN=1; shift ;;
-        build|auth|run|shell|down|all) MODE="$1"; shift ;;
-        *) echo "usage: $0 [--image base|pristine] [--until N] [--then shell|down] [--npm-registry URL] [--token-account USER] [--no-token] {build|auth|run|shell|down|all}" >&2; exit 2 ;;
+        build|auth|run|shell|down|bridge-register|bridge-unregister|all) MODE="$1"; shift ;;
+        *) echo "usage: $0 [--image base|pristine] [--until N] [--then shell|down] [--npm-registry URL] [--token-account USER] [--no-token] {build|auth|run|shell|down|bridge-register|bridge-unregister|all}" >&2; exit 2 ;;
     esac
 done
 
@@ -42,6 +42,7 @@ case "$IMAGE" in base) DOCKERFILE=Dockerfile ;; pristine) DOCKERFILE=Dockerfile.
 BASE_TAG="copilot-cleanroom:$IMAGE"
 if [ "$IMAGE" = base ]; then AUTH_TAG="copilot-cleanroom:authed"; else AUTH_TAG="copilot-cleanroom:$IMAGE-authed"; fi
 CONTAINER="cr-$IMAGE"
+AGENT_NAME="cleanroom-$IMAGE"   # agent-bridge agent + provider name for this box
 
 if [ -n "${CR_RESULTS_DIR:-}" ]; then
     RESULTS="$CR_RESULTS_DIR"
@@ -122,6 +123,16 @@ do_shell() {
     docker exec -it "$CONTAINER" /bin/bash -l
 }
 do_down() { docker rm -f "$CONTAINER" >/dev/null 2>&1 || true; echo "removed $CONTAINER"; }
+# Register/unregister the container as an agent-bridge agent (drive the
+# in-container Copilot with `agent-bridge send $AGENT_NAME "<prompt>"`). Uses the
+# runtime provider API via bridge_register.py (a docker-exec command agent).
+_py() { command -v python3 || command -v python; }
+do_bridge_register() {
+    ensure_container
+    "$(_py)" "$HERE/bridge_register.py" register --container "$CONTAINER" --name "$AGENT_NAME"
+    echo "drive it:  agent-bridge send $AGENT_NAME \"<prompt>\""
+}
+do_bridge_unregister() { "$(_py)" "$HERE/bridge_register.py" unregister --name "$AGENT_NAME"; }
 do_run() {
     start_container
     echo "== running clean-room validation ($IMAGE, through phase $UNTIL) =="
@@ -143,5 +154,7 @@ case "$MODE" in
     run)   do_run ;;
     shell) do_shell ;;
     down)  do_down ;;
+    bridge-register)   do_bridge_register ;;
+    bridge-unregister) do_bridge_unregister ;;
     all)   do_build; do_run ;;
 esac
