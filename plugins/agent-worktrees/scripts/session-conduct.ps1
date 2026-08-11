@@ -31,13 +31,19 @@ $project = (& $python -m agent_worktrees get project 2>$null | Select-Object -Fi
 if (-not $project) { Emit-Empty }
 
 # --- collect deployed conduct fragments ---
-$dir = Join-Path $env:USERPROFILE '.agent-worktrees\bin\conduct'
-if (-not (Test-Path $dir)) { Emit-Empty }
-
 $parts = @()
-foreach ($f in (Get-ChildItem -Path $dir -Filter '*.md' -File -ErrorAction SilentlyContinue | Sort-Object Name)) {
-    $t = (Get-Content -Raw -LiteralPath $f.FullName)
-    if ($t) { $parts += $t.TrimEnd() }
+
+# Dynamic: the "the user's state repo" definition (binds the term to the
+# resolved checkout so downstream plugins can refer to it in plain prose).
+$defn = (& $python -m agent_worktrees state-root --conduct 2>$null | Out-String).Trim()
+if ($defn) { $parts += $defn }
+
+$dir = Join-Path $env:USERPROFILE '.agent-worktrees\bin\conduct'
+if (Test-Path $dir) {
+    foreach ($f in (Get-ChildItem -Path $dir -Filter '*.md' -File -ErrorAction SilentlyContinue | Sort-Object Name)) {
+        $t = (Get-Content -Raw -LiteralPath $f.FullName)
+        if ($t) { $parts += $t.TrimEnd() }
+    }
 }
 if ($parts.Count -eq 0) { Emit-Empty }
 
