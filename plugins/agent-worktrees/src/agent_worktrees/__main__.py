@@ -1112,7 +1112,7 @@ def _create_worktree_core(
         no_resume=False, profile=None,
     )
     launch_cmd = _build_launch_cmd(config, fake_args, worktree_path, profile=profile)
-    env = _build_env(profile, _repo_session_env(config, worktree_path))
+    env = _build_env(profile, _repo_session_env(config, worktree_path), work_dir=worktree_path)
 
     return {
         "worktree": _worktree_to_dict(record),
@@ -1128,9 +1128,40 @@ def _create_worktree_core(
     }
 
 
+def _self_owner_ref(work_dir: str | None) -> str | None:
+    """Qualified ClaimRef of the worktree rooted at ``work_dir`` (None if not one).
+
+    The identity a launched session advertises via ``AGENT_WORKTREES_OWNER_REF``
+    so any resource it creates (a nested ``create``, a borrowed CodeSpace)
+    inherits *this* worktree as owner and the finalize gate can hold it
+    accountable (resource-obligation-settlement Ph6). Returns None for a
+    non-worktree path (e.g. the repo anchor) -- resources created there are
+    top-level, not owned -- and is fully best-effort (never raises).
+    """
+    if not work_dir:
+        return None
+    try:
+        # Resolve the worktree id the authoritative way -- git-identity first
+        # (root-independent, matches `get owner-ref`), then a tracked-path match.
+        wd = Path(work_dir)
+        wid = _worktree_id_from_git(wd) or tracking.find_worktree_id_by_cwd(str(wd))
+        if not wid:
+            return None
+        config = cfg.load_config()
+        try:
+            project = cfg.project_name()
+        except Exception:
+            project = config.repo_name
+        session = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
+        return tracking.format_claim_ref(config.machine, project, wid, session)
+    except Exception:
+        return None
+
+
 def _build_env(
     profile: cfg.CopilotProfile | None,
     session_env: dict[str, str] | None = None,
+    work_dir: str | None = None,
 ) -> dict[str, str]:
     """Build env dict with auto-injected vars, repo session_env, then profile.
 
@@ -1139,6 +1170,12 @@ def _build_env(
     profile env merges on top.  For path-list vars like
     COPILOT_CUSTOM_INSTRUCTIONS_DIRS, profile values are appended rather
     than replacing the auto-injected value.
+
+    When ``work_dir`` names a managed worktree, its qualified ClaimRef is
+    exported as ``AGENT_WORKTREES_OWNER_REF`` so any resource an agent creates
+    inside the launched session inherits this worktree as owner (Ph6 ambient
+    owner identity). A non-worktree ``work_dir`` (the anchor) or a failure to
+    resolve it simply omits the var.
     """
     env: dict[str, str] = {}
 
@@ -1155,6 +1192,14 @@ def _build_env(
             env["AGENT_WORKTREES_HOOKS"] = "1"
     except Exception:
         pass
+
+    # Ambient owner identity (Ph6): advertise the launched worktree's own
+    # ClaimRef so a resource it creates inherits it as owner. Each launch stamps
+    # SELF (overwriting any inherited value), so a chain A->B->C inherits one hop
+    # at each level. Best-effort; omitted for a non-worktree path (anchor).
+    owner_self = _self_owner_ref(work_dir)
+    if owner_self:
+        env["AGENT_WORKTREES_OWNER_REF"] = owner_self
 
     # Repo-declared session env (below the profile so a profile can override).
     if session_env:
@@ -1459,7 +1504,10 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
     record = tracking.load_record(yaml_path)
 
     launch_cmd = _build_launch_cmd(config, args, record.worktree_path)
-    env = _build_env(None, _repo_session_env(config, record.worktree_path))
+    env = _build_env(
+        None, _repo_session_env(config, record.worktree_path),
+        work_dir=record.worktree_path,
+    )
     # The seed is NOT passed as a launch arg. The launch wraps Copilot in
     # ``pwsh -File default-setup.ps1 ... <copilot args>`` and psmux (Windows)
     # cannot carry a spaces-containing pane arg (it word-splits, and a bare
@@ -1586,7 +1634,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
         return 0
 
     launch_cmd = _build_launch_cmd(config, args, work_dir)
-    env = _build_env(None, _repo_session_env(config, work_dir))
+    env = _build_env(None, _repo_session_env(config, work_dir), work_dir=work_dir)
     # D4: stamp the driver so the embodied session registers a "driven by
     # <agent>" banner (legible when a human takes it over in Neuron Forge).
     driver = getattr(args, "driver", None)
@@ -1742,7 +1790,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             repo = config.default_repo
             work_dir = repo.anchor
             launch_cmd = _build_launch_cmd(config, args, work_dir)
-            env = _build_env(None, _repo_session_env(config, work_dir))
+            env = _build_env(None, _repo_session_env(config, work_dir), work_dir=work_dir)
 
             _emit_plan({
                 "action": "exec",
@@ -1797,7 +1845,10 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             )
 
             launch_cmd = _build_launch_cmd(config, args, record.worktree_path)
-            env = _build_env(None, _repo_session_env(config, record.worktree_path))
+            env = _build_env(
+                None, _repo_session_env(config, record.worktree_path),
+                work_dir=record.worktree_path,
+            )
 
             # Auto-resume session
             no_resume = getattr(args, "no_resume", False)
@@ -3001,7 +3052,7 @@ def _resolve_base_repo(
         print()
 
     launch_cmd = _build_launch_cmd(config, args, repo.anchor, profile=profile)
-    merged_env = _build_env(profile, _repo_session_env(config, repo.anchor))
+    merged_env = _build_env(profile, _repo_session_env(config, repo.anchor), work_dir=repo.anchor)
     if args.dry_run:
         output.dry_run(f"Would launch: {' '.join(launch_cmd)}")
         if merged_env:
@@ -3265,7 +3316,10 @@ def _resolve_resume(
             print(f"   ⚠ Local commits present -- skipping auto-update ({ff.reason})")
 
     launch_cmd = _build_launch_cmd(config, args, record.worktree_path, profile=profile)
-    merged_env = _build_env(profile, _repo_session_env(config, record.worktree_path))
+    merged_env = _build_env(
+        profile, _repo_session_env(config, record.worktree_path),
+        work_dir=record.worktree_path,
+    )
 
     # two-step-restore "Bare resume": launch Copilot in the HOME dir instead of
     # the worktree cwd, and skip --resume, so a CLI bug that fails to start
@@ -3279,7 +3333,10 @@ def _resolve_resume(
     if bare_resume:
         plan_work_dir = os.path.expanduser("~")
         launch_cmd = _build_launch_cmd(config, args, plan_work_dir, profile=profile)
-        merged_env = _build_env(profile, _repo_session_env(config, plan_work_dir))
+        merged_env = _build_env(
+            profile, _repo_session_env(config, plan_work_dir),
+            work_dir=plan_work_dir,
+        )
 
     # Auto-resume target: the ONE session Open / Resume / Bare resume all agree
     # on -- the record's asserted lifecycle head when it still has on-disk
@@ -3384,7 +3441,10 @@ def _resolve_new(
         output.dry_run("Would clone permissions")
         output.dry_run("Would add worktree path to trustedFolders")
         launch_cmd = _build_launch_cmd(config, args, worktree_path, profile=profile)
-        merged_env = _build_env(profile, _repo_session_env(config, worktree_path))
+        merged_env = _build_env(
+            profile, _repo_session_env(config, worktree_path),
+            work_dir=worktree_path,
+        )
         output.dry_run(f"Would launch: {' '.join(launch_cmd)}")
         if merged_env:
             env_str = ", ".join(f"{k}={v}" for k, v in merged_env.items())
@@ -5958,14 +6018,18 @@ def cmd_create(args: argparse.Namespace) -> int:
     Copilot -- a daemon uses only the returned ``path``.
     """
     is_system = getattr(args, "system", False)
-    # resource-claims: an explicit --owner-ref flag wins; otherwise inherit the
-    # ambient AGENT_WORKTREES_OWNER_REF injected by a `run` wrapper. Stamped only
-    # on non-system (session) worktrees -- a daemon worktree is not an outbound
-    # resource of another worktree.
+    no_owner = getattr(args, "no_owner", False)
+    # Owner resolution (Ph6): an explicit --owner-ref wins; else the ambient
+    # AGENT_WORKTREES_OWNER_REF (exported at the parent worktree's launch, or by a
+    # `run` wrapper); else infer the enclosing worktree from the CWD -- so a plain
+    # nested `create` from inside a worktree is auto-parented, not orphaned.
+    # --no-owner forces a deliberately top-level worktree; a system worktree is
+    # never an outbound resource of another worktree.
     owner_ref = (
-        None if is_system
+        None if (is_system or no_owner)
         else (getattr(args, "owner_ref", None)
-              or os.environ.get("AGENT_WORKTREES_OWNER_REF") or None)
+              or os.environ.get("AGENT_WORKTREES_OWNER_REF")
+              or _resolve_owner_ref() or None)
     )
     with output.stdout_to_stderr():
         try:
@@ -13022,6 +13086,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "Usually injected by `run` via AGENT_WORKTREES_OWNER_REF; "
                         "the flag is the low-level primitive for scripts/tools "
                         "that already know both sides.")
+    p.add_argument("--no-owner", action="store_true", dest="no_owner",
+                   help="Create a deliberately top-level worktree: do NOT inherit "
+                        "an owner from AGENT_WORKTREES_OWNER_REF or the CWD, so no "
+                        "parent's finalize gate is held on it (Ph6).")
     p.add_argument("--json", action="store_true",
                    help="JSON output mode (stdout is JSON only)")
 

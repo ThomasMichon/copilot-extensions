@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -143,13 +144,19 @@ def _run(args: list[str], *, timeout: float = 45.0) -> subprocess.CompletedProce
 def owner_ref(explicit: str | None = None, session_id: str | None = None) -> str | None:
     """Resolve the qualified ClaimRef holder for the calling worktree.
 
-    An ``explicit`` value wins (e.g. an agent-bridge dispatch passing the caller's
-    ref). Otherwise shell ``agent-worktrees get owner-ref`` (honoring a
-    ``--session-id`` binding). Returns None when unresolvable -- the caller then
-    skips L2 (degrade-safe), preserving L1-only behavior.
+    Resolution order: an ``explicit`` value wins (e.g. an agent-bridge dispatch
+    passing the caller's ref); then the ambient ``AGENT_WORKTREES_OWNER_REF``
+    (exported at the borrowing worktree's session launch -- cwd-independent, so
+    it works even when this borrow runs from the daemon's cwd, Ph6); then shell
+    ``agent-worktrees get owner-ref`` (cwd-inferred, honoring ``--session-id``).
+    Returns None when unresolvable -- the caller then skips L2 (degrade-safe),
+    preserving L1-only behavior.
     """
     if explicit and explicit.strip():
         return explicit.strip()
+    ambient = os.environ.get("AGENT_WORKTREES_OWNER_REF")
+    if ambient and ambient.strip():
+        return ambient.strip()
     args = ["get", "owner-ref"]
     if session_id:
         args += ["--session-id", session_id]
