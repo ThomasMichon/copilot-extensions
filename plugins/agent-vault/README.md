@@ -139,6 +139,32 @@ use; the installer also deploys it as a background service (systemd `--user` uni
 on Linux, a windowless scheduled task on Windows) so `sudo -A` and other
 non-interactive callers work.
 
+### Standalone by default — an external core is optional
+
+agent-vault is **self-contained**. Everything it does — unlocking, reads, writes,
+search, the in-memory master cache, the `keepassxc-cli` tap — runs on the local
+machine using only what its own installer put there. The CLI cold-starts the
+local service on first use; no external process, container, tunnel, broker, or
+network peer is ever required to install or reach it. This is the vision's
+[`standalone-reachability`](../../visions/plugin-services/README.md) behavior.
+
+An **external "core"** — a remote or containerized engine that runs the same
+daemon protocol and coordinates the heavier, machine-crossing work — can be
+*wired in* as an opt-in [client-transport extension](#extensions) (see
+`agent_vault.core_ext`), selected with `AGENT_VAULT_CORE_ENDPOINT` /
+`AGENT_VAULT_CORE_TOKEN`. It is registered as a **fallback**, so:
+
+- **No core wired** → nothing changes; the local service handles every request.
+- **A local daemon is serving** → it wins; the core is never consulted.
+- **A core is wired but slow or unreachable** → the delegated round-trip is
+  **time-bounded** (`AGENT_VAULT_CORE_TIMEOUT`, default 30 s), so a misbehaving
+  optional core can never hang the CLI. It fails fast and the local path /
+  actionable error takes over. This is the vision's `degrade-gracefully`
+  behavior: a failing optional peer degrades a feature, never the whole service.
+
+The master key and the unlocked database never leave the host; the seam is
+loopback/pipe-only and token-bound.
+
 ## Persistent cache (opt-in)
 
 The service's in-memory cache dies on restart and cannot serve reads while the

@@ -281,6 +281,13 @@ def test_send_command_injects_client_kpdb_for_local(run_dir, monkeypatch, empty_
     """A local daemon *does* receive the caller's vault selection (unchanged)."""
     monkeypatch.setattr(cli, "IS_WSL", False)
     monkeypatch.setenv("KPDB", "/local/db.kdbx")
+    # Isolate from any *real* daemon listening on the default port (e.g. a
+    # deployed AgentVault service on the machine running the suite): force the
+    # built-in transports to miss so the request reaches the capture stand-in.
+    # kpdb injection happens in send_command *before* dispatch, so capturing via
+    # the fallback still validates it.
+    monkeypatch.setattr(cli, "_send_socket", lambda request, timeout=5.0, path=None: None)
+    monkeypatch.setattr(cli, "_send_tcp", lambda request, host, port, timeout: None)
     captured: dict = {}
 
     def _capture(request, timeout, ctx):
