@@ -1,22 +1,26 @@
 #!/usr/bin/env bash
-# bootstrap.sh — fetch and launch the copilot-extensions Configurator.
+# bootstrap.sh — fetch, version-install, and launch the copilot-extensions Configurator.
 #
 #   curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/configurator/bootstrap.sh | bash
 #
 # This is delivered OUTSIDE the plugin pipe: it does not require any Copilot
 # plugin to be installed, and does not go through `copilot plugin`. It fetches
-# the Configurator payload and runs it.
+# the Configurator payload, installs it under the SAME versioning convention as
+# the harness's other installers — an immutable ~/.configurator/versions/<ver>
+# slot, a plain-text ~/.configurator/current-version marker, and a
+# ~/.local/bin/configurator binstub — then launches it. Re-running is
+# version-gated (a no-op when already current).
 #
 # Phase 0 assumes git + uv are already present; automatic prerequisite
-# provisioning (installing Python/uv/etc. and prompting for restarts) lands in
-# Phase 2 (issue #355). Override the fetched ref with $CONFIGURATOR_REF.
+# provisioning lands in Phase 2 (issue #355). Override the fetched ref with
+# $CONFIGURATOR_REF and the install root with $CONFIGURATOR_ROOT.
 
 set -euo pipefail
 
 REPO='https://github.com/ThomasMichon/copilot-extensions.git'
 REF="${CONFIGURATOR_REF:-main}"
-ROOT="$HOME/.copilot-extensions-configurator"
-SRC="$ROOT/src"
+ROOT="${CONFIGURATOR_ROOT:-$HOME/.configurator}"
+STAGING="$ROOT/staging"
 
 echo 'copilot-extensions Configurator - bootstrap'
 
@@ -27,13 +31,17 @@ for tool in git uv; do
     fi
 done
 
-mkdir -p "$ROOT"
-if [ -d "$SRC/.git" ]; then
-    git -C "$SRC" fetch --depth 1 origin "$REF" >/dev/null 2>&1
-    git -C "$SRC" checkout -q FETCH_HEAD
+mkdir -p "$STAGING"
+if [ -d "$STAGING/.git" ]; then
+    git -C "$STAGING" fetch --depth 1 origin "$REF" >/dev/null 2>&1
+    git -C "$STAGING" checkout -q FETCH_HEAD
 else
-    git clone --depth 1 --branch "$REF" "$REPO" "$SRC" >/dev/null 2>&1
+    git clone --depth 1 --branch "$REF" "$REPO" "$STAGING" >/dev/null 2>&1
 fi
 
-cd "$SRC/configurator"
+cd "$STAGING/configurator"
+# Version-install the fetched payload (idempotent, version-gated): publishes the
+# versions/<ver> slot + current-version marker + ~/.local/bin binstub.
+uv run --quiet python -m configurator self-install --apply
+# Then run whatever the caller asked for through the freshly-installed app.
 exec uv run --quiet python -m configurator "$@"
