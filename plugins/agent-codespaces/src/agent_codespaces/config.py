@@ -183,6 +183,16 @@ class CredentialsConfig:
     # warning that never aborts an otherwise-healthy SSH+relay session. The relay
     # itself always logs a loud, actionable not-logged-in error regardless.
     enforce_ado_rest_login: bool = True
+    # Env var names to populate at launch from the CodeSpace-side
+    # ``ado-auth-helper get-access-token`` (a relay-minted ADO bearer), so
+    # tooling that authenticates to an Azure Artifacts feed via a static env
+    # token works over the relay. The relay itself only wires *git* auth; a Rush
+    # ``.npmrc`` line like ``//<feed>/:_authToken=${ODSP_NPM_AUTH_TOKEN}`` reads
+    # such a var and, when it is undefined, Rush drops the line -> anonymous ->
+    # E401. Set this to your feed's token var(s), e.g. ``[ODSP_NPM_AUTH_TOKEN]``.
+    # Left empty (default), nothing is exported and behavior is unchanged.
+    # dotfiles#1221.
+    feed_token_env: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -756,6 +766,10 @@ def load_merged_config(include_cwd: bool = True) -> CodespacesConfig:
                 "enforce_ado_rest_login",
                 merged.credentials.enforce_ado_rest_login,
             ))
+            # Union feed-token env var names across adopted repos (dotfiles#1221).
+            for _var in creds_raw.get("feed_token_env", []) or []:
+                if _var and _var not in merged.credentials.feed_token_env:
+                    merged.credentials.feed_token_env.append(_var)
             for source_name, source_raw in creds_raw.get("sources", {}).items():
                 if source_name not in merged.credentials.sources:
                     merged.credentials.sources[source_name] = _parse_credential_source(

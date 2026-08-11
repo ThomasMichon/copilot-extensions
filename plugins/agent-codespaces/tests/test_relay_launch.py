@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from agent_codespaces.relay_launch import (
     SCRUB_ENV_VARS,
+    build_feed_token_exports,
     build_relay_env,
 )
 
@@ -37,6 +38,56 @@ def test_build_relay_env_no_relay_still_scrubs():
     assert "LC_GIT_CREDENTIAL_RELAY" not in env
     assert "auth-error-policy.instructions.md" in env
     assert "COPILOT_CUSTOM_INSTRUCTIONS_DIRS" in env
+
+
+def test_build_feed_token_exports_emits_helper_backed_export():
+    # dotfiles#1221: env-token feed auth (npm/nuget/rush) is bridged from the
+    # relay-minted ADO bearer via the ado-auth-helper.
+    snippet = build_feed_token_exports(["ODSP_NPM_AUTH_TOKEN"])
+    assert (
+        'export ODSP_NPM_AUTH_TOKEN="$($HOME/.local/bin/ado-auth-helper '
+        'get-access-token 2>/dev/null || true)"; ' == snippet
+    )
+
+
+def test_build_feed_token_exports_multiple_and_empty():
+    assert build_feed_token_exports(None) == ""
+    assert build_feed_token_exports([]) == ""
+    assert build_feed_token_exports(["", None]) == ""
+    two = build_feed_token_exports(["A_TOKEN", "B_TOKEN"])
+    assert "export A_TOKEN=" in two and "export B_TOKEN=" in two
+
+
+def test_build_relay_env_exports_feed_token_after_relay():
+    env = build_relay_env(
+        9857,
+        "tok123",
+        use_relay=True,
+        ado_host="example.visualstudio.com",
+        feed_token_env=["ODSP_NPM_AUTH_TOKEN"],
+    )
+    assert "export ODSP_NPM_AUTH_TOKEN=" in env
+    assert "ado-auth-helper get-access-token" in env
+    # The feed-token export MUST come after LC_GIT_CREDENTIAL_RELAY (the helper
+    # needs it to reach the relay).
+    assert env.index("LC_GIT_CREDENTIAL_RELAY=") < env.index(
+        "export ODSP_NPM_AUTH_TOKEN="
+    )
+
+
+def test_build_relay_env_no_feed_token_by_default():
+    env = build_relay_env(9857, "tok123", use_relay=True)
+    assert "ODSP_NPM_AUTH_TOKEN" not in env
+    assert "ado-auth-helper" not in env
+
+
+def test_build_relay_env_no_relay_omits_feed_token():
+    # Without the relay there is no LC_GIT_CREDENTIAL_RELAY for the helper, so
+    # the feed-token export is not emitted either.
+    env = build_relay_env(
+        9857, "tok", use_relay=False, feed_token_env=["ODSP_NPM_AUTH_TOKEN"]
+    )
+    assert "ODSP_NPM_AUTH_TOKEN" not in env
 
 
 def test_build_relay_launch_env(monkeypatch, tmp_path):
