@@ -18,7 +18,12 @@ import sys
 
 from . import __version__
 from .catalog import load_catalog
+from .core_install import core_status, install_command, install_core
 from .model import Model, build_model, coverage, effective_prereqs
+from .prereqs import current_os, detect_baseline, missing
+from .provision import apply as provision_apply
+from .provision import plan as provision_plan
+from .provision import restart_needed
 
 _BANNER = "copilot-extensions Configurator"
 _TAGLINE = "the standalone, out-of-plugin installer & configurator"
@@ -31,8 +36,8 @@ KIND_ORDER = {"core": 0, "service": 1, "library": 2, "knowledge": 3}
 # with the vision's Features and the umbrella's phase issues (#353-#358).
 _ROADMAP = [
     ("0", "out-of-plugin app + one-line bootstrap", "done"),
-    ("1", "know each plugin's prerequisites & config (dependency-free)", "you are here"),
-    ("2", "install prerequisites (restart-aware) + the agent-worktrees core", ""),
+    ("1", "know each plugin's prerequisites & config (dependency-free)", "done"),
+    ("2", "install prerequisites (restart-aware) + the agent-worktrees core", "you are here"),
     ("3", "adopt a first harness repo + discover/register others", ""),
     ("4", "a non-agentic visual configurator (doctor / config / validate)", ""),
     ("5", "Git-referenced presets", ""),
@@ -43,16 +48,16 @@ def _print_intro() -> None:
     print()
     print(f"  {_BANNER}")
     print(f"  {_TAGLINE}")
-    print(f"  version {__version__}  ·  Phase 1 — plugin knowledge")
+    print(f"  version {__version__}  ·  Phase 2 — prerequisites & core install")
     print()
     print("  Build-out roadmap (issue #352):")
     for num, desc, here in _ROADMAP:
         marker = f"  <- {here}" if here else ""
         print(f"    {num}. {desc}{marker}")
     print()
-    print("  Nothing is installed yet. This build knows the plugins (Phase 1);")
-    print("  actually provisioning them lands in Phase 2. Run `configurator")
-    print("  plugins` to see what the installer knows.")
+    print("  Run `configurator doctor` to check prerequisites + the core install,")
+    print("  `configurator setup` to plan it (add --apply to execute), and")
+    print("  `configurator plugins` to see what the installer knows.")
     print()
 
 
@@ -195,29 +200,132 @@ def _cmd_plugins(rest: list[str]) -> int:
     return _print_plugin_detail(model, head)
 
 
+def _prereq_line(s) -> str:
+    if not s.present:
+        state = "optional, absent" if s.optional else "MISSING"
+        mark = "○" if s.optional else "✗"
+    elif not s.satisfied:
+        state = f"{s.version or '?'} < required {s.min_required}"
+        mark = "✗"
+    else:
+        ver = f" {s.version}" if s.version else ""
+        state = f"ok{ver}"
+        mark = "✓"
+    return f"    {mark} {s.name.ljust(9)} {state}"
+
+
+def _cmd_doctor() -> int:
+    statuses = detect_baseline()
+    core = core_status()
+    print()
+    print(f"  {_BANNER} — doctor  (os: {current_os()})")
+    print()
+    print("  prerequisites:")
+    for s in statuses:
+        print(_prereq_line(s))
+    print()
+    print("  agent-worktrees core:")
+    print(f"    state: {core.state}")
+    print(f"    runtime: {core.runtime_dir} "
+          f"({'present' if core.runtime_present else 'absent'}"
+          f"{', venv' if core.venv_present else ''})")
+    print(f"    binstub: {core.binstub or 'not found in ~/.local/bin'}")
+    print()
+    gaps = missing(statuses)
+    if gaps or not core.installed:
+        print("  → not fully set up. Run `configurator setup` to see the plan "
+              "(add --apply to execute).")
+    else:
+        print("  ✓ prerequisites satisfied and the core is installed.")
+    print()
+    return 0 if (not gaps and core.installed) else 1
+
+
+def _cmd_setup(rest: list[str]) -> int:
+    do_apply = "--apply" in rest
+    statuses = detect_baseline()
+    gaps = missing(statuses)
+    actions = provision_plan(gaps)
+    core = core_status()
+
+    print()
+    print(f"  {_BANNER} — setup {'(APPLY)' if do_apply else '(plan / dry-run)'}")
+    print()
+    if not actions:
+        print("  prerequisites: all satisfied — nothing to provision.")
+    else:
+        print("  prerequisites to provision (in order):")
+        for a in actions:
+            tag = "manual" if a.manual else a.method
+            print(f"    - {a.name}  [{tag}]"
+                  f"{'  (restart after)' if a.changes_path else ''}")
+            if a.command:
+                print(f"        $ {a.command}")
+            if a.note:
+                print(f"        {a.note}")
+    results = provision_apply(actions, dry_run=not do_apply)
+    manual = [r for r in results if r.skipped_reason == "manual"]
+
+    print()
+    print("  agent-worktrees core:")
+    cmd = install_command()
+    if core.installed:
+        print("    ✓ already installed (idempotent — nothing to do).")
+    elif cmd is None:
+        print("    ! the real installer needs a copilot-extensions checkout;")
+        print("      run `configurator setup` from (or after adopting) a checkout.")
+    else:
+        print(f"    state: {core.state} → drive the harness's own installer:")
+        print(f"        $ {' '.join(cmd)}")
+    core_res = install_core(dry_run=not do_apply)
+    if do_apply and core_res.ran:
+        print(f"    installer exit code: {core_res.returncode}")
+
+    print()
+    if not do_apply:
+        print("  (plan only — nothing was changed. Re-run with --apply to execute.)")
+    else:
+        if restart_needed(results):
+            print("  ⟳ PATH changed — RESTART your shell (or open a new one) before")
+            print("    continuing so the newly-installed tools are found.")
+        if manual:
+            names = ", ".join(r.action.name for r in manual)
+            print(f"  ! manual prerequisites still needed: {names} — install them, then re-run.")
+    print()
+    # Non-zero while anything remains to be done.
+    done = not gaps and core.installed
+    return 0 if done else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] in ("--version", "-V"):
         print(f"configurator {__version__}")
         return 0
     if args and args[0] in ("--help", "-h"):
-        print("usage: configurator [--version] [--help] [plugins [<name>|--prereqs|--reconcile]]")
+        print("usage: configurator [--version] [--help] <command>")
         print()
         print("The standalone copilot-extensions installer & configurator.")
         print()
         print("commands:")
         print("  (no args)              show the app banner + build-out roadmap")
+        print("  doctor                 report prerequisites + the agent-worktrees core")
+        print("  setup [--apply]        plan (default) or run prereq provisioning + core install")
         print("  plugins                list the plugins the installer knows about")
         print("  plugins <name>         show one plugin's prereqs / config / steps")
         print("  plugins --prereqs      the de-duplicated union of all prerequisites")
         print("  plugins --reconcile    coverage of the discovered membership by the catalog")
         print()
-        print("Phase 1 builds the dependency-free plugin-knowledge model; later")
-        print("phases add prerequisite install, core install, repo adoption/")
-        print("discovery, the visual configurator, and presets (issue #352).")
+        print("Phase 2 adds restart-aware prerequisite provisioning and drives the")
+        print("harness's own core install; later phases add repo adoption/discovery,")
+        print("the visual configurator, and presets (issue #352).")
         return 0
     if args and args[0] == "plugins":
         return _cmd_plugins(args[1:])
+    if args and args[0] == "doctor":
+        return _cmd_doctor()
+    if args and args[0] == "setup":
+        return _cmd_setup(args[1:])
     _print_intro()
     return 0
 
