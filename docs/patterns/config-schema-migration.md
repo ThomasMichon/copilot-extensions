@@ -42,8 +42,9 @@ without bound.
 
 **Scope is machine-local only.** This pattern migrates a plugin's *machine-local*
 YAML (`~/.agent-*/…`). **Repo-committed** config (`machines.yaml`,
-`codespaces.yaml`, in-repo `.agent-worktrees/*`, checked-in `*.mcp.yaml`) is
-**warn-only** on install/update — its migration is an `adopt` concern (see the
+in-repo `.agent-codespaces/config.yaml`, in-repo `.agent-worktrees/*`,
+checked-in `*.mcp.yaml`) is **warn-only** on install/update — its migration is
+an `adopt` concern (see the
 [install-vs-adopt boundary](install-vs-adopt-boundary.md)). SQLite and
 `deploy-manifest.json` already solve their own versioning and are untouched.
 

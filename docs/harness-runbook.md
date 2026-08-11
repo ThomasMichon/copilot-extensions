@@ -173,7 +173,7 @@ the phases below invoke them in order.
 | `copilot-extensions-setup` | install · machine-local | Deploy/refresh the **agent-worktrees + agent-bridge** runtimes (venv + binstub + service) after a payload update |
 | `agent-vault-setup` | install · machine-local | Install/update the **agent-vault** runtime + the `vault-askpass` SUDO_ASKPASS helper |
 | `session-sync-setup` | install · machine-local | Deploy **agent-logger**'s `session-sync` task/timer and its target |
-| `codespaces-setup` | adopt · repo | Create `codespaces.yaml`, adopt repos, configure credential-relay sources |
+| `codespaces-setup` | adopt · repo | Work out of the box on standard CodeSpaces; add a supplementary `.agent-codespaces/config.yaml` only for repos that deviate (adopt, credential-relay sources) |
 | `containers-fleet` | adopt · repo | Configure the `containers.yaml` fleet defaults for **agent-containers** |
 | `efforts-setup` | scaffold · repo | Scaffold `efforts/` + this repo's efforts addendum (Phase 7) |
 | `visions-setup` | scaffold · repo | Scaffold `visions/` + this repo's visions addendum (Phase 7) |

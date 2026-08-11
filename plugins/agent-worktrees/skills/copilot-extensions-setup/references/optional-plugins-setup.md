@@ -41,19 +41,24 @@ agent-codespaces status      # shows runtime, gh CLI, ssh
 
 ## 6. Agent-Codespaces Adopt
 
-Register the repo so agent-codespaces reads `codespaces.yaml` live (CodeSpace
-defaults + credential-relay policy). Run **from inside the repo**.
+**Most repos need no config.** agent-codespaces works out of the box on standard
+CodeSpaces — machine/location defaults, the `/workspaces/<basename>` checkout,
+and the git-credential relay (github.com + ADO) are all convention-derived. Add
+a supplementary `.agent-codespaces/config.yaml` (and adopt it) **only** when a
+repo deviates (a split `*-codespaces` repo, a pinned devcontainer, an ADO host,
+provision hooks). Run **from inside the repo**.
 
 ```bash
 cd /path/to/repo
-agent-codespaces config adopt
+agent-codespaces config init       # scaffold .agent-codespaces/config.yaml (+ auto-adopt)
 agent-codespaces config validate
 agent-codespaces config show
 ```
 
-If the repo has no `codespaces.yaml`, create one first — see the
-`codespaces-setup` skill for the format (defaults, credential sources, per-repo
-overrides).
+For a convention-matching repo, skip the above entirely — see the
+`codespaces-setup` skill for when supplementary config is warranted and its
+format. A legacy repo-root `codespaces.yaml` is still read (relocate it with
+`agent-codespaces config migrate`).
 
 ### Verify relay + bridge integration
 

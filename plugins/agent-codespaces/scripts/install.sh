@@ -512,7 +512,7 @@ do_install() {
     deploy_binstub
 
     # Machine-local config schema migration (idempotent + atomic; never touches
-    # repo-committed codespaces.yaml -- that is an adopt concern). Non-fatal.
+    # repo-committed .agent-codespaces/config.yaml -- that is an adopt concern). Non-fatal.
     PYTHONUTF8=1 "$VENV_PYTHON" -m agent_codespaces config-migrate 2>&1 \
         | sed 's/^/  /' || _warn "Config migration skipped"
 
@@ -680,7 +680,7 @@ do_update() {
     deploy_binstub
 
     # Machine-local config schema migration (idempotent + atomic; never touches
-    # repo-committed codespaces.yaml -- that is an adopt concern). Non-fatal.
+    # repo-committed .agent-codespaces/config.yaml -- that is an adopt concern). Non-fatal.
     PYTHONUTF8=1 "$VENV_PYTHON" -m agent_codespaces config-migrate 2>&1 \
         | sed 's/^/  /' || _warn "Config migration skipped"
 

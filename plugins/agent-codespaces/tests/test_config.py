@@ -1,4 +1,4 @@
-"""Tests for codespaces.yaml config loading and validation."""
+"""Tests for CodeSpace config loading and validation (.agent-codespaces/config.yaml)."""
 
 from __future__ import annotations
 

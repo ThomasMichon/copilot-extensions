@@ -244,9 +244,9 @@ def parse_codespace_plugins(
 
 
 def parse_operator_plugins(
-    entries: Any, declared_by: str = "codespaces.yaml"
+    entries: Any, declared_by: str = ".agent-codespaces/config.yaml"
 ) -> list[CodespacePluginSpec]:
-    """Parse an operator's ``codespace_plugins`` list (from codespaces.yaml).
+    """Parse an operator's ``codespace_plugins`` list (from the repo config).
 
     Same entry shape + tolerance as a manifest's ``codespacePlugins`` array
     (harness-plugin sources are dropped defensively). ``declared_by`` marks the
@@ -291,7 +291,7 @@ def resolve_codespace_plugins(
     and every declaring plugin is recorded in ``declared_by``.
 
     ``extra_specs`` are operator-declared specs (e.g. parsed from the control
-    plane's ``codespaces.yaml`` ``codespace_plugins`` list via
+    plane's ``.agent-codespaces/config.yaml`` ``codespace_plugins`` list via
     :func:`parse_operator_plugins`) merged in on equal footing with the swept
     ones -- the seam an operator uses to put generic plugins (agent-worktrees,
     efforts, ...) on every CodeSpace without editing a shared/repo plugin.json.

@@ -267,7 +267,7 @@ def test_resolve_drops_harness_declarations(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# Operator-declared globals (codespaces.yaml `codespace_plugins`)
+# Operator-declared globals (.agent-codespaces/config.yaml `codespace_plugins`)
 # --------------------------------------------------------------------------
 
 def test_parse_operator_plugins_drops_harness_and_parses():
@@ -282,7 +282,7 @@ def test_parse_operator_plugins_drops_harness_and_parses():
         "agent-worktrees@copilot-extensions",
         "efforts@copilot-extensions",
     ]
-    assert all(s.declared_by == ("codespaces.yaml",) for s in specs)
+    assert all(s.declared_by == (".agent-codespaces/config.yaml",) for s in specs)
     assert all(s.is_global for s in specs)  # no forWorkspaceRepo -> global
 
 

@@ -12,11 +12,12 @@ from the written docs; each becomes a required fix.
 ## Environment assumptions
 - Fresh Windows 11 dev box; nothing from copilot-extensions installed.
 - `my-control-harness` = the teammate's own control repo (start from an empty
-  git repo with a README; this run adds `machines.yaml`, `acp-agents.json`,
-  `codespaces.yaml`). It also serves as the CodeSpaces dotfiles repo.
+  git repo with a README; this run adds `machines.yaml`, `acp-agents.json`, and
+  — only if the team's CodeSpaces repo deviates from convention — a
+  `.agent-codespaces/config.yaml`). It also serves as the CodeSpaces dotfiles repo.
 - Installed & authed: `copilot`, `git`, `gh` (`gh auth login`), Python 3.10+.
-- Access to your team's shared CodeSpaces repo (set in `codespaces.yaml`) and
-  read access to `ThomasMichon/copilot-extensions`.
+- Access to your team's shared CodeSpaces repo and read access to
+  `ThomasMichon/copilot-extensions`.
 
 ## Phase 0 — Baseline
 ```powershell
@@ -80,9 +81,11 @@ agent-worktrees status
 Create topology files (templates: `plugins/agent-bridge/docs/machine-config.md`):
 - `machines.yaml` — this dev box (minimal/local is fine to start).
 - `acp-agents.json` — a `local` agent with `project: my-control-harness`.
-- `codespaces.yaml` — `defaults` (machine_type, location, `ssh_user: vscode`,
-  `workspace_folder: /workspaces/<your-repo>`) + `credentials` sources
-  (`git-credential`, `gh-auth`) + your team's shared CodeSpaces repo entry.
+- `.agent-codespaces/config.yaml` — **only if your CodeSpaces repo deviates from
+  convention** (machine/location default to `largePremiumLinux`/`EastUs`, the
+  checkout to `/workspaces/<basename>`, and the git-credential relay is
+  automatic). For a split `*-codespaces` repo add a `repos:` entry with
+  `workspace_repo`; otherwise skip this file entirely.
 ```powershell
 agent-bridge config adopt --repo <my-control-harness> --profile my-control-harness
 agent-bridge config validate

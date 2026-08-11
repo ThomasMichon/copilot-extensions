@@ -14,8 +14,8 @@ from agent_codespaces.__main__ import (
 )
 
 # Local-only denylist of internal identifiers that must never be baked into a
-# generated codespaces.yaml. The list is sourced **privately** so this public
-# repo carries none of the strings itself:
+# generated .agent-codespaces/config.yaml. The list is sourced **privately** so
+# this public repo carries none of the strings itself:
 #   1. env ``COPILOT_EXTENSIONS_FORBIDDEN_IDS`` (comma-separated), then
 #   2. ``~/.agent-codespaces/forbidden-identifiers.txt`` (one per line; blank
 #      lines and ``#`` comments ignored).

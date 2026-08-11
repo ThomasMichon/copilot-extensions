@@ -1,6 +1,7 @@
 """CodeSpace lifecycle management -- create, delete, list, status.
 
-Wraps ``gh codespace`` commands with configuration from codespaces.yaml.
+Wraps ``gh codespace`` commands with configuration from
+``.agent-codespaces/config.yaml``.
 """
 
 from __future__ import annotations

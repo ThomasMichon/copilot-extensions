@@ -4,7 +4,7 @@ Subcommands:
   ssh <name>            SSH into a CodeSpace (interactive or --stdio)
   list                  List active CodeSpaces
   config adopt          Register current repo for config
-  config init           Scaffold codespaces.yaml from existing CodeSpaces
+  config init           Scaffold .agent-codespaces/config.yaml (+ auto-adopt)
   config show           Show resolved config
   config validate       Validate config
   delete <name>         Delete a CodeSpace (recovers sessions first)
@@ -97,7 +97,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--project", "-p", dest="project", default=None, metavar="REPO",
         help="Resolve as if the cwd were inside REPO's checkout: repo-root "
-             "discovery (e.g. codespaces.yaml) targets REPO instead of the "
+             "discovery (e.g. .agent-codespaces/config.yaml) targets REPO "
+             "instead of the "
              "actual cwd. Injected by the `<repo> <slug>` router (e.g. `<repo> "
              "codespaces …`). A harmless no-op for verbs that take an explicit "
              "CodeSpace name or repo.",
@@ -338,7 +339,7 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "Devcontainer config to build from (e.g. "
             ".devcontainer/devcontainer.json). Only needed when the repo has "
-            "multiple devcontainer configs; overrides codespaces.yaml. "
+            "multiple devcontainer configs; overrides the repo config. "
             "Auto-resolved otherwise."
         ),
     )
@@ -653,7 +654,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # A top-level --project (e.g. injected by the `<repo> <slug>` router) means
     # "resolve as if the cwd were inside REPO's checkout" -- chdir to REPO's
-    # checkout so repo-root discovery (_resolve_repo_root / codespaces.yaml)
+    # checkout so repo-root discovery (_resolve_repo_root / the repo config)
     # targets it. Only the project-consuming verbs (config) actually read from
     # the cwd; on a name/CodeSpace-addressed verb an *explicit* --project bounces
     # (fail loud, #1080) while a router-injected one stays a silent no-op.
@@ -1132,7 +1133,7 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
                 )
 
             # Run repo-declared provision hooks (by-convention extras from the
-            # adopted repo's codespaces.yaml). Best-effort, idempotent.
+            # adopted repo's .agent-codespaces/config.yaml). Best-effort, idempotent.
             await _provision_repo_hooks(
                 manager, args.name, config, getattr(args, "repo", None),
             )
@@ -1522,7 +1523,7 @@ async def _register_codespace_plugins(
     - **user settings (interactive lane):** resolves the harness's
       ``codespacePlugins`` for this CodeSpace's workspace repo -- both those
       swept from installed harness plugins AND the operator-declared
-      ``codespaces.yaml`` ``codespace_plugins`` list
+      ``.agent-codespaces/config.yaml`` ``codespace_plugins`` list
       (:func:`codespace_plugins.resolve_codespace_plugins`) -- and writes them
       into the CodeSpace's user ``~/.copilot/settings.json`` + pre-installs the
       payloads (see :mod:`codespace_register`). Honored by interactive /
@@ -1560,7 +1561,8 @@ async def _register_codespace_plugins(
         repo_settings = repo_copilot_settings(getattr(config, "source_paths", []) or [])
         enabled_names = plugin_names_from_enabled(repo_settings.get("enabledPlugins"))
 
-        # Merge the operator-declared globals (codespaces.yaml `codespace_plugins`)
+        # Merge the operator-declared globals (.agent-codespaces/config.yaml
+        # `codespace_plugins`)
         # with the set swept from installed harness plugins.
         operator_specs = parse_operator_plugins(
             getattr(config, "codespace_plugins", []) or []
@@ -1805,7 +1807,7 @@ async def _provision_repo_hooks(
     """Run repo-declared provision hooks for a CodeSpace over SSH.
 
     Applies the adopted repo's ``provision`` block (global + per-repo,
-    selected by the CodeSpace's repository) from ``codespaces.yaml``.
+    selected by the CodeSpace's repository) from the repo config.
     The repo is taken from ``--repo`` when provided (hot path) and only
     looked up when per-repo hooks actually exist. When
     ``include_on_create`` is set, ``on_create`` commands run too (used
@@ -2046,7 +2048,7 @@ def _cmd_config(args: argparse.Namespace) -> int:
 
 
 # Verbs that actually consume the top-level ``--project``: their cwd/repo-root
-# discovery (``_resolve_repo_root`` -> ``codespaces.yaml``, exercised by
+# discovery (``_resolve_repo_root`` -> the repo config, exercised by
 # ``config init``/``config adopt``) targets the project's checkout. Every other
 # verb is name/CodeSpace-addressed or reads the merged adopted-repo config, so it
 # ignores ``--project`` -- see ``_guard_project_scope``.
@@ -3885,9 +3887,9 @@ def _cmd_relay_profile() -> int:
 def _cmd_config_migrate() -> int:
     """Migrate machine-local config schema (adopted-repos.yaml) in place.
 
-    Idempotent + atomic; machine-local only (never touches repo-committed
-    ``codespaces.yaml`` -- that is an adopt concern). Safe no-op when the
-    vendored ``config_migrate`` library is absent. Invoked once from the
+    Idempotent + atomic; machine-local only (never touches the repo-committed
+    ``.agent-codespaces/config.yaml`` -- that is an adopt concern). Safe no-op
+    when the vendored ``config_migrate`` library is absent. Invoked once from the
     installer's install/update flow.
     """
     from . import config_migrations

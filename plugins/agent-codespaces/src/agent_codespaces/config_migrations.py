@@ -2,11 +2,11 @@
 
 Plugin-side adapter over the vendored ``config_migrate`` library (see
 ``libs/config-migrate``). agent-codespaces keeps almost all configuration in
-**adopting repos** (`codespaces.yaml`) -- that is repo-committed, so migrating
-its schema is an ``adopt`` concern, never install/update. The only
-**machine-local** persisted YAML is the adoption manifest
-``~/.agent-codespaces/adopted-repos.yaml`` (a list of adopted repo paths); that
-is what this module versions.
+**adopting repos** (`.agent-codespaces/config.yaml`, or legacy `codespaces.yaml`)
+-- that is repo-committed, so migrating its schema is an ``adopt`` concern, never
+install/update. The only **machine-local** persisted YAML is the adoption
+manifest ``~/.agent-codespaces/adopted-repos.yaml`` (a list of adopted repo
+paths); that is what this module versions.
 
 Two call sites, one registry (mirroring the agent-worktrees exemplar):
 

@@ -60,8 +60,9 @@ def build_agent_configs(
     """Convert active codespaces to agent-bridge provider agent configs.
 
     Includes Available and Shutdown codespaces.  Each agent's
-    spawn_command uses ``effective_acp_command`` from ``codespaces.yaml``
-    which resolves ``workspace_folder`` into a ``cd`` prefix.
+    spawn_command uses ``effective_acp_command`` from
+    ``.agent-codespaces/config.yaml`` which resolves ``workspace_folder`` into a
+    ``cd`` prefix.
     """
     from .config import load_merged_config
 

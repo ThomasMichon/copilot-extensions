@@ -48,7 +48,8 @@ This is E1d of the `citadel-harness-split` effort (dotfiles#879).
 Binding is the **seam**, not the whole story. The knowledge repo is intended to
 **extend the harness's base `.agent-*` config** as much as practical — it may
 carry its own **`related.yaml` + narratives** (more coordinated repos than the
-name-free harness can list), a **`machines.yaml`**, **`codespaces.yaml`**, and
+name-free harness can list), a **`machines.yaml`**, a
+**`.agent-codespaces/config.yaml`**, and
 other multi-machine topology that is inherently operator-specific. Realizing that
 requires every plugin service/tool that reads harness config to become
 **state-root-aware** and **graft** the knowledge (state-root) repo's config on top

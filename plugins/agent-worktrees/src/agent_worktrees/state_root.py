@@ -211,7 +211,7 @@ def resolve_state_root(
 #                        visions), resolved by ``resolve_state_root`` above.
 #   * knowledge overlay -- the config-graft READ axis: the bound knowledge
 #                        repo's ``.agent-*`` config (related.yaml / machines.yaml
-#                        / codespaces.yaml) extending the harness base.
+#                        / .agent-codespaces/config.yaml) extending the harness base.
 # The overlay REUSES the state-root resolver only to LOCATE the knowledge
 # checkout; it is a separate concept from where personal state is written. A
 # self-hosted repo has a state-root (itself) but grafts NO overlay.
@@ -246,9 +246,9 @@ def config_source_anchors(
 
     This is the **knowledge overlay** (config-graft) seam (E1e): agent-* tools
     that read harness config (``related.yaml``, ``machines.yaml``,
-    ``codespaces.yaml``, ...) should union across these anchors instead of
-    assuming the launch repo is the sole config source. The list is in **overlay
-    order** -- the base (harness / launch) anchor first, then the bound
+    ``.agent-codespaces/config.yaml``, ...) should union across these anchors
+    instead of assuming the launch repo is the sole config source. The list is in
+    **overlay order** -- the base (harness / launch) anchor first, then the bound
     **knowledge repo** when the launch repo requires an external state root -- so
     later sources win on conflict.
 
