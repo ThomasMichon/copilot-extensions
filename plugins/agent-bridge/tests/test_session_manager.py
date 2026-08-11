@@ -210,6 +210,14 @@ async def _start_codespace_session(
     monkeypatch.setattr(
         "agent_bridge.session_manager._resolve_acp_model_flags", fake_resolve,
     )
+    # Isolate the model-flags behavior from the relay prelude: the real
+    # ``_resolve_relay_launch_env`` prepends an auth-scrub/relay setup string to
+    # the remote command, which is orthogonal to what these tests assert. Pin it
+    # to an empty prelude (its own tests cover the prelude itself).
+    monkeypatch.setattr(
+        "agent_bridge.session_manager._resolve_relay_launch_env",
+        lambda *args, **kwargs: ("", None),
+    )
     monkeypatch.setattr(
         "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
         lambda *args, **kwargs: object(),
