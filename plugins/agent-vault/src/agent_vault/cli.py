@@ -1067,6 +1067,92 @@ def cmd_export_key(args):
     return 0
 
 
+def _read_seal_input(args) -> bytes | None:
+    """Read the plaintext/ciphertext payload from --in FILE or stdin."""
+    src = getattr(args, "in_path", None)
+    try:
+        if src and src != "-":
+            return Path(src).read_bytes()
+        return sys.stdin.buffer.read()
+    except OSError as exc:
+        print(f"Error: cannot read input: {exc}", file=sys.stderr)
+        return None
+
+
+def cmd_seal(args):
+    import base64
+
+    if not ensure_service():
+        print("Error: service unreachable", file=sys.stderr)
+        return 1
+    data = _read_seal_input(args)
+    if data is None:
+        return 1
+    resp = send_command({
+        "action": "seal",
+        "name": args.name,
+        "data": base64.b64encode(data).decode(),
+    }, timeout=15.0)
+    if resp and resp.get("ok"):
+        sys.stdout.write(resp["sealed"])
+        if sys.stdout.isatty():
+            sys.stdout.write("\n")
+        return 0
+    error = resp.get("error", "unknown") if resp else "service unreachable"
+    print(f"Error: {error}", file=sys.stderr)
+    return 1
+
+
+def cmd_unseal(args):
+    import base64
+    import binascii
+
+    if not ensure_service():
+        print("Error: service unreachable", file=sys.stderr)
+        return 1
+    blob = _read_seal_input(args)
+    if blob is None:
+        return 1
+    try:
+        sealed = blob.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        print("Error: sealed input is not valid text (expected base64)", file=sys.stderr)
+        return 1
+    resp = send_command({
+        "action": "unseal",
+        "name": args.name,
+        "sealed": sealed,
+    }, timeout=15.0)
+    if resp and resp.get("ok"):
+        try:
+            sys.stdout.buffer.write(base64.b64decode(resp["data"]))
+        except (KeyError, binascii.Error, ValueError):
+            print("Error: malformed service response", file=sys.stderr)
+            return 1
+        return 0
+    error = resp.get("error", "unknown") if resp else "service unreachable"
+    print(f"Error: {error}", file=sys.stderr)
+    return 1
+
+
+def cmd_kek_list(args):
+    if not ensure_service():
+        print("Error: service unreachable", file=sys.stderr)
+        return 1
+    resp = send_command({"action": "kek-list"}, timeout=15.0)
+    if not resp or not resp.get("ok"):
+        error = resp.get("error", "unknown") if resp else "service unreachable"
+        print(f"Error: {error}", file=sys.stderr)
+        return 1
+    keks = resp.get("keks", [])
+    if getattr(args, "json", False):
+        print(json.dumps({"keks": keks}))
+    else:
+        for k in keks:
+            print(k)
+    return 0
+
+
 def _read_cache_manifest(path: Path) -> list[tuple[str, str]]:
     """Parse ``entry | field`` lines (``#`` comments) from a manifest file."""
     pairs: list[tuple[str, str]] = []
@@ -1432,6 +1518,24 @@ def main():
     p.add_argument("dest_dir", help="Destination directory")
     p.add_argument("key_name", help="Key filename (e.g. id_ed25519)")
     p.set_defaults(func=cmd_export_key)
+
+    p = sub.add_parser("seal",
+                       help="Seal stdin (or --in FILE) under an envelope KEK -> base64")
+    p.add_argument("name", help="KEK name (auto-created on first use)")
+    p.add_argument("--in", dest="in_path", metavar="FILE",
+                   help="Read plaintext from FILE instead of stdin ('-' = stdin)")
+    p.set_defaults(func=cmd_seal)
+
+    p = sub.add_parser("unseal",
+                       help="Unseal stdin (or --in FILE) with an envelope KEK -> stdout")
+    p.add_argument("name", help="KEK name")
+    p.add_argument("--in", dest="in_path", metavar="FILE",
+                   help="Read the sealed blob from FILE instead of stdin ('-' = stdin)")
+    p.set_defaults(func=cmd_unseal)
+
+    p = sub.add_parser("kek-list", help="List envelope KEK names")
+    p.add_argument("--json", action="store_true", help="Print JSON")
+    p.set_defaults(func=cmd_kek_list)
 
     p = sub.add_parser("which", help="Show the resolved vault context")
     p.add_argument("--json", action="store_true", help="Print JSON")
