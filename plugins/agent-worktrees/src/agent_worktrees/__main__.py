@@ -12173,12 +12173,10 @@ def cmd_related_dispatch(argv: list[str]) -> int:
 
     if sub == "owners":
         anchors = _related_config_source_anchors(anchor)
-        # Union owned targets across the config-source anchors (base + overlay).
-        seen: dict[str, dict] = {}
-        for a in anchors:
-            for t in related.owned_targets(a):
-                seen.setdefault(t["name"], t)
-        owners = [seen[k] for k in sorted(seen)]
+        # Grafted (base + knowledge overlay) merged view, so a later anchor that
+        # reclassifies a repo correctly overrides -- incl. demoting it out of
+        # 'owned'. See related.owned_targets_grafted.
+        owners = related.owned_targets_grafted(anchors)
         if json_out:
             _json_output({"owned": owners, "count": len(owners)})
         elif not owners:

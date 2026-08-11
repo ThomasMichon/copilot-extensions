@@ -997,8 +997,8 @@ def test_classify_owned_from_operator_login(monkeypatch):
 
 def test_classify_ado_is_internal(monkeypatch):
     _patch_registry(monkeypatch, {
-        "dev.tmichon": "https://onedrive.visualstudio.com/Developer/_git/dev.tmichon"})
-    own, _owner = related.classify_ownership("dev.tmichon")
+        "ado-tools": "https://example.visualstudio.com/Team/_git/ado-tools"})
+    own, _owner = related.classify_ownership("ado-tools")
     assert own == "internal"
 
 
@@ -1022,9 +1022,9 @@ def test_classify_unknown_repo_unclassified(monkeypatch):
 def test_effective_ownership_explicit_wins(monkeypatch):
     # ADO repo derives 'internal', but an explicit 'owned' overrides.
     _patch_registry(monkeypatch, {
-        "dev.tmichon": "https://onedrive.visualstudio.com/Developer/_git/dev.tmichon"})
-    e_owned = RelatedEntry(name="dev.tmichon", ownership="owned")
-    e_unset = RelatedEntry(name="dev.tmichon")
+        "ado-tools": "https://example.visualstudio.com/Team/_git/ado-tools"})
+    e_owned = RelatedEntry(name="ado-tools", ownership="owned")
+    e_unset = RelatedEntry(name="ado-tools")
     assert related.effective_ownership(e_owned) == "owned"
     assert related.effective_ownership(e_unset) == "internal"
 
@@ -1032,31 +1032,49 @@ def test_effective_ownership_explicit_wins(monkeypatch):
 def test_owned_targets_lists_owned_only(tmp_path: Path, monkeypatch):
     _patch_registry(monkeypatch, {
         "dotfiles": "https://github.com/me/dotfiles.git",
-        "dev.tmichon": "https://onedrive.visualstudio.com/Developer/_git/dev.tmichon",
+        "ado-tools": "https://example.visualstudio.com/Team/_git/ado-tools",
         "web": "https://github.com/some-org/web.git",
     }, logins=("me",))
     cfg = RelatedConfig(related={
         "dotfiles": RelatedEntry(name="dotfiles"),                 # derived owned
-        "dev.tmichon": RelatedEntry(name="dev.tmichon", ownership="owned"),  # explicit
+        "ado-tools": RelatedEntry(name="ado-tools", ownership="owned"),  # explicit
         "web": RelatedEntry(name="web"),                          # unclassified
     })
     related.write_related(tmp_path, cfg)
     owned = {t["name"] for t in related.owned_targets(tmp_path)}
-    assert owned == {"dotfiles", "dev.tmichon"}
+    assert owned == {"dotfiles", "ado-tools"}
     # slug is owner/name for github; empty for ADO.
     by_name = {t["name"]: t for t in related.owned_targets(tmp_path)}
     assert by_name["dotfiles"]["slug"] == "me/dotfiles"
-    assert by_name["dev.tmichon"]["slug"] == ""
+    assert by_name["ado-tools"]["slug"] == ""
+
+
+def test_owned_targets_grafted_overlay_demotes(tmp_path: Path, monkeypatch):
+    """A later (overlay) anchor that reclassifies an ``owned`` repo to
+    ``internal`` must drop it from the grafted owned set (overlay precedence)."""
+    _patch_registry(monkeypatch, {
+        "shared": "https://github.com/me/shared.git"}, logins=("me",))
+    base = tmp_path / "base"; overlay = tmp_path / "overlay"
+    base.mkdir(); overlay.mkdir()
+    related.write_related(base, RelatedConfig(related={
+        "shared": RelatedEntry(name="shared", ownership="owned")}))
+    # Single-anchor view: owned.
+    assert [t["name"] for t in related.owned_targets(base)] == ["shared"]
+    # Overlay demotes it -> grafted view drops it.
+    related.write_related(overlay, RelatedConfig(related={
+        "shared": RelatedEntry(name="shared", ownership="internal")}))
+    grafted = related.owned_targets_grafted([base, overlay])
+    assert grafted == []
 
 
 def test_classify_all_fills_unset_only(tmp_path: Path, monkeypatch):
     _patch_registry(monkeypatch, {
         "dotfiles": "https://github.com/me/dotfiles.git",
-        "dev.tmichon": "https://onedrive.visualstudio.com/Developer/_git/dev.tmichon",
+        "ado-tools": "https://example.visualstudio.com/Team/_git/ado-tools",
     }, logins=("me",))
     cfg = RelatedConfig(related={
         "dotfiles": RelatedEntry(name="dotfiles"),
-        "dev.tmichon": RelatedEntry(name="dev.tmichon", ownership="owned"),  # curated
+        "ado-tools": RelatedEntry(name="ado-tools", ownership="owned"),  # curated
     })
     related.write_related(tmp_path, cfg)
     changed = related.classify_all(tmp_path)
@@ -1064,17 +1082,17 @@ def test_classify_all_fills_unset_only(tmp_path: Path, monkeypatch):
     assert names == {"dotfiles"}   # only the unset one
     got = related.read_related(tmp_path)
     assert got.related["dotfiles"].ownership == "owned"
-    assert got.related["dev.tmichon"].ownership == "owned"  # untouched curation
+    assert got.related["ado-tools"].ownership == "owned"  # untouched curation
 
 
 def test_classify_all_overwrite_redoes_explicit(tmp_path: Path, monkeypatch):
     _patch_registry(monkeypatch, {
-        "dev.tmichon": "https://onedrive.visualstudio.com/Developer/_git/dev.tmichon",
+        "ado-tools": "https://example.visualstudio.com/Team/_git/ado-tools",
     }, logins=("me",))
     # Explicitly (mis)marked owned; --overwrite re-derives to internal.
     cfg = RelatedConfig(related={
-        "dev.tmichon": RelatedEntry(name="dev.tmichon", ownership="owned")})
+        "ado-tools": RelatedEntry(name="ado-tools", ownership="owned")})
     related.write_related(tmp_path, cfg)
     changed = related.classify_all(tmp_path, overwrite=True)
-    assert {c["name"] for c in changed} == {"dev.tmichon"}
-    assert related.read_related(tmp_path).related["dev.tmichon"].ownership == "internal"
+    assert {c["name"] for c in changed} == {"ado-tools"}
+    assert related.read_related(tmp_path).related["ado-tools"].ownership == "internal"

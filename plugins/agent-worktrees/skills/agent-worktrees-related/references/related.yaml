@@ -28,10 +28,10 @@ related:
     # at registration from the operator's own gh account logins + the remote,
     # then authoritative; an explicit value always wins over the derivation.
     #   owned    -- operator wholly owns it (own gh namespace, or marked so)
-    #   internal -- Microsoft-internal, not owned (e.g. an ADO org repo)
+    #   internal -- org-internal, not owned (e.g. an enterprise ADO org repo)
     #   external -- public/external, not owned (authored increments get attribution)
     ownership: external
-    owner: some-org                       # resolving operator account (optional)
+    owner: octocat                        # resolving operator account login (optional)
   copilot-extensions:
     role: tooling
     summary: "Source of the plugins this control plane drives."

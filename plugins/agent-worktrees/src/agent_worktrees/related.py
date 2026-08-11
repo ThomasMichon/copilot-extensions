@@ -89,7 +89,7 @@ VALID_DELEGATES = ("agent-bridge", "agent-codespaces", "none")
 #   owned     -- the operator wholly owns the target (their own gh namespace, or
 #                an explicitly-owned repo). No AI-acknowledgement on authored
 #                increments.
-#   internal  -- Microsoft-internal, not owned (e.g. an ADO org repo). No
+#   internal  -- org-internal, not owned (e.g. an enterprise ADO org repo). No
 #                acknowledgement on authored increments, but not the operator's.
 #   external  -- public/external, not owned. Authored increments are
 #                acknowledged.
@@ -690,7 +690,7 @@ def _operator_logins() -> set[str]:
 
 
 def _is_ado_remote(remote: str) -> bool:
-    """Whether a remote is an Azure DevOps / VSTS host (Microsoft-internal)."""
+    """Whether a remote is an Azure DevOps / VSTS host (org-internal)."""
     import re
     r = (remote or "").lower()
     return bool(re.search(r"(\.visualstudio\.com|(^|//|@)[^/]*dev\.azure\.com)", r))
@@ -705,7 +705,7 @@ def classify_ownership(name: str) -> tuple[str, str]:
     human curates rather than the tool guessing wrong:
 
     * gh owner is one of the operator's own account logins -> ``owned``.
-    * an Azure DevOps host -> ``internal`` (Microsoft-internal; the operator can
+    * an Azure DevOps host -> ``internal`` (org-internal; the operator can
       override to ``owned`` for a repo they wholly own, e.g. their own ADO
       plugin marketplace).
     * otherwise -> ``""`` (unclassified) -- e.g. a public github repo the
@@ -721,7 +721,7 @@ def classify_ownership(name: str) -> tuple[str, str]:
     if owner_ns and owner_ns.casefold() in _operator_logins():
         return "owned", owner_ns
     if _is_ado_remote(remote):
-        # Microsoft-internal by host; owner account (if any) via the org map.
+        # org-internal by host; owner account (if any) via the org map.
         return "internal", (repos.resolve_account(reg) or "")
     return "", (repos.resolve_account(reg) or "")
 
@@ -742,9 +742,21 @@ def owned_targets(anchor: str | Path) -> list[dict[str, str]]:
     ``{"name", "remote", "slug", "ownership"}`` -- the wholly-owned targets a
     consumer (e.g. the AI-attribution hook) should treat as the operator's own
     space. ``slug`` is the ``owner/name`` for a github remote (else "")."""
+    return _owned_from_entries(read_related(anchor).related)
+
+
+def owned_targets_grafted(anchors: list[str | Path]) -> list[dict[str, str]]:
+    """Grafted variant of :func:`owned_targets`: computes owned targets from the
+    config-source **merged** view (base + knowledge overlay), so a later anchor
+    that *reclassifies* a repo (e.g. demotes ``owned`` -> ``internal``) correctly
+    drops it -- which a per-anchor union cannot express."""
+    return _owned_from_entries(read_related_grafted(anchors).related)
+
+
+def _owned_from_entries(entries: dict[str, RelatedEntry]) -> list[dict[str, str]]:
     from . import repos
     out: list[dict[str, str]] = []
-    for name, entry in sorted(read_related(anchor).related.items()):
+    for name, entry in sorted(entries.items()):
         if effective_ownership(entry) != "owned":
             continue
         reg = repos.find_repo(name)

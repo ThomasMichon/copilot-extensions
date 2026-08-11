@@ -87,7 +87,7 @@ related:
   `agent-bridge`, `agent-codespaces`, `agent-containers`, or `none`.
 - **`ownership`** -- the operator's ownership posture toward the repo:
   `owned` (the operator wholly owns it -- their own gh namespace, or explicitly
-  marked), `internal` (Microsoft-internal, not owned -- e.g. an ADO org repo),
+  marked), `internal` (org-internal, not owned -- e.g. an enterprise ADO org repo),
   or `external` (public/external, not owned). **Derived once at registration**
   from the operator's own gh account logins + the repo's remote, then treated as
   **authoritative** -- consumers (e.g. the AI-attribution decision) read this
