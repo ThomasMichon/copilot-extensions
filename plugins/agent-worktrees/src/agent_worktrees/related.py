@@ -54,6 +54,7 @@ loaders.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -555,6 +556,78 @@ def get_primary(anchor: str | Path) -> str:
 # State-root config-graft (E1e): union related.yaml across config-source anchors
 # ---------------------------------------------------------------------------
 
+# Installed-plugin config-graft: an installed Copilot plugin can *contribute*
+# named related entries merely by shipping ``.agent-worktrees/related.yaml`` in
+# its payload -- e.g. a ``<repo>-harness`` plugin ships its target repo's
+# CodeSpace locus, so installing the plugin makes ``related resolve <repo>`` work
+# with no hand-authored config. These are the LOWEST-precedence graft layer:
+# any base / knowledge / user entry of the same name overrides a plugin's, and a
+# plugin's ``primary:`` is ignored (a plugin must never dictate the harness
+# primary). See :func:`installed_plugin_related_anchors` +
+# :func:`read_related_grafted`.
+
+# Test/override hook for the installed-plugins root (default ~/.copilot/installed-plugins).
+INSTALLED_PLUGINS_ENV = "AGENT_WORKTREES_INSTALLED_PLUGINS_DIR"
+
+
+def installed_plugins_root() -> Path:
+    """The Copilot CLI installed-plugins directory (override via env for tests)."""
+    override = os.environ.get(INSTALLED_PLUGINS_ENV)
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".copilot" / "installed-plugins"
+
+
+def _has_plugin_manifest(plugin_dir: Path) -> bool:
+    """True if ``plugin_dir`` looks like an installed plugin (has a manifest)."""
+    return (
+        (plugin_dir / "plugin.json").is_file()
+        or (plugin_dir / ".claude-plugin" / "plugin.json").is_file()
+    )
+
+
+def installed_plugin_related_anchors(root: Path | None = None) -> list[str]:
+    """Discover installed plugins that ship a ``.agent-worktrees/related.yaml``.
+
+    Returns each contributing plugin's directory (a valid :func:`read_related`
+    anchor), de-duplicated and sorted deterministically. Tolerates both the
+    marketplace-nested (``<root>/<marketplace>/<plugin>/``) and flat
+    (``<root>/<plugin>/``) installed-plugins layouts. A directory only counts if
+    it also carries a plugin manifest, so an incidental ``.agent-worktrees`` dir
+    elsewhere is ignored.
+
+    These anchors are the lowest-precedence config-graft layer (see the module
+    note above); callers prepend them ahead of the base/knowledge anchors.
+    """
+    base = root or installed_plugins_root()
+    try:
+        if not base.is_dir():
+            return []
+    except OSError:
+        return []
+    rel = f"{INREPO_DIRNAME}/{RELATED_FILENAME}"
+    found: set[str] = set()
+    # marketplace-nested and flat layouts
+    for pattern in (f"*/*/{rel}", f"*/{rel}"):
+        try:
+            for related_yaml in base.glob(pattern):
+                plugin_dir = related_yaml.parent.parent
+                if _has_plugin_manifest(plugin_dir):
+                    found.add(str(plugin_dir))
+        except OSError:
+            continue
+    return sorted(found)
+
+
+def _is_installed_plugin_anchor(anchor: str | Path) -> bool:
+    """True if ``anchor`` resolves to a path under the installed-plugins root."""
+    try:
+        root = installed_plugins_root().resolve()
+        return root in Path(anchor).resolve().parents
+    except OSError:
+        return False
+
+
 def read_related_grafted(anchors: list[str | Path]) -> RelatedConfig:
     """Union ``related.yaml`` across ordered config-source anchors.
 
@@ -562,12 +635,16 @@ def read_related_grafted(anchors: list[str | Path]) -> RelatedConfig:
     contributes its (name-free) base ``related.yaml`` while the bound **knowledge
     repo** contributes the real personal entries. ``anchors`` is the overlay order
     (base first, knowledge overlay last), as produced by
-    :func:`agent_worktrees.state_root.config_source_anchors`.
+    :func:`agent_worktrees.state_root.config_source_anchors`. Installed-plugin
+    anchors (see :func:`installed_plugin_related_anchors`) may be prepended ahead
+    of the base as the lowest-precedence layer.
 
     Merge semantics: later anchors **overlay** earlier ones -- on a name collision
-    the later entry wins wholesale, and the later ``primary`` wins when set. Each
-    returned entry's :attr:`RelatedEntry.origin_anchor` records the anchor it was
-    read from so its narrative ``doc`` still resolves against its own repo (see
+    the later entry wins wholesale, and the later ``primary`` wins when set. A
+    plugin anchor's ``primary`` is **ignored** (a plugin may contribute named
+    entries but never the harness primary). Each returned entry's
+    :attr:`RelatedEntry.origin_anchor` records the anchor it was read from so its
+    narrative ``doc`` still resolves against its own repo (see
     :func:`doc_abs_path`).
 
     A single-anchor list reproduces the pre-graft single-repo behavior exactly, so
@@ -576,7 +653,7 @@ def read_related_grafted(anchors: list[str | Path]) -> RelatedConfig:
     merged = RelatedConfig()
     for anchor in anchors:
         rc = read_related(anchor)
-        if rc.primary:
+        if rc.primary and not _is_installed_plugin_anchor(anchor):
             merged.primary = rc.primary
         for name, entry in rc.related.items():
             entry.origin_anchor = str(anchor)

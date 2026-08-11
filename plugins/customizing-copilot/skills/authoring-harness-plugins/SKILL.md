@@ -134,6 +134,32 @@ plugins/<repo>-harness/
 `version`, and `"skills": "skills/"` (skills auto-discover from the folder). See
 `authoring-skills` for `SKILL.md` frontmatter and the folder convention.
 
+### Contribute the target repo's locus by-install (`.agent-worktrees/related.yaml`)
+
+A `<repo>-harness` plugin **may ship a `.agent-worktrees/related.yaml` in its own
+payload** to contribute its target repo's related entry — `role`, `locus`
+(e.g. a CodeSpace/container venue), and `delegate` — so that **merely installing
+the plugin** makes `agent-worktrees related resolve <repo>` work, with no
+hand-authored config in the operator's control plane. agent-worktrees discovers
+these by convention: it sweeps installed plugins for a shipped
+`.agent-worktrees/related.yaml` and grafts them in as the **lowest-precedence**
+config layer (see agent-worktrees `related.installed_plugin_related_anchors`).
+
+Rules for a plugin-shipped `related.yaml`:
+
+- **Ship only your own repo's entry** (or entries you own) — one `related:` block,
+  keyed by the global-registry name. Don't ship other repos' entries.
+- **Never set `primary:`** — a plugin contributes *named* entries but must never
+  dictate the harness's primary project. Any `primary:` in a plugin payload is
+  ignored by the grafter.
+- **Lowest precedence:** the operator's own base/knowledge/user `related.yaml`
+  entry of the same name **overrides** the plugin's wholesale, so an operator can
+  always tune or replace it.
+- **Provisioning is separate.** This brings *discovery/resolution* (locus +
+  delegate); a venue's own provisioning config (e.g. a CodeSpace's
+  `.agent-codespaces/` vessel block) is a separate concern owned by that venue's
+  plugin.
+
 ### What the two skills should contain
 
 - **`contributing-to-<repo>`** — repo layout; the contribution flow (branch/PR
