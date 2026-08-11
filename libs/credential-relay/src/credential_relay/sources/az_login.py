@@ -112,7 +112,8 @@ class AzLoginSource:
         expires_on=1700000000
 
     Security:
-    - Disabled by default -- must be explicitly enabled in codespaces.yaml
+    - Disabled by default -- must be explicitly enabled in the adopting
+      repo's .agent-*/config.yaml (e.g. .agent-codespaces/config.yaml)
     - Exact-match resource allowlist -- no globbing
     - Tokens are cached until 5 minutes before expiry
     - Token values are never logged (only resource/tenant metadata)
