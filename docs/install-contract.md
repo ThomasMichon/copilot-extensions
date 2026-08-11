@@ -176,10 +176,10 @@ write deploy-manifest.json  (schema_version 3, source block, atomic temp+move)
 > devices, so the marker + pinned binstubs replace it; **on POSIX** the marker is
 > authoritative and a `venv`/`.venv` **symlink** (not a reparse point) still
 > publishes the active slot as the stable runtime-facing path. This is the
-> **default** for every Python runtime plugin; on Windows it is unconditional (the
-> legacy in-place-venv fork was retired with the junction), while the POSIX `.sh`
-> installers still honor an `AGENT_<NAME>_VERSIONED=0` /
-> `COPILOT_EXT_NO_VERSIONED=1` opt-out to a plain in-place venv.
+> **only** layout for every Python runtime plugin, on both OSes: the installers
+> are **always versioned** and the `AGENT_<NAME>_VERSIONED` /
+> `COPILOT_EXT_NO_VERSIONED` opt-out (and the legacy in-place-venv fork it
+> selected) are **retired**.
 > `tools/check-install-contract.py` (run in
 > CI) **enforces** it: every runtime ships a `versioned_runtime.py` primitive
 > **byte-identical to the canonical source**

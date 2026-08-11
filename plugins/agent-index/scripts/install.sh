@@ -198,22 +198,22 @@ ENGINE_SYSTEMD_UNIT="agent-index-engine.service"
 
 # === install-contract:v3 versioned-venv (agent-index: .venv-as-symlink) ===
 # Build each version into versions/<version> and make the historical `.venv`
-# path a symlink into the active slot. Enabled by default (set AGENT_INDEX_VERSIONED=0
-# or COPILOT_EXT_NO_VERSIONED=1 to opt out); COPILOT_EXT_NO_VERSIONED=1 force-disables.
+# path a symlink into the active slot. ALWAYS versioned -- the env opt-out
+# (COPILOT_EXT_NO_VERSIONED / AGENT_INDEX_VERSIONED) and the legacy in-place fork
+# are retired (a symlink is not a reparse point, so no opt-out is needed).
 LINK_DIR="$VENV_DIR"
 LINK_PYTHON="$VENV_PYTHON"
-VERSIONED_RUNTIME=0
+VERSIONED_RUNTIME=1
 SRC_VERSION=""
-if [[ "${COPILOT_EXT_NO_VERSIONED:-}" != "1" && ! "${AGENT_INDEX_VERSIONED:-}" =~ ^(0|false|no|off)$ ]]; then
-    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then
-        SRC_VERSION="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" | head -n1)"
-    fi
-    if [[ -n "$SRC_VERSION" ]]; then
-        VERSIONED_RUNTIME=1
-        VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
-        VENV_PYTHON="$VENV_DIR/bin/python"
-    fi
+if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then
+    SRC_VERSION="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" | head -n1)"
 fi
+if [[ -z "$SRC_VERSION" ]]; then
+    echo "[FAIL] Cannot determine plugin version from pyproject.toml (required for the versioned runtime)." >&2
+    exit 1
+fi
+VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
+VENV_PYTHON="$VENV_DIR/bin/python"
 
 _versioned_activate() {
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0

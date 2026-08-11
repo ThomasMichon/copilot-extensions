@@ -108,9 +108,8 @@ core of the principles above; a reviewer checks a change against these.
   `tools/sync-versioned-runtime.py`),
   it is the **default** for every Python runtime and **enforced** by
   `tools/check-install-contract.py` in CI (a runtime that skips the layout fails);
-  on Windows it is unconditional (the legacy in-place-venv fork was retired with
-  the junction), while the POSIX `.sh` installers still honor an
-  `AGENT_<NAME>_VERSIONED=0` / `COPILOT_EXT_NO_VERSIONED=1` opt-out.
+  it is **always versioned** on both OSes -- the `AGENT_<NAME>_VERSIONED` /
+  `COPILOT_EXT_NO_VERSIONED` opt-out and the legacy in-place-venv fork are retired.
   (Serves *Vision plugin-services §Behaviors/immutable-versioned-runtime*; tracked
   in dotfiles #581.)
 - **A version bump ships the change.** Every plugin change bumps its version in the

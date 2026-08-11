@@ -214,10 +214,10 @@ $BinstubNames = @('session-sync', 'agent-logger', 'collate-session', 'read-sessi
 # make the historical `.venv` path a junction into it, so the binstubs and the
 # scheduled sync task (which launches the windowless pythonw.exe) resolve through
 # the link unchanged. LinkDir/LinkPython/LinkPythonw are the stable `.venv` paths;
-# VenvDir/VenvPython(w) are the versions/<v> slot (build + health-gate). Legacy
-# mode: Link == Venv. Gated behind AGENT_LOGGER_VERSIONED=0 (default ON);
-# COPILOT_EXT_NO_VERSIONED=1 force-disables. scripts/versioned_runtime.py owns the
-# swap + migration + gc.
+# VenvDir/VenvPython(w) are the versions/<v> slot (build + health-gate). ALWAYS
+# versioned -- the env opt-out (COPILOT_EXT_NO_VERSIONED / AGENT_LOGGER_VERSIONED)
+# and the legacy in-place fork are retired; the code below reads neither var.
+# scripts/versioned_runtime.py owns the swap + migration + gc.
 $LinkDir          = $VenvDir
 $LinkPython       = $VenvPython
 $LinkPythonw      = $VenvPythonw

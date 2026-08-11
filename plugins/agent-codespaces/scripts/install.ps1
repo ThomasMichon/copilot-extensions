@@ -217,10 +217,10 @@ $VenvPython      = Join-Path $VenvDir 'Scripts\python.exe'
 # deploy-manifest resolve through the link unchanged. agent-codespaces is a CLI
 # (its SSH ControlMasters are ssh.exe, not python -- they don't lock the venv), so
 # no process to drain. LinkDir/LinkPython is the stable `.venv` path;
-# VenvDir/VenvPython is the versions/<v> slot (build + health-gate). Legacy mode:
-# Link == Venv. Gated behind AGENT_CODESPACES_VERSIONED=0 (default ON);
-# COPILOT_EXT_NO_VERSIONED=1 force-disables. scripts/versioned_runtime.py owns the
-# swap + migration + gc.
+# VenvDir/VenvPython is the versions/<v> slot (build + health-gate). ALWAYS
+# versioned -- the env opt-out (COPILOT_EXT_NO_VERSIONED / AGENT_CODESPACES_VERSIONED)
+# and the legacy in-place fork are retired; the code below reads neither var.
+# scripts/versioned_runtime.py owns the swap + migration + gc.
 $LinkDir          = $VenvDir
 $LinkPython       = $VenvPython
 $VersionedRuntime = $false

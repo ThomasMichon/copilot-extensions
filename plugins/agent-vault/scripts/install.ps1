@@ -226,9 +226,9 @@ $utf8NoBom   = New-Object System.Text.UTF8Encoding $false
 # reference `.venv` -- resolve through the link unchanged. LinkDir/LinkPython is
 # the stable `.venv` path (runtime-facing, never a versions/<v> absolute a `gc`
 # could remove); VenvDir/VenvPython is redirected to the versions/<v> slot
-# (build + health-gate). Legacy mode: Link == Venv (byte-for-byte old behavior).
-# Gated behind AGENT_VAULT_VERSIONED=0 (default ON) until validated;
-# COPILOT_EXT_NO_VERSIONED=1 force-disables. scripts/versioned_runtime.py owns
+# (build + health-gate). ALWAYS versioned -- the env opt-out
+# (COPILOT_EXT_NO_VERSIONED / AGENT_VAULT_VERSIONED) and the legacy in-place fork
+# are retired; the code below reads neither var. scripts/versioned_runtime.py owns
 # the swap + legacy migration + gc.
 $LinkDir          = $VenvDir
 $LinkPython       = $VenvPython

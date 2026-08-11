@@ -276,9 +276,10 @@ $VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
 # through the link unchanged. agent-worktrees is a CLI (no daemon), so there is no
 # running process to drain: a version bump builds a fresh slot and swaps the link.
 # LinkDir/LinkPython is the stable `.venv` path; VenvDir/VenvPython is the
-# versions/<v> slot (build + health-gate). Legacy mode: Link == Venv. Gated behind
-# AGENT_WORKTREES_VERSIONED=0 (default ON); COPILOT_EXT_NO_VERSIONED=1
-# force-disables. scripts/versioned_runtime.py owns the swap + migration + gc.
+# versions/<v> slot (build + health-gate). ALWAYS versioned -- the env opt-out
+# (COPILOT_EXT_NO_VERSIONED / AGENT_WORKTREES_VERSIONED) and the legacy in-place
+# fork are retired; the code below reads neither var. scripts/versioned_runtime.py
+# owns the swap + migration + gc.
 $LinkDir          = $VenvDir
 $LinkPython       = $VenvPython
 $VersionedRuntime = $false
