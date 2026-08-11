@@ -18,7 +18,6 @@ Configurator absent.
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass
 from importlib.resources import files
@@ -104,27 +103,6 @@ class Catalog:
         return tuple(p.name for p in self.plugins)
 
 
-@dataclass(frozen=True)
-class ReconcileReport:
-    """Result of reconciling the catalog against a repo checkout."""
-
-    #: In the marketplace but missing from the catalog (the installer is behind).
-    missing_from_catalog: tuple[str, ...] = ()
-    #: In the catalog but not in the marketplace (a phantom / renamed entry).
-    unknown_in_marketplace: tuple[str, ...] = ()
-    #: (plugin, prereq) the plugin's service.yaml declares but the catalog does
-    #: not carry as source == "published".
-    published_prereq_gaps: tuple[tuple[str, str], ...] = ()
-
-    @property
-    def ok(self) -> bool:
-        return not (
-            self.missing_from_catalog
-            or self.unknown_in_marketplace
-            or self.published_prereq_gaps
-        )
-
-
 def _prereq(d: dict) -> Prereq:
     return Prereq(
         name=d["name"],
@@ -176,18 +154,14 @@ def find_repo_root(start: str | Path | None = None) -> Path | None:
 
     Returns the repo root if one is found (it carries ``.github/plugin/
     marketplace.json`` and a ``plugins/`` tree), else ``None`` — the Configurator
-    may run with no checkout present, in which case reconcile is simply skipped.
+    may run with no checkout present, in which case discovery falls back to the
+    remote marketplace (see :mod:`discovery`).
     """
     here = Path(start) if start is not None else Path(__file__).resolve()
     for d in (here, *here.parents):
         if (d / ".github" / "plugin" / "marketplace.json").is_file() and (d / "plugins").is_dir():
             return d
     return None
-
-
-def _marketplace_names(repo_root: Path) -> list[str]:
-    data = json.loads((repo_root / ".github" / "plugin" / "marketplace.json").read_text("utf-8"))
-    return [p["name"] for p in data.get("plugins", [])]
 
 
 # service.yaml is small + regular; parse just its `prereqs:` block without adding
@@ -210,32 +184,6 @@ def published_prereq_names(repo_root: Path, plugin_name: str) -> list[str]:
     if not block:
         return []
     return [m.group(1).strip() for m in _PREREQ_NAME.finditer(block.group(1))]
-
-
-def reconcile(catalog: Catalog, repo_root: Path | None = None) -> ReconcileReport | None:
-    """Reconcile the catalog against a repo checkout's published metadata.
-
-    Returns ``None`` when no checkout is available (nothing to reconcile against).
-    Otherwise checks catalog↔marketplace membership and that every prereq a
-    plugin publishes in its service.yaml is represented in the catalog as
-    ``source == "published"``.
-    """
-    root = repo_root or find_repo_root()
-    if root is None:
-        return None
-    market = set(_marketplace_names(root))
-    cat = set(catalog.names)
-    gaps: list[tuple[str, str]] = []
-    for plugin in catalog.plugins:
-        have = {p.name for p in plugin.published_prereqs}
-        for name in published_prereq_names(root, plugin.name):
-            if name not in have:
-                gaps.append((plugin.name, name))
-    return ReconcileReport(
-        missing_from_catalog=tuple(sorted(market - cat)),
-        unknown_in_marketplace=tuple(sorted(cat - market)),
-        published_prereq_gaps=tuple(gaps),
-    )
 
 
 def all_prereqs(catalog: Catalog, include_optional: bool = True) -> list[Prereq]:

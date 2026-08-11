@@ -1,25 +1,33 @@
 # Installer-owned declarative plugin-knowledge catalog (Phase 1, effort
 # installer-configurator / umbrella #352, resolves DQ2).
 #
-# This file is the Configurator's OWN source of truth about the plugins: their
+# This file is the Configurator's OWN knowledge overlay about the plugins: their
 # prerequisites, the config they manage, and the "what to do" to make each one
 # ready. It is DATA, not code, and it lives INSIDE the configurator payload.
 #
+# Membership is DISCOVERED, not frozen here. `discovery.py` reads which plugins
+# exist from the marketplace (a nearby checkout, else the remote published ref);
+# `model.py` overlays these entries onto that discovered membership. A discovered
+# plugin with no entry here is kept with inferred defaults — so this catalog only
+# needs to carry the knowledge the installer ADDS beyond what discovery yields.
+#
 # The dependency-free boundary (one-way awareness):
-#   * The Configurator *knows about* the plugins through this catalog. No plugin
-#     is imported, and no plugin is required to publish anything installer-
-#     specific for this catalog to exist. A plugin behaves identically whether or
-#     not the Configurator is present.
+#   * The Configurator *knows about* the plugins through discovery + this overlay.
+#     No plugin is imported, and no plugin is required to publish anything
+#     installer-specific. A plugin behaves identically whether or not the
+#     Configurator is present.
 #   * Where a plugin ALREADY publishes generic metadata for its OWN reasons
 #     (`scripts/service.yaml` prereqs, the marketplace entry), the Configurator
-#     reconciles this catalog against it opportunistically (see catalog.py
-#     `reconcile`) — reading it if a checkout is present, ignoring it otherwise.
-#     A prereq tagged `source = "published"` is one the plugin itself declares in
-#     its service.yaml; `source = "installer"` is knowledge the Configurator adds.
+#     reads it opportunistically. A prereq tagged `source = "published"` is one
+#     the plugin itself declares in its service.yaml; `source = "installer"` is
+#     knowledge this catalog adds.
 #
-# When a plugin is added to / removed from the marketplace, update this catalog
-# to match — the reconcile check (and its test) is the forcing function that
-# keeps "the installer knows about the plugins" honest.
+# `configurator plugins --reconcile` reports COVERAGE of the discovered
+# membership by this overlay: `uncovered` (discovered but not authored here —
+# running on inference; fine) vs. `phantom` (authored here but not discovered —
+# a rename/removal to fix) vs. published-prereq drift. Keep this in step by
+# adding an entry when a plugin needs installer knowledge beyond the inferred
+# default.
 
 schema_version = 1
 
