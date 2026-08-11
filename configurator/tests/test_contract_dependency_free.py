@@ -48,14 +48,16 @@ def test_configurator_imports_no_plugin_code_statically():
 
 
 def test_loading_the_catalog_pulls_in_no_plugin_runtime():
-    # Fresh: nothing plugin-side should be imported by exercising the catalog.
+    # Fresh: nothing plugin-side should be imported by exercising the model.
     before = set(sys.modules)
-    cat = load_catalog()
-    # Touch every code path that reads plugin-published metadata.
+    load_catalog()
+    # Touch every code path that reads plugin-published metadata (discovery +
+    # overlay + coverage), staying local (no network) when a checkout is present.
     root = find_repo_root()
     if root is not None:
-        from configurator.catalog import reconcile
-        reconcile(cat, root)
+        from configurator.model import build_model, coverage
+        build_model(repo_root=root, allow_remote=False)
+        coverage(repo_root=root, allow_remote=False)
     leaked = [
         m for m in (set(sys.modules) - before)
         if m.split(".")[0] in _PLUGIN_RUNTIME_PREFIXES

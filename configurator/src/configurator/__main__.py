@@ -17,13 +17,8 @@ from __future__ import annotations
 import sys
 
 from . import __version__
-from .catalog import (
-    Catalog,
-    all_prereqs,
-    find_repo_root,
-    load_catalog,
-    reconcile,
-)
+from .catalog import load_catalog
+from .model import Model, build_model, coverage, effective_prereqs
 
 _BANNER = "copilot-extensions Configurator"
 _TAGLINE = "the standalone, out-of-plugin installer & configurator"
@@ -70,28 +65,49 @@ def _fmt_prereq(pr) -> str:
     return " ".join(bits)
 
 
-def _print_plugins_table(cat: Catalog) -> None:
+def _source_line(model: Model) -> str:
+    s = model.source
+    if s.kind == "checkout":
+        return f"discovered from checkout: {s.detail}"
+    if s.kind == "remote":
+        return f"discovered from remote marketplace: {s.detail}"
+    return "no marketplace reachable — showing the authored catalog (unconfirmed)"
+
+
+def _print_plugins_table(model: Model) -> None:
     print()
-    print(f"  {_BANNER} — plugin knowledge (installer-owned catalog)")
-    print(f"  schema v{cat.schema_version} · {len(cat.plugins)} plugins")
+    print(f"  {_BANNER} — effective plugin model")
+    authored = sum(1 for ep in model.plugins if ep.authored)
+    inferred = len(model.plugins) - authored
+    print(f"  {len(model.plugins)} plugins · {authored} authored · {inferred} inferred")
+    print(f"  {_source_line(model)}")
     print()
-    width = max((len(p.name) for p in cat.plugins), default=0)
-    for p in sorted(cat.plugins, key=lambda x: (KIND_ORDER.get(x.kind, 99), x.name)):
+    width = max((len(ep.plugin.name) for ep in model.plugins), default=0)
+    for ep in sorted(model.plugins,
+                     key=lambda e: (KIND_ORDER.get(e.plugin.kind, 99), e.plugin.name)):
+        p = ep.plugin
         prereqs = ", ".join(_fmt_prereq(pr) for pr in p.prereqs) or "—"
-        print(f"    {p.name.ljust(width)}  [{p.kind}]  {prereqs}")
+        mark = "  " if ep.authored else " *"
+        print(f"   {mark}{p.name.ljust(width)}  [{p.kind}]  {prereqs}")
+    if inferred:
+        print()
+        print("  * = discovered but not in the authored catalog — running on inferred")
+        print("    defaults. Add an entry to data/plugins.toml to teach the installer.")
     print()
     print("  `configurator plugins <name>` for detail · "
-          "`--prereqs` for the union · `--reconcile` vs the checkout.")
+          "`--prereqs` for the union · `--reconcile` for coverage.")
     print()
 
 
-def _print_plugin_detail(cat: Catalog, name: str) -> int:
-    p = cat.get(name)
-    if p is None:
-        print(f"error: unknown plugin {name!r}. Known: {', '.join(cat.names)}")
+def _print_plugin_detail(model: Model, name: str) -> int:
+    ep = model.get(name)
+    if ep is None:
+        print(f"error: unknown plugin {name!r}. Known: {', '.join(model.names)}")
         return 2
+    p = ep.plugin
     print()
-    print(f"  {p.name}  [{p.kind}]")
+    tag = "authored" if ep.authored else "inferred (no catalog entry yet)"
+    print(f"  {p.name}  [{p.kind}]  · {tag}")
     if p.summary:
         print(f"  {p.summary}")
     if p.depends_on:
@@ -118,63 +134,65 @@ def _print_plugin_detail(cat: Catalog, name: str) -> int:
     return 0
 
 
-def _print_prereqs(cat: Catalog) -> None:
+def _print_prereqs(model: Model) -> None:
+    cat = load_catalog()
     print()
     print("  Prerequisites across the whole harness (baseline + all plugins):")
     print()
-    for pr in all_prereqs(cat):
+    for pr in effective_prereqs(model, cat.baseline_prereqs):
         note = f" — {pr.notes}" if pr.notes else ""
         print(f"    - {_fmt_prereq(pr)}{note}")
     print()
 
 
-def _print_reconcile(cat: Catalog) -> int:
-    root = find_repo_root()
-    if root is None:
-        print("no copilot-extensions checkout found nearby — nothing to reconcile "
-              "against (this is fine; the catalog stands alone).")
-        return 0
-    report = reconcile(cat, root)
-    assert report is not None
-    print(f"  Reconciling the catalog against {root} …")
+def _print_reconcile() -> int:
+    cov = coverage()
     print()
-    if report.ok:
-        print("  ✓ catalog is in sync with the marketplace and published prereqs.")
+    print(f"  Catalog coverage of the discovered membership (source: {cov.source_kind}).")
+    print()
+    if cov.source_kind == "none":
+        print("  no marketplace reachable (no checkout, remote fetch failed) — "
+              "cannot confirm membership. The authored catalog still stands alone.")
         print()
         return 0
-    if report.missing_from_catalog:
-        print("  ✗ in the marketplace but MISSING from the catalog "
-              "(add them so the installer knows about them):")
-        for n in report.missing_from_catalog:
+    if cov.uncovered:
+        print("  ○ discovered but NOT in the authored catalog (running on inferred")
+        print("    defaults — add an entry to data/plugins.toml to teach the installer):")
+        for n in cov.uncovered:
             print(f"      - {n}")
-    if report.unknown_in_marketplace:
-        print("  ✗ in the catalog but NOT in the marketplace (phantom/renamed):")
-        for n in report.unknown_in_marketplace:
+    if cov.phantom:
+        print("  ✗ in the authored catalog but NOT discovered (phantom/renamed — fix it):")
+        for n in cov.phantom:
             print(f"      - {n}")
-    if report.published_prereq_gaps:
+    if cov.published_prereq_gaps:
         print("  ✗ a plugin publishes a prereq the catalog does not carry as "
               "source=\"published\":")
-        for plug, pr in report.published_prereq_gaps:
+        for plug, pr in cov.published_prereq_gaps:
             print(f"      - {plug}: {pr}")
+    if cov.ok and not cov.uncovered:
+        print("  ✓ every discovered plugin has an authored catalog entry; no drift.")
+    elif cov.ok:
+        print()
+        print("  ✓ no errors (uncovered plugins are handled by inference).")
     print()
-    return 1
+    return 0 if cov.ok else 1
 
 
 def _cmd_plugins(rest: list[str]) -> int:
-    cat = load_catalog()
-    if not rest:
-        _print_plugins_table(cat)
-        return 0
-    head = rest[0]
-    if head in ("--prereqs", "-p"):
-        _print_prereqs(cat)
-        return 0
+    head = rest[0] if rest else ""
     if head in ("--reconcile", "-r"):
-        return _print_reconcile(cat)
+        return _print_reconcile()
+    model = build_model()
+    if not rest:
+        _print_plugins_table(model)
+        return 0
+    if head in ("--prereqs", "-p"):
+        _print_prereqs(model)
+        return 0
     if head.startswith("-"):
         print(f"error: unknown option {head!r} for `plugins`.")
         return 2
-    return _print_plugin_detail(cat, head)
+    return _print_plugin_detail(model, head)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -192,7 +210,7 @@ def main(argv: list[str] | None = None) -> int:
         print("  plugins                list the plugins the installer knows about")
         print("  plugins <name>         show one plugin's prereqs / config / steps")
         print("  plugins --prereqs      the de-duplicated union of all prerequisites")
-        print("  plugins --reconcile    check the catalog against a nearby checkout")
+        print("  plugins --reconcile    coverage of the discovered membership by the catalog")
         print()
         print("Phase 1 builds the dependency-free plugin-knowledge model; later")
         print("phases add prerequisite install, core install, repo adoption/")
