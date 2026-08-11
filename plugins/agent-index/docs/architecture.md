@@ -28,9 +28,9 @@ The plugin follows the service model's **immutable-versioned-runtime** and
 **zero-downtime-cutover** behaviors:
 
 - **Executable logic** installs as an **immutable, versioned runtime** selected by
-  an atomic `current` junction swap (`scripts/versioned_runtime.py`). A version is
-  never mutated in place; a new version installs beside the old and is selected
-  atomically.
+  an atomic `current-version` marker publish (`scripts/versioned_runtime.py`). A
+  version is never mutated in place; a new version installs beside the old and is
+  selected atomically (on Windows via the marker alone — no junction).
 - **Durable data** — the index/store, embeddings, and indexing work-state — lives
   in a **separate durable location** (`~/.agent-index/data/`, outside the swapped
   runtime) so a version cutover or rollback never touches it. It stays

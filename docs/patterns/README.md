@@ -93,9 +93,12 @@ core of the principles above; a reviewer checks a change against these.
   `~/.copilot/installed-plugins/…` or a runtime dir is forbidden.
 - **Runtime installs are immutable and versioned.** An installer never mutates a
   runtime venv in place. A new version is built into its **own** directory beside
-  the old one and the active version is selected by an **atomic** `current`
-  junction (Windows) / symlink (POSIX) swap; a running service keeps serving its
-  own immutable files until it is cut over or retired, and rollback is a swap back,
+  the old one and the active version is published by an **atomic** `current-version`
+  **marker file** (on Windows there is no junction at all — a reparse point was
+  blocked by RedirectionGuard/WinError 448 on managed devices; POSIX keeps a
+  `venv`/`.venv` symlink into the active slot, but the marker is authoritative); a
+  running service keeps serving its own immutable files until it is cut over or
+  retired, and rollback is a marker rewrite,
   not a rebuild. Concurrent live versions are reconciled by drain-and-cutover +
   shared routing/port state, never by racing to overwrite one install — so a
   concurrent-update corruption (duplicate/broken daemons) cannot happen by
@@ -105,8 +108,9 @@ core of the principles above; a reviewer checks a change against these.
   `tools/sync-versioned-runtime.py`),
   it is the **default** for every Python runtime and **enforced** by
   `tools/check-install-contract.py` in CI (a runtime that skips the layout fails);
-  opt out per-plugin with `AGENT_<NAME>_VERSIONED=0` or globally with
-  `COPILOT_EXT_NO_VERSIONED=1`.
+  on Windows it is unconditional (the legacy in-place-venv fork was retired with
+  the junction), while the POSIX `.sh` installers still honor an
+  `AGENT_<NAME>_VERSIONED=0` / `COPILOT_EXT_NO_VERSIONED=1` opt-out.
   (Serves *Vision plugin-services §Behaviors/immutable-versioned-runtime*; tracked
   in dotfiles #581.)
 - **A version bump ships the change.** Every plugin change bumps its version in the

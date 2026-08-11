@@ -164,15 +164,23 @@ write deploy-manifest.json  (schema_version 3, source block, atomic temp+move)
 ```
 
 > **Immutable-versioned layout (dotfiles #581 — the default; enforced).** The
-> single `~/.<runtime>/.venv` above is an **immutable, versioned** layout: each
-> version is built into `~/.<runtime>/versions/<version>/` and the runtime path is
-> a `.venv`/`venv`/`current` junction (Windows) / symlink (POSIX) into the active
-> one, so `update` builds a new version dir and **atomically swaps** the link
-> instead of mutating a live venv (binding invariant *Runtime installs are
-> immutable and versioned* — see [`patterns/README.md`](patterns/README.md)). This
-> is the **default** for every Python runtime plugin (opt out per-plugin with
-> `AGENT_<NAME>_VERSIONED=0`, or globally with `COPILOT_EXT_NO_VERSIONED=1`, which
-> falls back to a plain in-place venv). `tools/check-install-contract.py` (run in
+> `~/.<runtime>/.venv` above is really an **immutable, versioned** layout: each
+> version is built into `~/.<runtime>/versions/<version>/`, and the active one is
+> published by a `~/.<runtime>/current-version` **plain-text marker file**. The
+> installer re-points its **version-pinned binstubs** (+ scheduled task / deploy
+> manifest) straight at `versions/<version>/…`, so `update` builds a new version
+> dir and **republishes the marker** instead of mutating a live venv (binding
+> invariant *Runtime installs are immutable and versioned* — see
+> [`patterns/README.md`](patterns/README.md)). **On Windows there is no junction at
+> all** — a reparse point was blocked by RedirectionGuard (WinError 448) on managed
+> devices, so the marker + pinned binstubs replace it; **on POSIX** the marker is
+> authoritative and a `venv`/`.venv` **symlink** (not a reparse point) still
+> publishes the active slot as the stable runtime-facing path. This is the
+> **default** for every Python runtime plugin; on Windows it is unconditional (the
+> legacy in-place-venv fork was retired with the junction), while the POSIX `.sh`
+> installers still honor an `AGENT_<NAME>_VERSIONED=0` /
+> `COPILOT_EXT_NO_VERSIONED=1` opt-out to a plain in-place venv.
+> `tools/check-install-contract.py` (run in
 > CI) **enforces** it: every runtime ships a `versioned_runtime.py` primitive
 > **byte-identical to the canonical source**
 > (`libs/versioned-runtime/versioned_runtime.py`, vendored in by
@@ -188,10 +196,14 @@ write deploy-manifest.json  (schema_version 3, source block, atomic temp+move)
 2. **No `PYTHONPATH` to a `lib/` dir.** A binstub that points `PYTHONPATH` at a
    loose `…/lib` dir and runs `python -m <pkg>` is forbidden — the package must
    be `uv pip install`ed into the venv's site-packages (rule 1), not imported
-   off a sidecar path. How the binstub launches differs by OS:
-   - **Linux/WSL:** `exec` the venv's console script (`…/.venv/bin/<name>`) — a
-     shebang script, no Smart App Control concern.
-   - **Windows:** launch `…\.venv\Scripts\python.exe -m <pkg>`, **never** the
+   off a sidecar path. How the binstub launches differs by OS (both resolve the
+   active slot from the `current-version` marker — Windows directly, POSIX through
+   the `venv`/`.venv` symlink that publishes it):
+   - **Linux/WSL:** `exec` the active slot's console script
+     (`…/versions/<v>/bin/<name>`, reachable via the `.venv` symlink) — a shebang
+     script, no Smart App Control concern.
+   - **Windows:** launch `…\versions\<v>\Scripts\python.exe -m <pkg>` (resolved via
+     the `current-version` marker — there is no `.venv` junction), **never** the
      generated `…\Scripts\<name>.exe` console-script trampoline. That trampoline
      is an unsigned, zero-reputation PE that Smart App Control blocks
      (CodeIntegrity 3077). See [SAC-safe launchers (Windows)](#sac-safe-launchers-windows).
@@ -267,7 +279,7 @@ download degrades to "failed + retryable" rather than wedging. Backstop:
 ### Completion marker — no corpse reuse, clean retry
 
 Completion was inferred only from the runtime-root `deploy-manifest.json` /
-`running-version.json` + the active junction. A killed/crashed build left a
+`running-version.json` + the active-version marker. A killed/crashed build left a
 **half-built `versions/<v>` slot** on disk that the next `uv venv --allow-existing`
 could silently reuse.
 
@@ -280,7 +292,8 @@ build"), owned by the shared `versioned_runtime.py`:
   the current/active slot); `toss-incomplete` / `gc --toss-incomplete` reap markerless
   non-current slots.
 
-Because **activate (junction swap) runs only after the health gate + marker**, a
+Because **activate (marker publish + binstub re-point) runs only after the health
+gate + marker**, a
 watchdog-killed build never becomes the live version — the old daemon keeps serving,
 and the markerless corpse is tossed + rebuilt on the next run (automatic retry).
 

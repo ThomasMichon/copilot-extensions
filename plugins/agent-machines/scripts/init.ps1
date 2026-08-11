@@ -201,13 +201,15 @@ if ($env:OS -eq 'Windows_NT') {
 
 # === install-contract:v3 versioned-venv -- keep byte-identical across plugins ===
 # Immutable per-version runtime (#581): build the venv into versions/<version>
-# and make the historical `.venv` path a junction (Windows) / symlink (POSIX) into
-# it, so the binstub + deploy-manifest (which reference `.venv`) resolve through
-# the link unchanged -- only *where* the venv physically lives and *how* it is
-# activated change. `.venv` stays the stable reference; a version bump builds a new
-# slot beside the old one and atomically swaps the link (never mutates a live
-# venv). Opt out with COPILOT_EXT_NO_VERSIONED=1 (falls back to a plain in-place
-# `.venv`). The scripts/versioned_runtime.py primitive owns the swap + migration.
+# and publish the active one via the `<root>/current-version` plain-text marker.
+# On Windows there is NO junction at all -- a reparse point was blocked by
+# RedirectionGuard (WinError 448) on managed devices -- so the version-pinned
+# binstub + deploy-manifest resolve the active slot straight from the marker. On
+# POSIX a `.venv` symlink (not a reparse point) still publishes the active slot,
+# but the marker is authoritative. A version bump builds a new slot beside the old
+# one and republishes the marker (never mutates a live venv). The version opt-out
+# is retired on Windows (always versioned). scripts/versioned_runtime.py owns the
+# marker publish + migration.
 $LinkDir = $VenvDir                       # stable path the binstub/manifest reference
 $LinkPython = $VenvPython
 $VersionedRuntime = $true  # always versioned (junction-free marker model; COPILOT_EXT_NO_VERSIONED retired)
