@@ -416,7 +416,11 @@ async def _cleanup_worktree(target: SpawnTarget, turn_count: int) -> None:
     env["PYTHONUTF8"] = "1"
     env["WORKTREE_PROJECT"] = target.project
 
-    cmd = [python, "-m", "agent_worktrees", "cleanup", "--clean", "--include-unused"]
+    # Global --project (before the subcommand); the ambient $WORKTREE_PROJECT
+    # identity fallback was retired (cwd-resolution Phase 3) and this cleanup
+    # runs from a neutral daemon cwd outside the target repo.
+    cmd = [python, "-m", "agent_worktrees", "--project", target.project,
+           "cleanup", "--clean", "--include-unused"]
     log.info("Cleaning up unused worktrees (session %s was 0-turn): %s", worktree_id, " ".join(cmd))
 
     try:
