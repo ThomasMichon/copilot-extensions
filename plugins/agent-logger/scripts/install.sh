@@ -166,21 +166,20 @@ warn() { log "WARN" "$1"; }
 # make the `.venv` path a symlink into it, so the binstub symlinks, the systemd
 # timer unit, and the deploy-manifest resolve through the link. LINK_DIR is the
 # stable `.venv` path; VENV is redirected to the versions/<v> slot (build +
-# health-gate). Legacy mode: LINK_DIR == VENV. Gated behind
-# AGENT_LOGGER_VERSIONED=0 (default ON); scripts/versioned_runtime.py owns the
-# swap + migration + gc.
+# health-gate). ALWAYS versioned -- the env opt-out (COPILOT_EXT_NO_VERSIONED /
+# AGENT_LOGGER_VERSIONED) and the legacy in-place fork are retired;
+# scripts/versioned_runtime.py owns the swap + migration + gc.
 LINK_DIR="$VENV"
-VERSIONED_RUNTIME=0
+VERSIONED_RUNTIME=1
 SRC_VERSION=""
-if [[ "${COPILOT_EXT_NO_VERSIONED:-}" != "1" && ! "${AGENT_LOGGER_VERSIONED:-}" =~ ^(0|false|no|off)$ ]]; then
-    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then
-        SRC_VERSION="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" | head -n1)"
-    fi
-    if [[ -n "$SRC_VERSION" ]]; then
-        VERSIONED_RUNTIME=1
-        VENV="$INSTALL_DIR/versions/$SRC_VERSION"
-    fi
+if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then
+    SRC_VERSION="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" | head -n1)"
 fi
+if [[ -z "$SRC_VERSION" ]]; then
+    echo "[FAIL] Cannot determine plugin version from pyproject.toml (required for the versioned runtime)." >&2
+    exit 1
+fi
+VENV="$INSTALL_DIR/versions/$SRC_VERSION"
 
 _versioned_activate() {
     # Health-gate the slot, swap the `.venv` symlink onto it (first migration moves
