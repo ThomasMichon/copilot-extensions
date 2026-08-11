@@ -125,7 +125,7 @@ blindly orphans those. Close-out is deeper than the local git/liveness check.
 
 - **Check the claim ledger — but do not trust it alone.**
   ```
-  <project> claims <worktree_id>          # outbound resources it owns + inbound tasks
+  <project> claims <id>                  # outbound resources it owns + inbound tasks
   ```
   `finalize` is claim-aware (its gate blocks on unreleased outbound claims), and
   `claims release <ref>` / `claims settle <ref>` / `claims sweep --apply` retire
