@@ -1942,9 +1942,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
     from . import bridge
     from .hibernation import RunSpec, run_and_resume
 
-    command = list(args.command or [])
-    if command and command[0] == "--":
-        command = command[1:]
+    command = getattr(args, "_dashdash_tail", None)
+    if command is None:
+        command = list(args.command or [])
+        if command and command[0] == "--":
+            command = command[1:]
     if not command:
         print(
             "agent-dispatch: run needs a command after '--', e.g. "
@@ -2179,9 +2181,11 @@ def _cmd_recipes_drive(args: argparse.Namespace) -> int:
         return _emit(report)
 
     if action.kind == SUSPEND:
-        wait_cmd = list(args.wait_cmd or [])
-        if wait_cmd and wait_cmd[0] == "--":
-            wait_cmd = wait_cmd[1:]
+        wait_cmd = getattr(args, "_dashdash_tail", None)
+        if wait_cmd is None:
+            wait_cmd = list(args.wait_cmd or [])
+            if wait_cmd and wait_cmd[0] == "--":
+                wait_cmd = wait_cmd[1:]
         if not wait_cmd or not args.resume:
             report["executed"] = False
             report["note"] = (
@@ -2225,8 +2229,37 @@ def _cmd_recipes_drive(args: argparse.Namespace) -> int:
     return _emit(report)
 
 
+class _DashDashParser(argparse.ArgumentParser):
+    """Top-level parser that captures a verbatim ``-- <command...>`` tail robustly.
+
+    argparse's handling of a ``--`` separator before a ``nargs='*'`` positional
+    differs across CPython versions (3.11 raises "unrecognized arguments"; 3.12+
+    consumes it), which broke ``recipes drive --execute -- <cmd>`` on 3.11
+    runtime slots (#383). Rather than depend on that, split everything after the
+    FIRST ``--`` off ourselves, parse the head normally, and expose the verbatim
+    tail via ``_dashdash_tail`` for the ``run`` / ``recipes drive`` handlers.
+
+    Scoped to those two commands (the only ones that take a ``-- <command>``
+    tail) so every other subcommand keeps argparse's native ``--`` "end of
+    options" escape hatch.
+    """
+
+    def parse_known_args(self, args=None, namespace=None):  # type: ignore[override]
+        args = list(sys.argv[1:] if args is None else args)
+        tail = None
+        if "--" in args:
+            idx = args.index("--")
+            head = args[:idx]
+            if "run" in head or ("recipes" in head and "drive" in head):
+                args, tail = head, args[idx + 1:]
+        ns, extras = super().parse_known_args(args, namespace)
+        if tail is not None:
+            ns._dashdash_tail = tail
+        return ns, extras
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = _DashDashParser(
         prog="agent-dispatch", description="Agent task queue + coordinator"
     )
     parser.add_argument("--version", action="version", version=f"agent-dispatch {__version__}")

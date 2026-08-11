@@ -107,6 +107,33 @@ def test_parser_requires_subcommand():
         build_parser().parse_args([])
 
 
+def test_parser_dashdash_tail_captured_for_drive_and_run():
+    """`recipes drive` (leading positional) and `run` capture a verbatim
+    `-- <command>` tail via `_dashdash_tail`, robustly across CPython versions
+    (argparse's raw `--` + nargs='*' handling raised on 3.11 but not 3.12, #383).
+    """
+    d = build_parser().parse_args([
+        "recipes", "drive", "reviewer", "--signal", "work-done",
+        "--resume", "m/wt-1", "--execute", "--", "agent-worktrees", "pr-watch", "42",
+    ])
+    # Options before the `--` still parse as options, not swallowed into the tail.
+    assert d.name == "reviewer" and d.signal == "work-done"
+    assert d.resume == "m/wt-1" and d.execute is True
+    assert d._dashdash_tail == ["agent-worktrees", "pr-watch", "42"]
+
+    r = build_parser().parse_args(["run", "--resume", "m/wt", "--", "sleep", "5"])
+    assert r.resume == "m/wt"
+    assert r._dashdash_tail == ["sleep", "5"]
+
+
+def test_parser_dashdash_left_intact_for_other_subcommands():
+    """The `--` interception is scoped to run / recipes-drive; other subcommands
+    keep argparse's native `--` "end of options" escape hatch."""
+    a = build_parser().parse_args(["create", "--", "-weird-title"])
+    assert not hasattr(a, "_dashdash_tail")
+    assert a.title == "-weird-title"
+
+
 def test_parser_create_spawn_flags():
     args = build_parser().parse_args(
         ["create", "x", "--spawn", "--spawn-agent", "w", "--async"]
