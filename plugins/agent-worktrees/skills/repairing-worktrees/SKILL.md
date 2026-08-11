@@ -145,11 +145,31 @@ blindly orphans those. Close-out is deeper than the local git/liveness check.
   those dependent spaces** and verify each is closed out (PR merged/closed,
   CodeSpace done/stopped, cross-repo worktree finalized, container lease
   released) *before* reaping the owner.
-- **Best: let the worktree drive its own close-out — "just ask" it.** The
-  worktree holds context the ledger never captured, so rather than reconstructing
-  its footprint by hand, resume it and have it wrap up: release/settle its claims,
-  land or close its cross-repo PRs, disconnect its CodeSpace, finalize its
-  cross-repo worktrees. Hand it a close-out task via agent-bridge / embodiment:
+- **Best: file a durable close-out *task* and let worktrees resolve async.**
+  Rather than reconstruct each footprint by hand, queue a close-out task with a
+  strong wind-down **goal** and let a worker (often the worktree itself) drive it
+  — worktrees then resolve **asynchronously over a duration**, at scale, instead
+  of blocking this session. Use the **agent-dispatch** queue:
+  ```
+  agent-dispatch create "Close out <id>" \
+    --target-worktree <id> --dedup-key closeout:<id> \
+    --goal "Wind down cleanly — everything filed or built out as efforts" \
+    --done-criteria "cross-repo PRs landed/closed; CodeSpaces disconnected; \
+      cross-repo worktrees finalized; claims released; worktree finalized" \
+    --prompt "Close out worktree <id>. Investigate what it touched (its claims \
+      ledger, session transcript, effort files, cross-repo PRs/CodeSpaces). File \
+      or build out any unfinished work as efforts, land or close cross-repo PRs, \
+      disconnect CodeSpaces, finalize cross-repo worktrees, release/settle your \
+      claims, then finalize."
+  ```
+  **Dedup first** (`agent-dispatch find` / `sweep`) so you file one close-out per
+  worktree; workers then `claim` → `start` → `complete` it on their own cadence.
+  `--spawn` (with `--spawn-backend bridge` or `embody`) kicks a worker
+  immediately; otherwise the task waits in the queue for async pickup.
+- **Or drive one now (synchronous).** To close a single worktree immediately,
+  embody its session directly — `embody` is **agent-worktrees'** embodiment verb
+  (it resumes a detached session and auto-registers with **agent-bridge**), not
+  an agent-dispatch verb (agent-dispatch merely *uses* it as a spawn backend):
   ```
   <project> embody --worktree-id <id> --seed "Close yourself out: land or close \
     any cross-repo PRs, disconnect any CodeSpace, finalize any cross-repo \
