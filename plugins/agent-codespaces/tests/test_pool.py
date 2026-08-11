@@ -795,3 +795,73 @@ def test_allocation_decision_to_dict_shape():
         repo="web", new_cores=8, leases=[_lease_for("busy")],
     ).to_dict()
     assert "then" not in plain
+
+
+# --- cleanliness beacon overlay (Phase 3 / codespace-clean-beacon) ------------
+
+
+def _clean(**kw):
+    from agent_codespaces.coordination import CleanRecord
+    base = dict(key="a", known=True, clean=True, dirty=False, ahead=0,
+                unpushed_branches=0, at="2026-08-10T00:00:00Z", by="m/p/w",
+                live=True)
+    base.update(kw)
+    return CleanRecord(**base)
+
+
+def test_off_box_safe_true_when_live_known_clean():
+    members, _ = build_pool(
+        budget_cores=64, codespaces=[_cs("a")], leases=[], markers={},
+        clean_records={"a": _clean(clean=True)},
+    )
+    assert members[0].off_box_safe is True
+
+
+def test_off_box_safe_false_when_live_known_dirty():
+    members, _ = build_pool(
+        budget_cores=64, codespaces=[_cs("a")], leases=[], markers={},
+        clean_records={"a": _clean(clean=False, dirty=True)},
+    )
+    assert members[0].off_box_safe is False
+
+
+def test_off_box_safe_none_when_expired_beacon():
+    # An expired (not live) record is never trusted -> unknown.
+    members, _ = build_pool(
+        budget_cores=64, codespaces=[_cs("a")], leases=[], markers={},
+        clean_records={"a": _clean(clean=True, live=False)},
+    )
+    assert members[0].off_box_safe is None
+
+
+def test_off_box_safe_none_when_unknown_verdict():
+    members, _ = build_pool(
+        budget_cores=64, codespaces=[_cs("a")], leases=[], markers={},
+        clean_records={"a": _clean(known=False)},
+    )
+    assert members[0].off_box_safe is None
+
+
+def test_off_box_safe_none_when_no_record():
+    members, _ = build_pool(
+        budget_cores=64, codespaces=[_cs("a")], leases=[], markers={},
+        clean_records={},
+    )
+    assert members[0].off_box_safe is None
+
+
+def test_picker_payload_safe_field_tristate():
+    from agent_codespaces.pool import picker_payload
+    codespaces = [_cs("yes"), _cs("no"), _cs("unk")]
+    members, budget = build_pool(
+        budget_cores=64, codespaces=codespaces, leases=[], markers={},
+        clean_records={
+            "yes": _clean(key="yes", clean=True),
+            "no": _clean(key="no", clean=False, dirty=True),
+            # "unk" absent -> unknown
+        },
+    )
+    payload = picker_payload(members, budget)
+    safe_by_id = {e["id"]: e["safe"] for e in payload["entries"]}
+    assert safe_by_id == {"yes": "yes", "no": "no", "unk": "unknown"}
+

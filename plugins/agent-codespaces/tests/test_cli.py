@@ -154,6 +154,8 @@ class TestFinalize:
     def test_finalize_delete_after_success(self, capsys):
         with patch("agent_codespaces.__main__.sync_codespace_sessions",
                    return_value={"ok": True, "session_count": 1, "detail": "ok"}), \
+             patch("agent_codespaces.__main__._recycle_safety_block",
+                   return_value=None), \
              patch("agent_codespaces.__main__.delete_codespace") as delete:
             rc = main(["finalize", "cs-1", "--delete"])
         assert rc == 0
@@ -162,6 +164,8 @@ class TestFinalize:
     def test_finalize_refuses_delete_on_failed_sync(self, capsys):
         with patch("agent_codespaces.__main__.sync_codespace_sessions",
                    return_value={"ok": False, "detail": "could not connect"}), \
+             patch("agent_codespaces.__main__._recycle_safety_block",
+                   return_value=None), \
              patch("agent_codespaces.__main__.delete_codespace") as delete:
             rc = main(["finalize", "cs-1", "--delete"])
         assert rc == 1
@@ -198,6 +202,8 @@ class TestFinalizeProgress:
     def test_recycle_streams_envelope_and_deletes(self):
         with patch("agent_codespaces.__main__.sync_codespace_sessions",
                    return_value={"ok": True, "session_count": 2, "detail": "ok"}), \
+             patch("agent_codespaces.__main__._recycle_safety_block",
+                   return_value=None), \
              patch("agent_codespaces.__main__.delete_codespace") as delete, \
              patch("agent_codespaces.__main__._release_lease_quietly"), \
              patch("agent_codespaces.__main__._clear_status_quietly"):
@@ -214,6 +220,8 @@ class TestFinalizeProgress:
     def test_recycle_aborts_on_failed_recovery_without_force(self):
         with patch("agent_codespaces.__main__.sync_codespace_sessions",
                    return_value={"ok": False, "detail": "ssh timeout"}), \
+             patch("agent_codespaces.__main__._recycle_safety_block",
+                   return_value=None), \
              patch("agent_codespaces.__main__.delete_codespace") as delete:
             rc, frames = self._run(["finalize", "cs-1", "--delete",
                                     "--picker-progress"])
@@ -614,3 +622,134 @@ class TestNamespaceSeams:
 
         with patch("agent_codespaces.resolver.CodespaceResolver.ensure_ready", _fail):
             assert main(["namespace-ensure-ready", "cs-a"]) == 1
+
+
+class TestRecycleSafetyGate:
+    """`finalize --delete` is gated on the cleanliness beacon (venue-pool
+    Phase 3): a box is deletable only with a live, known, clean verdict; unknown
+    or dirty is refused (rc 2); --force and a down beacon store both pass."""
+
+    def _rec(self, **kw):
+        from agent_codespaces.coordination import CleanRecord
+        base = dict(key="cs-1", known=True, clean=True, dirty=False, ahead=0,
+                    unpushed_branches=0, at="", by="", live=True)
+        base.update(kw)
+        return CleanRecord(**base)
+
+    def test_block_none_when_safe(self):
+        import agent_codespaces.__main__ as m
+        with patch("agent_codespaces.coordination.list_cleanliness",
+                   return_value={"cs-1": self._rec(clean=True)}):
+            assert m._recycle_safety_block("cs-1", force=False) is None
+
+    def test_block_message_when_dirty(self):
+        import agent_codespaces.__main__ as m
+        with patch("agent_codespaces.coordination.list_cleanliness",
+                   return_value={"cs-1": self._rec(clean=False, dirty=True, ahead=2)}):
+            msg = m._recycle_safety_block("cs-1", force=False)
+        assert msg and "un-off-boxed" in msg
+
+    def test_block_message_when_unknown(self):
+        import agent_codespaces.__main__ as m
+        with patch("agent_codespaces.coordination.list_cleanliness",
+                   return_value={}):
+            msg = m._recycle_safety_block("cs-1", force=False)
+        assert msg and "UNKNOWN" in msg and "verify" in msg
+
+    def test_force_bypasses_gate(self):
+        import agent_codespaces.__main__ as m
+        # Force short-circuits before any store read.
+        with patch("agent_codespaces.coordination.list_cleanliness") as lst:
+            assert m._recycle_safety_block("cs-1", force=True) is None
+        lst.assert_not_called()
+
+    def test_store_unavailable_is_degrade_safe(self):
+        import agent_codespaces.__main__ as m
+        with patch("agent_codespaces.coordination.list_cleanliness",
+                   return_value=None):
+            assert m._recycle_safety_block("cs-1", force=False) is None
+
+    def test_finalize_delete_blocked_when_unknown(self, capsys):
+        import agent_codespaces.__main__ as m
+        with patch("agent_codespaces.coordination.list_cleanliness",
+                   return_value={}), \
+             patch.object(m, "sync_codespace_sessions") as sync, \
+             patch.object(m, "delete_codespace") as delete:
+            rc = main(["finalize", "cs-1", "--delete"])
+        assert rc == 2
+        delete.assert_not_called()
+        sync.assert_not_called()            # gated BEFORE any recover work
+        assert "blocked" in capsys.readouterr().err.lower()
+
+    def test_finalize_delete_allowed_when_safe(self):
+        import agent_codespaces.__main__ as m
+        with patch("agent_codespaces.coordination.list_cleanliness",
+                   return_value={"cs-1": self._rec(clean=True)}), \
+             patch.object(m, "sync_codespace_sessions",
+                          return_value={"ok": True, "session_count": 0, "detail": "ok"}), \
+             patch.object(m, "delete_codespace") as delete, \
+             patch.object(m, "_release_lease_quietly"), \
+             patch.object(m, "_clear_status_quietly"):
+            rc = main(["finalize", "cs-1", "--delete"])
+        assert rc == 0
+        delete.assert_called_once_with("cs-1", force=False)
+
+
+class TestVerifyCommand:
+    """`agent-codespaces verify <name>` probes git-cleanliness over SSH and
+    publishes the verdict to the beacon (backs the picker Verify action)."""
+
+    def _wire(self, m, gc, published=True):
+        from agent_codespaces import cleanliness
+
+        class _FakeMgr:
+            async def ensure_connected(self, *a, **k):
+                return object()
+            async def disconnect(self, *a, **k):
+                return None
+
+        async def _probe(manager, name, **kw):
+            return gc
+
+        return (
+            patch("ssh_manager.ConnectionManager", _FakeMgr),
+            patch.object(cleanliness, "probe_cleanliness", _probe),
+            patch("agent_codespaces.coordination.publish_cleanliness",
+                  return_value=published),
+            patch("agent_codespaces.lifecycle.account_for_codespace",
+                  return_value=""),
+        )
+
+    def test_verify_safe_publishes_and_exits_0(self, capsys):
+        import agent_codespaces.__main__ as m
+        from agent_codespaces.cleanliness import GitCleanliness
+        gc = GitCleanliness(known=True, dirty=False, ahead=0, unpushed_branches=0)
+        p1, p2, p3, p4 = self._wire(m, gc)
+        with p1, p2, p3 as pub, p4:
+            rc = main(["verify", "cs-1", "--json"])
+        assert rc == 0
+        out = json.loads(capsys.readouterr().out.strip())
+        assert out["verdict"] == "safe" and out["off_box_safe"] is True
+        pub.assert_called_once()
+
+    def test_verify_dirty_exits_3(self, capsys):
+        import agent_codespaces.__main__ as m
+        from agent_codespaces.cleanliness import GitCleanliness
+        gc = GitCleanliness(known=True, dirty=True, ahead=1, unpushed_branches=0)
+        p1, p2, p3, p4 = self._wire(m, gc)
+        with p1, p2, p3, p4:
+            rc = main(["verify", "cs-1", "--json"])
+        assert rc == 3
+        out = json.loads(capsys.readouterr().out.strip())
+        assert out["verdict"] == "unsafe" and out["off_box_safe"] is False
+
+    def test_verify_unknown_exits_3(self, capsys):
+        import agent_codespaces.__main__ as m
+        from agent_codespaces.cleanliness import GitCleanliness
+        gc = GitCleanliness(known=False)
+        p1, p2, p3, p4 = self._wire(m, gc)
+        with p1, p2, p3, p4:
+            rc = main(["verify", "cs-1", "--json"])
+        assert rc == 3
+        out = json.loads(capsys.readouterr().out.strip())
+        assert out["verdict"] == "unknown" and out["off_box_safe"] is None

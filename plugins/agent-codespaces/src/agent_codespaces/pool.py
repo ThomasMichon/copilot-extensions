@@ -238,6 +238,12 @@ class PoolMember:
     # orphaned lock -- the lease lingers past the worktree's finalize/prune). A
     # derived, host-local fact (see :func:`_holder_worktree_gone`); default False.
     orphaned: bool = False
+    # Cleanliness-beacon verdict (venue-pool Phase 3 / codespace-clean-beacon):
+    # the tri-state "is all work off-box?" safety gate the destructive Recycle
+    # keys on -- True (safe to delete), False (work still on-box), or None
+    # (unknown: no fresh/known verdict -> Recycle hidden, Verify offered).
+    # Derived from the ``codespace-clean`` git-ref overlay; default None.
+    off_box_safe: bool | None = None
 
     @property
     def holder_owner(self) -> str | None:
@@ -274,6 +280,8 @@ class PoolMember:
             },
             "eligibility": self.marker or "active",
             "idle_age_s": round(self.idle_age) if self.idle_age is not None else None,
+            # Cleanliness-beacon safety verdict (True/False/None-unknown).
+            "off_box_safe": self.off_box_safe,
         }
 
 
@@ -308,6 +316,7 @@ def build_pool(
     leases: list[Lease] | None = None,
     markers: dict[str, str] | None = None,
     l2_leases: dict | None = None,
+    clean_records: dict | None = None,
 ) -> tuple[list[PoolMember], Budget]:
     """Derive the full pool view (members + budget) from the owning layers.
 
@@ -320,6 +329,12 @@ def build_pool(
     **degrade-safe** -- an unavailable/unreadable L2 store yields ``None`` and the
     overlay is simply absent, so the pool view is identical to the pre-overlay
     behavior. Pass ``{}`` in tests to assert the no-overlay path without shelling.
+
+    ``clean_records`` is the per-box **cleanliness beacon** overlay (a
+    ``{name: CleanRecord}`` map from ``coordination.list_cleanliness``): the last
+    published git-safety verdict, read WITHOUT SSH. Same degrade-safe contract as
+    ``l2_leases`` (omit -> live read; unavailable -> absent -> every box's
+    ``off_box_safe`` is None/unknown). Pass ``{}`` in tests for the no-overlay path.
     """
     import time as _time
 
@@ -338,6 +353,14 @@ def build_pool(
             l2_leases = coordination.list_leases() or {}
         except Exception:
             l2_leases = {}
+    if clean_records is None:
+        # Best-effort cleanliness-beacon overlay; a missing/unreadable store just
+        # leaves every box's safety ``unknown`` (Recycle stays Verify-gated).
+        try:
+            from . import coordination
+            clean_records = coordination.list_cleanliness() or {}
+        except Exception:
+            clean_records = {}
 
     lease_by_cs = {ls.codespace: ls for ls in leases}
 
@@ -360,6 +383,13 @@ def build_pool(
 
         last_used = _iso_to_epoch(cs.last_used_at)
         idle_age = (now - last_used) if (last_used is not None and lease is None) else None
+
+        # Cleanliness-beacon overlay: the last-published git-safety verdict for
+        # this box (read without SSH). ``off_box_safe`` is tri-state -- True (all
+        # work off-box, safe to Recycle), False (work still on-box), or None
+        # (unknown: no fresh/known verdict -> Recycle stays Verify-gated).
+        crec = clean_records.get(cs.name)
+        off_box_safe = crec.off_box_safe if crec is not None else None
 
         disposition = derive_disposition(
             state=cs.state,
@@ -403,6 +433,9 @@ def build_pool(
             display_name=cs.display_name or "",
             # 3b: flag an orphaned claim (holder worktree positively gone).
             orphaned=_holder_worktree_gone(lease.worktree if lease else None),
+            # Cleanliness-beacon verdict (venue-pool Phase 3): tri-state safety
+            # gate for the destructive Recycle -- True/False/None (unknown).
+            off_box_safe=off_box_safe,
         ))
 
     budget = Budget(
@@ -695,6 +728,16 @@ def picker_payload(
             # free the stale lock. ``orphaned`` is the raw signal for gating.
             "orphaned": m.orphaned,
             "occupancy": "orphan" if m.orphaned else m.disposition,
+            # Cleanliness-beacon safety verdict as a picker-gate string (venue-
+            # pool Phase 3 / codespace-clean-beacon): "yes" (all work off-box ->
+            # Recycle offered), "no" (work still on-box), "unknown" (no fresh
+            # verdict -> Recycle hidden, Verify offered). The Recycle/Verify
+            # actions gate on this via their ``when`` clause.
+            "safe": (
+                "yes" if m.off_box_safe is True
+                else "no" if m.off_box_safe is False
+                else "unknown"
+            ),
         })
     summary = dict(budget.to_dict())
     summary["note"] = note or ""

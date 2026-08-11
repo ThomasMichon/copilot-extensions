@@ -274,6 +274,23 @@ def main(argv: list[str] | None = None) -> int:
              "into its modal (D4).",
     )
 
+    # --- verify (cleanliness-beacon refresh: venue-pool Phase 3) ---
+    verify_parser = sub.add_parser(
+        "verify",
+        help="Probe a CodeSpace's git-cleanliness over SSH and publish the "
+             "off-box-safety verdict to the no-SSH `codespace-clean` beacon "
+             "(backs the picker's Verify action; gates Recycle).",
+    )
+    verify_parser.add_argument("name", help="CodeSpace name")
+    verify_parser.add_argument(
+        "--json", dest="json_output", action="store_true",
+        help="Emit the machine-readable verdict",
+    )
+    verify_parser.add_argument(
+        "--timeout", type=float, default=45.0,
+        help="Seconds for the cleanliness probe (default: 45)",
+    )
+
     # --- stop ---
     stop_parser = sub.add_parser(
         "stop",
@@ -681,6 +698,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_finalize(args)
         if args.command == "stop":
             return _cmd_stop(args)
+        if args.command == "verify":
+            return _cmd_verify(args)
         if args.command == "create":
             return _cmd_create(args)
         if args.command == "prune":
@@ -1276,6 +1295,23 @@ async def _settle_codespace_on_disconnect(
         gc = await cleanliness.probe_cleanliness(manager, name)
     except Exception:
         return False
+    # Publish the git-cleanliness verdict to the no-SSH `codespace-clean` beacon
+    # (venue-pool Phase 3) so the pool/picker can gate a destructive Recycle on a
+    # box's off-box safety without re-probing. Best-effort + degrade-safe; we do
+    # this whatever the at-rest outcome so a *dirty* verdict is recorded too (and
+    # thus hides Recycle), not just the clean case.
+    try:
+        coordination.publish_cleanliness(
+            name,
+            known=gc.known,
+            clean=cleanliness.is_git_clean(gc),
+            dirty=gc.dirty,
+            ahead=gc.ahead,
+            unpushed_branches=gc.unpushed_branches,
+            holder=holder_ref,
+        )
+    except Exception as exc:
+        log.debug("cleanliness publish for %s degraded: %s", name, exc)
     if not cleanliness.at_rest(gc, in_flight=False):
         log.info(
             "CodeSpace %s not at-rest on disconnect (known=%s dirty=%s ahead=%s "
@@ -2761,6 +2797,53 @@ def _cmd_delete(args: argparse.Namespace) -> int:
     return 0
 
 
+def _recycle_safety_block(name: str, *, force: bool) -> str | None:
+    """Guard a destructive Recycle (``finalize --delete``) on the no-SSH
+    cleanliness beacon (venue-pool Phase 3): return a refusal reason when the box
+    is NOT known-safe to delete, else None.
+
+    Refuses unless the ``codespace-clean`` beacon says the box is definitively
+    **off-box safe** (a live, known, clean verdict). An **unknown** verdict (never
+    probed / beacon expired) or a **dirty** one blocks -- conservative by design:
+    we never delete a box that might hold unpushed work. ``--force`` bypasses the
+    gate (operator asserts safety), and the gate is **degrade-safe** -- if the
+    beacon store is entirely unreadable it does NOT block (returns None) so a
+    missing state repo can't wedge every finalize; the store being reachable but
+    lacking a fresh verdict is what blocks.
+
+    The remedy is to publish a fresh verdict first: ``agent-codespaces verify
+    <name>`` (an on-demand SSH probe), which the picker surfaces as the *Verify*
+    action next to a box whose safety is unknown.
+    """
+    if force:
+        return None
+    from . import coordination
+    try:
+        records = coordination.list_cleanliness()
+    except Exception:
+        records = None
+    if records is None:
+        # Store unreadable/unavailable -> cannot assert either way; degrade-safe
+        # (don't wedge finalize on a missing state repo). The connect-path
+        # recover/sync remains the session-safety backstop.
+        return None
+    rec = records.get(name)
+    safe = rec.off_box_safe if rec is not None else None
+    if safe is True:
+        return None
+    if safe is False:
+        detail = ""
+        if rec is not None:
+            detail = (f" (dirty={rec.dirty} ahead={rec.ahead} "
+                      f"unpushed_branches={rec.unpushed_branches})")
+        return (f"{name} has un-off-boxed work{detail} -- refusing to delete. "
+                f"Push/settle the work, then re-run, or override with --force.")
+    return (f"{name}'s off-box safety is UNKNOWN (no fresh cleanliness verdict) "
+            f"-- refusing to delete. Run `agent-codespaces verify {name}` to "
+            f"probe + publish a verdict (the picker's Verify action), then "
+            f"retry, or override with --force.")
+
+
 def _cmd_finalize(args: argparse.Namespace) -> int:
     """Gracefully close out a CodeSpace (the worktree-style "done" transition).
 
@@ -2772,9 +2855,20 @@ def _cmd_finalize(args: argparse.Namespace) -> int:
     re-pull (fixes the "too many codespaces running" quota error).
 
     With ``--delete``: recover then delete (removed only after a successful sync,
-    unless ``--force`` overrides a failed one) -- the eager retire path.
+    unless ``--force`` overrides a failed one) -- the eager retire path. The
+    delete is additionally gated on the cleanliness beacon (off-box safety) unless
+    ``--force`` (venue-pool Phase 3).
     """
     from .status import STATE_RECOVERED, set_status
+
+    # venue-pool Phase 3: gate the destructive delete on off-box safety BEFORE any
+    # recover/boot work, so an unsafe/unknown box is refused fast (not deleted
+    # minutes later). --force bypasses; degrade-safe if the beacon store is down.
+    if args.delete:
+        block = _recycle_safety_block(args.name, force=args.force)
+        if block is not None:
+            print(f"[blocked] {block}", file=sys.stderr)
+            return 2
 
     # Preserving path may skip booting a Shutdown box; the destructive --delete
     # path must recover first (booting if needed) before the box is gone.
@@ -2857,6 +2951,14 @@ def _cmd_finalize_progress(args: argparse.Namespace) -> int:
 
     name = args.name
     try:
+        # venue-pool Phase 3: gate the destructive delete on off-box safety before
+        # any work (same contract as _cmd_finalize; --force bypasses). Emitted as
+        # a modal-readable error frame so the picker's Recycle surfaces the block.
+        if args.delete:
+            block = _recycle_safety_block(name, force=args.force)
+            if block is not None:
+                emit({"type": "error", "message": block})
+                return 2
         emit({"type": "progress", "pct": 5.0,
               "msg": f"Recovering Copilot sessions from {name}\u2026"})
         res = sync_codespace_sessions(
@@ -2908,6 +3010,69 @@ def _cmd_finalize_progress(args: argparse.Namespace) -> int:
     except Exception as exc:  # never crash the modal reader
         emit({"type": "error", "message": str(exc)[:200]})
         return 1
+
+
+def _cmd_verify(args: argparse.Namespace) -> int:
+    """Probe a CodeSpace's git-cleanliness over SSH and PUBLISH the verdict to
+    the no-SSH ``codespace-clean`` beacon (venue-pool Phase 3).
+
+    The on-demand refresh behind the picker's *Verify* action: an SSH probe
+    (``cleanliness.probe_command`` over every ``/workspaces/*`` repo) whose result
+    is written to the git-ref beacon store, so the pool/picker can then gate a
+    destructive Recycle on a fresh off-box-safety verdict without re-probing.
+    Read-only on the box (the only write is the beacon). A Shutdown box boots on
+    connect. Exit ``0`` when the box is definitively safe (known + clean), else
+    ``3`` (unsafe or unknown) so a scripted ``verify && finalize --delete`` gates.
+    """
+    from ssh_manager import ConnectionManager
+
+    from . import cleanliness, coordination
+    from .lifecycle import account_for_codespace
+
+    source = CodespaceSource(args.name, account=account_for_codespace(args.name))
+    manager = ConnectionManager()
+
+    async def _run():
+        try:
+            await manager.ensure_connected(args.name, source, [])
+            return await cleanliness.probe_cleanliness(
+                manager, args.name, timeout=args.timeout,
+            )
+        finally:
+            await manager.disconnect(args.name)
+
+    try:
+        gc = asyncio.run(_run())
+    except Exception as exc:
+        print(f"ERROR: could not probe {args.name}: {exc}", file=sys.stderr)
+        return 1
+
+    clean = cleanliness.is_git_clean(gc)
+    published = coordination.publish_cleanliness(
+        args.name, known=gc.known, clean=clean, dirty=gc.dirty,
+        ahead=gc.ahead, unpushed_branches=gc.unpushed_branches,
+    )
+    verdict = "safe" if (gc.known and clean) else ("unsafe" if gc.known else "unknown")
+    if getattr(args, "json_output", False):
+        print(json.dumps({
+            "codespace": args.name,
+            "known": gc.known,
+            "clean": clean,
+            "dirty": gc.dirty,
+            "ahead": gc.ahead,
+            "unpushed_branches": gc.unpushed_branches,
+            "off_box_safe": (clean if gc.known else None),
+            "verdict": verdict,
+            "published": published,
+        }))
+    else:
+        print(
+            f"{args.name}: off-box safety = {verdict} "
+            f"(known={gc.known} dirty={gc.dirty} ahead={gc.ahead} "
+            f"unpushed_branches={gc.unpushed_branches}); "
+            f"beacon {'published' if published else 'publish skipped'}"
+        )
+    return 0 if (gc.known and clean) else 3
 
 
 def _cmd_stop(args: argparse.Namespace) -> int:
