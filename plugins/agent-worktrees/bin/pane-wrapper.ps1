@@ -40,12 +40,25 @@ $runtime = [int]((Get-Date) - $start).TotalSeconds
 # teardown. Correlates to the launch flow via WORKTREE_LAUNCH_ID (inherited from
 # the mux server env).
 try {
-    $awArgs = @('activity-log', 'pane_exited', '--source', 'launcher',
-                '--field', "exit_code=$exitCode", '--field', "runtime=$runtime")
-    if ($awWt) { $awArgs += @('--worktree-id', $awWt) }
-    if ($env:WORKTREE_LAUNCH_ID) { $awArgs += @('--launch-id', $env:WORKTREE_LAUNCH_ID) }
-    Start-Process -FilePath 'agent-worktrees' -ArgumentList $awArgs `
-        -WindowStyle Hidden -ErrorAction Stop | Out-Null
+    # Launch the resolved runtime python directly -- NOT the bare
+    # `agent-worktrees` stub. `Start-Process -FilePath 'agent-worktrees'` goes
+    # through ShellExecute; PowerShell command-discovery resolves the bare name
+    # to the `.ps1` binstub (preferred over the `.cmd`), and ShellExecute of a
+    # `.ps1` runs its "edit" file association -- opening the stub in Notepad
+    # instead of executing it. Running `python.exe -m agent_worktrees` is a real
+    # executable and is executed, not opened.
+    $_r = Join-Path $env:USERPROFILE '.agent-worktrees\bin\resolve-runtime.ps1'
+    $awPy = if (Test-Path -LiteralPath $_r) { . $_r; $AwPy } else { $null }
+    if ($awPy) {
+        $env:PYTHONPATH = ''  # package is installed in the venv (no lib/ shadow)
+        $awArgs = @('-m', 'agent_worktrees', 'activity-log', 'pane_exited',
+                    '--source', 'launcher',
+                    '--field', "exit_code=$exitCode", '--field', "runtime=$runtime")
+        if ($awWt) { $awArgs += @('--worktree-id', $awWt) }
+        if ($env:WORKTREE_LAUNCH_ID) { $awArgs += @('--launch-id', $env:WORKTREE_LAUNCH_ID) }
+        Start-Process -FilePath $awPy -ArgumentList $awArgs `
+            -WindowStyle Hidden -ErrorAction Stop | Out-Null
+    }
 } catch {}
 
 # Intentional interrupt -- exit silently so post-exit finalization runs.
