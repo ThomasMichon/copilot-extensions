@@ -11,6 +11,18 @@ clean room. It isolates *everything* under test (no `~/.agent-*`, no
 `~/.local/bin`, no marketplace, a stock login-shell PATH) while reusing your
 Copilot **login** (auth is not what we're validating).
 
+## Image variants
+
+| Image | Toolchain present | Use |
+|-------|-------------------|-----|
+| `base` (default) | git, python3, node, uv | Plugin-install checks where a stock dev toolchain is assumed. |
+| `pristine` | **Copilot + git only** — a system `python3` exists (as on any real box) but **no venv module, no pip, no uv, no `~/.local/bin`, no feed governance** | The harshest fresh **internal** machine: forces the harness to provision its own toolchain, so uv/venv/pip-feed jams **surface** instead of being hidden. Select with `-Image pristine`. |
+
+Feed governance is injected per-scenario at run time, never baked into an image.
+The realistic corp-box case to reproduce is an **asymmetry**: a policy sets
+**pip's** internal feed but not **uv**, so `uv`/`uv pip install` still hit the
+TLS-blocked public index while pip works.
+
 ## What it checks
 
 | Phase | Question it answers |
@@ -32,36 +44,51 @@ robust across `copilot` versions and records the CLI surface + full logs it saw.
 - A GitHub account entitled to Copilot (for the one-time device-code login).
 
 > **Governed machines / internal npm feed.** On a corp-governed box the public
-> `registry.npmjs.org` is blocked at the TLS layer, so the in-image
-> `npm install -g @github/copilot` would fail with an SSL handshake error. The
-> wrappers auto-detect the host's configured npm registry (`npm config get
-> registry`) and forward it as the `NPM_REGISTRY` Docker build-arg, so the
-> container installs the Copilot CLI through the same governed feed the host
-> uses. Override explicitly with `-BuildArg`/`CR_NPM_REGISTRY` if needed.
+> `registry.npmjs.org` is TLS-blocked, so the in-image `npm install -g
+> @github/copilot` fails. Pass an internal feed **explicitly** to install the
+> Copilot CLI prereq: `-NpmRegistry https://<your-internal-npm-feed>/`
+> (`--npm-registry` on `run.sh`, or `$env:CR_NPM_REGISTRY`). The runner does
+> **not** auto-forward the host's npm config — silently inheriting the host feed
+> makes the container non-fresh and **biases the experiment**; the feed is a
+> build-time convenience to install a *given* prereq, not part of what's tested,
+> and is not inherited into the operator's runtime environment.
 
 ## Usage
 
 ```powershell
 # Windows host
-./run.ps1 -Mode all        # build image -> device-code login (once) -> validate
-./run.ps1 -Mode run        # re-run validation against the cached authed image
+./run.ps1 -Mode all                      # build -> device-code login (once) -> validate
+./run.ps1                                # validate against the cached authed image (base)
+./run.ps1 -Image pristine -Mode shell    # drop into a pristine fresh box (headed copilot)
+./run.ps1 -Until 1 -Then shell           # prepare up to phase 1, then hand off to a shell
+./run.ps1 -Image pristine -Mode down     # remove the container
 ```
 
 ```bash
 # Linux / WSL / macOS host
 ./run.sh all
-./run.sh run
+./run.sh --image pristine shell
+./run.sh --until 1 --then shell run
+./run.sh --image pristine down
 ```
+
+**Interactive shell / headed smoke tests.** The runner drives a **persistent**
+named container (`cr-<image>`), so you can run the automated `validate.sh` (all
+phases, or `-Until <n>` to stop early) and then `-Mode shell` / `-Then shell`
+into the *same* box to run the real interactive `copilot` — Copilot CLI does not
+fully enable every feature in `-p`/ACP, so the rig automates what it can and
+hands off for the rest. The container stays up until `-Mode down`.
 
 **Auth is a one-time step.** `-Mode auth` (or the auto-prompt on first `run`)
 opens an interactive Copilot session in the container; run `/login` if you're
 not prompted, authorize the device code in your browser, then `/exit`. The
-wrapper `docker commit`s the result to `copilot-cleanroom:authed` so subsequent
-runs reuse the login. Re-run `auth` when the token expires.
+wrapper `docker commit`s the result to `copilot-cleanroom:authed` (base) /
+`copilot-cleanroom:pristine-authed` (pristine) so subsequent runs reuse the
+login. Re-run `auth` when the token expires.
 
-> **Credential hygiene:** the *base* image (`Dockerfile`) is credential-free and
-> safe to rebuild/share. Only the local `:authed` image holds your session —
-> never push it to a registry.
+> **Credential hygiene:** the base/pristine images (`Dockerfile*`) are
+> credential-free and safe to rebuild/share. Only the local `:authed` images
+> hold your session — never push them to a registry.
 
 Results land in a **machine-local dir outside the repo** — by default
 `%LOCALAPPDATA%\copilot-cleanroom\runs\<timestamp>\` (Windows) or
@@ -78,15 +105,16 @@ PASS/FAIL) plus per-phase command logs under `cr-logs/`.
 
 Override via `run.ps1` params or `CR_*` env (see `validate.sh` header):
 `CR_MARKETPLACE_REPO`, `CR_MARKETPLACE_NAME`, `CR_PRIMARY_PLUGIN`,
-`CR_EXPECT_DEPS`.
+`CR_EXPECT_DEPS`, `CR_UNTIL` (stop after phase N).
 
 ## Files
 
 | File | Role |
 |------|------|
-| `Dockerfile` | Credential-free "fresh machine": git, python, node, uv, Copilot CLI — nothing from copilot-extensions. |
-| `validate.sh` | In-container driver + assertions (bind-mounted at run, so edits need no rebuild). |
-| `run.ps1` / `run.sh` | Host wrappers: build · one-time auth+commit · run. |
+| `Dockerfile` | Credential-free `base` "fresh machine": git, python, node, uv, Copilot CLI — nothing from copilot-extensions. |
+| `Dockerfile.pristine` | The `pristine` variant: Copilot + git only (no venv/pip/uv/feed-governance) — forces the harness to self-provision. |
+| `validate.sh` | In-container driver + assertions (bind-mounted at run, so edits need no rebuild). Honors `CR_UNTIL` to stop after a phase. |
+| `run.ps1` / `run.sh` | Host wrappers: build · one-time auth+commit · run · **shell** (interactive handoff) · down; `-Image base\|pristine`. |
 
 ## Scope / non-goals
 

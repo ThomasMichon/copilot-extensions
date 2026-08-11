@@ -1,0 +1,55 @@
+# Clean-room PRISTINE image -- the harshest "fresh internal machine".
+#
+# Unlike the base image, this deliberately WITHHOLDS the dev toolchain the
+# harness needs. Only the two givens are present:
+#   * git      -- to clone the harness repo
+#   * Copilot  -- the CLI itself (a given prereq; its node runtime comes along)
+#
+# A system python3 IS present (Ubuntu ships one, as does any real box) -- but
+# there is NO venv module (ensurepip/python3-venv), NO pip, and NO uv, and NO
+# ~/.local/bin / feed governance. So the harness's own setup flow must acquire
+# the venv toolchain (uv, venvs) and configure package feeds itself, and the
+# real fresh-machine jams (uv missing, `python3 -m venv` failing, uv's index
+# unconfigured while pip's policy feed is set, venv/PYTHONPATH, binstub PATH)
+# SURFACE instead of being hidden by a toolchain-baked image. Feed governance is
+# injected per-scenario at run time (e.g. an internal pip.conf with uv left
+# unconfigured), never baked here, so the image stays generic and unbiased.
+#
+# Auth is NOT baked here -- see run.ps1/run.sh (`:pristine-authed`).
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ONLY git + the Copilot CLI's runtime deps. Intentionally NO python3, NO uv:
+# the harness must provision those. Node is the Copilot CLI's own runtime, not a
+# dev toolchain we grant to the harness.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl git sudo \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# The GitHub Copilot CLI. NPM_REGISTRY is a BUILD-TIME convenience ONLY (install
+# the given Copilot prereq on a governed box where public npm is TLS-blocked);
+# it is deleted after install and NOT inherited into the operator's runtime, so
+# it does not bias the experiment. The runner never auto-forwards host npm config.
+ARG NPM_REGISTRY=https://registry.npmjs.org/
+RUN npm config set registry "$NPM_REGISTRY" \
+    && npm install -g @github/copilot \
+    && npm config delete registry
+
+# A non-root operator, mirroring a real login. We do NOT pre-create ~/.local/bin
+# or touch PATH beyond Ubuntu's stock ~/.profile -- the binstub-PATH timing is
+# exactly what the harness must get right.
+RUN groupadd -f operator \
+    && useradd -m -s /bin/bash -g operator operator \
+    && adduser operator sudo \
+    && echo 'operator ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/operator
+USER operator
+WORKDIR /home/operator
+
+# No validate.sh baked in: pristine is driven by a mounted scenario (or entered
+# interactively via `run -Image pristine -Mode shell`). Idle by default so the
+# runner can start it detached and `docker exec` into it.
+ENTRYPOINT ["/bin/bash", "-lc"]
+CMD ["sleep infinity"]
