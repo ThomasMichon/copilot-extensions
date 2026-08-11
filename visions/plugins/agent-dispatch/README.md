@@ -299,6 +299,32 @@ re-register reconciles the unit rather than duplicating it. Each registered unit
 runs in its **own subprocess**, so one unit's load or failure is isolated from the
 others and from the master.
 
+### declarative-discovered-registrar
+Registered supervision has a **declarative, discovered** face, not only an
+imperative call. A system, service, or repository **declares** its supervised work
+as **configuration** in its **own install footprint**, and makes that footprint
+known to the host supervisor through a lightweight **pointer** — the same shape as
+a cache-populate registration, where a consumer points at *where its material
+lives* rather than pushing it inline. The singleton **aggregates every registered
+pointer**, reads the units it finds declared there, and reconciles them into what
+it runs. This is what lets a domain **bring its own supervised work by convention**
+— dropping a declaration into its own tree and being discoverable once — instead of
+editing the supervisor or scattering a bespoke installer step per unit. Two
+consequences follow. First, **supervised work travels with the code**: because a
+declaration lives in the owning tree, a repository that carries its declarations
+makes them **available wherever that repo is synced** — they light up on sync and
+wind down when the repo or its declaration goes away, with no per-host installer
+step. Second, the declaration carries **provenance** — which system owns it — so
+the aggregated, machine-wide set of supervised units stays **legible** even though
+many independent systems contribute to it. Crucially there is **one source of
+truth**: the declared documents themselves. The imperative registration call
+(*registered-supervision*) is a **thin writer over that source** — to register is
+to **write a declaration**, to remove is to **delete it**, to query a handle is to
+**read it back** — after which the singleton discovers and reconciles the change
+exactly as it would a declaration authored by any other means. The declaration
+*is* the registration; there is **no second, in-memory registry** standing beside
+the files (*no-second-store*, applied to supervision).
+
 ## Behaviors
 
 ### fire-and-forget-not-driven
@@ -475,6 +501,22 @@ of *registered-supervision*: the terminal that registers a schedule, an emitter,
 evaluator, or a supervised lane does not become that work's host — the machine's one
 supervisor does.
 
+### discover-and-live-reconcile
+The singleton does not only reconcile registrations at startup — it **watches its
+registered pointers and reconciles continuously**. A declaration that **appears**
+(a synced repository, a newly installed service) is picked up and its unit
+**started**; one that **changes** is **applied in place** — new concurrency, a
+different body, an altered lane — without tearing the rest down; one that
+**disappears** is **wound down**, its in-flight work drained, never orphaned. All of
+this happens **without restarting** the supervisor and without a human editing a
+central list: discovery is **by convention**, so adding supervised work is a matter
+of *declaring it where the supervisor already looks*, and removing it is a matter of
+*deleting the declaration*. The live set of supervised units is therefore a
+**continuously-reconciled reflection** of what every registered system currently
+declares — the same self-healing posture the singleton already applies to a unit's
+liveness, extended to the *membership* of the set itself. Discovery reconciles
+**intent to reality**: what is declared is what runs.
+
 ## Non-Goals / Boundaries
 
 - **Not the live-conversation layer.** Driving or messaging a running agent
@@ -510,6 +552,22 @@ supervisor does.
 
 ## Provenance
 
+- **2026-08-10** — Added the *declarative-discovered-registrar* feature and the
+  *discover-and-live-reconcile* behavior: registered supervision gains a
+  **declarative, discovered** face on top of the imperative call. A system,
+  service, or repository **declares** its supervised work as configuration in its
+  own footprint and makes it discoverable to the host supervisor through a
+  lightweight **pointer** (cache-populate style); the singleton aggregates every
+  pointer, reads the declared units, and **continuously reconciles** them —
+  starting what appears, applying what changes, winding down what disappears —
+  without a restart. Supervised work thus **travels with the code** (a repo's
+  declarations light up on sync). The imperative registration is reframed as a
+  **thin writer over the one source of truth** (the declared documents), so there
+  is *no second registry* beside the files. Mined from an operator design steer
+  (the supervisor-profile config should be a durable, YAML-first task registrar,
+  self-service and hot-reloaded, rather than installer-managed per-unit env files).
+  Concrete formats, directory conventions, the pointer mechanism, and the
+  file-watch/reload machinery stay **spec-level** (reality docs), not here.
 - **2026-07-24** — Initial authoring as a per-plugin leaf under agent-fabric.
   Intent mined from the operator's four canonical use cases for the delegation
   layer (continuation storage, fire-and-forget delegation, reactive
