@@ -63,8 +63,16 @@ runs reuse the login. Re-run `auth` when the token expires.
 > safe to rebuild/share. Only the local `:authed` image holds your session —
 > never push it to a registry.
 
-Results land in `./results/` — `cr-report.json` (structured PASS/FAIL) plus
-per-phase command logs under `results/cr-logs/`.
+Results land in a **machine-local dir outside the repo** — by default
+`%LOCALAPPDATA%\copilot-cleanroom\runs\<timestamp>\` (Windows) or
+`${XDG_STATE_HOME:-~/.local/state}/copilot-cleanroom/runs/<timestamp>/`
+(Linux/WSL/macOS). Each run prints its exact path. Override with
+`-ResultsDir` / `$env:CR_RESULTS_DIR`. Contents: `cr-report.json` (structured
+PASS/FAIL) plus per-phase command logs under `cr-logs/`.
+
+> **Never write run artifacts into the repo tree.** This harness may run from an
+> anchor checkout; per-run state in a repo (especially an anchor) is a hazard, so
+> the default results dir is deliberately machine-local and out-of-tree.
 
 ## Configuration
 

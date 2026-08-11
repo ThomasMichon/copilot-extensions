@@ -1,3 +1,5 @@
-# Local run artifacts -- never committed (may contain repo/plugin paths + logs;
-# the cached authed Docker image lives in the local Docker daemon, not here).
+# Safety net only. Run artifacts now default to a MACHINE-LOCAL dir OUTSIDE the
+# repo (%LOCALAPPDATA%\copilot-cleanroom\ or $XDG_STATE_HOME/copilot-cleanroom/),
+# so nothing lands here by default. This still ignores a `results/` dir in case
+# someone overrides -ResultsDir / $CR_RESULTS_DIR back into the repo tree.
 results/
