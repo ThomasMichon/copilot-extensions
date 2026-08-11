@@ -39,7 +39,8 @@ bash "$(copilot plugin path agent-dispatch)/scripts/install.sh" install    # Lin
 
 `scripts/install.{sh,ps1}` is a lifecycle manager --
 `install | update | status | start | stop | uninstall` (`init.{sh,ps1}` is a
-thin alias for `install`). `install`/`update` create `~/.agent-dispatch/.venv`,
+thin alias for `install`). `install`/`update` build a versioned runtime under
+`~/.agent-dispatch/versions/<v>/` (published by the `current-version` marker),
 an `agent-dispatch` binstub in `~/.local/bin`, a schema-3 deploy manifest, the
 **"Tasks" picker pivot** (see below), and -- unless `--no-service` (`-NoService`)
 -- the coordinator service (a per-host local coordinator, matching agent-bridge).

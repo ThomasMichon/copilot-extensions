@@ -3,9 +3,15 @@
 The **canonical source** of `versioned_runtime.py` — the stdlib-only,
 cross-platform primitive that owns the immutable per-version runtime layout
 (dotfiles #581). Each version installs into its own immutable
-`<root>/versions/<version>/` directory and the active one is named by a
-`.venv`/`venv`/`current` **junction** (Windows) / **symlink** (POSIX); switching
-versions is an atomic-ish link swap, never a file rewrite. See
+`<root>/versions/<version>/` directory and the active one is published by a
+`<root>/current-version` **plain-text marker file**. Switching versions rewrites
+that marker (atomic temp+rename) and re-points the **version-pinned binstubs**
+(+ scheduled task / deploy manifest) straight at `versions/<version>/…`, never a
+file rewrite. **On Windows there is no junction at all** — a reparse point was
+blocked by RedirectionGuard (WinError 448) on managed devices, so the marker +
+pinned binstubs replace it. **On POSIX** the marker is authoritative and a
+`venv`/`.venv` **symlink** (not a reparse point) still publishes the active slot
+as the stable runtime-facing path. See
 [`docs/install-contract.md`](../../docs/install-contract.md) and
 [`docs/patterns/README.md`](../../docs/patterns/README.md) §"Runtime installs are
 immutable and versioned".
