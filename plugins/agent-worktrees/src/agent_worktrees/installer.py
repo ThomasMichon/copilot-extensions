@@ -368,6 +368,7 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
     for name in ("resolve-runtime.ps1", "resolve-runtime.sh",
                  "session-conduct.ps1", "session-conduct.sh",
                  "session-machine.ps1", "session-machine.sh",
+                 "session-ext-reload.ps1", "session-ext-reload.sh",
                  "bootstrap-check.ps1", "bootstrap-check.sh",
                  "statelessness_guard.py", "cross_repo_guard.py",
                  "anchor_write_guard.py"):
@@ -387,6 +388,15 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
         for frag in sorted(conduct_src.glob("*.md")):
             shutil.copy2(frag, conduct_dst / frag.name)
             output.ok(f"Conduct: {conduct_dst / frag.name}")
+
+    # Deploy the temporary ext-reload hang warning fragment that the
+    # session-ext-reload sessionStart hook emits as additionalContext (NOT
+    # cwd-gated -- also fires at cwd=~/ so it reaches Bare resume; dotfiles#1055).
+    # Retired with the rest of the feature when #13494 ships.
+    ext_reload_src = scripts / "ext-reload-hang.md"
+    if ext_reload_src.is_file():
+        shutil.copy2(ext_reload_src, bd / "ext-reload-hang.md")
+        output.ok(f"Bootstrap: {bd / 'ext-reload-hang.md'}")
 
     # Deploy default setup scripts (used when repos lack their own)
     sd = install_dir() / "scripts"
