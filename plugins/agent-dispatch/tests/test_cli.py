@@ -127,11 +127,28 @@ def test_parser_dashdash_tail_captured_for_drive_and_run():
 
 
 def test_parser_dashdash_left_intact_for_other_subcommands():
-    """The `--` interception is scoped to run / recipes-drive; other subcommands
-    keep argparse's native `--` "end of options" escape hatch."""
+    """The `--` interception is scoped to run / recipes-drive (resolved by the
+    parsed subcommand, not token membership); other subcommands keep argparse's
+    native `--` "end of options" escape hatch."""
     a = build_parser().parse_args(["create", "--", "-weird-title"])
     assert not hasattr(a, "_dashdash_tail")
     assert a.title == "-weird-title"
+
+
+def test_parser_dashdash_scoping_ignores_positional_named_run():
+    """A positional VALUE equal to 'run' (here create's title) must NOT be
+    mistaken for the `run` subcommand and trigger `--` interception (#383 review).
+    """
+    import pytest
+
+    # Without '--': parses fine, title == "run", no tail captured.
+    a = build_parser().parse_args(["create", "run"])
+    assert a.title == "run" and not hasattr(a, "_dashdash_tail")
+
+    # With '--': the tail is NOT swallowed into _dashdash_tail; argparse handles
+    # it natively (rejects the stray positional) instead of silently dropping it.
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["create", "run", "--", "-weird"])
 
 
 def test_parser_create_spawn_flags():

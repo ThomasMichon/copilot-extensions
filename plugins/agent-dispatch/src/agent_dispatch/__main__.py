@@ -2246,16 +2246,23 @@ class _DashDashParser(argparse.ArgumentParser):
 
     def parse_known_args(self, args=None, namespace=None):  # type: ignore[override]
         args = list(sys.argv[1:] if args is None else args)
-        tail = None
         if "--" in args:
             idx = args.index("--")
-            head = args[:idx]
-            if "run" in head or ("recipes" in head and "drive" in head):
-                args, tail = head, args[idx + 1:]
-        ns, extras = super().parse_known_args(args, namespace)
-        if tail is not None:
-            ns._dashdash_tail = tail
-        return ns, extras
+            head, tail = args[:idx], args[idx + 1:]
+            # Resolve the ACTUAL subcommand from the head (peek parse) rather than
+            # a token-membership test -- a positional VALUE equal to 'run'/'drive'
+            # (e.g. `create run -- ...`) must not trigger interception (#383).
+            try:
+                peek, _ = super().parse_known_args(head, None)
+            except SystemExit:
+                peek = None
+            if peek is not None and getattr(peek, "func", None) in (
+                _cmd_run, _cmd_recipes_drive
+            ):
+                ns, extras = super().parse_known_args(head, namespace)
+                ns._dashdash_tail = tail
+                return ns, extras
+        return super().parse_known_args(args, namespace)
 
 
 def build_parser() -> argparse.ArgumentParser:
