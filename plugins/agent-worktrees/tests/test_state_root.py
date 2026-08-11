@@ -356,3 +356,26 @@ def test_state_repo_definition_unbound_has_no_path_and_warns():
     assert "not bound on this machine" in text
     assert "`" not in text  # no backtick-quoted path when unresolved
     assert "**The user's state repo**" in text
+
+
+def test_state_repo_definition_bound_knowledge_carries_write_routing():
+    # A bound knowledge repo => harness and state repo are distinct, so the
+    # definition adds the "where changes go" routing clause.
+    res = sr.StateRoot("/repos/knowledge", "knowledge_repo", "kn", True, True, True)
+    text = sr.state_repo_definition(res)
+    assert "Where changes go" in text
+    assert "shared harness" in text
+    assert "harness repo (your current checkout)" in text
+
+
+def test_state_repo_definition_self_hosted_has_no_write_routing():
+    # Self-hosted: one checkout, so NO routing clause (would be noise).
+    res = sr.StateRoot("/work/tree", "launch_repo", "dotfiles", False, False, True)
+    text = sr.state_repo_definition(res)
+    assert "Where changes go" not in text
+
+
+def test_state_repo_definition_explicit_has_no_write_routing():
+    res = sr.StateRoot("/repos/x", "explicit", "x", False, False, True)
+    text = sr.state_repo_definition(res)
+    assert "Where changes go" not in text
