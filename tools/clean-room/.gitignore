@@ -1,0 +1,3 @@
+# Local run artifacts -- never committed (may contain repo/plugin paths + logs;
+# the cached authed Docker image lives in the local Docker daemon, not here).
+results/
