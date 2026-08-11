@@ -14,7 +14,8 @@ from agent_codespaces import coordination as coord
 # module (which tests the shim itself) can restore the real implementations.
 _REAL = {
     name: getattr(coord, name)
-    for name in ("owner_ref", "acquire", "renew", "release", "inspect", "list_leases")
+    for name in ("owner_ref", "acquire", "renew", "release", "inspect",
+                 "list_leases", "publish_cleanliness", "list_cleanliness")
 }
 
 
@@ -203,3 +204,82 @@ def test_list_leases_skips_keyless_or_nondict_rows(monkeypatch):
     monkeypatch.setattr(coord, "_run", lambda *a, **k: _proc(0, json.dumps(rows)))
     out = coord.list_leases()
     assert set(out) == {"cs-ok"}
+
+
+# --- cleanliness beacon (Phase 3 / codespace-clean-beacon) --------------------
+
+
+def test_publish_cleanliness_acquires_with_context(monkeypatch):
+    captured = {}
+
+    def fake_run(args, **kw):
+        captured["args"] = args
+        return _proc(0, json.dumps({"token": "b" * 40}))
+
+    monkeypatch.setattr(coord, "_run", fake_run)
+    ok = coord.publish_cleanliness(
+        "cs-one", known=True, clean=True, dirty=False, ahead=0,
+        unpushed_branches=0, holder="m/p/w", at="2026-08-10T00:00:00Z", ttl=3600,
+    )
+    assert ok is True
+    args = captured["args"]
+    assert args[:4] == ["lease", "acquire", coord.KIND_CLEAN, "cs-one"]
+    joined = " ".join(args)
+    assert "--holder m/p/w" in joined
+    assert "clean=1" in args and "known=1" in args and "dirty=0" in args
+    assert "at=2026-08-10T00:00:00Z" in args
+
+
+def test_publish_cleanliness_conflict_is_degrade_safe(monkeypatch):
+    # A still-live prior record (conflict, exit 3) -> False (existing verdict
+    # stands), never raises.
+    monkeypatch.setattr(coord, "_run", lambda *a, **k: _proc(3, stderr="conflict"))
+    assert coord.publish_cleanliness(
+        "cs-one", known=True, clean=True, dirty=False, ahead=0,
+        unpushed_branches=0,
+    ) is False
+
+
+def test_publish_cleanliness_unavailable_when_no_binstub(monkeypatch):
+    monkeypatch.setattr(coord, "_run", lambda *a, **k: None)
+    assert coord.publish_cleanliness(
+        "cs-one", known=False, clean=False, dirty=True, ahead=1,
+        unpushed_branches=1,
+    ) is False
+
+
+def test_list_cleanliness_projects_context(monkeypatch):
+    rows = [{
+        "resource": {"kind": coord.KIND_CLEAN, "key": "cs-one"},
+        "holder": "m/p/w",
+        "live": True,
+        "context": {"known": "1", "clean": "0", "dirty": "1", "ahead": "2",
+                    "unpushed_branches": "1", "at": "2026-08-10T00:00:00Z"},
+    }]
+    monkeypatch.setattr(coord, "_run", lambda *a, **k: _proc(0, json.dumps(rows)))
+    out = coord.list_cleanliness()
+    rec = out["cs-one"]
+    assert rec.known and rec.dirty and not rec.clean
+    assert rec.ahead == 2 and rec.unpushed_branches == 1
+    assert rec.by == "m/p/w" and rec.live is True
+    assert rec.off_box_safe is False        # live + known + not clean
+
+
+def test_clean_record_off_box_safe_tristate():
+    from agent_codespaces.coordination import CleanRecord
+
+    def rec(**kw):
+        base = dict(key="k", known=True, clean=True, dirty=False, ahead=0,
+                    unpushed_branches=0, at="", by="", live=True)
+        base.update(kw)
+        return CleanRecord(**base)
+
+    assert rec().off_box_safe is True
+    assert rec(clean=False).off_box_safe is False
+    assert rec(live=False).off_box_safe is None      # expired
+    assert rec(known=False).off_box_safe is None      # unknown
+
+
+def test_list_cleanliness_unavailable_is_none(monkeypatch):
+    monkeypatch.setattr(coord, "_run", lambda *a, **k: _proc(2, stderr="no origin"))
+    assert coord.list_cleanliness() is None
