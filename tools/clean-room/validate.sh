@@ -27,6 +27,10 @@ MARKETPLACE_NAME="${CR_MARKETPLACE_NAME:-copilot-extensions}"
 PRIMARY_PLUGIN="${CR_PRIMARY_PLUGIN:-agent-codespaces}"
 EXPECT_DEPS="${CR_EXPECT_DEPS:-agent-bridge agent-worktrees}"
 REPORT="${CR_REPORT:-$HOME/cr-report.json}"
+# CR_UNTIL: stop after this phase number (0-6), then write the report and exit 0.
+# Lets the runner prepare the box up to a chosen point and hand off to an
+# interactive shell (run -Until N -Then shell). Default: run all phases.
+UNTIL="${CR_UNTIL:-6}"
 
 INSTALLED_ROOT="$HOME/.copilot/installed-plugins/$MARKETPLACE_NAME"
 LOGDIR="$HOME/cr-logs"
@@ -58,6 +62,27 @@ _run() {  # label -- command...   (captures output to a log, echoes tail)
     return $rc
 }
 
+_finalize() {  # write the JSON report + summary from accumulated RESULTS, then exit
+    _phase "Summary"
+    printf '  \033[1m%d passed, %d failed\033[0m (ran through phase %s)\n' "$PASS" "$FAIL" "$UNTIL"
+    {
+        printf '{\n  "marketplace_repo": "%s",\n  "primary_plugin": "%s",\n' "$MARKETPLACE_REPO" "$PRIMARY_PLUGIN"
+        printf '  "copilot_version": "%s",\n  "ran_until_phase": %s,\n' "$(copilot --version 2>/dev/null | head -1)" "$UNTIL"
+        printf '  "passed": %d, "failed": %d,\n  "results": [\n' "$PASS" "$FAIL"
+        local first=1
+        for r in "${RESULTS[@]}"; do
+            [ $first -eq 1 ] && first=0 || printf ',\n'
+            printf '    %s' "$r"
+        done
+        printf '\n  ]\n}\n'
+    } > "$REPORT"
+    printf '  report: %s\n  logs:   %s\n' "$REPORT" "$LOGDIR"
+    [ "$FAIL" -eq 0 ]; exit $?
+}
+_gate() {  # _gate N -- if the requested UNTIL stops before phase N, finalize now
+    [ "$UNTIL" -ge "$1" ] || _finalize
+}
+
 # =========================================================================
 _phase "Phase 0 -- environment (must look like a fresh machine)"
 _rec INFO "whoami=$(whoami) HOME=$HOME"
@@ -74,6 +99,7 @@ copilot --help              >"$LOGDIR/copilot-help.log"        2>&1 || true
 copilot plugin --help       >"$LOGDIR/copilot-plugin-help.log" 2>&1 || true
 
 # =========================================================================
+_gate 1
 _phase "Phase 1 -- register marketplace + install ONE plugin ($PRIMARY_PLUGIN)"
 # Seed the marketplace declaratively (most robust across CLI versions); also try
 # the CLI verb and record which path worked.
@@ -101,6 +127,7 @@ else
 fi
 
 # =========================================================================
+_gate 2
 _phase "Phase 2 -- dependency chain (does one install pull the rest?)"
 for dep in $EXPECT_DEPS; do
     if [ -d "$INSTALLED_ROOT/$dep" ]; then
@@ -112,6 +139,7 @@ done
 _rec INFO "installed-plugins dir: $(ls -1 "$INSTALLED_ROOT" 2>/dev/null | tr '\n' ' ' || echo '(none)')"
 
 # =========================================================================
+_gate 3
 _phase "Phase 3 -- runtime bootstrap on first session (venv + binstub)"
 # Firing a session runs the plugins' sessionStart hooks. On a clean machine the
 # bootstrap-check hook currently EXITS if there is no deploy-manifest yet -- this
@@ -136,6 +164,7 @@ else
 fi
 
 # =========================================================================
+_gate 4
 _phase "Phase 4 -- binstub reachability from a stock login shell"
 if [ -e "$HOME/.local/bin/agent-codespaces" ]; then
     _rec PASS "binstub deployed: ~/.local/bin/agent-codespaces"
@@ -155,6 +184,7 @@ else
 fi
 
 # =========================================================================
+_gate 5
 _phase "Phase 5 -- plugin loading in headless copilot -p (enabledPlugins vs --plugin-dir)"
 # (a) rely on enabledPlugins in settings.json (NO --plugin-dir)
 ( cd "$HOME/harness-repo" && _run "load-enabledonly" \
@@ -174,6 +204,7 @@ else
 fi
 
 # =========================================================================
+_gate 6
 _phase "Phase 6 -- register the current repo as a harness project"
 if command -v agent-worktrees >/dev/null 2>&1; then
     ( cd "$HOME/harness-repo" && _run "register" agent-worktrees register harness-repo ) || true
@@ -187,19 +218,4 @@ else
 fi
 
 # =========================================================================
-_phase "Summary"
-printf '  \033[1m%d passed, %d failed\033[0m\n' "$PASS" "$FAIL"
-{
-    printf '{\n  "marketplace_repo": "%s",\n  "primary_plugin": "%s",\n' "$MARKETPLACE_REPO" "$PRIMARY_PLUGIN"
-    printf '  "copilot_version": "%s",\n' "$(copilot --version 2>/dev/null | head -1)"
-    printf '  "passed": %d, "failed": %d,\n  "results": [\n' "$PASS" "$FAIL"
-    local_first=1
-    for r in "${RESULTS[@]}"; do
-        [ $local_first -eq 1 ] && local_first=0 || printf ',\n'
-        printf '    %s' "$r"
-    done
-    printf '\n  ]\n}\n'
-} > "$REPORT"
-printf '  report: %s\n  logs:   %s\n' "$REPORT" "$LOGDIR"
-
-[ "$FAIL" -eq 0 ]
+_finalize

@@ -1,42 +1,69 @@
 #!/usr/bin/env bash
 # Linux/WSL/macOS host wrapper for the clean-room install-flow validation.
-# Mirrors run.ps1. Subcommands: build | auth | run (default) | all.
+# Mirrors run.ps1. Drives a PERSISTENT container so you can run the automated
+# validate.sh (optionally to a chosen phase) and then drop into an INTERACTIVE
+# shell in the same box for headed `copilot` smoke tests.
 #
-#   ./run.sh all                # build -> auth (once) -> run
-#   ./run.sh run                # run against the cached :authed image
+#   ./run.sh                              # base: full validate against :authed
+#   ./run.sh --image pristine shell       # drop into a pristine fresh box
+#   ./run.sh --until 1 --then shell run   # install the plugin, then hand off
+#   ./run.sh --image pristine down        # remove the pristine container
+#
+# Feed policy: the host npm config is NEVER auto-forwarded (that would bias the
+# fresh-machine experiment). Pass --npm-registry <feed> ONLY to install the
+# Copilot CLI prereq on a governed box (a build-time given, not the experiment).
 #
 # Env overrides: CR_MARKETPLACE_REPO CR_MARKETPLACE_NAME CR_PRIMARY_PLUGIN
-#                CR_EXPECT_DEPS CR_RESULTS_DIR
+#                CR_EXPECT_DEPS CR_RESULTS_DIR CR_NPM_REGISTRY
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Run artifacts land in a MACHINE-LOCAL dir OUTSIDE any repo checkout -- they are
-# per-run state and must never be written into the (possibly anchor) repo tree.
-# Override with $CR_RESULTS_DIR.
+
+IMAGE=base
+UNTIL=6
+THEN=none
+NPM_REGISTRY="${CR_NPM_REGISTRY:-}"
+MODE=run
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --image) IMAGE="$2"; shift 2 ;;
+        --until) UNTIL="$2"; shift 2 ;;
+        --then)  THEN="$2"; shift 2 ;;
+        --npm-registry) NPM_REGISTRY="$2"; shift 2 ;;
+        build|auth|run|shell|down|all) MODE="$1"; shift ;;
+        *) echo "usage: $0 [--image base|pristine] [--until N] [--then shell|down] [--npm-registry URL] {build|auth|run|shell|down|all}" >&2; exit 2 ;;
+    esac
+done
+
+case "$IMAGE" in base) DOCKERFILE=Dockerfile ;; pristine) DOCKERFILE=Dockerfile.pristine ;; *) echo "bad --image: $IMAGE" >&2; exit 2 ;; esac
+BASE_TAG="copilot-cleanroom:$IMAGE"
+if [ "$IMAGE" = base ]; then AUTH_TAG="copilot-cleanroom:authed"; else AUTH_TAG="copilot-cleanroom:$IMAGE-authed"; fi
+CONTAINER="cr-$IMAGE"
+
 if [ -n "${CR_RESULTS_DIR:-}" ]; then
     RESULTS="$CR_RESULTS_DIR"
 else
     RESULTS="${XDG_STATE_HOME:-$HOME/.local/state}/copilot-cleanroom/runs/$(date +%Y%m%d-%H%M%S)"
 fi
-mkdir -p "$RESULTS"
-echo "results -> $RESULTS"
-BASE_TAG="${CR_BASE_TAG:-copilot-cleanroom:base}"
-AUTH_TAG="${CR_AUTH_TAG:-copilot-cleanroom:authed}"
-MODE="${1:-run}"
 
-img_exists() { [ -n "$(docker images -q "$1" 2>/dev/null)" ]; }
+img_exists()  { [ -n "$(docker images -q "$1" 2>/dev/null)" ]; }
+is_running()  { [ -n "$(docker ps -q -f "name=^$1\$" 2>/dev/null)" ]; }
 
 do_build() {
-    echo "== building credential-free base image ($BASE_TAG) =="
-    # Governed machines block the public npm registry at the TLS layer; forward
-    # the host's configured registry so the in-image Copilot CLI install matches.
-    local reg="${CR_NPM_REGISTRY:-$(npm config get registry 2>/dev/null | head -1)}"
-    case "$reg" in ''|undefined|null) reg='https://registry.npmjs.org/' ;; esac
-    echo "   npm registry: $reg"
-    docker build --build-arg "NPM_REGISTRY=$reg" -t "$BASE_TAG" "$HERE"
+    echo "== building $IMAGE image ($BASE_TAG) from $DOCKERFILE =="
+    # No host-config auto-forward: pass a feed ONLY when explicitly requested
+    # (installs the Copilot CLI prereq on a governed box). Public by default.
+    local reg="${NPM_REGISTRY:-https://registry.npmjs.org/}"
+    [ -z "$reg" ] && reg='https://registry.npmjs.org/'
+    echo "   npm registry (build-time, Copilot install only): $reg"
+    if ! docker build --build-arg "NPM_REGISTRY=$reg" -f "$HERE/$DOCKERFILE" -t "$BASE_TAG" "$HERE"; then
+        echo "docker build failed. On a governed box the public npm feed is TLS-blocked;" >&2
+        echo "re-run with --npm-registry https://<your-internal-npm-feed>/ to install Copilot." >&2
+        exit 1
+    fi
 }
 do_auth() {
     img_exists "$BASE_TAG" || do_build
-    echo "== one-time device-code login =="
+    echo "== one-time device-code login ($AUTH_TAG) =="
     echo "Run '/login' if not prompted, authorize the device code, then '/exit'."
     docker rm -f cr-auth >/dev/null 2>&1 || true
     docker run -it --name cr-auth --entrypoint /bin/bash "$BASE_TAG" -lc 'copilot; echo "--- login session ended ---"'
@@ -45,10 +72,11 @@ do_auth() {
     docker rm -f cr-auth >/dev/null
     echo "cached $AUTH_TAG"
 }
-do_run() {
+start_container() {
     img_exists "$AUTH_TAG" || { echo "no $AUTH_TAG yet -- authing first"; do_auth; }
-    echo "== running clean-room validation =="
-    docker run --rm \
+    docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+    mkdir -p "$RESULTS"
+    docker run -d --name "$CONTAINER" \
         -v "$HERE/validate.sh:/home/operator/validate.sh:ro" \
         -v "$RESULTS:/home/operator/out" \
         -e "CR_MARKETPLACE_REPO=${CR_MARKETPLACE_REPO:-ThomasMichon/copilot-extensions}" \
@@ -56,17 +84,37 @@ do_run() {
         -e "CR_PRIMARY_PLUGIN=${CR_PRIMARY_PLUGIN:-agent-codespaces}" \
         -e "CR_EXPECT_DEPS=${CR_EXPECT_DEPS:-agent-bridge agent-worktrees}" \
         -e "CR_REPORT=/home/operator/out/cr-report.json" \
-        --entrypoint /bin/bash \
-        "$AUTH_TAG" -lc 'bash /home/operator/validate.sh; rc=$?; cp -r $HOME/cr-logs /home/operator/out/ 2>/dev/null; exit $rc'
+        --entrypoint sleep "$AUTH_TAG" infinity >/dev/null
+    echo "container $CONTAINER up (results -> $RESULTS)"
+}
+ensure_container() { is_running "$CONTAINER" || start_container; }
+do_shell() {
+    ensure_container
+    echo "== entering $CONTAINER (interactive login shell; 'exit' leaves, container stays up) =="
+    echo "   run '$0 --image $IMAGE down' to remove it."
+    docker exec -it "$CONTAINER" /bin/bash -l
+}
+do_down() { docker rm -f "$CONTAINER" >/dev/null 2>&1 || true; echo "removed $CONTAINER"; }
+do_run() {
+    start_container
+    echo "== running clean-room validation ($IMAGE, through phase $UNTIL) =="
+    docker exec -e "CR_UNTIL=$UNTIL" "$CONTAINER" /bin/bash -lc \
+        'cp -r $HOME/cr-logs /home/operator/out/ 2>/dev/null; bash /home/operator/validate.sh; rc=$?; cp -r $HOME/cr-logs /home/operator/out/ 2>/dev/null; exit $rc'
     local rc=$?
     echo; echo "== report =="; cat "$RESULTS/cr-report.json" 2>/dev/null || true
     echo "results dir: $RESULTS"
-    return $rc
+    case "$THEN" in
+        shell) do_shell ;;
+        down)  do_down ;;
+    esac
+    [ "$THEN" = shell ] || return $rc
 }
+
 case "$MODE" in
     build) do_build ;;
     auth)  do_auth ;;
     run)   do_run ;;
+    shell) do_shell ;;
+    down)  do_down ;;
     all)   do_build; img_exists "$AUTH_TAG" || do_auth; do_run ;;
-    *) echo "usage: $0 {build|auth|run|all}" >&2; exit 2 ;;
 esac
