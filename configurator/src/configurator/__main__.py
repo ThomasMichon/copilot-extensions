@@ -26,6 +26,8 @@ from .harness_state import (
 )
 from .model import Model, build_model, coverage, effective_prereqs
 from .prereqs import current_os, detect_baseline, missing
+from .self_install import self_install
+from .self_install import status as self_status
 from .provision import apply as provision_apply
 from .provision import plan as provision_plan
 from .provision import restart_needed
@@ -349,6 +351,13 @@ def _cmd_doctor() -> int:
           f"{', venv' if core.venv_present else ''})")
     print(f"    binstub: {core.binstub or 'not found in ~/.local/bin'}")
     print()
+    selfst = self_status()
+    print("  configurator (self):")
+    print(f"    installed version: {selfst.installed_version or '(not versioned-installed)'}")
+    print(f"    running version:   {__version__}")
+    print(f"    binstub: {selfst.binstub or 'not found in ~/.local/bin'}")
+    print(f"    root: {selfst.root}")
+    print()
     gaps = missing(statuses)
     if gaps or not core.installed:
         print("  → not fully set up. Run `configurator setup` to see the plan "
@@ -415,6 +424,43 @@ def _cmd_setup(rest: list[str]) -> int:
     return 0 if done else 1
 
 
+def _cmd_self_install(rest: list[str]) -> int:
+    do_apply = "--apply" in rest
+    st = self_status()
+    res = self_install(dry_run=not do_apply)
+    print()
+    print(f"  {_BANNER} — self-install {'(APPLY)' if do_apply else '(plan / dry-run)'}")
+    print()
+    print(f"    payload version:   {res.version or '?'}")
+    print(f"    installed version: {st.installed_version or '(none)'}")
+    print(f"    root:              {res.root}")
+    print(f"    version slot:      {res.slot or '?'}")
+    print(f"    marker file:       {res.root}/current-version")
+    print(f"    binstub dir:       {local_bin_hint()}")
+    print()
+    if res.action == "already-current":
+        print("  ✓ already current — nothing to do (version-gated no-op).")
+    elif res.action == "planned":
+        print("  would install this version's slot, publish the current-version")
+        print("  marker, and deploy the ~/.local/bin/configurator binstub.")
+        print("  (plan only — re-run with --apply to execute.)")
+    elif res.action == "installed":
+        print(f"  ✓ installed {res.version}: slot + marker written, binstub deployed:")
+        for b in res.binstubs:
+            print(f"      {b}")
+        print("  ensure ~/.local/bin is on PATH, then run `configurator` directly.")
+    else:
+        print(f"  ! {res.reason}")
+        return 1
+    print()
+    return 0
+
+
+def local_bin_hint() -> str:
+    from .self_install import local_bin
+    return str(local_bin())
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] in ("--version", "-V"):
@@ -429,6 +475,7 @@ def main(argv: list[str] | None = None) -> int:
         print("  (no args)              show the app banner + build-out roadmap")
         print("  doctor                 report prerequisites + the agent-worktrees core")
         print("  setup [--apply]        plan (default) or run prereq provisioning + core install")
+        print("  self-install [--apply] version the app: current-version marker + ~/.local/bin binstub")
         print("  plugins                list the plugins the installer knows about")
         print("  plugins <name>         show one plugin's prereqs / config / steps")
         print("  plugins --prereqs      the de-duplicated union of all prerequisites")
@@ -451,6 +498,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_doctor()
     if args and args[0] == "setup":
         return _cmd_setup(args[1:])
+    if args and args[0] == "self-install":
+        return _cmd_self_install(args[1:])
     _print_intro()
     return 0
 
