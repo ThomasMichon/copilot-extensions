@@ -13,9 +13,11 @@ via the ``AGENT_VAULT_CACHE`` env var (truthy) or a configured cache directory
 (``AGENT_VAULT_CACHE_DIR``). When disabled, or when the optional ``cryptography``
 dependency is not installed, every operation is a safe no-op.
 
-Security posture: the Fernet key sits beside the cache file at ``0600``. This is
-hygiene, not high security; physical-access control and full-disk encryption are
-the real barriers. Never treat the on-disk cache as a trust boundary.
+Security posture: the Fernet key sits beside the cache file, **wrapped at rest** --
+DPAPI (per-OS-user) on Windows via the ``kek`` module, or a ``0600`` file on POSIX.
+On Windows the wrapped key is only unwrappable by the same user account; on POSIX it
+is hygiene, not high security, so physical-access control and full-disk encryption
+remain the real barriers. Never treat the on-disk cache as a trust boundary.
 """
 
 from __future__ import annotations
@@ -101,16 +103,32 @@ class PersistentCache:
             return None
         from cryptography.fernet import Fernet
 
+        from . import kek
+
         self._base_dir.mkdir(parents=True, exist_ok=True)
         if self._key_file.exists():
-            key = self._key_file.read_bytes().strip()
+            blob = self._key_file.read_bytes()
+            if kek.is_wrapped(blob):
+                key = kek.unwrap_bytes(blob)
+            else:
+                # Legacy plaintext key file -> migrate to a wrapped (DPAPI on
+                # Windows) blob bound to the OS user, best-effort.
+                key = blob.strip()
+                with contextlib.suppress(Exception):
+                    self._write_key(key)
         else:
             key = Fernet.generate_key()
-            self._key_file.write_bytes(key + b"\n")
-            if not IS_WINDOWS:
-                self._key_file.chmod(0o600)
+            self._write_key(key)
         self._fernet = Fernet(key)
         return self._fernet
+
+    def _write_key(self, key: bytes) -> None:
+        """Persist the Fernet key wrapped at rest (DPAPI per-user on Windows)."""
+        from . import kek
+
+        self._key_file.write_bytes(kek.wrap_bytes(key))
+        if not IS_WINDOWS:
+            self._key_file.chmod(0o600)
 
     # -- atomic file I/O ---------------------------------------------------
 
