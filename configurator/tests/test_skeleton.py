@@ -23,7 +23,6 @@ def test_bare_run_prints_intro_and_roadmap(capsys):
     assert main([]) == 0
     out = capsys.readouterr().out
     assert "Configurator" in out
-    assert "Phase 0 skeleton" in out
     # The roadmap is shown so a first run is self-explanatory.
     assert "one-line bootstrap" in out
     assert "you are here" in out

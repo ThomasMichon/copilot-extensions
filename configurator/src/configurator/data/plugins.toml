@@ -1,0 +1,240 @@
+# Installer-owned declarative plugin-knowledge catalog (Phase 1, effort
+# installer-configurator / umbrella #352, resolves DQ2).
+#
+# This file is the Configurator's OWN source of truth about the plugins: their
+# prerequisites, the config they manage, and the "what to do" to make each one
+# ready. It is DATA, not code, and it lives INSIDE the configurator payload.
+#
+# The dependency-free boundary (one-way awareness):
+#   * The Configurator *knows about* the plugins through this catalog. No plugin
+#     is imported, and no plugin is required to publish anything installer-
+#     specific for this catalog to exist. A plugin behaves identically whether or
+#     not the Configurator is present.
+#   * Where a plugin ALREADY publishes generic metadata for its OWN reasons
+#     (`scripts/service.yaml` prereqs, the marketplace entry), the Configurator
+#     reconciles this catalog against it opportunistically (see catalog.py
+#     `reconcile`) — reading it if a checkout is present, ignoring it otherwise.
+#     A prereq tagged `source = "published"` is one the plugin itself declares in
+#     its service.yaml; `source = "installer"` is knowledge the Configurator adds.
+#
+# When a plugin is added to / removed from the marketplace, update this catalog
+# to match — the reconcile check (and its test) is the forcing function that
+# keeps "the installer knows about the plugins" honest.
+
+schema_version = 1
+
+# Prereqs the whole harness needs before ANY plugin is usable. Provisioned in
+# Phase 2 (#355); `provision` hints how ("system" = OS/package manager, "script"
+# = fetched by the bootstrap/Phase-2 provisioner).
+[baseline]
+prereqs = [
+    { name = "git", min = "2.15", notes = "Git with worktree support", provision = "system" },
+    { name = "python3", min = "3.10", notes = "Python 3.10+", provision = "system" },
+    { name = "uv", notes = "Astral uv — venvs + package installs", provision = "script" },
+    { name = "psmux", notes = "Terminal multiplexer for interactive sessions", optional = true, provision = "script" },
+]
+
+# ── core ────────────────────────────────────────────────────────────────────
+# The install engine + worktree lifecycle. Everything else builds on it, so it
+# is the one plugin whose real installer the Configurator must drive (Phase 2).
+[[plugins]]
+name = "agent-worktrees"
+kind = "core"
+summary = "Worktree isolation + the shared runtime/binstub install engine the rest of the harness relies on."
+prereqs = [
+    { name = "git", min = "2.15", source = "published", notes = "Git with worktree support (2.15+)" },
+    { name = "python3", min = "3.10", source = "published", notes = "Python 3.10+" },
+]
+config = [
+    { path = "~/.{project}/config.yaml", description = "Per-project worktree manager config (re-rendered by the installer)" },
+]
+steps = [
+    { id = "install-core", what = "Build the shared runtime (venv + package + wrappers) and the ~/.local/bin binstubs.", runs = "pwsh -File plugins/agent-worktrees/scripts/install.ps1 install" },
+]
+
+# ── services (own installer / daemon) ───────────────────────────────────────
+[[plugins]]
+name = "agent-bridge"
+kind = "service"
+summary = "Persistent inter-agent communication service (port 9280) + ACP transport."
+depends_on = ["agent-worktrees"]
+prereqs = [
+    { name = "python3", min = "3.10", source = "installer" },
+]
+steps = [
+    { id = "install-service", what = "Build the bridge runtime and register the service (updated as an agent-worktrees module).", runs = "pwsh -File plugins/agent-bridge/scripts/install.ps1 install" },
+]
+
+[[plugins]]
+name = "agent-codespaces"
+kind = "service"
+summary = "GitHub Codespaces lifecycle, SSH transport, and credential relay."
+depends_on = ["agent-worktrees", "agent-bridge"]
+prereqs = [
+    { name = "python3", min = "3.10", source = "published" },
+    { name = "gh", source = "published", notes = "GitHub CLI (authenticated)" },
+    { name = "ssh", source = "published", notes = "OpenSSH client" },
+]
+steps = [
+    { id = "install-service", what = "Build the codespaces runtime, SSH manager, and credential relay.", runs = "pwsh -File plugins/agent-codespaces/scripts/install.ps1 install" },
+]
+
+[[plugins]]
+name = "agent-ssh"
+kind = "service"
+summary = "SSH connectivity layer: machine-name profiles + pluggable transport providers."
+depends_on = ["agent-worktrees"]
+prereqs = [
+    { name = "ssh", source = "installer", notes = "OpenSSH client" },
+    { name = "python3", min = "3.10", source = "installer" },
+]
+steps = [
+    { id = "install-service", what = "Emit/verify machine-name SSH profiles and install the transport contract.", runs = "pwsh -File plugins/agent-ssh/scripts/install.ps1 install" },
+]
+
+[[plugins]]
+name = "agent-logger"
+kind = "service"
+summary = "Session logging: segment, write Markdown logs, sync raw sessions, optional orchestrator."
+depends_on = ["agent-worktrees"]
+prereqs = [
+    { name = "python3", min = "3.10", source = "published" },
+    { name = "rsync", optional = true, source = "published", notes = "Only for the ssh / ssh-tunnel / ingest targets" },
+]
+steps = [
+    { id = "install-service", what = "Build the logger runtime and (optionally) the scheduled orchestrator.", runs = "pwsh -File plugins/agent-logger/scripts/install.ps1 install" },
+]
+
+[[plugins]]
+name = "agent-dispatch"
+kind = "service"
+summary = "Claimable, worktree-pinned task hand-offs across sessions."
+depends_on = ["agent-worktrees"]
+prereqs = [
+    { name = "python3", min = "3.10", source = "installer" },
+]
+steps = [
+    { id = "install-service", what = "Build the dispatch runtime + binstub.", runs = "pwsh -File plugins/agent-dispatch/scripts/install.ps1 install" },
+]
+
+[[plugins]]
+name = "agent-vault"
+kind = "service"
+summary = "Local secret vault for the agent fabric."
+depends_on = ["agent-worktrees"]
+prereqs = [
+    { name = "python3", min = "3.10", source = "installer" },
+]
+steps = [
+    { id = "install-service", what = "Build the vault runtime + binstub.", runs = "pwsh -File plugins/agent-vault/scripts/install.ps1 install" },
+]
+
+[[plugins]]
+name = "agent-index"
+kind = "service"
+summary = "Fabric index/registry service."
+depends_on = ["agent-worktrees"]
+prereqs = [
+    { name = "python3", min = "3.10", source = "installer" },
+]
+steps = [
+    { id = "install-service", what = "Build the index runtime + binstub.", runs = "pwsh -File plugins/agent-index/scripts/install.ps1 install" },
+]
+
+# ── libraries (Python-backed, no standalone installer) ──────────────────────
+# Provisioned with the core runtime / on first use — no separate install script.
+[[plugins]]
+name = "agent-containers"
+kind = "library"
+summary = "Local Docker dev-container fleet management + lease broker."
+depends_on = ["agent-worktrees", "agent-bridge"]
+prereqs = [
+    { name = "docker", source = "installer", notes = "Docker engine for the local container fleet" },
+    { name = "python3", min = "3.10", source = "installer" },
+]
+steps = [
+    { id = "provision-with-core", what = "No standalone installer — its venv/package is built by the agent-worktrees install/update flow or on first use." },
+]
+
+[[plugins]]
+name = "agent-mcp"
+kind = "library"
+summary = "Swiss-army MCP bridge — wrap an upstream MCP server as local stdio with a decorator stack."
+depends_on = ["agent-worktrees"]
+prereqs = [
+    { name = "python3", min = "3.10", source = "installer" },
+    { name = "uv", source = "installer", notes = "Runs the wrapped MCP server's venv" },
+]
+steps = [
+    { id = "provision-with-core", what = "No standalone installer — provisioned by the core flow; each wrapped server gets its own venv on demand." },
+]
+
+[[plugins]]
+name = "agent-machines"
+kind = "library"
+summary = "Machine-inventory model + topology helpers consumed by the fabric."
+depends_on = ["agent-worktrees"]
+prereqs = [
+    { name = "python3", min = "3.10", source = "installer" },
+]
+steps = [
+    { id = "provision-with-core", what = "No standalone installer — provisioned by the core flow." },
+]
+
+# ── knowledge (skills / instructions only, no build step) ───────────────────
+[[plugins]]
+name = "context-handoff"
+kind = "knowledge"
+summary = "Context-window monitoring + session hand-off skill (sits on agent-dispatch)."
+steps = [
+    { id = "enable", what = "Skills/instructions only — active once the plugin is enabled; no build step." },
+]
+
+[[plugins]]
+name = "efforts"
+kind = "knowledge"
+summary = "Effort planning + tracking conventions."
+steps = [
+    { id = "enable", what = "Skills/instructions only — active once the plugin is enabled; no build step." },
+]
+
+[[plugins]]
+name = "visions"
+kind = "knowledge"
+summary = "North-star intent (visions) authoring + conventions."
+steps = [
+    { id = "enable", what = "Skills/instructions only — active once the plugin is enabled; no build step." },
+]
+
+[[plugins]]
+name = "customizing-copilot"
+kind = "knowledge"
+summary = "Authoring plugins/skills/sub-agents + reviewing the loaded set."
+steps = [
+    { id = "enable", what = "Skills/instructions only — active once the plugin is enabled; no build step." },
+]
+
+[[plugins]]
+name = "copilot-extensions-harness"
+kind = "knowledge"
+summary = "Contributing-to / diagnosing the copilot-extensions harness itself."
+steps = [
+    { id = "enable", what = "Skills/instructions only — active once the plugin is enabled; no build step." },
+]
+
+[[plugins]]
+name = "wsl-setup"
+kind = "knowledge"
+summary = "WSL environment setup + networking troubleshooting guidance."
+steps = [
+    { id = "enable", what = "Skills/instructions only — active once the plugin is enabled; no build step." },
+]
+
+[[plugins]]
+name = "harness-knowledge"
+kind = "knowledge"
+summary = "Binds a knowledge repo + assembles per-plugin knowledge fragments."
+depends_on = ["agent-worktrees"]
+steps = [
+    { id = "enable", what = "Skills/instructions only; its own bind_knowledge configurator is run on demand via the binding-knowledge skill — no install-time build step." },
+]

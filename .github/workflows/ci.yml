@@ -76,6 +76,19 @@ jobs:
       - name: Ruff (F, E9)
         run: ruff check --select F,E9 --output-format=github .
 
+  configurator:
+    name: configurator (out-of-plugin)
+    # The configurator is delivered OUTSIDE the plugin pipe, so the per-plugin
+    # matrix below never runs its tests. This dedicated job gives it real CI.
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Test configurator
+        working-directory: configurator
+        run: uv run --extra dev pytest -q
+
   discover:
     name: discover suites
     if: github.event_name != 'workflow_dispatch'
