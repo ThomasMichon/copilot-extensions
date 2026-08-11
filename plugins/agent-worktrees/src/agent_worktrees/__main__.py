@@ -10760,8 +10760,8 @@ def _repos_usage() -> None:
     print("  doctor [--fix] [--json]             Reconcile projects.yaml <-> repos.yaml")
     print("  account [list|set <owner> <login>|unset <owner>]")
     print("                                      Decoupled owner->gh-login map (account_map)")
-    print("  account-for <owner|owner/name>      Print the resolved gh login (exit 1 if none)")
-    print("  gh <owner|owner/name> [--] <args>   Run gh under that repo's account (token-inject)")
+    print("  account-for [owner|owner/name]      Print the resolved gh login (exit 1 if none)")
+    print("  gh [owner|owner/name] [--] <args>   Run gh under that repo's account (token-inject)")
     print("  allow-edits <repo> --reason <why>   Break-glass: temporarily allow direct edits")
     print("     [--minutes N] | --list | <repo> --revoke   to a guarded repo (default 10m, max 60m)")
     print()
@@ -11154,11 +11154,15 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         # Resolve the effective gh account for an owner or owner/name slug.
         # Prints the login on stdout (exit 0); prints nothing + exit 1 when no
         # preference resolves (caller then uses ambient auth). The programmatic
-        # primitive agent-codespaces (and other tools) shell out to.
+        # primitive agent-codespaces (and other tools) shell out to. The slug is
+        # inferred from the active project when omitted.
         target = rest[0] if rest and not rest[0].startswith("-") else None
         json_out = "--json" in rest
         if not target:
-            output.err("Usage: repos account-for <owner|owner/name>")
+            target = _infer_active_repo_slug(cfg.load_config())
+        if not target:
+            output.err("Usage: repos account-for [owner|owner/name]  "
+                       "(inferred from the active project when omitted)")
             return 1
         login = repos.account_for_github_slug(target)
         # Suppress the bare-owner echo: when the owner isn't a github owner or
@@ -11175,16 +11179,29 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
     if sub == "gh":
         # Run `gh` against a repo under the account that owns it, via token
         # injection -- race-safe on a shared box where the active gh account is
-        # global per-machine. Usage: repos gh <owner|owner/name> [--] <gh args>
+        # global per-machine. Usage: repos gh [owner/name] [--] <gh args>
+        # The repo is inferred from the active project when the first token is
+        # `--` (an explicit "no target" marker), so `repos gh -- issue list`
+        # works from inside the repo without naming it.
         args = list(rest)
+        target = None
         if args and args[0] == "--":
-            args = args[1:]
-        target = args[0] if args else None
-        gh_args = args[1:] if args else []
-        if gh_args and gh_args[0] == "--":
-            gh_args = gh_args[1:]
+            # Explicit "no target" -> infer; everything after -- is gh args.
+            gh_args = args[1:]
+        elif args and not args[0].startswith("-"):
+            target = args[0]
+            gh_args = args[1:]
+            if gh_args and gh_args[0] == "--":
+                gh_args = gh_args[1:]
+        else:
+            # Leading flag (e.g. `repos gh --json ...`): infer the target, treat
+            # the rest as gh args.
+            gh_args = args
+        if target is None:
+            target = _infer_active_repo_slug(cfg.load_config())
         if not target or not gh_args:
-            output.err("Usage: repos gh <owner|owner/name> [--] <gh args...>")
+            output.err("Usage: repos gh [owner|owner/name] [--] <gh args...>  "
+                       "(repo inferred from the active project when omitted)")
             return 1
         if shutil.which("gh") is None:
             output.err("gh CLI not found on PATH")
@@ -15631,16 +15648,57 @@ def _pr_watch_usage() -> None:
     print("    clear_to_merge  true when only consent stands in the way.", file=out)
 
 
-def _pr_watch_prcfg(config_path: str | None):
-    """Load the active repo's PR binding (PRConfig) for the pr-watch verb."""
-    config = cfg.load_config(Path(config_path) if config_path else None)
-    return config.default_repo.pr
-
-
 def _pr_parse_repo(value: str) -> str:
     if value.count("/") != 1 or not all(value.split("/")):
-        raise ValueError("repo must be 'owner/name'")
+        raise ValueError("repo must be a 'owner/name' (or ADO 'project/repo') slug")
     return value
+
+
+def _infer_active_repo_slug(config: cfg.Config) -> str | None:
+    """Provider-correct PR repo slug for the active project, or None.
+
+    Lets the pr-* / ``repos`` verbs omit the explicit ``owner/name`` positional:
+    resolves the active project's canonical remote (``_resolve_repo_remote`` --
+    the registry remote, else the anchor's git origin) and parses the hosting
+    slug from the URL. Provider-correct for **both** GitHub (``owner/name``) and
+    Azure DevOps (``project/repo`` -- e.g. ``ExampleProject/example-repo``).
+    Returns None when the remote is unresolvable (caller then requires the
+    positional).
+    """
+    try:
+        remote = _resolve_repo_remote(config, config.default_repo)
+    except Exception:
+        return None
+    return git_ops.slug_from_url(remote)
+
+
+def _classify_pr_operands(operands: list[str]) -> tuple[str | None, int | None]:
+    """Split free-form pr-merge operands into ``(repo_slug, pr_number)``.
+
+    A token containing ``/`` is the provider repo slug (``owner/name`` or ADO
+    ``project/repo``); an all-digit token is the PR number. This is what lets
+    the repo be **omitted** (inferred from the active project) while a bare PR
+    number is never mistaken for a slug -- e.g. ``pr-merge 2333486`` resolves to
+    ``(None, 2333486)``, not a bogus repo. Raises ``ValueError`` on a duplicate
+    or unrecognized token.
+    """
+    repo: str | None = None
+    pr: int | None = None
+    for tok in operands:
+        if "/" in tok:
+            if repo is not None:
+                raise ValueError(f"unexpected extra repo argument {tok!r}")
+            repo = _pr_parse_repo(tok)
+        elif tok.isdigit():
+            if pr is not None:
+                raise ValueError(f"unexpected extra PR number {tok!r}")
+            pr = int(tok)
+        else:
+            raise ValueError(
+                f"unrecognized argument {tok!r} (expected a repo slug "
+                "-- owner/name or ADO project/repo -- or a PR number)"
+            )
+    return repo, pr
 
 
 def cmd_pr_watch_dispatch(argv: list[str]) -> int:
@@ -15668,7 +15726,9 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
         return 1
 
     p = argparse.ArgumentParser(prog=f"pr-watch {verb}", add_help=True)
-    p.add_argument("repo", type=_pr_parse_repo, help="owner/name")
+    p.add_argument("repo", type=_pr_parse_repo, nargs="?", default=None,
+                   help="repo slug -- owner/name or ADO project/repo (optional; "
+                        "inferred from the active project)")
     p.add_argument("pr", type=int, help="PR number")
     p.add_argument("--host", default="",
                    help="API base URL override (else the binding's api_base)")
@@ -15707,7 +15767,14 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
             return 2
 
     try:
-        prcfg = _pr_watch_prcfg(args.config)
+        config = cfg.load_config(Path(args.config) if args.config else None)
+        prcfg = config.default_repo.pr
+        if args.repo is None:
+            args.repo = _infer_active_repo_slug(config)
+            if not args.repo:
+                output.err("pr-watch: could not infer the repo from the active "
+                           "project; pass an explicit repo slug")
+                return 2
         fetch = prw.build_fetch(prcfg, args.repo, args.pr,
                                 api_base=args.host, token=args.token)
         if verb == "cursor":
@@ -15987,8 +16054,10 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
         return 0
 
     p = argparse.ArgumentParser(prog="pr-merge", add_help=True)
-    p.add_argument("repo", type=_pr_parse_repo, help="owner/name")
-    p.add_argument("pr", type=int, nargs="?", default=None, help="PR number")
+    p.add_argument("operands", nargs="*", metavar="[repo] [pr]",
+                   help="repo slug -- owner/name or ADO project/repo (optional; "
+                        "inferred from the active project) -- and/or PR number, "
+                        "in any order")
     p.add_argument("--all", action="store_true", dest="sweep",
                    help="sweep every open PR (transition-helper mode)")
     p.add_argument("--dry-run", action="store_true",
@@ -16009,6 +16078,15 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
     except SystemExit as exc:
         return int(exc.code or 0)
 
+    # A repo slug (contains '/') and/or a PR number (all digits) may be given in
+    # any order; the slug is optional and inferred below when omitted, so a bare
+    # `pr-merge <#>` is never mistaken for a repo.
+    try:
+        args.repo, args.pr = _classify_pr_operands(args.operands)
+    except ValueError as exc:
+        output.err(f"pr-merge: {exc}")
+        return 2
+
     if args.sweep and args.pr is not None:
         output.err("pr-merge: pass either a <pr> or --all, not both")
         return 2
@@ -16019,6 +16097,12 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
     apply = not args.dry_run
     try:
         config = cfg.load_config(Path(args.config) if args.config else None)
+        if args.repo is None:
+            args.repo = _infer_active_repo_slug(config)
+            if not args.repo:
+                output.err("pr-merge: could not infer the repo from the active "
+                           "project; pass an explicit repo slug")
+                return 2
         repo_cfg = config.default_repo
         prcfg = repo_cfg.pr
         default_branch = repo_cfg.default_branch
@@ -16206,7 +16290,7 @@ def cmd_pr_research_dispatch(argv: list[str]) -> int:
     from .providers import ProviderError, account_token_for_slug, get_provider
 
     if argv and argv[0] in ("--help", "-h", "help"):
-        print("Usage: <project> pr-research <owner/name> [--default-branch B] "
+        print("Usage: <project> pr-research [repo] [--default-branch B] "
               "[--host URL] [--token T] [--json]", file=sys.stderr)
         print(file=sys.stderr)
         print("Read the repo's live provider settings (allowed merge methods, "
@@ -16214,11 +16298,14 @@ def cmd_pr_research_dispatch(argv: list[str]) -> int:
         print("delete-branch-on-merge, required reviews/checks) and derive the "
               "repo-overridable", file=sys.stderr)
         print("`pr:` policy matrix to match. Read-only -- prints a suggestion; "
-              "writes nothing.", file=sys.stderr)
+              "writes nothing. The repo is inferred from the active project when "
+              "omitted.", file=sys.stderr)
         return 0
 
     p = argparse.ArgumentParser(prog="pr-research", add_help=True)
-    p.add_argument("repo", type=_pr_parse_repo, help="owner/name")
+    p.add_argument("repo", type=_pr_parse_repo, nargs="?", default=None,
+                   help="repo slug -- owner/name or ADO project/repo (optional; "
+                        "inferred from the active project)")
     p.add_argument("--default-branch", default="", dest="default_branch",
                    help="branch to read protection from (defaults to repo config)")
     p.add_argument("--host", default="", help="API base URL override")
@@ -16232,6 +16319,11 @@ def cmd_pr_research_dispatch(argv: list[str]) -> int:
 
     try:
         config = cfg.load_config(Path(args.config) if args.config else None)
+        if args.repo is None:
+            args.repo = _infer_active_repo_slug(config)
+            if not args.repo:
+                raise ValueError("could not infer the repo from the active "
+                                 "project; pass an explicit repo slug")
         repo_cfg = config.default_repo
         prcfg = repo_cfg.pr
         provider = get_provider(getattr(prcfg, "provider", "gitea") or "gitea")
