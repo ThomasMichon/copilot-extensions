@@ -62,6 +62,7 @@ robust across `copilot` versions and records the CLI surface + full logs it saw.
 ./run.ps1                                # validate against the cached authed image (base)
 ./run.ps1 -Image pristine -Mode shell    # drop into a pristine fresh box (headed copilot)
 ./run.ps1 -Until 1 -Then shell           # prepare up to phase 1, then hand off to a shell
+./run.ps1 -Mode bridge-register          # expose the box as an agent-bridge agent
 ./run.ps1 -Image pristine -Mode down     # remove the container
 ```
 
@@ -70,8 +71,41 @@ robust across `copilot` versions and records the CLI surface + full logs it saw.
 ./run.sh all
 ./run.sh --image pristine shell
 ./run.sh --until 1 --then shell run
+./run.sh bridge-register
 ./run.sh --image pristine down
 ```
+
+## Driving the box over agent-bridge
+
+Beyond the interactive shell, the runner can register the container as an
+**agent-bridge agent** so you (or an orchestrator) can drive the in-container
+Copilot programmatically:
+
+```powershell
+./run.ps1 -Image base -Mode bridge-register     # agent name: cleanroom-base
+agent-bridge send cleanroom-base "install agent-codespaces and report PASS/FAIL"
+./run.ps1 -Image base -Mode bridge-unregister
+```
+
+The agent is a `command`-type provider agent whose transport is
+`docker exec -i cr-<image> bash -lc "copilot --acp --stdio --allow-all-tools"`.
+The in-container Copilot authenticates via the injected `COPILOT_GITHUB_TOKEN`,
+so no token is embedded in the spawn command. Registration is TTL-scoped (1h)
+against the live daemon's provider API.
+
+> **agent-bridge ergonomics (discovery).** There is **no** `agent-bridge
+> register` CLI, and `~/.agent-bridge/config.yaml` has **no inline agents list** —
+> the roster is *derived* from topology (`machines.yaml` + `related.yaml`). A
+> per-topology `agents_config:` pointer to a hand-authored **`acp-agents.json`**
+> is still honored (deprecated, explicit-wins) and is the accepted way to declare
+> a *couple of manual agents* — **but** its parser only supports `host`/`ssh` and
+> `copilot_path` agents; it does **not** read a raw `spawn_command`. A container's
+> `docker exec …` transport therefore can't be a static-file agent — it must come
+> through the **runtime provider API** (what `bridge-register` uses), the same
+> path `agent-codespaces`/`agent-containers` take. So: static file for
+> host/ssh/local agents; provider API for arbitrary command transports.
+
+
 
 **Interactive shell / headed smoke tests.** The runner drives a **persistent**
 named container (`cr-<image>`), so you can run the automated `validate.sh` (all
@@ -121,7 +155,8 @@ Override via `run.ps1` params or `CR_*` env (see `validate.sh` header):
 | `Dockerfile` | Credential-free `base` "fresh machine": git, python, node, uv, Copilot CLI — nothing from copilot-extensions. |
 | `Dockerfile.pristine` | The `pristine` variant: Copilot + git only (no venv/pip/uv/feed-governance) — forces the harness to self-provision. |
 | `validate.sh` | In-container driver + assertions (bind-mounted at run, so edits need no rebuild). Honors `CR_UNTIL` to stop after a phase. |
-| `run.ps1` / `run.sh` | Host wrappers: build · one-time auth+commit · run · **shell** (interactive handoff) · down; `-Image base\|pristine`. |
+| `run.ps1` / `run.sh` | Host wrappers: build · one-time auth+commit · run · **shell** (interactive handoff) · **bridge-register/unregister** (drive over agent-bridge) · down; `-Image base\|pristine`. |
+| `bridge_register.py` | Stdlib-only helper: register/unregister the container as an agent-bridge `command` agent via the provider API (no copilot-extensions imports). |
 
 ## Scope / non-goals
 
