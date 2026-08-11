@@ -573,8 +573,16 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
             local aw; aw="$(command -v agent-worktrees 2>/dev/null || true)"
             [[ -x "$aw" ]] || aw="$HOME/.local/bin/agent-worktrees"
             [[ -x "$aw" ]] || return 0
-            setsid "$aw" status-updater --session "$sess" --mux tmux \
-                --path "${STATUS_PATH:-${WORK_DIR:-$PWD}}" >/dev/null 2>&1 < /dev/null &
+            # Capture the worktree path BEFORE the subshell cd's away.
+            local spath="${STATUS_PATH:-${WORK_DIR:-$PWD}}"
+            # Root the detached loop at $HOME, never the caller's cwd: under the
+            # sessionStart reseed hook the cwd is the plugin payload dir, and a
+            # child holding it as its cwd blocks `copilot plugin update` from
+            # replacing the payload on Windows (os error 32). Uniform on POSIX
+            # (harmless: it locates its worktree via --path).
+            ( cd "$HOME" 2>/dev/null || cd / ;
+              setsid "$aw" status-updater --session "$sess" --mux tmux \
+                  --path "$spath" >/dev/null 2>&1 < /dev/null & )
             disown 2>/dev/null || true
         }
 

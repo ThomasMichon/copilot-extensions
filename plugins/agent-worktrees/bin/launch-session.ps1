@@ -764,7 +764,7 @@ function Start-StatusUpdater {
                      '--session', $Session, '--mux', 'psmux')
         if ($WorkDir) { $updArgs += @('--path', $WorkDir) }
         Start-Process -FilePath $VenvPython -ArgumentList $updArgs `
-            -WindowStyle Hidden -ErrorAction Stop | Out-Null
+            -WorkingDirectory $HOME -WindowStyle Hidden -ErrorAction Stop | Out-Null
         Write-SetupLog "psmux: started status-updater for $Session"
     } catch {
         Write-SetupLog "psmux: status-updater spawn failed: $($_.Exception.Message)" 'WARN'

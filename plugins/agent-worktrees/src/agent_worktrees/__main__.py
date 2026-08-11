@@ -5035,6 +5035,14 @@ def _spawn_status_updater(worktree_id: str, path: str | None) -> bool:
             "stdin": subprocess.DEVNULL,
             "stdout": subprocess.DEVNULL,
             "stderr": subprocess.DEVNULL,
+            # Never inherit the spawner's cwd.  Both spawn seams -- the launcher
+            # and the sessionStart reseed hook -- run FROM the plugin payload
+            # dir, and a detached child that keeps that dir as its cwd holds an
+            # open directory handle that blocks ``copilot plugin update`` from
+            # replacing the payload on Windows (``os error 32``: the file/dir is
+            # in use).  The updater locates its worktree via ``--path``, so its
+            # cwd is irrelevant to its work -- root it at HOME.
+            "cwd": os.path.expanduser("~"),
         }
         if os.name == "nt":
             # Fully detach on Windows: no console window, own process group, and
@@ -5137,6 +5145,31 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
     if _session_state() == "gone":
         return 0
 
+    # Debounce redundant spawns (dotfiles #911).  Both the launcher
+    # (Start-StatusUpdater) and the sessionStart reseed hook (cmd_register_
+    # session) (re)spawn an updater at session start, so without a guard every
+    # session leaks a *pair* of updaters -- and a duplicate that pins the plugin
+    # payload dir as its cwd blocks ``copilot plugin update`` on Windows.  If a
+    # live updater already owns this session on the *current* runtime, this
+    # spawn is redundant: retire now rather than run a second loop.  A superseded
+    # owner (older version, mid-deploy) is deliberately NOT deferred to -- the
+    # reseed must replace it, so the bar never goes dark after a deploy
+    # (dotfiles #915); likewise an owner with no published prefix (a pre-upgrade
+    # updater) is replaced rather than deferred to, so the transition can't wedge
+    # a dark bar.
+    from . import update_stage as _upd
+    _owner = _mux("display-message", "-t", sess, "-p", "#{@aw_updater}")
+    if _owner is not None and _owner.returncode == 0:
+        _tok = (_owner.stdout or "").strip()
+        if _tok.isdigit() and int(_tok) != os.getpid() and _upd._pid_alive(
+                int(_tok)):
+            _op = _mux(
+                "display-message", "-t", sess, "-p", "#{@aw_updater_prefix}")
+            _owner_prefix = (_op.stdout or "").strip() if (
+                _op is not None and _op.returncode == 0) else ""
+            if _owner_prefix and not _runtime_superseded(prefix=_owner_prefix):
+                return 0
+
     # Single-instance guard.  The launcher may (re)spawn an updater on every
     # attach/join, so each updater claims @aw_updater with its own token; a
     # newer updater overwrites it and the older one retires on its next tick.
@@ -5151,6 +5184,10 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
         return r.stdout.strip() == token
 
     _set("@aw_updater", token)
+    # Publish this updater's runtime slot (``sys.prefix``) alongside the pid
+    # token so a later spawn can distinguish a live *current* owner (defer to it)
+    # from a live but superseded one (replace it) -- see the debounce above.
+    _set("@aw_updater_prefix", os.path.realpath(sys.prefix))
 
     # Identity (machine | env | repo:id4) is static for the session's life:
     # render once, push to @aw_ctx, never poll it again.
