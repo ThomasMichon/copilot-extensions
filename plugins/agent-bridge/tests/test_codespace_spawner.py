@@ -500,9 +500,24 @@ def _install_fake_agent_codespaces(monkeypatch, recorder=None):
     """Inject a fake ``agent_codespaces.codespace_assets`` whose
     ``build_provision_command`` returns a sentinel (optionally recording calls),
     so the spawner's dispatch-path helper (re)deploy has something to import even
-    though agent_codespaces is not an agent-bridge test dependency."""
+    though agent_codespaces is not an agent-bridge test dependency.
+
+    ``_resolve_provision_command`` prefers the ``agent-codespaces`` *binstub*
+    (a subprocess) over this in-process import, so on any machine where that
+    binstub is installed the real provision command would run instead of the
+    sentinel. Force the binstub lookup to miss so the fallback import (this fake)
+    is exercised deterministically."""
+    import shutil
     import sys
     import types
+
+    _real_which = shutil.which
+    monkeypatch.setattr(
+        shutil, "which",
+        lambda name, *a, **k: (
+            None if name == "agent-codespaces" else _real_which(name, *a, **k)
+        ),
+    )
 
     assets = types.ModuleType("agent_codespaces.codespace_assets")
 
