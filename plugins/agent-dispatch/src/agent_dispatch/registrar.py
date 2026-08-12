@@ -231,6 +231,13 @@ class ProfileDeclaration:
             return self.labels
         return ()
 
+    def effective_headless_labels(self) -> tuple[str, ...]:
+        """Public accessor for the labels this (local) profile routes headless.
+
+        The supervisor's declaration->registration bridge needs this to build the
+        lane spec, so it is exposed rather than kept private."""
+        return self._effective_headless_labels()
+
     def with_owner(self, owner: str) -> "ProfileDeclaration":
         """Return a copy stamped with discovery-time provenance (the pointer's owner),
         used when a declaration is discovered without an explicit ``owner``."""
