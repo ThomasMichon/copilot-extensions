@@ -254,6 +254,7 @@ switch ($Action) {
         $sshd = Get-SshdExe; if ($sshd) { Write-Host "sshd: $sshd" } else { Write-Warning 'sshd not found' }
         $running = @(Get-HostProcess); if ($running) { Write-Host "host running: $(@($running).ProcessId -join ',')" } else { Write-Warning 'host not running' }
         $sshdUp = $false
+        $c = $null
         try {
             $c = [System.Net.Sockets.TcpClient]::new()
             $iar = $c.BeginConnect('127.0.0.1', $Port, $null, $null)
@@ -263,14 +264,19 @@ switch ($Action) {
                     # Read the SSH banner, not just the TCP connect: a wedged sshd
                     # (pre-auth slots saturated past MaxStartups) still accepts TCP
                     # but never banners, so a connect-only check falsely reports
-                    # healthy while remote reach is broken.
+                    # healthy while remote reach is broken. Accumulate >= 4 bytes so
+                    # a banner split across TCP segments isn't a false negative.
                     $s = $c.GetStream(); $s.ReadTimeout = 3000
-                    $buf = [byte[]]::new(64); $n = $s.Read($buf, 0, $buf.Length)
-                    $sshdUp = ($n -gt 0) -and [System.Text.Encoding]::ASCII.GetString($buf, 0, $n).StartsWith('SSH-')
+                    $buf = [byte[]]::new(64); $got = 0
+                    while ($got -lt 4) {
+                        $n = $s.Read($buf, $got, $buf.Length - $got)
+                        if ($n -le 0) { break }
+                        $got += $n
+                    }
+                    $sshdUp = ($got -ge 4) -and [System.Text.Encoding]::ASCII.GetString($buf, 0, $got).StartsWith('SSH-')
                 }
             }
-            $c.Dispose()
-        } catch { $sshdUp = $false }
+        } catch { $sshdUp = $false } finally { if ($c) { $c.Dispose() } }
         if ($sshdUp) { Write-Host "sshd serving: 127.0.0.1:$Port (SSH banner OK)" }
         else {
             $est = @(Get-NetTCPConnection -LocalPort $Port -State Established -ErrorAction SilentlyContinue).Count

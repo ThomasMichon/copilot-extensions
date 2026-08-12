@@ -296,9 +296,19 @@ function Test-SshdServing {
         $stream = $client.GetStream()
         $stream.ReadTimeout = $TimeoutMs
         $buf = [byte[]]::new(64)
-        $n = $stream.Read($buf, 0, $buf.Length)
-        if ($n -le 0) { return $false }
-        return [System.Text.Encoding]::ASCII.GetString($buf, 0, $n).StartsWith('SSH-')
+        # Accumulate until we have enough bytes to test the "SSH-" prefix: a single
+        # Read() can return a partial banner if it arrives split across TCP
+        # segments, and a premature StartsWith check would false-negative and
+        # needlessly restart a healthy sshd. A read timeout on a wedged sshd throws
+        # (caught below => not serving).
+        $got = 0
+        while ($got -lt 4) {
+            $n = $stream.Read($buf, $got, $buf.Length - $got)
+            if ($n -le 0) { break }   # peer closed before sending a banner
+            $got += $n
+        }
+        if ($got -lt 4) { return $false }
+        return [System.Text.Encoding]::ASCII.GetString($buf, 0, $got).StartsWith('SSH-')
     } catch {
         # Includes the IOException thrown when the banner read times out on a
         # wedged sshd (accepts TCP, sends nothing) — correctly => not serving.
