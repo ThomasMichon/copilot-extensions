@@ -11,6 +11,7 @@ description: >
   - 'clean up empty sessions'
   - 'clean up / organize / backfill worktrees'
   - 'backfill worktree status' / 'backfill sessions'
+  - 'recover worktrees' / 'orphaned worktree session'
   - 'close out a worktree' / 'release worktree claims'
   - "what did this worktree touch / its footprint"
   - 'why is a worktree showing 0 turns' / 'picker shows wrong session'
@@ -63,6 +64,87 @@ Run it per project (`dotfiles`, `aperture-labs`, …) — the command scopes to 
 current project's tracking store; the Copilot session-state/store it cleans is
 shared across projects, so the guards (current + registered session ids) protect
 live work regardless of which project you invoke it from.
+
+## "0 turns" / picker-shows-wrong-session — classify before you "recover"
+
+`doctor` backfill (`backfill-sessions`) only ever fills **empty** registries
+(`sessions:` is `None`/`[]`) — by design, the single sanctioned session-state
+sweep. So a worktree can still read **0 turns** (or the picker can show the wrong
+session) for reasons `doctor` will *not* touch. Before concluding "work was
+lost," classify the worktree into one of these — the fix is different for each,
+and **most 0-turn worktrees are not lost work.** There is **no Copilot
+session-state garbage collection** (Copilot never auto-deletes transcripts; only
+`doctor --gc-sessions`, run by hand, removes *zero-turn shells*) — so a missing
+transcript is almost always one of these classes, not a deletion.
+
+**A. Empty registry, real session on disk → `doctor --fix` (backfill).**
+The normal case. `backfill-sessions` links the cwd-matched session. Nothing
+manual needed.
+
+**B. Placeholder / partial registry blocks backfill → `register-session` +
+`link-succession`.** If the registry is **non-empty but wrong** — e.g. it holds
+a *synthetic* head (a `diag-test-*`, a launch stub, a hand-seeded id) while the
+worktree's **real** session sits unregistered on disk — backfill **skips it**
+(registry isn't empty) and the picker resolves `resolved_head_session` to the
+bogus id, which has no on-disk turns → **0 turns, forever.** Recover by
+registering the real session and promoting it over the placeholder:
+   ```
+   agent-worktrees register-session --cwd <worktree-path> --session-id <real-id>
+   agent-worktrees link-succession --worktree <id> \
+       --predecessor <placeholder-id> --successor <real-id> \
+       --predecessor-state concluded          # retire the placeholder, promote the real head
+   agent-worktrees list-sessions --worktree <id>   # verify: real session is head, turns > 0
+   ```
+   (`register-session` resolves the project from `--cwd`; pass the target
+   worktree's path when running from a *different* worktree.)
+
+**C. Multi-session worktree with orphaned extra sessions → `register-session`
+each, then set the true head.** A worktree with a *non-empty* registry can still
+have **additional** real on-disk sessions that never got registered (again,
+backfill skips non-empty registries). Register each missing session, then, if the
+chronologically-latest one should be head, promote it:
+   ```
+   agent-worktrees register-session --cwd <worktree-path> --session-id <missing-id>   # repeat, oldest→newest
+   agent-worktrees link-succession --worktree <id> \
+       --predecessor <old-head> --successor <newest-id> --predecessor-state handed-off
+   ```
+   `register-session` appends and may stamp the *first* newly-registered session
+   as head; `resolved_head_session` otherwise takes the newest **non-concluded**
+   entry by list order — so use `link-succession` to assert the head you actually
+   want rather than relying on registration order.
+
+**D. Parent-spawned PR vessel → correctly empty; do NOT "recover".** A
+`finalized` worktree with `sessions: []`, a **`parent_session`** naming a session
+in a *different* worktree, and a **merged PR** was created **programmatically**
+(`create` / `run`) by that parent session purely to carry a branch/commit/PR — no
+interactive Copilot ever ran *inside* it, so **0 turns is correct** and its work
+lives in the parent. This is exactly the `doctor` **alignment audit** (report-only
+item 5). Registering the parent session here would **double-count** it (its cwd is
+the parent's worktree) — leave the `parent_session` field as the lineage record.
+
+**E. Genuinely no local transcript.** Rare, but confirm B–D don't apply before
+declaring it. `session_turns` in the record is only a **picker render-cache** — it
+self-heals to the real count on the next populate, so a stale `session_turns: 0`
+on a *correctly-registered* worktree is cosmetic, not lost work.
+
+### Verify which class you're in — content-grep, don't guess
+
+`workspace.yaml` `cwd` matching only finds a session **rooted in** the worktree.
+To prove whether *any* real transcript worked on a worktree (and to tell an
+incidental mention from a genuine in-worktree session), grep the transcript bodies
+across the whole session-state root for the worktree id, then inspect each hit's
+own `cwd` + whether it has `session.db`/`events.jsonl`:
+
+```
+# for each session-state dir, does events.jsonl / session.db contain "<worktree-suffix>"?
+#   hit whose OWN cwd == the worktree  → a real in-worktree session (classes A–C)
+#   hit whose cwd is a DIFFERENT wt    → incidental mention (usually the class-D parent)
+#   only zero-data stubs match         → class D or E (no transcript to recover)
+```
+
+The `parent_session` on a session-less worktree (from `doctor`'s alignment audit)
+usually **is** the class-D parent that created it — cross-check it against these
+grep hits.
 
 ## Liveness trumps git state — never reap a live worktree
 
