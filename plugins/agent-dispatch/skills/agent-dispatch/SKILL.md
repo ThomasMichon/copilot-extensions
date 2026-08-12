@@ -26,6 +26,15 @@ description: >
 
 # agent-dispatch -- Agent Task Queue + Coordinator
 
+> **Before you start — readiness (self-provisioning, no agent-worktrees required).**
+> agent-dispatch provisions its own runtime on first use and works standalone in any
+> host (CLI, Copilot app, cloud agent). If `command -v agent-dispatch` fails, deploy
+> its binstub first (it then self-provisions on first call):
+> `bash "$(ls ~/.copilot/installed-plugins/*/agent-dispatch/scripts/install.sh | head -1)" stamp`
+> The first call may take ~30–120s to provision (watch for `::agent-provisioning::`);
+> let it finish. If it reports a provisioning failure (e.g. missing uv / network),
+> surface the exact message — don't improvise a toolchain install.
+
 `agent-dispatch` is a **portable agent task-queue**. A per-host **coordinator**
 (a single-writer SQLite/WAL daemon) hands out an **atomic leased claim** over a
 queue of *tasks*, so multiple agents coordinate without racing through
