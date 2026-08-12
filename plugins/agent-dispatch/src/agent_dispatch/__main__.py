@@ -454,8 +454,8 @@ def _cmd_propose(args: argparse.Namespace) -> int:
 
     Identical to ``create`` but the task is always ``proposed`` (unclaimable) and is
     never claimed or spawned -- a proposal is a *plan*, committed to binding later
-    with ``queue <id>``. Rejects the execution-only flags rather than silently
-    ignoring them.
+    with ``queue <id>``. Rejects the execution-only flags ``--claim`` / ``--spawn``
+    rather than silently ignoring them.
     """
     if getattr(args, "claim", False) or getattr(args, "spawn", False):
         print(

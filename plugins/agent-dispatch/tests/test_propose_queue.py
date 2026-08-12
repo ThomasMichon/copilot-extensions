@@ -30,11 +30,13 @@ def test_propose_shares_create_surface_and_routes_to_cmd_propose():
 
 
 def test_queue_is_alias_of_approve():
-    ns = _args(["queue", "task-123"])
-    assert ns.task_id == "task-123"
-    # dispatches through the same approve handler as `approve`
-    approve_ns = _args(["approve", "task-123"])
-    assert ns.func.__name__ == approve_ns.func.__name__
+    # Reuse one parser so the alias shares the single approve subparser action:
+    # `queue` and `approve` resolve to the *same* handler object.
+    parser = build_parser()
+    q = parser.parse_args(["queue", "task-123"])
+    a = parser.parse_args(["approve", "task-123"])
+    assert q.task_id == "task-123"
+    assert q.func is a.func
 
 
 def test_propose_forces_proposed_and_rejects_execution_flags(capsys):
