@@ -178,6 +178,26 @@ class TestBuildAgentConfigs:
         unmapped = " ".join(by_name["cs-fuzzy-adventure-abc123"]["spawn_command"])
         assert "CODESPACE_VSCODE_FOLDER" in unmapped
 
+    def test_structured_workspace_folder_is_concrete_without_config(self):
+        """Even with NO config, the structured codespace.workspace_folder is a
+        concrete /workspaces/<basename> (never None / the env-expansion), so
+        agent-bridge sets the ACP session cwd to the checkout instead of
+        /home/<user> (dotfiles#1274). The process cd stays env-expanded."""
+        from agent_codespaces.config import CodespacesConfig
+
+        with patch(
+            "agent_codespaces.config.load_merged_config",
+            return_value=CodespacesConfig(),
+        ):
+            agents = build_agent_configs(SAMPLE_CODESPACES)
+        by_name = {a["name"]: a for a in agents}
+        meta = by_name["cs-fuzzy-adventure-abc123"]["codespace"]
+        # user/my-repo -> /workspaces/my-repo (concrete, not an env-expansion).
+        assert meta["workspace_folder"] == "/workspaces/my-repo"
+        assert "${" not in (meta["workspace_folder"] or "")
+        # The process cd for this unmapped repo still uses the env-expansion.
+        assert "CODESPACE_VSCODE_FOLDER" in meta["acp_command"]
+
     def test_empty_codespace_list(self):
         agents = build_agent_configs([])
         assert agents == []

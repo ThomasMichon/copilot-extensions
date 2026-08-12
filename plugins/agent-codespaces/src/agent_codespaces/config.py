@@ -134,6 +134,32 @@ def _repo_matches_codespace(repo: str, cs_repository: str | None) -> bool:
         return False
     return _norm_repo(repo) == _norm_repo(cs_repository)
 
+
+def _conventional_workspace_folder(repo: str | None) -> str | None:
+    """The ``/workspaces/<basename>`` a CodeSpace checks a repo out at, by convention.
+
+    GitHub Codespaces materializes a repo at ``/workspaces/<basename>``; a
+    ``<product>-codespaces`` host repo bootstraps its product at
+    ``/workspaces/<product>``. Mirrors :func:`_norm_repo` (strip ``owner/`` +
+    drop a trailing ``-codespaces``) but **preserves case**, since a filesystem
+    path is case-sensitive (unlike the lower-cased matching key). Returns
+    ``None`` for an empty repo.
+
+    This is the deterministic, probe-free concrete folder used to populate the
+    **structured** provider ``workspace_folder`` (the ACP ``session/new`` cwd)
+    when nothing is explicitly configured -- so a dispatched agent's tools run
+    from the repo checkout instead of ``/home/<user>`` (dotfiles#1274). It does
+    **not** change the process ``cd`` in ``effective_acp_command_for``, which
+    keeps its robust runtime env-expansion for unmapped repos.
+    """
+    if not repo:
+        return None
+    base = repo.strip().rstrip("/").split("/")[-1]
+    suffix = "-codespaces"
+    if base.endswith(suffix):
+        base = base[: -len(suffix)]
+    return f"/workspaces/{base}" if base else None
+
 # Remote-resolved `cd` for a CodeSpace session when no explicit
 # ``workspace_folder`` is configured (#33). Expanded by the remote
 # ``bash -l -c`` at launch, so the agent lands in the repo checkout rather than
@@ -369,6 +395,27 @@ class CodespacesConfig:
                 if basename:
                     return f"/workspaces/{basename}"
         return self.workspace_folder
+
+    def resolved_workspace_folder_for(self, repo: str | None) -> str | None:
+        """Concrete workspace folder for a CodeSpace repo, config-or-convention.
+
+        Like :meth:`workspace_folder_for` but, when nothing is explicitly
+        configured, falls back to the ``/workspaces/<basename>`` CodeSpaces
+        layout convention (:func:`_conventional_workspace_folder`) instead of
+        returning ``None``. This is what the bridge provider publishes as the
+        structured ``codespace.workspace_folder`` -- the value agent-bridge uses
+        as the ACP ``session/new`` cwd (it prefers structured metadata over
+        parsing the launch command). A concrete folder here is what keeps a
+        dispatched agent's tools rooted in the repo checkout rather than
+        ``/home/<user>`` (dotfiles#1274), even for a CodeSpace with no per-repo
+        config. Returns ``None`` only when *repo* is empty and no global default
+        is set. Intentionally does **not** feed ``effective_acp_command_for``,
+        whose process ``cd`` keeps the robust runtime env-expansion for unmapped
+        repos.
+        """
+        return self.workspace_folder_for(repo) or _conventional_workspace_folder(
+            repo
+        )
 
     def workspace_folder_for_request(
         self, cs_repository: str | None, requested_repo: str,
