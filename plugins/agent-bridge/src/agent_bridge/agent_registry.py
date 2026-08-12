@@ -30,7 +30,7 @@ import subprocess
 import sys
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -1007,6 +1007,9 @@ def derive_topology_agents(
     local_platform: str = "",
     repos: list[dict] | None = None,
     elevated_projects: set[str] | None = None,
+    *,
+    default_copilot_args: list[str] | None = None,
+    default_env: dict[str, str] | None = None,
 ) -> dict[str, AgentConfig]:
     """Synthesize the agent roster from topology (machines × repos × envs).
 
@@ -1138,6 +1141,21 @@ def derive_topology_agents(
                     ),
                 )
 
+    # Apply the profile's facility-wide spawn defaults to every derived agent.
+    # Derived agents otherwise carry no copilot args/env, so the model target had
+    # to be repeated on each hand-authored acp-agents.json entry. Applying it here
+    # lets the derived roster be the single source of the machine lanes. A derived
+    # agent never sets these itself, so this is a plain fill (no merge ambiguity);
+    # an explicit agents_config entry is a *separate* agent that still wins by
+    # ``setdefault`` in :func:`build_resolver`.
+    if default_copilot_args or default_env:
+        for name, agent in list(out.items()):
+            out[name] = replace(
+                agent,
+                copilot_args=list(default_copilot_args or agent.copilot_args),
+                env={**(default_env or {}), **agent.env},
+            )
+
     return out
 
 
@@ -1200,6 +1218,8 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
         derived = derive_topology_agents(
             machines, cp_project, related, local_machine, local_platform,
             local_repos, load_elevated_projects(),
+            default_copilot_args=profile.default_copilot_args,
+            default_env=profile.default_env,
         )
         for name, agent in derived.items():
             all_agents.setdefault(name, agent)  # explicit agents_config wins

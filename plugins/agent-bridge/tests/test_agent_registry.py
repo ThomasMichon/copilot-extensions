@@ -1466,6 +1466,34 @@ class TestControlPlaneMachineAgents:
         assert agents == {}
 
 
+class TestDerivedAgentDefaults:
+    """A profile's default copilot args/env are applied to derived agents."""
+
+    def test_default_copilot_args_applied(self):
+        ms = _topo_machines()
+        agents = derive_topology_agents(
+            ms, "dotfiles", [], None,
+            default_copilot_args=["--model", "some-model", "--reasoning-effort", "high"],
+        )
+        assert agents["dev6"].copilot_args == [
+            "--model", "some-model", "--reasoning-effort", "high",
+        ]
+        assert agents["dev6-wsl"].copilot_args[0] == "--model"
+
+    def test_default_env_applied(self):
+        ms = _topo_machines()
+        agents = derive_topology_agents(
+            ms, "dotfiles", [], None, default_env={"MY_DEFAULT": "1"},
+        )
+        assert agents["dev6"].env == {"MY_DEFAULT": "1"}
+
+    def test_no_defaults_leaves_derived_bare(self):
+        ms = _topo_machines()
+        agents = derive_topology_agents(ms, "dotfiles", [], None)
+        assert agents["dev6"].copilot_args == []
+        assert agents["dev6"].env == {}
+
+
 class TestRelatedRemoteAgents:
 
     def test_remote_related_synthesized(self):
