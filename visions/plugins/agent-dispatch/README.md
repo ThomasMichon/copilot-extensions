@@ -137,7 +137,7 @@ reusable **templates** — a recipe is **not a command you run**, it is a
 **template for an emitter/evaluator pair**. You **instantiate** one by
 **registering** a concrete emitter/evaluator pair, made real by the specifics its
 template leaves open: the target repo, the change-review technology, the issue
-back-end, the actual machine and account names. Three archetypes are first-class:
+backend, the actual machine and account names. Three archetypes are first-class:
 
 1. **reviewer** — for a given change (a pull request, a branch diff), loop until
    the change is merged or abandoned: review, post feedback or approve, suspend on
@@ -254,7 +254,7 @@ The layer ships the **shapes** of long-running agentic work — **reviewer**,
 **conflict-resolution**, **goal-driven** — as reusable **emitter/evaluator
 templates** (see *The recipe*). A domain **instantiates** one by registering a
 concrete emitter/evaluator pair and supplying the specifics (which repo, which
-review technology, which issue back-end, which machine and account); the template
+review technology, which issue backend, which machine and account); the template
 fixes the suspend/resume rhythm and the resolution target for its class of work.
 Extension is expected where a domain needs more, but the default is **reuse**: the
 same template is the engine behind a standing automated service and an on-demand
@@ -636,7 +636,7 @@ liveness, extended to the *membership* of the set itself. Discovery reconciles
   unclaimable); queue commits it to binding. (2) **"Recipe" left the command
   surface**: a recipe is now a **template for an emitter/evaluator pair**,
   *instantiated by registering* a concrete pair with the environment specifics
-  (target repo, review technology, issue back-end, machine/account) — *The recipe*,
+  (target repo, review technology, issue backend, machine/account) — *The recipe*,
   *loop-recipes*, and *a-loop-runs-with-or-without-a-service* were reframed
   accordingly, and *recipes-run-ad-hoc* became **side-load-through-an-emitter**
   (hand a request to a registered emitter and it authors the fully-evaluated task on
