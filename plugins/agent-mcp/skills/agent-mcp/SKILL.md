@@ -10,6 +10,15 @@ description: >-
 
 # agent-mcp
 
+> **Before you start — readiness (self-provisioning, no agent-worktrees required).**
+> agent-mcp provisions its own runtime on first use and works standalone in any
+> host (CLI, Copilot app, cloud agent). If `command -v agent-mcp` fails, deploy its
+> binstub first (it then self-provisions on first call):
+> `bash "$(ls ~/.copilot/installed-plugins/*/agent-mcp/scripts/init.sh | head -1)" stamp`
+> The first call may take ~30–120s to provision (watch for `::agent-provisioning::`);
+> let it finish. If it reports a provisioning failure (e.g. missing uv / network),
+> surface the exact message — don't improvise a toolchain install.
+
 `agent-mcp` wraps one upstream MCP server as a local **stdio** MCP server and
 injects host credentials, driven by a single per-bridge config file. It
 replaces single-purpose, hardcoded MCP wrapper scripts with a config-driven,
