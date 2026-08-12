@@ -701,17 +701,120 @@ _migration_check() {
 
 # -- Actions -----------------------------------------------------------------
 
+# --- self-provisioning helpers (runtime-self-provisioning pattern) -----------
+# Vendor a standalone uv into the runtime tool dir when uv is absent (pristine or
+# governed box) instead of dead-ending; add it to PATH for this run.
+_ensure_uv() {
+    command -v uv &>/dev/null && return 0
+    local tooldir="$INSTALL_DIR/tool"
+    if [[ -x "$tooldir/uv" ]]; then export PATH="$tooldir:$PATH"; return 0; fi
+    _step "uv not found -- vendoring a standalone uv into $tooldir"
+    mkdir -p "$tooldir"
+    local url="https://astral.sh/uv/install.sh" script="$tooldir/uv-install.sh" got=""
+    if command -v curl &>/dev/null; then curl -LsSf "$url" -o "$script" 2>/dev/null && got=1; fi
+    if [[ -z "$got" ]] && command -v wget &>/dev/null; then wget -qO "$script" "$url" 2>/dev/null && got=1; fi
+    if [[ -z "$got" ]] && command -v python3 &>/dev/null; then
+        python3 - "$url" "$script" <<'PY' 2>/dev/null && got=1
+import sys, urllib.request
+urllib.request.urlretrieve(sys.argv[1], sys.argv[2])
+PY
+    fi
+    if [[ -n "$got" && -s "$script" ]]; then
+        env UV_INSTALL_DIR="$tooldir" UV_UNMANAGED_INSTALL="$tooldir" INSTALLER_NO_MODIFY_PATH=1 sh "$script" >/dev/null 2>&1 || true
+    fi
+    [[ -x "$tooldir/bin/uv" && ! -x "$tooldir/uv" ]] && ln -sf "$tooldir/bin/uv" "$tooldir/uv" 2>/dev/null || true
+    if [[ -x "$tooldir/uv" ]]; then export PATH="$tooldir:$PATH"; _ok "Vendored uv into $tooldir"; return 0; fi
+    _fail "uv is required but not found, and vendoring failed (no reachable uv installer). Install uv, then retry."
+    return 1
+}
+
+# Mirror pip's configured index to uv on a governed box (public PyPI TLS-blocked):
+# uv does not read pip.conf, so derive index-url from pip config / the pip.conf
+# files and export it. No-op where pip has no index (e.g. pristine -- the index
+# then arrives via env / the clean-room fixture).
+_ensure_uv_index() {
+    [[ -n "${UV_INDEX_URL:-}${UV_DEFAULT_INDEX:-}" ]] && return 0
+    local idx=""
+    if command -v pip &>/dev/null; then idx="$(pip config get global.index-url 2>/dev/null | tr -d '[:space:]')"; fi
+    if [[ -z "$idx" ]] && command -v pip3 &>/dev/null; then idx="$(pip3 config get global.index-url 2>/dev/null | tr -d '[:space:]')"; fi
+    if [[ -z "$idx" ]]; then
+        local f
+        for f in "${PIP_CONFIG_FILE:-}" "$HOME/.config/pip/pip.conf" "$HOME/.pip/pip.conf" /etc/pip.conf /etc/xdg/pip/pip.conf; do
+            [[ -n "$f" && -f "$f" ]] || continue
+            idx="$(sed -n 's/^[[:space:]]*index-url[[:space:]]*=[[:space:]]*//p' "$f" | head -n1 | tr -d '[:space:]')"
+            [[ -n "$idx" ]] && break
+        done
+    fi
+    if [[ -n "$idx" ]]; then export UV_DEFAULT_INDEX="$idx"; _step "uv index derived from pip config (governed-feed bridge)"; fi
+}
+
+# Deploy the self-provisioning binstub (install-on-first-use). Fast path execs the
+# venv console script; otherwise it provisions on first use -- announcing (a human
+# line + a machine-readable ::agent-provisioning:: signal so a caller can extend
+# its timeout), lock-serialized, fail-fast. Replaces the old thin exec stub.
+deploy_binstub() {
+    mkdir -p "$LOCAL_BIN"
+    cat > "$BINSTUB" << 'STUB'
+#!/usr/bin/env bash
+# agent-bridge binstub -- self-provisioning (install-on-first-use).
+export PYTHONUTF8=1
+_name="agent-bridge"
+_root="$HOME/.$_name"
+_console="$_root/venv/bin/$_name"
+[ -x "$_console" ] && exec "$_console" "$@"
+mkdir -p "$_root"
+_status="$_root/.provision-status"
+printf '%s\n' "[$_name] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout." >&2
+printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' "$_name" "$_status" >&2
+_install="$(cat "$_root/payload-dir" 2>/dev/null)/scripts/install.sh"
+[ -f "$_install" ] || _install="$(ls "$HOME"/.copilot/installed-plugins/*/"$_name"/scripts/install.sh 2>/dev/null | head -n1)"
+if [ ! -f "$_install" ]; then
+    printf '%s\n' "[$_name] cannot self-provision: installer not found in plugin payload. Ensure the plugin is enabled, then retry." >&2
+    exit 127
+fi
+_lock="$_root/.provision.lock"
+exec 9>"$_lock"
+command -v flock >/dev/null 2>&1 && flock 9 2>/dev/null
+[ -x "$_console" ] && exec "$_console" "$@"
+printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
+bash "$_install" provision >&2
+_rc=$?
+if [ "$_rc" -eq 0 ] && [ -x "$_console" ]; then
+    printf 'ready %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
+    exec "$_console" "$@"
+fi
+printf 'failed rc=%s %s\n' "$_rc" "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
+if [ "$_rc" -eq 0 ]; then
+    printf '%s\n' "[$_name] provisioning reported success but the CLI is still missing ($_console)." >&2
+    _rc=1
+else
+    printf '%s\n' "[$_name] provisioning FAILED (rc=$_rc). See the log above; retry, or run: bash \"$_install\" provision" >&2
+fi
+exit "$_rc"
+STUB
+    chmod +x "$BINSTUB"
+    _ok "Binstub: $BINSTUB (self-provisioning)"
+}
+
+# Cheap "splat the binstub, defer the runtime" install (fits a sessionStart hook's
+# grace window): record the REAL payload path + deploy the self-provisioning
+# binstub -- NO venv, NO uv. The runtime builds itself on the binstub's first use.
+do_stamp() {
+    echo ""; echo "=== agent-bridge stamp (defer runtime to first use) ==="; echo ""
+    mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
+    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
+    deploy_binstub
+    _ok "Stamped: binstub on PATH; runtime provisions on first use."
+}
+
 do_install() {
     echo ""
     echo "=== agent-bridge install ==="
     echo ""
 
-    # Prerequisite: uv
-    if ! command -v uv &>/dev/null; then
-        _fail "uv not found on PATH (required for venv + package management)"
-        _fail "Install: curl -LsSf https://astral.sh/uv/install.sh | sh"
-        exit 1
-    fi
+    # Prerequisite: uv (self-acquired if absent) + governed-feed index
+    _ensure_uv || exit 1
+    _ensure_uv_index
 
     _migration_check
 
@@ -820,13 +923,7 @@ do_install() {
     fi
 
     # Create binstub
-    cat > "$BINSTUB" << 'STUB'
-#!/usr/bin/env bash
-export PYTHONUTF8=1
-exec "$HOME/.agent-bridge/venv/bin/agent-bridge" "$@"
-STUB
-    chmod +x "$BINSTUB"
-    _ok "Binstub: $BINSTUB"
+    deploy_binstub
 
     # Generate default config
     "$VENV_DIR/bin/python" -c \
@@ -1258,12 +1355,9 @@ do_update() {
     echo "=== agent-bridge update ==="
     echo ""
 
-    # Prerequisite: uv
-    if ! command -v uv &>/dev/null; then
-        _fail "uv not found on PATH (required for package management)"
-        _fail "Install: curl -LsSf https://astral.sh/uv/install.sh | sh"
-        exit 1
-    fi
+    # Prerequisite: uv (self-acquired if absent) + governed-feed index
+    _ensure_uv || exit 1
+    _ensure_uv_index
 
     # Refuse a downgrade from a stale checkout before touching the live daemon
     # (#1790). Runs first so a rejected update never drains/stops the service.
@@ -1378,12 +1472,7 @@ do_update() {
     _install_sibling_plugins reinstall
 
     # Update binstub
-    cat > "$BINSTUB" << 'STUB'
-#!/usr/bin/env bash
-export PYTHONUTF8=1
-exec "$HOME/.agent-bridge/venv/bin/agent-bridge" "$@"
-STUB
-    chmod +x "$BINSTUB"
+    deploy_binstub
 
     # Update systemd unit
     _install_systemd_unit
@@ -1421,13 +1510,15 @@ STUB
 
 case "$ACTION" in
     install)   do_install ;;
+    stamp)     do_stamp ;;
+    provision) do_install ;;
     uninstall) do_uninstall ;;
     start)     do_start ;;
     stop)      do_stop ;;
     status)    do_status ;;
     update)    do_update ;;
     *)
-        echo "Usage: $0 {install|uninstall|start|stop|status|update} [options]" >&2
+        echo "Usage: $0 {install|stamp|provision|uninstall|start|stop|status|update} [options]" >&2
         exit 1
         ;;
 esac
