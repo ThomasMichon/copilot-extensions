@@ -622,6 +622,43 @@ class TestPerRepoWorkspaceFolder:
             and "VM_REPO_PATH" in cmd
         )
 
+    def test_resolved_workspace_folder_convention_fallback(self):
+        # Structured metadata must be a CONCRETE folder even with no config, so
+        # the ACP session cwd roots in the checkout, not /home (#1274).
+        config = CodespacesConfig()
+        # -codespaces host repo -> product checkout, case preserved, owner stripped.
+        assert config.resolved_workspace_folder_for(
+            "odsp-microsoft/odsp-web-codespaces"
+        ) == "/workspaces/odsp-web"
+        # A plain (non-split) repo -> /workspaces/<basename>.
+        assert config.resolved_workspace_folder_for("org/Some-Repo") == (
+            "/workspaces/Some-Repo"
+        )
+        # Empty repo with no global default -> None.
+        assert config.resolved_workspace_folder_for(None) is None
+
+    def test_resolved_workspace_folder_prefers_config(self):
+        from agent_codespaces.config import RepoConfig
+
+        config = CodespacesConfig()
+        config.repos["org/example-web-codespaces"] = RepoConfig(
+            workspace_folder="/workspaces/custom"
+        )
+        # Explicit config still wins over the convention fallback.
+        assert config.resolved_workspace_folder_for(
+            "org/example-web-codespaces"
+        ) == "/workspaces/custom"
+
+    def test_resolved_workspace_folder_does_not_change_process_cd(self):
+        # The convention fallback feeds structured metadata only; the process cd
+        # for an unmapped repo keeps its robust runtime env-expansion.
+        config = CodespacesConfig()
+        assert config.resolved_workspace_folder_for("org/unmapped") == (
+            "/workspaces/unmapped"
+        )
+        cmd = config.effective_acp_command_for("org/unmapped")
+        assert "CODESPACE_VSCODE_FOLDER" in cmd and "WORKING_DIRECTORY" in cmd
+
     def test_global_acp_command_still_overrides(self):
         config = self._config(workspace_repo="example-web")
         config.acp_command = "custom --acp"

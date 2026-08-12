@@ -123,7 +123,14 @@ def build_agent_configs(
                 "name": cs.name,
                 "repo": cs.repository,
                 "acp_command": acp_command,
-                "workspace_folder": config.workspace_folder_for(cs.repository),
+                # Concrete folder (config-or-convention, never the env-expansion
+                # placeholder): agent-bridge uses this as the ACP session/new cwd
+                # (it prefers structured metadata), so a dispatched agent's tools
+                # root in the repo checkout instead of /home/<user> even when the
+                # CodeSpace has no per-repo workspace_folder config (dotfiles#1274).
+                "workspace_folder": config.resolved_workspace_folder_for(
+                    cs.repository
+                ),
             },
         })
 
