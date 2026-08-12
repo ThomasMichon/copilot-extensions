@@ -5801,6 +5801,75 @@ def _load_claim_child_record(
         return (None, False)
 
 
+def _repo_for_project(
+    project: str | None, config: cfg.Config,
+) -> cfg.RepoConfig | None:
+    """Resolve the :class:`RepoConfig` for a claim child's project (same-machine).
+
+    Returns the repo from ``config.repos`` when the project is known there, or
+    the active ``default_repo`` for a bare/same-project ref; ``None`` when the
+    child's repo cannot be resolved from the current context (so the caller
+    spares rather than guesses). Fully best-effort.
+    """
+    try:
+        repos = getattr(config, "repos", None) or {}
+        if project and project in repos:
+            return repos[project]
+        if not project or project == getattr(config, "repo_name", None):
+            return config.default_repo
+    except Exception:
+        return None
+    return None
+
+
+def _child_branch_merged(
+    child: tracking.WorktreeRecord, ref: str, config: cfg.Config,
+) -> bool | None:
+    """Prove a gone, non-terminal child's work is SAFE via a branch-merged check.
+
+    The crashed-holder case (resource-obligation-settlement Ph4 follow-up,
+    dotfiles#1161): a child whose record is present but whose dir was removed
+    while its status is still ``active``/``pushed`` -- its ``finalize`` never ran,
+    so the ``finalized``-status shortcut in the sweep can't clear it, and it
+    wedges the owner's ``block``-mode finalize forever. Prove it safe **only**
+    when its feature branch's content already landed on its project upstream (a
+    crash *after* the work merged), reusing finalize's squash-aware
+    :func:`finalize._is_content_on_upstream`.
+
+    Returns ``True`` on a positive merge proof, else ``None`` (spare -- never
+    ``False``: a non-merged, branch-gone, or unresolvable child is left for a
+    human, never abandoned on a guess). Same-machine + resolvable-repo only, and
+    checked against the LOCAL ``origin/<default>`` (no fetch), so a stale anchor
+    spares rather than misjudges.
+    """
+    parsed = tracking.parse_claim_ref(ref)
+    if parsed is None:
+        return None
+    repo = _repo_for_project(parsed.project, config)
+    if repo is None:
+        return None
+    branch = None
+    pr = getattr(child, "pr", None)
+    if pr is not None and getattr(pr, "branch", None):
+        branch = pr.branch
+    if not branch:
+        branch = f"worktree/{child.worktree_id}"
+    upstream = f"{repo.remote}/{repo.default_branch}"
+    try:
+        verify = git_ops.git(
+            "rev-parse", "--verify", "--quiet", branch,
+            cwd=repo.anchor, check=False,
+        )
+        if verify.returncode != 0:
+            return None  # branch ref gone -> can't prove -> spare
+        from . import finalize as _finalize
+        if _finalize._is_content_on_upstream(branch, upstream, cwd=repo.anchor):
+            return True
+    except Exception:
+        return None
+    return None
+
+
 def _claims_sweep(args: argparse.Namespace) -> int:
     """Never-wedge reclaim sweep over local ledgers (resource-obligation Ph4).
 
@@ -5813,15 +5882,19 @@ def _claims_sweep(args: argparse.Namespace) -> int:
       (``finalized``/``orphaned``); an active child (a live holder may still be
       working) is *not* gone. A cross-machine child is not judgeable here
       (deferred to the lease mirror) and is left alone.
-    * **safe** -- only a **finalized** child is provably safe (its finalize
-      verified content upstream). An ``orphaned`` child (push failed) is *unsafe*;
-      an absent/active child is *unproven* -- both leave the obligation intact.
+    * **safe** -- a **finalized** child is provably safe (its finalize verified
+      content upstream). An ``orphaned`` child (push failed) is *unsafe*. A gone,
+      **non-terminal** child (``active``/``pushed`` but its dir removed -- the
+      crashed-holder case) is proven safe only when its branch content already
+      landed on its project upstream (:func:`_child_branch_merged`); otherwise it
+      is *unproven* and left intact.
 
-    So the sweep reclaims exactly the "child finalized but the parent's claim
-    was never flipped" gap (a missed/failed ``_settle_parent_obligation``),
-    never abandoning on a guess. **Dry-run by default**; ``--apply`` writes.
-    (Process-liveness of an active holder + cross-machine reclaim are future
-    work; today an active or cross-machine claim is spared.)
+    So the sweep reclaims the "child finalized but the parent's claim was never
+    flipped" gap (a missed/failed ``_settle_parent_obligation``) **and** the
+    crashed-but-merged holder, never abandoning on a guess. **Dry-run by
+    default**; ``--apply`` writes. (Process-liveness of a still-present active
+    holder + cross-machine reclaim are future work; today a live-dir or
+    cross-machine claim is spared.)
     """
     config = cfg.load_config()
     apply = getattr(args, "apply", False)
@@ -5843,10 +5916,10 @@ def _claims_sweep(args: argparse.Namespace) -> int:
             return True
         if child.status == "orphaned":
             return False
-        # active/pushed (a crashed holder whose dir may be gone): proving safety
-        # needs a branch-merged check against the child's project upstream --
-        # deferred as a follow-up. Unproven -> spare.
-        return None
+        # A gone, non-terminal (active/pushed) child -- the crashed-holder case:
+        # prove safe iff its branch content already landed upstream (a crash
+        # after the work merged). Unproven -> spare (dotfiles#1161).
+        return _child_branch_merged(child, claim.ref, config)
 
     reclaimed: list[dict[str, str]] = []
     tdir = cfg.tracking_dir()

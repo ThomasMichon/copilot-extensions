@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 
+import pytest
+
 import agent_worktrees.__main__ as m
 from agent_worktrees import config as cfg
 from agent_worktrees import obligations, tracking
@@ -152,3 +154,127 @@ def test_cli_sweep_non_worktree_kind_is_spared(tmp_path, monkeypatch, capfd):
     rc = m.cmd_claims(_sweep_args(apply=True))
     assert rc == 0
     assert tracking.load_record(tdir / "wt-o.yaml").resources[0].state == "active"
+
+
+# ── branch-merged safe-check (dotfiles#1161: crashed-but-merged holder) ───────
+
+import types as _types  # noqa: E402
+
+
+def _repo(anchor="/a", default_branch="master", remote="origin"):
+    return cfg.RepoConfig(anchor=anchor, worktree_root=anchor + ".worktrees",
+                          default_branch=default_branch, remote=remote)
+
+
+def _cfg_with_repo(project="p", machine="m"):
+    r = _repo()
+    return _types.SimpleNamespace(machine=machine, repo_name=project,
+                                  repos={project: r}, default_repo=r), r
+
+
+def test_repo_for_project_resolves_named_and_default():
+    conf, r = _cfg_with_repo(project="p")
+    assert m._repo_for_project("p", conf) is r          # named
+    assert m._repo_for_project(None, conf) is r          # bare -> default
+    assert m._repo_for_project("p", conf) is r           # same as repo_name
+    assert m._repo_for_project("other", conf) is None    # unknown -> spare
+
+
+def test_repo_for_project_degrades_without_repos():
+    bare = _types.SimpleNamespace(machine="m")  # no repos / default_repo
+    assert m._repo_for_project("p", bare) is None
+
+
+def _child_rec(wt_id="wt-c", pr_branch=None):
+    pr = _types.SimpleNamespace(branch=pr_branch) if pr_branch else None
+    return _types.SimpleNamespace(worktree_id=wt_id, pr=pr)
+
+
+def test_child_branch_merged_true_when_content_upstream(monkeypatch):
+    conf, _r = _cfg_with_repo()
+    monkeypatch.setattr(m.git_ops, "git",
+                        lambda *a, **k: _types.SimpleNamespace(returncode=0, stdout=""))
+    import agent_worktrees.finalize as _fin
+    monkeypatch.setattr(_fin, "_is_content_on_upstream", lambda *a, **k: True)
+    assert m._child_branch_merged(_child_rec(), "m/p/wt-c", conf) is True
+
+
+def test_child_branch_merged_spares_when_not_upstream(monkeypatch):
+    conf, _r = _cfg_with_repo()
+    monkeypatch.setattr(m.git_ops, "git",
+                        lambda *a, **k: _types.SimpleNamespace(returncode=0, stdout=""))
+    import agent_worktrees.finalize as _fin
+    monkeypatch.setattr(_fin, "_is_content_on_upstream", lambda *a, **k: False)
+    # not-merged -> None (spare), never False -- we never abandon on a guess.
+    assert m._child_branch_merged(_child_rec(), "m/p/wt-c", conf) is None
+
+
+def test_child_branch_merged_spares_when_branch_ref_gone(monkeypatch):
+    conf, _r = _cfg_with_repo()
+    monkeypatch.setattr(m.git_ops, "git",
+                        lambda *a, **k: _types.SimpleNamespace(returncode=1, stdout=""))
+    import agent_worktrees.finalize as _fin
+    monkeypatch.setattr(_fin, "_is_content_on_upstream",
+                        lambda *a, **k: pytest.fail("must not check content when branch is gone"))
+    assert m._child_branch_merged(_child_rec(), "m/p/wt-c", conf) is None
+
+
+def test_child_branch_merged_spares_when_repo_unresolvable(monkeypatch):
+    bare = _types.SimpleNamespace(machine="m")
+    assert m._child_branch_merged(_child_rec(), "m/p/wt-c", bare) is None
+
+
+def test_child_branch_merged_prefers_pr_branch(monkeypatch):
+    conf, _r = _cfg_with_repo()
+    seen = {}
+    monkeypatch.setattr(m.git_ops, "git",
+                        lambda *a, **k: _types.SimpleNamespace(returncode=0, stdout=""))
+    import agent_worktrees.finalize as _fin
+
+    def _capture(branch, upstream, cwd):
+        seen["branch"] = branch
+        seen["upstream"] = upstream
+        return True
+
+    monkeypatch.setattr(_fin, "_is_content_on_upstream", _capture)
+    assert m._child_branch_merged(_child_rec(pr_branch="feat/x"), "m/p/wt-c", conf) is True
+    assert seen["branch"] == "feat/x"
+    assert seen["upstream"] == "origin/master"
+
+
+def _seed_project_with_repo(tmp_path, monkeypatch, machine="m", project="p"):
+    tdir = _seed_project(tmp_path, monkeypatch, machine, project)
+    conf, r = _cfg_with_repo(project=project, machine=machine)
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: conf)
+    return tdir, r
+
+
+def test_cli_sweep_abandons_crashed_but_merged_child(tmp_path, monkeypatch, capfd):
+    tdir, _r = _seed_project_with_repo(tmp_path, monkeypatch)
+    # A crashed holder: record present + status active, but its dir is gone.
+    _child(tdir, "wt-crashed", "active")   # worktree_path points at a non-existent dir
+    _owner_with_claim(tdir, "wt-owner", "m/p/wt-crashed")
+    # Its branch content DID land upstream before the crash.
+    monkeypatch.setattr(m.git_ops, "git",
+                        lambda *a, **k: _types.SimpleNamespace(returncode=0, stdout=""))
+    import agent_worktrees.finalize as _fin
+    monkeypatch.setattr(_fin, "_is_content_on_upstream", lambda *a, **k: True)
+    rc = m.cmd_claims(_sweep_args(apply=True))
+    assert rc == 0
+    owner = tracking.load_record(tdir / "wt-owner.yaml")
+    assert owner.resources[0].state == "abandoned"
+
+
+def test_cli_sweep_spares_crashed_unmerged_child(tmp_path, monkeypatch, capfd):
+    tdir, _r = _seed_project_with_repo(tmp_path, monkeypatch)
+    _child(tdir, "wt-crashed", "active")
+    _owner_with_claim(tdir, "wt-owner", "m/p/wt-crashed")
+    # Branch content is NOT upstream -> unproven -> spared.
+    monkeypatch.setattr(m.git_ops, "git",
+                        lambda *a, **k: _types.SimpleNamespace(returncode=0, stdout=""))
+    import agent_worktrees.finalize as _fin
+    monkeypatch.setattr(_fin, "_is_content_on_upstream", lambda *a, **k: False)
+    rc = m.cmd_claims(_sweep_args(apply=True))
+    assert rc == 0
+    owner = tracking.load_record(tdir / "wt-owner.yaml")
+    assert owner.resources[0].state == "active"
