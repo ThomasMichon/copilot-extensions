@@ -39,9 +39,22 @@
     The relay count alone is NOT sufficient: the dtssh host can stay connected to
     the relay (host-conn > 0) while its dedicated sshd CHILD dies, leaving :$Port
     with no listener and remote reach silently broken until an interactive re-host
-    (#576). So each cycle ALSO probes the sshd with a plain TCP connect to
-    127.0.0.1:<port> and restarts the child when the port isn't listening, even
-    when the relay count looks healthy.
+    (#576). So each cycle ALSO probes the sshd and restarts the child when it is
+    not serving, even when the relay count looks healthy.
+
+    The sshd probe reads the SSH IDENTIFICATION BANNER, not just a bare TCP
+    connect. A bare connect is ALSO insufficient: a *wedged* sshd — one whose
+    pre-auth slots are saturated because half-open/idle pre-auth connections
+    piled up past `MaxStartups` (OpenSSH default 10:30:100) — keeps ACCEPTING the
+    TCP connection but never sends its banner, so a connect-only probe reads
+    healthy while remote reach is fully broken. Observed in the wild as a
+    multi-day silent outage: 500+ Established pre-auth connections on :$Port,
+    both the relay count and a bare-connect probe green, yet every `ssh <alias>`
+    (even from the host itself) closed pre-banner. Reading the banner is the
+    discriminator that lets the watchdog detect the wedge and restart — and the
+    restart's Clear-DedicatedSshd reaps the piled-up connections. A soft
+    early-warning also logs when the Established-connection count on :$Port
+    crosses -PreAuthWarnThreshold, before saturation fully wedges the port.
 
     The tunnel id is resolved from dtssh's own persisted record
     (`%LOCALAPPDATA%\dtssh\host\service-<alias>.tunnel`), falling back to matching
@@ -85,6 +98,13 @@
     Seconds to wait after (re)starting `dtssh host` before the first health check
     (default 45) — lets the relay register the host before we judge it.
 
+.PARAMETER PreAuthWarnThreshold
+    Established-connection count on :$Port above which the launcher logs a soft
+    pre-saturation warning (default 80 — below OpenSSH's default MaxStartups full
+    cutoff of 100). Advisory only: the banner probe, not this count, drives
+    restarts, so legitimate concurrent sessions are never force-killed by the
+    count alone.
+
 .PARAMETER NoMonitor
     Legacy one-shot mode: start `dtssh host` hidden and exit, with no health
     monitoring. Kept as a fallback.
@@ -101,6 +121,7 @@ param(
     [int]$HealthCheckSec      = 120,
     [int]$ConsecutiveFailures = 2,
     [int]$GracePeriodSec      = 45,
+    [int]$PreAuthWarnThreshold = 80,
     [switch]$NoMonitor
 )
 
@@ -243,28 +264,61 @@ function Clear-DedicatedSshd {
     } catch { Write-Log "sshd reap failed: $_" 'WARN' }
 }
 
-function Test-SshdListening {
+function Test-SshdServing {
     <#
-      True if the dedicated sshd is accepting TCP on 127.0.0.1:$ProbePort. This is
-      the #576 liveness probe: the relay host-connection check can read >0 while the
-      sshd CHILD behind the tunnel is dead, so the tunnel forwards to a port with no
-      listener and remote reach is silently broken. A plain TCP connect (not a full
-      SSH handshake) proves the listener is alive; a short timeout keeps the health
-      loop responsive.
+      True only if the dedicated sshd on 127.0.0.1:$ProbePort completes a TCP
+      connect AND emits an SSH identification banner ("SSH-...") within the
+      timeout.
+
+      This is deliberately STRONGER than a bare TCP connect. Two failure modes it
+      must catch:
+        - #576: the sshd CHILD dies, so :$Port has no listener at all (connect
+          fails outright).
+        - the pre-auth WEDGE: sshd is alive and still ACCEPTS the TCP connection,
+          but its pre-auth slots are saturated (half-open/idle pre-auth
+          connections piled up past MaxStartups), so it never sends its banner.
+          A connect-only probe reads healthy here while remote reach is fully
+          broken. Reading the banner is the discriminator; a restart then reaps
+          the piled-up connections via Clear-DedicatedSshd.
+
+      An SSH server sends its identification string first, before the client
+      writes anything, so a plain connect+read (no handshake) surfaces the banner.
+      A read timeout / short read / non-"SSH-" prefix all count as NOT serving.
     #>
-    param([int]$ProbePort)
+    param([int]$ProbePort, [int]$TimeoutMs = 4000)
     $client = $null
     try {
         $client = [System.Net.Sockets.TcpClient]::new()
         $iar = $client.BeginConnect('127.0.0.1', $ProbePort, $null, $null)
-        if (-not $iar.AsyncWaitHandle.WaitOne(3000)) { return $false }
+        if (-not $iar.AsyncWaitHandle.WaitOne($TimeoutMs)) { return $false }
         $client.EndConnect($iar)
-        return $client.Connected
+        if (-not $client.Connected) { return $false }
+        $stream = $client.GetStream()
+        $stream.ReadTimeout = $TimeoutMs
+        $buf = [byte[]]::new(64)
+        $n = $stream.Read($buf, 0, $buf.Length)
+        if ($n -le 0) { return $false }
+        return [System.Text.Encoding]::ASCII.GetString($buf, 0, $n).StartsWith('SSH-')
     } catch {
+        # Includes the IOException thrown when the banner read times out on a
+        # wedged sshd (accepts TCP, sends nothing) — correctly => not serving.
         return $false
     } finally {
         if ($client) { $client.Dispose() }
     }
+}
+
+function Get-EstablishedConnCount {
+    <#
+      Count Established TCP connections to the dedicated loopback sshd port. A
+      large, growing count of pre-auth connections precedes a MaxStartups wedge;
+      used as an early-warning signal (advisory — see PreAuthWarnThreshold).
+      Returns -1 if the count can't be read.
+    #>
+    param([int]$ProbePort)
+    try {
+        return @(Get-NetTCPConnection -LocalPort $ProbePort -State Established -ErrorAction SilentlyContinue).Count
+    } catch { return -1 }
 }
 
 function Start-HostProc {
@@ -354,27 +408,35 @@ try {
             continue
         }
 
-        # Health = relay connected AND the dedicated sshd is actually listening.
+        # Health = relay connected AND the dedicated sshd is actually SERVING.
         # Checking only the relay host-connection count misses the case where the
-        # dtssh host stays connected but its sshd CHILD dies: host-conn reads >0
-        # while :$Port has no listener, so remote reach is silently broken until an
-        # interactive re-host (#576). Probe both and restart on either failure.
+        # dtssh host stays connected but its sshd CHILD dies (#576); checking only
+        # a bare TCP connect misses the pre-auth WEDGE (sshd accepts TCP but never
+        # banners once MaxStartups is saturated). So probe the relay AND read the
+        # sshd banner, and restart on either failure. A restart's Clear-DedicatedSshd
+        # reaps any piled-up pre-auth connections that caused a wedge.
         $relayOk = $true
         if ($tunnelId) {
             $conns = Get-HostConnections $tunnelId
             if ($conns -eq 0) { $relayOk = $false }
             # $conns -eq -1: transient/unknown — do not treat as a failure.
         }
-        $sshdOk = Test-SshdListening $Port
+        $sshdOk = Test-SshdServing $Port
+
+        # Soft pre-saturation early-warning (advisory; does not force a restart).
+        $estConns = Get-EstablishedConnCount $Port
+        if ($estConns -ge $PreAuthWarnThreshold) {
+            Write-Log "pre-auth pressure: $estConns established connection(s) on :$Port (>= $PreAuthWarnThreshold; MaxStartups wedge risk)" 'WARN'
+        }
 
         if ($relayOk -and $sshdOk) {
-            if ($failCount -ne 0) { Write-Log "recovered: healthy (relay connected, sshd :$Port listening)" }
+            if ($failCount -ne 0) { Write-Log "recovered: healthy (relay connected, sshd :$Port serving banner)" }
             $failCount = 0
         } else {
             $failCount++
             $reasons = @()
             if (-not $relayOk) { $reasons += '0 relay host-connections' }
-            if (-not $sshdOk)  { $reasons += "sshd :$Port not listening" }
+            if (-not $sshdOk)  { $reasons += "sshd :$Port not serving (no SSH banner$(if ($estConns -ge $PreAuthWarnThreshold) { "; $estConns pre-auth conns — likely MaxStartups wedge" }))" }
             Write-Log "UNHEALTHY: $($reasons -join '; ') (consecutive $failCount/$ConsecutiveFailures)" 'WARN'
             if ($failCount -ge $ConsecutiveFailures) {
                 Write-Log "restarting dtssh host after $failCount unhealthy checks" 'WARN'

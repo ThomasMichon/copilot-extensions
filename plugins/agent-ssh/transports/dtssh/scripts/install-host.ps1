@@ -254,8 +254,28 @@ switch ($Action) {
         $sshd = Get-SshdExe; if ($sshd) { Write-Host "sshd: $sshd" } else { Write-Warning 'sshd not found' }
         $running = @(Get-HostProcess); if ($running) { Write-Host "host running: $(@($running).ProcessId -join ',')" } else { Write-Warning 'host not running' }
         $sshdUp = $false
-        try { $c = [System.Net.Sockets.TcpClient]::new(); $iar = $c.BeginConnect('127.0.0.1', $Port, $null, $null); if ($iar.AsyncWaitHandle.WaitOne(3000)) { $c.EndConnect($iar); $sshdUp = $c.Connected }; $c.Dispose() } catch { $sshdUp = $false }
-        if ($sshdUp) { Write-Host "sshd listening: 127.0.0.1:$Port" } else { Write-Warning "sshd NOT listening on :$Port (dead sshd child -- remote reach broken even if the tunnel shows connected; #576)" }
+        try {
+            $c = [System.Net.Sockets.TcpClient]::new()
+            $iar = $c.BeginConnect('127.0.0.1', $Port, $null, $null)
+            if ($iar.AsyncWaitHandle.WaitOne(3000)) {
+                $c.EndConnect($iar)
+                if ($c.Connected) {
+                    # Read the SSH banner, not just the TCP connect: a wedged sshd
+                    # (pre-auth slots saturated past MaxStartups) still accepts TCP
+                    # but never banners, so a connect-only check falsely reports
+                    # healthy while remote reach is broken.
+                    $s = $c.GetStream(); $s.ReadTimeout = 3000
+                    $buf = [byte[]]::new(64); $n = $s.Read($buf, 0, $buf.Length)
+                    $sshdUp = ($n -gt 0) -and [System.Text.Encoding]::ASCII.GetString($buf, 0, $n).StartsWith('SSH-')
+                }
+            }
+            $c.Dispose()
+        } catch { $sshdUp = $false }
+        if ($sshdUp) { Write-Host "sshd serving: 127.0.0.1:$Port (SSH banner OK)" }
+        else {
+            $est = @(Get-NetTCPConnection -LocalPort $Port -State Established -ErrorAction SilentlyContinue).Count
+            Write-Warning "sshd NOT serving on :$Port -- accepts TCP but no SSH banner (dead sshd child #576, or a MaxStartups wedge: $est established pre-auth connection(s)). Remote reach is broken even if the tunnel shows connected; restart the host (install-host.ps1 stop; start)."
+        }
         $wd = @(Get-CimInstance Win32_Process -Filter "Name='pwsh.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like '*agent-ssh-dtssh\dtssh-host-launcher.ps1*' })
         if ($wd) { Write-Host "watchdog running: $($wd.ProcessId -join ',')" } else { Write-Warning 'watchdog not running (host will not self-heal or restart on child exit)' }
         $rec = Join-Path $env:LOCALAPPDATA "dtssh\host\service-$Alias.tunnel"
