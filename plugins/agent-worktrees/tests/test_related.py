@@ -602,7 +602,7 @@ def test_resolve_codespace(tmp_path: Path):
     )
     assert r.locus_kind == "codespace"
     assert r.available_here is True
-    assert any("gh cs create -R org/example-web-codespaces" in s for s in r.steps)
+    assert any("agent-codespaces create org/example-web-codespaces" in s for s in r.steps)
     assert any("agent-bridge send codespace:" in s for s in r.steps)
 
 
@@ -732,7 +732,7 @@ def test_resolve_container_unavailable_elsewhere_falls_back(tmp_path: Path):
     assert r.available_here is False
     assert any("only available on: dev6" in n for n in r.notes)
     # CodeSpace is offered as the machine-agnostic fallback
-    assert any("gh cs create -R org/example-web-codespaces" in n for n in r.notes)
+    assert any("agent-codespaces create org/example-web-codespaces" in n for n in r.notes)
 
 
 def test_resolve_codespace_notes_container_alternative_here(tmp_path: Path):
