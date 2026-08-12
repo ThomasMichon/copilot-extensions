@@ -121,10 +121,12 @@ core of the principles above; a reviewer checks a change against these.
   A user's only action is enabling; provisioning and version reconciliation are the
   model's job and must never require hand-running an installer, nor depend on one
   *particular* sibling being the session launcher. (Serves *Vision plugin-services
-  §Features/self-provisioning-runtime*; realized today by `runtimeScope` +
+  §Features/self-provisioning-runtime*; the convenience realization is `runtimeScope` +
   `agent-worktrees reconcile-plugins`, see
   [`../install-contract.md`](../install-contract.md) § "Automatic reconciliation at
-  launch".)
+  launch" — but that path must not be a *dependency*: the sibling-independent,
+  confined-env realization (self-provisioning binstub + `stamp` + skill readiness
+  self-check) is [`runtime-self-provisioning.md`](runtime-self-provisioning.md).)
 - **Repo mutation is an adopt-only power.** `install`/`update` act on
   **machine-local** state only — they may migrate local config *schema* and *warn*
   on a stale/deprecated repo convention, but never alter a repo's committed config
@@ -183,6 +185,7 @@ the exemplars, and the vision it serves):
 | [install-vs-adopt-boundary](install-vs-adopt-boundary.md) | Which lifecycle verb may mutate what — `install`/`update` is machine-local (schema-migrate + warn), `register`/`adopt` is the only repo-mutating verb (repo config + git hooks), and ownership falls out of adoption |
 | [config-schema-migration](config-schema-migration.md) | How a machine-local YAML config gains an explicit `schema_version` + scripted `vN -> vN+1` migrate-by-rewrite (the vendored `config-migrate` primitive), applied lazily on read + eagerly on install/update, with a fixture-guarded backward-compat window |
 | [a-la-carte-independence](a-la-carte-independence.md) | Standalone-first plugins that compose gracefully, incl. the resolver-import pattern |
+| [runtime-self-provisioning](runtime-self-provisioning.md) | How a plugin provisions its own runtime with no manual step and **no dependency on a sibling launcher** — the layered bootstrap (self-provisioning binstub → sessionStart auto-stamp → skill-driven readiness self-check) + toolchain self-acquisition (vendored uv, pip-index bridge), reaching confined envs (Copilot app, cloud agent) |
 | [cross-platform-parity](cross-platform-parity.md) | One behavior across Windows and Linux/WSL: shells, UTF-8, the WSL/Windows boundary, binstubs |
 | [project-scoped-invocation](project-scoped-invocation.md) | Reach any layer against an explicitly named project (`--project`), CWD-independently, and the per-project `<repo>` binstub as a uniform `<repo> <layer> …` dispatcher over the agent-* fleet |
 | [durable-vs-versioned-runtime](durable-vs-versioned-runtime.md) | When a plugin carries an expensive, warm, stateful runtime (heavy stack + loaded model) that must outlive routine service cutovers: a durable runtime + warm daemon on its own lifecycle, decoupled from the swappable versioned runtime, config-resolved + capability-matched per host |

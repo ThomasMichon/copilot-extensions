@@ -29,6 +29,12 @@ binding* (recording the borrow in the effort file, the dispatch/monitoring loop)
 is owned by the control-plane delegation skill (e.g. `dispatching-work` /
 `working-cross-repo`), which calls these commands.
 
+> **Before you start — readiness (no agent-worktrees required).** If
+> `command -v agent-codespaces` fails, deploy its binstub first (it self-provisions
+> on first call): `bash "$(ls ~/.copilot/installed-plugins/*/agent-codespaces/scripts/install.sh | head -1)" stamp`.
+> The first call may take ~30–120s to provision — let it finish. Full detail:
+> `codespaces-setup` § *Readiness*.
+
 > **CodeSpace vs container:** a CodeSpace is the default for cloud feature work;
 > borrow a **local container** (`borrowing-containers` / `containers-fleet`) for
 > fast local iteration. The lease model is the same shape in both plugins.
