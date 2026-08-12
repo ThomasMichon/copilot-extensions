@@ -212,4 +212,40 @@ else
 fi
 
 # =========================================================================
+phase 7 "repo-scoped enablement (.github/copilot/settings.json fires sessionStart hooks)"
+# The real harness enables plugins via the REPO's .github/copilot/settings.json,
+# NOT ~/.copilot. Prove that repo-scoped enablement ALONE loads the plugin and
+# fires its sessionStart hooks. Generic signal: for a stamp-capable runtime the
+# binstub re-appears (the bootstrap-check stamp); the plugin must have loaded for
+# that to happen.
+_repo="$HOME/repo-scoped"
+rm -rf "$_repo"; mkdir -p "$_repo/.github/copilot"
+cat > "$_repo/.github/copilot/settings.json" <<JSON
+{
+  "extraKnownMarketplaces": { "$MARKETPLACE_NAME": { "source": { "source": "github", "repo": "$MARKETPLACE_REPO" } } },
+  "enabledPlugins": { "$PRIMARY_PLUGIN@$MARKETPLACE_NAME": true }
+}
+JSON
+( cd "$_repo" && git init -q && git config user.email t@e && git config user.name t && git add -A && git commit -qm init )
+# Neutralize USER-level enablement so ONLY the repo settings can load the plugin,
+# and clear the binstub so its re-appearance is unambiguous evidence.
+if [ -f "$HOME/.copilot/settings.json" ]; then cp "$HOME/.copilot/settings.json" "$HOME/.copilot/settings.json.crbak"; fi
+echo '{}' > "$HOME/.copilot/settings.json"
+rm -f "$HOME/.local/bin/$PRIMARY_PLUGIN"
+_apply_uv_index_fixture
+# Run a session FROM the repo, WITHOUT --plugin-dir: only .github/copilot/settings.json can enable it.
+( cd "$_repo" && capture "session-reposcoped" -- copilot -p "Reply with the single word: ok." --allow-all-tools ) || true
+sleep 5
+if [ -e "$HOME/.local/bin/$PRIMARY_PLUGIN" ]; then
+    pass "repo-scoped .github/copilot/settings.json enablement fired the sessionStart hook ($PRIMARY_PLUGIN binstub re-stamped)"
+elif grep -qE '^[[:space:]]*stamp\)' "$INSTALLED_ROOT/$PRIMARY_PLUGIN/scripts/install.sh" 2>/dev/null; then
+    jam "experimental-mode-gate" "repo-scoped enablement did NOT fire the sessionStart hook ($PRIMARY_PLUGIN is stamp-capable but no binstub re-stamped)" \
+        "verify .github/copilot/settings.json enablement loads plugins + fires hooks in this CLI/launch mode"
+else
+    info "repo-scoped enablement: $PRIMARY_PLUGIN is not stamp-capable, so hook-firing can't be asserted via binstub (session ran; see cr-logs/session-reposcoped.log)"
+fi
+# Restore user-level settings.
+[ -f "$HOME/.copilot/settings.json.crbak" ] && mv -f "$HOME/.copilot/settings.json.crbak" "$HOME/.copilot/settings.json"
+
+# =========================================================================
 cr_finalize
