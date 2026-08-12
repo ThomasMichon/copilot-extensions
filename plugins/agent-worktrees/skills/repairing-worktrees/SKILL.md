@@ -127,16 +127,36 @@ declaring it. `session_turns` in the record is only a **picker render-cache** �
 self-heals to the real count on the next populate, so a stale `session_turns: 0`
 on a *correctly-registered* worktree is cosmetic, not lost work.
 
-### Verify which class you're in — content-grep, don't guess
+### Verify which class you're in — cheap structured signals first
 
-`workspace.yaml` `cwd` matching only finds a session **rooted in** the worktree.
-To prove whether *any* real transcript worked on a worktree (and to tell an
-incidental mention from a genuine in-worktree session), grep the transcript bodies
-across the whole session-state root for the worktree id, then inspect each hit's
-own `cwd` + whether it has `session.db`/`events.jsonl`:
+Work **cheap → expensive**; most cases resolve without ever touching the
+state root:
+
+1. **The record itself (free).** `parent_session` + `sessions: []` + a merged PR
+   ⇒ class **D** (parent-spawned vessel), decided from the YAML alone. `doctor`'s
+   **alignment audit** (report-only item 5) already surfaces these.
+2. **`list-sessions` / `head-session` (registry, O(this worktree)).** Shows the
+   registered sessions and which id `resolved_head_session` picks — a synthetic /
+   dead head with real siblings on disk points at class **B/C**.
+3. **The session-store index, keyed by cwd (one indexed query).** Query the
+   Copilot session store's index for sessions whose `cwd` is the worktree path,
+   rather than walking the filesystem — this finds a real in-worktree session
+   without any directory iteration.
+
+### Last resort — content-grep the transcript bodies (expensive; explicitly initiated)
+
+Only when 1–3 can't resolve it (e.g. the store index is unavailable, or you must
+prove a worktree has **no** transcript *anywhere*) fall back to grepping transcript
+bodies across the whole state root. This is **more expensive than the sanctioned
+`backfill-sessions` sweep** — it reads every session's `events.jsonl` / `session.db`
+(megabytes each), not just `workspace.yaml`. It is acceptable **only** here: an
+**on-demand, agent-driven recovery inquiry**, which is exactly the "explicitly
+initiated by a user or an agent" exception the
+[`session-state-access`](../../../../docs/patterns/session-state-access.md)
+invariant carves out. **Never** put a sweep like this on any hot / automated path.
 
 ```
-# for each session-state dir, does events.jsonl / session.db contain "<worktree-suffix>"?
+# LAST RESORT: for each session-state dir, does events.jsonl / session.db contain "<worktree-suffix>"?
 #   hit whose OWN cwd == the worktree  → a real in-worktree session (classes A–C)
 #   hit whose cwd is a DIFFERENT wt    → incidental mention (usually the class-D parent)
 #   only zero-data stubs match         → class D or E (no transcript to recover)
@@ -144,7 +164,7 @@ own `cwd` + whether it has `session.db`/`events.jsonl`:
 
 The `parent_session` on a session-less worktree (from `doctor`'s alignment audit)
 usually **is** the class-D parent that created it — cross-check it against these
-grep hits.
+grep hits before spending the sweep.
 
 ## Liveness trumps git state — never reap a live worktree
 
