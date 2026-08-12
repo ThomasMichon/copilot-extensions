@@ -592,6 +592,22 @@ declares — the same self-healing posture the singleton already applies to a un
 liveness, extended to the *membership* of the set itself. Discovery reconciles
 **intent to reality**: what is declared is what runs.
 
+### overrides-take-precedence
+The running set of supervised work is **declarations reconciled with operator
+overrides**, and an override **wins**. A fast, local **enable/disable** toggle on a
+declared unit — an **emitter** (stop it producing) or a **pool** (stop it binding) —
+takes precedence over that unit's declared state *and* over the discovery layer, so
+an operator can **stop a misbehaving unit immediately** without editing, or racing a
+repo-sync against, its declaration. The override is applied **out of band** (a
+runtime control, not a repo commit + sync cycle), is **reversible** (clear it and
+the unit returns to whatever its declaration says), and is **legible** (what is
+overridden-off, and why, is visible beside what is declared). This is the emergency
+stop that *discover-and-live-reconcile* needs to be safe: discovery keeps *what
+should run* converging on the declarations, while an override is a human's
+**higher-precedence veto** for when something must stop running *right now*,
+declaration notwithstanding — and, crucially, a later re-sync of the declaration
+does **not** quietly undo it.
+
 ## Non-Goals / Boundaries
 
 - **Not the live-conversation layer.** Driving or messaging a running agent
@@ -627,6 +643,15 @@ liveness, extended to the *membership* of the set itself. Discovery reconciles
 
 ## Provenance
 
+- **2026-08-11** — Added the *overrides-take-precedence* behavior: the running set
+  of supervised work is declarations **reconciled with operator overrides**, and an
+  override wins. A fast, local, reversible enable/disable toggle on a declared unit
+  (an emitter to stop producing, a pool to stop binding) takes precedence over the
+  declared state and the discovery layer, so an operator can stop a misbehaving unit
+  immediately without editing or racing a repo-sync against its declaration (and a
+  later re-sync does not undo it). Mined from an operator design steer (a quick
+  emitter enable/disable kill-switch for when something goes wrong). The override
+  mechanism/CLI stays spec-level.
 - **2026-08-11** — Reframed the production model around **propose/queue**,
   **filters**, and **emitter/evaluator templates** (one operator design
   conversation). (1) The lifecycle wording was corrected to the code's real states
