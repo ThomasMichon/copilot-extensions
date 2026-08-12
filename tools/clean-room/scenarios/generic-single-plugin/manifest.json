@@ -1,0 +1,35 @@
+{
+  "name": "generic-single-plugin",
+  "description": "The reference scenario: register the marketplace, install ONE plugin on a fresh box, and assert on the filesystem outcomes of the install -> bootstrap -> binstub -> plugin-load -> register flow. Name-free of any operator's repos; the plugin under test is fully configurable via CR_* env.",
+  "image": "base",
+  "prereqs": {
+    "present": ["git", "python3", "node", "uv"],
+    "provisioned_by_flow": []
+  },
+  "auth": {
+    "copilot": "required",
+    "gh": "optional",
+    "ado": "none"
+  },
+  "fixtures": {
+    "uv-index": {
+      "opt_in": true,
+      "applied_by": "runner env (CR_UV_INDEX -> UV_INDEX_URL/UV_DEFAULT_INDEX/UV_EXTRA_INDEX_URL)",
+      "purpose": "On a governed box uv's default public PyPI index is TLS-blocked, so the deploy/provision stage fails (toolchain-uv jam). Mirrors the npm build-arg: opt-in only, default off so the jam surfaces."
+    }
+  },
+  "expected_artifacts": [
+    "~/.copilot/installed-plugins/<marketplace>/<primary-plugin>",
+    "~/.local/bin/<primary-plugin> (binstub, after first-session provision)",
+    "~/.agent-worktrees/projects.yaml (after register)"
+  ],
+  "stages": [
+    { "n": 0, "title": "environment must look like a fresh machine" },
+    { "n": 1, "title": "register marketplace + install ONE plugin" },
+    { "n": 2, "title": "dependency chain (does one install pull the rest?)" },
+    { "n": 3, "title": "runtime bootstrap on first session (venv + binstub)" },
+    { "n": 4, "title": "binstub reachability from a stock login shell" },
+    { "n": 5, "title": "plugin loading in headless copilot -p" },
+    { "n": 6, "title": "register the current repo as a harness project" }
+  ]
+}

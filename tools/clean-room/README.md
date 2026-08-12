@@ -23,9 +23,9 @@ The realistic corp-box case to reproduce is an **asymmetry**: a policy sets
 **pip's** internal feed but not **uv**, so `uv`/`uv pip install` still hit the
 TLS-blocked public index while pip works.
 
-## What it checks
+## What it checks (the `generic-single-plugin` reference scenario)
 
-| Phase | Question it answers |
+| Stage | Question it answers |
 |-------|---------------------|
 | 0 | Is the box actually clean (no pre-existing runtime/binstubs)? |
 | 1 | Does registering the marketplace + `plugin install <one plugin>` land the payload? |
@@ -35,7 +35,7 @@ TLS-blocked public index while pip works.
 | 5 | **Headless plugin loading:** does `copilot -p` honor `enabledPlugins`, or does it need explicit `--plugin-dir` per plugin (the agent-bridge dispatch mechanism)? |
 | 6 | Does `agent-worktrees register` wire the repo as a harness project (`projects.yaml`)? |
 
-Each phase asserts on **filesystem outcomes**, not exact CLI syntax, so it stays
+Each stage asserts on **filesystem outcomes**, not exact CLI syntax, so it stays
 robust across `copilot` versions and records the CLI surface + full logs it saw.
 
 ## Prerequisites
@@ -58,10 +58,12 @@ robust across `copilot` versions and records the CLI surface + full logs it saw.
 
 ```powershell
 # Windows host
-./run.ps1 -Mode all                      # build -> device-code login (once) -> validate
-./run.ps1                                # validate against the cached authed image (base)
+./run.ps1 -Mode all                      # build -> device-code login (once) -> run
+./run.ps1                                # run generic-single-plugin against the base image
+./run.ps1 -Scenario generic-single-plugin  # (the default) run a named scenario
 ./run.ps1 -Image pristine -Mode shell    # drop into a pristine fresh box (headed copilot)
-./run.ps1 -Until 1 -Then shell           # prepare up to phase 1, then hand off to a shell
+./run.ps1 -Until 1 -Then shell           # prepare up to stage 1, then hand off to a shell
+./run.ps1 -UvIndex https://…/pypi/simple/  # opt-in uv-index fixture (governed box)
 ./run.ps1 -Mode bridge-register          # expose the box as an agent-bridge agent
 ./run.ps1 -Image pristine -Mode down     # remove the container
 ```
@@ -69,11 +71,37 @@ robust across `copilot` versions and records the CLI surface + full logs it saw.
 ```bash
 # Linux / WSL / macOS host
 ./run.sh all
+./run.sh --scenario generic-single-plugin
 ./run.sh --image pristine shell
 ./run.sh --until 1 --then shell run
+./run.sh --uv-index https://…/pypi/simple/ run
 ./run.sh bridge-register
 ./run.sh --image pristine down
 ```
+
+## Scenarios & the scenario contract
+
+The runner is **scenario-driven** (design doc `docs/clean-room-test-rig.md`
+Sec.6): `-Scenario <name|dir>` selects a self-describing scenario directory that
+the runner mounts (with the shared `lib/`) read-only into the box and runs. This
+keeps the public runner **name-free** of any operator's repos.
+
+```
+scenarios/<name>/
+├── manifest.json   # name; image variant; prereqs; auth; expected artifacts; stages
+├── scenario.sh     # sources lib/clean-room-lib.sh; defines its stages via the helper API
+└── fixtures/       # optional seed files / opt-in fixtures (e.g. the uv-index unjam)
+```
+
+`lib/clean-room-lib.sh` provides the uniform helper API every scenario uses:
+`phase <n> <title>` (also the `--until` gate) · `pass`/`fail`/`info` ·
+`capture <label> -- <cmd…>` · `envdump` · `jam <category> <evidence> [hint]`
+(the Sec.7 diagnostic taxonomy) · `cr_meta <key> <value>` · `cr_finalize`. The
+report shape (`cr-report.json`) keeps its historical top-level keys and adds an
+`env{}` snapshot and a classified `jams[]` array.
+
+**`generic-single-plugin`** is the reference scenario — today's Layer-0 install
+check — proving the substrate generalises without an internal dependency.
 
 ## Driving the box over agent-bridge
 
@@ -108,8 +136,8 @@ against the live daemon's provider API.
 
 
 **Interactive shell / headed smoke tests.** The runner drives a **persistent**
-named container (`cr-<image>`), so you can run the automated `validate.sh` (all
-phases, or `-Until <n>` to stop early) and then `-Mode shell` / `-Then shell`
+named container (`cr-<image>`), so you can run the automated scenario (all
+stages, or `-Until <n>` to stop early) and then `-Mode shell` / `-Then shell`
 into the *same* box to run the real interactive `copilot` — Copilot CLI does not
 fully enable every feature in `-p`/ACP, so the rig automates what it can and
 hands off for the rest. The container stays up until `-Mode down`.
@@ -144,9 +172,10 @@ PASS/FAIL) plus per-phase command logs under `cr-logs/`.
 
 ## Configuration
 
-Override via `run.ps1` params or `CR_*` env (see `validate.sh` header):
-`CR_MARKETPLACE_REPO`, `CR_MARKETPLACE_NAME`, `CR_PRIMARY_PLUGIN`,
-`CR_EXPECT_DEPS`, `CR_UNTIL` (stop after phase N).
+Override via `run.ps1` params or `CR_*` env (see the `scenarios/generic-single-plugin/scenario.sh`
+header): `CR_MARKETPLACE_REPO`, `CR_MARKETPLACE_NAME`, `CR_PRIMARY_PLUGIN`,
+`CR_EXPECT_DEPS`, `CR_UV_INDEX` (opt-in uv-index fixture), `CR_UNTIL` (stop after
+stage N). The scenario name + stage list live in `manifest.json`.
 
 ## Files
 
@@ -154,8 +183,11 @@ Override via `run.ps1` params or `CR_*` env (see `validate.sh` header):
 |------|------|
 | `Dockerfile` | Credential-free `base` "fresh machine": git, python, node, uv, Copilot CLI — nothing from copilot-extensions. |
 | `Dockerfile.pristine` | The `pristine` variant: Copilot + git only (no venv/pip/uv/feed-governance) — forces the harness to self-provision. |
-| `validate.sh` | In-container driver + assertions (bind-mounted at run, so edits need no rebuild). Honors `CR_UNTIL` to stop after a phase. |
-| `run.ps1` / `run.sh` | Host wrappers: build · one-time auth+commit · run · **shell** (interactive handoff) · **bridge-register/unregister** (drive over agent-bridge) · down; `-Image base\|pristine`. |
+| `lib/clean-room-lib.sh` | Shared scenario helper API (`phase`/`pass`/`fail`/`info`/`capture`/`envdump`/`jam`/`cr_meta`/`cr_finalize`) + uniform `cr-report.json` writer. Mounted read-only. |
+| `scenarios/<name>/manifest.json` | Scenario descriptor: image variant, prereqs, auth, expected artifacts, ordered stages. |
+| `scenarios/<name>/scenario.sh` | In-container driver + assertions for one scenario (bind-mounted at run, so edits need no rebuild). Sources the lib; honors `CR_UNTIL`. |
+| `scenarios/generic-single-plugin/` | The reference scenario (today's Layer-0 install check). |
+| `run.ps1` / `run.sh` | Host wrappers: build · one-time auth+commit · run (`-Scenario`) · **shell** (interactive handoff) · **bridge-register/unregister** (drive over agent-bridge) · down; `-Image base\|pristine`, `-UvIndex`. |
 | `bridge_register.py` | Stdlib-only helper: register/unregister the container as an agent-bridge `command` agent via the provider API (no copilot-extensions imports). |
 
 ## Scope / non-goals

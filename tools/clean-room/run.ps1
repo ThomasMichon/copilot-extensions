@@ -33,25 +33,35 @@
   build : build the selected image only.
   auth  : one-time device-code `copilot` login, committed to the cached :authed
           image for that variant.
-  run   : (default) start a fresh container, run validate.sh (to -Until), report.
+  run   : (default) start a fresh container, run the scenario (to -Until), report.
   shell : drop into an interactive login shell in the container (start one if
           none is up). Use after `run -Then shell`, or standalone to poke a box.
   down  : remove the container for the selected variant.
   all   : build -> (auth if needed) -> run.
 
 .PARAMETER Image     base | pristine (default base).
-.PARAMETER Until     Stop validate.sh after this phase number 0-6 (default 6 = all).
+.PARAMETER Scenario  Scenario to run: a name under scenarios/ or a dir path
+                     (default generic-single-plugin). The runner mounts the
+                     scenario dir + shared lib/ read-only and runs scenario.sh.
+.PARAMETER Until     Stop the scenario after this stage number, or 'all'
+                     (default) for every stage.
 .PARAMETER Then      After `run`: none | shell | down (default none).
 .PARAMETER NpmRegistry
   Explicit npm feed for the image BUILD only (installs the Copilot CLI prereq).
   Empty = public registry.npmjs.org; never auto-detected from the host.
+.PARAMETER UvIndex
+  Opt-in uv-index fixture: point the deploy stage's uv at an internal index on a
+  governed box (runtime analog of -NpmRegistry). Empty = off, so the governed uv
+  jam surfaces. Also settable via $env:CR_UV_INDEX.
 
 .EXAMPLE
-  ./run.ps1                                   # base: full validate against :authed
+  ./run.ps1                                   # base: full generic-single-plugin scenario
 .EXAMPLE
   ./run.ps1 -Image pristine -Mode shell       # drop into a pristine fresh box
 .EXAMPLE
   ./run.ps1 -Until 1 -Then shell              # install the plugin, then hand off
+.EXAMPLE
+  ./run.ps1 -UvIndex https://…/pypi/simple/   # opt-in uv-index fixture (governed box)
 #>
 [CmdletBinding()]
 param(
@@ -59,11 +69,17 @@ param(
     [string]$Mode = 'run',
     [ValidateSet('base','pristine')]
     [string]$Image = 'base',
-    [ValidateRange(0,6)]
-    [int]$Until = 6,
+    # Scenario to run: a name under scenarios/ or an explicit dir path.
+    [string]$Scenario = 'generic-single-plugin',
+    # Stop the scenario after this stage number, or 'all' (default) for every stage.
+    [string]$Until = 'all',
     [ValidateSet('none','shell','down')]
     [string]$Then = 'none',
     [string]$NpmRegistry = '',
+    # Opt-in uv-index fixture: point the deploy stage's uv at an internal index
+    # (governed box). Empty = off, so the governed uv jam surfaces. Runtime
+    # analog of -NpmRegistry (which is build-time). Also $env:CR_UV_INDEX.
+    [string]$UvIndex = '',
     # Auth: by default the runner injects a Copilot token grabbed from the host
     # `gh` (COPILOT_GITHUB_TOKEN) so NO interactive device-code login is needed.
     # -TokenAccount picks which gh account (must have Copilot entitlement);
@@ -82,6 +98,26 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+# --- Until validation: 'all' or a non-negative integer ------------------------
+if ($Until -ne 'all' -and $Until -notmatch '^\d+$') {
+    throw "-Until must be 'all' or a non-negative integer (got '$Until')"
+}
+
+# --- scenario resolution: an explicit dir, else scenarios/<name>/ -------------
+if (Test-Path -PathType Container $Scenario) {
+    $ScenarioDir  = (Resolve-Path $Scenario).Path
+    $ScenarioName = Split-Path -Leaf $ScenarioDir
+} elseif (Test-Path -PathType Container (Join-Path $Here "scenarios\$Scenario")) {
+    $ScenarioDir  = Join-Path $Here "scenarios\$Scenario"
+    $ScenarioName = $Scenario
+} else {
+    throw "unknown -Scenario '$Scenario' (not a dir, and no scenarios\$Scenario)"
+}
+if (-not (Test-Path (Join-Path $ScenarioDir 'scenario.sh'))) {
+    throw "scenario '$ScenarioName' has no scenario.sh"
+}
+$LibDir = Join-Path $Here 'lib'
 
 # --- image/tag/container naming (base keeps the legacy :authed tag) -----------
 $Dockerfile = if ($Image -eq 'pristine') { 'Dockerfile.pristine' } else { 'Dockerfile' }
@@ -168,15 +204,21 @@ function Start-Container {
     }
     docker rm -f $Container 2>$null | Out-Null
     New-Item -ItemType Directory -Force -Path $Results | Out-Null
-    $validate = ($Here + '/validate.sh') -replace '\\','/'
-    $res      = ($Results) -replace '\\','/'
+    $scenDir = ($ScenarioDir) -replace '\\','/'
+    $libDir  = ($LibDir)      -replace '\\','/'
+    $res     = ($Results)     -replace '\\','/'
     docker run -d --name $Container `
-        -v "${validate}:/home/operator/validate.sh:ro" `
+        -v "${scenDir}:/home/operator/scenario:ro" `
+        -v "${libDir}:/home/operator/lib:ro" `
         -v "${res}:/home/operator/out" `
+        -e "CR_LIB=/home/operator/lib/clean-room-lib.sh" `
+        -e "CR_SCENARIO_NAME=$ScenarioName" `
         -e "CR_MARKETPLACE_REPO=$MarketplaceRepo" `
         -e "CR_MARKETPLACE_NAME=$MarketplaceName" `
         -e "CR_PRIMARY_PLUGIN=$PrimaryPlugin" `
         -e "CR_EXPECT_DEPS=$ExpectDeps" `
+        -e "CR_UV_INDEX=$UvIndex" `
+        -e "CR_LOGDIR=/home/operator/cr-logs" `
         -e "CR_REPORT=/home/operator/out/cr-report.json" `
         @tokenArgs `
         --entrypoint sleep $img infinity | Out-Null
@@ -190,9 +232,11 @@ function Ensure-Container {
 
 function Invoke-Run {
     Start-Container
-    Write-Host "== running clean-room validation ($Image, through phase $Until) ==" -ForegroundColor Cyan
-    docker exec -e "CR_UNTIL=$Until" $Container /bin/bash -lc `
-        'cp -r $HOME/cr-logs /home/operator/out/ 2>/dev/null; bash /home/operator/validate.sh; rc=$?; cp -r $HOME/cr-logs /home/operator/out/ 2>/dev/null; exit $rc'
+    $untilArgs = @()
+    if ($Until -ne 'all') { $untilArgs = @('-e', "CR_UNTIL=$Until") }
+    Write-Host "== running clean-room scenario '$ScenarioName' ($Image, through stage $Until) ==" -ForegroundColor Cyan
+    docker exec @untilArgs $Container /bin/bash -lc `
+        'bash /home/operator/scenario/scenario.sh; rc=$?; cp -r $HOME/cr-logs /home/operator/out/ 2>/dev/null; exit $rc'
     $rc = $LASTEXITCODE
     Write-Host "`n== report ==" -ForegroundColor Cyan
     if (Test-Path (Join-Path $Results 'cr-report.json')) {
