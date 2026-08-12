@@ -24,13 +24,14 @@ from .config import (
     SOCKET_PATH,
     load_config,
     normalize_entry,
+    resolve_context,
     resolve_kpdb,
     run_dir,
 )
 from .config import (
     tcp_port as configured_tcp_port,
 )
-from .extensions import ActionContext, UnlockContext, get_registry
+from .extensions import ActionContext, StartupContext, UnlockContext, get_registry
 from .gcm import git_credential_action
 from .keepassxc import KeePassXCBackend
 from .prompt import prompt_password
@@ -780,6 +781,7 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
 
     port = tcp_port or configured_tcp_port()
     tcp_address: str | None = None
+    bound_port: int | None = None
     try:
         tcp_srv = await asyncio.start_server(
             lambda r, w: handle_client(r, w, service),
@@ -838,6 +840,22 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
             log.info("Advertised endpoint %s:%s at %s", advertised[0], advertised[1], path)
         except OSError as e:
             log.warning("Could not write rendezvous file (%s); discovery degraded", e)
+
+    # Run extension startup hooks once, now that listeners are bound and the
+    # endpoint is advertised. Lets an extension start a long-lived background task
+    # tied to the daemon's lifetime (e.g. a transport bridge) instead of forking
+    # the service launcher. Fail-open: a broken hook never blocks serving.
+    startup_res = resolve_context()
+    get_registry().run_startup(
+        service,
+        StartupContext(
+            kpdb=startup_res.kpdb,
+            group=startup_res.group,
+            vault_name=startup_res.vault_name or "",
+            port=bound_port or port,
+            run_dir=str(run_dir()),
+        ),
+    )
 
     try:
         while not service._shutdown and not service.is_expired:
