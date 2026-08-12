@@ -9,7 +9,7 @@ import pytest
 
 import agent_worktrees.__main__ as m
 from agent_worktrees import config as cfg
-from agent_worktrees import obligations, tracking
+from agent_worktrees import obligations, sweep, tracking
 
 # ── vocabulary ───────────────────────────────────────────────────────────────
 
@@ -174,15 +174,15 @@ def _cfg_with_repo(project="p", machine="m"):
 
 def test_repo_for_project_resolves_named_and_default():
     conf, r = _cfg_with_repo(project="p")
-    assert m._repo_for_project("p", conf) is r          # named
-    assert m._repo_for_project(None, conf) is r          # bare -> default
-    assert m._repo_for_project("p", conf) is r           # same as repo_name
-    assert m._repo_for_project("other", conf) is None    # unknown -> spare
+    assert sweep.repo_for_project("p", conf) is r          # named
+    assert sweep.repo_for_project(None, conf) is r          # bare -> default
+    assert sweep.repo_for_project("p", conf) is r           # same as repo_name
+    assert sweep.repo_for_project("other", conf) is None    # unknown -> spare
 
 
 def test_repo_for_project_degrades_without_repos():
     bare = _types.SimpleNamespace(machine="m")  # no repos / default_repo
-    assert m._repo_for_project("p", bare) is None
+    assert sweep.repo_for_project("p", bare) is None
 
 
 def _child_rec(wt_id="wt-c", pr_branch=None):
@@ -196,7 +196,7 @@ def test_child_branch_merged_true_when_content_upstream(monkeypatch):
                         lambda *a, **k: _types.SimpleNamespace(returncode=0, stdout=""))
     import agent_worktrees.finalize as _fin
     monkeypatch.setattr(_fin, "_is_content_on_upstream", lambda *a, **k: True)
-    assert m._child_branch_merged(_child_rec(), "m/p/wt-c", conf) is True
+    assert sweep.child_branch_merged(_child_rec(), "m/p/wt-c", conf) is True
 
 
 def test_child_branch_merged_spares_when_not_upstream(monkeypatch):
@@ -206,7 +206,7 @@ def test_child_branch_merged_spares_when_not_upstream(monkeypatch):
     import agent_worktrees.finalize as _fin
     monkeypatch.setattr(_fin, "_is_content_on_upstream", lambda *a, **k: False)
     # not-merged -> None (spare), never False -- we never abandon on a guess.
-    assert m._child_branch_merged(_child_rec(), "m/p/wt-c", conf) is None
+    assert sweep.child_branch_merged(_child_rec(), "m/p/wt-c", conf) is None
 
 
 def test_child_branch_merged_spares_when_branch_ref_gone(monkeypatch):
@@ -216,12 +216,12 @@ def test_child_branch_merged_spares_when_branch_ref_gone(monkeypatch):
     import agent_worktrees.finalize as _fin
     monkeypatch.setattr(_fin, "_is_content_on_upstream",
                         lambda *a, **k: pytest.fail("must not check content when branch is gone"))
-    assert m._child_branch_merged(_child_rec(), "m/p/wt-c", conf) is None
+    assert sweep.child_branch_merged(_child_rec(), "m/p/wt-c", conf) is None
 
 
 def test_child_branch_merged_spares_when_repo_unresolvable(monkeypatch):
     bare = _types.SimpleNamespace(machine="m")
-    assert m._child_branch_merged(_child_rec(), "m/p/wt-c", bare) is None
+    assert sweep.child_branch_merged(_child_rec(), "m/p/wt-c", bare) is None
 
 
 def test_child_branch_merged_prefers_pr_branch(monkeypatch):
@@ -237,7 +237,7 @@ def test_child_branch_merged_prefers_pr_branch(monkeypatch):
         return True
 
     monkeypatch.setattr(_fin, "_is_content_on_upstream", _capture)
-    assert m._child_branch_merged(_child_rec(pr_branch="feat/x"), "m/p/wt-c", conf) is True
+    assert sweep.child_branch_merged(_child_rec(pr_branch="feat/x"), "m/p/wt-c", conf) is True
     assert seen["branch"] == "feat/x"
     assert seen["upstream"] == "origin/master"
 

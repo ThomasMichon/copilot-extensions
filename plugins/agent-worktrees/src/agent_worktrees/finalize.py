@@ -1113,12 +1113,45 @@ def _assert_obligations_settled(
     obligations (the downstream ``release_all_resources`` marks the claims
     released and surfaces them for cleanup/adoption). Returns True to proceed,
     False to block the finalize. Degrade-safe: no record / no resources -> proceed.
+
+    Before deciding, it **self-heals** (dotfiles#1161): a blocking claim whose
+    holder is provably gone AND whose work is provably safe is auto-reclaimed
+    (flipped to ``abandoned`` via :func:`sweep.self_heal`), so a crashed/missed
+    settlement never wedges finalize forever -- the automatic complement to the
+    manual ``claims sweep`` verb.
     """
     if record is None:
         return True
     mode = obligations.gate_mode()
     if mode == obligations.OFF:
         return True
+
+    # Self-heal (never-wedge, dotfiles#1161): before the gate can block, reclaim
+    # any blocking claim whose holder is provably GONE and whose work is provably
+    # SAFE -- a crashed/missed settlement must not wedge finalize forever. This
+    # is the automatic complement to the manual `claims sweep` verb, applied to
+    # this owner at the natural trigger. Conservative (only definitive gone+safe
+    # flips to `abandoned`) and best-effort (never let it break finalize).
+    try:
+        from . import config as _cfg
+        from . import sweep as _sweep
+        _config = _cfg.load_config()
+        _path = _cfg.tracking_dir() / f"{worktree_id}.yaml"
+        healed = _sweep.self_heal(record, _config, path=_path, save=True)
+        if healed:
+            output.warn(
+                f"Auto-reclaimed {len(healed)} unsettled obligation(s) of "
+                f"{worktree_id} whose holder is gone and work is safe "
+                f"(never-wedge sweep):"
+            )
+            for c in healed:
+                lbl = f"  · {c.kind}: {c.ref}"
+                if c.note:
+                    lbl += f" ({c.note})"
+                print(lbl)
+    except Exception:
+        pass
+
     unsettled = [c for c in record.resources if c.is_unsettled]
     if not unsettled:
         return True

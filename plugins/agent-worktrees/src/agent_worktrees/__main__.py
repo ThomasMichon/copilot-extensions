@@ -5773,103 +5773,6 @@ def _claims_settle(args: argparse.Namespace, ref: str) -> int:
     return 0
 
 
-def _load_claim_child_record(
-    ref: str, config: cfg.Config,
-) -> tuple[tracking.WorktreeRecord | None, bool]:
-    """Load the tracking record for a worktree-claim's child ref (same-machine).
-
-    Returns ``(record_or_None, judgeable)``. ``judgeable`` is False for a
-    cross-machine child (this machine cannot see it -- the sweep must defer to
-    the lease mirror). A same-machine child that has no local record yields
-    ``(None, True)`` -- judgeable, and gone.
-    """
-    parsed = tracking.parse_claim_ref(ref)
-    if parsed is None:
-        return (None, False)
-    if parsed.machine and parsed.machine != config.machine:
-        return (None, False)  # cross-machine -> not judgeable here
-    if parsed.machine and parsed.project:
-        path = (cfg.project_dir(parsed.project) / "worktrees"
-                / f"{parsed.worktree_id}.yaml")
-    else:  # bare/same-repo ref
-        path = cfg.tracking_dir() / f"{parsed.worktree_id}.yaml"
-    if not path.exists():
-        return (None, True)
-    try:
-        return (tracking.load_record(path), True)
-    except Exception:
-        return (None, False)
-
-
-def _repo_for_project(
-    project: str | None, config: cfg.Config,
-) -> cfg.RepoConfig | None:
-    """Resolve the :class:`RepoConfig` for a claim child's project (same-machine).
-
-    Returns the repo from ``config.repos`` when the project is known there, or
-    the active ``default_repo`` for a bare/same-project ref; ``None`` when the
-    child's repo cannot be resolved from the current context (so the caller
-    spares rather than guesses). Fully best-effort.
-    """
-    try:
-        repos = getattr(config, "repos", None) or {}
-        if project and project in repos:
-            return repos[project]
-        if not project or project == getattr(config, "repo_name", None):
-            return config.default_repo
-    except Exception:
-        return None
-    return None
-
-
-def _child_branch_merged(
-    child: tracking.WorktreeRecord, ref: str, config: cfg.Config,
-) -> bool | None:
-    """Prove a gone, non-terminal child's work is SAFE via a branch-merged check.
-
-    The crashed-holder case (resource-obligation-settlement Ph4 follow-up,
-    dotfiles#1161): a child whose record is present but whose dir was removed
-    while its status is still ``active``/``pushed`` -- its ``finalize`` never ran,
-    so the ``finalized``-status shortcut in the sweep can't clear it, and it
-    wedges the owner's ``block``-mode finalize forever. Prove it safe **only**
-    when its feature branch's content already landed on its project upstream (a
-    crash *after* the work merged), reusing finalize's squash-aware
-    :func:`finalize._is_content_on_upstream`.
-
-    Returns ``True`` on a positive merge proof, else ``None`` (spare -- never
-    ``False``: a non-merged, branch-gone, or unresolvable child is left for a
-    human, never abandoned on a guess). Same-machine + resolvable-repo only, and
-    checked against the LOCAL ``origin/<default>`` (no fetch), so a stale anchor
-    spares rather than misjudges.
-    """
-    parsed = tracking.parse_claim_ref(ref)
-    if parsed is None:
-        return None
-    repo = _repo_for_project(parsed.project, config)
-    if repo is None:
-        return None
-    branch = None
-    pr = getattr(child, "pr", None)
-    if pr is not None and getattr(pr, "branch", None):
-        branch = pr.branch
-    if not branch:
-        branch = f"worktree/{child.worktree_id}"
-    upstream = f"{repo.remote}/{repo.default_branch}"
-    try:
-        verify = git_ops.git(
-            "rev-parse", "--verify", "--quiet", branch,
-            cwd=repo.anchor, check=False,
-        )
-        if verify.returncode != 0:
-            return None  # branch ref gone -> can't prove -> spare
-        from . import finalize as _finalize
-        if _finalize._is_content_on_upstream(branch, upstream, cwd=repo.anchor):
-            return True
-    except Exception:
-        return None
-    return None
-
-
 def _claims_sweep(args: argparse.Namespace) -> int:
     """Never-wedge reclaim sweep over local ledgers (resource-obligation Ph4).
 
@@ -5898,28 +5801,8 @@ def _claims_sweep(args: argparse.Namespace) -> int:
     """
     config = cfg.load_config()
     apply = getattr(args, "apply", False)
-    from . import claimant as claimant_mod
-
-    def gone_of(ref: str) -> bool | None:
-        # Reuse the same-machine claimant-liveness resolver (record absent /
-        # terminal status / worktree dir removed -> gone; cross-machine -> None).
-        alive = claimant_mod.local_claimant_alive(ref)
-        return None if alive is None else (not alive)
-
-    def safe_of(claim: tracking.ResourceClaim) -> bool | None:
-        if claim.kind != "worktree":
-            return None  # only a worktree child is provable within agent-worktrees
-        child, judgeable = _load_claim_child_record(claim.ref, config)
-        if not judgeable or child is None:
-            return None
-        if child.status == "finalized":
-            return True
-        if child.status == "orphaned":
-            return False
-        # A gone, non-terminal (active/pushed) child -- the crashed-holder case:
-        # prove safe iff its branch content already landed upstream (a crash
-        # after the work merged). Unproven -> spare (dotfiles#1161).
-        return _child_branch_merged(child, claim.ref, config)
+    from . import sweep as sweep_mod
+    gone_of, safe_of = sweep_mod.make_resolvers(config)
 
     reclaimed: list[dict[str, str]] = []
     tdir = cfg.tracking_dir()
