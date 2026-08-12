@@ -90,6 +90,22 @@ def test_add_pointer_bad_name_rejected(tmp_path):
         add_pointer("bad name", tmp_path, base=tmp_path)
 
 
+def test_add_pointer_identical_is_noop(tmp_path):
+    add_pointer("general", tmp_path / "decls", base=tmp_path)
+    mtime1 = (tmp_path / "pointers.json").stat().st_mtime_ns
+    add_pointer("general", tmp_path / "decls", base=tmp_path)  # identical
+    mtime2 = (tmp_path / "pointers.json").stat().st_mtime_ns
+    assert mtime1 == mtime2  # file not rewritten
+
+
+def test_corrupt_entry_names_its_index(tmp_path):
+    (tmp_path / "pointers.json").write_text(
+        json.dumps([{"name": "ok", "location": "/x"}, {"name": "bad"}]), encoding="utf-8"
+    )
+    with pytest.raises(RegistrarError, match=r"pointers\.json\[1\]"):
+        load_pointers(tmp_path)
+
+
 def test_save_pointers_is_atomic_json_list(tmp_path):
     save_pointers([Pointer(name="x", location="/x")], tmp_path)
     raw = json.loads((tmp_path / "pointers.json").read_text(encoding="utf-8"))

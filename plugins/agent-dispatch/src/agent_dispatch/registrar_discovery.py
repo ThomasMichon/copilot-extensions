@@ -134,7 +134,13 @@ def load_pointers(base: Path | None = None) -> list[Pointer]:
         raise RegistrarError(
             f"{path}: pointer registry must be a JSON list, got {type(raw).__name__}"
         )
-    return [Pointer.from_dict(item) for item in raw]
+    out: list[Pointer] = []
+    for i, item in enumerate(raw):
+        try:
+            out.append(Pointer.from_dict(item))
+        except RegistrarError as exc:
+            raise RegistrarError(f"{path}[{i}]: {exc}") from exc
+    return out
 
 
 def save_pointers(pointers: Iterable[Pointer], base: Path | None = None) -> Path:
@@ -170,8 +176,12 @@ def add_pointer(
         raise RegistrarError(f"pointer name {name!r}: use only letters, digits, '-' and '_'")
     pointer = Pointer(name=name, location=str(Path(location).expanduser()), kind=kind, owner=owner)
     Pointer.from_dict(pointer.to_dict())  # validate kind/shape via the loader
-    existing = [p for p in load_pointers(base) if p.name != name]
-    save_pointers([*existing, pointer], base)
+    existing = load_pointers(base)
+    current = next((p for p in existing if p.name == name), None)
+    if current == pointer:
+        return pointer  # truly idempotent: identical entry, don't rewrite the file
+    others = [p for p in existing if p.name != name]
+    save_pointers([*others, pointer], base)
     return pointer
 
 
