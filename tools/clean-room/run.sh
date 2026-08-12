@@ -1,27 +1,37 @@
 #!/usr/bin/env bash
-# Linux/WSL/macOS host wrapper for the clean-room install-flow validation.
-# Mirrors run.ps1. Drives a PERSISTENT container so you can run the automated
-# validate.sh (optionally to a chosen phase) and then drop into an INTERACTIVE
+# Linux/WSL/macOS host wrapper for the clean-room SCENARIO validation.
+# Mirrors run.ps1. Drives a PERSISTENT container so you can run an automated
+# scenario (optionally to a chosen stage) and then drop into an INTERACTIVE
 # shell in the same box for headed `copilot` smoke tests.
 #
-#   ./run.sh                              # base: full validate against :authed
-#   ./run.sh --image pristine shell       # drop into a pristine fresh box
-#   ./run.sh --until 1 --then shell run   # install the plugin, then hand off
-#   ./run.sh --image pristine down        # remove the pristine container
+#   ./run.sh                                    # base: full generic-single-plugin scenario
+#   ./run.sh --scenario generic-single-plugin   # (the default) run a named scenario
+#   ./run.sh --image pristine shell             # drop into a pristine fresh box
+#   ./run.sh --until 1 --then shell run         # install the plugin, then hand off
+#   ./run.sh --uv-index https://…/pypi/simple/  # opt-in uv-index fixture (governed box)
+#   ./run.sh --image pristine down              # remove the pristine container
+#
+# The --scenario seam mounts a scenario dir (scenarios/<name>/ or an explicit
+# path) plus the shared lib/ read-only into the box and runs scenario.sh, which
+# sources lib/clean-room-lib.sh and reports a uniform cr-report.json.
 #
 # Feed policy: the host npm config is NEVER auto-forwarded (that would bias the
 # fresh-machine experiment). Pass --npm-registry <feed> ONLY to install the
 # Copilot CLI prereq on a governed box (a build-time given, not the experiment).
+# --uv-index is the RUNTIME analog: opt-in, points the deploy stage's uv at an
+# internal index; default off so the governed uv jam surfaces.
 #
 # Env overrides: CR_MARKETPLACE_REPO CR_MARKETPLACE_NAME CR_PRIMARY_PLUGIN
-#                CR_EXPECT_DEPS CR_RESULTS_DIR CR_NPM_REGISTRY
+#                CR_EXPECT_DEPS CR_RESULTS_DIR CR_NPM_REGISTRY CR_UV_INDEX
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 IMAGE=base
-UNTIL=6
+UNTIL=all
 THEN=none
+SCENARIO=generic-single-plugin
 NPM_REGISTRY="${CR_NPM_REGISTRY:-}"
+UV_INDEX="${CR_UV_INDEX:-}"
 TOKEN_ACCOUNT=""
 NO_TOKEN=0
 MODE=run
@@ -30,13 +40,26 @@ while [ $# -gt 0 ]; do
         --image) IMAGE="$2"; shift 2 ;;
         --until) UNTIL="$2"; shift 2 ;;
         --then)  THEN="$2"; shift 2 ;;
+        --scenario) SCENARIO="$2"; shift 2 ;;
         --npm-registry) NPM_REGISTRY="$2"; shift 2 ;;
+        --uv-index) UV_INDEX="$2"; shift 2 ;;
         --token-account) TOKEN_ACCOUNT="$2"; shift 2 ;;
         --no-token) NO_TOKEN=1; shift ;;
         build|auth|run|shell|down|bridge-register|bridge-unregister|all) MODE="$1"; shift ;;
-        *) echo "usage: $0 [--image base|pristine] [--until N] [--then shell|down] [--npm-registry URL] [--token-account USER] [--no-token] {build|auth|run|shell|down|bridge-register|bridge-unregister|all}" >&2; exit 2 ;;
+        *) echo "usage: $0 [--image base|pristine] [--scenario NAME|DIR] [--until N|all] [--then shell|down] [--npm-registry URL] [--uv-index URL] [--token-account USER] [--no-token] {build|auth|run|shell|down|bridge-register|bridge-unregister|all}" >&2; exit 2 ;;
     esac
 done
+
+# Resolve the scenario dir: an explicit path, else scenarios/<name>/.
+if [ -d "$SCENARIO" ]; then
+    SCENARIO_DIR="$(cd "$SCENARIO" && pwd)"; SCENARIO_NAME="$(basename "$SCENARIO_DIR")"
+elif [ -d "$HERE/scenarios/$SCENARIO" ]; then
+    SCENARIO_DIR="$HERE/scenarios/$SCENARIO"; SCENARIO_NAME="$SCENARIO"
+else
+    echo "unknown --scenario '$SCENARIO' (not a dir, and no scenarios/$SCENARIO)" >&2; exit 2
+fi
+[ -f "$SCENARIO_DIR/scenario.sh" ] || { echo "scenario '$SCENARIO_NAME' has no scenario.sh" >&2; exit 2; }
+LIB_DIR="$HERE/lib"
 
 case "$IMAGE" in base) DOCKERFILE=Dockerfile ;; pristine) DOCKERFILE=Dockerfile.pristine ;; *) echo "bad --image: $IMAGE" >&2; exit 2 ;; esac
 BASE_TAG="copilot-cleanroom:$IMAGE"
@@ -103,12 +126,17 @@ start_container() {
     docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
     mkdir -p "$RESULTS"
     docker run -d --name "$CONTAINER" \
-        -v "$HERE/validate.sh:/home/operator/validate.sh:ro" \
+        -v "$SCENARIO_DIR:/home/operator/scenario:ro" \
+        -v "$LIB_DIR:/home/operator/lib:ro" \
         -v "$RESULTS:/home/operator/out" \
+        -e "CR_LIB=/home/operator/lib/clean-room-lib.sh" \
+        -e "CR_SCENARIO_NAME=$SCENARIO_NAME" \
         -e "CR_MARKETPLACE_REPO=${CR_MARKETPLACE_REPO:-ThomasMichon/copilot-extensions}" \
         -e "CR_MARKETPLACE_NAME=${CR_MARKETPLACE_NAME:-copilot-extensions}" \
         -e "CR_PRIMARY_PLUGIN=${CR_PRIMARY_PLUGIN:-agent-codespaces}" \
         -e "CR_EXPECT_DEPS=${CR_EXPECT_DEPS:-agent-bridge agent-worktrees}" \
+        -e "CR_UV_INDEX=$UV_INDEX" \
+        -e "CR_LOGDIR=/home/operator/cr-logs" \
         -e "CR_REPORT=/home/operator/out/cr-report.json" \
         "${token_args[@]}" \
         --entrypoint sleep "$img" infinity >/dev/null
@@ -135,9 +163,11 @@ do_bridge_register() {
 do_bridge_unregister() { "$(_py)" "$HERE/bridge_register.py" unregister --name "$AGENT_NAME"; }
 do_run() {
     start_container
-    echo "== running clean-room validation ($IMAGE, through phase $UNTIL) =="
-    docker exec -e "CR_UNTIL=$UNTIL" "$CONTAINER" /bin/bash -lc \
-        'cp -r $HOME/cr-logs /home/operator/out/ 2>/dev/null; bash /home/operator/validate.sh; rc=$?; cp -r $HOME/cr-logs /home/operator/out/ 2>/dev/null; exit $rc'
+    local until_env=()
+    [ "$UNTIL" != all ] && until_env=(-e "CR_UNTIL=$UNTIL")
+    echo "== running clean-room scenario '$SCENARIO_NAME' ($IMAGE, through stage ${UNTIL}) =="
+    docker exec "${until_env[@]}" "$CONTAINER" /bin/bash -lc \
+        'bash /home/operator/scenario/scenario.sh; rc=$?; cp -r $HOME/cr-logs /home/operator/out/ 2>/dev/null; exit $rc'
     local rc=$?
     echo; echo "== report =="; cat "$RESULTS/cr-report.json" 2>/dev/null || true
     echo "results dir: $RESULTS"
