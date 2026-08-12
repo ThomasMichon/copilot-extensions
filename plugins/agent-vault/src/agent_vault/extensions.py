@@ -30,6 +30,11 @@ Four generic hook categories are exposed, each a plain callable:
   ``set_defaults(func=handler)``, where ``handler(args) -> int | None`` runs the
   command. Consulted *after* the built-in verbs are registered, so an extension
   adds facility-only verbs instead of forking ``cli.py``.
+- **startup hook** ``hook(service, ctx) -> None`` -- run once, in priority order,
+  when the daemon begins serving (after its listeners are bound and its endpoint
+  is advertised). Lets an extension start a long-lived background task tied to the
+  daemon's lifetime -- e.g. a transport bridge or a watcher -- instead of forking
+  the service launcher. A hook that raises is logged and skipped (fail-open).
 
 Extensions are discovered two ways (union, deduped), each pointing at a
 ``register(registry)`` callable:
@@ -63,6 +68,7 @@ ClientTransport = Callable[[dict, "float | None", "TransportContext"], "dict | N
 ConfigSource = Callable[["str | None"], dict]
 CacheSource = Callable[["str | None"], "object"]
 CliCommand = Callable[[Any], None]
+StartupHook = Callable[[Any, "StartupContext"], None]
 
 
 @dataclass(frozen=True)
@@ -94,6 +100,22 @@ class TransportContext:
     port: int
 
 
+@dataclass(frozen=True)
+class StartupContext:
+    """Context passed to daemon startup hooks.
+
+    Handed to each hook once, when the daemon begins serving. ``run_dir`` is the
+    directory holding the rendezvous (endpoint) file; ``port`` is the *actually
+    bound* TCP port (never 0 -- resolved after the listener binds).
+    """
+
+    kpdb: str | None
+    group: str | None
+    vault_name: str
+    port: int
+    run_dir: str
+
+
 @dataclass(order=True)
 class _Ranked:
     priority: int
@@ -113,6 +135,7 @@ class ExtensionRegistry:
         self._config_sources: list[_Ranked] = []
         self._cache_sources: list[_Ranked] = []
         self._cli_commands: list[_Ranked] = []
+        self._startup_hooks: list[_Ranked] = []
         self._seq = 0
         self._loaded = False
 
@@ -197,6 +220,24 @@ class ExtensionRegistry:
         )
         self._cli_commands.sort()
 
+    def register_startup(
+        self, fn: StartupHook, *, priority: int = 100, name: str | None = None
+    ) -> None:
+        """Register a hook run once when the daemon begins serving.
+
+        The callable receives the live ``VaultService`` and a
+        :class:`StartupContext`. Hooks run in priority order after the daemon's
+        listeners are bound and its endpoint advertised, letting a downstream
+        harness start a long-lived background task (e.g. a transport bridge)
+        without forking the service launcher. A hook that raises is logged and
+        skipped (fail-open) so a broken extension never prevents the daemon from
+        serving.
+        """
+        self._startup_hooks.append(
+            _Ranked(priority, self._next_seq(), name or getattr(fn, "__name__", "?"), fn)
+        )
+        self._startup_hooks.sort()
+
     # -- ordered access --------------------------------------------------
 
     @property
@@ -225,6 +266,10 @@ class ExtensionRegistry:
     @property
     def cli_commands(self) -> list[_Ranked]:
         return list(self._cli_commands)
+
+    @property
+    def startup_hooks(self) -> list[_Ranked]:
+        return list(self._startup_hooks)
 
     # -- hook invocation helpers ----------------------------------------
 
@@ -342,6 +387,19 @@ class ExtensionRegistry:
                 ranked.fn(subparsers)
             except Exception as exc:
                 log.warning("CLI command builder %r raised: %s", ranked.name, exc)
+
+    def run_startup(self, service: Any, ctx: "StartupContext") -> None:
+        """Run each registered startup hook once, in priority order.
+
+        Called by the daemon when it begins serving. A hook that raises is logged
+        and skipped (fail-open) so a broken extension never prevents the daemon
+        from serving.
+        """
+        for ranked in self._startup_hooks:
+            try:
+                ranked.fn(service, ctx)
+            except Exception as exc:
+                log.warning("Startup hook %r raised: %s", ranked.name, exc)
 
 
 # ---------------------------------------------------------------------------
