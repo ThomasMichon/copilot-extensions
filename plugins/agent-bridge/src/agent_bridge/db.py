@@ -306,8 +306,18 @@ class Database:
             self._local.conn = None
 
     def _raise_writer_error(self) -> None:
-        if self._writer_error is not None:
-            raise RuntimeError("event writer failed") from self._writer_error
+        # Read-and-clear: surface a recorded writer error exactly ONCE, then
+        # reset the latch. Previously the latch stayed set until a full
+        # writer-thread restart, so a single failed batch re-raised on EVERY
+        # subsequent flush()/read and 500'd the whole daemon indefinitely --
+        # status/resume/cursor/turns for healthy AND wedged sessions alike
+        # (dotfiles #1282). Self-healing surfacing keeps a genuine failure
+        # visible without wedging unrelated reads.
+        with self._writer_state_lock:
+            exc = self._writer_error
+            self._writer_error = None
+        if exc is not None:
+            raise RuntimeError("event writer failed") from exc
 
     def _record_writer_error(self, exc: BaseException) -> None:
         with self._writer_state_lock:
@@ -386,9 +396,55 @@ class Database:
                     batch,
                 )
                 conn.commit()
+            except sqlite3.IntegrityError:
+                # `executemany` is atomic: ONE bad row (an orphan event whose
+                # session_id has no `sessions` parent -- a lifecycle/write-
+                # ordering race -- or a duplicate (session_id, event_id)) would
+                # otherwise drop every GOOD event in the batch AND latch
+                # `_writer_error`, which then 500s every later flush()/read for
+                # ALL sessions, wedging the daemon (dotfiles #1282). Fall back
+                # to row-by-row inserts, skipping only the offenders so good
+                # events still land and no writer error is recorded.
+                conn.rollback()
+                self._write_event_batch_rowwise(conn, batch)
             except Exception:
                 conn.rollback()
                 raise
+
+    def _write_event_batch_rowwise(
+        self, conn: sqlite3.Connection, batch: list[_EventWriteItem | object]
+    ) -> None:
+        """Insert events one-by-one, skipping constraint-violating rows.
+
+        Called only after a batch ``executemany`` hit an ``IntegrityError``,
+        with ``self._write_lock`` already held by the caller. Orphan-session
+        events (no matching ``sessions`` row) and duplicate
+        ``(session_id, event_id)`` rows are dropped with a warning rather than
+        raising -- an unattachable event is unreadable anyway, and dropping it
+        is far cheaper than wedging every read. Non-integrity errors still
+        propagate (a genuine write failure is worth surfacing).
+        """
+        skipped: list[str] = []
+        for item in batch:
+            try:
+                conn.execute(
+                    "INSERT INTO events "
+                    "(session_id, event_id, event_type, data_json, timestamp) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    item,
+                )
+            except sqlite3.IntegrityError:
+                sid = item[0] if isinstance(item, (tuple, list)) and item else "?"
+                skipped.append(str(sid))
+        conn.commit()
+        if skipped:
+            distinct = sorted(set(skipped))
+            log.warning(
+                "Dropped %d event(s) with no/duplicate session parent -- kept "
+                "the rest of the batch (orphan session_id(s): %s) (dotfiles "
+                "#1282)",
+                len(skipped), ", ".join(distinct[:5]),
+            )
 
     def _init_schema(self) -> None:
         """Create tables if they don't exist, run migrations."""
