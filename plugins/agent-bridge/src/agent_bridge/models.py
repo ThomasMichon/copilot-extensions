@@ -569,6 +569,15 @@ class TopologyProfile(BaseModel):
 
     machines_yaml: str | None = None
     agents_config: str | None = None
+    # Facility-wide spawn defaults applied to every **derived** agent in this
+    # profile (the topology roster synthesized from machines.yaml). Derived agents
+    # otherwise carry no copilot args, so the model target lived, redundantly, on
+    # each hand-authored acp-agents.json entry. Setting it once here lets the
+    # derived roster be the single source of the machine lanes while still spawning
+    # with the intended model/args. Empty by default (no behavior change); an
+    # explicit agents_config entry still wins and can override per agent.
+    default_copilot_args: list[str] = Field(default_factory=list)
+    default_env: dict[str, str] = Field(default_factory=dict)
 
 
 class ServiceConfig(BaseModel):
