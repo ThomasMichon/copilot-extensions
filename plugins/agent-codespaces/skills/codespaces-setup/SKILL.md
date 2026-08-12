@@ -22,6 +22,34 @@ description: >
 One-time setup and configuration for agent-codespaces. For day-to-day
 operations (SSH, listing, bridge), see the `codespaces-lifecycle` skill.
 
+## Readiness — agent-codespaces provisions its own runtime (standalone)
+
+agent-codespaces is **self-provisioning and standalone**: it needs no
+agent-worktrees, no session launcher, and no manual install. It works anywhere
+its skills load and a shell is available — the Copilot CLI, the **GitHub Copilot
+app**, or a **cloud agent**. Before any agent-codespaces command, do this
+**readiness self-check** (treat "no explicit ready" as *not ready*):
+
+1. **Is the CLI on PATH?** `command -v agent-codespaces`
+   - **Yes** → use it. The **first** call self-provisions the runtime (vendors
+     `uv` if missing, builds the venv), printing a `::agent-provisioning::` line
+     and progress — this can take ~30–120s; **let it finish, don't kill it**.
+   - A session-start hook may already have emitted `agent-codespaces: READY …`.
+2. **Not on PATH?** Deploy the binstub yourself (cheap — no venv build), then use
+   it (it self-provisions on first call):
+   ```bash
+   bash "$(ls ~/.copilot/installed-plugins/*/agent-codespaces/scripts/install.sh | head -1)" stamp
+   ```
+   `~/.local/bin/agent-codespaces` now exists. If `~/.local/bin` isn't on PATH,
+   call it by full path (or add it to PATH).
+3. **A call reports a provisioning failure** (e.g. `uv is required…`, a network/TLS
+   error)? **Surface the exact message and stop** — do not improvise a toolchain
+   install. On a governed box, provide the internal index
+   (`UV_DEFAULT_INDEX=<pip index-url>`) or install `uv`, then retry.
+
+This is agent-codespaces' own runtime readiness — distinct from the external
+**Prerequisites** below (`gh`, `ssh-manager`), which it cannot self-install.
+
 ## Most repos need no config -- start here
 
 agent-codespaces works **out of the box** on standard GitHub CodeSpaces by
