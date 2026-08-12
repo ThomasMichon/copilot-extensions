@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import re
@@ -28,6 +29,7 @@ from acp.schema import (
     AvailableCommandsUpdate,
     CancelElicitationResponse,
     ClientCapabilities,
+    ClientSessionCapabilities,
     ConfigOptionUpdate,
     CreateTerminalResponse,
     CurrentModeUpdate,
@@ -44,6 +46,7 @@ from acp.schema import (
     ReadTextFileResponse,
     ReleaseTerminalResponse,
     RequestPermissionResponse,
+    SessionConfigOptionsCapabilities,
     SessionInfoUpdate,
     SseMcpServer,
     TerminalOutputResponse,
@@ -334,6 +337,94 @@ class ToolCallRecord:
         }
 
 
+# --- Model / effort propagation over ACP (dotfiles#790) --------------------
+#
+# Copilot IGNORES the ``--model`` / ``--reasoning-effort`` / ``--context`` CLI
+# flags when it runs as an ACP server (``--acp``): a dispatched agent falls back
+# to the account-default model (e.g. ``gpt-5.6-sol``) regardless of the launch
+# flags. The session's model is instead chosen by the ACP *client* via
+# ``session/set_config_option`` against the ``model`` / ``reasoning_effort``
+# *select* options copilot advertises in the ``session/new`` (and
+# ``session/load``) response. This is agent-bridge's single, standard mechanism
+# for setting a dispatched agent's model -- applied uniformly on every session
+# create and resume, for CodeSpace, elevated-local, and container dispatch alike.
+
+# ACP select-option ids copilot advertises.
+_ACP_MODEL_CONFIG_ID = "model"
+_ACP_EFFORT_CONFIG_ID = "reasoning_effort"
+
+# Env overrides (bridge-native names first, agent-codespaces aliases for
+# back-compat with the retired ``acp-model-flags`` seam).
+_ACP_MODEL_ENV = ("AGENT_BRIDGE_ACP_MODEL", "AGENT_CODESPACES_ACP_MODEL")
+_ACP_EFFORT_ENV = ("AGENT_BRIDGE_ACP_EFFORT", "AGENT_CODESPACES_ACP_EFFORT")
+_ACP_PROPAGATE_OFF_ENV = ("AGENT_BRIDGE_MODEL_PROPAGATE", "AGENT_CODESPACES_MODEL_PROPAGATE")
+
+
+def _first_env(names: tuple[str, ...]) -> str | None:
+    for name in names:
+        value = os.environ.get(name)
+        if value is not None and value.strip():
+            return value.strip()
+    return None
+
+
+def _host_copilot_model_settings() -> dict[str, str]:
+    """Read ``model`` / ``effortLevel`` from the host ``~/.copilot/settings.json``.
+
+    The daemon runs on the operator's host, so this is the caller's own default
+    model. Degrade-safe: returns ``{}`` on any error (missing file / bad JSON).
+    """
+    try:
+        path = os.path.join(os.path.expanduser("~"), ".copilot", "settings.json")
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except Exception:
+        return {}
+    out: dict[str, str] = {}
+    if isinstance(data, dict):
+        model = data.get("model")
+        effort = data.get("effortLevel")
+        if isinstance(model, str) and model.strip():
+            out[_ACP_MODEL_CONFIG_ID] = model.strip()
+        if isinstance(effort, str) and effort.strip():
+            out[_ACP_EFFORT_CONFIG_ID] = effort.strip()
+    return out
+
+
+def resolve_acp_model_config() -> dict[str, str]:
+    """Resolve the model/effort to apply to a dispatched ACP session.
+
+    Precedence: explicit env override (``AGENT_BRIDGE_ACP_MODEL`` /
+    ``AGENT_CODESPACES_ACP_MODEL`` and the ``*_EFFORT`` siblings) -> host
+    ``~/.copilot/settings.json`` (``model`` / ``effortLevel``) -> none. Opt out
+    entirely with ``AGENT_BRIDGE_MODEL_PROPAGATE=0`` (or the ``AGENT_CODESPACES_``
+    alias). Returns a possibly-empty mapping keyed by ACP config-option id
+    (``model`` / ``reasoning_effort``).
+    """
+    off = _first_env(_ACP_PROPAGATE_OFF_ENV)
+    if off is not None and off.lower() in ("0", "false", "no", "off"):
+        return {}
+    cfg = _host_copilot_model_settings()
+    model = _first_env(_ACP_MODEL_ENV)
+    if model:
+        cfg[_ACP_MODEL_CONFIG_ID] = model
+    effort = _first_env(_ACP_EFFORT_ENV)
+    if effort:
+        cfg[_ACP_EFFORT_CONFIG_ID] = effort
+    return cfg
+
+
+def _cfg_attr(obj: Any, attr: str, key: str) -> Any:
+    """Read a field from an ACP config-option that may be a pydantic model or a
+    plain dict. Prefers the model attribute (snake_case), falls back to the dict
+    key (camelCase wire form). Returns ``None`` when absent.
+    """
+    value = getattr(obj, attr, None)
+    if value is None and isinstance(obj, dict):
+        value = obj.get(key)
+    return value
+
+
 class AcpClient:
     """Wraps a single Copilot CLI subprocess running in ACP mode.
 
@@ -565,6 +656,14 @@ class AcpClient:
                 elicitation=ElicitationCapabilities(
                     form=ElicitationFormCapabilities(),
                 ),
+                # Advertise session config-option support so we may drive the
+                # agent's ``model`` / ``reasoning_effort`` select options via
+                # ``session/set_config_option`` (dotfiles#790). Select options
+                # need no capability flag, but advertising is the spec-correct
+                # signal that this client sets config options.
+                session=ClientSessionCapabilities(
+                    config_options=SessionConfigOptionsCapabilities(),
+                ),
             ),
             client_info=Implementation(
                 name="agent-bridge",
@@ -586,6 +685,10 @@ class AcpClient:
             cwd=cwd, mcp_servers=build_mcp_servers(mcp_servers),
         )
         self._acp_session_id = result.session_id
+        # Set the session's model/effort now that it exists (dotfiles#790):
+        # copilot ignores the ``--model`` launch flag in ``--acp`` mode, so the
+        # model is chosen here against the advertised select options.
+        await self._apply_model_config(getattr(result, "config_options", None))
         return result.session_id
 
     def adopt_session(self, acp_session_id: str) -> None:
@@ -632,8 +735,9 @@ class AcpClient:
         self._cancel_out_of_turn()
         self._loading_session = True
         self._suppress_replay = suppress_replay
+        result = None
         try:
-            await self._connection.load_session(
+            result = await self._connection.load_session(
                 cwd=cwd, session_id=session_id,
                 mcp_servers=build_mcp_servers(mcp_servers),
             )
@@ -641,6 +745,76 @@ class AcpClient:
             self._loading_session = False
             self._suppress_replay = True
         self._acp_session_id = session_id
+        # Re-assert the model/effort on resume: a reloaded session may report
+        # the agent's default in its config options (dotfiles#790).
+        await self._apply_model_config(getattr(result, "config_options", None))
+
+    async def _apply_model_config(self, config_options: Any) -> None:
+        """Set the session's ``model`` / ``reasoning_effort`` via ACP.
+
+        Copilot ignores ``--model`` / ``--reasoning-effort`` in ``--acp`` mode;
+        the model is chosen here, per-session, by ``session/set_config_option``
+        against the *select* options the agent advertised in its
+        ``session/new`` / ``session/load`` response. Only options the agent
+        actually offers (with the desired value among their choices) are set,
+        and only when they differ from the current value. Degrade-safe: any
+        resolution or RPC failure is logged and swallowed so it never breaks the
+        session (it just keeps the agent's default model). See dotfiles#790.
+        """
+        if not self._connection or not self._acp_session_id:
+            return
+        try:
+            desired = resolve_acp_model_config()
+        except Exception as exc:
+            log.debug("ACP model-config resolution failed: %s", exc)
+            return
+        if not desired:
+            return
+
+        # Index the advertised options by id -> (current_value, {allowed values}).
+        advertised: dict[str, tuple[str | None, set[str]]] = {}
+        for opt in (config_options or []):
+            oid = _cfg_attr(opt, "id", "id")
+            if not oid:
+                continue
+            current = _cfg_attr(opt, "current_value", "currentValue")
+            values: set[str] = set()
+            for choice in (_cfg_attr(opt, "options", "options") or []):
+                val = _cfg_attr(choice, "value", "value")
+                if isinstance(val, str):
+                    values.add(val)
+            advertised[oid] = (current, values)
+
+        for config_id in (_ACP_MODEL_CONFIG_ID, _ACP_EFFORT_CONFIG_ID):
+            value = desired.get(config_id)
+            if not value:
+                continue
+            entry = advertised.get(config_id)
+            if entry is None:
+                log.debug(
+                    "ACP agent does not advertise config option %r; skipping", config_id,
+                )
+                continue
+            current, allowed = entry
+            if allowed and value not in allowed:
+                log.warning(
+                    "ACP config %s=%r not offered by agent (%d options); skipping",
+                    config_id, value, len(allowed),
+                )
+                continue
+            if current == value:
+                continue
+            try:
+                await self._connection.set_config_option(
+                    config_id=config_id,
+                    session_id=self._acp_session_id,
+                    value=value,
+                )
+                log.info(
+                    "ACP session %s: set %s=%s", self._acp_session_id, config_id, value,
+                )
+            except Exception as exc:
+                log.warning("ACP set_config_option %s=%s failed: %s", config_id, value, exc)
 
     async def send_prompt(self, text: str) -> dict[str, Any]:
         """Send a prompt and block until the turn completes.

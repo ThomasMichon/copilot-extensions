@@ -199,18 +199,8 @@ class TestConcurrencyGuard:
         assert second.status == SessionStatus.IDLE
 
 
-async def _start_codespace_session(
-    tmp_db, monkeypatch, *, model_flags: str = "", raises: bool = False,
-):
-    def fake_resolve() -> str:
-        if raises:
-            raise RuntimeError("resolver failed")
-        return model_flags
-
-    monkeypatch.setattr(
-        "agent_bridge.session_manager._resolve_acp_model_flags", fake_resolve,
-    )
-    # Isolate the model-flags behavior from the relay prelude: the real
+async def _start_codespace_session(tmp_db, monkeypatch):
+    # Isolate the acp_command from the relay prelude: the real
     # ``_resolve_relay_launch_env`` prepends an auth-scrub/relay setup string to
     # the remote command, which is orthogonal to what these tests assert. Pin it
     # to an empty prelude (its own tests cover the prelude itself).
@@ -249,38 +239,19 @@ async def _start_codespace_session(
     return acp_command, captured["remote_child_argv"]
 
 
-class TestCodespaceSessionHostModelFlags:
-    """Model flags are appended at the Session-Host CodeSpace dispatch seam.
+class TestCodespaceSessionHostAcpCommand:
+    """The Session-Host CodeSpace dispatch passes copilot's acp_command through
+    unchanged (no ``--model`` launch flags).
 
-    Resolved via a process-to-process call to the agent-codespaces binstub
-    (``_resolve_acp_model_flags``), not an in-process import.
+    Model/effort are NOT set via CLI flags -- copilot ignores them in ``--acp``
+    mode. The dispatched agent's model is set after the session exists, via ACP
+    ``session/set_config_option`` in ``AcpClient._apply_model_config``
+    (dotfiles#790). See ``tests/test_acp_client.py`` for that behavior.
     """
 
     @pytest.mark.asyncio
-    async def test_appends_model_flags(self, tmp_db, monkeypatch) -> None:
-        # The binstub prints the flags without a leading space; the dispatch
-        # seam inserts the separating space.
-        flags = "--model claude-opus-4.8 --reasoning-effort high --context long_context"
-
-        acp_command, remote_argv = await _start_codespace_session(
-            tmp_db, monkeypatch, model_flags=flags,
-        )
-
-        assert remote_argv == ["bash", "-lc", f"{acp_command} {flags}"]
-
-    @pytest.mark.asyncio
-    async def test_unchanged_when_model_flags_empty(self, tmp_db, monkeypatch) -> None:
-        acp_command, remote_argv = await _start_codespace_session(
-            tmp_db, monkeypatch, model_flags="",
-        )
-
-        assert remote_argv == ["bash", "-lc", acp_command]
-
-    @pytest.mark.asyncio
-    async def test_unchanged_when_model_flags_raise(self, tmp_db, monkeypatch) -> None:
-        acp_command, remote_argv = await _start_codespace_session(
-            tmp_db, monkeypatch, model_flags="", raises=True,
-        )
+    async def test_acp_command_passed_through_unchanged(self, tmp_db, monkeypatch) -> None:
+        acp_command, remote_argv = await _start_codespace_session(tmp_db, monkeypatch)
 
         assert remote_argv == ["bash", "-lc", acp_command]
 
@@ -1548,9 +1519,6 @@ class TestCodespaceExclusiveClaim:
 
     async def _start(self, tmp_db, monkeypatch, *, claim_result, caller_worktree,
                      caller_id=None):
-        monkeypatch.setattr(
-            "agent_bridge.session_manager._resolve_acp_model_flags", lambda: "",
-        )
         monkeypatch.setattr(
             "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
             lambda *a, **k: object(),
