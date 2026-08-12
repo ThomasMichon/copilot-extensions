@@ -9,6 +9,8 @@
 #
 # Usage:
 #   bash plugins/agent-codespaces/scripts/install.sh install
+#   bash plugins/agent-codespaces/scripts/install.sh stamp      # cheap: binstub only, defer runtime to first use
+#   bash plugins/agent-codespaces/scripts/install.sh provision  # heavy: build the runtime venv (what the binstub calls on first use)
 #   bash plugins/agent-codespaces/scripts/install.sh status
 #   bash plugins/agent-codespaces/scripts/install.sh update
 # =============================================================================
@@ -354,7 +356,34 @@ _git_info() {
 }
 
 _assert_uv() {
-    command -v uv &>/dev/null || { _fail "uv is required but not found on PATH."; exit 1; }
+    command -v uv &>/dev/null && return 0
+    # Vendor a standalone uv into the runtime tool dir. A governed/pristine box
+    # ships no uv (the #1 provisioning blocker), so rather than dead-end we fetch
+    # a self-contained uv via the official installer (curl/wget/python3 -- no pip,
+    # no venv needed) into ~/.agent-codespaces/tool and put it on PATH for this run.
+    local tooldir="$INSTALL_DIR/tool"
+    if [[ -x "$tooldir/uv" ]]; then export PATH="$tooldir:$PATH"; return 0; fi
+    _step "uv not found -- vendoring a standalone uv into $tooldir"
+    mkdir -p "$tooldir"
+    local url="https://astral.sh/uv/install.sh" script="$tooldir/uv-install.sh" got=""
+    if command -v curl &>/dev/null; then curl -LsSf "$url" -o "$script" 2>/dev/null && got=1; fi
+    if [[ -z "$got" ]] && command -v wget &>/dev/null; then wget -qO "$script" "$url" 2>/dev/null && got=1; fi
+    if [[ -z "$got" ]] && command -v python3 &>/dev/null; then
+        python3 - "$url" "$script" <<'PY' 2>/dev/null && got=1
+import sys, urllib.request
+urllib.request.urlretrieve(sys.argv[1], sys.argv[2])
+PY
+    fi
+    if [[ -n "$got" && -s "$script" ]]; then
+        # The installer honors UV_INSTALL_DIR for a self-contained, unmanaged drop
+        # and INSTALLER_NO_MODIFY_PATH so it never edits the user's shell profile.
+        env UV_INSTALL_DIR="$tooldir" UV_UNMANAGED_INSTALL="$tooldir" INSTALLER_NO_MODIFY_PATH=1 sh "$script" >/dev/null 2>&1 || true
+    fi
+    # The installer may drop uv directly in tooldir or under tooldir/bin.
+    [[ -x "$tooldir/bin/uv" && ! -x "$tooldir/uv" ]] && ln -sf "$tooldir/bin/uv" "$tooldir/uv" 2>/dev/null || true
+    if [[ -x "$tooldir/uv" ]]; then export PATH="$tooldir:$PATH"; _ok "Vendored uv into $tooldir"; return 0; fi
+    _fail "uv is required but not found, and vendoring failed (no reachable uv installer). Install uv, then retry."
+    exit 1
 }
 
 # uv pip install the vendored libs (ssh-manager, credential-relay) then
@@ -411,8 +440,37 @@ BUILD_INFO: dict[str, str] = {
 PYEOF
 }
 
+# Mirror pip's configured index to uv when uv has none of its own. A governed box
+# sets pip's internal feed (a system/global pip.conf index-url) but NOT uv, so
+# uv/`uv pip install` still default to the TLS-blocked public PyPI and provisioning
+# fails. Best-effort: if neither UV_INDEX_URL nor UV_DEFAULT_INDEX is set but pip
+# has an index-url, export it for uv. No-op where pip is absent (e.g. pristine --
+# there the index arrives via env/the clean-room fixture).
+_ensure_uv_index() {
+    [[ -n "${UV_INDEX_URL:-}${UV_DEFAULT_INDEX:-}" ]] && return 0
+    local idx=""
+    # Prefer `pip config get` when pip is on PATH.
+    if command -v pip &>/dev/null; then idx="$(pip config get global.index-url 2>/dev/null | tr -d '[:space:]')"; fi
+    if [[ -z "$idx" ]] && command -v pip3 &>/dev/null; then idx="$(pip3 config get global.index-url 2>/dev/null | tr -d '[:space:]')"; fi
+    # Else parse the standard pip.conf files directly -- a governed box carries the
+    # conf (index-url policy) but may not have pip on PATH in this context.
+    if [[ -z "$idx" ]]; then
+        local f
+        for f in "${PIP_CONFIG_FILE:-}" "$HOME/.config/pip/pip.conf" "$HOME/.pip/pip.conf" /etc/pip.conf /etc/xdg/pip/pip.conf; do
+            [[ -n "$f" && -f "$f" ]] || continue
+            idx="$(sed -n 's/^[[:space:]]*index-url[[:space:]]*=[[:space:]]*//p' "$f" | head -n1 | tr -d '[:space:]')"
+            [[ -n "$idx" ]] && break
+        done
+    fi
+    if [[ -n "$idx" ]]; then
+        export UV_DEFAULT_INDEX="$idx"
+        _step "uv index derived from pip config (governed-feed bridge)"
+    fi
+}
+
 deploy_venv() {
     _assert_uv
+    _ensure_uv_index
     mkdir -p "$VENV_DIR"
     _versioned_slot_clean
     if ! uv venv "$VENV_DIR" --python 3.11 --allow-existing 2>/dev/null; then
@@ -446,13 +504,58 @@ deploy_package() {
 deploy_binstub() {
     mkdir -p "$LOCAL_BIN"
     local stub_path="$LOCAL_BIN/agent-codespaces"
+    # Self-provisioning binstub (install-on-first-use). When the runtime venv is
+    # present it is a thin exec (fast path). When it is NOT, the shim provisions
+    # the runtime on first use -- announcing LOUDLY (never a silent block) with a
+    # machine-readable signal so a caller can extend its timeout instead of
+    # killing us -- then execs. Concurrent first-invocations are serialized.
     cat > "$stub_path" << 'STUB'
 #!/usr/bin/env bash
+# agent-codespaces binstub -- self-provisioning (install-on-first-use).
 export PYTHONUTF8=1
-exec "$HOME/.agent-codespaces/.venv/bin/agent-codespaces" "$@"
+_name="agent-codespaces"
+_root="$HOME/.$_name"
+_console="$_root/.venv/bin/$_name"
+# Fast path: runtime already provisioned.
+[ -x "$_console" ] && exec "$_console" "$@"
+# --- not provisioned: self-install on first use --------------------------
+mkdir -p "$_root"
+_status="$_root/.provision-status"
+# Announce -- human line (stderr) + machine-readable signal. NEVER silent: a
+# caller seeing ::agent-provisioning:: should extend its timeout, not kill us.
+printf '%s\n' "[$_name] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout." >&2
+printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' "$_name" "$_status" >&2
+# Locate the plugin payload installer (recorded at stamp; else glob the marketplace).
+_install="$(cat "$_root/payload-dir" 2>/dev/null)/scripts/install.sh"
+[ -f "$_install" ] || _install="$(ls "$HOME"/.copilot/installed-plugins/*/"$_name"/scripts/install.sh 2>/dev/null | head -n1)"
+if [ ! -f "$_install" ]; then
+    printf '%s\n' "[$_name] cannot self-provision: installer not found in plugin payload. Ensure the plugin is enabled, then retry." >&2
+    exit 127
+fi
+# Serialize concurrent first-invocations (avoid a thundering-herd double-build).
+_lock="$_root/.provision.lock"
+exec 9>"$_lock"
+command -v flock >/dev/null 2>&1 && flock 9 2>/dev/null
+# Re-check under the lock -- another invocation may have finished provisioning.
+[ -x "$_console" ] && exec "$_console" "$@"
+printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
+bash "$_install" provision >&2
+_rc=$?
+if [ "$_rc" -eq 0 ] && [ -x "$_console" ]; then
+    printf 'ready %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
+    exec "$_console" "$@"
+fi
+printf 'failed rc=%s %s\n' "$_rc" "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
+if [ "$_rc" -eq 0 ]; then
+    printf '%s\n' "[$_name] provisioning reported success but the CLI is still missing ($_console)." >&2
+    _rc=1
+else
+    printf '%s\n' "[$_name] provisioning FAILED (rc=$_rc). See the log above; retry, or run: bash \"$_install\" provision" >&2
+fi
+exit "$_rc"
 STUB
     chmod +x "$stub_path"
-    _ok "Binstub: $stub_path"
+    _ok "Binstub: $stub_path (self-provisioning)"
 }
 
 write_deploy_manifest() {
@@ -690,15 +793,51 @@ do_update() {
     _ok "$SERVICE_NAME updated"
 }
 
+# Cheap "splat the binstub, defer the runtime" install (fits a sessionStart hook's
+# grace window): create dirs, record the payload path so the smart binstub can
+# find this installer, and deploy the self-provisioning binstub -- NO venv, NO uv.
+# The runtime then builds itself on the binstub's first use.
+do_stamp() {
+    _header "$SERVICE_NAME Stamp (defer runtime to first use)"
+    mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
+    printf '%s\n' "$PLUGIN_DIR" > "$INSTALL_DIR/payload-dir"
+    deploy_binstub
+    _ok "Stamped: binstub on PATH; runtime provisions on first use."
+}
+
+# The heavy runtime build (venv + package + activate + manifest), WITHOUT
+# rewriting the binstub -- this is what the self-provisioning binstub invokes on
+# first use, so it must not touch the running shim.
+do_provision() {
+    _header "$SERVICE_NAME Provision (runtime)"
+    mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
+    deploy_venv || return 1
+    deploy_package || return 1
+    _versioned_activate || return 1
+    PYTHONUTF8=1 "$VENV_PYTHON" -m agent_codespaces config-migrate 2>&1 \
+        | sed 's/^/  /' || _warn "Config migration skipped"
+    write_deploy_manifest
+    local check
+    check="$("$LINK_PYTHON" -c 'import agent_codespaces; print("OK")' 2>/dev/null || true)"
+    if [[ "$check" == "OK" ]]; then
+        _ok "Verification: module imports successfully"
+    else
+        _fail "Verification: module import failed"
+    fi
+    _ok "$SERVICE_NAME runtime provisioned"
+}
+
 # -- Dispatch --------------------------------------------------------------
 
 case "$ACTION" in
     install)   do_install ;;
+    stamp)     do_stamp ;;
+    provision) do_provision ;;
     uninstall) do_uninstall ;;
     status)    do_status ;;
     update)    do_update ;;
     *)
-        echo "Usage: $0 {install|uninstall|status|update}" >&2
+        echo "Usage: $0 {install|stamp|provision|uninstall|status|update}" >&2
         exit 1
         ;;
 esac
