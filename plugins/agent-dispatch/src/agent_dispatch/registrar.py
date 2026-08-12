@@ -44,6 +44,7 @@ _KNOWN_KEYS = frozenset(
         "verify_timeout",
         "body",
         "fleet",
+        "filters",
         "evaluator",
         "owner",
         "description",
@@ -51,6 +52,24 @@ _KNOWN_KEYS = frozenset(
 )
 _KNOWN_BODY_KEYS = frozenset({"type", "agent", "headless_labels"})
 _KNOWN_FLEET_KEYS = frozenset({"pool", "origin", "headless"})
+_KNOWN_FILTER_KEYS = frozenset({"permit", "reject"})
+
+#: The one filter vocabulary, spoken by both sides (a task *declares* these
+#: attributes; a pool *filters* over them). Scalar dimensions match by
+#: membership (the task's single value must be among the permitted set);
+#: ``capabilities`` is a *set* dimension matched by subset (a task's required
+#: capabilities must all be provided by the pool). See the registrar effort's
+#: Model section + worked examples.
+_FILTER_SCALAR_DIMS = frozenset({"repo", "machine", "env", "role", "worktree", "task-type"})
+_FILTER_SET_DIMS = frozenset({"capabilities"})
+_FILTER_DIMS = _FILTER_SCALAR_DIMS | _FILTER_SET_DIMS
+
+
+def _canon_dim(key: object) -> str:
+    """Normalize a filter dimension name (accept ``task_type`` for ``task-type``)."""
+    if not isinstance(key, str) or not key:
+        raise RegistrarError(f"filters: dimension names must be non-empty strings, got {key!r}")
+    return key.replace("_", "-")
 
 
 @dataclass(frozen=True)
@@ -83,6 +102,54 @@ class Fleet:
 
 
 @dataclass(frozen=True)
+class Filters:
+    """A pool's permit/reject predicate over the shared filter vocabulary.
+
+    A **pool is a filter with a cap** (vision: *pools-as-filters*): it accepts a
+    task when the task's declared attributes clear the ``permit`` gate and miss the
+    ``reject`` gate. Both sides are keyed by the same vocabulary
+    (:data:`_FILTER_DIMS`). Semantics:
+
+    * ``permit`` -- for each constrained dimension the task must match. A scalar
+      dimension matches when the task's value is among the permitted set **or the
+      task does not declare it** (an *untargeted* attribute is a wildcard, so an
+      unpinned task can bind to any pool). ``capabilities`` matches when the task's
+      required capabilities are a *subset* of those the pool provides. Dimensions
+      not listed in ``permit`` are unconstrained.
+    * ``reject`` -- a task is rejected when it *explicitly* carries a rejected value
+      (scalar: equal; ``capabilities``: intersects). Reject wins over permit.
+
+    Pure data + a predicate; nothing here binds a task -- the supervisor consults
+    :meth:`ProfileDeclaration.permits`.
+    """
+
+    permit: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    reject: Mapping[str, frozenset[str]] = field(default_factory=dict)
+
+    def is_empty(self) -> bool:
+        return not self.permit and not self.reject
+
+    def permits(self, attrs: Mapping[str, object]) -> bool:
+        """Does a task with these declared ``attrs`` clear this filter?"""
+        norm = _normalize_task_attrs(attrs)
+        for dim, rejected in self.reject.items():
+            tv = norm.get(dim)
+            if dim in _FILTER_SET_DIMS:
+                if tv and (set(tv) & rejected):
+                    return False
+            elif tv is not None and tv in rejected:
+                return False
+        for dim, permitted in self.permit.items():
+            tv = norm.get(dim)
+            if dim in _FILTER_SET_DIMS:
+                if not set(tv or ()) <= permitted:
+                    return False
+            elif tv is not None and tv not in permitted:
+                return False
+        return True
+
+
+@dataclass(frozen=True)
 class ProfileDeclaration:
     """One declarative unit of supervised work -- the registrar's atom.
 
@@ -104,6 +171,7 @@ class ProfileDeclaration:
     verify_timeout: int = 0
     body: Body = field(default_factory=Body)
     fleet: Fleet = field(default_factory=Fleet)
+    filters: Filters = field(default_factory=Filters)
     evaluator: str | None = None
     owner: str | None = None  # provenance: which system declared this
     description: str | None = None
@@ -167,6 +235,28 @@ class ProfileDeclaration:
         """Return a copy stamped with discovery-time provenance (the pointer's owner),
         used when a declaration is discovered without an explicit ``owner``."""
         return replace(self, owner=self.owner or owner)
+
+    def effective_filters(self) -> Filters:
+        """The pool filter with the ``name``/``labels``/``repos`` shorthand folded in.
+
+        The legacy fields *are* a filter shorthand (vision: *pools-as-filters*, the
+        registrar effort's Model section): a pool is *named for its task-type*, so an
+        unspecified ``permit.task-type`` defaults to this profile's ``name`` plus its
+        watched ``labels`` (the legacy label gate generalizes to task-type); an
+        unspecified ``permit.repo`` defaults to the profile's lane (``repos``) unless
+        it watches all repos. Explicit ``filters`` always win over the shorthand.
+        """
+        permit = dict(self.filters.permit)
+        reject = dict(self.filters.reject)
+        if "task-type" not in permit:
+            permit["task-type"] = frozenset({self.name, *self.labels})
+        if "repo" not in permit and self.repos != "all":
+            permit["repo"] = frozenset({self.repos})
+        return Filters(permit=permit, reject=reject)
+
+    def permits(self, task_attrs: Mapping[str, object]) -> bool:
+        """Does this pool (filter + shorthand) accept a task with these attributes?"""
+        return self.effective_filters().permits(task_attrs)
 
 
 def _num(x: float) -> str:
@@ -258,6 +348,60 @@ def _load_fleet(data: object) -> Fleet:
     )
 
 
+def _load_filter_side(data: object, *, where: str) -> dict[str, frozenset[str]]:
+    """Parse one side (``permit`` or ``reject``) of a filter into dim -> value set."""
+    if data is None:
+        return {}
+    if not isinstance(data, Mapping):
+        raise RegistrarError(f"{where}: expected a mapping of dimension->values, "
+                             f"got {type(data).__name__}")
+    out: dict[str, frozenset[str]] = {}
+    for raw_key, value in data.items():
+        dim = _canon_dim(raw_key)
+        if dim not in _FILTER_DIMS:
+            raise RegistrarError(
+                f"{where}: unknown dimension {dim!r}; known: {sorted(_FILTER_DIMS)}"
+            )
+        out[dim] = frozenset(_as_str_tuple(value, key=f"{where}.{dim}"))
+    return out
+
+
+def _load_filters(data: object) -> Filters:
+    if data is None:
+        return Filters()
+    if not isinstance(data, Mapping):
+        raise RegistrarError(f"filters: expected a mapping, got {type(data).__name__}")
+    _reject_unknown(data, _KNOWN_FILTER_KEYS, where="filters")
+    return Filters(
+        permit=_load_filter_side(data.get("permit"), where="filters.permit"),
+        reject=_load_filter_side(data.get("reject"), where="filters.reject"),
+    )
+
+
+def _normalize_task_attrs(attrs: Mapping[str, object]) -> dict[str, object]:
+    """Normalize a task's declared attributes for filter matching.
+
+    Canonicalizes dimension names (``task_type`` -> ``task-type``), coerces the
+    ``capabilities`` set dimension to a tuple, and leaves scalar dimensions as their
+    string value. Unknown dimensions are ignored (a task may carry attributes no
+    pool filters on).
+    """
+    if not isinstance(attrs, Mapping):
+        raise RegistrarError(f"task attributes: expected a mapping, got {type(attrs).__name__}")
+    out: dict[str, object] = {}
+    for raw_key, value in attrs.items():
+        dim = _canon_dim(raw_key)
+        if dim not in _FILTER_DIMS:
+            continue
+        if dim in _FILTER_SET_DIMS:
+            out[dim] = _as_str_tuple(value, key=dim)
+        elif value is not None:
+            if not isinstance(value, str):
+                raise RegistrarError(f"task attribute {dim!r}: expected a string, got {value!r}")
+            out[dim] = value
+    return out
+
+
 def _load_label_max_attempts(value: object) -> dict[str, int]:
     if value is None:
         return {}
@@ -320,6 +464,7 @@ def load_declaration(data: Mapping) -> ProfileDeclaration:
         verify_timeout=_as_int(data.get("verify_timeout", 0), key="verify_timeout", minimum=0),
         body=_load_body(data.get("body")),
         fleet=_load_fleet(data.get("fleet")),
+        filters=_load_filters(data.get("filters")),
         evaluator=evaluator,
         owner=data.get("owner"),
         description=data.get("description"),

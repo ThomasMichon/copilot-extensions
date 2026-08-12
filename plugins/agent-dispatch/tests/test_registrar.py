@@ -6,6 +6,7 @@ import pytest
 
 from agent_dispatch.registrar import (
     Body,
+    Filters,
     Fleet,
     RegistrarError,
     declaration_from_env,
@@ -229,6 +230,137 @@ def test_with_owner_stamps_only_when_absent():
     assert d.with_owner("repo:foo").owner == "repo:foo"
     d2 = load_declaration({"name": "x", "owner": "explicit"})
     assert d2.with_owner("repo:foo").owner == "explicit"
+
+
+# -- filters block (pools-as-filters) ----------------------------------------
+
+def test_filters_default_empty():
+    d = load_declaration({"name": "general"})
+    assert d.filters == Filters()
+    assert d.filters.is_empty()
+
+
+def test_filters_explicit_permit_reject_loaded():
+    d = load_declaration(
+        {
+            "name": "review",
+            "filters": {
+                "permit": {"task-type": ["review"], "role": ["reviewer"]},
+                "reject": {"role": ["intern"]},
+            },
+        }
+    )
+    assert d.filters.permit["task-type"] == frozenset({"review"})
+    assert d.filters.permit["role"] == frozenset({"reviewer"})
+    assert d.filters.reject["role"] == frozenset({"intern"})
+
+
+def test_filters_unknown_side_key_rejected():
+    with pytest.raises(RegistrarError, match="filters: unknown key"):
+        load_declaration({"name": "x", "filters": {"allow": {"role": ["a"]}}})
+
+
+def test_filters_unknown_dimension_rejected():
+    with pytest.raises(RegistrarError, match="unknown dimension"):
+        load_declaration({"name": "x", "filters": {"permit": {"colour": ["blue"]}}})
+
+
+def test_filters_dimension_underscore_normalized():
+    d = load_declaration({"name": "x", "filters": {"permit": {"task_type": ["general"]}}})
+    assert d.filters.permit["task-type"] == frozenset({"general"})
+
+
+def test_permit_membership_scalar():
+    d = load_declaration({"name": "review", "filters": {"permit": {"role": ["reviewer"]}}})
+    assert d.permits({"role": "reviewer", "task-type": "review"})
+    assert not d.permits({"role": "author", "task-type": "review"})
+
+
+def test_permit_missing_attr_is_wildcard():
+    # An untargeted task (no machine declared) binds to a machine-pinned pool.
+    d = load_declaration({"name": "review", "filters": {"permit": {"machine": ["host-a"]}}})
+    assert d.permits({"task-type": "review"})
+    assert d.permits({"task-type": "review", "machine": "host-a"})
+    assert not d.permits({"task-type": "review", "machine": "host-b"})
+
+
+def test_reject_wins_over_permit():
+    d = load_declaration(
+        {
+            "name": "review",
+            "filters": {
+                "permit": {"task-type": ["review"]},
+                "reject": {"repo": ["lane-b"]},
+            },
+        }
+    )
+    assert d.permits({"task-type": "review", "repo": "lane-a"})
+    assert not d.permits({"task-type": "review", "repo": "lane-b"})
+
+
+def test_capabilities_subset_semantics():
+    d = load_declaration({"name": "review", "filters": {"permit": {"capabilities": ["checkout", "gpu"]}}})
+    # task requiring a subset of provided capabilities binds
+    assert d.permits({"task-type": "review", "capabilities": ["checkout"]})
+    assert d.permits({"task-type": "review"})  # requires nothing
+    # task requiring a capability the pool doesn't provide is rejected
+    assert not d.permits({"task-type": "review", "capabilities": ["checkout", "tpu"]})
+
+
+def test_capabilities_reject_intersects():
+    d = load_declaration(
+        {"name": "review", "filters": {"reject": {"capabilities": ["dangerous"]}}}
+    )
+    assert d.permits({"task-type": "review", "capabilities": ["safe"]})
+    assert not d.permits({"task-type": "review", "capabilities": ["safe", "dangerous"]})
+
+
+def test_shorthand_task_type_from_name_and_labels():
+    # No explicit filters: name + labels become the task-type permit.
+    d = load_declaration({"name": "general", "labels": ["general", "loop"]})
+    ef = d.effective_filters()
+    assert ef.permit["task-type"] == frozenset({"general", "loop"})
+    assert d.permits({"task-type": "loop"})
+    assert not d.permits({"task-type": "cab"})
+
+
+def test_shorthand_repo_from_lane():
+    d = load_declaration({"name": "review", "repos": "lane-a"})
+    ef = d.effective_filters()
+    assert ef.permit["repo"] == frozenset({"lane-a"})
+    assert d.permits({"task-type": "review", "repo": "lane-a"})
+    assert not d.permits({"task-type": "review", "repo": "lane-b"})
+
+
+def test_shorthand_all_repos_has_no_repo_permit():
+    d = load_declaration({"name": "general", "repos": "all"})
+    assert "repo" not in d.effective_filters().permit
+    assert d.permits({"task-type": "general", "repo": "any-lane"})
+
+
+def test_explicit_filters_win_over_shorthand():
+    # An explicit permit.task-type overrides the name/labels default.
+    d = load_declaration(
+        {"name": "general", "labels": ["general"], "filters": {"permit": {"task-type": ["special"]}}}
+    )
+    ef = d.effective_filters()
+    assert ef.permit["task-type"] == frozenset({"special"})
+    assert d.permits({"task-type": "special"})
+    assert not d.permits({"task-type": "general"})
+
+
+def test_permits_rejects_bad_attrs_shape():
+    d = load_declaration({"name": "x"})
+    with pytest.raises(RegistrarError, match="task attributes"):
+        d.permits(["not", "a", "mapping"])  # type: ignore[arg-type]
+
+
+def test_filters_dont_affect_supervise_args():
+    # The filter block is a binding concept, not part of the legacy supervise argv.
+    d = load_declaration(
+        {"name": "general", "labels": ["general"], "filters": {"permit": {"role": ["worker"]}}}
+    )
+    assert "--role" not in d.to_supervise_args()
 
 
 # -- helpers -----------------------------------------------------------------
