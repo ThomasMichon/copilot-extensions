@@ -5,6 +5,8 @@ from __future__ import annotations
 import time
 
 
+import pytest
+
 from agent_bridge.db import Database
 
 
@@ -181,6 +183,35 @@ class TestEventCRUD:
         tmp_db.append_event("s1", 5, "test", {}, now)
         tmp_db.append_event("s1", 10, "test", {}, now)
         assert tmp_db.get_max_event_id("s1") == 10
+
+    def test_orphan_event_does_not_wedge_writer(self, tmp_db: Database) -> None:
+        # Regression (dotfiles #1282): an event queued for a session_id with no
+        # `sessions` parent violates the events->sessions FK. Previously the
+        # atomic batch write failed wholesale and latched `_writer_error`, so
+        # EVERY later flush()/read raised "event writer failed" -> the daemon
+        # 500'd status/resume/cursor/turns for ALL sessions. The orphan must be
+        # dropped, good events must still land, and reads must NOT raise.
+        now = time.time()
+        tmp_db.create_session("good", "test", None, ".", "local", "idle", now)
+        tmp_db.append_event("orphan", 1, "agent_message", {"text": "x"}, now)
+        tmp_db.append_event("good", 1, "agent_message", {"text": "ok"}, now)
+        # Must not raise despite the orphan in the queue.
+        tmp_db.flush()
+        good = tmp_db.get_events("good")
+        assert len(good) == 1
+        assert good[0]["data"] == {"text": "ok"}
+        # The orphan was dropped, not persisted.
+        assert tmp_db.get_events("orphan") == []
+
+    def test_writer_error_latch_self_heals(self, tmp_db: Database) -> None:
+        # A recorded writer error surfaces exactly once, then the latch clears
+        # so it can't 500 every subsequent unrelated read forever (#1282).
+        tmp_db.start_writer()
+        tmp_db._record_writer_error(RuntimeError("boom"))
+        with pytest.raises(RuntimeError, match="event writer failed"):
+            tmp_db.flush()
+        # Latch cleared -- a following read does not re-raise.
+        tmp_db.flush()
 
 
 class TestLiveSessionLease:
