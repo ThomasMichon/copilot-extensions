@@ -348,15 +348,120 @@ EOF
     ok "deploy manifest written (source: $kind)"
 }
 
+# --- self-provisioning helpers (runtime-self-provisioning pattern) -----------
+# Vendor a standalone uv into the runtime tool dir when uv is absent (pristine or
+# governed box) instead of dead-ending; add it to PATH for this run.
+_ensure_uv() {
+    command -v uv >/dev/null 2>&1 && return 0
+    local tooldir="${INSTALL_DIR}/tool"
+    if [ -x "${tooldir}/uv" ]; then export PATH="${tooldir}:$PATH"; return 0; fi
+    chg "uv not found -- vendoring a standalone uv into ${tooldir}"
+    mkdir -p "${tooldir}"
+    local url="https://astral.sh/uv/install.sh" script="${tooldir}/uv-install.sh" got=""
+    if command -v curl >/dev/null 2>&1; then curl -LsSf "$url" -o "$script" 2>/dev/null && got=1; fi
+    if [ -z "$got" ] && command -v wget >/dev/null 2>&1; then wget -qO "$script" "$url" 2>/dev/null && got=1; fi
+    if [ -z "$got" ] && command -v python3 >/dev/null 2>&1; then
+        python3 - "$url" "$script" <<'PY' 2>/dev/null && got=1
+import sys, urllib.request
+urllib.request.urlretrieve(sys.argv[1], sys.argv[2])
+PY
+    fi
+    if [ -n "$got" ] && [ -s "$script" ]; then
+        env UV_INSTALL_DIR="${tooldir}" UV_UNMANAGED_INSTALL="${tooldir}" INSTALLER_NO_MODIFY_PATH=1 sh "$script" >/dev/null 2>&1 || true
+    fi
+    [ -x "${tooldir}/bin/uv" ] && [ ! -x "${tooldir}/uv" ] && ln -sf "${tooldir}/bin/uv" "${tooldir}/uv" 2>/dev/null || true
+    if [ -x "${tooldir}/uv" ]; then export PATH="${tooldir}:$PATH"; ok "vendored uv into ${tooldir}"; return 0; fi
+    warn "uv is required but not found, and vendoring failed (no reachable uv installer). Install uv, then retry."
+    return 1
+}
+
+# Mirror pip's configured index to uv on a governed box (public PyPI TLS-blocked):
+# uv does not read pip.conf, so derive index-url from pip config / the pip.conf
+# files and export it. No-op where pip has no index (e.g. pristine -- the index
+# then arrives via env / the clean-room fixture).
+_ensure_uv_index() {
+    [ -n "${UV_INDEX_URL:-}${UV_DEFAULT_INDEX:-}" ] && return 0
+    local idx=""
+    if command -v pip >/dev/null 2>&1; then idx="$(pip config get global.index-url 2>/dev/null | tr -d '[:space:]')"; fi
+    if [ -z "$idx" ] && command -v pip3 >/dev/null 2>&1; then idx="$(pip3 config get global.index-url 2>/dev/null | tr -d '[:space:]')"; fi
+    if [ -z "$idx" ]; then
+        local f
+        for f in "${PIP_CONFIG_FILE:-}" "$HOME/.config/pip/pip.conf" "$HOME/.pip/pip.conf" /etc/pip.conf /etc/xdg/pip/pip.conf; do
+            [ -n "$f" ] && [ -f "$f" ] || continue
+            idx="$(sed -n 's/^[[:space:]]*index-url[[:space:]]*=[[:space:]]*//p' "$f" | head -n1 | tr -d '[:space:]')"
+            [ -n "$idx" ] && break
+        done
+    fi
+    if [ -n "$idx" ]; then export UV_DEFAULT_INDEX="$idx"; chg "uv index derived from pip config (governed-feed bridge)"; fi
+}
+
+# Deploy the self-provisioning `agent-logger` binstub (install-on-first-use). Fast
+# path execs the venv's `agent-logger` console script; otherwise it provisions on
+# first use -- announcing (a human line + a machine-readable ::agent-provisioning::
+# signal so a caller can extend its timeout), lock-serialized, fail-fast. The 5
+# auxiliary console-script binstubs (session-sync, collate-session, ...) are plain
+# symlinks created only by a full provision.
+deploy_binstub() {
+    mkdir -p "${LOCAL_BIN}"
+    cat > "${LOCAL_BIN}/agent-logger" << 'STUBEOF'
+#!/usr/bin/env bash
+# agent-logger binstub -- self-provisioning (install-on-first-use).
+export PYTHONUTF8=1
+_name="agent-logger"
+_root="$HOME/.$_name"
+_console="$_root/.venv/bin/$_name"
+[ -x "$_console" ] && exec "$_console" "$@"
+mkdir -p "$_root"
+_status="$_root/.provision-status"
+printf '%s\n' "[$_name] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout." >&2
+printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' "$_name" "$_status" >&2
+_install="$(cat "$_root/payload-dir" 2>/dev/null)/scripts/install.sh"
+[ -f "$_install" ] || _install="$(ls "$HOME"/.copilot/installed-plugins/*/"$_name"/scripts/install.sh 2>/dev/null | head -n1)"
+if [ ! -f "$_install" ]; then
+    printf '%s\n' "[$_name] cannot self-provision: installer not found in plugin payload. Ensure the plugin is enabled, then retry." >&2
+    exit 127
+fi
+_lock="$_root/.provision.lock"
+exec 9>"$_lock"
+command -v flock >/dev/null 2>&1 && flock 9 2>/dev/null
+[ -x "$_console" ] && exec "$_console" "$@"
+printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
+bash "$_install" provision >&2
+_rc=$?
+if [ "$_rc" -eq 0 ] && [ -x "$_console" ]; then
+    printf 'ready %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
+    exec "$_console" "$@"
+fi
+printf 'failed rc=%s %s\n' "$_rc" "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
+if [ "$_rc" -eq 0 ]; then
+    printf '%s\n' "[$_name] provisioning reported success but the CLI is still missing ($_console)." >&2
+    _rc=1
+else
+    printf '%s\n' "[$_name] provisioning FAILED (rc=$_rc). See the log above; retry, or run: bash \"$_install\" provision" >&2
+fi
+exit "$_rc"
+STUBEOF
+    chmod +x "${LOCAL_BIN}/agent-logger"
+    ok "binstub: ${LOCAL_BIN}/agent-logger (self-provisioning)"
+}
+
+# Cheap 'stamp': splat the agent-logger binstub + payload marker, defer the venv
+# build to first use (fits a sessionStart hook's grace window). No venv, no uv.
+do_stamp() {
+    mkdir -p "${INSTALL_DIR}" "${LOCAL_BIN}"
+    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "${INSTALL_DIR}/payload-dir"
+    deploy_binstub
+    ok "stamped: binstub on PATH; runtime provisions on first use."
+}
+
 install_package() {
   mkdir -p "${INSTALL_DIR}" "${LOCAL_BIN}"
 
   # Prerequisite: uv (venv + package management per the install contract).
-  if ! command -v uv >/dev/null 2>&1; then
-    warn "uv not found on PATH (required for venv + package management)"
-    warn "Install: curl -LsSf https://astral.sh/uv/install.sh | sh"
-    exit 1
-  fi
+  # Self-acquire uv (vendored if absent) + mirror the governed pip index to uv so
+  # a solo/standalone install works on a pristine or governed box.
+  _ensure_uv_index
+  _ensure_uv || exit 1
 
   if [ ! -x "${VENV}/bin/python" ]; then
     _versioned_slot_clean
@@ -385,9 +490,12 @@ install_package() {
   # session-log-writer agent invoke, so they resolve on PATH rather than assuming
   # a bare command that was never deployed. Point at the stable `.venv` link
   # ($LINK_DIR), never a versions/<v> absolute a `gc` could remove.
-  for name in session-sync agent-logger collate-session read-session-digest prepare-session-log ramp-up-session; do
+  for name in session-sync collate-session read-session-digest prepare-session-log ramp-up-session; do
     ln -sf "${LINK_DIR}/bin/${name}" "${LOCAL_BIN}/${name}"
   done
+  # The primary `agent-logger` entrypoint is a self-provisioning binstub (not a
+  # plain symlink) so it can rebuild the runtime on first use in a confined host.
+  deploy_binstub
   ok "linked binstubs into ${LOCAL_BIN}"
 
   # Machine-local config schema migration (idempotent + atomic). Non-fatal.
@@ -443,6 +551,14 @@ case "${ACTION}" in
     _write_deploy_manifest
     ok "timer enabled (every 4h)"
     ;;
+  stamp)
+    do_stamp
+    ;;
+  provision)
+    install_package
+    _write_deploy_manifest
+    ok "runtime provisioned"
+    ;;
   update)
     install_package
     write_units
@@ -471,7 +587,7 @@ case "${ACTION}" in
       && ok "timer active" || warn "timer not active"
     ;;
   *)
-    echo "usage: install.sh {install|update|uninstall|status}" >&2
+    echo "usage: install.sh {install|stamp|provision|update|uninstall|status}" >&2
     exit 2
     ;;
 esac

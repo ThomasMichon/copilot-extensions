@@ -12,6 +12,17 @@ description: >
 
 # Log Session (interactive)
 
+> **Before you start — readiness (self-provisioning, no agent-worktrees required).**
+> agent-logger provisions its own runtime on first use and works standalone in any
+> host (CLI, Copilot app, cloud agent). If `command -v agent-logger` fails, deploy
+> its binstub first (it then self-provisions on first call):
+> `bash "$(ls ~/.copilot/installed-plugins/*/agent-logger/scripts/install.sh | head -1)" stamp`
+> then run `agent-logger version` once — the first call provisions the runtime
+> (~30–120s; watch for `::agent-provisioning::`) and deploys the auxiliary tools
+> (`session-sync`, `collate-session`, `prepare-session-log`, …). If it reports a
+> provisioning failure (e.g. missing uv / network), surface the exact message —
+> don't improvise a toolchain install.
+
 Write a structured Markdown log for the **current** session, now. This skill
 is the interactive, single-session entry point to the
 `session-log-writer` agent. It produces a plain log unless repository
