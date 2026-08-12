@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-# Session-start runtime reconcile -- generic, self-locating; byte-identical across
-# agent-* runtime plugins. Invoked (via hooks.json) from the plugin's scripts/
-# dir. Derives the install dir from plugin.json's name (~/.<name>) and re-runs the
-# installer in the BACKGROUND only when the deployed version drifts from the
-# payload. Reconciles the TOOL, never machine state/config.
+# Session-start runtime bootstrap + reconcile -- generic, self-locating. Invoked
+# (via hooks.json) from the plugin's scripts/ dir. Derives the install dir from
+# plugin.json's name (~/.<name>). Two jobs, both grace-window-cheap:
+#   1. FIRST install (unprovisioned): if the installer supports a cheap 'stamp'
+#      action, splat the self-provisioning binstub now (deferring the venv build
+#      to the binstub's first use) so the CLI is on PATH this session -- no venv
+#      build on the hook. Installers without 'stamp' keep the old no-op.
+#   2. RECONCILE (already provisioned): re-run the installer in the BACKGROUND
+#      only when the deployed version drifts. Reconciles the TOOL, never state.
 ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PluginDir="$(cd "$ScriptDir/.." && pwd)"
 py="$(command -v python3 || command -v python || true)"; [ -n "$py" ] || exit 0
@@ -11,7 +15,16 @@ name="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1])).get("name",
 [ -n "$name" ] || exit 0
 InstallDir="$HOME/.$name"
 Manifest="$InstallDir/deploy-manifest.json"
-[ -f "$Manifest" ] || exit 0
+if [ ! -f "$Manifest" ]; then
+  # Not provisioned yet -- do the cheap FIRST install (stamp) so the binstub is
+  # callable this session; it self-provisions the runtime on first use. Fully
+  # back-compatible: only fires when the installer declares a 'stamp' action.
+  installer="$PluginDir/scripts/install.sh"
+  if [ -f "$installer" ] && grep -qE '^[[:space:]]*stamp\)' "$installer" 2>/dev/null; then
+    bash "$installer" stamp >/dev/null 2>&1 || true
+  fi
+  exit 0
+fi
 deployed="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1]))["source"].get("version",""))' "$Manifest" 2>/dev/null)"
 current="$deployed"
 pyproj="$PluginDir/pyproject.toml"
