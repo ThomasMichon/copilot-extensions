@@ -30,6 +30,7 @@
     { "n": 3, "title": "runtime bootstrap on first session (venv + binstub)" },
     { "n": 4, "title": "binstub reachability from a stock login shell" },
     { "n": 5, "title": "plugin loading in headless copilot -p" },
-    { "n": 6, "title": "register the current repo as a harness project" }
+    { "n": 6, "title": "register the current repo as a harness project" },
+    { "n": 7, "title": "repo-scoped enablement (.github/copilot/settings.json fires sessionStart hooks)" }
   ]
 }
