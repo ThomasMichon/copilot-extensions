@@ -353,3 +353,60 @@ def test_broken_cli_command_builder_is_skipped(registry):
     assert good["built"] is True
     args = parser.parse_args(["probe2"])
     assert args.func(args) == 0
+
+
+# ---------------------------------------------------------------------------
+# Startup hook -> run_server (daemon boot)
+# ---------------------------------------------------------------------------
+
+
+def test_startup_hooks_run_in_priority_order(registry):
+    from agent_vault.extensions import StartupContext
+
+    order = []
+    registry.register_startup(lambda s, c: order.append("b"), priority=50, name="b")
+    registry.register_startup(lambda s, c: order.append("a"), priority=10, name="a")
+    registry.register_startup(lambda s, c: order.append("c"), priority=50, name="c")
+    names = [r.name for r in registry.startup_hooks]
+    assert names == ["a", "b", "c"]  # priority asc, then registration order
+
+    ctx = StartupContext(kpdb="x.kdbx", group="G", vault_name="work", port=51234, run_dir="/run")
+    registry.run_startup(object(), ctx)
+    assert order == ["a", "b", "c"]
+
+
+def test_startup_hook_receives_service_and_context(registry):
+    from agent_vault.extensions import StartupContext
+
+    seen = {}
+    sentinel = object()
+
+    def hook(service, ctx):
+        seen["service"] = service
+        seen["ctx"] = ctx
+
+    registry.register_startup(hook, name="tunnel")
+    ctx = StartupContext(kpdb="x.kdbx", group="G", vault_name="work", port=51234, run_dir="/run")
+    registry.run_startup(sentinel, ctx)
+    assert seen["service"] is sentinel
+    assert isinstance(seen["ctx"], StartupContext)
+    assert seen["ctx"].port == 51234
+    assert seen["ctx"].run_dir == "/run"
+
+
+def test_broken_startup_hook_is_contained(registry):
+    from agent_vault.extensions import StartupContext
+
+    ran = {"good": False}
+
+    def boom(service, ctx):
+        raise RuntimeError("kaboom")
+
+    def good(service, ctx):
+        ran["good"] = True
+
+    registry.register_startup(boom, priority=10, name="boom")
+    registry.register_startup(good, priority=20, name="good")
+    ctx = StartupContext(kpdb=None, group=None, vault_name="", port=0, run_dir="/run")
+    registry.run_startup(object(), ctx)  # must not raise
+    assert ran["good"] is True
