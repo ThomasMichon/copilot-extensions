@@ -9,6 +9,15 @@ description: >-
 
 # agent-ssh (core + transport-provider contract)
 
+> **Before you start — readiness (self-provisioning, no agent-worktrees required).**
+> agent-ssh provisions its own runtime on first use and works standalone in any
+> host (CLI, Copilot app, cloud agent). If `command -v agent-ssh` fails, deploy its
+> binstub first (it then self-provisions on first call):
+> `bash "$(ls ~/.copilot/installed-plugins/*/agent-ssh/scripts/install.sh | head -1)" stamp`
+> The first call may take ~30–120s to provision (watch for `::agent-provisioning::`);
+> let it finish. If it reports a provisioning failure (e.g. missing uv / network),
+> surface the exact message — don't improvise a toolchain install.
+
 The connectivity layer that makes machine-name SSH profiles real for the agent
 fabric. The public runtime ships the transport-agnostic core and the provider
 contract; concrete transports live in their own provider plugins.
