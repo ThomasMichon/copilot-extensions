@@ -1627,9 +1627,17 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
     from .supervisor_daemon import SupervisorDaemon
 
     machine, env = _registration_scope(args)
+
+    declared_source = None
+    if not getattr(args, "no_declared", False):
+        from . import registrar_discovery
+
+        declared_source = registrar_discovery.discover
+
     with _client(args) as c:
         daemon = SupervisorDaemon(
-            c, machine, env, poll_interval=getattr(args, "interval", 5.0)
+            c, machine, env, poll_interval=getattr(args, "interval", 5.0),
+            declared_source=declared_source,
         )
 
         def _on_cycle(summary) -> None:
@@ -3104,6 +3112,9 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--no-single-instance", action="store_true",
                     help="skip the singleton election (deliberately unguarded; "
                          "for tests / diagnostics only)")
+    rp.add_argument("--no-declared", action="store_true",
+                    help="do not supervise the registrar's DECLARED profile set "
+                         "(discovered pointers); run only store-backed registrations")
     rp.set_defaults(func=_cmd_supervise)
     rp = sup_sub.add_parser(
         "daemon-status",

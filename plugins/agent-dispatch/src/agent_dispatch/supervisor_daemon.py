@@ -33,6 +33,7 @@ import logging
 import subprocess
 import sys
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Protocol
@@ -85,6 +86,17 @@ def _lane_flags(spec: dict) -> list[str]:
     if spec.get("headless_agent"):
         argv += ["--headless-agent", str(spec["headless_agent"])]
     argv += ["--interval", str(spec.get("interval", 30.0))]
+    # Full supervise surface (a declaration is a lossless superset of the legacy env
+    # profile): these keys are absent in older store-backed specs -- emitted only
+    # when present, so existing supervised-lane registrations are unaffected.
+    if spec.get("heartbeat") is False:
+        argv.append("--no-heartbeat")
+    if spec.get("reactive") is False:
+        argv.append("--no-reactive")
+    if spec.get("reactive_interval") is not None:
+        argv += ["--reactive-interval", str(spec["reactive_interval"])]
+    if spec.get("verify_timeout"):
+        argv += ["--verify-timeout", str(spec["verify_timeout"])]
     return argv
 
 
@@ -244,6 +256,7 @@ class SupervisorDaemon:
         restart_backoff: float = 5.0,
         max_restarts: int | None = None,
         lock: Any | None = None,
+        declared_source: Callable[[], Iterable[Any]] | None = None,
     ):
         self.client = client
         self.machine = machine
@@ -259,16 +272,57 @@ class SupervisorDaemon:
         #: The single-instance lock (injectable for tests). Built lazily from the
         #: run-dir + scope when first needed, unless one was supplied.
         self._lock = lock
+        #: Optional provider of the DECLARED profile set (the registrar's discovered
+        #: declarations). Called every reconcile so appearing/changing/vanishing
+        #: declarations are hot-reconciled alongside store-backed registrations --
+        #: the *declarations-are-the-source-of-truth* path. Returns ProfileDeclaration
+        #: objects; None disables declared supervision (store-only, legacy behavior).
+        self.declared_source = declared_source
+        #: The declared set most recently read successfully -- returned when a later
+        #: discovery read *errors*, so a transient filesystem/env blip never winds
+        #: down live declared units (only a successful read that no longer lists a
+        #: unit does). Empty until the first successful read.
+        self._last_declared: list[dict] = []
         self._units: dict[str, ManagedUnit] = {}
 
     # -- registry view -------------------------------------------------------
 
+    def _declared(self) -> list[dict]:
+        """The declared profile set for this (machine, env), as registrations.
+
+        Re-read every reconcile (that is the *watch*): the daemon's existing
+        start/restart/wind-down logic turns a re-read into hot-reconcile. On a read
+        *error* the last successfully-read set is returned (not empty), so a transient
+        discovery failure never tears down live declared units; a successful read that
+        drops a unit still winds it down.
+        """
+        if self.declared_source is None:
+            return []
+        from .registrar_reconcile import declared_registrations
+
+        try:
+            decls = list(self.declared_source())
+        except Exception:  # pragma: no cover - discovery is environment-dependent
+            log.exception("failed to read declared profile set; keeping the last known set")
+            return self._last_declared
+        self._last_declared = declared_registrations(decls, machine=self.machine, env=self.env)
+        return self._last_declared
+
     def _desired(self) -> dict[str, dict]:
-        """Active registrations scoped to this daemon's (machine, env)."""
+        """Active registrations scoped to this daemon's (machine, env).
+
+        Two sources, one desired set: the coordinator's store-backed registrations
+        plus the registrar's **declared** profile set. Declared ids are namespaced
+        (``declared:...``) to avoid colliding with *derived* store ids; if a
+        caller-supplied store id ever collides, the **declared** entry wins (the
+        declaration is the source of truth)."""
         regs = self.client.list_registrations(
             machine=self.machine, env=self.env, include_paused=False
         )
-        return {r["id"]: r for r in regs}
+        desired = {r["id"]: r for r in regs}
+        for reg in self._declared():
+            desired[reg["id"]] = reg
+        return desired
 
     # -- unit lifecycle ------------------------------------------------------
 
