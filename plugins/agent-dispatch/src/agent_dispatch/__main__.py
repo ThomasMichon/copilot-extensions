@@ -449,6 +449,25 @@ def _cmd_create(args: argparse.Namespace) -> int:
     return _emit(_enrich(task))
 
 
+def _cmd_propose(args: argparse.Namespace) -> int:
+    """Draft an unclaimable ``proposed`` task (the propose -> queue lifecycle).
+
+    Identical to ``create`` but the task is always ``proposed`` (unclaimable) and is
+    never claimed or spawned -- a proposal is a *plan*, committed to binding later
+    with ``queue <id>``. Rejects the execution-only flags rather than silently
+    ignoring them.
+    """
+    if getattr(args, "claim", False) or getattr(args, "spawn", False):
+        print(
+            "agent-dispatch propose: a proposed draft is not claimed or spawned; use "
+            "'create' for that, or 'queue <id>' after proposing to make it claimable",
+            file=sys.stderr,
+        )
+        return 2
+    args.proposed = True
+    return _cmd_create(args)
+
+
 def _read_payload_file(path: str) -> str:
     """Read a payload file, or stdin when ``path`` is ``-``."""
     if path == "-":
@@ -2314,6 +2333,105 @@ def _cmd_registrar(args: argparse.Namespace) -> int:
     raise AssertionError(f"unhandled registrar command {args.registrar_command!r}")
 
 
+def _create_args_parent() -> argparse.ArgumentParser:
+    """The shared argument surface for ``create`` and ``propose`` (an argparse parent).
+
+    Both verbs enqueue a task from the identical inputs; ``propose`` just forces the
+    ``proposed`` (unclaimable) state. Defining the args once keeps the two verbs from
+    drifting.
+    """
+    cp = argparse.ArgumentParser(add_help=False)
+    cp.add_argument("title", help="short, specific, self-contained summary of the work")
+    cp.add_argument(
+        "--prompt", default="",
+        help="the task instruction -- describe the work fully enough to dedup "
+             "against and to execute without extra context",
+    )
+    cp.add_argument(
+        "--repo",
+        help="lane (repo) this task belongs to: a local repo name or a remote "
+             "URL. Default: the calling repo resolved from the CWD. Tasks stay "
+             "in their producing repo's lane -- for a cross-repo *code* target "
+             "use --target-repo and let the lane agent do it via working-cross-repo.",
+    )
+    cp.add_argument("--proposed", action="store_true", help="create as an unclaimable draft")
+    cp.add_argument(
+        "--claim", action="store_true",
+        help="atomically create-AND-claim as this worktree (no queued gap). With "
+             "--dedup-key <subject>, this is the lazy open-ended-pickup primitive: "
+             "either mint the subject as mine, or (on a dedup collision) get back "
+             "the row someone else already took -- see 'claimed_by_me' in the "
+             "output to tell which.",
+    )
+    cp.add_argument(
+        "--require", action="append", help="hard capability/identity token (repeatable)"
+    )
+    cp.add_argument(
+        "--exclude", action="append",
+        help="hard EXCLUSION token -- a worker whose capabilities/identity match "
+             "any exclude is ineligible (anti-affinity; repeatable). E.g. "
+             "'machine:host-a', 'worktree:foo', 'agent:reviewer'.",
+    )
+    cp.add_argument("--affinity", action="append", help="soft preference key=value (repeatable)")
+    cp.add_argument("--label", action="append", help="free-form label (repeatable)")
+    cp.add_argument("--payload-ref")
+    cp.add_argument("--payload-inline")
+    cp.add_argument(
+        "--payload-file",
+        help="read the payload from a file (large payloads spill to a blob "
+             "automatically); '-' reads from stdin",
+    )
+    cp.add_argument(
+        "--target-machine",
+        help="route the task to this machine. With `--spawn --spawn-backend "
+             "embody` for another machine, dispatch runs there over the SSH "
+             "mesh (Phase 8: create+embody land on the target's coordinator).",
+    )
+    cp.add_argument("--target-worktree")
+    cp.add_argument("--target-repo")
+    cp.add_argument("--source")
+    cp.add_argument("--origin-ref")
+    cp.add_argument("--dedup-key")
+    cp.add_argument(
+        "--goal",
+        help="durable objective the worker loops toward across turns/embodiments "
+             "(the resumable-goal feature); a worker resumes it from recorded "
+             "progress rather than restarting. Omit for a plain one-shot task.",
+    )
+    cp.add_argument(
+        "--done-criteria",
+        help="explicit criteria for when --goal is met; the worker completes only "
+             "once it judges these satisfied (deferred completion).",
+    )
+    cp.add_argument("--not-before", type=float, default=0.0)
+    cp.add_argument(
+        "--spawn", action="store_true",
+        help="after creating, spawn a worker to execute it (best effort)",
+    )
+    cp.add_argument(
+        "--spawn-backend", choices=["bridge", "embody"], default="bridge",
+        help="how to embody the spawned worker: 'embody' = a CLI-backed "
+             "autopilot session in a fresh parallel worktree (agent-worktrees "
+             "embody -- the 'dispatch an agent to do X' path); 'bridge' "
+             "(default) = a headless agent-bridge ACP worker",
+    )
+    cp.add_argument(
+        "--spawn-agent", default="task-worker",
+        help="agent-bridge agent name to spawn (bridge backend only; "
+             "default: task-worker)",
+    )
+    cp.add_argument(
+        "--verify-timeout", type=int, default=0,
+        help="embody backend: wait up to N seconds for the spawned mux session "
+             "to come up before returning (default 0: don't wait)",
+    )
+    cp.add_argument(
+        "--async", dest="run_async", action="store_true",
+        help="with --spawn, don't wait for the worker (fire-and-forget)",
+    )
+    return cp
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = _DashDashParser(
         prog="agent-dispatch", description="Agent task queue + coordinator"
@@ -2337,102 +2455,27 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--db")
     p.set_defaults(func=_cmd_serve)
 
+    create_parent = _create_args_parent()
     p = sub.add_parser(
         "create",
+        parents=[create_parent],
         help="enqueue a task (write a self-contained title + --prompt so a "
              "producer sweeping existing tasks can judge duplication)",
     )
-    p.add_argument("title", help="short, specific, self-contained summary of the work")
-    p.add_argument(
-        "--prompt", default="",
-        help="the task instruction -- describe the work fully enough to dedup "
-             "against and to execute without extra context",
-    )
-    p.add_argument(
-        "--repo",
-        help="lane (repo) this task belongs to: a local repo name or a remote "
-             "URL. Default: the calling repo resolved from the CWD. Tasks stay "
-             "in their producing repo's lane -- for a cross-repo *code* target "
-             "use --target-repo and let the lane agent do it via working-cross-repo.",
-    )
-    p.add_argument("--proposed", action="store_true", help="create as an unclaimable draft")
-    p.add_argument(
-        "--claim", action="store_true",
-        help="atomically create-AND-claim as this worktree (no queued gap). With "
-             "--dedup-key <subject>, this is the lazy open-ended-pickup primitive: "
-             "either mint the subject as mine, or (on a dedup collision) get back "
-             "the row someone else already took -- see 'claimed_by_me' in the "
-             "output to tell which.",
-    )
-    p.add_argument(
-        "--require", action="append", help="hard capability/identity token (repeatable)"
-    )
-    p.add_argument(
-        "--exclude", action="append",
-        help="hard EXCLUSION token -- a worker whose capabilities/identity match "
-             "any exclude is ineligible (anti-affinity; repeatable). E.g. "
-             "'machine:lambda-core', 'worktree:foo', 'agent:reviewer'.",
-    )
-    p.add_argument("--affinity", action="append", help="soft preference key=value (repeatable)")
-    p.add_argument("--label", action="append", help="free-form label (repeatable)")
-    p.add_argument("--payload-ref")
-    p.add_argument("--payload-inline")
-    p.add_argument(
-        "--payload-file",
-        help="read the payload from a file (large payloads spill to a blob "
-             "automatically); '-' reads from stdin",
-    )
-    p.add_argument(
-        "--target-machine",
-        help="route the task to this machine. With `--spawn --spawn-backend "
-             "embody` for another machine, dispatch runs there over the facility "
-             "SSH mesh (Phase 8: create+embody land on the target's coordinator).",
-    )
-    p.add_argument("--target-worktree")
-    p.add_argument("--target-repo")
-    p.add_argument("--source")
-    p.add_argument("--origin-ref")
-    p.add_argument("--dedup-key")
-    p.add_argument(
-        "--goal",
-        help="durable objective the worker loops toward across turns/embodiments "
-             "(the resumable-goal feature); a worker resumes it from recorded "
-             "progress rather than restarting. Omit for a plain one-shot task.",
-    )
-    p.add_argument(
-        "--done-criteria",
-        help="explicit criteria for when --goal is met; the worker completes only "
-             "once it judges these satisfied (deferred completion).",
-    )
-    p.add_argument("--not-before", type=float, default=0.0)
-    p.add_argument(
-        "--spawn", action="store_true",
-        help="after creating, spawn a worker to execute it (best effort)",
-    )
-    p.add_argument(
-        "--spawn-backend", choices=["bridge", "embody"], default="bridge",
-        help="how to embody the spawned worker: 'embody' = a CLI-backed "
-             "autopilot session in a fresh parallel worktree (agent-worktrees "
-             "embody -- the 'dispatch an agent to do X' path); 'bridge' "
-             "(default) = a headless agent-bridge ACP worker",
-    )
-    p.add_argument(
-        "--spawn-agent", default="task-worker",
-        help="agent-bridge agent name to spawn (bridge backend only; "
-             "default: task-worker)",
-    )
-    p.add_argument(
-        "--verify-timeout", type=int, default=0,
-        help="embody backend: wait up to N seconds for the spawned mux session "
-             "to come up before returning (default 0: don't wait)",
-    )
-    p.add_argument(
-        "--async", dest="run_async", action="store_true",
-        help="with --spawn, don't wait for the worker (fire-and-forget)",
-    )
     p.set_defaults(func=_cmd_create)
 
-    p = sub.add_parser("approve", help="move a proposed task to queued")
+    p = sub.add_parser(
+        "propose",
+        parents=[create_parent],
+        help="draft an unclaimable 'proposed' task (the propose -> queue "
+             "lifecycle): like create but always proposed, never claimed or "
+             "spawned; run 'queue <id>' to make it claimable",
+    )
+    p.set_defaults(func=_cmd_propose)
+
+    p = sub.add_parser(
+        "approve", aliases=["queue"], help="move a proposed task to queued (commit it to binding)"
+    )
     p.add_argument("task_id")
     p.set_defaults(func=_simple("approve", "task_id"))
 
