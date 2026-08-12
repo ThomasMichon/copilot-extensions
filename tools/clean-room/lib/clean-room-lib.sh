@@ -1,0 +1,212 @@
+#!/usr/bin/env bash
+# clean-room-lib.sh -- shared helper API for clean-room SCENARIOS.
+#
+# This is the substrate half of the "scenario contract" (design doc
+# docs/clean-room-test-rig.md Sec.6). It is mounted READ-ONLY into the container
+# and sourced by a scenario's scenario.sh, so assertions, reporting, and
+# diagnostics stay uniform across scenarios and the runner stays name-free.
+#
+# Public helper API (see the design doc for the vocabulary):
+#   cr_init                      -- initialise accounting + logdir (call once, first)
+#   phase <n> <title>            -- start phase <n>; also the --until GATE
+#                                   (if <n> exceeds CR_UNTIL, finalize + exit here)
+#   pass  <msg>                  -- record a PASS line
+#   fail  <msg>                  -- record a FAIL line
+#   info  <msg>                  -- record an INFO line
+#   capture <label> -- <cmd...>  -- run <cmd>, tee stdout+stderr to
+#                                   cr-logs/<label>.log, record exit; returns rc
+#   envdump                      -- snapshot PATH / key tools+versions / named
+#                                   config files into the report's "env" object
+#   jam <category> <evidence> [hint]
+#                                -- emit a CLASSIFIED failure (design Sec.7);
+#                                   also counts as a FAIL
+#   cr_meta <key> <value>        -- add a scenario-specific top-level report field
+#   cr_finalize                  -- write cr-report.json + summary, then exit
+#                                   (exit 0 iff no FAILs); usually called for you
+#                                   by the --until gate or at scenario end
+#
+# Environment consumed:
+#   CR_REPORT        path for the JSON report            (default $HOME/cr-report.json)
+#   CR_LOGDIR        per-label command logs              (default $HOME/cr-logs)
+#   CR_UNTIL         stop after this phase number        (default 999 = all)
+#   CR_SCENARIO_NAME scenario name recorded in the report (default "unnamed")
+#
+# Contract notes:
+# - The report keeps the historical shape: top-level copilot_version,
+#   ran_until_phase, passed, failed, results[] -- plus additive scenario meta
+#   (via cr_meta), a jams[] array, and an env{} object. Existing consumers that
+#   read those top-level keys keep working.
+# - .sh files MUST be LF (the container's bash -lc / shebang break on CRLF).
+
+# ---- configuration -------------------------------------------------------
+CR_REPORT="${CR_REPORT:-$HOME/cr-report.json}"
+CR_LOGDIR="${CR_LOGDIR:-$HOME/cr-logs}"
+CR_UNTIL="${CR_UNTIL:-999}"
+CR_SCENARIO_NAME="${CR_SCENARIO_NAME:-unnamed}"
+
+# ---- accounting ----------------------------------------------------------
+CR_PASS=0
+CR_FAIL=0
+declare -a CR_RESULTS=()
+declare -a CR_JAMS=()
+declare -a CR_META_KEYS=()
+declare -a CR_META_VALS=()
+declare -a CR_ENV_TOOLS=()
+declare -a CR_ENV_CONFIGS=()
+CR_ENV_PATH=""
+CR_ENV_CAPTURED=0
+CR_CUR_PHASE=0
+
+# JSON-string-escape helper (quotes, backslashes, newlines, tabs, strip CR).
+_cr_esc() {
+    local s="$1"
+    s=${s//\\/\\\\}
+    s=${s//\"/\\\"}
+    s=${s//$'\n'/\\n}
+    s=${s//$'\t'/\\t}
+    s=${s//$'\r'/}
+    printf '%s' "$s"
+}
+
+cr_init() {
+    mkdir -p "$CR_LOGDIR"
+    CR_PASS=0; CR_FAIL=0
+    CR_RESULTS=(); CR_JAMS=(); CR_META_KEYS=(); CR_META_VALS=()
+    printf '\033[1m### clean-room scenario: %s (until phase %s) ###\033[0m\n' \
+        "$CR_SCENARIO_NAME" "$CR_UNTIL"
+}
+
+_cr_rec() {  # kind message
+    local kind="$1"; shift
+    local msg="$*"
+    case "$kind" in
+        PASS) CR_PASS=$((CR_PASS+1)); printf '  \033[32m[PASS]\033[0m %s\n' "$msg" ;;
+        FAIL) CR_FAIL=$((CR_FAIL+1)); printf '  \033[31m[FAIL]\033[0m %s\n' "$msg" ;;
+        INFO) printf '  \033[36m[INFO]\033[0m %s\n' "$msg" ;;
+    esac
+    CR_RESULTS+=("{\"kind\":\"$kind\",\"phase\":$CR_CUR_PHASE,\"msg\":\"$(_cr_esc "$msg")\"}")
+}
+
+pass() { _cr_rec PASS "$*"; }
+fail() { _cr_rec FAIL "$*"; }
+info() { _cr_rec INFO "$*"; }
+
+phase() {  # <n> <title...>  -- start phase n; gate on CR_UNTIL
+    local n="$1"; shift
+    if [ "$CR_UNTIL" -lt "$n" ] 2>/dev/null; then
+        cr_finalize
+    fi
+    CR_CUR_PHASE="$n"
+    printf '\n\033[1m== Phase %s -- %s ==\033[0m\n' "$n" "$*"
+}
+
+capture() {  # <label> -- <cmd...>   run, tee to cr-logs/<label>.log, record exit
+    local label="$1"; shift
+    [ "$1" = "--" ] && shift
+    local log="$CR_LOGDIR/${label}.log"
+    printf '  $ %s\n' "$*" | tee "$log" >/dev/null
+    "$@" >>"$log" 2>&1
+    local rc=$?
+    printf '  (%s exit=%s, log=%s)\n' "$label" "$rc" "$log"
+    return $rc
+}
+
+# Record one key=value scenario-specific field, emitted at the report top level
+# (preserves the historical shape for scenario-specific consumers).
+cr_meta() {  # <key> <value>
+    CR_META_KEYS+=("$1"); shift
+    CR_META_VALS+=("$*")
+}
+
+# Snapshot the environment into the report's env{} object: login-shell PATH, the
+# presence+version of key tools, and the presence of named config files.
+envdump() {
+    CR_ENV_PATH="$(bash -lc 'echo $PATH' 2>/dev/null)"
+    CR_ENV_TOOLS=(); CR_ENV_CONFIGS=()
+    local t ver where
+    for t in copilot uv git node python3 python pip gh; do
+        where="$(command -v "$t" 2>/dev/null || echo '')"
+        if [ -n "$where" ]; then
+            case "$t" in
+                copilot) ver="$(copilot --version 2>/dev/null | head -1)" ;;
+                uv)      ver="$(uv --version 2>/dev/null | head -1)" ;;
+                git)     ver="$(git --version 2>/dev/null | head -1)" ;;
+                node)    ver="$(node --version 2>/dev/null | head -1)" ;;
+                gh)      ver="$(gh --version 2>/dev/null | head -1)" ;;
+                *)       ver="$("$t" --version 2>&1 | head -1)" ;;
+            esac
+        else
+            ver=""
+        fi
+        CR_ENV_TOOLS+=("{\"tool\":\"$(_cr_esc "$t")\",\"path\":\"$(_cr_esc "$where")\",\"version\":\"$(_cr_esc "$ver")\"}")
+    done
+    local f
+    for f in "$HOME/.config/uv/uv.toml" /etc/pip.conf "$HOME/.pip/pip.conf" "$HOME/.config/pip/pip.conf"; do
+        if [ -f "$f" ]; then
+            CR_ENV_CONFIGS+=("{\"file\":\"$(_cr_esc "$f")\",\"present\":true}")
+        else
+            CR_ENV_CONFIGS+=("{\"file\":\"$(_cr_esc "$f")\",\"present\":false}")
+        fi
+    done
+    CR_ENV_CAPTURED=1
+    info "envdump: PATH + $(command -v uv >/dev/null && echo uv || echo 'no-uv') + configs captured"
+}
+
+# Emit a classified failure (design Sec.7 taxonomy). Counts as a FAIL and is also
+# recorded in the jams[] array with its evidence reference + optional unjam hint.
+jam() {  # <category> <evidence-ref> [<unjam-hint>]
+    local cat="$1" ev="$2" hint="${3:-}"
+    CR_FAIL=$((CR_FAIL+1))
+    printf '  \033[31m[JAM:%s]\033[0m %s%s\n' "$cat" "$ev" \
+        "$( [ -n "$hint" ] && printf ' -- hint: %s' "$hint" )"
+    CR_RESULTS+=("{\"kind\":\"FAIL\",\"phase\":$CR_CUR_PHASE,\"msg\":\"jam[$(_cr_esc "$cat")]: $(_cr_esc "$ev")\"}")
+    CR_JAMS+=("{\"category\":\"$(_cr_esc "$cat")\",\"phase\":$CR_CUR_PHASE,\"evidence\":\"$(_cr_esc "$ev")\",\"hint\":\"$(_cr_esc "$hint")\"}")
+}
+
+_cr_join() {  # print array elements joined by ",\n    " with a leading indent
+    local first=1 e
+    for e in "$@"; do
+        [ $first -eq 1 ] && first=0 || printf ',\n'
+        printf '    %s' "$e"
+    done
+}
+
+cr_finalize() {
+    printf '\n\033[1m== Summary ==\033[0m\n'
+    printf '  \033[1m%d passed, %d failed\033[0m (scenario=%s, ran through phase %s)\n' \
+        "$CR_PASS" "$CR_FAIL" "$CR_SCENARIO_NAME" "$CR_UNTIL"
+    [ ${#CR_JAMS[@]} -gt 0 ] && printf '  \033[31m%d jam(s) classified\033[0m\n' "${#CR_JAMS[@]}"
+    {
+        printf '{\n'
+        printf '  "scenario": "%s",\n' "$(_cr_esc "$CR_SCENARIO_NAME")"
+        printf '  "copilot_version": "%s",\n' "$(_cr_esc "$(copilot --version 2>/dev/null | head -1)")"
+        printf '  "ran_until_phase": %s,\n' "$CR_UNTIL"
+        # scenario-specific top-level meta (historical-shape fields)
+        local i
+        for i in "${!CR_META_KEYS[@]}"; do
+            printf '  "%s": "%s",\n' "$(_cr_esc "${CR_META_KEYS[$i]}")" "$(_cr_esc "${CR_META_VALS[$i]}")"
+        done
+        printf '  "passed": %d,\n  "failed": %d,\n' "$CR_PASS" "$CR_FAIL"
+        # env{}
+        printf '  "env": {\n'
+        printf '    "path": "%s",\n' "$(_cr_esc "$CR_ENV_PATH")"
+        printf '    "tools": [\n'
+        [ ${#CR_ENV_TOOLS[@]} -gt 0 ] && { _cr_join "${CR_ENV_TOOLS[@]}"; printf '\n'; }
+        printf '    ],\n'
+        printf '    "configs": [\n'
+        [ ${#CR_ENV_CONFIGS[@]} -gt 0 ] && { _cr_join "${CR_ENV_CONFIGS[@]}"; printf '\n'; }
+        printf '    ]\n'
+        printf '  },\n'
+        # jams[]
+        printf '  "jams": [\n'
+        [ ${#CR_JAMS[@]} -gt 0 ] && { _cr_join "${CR_JAMS[@]}"; printf '\n'; }
+        printf '  ],\n'
+        # results[]
+        printf '  "results": [\n'
+        [ ${#CR_RESULTS[@]} -gt 0 ] && { _cr_join "${CR_RESULTS[@]}"; printf '\n'; }
+        printf '  ]\n'
+        printf '}\n'
+    } > "$CR_REPORT"
+    printf '  report: %s\n  logs:   %s\n' "$CR_REPORT" "$CR_LOGDIR"
+    [ "$CR_FAIL" -eq 0 ]; exit $?
+}
