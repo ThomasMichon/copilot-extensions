@@ -1050,18 +1050,27 @@ def build_resolution(
         mach = cs.get("machine", "")
         loc = cs.get("location", "")
         ws = cs.get("workspace_folder", "")
-        create = f"gh cs create -R {repo}"
-        if mach:
-            create += f" -m {mach}"
-        if loc:
-            create += f" -l {loc}"
+        # Recommend the headless agent-codespaces wrapper, NOT bare `gh cs create`
+        # (dotfiles#1215): `gh cs create` still prompts interactively (billing
+        # consent, devcontainer selection) and hard-fails from a non-TTY agent
+        # ("failed to prompt: no terminal"). `agent-codespaces create` routes
+        # around every prompt via the REST fallback + devcontainer auto-resolve
+        # and honors the reuse-before-create pool guard. Machine/location come
+        # from agent-codespaces' own venue config, not flags here.
+        create = f"agent-codespaces create {repo}"
         res.steps = [
             f"Preferred locus is a CodeSpace (delegate via "
             f"{entry.delegate or 'agent-codespaces'}).",
-            f"Provision/reuse: {create}",
+            f"Provision/reuse (headless, no TTY): {create}",
             "Dispatch work: `agent-bridge send codespace:<name> \"<task>\"` "
             "(or `agent-codespaces ssh <name>`).",
         ]
+        if mach or loc:
+            sizing = ", ".join(
+                p for p in (f"machine={mach}" if mach else "",
+                            f"location={loc}" if loc else "") if p
+            )
+            res.notes.append(f"Venue sizing from config: {sizing}.")
         if ws:
             res.notes.append(f"Workspace checkout on the CodeSpace: {ws}.")
         # Surface the container alternative when this machine hosts the fleet.
@@ -1108,7 +1117,7 @@ def build_resolution(
                 cs_repo = entry.locus.codespace.get("repo", "<codespace-repo>")
                 res.notes.append(
                     f"Or use the CodeSpace from any machine: "
-                    f"`gh cs create -R {cs_repo}` then "
+                    f"`agent-codespaces create {cs_repo}` then "
                     f"`agent-bridge send codespace:<name> \"<task>\"`."
                 )
         return res
