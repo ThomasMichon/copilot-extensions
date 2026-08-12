@@ -18,13 +18,16 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from . import __version__
 from . import config as _config
 from .client import DispatchClient, DispatchError
 from .config import Config, client_token, client_url, shared_token, shared_url
 from .registrations import RegistrationKind
+
+if TYPE_CHECKING:
+    from .registrar import ProfileDeclaration
 
 
 def _emit(value: Any) -> int:
@@ -2265,6 +2268,52 @@ class _DashDashParser(argparse.ArgumentParser):
         return super().parse_known_args(args, namespace)
 
 
+def _declaration_summary(decl: ProfileDeclaration) -> dict[str, Any]:
+    """A JSON-friendly summary of a discovered declaration (for ``registrar discover``)."""
+    ef = decl.effective_filters()
+    return {
+        "name": decl.name,
+        "owner": decl.owner,
+        "labels": list(decl.labels),
+        "repos": decl.repos,
+        "concurrency": decl.concurrency,
+        "body": {"type": decl.body.type, "agent": decl.body.agent},
+        "filters": {
+            "permit": {dim: sorted(vals) for dim, vals in ef.permit.items()},
+            "reject": {dim: sorted(vals) for dim, vals in ef.reject.items()},
+        },
+    }
+
+
+def _cmd_registrar(args: argparse.Namespace) -> int:
+    """The declarative-supervision registrar: manage discovery pointers + read the
+    declared profile set. A thin writer/reader over the declared documents (the one
+    source of truth) -- no coordinator round-trip."""
+    from . import registrar_discovery as rd
+    from .registrar import RegistrarError
+
+    try:
+        if args.registrar_command == "add-pointer":
+            pointer = rd.add_pointer(
+                args.name, args.location, kind=args.kind, owner=args.owner
+            )
+            return _emit(pointer.to_dict())
+        if args.registrar_command == "list":
+            return _emit([p.to_dict() for p in rd.load_pointers()])
+        if args.registrar_command == "remove":
+            return _emit({"removed": rd.remove_pointer(args.name)})
+        if args.registrar_command == "discover":
+            decls = rd.discover()
+            return _emit([_declaration_summary(d) for d in decls])
+        if args.registrar_command == "discover-repo":
+            decls = rd.discover_repo(args.repo_root, owner=args.owner)
+            return _emit([_declaration_summary(d) for d in decls])
+    except RegistrarError as exc:
+        print(f"agent-dispatch registrar: {exc}", file=sys.stderr)
+        return 2
+    raise AssertionError(f"unhandled registrar command {args.registrar_command!r}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = _DashDashParser(
         prog="agent-dispatch", description="Agent task queue + coordinator"
@@ -2386,6 +2435,50 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("approve", help="move a proposed task to queued")
     p.add_argument("task_id")
     p.set_defaults(func=_simple("approve", "task_id"))
+
+    p = sub.add_parser(
+        "registrar",
+        help="declarative-supervision registrar: manage discovery pointers and read "
+             "the declared profile set (declarations are the one source of truth; "
+             "the CLI is a thin writer/reader over them)",
+    )
+    reg_sub = p.add_subparsers(dest="registrar_command", required=True)
+    rp = reg_sub.add_parser(
+        "add-pointer",
+        help="record (or replace) a pointer to a location of declaration documents",
+    )
+    rp.add_argument("name", help="unique pointer name (letters, digits, '-', '_')")
+    rp.add_argument(
+        "location",
+        help="directory of declaration docs, or (with --kind repo) a repo root "
+             "whose .agent-dispatch/registrar/ is read",
+    )
+    rp.add_argument(
+        "--kind", choices=["dir", "repo"], default="dir",
+        help="'dir' (default) reads the location directly; 'repo' reads its "
+             ".agent-dispatch/registrar/ subdir",
+    )
+    rp.add_argument("--owner", help="provenance stamped on declarations read here")
+    rp.set_defaults(func=_cmd_registrar)
+    rp = reg_sub.add_parser("list", help="list the recorded discovery pointers")
+    rp.set_defaults(func=_cmd_registrar)
+    rp = reg_sub.add_parser("remove", help="remove a discovery pointer by name")
+    rp.add_argument("name", help="the pointer name to remove")
+    rp.set_defaults(func=_cmd_registrar)
+    rp = reg_sub.add_parser(
+        "discover",
+        help="read + aggregate the declared profile set across all pointers "
+             "(rejects duplicate profile names across sources)",
+    )
+    rp.set_defaults(func=_cmd_registrar)
+    rp = reg_sub.add_parser(
+        "discover-repo",
+        help="read a single synced repo's in-repo .agent-dispatch/registrar/ "
+             "declarations (the repo-sync discovery unit)",
+    )
+    rp.add_argument("repo_root", help="path to the repo root to read declarations from")
+    rp.add_argument("--owner", help="provenance override (default: repo:<name>)")
+    rp.set_defaults(func=_cmd_registrar)
 
     p = sub.add_parser(
         "claim", help="atomically lease one eligible task (identity auto-resolved from CWD)"
