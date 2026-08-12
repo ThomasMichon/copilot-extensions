@@ -51,6 +51,15 @@ SAMPLE_AGENTS = {
         "cwd": "C:\\Users\\user\\src",
         "description": "Agent on pwsh-only machine",
     },
+    "pool-body-agent": {
+        # A spawn body: needs a project to be embodied into a worktree on spawn,
+        # but shares another lane's host+root, so it opts out of worktree discovery.
+        "host": "workstation",
+        "ssh_environment": "wsl",
+        "project": "my-project",
+        "worktree_discovery": False,
+        "description": "Headless pool body sharing the workstation-wsl lane",
+    },
 }
 
 SAMPLE_MACHINES_DATA = {
@@ -99,7 +108,17 @@ class TestParseAgentRegistry:
 
     def test_parse_all_agents(self):
         registry = parse_agent_registry(SAMPLE_AGENTS)
-        assert len(registry) == 5
+        assert len(registry) == 6
+
+    def test_worktree_discovery_defaults_true(self):
+        registry = parse_agent_registry(SAMPLE_AGENTS)
+        assert registry["local-agent"].worktree_discovery is True
+
+    def test_worktree_discovery_opt_out(self):
+        registry = parse_agent_registry(SAMPLE_AGENTS)
+        assert registry["pool-body-agent"].worktree_discovery is False
+        # a spawn body keeps its project (load-bearing for spawn-time worktree resolve)
+        assert registry["pool-body-agent"].project == "my-project"
 
     def test_local_agent_fields(self):
         registry = parse_agent_registry(SAMPLE_AGENTS)
@@ -324,7 +343,7 @@ class TestAgentResolver:
 
     def test_list_agents(self):
         agents = self.resolver.list_agents()
-        assert len(agents) == 5
+        assert len(agents) == 6
         names = {a["name"] for a in agents}
         assert "local-agent" in names
         assert "managed-agent" in names
@@ -470,7 +489,7 @@ class TestLoadAgentRegistry:
         reg_path = tmp_path / "agents.json"
         reg_path.write_text(json.dumps(SAMPLE_AGENTS))
         registry = load_agent_registry(reg_path)
-        assert len(registry) == 5
+        assert len(registry) == 6
 
     def test_load_missing_file(self, tmp_path: Path):
         registry = load_agent_registry(tmp_path / "nonexistent.json")
@@ -2105,3 +2124,34 @@ class TestMissingNamespaceLogging:
             _log_missing_namespace("agent-containers", "container:")
         assert [r for r in caplog.records if r.levelname == "WARNING"] == []
         assert any(r.levelname == "DEBUG" for r in caplog.records)
+
+
+class TestWorktreeDiscoveryEligibility:
+    """The worktree-discovery crawl skips agents that opt out (spawn bodies)."""
+
+    def test_crawl_excludes_worktree_discovery_false(self):
+        import asyncio
+
+        from agent_bridge.routes.worktrees import WorktreeDiscoveryCache
+
+        agents = parse_agent_registry(SAMPLE_AGENTS)
+        machines = parse_machines_yaml(SAMPLE_MACHINES_DATA)
+        resolver = AgentResolver(agents, machines)
+
+        cache = WorktreeDiscoveryCache()
+        crawled: list[str] = []
+
+        async def fake_crawl_agent(agent_name, config, resolver):
+            crawled.append(agent_name)
+            return []
+
+        cache._crawl_agent = fake_crawl_agent  # type: ignore[assignment]
+        asyncio.run(cache.crawl(resolver))
+
+        # local-agent + remote-agent have a project AND default worktree_discovery.
+        assert "local-agent" in crawled
+        assert "remote-agent" in crawled
+        # pool-body-agent has a project but opted out -> never crawled/listed.
+        assert "pool-body-agent" not in crawled
+        # an agent without a project is ineligible regardless.
+        assert "lambda-agent" not in crawled

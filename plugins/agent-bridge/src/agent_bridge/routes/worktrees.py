@@ -191,7 +191,7 @@ class WorktreeDiscoveryCache:
         """Crawl all eligible agents concurrently."""
         eligible = [
             (name, cfg) for name, cfg in resolver.agents.items()
-            if cfg.project
+            if cfg.project and cfg.worktree_discovery
         ]
         if not eligible:
             return

@@ -127,6 +127,14 @@ class AgentConfig:
     worktree_root: str | None = None
     env: dict[str, str] = field(default_factory=dict)
     project: str | None = None  # agent-worktrees project (binstub name)
+    # Whether this agent is enumerated as a worktree-discovery *lane* (its
+    # machine's worktrees listed under it in /api/v1/worktrees). Default True for
+    # a machine/repo lane. Set False for a **spawn body** that legitimately needs
+    # ``project`` to be embodied into a worktree on spawn (e.g. a headless pool
+    # worker) but shares another agent's host+root -- otherwise it double-lists
+    # that machine's entire inventory under itself. A spawn body's real sessions
+    # already appear under the machine lane it runs on.
+    worktree_discovery: bool = True
     setup_script: str | None = None
     auto_discovered: bool = False  # True for agents from projects.yaml
     derived: bool = False  # True for agents synthesized from topology (machines × repos)
@@ -513,6 +521,7 @@ def parse_agent_registry(data: dict[str, Any]) -> dict[str, AgentConfig]:
             worktree_root=config.get("worktree_root"),
             env={str(k): str(v) for k, v in config.get("env", {}).items()},
             project=config.get("project"),
+            worktree_discovery=bool(config.get("worktree_discovery", True)),
             setup_script=config.get("setup_script"),
             requires_admin=bool(config.get("requires_admin")),
         )
