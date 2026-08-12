@@ -119,19 +119,25 @@ The coordinator only owns the queue; anything that *creates* a task is a
    enough that re-firing the same occurrence does not duplicate it.
 
 ### The lifecycle
-A task moves through a small set of states from *drafted* → *ready* → *claimed*
-(held for evaluation) → *started* (under active work) → *completed*, with a
-*discarded* terminal path for duplicates and dropped priorities. The
-**claim→start** gap is a deliberate **evaluation window**: a worker holds a task
-exclusively while it decides whether to accept, decline (returning it with a
-"not me" so it isn't re-offered the same task), or retire it as a duplicate.
+A task moves through a small set of states: **proposed → queued → claimed**
+(held for evaluation) → **started** (under active work) → **completed**, with an
+**abandoned** terminal path for duplicates and dropped priorities. The two entry
+states are two deliberate operations: to **propose** is to draft a task — its
+concise **goal**, its detailed **goal payload**, the capabilities it **requires**,
+the work it **rejects**, and its other filter attributes — and get back a **task
+id**, *without* making it claimable; to **queue** it moves **proposed → queued**,
+at which point the layer **binds it to an agent whose pool filter accepts it**.
+The **claim→start** gap is then a deliberate **evaluation window**: a worker holds
+a queued task exclusively while it decides whether to accept, decline (returning it
+with a "not me" so it isn't re-offered the same task), or retire it as a duplicate.
 
-### The recipe — a packaged loop archetype
+### The recipe — an emitter/evaluator template
 The common **shapes** of long-running agentic work ship with the layer as named,
-reusable **recipes**, rather than being re-derived by every consumer. A recipe is
-a **charter template plus wiring**: the goal-loop working contract specialized for
-a class of work, the domain events it **suspends** on, and the **resolution** it
-drives toward. Three archetypes are first-class:
+reusable **templates** — a recipe is **not a command you run**, it is a
+**template for an emitter/evaluator pair**. You **instantiate** one by
+**registering** a concrete emitter/evaluator pair, made real by the specifics its
+template leaves open: the target repo, the change-review technology, the issue
+back-end, the actual machine and account names. Three archetypes are first-class:
 
 1. **reviewer** — for a given change (a pull request, a branch diff), loop until
    the change is merged or abandoned: review, post feedback or approve, suspend on
@@ -148,19 +154,25 @@ drives toward. Three archetypes are first-class:
    review feedback — until the goal is met or abandoned.
 
 A consumer **selects and parameterizes** a recipe rather than hand-rolling a loop,
-and may **extend** one where its domain needs more. One reviewer recipe serves an
-automated review service, an ad-hoc review of a single check-in, and a batch of
-target pull requests alike — one shape, many tenants.
+and may **extend** one where its domain needs more. An instantiated pair knows how
+to **author its own tasks** — deriving the goal and payload, stamping the filters,
+wiring its evaluator, defining the intermediary steps, and owning suspend/resume —
+whether it fires on its own event or is **side-loaded** on demand (see
+*side-load-through-an-emitter*). One reviewer template serves an automated review
+service, an on-demand review of a single check-in, and a batch of target pull
+requests alike — one shape, many instantiations.
 
-### The evaluator — a producer's lifecycle handler
-A producer puts work on the queue; an **evaluator** is its companion **handler**
-that decides what happens *next* as that work progresses. Like a hook, an
-evaluator receives a task's **lifecycle events** and chooses the follow-through —
-emit a follow-up task, update domain state, or confirm completion. Producers wire
-a domain's *world* into the queue; evaluators wire its *judgment* into the loop —
-so a standing domain automates a whole cycle without the layer needing a bespoke
-module per domain. The **degenerate case is the ad-hoc kick**: a one-off task with
-no evaluator still runs, supervised locally and reporting its own outcome.
+### The evaluator — an emitter's lifecycle handler
+An **evaluator** is the **emitter's companion handler** — it belongs to the
+emitter, not to a lone task. It receives the **lifecycle events** of the tasks
+*its emitter produced* and chooses the follow-through: emit a follow-up task,
+update domain state, suspend/resume the worker, or confirm completion. This is
+what makes an emitter's tasks **self-driving**: because the evaluator rides their
+lifecycle, a standing domain automates a whole cycle without the layer needing a
+bespoke module per domain. The boundary is ownership — a task produced **through an
+emitter** gets that emitter's evaluator run over it automatically; a task
+**proposed and queued by hand, with no emitter behind it**, has no evaluator and is
+**tracked by its caller** (see *emitter-tasks-are-evaluated-mine-are-tracked*).
 
 ## Features
 
@@ -187,7 +199,11 @@ text; a semantic index is a performance layer over it, never a precondition.
 A task can **require** capabilities (hard: only a worker advertising them may
 claim) and **prefer** affinities (soft: order candidates without excluding). Two
 workers advertising the same capability give **cooperative, redundant** coverage
-of that work with no coordinator-side scheduling.
+of that work with no coordinator-side scheduling. Capabilities and affinities are
+the open end of a larger **attribute vocabulary** a task is routed by — alongside
+its repo lane, an optional target **machine**, **environment**, or **worktree**,
+and a **role** (a specialized body such as review or logging). *pools-are-filters-with-a-cap*
+is what reads that whole vocabulary from the other side.
 
 ### recorded-outcome
 A worker reports **progress toward the goal** at meaningful transitions and a
@@ -235,24 +251,31 @@ not a shared runtime.
 
 ### loop-recipes
 The layer ships the **shapes** of long-running agentic work — **reviewer**,
-**conflict-resolution**, **goal-driven** — as reusable, parameterized recipes (see
-*The recipe*). A consumer selects and configures a loop instead of re-implementing
-one; a recipe fixes the suspend/resume rhythm and the resolution target for its
-class of work, and the consumer supplies the specifics (which repo, which goal,
-which target change). Extension is expected where a domain needs more, but the
-default is **reuse**: the same recipe is the engine behind a standing service and
-a one-off alike.
+**conflict-resolution**, **goal-driven** — as reusable **emitter/evaluator
+templates** (see *The recipe*). A domain **instantiates** one by registering a
+concrete emitter/evaluator pair and supplying the specifics (which repo, which
+review technology, which issue back-end, which machine and account); the template
+fixes the suspend/resume rhythm and the resolution target for its class of work.
+Extension is expected where a domain needs more, but the default is **reuse**: the
+same template is the engine behind a standing automated service and an on-demand
+instance alike.
 
-### recipes-run-ad-hoc
-A loop recipe is a **directly-invokable** capability, not something that only
-exists inside a standing domain service. A one-off — "review this change to
-merge," "unstick this stalled change," "drive this goal to a pull request" — can
-be **kicked from the command line** needing nothing more than a **coordinator, a
-worker body, and the recipe**. No standing service, emitter, evaluator, or
-per-domain deployment is a precondition; that machinery is how a *recurring* or
-*at-scale* domain grows, never a gate. The minimum viable deployment is small on
-purpose, so the loops are equally available to a full automated deployment and to
-a bare host that has none of it.
+### side-load-through-an-emitter
+A **registered emitter can be triggered on demand**, not only by its native event
+source. Handing it a specific request — "review this pull request," "unstick this
+change" — makes it **author the task exactly as if it had discovered the work
+itself**: it derives the concise **goal** and the detailed **goal payload**, stamps
+the **filters**, associates itself so its **evaluator runs**, defines the
+**intermediary steps** the worker may take, and owns **suspend/resume** off its own
+and the evaluator's logged state and update subscriptions. So an operator's or an
+agent's off-hand "handle this one" is **not** a bare, self-tracked task — it is a
+**fully evaluated** one, just triggered manually instead of by a webhook or a
+schedule. Direct hand-authoring (propose + queue with no emitter) stays available
+for genuinely novel work that **no** registered emitter matches; that is the
+self-tracked path (*emitter-tasks-are-evaluated-mine-are-tracked*). The point is
+that the *normal* way to get one-off domain work done is to **feed it through the
+domain's emitter**, reusing all of its authoring and lifecycle logic, rather than
+re-deriving a task by hand.
 
 ### hibernate-the-wait
 A worker that must wait on a slow external condition does not sit holding a live
@@ -270,11 +293,14 @@ Work enters and advances through a **paired contract** layered on *the four
 production modes*: an **emitter** is a producer with a body the layer supervises
 (a webhook receiver that turns an event into a task; a scheduled check that emits
 when a threshold trips), and an **evaluator** is its companion handler that reacts
-to a task's lifecycle events and chooses the next step (see *The evaluator*).
-Together they let a domain plug its world and its judgment into the queue without
-a bespoke module. Pushing and polling tasks directly stays available — that simply
-keeps the lifecycle responsibility with the caller instead of an evaluator — and
-the ad-hoc kick is the degenerate "one task, no evaluator" case.
+to the lifecycle events of *that emitter's* tasks and chooses the next step (see
+*The evaluator*). Together they let a domain plug its world and its judgment into
+the queue without a bespoke module. An emitter can be driven two ways — by its
+**native event** or by a **side-load** (*side-load-through-an-emitter*), a specific
+request handed to it on demand — and either way it authors the task and its
+evaluator owns the follow-through. Direct **propose + queue** with no emitter stays
+available; that simply keeps the lifecycle responsibility with the caller
+(*emitter-tasks-are-evaluated-mine-are-tracked*).
 
 ### bounded-concurrency-wide-charters
 The pool of concurrently embodied workers is **capped** — a deliberate ceiling
@@ -283,6 +309,33 @@ worker a **wider charter** rather than by exceeding the cap. The supervisor's
 concurrency limit is the ceiling; *buildup-is-a-health-signal*'s escalate-or-demote
 is how the queue reacts **within** it. A bounded pool of broadly-chartered workers
 is the default posture, not an unbounded swarm of narrow ones.
+
+### pools-are-filters-with-a-cap
+A **supervised pool** is not a hardcoded category — it is a **standing filter over
+the task-attribute vocabulary, plus a ceiling on how many agents may bind to it**.
+The same vocabulary describes both sides. A **task declares** its attributes — its
+repo lane, the capabilities it **requires**, an optional target **machine** /
+**environment** / **worktree**, a **role** (a specialized body such as review or
+logging), and its **task-type** — and a **pool declares a predicate** over exactly
+those attributes: it **permits** the work it accepts and **rejects** the work it
+won't take, under a **max-agent cap**. A task **binds** to a pool whose filter
+accepts its attributes, up to that pool's cap; two pools never fight over one task
+because their filters plus the atomic claim decide ownership. A pool is **named for
+its task-type** (the label dimension it gates), and its repo filter **defaults to
+same-repo**, so a **repo-scoped pool is the default** and a fleet-wide one is a
+deliberate exception. Specialization is nothing more than **adding filters** — a
+code-review pool permits `role=review`; a container-bound task is permitted only on
+machines advertising that container; a handoff **pins a worktree** so nothing else
+can claim it. And because a hard per-task pin (a required capability, a target
+worktree) is itself a filter, it **binds regardless of any pool** — the pinned
+worker is the only eligible one. This is the generalization of
+*capability-and-affinity-routing* and *bounded-concurrency-wide-charters* into one
+filter language spoken by tasks and pools alike; a pool declaration
+(*declarative-discovered-registrar*) is where a pool's filter and cap are written
+down. An **emitter** (*emitters-and-evaluators*) is the producer side of the same
+language: it **names no pool** — it stamps a produced task's attributes, and
+whichever pool's filter accepts them claims it, so the producer/pool coupling is a
+**filter match, not a wire**.
 
 ### registered-supervision
 Supervision is **registered, not run in the foreground**. A caller hands the
@@ -326,6 +379,27 @@ exactly as it would a declaration authored by any other means. The declaration
 the files (*no-second-store*, applied to supervision).
 
 ## Behaviors
+
+### propose-then-queue
+Putting work on the queue is **two acts, not one**. To **propose** is to author a
+task — its concise goal, its detailed goal payload, its `requires`, its
+`rejects`, and its other filter attributes — and receive a durable **task id**,
+while the task sits **proposed** and **deliberately unclaimable**. To **queue** it
+is the separate act that flips **proposed → queued** and hands it to binding. The
+gap is useful: a producer (or an emitter authoring on a side-load) can **stage and
+inspect** a task, revise its filters, or dedup it against existing work *before*
+any agent can claim it, and a caller that wants the old one-shot behavior simply
+does both in sequence. Nothing binds a proposed task; queueing is the commit.
+
+### emitter-tasks-are-evaluated-mine-are-tracked
+Whether a task is **auto-driven** or **self-tracked** is decided by **how it was
+produced**. A task authored **through an emitter** — on its native event or a
+side-load — carries that emitter's **evaluator**, so the layer runs the
+follow-through (suspend/resume, follow-up tasks, completion confirmation)
+automatically. A task **proposed and queued by hand, behind no emitter**, has no
+evaluator: the layer still binds, embodies, and records it, but **the caller owns
+watching it** to done. So "am I producing through an emitter?" is the single
+question that decides who drives the lifecycle — the domain's evaluator, or you.
 
 ### fire-and-forget-not-driven
 This is the line between the delegation layer and the coordination layer. A task
@@ -476,15 +550,16 @@ does not hinge on perfect timing, yet the layer refuses to leave a zombie worker
 running next to the one that supersedes it.
 
 ### a-loop-runs-with-or-without-a-service
-The same recipe runs two ways, and neither requires the other. **Ad-hoc**: a person
-or agent kicks a one-off and the *local* supervisor watches it to resolution, the
-worker reporting back what it did — no standing service, emitter, or evaluator.
-**Service-driven**: a standing domain wires an emitter to carve the work and an
-evaluator to advance it across events. The service tier is how *recurring* or
-*at-scale* work is automated; it is never a precondition for running a single loop.
-The minimum viable deployment is a **coordinator plus a worker body**, so the
-reviewer, conflict-resolution, and goal-driven loops are equally available to a
-full automated deployment and to a bare host that has none of it.
+The same template runs two ways, and neither requires the other. **On demand**: a
+person or agent **side-loads** a registered emitter (or, for genuinely novel work
+with no matching emitter, hand-authors a task by **propose + queue**) and the
+*local* supervisor watches it to resolution — no standing schedule required.
+**Service-driven**: the same registered emitter also fires on its **native event**,
+and its evaluator advances the work across events. The service tier is how
+*recurring* or *at-scale* work is automated; it is never a precondition for running
+a single loop. The minimum viable deployment is a **coordinator plus a worker
+body**, so the reviewer, conflict-resolution, and goal-driven templates are equally
+available to a full automated deployment and to a bare host that has none of it.
 
 ### supervise-registers-and-returns
 Registering supervised work **adds the registration and completes**, emitting the
@@ -552,6 +627,40 @@ liveness, extended to the *membership* of the set itself. Discovery reconciles
 
 ## Provenance
 
+- **2026-08-11** — Reframed the production model around **propose/queue**,
+  **filters**, and **emitter/evaluator templates** (one operator design
+  conversation). (1) The lifecycle wording was corrected to the code's real states
+  (**proposed → queued**, not "drafted → ready"), and **propose** and **queue** were
+  split into two first-class operations (behavior *propose-then-queue*): propose
+  drafts a task (goal + goal payload + requires + rejects + filter attributes → id,
+  unclaimable); queue commits it to binding. (2) **"Recipe" left the command
+  surface**: a recipe is now a **template for an emitter/evaluator pair**,
+  *instantiated by registering* a concrete pair with the environment specifics
+  (target repo, review technology, issue back-end, machine/account) — *The recipe*,
+  *loop-recipes*, and *a-loop-runs-with-or-without-a-service* were reframed
+  accordingly, and *recipes-run-ad-hoc* became **side-load-through-an-emitter**
+  (hand a request to a registered emitter and it authors the fully-evaluated task on
+  demand). (3) The **evaluator belongs to the emitter**: an emitter's tasks are
+  auto-driven by its evaluator; a hand-proposed task with no emitter is self-tracked
+  (behavior *emitter-tasks-are-evaluated-mine-are-tracked*). Pairs with the same
+  conversation's *pools-are-filters-with-a-cap* below: pools, and the emitter/
+  evaluator pairs that feed them, are all **declarations in the registrar**, coupled
+  only by the shared filter vocabulary. Concrete verbs, schema, and the filter
+  syntax stay spec-level (reality docs), not here.
+- **2026-08-11** — Added the *pools-are-filters-with-a-cap* feature (and extended
+  *capability-and-affinity-routing* to name the fuller attribute vocabulary). A
+  supervised pool is reframed as a **standing filter predicate over the
+  task-attribute vocabulary — permit and reject — plus a max-agent cap**, named for
+  its task-type, with the repo filter defaulting to same-repo. Tasks *declare*
+  attributes and pools *filter* over the same vocabulary ({repo, machine,
+  environment, worktree, capabilities, role, task-type}); a task binds to the pool
+  whose filter accepts it, subject to the cap, while a hard per-task pin (a target
+  worktree, a required capability) binds regardless of any pool. Mined from an
+  operator design steer (an "agent pool" is a repo-bound sub-group whose name is the
+  task type and which caps agents-per-type; more generally, repo/machine/env/role/
+  worktree are all *filters* on valid tasks, and both a dispatch and a pool are
+  expressed in that one vocabulary). Concrete filter syntax stays spec-level (the
+  registrar declaration's `filters:` block), not here.
 - **2026-08-10** — Added the *declarative-discovered-registrar* feature and the
   *discover-and-live-reconcile* behavior: registered supervision gains a
   **declarative, discovered** face on top of the imperative call. A system,
