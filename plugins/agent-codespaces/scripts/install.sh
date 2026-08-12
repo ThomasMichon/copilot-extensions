@@ -800,7 +800,11 @@ do_update() {
 do_stamp() {
     _header "$SERVICE_NAME Stamp (defer runtime to first use)"
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
-    printf '%s\n' "$PLUGIN_DIR" > "$INSTALL_DIR/payload-dir"
+    # Record the REAL payload dir so the binstub can find this installer on first
+    # use. Under the install-contract:v4 self-stage, $PLUGIN_DIR is an ephemeral
+    # per-invocation staging copy that gets reaped -- COPILOT_PLUGIN_STAGED_FROM
+    # holds the true (installed-plugins) payload path; prefer it.
+    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
     deploy_binstub
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
 }
