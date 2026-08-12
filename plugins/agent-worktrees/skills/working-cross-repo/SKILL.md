@@ -98,8 +98,10 @@ Always read the repo's `CONTRIBUTING.md` / `AGENTS.md` and its narrative
   just to avoid delegating.
 - **codespace** -- provision/connect via **agent-codespaces** and dispatch via
   agent-bridge:
-  `gh cs create -R <cs-repo> -m <cs-machine> -l <cs-location>` (or reuse an
-  existing one), then `agent-bridge send codespace:<name> "<task>"` /
+  `agent-codespaces create <cs-repo>` (headless, no TTY -- routes around
+  `gh cs create`'s interactive billing/devcontainer prompts via the REST
+  fallback; reuses an existing idle box per the pool guard), then
+  `agent-bridge send codespace:<name> "<task>"` /
   `agent-codespaces ssh <name>`.
 - **not available on this machine** (per `locus.machines`) -- do **not**
   blind-clone. Follow the locus: delegate to a machine that has it.
