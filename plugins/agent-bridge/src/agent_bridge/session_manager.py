@@ -41,34 +41,6 @@ from .transport import SpawnTarget, spawn, _agent_worktrees_python
 log = logging.getLogger("agent-bridge")
 
 
-def _resolve_acp_model_flags() -> str:
-    """Resolve per-session copilot model flags for a CodeSpace ACP dispatch.
-
-    Shells out to the ``agent-codespaces`` binstub (``acp-model-flags``) rather
-    than importing ``agent_codespaces`` in the bridge venv, so the two
-    separately-versioned plugin venvs stay decoupled -- an in-process import
-    would force the installer to keep a synced copy of ``agent_codespaces`` in
-    the bridge venv (which drifts stale). Mirrors ``gh_account``'s
-    shell-out-to-a-sibling-binstub pattern. Degrade-safe: returns ``""`` (no
-    propagation, today's behavior) when the binstub is absent or the call fails.
-    """
-    binstub = shutil.which("agent-codespaces")
-    if not binstub:
-        return ""
-    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-    try:
-        result = subprocess.run(
-            [binstub, "acp-model-flags"],
-            capture_output=True, text=True, timeout=10,
-            creationflags=creationflags,
-        )
-    except Exception:
-        return ""
-    if result.returncode != 0:
-        return ""
-    return result.stdout.strip()
-
-
 def _resolve_relay_launch_env(
     codespace_name: str, relay_port: int | None
 ) -> tuple[str, int | None]:
@@ -191,7 +163,7 @@ def _claim_codespace(codespace_name: str, owner: str) -> tuple[bool, str]:
     where the daemon closes that gap. Shells the ``agent-codespaces claim`` seam
     rather than importing ``agent_codespaces`` in the bridge venv (#796), so the
     two separately-versioned plugin venvs stay decoupled; mirrors
-    ``_resolve_acp_model_flags``'s shell-out-to-a-sibling-binstub pattern.
+    ``gh_account``'s shell-out-to-a-sibling-binstub pattern.
 
     Returns ``(True, "")`` on success or a degrade-safe skip (claim disabled,
     no owner, binstub absent, or an unexpected error -- claim bookkeeping must
@@ -2314,20 +2286,14 @@ class SessionManager:
                 # so the Session Host execs it through a login shell (with the
                 # relay prelude prepended); copilot inherits the host's stdio pipe
                 # as fd 0/1 and its exit ends the shell (child-liveness tracks it).
-                # Fresh-at-dispatch model propagation seam (dotfiles #790).
-                # Resolved via a process-to-process call to the agent-codespaces
-                # binstub -- NOT an in-process import -- so the separately
-                # versioned bridge and agent-codespaces venvs stay decoupled (an
-                # in-process import forces the installer to keep a synced copy of
-                # agent_codespaces in the bridge venv, which drifts stale). Mirrors
-                # gh_account's shell-out-to-a-sibling-binstub pattern.
-                try:
-                    model_flags = _resolve_acp_model_flags()
-                except Exception:
-                    model_flags = ""
+                #
+                # Model/effort are NOT passed as ``--model`` launch flags here:
+                # copilot ignores them in ``--acp`` mode. The dispatched agent's
+                # model is set by the ACP client after the session exists, via
+                # ``session/set_config_option`` (see AcpClient._apply_model_config,
+                # dotfiles#790) -- the single, uniform mechanism for every
+                # dispatch path.
                 acp_command = cs_target["acp_command"]
-                if model_flags:
-                    acp_command = f"{acp_command} {model_flags}"
                 remote_argv = [
                     "bash", "-lc", relay_prelude + acp_command,
                 ]

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 from acp.schema import ContentToolCallContent, TextContentBlock, ToolCallProgress, ToolCallStart
 
-from agent_bridge.acp_client import AcpClient
+from agent_bridge.acp_client import AcpClient, resolve_acp_model_config
 
 
 def _client_with_recorder() -> tuple[AcpClient, list[tuple[str, dict]]]:
@@ -630,3 +633,151 @@ def test_new_turn_cancels_pending_out_of_turn_bracket() -> None:
         assert client._out_of_turn_settle_handle is None
 
     asyncio.run(scenario())
+
+
+# --------------------------------------------------------------------------
+# Model / effort propagation over ACP (dotfiles#790)
+# --------------------------------------------------------------------------
+
+_MODEL_ENV = (
+    "AGENT_BRIDGE_ACP_MODEL", "AGENT_CODESPACES_ACP_MODEL",
+    "AGENT_BRIDGE_ACP_EFFORT", "AGENT_CODESPACES_ACP_EFFORT",
+    "AGENT_BRIDGE_MODEL_PROPAGATE", "AGENT_CODESPACES_MODEL_PROPAGATE",
+)
+
+
+def _clear_model_env(monkeypatch) -> None:
+    for name in _MODEL_ENV:
+        monkeypatch.delenv(name, raising=False)
+
+
+def _model_config_options() -> list[dict]:
+    """A copilot-shaped session/new configOptions payload (dict form)."""
+    return [
+        {
+            "id": "model",
+            "type": "select",
+            "currentValue": "gpt-5.6-sol",
+            "options": [
+                {"value": "gpt-5.6-sol"},
+                {"value": "claude-opus-4.8"},
+                {"value": "auto"},
+            ],
+        },
+        {
+            "id": "reasoning_effort",
+            "type": "select",
+            "currentValue": "high",
+            "options": [{"value": "high"}, {"value": "max"}, {"value": "medium"}],
+        },
+    ]
+
+
+def _apply_client() -> AcpClient:
+    client = AcpClient()
+    client._connection = MagicMock()
+    client._connection.set_config_option = AsyncMock()
+    client._acp_session_id = "sess-1"
+    return client
+
+
+def test_resolve_model_config_env_overrides_settings(monkeypatch) -> None:
+    _clear_model_env(monkeypatch)
+    monkeypatch.setattr(
+        "agent_bridge.acp_client._host_copilot_model_settings",
+        lambda: {"model": "gpt-5.4", "reasoning_effort": "low"},
+    )
+    monkeypatch.setenv("AGENT_BRIDGE_ACP_MODEL", "claude-opus-4.8")
+    monkeypatch.setenv("AGENT_CODESPACES_ACP_EFFORT", "max")
+    cfg = resolve_acp_model_config()
+    assert cfg == {"model": "claude-opus-4.8", "reasoning_effort": "max"}
+
+
+def test_resolve_model_config_falls_back_to_settings(monkeypatch) -> None:
+    _clear_model_env(monkeypatch)
+    monkeypatch.setattr(
+        "agent_bridge.acp_client._host_copilot_model_settings",
+        lambda: {"model": "claude-opus-4.8", "reasoning_effort": "high"},
+    )
+    assert resolve_acp_model_config() == {
+        "model": "claude-opus-4.8", "reasoning_effort": "high",
+    }
+
+
+def test_resolve_model_config_opt_out(monkeypatch) -> None:
+    _clear_model_env(monkeypatch)
+    monkeypatch.setattr(
+        "agent_bridge.acp_client._host_copilot_model_settings",
+        lambda: {"model": "claude-opus-4.8"},
+    )
+    monkeypatch.setenv("AGENT_BRIDGE_MODEL_PROPAGATE", "0")
+    assert resolve_acp_model_config() == {}
+
+
+def test_apply_model_config_sets_model_and_effort(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "agent_bridge.acp_client.resolve_acp_model_config",
+        lambda: {"model": "claude-opus-4.8", "reasoning_effort": "max"},
+    )
+    client = _apply_client()
+    asyncio.run(client._apply_model_config(_model_config_options()))
+    calls = {
+        c.kwargs["config_id"]: c.kwargs["value"]
+        for c in client._connection.set_config_option.call_args_list
+    }
+    assert calls == {"model": "claude-opus-4.8", "reasoning_effort": "max"}
+    for c in client._connection.set_config_option.call_args_list:
+        assert c.kwargs["session_id"] == "sess-1"
+
+
+def test_apply_model_config_skips_when_already_current(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "agent_bridge.acp_client.resolve_acp_model_config",
+        lambda: {"model": "gpt-5.6-sol", "reasoning_effort": "high"},
+    )
+    client = _apply_client()
+    asyncio.run(client._apply_model_config(_model_config_options()))
+    client._connection.set_config_option.assert_not_awaited()
+
+
+def test_apply_model_config_skips_unoffered_value(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "agent_bridge.acp_client.resolve_acp_model_config",
+        lambda: {"model": "gpt-9-imaginary"},
+    )
+    client = _apply_client()
+    asyncio.run(client._apply_model_config(_model_config_options()))
+    client._connection.set_config_option.assert_not_awaited()
+
+
+def test_apply_model_config_skips_unadvertised_option(monkeypatch) -> None:
+    # Agent advertises only 'model'; effort resolves but is not offered.
+    monkeypatch.setattr(
+        "agent_bridge.acp_client.resolve_acp_model_config",
+        lambda: {"model": "claude-opus-4.8", "reasoning_effort": "max"},
+    )
+    client = _apply_client()
+    only_model = [_model_config_options()[0]]
+    asyncio.run(client._apply_model_config(only_model))
+    calls = [c.kwargs["config_id"] for c in client._connection.set_config_option.call_args_list]
+    assert calls == ["model"]
+
+
+def test_apply_model_config_noop_when_nothing_resolved(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "agent_bridge.acp_client.resolve_acp_model_config", lambda: {},
+    )
+    client = _apply_client()
+    asyncio.run(client._apply_model_config(_model_config_options()))
+    client._connection.set_config_option.assert_not_awaited()
+
+
+def test_apply_model_config_degrade_safe_on_rpc_error(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "agent_bridge.acp_client.resolve_acp_model_config",
+        lambda: {"model": "claude-opus-4.8"},
+    )
+    client = _apply_client()
+    client._connection.set_config_option = AsyncMock(side_effect=RuntimeError("boom"))
+    # Must not raise -- a failed model set never breaks the session.
+    asyncio.run(client._apply_model_config(_model_config_options()))
