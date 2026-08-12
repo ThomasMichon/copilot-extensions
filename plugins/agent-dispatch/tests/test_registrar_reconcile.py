@@ -184,6 +184,26 @@ def test_daemon_excludes_machine_pinned_declaration():
     assert summary.started == []  # pinned to another host
 
 
+def test_daemon_preserves_declared_units_on_discovery_error():
+    launcher = FakeLauncher()
+    holder = {"decls": [_decl("general")], "fail": False}
+
+    def _source():
+        if holder["fail"]:
+            raise RuntimeError("transient discovery blip")
+        return holder["decls"]
+
+    daemon = SupervisorDaemon(
+        FakeClient([]), "host-a", launcher=launcher, clock=Clock(),
+        declared_source=_source,
+    )
+    daemon.reconcile_once()  # started
+    holder["fail"] = True
+    summary = daemon.reconcile_once()  # discovery errors this tick
+    assert summary.stopped == []  # last-known set kept -> not torn down
+    assert "declared:local:general" in summary.running
+
+
 def test_daemon_uses_real_discover_source(tmp_path, monkeypatch):
     # End-to-end through the real discovery layer: register a pointer, and the
     # served daemon supervises what it declares.

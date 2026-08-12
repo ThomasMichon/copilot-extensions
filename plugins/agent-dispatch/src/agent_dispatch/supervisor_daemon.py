@@ -278,6 +278,11 @@ class SupervisorDaemon:
         #: the *declarations-are-the-source-of-truth* path. Returns ProfileDeclaration
         #: objects; None disables declared supervision (store-only, legacy behavior).
         self.declared_source = declared_source
+        #: The declared set most recently read successfully -- returned when a later
+        #: discovery read *errors*, so a transient filesystem/env blip never winds
+        #: down live declared units (only a successful read that no longer lists a
+        #: unit does). Empty until the first successful read.
+        self._last_declared: list[dict] = []
         self._units: dict[str, ManagedUnit] = {}
 
     # -- registry view -------------------------------------------------------
@@ -286,9 +291,10 @@ class SupervisorDaemon:
         """The declared profile set for this (machine, env), as registrations.
 
         Re-read every reconcile (that is the *watch*): the daemon's existing
-        start/restart/wind-down logic turns a re-read into hot-reconcile. A failure
-        to read declarations is logged and treated as empty for this tick, so a
-        transient discovery error never tears down store-backed units.
+        start/restart/wind-down logic turns a re-read into hot-reconcile. On a read
+        *error* the last successfully-read set is returned (not empty), so a transient
+        discovery failure never tears down live declared units; a successful read that
+        drops a unit still winds it down.
         """
         if self.declared_source is None:
             return []
@@ -297,17 +303,19 @@ class SupervisorDaemon:
         try:
             decls = list(self.declared_source())
         except Exception:  # pragma: no cover - discovery is environment-dependent
-            log.exception("failed to read declared profile set; skipping this tick")
-            return []
-        return declared_registrations(decls, machine=self.machine, env=self.env)
+            log.exception("failed to read declared profile set; keeping the last known set")
+            return self._last_declared
+        self._last_declared = declared_registrations(decls, machine=self.machine, env=self.env)
+        return self._last_declared
 
     def _desired(self) -> dict[str, dict]:
         """Active registrations scoped to this daemon's (machine, env).
 
         Two sources, one desired set: the coordinator's store-backed registrations
         plus the registrar's **declared** profile set. Declared ids are namespaced
-        (``declared:...``) so they never collide with store ids; when both name the
-        same id the declared source wins (the declaration is the source of truth)."""
+        (``declared:...``) to avoid colliding with *derived* store ids; if a
+        caller-supplied store id ever collides, the **declared** entry wins (the
+        declaration is the source of truth)."""
         regs = self.client.list_registrations(
             machine=self.machine, env=self.env, include_paused=False
         )
