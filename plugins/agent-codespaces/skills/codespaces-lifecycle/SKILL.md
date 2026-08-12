@@ -23,6 +23,14 @@ description: >
 Day-to-day operations for GitHub Codespaces via agent-codespaces. For
 first-time setup and config changes, see the `codespaces-setup` skill.
 
+> **Before you start — readiness (works with no agent-worktrees, in any host).**
+> If `command -v agent-codespaces` fails, deploy its binstub first (it then
+> self-provisions on first call):
+> `bash "$(ls ~/.copilot/installed-plugins/*/agent-codespaces/scripts/install.sh | head -1)" stamp`
+> The first call may take ~30–120s to provision (watch for `::agent-provisioning::`);
+> let it finish. If it reports a provisioning failure, surface the exact message —
+> don't improvise. Full detail: `codespaces-setup` § *Readiness*.
+
 ## Connecting to CodeSpaces
 
 All CodeSpace interaction should go through **agent-bridge**, not raw SSH.
