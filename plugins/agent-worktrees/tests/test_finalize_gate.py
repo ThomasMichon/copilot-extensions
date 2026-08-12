@@ -77,3 +77,55 @@ def test_only_unsettled_claims_count(monkeypatch):
     _gate(monkeypatch, "block")
     rec = _record("at-rest", "released", "at-rest")
     assert _assert_obligations_settled(rec, "wt", abandon=False) is True
+
+
+# ── self-heal (never-wedge, dotfiles#1161) ───────────────────────────────────
+
+def _worktree_record(*states):
+    from agent_worktrees.tracking import ResourceClaim
+    return SimpleNamespace(
+        resources=[ResourceClaim(kind="worktree", ref=f"m/p/c{i}", state=s)
+                   for i, s in enumerate(states)])
+
+
+def test_gate_self_heals_gone_and_safe_then_proceeds(monkeypatch, capsys):
+    _gate(monkeypatch, "block")
+    rec = _worktree_record("active")
+    from agent_worktrees import config as cfg
+    from agent_worktrees import sweep
+
+    def _fake_heal(record, config, *, path=None, save=True):
+        record.resources[0].state = "abandoned"   # provably gone + safe
+        return [record.resources[0]]
+
+    monkeypatch.setattr(sweep, "self_heal", _fake_heal)
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(cfg, "tracking_dir",
+                        lambda: __import__("pathlib").Path("."))
+    # Under block, the lone blocking claim is auto-reclaimed -> finalize proceeds.
+    assert _assert_obligations_settled(rec, "wt", abandon=False) is True
+    out = capsys.readouterr()
+    assert "auto-reclaimed" in (out.err + out.out).lower()
+
+
+def test_gate_still_blocks_when_self_heal_reclaims_nothing(monkeypatch):
+    _gate(monkeypatch, "block")
+    rec = _worktree_record("active")
+    from agent_worktrees import config as cfg
+    from agent_worktrees import sweep
+    monkeypatch.setattr(sweep, "self_heal", lambda *a, **k: [])
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(cfg, "tracking_dir",
+                        lambda: __import__("pathlib").Path("."))
+    # A genuinely-active claim that the sweep spares still blocks.
+    assert _assert_obligations_settled(rec, "wt", abandon=False) is False
+
+
+def test_gate_self_heal_failure_never_breaks_finalize(monkeypatch):
+    _gate(monkeypatch, "block")
+    rec = _worktree_record("at-rest")   # nothing unsettled
+    from agent_worktrees import config as cfg
+    monkeypatch.setattr(cfg, "load_config",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    # load_config blowing up is swallowed; the gate still evaluates normally.
+    assert _assert_obligations_settled(rec, "wt", abandon=False) is True
