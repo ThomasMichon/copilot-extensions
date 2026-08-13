@@ -102,3 +102,89 @@ def test_app_engine_error_shows_status_not_crash():
             return app._last_status
 
     assert "engine unavailable" in asyncio.run(_run())
+
+
+# ── launch/resume action (slice 3) ────────────────────────────────────────────
+
+_FIX = [
+    Worktree(id="aaaa1111", repo="r", machine="m", branch="b", title="first",
+             state="wip", ahead=1, behind=0, dirty=False, status="active",
+             path="/x", raw={}),
+    Worktree(id="bbbb2222", repo="r", machine="m", branch="b2", title="second",
+             state="clean", ahead=0, behind=0, dirty=False, status="active",
+             path="/y", raw={}),
+]
+
+
+def _drive(keys: list[str]):
+    async def _run():
+        app = picker_app.WorktreeManagerApp(lambda: list(_FIX), project="r")
+        async with app.run_test(size=(100, 24)) as pilot:
+            for k in keys:
+                await pilot.press(k)
+        return app.pending_launch
+
+    return asyncio.run(_run())
+
+
+def test_launch_key_requests_resume_of_selected_row():
+    req = _drive(["l"])
+    assert req is not None
+    assert req.mode == "resume"
+    assert req.project == "r"
+    assert req.worktree_id == "aaaa1111"  # cursor starts on the first row
+
+
+def test_cursor_move_then_launch_targets_that_row():
+    req = _drive(["down", "l"])
+    assert req is not None and req.worktree_id == "bbbb2222"
+
+
+def test_bare_resume_key():
+    req = _drive(["b"])
+    assert req is not None and req.mode == "bare-resume"
+
+
+def test_new_worktree_key_needs_no_selection():
+    req = _drive(["n"])
+    assert req is not None and req.mode == "new" and req.worktree_id is None
+
+
+def test_run_picker_invokes_on_launch(monkeypatch):
+    captured = {}
+
+    class _FakeApp:
+        def __init__(self, *a, **kw):
+            self.pending_launch = picker_app.LaunchRequest(
+                project="r", worktree_id="aaaa1111", mode="resume")
+
+        def run(self):
+            return None
+
+    monkeypatch.setattr(picker_app, "WorktreeManagerApp", _FakeApp)
+
+    def on_launch(req):
+        captured["req"] = req
+        return 42
+
+    code = picker_app.run_picker(lambda: [], project="r", on_launch=on_launch)
+    assert code == 42
+    assert captured["req"].worktree_id == "aaaa1111"
+
+
+def test_demo_engine_resolve_emits_plan():
+    rc, out = _run_demo_engine(
+        ["--project", demo.DEMO_PROJECT, "resolve", "--json",
+         "--worktree-id", "aperture-labs-testchamber-18c4"])
+    assert rc == 0
+    plan = json.loads(out)
+    assert plan["action"] == "exec"
+    assert plan["worktree_id"] == "aperture-labs-testchamber-18c4"
+    assert "Aperture" in " ".join(plan["cmd"])
+
+
+def test_demo_engine_resolve_new():
+    rc, out = _run_demo_engine(
+        ["--project", demo.DEMO_PROJECT, "resolve", "--json", "--new"])
+    assert rc == 0
+    assert "creating" in json.loads(out)["cmd"][-1]
