@@ -66,7 +66,12 @@ try {
 
 If it reads NOT SERVING (or a high Established count), restart the host —
 `install-host.ps1 stop; install-host.ps1 start` — which reaps the pileup.
-`install-host.ps1 status` now performs this banner check for you.
+`install-host.ps1 status` now performs this banner check for you. The launcher
+also **preemptively reaps** the pileup (restarts) once the Established count on
+:2222 crosses a pathological threshold, and the true fix is upstream — dtssh now
+emits `MaxStartups`/`LoginGraceTime`/`ClientAlive*` in its generated
+`sshd_config` ([bmiddha/devtunnel-ssh#13](https://github.com/bmiddha/devtunnel-ssh/pull/13)),
+so an updated dtssh binary can't accumulate the pileup in the first place.
 
 ---
 

@@ -105,6 +105,17 @@
     restarts, so legitimate concurrent sessions are never force-killed by the
     count alone.
 
+.PARAMETER PreAuthReapThreshold
+    Established-connection count on :$Port at which the launcher PREEMPTIVELY
+    restarts the host to reap the pile-up (default 128), before saturation fully
+    wedges the port. This is the active counterpart to the advisory warn
+    threshold: it fires only at a count that is pathological for a single-user
+    interactive host (legitimate concurrent sessions number a handful), so the
+    collateral of a restart is acceptable to keep the box reachable. Belt-and-
+    suspenders alongside the banner probe (which only restarts AFTER reach is
+    already broken) and the upstream sshd_config fix (dtssh adds
+    MaxStartups/LoginGraceTime; bmiddha/devtunnel-ssh#13). Set to 0 to disable.
+
 .PARAMETER NoMonitor
     Legacy one-shot mode: start `dtssh host` hidden and exit, with no health
     monitoring. Kept as a fallback.
@@ -122,6 +133,7 @@ param(
     [int]$ConsecutiveFailures = 2,
     [int]$GracePeriodSec      = 45,
     [int]$PreAuthWarnThreshold = 80,
+    [int]$PreAuthReapThreshold = 128,
     [switch]$NoMonitor
 )
 
@@ -437,6 +449,23 @@ try {
         $estConns = Get-EstablishedConnCount $Port
         if ($estConns -ge $PreAuthWarnThreshold) {
             Write-Log "pre-auth pressure: $estConns established connection(s) on :$Port (>= $PreAuthWarnThreshold; MaxStartups wedge risk)" 'WARN'
+        }
+
+        # Active reap: at a pathological Established count, preemptively restart to
+        # drain the pile-up BEFORE MaxStartups saturates and sshd starts dropping
+        # handshakes pre-banner. The banner probe below only fires once reach is
+        # already broken; this heads that off. Gated high enough that it can't trip
+        # on legitimate concurrent sessions. (Root-cause prevention lives upstream —
+        # dtssh emitting MaxStartups/LoginGraceTime, bmiddha/devtunnel-ssh#13 — this
+        # protects boxes still on an unpatched dtssh and is cheap insurance after.)
+        if ($PreAuthReapThreshold -gt 0 -and $estConns -ge $PreAuthReapThreshold) {
+            Write-Log "SATURATION REAP: $estConns established connection(s) on :$Port (>= $PreAuthReapThreshold) — restarting host to drain pre-auth pile-up before it wedges" 'WARN'
+            Stop-HostProc $hostProc.Id
+            Start-Sleep -Seconds 3
+            $hostProc = Start-HostProc
+            $failCount = 0
+            Start-Sleep -Seconds $GracePeriodSec
+            continue
         }
 
         if ($relayOk -and $sshdOk) {
