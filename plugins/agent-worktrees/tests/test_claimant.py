@@ -80,6 +80,47 @@ class TestLocalClaimantAlive:
     def test_empty_ref_none(self):
         assert claimant.local_claimant_alive("") is None
 
+    # --- anchor owners (permanent; invert the "missing record => gone" rule) ---
+
+    def _seed_anchor(self, tmp_path, monkeypatch, project, *, path_exists=True,
+                     make_record=True, machine="lambda-core"):
+        monkeypatch.setattr("agent_worktrees.config.load_config",
+                            lambda *a, **k: _cfg(machine))
+        monkeypatch.setattr("agent_worktrees.config.project_dir",
+                            lambda name=None: tmp_path / f".{name}")
+        adir = tmp_path / "anchors" / project
+        if path_exists:
+            adir.mkdir(parents=True, exist_ok=True)
+        tdir = tmp_path / f".{project}" / "worktrees"
+        tdir.mkdir(parents=True, exist_ok=True)
+        if make_record:
+            tracking.load_or_create_anchor_record(
+                str(adir), project, machine, "wsl", tdir)
+
+    def test_anchor_present_is_alive(self, tmp_path, monkeypatch):
+        self._seed_anchor(tmp_path, monkeypatch, "spo-core")
+        assert claimant.local_claimant_alive(
+            "lambda-core/spo-core/@anchor") is True
+
+    def test_anchor_missing_ledger_is_unconfirmed(self, tmp_path, monkeypatch):
+        # A missing @anchor ledger is NOT proof the enlistment is gone -> spare
+        # (the crucial asymmetry vs. a worktree, whose missing record => gone).
+        self._seed_anchor(tmp_path, monkeypatch, "spo-core", make_record=False)
+        assert claimant.local_claimant_alive(
+            "lambda-core/spo-core/@anchor") is None
+
+    def test_anchor_removed_checkout_is_gone(self, tmp_path, monkeypatch):
+        # Only a removed anchor checkout is a confirmed gone.
+        self._seed_anchor(tmp_path, monkeypatch, "spo-core", path_exists=False)
+        assert claimant.local_claimant_alive(
+            "lambda-core/spo-core/@anchor") is False
+
+    def test_anchor_cross_machine_none(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("agent_worktrees.config.load_config",
+                            lambda *a, **k: _cfg("lambda-core"))
+        assert claimant.local_claimant_alive(
+            "borealis/spo-core/@anchor") is None
+
 
 # --- resolve_claimant_alive (fabric) ----------------------------------------
 
