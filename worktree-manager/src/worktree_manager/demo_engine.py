@@ -21,19 +21,37 @@ from . import demo
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    # Strip the engine-global --project <name> the client prepends.
+    # Parse the client's argument surface: the engine-global ``--project <name>``
+    # the client prepends, the verb, and (for resolve) the launch selectors.
     verb = None
+    worktree_id = None
+    new = False
+    bare_resume = False
     i = 0
     while i < len(args):
-        if args[i] == "--project":
+        a = args[i]
+        if a == "--project":
             i += 2
             continue
-        if not args[i].startswith("-") and verb is None:
-            verb = args[i]
+        if a == "--worktree-id":
+            worktree_id = args[i + 1] if i + 1 < len(args) else None
+            i += 2
+            continue
+        if a == "--new":
+            new = True
+        elif a == "--bare-resume":
+            bare_resume = True
+        elif not a.startswith("-") and verb is None:
+            verb = a
         i += 1
 
     if verb == "list":
         json.dump(demo.list_envelope(), sys.stdout)
+        sys.stdout.write("\n")
+        return 0
+    if verb == "resolve":
+        json.dump(demo.resolve_plan(worktree_id, new=new, bare_resume=bare_resume),
+                  sys.stdout)
         sys.stdout.write("\n")
         return 0
     # Unknown verb: mimic the engine's JSON error envelope + non-zero exit.

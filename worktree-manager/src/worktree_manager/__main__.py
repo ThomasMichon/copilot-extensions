@@ -417,6 +417,7 @@ def _cmd_picker(rest: list[str]) -> int:
         project = DEMO_PROJECT
         source = picker_app.demo_source()
         subtitle = f"{project} · demo (Aperture Labs)"
+        on_launch = _demo_launch_preview
     else:
         if not engine_available():
             print()
@@ -436,6 +437,7 @@ def _cmd_picker(rest: list[str]) -> int:
             return 2
         source = picker_app.engine_source(project)
         subtitle = project
+        on_launch = _run_launch
 
     if screenshot:
         svg = picker_app.capture_svg(source, project=project, subtitle=subtitle)
@@ -443,7 +445,60 @@ def _cmd_picker(rest: list[str]) -> int:
             fh.write(svg)
         print(f"  wrote screenshot: {screenshot}")
         return 0
-    return picker_app.run_picker(source, project=project, subtitle=subtitle)
+    return picker_app.run_picker(source, project=project, subtitle=subtitle,
+                                 on_launch=on_launch)
+
+
+def _resolve_for(req) -> "tuple[object | None, int]":
+    """Resolve a picker :class:`LaunchRequest` to a launch plan (shared).
+
+    Returns ``(plan, 0)`` on success, else ``(None, exit_code)`` after printing
+    the engine error. The whole thing goes through the process boundary --
+    ``engine_client.resolve_launch_plan`` shells to ``agent-worktrees resolve
+    --json`` and never imports the plugin.
+    """
+    from .engine_client import EngineError, resolve_launch_plan
+    try:
+        plan = resolve_launch_plan(
+            req.project, worktree_id=req.worktree_id,
+            new=(req.mode == "new"), bare_resume=(req.mode == "bare-resume"))
+    except EngineError as e:
+        print(f"error: could not resolve a launch plan: {e}")
+        return None, 1
+    return plan, 0
+
+
+def _run_launch(req) -> int:
+    """Resolve + execute the operator's launch/resume (real engine)."""
+    from . import launcher
+    plan, code = _resolve_for(req)
+    if plan is None:
+        return code
+    if plan.action != "exec":
+        return plan.exit_code
+    return launcher.launch(plan)
+
+
+def _demo_launch_preview(req) -> int:
+    """Show what the launch/resume *would* run, without starting anything.
+
+    Exercises the same resolve -> compose path (through the fake Aperture engine)
+    the real launch uses, then prints the composed argv instead of executing it --
+    so the demo never spawns a Copilot session.
+    """
+    from . import launcher
+    plan, code = _resolve_for(req)
+    if plan is None:
+        return code
+    le = launcher.compose_launch(plan)
+    print()
+    target = req.worktree_id or "a new worktree"
+    print(f"  demo launch ({req.mode}) — {target}")
+    print(f"    action: {plan.action}   muxed: {le.muxed}   cwd: {le.cwd}")
+    print(f"    argv:   {' '.join(le.argv)}")
+    print("  (demo mode — not executed)")
+    print()
+    return 0
 
 
 def _prereq_line(s) -> str:
@@ -613,6 +668,7 @@ def main(argv: list[str] | None = None) -> int:
         print("  picker [<project>]     launch the interactive Picker (Textual)")
         print("  picker --demo          preview the Picker with mock Aperture Labs data")
         print("  picker [...] --screenshot F  render a headless SVG screenshot to F")
+        print("                         (in the Picker: l launch/resume · b bare-resume · n new)")
         print()
         print("Phase 2 provisions prerequisites + drives the core install; Phase 3")
         print("adds the Manager state views (projects/repos/plugin enablement); later")

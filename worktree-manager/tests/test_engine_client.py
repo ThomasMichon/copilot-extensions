@@ -128,3 +128,93 @@ def test_empty_worktrees_list(monkeypatch):
     _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(
         cmd, stdout=json.dumps({"version": 1, "worktrees": []})))
     assert ec.list_worktrees("dotfiles") == []
+
+
+# ── resolve_launch_plan (slice 3) ─────────────────────────────────────────────
+
+_RESUME_PLAN = {
+    "action": "exec",
+    "work_dir": "/w/x",
+    "status_path": "/w/x",
+    "cmd": ["copilot", "--resume=sess123"],
+    "env": {"COPILOT_CUSTOM_INSTRUCTIONS_DIRS": "/home/u/.dotfiles"},
+    "worktree_id": "m-win-1200-ab12",
+    "post_exit": True,
+    "no_mux": True,
+}
+
+
+def test_resolve_resume_parses_plan(monkeypatch):
+    def handler(cmd, kw):
+        assert "resolve" in cmd and "--json" in cmd
+        assert "--worktree-id" in cmd and "m-win-1200-ab12" in cmd
+        assert "--new" not in cmd
+        return _fake_completed(cmd, stdout=json.dumps(_RESUME_PLAN))
+
+    _install_fake(monkeypatch, handler)
+    plan = ec.resolve_launch_plan("dotfiles", worktree_id="m-win-1200-ab12")
+    assert plan.is_exec and plan.no_mux is True
+    assert plan.cmd == ["copilot", "--resume=sess123"]
+    assert plan.work_dir == "/w/x" and plan.worktree_id == "m-win-1200-ab12"
+    assert plan.post_exit is True
+
+
+def test_resolve_new_sends_new_flag(monkeypatch):
+    def handler(cmd, kw):
+        assert "--new" in cmd and "--worktree-id" not in cmd
+        return _fake_completed(cmd, stdout=json.dumps(_RESUME_PLAN))
+
+    _install_fake(monkeypatch, handler)
+    plan = ec.resolve_launch_plan("dotfiles", new=True)
+    assert plan.is_exec
+
+
+def test_resolve_requires_a_target(monkeypatch):
+    _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(cmd))
+    with pytest.raises(ec.EngineError):
+        ec.resolve_launch_plan("dotfiles")
+
+
+def test_resolve_worktree_and_new_are_exclusive(monkeypatch):
+    _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(cmd))
+    with pytest.raises(ec.EngineError):
+        ec.resolve_launch_plan("dotfiles", worktree_id="x", new=True)
+
+
+def test_resolve_none_action(monkeypatch):
+    payload = {"action": "none", "exit_code": 0}
+    _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(cmd, stdout=json.dumps(payload)))
+    plan = ec.resolve_launch_plan("dotfiles", worktree_id="x")
+    assert plan.action == "none" and not plan.is_exec and plan.exit_code == 0
+
+
+def test_resolve_unwraps_nested_launch(monkeypatch):
+    nested = {"worktree": {"id": "x"}, "launch": _RESUME_PLAN}
+    _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(cmd, stdout=json.dumps(nested)))
+    plan = ec.resolve_launch_plan("dotfiles", worktree_id="m-win-1200-ab12")
+    assert plan.cmd == ["copilot", "--resume=sess123"]
+
+
+def test_resolve_bare_resume_skew_retries_without_flag(monkeypatch):
+    calls = []
+
+    def handler(cmd, kw):
+        calls.append(list(cmd))
+        if "--bare-resume" in cmd:
+            return _fake_completed(cmd, returncode=2,
+                                   stderr="unrecognized arguments: --bare-resume")
+        return _fake_completed(cmd, stdout=json.dumps(_RESUME_PLAN))
+
+    _install_fake(monkeypatch, handler)
+    plan = ec.resolve_launch_plan("dotfiles", worktree_id="x", bare_resume=True)
+    assert plan.is_exec
+    assert any("--bare-resume" in c for c in calls)
+    assert any("--bare-resume" not in c for c in calls)
+
+
+def test_resolve_error_envelope_surfaced(monkeypatch):
+    payload = json.dumps({"version": 1, "error": "no such worktree"})
+    _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(cmd, returncode=1, stdout=payload))
+    with pytest.raises(ec.EngineError) as ei:
+        ec.resolve_launch_plan("dotfiles", worktree_id="nope")
+    assert "no such worktree" in str(ei.value)

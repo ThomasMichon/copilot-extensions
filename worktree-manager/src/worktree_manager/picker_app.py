@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from textual.app import App, ComposeResult
 from textual.widgets import DataTable, Footer, Header, Static
@@ -28,6 +29,24 @@ from .engine_client import EngineError, Worktree
 Source = Callable[[], "list[Worktree]"]
 
 _COLUMNS = ("id", "machine", "repo", "state", "±sync", "title")
+
+
+@dataclass(frozen=True)
+class LaunchRequest:
+    """A launch the operator asked for in the Picker, handed to the runner.
+
+    The Textual app cannot cleanly exec-replace itself, so pressing a launch key
+    records this request and quits the app; :func:`run_picker`'s ``on_launch``
+    callback then resolves + executes it (fetch the plan across the engine
+    boundary, compose by mux capability, run). ``mode`` maps to the engine's
+    ``resolve`` selectors: ``resume`` -> ``--worktree-id``, ``bare-resume`` ->
+    ``--worktree-id --bare-resume``, ``new`` -> ``--new``.
+    """
+
+    project: str
+    worktree_id: str | None
+    mode: str
+    title: str | None = None
 
 
 def _state_cell(w: Worktree) -> str:
@@ -61,6 +80,9 @@ class WorktreeManagerApp(App):
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("r", "refresh", "Refresh"),
+        ("l", "launch", "Launch/Resume"),
+        ("b", "bare_resume", "Bare resume"),
+        ("n", "new_worktree", "New worktree"),
     ]
 
     def __init__(self, source: Source, *, project: str,
@@ -69,6 +91,9 @@ class WorktreeManagerApp(App):
         self._source = source
         self._project = project
         self._last_status = ""
+        self._worktrees: list[Worktree] = []
+        #: Set when the operator picks a launch; read by the runner after quit.
+        self.pending_launch: LaunchRequest | None = None
         self.sub_title = subtitle or project
 
     def compose(self) -> ComposeResult:
@@ -94,15 +119,64 @@ class WorktreeManagerApp(App):
         except EngineError as e:
             hint = ("  Run `worktree-manager setup --apply` to install it."
                     if e.install_hint else "")
+            self._worktrees = []
             self._last_status = f"engine unavailable: {e}{hint}"
             status.update(self._last_status)
             return
-        self._last_status = (f"{self._project} · {len(worktrees)} worktree(s) · "
-                             f"r: refresh · q: quit")
+        self._worktrees = list(worktrees)
+        self._last_status = (
+            f"{self._project} · {len(worktrees)} worktree(s) · "
+            f"l: launch/resume · b: bare · n: new · r: refresh · q: quit")
         status.update(self._last_status)
         for w in worktrees:
             table.add_row(w.id4, w.machine or "?", w.repo or "?",
                           _state_cell(w), w.sync_tag or "", w.title or "")
+
+    # ── launch/resume action ─────────────────────────────────────────────────
+
+    def _selected_worktree(self) -> Worktree | None:
+        try:
+            table = self.query_one(DataTable)
+        except Exception:
+            return None
+        idx = table.cursor_row
+        if idx is None or idx < 0 or idx >= len(self._worktrees):
+            return None
+        return self._worktrees[idx]
+
+    def _request_launch(self, mode: str) -> None:
+        """Record the operator's launch choice and quit so the runner can act."""
+        if mode == "new":
+            self.pending_launch = LaunchRequest(
+                project=self._project, worktree_id=None, mode="new")
+            self.exit()
+            return
+        w = self._selected_worktree()
+        if w is None:
+            self._set_status("no worktree selected — move the cursor to a row first.")
+            return
+        self.pending_launch = LaunchRequest(
+            project=self._project, worktree_id=w.id, mode=mode, title=w.title)
+        self.exit()
+
+    def _set_status(self, text: str) -> None:
+        self._last_status = text
+        try:
+            self.query_one("#status", Static).update(text)
+        except Exception:
+            pass
+
+    def on_data_table_row_selected(self, event) -> None:  # Enter on a row
+        self._request_launch("resume")
+
+    def action_launch(self) -> None:
+        self._request_launch("resume")
+
+    def action_bare_resume(self) -> None:
+        self._request_launch("bare-resume")
+
+    def action_new_worktree(self) -> None:
+        self._request_launch("new")
 
 
 # ── sources ─────────────────────────────────────────────────────────────────
@@ -138,7 +212,17 @@ def capture_svg(source: Source, *, project: str, size: tuple[int, int] = (110, 3
     return asyncio.run(_render_svg(app, size))
 
 
-def run_picker(source: Source, *, project: str, subtitle: str | None = None) -> int:
-    """Launch the interactive Picker (blocks until the user quits)."""
-    WorktreeManagerApp(source, project=project, subtitle=subtitle).run()
+def run_picker(source: Source, *, project: str, subtitle: str | None = None,
+               on_launch: "Callable[[LaunchRequest], int] | None" = None) -> int:
+    """Launch the interactive Picker (blocks until the user quits).
+
+    If the operator picks a launch/resume and ``on_launch`` is provided, the app
+    quits and ``on_launch`` runs the composed launch (its exit code is returned).
+    Plain quit returns 0. Keeping the exec out of the running app is what lets the
+    launch cleanly replace / follow the TUI rather than nest under it.
+    """
+    app = WorktreeManagerApp(source, project=project, subtitle=subtitle)
+    app.run()
+    if app.pending_launch is not None and on_launch is not None:
+        return on_launch(app.pending_launch)
     return 0

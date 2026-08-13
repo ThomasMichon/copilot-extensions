@@ -209,6 +209,104 @@ def _to_worktree(d: dict) -> Worktree:
     )
 
 
+@dataclass(frozen=True)
+class LaunchPlan:
+    """A launch plan emitted by ``agent-worktrees resolve --json`` (contract v1).
+
+    ``resolve`` is the engine's *control-plane* verb: given a worktree id (resume),
+    ``--new`` (create-and-launch), or ``--bare-resume``, it returns the JSON plan
+    the front-end acts on -- **it does not launch anything itself** (the Python
+    process exits before Copilot starts; the caller executes the plan). The Manager
+    is that caller now, so :mod:`launcher` composes + runs this plan.
+
+    ``--json`` forces ``no_mux`` on the *engine* side (the engine must never spawn a
+    multiplexer in machine-readable mode); muxing is the Manager's own decision
+    (DQ9 -- the Manager owns mux), so :func:`launcher.compose_launch` does not gate
+    on ``no_mux``. Only the fields the launcher needs are typed; ``raw`` keeps the
+    whole plan for forward-compat fields.
+    """
+
+    action: str                 # "exec" | "none" | (other engine actions pass through)
+    cmd: list[str]
+    work_dir: str | None
+    status_path: str | None
+    env: dict
+    worktree_id: str | None
+    post_exit: bool
+    no_mux: bool                # the *engine's* mux suppression (always set by --json)
+    exit_code: int
+    raw: dict
+
+    @property
+    def is_exec(self) -> bool:
+        return self.action == "exec"
+
+
+def _to_launch_plan(d: dict) -> LaunchPlan:
+    cmd = d.get("cmd")
+    return LaunchPlan(
+        action=str(d.get("action", "none")),
+        cmd=[str(c) for c in cmd] if isinstance(cmd, list) else [],
+        work_dir=d.get("work_dir"),
+        status_path=d.get("status_path") or d.get("work_dir"),
+        env=dict(d.get("env") or {}),
+        worktree_id=d.get("worktree_id"),
+        post_exit=bool(d.get("post_exit")),
+        no_mux=bool(d.get("no_mux")),
+        exit_code=int(d.get("exit_code") or 0),
+        raw=d,
+    )
+
+
+def resolve_launch_plan(
+    project: str,
+    *,
+    worktree_id: str | None = None,
+    new: bool = False,
+    bare_resume: bool = False,
+    timeout: int = _DEFAULT_TIMEOUT,
+) -> LaunchPlan:
+    """Fetch a launch plan via ``agent-worktrees resolve --json`` (process boundary).
+
+    Exactly one of ``worktree_id`` (resume the worktree) or ``new`` (create + launch
+    a fresh worktree) must be given; ``bare_resume`` is the two-step-restore variant
+    of a resume. Mirrors the engine's own ``--json requires --worktree-id or --new``
+    rule so the Manager fails fast rather than shelling out to be rejected.
+
+    Version-skew tolerant: an older engine that does not know ``--bare-resume`` is
+    retried as a plain resume (degrade the feature, don't fail) -- the same contract
+    property :func:`list_worktrees` applies to ``--classify``.
+    """
+    if worktree_id and new:
+        raise EngineError("worktree_id and new are mutually exclusive")
+    if not worktree_id and not new:
+        raise EngineError("resolve requires a worktree_id or new=True")
+
+    args = ["resolve", "--json"]
+    if new:
+        args.append("--new")
+    else:
+        args += ["--worktree-id", worktree_id or ""]
+    if bare_resume:
+        args.append("--bare-resume")
+
+    try:
+        obj = run_json(project, args, timeout=timeout)
+    except EngineError as e:
+        if bare_resume and "--bare-resume" in str(e):
+            return resolve_launch_plan(
+                project, worktree_id=worktree_id, new=new,
+                bare_resume=False, timeout=timeout)
+        raise
+
+    # agent-bridge's ACP path nests the plan under ``launch``; the interactive
+    # resolve emits it flat. Unwrap defensively so either shape parses (mirrors
+    # the shell launcher's own unwrap).
+    if isinstance(obj.get("launch"), dict):
+        obj = obj["launch"]
+    return _to_launch_plan(obj)
+
+
 def list_worktrees(project: str, *, classify: bool = True) -> list[Worktree]:
     """List a project's worktrees via ``agent-worktrees list --json``.
 

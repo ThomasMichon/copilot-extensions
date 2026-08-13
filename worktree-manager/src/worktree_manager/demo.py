@@ -71,3 +71,28 @@ def aperture_worktrees() -> list[dict]:
 def list_envelope() -> dict:
     """A full ``list --json`` envelope (version + worktrees) for the fake engine."""
     return {"version": 1, "worktrees": aperture_worktrees()}
+
+
+def resolve_plan(worktree_id: str | None = None, *,
+                 new: bool = False, bare_resume: bool = False) -> dict:
+    """A harmless demo launch plan (the shape ``resolve --json`` emits).
+
+    Obviously synthetic and side-effect-free: it "launches" a Python one-liner that
+    just prints an Aperture Science line, so a demo of the Picker's launch/resume
+    action exercises the whole resolve -> compose path without ever starting a real
+    Copilot session. ``new`` invents a fresh test-chamber id.
+    """
+    wid = worktree_id or "aperture-labs-testchamber-new0"
+    what = "creating + launching" if new else (
+        "bare-resuming" if bare_resume else "resuming")
+    return {
+        "action": "exec",
+        "work_dir": f"/aperture/testchambers/{wid[-4:]}",
+        "status_path": f"/aperture/testchambers/{wid[-4:]}",
+        "cmd": ["python", "-c",
+                f"print('Aperture Labs: {what} {wid} -- for science.')"],
+        "env": {"APERTURE_DEMO": "1"},
+        "worktree_id": wid,
+        "post_exit": True,
+        "no_mux": True,
+    }
