@@ -47,6 +47,19 @@ _GH_PR_URL = re.compile(
 #: are full URLs and never match this).
 _GH_PR_SHORT = re.compile(r"^([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#(\d+)$")
 
+#: A classic ADO PR URL on the ``<org>.visualstudio.com`` host, e.g.
+#: ``https://onedrive.visualstudio.com/ODSP-Web/_git/odsp-web/pullrequest/2285417``
+#: (group 1 = ``<org>.visualstudio.com`` host, group 2 = PR id).
+_ADO_PR_VSTS = re.compile(
+    r"^https?://([A-Za-z0-9._-]+\.visualstudio\.com)/.+/pullrequest/(\d+)/?$",
+    re.IGNORECASE)
+#: The modern ADO PR URL on ``dev.azure.com/<org>``, e.g.
+#: ``https://dev.azure.com/onedrive/ODSP-Web/_git/odsp-web/pullrequest/2285417``
+#: (group 1 = ``<org>`` slug, group 2 = PR id).
+_ADO_PR_DEVAZURE = re.compile(
+    r"^https?://dev\.azure\.com/([A-Za-z0-9._-]+)/.+/pullrequest/(\d+)/?$",
+    re.IGNORECASE)
+
 
 def load_claim_child_record(
     ref: str, config: cfg.Config,
@@ -249,17 +262,14 @@ def _github_pr_view_args(ref: str) -> list[str] | None:
     return None
 
 
-def pr_merged(ref: str) -> bool | None:
+def _github_pr_merged(ref: str) -> bool | None:
     """Is a **GitHub** PR claim's PR provably **MERGED**? (tri-state).
 
     Shells ``gh pr view <ref> --json state`` and returns ``True`` only on a
     definitive ``MERGED`` state; an ``OPEN`` PR (still owed), a ``CLOSED`` but
-    unmerged PR (abandoned work -- never silently reclaimed), a non-GitHub/ADO
-    ref, a missing ``gh``, an auth/visibility failure (e.g. the ambient account
-    can't see the repo), or any error -> ``None`` (spare). Never raises. This is
-    the ``pr``-kind analog of the worktree branch-merged check: a merged PR is
-    provably safe AND its obligation discharged, so a stale (manually-journaled,
-    never-settled) cross-repo PR claim auto-reclaims once the PR lands.
+    unmerged PR (abandoned work -- never silently reclaimed), a non-GitHub ref, a
+    missing ``gh``, an auth/visibility failure (e.g. the ambient account can't
+    see the repo), or any error -> ``None`` (spare). Never raises.
     """
     args = _github_pr_view_args(ref)
     if args is None:
@@ -286,13 +296,93 @@ def pr_merged(ref: str) -> bool | None:
     return True if state == "MERGED" else None
 
 
+def _ado_pr_view_args(ref: str) -> list[str] | None:
+    """Map an **ADO** PR ref to ``az repos pr show`` args, or ``None`` if not ADO.
+
+    Recognizes the classic ``https://<org>.visualstudio.com/.../pullrequest/N``
+    and modern ``https://dev.azure.com/<org>/.../pullrequest/N`` URL shapes (the
+    odsp-web case). Returns ``["--id", N, "--org", <org-url>]`` -- the org URL
+    ``az`` needs to resolve the org-wide-unique PR id (the repo/project in the
+    URL is not required by ``az repos pr show``). A GitHub ref, a bare number, or
+    any other shape yields ``None`` (spare).
+    """
+    ref = (ref or "").strip()
+    m = _ADO_PR_VSTS.match(ref)
+    if m:
+        return ["--id", m.group(2), "--org", f"https://{m.group(1)}/"]
+    m = _ADO_PR_DEVAZURE.match(ref)
+    if m:
+        return ["--id", m.group(2), "--org",
+                f"https://dev.azure.com/{m.group(1)}/"]
+    return None
+
+
+def _ado_pr_merged(ref: str) -> bool | None:
+    """Is an **ADO** PR claim's PR provably **completed** (merged)? (tri-state).
+
+    Shells ``az repos pr show --id N --org <org> --query status -o tsv`` (the
+    azure-devops extension) and returns ``True`` only on a definitive
+    ``completed`` status; an ``active`` PR (still owed), an ``abandoned`` PR
+    (closed unmerged -- never silently reclaimed), a non-ADO ref, a missing
+    ``az`` / azure-devops extension, an auth/visibility failure, or any error ->
+    ``None`` (spare). Never raises. The ADO analog of :func:`_github_pr_merged`
+    -- ``az`` reaches ADO under the operator's ambient ``az login`` (best-effort;
+    unauthenticated -> nonzero exit -> spare), keeping the sweep dependency-free
+    beyond the CLI the harness already uses for ADO. We project to just the
+    ``status`` field (not the full ``-o json`` payload) so a PR title/description
+    carrying non-UTF-8 (cp1252) bytes can't crash decoding into a false spare;
+    ``errors="replace"`` hardens it further.
+    """
+    args = _ado_pr_view_args(ref)
+    if args is None:
+        return None
+    az = shutil.which("az")
+    if not az:
+        return None
+    try:
+        proc = subprocess.run(
+            [az, "repos", "pr", "show", *args, "--query", "status", "-o", "tsv"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=45,
+            creationflags=(subprocess.CREATE_NO_WINDOW if sys.platform == "win32"
+                           else 0),
+        )
+    except Exception as exc:
+        log.debug("az repos pr show for %s degraded: %s", ref, exc)
+        return None
+    if proc.returncode != 0:
+        return None
+    return True if (proc.stdout or "").strip() == "completed" else None
+
+
+def pr_merged(ref: str) -> bool | None:
+    """Is a PR claim's PR provably **merged**? (tri-state) -- GitHub **or** ADO.
+
+    Dispatches by ref shape: a GitHub ref (full ``github.com`` URL or the
+    ``owner/repo#N`` shorthand) -> :func:`_github_pr_merged` (``gh pr view``); an
+    ADO PR URL (``*.visualstudio.com`` / ``dev.azure.com``) ->
+    :func:`_ado_pr_merged` (``az repos pr show``). An unrecognized ref (bare
+    number / junk), a missing tool, an auth/visibility failure, or any error ->
+    ``None`` (spare). Never raises. This is the ``pr``-kind analog of the
+    worktree branch-merged check: a merged PR is provably safe AND its obligation
+    discharged, so a stale (manually-journaled, never-settled) cross-repo PR
+    claim -- GitHub or the real-world **odsp-web ADO** case -- auto-reclaims once
+    the PR lands.
+    """
+    if _github_pr_view_args(ref) is not None:
+        return _github_pr_merged(ref)
+    if _ado_pr_view_args(ref) is not None:
+        return _ado_pr_merged(ref)
+    return None
+
+
 def claim_gone(claim: tracking.ResourceClaim, config: cfg.Config) -> bool | None:
     """Tri-state **gone** verdict, dispatched by claim kind.
 
     A ``worktree`` claim reuses the same-machine claimant-liveness resolver
     (:func:`gone_of`). A leaseable kind (codespace/container) is *gone* when its
     lease mirror shows the obligation settled (:func:`leaseable_settled`). A
-    ``pr`` claim is *gone* when its (GitHub) PR is provably merged
+    ``pr`` claim is *gone* when its PR (GitHub **or** ADO) is provably merged
     (:func:`pr_merged`). Every other kind is ``None`` (spare).
     """
     if claim.kind == "worktree":
