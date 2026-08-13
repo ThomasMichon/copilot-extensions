@@ -10,14 +10,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from configurator.harness_state import (
+from worktree_manager.harness_state import (
     build_projects,
     build_repos,
     build_state,
     pr_model,
     user_enabled_plugins,
 )
-from configurator.__main__ import main
+from worktree_manager.__main__ import main
 
 
 def _make_home(tmp: Path) -> Path:

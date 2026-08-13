@@ -15518,15 +15518,16 @@ _WORKTREE_MANAGER_BIN = "worktree-manager"
 # verify the install command is ours before running it -- not an attack) and the
 # per-platform install/update one-liner (the Manager's own bootstrap flow). The
 # install trigger only *shows* these; it never auto-runs a remote script (the
-# bootstrap ships with Phase 6b -- until then a user runs it themselves).
+# bootstrap ships with the Worktree Manager package -- until then a user runs it
+# themselves).
 _WORKTREE_MANAGER_REPO_URL = "https://github.com/ThomasMichon/copilot-extensions"
 _WORKTREE_MANAGER_INSTALL_SH = (
     "curl -fsSL https://raw.githubusercontent.com/ThomasMichon/"
-    "copilot-extensions/main/configurator/bootstrap.sh | bash"
+    "copilot-extensions/main/worktree-manager/bootstrap.sh | bash"
 )
 _WORKTREE_MANAGER_INSTALL_PS1 = (
     "iex (irm https://raw.githubusercontent.com/ThomasMichon/"
-    "copilot-extensions/main/configurator/bootstrap.ps1)"
+    "copilot-extensions/main/worktree-manager/bootstrap.ps1)"
 )
 
 

@@ -1,13 +1,13 @@
-"""Versioned self-install for the Configurator (matches the harness convention).
+"""Versioned self-install for the Worktree Manager (matches the harness convention).
 
-The Configurator is delivered out-of-plugin, but its install flow follows the
+The Worktree Manager is delivered out-of-plugin, but its install flow follows the
 **same versioning convention as the harness's other installers** (see
 ``plugins/agent-worktrees/scripts/versioned_runtime.py``):
 
 * an immutable per-version slot at ``<root>/versions/<version>/``,
 * a plain-text ``<root>/current-version`` **marker file** naming the active
   version (written atomically: temp + rename), and
-* a **binstub** in ``~/.local/bin/`` (``configurator`` + ``.cmd``/``.ps1`` on
+* a **binstub** in ``~/.local/bin/`` (``worktree-manager`` + ``.cmd``/``.ps1`` on
   Windows) that resolves the marker and runs the active slot.
 
 This is *convention* reuse, not code reuse: nothing here imports the plugin's
@@ -24,7 +24,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-import configurator
+import worktree_manager
 
 MARKER = "current-version"
 VERSIONS_DIR = "versions"
@@ -33,11 +33,11 @@ _VERSION_RE = re.compile(r'__version__\s*=\s*"([^"]+)"')
 
 def default_root() -> Path:
     """Install root, mirroring ``~/.agent-worktrees`` for the core installer."""
-    env = os.environ.get("CONFIGURATOR_ROOT")
+    env = os.environ.get("WORKTREE_MANAGER_ROOT")
     if env:
         return Path(env)
     home = Path(os.environ.get("USERPROFILE") or os.path.expanduser("~"))
-    return home / ".configurator"
+    return home / ".worktree-manager"
 
 
 def local_bin() -> Path:
@@ -47,14 +47,14 @@ def local_bin() -> Path:
 
 def running_payload_dir() -> Path:
     """The project dir of the currently-running payload (has pyproject.toml)."""
-    # .../configurator/src/configurator/self_install.py -> parents[2] == project.
-    return Path(configurator.__file__).resolve().parents[2]
+    # .../worktree-manager/src/worktree_manager/self_install.py -> parents[2] == project.
+    return Path(worktree_manager.__file__).resolve().parents[2]
 
 
 def payload_version(payload_dir: Path | None = None) -> str | None:
-    """Read ``__version__`` from a payload's src/configurator/__init__.py."""
+    """Read ``__version__`` from a payload's src/worktree_manager/__init__.py."""
     pd = payload_dir or running_payload_dir()
-    init = pd / "src" / "configurator" / "__init__.py"
+    init = pd / "src" / "worktree_manager" / "__init__.py"
     try:
         m = _VERSION_RE.search(init.read_text("utf-8"))
     except OSError:
@@ -77,8 +77,8 @@ def version_slot(version: str, root: Path | None = None) -> Path:
 
 def _binstub_files() -> list[str]:
     if os.name == "nt":
-        return ["configurator.cmd", "configurator.ps1", "configurator"]
-    return ["configurator"]
+        return ["worktree-manager.cmd", "worktree-manager.ps1", "worktree-manager"]
+    return ["worktree-manager"]
 
 
 def binstub_present() -> Path | None:
@@ -125,11 +125,11 @@ def needs_install(version: str, root: Path | None = None) -> bool:
 def _sh_binstub() -> str:
     return (
         "#!/usr/bin/env bash\n"
-        "# configurator binstub (versioned) — resolves the current-version marker.\n"
+        "# worktree-manager binstub (versioned) — resolves the current-version marker.\n"
         'set -euo pipefail\n'
-        'root="${CONFIGURATOR_ROOT:-$HOME/.configurator}"\n'
+        'root="${WORKTREE_MANAGER_ROOT:-$HOME/.worktree-manager}"\n'
         'ver="$(cat "$root/current-version")"\n'
-        'exec uv run --quiet --project "$root/versions/$ver" python -m configurator "$@"\n'
+        'exec uv run --quiet --project "$root/versions/$ver" python -m worktree_manager "$@"\n'
     )
 
 
@@ -137,21 +137,21 @@ def _cmd_binstub() -> str:
     return (
         "@echo off\r\n"
         "setlocal\r\n"
-        'if "%CONFIGURATOR_ROOT%"=="" set "CONFIGURATOR_ROOT=%USERPROFILE%\\.configurator"\r\n'
-        'set /p VER=<"%CONFIGURATOR_ROOT%\\current-version"\r\n'
-        'uv run --quiet --project "%CONFIGURATOR_ROOT%\\versions\\%VER%" '
-        "python -m configurator %*\r\n"
+        'if "%WORKTREE_MANAGER_ROOT%"=="" set "WORKTREE_MANAGER_ROOT=%USERPROFILE%\\.worktree-manager"\r\n'
+        'set /p VER=<"%WORKTREE_MANAGER_ROOT%\\current-version"\r\n'
+        'uv run --quiet --project "%WORKTREE_MANAGER_ROOT%\\versions\\%VER%" '
+        "python -m worktree_manager %*\r\n"
     )
 
 
 def _ps1_binstub() -> str:
     return (
-        "# configurator binstub (versioned) — resolves the current-version marker.\n"
-        '$root = if ($env:CONFIGURATOR_ROOT) { $env:CONFIGURATOR_ROOT } '
-        'else { Join-Path $env:USERPROFILE ".configurator" }\n'
+        "# worktree-manager binstub (versioned) — resolves the current-version marker.\n"
+        '$root = if ($env:WORKTREE_MANAGER_ROOT) { $env:WORKTREE_MANAGER_ROOT } '
+        'else { Join-Path $env:USERPROFILE ".worktree-manager" }\n'
         '$ver = (Get-Content (Join-Path $root "current-version") -Raw).Trim()\n'
         '$slot = Join-Path (Join-Path $root "versions") $ver\n'
-        "uv run --quiet --project $slot python -m configurator @args\n"
+        "uv run --quiet --project $slot python -m worktree_manager @args\n"
     )
 
 
@@ -159,12 +159,12 @@ def _deploy_binstubs() -> list[Path]:
     lb = local_bin()
     lb.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
-    contents = {"configurator": _sh_binstub()}
+    contents = {"worktree-manager": _sh_binstub()}
     if os.name == "nt":
         contents = {
-            "configurator.cmd": _cmd_binstub(),
-            "configurator.ps1": _ps1_binstub(),
-            "configurator": _sh_binstub(),  # for git-bash on Windows
+            "worktree-manager.cmd": _cmd_binstub(),
+            "worktree-manager.ps1": _ps1_binstub(),
+            "worktree-manager": _sh_binstub(),  # for git-bash on Windows
         }
     for name, body in contents.items():
         p = lb / name

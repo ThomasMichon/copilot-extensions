@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import configurator.self_install as si
-from configurator.self_install import (
+import worktree_manager.self_install as si
+from worktree_manager.self_install import (
     current_version,
     needs_install,
     payload_version,
@@ -20,12 +20,12 @@ from configurator.self_install import (
     status,
     version_slot,
 )
-from configurator.__main__ import main
+from worktree_manager.__main__ import main
 
 
 def _fake_payload(tmp: Path, version: str) -> Path:
     pd = tmp / "payload"
-    pkg = pd / "src" / "configurator"
+    pkg = pd / "src" / "worktree_manager"
     pkg.mkdir(parents=True)
     (pkg / "__init__.py").write_text(f'__version__ = "{version}"\n')
     (pd / "pyproject.toml").write_text("[project]\nname='x'\n")
@@ -66,12 +66,12 @@ def test_apply_installs_marker_slot_and_binstub(tmp_path, monkeypatch):
     # immutable version slot with the payload copied in
     slot = version_slot("1.2.3", root)
     assert slot.is_dir()
-    assert (slot / "src" / "configurator" / "__init__.py").exists()
+    assert (slot / "src" / "worktree_manager" / "__init__.py").exists()
     # binstub deployed to ~/.local/bin
-    stub = lb / "configurator"
+    stub = lb / "worktree-manager"
     assert stub.exists()
     body = stub.read_text()
-    assert "current-version" in body and "configurator" in body
+    assert "current-version" in body and "worktree-manager" in body
 
 
 def test_apply_is_idempotent_and_version_gated(tmp_path, monkeypatch):
@@ -118,4 +118,4 @@ def test_self_install_command_dry_run(capsys):
 
 def test_doctor_shows_self_section(capsys):
     main(["doctor"])
-    assert "configurator (self)" in capsys.readouterr().out
+    assert "worktree-manager (self)" in capsys.readouterr().out

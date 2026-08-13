@@ -1,28 +1,28 @@
 #!/usr/bin/env bash
-# bootstrap.sh — fetch, version-install, and launch the copilot-extensions Configurator.
+# bootstrap.sh — fetch, version-install, and launch the copilot-extensions Worktree Manager.
 #
-#   curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/configurator/bootstrap.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/worktree-manager/bootstrap.sh | bash
 #
 # This is delivered OUTSIDE the plugin pipe: it does not require any Copilot
 # plugin to be installed, and does not go through `copilot plugin`. It fetches
-# the Configurator payload, installs it under the SAME versioning convention as
-# the harness's other installers — an immutable ~/.configurator/versions/<ver>
-# slot, a plain-text ~/.configurator/current-version marker, and a
-# ~/.local/bin/configurator binstub — then launches it. Re-running is
+# the Worktree Manager payload, installs it under the SAME versioning convention as
+# the harness's other installers — an immutable ~/.worktree-manager/versions/<ver>
+# slot, a plain-text ~/.worktree-manager/current-version marker, and a
+# ~/.local/bin/worktree-manager binstub — then launches it. Re-running is
 # version-gated (a no-op when already current).
 #
 # Phase 0 assumes git + uv are already present; automatic prerequisite
 # provisioning lands in Phase 2 (issue #355). Override the fetched ref with
-# $CONFIGURATOR_REF and the install root with $CONFIGURATOR_ROOT.
+# $WORKTREE_MANAGER_REF and the install root with $WORKTREE_MANAGER_ROOT.
 
 set -euo pipefail
 
 REPO='https://github.com/ThomasMichon/copilot-extensions.git'
-REF="${CONFIGURATOR_REF:-main}"
-ROOT="${CONFIGURATOR_ROOT:-$HOME/.configurator}"
+REF="${WORKTREE_MANAGER_REF:-main}"
+ROOT="${WORKTREE_MANAGER_ROOT:-$HOME/.worktree-manager}"
 STAGING="$ROOT/staging"
 
-echo 'copilot-extensions Configurator - bootstrap'
+echo 'copilot-extensions Worktree Manager - bootstrap'
 
 for tool in git uv; do
     if ! command -v "$tool" >/dev/null 2>&1; then
@@ -39,9 +39,9 @@ else
     git clone --depth 1 --branch "$REF" "$REPO" "$STAGING" >/dev/null 2>&1
 fi
 
-cd "$STAGING/configurator"
+cd "$STAGING/worktree-manager"
 # Version-install the fetched payload (idempotent, version-gated): publishes the
 # versions/<ver> slot + current-version marker + ~/.local/bin binstub.
-uv run --quiet python -m configurator self-install --apply
+uv run --quiet python -m worktree_manager self-install --apply
 # Then run whatever the caller asked for through the freshly-installed app.
-exec uv run --quiet python -m configurator "$@"
+exec uv run --quiet python -m worktree_manager "$@"
