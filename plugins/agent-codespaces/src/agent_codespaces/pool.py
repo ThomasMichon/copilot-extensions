@@ -244,6 +244,11 @@ class PoolMember:
     # (unknown: no fresh/known verdict -> Recycle hidden, Verify offered).
     # Derived from the ``codespace-clean`` git-ref overlay; default None.
     off_box_safe: bool | None = None
+    # Self-recognition (agent-claim-awareness): True when THIS worktree/session is
+    # the holder -- so ``pool``/``leases`` can mark the row ``(you)`` and an agent
+    # reuses its own box instead of steering clear of it as if foreign. Annotated
+    # by the command after resolving the caller's own ClaimRef; default False.
+    held_by_self: bool = False
 
     @property
     def holder_owner(self) -> str | None:
@@ -282,6 +287,10 @@ class PoolMember:
             "idle_age_s": round(self.idle_age) if self.idle_age is not None else None,
             # Cleanliness-beacon safety verdict (True/False/None-unknown).
             "off_box_safe": self.off_box_safe,
+            # Self-recognition: True when THIS worktree/session holds the claim
+            # (agent-claim-awareness) -- so a consumer reuses its own box instead
+            # of treating it as foreign and steering clear.
+            "held_by_self": self.held_by_self,
         }
 
 
