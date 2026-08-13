@@ -13,6 +13,7 @@ import logging
 import sqlite3
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -33,6 +34,9 @@ CREATE TABLE IF NOT EXISTS tasks (
     trigger_source  TEXT NOT NULL DEFAULT 'unknown',
     result_stats    TEXT,
     attempt_count   INTEGER NOT NULL DEFAULT 1,
+    worker_pid      INTEGER,
+    worker_host     TEXT,
+    worker_version  TEXT,
     created_at      REAL NOT NULL,
     started_at      REAL,
     finished_at     REAL,
@@ -73,6 +77,9 @@ class TaskRecord:
     trigger_source: str
     result_stats: dict[str, Any] | None
     attempt_count: int
+    worker_pid: int | None
+    worker_host: str | None
+    worker_version: str | None
     created_at: float
     started_at: float | None
     finished_at: float | None
@@ -122,6 +129,9 @@ def _row_to_record(row: sqlite3.Row) -> TaskRecord:
         trigger_source=row["trigger_source"] if "trigger_source" in row.keys() else "unknown",
         result_stats=result_stats,
         attempt_count=row["attempt_count"],
+        worker_pid=row["worker_pid"] if "worker_pid" in row.keys() else None,
+        worker_host=row["worker_host"] if "worker_host" in row.keys() else None,
+        worker_version=row["worker_version"] if "worker_version" in row.keys() else None,
         created_at=row["created_at"],
         started_at=row["started_at"],
         finished_at=row["finished_at"],
@@ -139,6 +149,11 @@ class TaskStore:
         self._db_path = str(db_path)
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
+
+    @property
+    def data_dir(self) -> Path:
+        """Directory holding the queue DB (shared with the index data)."""
+        return Path(self._db_path).parent
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path, timeout=10)
@@ -166,6 +181,18 @@ class TaskStore:
                 )
                 conn.commit()
                 log.info("Migrated tasks table: added result_stats column")
+            # Worker-identity columns (model A: indexing runs in a detached
+            # versioned worker subprocess). Used for PID-aware crash recovery and
+            # cross-cutover re-adoption.
+            for col, decl in (
+                ("worker_pid", "INTEGER"),
+                ("worker_host", "TEXT"),
+                ("worker_version", "TEXT"),
+            ):
+                if col not in cols:
+                    conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {decl}")
+                    conn.commit()
+                    log.info("Migrated tasks table: added %s column", col)
         finally:
             conn.close()
 
@@ -487,5 +514,88 @@ class TaskStore:
             if affected:
                 log.warning("Marked %d interrupted task(s) from previous run", affected)
             return affected
+        finally:
+            conn.close()
+
+    # ── Worker delegation (model A) ──────────────────────────
+
+    def set_worker(
+        self, task_id: str, pid: int, host: str, version: str
+    ) -> None:
+        """Record the detached worker subprocess owning a processing task."""
+        now = time.time()
+        conn = self._connect()
+        try:
+            conn.execute(
+                """UPDATE tasks
+                   SET worker_pid = ?, worker_host = ?, worker_version = ?,
+                       updated_at = ?
+                   WHERE id = ?""",
+                (int(pid), host, version, now, task_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_running_with_worker(self, host: str) -> list[TaskRecord]:
+        """Return 'processing' tasks whose worker was spawned on ``host``.
+
+        The caller checks liveness (a local PID) to decide reap vs. re-adopt.
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT * FROM tasks
+                   WHERE status = 'processing' AND worker_host = ?
+                   ORDER BY created_at""",
+                (host,),
+            ).fetchall()
+            return [_row_to_record(r) for r in rows]
+        finally:
+            conn.close()
+
+    def reap_orphaned(
+        self, host: str, is_alive: "Callable[[int], bool]"
+    ) -> int:
+        """Mark 'processing' tasks whose worker is dead as 'interrupted'.
+
+        PID-aware crash recovery (replaces the blanket ``mark_interrupted`` in
+        the worker-delegation model): a task whose worker subprocess is still
+        alive is LEFT untouched, so a service cutover never kills an in-flight
+        index job — the new service re-adopts it. A task with no recorded worker,
+        or a worker on THIS host whose PID is gone, is interrupted (resumable).
+        A worker recorded on a DIFFERENT host is left alone (not ours to judge).
+
+        Returns the number of tasks marked interrupted.
+        """
+        now = time.time()
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT id, worker_pid, worker_host FROM tasks WHERE status = 'processing'"
+            ).fetchall()
+            reaped = 0
+            for row in rows:
+                wpid = row["worker_pid"]
+                whost = row["worker_host"]
+                # A live worker (recorded on this host, PID still alive) survives.
+                if whost == host and wpid and is_alive(int(wpid)):
+                    continue
+                # A worker on another host: we cannot check its PID — leave it.
+                if whost and whost != host:
+                    continue
+                conn.execute(
+                    """UPDATE tasks
+                       SET status = 'interrupted',
+                           error = 'Interrupted (worker not alive)',
+                           finished_at = ?, updated_at = ?
+                       WHERE id = ? AND status = 'processing'""",
+                    (now, now, row["id"]),
+                )
+                reaped += 1
+            conn.commit()
+            if reaped:
+                log.warning("Reaped %d orphaned task(s) with dead workers", reaped)
+            return reaped
         finally:
             conn.close()

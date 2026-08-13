@@ -334,6 +334,18 @@ def cmd_index(args: argparse.Namespace) -> int:
         return _emit_error(exc)
 
 
+def cmd_index_worker(args: argparse.Namespace) -> int:
+    """Run one queued indexing task in this (versioned) worker process.
+
+    Internal entry point spawned by the service's TaskRunner (model A): the
+    worker runs from the active versioned slot's python, so it survives a
+    service cutover and makes the job resumable via the durable queue.
+    """
+    from agent_index.indexing.worker import run_worker
+
+    return run_worker(args.task)
+
+
 def cmd_search(args: argparse.Namespace) -> int:
     try:
         from agent_index.search import engine as search_engine
@@ -532,6 +544,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_index.add_argument("--source", help="source name to index instead of configured defaults")
     p_index.add_argument("--full", action="store_true", help="run a full reindex")
     p_index.set_defaults(func=cmd_index)
+
+    # Internal: run a single queued task in a detached versioned worker process
+    # (spawned by the service TaskRunner; not part of the public surface).
+    p_worker = sub.add_parser("index-worker", help=argparse.SUPPRESS)
+    p_worker.add_argument("--task", required=True, help="task id to run")
+    p_worker.set_defaults(func=cmd_index_worker)
 
     p_search = sub.add_parser("search", help="search the durable index")
     p_search.add_argument("query")
