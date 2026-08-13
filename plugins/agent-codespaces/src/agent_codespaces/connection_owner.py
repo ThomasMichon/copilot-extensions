@@ -42,6 +42,7 @@ may a later increment tear the connection down.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -50,7 +51,7 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, fields
-from typing import Protocol
+from typing import Any, Protocol
 
 from .config import RUNTIME_DIR, ensure_runtime_dir
 
@@ -442,3 +443,91 @@ class ConnectionOwner:
         """Stop all relay channels (daemon shutdown). The registry is untouched."""
         for codespace in list(self._channels):
             await self.drop(codespace)
+
+
+# ---------------------------------------------------------------------------
+# Real transport factory + daemon runner (increment 3)
+# ---------------------------------------------------------------------------
+#
+# Increment 2 left the relay transport injected. Here we supply the real factory
+# (backed by ssh_manager.SupervisedRelayForward) and the reconcile loop a
+# persistent daemon runs. Both are additive + opt-in: nothing starts the daemon
+# by default. Wiring a CLI entrypoint and actually running it on a machine
+# (making the ssh/dispatch paths defer to the Owner) is the deploy-gated
+# increment that follows (dotfiles#1345).
+
+
+def make_supervised_relay_factory(
+    config: Any,
+    *,
+    gh_env: dict | None = None,
+    relay_cls: type | None = None,
+    config_source_cls: type | None = None,
+    port_resolver: Callable[[Any], int] | None = None,
+) -> RelayFactory:
+    """Build a :data:`RelayFactory` backed by ``ssh_manager.SupervisedRelayForward``.
+
+    Per CodeSpace the factory resolves the CodeSpace SSH config
+    (``CodespaceConfigSource`` -> ``gh codespace ssh --config``) and the host
+    relay port (``relay_launch.effective_relay_port``) and constructs an
+    **unstarted** ``SupervisedRelayForward`` -- mirroring the per-dispatch relay
+    setup in ``__main__._start_supervised_relay``, but owned by the persistent
+    Connection Owner rather than a single dispatch. The ``host_port_resolver``
+    lets the ``-R`` target follow a relay that rebinds a new host port after a
+    daemon restart (dotfiles#855). The transport / config-source classes and the
+    port resolver are injectable so this is unit-testable without a real
+    CodeSpace or an SSH subprocess.
+    """
+    if relay_cls is None:
+        from ssh_manager import SupervisedRelayForward
+
+        relay_cls = SupervisedRelayForward
+    if config_source_cls is None:
+        from ssh_manager.codespace_source import CodespaceConfigSource
+
+        config_source_cls = CodespaceConfigSource
+    if port_resolver is None:
+        from .relay_launch import effective_relay_port
+
+        port_resolver = effective_relay_port
+
+    def factory(codespace: str) -> RelayChannel:
+        ssh_config = config_source_cls(codespace, gh_env=gh_env).get_ssh_config()
+        relay_port = port_resolver(config)
+        return relay_cls(
+            ssh_config,
+            relay_port,
+            host_port_resolver=lambda: port_resolver(config),
+        )
+
+    return factory
+
+
+async def run_owner_daemon(
+    owner: ConnectionOwner,
+    *,
+    interval: float = 15.0,
+    stop_event: asyncio.Event | None = None,
+) -> None:
+    """Run the Connection Owner reconcile loop until ``stop_event`` is set.
+
+    Reconciles immediately, then every ``interval`` seconds, so the set of live
+    relay channels tracks the registry (a tenant hold/release is reflected within
+    one interval). A failed reconcile cycle is logged and the loop continues (a
+    transient error must not kill the daemon). On exit -- normal stop or an
+    unexpected error -- all channels are stopped (registry intent is untouched).
+    Additive + opt-in: nothing starts this by default.
+    """
+    stop = stop_event if stop_event is not None else asyncio.Event()
+    try:
+        while not stop.is_set():
+            try:
+                await owner.reconcile()
+            except Exception as exc:  # a bad cycle must not kill the daemon
+                log.warning("Connection Owner reconcile cycle failed: %s", exc)
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=interval)
+            except TimeoutError:
+                pass
+    finally:
+        await owner.shutdown()
