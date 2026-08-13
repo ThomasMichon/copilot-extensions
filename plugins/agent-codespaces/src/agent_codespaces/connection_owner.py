@@ -347,10 +347,12 @@ class RelayChannel(Protocol):
     """The subset of ``ssh_manager.SupervisedRelayForward`` the Owner drives.
 
     ``start`` establishes the reverse-forward and starts the self-healing
-    monitor; ``stop`` tears it down (idempotent); ``is_alive`` reports whether
-    the underlying ``ssh -N -R`` process is currently running.
+    monitor; ``stop`` tears it down (idempotent); ``is_alive`` (a **property**,
+    matching ``SupervisedRelayForward``) reports whether the underlying
+    ``ssh -N -R`` process is currently running.
     """
 
+    @property
     def is_alive(self) -> bool: ...
 
     async def start(self) -> None: ...
@@ -381,7 +383,7 @@ class ConnectionOwner:
 
     def active_codespaces(self) -> set[str]:
         """CodeSpaces with a currently-live relay channel under this Owner."""
-        return {cs for cs, channel in self._channels.items() if channel.is_alive()}
+        return {cs for cs, channel in self._channels.items() if channel.is_alive}
 
     async def ensure(self, codespace: str) -> bool:
         """Ensure a started relay channel for ``codespace`` iff it is held.
@@ -399,7 +401,7 @@ class ConnectionOwner:
         if channel is None:
             channel = self._factory(codespace)
             self._channels[codespace] = channel
-        if not channel.is_alive():
+        if not channel.is_alive:
             try:
                 await channel.start()
             except Exception:

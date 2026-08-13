@@ -7,6 +7,7 @@ semantics, TTL-based tenant reclamation, pin stickiness, and persistence.
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 import pytest
@@ -193,6 +194,7 @@ class FakeRelay:
         self.stops = 0
         self._alive = False
 
+    @property
     def is_alive(self) -> bool:
         return self._alive
 
@@ -225,7 +227,7 @@ async def test_reconcile_starts_held_and_stops_unheld(store):
     owner.hold("cs-one", "tenant-a", pin=True)
     await owner_mgr.reconcile()
     assert owner_mgr.active_codespaces() == {"cs-one"}
-    assert created["cs-one"].is_alive()
+    assert created["cs-one"].is_alive
     assert created["cs-one"].starts == 1
 
     # A second reconcile is idempotent -- no extra start.
@@ -257,7 +259,7 @@ async def test_reconcile_survives_a_failing_channel(store):
 
     # The good channel is up; the bad one is dropped (to retry next cycle).
     assert "cs-good" in owner_mgr.active_codespaces()
-    assert created["cs-good"].is_alive()
+    assert created["cs-good"].is_alive
     assert "cs-bad" not in owner_mgr.active_codespaces()
     assert created["cs-bad"].starts == 1
     assert created["cs-bad"].stops == 1  # best-effort teardown, no leaked process
@@ -282,7 +284,6 @@ async def test_shutdown_stops_all_without_touching_registry(store):
 # ---------------------------------------------------------------------------
 # Real factory + daemon runner (increment 3)
 # ---------------------------------------------------------------------------
-import asyncio
 
 
 def test_make_supervised_relay_factory_wires_config_and_port():
@@ -294,6 +295,7 @@ def test_make_supervised_relay_factory_wires_config_and_port():
                 ssh_config=ssh_config, relay_port=relay_port, resolver=host_port_resolver
             )
 
+        @property
         def is_alive(self):
             return False
 
