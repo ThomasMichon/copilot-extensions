@@ -75,6 +75,7 @@ def test_status_renders_inflight_tool(monkeypatch, capsys):
         "session_id": "s1", "name": "calm-lake", "agent_name": "codespace:x",
         "caller_id": "host-A", "status": "running", "turn_count": 3,
         "context_pct": 12.0, "head_id": 50, "last_acked_id": 40, "behind": 10,
+        "usage_model": "claude-opus-4.8",
         "active_tool": {"title": "Build", "command": "rush build", "elapsed_s": 17.4},
         "progress": {"build": "ok", "pr": "42"},
         "updated_at": "2026-06-15T18:00:00+00:00",
@@ -87,6 +88,7 @@ def test_status_renders_inflight_tool(monkeypatch, capsys):
     assert "rush build" in out
     assert "10 new" in out  # cursor-lag hint
     assert "Progress: build=ok  pr=42" in out
+    assert "Model:   claude-opus-4.8" in out
 
 
 def test_status_idle_when_no_tool(monkeypatch, capsys):

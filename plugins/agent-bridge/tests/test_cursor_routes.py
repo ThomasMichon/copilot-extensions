@@ -186,3 +186,18 @@ class TestStatusEndpoint:
         resp = client.get("/api/v1/sessions/sess-1/status")
         assert resp.status_code == 200
         assert resp.json()["progress"] == {"build": "ok", "pr": "42"}
+
+    def test_status_surfaces_usage_model(self, client, app) -> None:
+        # The applied model must be verifiable at a glance from status
+        # (dotfiles#790/#1274 WS1-model).
+        mgr = _seed_session(app)
+        mgr._sessions["sess-1"].usage_model = "claude-opus-4.8"
+        resp = client.get("/api/v1/sessions/sess-1/status")
+        assert resp.status_code == 200
+        assert resp.json()["usage_model"] == "claude-opus-4.8"
+
+    def test_status_usage_model_absent_when_unknown(self, client, app) -> None:
+        _seed_session(app)
+        resp = client.get("/api/v1/sessions/sess-1/status")
+        assert resp.status_code == 200
+        assert resp.json()["usage_model"] is None
