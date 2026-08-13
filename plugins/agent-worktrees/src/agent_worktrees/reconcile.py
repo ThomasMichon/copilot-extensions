@@ -166,6 +166,30 @@ def _versions_equal(a: str | None, b: str | None) -> bool:
     return na == nb
 
 
+def _version_lt(a: str | None, b: str | None) -> bool:
+    """Return True only when version ``a`` is *confidently* older than ``b``.
+
+    Used to keep runtime reconciliation **monotonic**: a payload version that is
+    strictly older than the running/deployed build must never be redeployed --
+    that would silently REVERT a newer local build toward a stale/throttled
+    marketplace payload (dotfiles #1366). Returns ``False`` on any ambiguity
+    (missing, equal, or unorderable versions) so a genuine *forward* update is
+    never suppressed. Tolerates the ``0.4.0-dev5`` vs ``0.4.0.dev5`` spelling via
+    ``packaging`` (same normalization as :func:`_versions_equal`); without
+    ``packaging`` we cannot order reliably, so we conservatively return ``False``.
+    """
+    if a is None or b is None or a == b:
+        return False
+    try:
+        from packaging.version import InvalidVersion, Version
+        try:
+            return Version(a) < Version(b)
+        except InvalidVersion:
+            return False
+    except ImportError:
+        return False
+
+
 # --------------------------------------------------------------------------
 # Repo settings -> enabled copilot-extensions plugins
 # --------------------------------------------------------------------------
@@ -702,6 +726,14 @@ def build_plan(
             # running-version.json (or a dead pid) -> fall back to on-disk.
             rver = rrun if rrun is not None else rdep
             if pver is None or not _versions_equal(rver, pver):
+                # Monotonic guard (#1366): never redeploy a payload that is
+                # strictly OLDER than the running/deployed build -- doing so would
+                # REVERT a newer local `source: local` deploy toward a stale /
+                # throttled marketplace payload on the next reconcile pass. Only
+                # a confidently-older payload is suppressed; runtime-missing
+                # (rver is None) and forward/ambiguous cases still deploy.
+                if _version_lt(pver, rver):
+                    continue
                 built = runtime_installer_argv(pdir)
                 if built is not None:
                     cmd, argv = built
