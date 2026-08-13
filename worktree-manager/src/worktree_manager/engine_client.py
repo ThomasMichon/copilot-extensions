@@ -19,12 +19,21 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass
 
 #: The engine binstub name (the self-provisioning agent-worktrees tool CLI).
 ENGINE_BIN = "agent-worktrees"
+
+#: Override the base engine command (everything before ``[--project …] <verb>``).
+#: Set to a shell-quoted command to point the client at a *fake* engine binstub
+#: instead of the real one -- the seam that makes the Manager (and its Picker)
+#: buildable, testable, and demo-able without a live agent-worktrees, faithfully
+#: through the same subprocess + JSON-parse path. The ``--demo`` Picker mode sets
+#: this to the bundled Aperture Labs fake engine.
+ENGINE_CMD_ENV = "WORKTREE_MANAGER_ENGINE_CMD"
 
 #: A generous ceiling: a cold engine self-provisions on first use, and a classify
 #: pass can enumerate many worktrees. Kept bounded so the Manager never hangs.
@@ -44,13 +53,49 @@ class EngineError(RuntimeError):
         self.install_hint = install_hint
 
 
+def _engine_override() -> list[str] | None:
+    """The overriding base engine command from the environment, if set."""
+    raw = os.environ.get(ENGINE_CMD_ENV)
+    if not raw or not raw.strip():
+        return None
+    return shlex.split(raw, posix=os.name != "nt")
+
+
+#: In-process base-command override (wins over the env). Set by the Picker's
+#: ``--demo`` mode to the bundled fake engine, avoiding any shell-quoting round
+#: trip through the environment.
+_ENGINE_CMD_OVERRIDE: list[str] | None = None
+
+
+def set_engine_command(cmd: list[str] | None) -> None:
+    """Force the base engine command in-process (e.g. a fake/demo engine)."""
+    global _ENGINE_CMD_OVERRIDE
+    _ENGINE_CMD_OVERRIDE = list(cmd) if cmd else None
+
+
+def engine_base_command() -> list[str] | None:
+    """The base command to run the engine (before ``[--project …] <verb>``).
+
+    Resolution order: the in-process override (demo/tests) → the
+    ``WORKTREE_MANAGER_ENGINE_CMD`` env override → the resolved ``agent-worktrees``
+    binstub. None when none is available.
+    """
+    if _ENGINE_CMD_OVERRIDE:
+        return list(_ENGINE_CMD_OVERRIDE)
+    override = _engine_override()
+    if override:
+        return override
+    exe = engine_path()
+    return [exe] if exe else None
+
+
 def engine_path() -> str | None:
     """Resolve the ``agent-worktrees`` binstub on PATH, or None if not installed."""
     return shutil.which(ENGINE_BIN)
 
 
 def engine_available() -> bool:
-    return engine_path() is not None
+    return engine_base_command() is not None
 
 
 def _run(project: str | None, args: list[str], *, timeout: int = _DEFAULT_TIMEOUT) -> str:
@@ -60,11 +105,11 @@ def _run(project: str | None, args: list[str], *, timeout: int = _DEFAULT_TIMEOU
     the process fails, or times out. A non-zero exit whose stdout is a JSON error
     envelope surfaces the engine's own ``error`` message.
     """
-    exe = engine_path()
-    if exe is None:
+    base = engine_base_command()
+    if base is None:
         raise EngineError(
             f"the {ENGINE_BIN} engine is not installed", install_hint=True)
-    cmd = [exe]
+    cmd = [*base]
     if project:
         cmd += ["--project", project]
     cmd += args
