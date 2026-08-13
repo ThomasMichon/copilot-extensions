@@ -136,6 +136,44 @@ install | uninstall | start | stop | status | update-config | update
 
 ---
 
+## Convergence: `install` / `update` Are the Only Verbs Runtime Management Needs
+
+**Contract invariant.** `install` and `update` are **idempotent, config-directed
+convergence** operations: they reconcile the machine to the desired state that
+configuration (default + per-machine + repo-declared) ultimately directs —
+**including standing up, reconfiguring, and cutting over persistent daemons**. An
+operator (or an agent driving a deploy) must **never need any verb other than
+`install` / `update`** to provision a service, enable a new daemon, or perform a
+live cutover. Everything a running system should become is a function of config;
+`install`/`update` are what *effect* it.
+
+- **Config directs; install/update effect.** A new persistent daemon, or a
+  behavior cutover from an old path to a new one, is turned on by **configuration**
+  (a default / per-machine / repo-declared key), not by a bespoke command.
+  `install`/`update` read that config and converge: provision + register + start
+  what is now enabled, reconfigure what changed, and tear down what is no longer
+  enabled — all idempotently, safe to re-run.
+- **No bespoke run/cutover verbs.** Do **not** add an operator-facing verb to "run
+  the daemon" or "cut over to the new path." A daemon MAY have an **internal**
+  service entrypoint (what the OS service manager invokes) — but that is an
+  implementation detail `install`/`update` wire up, never the operator's interface.
+- **`start` / `stop` / `status` / `update-config` / `uninstall` remain, but are not
+  required.** They exist for diagnostics, emergency control, config-only sync, and
+  removal — not for normal provisioning or cutover, which `install`/`update` fully
+  own. (`update` already performs the drift/config reconcile that `update-config`
+  does in isolation, so `update-config` is an optional convenience, never a
+  prerequisite.)
+- **Live cutover is convergence, not a step.** Flipping a running system from an
+  old mechanism to a new one (e.g. moving credential-relay ownership into a new
+  persistent daemon) happens *inside* `install`/`update` as a reconcile against
+  config — safely and idempotently — not as a separate operator-run migration.
+
+**Litmus test:** enabling a brand-new persistent daemon on every machine should be
+*"change a config default (or a per-machine key), then run `update`"* — nothing
+else.
+
+---
+
 ## Config Layer Model
 
 All configs use **YAML** format. Three layers, merged at deploy time:
