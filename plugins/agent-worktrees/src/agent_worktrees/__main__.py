@@ -15504,14 +15504,30 @@ def cmd_help_unrouted(requested: str | None = None) -> int:
 # A bare, no-args invocation (`<project>` / `agent-worktrees`) is the
 # *human-facing* path. It resolves to the interactive front-end: the
 # out-of-plugin **Worktree Manager** if it is on PATH, else the still-bundled
-# Picker (6a) -- eventually a help + install hint (6c). PATH presence of the
-# `worktree-manager` binstub is the WHOLE seam signal (DQ7); there is no
-# registration file. This resolution lives in the CLI (not just the binstub) so
-# that bare invocation ALWAYS resolves sanely, even through a stale per-project
-# binstub that merely forwards here (DQ8's safety invariant). Any args route
-# programmatically to the tool CLI and never touch this seam.
+# Picker (6a) -- and, once the bundled Picker is retired (6c), a trustworthy
+# **install trigger** that points at the Manager's install/update flow. PATH
+# presence of the `worktree-manager` binstub is the WHOLE seam signal (DQ7);
+# there is no registration file. This resolution lives in the CLI (not just the
+# binstub) so that bare invocation ALWAYS resolves sanely, even through a stale
+# per-project binstub that merely forwards here (DQ8's safety invariant). Any
+# args route programmatically to the tool CLI and never touch this seam.
 
 _WORKTREE_MANAGER_BIN = "worktree-manager"
+
+# The Worktree Manager's canonical, human-visitable source (shown so a user can
+# verify the install command is ours before running it -- not an attack) and the
+# per-platform install/update one-liner (the Manager's own bootstrap flow). The
+# install trigger only *shows* these; it never auto-runs a remote script (the
+# bootstrap ships with Phase 6b -- until then a user runs it themselves).
+_WORKTREE_MANAGER_REPO_URL = "https://github.com/ThomasMichon/copilot-extensions"
+_WORKTREE_MANAGER_INSTALL_SH = (
+    "curl -fsSL https://raw.githubusercontent.com/ThomasMichon/"
+    "copilot-extensions/main/configurator/bootstrap.sh | bash"
+)
+_WORKTREE_MANAGER_INSTALL_PS1 = (
+    "iex (irm https://raw.githubusercontent.com/ThomasMichon/"
+    "copilot-extensions/main/configurator/bootstrap.ps1)"
+)
 
 
 def _worktree_manager_path() -> str | None:
@@ -15550,6 +15566,62 @@ def _exec_worktree_manager(mgr: str, project: str | None) -> int:
         sys.exit(rc)
     os.execvp(mgr, argv)
     return 1  # unreachable -- os.execvp replaces the process
+
+
+def _bundled_picker_available() -> bool:
+    """Return True while the interactive Picker still ships inside the plugin.
+
+    The seam's fallback (Manager absent) prefers the bundled Picker for as long
+    as it is present, then switches to the install trigger once Phase 6c retires
+    it. Detected by the presence of the ``picker_tui`` package (the Textual
+    front-end 6c removes) rather than a version flag, so the fallback flips
+    automatically the moment the Picker is gone -- no dispatch change needed.
+    """
+    import importlib.util
+    try:
+        return importlib.util.find_spec("agent_worktrees.picker_tui") is not None
+    except Exception:
+        # A parent-package import error is not a clean "absent"; keep today's
+        # Picker behavior rather than surfacing the install trigger spuriously.
+        return True
+
+
+def cmd_manager_install_trigger(project: str | None) -> int:
+    """The install trigger: guide the user to install the Worktree Manager.
+
+    Shown on a bare, no-args invocation when neither the Manager nor the bundled
+    Picker is available -- i.e. after Phase 6c retires the in-plugin Picker. It
+    is a *guided deprecation*, not an error: the interactive launcher/picker now
+    ships as the standalone Worktree Manager, and this prints the trustworthy
+    source URL (so the user can verify it is ours) plus the platform install
+    command. It never auto-runs a remote script.
+    """
+    out = sys.stderr
+    name = project or "agent-worktrees"
+    is_windows = platform.system() == "Windows"
+    install_cmd = (_WORKTREE_MANAGER_INSTALL_PS1 if is_windows
+                   else _WORKTREE_MANAGER_INSTALL_SH)
+
+    output.header(f"{name} -- the interactive front-end has moved")
+    print(
+        "The Picker / session launcher now ships as the standalone Worktree "
+        "Manager, installed and updated out-of-band from the plugin. Install "
+        "it to launch and manage worktrees interactively again.",
+        file=out,
+    )
+    print(file=out)
+    print(f"  Source (verify this is ours): {_WORKTREE_MANAGER_REPO_URL}", file=out)
+    print(file=out)
+    print("  Install / update:", file=out)
+    print(f"    {install_cmd}", file=out)
+    print(file=out)
+    print(
+        f"Once installed, run this binstub again -- bare `{name}` will open the "
+        f"Manager. Agents are unaffected: `{name} <verb>` (e.g. list, create, "
+        "finalize) works headless without the Manager.",
+        file=out,
+    )
+    return 0
 
 
 def _is_headless_project() -> bool:
@@ -16666,10 +16738,12 @@ def main(argv: list[str] | None = None) -> int:
     # No args → the binstub seam (Phase 6 / DQ7 / DQ8). A bare, no-args
     # invocation is the human-facing path: prefer the out-of-plugin Worktree
     # Manager when it is on PATH (its presence is the whole seam signal -- no
-    # registration file), otherwise fall back to the still-bundled Picker
-    # (has_project) or a helpful balk (no project). Headless projects are never
-    # interactive, so they keep their CLI-only summary. Any args route
-    # programmatically to the CLI (below), never through this seam.
+    # registration file). With no Manager, fall back to the still-bundled Picker
+    # while it ships, and to the trustworthy install trigger once Phase 6c
+    # retires it (`_bundled_picker_available()` flips this automatically).
+    # Headless projects are never interactive, so they keep their CLI-only
+    # summary. Any args route programmatically to the CLI (below), never through
+    # this seam.
     if not args_list:
         if has_project:
             if _is_headless_project():
@@ -16677,11 +16751,15 @@ def main(argv: list[str] | None = None) -> int:
             mgr = _worktree_manager_path()
             if mgr:
                 return _exec_worktree_manager(mgr, cfg.active_project())
-            return cmd_launch([])
+            if _bundled_picker_available():
+                return cmd_launch([])
+            return cmd_manager_install_trigger(cfg.active_project())
         mgr = _worktree_manager_path()
         if mgr:
             return _exec_worktree_manager(mgr, None)
-        return cmd_help_unrouted()
+        if _bundled_picker_available():
+            return cmd_help_unrouted()
+        return cmd_manager_install_trigger(None)
 
     # A project-requiring subcommand without any project context → balk
     # helpfully instead of raising a bare RuntimeError deep in load_config.
