@@ -781,3 +781,64 @@ def test_apply_model_config_degrade_safe_on_rpc_error(monkeypatch) -> None:
     client._connection.set_config_option = AsyncMock(side_effect=RuntimeError("boom"))
     # Must not raise -- a failed model set never breaks the session.
     asyncio.run(client._apply_model_config(_model_config_options()))
+
+
+def _capture_client(events: list[tuple[str, dict]]) -> AcpClient:
+    client = AcpClient(on_event=lambda et, d: events.append((et, d)))
+    client._connection = MagicMock()
+    client._connection.set_config_option = AsyncMock()
+    client._acp_session_id = "sess-1"
+    return client
+
+
+def test_apply_model_config_emits_applied_model_for_verification(monkeypatch) -> None:
+    # The applied model must be surfaced (routed to usage_model -> status) so the
+    # dispatched agent's model is VERIFIABLE, not set-and-hope (#790/#1274).
+    monkeypatch.setattr(
+        "agent_bridge.acp_client.resolve_acp_model_config",
+        lambda: {"model": "claude-opus-4.8", "reasoning_effort": "max"},
+    )
+    events: list[tuple[str, dict]] = []
+    client = _capture_client(events)
+    asyncio.run(client._apply_model_config(_model_config_options()))
+    kinds = [e[0] for e in events]
+    assert "usage_update" in kinds
+    usage = next(d for et, d in events if et == "usage_update")
+    assert usage == {"model": "claude-opus-4.8"}
+    applied = next(d for et, d in events if et == "model_applied")
+    assert applied == {"model": "claude-opus-4.8", "reasoning_effort": "max"}
+    assert "model_fallback" not in kinds
+
+
+def test_apply_model_config_already_current_still_records(monkeypatch) -> None:
+    # current == desired: no RPC, but still recorded/emitted so status shows it.
+    monkeypatch.setattr(
+        "agent_bridge.acp_client.resolve_acp_model_config",
+        lambda: {"model": "gpt-5.6-sol"},
+    )
+    events: list[tuple[str, dict]] = []
+    client = _capture_client(events)
+    asyncio.run(client._apply_model_config(_model_config_options()))
+    client._connection.set_config_option.assert_not_awaited()
+    usage = next(d for et, d in events if et == "usage_update")
+    assert usage == {"model": "gpt-5.6-sol"}
+
+
+def test_apply_model_config_emits_loud_fallback_when_unoffered(monkeypatch) -> None:
+    # A silent downgrade must not hide: a requested-but-unoffered model emits a
+    # visible model_fallback event (lands in the event log) and NO applied model.
+    monkeypatch.setattr(
+        "agent_bridge.acp_client.resolve_acp_model_config",
+        lambda: {"model": "gpt-9-imaginary"},
+    )
+    events: list[tuple[str, dict]] = []
+    client = _capture_client(events)
+    asyncio.run(client._apply_model_config(_model_config_options()))
+    client._connection.set_config_option.assert_not_awaited()
+    kinds = [e[0] for e in events]
+    assert "usage_update" not in kinds
+    assert "model_applied" not in kinds
+    fb = next(d for et, d in events if et == "model_fallback")
+    assert fb["fallbacks"][0]["config"] == "model"
+    assert fb["fallbacks"][0]["reason"] == "not-offered"
+    assert fb["fallbacks"][0]["requested"] == "gpt-9-imaginary"
