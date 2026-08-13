@@ -144,6 +144,82 @@ def test_sweep_reclaims_at_rest_codespace_via_mirror(monkeypatch):
     assert rec.resources[1].state == "active"
 
 
+# ── pr-kind reclaim via a GitHub merge check (pr-claim-accountability Ph1) ────
+
+def _proc(returncode=0, stdout="", stderr=""):
+    return types.SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+def test_github_pr_view_args_recognizes_forms():
+    assert sweep._github_pr_view_args(
+        "https://github.com/o/r/pull/12") == ["https://github.com/o/r/pull/12"]
+    assert sweep._github_pr_view_args("o/r#34") == ["34", "--repo", "o/r"]
+    # ADO url, bare number, junk -> None (spare / Phase 2).
+    assert sweep._github_pr_view_args(
+        "https://onedrive.visualstudio.com/ODSP-Web/_git/odsp-web/pullrequest/9") is None
+    assert sweep._github_pr_view_args("123") is None
+    assert sweep._github_pr_view_args("") is None
+
+
+def test_pr_merged_true_only_on_merged(monkeypatch):
+    monkeypatch.setattr(sweep.shutil, "which", lambda _: "gh")
+    monkeypatch.setattr(sweep.subprocess, "run",
+                        lambda *a, **k: _proc(0, '{"state": "MERGED"}'))
+    assert sweep.pr_merged("o/r#1") is True
+    for state in ("OPEN", "CLOSED"):
+        monkeypatch.setattr(sweep.subprocess, "run",
+                            lambda *a, s=state, **k: _proc(0, f'{{"state": "{s}"}}'))
+        assert sweep.pr_merged("o/r#1") is None
+
+
+def test_pr_merged_degrades_to_none(monkeypatch):
+    # non-github ref -> never shells out
+    monkeypatch.setattr(sweep.shutil, "which",
+                        lambda _: (_ for _ in ()).throw(AssertionError("no gh")))
+    assert sweep.pr_merged("https://dev.azure.com/o/p/_git/r/pullrequest/5") is None
+    # gh missing
+    monkeypatch.setattr(sweep.shutil, "which", lambda _: None)
+    assert sweep.pr_merged("o/r#1") is None
+    # gh error (e.g. wrong account / not visible) -> None
+    monkeypatch.setattr(sweep.shutil, "which", lambda _: "gh")
+    monkeypatch.setattr(sweep.subprocess, "run",
+                        lambda *a, **k: _proc(1, stderr="could not resolve"))
+    assert sweep.pr_merged("o/r#1") is None
+    # unparseable json -> None
+    monkeypatch.setattr(sweep.subprocess, "run",
+                        lambda *a, **k: _proc(0, "not json"))
+    assert sweep.pr_merged("o/r#1") is None
+
+
+def test_claim_gone_safe_route_pr_to_merge_check(monkeypatch):
+    monkeypatch.setattr(sweep, "pr_merged", lambda ref: True)
+    c = tracking.ResourceClaim(kind="pr", ref="o/r#7", state="active")
+    assert sweep.claim_gone(c, types.SimpleNamespace()) is True
+    assert sweep.claim_safe(c, types.SimpleNamespace()) is True
+    monkeypatch.setattr(sweep, "pr_merged", lambda ref: None)
+    assert sweep.claim_gone(c, types.SimpleNamespace()) is None
+    assert sweep.claim_safe(c, types.SimpleNamespace()) is None
+
+
+def test_sweep_reclaims_merged_pr_via_make_resolvers(monkeypatch):
+    rec = tracking.WorktreeRecord(
+        worktree_id="wt", branch="worktree/wt", worktree_path="/x", repo="p",
+        machine="m", platform="windows", started_at="t", last_resumed_at="t",
+        resume_count=0, title=None, status="active", completed_at=None,
+        resources=[
+            tracking.ResourceClaim(kind="pr", ref="o/r#merged", state="active"),
+            tracking.ResourceClaim(kind="pr", ref="o/r#open", state="active"),
+        ],
+    )
+    merged = {"o/r#merged": True, "o/r#open": None}
+    monkeypatch.setattr(sweep, "pr_merged", lambda ref: merged.get(ref))
+    g, s = sweep.make_resolvers(types.SimpleNamespace())
+    flipped = tracking.sweep_abandoned_obligations(rec, gone_of=g, safe_of=s, save=False)
+    assert [c.ref for c in flipped] == ["o/r#merged"]
+    assert rec.resources[0].state == "abandoned"   # merged -> reclaimed
+    assert rec.resources[1].state == "active"      # open -> spared (still owed)
+
+
 def test_self_heal_abandons_only_gone_and_safe(monkeypatch):
     rec = _rec("active", "active", "at-rest")
     verdicts = {"m/p/c0": (True, True), "m/p/c1": (True, None)}
