@@ -219,6 +219,29 @@ write deploy-manifest.json  (schema_version 3, source block, atomic temp+move)
    install. Resolve the dir with `PYTHONPATH` cleared so a stale `…/lib` can't
    shadow it; retire `lib/` **before** the probe.
 6. **Create the venv before installing the package** (the install targets it).
+7. **The installer process is never elevated, and never self-elevates as a
+   whole.** An installer must run to a useful result as the ordinary user. It may
+   *skip* steps that genuinely require admin (warning with remediation), but it
+   must not gate the whole run behind, or silently escalate to, Administrator.
+   Re-running the entire script under UAC (the legacy `Invoke-SelfElevated`
+   pattern) is retired.
+8. **Scheduled-task registration is user-mode, idempotent, and update-in-place;
+   only a dedicated task-scheduling action may (opt-in) elevate that one step.**
+   - Default is a **per-user auto-run** task (`AtLogon`, `LogonType Interactive`,
+     `RunLevel Limited`) — no elevation. Flows that *require* elevation (e.g. an
+     `AtStartup` "run whether logged on or not" task under SYSTEM/stored creds)
+     are **opt-in only**.
+   - Be **idempotent**: if the task already matches the desired shape, do nothing.
+   - Prefer **`Set-ScheduledTask`** to update an existing task in place — it
+     modifies a task the user already owns *without admin*, unlike
+     `Register-ScheduledTask -Force` (which some locked-down machines refuse to
+     non-admins even for a per-user task).
+   - If a **missing** task cannot be created without admin, **do not elevate the
+     installer** — warn with remediation and continue; any existing task keeps
+     running.
+   - The **only** place elevation may happen is a dedicated task-only action
+     (agent-index: `install.ps1 register-tasks -AllowTaskElevation`) that
+     self-elevates **only that step**, never install/update.
 
 ## Update-flow robustness — self-stage, watchdog, completion markers (#935)
 
