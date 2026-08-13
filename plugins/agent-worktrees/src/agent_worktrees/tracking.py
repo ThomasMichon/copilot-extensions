@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import tempfile
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -1848,6 +1848,78 @@ def release_all_resources(
     if released and save:
         save_record(record)
     return released
+
+
+# ── Durable orphanage: re-homed (abandoned) obligations ──────────────────────
+# When a worktree finalizes with ``--abandon``, its still-unsettled outbound
+# obligations are released, but the resources they named must not be silently
+# *dropped*. They are re-homed to a durable, per-project registry so a later
+# cleanup/adoption pass can find and reclaim them ("abandon re-homes
+# responsibility rather than dropping it"; resource-obligation-settlement).
+
+def orphanage_path(project: str | None = None) -> Path:
+    """The durable per-project registry of re-homed (abandoned) obligations."""
+    return cfg.project_dir(project) / "orphaned-obligations.yaml"
+
+
+def load_orphaned_obligations(project: str | None = None) -> list[dict]:
+    """Read the durable orphanage registry (empty when absent/unreadable)."""
+    path = orphanage_path(project)
+    if not path.exists():
+        return []
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        items = data.get("orphaned", [])
+        return list(items) if isinstance(items, list) else []
+    except Exception:
+        return []
+
+
+def rehome_abandoned_obligations(
+    claims: Iterable[ResourceClaim],
+    *,
+    source_worktree: str,
+    config: object,
+    project: str | None = None,
+) -> list[dict]:
+    """Durably re-home abandoned obligations to the control-plane orphanage.
+
+    Appends each claim to :func:`orphanage_path` with provenance (source
+    worktree, machine, project, timestamp) so the orphaned resource it named is
+    recorded rather than dropped. **Idempotent** (dedups by
+    ``source_worktree`` + ``ref``). Returns the entries **newly** written.
+    Best-effort: any IO failure returns ``[]`` and never raises -- re-homing must
+    never break the finalize it rides on.
+    """
+    try:
+        existing = load_orphaned_obligations(project)
+        seen = {(e.get("source_worktree"), e.get("ref")) for e in existing}
+        machine = getattr(config, "machine", None)
+        proj = project or getattr(config, "repo_name", None)
+        now = _now_iso()
+        added: list[dict] = []
+        for c in claims:
+            key = (source_worktree, c.ref)
+            if key in seen:
+                continue
+            entry = {
+                "kind": c.kind, "ref": c.ref, "note": c.note or "",
+                "source_worktree": source_worktree, "machine": machine,
+                "project": proj, "disposition": "abandoned", "abandoned_at": now,
+            }
+            existing.append(entry)
+            added.append(entry)
+            seen.add(key)
+        if added:
+            path = orphanage_path(project)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                yaml.safe_dump({"orphaned": existing}, sort_keys=False),
+                encoding="utf-8",
+            )
+        return added
+    except Exception:
+        return []
 
 
 def find_orphaned_children(

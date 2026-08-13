@@ -1189,6 +1189,33 @@ def _assert_obligations_settled(
     return True
 
 
+def _rehome_abandoned_obligations(record, worktree_id: str, config) -> list[dict]:
+    """Durably re-home an ``--abandon`` finalize's still-unsettled obligations.
+
+    Selects the record's unsettled (blocking) claims -- the ones a plain finalize
+    would refuse and ``--abandon`` is about to release -- and records each in the
+    per-project orphanage (:func:`tracking.rehome_abandoned_obligations`) so the
+    orphaned resource it named is not silently dropped. Logs what it re-homed.
+    Returns the entries written (empty when nothing was unsettled). Best-effort.
+    """
+    abandoned = [c for c in record.resources if c.is_unsettled]
+    if not abandoned:
+        return []
+    rehomed = tracking.rehome_abandoned_obligations(
+        abandoned, source_worktree=worktree_id, config=config)
+    if rehomed:
+        output.warn(
+            f"Re-homed {len(rehomed)} abandoned obligation(s) of {worktree_id} "
+            f"to the durable orphanage (not dropped) -- list via "
+            f"'agent-worktrees claims orphans':")
+        for c in abandoned:
+            lbl = f"  · {c.kind}: {c.ref}"
+            if c.note:
+                lbl += f" ({c.note})"
+            print(lbl)
+    return rehomed
+
+
 def validate_and_finalize(
     worktree_id: str,
     config: Config,
@@ -1423,6 +1450,13 @@ def validate_and_finalize(
 
         # Update tracking
         if record:
+            # Durable re-home (resource-obligation-settlement, dotfiles#1161):
+            # an --abandon finalize is about to RELEASE its still-unsettled
+            # obligations. Before dropping them, re-home each to the durable
+            # per-project orphanage so the orphaned resource it named is recorded
+            # for later cleanup/adoption, not silently lost. Best-effort.
+            if abandon:
+                _rehome_abandoned_obligations(record, worktree_id, config)
             # Citadel E1b cascade (#877): a parent that owns outbound worktree
             # resources hands them back on finalize -- release the live claims so
             # the ledger stops asserting the parent holds them, and SURFACE the
