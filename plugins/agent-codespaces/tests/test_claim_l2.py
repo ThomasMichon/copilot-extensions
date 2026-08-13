@@ -40,10 +40,10 @@ def test_claim_takes_l2_lease_and_stores_token(leases, monkeypatch):
 def test_claim_blocks_on_cross_machine_conflict(leases, monkeypatch):
     monkeypatch.setattr(
         lease_mod.coordination, "acquire",
-        lambda key, holder, **kw: coord.L2Result("conflict", holder="other/p/w"),
+        lambda key, holder, **kw: coord.L2Result("conflict", holder="otherhost/p/other-wt"),
     )
-    with pytest.raises(lease_mod.ClaimConflict, match="other/p/w"):
-        lease_mod.claim("cs-one", "/wt/a", holder_ref="m/p/w")
+    with pytest.raises(lease_mod.ClaimConflict, match="other-wt"):
+        lease_mod.claim("cs-one", "/wt/a", holder_ref="myhost/p/my-wt")
     # no local claim was written when the cross-machine acquire lost
     assert lease_mod.get_lease("cs-one") is None
 
