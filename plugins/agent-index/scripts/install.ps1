@@ -6,7 +6,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('install', 'update', 'status', 'start', 'stop', 'uninstall', 'engine', 'engine-update', 'register-tasks')]
+    [ValidateSet('install', 'update', 'status', 'start', 'stop', 'ensure', 'uninstall', 'engine', 'engine-update', 'register-tasks')]
     [string]$Action = 'install',
     [string]$InstallDir,
     [switch]$NoService,
@@ -829,13 +829,20 @@ function Restart-EngineDaemon {
     # is the ONE place a restart is intended -- the explicit engine-runtime update
     # path, decoupled from the service `update` (which must never bounce the engine).
     if ($NoService) { Write-Skip 'Engine daemon restart skipped (-NoService)'; return }
+    # If the operator opted into the advanced task tier, bounce the task; otherwise
+    # restart the detached engine user-mode (NO scheduled task, NO elevation).
     if (Get-ScheduledTask -TaskName $EngineTaskName -ErrorAction SilentlyContinue) {
         Stop-ScheduledTask -TaskName $EngineTaskName -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 1
         Start-ScheduledTask -TaskName $EngineTaskName -ErrorAction SilentlyContinue
-        Write-Ok "Engine daemon restarted (new engine runtime loaded): $EngineTaskName"
+        Write-Ok "Engine daemon restarted via task: $EngineTaskName"
+    } elseif (Test-Path $EngineVenvPython) {
+        & $EngineVenvPython -m agent_index engine stop 2>&1 | Out-Host
+        Start-Sleep -Seconds 1
+        & $EngineVenvPython -m agent_index engine start 2>&1 | Out-Host
+        Write-Ok 'Engine daemon restarted (user-mode, new engine runtime loaded)'
     } else {
-        Register-EngineDaemon
+        Write-Skip 'Engine runtime not provisioned -- restart skipped'
     }
 }
 
@@ -863,9 +870,15 @@ exit `$LASTEXITCODE
     [System.IO.File]::WriteAllText($EngineLauncher, $engLauncher, $utf8NoBom)
 }
 
-# ── Scheduled-task registration: user-mode by default; NEVER elevate the whole
-#    installer (see docs/install-contract.md § Hard rules) ─────────────────────
-# The installer process is never elevated. Task registration is:
+# ── Scheduled-task registration: OPT-IN ADVANCED TIER ONLY (never the default) ─
+#    The DEFAULT lifecycle is user-mode: the daemon runs as a plain user process,
+#    started/kept-alive by `Ensure-Running` (install/update/start) and the
+#    sessionStart `ensure` safety net -- NO scheduled task, NO elevation. Scheduled
+#    tasks are reachable ONLY via the explicit `register-tasks` action, for boxes
+#    that want OS-level AtLogon persistence independent of a Copilot session.
+#    (see docs/install-contract.md § Hard rules).
+# The installer process is never elevated. When the opt-in task tier IS used,
+# task registration is:
 #   1. idempotent -- a task already in the desired state is left untouched;
 #   2. in-place   -- an existing-but-drifted task is updated with Set-ScheduledTask,
 #                    which (unlike Register-ScheduledTask -Force) modifies a task
@@ -876,7 +889,8 @@ exit `$LASTEXITCODE
 #                    machine refuses that without admin we do NOT elevate the
 #                    installer -- we warn with remediation and continue.
 # The ONLY elevation path is the explicit, opt-in `register-tasks` action, which
-# self-elevates ONLY that task-scheduling step -- never install/update.
+# self-elevates ONLY that task-scheduling step -- never install/update, and never
+# the start/stop path.
 
 function Test-Elevated {
     try {
@@ -1056,19 +1070,70 @@ function Install-Service {
     }
 }
 
+# ── DEFAULT lifecycle: user-mode auto-run (NO scheduled task, NO elevation) ────
+# The default way the daemon runs is a plain user-mode process, started/kept
+# alive by the user-mode CLI and the sessionStart `ensure` safety net. Scheduled
+# tasks are an OPT-IN advanced tier (`register-tasks`) -- never the default, and
+# never in the start/stop path. See docs/install-contract.md § Hard rules.
+function Get-ActiveServicePort {
+    $aj = Join-Path $InstallDir 'active.json'
+    if (-not (Test-Path $aj)) { return $null }
+    try { return [int]((Get-Content $aj -Raw | ConvertFrom-Json).active.port) } catch { return $null }
+}
+
+function Test-ServiceHealthy {
+    # Health-gate on the LIVE routing endpoint (active.json), not a static port:
+    # a stale active.json pointing at a dead pid correctly reads as unhealthy.
+    $port = Get-ActiveServicePort
+    if (-not $port) { return $false }
+    try {
+        $r = Invoke-WebRequest "http://127.0.0.1:$port/health" -UseBasicParsing -TimeoutSec 3
+        return ($r.StatusCode -eq 200)
+    } catch { return $false }
+}
+
+function Ensure-ServiceRunning {
+    # Idempotent, user-mode, no-elevation. If a healthy daemon already serves the
+    # routing endpoint, do nothing; otherwise start one via the ZDD cutover
+    # primitive (`agent-index deploy`), which spawns a DETACHED user-mode daemon
+    # and flips routing -- robust to a stale/dead active.json. Never a task.
+    if ($NoService) { Write-Skip 'Service ensure skipped (-NoService)'; return }
+    if (-not (Test-Path $LinkPython)) { Write-Skip 'Runtime not installed -- service not ensured'; return }
+    Write-ServiceFiles
+    if (Test-ServiceHealthy) { Write-Skip 'Service already healthy (user-mode daemon serving)'; return }
+    & $LinkPython -m agent_index deploy 2>&1 | Out-Host
+    if (Test-ServiceHealthy) { Write-Ok 'Service ensured (user-mode daemon)' }
+    else { Write-Warn 'Service ensure attempted -- endpoint not yet healthy (it may still be starting)' }
+}
+
+function Ensure-EngineRunning {
+    # Host-side durable embedding engine, user-mode (NO scheduled task). Left warm
+    # if already serving; else started detached from the durable venv.
+    if ($NoService) { Write-Skip 'Engine ensure skipped (-NoService)'; return }
+    if (-not (Test-Path $EngineVenvPython)) { Write-Skip 'Engine runtime not provisioned -- engine not ensured'; return }
+    Write-EngineFiles
+    if (Test-EnginePort) { Write-Skip 'Engine already serving -- leaving the warm engine untouched'; return }
+    & $EngineVenvPython -m agent_index engine start 2>&1 | Out-Host
+    Write-Ok 'Engine ensured (user-mode durable daemon)'
+}
+
+function Ensure-Running {
+    # The DEFAULT user-mode lifecycle: engine (host) then service. No task, no
+    # elevation. Called by install/update/start and the sessionStart `ensure`.
+    if ((Get-InstallRole) -eq 'host') { Ensure-EngineRunning }
+    Ensure-ServiceRunning
+}
+
 function Invoke-Status {
     if (Test-Path $LinkPython) { & $LinkPython -m agent_index status }
     else { Write-Skip "Runtime not installed: $InstallDir" }
 }
 
 function Invoke-Start {
-    if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
-        Start-ScheduledTask -TaskName $TaskName
-        Write-Ok "Service task started: $TaskName"
-    } elseif (Test-Path $LinkPython) {
-        Start-Process -FilePath $LinkPython -ArgumentList @('-m', 'agent_index', 'start') -WorkingDirectory $InstallDir
-        Write-Ok 'Service process started'
-    } else { Write-Fail 'Runtime not installed'; exit 1 }
+    # Default user-mode start (no scheduled task). If the operator opted into the
+    # task tier the task auto-runs the daemon anyway; this still ensures it.
+    if (-not (Test-Path $LinkPython)) { Write-Fail 'Runtime not installed'; exit 1 }
+    Ensure-Running
 }
 
 function Invoke-Stop {
@@ -1099,18 +1164,19 @@ function Invoke-Uninstall {
 
 switch ($Action) {
     'install' {
-        Install-Runtime; Install-Service
+        Install-Runtime
         $role = Get-InstallRole
         if ($role -eq 'host') {
             Install-Engine | Out-Null
-            Register-EngineDaemon
         } else {
             Write-Skip "Engine runtime skipped (role: $role) -- set 'role: host' in $InstallDir\config.yaml or AGENT_INDEX_ROLE=host to host the durable engine"
         }
+        Ensure-Running   # DEFAULT user-mode start (no scheduled task, no elevation)
     }
-    'update' { Invoke-DowngradeGuard; Install-Runtime; Install-Service }  # engine venv + daemon left untouched by design
-    'register-tasks' { Invoke-RegisterTasks }  # task-scheduling ONLY -- the sole action that may (opt-in) self-elevate that step
-    'engine' { Install-Engine | Out-Null; Register-EngineDaemon }        # explicit host-side provisioning (role-independent)
+    'update' { Invoke-DowngradeGuard; Install-Runtime; Ensure-ServiceRunning }  # engine venv + daemon left untouched by design
+    'ensure' { Ensure-Running }  # user-mode auto-run safety net (sessionStart hook) -- start if not already healthy
+    'register-tasks' { Invoke-RegisterTasks }  # OPT-IN advanced tier (scheduled tasks) -- the sole action that may (opt-in) self-elevate that ONE step
+    'engine' { Install-Engine | Out-Null; Ensure-EngineRunning }        # explicit host-side provisioning (role-independent), user-mode
     'engine-update' { if (Install-Engine -Upgrade) { Restart-EngineDaemon } }  # rebuild durable engine venv + restart daemon (decoupled from service update)
     'status' { Invoke-Status }
     'start' { Invoke-Start }

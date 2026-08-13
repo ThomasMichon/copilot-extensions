@@ -927,6 +927,7 @@ _start() {
         systemctl --user start "$SYSTEMD_UNIT"
         _ok "Service started ($SYSTEMD_UNIT)"
     elif [[ -x "$LINK_PYTHON" ]]; then
+        if _service_healthy; then _skip 'Service already running -- not starting a second daemon'; return 0; fi
         nohup "$LINK_PYTHON" -m agent_index start >> "$INSTALL_DIR/service.log" 2>&1 &
         _ok "Service process started"
     else
@@ -966,6 +967,74 @@ _uninstall() {
     _ok 'agent-index uninstalled'
 }
 
+_service_healthy() {
+    # Health-gate on the LIVE routing endpoint (active.json ephemeral port); a
+    # stale active.json pointing at a dead pid correctly reads as unhealthy.
+    # Prefer the runtime's OWN venv python (always present when installed) over a
+    # global python3; fall back to curl so a host without either still works.
+    local aj="$INSTALL_DIR/active.json"
+    [ -f "$aj" ] || return 1
+    local py=""
+    if [ -x "$LINK_PYTHON" ]; then py="$LINK_PYTHON"
+    elif command -v python3 >/dev/null 2>&1; then py="python3"; fi
+    if [ -n "$py" ]; then
+        "$py" - "$aj" <<'PY' 2>/dev/null
+import json, sys, urllib.request
+try:
+    p = json.load(open(sys.argv[1]))["active"]["port"]
+    urllib.request.urlopen("http://127.0.0.1:%d/health" % int(p), timeout=2).read()
+except Exception:
+    sys.exit(1)
+PY
+        return $?
+    fi
+    if command -v curl >/dev/null 2>&1; then
+        local port
+        port="$(sed -n 's/.*"port"[: ]*\([0-9]\{1,\}\).*/\1/p' "$aj" | head -n1)"
+        [ -n "$port" ] || return 1
+        curl -fsS --max-time 2 "http://127.0.0.1:$port/health" >/dev/null 2>&1
+        return $?
+    fi
+    return 1
+}
+
+_ensure_service_running() {
+    # Idempotent, user-mode. If a healthy daemon already serves, do nothing; else
+    # start it (systemd --user is user-mode; nohup fallback). Never elevated.
+    if [[ "$NO_SERVICE" -eq 1 ]]; then _skip 'Service ensure skipped (--no-service)'; return 0; fi
+    [[ -x "$LINK_PYTHON" ]] || { _skip 'Runtime not installed -- service not ensured'; return 0; }
+    if _service_healthy; then _skip 'Service already healthy (user-mode daemon serving)'; return 0; fi
+    # Unhealthy: if a systemd unit exists, RESTART it -- a hung-but-"active" unit
+    # will not recover from `start` (a no-op). Else fall through to _start.
+    if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$SYSTEMD_UNIT" ]]; then
+        systemctl --user restart "$SYSTEMD_UNIT" 2>/dev/null || true
+        _ok 'Service ensured (systemd --user restart)'
+        return 0
+    fi
+    _start
+}
+
+_ensure_engine_running() {
+    # Host-side durable embedding engine, user-mode. Left warm if already active.
+    if [[ "$NO_SERVICE" -eq 1 ]]; then _skip 'Engine ensure skipped (--no-service)'; return 0; fi
+    [[ -x "$ENGINE_VENV_PYTHON" ]] || { _skip 'Engine runtime not provisioned -- engine not ensured'; return 0; }
+    if command -v systemctl >/dev/null 2>&1 && systemctl --user is-active "$ENGINE_SYSTEMD_UNIT" >/dev/null 2>&1; then
+        _skip 'Engine already serving -- leaving the warm engine untouched'; return 0
+    fi
+    if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$ENGINE_SYSTEMD_UNIT" ]]; then
+        systemctl --user start "$ENGINE_SYSTEMD_UNIT" 2>/dev/null || true
+    else
+        "$ENGINE_VENV_PYTHON" -m agent_index engine start 2>/dev/null || true
+    fi
+    _ok 'Engine ensured (user-mode durable daemon)'
+}
+
+_ensure_running() {
+    # The DEFAULT user-mode lifecycle: engine (host) then service. No elevation.
+    if [[ "$(_install_role)" == "host" ]]; then _ensure_engine_running; fi
+    _ensure_service_running
+}
+
 case "$ACTION" in
     install)
         _ensure_runtime
@@ -979,6 +1048,7 @@ case "$ACTION" in
         fi
         ;;
     update) _downgrade_guard; _ensure_runtime; _install_service ;;  # engine venv + daemon left untouched by design
+    ensure) _ensure_running ;;  # user-mode auto-run safety net (sessionStart hook) -- start if not already healthy
     stamp) do_stamp ;;
     provision) _ensure_runtime; _install_service ;;
     engine) _install_engine || true; _register_engine_daemon ;;     # explicit host-side provisioning (role-independent)
