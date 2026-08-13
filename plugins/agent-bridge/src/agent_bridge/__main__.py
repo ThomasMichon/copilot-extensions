@@ -547,6 +547,25 @@ def _cmd_session_status(args: argparse.Namespace) -> None:
         markers = "  ".join(f"{k}={v}" for k, v in progress.items())
         print(f"    Progress: {markers}")
 
+    # The dispatched agent is blocked on a question for the host to answer
+    # (the elicitation backstop, dotfiles#1275) -- surface it loudly so the turn
+    # doesn't sit parked unnoticed, with the exact command to unblock it.
+    pending = st.get("pending_ask_user") or []
+    for q in pending:
+        msg = (q.get("message") or "").strip().replace("\n", " ")
+        if len(msg) > 200:
+            msg = msg[:197] + "..."
+        print(f"    ASK:     {msg}")
+        fields = _ask_user_fields(q.get("requested_schema"))
+        if fields:
+            print(f"             fields: {fields}")
+        tcid = q.get("tool_call_id") or ""
+        print(
+            f"             answer: `agent-bridge answer {sid} "
+            f"--field <key>=<value> …`"
+            + (f" (--tool-call-id {tcid})" if len(pending) > 1 else "")
+        )
+
     # Last K collapsed steps (cursor-neutral tail read; --steps 0 disables).
     k = getattr(args, "steps", 0) or 0
     if k > 0 and head:
@@ -556,6 +575,33 @@ def _cmd_session_status(args: argparse.Namespace) -> None:
             print("    Recent:")
             for line in out.rstrip().splitlines():
                 print(f"      {line}")
+
+
+def _ask_user_fields(schema: Any) -> str:
+    """Compact one-line summary of an ask_user form schema's fields.
+
+    Renders ``key(type)`` per property, appending ``=a|b`` for enum choices, so
+    the host can see what values an ``ask_user`` question expects before
+    answering. Best-effort: returns ``""`` for an unreadable schema.
+    """
+    try:
+        props = (schema or {}).get("properties") or {}
+        required = set((schema or {}).get("required") or [])
+    except Exception:
+        return ""
+    parts: list[str] = []
+    for key, spec in props.items():
+        spec = spec if isinstance(spec, dict) else {}
+        typ = spec.get("type", "string")
+        star = "*" if key in required else ""
+        choices = spec.get("enum")
+        if not choices and isinstance(spec.get("items"), dict):
+            choices = spec["items"].get("enum")
+        if choices:
+            parts.append(f"{key}{star}={'|'.join(str(c) for c in choices)}")
+        else:
+            parts.append(f"{key}{star}({typ})")
+    return "  ".join(parts)
 
 
 def _cmd_version(_args: argparse.Namespace) -> None:
@@ -2895,6 +2941,79 @@ def _cmd_session_usage(args: argparse.Namespace) -> None:
         print(f"Updated:  {_short_dt(last_at)}")
 
 
+def _cmd_answer(args: argparse.Namespace) -> None:
+    """Answer a dispatched agent's parked ``ask_user`` question (backstop).
+
+    Resolves the remote agent's blocked ``ask_user`` so its turn continues --
+    the host acting as the human the dispatched agent reached for (dotfiles#1275).
+    Defaults the target question to the sole pending one; requires
+    ``--tool-call-id`` when several are outstanding.
+    """
+    from .client import BridgeClientError
+
+    client = _get_client()
+    caller_id = _caller_id_for(args)
+    sid = args.session_id
+
+    action = "accept"
+    if args.decline:
+        action = "decline"
+    elif args.cancel:
+        action = "cancel"
+
+    content: dict[str, Any] = {}
+    if action == "accept":
+        if args.content_json:
+            try:
+                content = json.loads(args.content_json)
+                if not isinstance(content, dict):
+                    raise ValueError("content must be a JSON object")
+            except Exception as exc:
+                print(f"[FAIL] --json is not a valid JSON object: {exc}", file=sys.stderr)
+                sys.exit(1)
+        else:
+            for pair in args.fields:
+                key, sep, value = pair.partition("=")
+                if not sep:
+                    print(f"[FAIL] --field must be KEY=VALUE (got {pair!r})", file=sys.stderr)
+                    sys.exit(1)
+                content[key.strip()] = value
+
+    # Resolve which parked question to answer. Default to the sole pending one.
+    tool_call_id = args.tool_call_id
+    if not tool_call_id:
+        try:
+            st = client.get_session_status(sid, caller_id=caller_id)
+        except BridgeClientError as exc:
+            print(f"[FAIL] {exc.detail}", file=sys.stderr)
+            sys.exit(1)
+        pending = st.get("pending_ask_user") or []
+        if not pending:
+            print(f"[FAIL] Session {sid} has no parked ask_user to answer.", file=sys.stderr)
+            sys.exit(1)
+        if len(pending) > 1:
+            ids = ", ".join(q.get("tool_call_id", "?") for q in pending)
+            print(
+                f"[FAIL] {len(pending)} questions are pending on {sid}; pass "
+                f"--tool-call-id (one of: {ids}).",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        tool_call_id = pending[0].get("tool_call_id")
+
+    try:
+        client.answer_ask_user(sid, tool_call_id, content, action=action)
+    except BridgeClientError as exc:
+        if exc.status == 404:
+            print(f"[FAIL] Session {sid} not found", file=sys.stderr)
+        elif exc.status == 409:
+            print(f"[FAIL] {exc.detail}", file=sys.stderr)
+        else:
+            print(f"[FAIL] {exc.detail}", file=sys.stderr)
+        sys.exit(1)
+    print(f"[OK] Answered ask_user ({action}) on {sid}; the agent's turn continues.")
+
+
 def _cmd_agent(args: argparse.Namespace) -> None:
     """Run agent-bridge as an upstream ACP agent on stdio."""
     import asyncio
@@ -3546,6 +3665,36 @@ def build_parser() -> argparse.ArgumentParser:
     )
     usage_p.add_argument("session_id", help="Session ID")
     usage_p.set_defaults(func=_cmd_session_usage)
+
+    answer_p = sub.add_parser(
+        "answer",
+        help="Answer a dispatched agent's parked ask_user question "
+             "(the elicitation backstop) so its turn continues",
+    )
+    answer_p.add_argument("session_id", help="Session ID")
+    answer_p.add_argument(
+        "--field", dest="fields", action="append", default=[], metavar="KEY=VALUE",
+        help="A form field answer (repeatable). Values are strings; use --json "
+             "for numbers/booleans/complex values.",
+    )
+    answer_p.add_argument(
+        "--json", dest="content_json", default=None,
+        help="Full answer content as a JSON object (overrides --field).",
+    )
+    answer_p.add_argument(
+        "--tool-call-id", dest="tool_call_id", default=None,
+        help="Which parked question to answer (defaults to the sole pending one; "
+             "required when more than one is outstanding -- see `status`).",
+    )
+    answer_p.add_argument(
+        "--decline", action="store_true",
+        help="Decline the question instead of submitting an answer.",
+    )
+    answer_p.add_argument(
+        "--cancel", action="store_true",
+        help="Cancel the question instead of submitting an answer.",
+    )
+    answer_p.set_defaults(func=_cmd_answer)
 
     # -- Agent mode --
 

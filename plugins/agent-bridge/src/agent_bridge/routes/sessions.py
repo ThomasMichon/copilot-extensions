@@ -466,6 +466,9 @@ async def get_session_status(
         "behind": max(0, head_id - last_acked),
         "active_tool": active,
         "active_background_tasks": session.active_background_tasks,
+        "pending_ask_user": (
+            session.client.pending_ask_user() if session.client else []
+        ),
         "progress": dict(session.progress),
         "updated_at": datetime.fromtimestamp(
             session.updated_at, tz=timezone.utc

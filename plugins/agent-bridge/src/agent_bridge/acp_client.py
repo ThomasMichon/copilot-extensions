@@ -487,6 +487,11 @@ class AcpClient:
                 | CancelElicitationResponse
             ],
         ] = {}
+        # Question metadata (message + requested form schema) parallel to
+        # ``_pending_elicitations``, so the parked questions can be *surfaced*
+        # (e.g. in ``status``) for a human/host to answer -- the elicitation
+        # backstop (dotfiles#1275). Kept in lockstep with the futures above.
+        self._pending_ask_user_meta: dict[str, dict[str, Any]] = {}
 
         # True only while awaiting a prompt turn result. Distinguishes a
         # real mid-turn crash from an idle/just-resumed process exit.
@@ -945,6 +950,7 @@ class AcpClient:
             if not fut.done():
                 fut.set_result(CancelElicitationResponse(action="cancel"))
         self._pending_elicitations.clear()
+        self._pending_ask_user_meta.clear()
 
         if self._connection:
             with contextlib.suppress(Exception):
@@ -1315,6 +1321,10 @@ class AcpClient:
         if stale is not None and not stale.done():
             stale.set_result(CancelElicitationResponse(action="cancel"))
         self._pending_elicitations[tool_call_id] = fut
+        self._pending_ask_user_meta[tool_call_id] = {
+            "message": message,
+            "requested_schema": schema_data,
+        }
         self._completion_event.set()
         try:
             return await fut
@@ -1323,6 +1333,7 @@ class AcpClient:
             # re-ask may have replaced it).
             if self._pending_elicitations.get(tool_call_id) is fut:
                 self._pending_elicitations.pop(tool_call_id, None)
+                self._pending_ask_user_meta.pop(tool_call_id, None)
 
     def resolve_elicitation(
         self,
@@ -1347,6 +1358,7 @@ class AcpClient:
             fut.set_result(CancelElicitationResponse(action="cancel"))
         else:
             fut.set_result(AcceptElicitationResponse(action="accept", content=content or {}))
+        self._pending_ask_user_meta.pop(tool_call_id, None)
         self._emit("ask_user_resolved", {
             "tool_call_id": tool_call_id,
             "action": action,
@@ -1366,11 +1378,28 @@ class AcpClient:
             elicitation_id, fut = next(iter(self._pending_elicitations.items()))
         if fut is not None and not fut.done():
             fut.set_result(CancelElicitationResponse(action="cancel"))
+            self._pending_ask_user_meta.pop(elicitation_id, None)
+            self._emit("ask_user_withdrawn", {"tool_call_id": elicitation_id})
 
     def has_pending_elicitation(self, tool_call_id: str) -> bool:
         """Whether an unanswered ``ask_user`` request is parked for a tool call."""
         fut = self._pending_elicitations.get(tool_call_id)
         return fut is not None and not fut.done()
+
+    def pending_ask_user(self) -> list[dict[str, Any]]:
+        """The parked ``ask_user`` questions awaiting a human answer.
+
+        Each entry is ``{tool_call_id, message, requested_schema}`` for a still-
+        outstanding elicitation, so ``status`` can surface what the dispatched
+        agent is blocked on and the host can answer it (the elicitation backstop,
+        dotfiles#1275). Empty when nothing is parked.
+        """
+        out: list[dict[str, Any]] = []
+        for tool_call_id, meta in self._pending_ask_user_meta.items():
+            fut = self._pending_elicitations.get(tool_call_id)
+            if fut is not None and not fut.done():
+                out.append({"tool_call_id": tool_call_id, **meta})
+        return out
 
     # -- Buffer management ---------------------------------------------------
 

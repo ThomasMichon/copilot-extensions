@@ -78,6 +78,13 @@ def test_status_renders_inflight_tool(monkeypatch, capsys):
         "usage_model": "claude-opus-4.8",
         "active_tool": {"title": "Build", "command": "rush build", "elapsed_s": 17.4},
         "progress": {"build": "ok", "pr": "42"},
+        "pending_ask_user": [{
+            "tool_call_id": "tc-9", "message": "Which database?",
+            "requested_schema": {
+                "type": "object", "required": ["db"],
+                "properties": {"db": {"type": "string", "enum": ["pg", "mysql"]}},
+            },
+        }],
         "updated_at": "2026-06-15T18:00:00+00:00",
     })
     monkeypatch.setattr(m, "_get_client", lambda: client)
@@ -89,6 +96,9 @@ def test_status_renders_inflight_tool(monkeypatch, capsys):
     assert "10 new" in out  # cursor-lag hint
     assert "Progress: build=ok  pr=42" in out
     assert "Model:   claude-opus-4.8" in out
+    assert "ASK:     Which database?" in out
+    assert "db*=pg|mysql" in out
+    assert "agent-bridge answer s1" in out
 
 
 def test_status_idle_when_no_tool(monkeypatch, capsys):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -201,3 +202,25 @@ class TestStatusEndpoint:
         resp = client.get("/api/v1/sessions/sess-1/status")
         assert resp.status_code == 200
         assert resp.json()["usage_model"] is None
+
+    def test_status_surfaces_pending_ask_user(self, client, app) -> None:
+        # The dispatched agent's parked ask_user question is surfaced so the
+        # host can answer it (elicitation backstop, dotfiles#1275).
+        mgr = _seed_session(app)
+        fake = MagicMock()
+        fake.pending_ask_user.return_value = [
+            {"tool_call_id": "tc-1", "message": "Proceed?",
+             "requested_schema": {"type": "object", "properties": {}}}
+        ]
+        mgr._sessions["sess-1"].client = fake
+        resp = client.get("/api/v1/sessions/sess-1/status")
+        assert resp.status_code == 200
+        pending = resp.json()["pending_ask_user"]
+        assert pending[0]["tool_call_id"] == "tc-1"
+        assert pending[0]["message"] == "Proceed?"
+
+    def test_status_pending_ask_user_empty_without_client(self, client, app) -> None:
+        _seed_session(app)
+        resp = client.get("/api/v1/sessions/sess-1/status")
+        assert resp.status_code == 200
+        assert resp.json()["pending_ask_user"] == []
