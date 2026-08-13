@@ -1166,15 +1166,24 @@ def _effective_spawn_defaults(
 
     ``profile`` is the machine-local :class:`TopologyProfile`; ``repo_cfg`` is the
     optional in-repo :class:`RepoBridgeConfig` (``None`` when the repo carries no
-    ``.agent-bridge/config.yaml``). Each dimension resolves independently: a
-    machine-local value (explicit local override) takes precedence; otherwise the
-    repo-declared default is used; otherwise empty. Precedence is per-dimension, so
-    a repo can supply ``default_copilot_args`` while a machine overrides only
-    ``default_env`` (or vice versa)."""
-    copilot_args = profile.default_copilot_args or (
-        repo_cfg.default_copilot_args if repo_cfg else []
+    ``.agent-bridge/config.yaml``). Each dimension resolves independently: if the
+    machine-local profile **explicitly set** the field it wins -- *including setting
+    it to empty*, so a local profile can deliberately clear a repo-provided default
+    (``default_env: {}``); otherwise the repo-declared default is used; otherwise
+    empty. "Explicitly set" is distinguished from "left at its default" via
+    Pydantic's ``model_fields_set``, so an absent local value falls through to the
+    repo, but a present-but-empty one overrides it."""
+    profile_set = getattr(profile, "model_fields_set", set())
+
+    def _pick(field: str, repo_value: object) -> object:
+        if field in profile_set:
+            return getattr(profile, field)
+        return repo_value if repo_cfg is not None else getattr(profile, field)
+
+    copilot_args = _pick(
+        "default_copilot_args", repo_cfg.default_copilot_args if repo_cfg else None
     )
-    env = profile.default_env or (repo_cfg.default_env if repo_cfg else {})
+    env = _pick("default_env", repo_cfg.default_env if repo_cfg else None)
     return list(copilot_args), dict(env)
 
 

@@ -1534,6 +1534,17 @@ class TestEffectiveSpawnDefaults:
         args, env = _effective_spawn_defaults(TopologyProfile(machines_yaml="m.yaml"), None)
         assert args == [] and env == {}
 
+    def test_profile_explicitly_clears_repo_default(self):
+        # A local profile that explicitly sets default_env={} overrides (clears) a
+        # repo-provided default -- present-but-empty is distinct from not-provided.
+        profile = TopologyProfile(machines_yaml="m.yaml", default_env={})
+        repo_cfg = RepoBridgeConfig(
+            default_copilot_args=["--model", "repo-m"], default_env={"K": "v"},
+        )
+        args, env = _effective_spawn_defaults(profile, repo_cfg)
+        assert env == {}  # explicit local clear wins over the repo default
+        assert args == ["--model", "repo-m"]  # copilot_args not set locally -> repo
+
 
 class TestRelatedRemoteAgents:
 

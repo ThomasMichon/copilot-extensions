@@ -61,7 +61,7 @@ def load_repo_bridge_config(repo_root: Path) -> RepoBridgeConfig | None:
         data = yaml.safe_load(cfg_path.read_text()) or {}
         return RepoBridgeConfig(**data)
     except Exception:
-        log.warning("Failed to parse in-repo config %s, ignoring", cfg_path)
+        log.warning("Failed to parse in-repo config %s, ignoring", cfg_path, exc_info=True)
         return None
 
 
