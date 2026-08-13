@@ -260,6 +260,7 @@ async def test_reconcile_survives_a_failing_channel(store):
     assert created["cs-good"].is_alive()
     assert "cs-bad" not in owner_mgr.active_codespaces()
     assert created["cs-bad"].starts == 1
+    assert created["cs-bad"].stops == 1  # best-effort teardown, no leaked process
 
 
 async def test_shutdown_stops_all_without_touching_registry(store):

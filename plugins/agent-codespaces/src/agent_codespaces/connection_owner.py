@@ -379,8 +379,8 @@ class ConnectionOwner:
         self._channels: dict[str, RelayChannel] = {}
 
     def active_codespaces(self) -> set[str]:
-        """CodeSpaces with a live relay channel under this Owner."""
-        return set(self._channels)
+        """CodeSpaces with a currently-live relay channel under this Owner."""
+        return {cs for cs, channel in self._channels.items() if channel.is_alive()}
 
     async def ensure(self, codespace: str) -> bool:
         """Ensure a started relay channel for ``codespace`` iff it is held.
@@ -402,6 +402,12 @@ class ConnectionOwner:
             try:
                 await channel.start()
             except Exception:
+                # start() may have spawned the ssh process before failing; stop it
+                # best-effort so we don't leak a relay we've stopped tracking.
+                try:
+                    await channel.stop()
+                except Exception:
+                    log.debug("relay stop after failed start also failed for %s", codespace)
                 self._channels.pop(codespace, None)
                 raise
         return True
