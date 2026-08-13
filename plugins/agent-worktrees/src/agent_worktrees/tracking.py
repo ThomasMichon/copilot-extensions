@@ -174,11 +174,47 @@ class ClaimRef:
         """True when the ref carries machine + project (cross-repo-resolvable)."""
         return bool(self.machine and self.project)
 
+    @property
+    def is_anchor(self) -> bool:
+        """True when this ref names a repo's **anchor** checkout, not a worktree.
+
+        An anchor owner uses the reserved ``worktree_id`` sentinel
+        :data:`ANCHOR_ID` (``@anchor``) -- a singleton/whole-repo enlistment that
+        is worked in place and, unlike an ephemeral worktree, is **permanent**.
+        Liveness and reclaim treat it differently (see
+        :func:`claimant.local_claimant_alive`).
+        """
+        return self.worktree_id == ANCHOR_ID
+
     def canonical(self) -> str:
         """Render back to the canonical string form."""
         return format_claim_ref(
             self.machine, self.project, self.worktree_id, self.session
         )
+
+
+#: Reserved ``worktree_id`` sentinel naming a repo's **anchor** checkout (its
+#: permanent, whole-repo enlistment) as a claimable owner -- as opposed to an
+#: ephemeral worktree. It can't collide with a real worktree_id (those are
+#: timestamped ``<host>-<os>-<ts>-<hash>``) and ``@`` is filesystem-safe, so the
+#: anchor's per-project claim ledger lives at
+#: ``project_dir(project)/worktrees/@anchor.yaml`` and its ref is the ordinary
+#: qualified ``<machine>/<project>/@anchor`` (no ref-grammar change).
+ANCHOR_ID = "@anchor"
+
+
+def format_anchor_ref(
+    machine: str | None,
+    project: str | None,
+    session: str | None = None,
+) -> str:
+    """Build a canonical **anchor** owner ref ``<machine>/<project>/@anchor``.
+
+    Thin wrapper over :func:`format_claim_ref` with the reserved
+    :data:`ANCHOR_ID` sentinel -- the accountable-owner analog of a worktree ref
+    for a singleton/whole-repo enlistment worked in its anchor checkout.
+    """
+    return format_claim_ref(machine, project, ANCHOR_ID, session)
 
 
 def format_claim_ref(
@@ -943,6 +979,22 @@ def resolve_worktree_path(worktree_id: str, worktree_root: str) -> str:
     return str(Path(worktree_root) / worktree_id)
 
 
+def _yaml_scalar(v: str) -> str:
+    """Render a string scalar for the hand-rolled record YAML, quoting only when
+    a plain scalar would be mis-tokenized.
+
+    The reserved ``@anchor`` owner id (and any value with a leading YAML
+    indicator character) would otherwise be emitted bare and crash
+    ``yaml.safe_load`` on read (``found character '@' that cannot start any
+    token``). Values that start with a letter/digit -- every real
+    worktree_id/branch/ref today -- are returned unquoted, so existing records
+    stay byte-identical.
+    """
+    if v and v[0] in "@`-?:,[]{}#&*!|>%'\" ":
+        return "'" + v.replace("'", "''") + "'"
+    return v
+
+
 def save_record(record: WorktreeRecord, path: Path | None = None) -> None:
     """Write a worktree tracking record to YAML (atomic)."""
     if path is None:
@@ -955,8 +1007,8 @@ def save_record(record: WorktreeRecord, path: Path | None = None) -> None:
         title_val = f"'{safe_title}'"
 
     content = (
-        f"worktree_id: {record.worktree_id}\n"
-        f"branch: {record.branch}\n"
+        f"worktree_id: {_yaml_scalar(record.worktree_id)}\n"
+        f"branch: {_yaml_scalar(record.branch)}\n"
         f"worktree_path: {record.worktree_path}\n"
         f"repo: {record.repo}\n"
         f"machine: {record.machine}\n"
@@ -1031,20 +1083,20 @@ def save_record(record: WorktreeRecord, path: Path | None = None) -> None:
         content += f"head_session: {record.head_session}\n"
     # #2178: bridge caller-worktree pointer. Emitted only when set.
     if record.caller_worktree:
-        content += f"caller_worktree: {record.caller_worktree}\n"
+        content += f"caller_worktree: {_yaml_scalar(record.caller_worktree)}\n"
     # agent-fabric resource-claims: the backward owner link. Emitted only when
     # set, so an unclaimed worktree's YAML stays byte-identical.
     if record.owner_ref:
-        content += f"owner_ref: {record.owner_ref}\n"
+        content += f"owner_ref: {_yaml_scalar(record.owner_ref)}\n"
     # citadel paired -harness/-knowledge worktree lifecycle (#957): the pair
     # linkage. Emitted only when set, so an unpaired worktree's YAML stays
     # byte-identical (the common case is unpaired).
     if record.pair_id:
-        content += f"pair_id: {record.pair_id}\n"
+        content += f"pair_id: {_yaml_scalar(record.pair_id)}\n"
     if record.pair_role in ("harness", "knowledge"):
         content += f"pair_role: {record.pair_role}\n"
     if record.pair_ref:
-        content += f"pair_ref: {record.pair_ref}\n"
+        content += f"pair_ref: {_yaml_scalar(record.pair_ref)}\n"
     if record.pair_kind in ("worktree", "anchor"):
         content += f"pair_kind: {record.pair_kind}\n"
     # agent-fabric resource-claims: the forward outbound list. Emitted only when
@@ -1721,6 +1773,34 @@ def create_new_record(
     path = tracking_path / f"{worktree_id}.yaml"
     save_record(record, path)
     return record
+
+
+def load_or_create_anchor_record(
+    anchor_path: str,
+    repo: str,
+    machine: str,
+    platform_name: str,
+    tracking_path: Path,
+) -> WorktreeRecord:
+    """Load (or lazily create) a repo's ``@anchor`` claim-ledger record.
+
+    The anchor ledger is an ordinary :class:`WorktreeRecord` keyed by the
+    reserved :data:`ANCHOR_ID` sentinel and stamped ``pair_kind="anchor"``,
+    stored at ``<tracking_path>/@anchor.yaml`` -- the accountable owner for a
+    singleton / whole-repo enlistment worked in its anchor checkout. Created on
+    first use so a repo that never journals an anchor claim pays nothing;
+    idempotent (an existing ledger is returned as-is). ``branch`` is the
+    sentinel :data:`ANCHOR_ID` -- an anchor has no feature branch and its own
+    branch is never a settlement input (anchor claims settle by the resource's
+    own proof).
+    """
+    path = tracking_path / f"{ANCHOR_ID}.yaml"
+    if path.exists():
+        return load_record(path)
+    return create_new_record(
+        ANCHOR_ID, ANCHOR_ID, anchor_path, repo, machine, platform_name,
+        tracking_path, pair_kind="anchor",
+    )
 
 
 def add_resource_claim(

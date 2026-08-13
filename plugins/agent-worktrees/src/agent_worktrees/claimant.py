@@ -58,6 +58,11 @@ def local_claimant_alive(owner_ref: str) -> bool | None:
         resolution is done by :func:`resolve_claimant_alive`.
 
     Only a *positively resolved, gone* same-machine owner returns ``False``.
+
+    **Anchor owners** (``<machine>/<project>/@anchor``) are permanent, so they
+    invert the worktree rule: a *missing* anchor ledger is ``None`` (spare, never
+    ``False``) and only a *removed anchor checkout* is ``False`` -- an anchor's
+    claims settle by the resource's own proof, not by owner-death.
     """
     parsed = tracking.parse_claim_ref(owner_ref)
     if parsed is None:
@@ -80,6 +85,22 @@ def local_claimant_alive(owner_ref: str) -> bool | None:
         rec_path = cfg.project_dir(project) / "worktrees" / f"{parsed.worktree_id}.yaml"
     except Exception:
         return None
+    # ANCHOR owner (a permanent, whole-repo enlistment) inverts the worktree
+    # "missing record => gone" rule: an anchor is never pruned, so a *missing*
+    # ledger is NOT proof the enlistment is gone -- it is UNCONFIRMED (spare).
+    # Only a removed anchor checkout is a confirmed gone. An anchor's outbound
+    # claims are therefore settled by the resource's own proof (a merged PR, a
+    # merged child branch), never by owner-death.
+    if parsed.is_anchor:
+        if not rec_path.exists():
+            return None  # no ledger yet -> unconfirmed, spare (never False)
+        try:
+            anchor_rec = tracking.load_record(rec_path)
+        except Exception:
+            return True  # present but unreadable -> bias to sparing
+        if anchor_rec.worktree_path and not Path(anchor_rec.worktree_path).exists():
+            return False  # the anchor checkout truly went away -> gone
+        return True  # anchor present -> alive (permanent)
     if not rec_path.exists():
         return False  # owner record gone -> claim is stale
     try:
