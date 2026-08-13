@@ -323,8 +323,15 @@ def build_app() -> FastAPI:
 
 
 def _missing_indexing_dependencies() -> str | None:
-    """Return a short missing-dependency message, or None when indexing can start."""
-    missing = [name for name in ("lancedb", "torch") if importlib.util.find_spec(name) is None]
+    """Return a short missing-dependency message, or None when indexing can start.
+
+    Embedding is delegated to the durable engine daemon (over HTTP), and in the
+    worker-delegation model (model A) the actual crawl/store runs in a detached
+    worker subprocess — so the SERVICE only needs the store library (``lancedb``)
+    to accept a reindex. ``torch`` lives in the engine's own venv, not here, and
+    must not gate the API on a torch-free service box.
+    """
+    missing = [name for name in ("lancedb",) if importlib.util.find_spec(name) is None]
     if missing:
         return f"missing optional indexing dependencies: {', '.join(missing)}"
     return None
