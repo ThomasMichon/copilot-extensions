@@ -785,24 +785,39 @@ class AcpClient:
                     values.add(val)
             advertised[oid] = (current, values)
 
+        applied: dict[str, str] = {}
+        fallbacks: list[dict[str, Any]] = []
         for config_id in (_ACP_MODEL_CONFIG_ID, _ACP_EFFORT_CONFIG_ID):
             value = desired.get(config_id)
             if not value:
                 continue
             entry = advertised.get(config_id)
             if entry is None:
-                log.debug(
-                    "ACP agent does not advertise config option %r; skipping", config_id,
+                log.warning(
+                    "ACP agent does not advertise config option %r; the dispatched "
+                    "agent keeps its default (requested %s=%s)",
+                    config_id, config_id, value,
+                )
+                fallbacks.append(
+                    {"config": config_id, "requested": value, "reason": "not-advertised"}
                 )
                 continue
             current, allowed = entry
             if allowed and value not in allowed:
                 log.warning(
-                    "ACP config %s=%r not offered by agent (%d options); skipping",
+                    "ACP config %s=%r not offered by agent (%d options); the "
+                    "dispatched agent keeps its default",
                     config_id, value, len(allowed),
+                )
+                fallbacks.append(
+                    {"config": config_id, "requested": value, "reason": "not-offered",
+                     "offered": sorted(allowed)}
                 )
                 continue
             if current == value:
+                # Already the desired value -- still "applied" (record it so the
+                # operator can verify, e.g. via status).
+                applied[config_id] = value
                 continue
             try:
                 await self._connection.set_config_option(
@@ -810,11 +825,32 @@ class AcpClient:
                     session_id=self._acp_session_id,
                     value=value,
                 )
+                applied[config_id] = value
                 log.info(
                     "ACP session %s: set %s=%s", self._acp_session_id, config_id, value,
                 )
             except Exception as exc:
                 log.warning("ACP set_config_option %s=%s failed: %s", config_id, value, exc)
+                fallbacks.append(
+                    {"config": config_id, "requested": value, "reason": "rpc-failed",
+                     "error": str(exc)}
+                )
+
+        # Surface the outcome so the model is VERIFIABLE (not just set-and-hope):
+        # record the applied model on the session (routed to ``usage_model`` ->
+        # ``status``) and emit a loud, event-log-visible warning on any fallback
+        # so a silent downgrade can't hide (dotfiles#790/#1274 WS1-model).
+        applied_model = applied.get(_ACP_MODEL_CONFIG_ID)
+        if applied_model:
+            self._emit("usage_update", {"model": applied_model})
+        if applied:
+            self._emit("model_applied", dict(applied))
+        if fallbacks:
+            self._emit("model_fallback", {
+                "requested": dict(desired),
+                "applied": dict(applied),
+                "fallbacks": fallbacks,
+            })
 
     async def send_prompt(self, text: str) -> dict[str, Any]:
         """Send a prompt and block until the turn completes.
