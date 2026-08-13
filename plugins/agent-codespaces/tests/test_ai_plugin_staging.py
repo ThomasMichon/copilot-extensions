@@ -136,3 +136,57 @@ def test_full_bash_command_runs_on_posix(tmp_path: Path):
     assert len(resolved) == 1
     assert resolved[0].endswith("/.ai/atomic-dir")
     assert "flt@remote" in unresolved
+
+
+def test_resolve_repo_ai_plugin_dirs_prefers_explicit_repo_dir():
+    """``_resolve_repo_ai_plugin_dirs`` uses an explicit ``repo_dir`` as-is and
+    does NOT fall back to config derivation (dotfiles#1274): the Session-Host
+    dispatch passes the target's known ``workspace_folder`` even when the spawn
+    command carried no ``--repo`` (so config-from-repo would resolve nothing)."""
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from agent_codespaces.__main__ import _resolve_repo_ai_plugin_dirs
+
+    seen = {}
+
+    class _FakeManager:
+        async def exec_command(self, name, command, timeout=None):
+            seen["command"] = command
+            payload = (
+                f'{aps.RESULT_MARKER}'
+                '{"resolved": {"atomic@m": "/workspaces/odsp-web/.ai/atomic"}, '
+                '"unresolved": []}'
+            )
+            return SimpleNamespace(stdout=payload, stderr="", exit_code=0)
+
+    # config.resolved_workspace_folder_for MUST NOT be consulted when repo_dir
+    # is given -- make it explode to prove precedence.
+    def _boom(_repo):
+        raise AssertionError("config derivation must not run when repo_dir given")
+
+    config = SimpleNamespace(resolved_workspace_folder_for=_boom)
+
+    with patch.object(aps, "find_plugin_resolve_pkg", return_value=Path(".")), \
+         patch.object(aps, "tar_pkg_b64", return_value="B64"):
+        dirs = asyncio.run(_resolve_repo_ai_plugin_dirs(
+            _FakeManager(), "my-cs", None, config,
+            repo_dir="/workspaces/odsp-web",
+        ))
+    assert dirs == ["/workspaces/odsp-web/.ai/atomic"]
+    assert "/workspaces/odsp-web" in seen["command"]
+
+
+def test_resolve_repo_ai_plugin_dirs_empty_when_no_dir():
+    """No explicit ``repo_dir`` and config yields nothing -> ``[]``."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from agent_codespaces.__main__ import _resolve_repo_ai_plugin_dirs
+
+    config = SimpleNamespace(resolved_workspace_folder_for=lambda _r: None)
+    dirs = asyncio.run(_resolve_repo_ai_plugin_dirs(
+        object(), "my-cs", None, config,
+    ))
+    assert dirs == []
