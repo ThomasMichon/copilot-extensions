@@ -272,12 +272,19 @@ def client_url() -> str | None:
     """Return the active service URL.
 
     A **client** carries an explicit machine-local ``endpoint`` (its routing to the
-    designated indexer) which wins; otherwise the local service is followed via zdd
-    routing, then rendezvous. (An ``AGENT_INDEX_ENDPOINT`` env override, handled by
-    callers, still trumps everything.)"""
-    configured = configured_endpoint()
-    if configured:
-        return configured
+    designated indexer) which wins; a **host** always follows its own local service
+    via zdd routing, then rendezvous. (An ``AGENT_INDEX_ENDPOINT`` env override,
+    handled by callers, still trumps everything.)
+
+    The configured ``endpoint`` is honored **only for a client**. On a host it is
+    stale/spurious and must not shadow the live zdd routing table, whose port
+    changes every zero-downtime generation -- a fixed host ``endpoint`` there made
+    ``status``/``stop`` probe a dead static port and report the running service as
+    down (#1349)."""
+    if resolve_role() == "client":
+        configured = configured_endpoint()
+        if configured:
+            return configured
 
     routed = _routing_url()
     if routed:

@@ -127,3 +127,40 @@ def test_git_repo_connector_falls_back_to_local_head_without_remote(tmp_path: Pa
     paths = {entry.path for entry in connector.discover()}
     assert "only.py" in paths
     assert connector.current_commit() == head
+
+
+def test_source_name_from_url_parsing() -> None:
+    """Repo-name extraction handles https, scp-like, trailing slash and .git."""
+    f = GitRepoConnector._repo_name_from_url
+    assert f("https://github.com/tmichon_microsoft/dotfiles.git") == "dotfiles"
+    assert f("https://github.com/tmichon_microsoft/dotfiles") == "dotfiles"
+    assert f("git@github.com:owner/dotfiles.git") == "dotfiles"
+    assert f("https://host/owner/repo/") == "repo"
+    assert f(r"C:\repos\owner\dotfiles.git") == "dotfiles"
+    assert f("") is None
+
+
+def test_source_name_is_stable_across_worktrees(tmp_path: Path) -> None:
+    """Two differently-named checkouts of the SAME remote repo share one source
+    name (``git:<remote-repo>``), not ``git:<checkout-folder>`` -- so indexing
+    from a linked worktree updates the canonical source instead of minting a
+    spurious per-worktree one (#1350)."""
+    origin = tmp_path / "canonical.git"
+    _git(tmp_path, "init", "--bare", "-b", "main", str(origin))
+    seed = tmp_path / "seed"
+    _git(tmp_path, "clone", str(origin), str(seed))
+    _git(seed, "config", "user.email", "dev@example.test")
+    _git(seed, "config", "user.name", "Dev User")
+    (seed / "README.md").write_text("# Canonical\n", encoding="utf-8")
+    _git(seed, "add", "README.md")
+    _git(seed, "commit", "-m", "seed")
+    _git(seed, "push", "-u", "origin", "main")
+
+    # Two checkouts with different folder basenames, same origin.
+    anchor = tmp_path / "dotfiles"
+    worktree = tmp_path / "tmichon-cloud1-win-20260812-xyz"
+    _git(tmp_path, "clone", str(origin), str(anchor))
+    _git(tmp_path, "clone", str(origin), str(worktree))
+
+    assert GitRepoConnector(repo_path=anchor).source_name == "git:canonical"
+    assert GitRepoConnector(repo_path=worktree).source_name == "git:canonical"
