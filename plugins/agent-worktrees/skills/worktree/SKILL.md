@@ -216,6 +216,31 @@ Inspect the ledger any time with `agent-worktrees claims show`. (Relax the gate
 for a session with `AGENT_WORKTREES_OBLIGATION_GATE=warn` -- surface but proceed
 -- but prefer settling the resource.)
 
+#### Resources you create **out-of-band** aren't auto-journaled — claim them by hand
+
+Auto-journaling only covers resources created through the blessed paths: a
+worktree via `agent-worktrees create`/bridge dispatch, and a CodeSpace via
+`agent-codespaces ssh`. Anything you bring into being **another way** is invisible
+to the finalize gate unless you journal it yourself — so `finalize` would let this
+worktree vanish while that work is still open. Journal it as a claim on **this**
+worktree, and settle it when it's done:
+
+```
+# You opened a cross-repo / ADO PR out-of-band (e.g. an odsp-web PR created with
+# the AZ CLI / ADO REST / gh, NOT `agent-worktrees create-pr`):
+agent-worktrees claims add pr <pr-url-or-id> --owner-ref "$(agent-worktrees get owner-ref)"
+# ...later, when that PR merges or closes:
+agent-worktrees claims settle <pr-url-or-id>     # or: claims release <pr-url-or-id> --remove
+```
+
+The gate is **kind-agnostic** — a `pr` (or `codespace`/`container`/`workdir`)
+claim blocks finalize exactly like a worktree claim, so this keeps you honest
+about unfinished cross-repo work. But the reclaim **sweep spares `pr`-kind
+claims** (it can't prove an arbitrary PR safe), so a `pr` claim is **manual to
+settle** — there is no auto-reclaim. Kinds: `worktree|codespace|container|ssh|
+workdir|pr`. *(Auto-journaling `pr` claims + settle-on-merge is tracked in
+tmichon_microsoft/dotfiles#1351.)*
+
 ### When the user says "finalize", "wrap up", "sign off", or "done with this"
 
 They mean: push changes and clean up. Run both steps:
