@@ -154,7 +154,8 @@ def test_github_pr_view_args_recognizes_forms():
     assert sweep._github_pr_view_args(
         "https://github.com/o/r/pull/12") == ["https://github.com/o/r/pull/12"]
     assert sweep._github_pr_view_args("o/r#34") == ["34", "--repo", "o/r"]
-    # ADO url, bare number, junk -> None (spare / Phase 2).
+    # ADO url, bare number, junk -> None (the GitHub recognizer; ADO is matched
+    # separately by _ado_pr_view_args).
     assert sweep._github_pr_view_args(
         "https://onedrive.visualstudio.com/ODSP-Web/_git/odsp-web/pullrequest/9") is None
     assert sweep._github_pr_view_args("123") is None
@@ -173,10 +174,11 @@ def test_pr_merged_true_only_on_merged(monkeypatch):
 
 
 def test_pr_merged_degrades_to_none(monkeypatch):
-    # non-github ref -> never shells out
+    # unrecognized ref (bare number / junk) -> never shells out
     monkeypatch.setattr(sweep.shutil, "which",
-                        lambda _: (_ for _ in ()).throw(AssertionError("no gh")))
-    assert sweep.pr_merged("https://dev.azure.com/o/p/_git/r/pullrequest/5") is None
+                        lambda _: (_ for _ in ()).throw(AssertionError("no shell")))
+    assert sweep.pr_merged("123") is None
+    assert sweep.pr_merged("not-a-ref") is None
     # gh missing
     monkeypatch.setattr(sweep.shutil, "which", lambda _: None)
     assert sweep.pr_merged("o/r#1") is None
@@ -189,6 +191,68 @@ def test_pr_merged_degrades_to_none(monkeypatch):
     monkeypatch.setattr(sweep.subprocess, "run",
                         lambda *a, **k: _proc(0, "not json"))
     assert sweep.pr_merged("o/r#1") is None
+
+
+def test_ado_pr_view_args_recognizes_forms():
+    # classic <org>.visualstudio.com -> org = https://<host>/
+    assert sweep._ado_pr_view_args(
+        "https://onedrive.visualstudio.com/ODSP-Web/_git/odsp-web/pullrequest/2285417"
+    ) == ["--id", "2285417", "--org", "https://onedrive.visualstudio.com/"]
+    # modern dev.azure.com/<org> -> org = https://dev.azure.com/<org>/
+    assert sweep._ado_pr_view_args(
+        "https://dev.azure.com/onedrive/ODSP-Web/_git/odsp-web/pullrequest/2285417"
+    ) == ["--id", "2285417", "--org", "https://dev.azure.com/onedrive/"]
+    # GitHub refs, bare number, junk -> None
+    assert sweep._ado_pr_view_args("https://github.com/o/r/pull/12") is None
+    assert sweep._ado_pr_view_args("o/r#34") is None
+    assert sweep._ado_pr_view_args("123") is None
+    assert sweep._ado_pr_view_args("") is None
+
+
+def test_ado_pr_merged_true_only_on_completed(monkeypatch):
+    ado = "https://onedrive.visualstudio.com/P/_git/r/pullrequest/9"
+    monkeypatch.setattr(sweep.shutil, "which", lambda _: "az")
+    monkeypatch.setattr(sweep.subprocess, "run",
+                        lambda *a, **k: _proc(0, "completed\n"))
+    assert sweep._ado_pr_merged(ado) is True
+    assert sweep.pr_merged(ado) is True  # routes through the dispatcher too
+    for status in ("active", "abandoned", "notSet"):
+        monkeypatch.setattr(sweep.subprocess, "run",
+                            lambda *a, s=status, **k: _proc(0, f"{s}\n"))
+        assert sweep._ado_pr_merged(ado) is None
+
+
+def test_ado_pr_merged_degrades_to_none(monkeypatch):
+    ado = "https://dev.azure.com/o/p/_git/r/pullrequest/5"
+    # non-ADO ref -> never shells out
+    monkeypatch.setattr(sweep.shutil, "which",
+                        lambda _: (_ for _ in ()).throw(AssertionError("no az")))
+    assert sweep._ado_pr_merged("o/r#1") is None
+    # az missing (no azure-devops CLI)
+    monkeypatch.setattr(sweep.shutil, "which", lambda _: None)
+    assert sweep._ado_pr_merged(ado) is None
+    # az error (unauthenticated / not visible) -> None
+    monkeypatch.setattr(sweep.shutil, "which", lambda _: "az")
+    monkeypatch.setattr(sweep.subprocess, "run",
+                        lambda *a, **k: _proc(1, stderr="not authenticated"))
+    assert sweep._ado_pr_merged(ado) is None
+    # empty / whitespace output -> None
+    monkeypatch.setattr(sweep.subprocess, "run",
+                        lambda *a, **k: _proc(0, "\n"))
+    assert sweep._ado_pr_merged(ado) is None
+
+
+def test_pr_merged_dispatches_github_vs_ado(monkeypatch):
+    calls = []
+    monkeypatch.setattr(sweep, "_github_pr_merged",
+                        lambda ref: calls.append(("gh", ref)) or True)
+    monkeypatch.setattr(sweep, "_ado_pr_merged",
+                        lambda ref: calls.append(("ado", ref)) or True)
+    assert sweep.pr_merged("o/r#7") is True
+    assert sweep.pr_merged(
+        "https://onedrive.visualstudio.com/P/_git/r/pullrequest/8") is True
+    assert sweep.pr_merged("123") is None  # unrecognized -> neither backend
+    assert [c[0] for c in calls] == ["gh", "ado"]
 
 
 def test_claim_gone_safe_route_pr_to_merge_check(monkeypatch):
