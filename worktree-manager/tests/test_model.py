@@ -10,11 +10,11 @@ from __future__ import annotations
 import io
 import json
 
-import configurator.discovery as discovery
-import configurator.model as model
-from configurator.catalog import find_repo_root, load_catalog
-from configurator.discovery import Discovered, DiscoverySource
-from configurator.model import build_model, coverage
+import worktree_manager.discovery as discovery
+import worktree_manager.model as model
+from worktree_manager.catalog import find_repo_root, load_catalog
+from worktree_manager.discovery import Discovered, DiscoverySource
+from worktree_manager.model import build_model, coverage
 
 
 def test_build_model_from_checkout_overlays_catalog():
@@ -100,7 +100,7 @@ def test_coverage_flags_phantom_and_uncovered(monkeypatch):
 
 
 def test_reconcile_command_reports_coverage(capsys):
-    from configurator.__main__ import main
+    from worktree_manager.__main__ import main
     rc = main(["plugins", "--reconcile"])
     out = capsys.readouterr().out
     assert "coverage" in out.lower()

@@ -1,6 +1,6 @@
 """Effective plugin model = dynamic membership (discovery) + authored overlay.
 
-The Configurator's *effective* knowledge of the plugins is composed here: the
+The Worktree Manager's *effective* knowledge of the plugins is composed here: the
 **membership** comes from :mod:`discovery` (the marketplace — checkout or remote),
 and each discovered plugin is enriched by the installer-owned **catalog**
 (``data/plugins.toml``) when an authored entry exists. A discovered plugin with

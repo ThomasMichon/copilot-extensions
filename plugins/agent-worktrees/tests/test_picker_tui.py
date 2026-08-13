@@ -2555,7 +2555,7 @@ def test_tui_renders_local_worktrees():
         async with app.run_test(size=(118, 36)) as pilot:  # noqa: F841
             scr = app.query_one(PickerScreen)
             out = pcap.screen_to_text(scr)
-            assert "Agent Worktrees" in out
+            assert "Worktree Manager" in out
             # Canonical state vocabulary (aperture-labs #1290).
             assert "WIP" in out
             assert "UNUSED" in out
@@ -2597,7 +2597,7 @@ def test_topbar_drops_repo_branch_when_source_omits_them():
         async with app.run_test(size=(118, 36)) as pilot:  # noqa: F841
             scr = app.query_one(PickerScreen)
             out = pcap.screen_to_text(scr)
-            assert "Agent Worktrees" in out
+            assert "Worktree Manager" in out
             assert "aperture-labs" not in out
 
     asyncio.run(run())
@@ -2680,7 +2680,7 @@ def test_tui_live_multi_machine():
             scr._tick()
             await pilot.pause()
             out = pcap.screen_to_text(scr)
-            assert "Agent Worktrees" in out
+            assert "Worktree Manager" in out
             # Both ready machines' worktrees stream into the All view.
             assert "Local wip" in out
             assert "Remote work" in out

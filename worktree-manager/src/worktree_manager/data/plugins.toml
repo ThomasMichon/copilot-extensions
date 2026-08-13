@@ -1,9 +1,9 @@
 # Installer-owned declarative plugin-knowledge catalog (Phase 1, effort
 # installer-configurator / umbrella #352, resolves DQ2).
 #
-# This file is the Configurator's OWN knowledge overlay about the plugins: their
+# This file is the Worktree Manager's OWN knowledge overlay about the plugins: their
 # prerequisites, the config they manage, and the "what to do" to make each one
-# ready. It is DATA, not code, and it lives INSIDE the configurator payload.
+# ready. It is DATA, not code, and it lives INSIDE the worktree-manager payload.
 #
 # Membership is DISCOVERED, not frozen here. `discovery.py` reads which plugins
 # exist from the marketplace (a nearby checkout, else the remote published ref);
@@ -12,17 +12,17 @@
 # needs to carry the knowledge the installer ADDS beyond what discovery yields.
 #
 # The dependency-free boundary (one-way awareness):
-#   * The Configurator *knows about* the plugins through discovery + this overlay.
+#   * The Worktree Manager *knows about* the plugins through discovery + this overlay.
 #     No plugin is imported, and no plugin is required to publish anything
 #     installer-specific. A plugin behaves identically whether or not the
-#     Configurator is present.
+#     Worktree Manager is present.
 #   * Where a plugin ALREADY publishes generic metadata for its OWN reasons
-#     (`scripts/service.yaml` prereqs, the marketplace entry), the Configurator
+#     (`scripts/service.yaml` prereqs, the marketplace entry), the Worktree Manager
 #     reads it opportunistically. A prereq tagged `source = "published"` is one
 #     the plugin itself declares in its service.yaml; `source = "installer"` is
 #     knowledge this catalog adds.
 #
-# `configurator plugins --reconcile` reports COVERAGE of the discovered
+# `worktree-manager plugins --reconcile` reports COVERAGE of the discovered
 # membership by this overlay: `uncovered` (discovered but not authored here —
 # running on inference; fine) vs. `phantom` (authored here but not discovered —
 # a rename/removal to fix) vs. published-prereq drift. Keep this in step by
@@ -44,7 +44,7 @@ prereqs = [
 
 # ── core ────────────────────────────────────────────────────────────────────
 # The install engine + worktree lifecycle. Everything else builds on it, so it
-# is the one plugin whose real installer the Configurator must drive (Phase 2).
+# is the one plugin whose real installer the Worktree Manager must drive (Phase 2).
 [[plugins]]
 name = "agent-worktrees"
 kind = "core"

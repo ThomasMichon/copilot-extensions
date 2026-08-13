@@ -1182,7 +1182,7 @@ machine scope, buttons) are `sel`-coupled and rendered across `topbar()` and
 `build_body()`, so they don't map 1:1 to NF2's four segments -- making them
 focusable together needs each region to be its own widget first. This slice splits
 the **header** segment into its two conceptual region rows: `#nf-title` (the
-identity row -- "Agent Worktrees", version, update indicator, host) and `#nf-pivots`
+identity row -- "Worktree Manager", version, update indicator, host) and `#nf-pivots`
 (the WORKTREES/Tasks/Bridges pivot tabs + the ⚙ Configuration entry). `_PickerSegment`
 gained an optional `rows` slice so one segment can back several row-widgets; the two
 render header rows `0:1` and `1:2` and recompose the whole header byte-identically
