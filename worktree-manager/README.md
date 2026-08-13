@@ -72,8 +72,19 @@ uv run python -m worktree_manager projects        # harness repos (binstubs + pr
 uv run python -m worktree_manager projects <name> # config dir, linked knowledge repo, profiles, enabled plugins
 uv run python -m worktree_manager repos           # every known repo + indicators
 uv run python -m worktree_manager repos <name>    # worktree mode · agent mode · pr model · ownership · remote
+uv run python -m worktree_manager worktrees       # live worktree counts per project (via the engine)
+uv run python -m worktree_manager worktrees <name> # one project's worktrees: state, sync tags, titles
 uv run python -m worktree_manager plugins --status  # known plugins vs. what is enabled user-global
 ```
+
+The **worktrees** views are the first slice of the extracted Picker: they read
+**live** worktrees by shelling out to the `agent-worktrees` engine
+(`agent-worktrees --project <p> list --json --classify`) — the **process
+boundary** the Textual Picker will sit on. The Manager never imports the plugin;
+the only coupling is the engine's stable `--json` verbs (the pinned
+[engine ↔ Picker contract](../plugins/agent-worktrees/docs/engine-picker-contract.md)),
+and the client ([`engine_client.py`](src/worktree_manager/engine_client.py))
+tolerates an older engine by degrading a request rather than failing.
 
 **Projects** are the repos promoted to first-class harness projects (worthy of
 binstubs + profiles, in `projects.yaml`); **Repos** are everything else in the

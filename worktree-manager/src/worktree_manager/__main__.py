@@ -19,6 +19,7 @@ import sys
 from . import __version__
 from .catalog import load_catalog
 from .core_install import core_status, install_command, install_core
+from .engine_client import EngineError, engine_available, list_worktrees
 from .harness_state import (
     build_projects,
     build_repos,
@@ -26,11 +27,11 @@ from .harness_state import (
 )
 from .model import Model, build_model, coverage, effective_prereqs
 from .prereqs import current_os, detect_baseline, missing
-from .self_install import self_install
-from .self_install import status as self_status
 from .provision import apply as provision_apply
 from .provision import plan as provision_plan
 from .provision import restart_needed
+from .self_install import self_install
+from .self_install import status as self_status
 
 _BANNER = "copilot-extensions Worktree Manager"
 _TAGLINE = "the standalone, out-of-plugin harness control plane"
@@ -320,6 +321,77 @@ def _cmd_repos(rest: list[str]) -> int:
     return 0
 
 
+def _worktree_row(w) -> str:
+    """One rendered worktree line: id4 · machine · repo · STATE sync · title."""
+    state = (w.state or "-").upper()
+    dirty = " DIRTY" if w.dirty and "DIRTY" not in state else ""
+    sync = f" {w.sync_tag}" if w.sync_tag else ""
+    title = f"  {w.title}" if w.title else ""
+    return (f"    {w.id4}  {(w.machine or '?').ljust(10)}  "
+            f"{(w.repo or '?').ljust(18)}  {state}{dirty}{sync}{title}")
+
+
+def _cmd_worktrees(rest: list[str]) -> int:
+    """List worktrees via the engine's ``list --json`` (the process boundary).
+
+    ``worktree-manager worktrees`` -> every project with a live worktree count;
+    ``worktree-manager worktrees <project>`` -> that project's worktrees. All data
+    comes from shelling out to ``agent-worktrees`` -- the Manager never imports
+    the plugin. This is the read/render foundation the Textual Picker builds on.
+    """
+    if not engine_available():
+        print()
+        print("  The agent-worktrees engine is not installed yet, so there are no")
+        print("  worktrees to show. Set it up with:")
+        print("      $ worktree-manager setup --apply")
+        print()
+        return 1
+
+    projects = build_projects()
+    if rest and not rest[0].startswith("-"):
+        name = rest[0]
+        if name not in {p.name for p in projects}:
+            print(f"error: unknown project {name!r}. "
+                  f"Known: {', '.join(p.name for p in projects)}")
+            return 2
+        try:
+            worktrees = list_worktrees(name)
+        except EngineError as e:
+            print(f"error: {e}")
+            return 1
+        print()
+        print(f"  {name} — worktrees  ({len(worktrees)})")
+        print()
+        if not worktrees:
+            print("    (none)")
+        for w in worktrees:
+            print(_worktree_row(w))
+        print()
+        print("  `worktree-manager worktrees` for all projects.")
+        print()
+        return 0
+
+    # No project: a per-project summary with live counts.
+    print()
+    print(f"  {_BANNER} — Worktrees  (per project, live from the engine)")
+    print()
+    width = max((len(p.name) for p in projects), default=0)
+    total = 0
+    for p in projects:
+        try:
+            n = len(list_worktrees(p.name, classify=False))
+        except EngineError:
+            print(f"    {p.name.ljust(width)}  (unavailable)")
+            continue
+        total += n
+        print(f"    {p.name.ljust(width)}  {n} worktree(s)")
+    print()
+    print(f"  {total} worktree(s) across {len(projects)} project(s).")
+    print("  `worktree-manager worktrees <project>` to list one.")
+    print()
+    return 0
+
+
 def _prereq_line(s) -> str:
     if not s.present:
         state = "optional, absent" if s.optional else "MISSING"
@@ -483,6 +555,7 @@ def main(argv: list[str] | None = None) -> int:
         print("  plugins --status       known plugins vs. what is enabled user-global")
         print("  projects [<name>]      registered projects (harness repos: binstubs + profiles)")
         print("  repos [<name>]         every known repo + its config-state indicators")
+        print("  worktrees [<project>]  live worktrees via the agent-worktrees engine (--json)")
         print()
         print("Phase 2 provisions prerequisites + drives the core install; Phase 3")
         print("adds the Manager state views (projects/repos/plugin enablement); later")
@@ -494,6 +567,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_projects(args[1:])
     if args and args[0] == "repos":
         return _cmd_repos(args[1:])
+    if args and args[0] == "worktrees":
+        return _cmd_worktrees(args[1:])
     if args and args[0] == "doctor":
         return _cmd_doctor()
     if args and args[0] == "setup":
