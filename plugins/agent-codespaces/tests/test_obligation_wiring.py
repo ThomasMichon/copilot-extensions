@@ -43,6 +43,29 @@ async def test_settle_on_clean_disconnect_settles(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_clean_disconnect_mirrors_at_rest_on_lease(monkeypatch):
+    """After a confirmed settle, the disposition is mirrored onto the shared
+    exclusion lease (item 2), using the L2 token read from the local L1 store."""
+    monkeypatch.setattr(
+        "agent_codespaces.coordination.settle_obligation",
+        lambda name, ref, **k: True,
+    )
+    monkeypatch.setattr(
+        "agent_codespaces.lease.lease_token_for", lambda name: "tok-" + "a" * 40)
+    mirrored = {}
+    monkeypatch.setattr(
+        "agent_codespaces.coordination.mirror_disposition",
+        lambda name, disp, token, **k: mirrored.update(
+            name=name, disp=disp, token=token) or True,
+    )
+    mgr = _FakeManager(stdout=_CLEAN)
+    ok = await m._settle_codespace_on_disconnect(mgr, "cs-one", "mach/proj/wt-b")
+    assert ok is True
+    assert mirrored == {"name": "cs-one", "disp": "at-rest",
+                        "token": "tok-" + "a" * 40}
+
+
+@pytest.mark.asyncio
 async def test_no_settle_when_dirty(monkeypatch):
     called = {"n": 0}
     monkeypatch.setattr(

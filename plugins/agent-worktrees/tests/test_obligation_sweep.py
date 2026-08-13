@@ -57,7 +57,7 @@ def test_sweep_abandons_only_gone_and_safe(tmp_path):
     gone = {"m/p/gone-safe": True, "m/p/gone-unsafe": True, "m/p/live": False}
     safe = {"m/p/gone-safe": True, "m/p/gone-unsafe": False, "m/p/live": None}
     flipped = tracking.sweep_abandoned_obligations(
-        rec, gone_of=lambda r: gone.get(r), safe_of=lambda c: safe.get(c.ref),
+        rec, gone_of=lambda c: gone.get(c.ref), safe_of=lambda c: safe.get(c.ref),
         save=False)
     assert [c.ref for c in flipped] == ["m/p/gone-safe"]
     assert claims[0].state == "abandoned"

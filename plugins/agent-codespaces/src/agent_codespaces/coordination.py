@@ -221,6 +221,43 @@ def settle_obligation(
     return True
 
 
+def mirror_disposition(
+    name: str, disposition: str, token: str | None, *, origin: str | None = None,
+) -> bool:
+    """Mirror the obligation ``disposition`` onto the CodeSpace's exclusion lease.
+
+    The cross-machine half of settlement (resource-obligation-settlement item 2):
+    ``settle_obligation`` flips the borrowing worktree's **local** ledger, but a
+    stale obligation on *another* machine (a missed settle, a bridge-driven box
+    that never ran ``agent-codespaces ssh``, or simply an owner on a different
+    box) can only be reclaimed if the settled disposition is visible **on the
+    shared lease**. This shells ``agent-worktrees lease renew codespace <name>
+    --token <token> --disposition <disposition>`` so the agent-worktrees reclaim
+    sweep reads it generically (``obligations.from_context``) and can settle the
+    stale claim, on any machine, without ever learning a CodeSpace convention.
+
+    Needs the L2 fencing ``token`` (from :func:`lease.lease_token_for`); with no
+    token the lease can't be renewed and this is a no-op. Fully best-effort +
+    degrade-safe: no binstub, no token, L2 not wired, a conflict (someone else
+    moved the ref), or any error -> ``False`` (never raises, never perturbs the
+    disconnect/release it rides on). Returns ``True`` only on a confirmed mirror.
+    """
+    if not token or not token.strip():
+        return False
+    args = ["lease", "renew", KIND, name, "--token", token.strip(),
+            "--disposition", disposition]
+    if origin:
+        args += ["--origin", origin]
+    proc = _run(args)
+    if proc is None:
+        return False
+    if proc.returncode != _EXIT_OK:
+        log.debug("disposition mirror for %s degraded (exit %s): %s",
+                  name, proc.returncode, (proc.stderr or "").strip())
+        return False
+    return True
+
+
 def harness_identity() -> str | None:
     """Resolve THIS harness's identity -- the Git-ref lease store origin URL.
 
