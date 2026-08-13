@@ -336,7 +336,12 @@ recursion **collapses into local checks**.
   defers to the lease mirror / reclaim sweep). The parent's own finalize gate
   then stops treating the child as unsettled **without re-deriving its state**.
 - **CodeSpace / container:** cleanliness is stamped on ssh disconnect / heartbeat
-  (see below); finalize reads the stamp.
+  (see below); finalize reads the stamp. On a clean disconnect agent-codespaces
+  also **mirrors the disposition onto the CodeSpace's exclusion lease**
+  (`coordination.mirror_disposition` → `lease renew codespace <name> --token …
+  --disposition at-rest`), so the settled verdict is visible **cross-machine** on
+  the shared lease — the source of truth the reclaim sweep reads to settle a
+  stale claim on *another* machine (or one a missed-settle left `active` locally).
 - **bridge:** flips when the bridge worktree is driven to final.
 
 `tracking.settle_resource_claim(record, ref, disposition)` is the primitive every
@@ -366,12 +371,41 @@ or the shell treats `*` literally and the probe finds no repo.
 
 ### Never-wedge safety net
 A crashed holder that never settles must not freeze its parent forever. The
-**reclaim sweep** (`agent_worktrees.claimant` liveness + reconcile) may flip an
-`active` obligation to **`abandoned`** when the holder is provably gone **and**
-the resource provably safe — GC as the complement to refcounting. The sweep may
-**only** flip to `abandoned`; it never fabricates `at-rest` (that is strictly the
-resource's own verdict). *(Phase 4 complete — the gate default is now `block`,
-enforcing accountability; `warn`/`off` relax it.)*
+**reclaim sweep** (`agent_worktrees.sweep`) may flip an `active` obligation to
+**`abandoned`** when the holder is provably gone **and** the resource provably
+safe — GC as the complement to refcounting. It may **only** flip to `abandoned`;
+it never fabricates `at-rest` (that is strictly the resource's own verdict), and
+every unknown is spare (an unconfirmed holder or unproven-safe resource is never
+reclaimed). Its verdicts are per-kind:
+
+- **worktree** — same-machine: the child's record is gone/terminal (**gone**) and
+  its work already landed upstream (**safe**), via `claimant` liveness + a
+  squash-aware branch-merged check.
+- **leaseable (codespace / container)** — read the **disposition mirror** off the
+  shared exclusion lease (`obligations.from_context`): a settled disposition
+  (`at-rest`/`released`/`abandoned`) proves the obligation dischargeable. This is
+  the **cross-machine** path *and* the missed-settle path (a bridge-driven box
+  that never ran `agent-codespaces ssh`, or a crash after a clean disconnect) —
+  the shared lease is the single source of truth, so any machine's sweep reclaims
+  its own stale claim.
+
+The sweep runs three ways: **automatically at finalize** (`sweep.self_heal` — the
+gate self-heals a provably-gone+safe blocking claim before it can wedge), on
+demand via **`agent-worktrees claims sweep [--apply]`** (dry-run by default), and
+implicitly whenever finalize re-evaluates the gate.
+
+**`--abandon` re-homes, never drops.** A `finalize --abandon` releases the
+worktree's still-unsettled obligations, but each is first written to a durable
+per-project **orphanage** (`~/.<project>/orphaned-obligations.yaml`) with
+provenance, so the resource it named (an orphaned CodeSpace, a cross-repo
+worktree) is recorded rather than lost. **`agent-worktrees claims orphans`** lists
+it; **`agent-worktrees claims cleanup [--apply]`** is the acting consumer that
+reclaims the orphaned resource (deletes the CodeSpace via `agent-codespaces
+delete`, finalizes the cross-repo worktree) and drops the settled entry —
+same-machine only, dry-run by default, best-effort (a failed reclaim is retained
+for a retry). *(Phase 4–6 complete — the gate default is `block`, enforcing
+accountability; `warn`/`off` relax it. Effort `resource-obligation-settlement`
+closed; umbrella dotfiles#1081.)*
 
 ## Where to go next
 

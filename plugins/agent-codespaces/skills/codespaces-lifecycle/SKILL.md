@@ -248,6 +248,18 @@ hook** (skip with `--no-sync`); unlike `finalize --delete`, a failed recovery
 there only warns and still deletes. Prefer `finalize --delete` when you want
 the delete gated on a successful recovery.
 
+> **Closing out a CodeSpace settles the borrowing worktree's obligation.** A
+> borrowed CodeSpace is an `active` `codespace` claim on the borrowing worktree's
+> ledger (`resource-obligation-settlement`) that blocks *its* `agent-worktrees
+> finalize`. A clean **disconnect** stamps the claim `at-rest` and mirrors that
+> onto the CodeSpace's shared lease (cross-machine visible); `agent-codespaces
+> delete` / `finalize --delete` release the box entirely. So drive a borrowed
+> CodeSpace to a clean state and disconnect (or delete it) **before** finalizing
+> the worktree that borrowed it — otherwise its finalize blocks on the unsettled
+> obligation. If a settle was missed (a crash, or a bridge-driven box), the
+> agent-worktrees reclaim sweep reads the lease mirror and settles the stale claim
+> automatically. See the `borrowing-codespaces` skill for the obligation model.
+
 > Requires the **agent-logger** plugin (provides the `session-sync` CLI). If it
 > isn't installed, recovery reports a clear error and (for plain `delete`) the
 > deletion still proceeds.

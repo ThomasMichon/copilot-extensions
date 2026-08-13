@@ -27,9 +27,10 @@ Pure decision logic + a shell probe builder + a defensive parser (mirrors
   obligation `active`.
 
 The caller settles the obligation (`agent-worktrees claims settle <cs-ref>` +
-the lease `--disposition` mirror) only on a *definitive* at-rest verdict.
-Anything the probe cannot determine reads as **not** at-rest, so an un-probeable
-CodeSpace stays an active (blocking) obligation rather than being settled blind.
+the lease `--disposition` mirror, see *Wiring* below) only on a *definitive*
+at-rest verdict. Anything the probe cannot determine reads as **not** at-rest, so
+an un-probeable CodeSpace stays an active (blocking) obligation rather than being
+settled blind.
 
 ## The read-only probe (`probe_command` / `parse_probe`)
 
@@ -63,12 +64,42 @@ probe (the pure predicate logic was already correct). The current probe:
 The marker contract and `parse_probe` are unchanged; only the shell construction
 was corrected.
 
-## Wiring (Phase 3b)
+## Wiring (shipped)
 
-- **Kernel (shipped):** `cleanliness.py` predicate + probe.
-- **Probe hardening (shipped, spike-driven):** the three fixes above.
-- **Call-site (in progress, 3b-wiring/2):** on CodeSpace borrow, journal
-  `agent-worktrees claims add codespace <name> --owner-ref <holder_ref>` onto the
-  borrowing worktree (resolve by the qualified holder-ref, **not** the daemon's
-  cwd project); on ssh disconnect / heartbeat run `probe_cleanliness` and, when
-  `at_rest`, `claims settle <name>` + mirror to the lease `--disposition`.
+- **Kernel:** `cleanliness.py` predicate + probe.
+- **Probe hardening (spike-driven):** the three fixes above.
+- **Journal on borrow:** on CodeSpace borrow, `coordination.journal_obligation`
+  shells `agent-worktrees claims add codespace <name> --owner-ref <holder_ref>`
+  onto the borrowing worktree (resolved by the qualified holder-ref, **not** the
+  daemon's cwd project).
+- **Settle + mirror on disconnect:** on ssh disconnect
+  (`_settle_codespace_on_disconnect`), `probe_cleanliness` runs and, on a
+  definitive `at_rest`, `coordination.settle_obligation` flips the borrowing
+  worktree's **local** ledger claim to `at-rest`, and
+  `coordination.mirror_disposition` writes the same disposition onto the
+  **CodeSpace's exclusion lease** — `lease renew codespace <name> --token <token>
+  --disposition at-rest` (the L2 fencing `token` is read from the local L1 store
+  via `lease.lease_token_for`). Best-effort: a no-token / degraded mirror is a
+  no-op and never perturbs the disconnect.
+
+### Why the lease mirror matters (cross-machine + missed-settle)
+
+The local `claims settle` only clears the obligation on the **borrowing
+worktree's own machine**. The lease `--disposition` mirror makes the settled
+verdict **cross-machine visible on the shared exclusion lease**, which is what
+lets agent-worktrees' never-wedge reclaim sweep (`sweep.lease_disposition_of` →
+`obligations.from_context`) settle a **stale** `codespace` obligation that the
+normal disconnect hook never cleared:
+
+- an owner on a **different machine** (the local settle can't reach its ledger),
+- a **missed settle** — a crash after a clean disconnect, or a **bridge-driven**
+  CodeSpace dispatched without an `agent-codespaces ssh` session (so the
+  journal/settle hooks never fired locally).
+
+In all these the shared lease is the single source of truth: whoever settles
+writes the disposition once, and any machine's sweep reads it to reclaim its own
+stale claim. A settled disposition (`at-rest`/`released`) proves the obligation
+dischargeable; an absent/`active` mirror is spare (never reclaimed on a guess).
+`release_claim` tombstones the lease (an absent lease reads as spare —
+conservative), so release relies on the local immediate-release cascade at
+finalize. (Effort `resource-obligation-settlement`, dotfiles#1081 — complete.)

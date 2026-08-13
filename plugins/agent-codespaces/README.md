@@ -15,6 +15,13 @@ A copilot-extensions plugin that provides:
   git-credential, gh-auth, az-login)
 - **Agent-bridge provider** -- register CodeSpaces as dynamic agents in
   agent-bridge for inter-agent communication
+- **Resource obligations** -- a borrowed CodeSpace is an accountable
+  **obligation** on the borrowing worktree: `ssh` journals an `active`
+  `codespace` claim onto its ledger, a clean disconnect settles it to `at-rest`
+  and **mirrors that disposition onto the shared exclusion lease** (cross-machine
+  visible), so the worktree's `agent-worktrees finalize` is gated until the box
+  is safe. See [`docs/resource-obligations.md`](docs/resource-obligations.md) and
+  the `borrowing-codespaces` skill.
 - **Session context map** -- a `sessionStart` hook injects a brief
   `additionalContext` map of the repos delegated to CodeSpaces (derived from
   `agent-worktrees related list`), so every session knows which repos have no

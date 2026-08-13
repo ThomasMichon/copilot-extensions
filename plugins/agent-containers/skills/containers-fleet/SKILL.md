@@ -87,6 +87,19 @@ Leases are **advisory** and persist across processes until `release` or TTL
 (default 24h). `borrow` will not hand out a container already leased to another
 effort; re-borrowing for the same effort is idempotent.
 
+> **A borrowed container is an obligation on the borrowing worktree** — the same
+> resource-accountability model as CodeSpaces (`resource-obligation-settlement`).
+> A `container`-kind claim on the borrowing worktree's ledger keeps
+> `agent-worktrees finalize` gated (`block` by default) until the container's
+> work is safe (merged / moved off-box) and the claim is settled. Inspect with
+> `agent-worktrees claims show`; `finalize --abandon` re-homes it to the durable
+> orphanage for later cleanup. agent-worktrees' reclaim sweep reads a leaseable
+> resource's disposition **mirror** off its shared lease
+> (`obligations.CONTEXT_KEY`) generically — so once agent-containers mirrors a
+> settled disposition onto the container lease at release (the codespace
+> `mirror_disposition` pattern; a documented follow-on), the same cross-machine
+> never-wedge reclaim applies to containers with no agent-worktrees change.
+
 ## Dispatch work
 
 ```bash
