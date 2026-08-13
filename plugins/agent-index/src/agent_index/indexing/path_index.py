@@ -215,6 +215,43 @@ class PathIndex:
         finally:
             conn.close()
 
+    def get_entry(self, source: str, file_path: str) -> tuple[str | None, float] | None:
+        """Return ``(content_hash, indexed_at)`` for a file, or None if absent.
+
+        Used for intra-source resume: a file already stored at the same content
+        hash within the current task's window can be skipped on a resumed run.
+        """
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """SELECT content_hash, indexed_at FROM indexed_files
+                   WHERE source = ? AND file_path = ?""",
+                (source, file_path),
+            ).fetchone()
+            if row is None:
+                return None
+            return (row["content_hash"], row["indexed_at"])
+        finally:
+            conn.close()
+
+    def get_all_entries(self) -> dict[tuple[str, str], tuple[str | None, float]]:
+        """Return ``{(source, file_path): (content_hash, indexed_at)}`` for all files.
+
+        A single-query bulk read for resume: the embed loop looks each file up in
+        this in-memory map instead of opening a SQLite connection per file.
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT source, file_path, content_hash, indexed_at FROM indexed_files"
+            ).fetchall()
+            return {
+                (r["source"], r["file_path"]): (r["content_hash"], r["indexed_at"])
+                for r in rows
+            }
+        finally:
+            conn.close()
+
     def get_content_hashes(self, source: str) -> dict[str, str | None]:
         """Return {file_path: content_hash} for all files in a source."""
         conn = self._connect()

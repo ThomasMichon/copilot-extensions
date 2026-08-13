@@ -16,6 +16,7 @@ vector tables alongside the shared content store.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import time
@@ -58,6 +59,7 @@ def run_reindex(
     full: bool = False,
     source: str | None = None,
     progress_cb: ProgressCallback | None = None,
+    resume_since: float | None = None,
 ) -> dict[str, object]:
     """Run the four-phase indexing pipeline.
 
@@ -65,6 +67,12 @@ def run_reindex(
         full: If True, do a full crawl (discover everything, not just changes).
         source: If set, only reindex this specific source.
         progress_cb: Optional callback for progress reporting and cancellation.
+        resume_since: When set (a resumed task's ``created_at`` epoch), files
+            already stored at the same content hash **within this task's window**
+            (``path_index.indexed_at >= resume_since``) are skipped — so an
+            interrupted reindex resumes mid-source instead of restarting. ``None``
+            (a fresh run) re-embeds everything the crawl selected, preserving
+            full-rebuild semantics.
 
     Returns:
         Dict with keys ``chunks_total``, ``chunks_deleted``, ``files_crawled``,
@@ -153,6 +161,7 @@ def run_reindex(
                     multi_clients=multi_clients,
                     full=full,
                     progress_cb=progress_cb,
+                    resume_since=resume_since,
                 )
                 total_chunks += stored
                 total_deleted += deleted
@@ -291,6 +300,7 @@ def _index_source(
     multi_clients: dict[str, EngineClient],
     full: bool,
     progress_cb: ProgressCallback | None = None,
+    resume_since: float | None = None,
 ) -> tuple[int, int, int]:
     """Index a single data source using the four-phase pipeline.
 
@@ -344,7 +354,7 @@ def _index_source(
         if progress_cb:
             progress_cb.phase("chunking", msg=f"Chunking {len(manifest.upserts)} files")
 
-        total_stored = _embed_and_store_files(
+        total_stored, upserted_files = _embed_and_store_files(
             manifest.upserts,
             multi_store=multi_store,
             multi_clients=multi_clients,
@@ -352,11 +362,11 @@ def _index_source(
             path_index=path_index,
             stream_batch_size=config.stream_batch_size,
             progress_cb=progress_cb,
+            resume_since=resume_since,
         )
-
-        # Track which files were upserted for stale chunk cleanup
-        for entry in manifest.upserts:
-            upserted_files.add((entry.source, entry.path))
+        # NOTE: ``upserted_files`` holds only files this run actually (re)stored;
+        # files SKIPPED on resume are excluded, so Phase 3b stale-cleanup (which
+        # deletes chunks older than run_start) won't drop their valid chunks.
 
     # ── Phase 3: Reconcile ──────────────────────────────────
     if progress_cb:
@@ -495,22 +505,68 @@ def _embed_and_store_files(
     path_index: PathIndex,
     stream_batch_size: int = STREAM_BATCH_SIZE,
     progress_cb: ProgressCallback | None = None,
-) -> int:
-    """Phase 2: Chunk files, embed via GPU, upsert to stores.
+    resume_since: float | None = None,
+) -> tuple[int, set[tuple[str, str]]]:
+    """Phase 2: Chunk files, embed via the engine, upsert to stores.
 
-    Returns total chunks stored.
+    Checkpoints ``path_index`` after EACH batch flush (with content hashes) so an
+    interruption leaves a crash-consistent record of what is stored. When
+    ``resume_since`` is set, files already stored at the same content hash within
+    the task window (``indexed_at >= resume_since``) are skipped, so a resumed run
+    continues mid-source instead of restarting.
+
+    Returns ``(total_chunks_stored, stored_files)`` where ``stored_files`` is the
+    set of ``(source, path)`` this run actually (re)stored — excluding skipped
+    files, so Phase 3 stale-cleanup does not delete their still-valid chunks.
     """
     from agent_index.chunking import get_chunker
 
     batch: list[Chunk] = []
     total_chunks = 0
     total_stored = 0
-    # Track per-file chunk counts for path index
-    file_chunk_counts: dict[tuple[str, str], int] = {}  # (source, path) → count
+    stored_files: set[tuple[str, str]] = set()
+    skipped = 0
+    # Bulk-load the stored-file map ONCE for resume lookups (avoids opening a
+    # SQLite connection per file on large sources).
+    resume_index: dict[tuple[str, str], tuple[str | None, float]] = (
+        path_index.get_all_entries() if resume_since is not None else {}
+    )
+    # Files whose chunks are in the current (not-yet-flushed) batch, with their
+    # content hash + chunk count — checkpointed to path_index on each flush. A
+    # file's chunks never straddle a flush (a whole file is added before the
+    # size check), so every pending file is fully persisted once the batch stores.
+    pending: list[tuple[str, str, str, int]] = []
+
+    def _flush() -> None:
+        nonlocal batch, total_stored, pending
+        if not batch:
+            return
+        if progress_cb:
+            progress_cb.check_cancelled()
+        total_stored += _embed_and_store_batch(
+            batch, multi_store, multi_clients,
+            model_profiles,
+            stream_batch_size=stream_batch_size,
+        )
+        if pending:
+            path_index.mark_indexed_batch(pending)  # crash-consistent checkpoint
+        pending = []
+        batch = []
+        if progress_cb:
+            progress_cb.batch_complete(total_stored, total_chunks)
 
     for entry in files:
         if progress_cb:
             progress_cb.check_cancelled()
+
+        chash = _content_hash(entry.content)
+
+        # Resume-skip: already stored at this hash within THIS task's window.
+        if resume_since is not None:
+            prior = resume_index.get((entry.source, entry.path))
+            if prior is not None and prior[0] == chash and prior[1] >= resume_since:
+                skipped += 1
+                continue
 
         chunker, _lang = get_chunker(entry.path)
         try:
@@ -524,41 +580,26 @@ def _embed_and_store_files(
 
         batch.extend(chunks)
         total_chunks += len(chunks)
-        file_chunk_counts[(entry.source, entry.path)] = len(chunks)
+        pending.append((entry.source, entry.path, chash, len(chunks)))
+        stored_files.add((entry.source, entry.path))
 
         if len(batch) >= stream_batch_size:
-            if progress_cb:
-                progress_cb.check_cancelled()
-            total_stored += _embed_and_store_batch(
-                batch, multi_store, multi_clients,
-                model_profiles,
-                stream_batch_size=stream_batch_size,
-            )
-            if progress_cb:
-                progress_cb.batch_complete(total_stored, total_chunks)
-            batch = []
+            _flush()
 
     # Final partial batch
-    if batch:
-        if progress_cb:
-            progress_cb.check_cancelled()
-        total_stored += _embed_and_store_batch(
-            batch, multi_store, multi_clients,
-            model_profiles,
-            stream_batch_size=stream_batch_size,
-        )
-        if progress_cb:
-            progress_cb.batch_complete(total_stored, total_chunks)
+    _flush()
 
-    # Update path index with what we just stored
-    path_entries: list[tuple[str, str, str | None, int]] = [
-        (src, path, None, count)
-        for (src, path), count in file_chunk_counts.items()
-    ]
-    path_index.mark_indexed_batch(path_entries)
+    msg = f"  Embedded: {total_chunks} chunks generated, {total_stored} stored"
+    if skipped:
+        msg += f" ({skipped} files skipped -- already stored this run)"
+    print(msg)
+    return (total_stored, stored_files)
 
-    print(f"  Embedded: {total_chunks} chunks generated, {total_stored} stored")
-    return total_stored
+
+def _content_hash(content: object) -> str:
+    """Stable content hash for resume comparison (sha256 hex, first 16 chars)."""
+    data = content if isinstance(content, bytes) else str(content).encode("utf-8", "replace")
+    return hashlib.sha256(data).hexdigest()[:16]
 
 
 def _embed_and_store_batch(

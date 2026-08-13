@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     worker_pid      INTEGER,
     worker_host     TEXT,
     worker_version  TEXT,
+    first_started_at REAL,
     created_at      REAL NOT NULL,
     started_at      REAL,
     finished_at     REAL,
@@ -80,6 +81,7 @@ class TaskRecord:
     worker_pid: int | None
     worker_host: str | None
     worker_version: str | None
+    first_started_at: float | None
     created_at: float
     started_at: float | None
     finished_at: float | None
@@ -132,6 +134,9 @@ def _row_to_record(row: sqlite3.Row) -> TaskRecord:
         worker_pid=row["worker_pid"] if "worker_pid" in row.keys() else None,
         worker_host=row["worker_host"] if "worker_host" in row.keys() else None,
         worker_version=row["worker_version"] if "worker_version" in row.keys() else None,
+        first_started_at=(
+            row["first_started_at"] if "first_started_at" in row.keys() else None
+        ),
         created_at=row["created_at"],
         started_at=row["started_at"],
         finished_at=row["finished_at"],
@@ -188,6 +193,7 @@ class TaskStore:
                 ("worker_pid", "INTEGER"),
                 ("worker_host", "TEXT"),
                 ("worker_version", "TEXT"),
+                ("first_started_at", "REAL"),
             ):
                 if col not in cols:
                     conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {decl}")
@@ -264,9 +270,11 @@ class TaskStore:
             task_id = row["id"]
             affected = conn.execute(
                 """UPDATE tasks
-                   SET status = 'processing', started_at = ?, updated_at = ?
+                   SET status = 'processing', started_at = ?,
+                       first_started_at = COALESCE(first_started_at, ?),
+                       updated_at = ?
                    WHERE id = ? AND status = 'queued'""",
-                (now, now, task_id),
+                (now, now, now, task_id),
             ).rowcount
             conn.commit()
 
@@ -555,7 +563,7 @@ class TaskStore:
             conn.close()
 
     def reap_orphaned(
-        self, host: str, is_alive: "Callable[[int], bool]"
+        self, host: str, is_alive: Callable[[int], bool]
     ) -> int:
         """Mark 'processing' tasks whose worker is dead as 'interrupted'.
 
