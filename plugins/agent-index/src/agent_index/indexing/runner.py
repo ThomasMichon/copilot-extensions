@@ -10,13 +10,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any
 
-from agent_index.indexing.task_store import TaskStatus
+from agent_index.indexing.task_store import TERMINAL, TaskStatus
 
 if TYPE_CHECKING:
     from agent_index.indexing.task_store import TaskRecord, TaskStore
@@ -27,6 +30,74 @@ log = logging.getLogger(__name__)
 # Throttle interval for persisting progress to SQLite (seconds).
 # SSE events are always emitted immediately.
 _PROGRESS_PERSIST_INTERVAL = 5.0
+
+_TERMINAL_VALUES = {s.value for s in TERMINAL}
+
+
+def _machine_id() -> str:
+    """This host's identity (matches the worker's recorded ``worker_host``)."""
+    try:
+        from agent_index import config as _config
+
+        return _config.machine_id()
+    except Exception:  # fall back to node name
+        import platform
+
+        return platform.node()
+
+
+def _pid_alive(pid: int | None) -> bool:
+    """Best-effort liveness check for a local PID (cross-platform)."""
+    if not pid:
+        return False
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            STILL_ACTIVE = 259
+            k32 = ctypes.windll.kernel32
+            handle = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+            if not handle:
+                return False
+            try:
+                code = ctypes.c_ulong()
+                ok = k32.GetExitCodeProcess(handle, ctypes.byref(code))
+                return bool(ok) and code.value == STILL_ACTIVE
+            finally:
+                k32.CloseHandle(handle)
+        except Exception:
+            return False
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # The PID exists but is owned by another user — treat as alive.
+        return True
+    except OSError:
+        return False
+
+
+def _terminate_pid(pid: int) -> None:
+    """Request a local worker PID to stop (SIGTERM / TerminateProcess)."""
+    try:
+        if sys.platform == "win32":
+            import ctypes
+
+            PROCESS_TERMINATE = 0x0001
+            k32 = ctypes.windll.kernel32
+            handle = k32.OpenProcess(PROCESS_TERMINATE, False, int(pid))
+            if handle:
+                try:
+                    k32.TerminateProcess(handle, 1)
+                finally:
+                    k32.CloseHandle(handle)
+        else:
+            os.kill(int(pid), 15)
+    except Exception:  # best effort
+        log.debug("terminate pid %s failed", pid, exc_info=True)
 
 
 class IndexingCancelled(Exception):
@@ -159,6 +230,14 @@ class TaskRunner:
         self._cancel_lock = threading.Lock()
         # Per-source write lock (set by server at startup)
         self._source_lock_acquire: Callable[..., Any] | None = None
+        # Worker delegation (model A): each active indexing task runs in a
+        # detached versioned subprocess. We track the live workers, their monitor
+        # coroutines, held source locks, and cancellation requests.
+        self._active_workers: set[str] = set()
+        self._worker_procs: dict[str, subprocess.Popen[bytes]] = {}
+        self._monitors: dict[str, asyncio.Task[None]] = {}
+        self._worker_locks: dict[str, Any] = {}
+        self._cancel_requested: set[str] = set()
         # Observable state
         self.running = False
         self.active_task_id: str | None = None
@@ -184,10 +263,15 @@ class TaskRunner:
     # ── Lifecycle ────────────────────────────────────────────
 
     async def start(self) -> None:
-        """Initialize DB, recover from crash, start the worker loop."""
-        interrupted = await asyncio.to_thread(self.store.mark_interrupted)
-        if interrupted:
+        """Initialize DB, reap orphaned workers, adopt live ones, start the loop."""
+        host = _machine_id()
+        reaped = await asyncio.to_thread(self.store.reap_orphaned, host, _pid_alive)
+        if reaped:
             self.event_bus.publish("queue_update", {"reason": "recovery"})
+
+        # Re-adopt any task whose detached worker is still alive: it survived a
+        # service cutover, running from its pinned version folder (near-ZDD).
+        await self._adopt_running_workers(host)
 
         pending = await asyncio.to_thread(self.store.get_pending_count)
         if pending > 0:
@@ -198,24 +282,38 @@ class TaskRunner:
         log.info("Task runner started")
 
     async def stop(self) -> None:
-        """Gracefully stop the worker loop."""
+        """Stop the loop + monitors. Detached workers are LEFT running — they
+        survive a cutover and are re-adopted by the next service."""
         self._shutdown = True
         self._wake.set()
         if self._task:
             self._task.cancel()
             with suppress(asyncio.CancelledError):
                 await self._task
+        for mon in list(self._monitors.values()):
+            mon.cancel()
+        for mon in list(self._monitors.values()):
+            with suppress(asyncio.CancelledError, Exception):
+                await mon
+        self._monitors.clear()
+        for lock in list(self._worker_locks.values()):
+            if lock is not None:
+                with suppress(Exception):
+                    lock.release()
+        self._worker_locks.clear()
         log.info("Task runner stopped")
 
     async def drain(self, *, timeout: float = 300.0, poll: float = 0.5) -> bool:
-        """Pause dequeueing and wait for the current task to finish."""
+        """Pause dequeueing for a cutover.
+
+        In the worker-delegation model indexing runs in a DETACHED versioned
+        subprocess that survives this service's exit (it runs from its pinned
+        version folder) and is re-adopted by the next service — so a running
+        index job never blocks a cutover. We only stop dequeueing new work;
+        in-flight searches are drained separately by the DrainGate.
+        """
         self._paused = True
         self._wake.set()
-        deadline = time.monotonic() + max(0.0, timeout)
-        while self.running or self.active_task_id is not None:
-            if time.monotonic() >= deadline:
-                return False
-            await asyncio.sleep(max(0.05, poll))
         return True
 
     async def resume(self) -> None:
@@ -231,18 +329,23 @@ class TaskRunner:
 
     def cancel_task(self, task_id: str) -> bool:
         """Cancel a queued or running task. Returns True if cancelled."""
-        # Try store-level cancel first (queued tasks)
+        # Queued tasks: cancel in the store directly.
         if self.store.cancel(task_id):
             self.event_bus.publish("task_cancelled", {"task_id": task_id})
             return True
-
-        # Signal running task
-        with self._cancel_lock:
-            evt = self._cancel_events.get(task_id)
-            if evt:
-                evt.set()
-                return True
-
+        # Running task: terminate its detached worker subprocess. The monitor
+        # reconciles the terminal status (cancelled) when the worker exits.
+        pid: int | None = None
+        proc = self._worker_procs.get(task_id)
+        if proc is not None:
+            pid = proc.pid
+        else:
+            rec = self.store.get_task(task_id)
+            pid = rec.worker_pid if rec else None
+        if pid:
+            self._cancel_requested.add(task_id)
+            _terminate_pid(int(pid))
+            return True
         return False
 
     # ── Status ───────────────────────────────────────────────
@@ -266,12 +369,14 @@ class TaskRunner:
         await asyncio.sleep(2)
 
         while not self._shutdown:
-            if self._paused:
+            # Pause (drain) or a worker already running => wait. At most one
+            # indexing worker runs at a time (serialized via _active_workers).
+            if self._paused or self._active_workers:
                 self._wake.clear()
                 try:
-                    await asyncio.wait_for(self._wake.wait(), timeout=10.0)
+                    await asyncio.wait_for(self._wake.wait(), timeout=5.0)
                 except TimeoutError:
-                    continue
+                    pass
                 continue
 
             task = await asyncio.to_thread(self.store.dequeue_next)
@@ -280,117 +385,162 @@ class TaskRunner:
                 try:
                     await asyncio.wait_for(self._wake.wait(), timeout=10.0)
                 except TimeoutError:
-                    continue
+                    pass
                 continue
 
-            self.running = True
-            self.active_task_id = task.id
-            self.event_bus.publish("task_started", {
-                "task_id": task.id,
-                "source": task.source,
-                "full": task.full,
-                "trigger_source": task.trigger_source,
-            })
-
-            try:
-                await self._process_task(task)
-            except Exception:
-                log.exception("Unhandled error processing task %s", task.id)
-
-            self.running = False
-            self.active_task_id = None
+            await self._launch_worker(task)
 
         log.info("Worker loop exited")
 
-    async def _process_task(self, task: TaskRecord) -> None:
-        """Run a single indexing task in an executor thread.
+    # ── Worker delegation (model A) ──────────────────────────
 
-        Acquires a per-source write lock (if configured) to prevent
-        concurrent writes from ingest endpoints.
+    def _spawn_worker(self, task_id: str) -> subprocess.Popen[bytes]:
+        """Spawn a detached versioned worker subprocess for ``task_id``.
+
+        Launched with THIS service's ``sys.executable`` — the active versioned
+        slot's python — so the worker runs from its own immutable version folder
+        and survives a later cutover of the service (near-ZDD).
         """
-        loop = asyncio.get_running_loop()
+        log_path = self.store.data_dir / "worker.log"
+        logf = open(log_path, "ab", buffering=0)  # child inherits this handle
+        try:
+            cmd = [sys.executable, "-m", "agent_index", "index-worker", "--task", task_id]
+            kwargs: dict[str, Any] = {
+                "stdout": logf,
+                "stderr": logf,
+                "stdin": subprocess.DEVNULL,
+            }
+            if sys.platform == "win32":
+                kwargs["creationflags"] = (
+                    subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
+                    | subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]
+                )
+            else:
+                kwargs["start_new_session"] = True
+            return subprocess.Popen(cmd, **kwargs)  # noqa: S603
+        finally:
+            with suppress(Exception):
+                logf.close()  # the child holds its own inherited handle
 
-        cancel_event = threading.Event()
-        with self._cancel_lock:
-            self._cancel_events[task.id] = cancel_event
-
-        callback = ProgressCallback(
-            task_id=task.id,
-            store=self.store,
-            event_bus=self.event_bus,
-            loop=loop,
-            cancelled=cancel_event,
-        )
-
-        def _run() -> dict[str, int] | None:
-            if self._index_fn is None:
-                raise RuntimeError("No index function registered — call set_index_fn()")
-
-            return self._index_fn(
-                full=task.full,
-                source=task.source if task.source != "all" else None,
-                progress_cb=callback,
-            )
-
-        # Acquire per-source lock before entering executor
+    async def _launch_worker(self, task: TaskRecord) -> None:
+        """Spawn + register a worker for a freshly dequeued (processing) task."""
         source_lock = None
         if self._source_lock_acquire is not None:
             source_key = task.source if task.source != "all" else "__all__"
             source_lock = await self._source_lock_acquire(source_key)
-
+        self._worker_locks[task.id] = source_lock
         try:
-            result_stats = await loop.run_in_executor(None, _run)
-
-            # Persist crawl stats
-            if result_stats and isinstance(result_stats, dict):
-                self.store.set_result_stats(task.id, result_stats)
-
-            # Force final progress persist
-            self.store.update_progress(task.id, "complete", 100.0, "Indexing complete")
-            await asyncio.to_thread(
-                self.store.update_status, task.id, TaskStatus.COMPLETE.value,
-            )
-            self.tasks_completed += 1
-            log.info("Task %s completed", task.id)
-            self.event_bus.publish("task_complete", {
-                "task_id": task.id,
-                "success": True,
-                "result_stats": result_stats,
-            })
-
-            # Run post-indexing hook (e.g. rebuild FTS index)
-            if self._post_index_fn is not None:
-                try:
-                    await asyncio.to_thread(self._post_index_fn)
-                except Exception:
-                    log.warning("Post-index hook failed", exc_info=True)
-
-        except IndexingCancelled:
-            await asyncio.to_thread(
-                self.store.update_status, task.id, TaskStatus.CANCELLED.value,
-            )
-            log.info("Task %s cancelled", task.id)
-            self.event_bus.publish("task_complete", {
-                "task_id": task.id,
-                "success": False,
-                "reason": "cancelled",
-            })
-
-        except Exception as e:
-            error_msg = f"{type(e).__name__}: {e}"
-            await asyncio.to_thread(
-                self.store.update_status, task.id, TaskStatus.FAILED.value, error_msg,
-            )
-            self.tasks_failed += 1
-            log.error("Task %s failed: %s", task.id, error_msg, exc_info=True)
-            self.event_bus.publish("task_complete", {
-                "task_id": task.id,
-                "success": False,
-                "error": error_msg,
-            })
-
-        finally:
+            proc = await asyncio.to_thread(self._spawn_worker, task.id)
+        except Exception:
+            log.exception("Failed to spawn worker for task %s", task.id)
             if source_lock is not None:
-                source_lock.release()
-            with self._cancel_lock:
-                self._cancel_events.pop(task.id, None)
+                with suppress(Exception):
+                    source_lock.release()
+            self._worker_locks.pop(task.id, None)
+            await asyncio.to_thread(
+                self.store.update_status, task.id, TaskStatus.FAILED.value,
+                "worker spawn failed",
+            )
+            return
+
+        from agent_index import __version__
+
+        await asyncio.to_thread(
+            self.store.set_worker, task.id, proc.pid, _machine_id(), __version__,
+        )
+        self._worker_procs[task.id] = proc
+        self._active_workers.add(task.id)
+        self.running = True
+        self.active_task_id = task.id
+        self.event_bus.publish("task_started", {
+            "task_id": task.id,
+            "source": task.source,
+            "full": task.full,
+            "trigger_source": task.trigger_source,
+        })
+        self._monitors[task.id] = asyncio.create_task(self._monitor_worker(task, proc))
+
+    async def _adopt_running_workers(self, host: str) -> None:
+        """Adopt tasks whose detached worker survived a cutover (monitor only)."""
+        try:
+            running = await asyncio.to_thread(self.store.get_running_with_worker, host)
+        except Exception:
+            log.debug("adopt scan failed", exc_info=True)
+            return
+        for task in running:
+            if task.id in self._active_workers or not _pid_alive(task.worker_pid):
+                continue
+            log.info(
+                "Adopting in-flight worker for task %s (pid %s)", task.id, task.worker_pid
+            )
+            self._active_workers.add(task.id)
+            self.running = True
+            self.active_task_id = task.id
+            self._monitors[task.id] = asyncio.create_task(
+                self._monitor_worker(task, None)
+            )
+
+    async def _monitor_worker(
+        self, task: TaskRecord, proc: subprocess.Popen[bytes] | None
+    ) -> None:
+        """Poll a worker to completion, then reconcile status + counters.
+
+        The WORKER owns the terminal status; the monitor only writes one if the
+        worker died without recording it (crash or hard-kill cancellation).
+        """
+        try:
+            while True:
+                rec = await asyncio.to_thread(self.store.get_task, task.id)
+                if rec is not None and rec.status in _TERMINAL_VALUES:
+                    break
+                if proc is not None:
+                    alive = proc.poll() is None
+                else:
+                    alive = _pid_alive(rec.worker_pid if rec else task.worker_pid)
+                if not alive:
+                    # Worker gone without a terminal status: reconcile it.
+                    if task.id in self._cancel_requested:
+                        final, err = TaskStatus.CANCELLED.value, None
+                    else:
+                        final, err = (
+                            TaskStatus.INTERRUPTED.value,
+                            "Worker exited without completing",
+                        )
+                    await asyncio.to_thread(self.store.update_status, task.id, final, err)
+                    break
+                await asyncio.sleep(1.0)
+
+            rec = await asyncio.to_thread(self.store.get_task, task.id)
+            status = rec.status if rec is not None else TaskStatus.FAILED.value
+            if status == TaskStatus.COMPLETE.value:
+                self.tasks_completed += 1
+                if self._post_index_fn is not None:
+                    try:
+                        await asyncio.to_thread(self._post_index_fn)
+                    except Exception:
+                        log.warning("Post-index hook failed", exc_info=True)
+            elif status in (TaskStatus.FAILED.value, TaskStatus.INTERRUPTED.value):
+                self.tasks_failed += 1
+            log.info("Task %s finished: %s", task.id, status)
+            self.event_bus.publish("task_complete", {
+                "task_id": task.id,
+                "success": status == TaskStatus.COMPLETE.value,
+                "status": status,
+                "result_stats": rec.result_stats if rec else None,
+            })
+        except asyncio.CancelledError:
+            # Service is stopping (e.g. cutover): LEAVE the detached worker
+            # running — the next service adopts it. Do not mark the task.
+            raise
+        finally:
+            lock = self._worker_locks.pop(task.id, None)
+            if lock is not None:
+                with suppress(Exception):
+                    lock.release()
+            self._active_workers.discard(task.id)
+            self._worker_procs.pop(task.id, None)
+            self._cancel_requested.discard(task.id)
+            self._monitors.pop(task.id, None)
+            self.running = bool(self._active_workers)
+            self.active_task_id = next(iter(self._active_workers), None)
+            self._wake.set()
