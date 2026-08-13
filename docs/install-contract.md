@@ -242,6 +242,25 @@ write deploy-manifest.json  (schema_version 3, source block, atomic temp+move)
    - The **only** place elevation may happen is a dedicated task-only action
      (agent-index: `install.ps1 register-tasks -AllowTaskElevation`) that
      self-elevates **only that step**, never install/update.
+9. **The default service lifecycle is user-mode; scheduled tasks are an opt-in
+   advanced tier and are never in the start/stop path.** Start/stop/keep-alive of
+   the daemon must not depend on any component that can require elevation.
+   - **Default (no elevation, no task):** the daemon runs as a plain user process,
+     started and kept alive by a user-mode *ensure* — health-gate the live routing
+     endpoint; if unhealthy, start it via the user-mode CLI (agent-index:
+     `agent-index deploy` on Windows; `systemctl --user` / nohup on POSIX). The
+     installer's `install` / `update` / `start`, **and a `sessionStart` `ensure`
+     hook**, all funnel through this same idempotent ensure. A Copilot session
+     therefore guarantees the daemon, so it survives reboots **without** an
+     AtLogon scheduled task.
+   - **Windows:** the default path must NOT call `Install-Service` /
+     `Register-ScheduledTask` / `Start-ScheduledTask`. Those live only behind the
+     opt-in `register-tasks` action (rule 8). POSIX `systemd --user` units are
+     already user-mode and remain the POSIX default.
+   - **Never** gate *starting* the service on a step that may require elevation
+     (e.g. don't `if (Register-Task) { Start }` — a locked-down box that can't
+     create the task would then never start the daemon). Registration and
+     start are independent; start is always user-mode.
 
 ## Update-flow robustness — self-stage, watchdog, completion markers (#935)
 
