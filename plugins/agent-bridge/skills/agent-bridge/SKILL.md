@@ -171,6 +171,27 @@ agent-bridge sessions
 agent-bridge sessions --json
 ```
 
+### Reading liveness -- `stalled` is usually deep thinking, NOT a wedge
+
+`status`/`sessions` may show a `Liveness: stalled` (or a `[stalled]`-ish
+"no output for a while") signal on a RUNNING session. **`stalled` means "no ACP
+frame for `_STALL_AFTER_S` (5 min)", not "dead".** Modern models think silently
+(no frame, no tool call) for **3-4 minutes** on a hard step -- live traces show
+single reasoning turns of 191-223s. So a `stalled` session is *most often a
+healthy deep-reasoning turn*, not a wedge.
+
+- **Do NOT reflexively `end`+`create` (or `send` a fresh prompt) on `stalled`.**
+  That is the "host got impatient and recreated a working session" anti-pattern.
+- **First, give it time and re-check** -- a deep think resolves on its own; the
+  daemon only *acts* on a stall after the far larger `live_stall_interrupt_after_s`
+  (default 900s / 15 min), and even then it gracefully interrupts the turn
+  (keeping the session), never respawns. A **reattached** still-thinking turn is
+  likewise left alone until 900s (dotfiles#1276), so the bridge will not land it
+  IDLE under you.
+- Only treat it as a genuine wedge if it stays silent well past 900s, or the
+  transport is actually gone (`disconnected` / `stopped` from connection loss --
+  and even then, **`send` to reattach**, don't recreate; see below).
+
 ### Context Window Monitoring
 
 The `CONTEXT` column in `agent-bridge sessions` shows token usage as a

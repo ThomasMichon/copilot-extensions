@@ -986,6 +986,29 @@ class TestReconcileWedged:
         assert session.event_log.get_events()[-1].data.get("resynced") is True
 
     @pytest.mark.asyncio
+    async def test_leaves_stalled_no_live_turn_within_threshold(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        """A client-UP `stalled` session with no live prompt task but whose
+        silence is still WITHIN the live-stall threshold is left alone -- it may
+        be a reattached, still-thinking turn (adopted after a restart), and
+        resyncing it would land a live think IDLE (dotfiles#1276). It heals only
+        once silence passes the conservative threshold."""
+        session = await session_manager.start_session(spawn_target)
+        session.status = SessionStatus.RUNNING
+        session._prompt_task = None
+        # Stalled (>_STALL_AFTER_S) but well within the 900s interrupt threshold.
+        session.last_output_at = time.time() - (_STALL_AFTER_S + 120)
+        assert session.liveness_state() == "stalled"
+
+        with patch("agent_bridge.session_manager.AcpClient",
+                   side_effect=self._replay_factory([("agent_message", {"text": "x"})])):
+            healed = await session_manager.reconcile_wedged_running()
+
+        assert healed == 0
+        assert session.status == SessionStatus.RUNNING
+
+    @pytest.mark.asyncio
     async def test_leaves_actively_progressing_turn(
         self, session_manager, spawn_target, _patch_spawn, _patch_acp
     ) -> None:

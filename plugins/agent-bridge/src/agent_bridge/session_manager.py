@@ -495,8 +495,13 @@ def _default_cwd(target: SpawnTarget) -> str:
 # Liveness (#145): a RUNNING session whose ACP event stream has produced no
 # frame for this long -- while its transport is still alive -- is treated as a
 # silent mid-turn *stall* (distinct from a healthy long reasoning step). Chosen
-# conservatively so a normal multi-second "thinking" step never trips it.
-_STALL_AFTER_S = 180.0
+# so a normal deep-reasoning step never trips it: modern models routinely think
+# silently (no ACP frame, no tool call) for 3-4 minutes on a hard step -- live
+# dispatch traces show single reasoning turns of 191-223s (12k+ reasoning
+# tokens) -- so the earlier 180s cutoff cried "stalled" on healthy thinking and
+# made the operator recreate a working session (dotfiles#1276). 300s clears the
+# observed deep-think band with margin while still catching a genuine wedge.
+_STALL_AFTER_S = 300.0
 
 
 class Session:
@@ -1801,7 +1806,13 @@ class SessionManager:
            live prompt task** driving it in this daemon -- would otherwise mirror
            "Responding..." forever. Resync it (rebuild from the agent's
            authoritative replay, respawning the child if the transport is gone)
-           so it lands IDLE with a terminal ``session_state_changed``.
+           so it lands IDLE with a terminal ``session_state_changed``. A
+           ``disconnected`` (transport gone) session is rebuilt at once; a
+           ``stalled`` (transport UP, silent) one is held until its silence
+           passes ``live_stall_interrupt_after_s`` first, because a **reattached,
+           still-thinking** turn (adopted by cursor after a restart, no
+           ``send_prompt`` here) is indistinguishable from a wedge by output
+           alone -- resyncing it early would land a live think IDLE (#1276).
 
         2. **Live-stalled turn** (#2427, Phase 5): a session that is liveness
            ``stalled`` (transport up, no ACP frame for ``_STALL_AFTER_S``) but
@@ -1859,6 +1870,30 @@ class SessionManager:
                             sid, exc_info=True,
                         )
                 continue
+            # No live turn in THIS daemon. Two shapes reach here:
+            #  * ``disconnected`` -- the transport is gone; nothing live to
+            #    preserve and the log may be truncated, so rebuild it now.
+            #  * ``stalled`` -- the client is UP but no local prompt task drives
+            #    it. That is ALSO exactly what a **reattached, still-thinking**
+            #    turn looks like: after a daemon restart / tunnel flap the
+            #    Session Host's child survives and is adopted by cursor with NO
+            #    ``send_prompt`` in this daemon, and a deep-reasoning step emits
+            #    no ACP frame for minutes. Output alone can't tell that from a
+            #    genuine wedge, and ``resync_session`` tears the client down,
+            #    respawns, and lands the session IDLE -- which would KILL a
+            #    resumed think mid-turn (dotfiles#1276). So hold off on a
+            #    client-up stall until its silence exceeds the same conservative
+            #    threshold the live-stall interrupt uses; a real wedge still
+            #    heals, just later. ``disconnected`` (no live transport) is not
+            #    gated -- it must rebuild to recover.
+            if liveness == "stalled":
+                threshold = self._live_stall_interrupt_after_s
+                silent_for = (
+                    now - session.last_output_at
+                    if session.last_output_at is not None else 0.0
+                )
+                if not (threshold > 0 and silent_for > threshold):
+                    continue
             try:
                 await self.resync_session(sid)
                 healed += 1
