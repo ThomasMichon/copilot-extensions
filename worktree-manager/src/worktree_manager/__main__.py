@@ -642,6 +642,66 @@ def local_bin_hint() -> str:
     return str(local_bin())
 
 
+def _strip_project(rest: list[str]) -> list[str]:
+    """Drop a threaded ``--project <name>`` (update is harness-wide, not scoped)."""
+    out: list[str] = []
+    i = 0
+    while i < len(rest):
+        if rest[i] == "--project":
+            i += 2
+            continue
+        out.append(rest[i])
+        i += 1
+    return out
+
+
+def _cmd_update(rest: list[str]) -> int:
+    """Update the harness — the Worktree Manager AS the plugin updater/aligner.
+
+    Where ``<project> update`` lands after the agent-worktrees seam hands off
+    (its DQ8 fallback runs the in-plugin update directly). Two steps:
+
+    1. **Self-update the Manager** to the latest out-of-band payload (git fetch →
+       versioned slot); best-effort + non-fatal, effective on the next run.
+    2. **Orchestrate the harness update** by driving the engine's own mechanics
+       via ``agent-worktrees update --no-manager`` (the seam bypass, so this does
+       not recurse) — refreshing every plugin payload + runtime, reconciling
+       binstubs, and syncing anchors. The Manager sequences + aligns; the plugin
+       still does the work. Forwarded flags (``--force`` …) are passed through.
+    """
+    from . import engine_client as ec
+    from .self_install import self_update
+
+    print()
+    print(f"  {_BANNER} — update")
+    print()
+
+    # 1. Self-update the Manager (best-effort; the new slot takes effect next run).
+    print("  Self-updating the Worktree Manager …")
+    su = self_update(dry_run=False)
+    if su.action == "updated":
+        print(f"    ✓ updated {su.previous or '(none)'} → {su.version} "
+              "(active on next run)")
+    elif su.action == "already-current":
+        print(f"    ✓ already current ({su.version})")
+    else:
+        print(f"    ○ self-update {su.action}: {su.reason} — continuing")
+
+    # 2. Orchestrate the harness/plugin update through the engine, bypassing the
+    #    seam (so we do not recurse back into the Manager).
+    forwarded = _strip_project(rest)
+    print()
+    print("  Updating harness plugins + runtimes via agent-worktrees …")
+    print()
+    try:
+        return ec.run_engine_passthrough(None, ["update", "--no-manager", *forwarded])
+    except ec.EngineError as e:
+        print(f"  ✗ {e}")
+        if getattr(e, "install_hint", False):
+            print("    Run `worktree-manager setup --apply` to install the engine first.")
+        return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] in ("--version", "-V"):
@@ -657,6 +717,7 @@ def main(argv: list[str] | None = None) -> int:
         print("  doctor                 report prerequisites + the agent-worktrees core")
         print("  setup [--apply]        plan (default) or run prereq provisioning + core install")
         print("  self-install [--apply] version the app: current-version marker + ~/.local/bin binstub")
+        print("  update                 self-update the Manager, then update the harness plugins/runtimes")
         print("  plugins                list the plugins the installer knows about")
         print("  plugins <name>         show one plugin's prereqs / config / steps")
         print("  plugins --prereqs      the de-duplicated union of all prerequisites")
@@ -690,6 +751,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_setup(args[1:])
     if args and args[0] == "self-install":
         return _cmd_self_install(args[1:])
+    if args and args[0] == "update":
+        return _cmd_update(args[1:])
     _print_intro()
     return 0
 
