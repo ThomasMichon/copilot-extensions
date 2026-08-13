@@ -1,13 +1,15 @@
 # Installer & Configurator — Vision
 
-- **Subject:** The **Installer & Configurator** — the standalone, out-of-plugin
-  app that bootstraps a bare machine into a working copilot-extensions harness,
-  remains the durable surface for configuring, validating, updating, and
-  repairing it, and serves as the **optional worktree- and agent- control-plane**
-  (picking, launching, and managing agent sessions) for those who want it.
+- **Subject:** The **Worktree Manager** (a.k.a. the **Installer & Configurator**) —
+  the standalone, out-of-plugin app that bootstraps a bare machine into a working
+  copilot-extensions harness, remains the durable surface for configuring,
+  validating, updating, and repairing it, and serves as the **optional worktree-
+  and agent- control-plane** (picking, launching, and managing agent sessions) for
+  those who want it. "Worktree Manager" is the product name for this one app across
+  all three of its roles.
 - **Scope:** leaf (concrete component; links its sibling capability visions)
 - **Status:** Active
-- **Last revised:** 2026-08-12
+- **Last revised:** 2026-08-13
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -161,7 +163,13 @@ management**, **terminal multiplexing**, and **visual decision aids** for
 choosing where to launch. This surface is **additive and optional** — the plugins
 provide the in-session tools agents use and are fully functional without it — and
 its role/guarantees are owned by the [picker](../picker/README.md) vision; this
-app is where it is delivered and kept current.
+app is where it is delivered and kept current. The interactive Picker opens by the
+**single most natural gesture — a bare, no-args invocation** of a project's front
+door; **every** other invocation routes programmatically to the plugins' own CLIs,
+whether or not it is interactive. And because a **terminal multiplexer is a heavy,
+invasive dependency**, muxing is a capability this app **provides** (the plugins
+detect it and use it when present, and run **non-muxed** when it is absent) rather
+than something the lightweight plugins carry.
 
 ### plugin-updating-and-alignment
 Keeps the installed plugin set **current and mutually consistent** — updates
@@ -307,3 +315,12 @@ the app to keep *itself* current.
   stand alone. The one-way, dependency-free boundary is preserved and extended to
   the launcher role. Mined from the operator's direction during the plugin
   self-provisioning rollout.
+- **2026-08-13** — Named the app the **Worktree Manager** (operator decision), and
+  sharpened two control-plane facts: the interactive Picker opens **only on a bare,
+  no-args invocation** (every other invocation routes programmatically to the
+  plugins' CLIs), and **terminal multiplexing is an optional capability this app
+  provides** — the lightweight plugins detect it and fall back to non-muxed when it
+  is absent, so the heavy/invasive mux dependency never lands in them. Mined from the
+  operator's Phase-6 design decisions (DQ6/DQ7/DQ9). The detailed installer flows,
+  the bare-invocation binstub seam, and the never-break migration live in the
+  dotfiles `installer-configurator` effort.

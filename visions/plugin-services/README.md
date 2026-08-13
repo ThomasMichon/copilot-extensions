@@ -5,7 +5,7 @@
   local services on a user's machine.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-08-12
+- **Last revised:** 2026-08-13
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -137,7 +137,13 @@ entirely absent**.
 ### graceful-composition
 When multiple services are present they discover and use one another's optional
 capabilities without a mandatory central broker and without user-authored wiring.
-Cooperation is opportunistic, not obligatory.
+Cooperation is opportunistic, not obligatory. The same rule governs a **heavy,
+invasive capability the optional control-plane provides** — for example **terminal
+multiplexing**: a plugin (e.g. the worktree tools, or agent-bridge when hosting
+sessions) **detects mux support and uses it when present, and runs non-muxed when
+it is absent**, rather than carrying the heavyweight multiplexer itself. The
+capability lives where it belongs (the Worktree Manager); the plugins consume it if
+it is there and degrade cleanly if it is not.
 
 ### version-skew-tolerant-contracts
 Because every plugin updates on its **own schedule**, the parties to a live
@@ -390,3 +396,12 @@ spec-level, not fixed here.
   control-plane. Mined from the operator's direction during, and the empirical
   results of, the plugin self-provisioning rollout (all binstub/service-installing
   agent-\* runtimes made self-provisioning + clean-room-validated).
+
+- **2026-08-13** — Extended **graceful-composition** to cover a **heavy, invasive
+  capability the optional control-plane (the Worktree Manager) provides** — namely
+  **terminal multiplexing**: a plugin (the worktree tools, or agent-bridge when
+  hosting sessions) **detects mux support and uses it when present, running
+  non-muxed when absent**, rather than carrying the multiplexer itself. Keeps the
+  heavyweight dependency out of the lightweight plugins while letting muxed sessions
+  light up when the Manager is installed. Mined from the operator's Phase-6 DQ9
+  decision (mux is Manager-owned; plugins detect-and-fall-back).
