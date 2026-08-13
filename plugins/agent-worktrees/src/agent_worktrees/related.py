@@ -954,6 +954,7 @@ class Resolution:
     delegate_via: str = ""           # agent-bridge | agent-codespaces | agent-containers | none
     steps: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    explore: list[str] = field(default_factory=list)  # how to READ the code (not just change it)
 
 
 def _venue_machines(venue: dict[str, Any]) -> list[str]:
@@ -971,6 +972,61 @@ def _venue_available_here(venue: dict[str, Any], current_machine: str) -> bool:
     machine must match one of them."""
     ms = _venue_machines(venue)
     return (not ms) or any(machine_matches(m, current_machine) for m in ms)
+
+
+# The generic "read the code where it lives" nudge.  When a repo's preferred
+# locus is a *non-local* venue (a CodeSpace, a container fleet, or another
+# machine), its source is not checked out on this box -- so exploring it by
+# reading files one-at-a-time through a remote/ADO API is slow, partial, and
+# easy to get wrong.  Every non-local resolution therefore carries an explicit
+# ``explore`` hint pointing the agent at the venue's full checkout for
+# search/read/understand work, *separately* from the change-oriented ``Plan``.
+_EXPLORE_LEAD = (
+    "To EXPLORE/READ the codebase (search, read many files, trace/understand "
+    "structure), do it IN the preferred locus against the full checkout -- not "
+    "by reading files piecemeal through a remote/ADO API. Bring the venue up "
+    "once, then grep/read/build there (or delegate a read-only task to it)."
+)
+
+
+def _explore_hint(kind: str, *, name: str, workspace: str, delegate: str,
+                  available_here: bool, venue_machines: list[str] | None = None,
+                  target_machine: str = "") -> list[str]:
+    """Build the exploration nudge for a non-local locus.
+
+    Returns an empty list for the ``local`` kind (the checkout is already on
+    this machine -- just grep/read it directly).
+    """
+    ws = workspace or "the venue checkout"
+    if kind == "codespace":
+        return [
+            _EXPLORE_LEAD,
+            f"CodeSpace checkout at {ws}: `agent-codespaces ssh {name}` and "
+            f"grep/read there, or delegate a read task via "
+            f"`agent-bridge send codespace:<name> \"<read-only task>\"`.",
+        ]
+    if kind == "container":
+        if available_here:
+            return [
+                _EXPLORE_LEAD,
+                f"Local container checkout at {ws}: `agent-containers up {name}` "
+                f"(reuse an already-provisioned/exited container if present), "
+                f"then read/grep inside it.",
+            ]
+        avail = ", ".join(venue_machines or []) or "a fleet host"
+        return [
+            _EXPLORE_LEAD,
+            f"No local container here -- delegate the exploration to a fleet "
+            f"host ({avail}) via `agent-bridge send <machine> \"<read task>\"`.",
+        ]
+    if kind == "machine":
+        return [
+            _EXPLORE_LEAD,
+            f"The checkout lives on '{target_machine}' -- explore it there via "
+            f"`agent-bridge send {target_machine} \"<read task>\"` rather than "
+            f"reading it remotely from here.",
+        ]
+    return []
 
 
 def build_resolution(
@@ -1073,6 +1129,10 @@ def build_resolution(
             res.notes.append(f"Venue sizing from config: {sizing}.")
         if ws:
             res.notes.append(f"Workspace checkout on the CodeSpace: {ws}.")
+        res.explore = _explore_hint(
+            "codespace", name=name, workspace=ws,
+            delegate=entry.delegate or "agent-codespaces", available_here=True,
+        )
         # Surface the container alternative when this machine hosts the fleet.
         if entry.locus.container and _venue_available_here(
             entry.locus.container, current_machine
@@ -1100,6 +1160,10 @@ def build_resolution(
             ]
             if ws:
                 res.notes.append(f"Workspace checkout in the container: {ws}.")
+            res.explore = _explore_hint(
+                "container", name=name, workspace=ws,
+                delegate=entry.delegate or "agent-containers", available_here=True,
+            )
         else:
             avail = ", ".join(ct_machines) if ct_machines else "(none configured)"
             via = entry.delegate or "agent-bridge"
@@ -1112,6 +1176,10 @@ def build_resolution(
                 f"Delegate via {via} to a fleet host: "
                 f"`agent-bridge send <machine> \"<task>\"`.",
             ]
+            res.explore = _explore_hint(
+                "container", name=name, workspace=ws, delegate=via,
+                available_here=False, venue_machines=ct_machines,
+            )
             # CodeSpaces, if configured, are the machine-agnostic fallback.
             if entry.locus.codespace:
                 cs_repo = entry.locus.codespace.get("repo", "<codespace-repo>")
@@ -1133,6 +1201,10 @@ def build_resolution(
                 f"'{current_machine}').",
                 f"Delegate via {via}: `agent-bridge send {target} \"<task>\"`.",
             ]
+            res.explore = _explore_hint(
+                "machine", name=name, workspace="", delegate=via,
+                available_here=False, target_machine=target,
+            )
         return res
 
     # kind == "local"
@@ -1146,6 +1218,12 @@ def build_resolution(
         res.steps = [
             f"Delegate via {via} to one of [{', '.join(machines)}]: "
             f"`agent-bridge send <machine> \"<task>\"`.",
+        ]
+        res.explore = [
+            _EXPLORE_LEAD,
+            f"The checkout lives on [{', '.join(machines)}], not here -- "
+            f"explore it there via `agent-bridge send <machine> "
+            f"\"<read task>\"` rather than reading it remotely from here.",
         ]
         return res
 
