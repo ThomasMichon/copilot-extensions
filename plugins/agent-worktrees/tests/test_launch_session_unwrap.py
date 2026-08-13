@@ -124,7 +124,8 @@ def test_launchers_render_status_bar_from_worktree_path():
     assert "Start-StatusUpdater $sessName $plan.work_dir" not in ps
     # bash: parse STATUS_PATH (fallback work_dir) and pass it as --path.
     assert "d.get('status_path') or d.get('work_dir','')" in sh
-    assert '--path "${STATUS_PATH:-${WORK_DIR:-$PWD}}"' in sh
+    assert 'spath="${STATUS_PATH:-${WORK_DIR:-$PWD}}"' in sh
+    assert '--path "$spath"' in sh
 
 
 def test_windows_launcher_passes_psmux_pane_verbatim():
@@ -139,7 +140,7 @@ def test_windows_launcher_passes_psmux_pane_verbatim():
     ps = _LAUNCH_PS1.read_text()
     # The collapse helper must be gone, and new-session must launch @cmd raw.
     assert "ConvertTo-PsmuxPaneCommand" not in ps
-    assert "new-session -d -s $sessName -c $plan.work_dir @envFlags @cmd" in ps
+    assert "new-session -d -s $sessName -c $plan.work_dir @envFlags @paneCmd" in ps
 
 
 _TERMINAL = Path(__file__).resolve().parents[1] / "terminal"

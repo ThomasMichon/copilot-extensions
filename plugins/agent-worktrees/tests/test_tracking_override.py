@@ -39,8 +39,9 @@ def _info(state, *, ahead=0, behind=0):
 class TestApplyTrackingOverride:
     def test_finalized_squash_merged_wip_reads_completed(self):
         # The #1447 case: finalized, but the branch still carries pre-squash
-        # commits so raw git classifies it ACTIVE/WIP with ahead>0.
-        info = _info(git_ops.WorktreeState.ACTIVE, ahead=3, behind=7)
+        # commits so raw git classifies it WIP with ahead>0. (Only a live
+        # session yields ACTIVE -- see test_finalized_active_session_not_masked.)
+        info = _info(git_ops.WorktreeState.WIP, ahead=3, behind=7)
         out = m._apply_tracking_override(_rec("finalized"), info)
         assert out.state == git_ops.WorktreeState.COMPLETED
 
@@ -52,9 +53,21 @@ class TestApplyTrackingOverride:
 
     def test_complete_and_completed_statuses_honored(self):
         for status in ("complete", "completed"):
-            info = _info(git_ops.WorktreeState.ACTIVE, ahead=1)
+            info = _info(git_ops.WorktreeState.WIP, ahead=1)
             out = m._apply_tracking_override(_rec(status), info)
             assert out.state == git_ops.WorktreeState.COMPLETED, status
+
+    def test_finalized_active_session_not_masked(self):
+        # The bb68/ca29 status-tracking bug: a finalized worktree the operator
+        # has re-opened (a live mux/lock session -> classify returns ACTIVE via
+        # active_paths) must NOT be masked to COMPLETED. Liveness wins over the
+        # durable finalize status, so the row stays actionable (Open/Stop or
+        # Reclaim) instead of being stranded FINAL.
+        for status in ("finalized", "complete", "completed"):
+            info = _info(git_ops.WorktreeState.ACTIVE, ahead=2, behind=1)
+            out = m._apply_tracking_override(_rec(status), info)
+            assert out.state == git_ops.WorktreeState.ACTIVE, status
+            assert out.ahead == 2 and out.behind == 1, status
 
     def test_gone_worktree_never_masked(self):
         # A missing checkout is real regardless of a finalized status.

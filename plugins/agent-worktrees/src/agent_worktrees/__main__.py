@@ -422,9 +422,19 @@ def _apply_tracking_override(
 
     A **GONE** worktree (its directory is missing) is never masked -- a missing
     checkout is real regardless of status.
+
+    An **ACTIVE** worktree (a live mux/lock session owns it right now, per
+    ``active_paths``) is never masked either: a finalized worktree the operator
+    has re-opened (or a bare/bound Copilot still holding its lock) is genuinely
+    live, and hiding it behind COMPLETED strands the row with no lifecycle verb
+    (the bb68/ca29 status-tracking bug -- a muxed/lock-held session rendered
+    FINAL). Liveness wins over the durable finalize status.
     """
     if rec.status in ("finalized", "complete", "completed"):
-        if info.state != git_ops.WorktreeState.GONE:
+        if info.state not in (
+            git_ops.WorktreeState.GONE,
+            git_ops.WorktreeState.ACTIVE,
+        ):
             return dataclasses.replace(info, state=git_ops.WorktreeState.COMPLETED)
     return info
 
@@ -711,6 +721,15 @@ def _worktree_to_dict(
         if _live_ids:
             d["live_session_ids"] = list(_live_ids)
             d["session_lock_live"] = True
+        # Stale-lock residue: ``inuse.<pid>.lock`` file(s) whose pid is no longer
+        # a live Copilot (crashed/killed without cleanup). Surfaced so the Picker
+        # can offer Reclaim (file-only cleanup) for a worktree with no mux and no
+        # live lock -- residue that must be cleared "to the point where the pid
+        # lock file is removed". Emitted only when present to keep the dict lean.
+        _stale_pids = session_ctx.stale_locks.get(norm) or []
+        if _stale_pids:
+            d["session_lock_stale"] = True
+            d["stale_lock_pids"] = list(_stale_pids)
         # GH #198: read the resume-target id from the single scan pass
         # (scan_sessions_fast folds it into SessionContext.last_session_id)
         # instead of a per-worktree full re-scan of session-state. The old
@@ -7146,6 +7165,20 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
     if do_kill and targets:
         reaped = reclaim.reap_bound_copilots(targets, table=table)
 
+    # Clear residual inuse.<pid>.lock files (parity with reclaim_one, the local
+    # picker path): force-remove the pids we just terminated plus any stale-pid
+    # residue for this worktree, so a killed/crashed session leaves ZERO lock
+    # behind. Only on a real kill (never a dry run) and only when scoped to a
+    # worktree (a --session-id/--all sweep leaves lock GC to its own worktree
+    # pass). A live muxed sibling's lock is preserved by clear_lock_residue.
+    cleared: list[dict] = []
+    if do_kill and (wt_id or wt_path):
+        cleared = reclaim.clear_lock_residue(
+            worktree_id=wt_id, worktree_path=wt_path,
+            force_pids={r["pid"] for r in reaped if r.get("killed")},
+            table=table,
+        )
+
     payload = {
         "ok": True,
         "action": "reclaim" if do_kill else "dry-run",
@@ -7156,6 +7189,7 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
         "targets": targets,
         "self_skipped": self_skipped,
         "reaped": reaped,
+        "locks_cleared": cleared,
     }
 
     if as_json:
@@ -7270,9 +7304,20 @@ def reclaim_one(worktree_id: str, *, bare_only: bool = True) -> dict:
     ]
     reaped = reclaim.reap_bound_copilots(targets, table=table) if targets else []
     ok = all(r["killed"] for r in reaped) if reaped else True
+    # Clear residual inuse.<pid>.lock files so the worktree ends with ZERO
+    # residue -- "to the point where the pid lock file is removed". Force-remove
+    # the pids we just terminated (the OS may not have reaped them yet, so a
+    # liveness re-check could still read them alive) plus any pre-existing
+    # stale-pid residue; a live muxed sibling's lock is preserved.
+    cleared = reclaim.clear_lock_residue(
+        worktree_id=worktree_id,
+        force_pids={r["pid"] for r in reaped if r.get("killed")},
+        table=table,
+    )
     return {
         "ok": ok, "worktree_id": worktree_id,
         "targets": len(targets), "reaped": reaped,
+        "locks_cleared": cleared,
     }
 
 

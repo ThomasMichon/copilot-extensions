@@ -521,3 +521,86 @@ def reap_bound_copilots(
             "children_killed": children_killed,
         })
     return out
+
+
+def clear_lock_residue(
+    *,
+    worktree_id: str | None = None,
+    worktree_path: str | None = None,
+    force_pids: set[int] | None = None,
+    table: dict[int, dict] | None = None,
+) -> list[dict]:
+    """Remove ``inuse.<pid>.lock`` residue for a worktree's session dirs.
+
+    The lock-file counterpart to :func:`reap_bound_copilots`: a *killed* Copilot
+    can't run its own on-exit lock cleanup, and a crashed session leaves a
+    **stale** lock whose pid is long dead -- either way the ``inuse.<pid>.lock``
+    lingers and keeps the worktree looking bound. This sweeps the session-state
+    dirs attributable to the worktree and unlinks every lock file that is NOT
+    held by a live Copilot, so Reclaim/Repair leave the worktree with **zero**
+    residue ("to the point where the pid lock file is removed").
+
+    Removal rule per lock file:
+
+    * pid in ``force_pids`` (a pid this reclaim just terminated -- it may not be
+      reaped by the OS yet, so trust the kill) -> remove.
+    * pid is NOT a live Copilot process (stale/dead) -> remove.
+    * pid IS a live Copilot (a preserved muxed sibling on the same worktree) ->
+      **kept** -- never strip a lock out from under a running session.
+
+    Attribution matches :func:`resolve_bound_copilots`: a session dir belongs to
+    the worktree when its recorded cwd resolves to ``worktree_id`` (or is at/under
+    ``worktree_path``), with a tracking-by-session fallback. Best-effort; a
+    per-file ``OSError`` is skipped, never raised. Returns the removed residue as
+    ``[{session_id, pid, path}]``.
+    """
+    force_pids = set(force_pids or [])
+    state_dir = sessions._session_state_dir()
+    removed: list[dict] = []
+    if not state_dir.exists():
+        return removed
+    for entry in sorted(state_dir.iterdir()):
+        if not entry.is_dir():
+            continue
+        # Cheap gate: skip a dir with no lock file at all before paying for the
+        # cwd read + worktree resolution.
+        if not any(entry.glob("inuse.*.lock")):
+            continue
+        cwd = _session_cwd(entry)
+        wt = _resolve_worktree_id_for_cwd(cwd) if cwd else None
+        if wt is None:
+            try:
+                wt = tracking.find_worktree_id_by_session(entry.name)
+            except Exception:
+                wt = None
+        matches = False
+        if worktree_id is not None and wt == worktree_id:
+            matches = True
+        if worktree_path is not None and _cwd_under(cwd, worktree_path):
+            matches = True
+        if not matches:
+            continue
+        for lock_file in entry.glob("inuse.*.lock"):
+            parts = lock_file.stem.split(".")
+            if len(parts) < 2:
+                continue
+            try:
+                pid = int(parts[1])
+            except ValueError:
+                continue
+            live = (
+                sessions._is_process_alive(pid)
+                and sessions._is_copilot_process(pid)
+            )
+            if live and pid not in force_pids:
+                continue
+            try:
+                lock_file.unlink()
+                removed.append({
+                    "session_id": entry.name,
+                    "pid": pid,
+                    "path": str(lock_file),
+                })
+            except OSError:
+                pass
+    return removed

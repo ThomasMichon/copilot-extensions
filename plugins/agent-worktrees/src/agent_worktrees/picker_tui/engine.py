@@ -384,9 +384,13 @@ ACTION_DESC = {
                    "Copilot in HOME with no --resume (dodges a CLI bug that "
                    "fails to start in a repo/worktree cwd). Finish with a "
                    "manual /resume <id> (id shown above).",
-    "Reclaim": "Kill the exact Copilot process holding this session's lock "
-               "(bare orphans a mux Stop cannot reach), so it can be re-Opened "
-               "or Bare-resumed cleanly.",
+    "Reclaim": "Kill the exact Copilot process(es) holding this session's lock "
+               "(bare orphans a mux Stop cannot reach) AND delete any residual "
+               "inuse.<pid>.lock, so it can be re-Opened or Bare-resumed "
+               "cleanly.",
+    "Repair": "Reconcile an inconsistent worktree: reap the stray bare "
+              "(un-muxed) orphan Copilot while PRESERVING the healthy mux "
+              "session, clear stale locks, and re-derive tracked state.",
     "Jump to host": "Switch to this worktree's host machine tab and highlight "
                     "it (reveals hidden bridge/system worktrees).",
     "Jump to caller": "Jump to the worktree that requested this bridge worktree "
@@ -3704,6 +3708,26 @@ class PickerScreen(Widget):
             return
         self._run_op_progress("Reclaim", "reclaim", live, armed=True)
 
+    def _start_repair(self, recs):
+        """Repair the inconsistent mux+stray-orphan double-binding (the 'Repair'
+        action, offered only in the WARNING state -- see :meth:`_warning`).
+
+        Drives the SAME ``reclaim`` op as :meth:`_start_reclaim` (bare-only reap
+        via ``reclaim_one``), which by construction reaps only the **un-muxed**
+        (bare/unknown-homing) orphan and leaves the positively **mux-homed**
+        session untouched -- so the healthy ``wt-<id>`` mux is PRESERVED while the
+        stray orphan and its lock residue are cleared. Filtered on the same
+        ``_warning`` predicate the verb is gated on, so it acts if and only if the
+        double-binding is real. After it finishes the touched machines reload and
+        the row re-renders as a clean, singly-bound mux -- ready to Open/Stop.
+        """
+        recs = [recs] if isinstance(recs, dict) else list(recs)
+        live = [r for r in recs if PickerScreen._warning(r)]
+        if not live:
+            self.debug = "no stray orphan to repair"
+            return
+        self._run_op_progress("Repair", "reclaim", live, armed=True)
+
     def _start_refresh(self, rec):
         """Per-row Refresh (picker-cache-first-paint, dotfiles#948).
 
@@ -3979,95 +4003,130 @@ class PickerScreen(Widget):
             "clean", "unused", "conversation", "gone")
 
     @staticmethod
-    def _reclaimable(rec) -> bool:
-        """Whether a live bound Copilot that **Stop cannot reach** is present, so
-        the Reclaim verb applies. The load-bearing invariant: as long as a live
-        ``inuse.<pid>.lock`` binds a Copilot to this worktree, the Actions menu
-        must offer *some* lifecycle verb (Stop when muxed, else Reclaim) -- never
-        strand the row ACTIVE with no way to act on it.
-
-        True when either:
-
-        * ``session_bare_orphan`` -- the machine-wide bare-orphan scan flagged a
-          **bare** (un-muxed) bound Copilot, possibly one the cwd-keyed lock scan
-          never registered (#662/#1416). Kept even alongside a live mux, because
-          a worktree can host *both* a healthy muxed session (Stop) and a
-          separate bare orphan (Reclaim).
-        * a live bound lock with **no mux** for Stop to reach --
-          ``session_lock_live`` (the authoritative menu-open verdict) or
-          ``session_bound_live`` (the cached off-hot-path hint) AND not
-          ``mux_live``. This arm closes the strand where the bound Copilot's
-          homing cannot be positively classified ``bare`` (e.g. an un-walkable /
-          racing ancestry -> ``unknown``): the lock is present and there is no
-          mux, so Reclaim must still light up.
+    def _warning(rec) -> bool:
+        """Inconsistent state: a healthy ``wt-<id>`` mux session AND a *separate*
+        bare (un-muxed) bound Copilot on the same worktree (the #662
+        double-binding). Stop reaches the mux but not the stray orphan; Reclaim
+        would kill the orphan but is unsafe to auto-offer beside a live mux (it
+        reaps un-muxed bindings machine-wide for the id). So the row is flagged
+        WARNING and offered **Stop + Repair** -- Repair reaps the stray orphan
+        while preserving the healthy mux, then re-derives state.
         """
-        if rec.get("session_bare_orphan"):
-            return True
+        return bool(rec.get("mux_live") and rec.get("session_bare_orphan"))
+
+    @staticmethod
+    def _reclaimable(rec) -> bool:
+        """Whether a bound Copilot or lock residue that **Stop cannot reach**
+        (i.e. no live mux) is present, so the Reclaim verb applies. The
+        load-bearing invariant: a worktree holding a bound lock or lock residue
+        must always expose *some* lifecycle verb (Stop when muxed, else Reclaim)
+        -- never strand the row with no way to act on it.
+
+        True when there is **no live mux** AND any of:
+
+        * ``session_bare_orphan`` -- the machine-wide scan flagged a **bare**
+          (un-muxed) bound Copilot (#662/#1416).
+        * a live bound lock -- ``session_lock_live`` (authoritative menu-open
+          verdict) or ``session_bound_live`` (cached off-hot-path hint) -- whose
+          homing could not be positively classified ``bare``.
+        * ``session_lock_stale`` -- stale ``inuse.<pid>.lock`` residue from a
+          crashed/killed session (file present, pid dead). Reclaim clears it to
+          zero ("to the point where the pid lock file is removed").
+
+        The **no-mux guard** keeps Reclaim mutually exclusive with the muxed
+        ``{Open, Stop}`` group and routes the mux+orphan double-binding to
+        WARNING/Repair instead (see :meth:`_warning`).
+        """
+        if rec.get("mux_live"):
+            return False
         return bool(
-            (rec.get("session_lock_live") or rec.get("session_bound_live"))
-            and not rec.get("mux_live")
+            rec.get("session_bare_orphan")
+            or rec.get("session_lock_live")
+            or rec.get("session_bound_live")
+            or rec.get("session_lock_stale")
         )
 
     @staticmethod
     def _session_action_verbs(rec) -> list[str]:
         """The session-lifecycle verbs a worktree's Actions menu offers, from its
-        (freshly menu-verified) liveness signals -- extracted as a pure,
-        record-driven helper so the Stop/Reclaim gates are unit-testable and
-        light up *when and only when* they apply (#4058). The caller appends the
-        bridge/system navigation + cross-plugin verbs, which need engine state.
+        (freshly menu-verified) liveness signals -- a pure, record-driven helper
+        so the gating is unit-testable and each verb lights up *when and only
+        when* it applies. The caller appends bridge/system navigation +
+        cross-plugin verbs, which need engine state.
 
-        Primary verb tracks liveness (#1343): a **live** mux -> "Open" (attach);
-        a **stopped** session with history -> "Resume" (relaunch + resume last
-        conversation); a **sessionless** worktree -> "Open" (cold start --
-        resuming nothing would silently blank-start, #1026).
+        Mutually-exclusive lifecycle groups, in precedence order (the operator's
+        state map). The five axes: **M**=live ``wt-<id>`` mux, **Lf/Pa**=lock
+        file / live bound process, **stale**=lock residue, **H**=identifiable
+        head session, **D**=worktree dir exists.
 
-        Stop/Reclaim together guarantee that a worktree holding a live bound lock
-        always exposes a lifecycle verb:
+        1. **WARNING** (M ∧ stray bare orphan) -> ``Stop`` + ``Repair``.
+        2. **healthy mux** (M) -> ``Open`` (only when D -- a leaked mux on a gone
+           dir offers ``Stop`` alone) + ``Stop``.
+        3. **bound / residue, no mux** (¬M ∧ (Pa ∨ Lf ∨ stale)) -> ``Reclaim``
+           (kills bound proc(es) AND deletes residual ``inuse.*.lock``). Resume/
+           Bare-resume are suppressed here -- Reclaim first, then resume.
+        4. **resumable** (¬M ∧ ¬bound ∧ H ∧ D) -> ``Resume`` + ``Bare resume``.
+        5. **sessionless** (¬M ∧ ¬bound ∧ ¬H ∧ D) -> ``Open`` (cold start).
+           Refresh (always) also attempts to recover a *lost* head session so a
+           falsely-sessionless worktree becomes resumable on the next paint.
+        6. **gone** (¬D, no live mux/lock) -> cleanup verbs only.
 
-        * **Stop** -- only with a live mux to stop. Its executor gracefully quits
-          the ``wt-<id>`` mux (double->triple Ctrl-C, Copilot's native clean
-          exit) and hard-kills only as a fallback.
-        * **Reclaim** -- whenever a live bound Copilot that Stop cannot reach is
-          present (see :meth:`_reclaimable`): a **bare orphan**, OR a live lock
-          with no mux whose homing could not be classified ``bare``. Its executor
-          reaps every **un-muxed** binding (``reclaim_one`` /
-          ``reclaim --bare-only``), leaving a positively mux-homed session to
-          Stop. This closes the strand where a bound-but-unclassifiable Copilot
-          (lock present, no mux) previously offered neither verb.
+        Group exclusivity ({Open,Stop} ⊻ {Resume,Bare resume} ⊻ {Reclaim}) holds
+        because M, (¬M ∧ bound), and (¬M ∧ ¬bound) partition every state.
+
+        ``Refresh`` is ALWAYS appended -- the on-demand live gather + cache
+        write-back (the only way to populate an **Unknown** row and re-derive a
+        stale one), which also runs the head-session recovery repair.
         """
-        if rec.get("sessionless") or rec.get("mux_live"):
-            acts = ["Open"]
-        else:
+        gone = rec.get("cleanup_bucket") == "gone"
+        warning = PickerScreen._warning(rec)
+        reclaimable = PickerScreen._reclaimable(rec)
+        if warning:
+            acts = ["Stop", "Repair"]
+        elif rec.get("mux_live"):
+            # Open attaches the live mux (needs the dir); a leaked mux on a gone
+            # worktree offers Stop alone to clear it.
+            acts = ["Open", "Stop"] if not gone else ["Stop"]
+        elif reclaimable:
+            acts = ["Reclaim"]
+        elif gone:
+            acts = []
+        elif not rec.get("sessionless"):
+            # A stopped worktree with prior history (not positively sessionless)
+            # -> Resume (relaunch + resume its last conversation). "Bare resume"
+            # (create the mux but launch Copilot in HOME with no --resume, then
+            # a manual ``/resume <id>``) is offered only when we have a concrete
+            # head-session id to hand the operator.
             acts = ["Resume"]
-        # two-step-restore "Bare resume": offered when there is a session to
-        # restore. Creates the worktree's mux but launches Copilot in HOME with
-        # no --resume (dodges a CLI bug that fails to start inside a repo/
-        # worktree cwd); the operator finishes with a manual ``/resume <id>``
-        # (the id is shown in this menu's header).
-        if rec.get("last_session_id"):
-            acts.append("Bare resume")
-        # A worktree we don't positively know to be sessionless can show its
-        # latest session's recent messages -- a read-only peek at what it was
-        # doing, independent of whether the disposition summary ever accumulated.
-        if not rec.get("sessionless"):
+            if rec.get("last_session_id"):
+                acts.append("Bare resume")
+        else:
+            # Sessionless: cold-start Open (resuming nothing would silently
+            # blank-start, #1026). A worktree that only *looks* sessionless
+            # because tracking lost its head session is repaired by Refresh.
+            acts = ["Open"]
+        # Read-only "Messages" peek -- an auxiliary, non-lifecycle verb offered
+        # for any worktree that could have a session to peek (not positively
+        # sessionless) and is not in the inconsistent WARNING state. Independent
+        # of the lifecycle group above (live, resumable, or residual all peek).
+        if not warning and not rec.get("sessionless"):
             acts.append("Messages")
-        if rec.get("ff_eligible"):
-            acts.append("Sync")
-        if PickerScreen._cleanable(rec):
+        # FF-sync / cleanup / finalize -- offered only in the non-broken,
+        # non-residue lifecycle states (never beside Reclaim/Repair, where a
+        # Cleanup/Sync would race the residue). A gone worktree still offers
+        # Cleanup to prune the leftover record.
+        if acts and not warning and not reclaimable and not gone:
+            if rec.get("ff_eligible"):
+                acts.append("Sync")
+            if PickerScreen._cleanable(rec):
+                acts.append("Cleanup")
+            if rec.get("cleanup_bucket") in ("conversation", "unused"):
+                # A conversation-only / unused worktree (no commits) can be
+                # wrapped up directly -- finalize validates nothing is unpushed
+                # and removes it (#2258 follow-up).
+                acts.append("Finalize")
+        elif gone and PickerScreen._cleanable(rec):
             acts.append("Cleanup")
-        if rec.get("cleanup_bucket") in ("conversation", "unused"):
-            # A conversation-only / unused worktree (no commits) can be wrapped
-            # up directly -- finalize validates nothing is unpushed (there is
-            # nothing) and removes it (#2258 follow-up).
-            acts.append("Finalize")
-        if rec.get("mux_live"):
-            acts.append("Stop")
-        if PickerScreen._reclaimable(rec):
-            acts.append("Reclaim")
-        # picker-cache-first-paint (dotfiles#948): every worktree gets a Refresh
-        # -- the on-demand live gather + cache write-back. It is the ONLY way to
-        # populate an **Unknown** row (the first paint reads cache only), and
-        # re-syncs any stale row without a full-fleet reload.
         acts.append("Refresh")
         return acts
 
@@ -4199,6 +4258,10 @@ class PickerScreen(Widget):
                 # Kill the exact Copilot process holding the session's lock
                 # (bare orphans Stop cannot reach); then re-Open / Bare resume.
                 self._start_reclaim(rec)
+            elif cur == "Repair":
+                # Reconcile the mux+stray-orphan double-binding: reap the bare
+                # orphan while preserving the healthy mux, clear stale locks.
+                self._start_repair(rec)
             elif cur == "Refresh":
                 # picker-cache-first-paint (dotfiles#948): on-demand live gather
                 # + cache write-back for THIS worktree (populates an Unknown row
@@ -5163,15 +5226,19 @@ class SubMenuScreen(ModalScreen[tuple]):
         t.append(meta1 + "\n", style=C_DIM)
         t.append(meta2, style=C_DIM)
         # two-step-restore: show the full session id so the operator can type
-        # ``/resume <id>`` after a Bare resume; flag a live bound lock.
+        # ``/resume <id>`` after a Bare resume; flag a live bound lock / residue.
         sid = rec.get("last_session_id")
         if sid:
-            if rec.get("session_bare_orphan"):
+            if rec.get("mux_live") and rec.get("session_bare_orphan"):
+                lock = " · ⚠ inconsistent (mux + stray orphan — Repair fixes it)"
+            elif rec.get("session_bare_orphan"):
                 lock = " · bound (⚠ bare orphan — Reclaim frees it)"
             elif rec.get("session_lock_live") and not rec.get("mux_live"):
                 lock = " · bound (lock live — Reclaim frees it)"
             elif rec.get("session_lock_live"):
                 lock = " · bound (lock live)"
+            elif rec.get("session_lock_stale") and not rec.get("mux_live"):
+                lock = " · stale lock (residue — Reclaim clears it)"
             else:
                 lock = ""
             t.append(f"\n session {sid}{lock}", style=C_DIM)
