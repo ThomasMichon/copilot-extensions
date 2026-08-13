@@ -498,6 +498,51 @@ def test_resolve_elicitation_unknown_returns_false() -> None:
     assert client.resolve_elicitation("nope", {"x": 1}) is False
 
 
+def test_pending_ask_user_surfaces_and_clears() -> None:
+    """`pending_ask_user()` exposes parked questions (message + schema) for the
+    host to answer, and empties once resolved -- the elicitation backstop
+    (dotfiles#1275)."""
+    import asyncio
+
+    async def scenario() -> None:
+        client, _ = _client_with_recorder()
+        client._acp_session_id = "acp-1"
+        schema = {"type": "object", "properties": {"choice": {"type": "string"}}}
+        mode = _form_session_mode("tc-ask", schema)
+        task = asyncio.ensure_future(client._handle_elicitation("Pick one", mode))
+        await asyncio.sleep(0.05)
+
+        pending = client.pending_ask_user()
+        assert pending == [{
+            "tool_call_id": "tc-ask",
+            "message": "Pick one",
+            "requested_schema": schema,
+        }]
+
+        assert client.resolve_elicitation("tc-ask", {"choice": "a"}) is True
+        await asyncio.wait_for(task, timeout=1.0)
+        assert client.pending_ask_user() == []
+
+    asyncio.run(scenario())
+
+
+def test_pending_ask_user_clears_on_withdraw() -> None:
+    import asyncio
+
+    async def scenario() -> None:
+        client, _ = _client_with_recorder()
+        client._acp_session_id = "acp-1"
+        mode = _form_session_mode("tc-w", {"type": "object", "properties": {}})
+        task = asyncio.ensure_future(client._handle_elicitation("m", mode))
+        await asyncio.sleep(0.05)
+        assert len(client.pending_ask_user()) == 1
+        client._withdraw_elicitation("tc-w")
+        await asyncio.wait_for(task, timeout=1.0)
+        assert client.pending_ask_user() == []
+
+    asyncio.run(scenario())
+
+
 def test_ask_user_elicitation_decline_and_cancel() -> None:
     import asyncio
 
