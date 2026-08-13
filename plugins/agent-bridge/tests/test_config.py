@@ -11,6 +11,7 @@ import yaml
 from agent_bridge.config import (
     adopt_topology,
     load_config,
+    load_repo_bridge_config,
     remove_topology,
     save_config,
     validate_config,
@@ -281,3 +282,51 @@ class TestValidateConfig:
         save_config(cfg)
         issues = validate_config()
         assert any("not found" in i for i in issues)
+
+
+class TestInRepoBridgeConfig:
+    """<repo>/.agent-bridge/config.yaml -- repo-portable facility spawn defaults."""
+
+    def test_missing_file_returns_none(self, tmp_path: Path):
+        assert load_repo_bridge_config(tmp_path) is None
+
+    def test_loads_default_copilot_args(self, tmp_path: Path):
+        cfg_dir = tmp_path / ".agent-bridge"
+        cfg_dir.mkdir()
+        (cfg_dir / "config.yaml").write_text(
+            yaml.dump({"default_copilot_args": ["--model", "some-model"]}),
+        )
+        cfg = load_repo_bridge_config(tmp_path)
+        assert cfg is not None
+        assert cfg.default_copilot_args == ["--model", "some-model"]
+
+    def test_loads_default_env(self, tmp_path: Path):
+        cfg_dir = tmp_path / ".agent-bridge"
+        cfg_dir.mkdir()
+        (cfg_dir / "config.yaml").write_text(yaml.dump({"default_env": {"K": "v"}}))
+        cfg = load_repo_bridge_config(tmp_path)
+        assert cfg is not None and cfg.default_env == {"K": "v"}
+
+    def test_unknown_keys_ignored(self, tmp_path: Path):
+        cfg_dir = tmp_path / ".agent-bridge"
+        cfg_dir.mkdir()
+        (cfg_dir / "config.yaml").write_text(
+            yaml.dump({"default_copilot_args": ["--model", "m"], "future_key": 123}),
+        )
+        cfg = load_repo_bridge_config(tmp_path)
+        assert cfg is not None and cfg.default_copilot_args == ["--model", "m"]
+
+    def test_bad_yaml_returns_none(self, tmp_path: Path):
+        cfg_dir = tmp_path / ".agent-bridge"
+        cfg_dir.mkdir()
+        (cfg_dir / "config.yaml").write_text("{ not: valid: yaml:")
+        assert load_repo_bridge_config(tmp_path) is None
+
+    def test_empty_file_is_defaults(self, tmp_path: Path):
+        cfg_dir = tmp_path / ".agent-bridge"
+        cfg_dir.mkdir()
+        (cfg_dir / "config.yaml").write_text("")
+        cfg = load_repo_bridge_config(tmp_path)
+        assert cfg is not None
+        assert cfg.default_copilot_args == []
+        assert cfg.default_env == {}
