@@ -155,6 +155,36 @@ def run_json(project: str | None, args: list[str], *,
     return obj
 
 
+def run_engine_passthrough(project: str | None, args: list[str], *,
+                           timeout: int | None = None) -> int:
+    """Run an engine verb with **inherited stdio**, returning its exit code.
+
+    Unlike :func:`run_json` (which captures + parses), this streams the engine's
+    live output straight to the user's terminal -- for interactive, non-``--json``
+    verbs the Manager *orchestrates* rather than reads, notably
+    ``agent-worktrees update --no-manager`` (the seam bypass the Manager re-enters
+    through). Raises :class:`EngineError` with ``install_hint`` when the engine
+    binstub is absent.
+    """
+    base = engine_base_command()
+    if base is None:
+        raise EngineError(
+            f"the {ENGINE_BIN} engine is not installed", install_hint=True)
+    cmd = [*base]
+    if project:
+        cmd += ["--project", project]
+    cmd += args
+    try:
+        return subprocess.run(
+            cmd, timeout=timeout, check=False,
+            env={**os.environ, "PYTHONUTF8": "1"},
+        ).returncode
+    except subprocess.TimeoutExpired as e:
+        raise EngineError(f"{ENGINE_BIN} {' '.join(args)} timed out") from e
+    except OSError as e:
+        raise EngineError(f"could not run {ENGINE_BIN}: {e}") from e
+
+
 @dataclass(frozen=True)
 class Worktree:
     """A worktree row derived from ``list --json --classify`` (contract v1).

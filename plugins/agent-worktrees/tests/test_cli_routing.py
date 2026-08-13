@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import pytest
@@ -997,6 +998,76 @@ def test_bare_falls_back_to_picker_when_manager_broken(monkeypatch):
     rc = m.main([])
     assert rc == 0
     assert launched["v"] is True
+
+
+# ── `update` → Worktree Manager seam (hand the updater/aligner over, DQ8) ──────
+
+def _update_args(**over):
+    base = dict(no_manager=False, recreate_venv=False, skip_modules=None,
+                no_anchor_sync=False, force=False)
+    base.update(over)
+    return argparse.Namespace(**base)
+
+
+def test_update_hands_off_to_usable_manager(monkeypatch):
+    """`update` with a usable Manager execs `worktree-manager update` and does
+    NOT run the in-plugin mechanics."""
+    monkeypatch.setattr(m, "_usable_worktree_manager", lambda: "/usr/bin/worktree-manager")
+    monkeypatch.setattr(m.cfg, "active_project", lambda: "demo")
+    seam = {}
+    monkeypatch.setattr(
+        m, "_exec_worktree_manager",
+        lambda mgr, project, *, subcommand=None: seam.update(
+            mgr=mgr, project=project, subcommand=subcommand) or 0)
+    monkeypatch.setattr(m, "_cmd_update_in_plugin",
+                        lambda args: pytest.fail("manager present: must not run in-plugin update"))
+    rc = m.cmd_update(_update_args())
+    assert rc == 0
+    assert seam == {"mgr": "/usr/bin/worktree-manager", "project": "demo",
+                    "subcommand": ["update"]}
+
+
+def test_update_threads_flags_through_seam(monkeypatch):
+    """Forwardable flags (--force, --skip-modules ...) survive the hand-off."""
+    monkeypatch.setattr(m, "_usable_worktree_manager", lambda: "/usr/bin/worktree-manager")
+    monkeypatch.setattr(m.cfg, "active_project", lambda: None)
+    seam = {}
+    monkeypatch.setattr(
+        m, "_exec_worktree_manager",
+        lambda mgr, project, *, subcommand=None: seam.update(subcommand=subcommand) or 0)
+    monkeypatch.setattr(m, "_cmd_update_in_plugin",
+                        lambda args: pytest.fail("must hand off"))
+    rc = m.cmd_update(_update_args(force=True, skip_modules=["agent-bridge"]))
+    assert rc == 0
+    assert seam["subcommand"] == ["update", "--force", "--skip-modules", "agent-bridge"]
+
+
+def test_update_no_manager_flag_bypasses_seam(monkeypatch):
+    """`update --no-manager` runs the in-plugin mechanics even with a Manager on
+    PATH -- the escape hatch the Manager itself re-enters through."""
+    monkeypatch.setattr(m, "_usable_worktree_manager",
+                        lambda: pytest.fail("--no-manager must not probe the manager"))
+    monkeypatch.setattr(m, "_exec_worktree_manager",
+                        lambda *a, **k: pytest.fail("--no-manager must not hand off"))
+    ran = {"v": False}
+    monkeypatch.setattr(m, "_cmd_update_in_plugin",
+                        lambda args: ran.__setitem__("v", True) or 0)
+    rc = m.cmd_update(_update_args(no_manager=True))
+    assert rc == 0
+    assert ran["v"] is True
+
+
+def test_update_falls_back_in_plugin_without_manager(monkeypatch):
+    """No usable Manager → the in-plugin update runs (DQ8 fallback)."""
+    monkeypatch.setattr(m, "_usable_worktree_manager", lambda: None)
+    monkeypatch.setattr(m, "_exec_worktree_manager",
+                        lambda *a, **k: pytest.fail("no manager: must not hand off"))
+    ran = {"v": False}
+    monkeypatch.setattr(m, "_cmd_update_in_plugin",
+                        lambda args: ran.__setitem__("v", True) or 0)
+    rc = m.cmd_update(_update_args())
+    assert rc == 0
+    assert ran["v"] is True
 
 
 def test_bare_headless_ignores_manager(monkeypatch):

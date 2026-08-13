@@ -9262,7 +9262,52 @@ def _resolve_copilot() -> str | None:
 
 
 def cmd_update(args: argparse.Namespace) -> int:
-    """Update agent-worktrees via the Copilot CLI plugin system.
+    """Update the harness -- via the Worktree Manager when present (the seam).
+
+    ``update`` is the harness's *plugin updater/aligner*: it refreshes every
+    registered copilot-extensions plugin payload + runtime, reconciles binstubs,
+    and fast-forwards managed anchors. The founding intent hands that role to the
+    out-of-plugin **Worktree Manager** (the Configurator's "plugin update +
+    cross-plugin alignment"). So, mirroring the bare-launch seam (DQ7/DQ8): when
+    a *usable* Manager is on PATH, hand off to ``worktree-manager update`` (which
+    self-updates the Manager, then drives the mechanics back through
+    ``agent-worktrees update --no-manager``); otherwise run the in-plugin update
+    directly. ``--no-manager`` is the seam bypass -- both the Manager's own
+    re-entry and an operator escape hatch -- and the DQ8 fallback whenever the
+    Manager is absent or fails its health check, so ``update`` never dead-ends.
+    """
+    if not getattr(args, "no_manager", False):
+        mgr = _usable_worktree_manager()
+        if mgr:
+            return _exec_worktree_manager(mgr, cfg.active_project(),
+                                          subcommand=["update", *_update_flags(args)])
+    return _cmd_update_in_plugin(args)
+
+
+def _update_flags(args: argparse.Namespace) -> list[str]:
+    """Reconstruct the forwardable ``update`` flags to thread through the seam.
+
+    So ``<project> update --force`` (etc.) keeps its meaning when handed to the
+    Worktree Manager, which forwards them back to ``agent-worktrees update
+    --no-manager``. ``--no-manager`` itself is never forwarded (it is the bypass).
+    """
+    flags: list[str] = []
+    if getattr(args, "force", False):
+        flags.append("--force")
+    if getattr(args, "no_anchor_sync", False):
+        flags.append("--no-anchor-sync")
+    if getattr(args, "recreate_venv", False):
+        flags.append("--recreate-venv")
+    skip = getattr(args, "skip_modules", None)
+    if skip is not None:
+        flags.append("--skip-modules")
+        flags.extend(skip)
+    return flags
+
+
+def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
+    """The in-plugin harness update mechanics (the seam's DQ8 fallback + the
+    body the Worktree Manager drives via ``agent-worktrees update --no-manager``).
 
     1. Run ``copilot plugin update`` to fetch the latest plugin version.
     2. Locate the installed plugin directory.
@@ -13588,6 +13633,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Re-deploy every runtime installer even when the "
                         "deployed version already matches the payload "
                         "(default: skip already-current runtimes for speed)")
+    p.add_argument("--no-manager", action="store_true",
+                   help="Run the in-plugin update directly, bypassing the "
+                        "Worktree Manager seam (the escape hatch the Manager "
+                        "itself re-enters through, and the DQ8 fallback)")
 
     # install-status
     sub.add_parser("install-status", help="Show installation status")
@@ -15615,17 +15664,21 @@ def _usable_worktree_manager() -> str | None:
     return mgr
 
 
-def _exec_worktree_manager(mgr: str, project: str | None) -> int:
-    """Hand a bare, no-args invocation off to the Worktree Manager (the seam).
+def _exec_worktree_manager(mgr: str, project: str | None,
+                           *, subcommand: list[str] | None = None) -> int:
+    """Hand an invocation off to the Worktree Manager (the seam).
 
-    Threads ``--project <name>`` through when a project is in scope so the
-    Manager opens that project's picker; otherwise it launches the Manager's
-    multi-project front door. Uses the same platform-exec discipline as
-    :func:`cmd_launch`: ``os.execvp`` on posix (replaces the process), and
-    ``Popen`` + wait + ``sys.exit`` on Windows (which has no true exec and would
-    otherwise detach the child from the console).
+    ``subcommand`` is the Manager verb + args to run (e.g. ``["update"]``); when
+    None this is the bare, no-args handoff that opens the Manager's picker /
+    front door. Threads ``--project <name>`` through when a project is in scope.
+    Uses the same platform-exec discipline as :func:`cmd_launch`: ``os.execvp``
+    on posix (replaces the process), and ``Popen`` + wait + ``sys.exit`` on
+    Windows (which has no true exec and would otherwise detach the child from the
+    console).
     """
     argv = [mgr]
+    if subcommand:
+        argv += list(subcommand)
     if project:
         argv += ["--project", project]
     if platform.system() == "Windows":

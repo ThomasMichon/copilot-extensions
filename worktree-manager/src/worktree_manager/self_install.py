@@ -21,6 +21,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -28,7 +29,11 @@ import worktree_manager
 
 MARKER = "current-version"
 VERSIONS_DIR = "versions"
+STAGING_DIR = "staging"
 _VERSION_RE = re.compile(r'__version__\s*=\s*"([^"]+)"')
+
+#: The Worktree Manager's out-of-band source (same as the bootstrap one-liners).
+_MANAGER_REPO = "https://github.com/ThomasMichon/copilot-extensions.git"
 
 
 def default_root() -> Path:
@@ -231,3 +236,74 @@ def self_install(
         version=version, action="installed", root=str(r), slot=str(slot),
         marker=version, binstubs=tuple(str(s) for s in stubs),
     )
+
+
+@dataclass(frozen=True)
+class SelfUpdateResult:
+    action: str          # "updated" | "already-current" | "skipped" | "error"
+    version: str | None = None
+    previous: str | None = None
+    reason: str | None = None
+
+
+def self_update(
+    *,
+    ref: str | None = None,
+    root: Path | None = None,
+    dry_run: bool = False,
+) -> SelfUpdateResult:
+    """Fetch the latest Worktree Manager payload and version-install it.
+
+    This is the "updater updates itself" step: it git-fetches the out-of-band
+    ``worktree-manager`` payload (the same source as the bootstrap one-liners),
+    then :func:`self_install`\\s it -- publishing a new ``versions/<ver>`` slot +
+    ``current-version`` marker when the fetched payload is newer, a no-op when
+    already current (version-gated).
+
+    Deliberately **best-effort and non-fatal**: git/uv missing, offline, or a
+    fetch error return an ``error``/``skipped`` result rather than raising, so a
+    transient network problem never blocks the harness ``update`` this feeds. The
+    currently-running process keeps running its existing code; the freshly
+    installed slot takes effect on the *next* ``worktree-manager`` invocation
+    (normal versioned-install semantics -- no in-process hot-swap).
+    """
+    r = root or default_root()
+    ref = ref or os.environ.get("WORKTREE_MANAGER_REF") or "main"
+    previous = current_version(r)
+
+    if not shutil.which("git"):
+        return SelfUpdateResult(action="skipped", previous=previous,
+                                reason="git not found on PATH")
+
+    staging = r / STAGING_DIR
+    try:
+        staging.mkdir(parents=True, exist_ok=True)
+        if (staging / ".git").is_dir():
+            subprocess.run(["git", "-C", str(staging), "fetch", "--depth", "1",
+                            "origin", ref], check=True, capture_output=True,
+                           text=True, timeout=180)
+            subprocess.run(["git", "-C", str(staging), "checkout", "-q",
+                            "FETCH_HEAD"], check=True, capture_output=True,
+                           text=True, timeout=60)
+        else:
+            subprocess.run(["git", "clone", "--depth", "1", "--branch", ref,
+                            _MANAGER_REPO, str(staging)], check=True,
+                           capture_output=True, text=True, timeout=300)
+    except (OSError, subprocess.SubprocessError) as e:
+        return SelfUpdateResult(action="error", previous=previous,
+                                reason=f"fetch failed: {e}")
+
+    payload = staging / "worktree-manager"
+    if not (payload / "pyproject.toml").is_file():
+        return SelfUpdateResult(action="error", previous=previous,
+                                reason=f"fetched payload not found at {payload}")
+
+    res = self_install(payload_dir=payload, root=r, dry_run=dry_run)
+    if res.action == "error":
+        return SelfUpdateResult(action="error", version=res.version,
+                                previous=previous, reason=res.reason)
+    if res.action == "already-current":
+        return SelfUpdateResult(action="already-current", version=res.version,
+                                previous=previous)
+    # installed | planned (dry-run)
+    return SelfUpdateResult(action="updated", version=res.version, previous=previous)
