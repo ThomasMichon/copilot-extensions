@@ -51,6 +51,39 @@ class TestClaimFromRunOutput:
         # id present but no machine -> cannot build a ref.
         assert m._claim_from_run_output(json.dumps({"worktree": {"id": "x"}})) is None
 
+    def test_create_pr_envelope_github(self):
+        out = json.dumps({
+            "success": True, "pr_opened": True, "provider": "github",
+            "number": 42, "url": "https://github.com/o/r/pull/42",
+            "pr": {"ref": "https://github.com/o/r/pull/42", "number": 42,
+                   "provider": "github", "url": "https://github.com/o/r/pull/42"},
+        })
+        claim = m._claim_from_run_output(out)
+        assert claim is not None
+        assert claim.kind == "pr"
+        assert claim.ref == "https://github.com/o/r/pull/42"
+        assert claim.state == "active" and claim.created_at
+
+    def test_create_pr_envelope_ado(self):
+        url = "https://onedrive.visualstudio.com/P/_git/r/pullrequest/2285417"
+        out = json.dumps({"success": True, "pr_opened": True, "pr": {"ref": url}})
+        claim = m._claim_from_run_output(out)
+        assert claim is not None and claim.kind == "pr" and claim.ref == url
+
+    def test_pr_envelope_without_ref_declines(self):
+        # A pr sub-dict lacking a ref cannot be journaled.
+        out = json.dumps({"pr_opened": True, "pr": {"number": 7}})
+        assert m._claim_from_run_output(out) is None
+
+    def test_worktree_envelope_wins_over_pr(self):
+        # A worktree envelope is recognized first (create, not create-pr).
+        out = json.dumps({
+            "worktree": {"id": "wt-B", "machine": "m", "repo": "p"},
+            "pr": {"ref": "https://github.com/o/r/pull/1"},
+        })
+        claim = m._claim_from_run_output(out)
+        assert claim is not None and claim.kind == "worktree"
+
 
 class TestJournalRunClaim:
     """_journal_run_claim appends the produced-resource claim to the caller's
@@ -88,6 +121,17 @@ class TestJournalRunClaim:
         reloaded = tracking.load_record(tmp_path / "wt-A.yaml")
         assert len(reloaded.resources) == 1
 
+    def test_journals_pr_claim(self, tmp_path: Path, monkeypatch):
+        self._make_caller(tmp_path, monkeypatch)
+        owner_ref = "lambda-core/aperture-labs/wt-A#s1"
+        out = json.dumps({"success": True, "pr_opened": True,
+                          "pr": {"ref": "https://github.com/o/r/pull/42"}})
+        claim = m._journal_run_claim(owner_ref, out)
+        assert claim is not None and claim.kind == "pr"
+        reloaded = tracking.load_record(tmp_path / "wt-A.yaml")
+        assert [(c.kind, c.ref) for c in reloaded.resources] == \
+            [("pr", "https://github.com/o/r/pull/42")]
+
     def test_missing_caller_record_is_noop(self, tmp_path: Path, monkeypatch):
         monkeypatch.setattr("agent_worktrees.config.tracking_dir",
                             lambda: tmp_path)
@@ -95,8 +139,6 @@ class TestJournalRunClaim:
                                        "repo": "p"}})
         # No wt-A.yaml exists.
         assert m._journal_run_claim("m/aperture-labs/wt-A", out) is None
-
-    def test_unrecognized_output_is_noop(self, tmp_path: Path, monkeypatch):
         self._make_caller(tmp_path, monkeypatch)
         assert m._journal_run_claim("lambda-core/aperture-labs/wt-A", "junk") is None
         reloaded = tracking.load_record(tmp_path / "wt-A.yaml")
