@@ -229,6 +229,15 @@ regression is something a test can catch before an operator does.
 - **Not the multiplexer.** The Picker *coordinates context with* the mux wrapper
   but is a distinct surface with a distinct job; it does not own session
   multiplexing.
+- **Not in-process with the engine — it sits *on top of* the CLI.** The Picker runs
+  as a **separate process** that reaches each layer's engine **only by invoking its
+  machine-readable (`--json`) CLI verbs**, never by importing it in-process. All the
+  underlying operations (creating, listing, repairing, doctoring worktrees, and the
+  like) belong to the owning plugin's CLI; the Picker **calls and renders** them. A
+  direct corollary: the Picker's **interactive-UI stack (its TUI framework) stays out
+  of the plugin engines entirely** — so a lightweight, headless plugin never pulls a UI
+  dependency, and the Picker can evolve independently. This is the runtime, process-level
+  expression of *render-derive-not-own* and *programmatic-parity*.
 - **Not a second store of fabric state.** The Picker renders and derives; it does
   not persist a competing copy of any layer's worktree, task, liveness, or
   identity state (see the fabric's derive-don't-duplicate boundary).
@@ -306,3 +315,13 @@ regression is something a test can catch before an operator does.
   still opens the Picker, now via a hand-off to the control-plane (with a plain
   CLI/help fallback when it is absent). Mined from the operator's direction during
   the plugin self-provisioning rollout.
+- **2026-08-12** — Sharpened the boundary to a **process-level separation**: the
+  Picker **sits on top of the engine CLIs as a separate process**, reaching them only
+  through their `--json` verbs (never an in-process import), and its **TUI framework
+  stays out of the plugin engines**. Recorded under *Non-Goals* as the runtime
+  expression of *render-derive-not-own* / *programmatic-parity*. Motivated by keeping
+  the agent-facing plugins lightweight and headless (no UI stack pulled into a confined
+  host) while the interactive surface evolves on its own. Mined from the operator's
+  Phase-6 boundary clarification; the mux/session-launch allocation (agent-bridge also
+  hosts muxed sessions) is deliberately left as a downstream design question, not fixed
+  here.
