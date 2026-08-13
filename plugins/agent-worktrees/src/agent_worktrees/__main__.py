@@ -15474,6 +15474,60 @@ def cmd_help_unrouted(requested: str | None = None) -> int:
     return 1
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# The binstub seam (Phase 6 / DQ7 / DQ8): bare no-args → interactive front-end
+# ═══════════════════════════════════════════════════════════════════════════
+# A bare, no-args invocation (`<project>` / `agent-worktrees`) is the
+# *human-facing* path. It resolves to the interactive front-end: the
+# out-of-plugin **Worktree Manager** if it is on PATH, else the still-bundled
+# Picker (6a) -- eventually a help + install hint (6c). PATH presence of the
+# `worktree-manager` binstub is the WHOLE seam signal (DQ7); there is no
+# registration file. This resolution lives in the CLI (not just the binstub) so
+# that bare invocation ALWAYS resolves sanely, even through a stale per-project
+# binstub that merely forwards here (DQ8's safety invariant). Any args route
+# programmatically to the tool CLI and never touch this seam.
+
+_WORKTREE_MANAGER_BIN = "worktree-manager"
+
+
+def _worktree_manager_path() -> str | None:
+    """Locate the out-of-plugin Worktree Manager binstub on PATH, if installed.
+
+    Its presence on PATH is the entire seam signal (DQ7) -- no registration
+    file. Returns the resolved executable path, or None when the Manager is not
+    installed (the common case until Phase 6b ships it).
+    """
+    return shutil.which(_WORKTREE_MANAGER_BIN)
+
+
+def _exec_worktree_manager(mgr: str, project: str | None) -> int:
+    """Hand a bare, no-args invocation off to the Worktree Manager (the seam).
+
+    Threads ``--project <name>`` through when a project is in scope so the
+    Manager opens that project's picker; otherwise it launches the Manager's
+    multi-project front door. Uses the same platform-exec discipline as
+    :func:`cmd_launch`: ``os.execvp`` on posix (replaces the process), and
+    ``Popen`` + wait + ``sys.exit`` on Windows (which has no true exec and would
+    otherwise detach the child from the console).
+    """
+    argv = [mgr]
+    if project:
+        argv += ["--project", project]
+    if platform.system() == "Windows":
+        proc = subprocess.Popen(argv)
+        try:
+            rc = proc.wait()
+        except KeyboardInterrupt:
+            try:
+                rc = proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                rc = 130  # 128 + SIGINT(2)
+        sys.exit(rc)
+    os.execvp(mgr, argv)
+    return 1  # unreachable -- os.execvp replaces the process
+
+
 def _is_headless_project() -> bool:
     """Return True if the active project is configured headless (CLI-only)."""
     try:
@@ -16585,12 +16639,24 @@ def main(argv: list[str] | None = None) -> int:
     # (cwd-resolution Phase 3).
     has_project = bool(cfg.active_project())
 
-    # No args → launch (with project) or helpful balk (without).
+    # No args → the binstub seam (Phase 6 / DQ7 / DQ8). A bare, no-args
+    # invocation is the human-facing path: prefer the out-of-plugin Worktree
+    # Manager when it is on PATH (its presence is the whole seam signal -- no
+    # registration file), otherwise fall back to the still-bundled Picker
+    # (has_project) or a helpful balk (no project). Headless projects are never
+    # interactive, so they keep their CLI-only summary. Any args route
+    # programmatically to the CLI (below), never through this seam.
     if not args_list:
         if has_project:
             if _is_headless_project():
                 return cmd_headless_bare()
+            mgr = _worktree_manager_path()
+            if mgr:
+                return _exec_worktree_manager(mgr, cfg.active_project())
             return cmd_launch([])
+        mgr = _worktree_manager_path()
+        if mgr:
+            return _exec_worktree_manager(mgr, None)
         return cmd_help_unrouted()
 
     # A project-requiring subcommand without any project context → balk
