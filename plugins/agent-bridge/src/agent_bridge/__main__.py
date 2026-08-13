@@ -502,6 +502,11 @@ def _cmd_session_status(args: argparse.Namespace) -> None:
 
     print(f"  {sid}  ({st.get('name', '')})  [{st.get('status', '')}]")
     print(f"    Agent:   {st.get('agent_name') or '(none)'}")
+    if st.get("usage_model"):
+        # The model the dispatched agent is running (applied via
+        # session/set_config_option, surfaced here so it is verifiable at a
+        # glance -- a silent downgrade is otherwise invisible; dotfiles#790/#1274).
+        print(f"    Model:   {st['usage_model']}")
     if st.get("caller_id"):
         print(f"    Caller:  {st['caller_id']}")
     print(

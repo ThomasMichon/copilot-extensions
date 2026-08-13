@@ -460,6 +460,7 @@ async def get_session_status(
         "status": session.status.value,
         "turn_count": session.turn_count,
         "context_pct": session.context_pct,
+        "usage_model": session.usage_model,
         "head_id": head_id,
         "last_acked_id": last_acked,
         "behind": max(0, head_id - last_acked),
