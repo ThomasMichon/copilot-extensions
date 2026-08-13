@@ -231,10 +231,16 @@ blindly orphans those. Close-out is deeper than the local git/liveness check.
   ```
   `finalize` is claim-aware (its gate blocks on unreleased outbound claims), and
   `claims release <ref>` / `claims settle <ref>` / `claims sweep --apply` retire
-  them. **But the ledger is best-effort and relatively new:** many older
-  worktrees show `(none)` even though they really did touch a Codespace or a
-  cross-repo PR — those actions predate consistent claim-journaling. An empty
-  ledger is *not* proof of an empty footprint.
+  them. A stale **leaseable** claim (a Codespace/container settled elsewhere or on
+  another machine, or a bridge-driven box) is reclaimed by `claims sweep` reading
+  the lease's mirrored disposition. If you had to `finalize --abandon` a worktree,
+  its still-unsettled obligations are re-homed to the durable **orphanage** —
+  `claims orphans` lists them and `claims cleanup --apply` reclaims the orphaned
+  resources (delete the Codespace, finalize the cross-repo worktree). **But the
+  ledger is best-effort and relatively new:** many older worktrees show `(none)`
+  even though they really did touch a Codespace or a cross-repo PR — those actions
+  predate consistent claim-journaling. An empty ledger is *not* proof of an empty
+  footprint.
 - **Deep-investigate what it actually touched.** Corroborate the ledger against
   the worktree's own history and artifacts:
   ```
