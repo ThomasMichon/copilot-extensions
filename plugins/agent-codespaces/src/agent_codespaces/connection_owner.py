@@ -49,7 +49,7 @@ import platform
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 
 from .config import RUNTIME_DIR, ensure_runtime_dir
 
@@ -145,11 +145,17 @@ def _read_holds() -> dict[str, OwnerHold]:
         log.warning("connection-owner.json is not an object; treating as empty")
         return {}
     holds: dict[str, OwnerHold] = {}
+    known_fields = {f.name for f in fields(OwnerHold)}
     for codespace, rec in raw.items():
         if not isinstance(rec, dict):
             continue
+        # Tolerate forward-compat extra keys (a newer writer may add fields):
+        # filter to this dataclass's fields rather than dropping the whole record
+        # on an unknown key, and force ``codespace`` to the map key.
+        fields_in = {k: v for k, v in rec.items() if k in known_fields}
+        fields_in["codespace"] = codespace
         try:
-            hold = OwnerHold(**rec)
+            hold = OwnerHold(**fields_in)
         except TypeError:
             continue
         # Sanitize the tenants map: must be {str: float}. Drop any entry whose

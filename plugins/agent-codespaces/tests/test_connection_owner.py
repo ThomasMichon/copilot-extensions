@@ -150,6 +150,22 @@ def test_corrupt_store_shapes_are_tolerated(store):
     assert owner.get_hold("cs-bad") is None
 
 
+def test_forward_compat_extra_keys_tolerated(store):
+    owner_file = store / "connection-owner.json"
+    # A record written by a newer version with an unknown field must still load
+    # (not be silently dropped), and codespace is forced to the map key.
+    owner_file.write_text(
+        '{"cs-one": {"codespace": "stale-name", "host": "h", "created_at": 1.0, '
+        '"heartbeat_at": 1.0, "pinned": true, "tenants": {}, '
+        '"future_field": "whatever"}}',
+        encoding="utf-8",
+    )
+    h = owner.get_hold("cs-one")
+    assert h is not None
+    assert h.codespace == "cs-one"  # forced to the map key, not "stale-name"
+    assert h.pinned
+
+
 def test_list_holds_persists_tenant_pruning(store):
     owner.hold("cs-one", "tenant-a", pin=True)  # pinned so the hold survives
     # ttl=0 makes the tenant stale; list_holds must persist the pruned tenants.
