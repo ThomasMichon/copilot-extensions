@@ -65,6 +65,19 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED) {
         if (($__selfStagePayload -replace '\\', '/') -match '/\.copilot/installed-plugins/') {
             $__selfStageName = (Get-Content (Join-Path $__selfStagePayload 'plugin.json') -Raw | ConvertFrom-Json).name
             if ($__selfStageName) {
+                # CWD guard (#1366): the sessionStart hook launches this installer
+                # with CWD = the SINGLETON payload dir, so our process CWD is an
+                # open directory handle that blocks `copilot plugin update` (os
+                # error 32) for our whole lifetime -- including the watchdog
+                # WaitForExit below and, on a self-stage failure, an in-place run.
+                # Self-stage relocates our FILE reads but NOT the CWD handle, so
+                # re-root the process CWD OFF the payload BEFORE the copy (absolute
+                # paths make this safe). Set the WIN32 cwd (the real dir handle),
+                # not just the PS provider location.
+                try {
+                    Set-Location -LiteralPath $env:USERPROFILE
+                    [System.IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
+                } catch {}
                 $__selfStageRoot = Join-Path (Join-Path $env:USERPROFILE ".$__selfStageName") '.install-stage'
                 $__selfStageDir = Join-Path $__selfStageRoot ((Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfff') + "-$PID")
                 New-Item -ItemType Directory -Force -Path $__selfStageDir | Out-Null
@@ -131,6 +144,7 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED) {
                 if (-not $__wdRaw) { $__wdRaw = $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC }
                 if ($__wdRaw) { [void][int]::TryParse([string]$__wdRaw, [ref]$__wdDeadline) }
                 $__wdChild = Start-Process -FilePath $__selfStageExe -PassThru -NoNewWindow `
+                    -WorkingDirectory $__selfStagedPayload `
                     -ArgumentList (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $__selfStagedEntry) + $__selfStageFwd)
                 if ($__wdDeadline -gt 0 -and -not $__wdChild.WaitForExit($__wdDeadline * 1000)) {
                     try { & taskkill.exe /PID $__wdChild.Id /T /F 2>&1 | Out-Null } catch {}

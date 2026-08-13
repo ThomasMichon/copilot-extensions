@@ -70,6 +70,14 @@ $launched = [System.Collections.Generic.List[System.Diagnostics.Process]]::new()
 function Start-Install([int]$sleep, [int]$deadline = 0, [bool]$grandchild = $false) {
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
     $psi.FileName = $pwshExe
+    # Reproduce the REAL sessionStart-hook condition: Copilot launches the hook
+    # (and thus the installer) with CWD = the SINGLETON payload dir. Without this
+    # the child inherits the TEST's cwd, so the PAYLOAD-FREE assertion passed
+    # vacuously and never caught the process-CWD lock (#1366). With it, an
+    # installer that fails to re-root its own CWD off the payload leaves the
+    # payload non-renamable -> PAYLOAD-FREE fails, exactly as a real
+    # `copilot plugin update` would hit os error 32.
+    $psi.WorkingDirectory = $payload
     foreach ($a in (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
             (Join-Path $payload $entryRel)) + $entryArgs)) { [void]$psi.ArgumentList.Add($a) }
     foreach ($e in [System.Environment]::GetEnvironmentVariables().GetEnumerator()) {
