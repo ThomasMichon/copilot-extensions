@@ -4029,6 +4029,14 @@ class PickerScreen(Widget):
         * a live bound lock -- ``session_lock_live`` (authoritative menu-open
           verdict) or ``session_bound_live`` (cached off-hot-path hint) -- whose
           homing could not be positively classified ``bare``.
+        * ``session_bridge_live`` -- a live **bridge-owned** Copilot (#4272),
+          read file-first from ``bridge.lock`` (cwd=home, so invisible to the
+          mux + cwd-keyed lock scans -- #1416). Without this, an
+          ACTIVE-via-bridge worktree with no mux and no row-visible inuse lock
+          would fall through to Resume/Bare-resume -- which then FAIL because the
+          bridge Copilot already holds the session -- stranding the row.
+          ``reclaim_one`` resolves the bridge.lock's owner pid (via
+          :func:`reclaim.resolve_bridge_bound`) so this verb actually reaps it.
         * ``session_lock_stale`` -- stale ``inuse.<pid>.lock`` residue from a
           crashed/killed session (file present, pid dead). Reclaim clears it to
           zero ("to the point where the pid lock file is removed").
@@ -4043,6 +4051,7 @@ class PickerScreen(Widget):
             rec.get("session_bare_orphan")
             or rec.get("session_lock_live")
             or rec.get("session_bound_live")
+            or rec.get("session_bridge_live")
             or rec.get("session_lock_stale")
         )
 

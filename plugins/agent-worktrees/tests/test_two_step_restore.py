@@ -11,6 +11,8 @@ import argparse
 import contextlib
 import os
 
+import pytest
+
 from agent_worktrees import __main__ as m
 from agent_worktrees.picker_tui import derive, maintenance
 
@@ -239,6 +241,14 @@ class TestResumeFallbackLadder:
 
 # ── reclaim_one executor ───────────────────────────────────────────────────
 class TestReclaimOne:
+    @pytest.fixture(autouse=True)
+    def _stub_bridge(self, monkeypatch):
+        # reclaim_one now also consults the bridge-lock layer (#4272). Default it
+        # to empty so the non-bridge tests stay hermetic (no real state-dir scan);
+        # the bridge-union test overrides resolve_bridge_bound explicitly.
+        monkeypatch.setattr(m.reclaim, "resolve_bridge_bound", lambda *a, **k: [])
+        monkeypatch.setattr(m.reclaim, "clear_bridge_locks", lambda *a, **k: [])
+
     def test_unmuxed_only_and_self_guard(self, monkeypatch):
         me = os.getpid()
         rows = [
@@ -275,7 +285,39 @@ class TestReclaimOne:
         monkeypatch.setattr(m.reclaim, "clear_lock_residue", lambda **k: [])
         out = m.reclaim_one("wtX")
         assert out == {"ok": True, "worktree_id": "wtX", "targets": 0,
-                       "reaped": [], "locks_cleared": []}
+                       "reaped": [], "locks_cleared": [],
+                       "bridge_locks_cleared": []}
+
+    def test_bridge_bound_unions_and_reaps(self, monkeypatch):
+        # #4272: a bare-resumed / bridge-owned session (cwd=home) is invisible to
+        # resolve_bound_copilots; its bridge.lock target is unioned in (deduped by
+        # pid) so Reclaim actually reaps it and clears the bridge.lock.
+        monkeypatch.setattr(m.reclaim, "build_process_table", lambda: {})
+        monkeypatch.setattr(m.reclaim, "resolve_bound_copilots", lambda **k: [])
+        monkeypatch.setattr(
+            m.reclaim, "resolve_bridge_bound",
+            lambda wt, **k: [{"session_id": "sB", "pid": 777,
+                              "worktree_id": wt, "homing": "bare",
+                              "bridge_lock": "/s/sB/bridge.lock"}])
+        monkeypatch.setattr(m.reclaim, "descendants_of", lambda pid, t: set())
+        monkeypatch.setattr(m.reclaim, "clear_lock_residue", lambda **k: [])
+        captured = {}
+        monkeypatch.setattr(
+            m.reclaim, "reap_bound_copilots",
+            lambda targets, **k: captured.update(t=[x["pid"] for x in targets])
+            or [{"pid": t["pid"], "killed": True, "children_killed": 0}
+                for t in targets])
+        cleared = {}
+        monkeypatch.setattr(
+            m.reclaim, "clear_bridge_locks",
+            lambda wt, **k: cleared.update(force=set(k.get("force_pids") or []))
+            or [{"session_id": "sB", "pid": 777, "path": "/s/sB/bridge.lock"}])
+        out = m.reclaim_one("wtX")
+        assert captured["t"] == [777]          # the bridge owner was reaped
+        assert out["targets"] == 1
+        assert out["ok"] is True
+        assert 777 in cleared["force"]          # its bridge.lock is force-cleared
+        assert out["bridge_locks_cleared"][0]["pid"] == 777
 
     def test_clears_lock_residue_after_reap(self, monkeypatch):
         # Reclaim must clear residual inuse.<pid>.lock "to the point where the
@@ -424,6 +466,21 @@ class TestSessionActionVerbs:
                             session_bare_orphan=False, last_session_id="s1")
         assert "Reclaim" in verbs
 
+    def test_unmuxed_bridge_live_offers_reclaim(self):
+        # #4272 strand: a live BRIDGE-owned Copilot (bridge.lock, cwd=home) makes
+        # the row ACTIVE, but there is NO mux for Stop, no bare-scan flag, and no
+        # row-visible inuse lock (session_lock_live/bound_live both False). Before
+        # the fix this fell through to Resume/Bare-resume -- which then FAIL
+        # because the bridge Copilot already holds the session -- stranding the
+        # row ACTIVE with no way to clear it. Reclaim MUST light up.
+        verbs = self._verbs(mux_live=False, session_bridge_live=True,
+                            session_lock_live=False, session_bound_live=False,
+                            session_bare_orphan=False, last_session_id="s1")
+        assert "Reclaim" in verbs
+        assert "Stop" not in verbs
+        assert "Resume" not in verbs and "Bare resume" not in verbs
+        assert verbs[0] == "Reclaim"
+
     def test_muxed_plus_bare_is_warning_stop_and_repair(self):
         # The #662 double-binding (a healthy mux AND a separate stray bare
         # orphan) is an INCONSISTENT/WARNING state: Stop reaches the mux, Repair
@@ -507,6 +564,18 @@ class TestStartReclaimFilter:
         stub, calls = self._stub()
         rec = {"id4": "wtX", "session_bare_orphan": False,
                "session_lock_live": True, "mux_live": False}
+        type(self)._PS._start_reclaim(stub, rec)
+        assert len(calls) == 1
+        assert calls[0][0][:3] == ("Reclaim", "reclaim", [rec])
+
+    def test_bridge_live_dispatches(self):
+        # #4272: an ACTIVE-via-bridge worktree (bridge.lock live, no mux, no
+        # inuse-lock signal) is reclaimable and must dispatch, so it is never
+        # stranded ACTIVE with no way to act.
+        stub, calls = self._stub()
+        rec = {"id4": "wtX", "session_bare_orphan": False,
+               "session_lock_live": False, "session_bound_live": False,
+               "session_bridge_live": True, "mux_live": False}
         type(self)._PS._start_reclaim(stub, rec)
         assert len(calls) == 1
         assert calls[0][0][:3] == ("Reclaim", "reclaim", [rec])
