@@ -5572,6 +5572,8 @@ def cmd_claims(args: argparse.Namespace) -> int:
         return _claims_settle(args, target[1])
     if target and target[0] == "sweep":
         return _claims_sweep(args)
+    if target and target[0] == "cleanup":
+        return _claims_cleanup(args)
     if target and target[0] == "orphans":
         return _claims_orphans(args)
     worktree_id = target[0] if target else None
@@ -5834,6 +5836,45 @@ def _claims_sweep(args: argparse.Namespace) -> int:
     print(f"{verb} {len(reclaimed)} obligation(s):")
     for r in reclaimed:
         print(f"  · {r['owner']}: {r['kind']} {r['ref']}")
+    return 0
+
+
+def _claims_cleanup(args: argparse.Namespace) -> int:
+    """Reclaim re-homed (abandoned) obligations from the durable orphanage.
+
+    The **acting** consumer for the registry ``claims orphans`` only lists
+    (resource-obligation-settlement, dotfiles#1161): for each re-homed
+    obligation it disposes of the resource the obligation named (deletes an
+    orphaned CodeSpace, ...) and drops the settled entry. **Dry-run by default**;
+    pass ``--apply`` to act. Same-machine only (a cross-machine entry is
+    surfaced for cleanup on its own box); best-effort -- a failed reclaim leaves
+    the entry for a retry, so nothing is ever lost.
+    """
+    config = cfg.load_config()
+    apply = getattr(args, "apply", False)
+    from . import cleanup as cleanup_mod
+    rows = cleanup_mod.cleanup_orphanage(config, apply=apply)
+
+    reclaimed = [r for r in rows if r["status"] == "reclaimed"]
+    if args.json:
+        _json_output({"applied": apply, "results": rows,
+                      "reclaimed": len(reclaimed), "count": len(rows)})
+        return 0
+    if not rows:
+        print("claims cleanup: no re-homed obligations to reclaim "
+              "(the orphanage is empty).")
+        return 0
+    verb = "Reclaimed" if apply else "Would reclaim (dry-run; pass --apply)"
+    print(f"claims cleanup -- {len(rows)} orphaned obligation(s):")
+    for r in rows:
+        mark = {"reclaimed": "\u2713", "failed": "\u2717",
+                "skipped": "\u2013", "unsupported": "?"}.get(r["status"], "?")
+        line = f"  {mark} {r['kind']}: {r['ref']}  [{r['status']}]"
+        if r["detail"]:
+            line += f" -- {r['detail']}"
+        print(line)
+    if reclaimed:
+        print(f"{verb}: {len(reclaimed)} of {len(rows)}.")
     return 0
 
 
@@ -13028,13 +13069,15 @@ def build_parser() -> argparse.ArgumentParser:
                         "OR 'settle <ref>' to mark it at-rest (settled) / released, "
                         "OR 'sweep' to reclaim provably-gone+safe obligations "
                         "(never-wedge), OR 'orphans' to list obligations re-homed "
-                        "by an --abandon finalize (pending cleanup)")
+                        "by an --abandon finalize (pending cleanup), OR 'cleanup' "
+                        "to reclaim those re-homed obligations (delete the "
+                        "orphaned resource; --apply to act)")
     p.add_argument("--remove", action="store_true",
                    help="with release: drop the claim entry entirely instead of "
                         "marking it released")
     p.add_argument("--apply", action="store_true",
-                   help="with sweep: write the abandonments (default: dry-run "
-                        "preview only)")
+                   help="with sweep/cleanup: write the abandonments / reclaim the "
+                        "orphaned resources (default: dry-run preview only)")
     p.add_argument("--note", default="",
                    help="with add: an optional human label for the claim")
     p.add_argument("--released", action="store_true",

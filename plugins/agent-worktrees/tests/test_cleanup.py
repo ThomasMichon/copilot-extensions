@@ -1,0 +1,213 @@
+"""Orphanage cleanup consumer: reclaim re-homed obligations + drop the entry.
+
+resource-obligation-settlement (dotfiles#1161): `cleanup.cleanup_orphanage` /
+`reclaim_orphan` / `reclaim_codespace`, the `tracking.remove_orphaned_
+obligations` write primitive, and the `claims cleanup` verb. The read-only
+lister is covered by test_orphanage.py; here we exercise the *acting* consumer.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import types
+
+import agent_worktrees.__main__ as m
+from agent_worktrees import cleanup, tracking
+from agent_worktrees import config as cfg
+
+
+def _seed_project(tmp_path, monkeypatch, project="p"):
+    monkeypatch.setattr(cfg, "project_dir",
+                        lambda name=None: tmp_path / f".{name or project}")
+    (tmp_path / f".{project}").mkdir(parents=True, exist_ok=True)
+
+
+def _claim(kind, ref, state="active", note=""):
+    return tracking.ResourceClaim(kind=kind, ref=ref, state=state, note=note)
+
+
+def _config(machine="m", project="p"):
+    return types.SimpleNamespace(machine=machine, repo_name=project)
+
+
+def _proc(returncode=0, stdout="", stderr=""):
+    return types.SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+# ── tracking.remove_orphaned_obligations ─────────────────────────────────────
+
+def test_remove_drops_matching_keeps_others(tmp_path, monkeypatch):
+    _seed_project(tmp_path, monkeypatch)
+    tracking.rehome_abandoned_obligations(
+        [_claim("codespace", "cs-a"), _claim("worktree", "m/p/b")],
+        source_worktree="wt", config=_config())
+    removed = tracking.remove_orphaned_obligations([("wt", "cs-a")])
+    assert removed == 1
+    left = tracking.load_orphaned_obligations()
+    assert [e["ref"] for e in left] == ["m/p/b"]
+
+
+def test_remove_deletes_file_when_empty(tmp_path, monkeypatch):
+    _seed_project(tmp_path, monkeypatch)
+    tracking.rehome_abandoned_obligations(
+        [_claim("codespace", "cs-a")], source_worktree="wt", config=_config())
+    assert tracking.orphanage_path().exists()
+    tracking.remove_orphaned_obligations([("wt", "cs-a")])
+    assert not tracking.orphanage_path().exists()
+
+
+def test_remove_noop_on_empty_or_unmatched(tmp_path, monkeypatch):
+    _seed_project(tmp_path, monkeypatch)
+    tracking.rehome_abandoned_obligations(
+        [_claim("codespace", "cs-a")], source_worktree="wt", config=_config())
+    assert tracking.remove_orphaned_obligations([]) == 0
+    assert tracking.remove_orphaned_obligations([("wt", "no-such")]) == 0
+    assert len(tracking.load_orphaned_obligations()) == 1
+
+
+def test_remove_best_effort_on_error(tmp_path, monkeypatch):
+    _seed_project(tmp_path, monkeypatch)
+    monkeypatch.setattr(tracking, "load_orphaned_obligations",
+                        lambda project=None: (_ for _ in ()).throw(OSError("boom")))
+    assert tracking.remove_orphaned_obligations([("wt", "x")]) == 0
+
+
+# ── reclaim_codespace ────────────────────────────────────────────────────────
+
+def test_reclaim_codespace_dry_run_reports_intent(monkeypatch):
+    called = {"n": 0}
+    monkeypatch.setattr(cleanup, "_run_codespaces",
+                        lambda *a, **k: called.__setitem__("n", 1))
+    r = cleanup.reclaim_codespace("cs-x", apply=False)
+    assert r.reclaimed and "would delete" in r.detail
+    assert called["n"] == 0  # dry-run never shells out
+
+
+def test_reclaim_codespace_apply_success(monkeypatch):
+    monkeypatch.setattr(cleanup, "_run_codespaces", lambda *a, **k: _proc(0))
+    r = cleanup.reclaim_codespace("cs-x", apply=True)
+    assert r.status == "reclaimed" and "deleted" in r.detail
+
+
+def test_reclaim_codespace_404_is_already_gone(monkeypatch):
+    monkeypatch.setattr(
+        cleanup, "_run_codespaces",
+        lambda *a, **k: _proc(1, stderr="HTTP 404: Not Found"))
+    r = cleanup.reclaim_codespace("cs-x", apply=True)
+    assert r.status == "reclaimed" and "already gone" in r.detail
+
+
+def test_reclaim_codespace_real_failure_retains(monkeypatch):
+    monkeypatch.setattr(
+        cleanup, "_run_codespaces",
+        lambda *a, **k: _proc(1, stderr="HTTP 500: server exploded"))
+    r = cleanup.reclaim_codespace("cs-x", apply=True)
+    assert r.status == "failed" and "exploded" in r.detail
+
+
+def test_reclaim_codespace_binstub_unavailable(monkeypatch):
+    monkeypatch.setattr(cleanup, "_run_codespaces", lambda *a, **k: None)
+    r = cleanup.reclaim_codespace("cs-x", apply=True)
+    assert r.status == "failed" and "binstub" in r.detail
+
+
+def test_reclaim_codespace_empty_name(monkeypatch):
+    r = cleanup.reclaim_codespace("", apply=True)
+    assert r.status == "failed"
+
+
+# ── reclaim_orphan dispatch ──────────────────────────────────────────────────
+
+def test_reclaim_orphan_cross_machine_skipped():
+    entry = {"kind": "codespace", "ref": "cs", "machine": "other"}
+    r = cleanup.reclaim_orphan(entry, _config(machine="m"), apply=True)
+    assert r.status == "skipped" and "cross-machine" in r.detail
+
+
+def test_reclaim_orphan_unknown_kind_unsupported():
+    entry = {"kind": "bridge", "ref": "sess", "machine": "m"}
+    r = cleanup.reclaim_orphan(entry, _config(machine="m"), apply=False)
+    assert r.status == "unsupported"
+
+
+def test_reclaim_orphan_codespace_dispatches(monkeypatch):
+    monkeypatch.setattr(cleanup, "_run_codespaces", lambda *a, **k: _proc(0))
+    entry = {"kind": "codespace", "ref": "cs-x", "machine": "m"}
+    r = cleanup.reclaim_orphan(entry, _config(machine="m"), apply=True)
+    assert r.status == "reclaimed"
+
+
+def test_reclaim_orphan_reclaimer_error_is_failed(monkeypatch):
+    def _boom(ref, apply):
+        raise RuntimeError("kaboom")
+    monkeypatch.setitem(cleanup._RECLAIMERS, "codespace", _boom)
+    entry = {"kind": "codespace", "ref": "cs-x", "machine": "m"}
+    r = cleanup.reclaim_orphan(entry, _config(machine="m"), apply=True)
+    assert r.status == "failed" and "kaboom" in r.detail
+
+
+# ── cleanup_orphanage: dry-run vs apply, selective removal ───────────────────
+
+def test_cleanup_dry_run_does_not_remove(tmp_path, monkeypatch):
+    _seed_project(tmp_path, monkeypatch)
+    tracking.rehome_abandoned_obligations(
+        [_claim("codespace", "cs-a")], source_worktree="wt", config=_config())
+    monkeypatch.setattr(cleanup, "_run_codespaces", lambda *a, **k: _proc(0))
+    rows = cleanup.cleanup_orphanage(_config(), apply=False)
+    assert rows[0]["status"] == "reclaimed"
+    # dry-run: registry untouched.
+    assert len(tracking.load_orphaned_obligations()) == 1
+
+
+def test_cleanup_apply_removes_only_reclaimed(tmp_path, monkeypatch):
+    _seed_project(tmp_path, monkeypatch)
+    tracking.rehome_abandoned_obligations(
+        [_claim("codespace", "cs-good"), _claim("codespace", "cs-bad"),
+         _claim("bridge", "sess-x")],
+        source_worktree="wt", config=_config())
+
+    def _fake(args, **k):
+        name = args[1]
+        return _proc(0) if name == "cs-good" else _proc(1, stderr="HTTP 500")
+    monkeypatch.setattr(cleanup, "_run_codespaces", _fake)
+
+    rows = cleanup.cleanup_orphanage(_config(), apply=True)
+    by_ref = {r["ref"]: r["status"] for r in rows}
+    assert by_ref == {"cs-good": "reclaimed", "cs-bad": "failed",
+                      "sess-x": "unsupported"}
+    # Only the reclaimed entry is dropped; failed + unsupported are retained.
+    left = {e["ref"] for e in tracking.load_orphaned_obligations()}
+    assert left == {"cs-bad", "sess-x"}
+
+
+def test_cleanup_empty_orphanage(tmp_path, monkeypatch):
+    _seed_project(tmp_path, monkeypatch)
+    assert cleanup.cleanup_orphanage(_config(), apply=True) == []
+
+
+# ── claims cleanup verb (CLI integration) ────────────────────────────────────
+
+def _cleanup_args(apply=False, json_=False):
+    return argparse.Namespace(target=(["cleanup"]), apply=apply, json=json_)
+
+
+def test_claims_cleanup_verb_json(tmp_path, monkeypatch, capfd):
+    _seed_project(tmp_path, monkeypatch)
+    monkeypatch.setattr(cfg, "load_config", lambda: _config())
+    tracking.rehome_abandoned_obligations(
+        [_claim("codespace", "cs-a")], source_worktree="wt", config=_config())
+    monkeypatch.setattr(cleanup, "_run_codespaces", lambda *a, **k: _proc(0))
+    rc = m.cmd_claims(_cleanup_args(apply=True, json_=True))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["applied"] is True and out["reclaimed"] == 1
+    assert out["results"][0]["ref"] == "cs-a"
+    assert tracking.load_orphaned_obligations() == []
+
+
+def test_claims_cleanup_verb_empty_text(tmp_path, monkeypatch, capfd):
+    _seed_project(tmp_path, monkeypatch)
+    monkeypatch.setattr(cfg, "load_config", lambda: _config())
+    rc = m.cmd_claims(_cleanup_args(apply=False, json_=False))
+    assert rc == 0
+    assert "orphanage is empty" in capfd.readouterr().out.lower()

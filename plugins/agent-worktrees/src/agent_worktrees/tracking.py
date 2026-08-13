@@ -1922,6 +1922,43 @@ def rehome_abandoned_obligations(
         return []
 
 
+def remove_orphaned_obligations(
+    keys: Iterable[tuple[str | None, str | None]],
+    *,
+    project: str | None = None,
+) -> int:
+    """Drop settled entries from the durable orphanage registry (the write side
+    of the cleanup consumer, resource-obligation-settlement dotfiles#1161).
+
+    ``keys`` is an iterable of ``(source_worktree, ref)`` pairs -- the same
+    identity :func:`rehome_abandoned_obligations` dedups on. Every matching
+    entry is removed and the file rewritten (deleted when it empties). Returns
+    the number of entries removed. **Best-effort**: any IO failure returns ``0``
+    and never raises -- a cleanup consumer must never break on a registry write.
+    """
+    try:
+        drop = {(k[0], k[1]) for k in keys}
+        if not drop:
+            return 0
+        existing = load_orphaned_obligations(project)
+        kept = [e for e in existing
+                if (e.get("source_worktree"), e.get("ref")) not in drop]
+        removed = len(existing) - len(kept)
+        if removed <= 0:
+            return 0
+        path = orphanage_path(project)
+        if kept:
+            path.write_text(
+                yaml.safe_dump({"orphaned": kept}, sort_keys=False),
+                encoding="utf-8",
+            )
+        elif path.exists():
+            path.unlink()
+        return removed
+    except Exception:
+        return 0
+
+
 def find_orphaned_children(
     tracking_path: Path,
 ) -> list[tuple[WorktreeRecord, WorktreeRecord | None]]:
