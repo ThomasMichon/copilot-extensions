@@ -26,6 +26,29 @@ def test_borrow_records_lease(leases):
     assert lease_mod.get_lease("cs-one").effort == "effort-a"
 
 
+def test_lease_token_for_returns_held_token(leases):
+    import time
+    now = time.time()
+    lease_mod._write_leases({
+        "cs-one": lease_mod.Lease(
+            codespace="cs-one", effort="e", pid=1, host="h",
+            acquired_at=now, heartbeat_at=now, lease_token="tok-" + "a" * 40),
+    })
+    assert lease_mod.lease_token_for("cs-one") == "tok-" + "a" * 40
+
+
+def test_lease_token_for_absent_or_untokened_is_none(leases):
+    import time
+    now = time.time()
+    assert lease_mod.lease_token_for("cs-none") is None
+    lease_mod._write_leases({
+        "cs-two": lease_mod.Lease(
+            codespace="cs-two", effort="e", pid=1, host="h",
+            acquired_at=now, heartbeat_at=now, lease_token=""),
+    })
+    assert lease_mod.lease_token_for("cs-two") is None
+
+
 def test_borrow_conflict_raises(leases):
     lease_mod.borrow("effort-a", "cs-one")
     with pytest.raises(RuntimeError, match="leased by effort 'effort-a'"):

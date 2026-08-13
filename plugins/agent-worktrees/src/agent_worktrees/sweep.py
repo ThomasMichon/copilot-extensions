@@ -22,9 +22,18 @@ import logging
 
 from . import claimant as _claimant
 from . import config as cfg
-from . import git_ops, tracking
+from . import git_ops, obligations, tracking
 
 log = logging.getLogger(__name__)
+
+#: Resource kinds whose obligation disposition is mirrored onto a **cross-machine
+#: lease** (the lease's diagnostic ``context`` under ``obligations.CONTEXT_KEY``),
+#: rather than provable from a local worktree record. The sweep reads that
+#: mirror generically -- it never learns any single resource plugin's internals,
+#: only the shared obligation vocabulary + the lease store. agent-codespaces
+#: populates it for ``codespace`` (at clean disconnect -> ``at-rest``, at release
+#: -> ``released``); ``container`` is reserved for agent-containers.
+_LEASEABLE_KINDS: frozenset[str] = frozenset({"codespace", "container"})
 
 
 def load_claim_child_record(
@@ -155,12 +164,98 @@ def safe_of(claim: tracking.ResourceClaim, config: cfg.Config) -> bool | None:
     return child_branch_merged(child, claim.ref, config)
 
 
+def lease_disposition_of(
+    kind: str, ref: str, config: cfg.Config,
+) -> obligations.Disposition | None:
+    """Best-effort read of a leaseable resource's **mirrored disposition**.
+
+    A leaseable resource (a CodeSpace, a container) carries its obligation
+    disposition on its **cross-machine lease** -- the lease record's diagnostic
+    ``context`` under :data:`obligations.CONTEXT_KEY`, populated by the owning
+    plugin when it settles/releases (agent-codespaces at clean disconnect ->
+    ``at-rest``, at release -> ``released``). The sweep reads it generically
+    (``obligations.from_context``) so it can reclaim a stale obligation whose
+    resource is provably settled -- both the **missed-settle** case (the local
+    ledger never got flipped) and the **cross-machine** case (the box was
+    settled from another machine; this machine's stale local claim reads the
+    shared lease as the source of truth).
+
+    Fully **degrade-safe**: an unconfigured store, an absent lease, a network
+    failure, or any error -> ``None`` (spare; the sweep never abandons on an
+    unreadable mirror). A present lease with no/``active`` disposition normalizes
+    to ``active`` -> also spare.
+    """
+    try:
+        from . import lease_config, lease_store
+        settings = lease_config.load_lease_settings()
+        snapshot = lease_store.GitLeaseStore(settings).inspect(kind, ref)
+    except Exception as exc:  # unconfigured / network / protocol -> spare
+        log.debug("lease disposition read for %s/%s degraded: %s", kind, ref, exc)
+        return None
+    if snapshot is None:
+        return None  # absent lease -> unproven (spare); release tombstones it
+    return obligations.from_context(snapshot.record.context)
+
+
+def leaseable_settled(
+    claim: tracking.ResourceClaim, config: cfg.Config,
+) -> bool | None:
+    """Is a leaseable claim's resource **provably settled** via its lease mirror?
+
+    Returns ``True`` only when the mirrored disposition is a settled value
+    (``at-rest`` / ``released`` / ``abandoned`` -- the work is off-box-safe and
+    the obligation's liability is discharged); otherwise ``None`` (spare -- an
+    ``active``, absent, or unreadable mirror is never reclaimed on a guess). This
+    single settled/unsettled verdict drives **both** the gone and safe tri-states
+    for a leaseable kind: a settled lease means the resource is safe AND the
+    obligation is no longer a live liability.
+    """
+    disposition = lease_disposition_of(claim.kind, claim.ref, config)
+    if disposition in (obligations.AT_REST, obligations.RELEASED,
+                       obligations.ABANDONED):
+        return True
+    return None
+
+
+def claim_gone(claim: tracking.ResourceClaim, config: cfg.Config) -> bool | None:
+    """Tri-state **gone** verdict, dispatched by claim kind.
+
+    A ``worktree`` claim reuses the same-machine claimant-liveness resolver
+    (:func:`gone_of`). A leaseable kind (codespace/container) is *gone* when its
+    lease mirror shows the obligation settled (:func:`leaseable_settled`) -- the
+    resource is no longer a live liability. Every other kind is ``None`` (spare).
+    """
+    if claim.kind == "worktree":
+        return gone_of(claim.ref)
+    if claim.kind in _LEASEABLE_KINDS:
+        return leaseable_settled(claim, config)
+    return None
+
+
+def claim_safe(claim: tracking.ResourceClaim, config: cfg.Config) -> bool | None:
+    """Tri-state **safe** verdict, dispatched by claim kind.
+
+    A ``worktree`` claim proves safety from the child's record/branch
+    (:func:`safe_of`). A leaseable kind proves it from the lease's settled
+    disposition mirror (:func:`leaseable_settled`). Every other kind is ``None``.
+    """
+    if claim.kind == "worktree":
+        return safe_of(claim, config)
+    if claim.kind in _LEASEABLE_KINDS:
+        return leaseable_settled(claim, config)
+    return None
+
+
 def make_resolvers(config: cfg.Config):
     """Return the ``(gone_of, safe_of)`` pair for :func:`tracking.sweep_abandoned_obligations`.
 
-    ``safe_of`` is bound to ``config`` (the sweep passes only the claim).
+    Both resolvers now take the **claim** (not just its ref) and are bound to
+    ``config`` -- the gone verdict needs the claim's *kind* to route a leaseable
+    resource to its lease disposition mirror rather than the worktree-liveness
+    resolver.
     """
-    return gone_of, (lambda claim: safe_of(claim, config))
+    return (lambda claim: claim_gone(claim, config),
+            lambda claim: claim_safe(claim, config))
 
 
 def self_heal(

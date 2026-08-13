@@ -1782,7 +1782,7 @@ def settle_resource_claim(
 def sweep_abandoned_obligations(
     record: WorktreeRecord,
     *,
-    gone_of: Callable[[str], bool | None],
+    gone_of: Callable[[ResourceClaim], bool | None],
     safe_of: Callable[[ResourceClaim], bool | None],
     save: bool = True,
     path: Path | None = None,
@@ -1791,22 +1791,24 @@ def sweep_abandoned_obligations(
 
     The never-wedge sweep: for each ``active`` outbound claim on ``record``, the
     injected resolvers report whether the claim's resource holder is **provably
-    gone** (``gone_of(ref)`` -- tri-state ``True``/``False``/``None``) and whether
+    gone** (``gone_of(claim)`` -- tri-state ``True``/``False``/``None``) and whether
     the resource is **provably safe** (``safe_of(claim)`` -- tri-state). A claim
     is flipped to ``abandoned`` **only** on a definitive *gone-and-safe* verdict
     (:func:`obligations.should_abandon`); an unconfirmed holder or unproven-safe
     resource is left untouched (unknown is spare -- the sweep never fabricates an
-    ``at-rest``/``released`` verdict and never abandons on a guess). Resolvers own
-    the per-kind + same-vs-cross-machine policy (e.g. defer cross-machine to the
-    lease mirror by returning ``None``). Returns the claims it abandoned (empty on
-    a no-op). Best-effort: a resolver that raises is treated as ``None`` (spare).
+    ``at-rest``/``released`` verdict and never abandons on a guess). Both
+    resolvers receive the **whole claim** (not just its ref) so they can route by
+    *kind* -- e.g. a worktree to the same-machine claimant-liveness check, a
+    leaseable resource (codespace/container) to its cross-machine lease
+    disposition mirror. Returns the claims it abandoned (empty on a no-op).
+    Best-effort: a resolver that raises is treated as ``None`` (spare).
     """
     reclaimed: list[ResourceClaim] = []
     for c in record.resources:
         if not c.is_unsettled:  # only active (blocking) obligations
             continue
         try:
-            gone = gone_of(c.ref)
+            gone = gone_of(c)
         except Exception:
             gone = None
         try:

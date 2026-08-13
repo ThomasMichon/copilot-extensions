@@ -69,6 +69,31 @@ def test_renew_requires_token(monkeypatch):
     assert coord.renew("cs-one", "").unavailable
 
 
+def test_mirror_disposition_no_token_is_noop(monkeypatch):
+    # no token -> False without shelling out (fixture fails on unexpected _run)
+    assert coord.mirror_disposition("cs-one", "at-rest", None) is False
+    assert coord.mirror_disposition("cs-one", "at-rest", "  ") is False
+
+
+def test_mirror_disposition_ok_renews_with_disposition(monkeypatch):
+    seen = {}
+    def fake_run(args, **kw):
+        seen["args"] = args
+        return _proc(0)
+    monkeypatch.setattr(coord, "_run", fake_run)
+    assert coord.mirror_disposition("cs-one", "at-rest", "a" * 40) is True
+    assert seen["args"][:4] == ["lease", "renew", "codespace", "cs-one"]
+    assert "--token" in seen["args"] and "a" * 40 in seen["args"]
+    assert seen["args"][seen["args"].index("--disposition") + 1] == "at-rest"
+
+
+def test_mirror_disposition_conflict_or_error_is_false(monkeypatch):
+    monkeypatch.setattr(coord, "_run", lambda *a, **k: _proc(3, stderr="ref moved"))
+    assert coord.mirror_disposition("cs-one", "at-rest", "a" * 40) is False
+    monkeypatch.setattr(coord, "_run", lambda *a, **k: None)
+    assert coord.mirror_disposition("cs-one", "at-rest", "a" * 40) is False
+
+
 def test_renew_ok_rotates_token(monkeypatch):
     new = "b" * 40
     monkeypatch.setattr(coord, "_run", lambda *a, **k: _proc(0, json.dumps({"token": new})))
