@@ -34,6 +34,7 @@ import sys
 from dataclasses import dataclass
 
 from . import config as cfg
+from . import sweep as sweep_mod
 from . import tracking
 
 log = logging.getLogger(__name__)
@@ -83,6 +84,28 @@ def _run_codespaces(args: list[str], *, timeout: float = 300.0):
         return None
 
 
+def _run_worktrees(args: list[str], *, cwd: str | None = None,
+                   timeout: float = 300.0):
+    """Run ``agent-worktrees <args>`` (optionally in ``cwd``); None if unrunnable.
+
+    ``agent-worktrees`` resolves its project from the current directory, so a
+    cross-project reclaim runs the binstub with ``cwd`` set to the child's repo
+    anchor.
+    """
+    binstub = shutil.which("agent-worktrees")
+    if not binstub:
+        return None
+    try:
+        return subprocess.run(
+            [binstub, *args], cwd=cwd,
+            capture_output=True, text=True, timeout=timeout,
+            creationflags=_creationflags(),
+        )
+    except Exception as exc:
+        log.debug("agent-worktrees %s failed to run: %s", args[:2], exc)
+        return None
+
+
 def _looks_gone(output: str) -> bool:
     """Heuristic: does a failed delete mean the CodeSpace is already gone?
 
@@ -120,10 +143,51 @@ def reclaim_codespace(name: str, *, apply: bool) -> ReclaimResult:
     return ReclaimResult("failed", f"delete failed: {detail}")
 
 
+def reclaim_worktree(
+    ref: str, config: cfg.Config, *, apply: bool,
+) -> ReclaimResult:
+    """Reclaim an orphaned cross-repo worktree by finalizing it (best-effort).
+
+    The ``ref`` is a qualified worktree ClaimRef (``machine/project/worktree_id``).
+    On apply, shells ``agent-worktrees finalize <worktree_id> --abandon --json``
+    **from the child project's repo anchor** (agent-worktrees resolves its
+    project from cwd; there is no ``--project`` flag). ``--abandon`` bypasses only
+    the child's own *obligation* gate (cascading any grandchild obligations back
+    to the orphanage) -- the content-on-upstream **safety** check is always
+    enforced, so an unmerged child is never reclaimed (finalize refuses ->
+    ``failed``, entry retained for a human). A child that is already gone
+    finalizes trivially (-> reclaimed, idempotent).
+    """
+    parsed = tracking.parse_claim_ref(ref)
+    if parsed is None or not parsed.worktree_id:
+        return ReclaimResult("failed", f"unparseable worktree ref {ref!r}")
+    repo = sweep_mod.repo_for_project(parsed.project, config)
+    if repo is None:
+        return ReclaimResult(
+            "failed", f"cannot resolve project {parsed.project!r} on this machine")
+    if not apply:
+        return ReclaimResult(
+            "reclaimed",
+            f"would finalize worktree {parsed.worktree_id} in {parsed.project}")
+    proc = _run_worktrees(
+        ["finalize", parsed.worktree_id, "--abandon", "--json"],
+        cwd=repo.anchor)
+    if proc is None:
+        return ReclaimResult("failed", "agent-worktrees binstub unavailable")
+    if proc.returncode == 0:
+        return ReclaimResult(
+            "reclaimed", f"finalized worktree {parsed.worktree_id}")
+    tail = (proc.stderr or proc.stdout or "").strip().splitlines()
+    detail = tail[-1] if tail else f"finalize exited {proc.returncode}"
+    return ReclaimResult("failed", f"finalize refused: {detail}")
+
+
 #: Kinds this consumer knows how to dispose of. Others are surfaced as
 #: ``unsupported`` (entry retained) until a reclaimer is wired.
 _RECLAIMERS = {
-    "codespace": lambda ref, apply: reclaim_codespace(ref, apply=apply),
+    "codespace": lambda ref, apply, config: reclaim_codespace(ref, apply=apply),
+    "worktree": lambda ref, apply, config: reclaim_worktree(
+        ref, config, apply=apply),
 }
 
 
@@ -148,7 +212,7 @@ def reclaim_orphan(
         return ReclaimResult(
             "unsupported", f"no reclaimer for kind {kind!r} yet")
     try:
-        return reclaimer(entry.get("ref") or "", apply)
+        return reclaimer(entry.get("ref") or "", apply, config)
     except Exception as exc:  # a reclaimer must never break the pass
         log.debug("reclaim of %s failed: %s", entry.get("ref"), exc)
         return ReclaimResult("failed", f"reclaimer error: {exc}")
