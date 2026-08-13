@@ -174,6 +174,71 @@ def test_claim_live_by_path_existence_bounces(leases, tmp_path):
         lease_mod.claim("cs-one", str(tmp_path / "wt-b"), active=None)
 
 
+# ── #1362: self-owned L2 conflict must adopt (not bounce), and a genuine
+#           conflict must report the real local holder (not '(cross-machine)') ──
+
+def _l2_conflict(holder):
+    from agent_codespaces import coordination
+    return lambda cs, holder_ref, **k: coordination.L2Result(
+        "conflict", holder=holder)
+
+
+def test_claim_self_conflict_same_owner_adopts(leases, monkeypatch):
+    from agent_codespaces import coordination
+    # A same-owner L1 record with NO L2 token (the #1362 trigger: a prior
+    # L1-only claim), and the L2 acquire now reports OUR OWN ref as the holder.
+    lease_mod.claim("cs-one", "/wt/a", active={"/wt/a"})  # token=""
+    monkeypatch.setattr(coordination, "acquire", _l2_conflict("m/p/wt-a"))
+    # Re-claim from the same owner -> must ADOPT (not raise), no --force needed.
+    cl = lease_mod.claim("cs-one", "/wt/a", active={"/wt/a"}, holder_ref="m/p/wt-a")
+    assert cl.worktree == "/wt/a"
+
+
+def test_claim_self_conflict_via_holder_ref_adopts(leases, monkeypatch):
+    from agent_codespaces import coordination
+    # No local L1 record, but the L2 acquire says WE hold it (same worktree id,
+    # different session/machine-prefix in the ref) -> recognized as self, adopt.
+    monkeypatch.setattr(coordination, "acquire",
+                        _l2_conflict("othermachine/p/wt-a#sess"))
+    cl = lease_mod.claim("cs-x", "/path/wt-a", active={"/path/wt-a"},
+                         holder_ref="m/p/wt-a")
+    assert cl.worktree == "/path/wt-a"
+
+
+def test_claim_l2_conflict_reports_real_local_holder(leases, monkeypatch):
+    from agent_codespaces import coordination
+    # A DIFFERENT owner holds it locally; the L2 acquire (as /wt/b) conflicts.
+    # The raised ClaimConflict must carry the real local worktree/host/pid, not
+    # the '(cross-machine)'/pid-0 placeholder (#1362 defect 2).
+    lease_mod.claim("cs-one", "/wt/a", active={"/wt/a", "/wt/b"})
+    monkeypatch.setattr(coordination, "acquire", _l2_conflict("other/p/wt-z"))
+    with pytest.raises(lease_mod.ClaimConflict) as ei:
+        lease_mod.claim("cs-one", "/wt/b", active={"/wt/a", "/wt/b"},
+                        holder_ref="m/p/wt-b")
+    assert ei.value.holder == "/wt/a"
+    assert ei.value.host != "(cross-machine)"
+    assert ei.value.pid != 0
+
+
+def test_claim_l2_conflict_cross_machine_names_ref(leases, monkeypatch):
+    from agent_codespaces import coordination
+    # No local record -> genuinely remote holder: name the remote ClaimRef
+    # (not a blank), and mark it cross-machine.
+    monkeypatch.setattr(coordination, "acquire", _l2_conflict("remote/p/wt-r"))
+    with pytest.raises(lease_mod.ClaimConflict) as ei:
+        lease_mod.claim("cs-remote", "/wt/b", active={"/wt/b"},
+                        holder_ref="m/p/wt-b")
+    assert ei.value.holder == "remote/p/wt-r"
+    assert ei.value.host == "(cross-machine)"
+
+
+def test_same_holder_ref_matches_worktree_id():
+    assert lease_mod._same_holder_ref("m/p/wt-a", "other/p/wt-a#sess") is True
+    assert lease_mod._same_holder_ref("m/p/wt-a", "m/p/wt-b") is False
+    assert lease_mod._same_holder_ref(None, "m/p/wt-a") is False
+    assert lease_mod._same_holder_ref("m/p/wt-a", "") is False
+
+
 def test_release_claim_is_owner_scoped(leases):
     lease_mod.claim("cs-one", "/wt/a", active={"/wt/a"})
     assert lease_mod.release_claim("cs-one", "/wt/b") is False  # not the owner

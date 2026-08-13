@@ -167,6 +167,16 @@ agent-codespaces leases
 
 ## Edge cases
 
+- **You already hold it — don't steer clear of your OWN claim.** `leases` and
+  `pool` mark a CodeSpace held by **this** worktree with **`(you)`**. Re-entry is
+  **idempotent**: re-running `agent-codespaces ssh`/`claim` on a box you already
+  hold renews it — it does **not** bounce (fixed in dotfiles#1362; a same-owner
+  L2 re-acquire is adopted, not conflicted). So if you see a claim on a box you
+  need, first check whether it's yours (`leases`/`pool` `(you)`, or compare the
+  holder to `agent-worktrees get owner-ref`) and **reuse it** rather than
+  creating a duplicate or `--force-claim`-ing yourself. A `[BUSY]` conflict now
+  reports the **real** holder (worktree/host/pid) — only a genuinely *different*
+  live worktree bounces you.
 - **Conflict on borrow:** pick a different CodeSpace, `release` the current
   holder, or `--force` if it's stale.
 - **Effort spans a CodeSpace *and* a container:** independent dispatch targets

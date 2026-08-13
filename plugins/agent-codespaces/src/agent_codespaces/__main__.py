@@ -3603,6 +3603,50 @@ def _short_owner(owner: str) -> str:
     return owner
 
 
+def _self_claim_identity() -> tuple[str | None, str | None]:
+    """Resolve THIS caller's own claim identity for ``(you)`` self-marking.
+
+    Returns ``(self_owner, self_worktree_id)``: ``self_owner`` is the calling
+    worktree's L1 claim-owner (from ``resolve_owner_worktree`` -- matches a
+    lease's ``worktree`` field); ``self_worktree_id`` is the worktree id parsed
+    from the caller's qualified ClaimRef (matches the worktree id in an L2 holder
+    ref, and cross-machine-independent). Both best-effort -> ``None`` when not in
+    a worktree, so the surfaces degrade to no marker (never wrong). Lets an agent
+    recognize a claim it holds itself instead of steering clear of its own box
+    (#1362 / agent-claim-awareness).
+    """
+    self_owner = None
+    self_wtid = None
+    try:
+        from .lease import resolve_owner_worktree
+        self_owner = resolve_owner_worktree() or None
+    except Exception:
+        self_owner = None
+    try:
+        from . import coordination
+        ref = coordination.owner_ref()
+        if ref:
+            self_wtid = ref.split("/")[-1].split("#")[0].strip() or None
+    except Exception:
+        self_wtid = None
+    if self_wtid is None and self_owner:
+        self_wtid = os.path.basename(self_owner.rstrip("/\\")) or None
+    return self_owner, self_wtid
+
+
+def _hold_is_self(owner: str | None, l2_holder: str | None,
+                  self_owner: str | None, self_wtid: str | None) -> bool:
+    """Is a hold (L1 owner and/or L2 holder ref) held by THIS caller? (#1362)."""
+    if self_owner and owner and owner == self_owner:
+        return True
+    if self_wtid:
+        if owner and os.path.basename(str(owner).rstrip("/\\")) == self_wtid:
+            return True
+        if l2_holder and l2_holder.split("/")[-1].split("#")[0].strip() == self_wtid:
+            return True
+    return False
+
+
 def _cmd_leases() -> int:
     """Show active CodeSpace leases (advisory borrows and #897 claims)."""
     from .lease import list_leases
@@ -3611,6 +3655,8 @@ def _cmd_leases() -> int:
     if not leases:
         print("No active leases.")
         return 0
+    self_owner, self_wtid = _self_claim_identity()
+    any_self = False
     print(f"{'CODESPACE':<40} {'OWNER':<28} {'KIND':<7} {'HOST':<16} {'PID'}")
     for lease in leases:
         # A claim keys its owner on ``worktree`` (with ``effort`` empty); an
@@ -3619,10 +3665,16 @@ def _cmd_leases() -> int:
         # blank row (#904).
         owner = lease.worktree or lease.effort
         kind = "claim" if lease.worktree else "borrow"
+        is_self = _hold_is_self(owner, None, self_owner, self_wtid)
+        any_self = any_self or is_self
+        label = _short_owner(owner) + ("  (you)" if is_self else "")
         print(
-            f"{lease.codespace:<40} {_short_owner(owner):<28} {kind:<7} "
+            f"{lease.codespace:<40} {label:<28} {kind:<7} "
             f"{lease.host:<16} {lease.pid}"
         )
+    if any_self:
+        print("\n(you) = held by THIS worktree -- reuse it; you already own it "
+              "(no need to create a new box or --force-claim).")
     return 0
 
 
@@ -3843,6 +3895,15 @@ def _cmd_pool(args: argparse.Namespace) -> int:
         budget_cores=budget_cores, stale_after=stale_after,
     )
 
+    # Self-recognition (#1362 / agent-claim-awareness): mark the box(es) THIS
+    # worktree holds so an agent reuses its own instead of steering clear. Best-
+    # effort; annotates every output path (text / --json / picker / stream).
+    _self_owner, _self_wtid = _self_claim_identity()
+    if _self_owner or _self_wtid:
+        for _m in members:
+            _m.held_by_self = _hold_is_self(
+                _m.holder_owner, _m.l2_holder, _self_owner, _self_wtid)
+
     if getattr(args, "picker_json", False):
         # Surface the missing-`codespace`-scope remedy as a prominent, actionable
         # **banner** (rather than an empty, opaque list) so the Picker CodeSpaces
@@ -3894,8 +3955,13 @@ def _cmd_pool(args: argparse.Namespace) -> int:
             holder = f"(L2: {pool_mod._short_claim_ref(m.l2_holder)})"
         else:
             holder = ""
+        if m.held_by_self:
+            holder = (holder + "  (you)") if holder else "(you)"
         print(f"{m.name:<38} {m.repository:<30} {m.disposition:<13} "
               f"{cores:<6} {holder}")
+    if any(m.held_by_self for m in members):
+        print("\n(you) = held by THIS worktree -- reuse it rather than creating "
+              "a new box or steering clear.")
     return 0
 
 

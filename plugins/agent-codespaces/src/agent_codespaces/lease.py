@@ -333,6 +333,22 @@ def _claim_owner(lease: Lease) -> str:
     return lease.worktree or lease.effort
 
 
+def _same_holder_ref(a: str | None, b: str | None) -> bool:
+    """True when two qualified ClaimRefs name the **same worktree**.
+
+    A ClaimRef is ``machine/project/worktree_id[#session]``; the worktree id (the
+    last path segment, minus any ``#session`` suffix) is the stable identity.
+    Two refs match iff their worktree ids match -- so a re-entry from a *new
+    session* of the same worktree still recognizes its own lease. Empty/None →
+    no match. Used to spot a self-conflict on the L2 acquire path (#1362).
+    """
+    if not a or not b:
+        return False
+    aw = a.split("/")[-1].split("#")[0].strip()
+    bw = b.split("/")[-1].split("#")[0].strip()
+    return bool(aw) and aw == bw
+
+
 def resolve_owner_worktree(
     explicit: str | None = None, session_id: str | None = None
 ) -> str | None:
@@ -508,16 +524,42 @@ def claim(
         if res.ok:
             lease_token = res.token
         elif res.conflict:
-            if not force:
-                raise ClaimConflict(
-                    codespace, res.holder or "(cross-machine)", "(cross-machine)", 0
+            # A conflict whose holder is THIS SAME worktree is re-entry, not a
+            # real conflict -- the "holder" is the caller's own prior lease
+            # (whose L2 token the local L1 record lost or never persisted, e.g.
+            # an L1-only first claim). Adopt it instead of bouncing the caller
+            # from a CodeSpace it already holds (#1362): proceed L1-only (the
+            # same-owner L1 lock block below refreshes the record idempotently).
+            self_conflict = same_owner or _same_holder_ref(res.holder, holder_ref)
+            if self_conflict:
+                log.info(
+                    "Re-entrant claim on '%s' by its own owner '%s'; adopting "
+                    "the existing lease (L1-only; token heals on next renew).",
+                    codespace, owner,
                 )
-            log.warning(
-                "Forced claim on '%s' over a live cross-machine lease held by "
-                "'%s'; proceeding without the L2 lease.",
-                codespace, res.holder or "?",
-            )
-            lease_token = ""
+                lease_token = prior_token
+            elif not force:
+                # A genuine conflict. Resolve the holder against L1 first so the
+                # message carries the real worktree/host/pid when a concrete
+                # local record exists; only fall back to the cross-machine
+                # ClaimRef (no pid) when the holder truly isn't on this box.
+                held_local = _read_leases().get(codespace)
+                if held_local is not None:
+                    raise ClaimConflict(
+                        codespace, _claim_owner(held_local),
+                        held_local.host, held_local.pid,
+                    )
+                raise ClaimConflict(
+                    codespace, res.holder or "(cross-machine)",
+                    "(cross-machine)", 0,
+                )
+            else:
+                log.warning(
+                    "Forced claim on '%s' over a live cross-machine lease held "
+                    "by '%s'; proceeding without the L2 lease.",
+                    codespace, res.holder or "?",
+                )
+                lease_token = ""
         # unavailable -> keep prior_token (renew) or "" (acquire): L1-only.
 
     with _lease_lock():
