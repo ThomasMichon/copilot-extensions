@@ -6,12 +6,17 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('install', 'update', 'status', 'start', 'stop', 'uninstall', 'engine', 'engine-update')]
+    [ValidateSet('install', 'update', 'status', 'start', 'stop', 'uninstall', 'engine', 'engine-update', 'register-tasks')]
     [string]$Action = 'install',
     [string]$InstallDir,
     [switch]$NoService,
     [switch]$Purge,
-    [switch]$Force
+    [switch]$Force,
+    # Allow the task-scheduling STEP to self-elevate (UAC) when this machine
+    # refuses scheduled-task CREATION without admin. Opt-in only; default is
+    # user-mode with no elevation. Never elevates install/update -- only the
+    # `register-tasks` action (see docs/install-contract.md § Hard rules).
+    [switch]$AllowTaskElevation
 )
 
 Set-StrictMode -Version 2.0
@@ -858,6 +863,139 @@ exit `$LASTEXITCODE
     [System.IO.File]::WriteAllText($EngineLauncher, $engLauncher, $utf8NoBom)
 }
 
+# ── Scheduled-task registration: user-mode by default; NEVER elevate the whole
+#    installer (see docs/install-contract.md § Hard rules) ─────────────────────
+# The installer process is never elevated. Task registration is:
+#   1. idempotent -- a task already in the desired state is left untouched;
+#   2. in-place   -- an existing-but-drifted task is updated with Set-ScheduledTask,
+#                    which (unlike Register-ScheduledTask -Force) modifies a task
+#                    the user already owns WITHOUT admin -- so the common update
+#                    path never elevates, even on boxes that forbid non-admin task
+#                    CREATION (as some locked-down machines do);
+#   3. create     -- a MISSING task is created with Register-ScheduledTask; if the
+#                    machine refuses that without admin we do NOT elevate the
+#                    installer -- we warn with remediation and continue.
+# The ONLY elevation path is the explicit, opt-in `register-tasks` action, which
+# self-elevates ONLY that task-scheduling step -- never install/update.
+
+function Test-Elevated {
+    try {
+        return ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+            ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    } catch { return $false }
+}
+
+function Test-TaskElevationOptIn {
+    if ($AllowTaskElevation) { return $true }
+    $v = $env:AGENT_INDEX_ALLOW_TASK_ELEVATION
+    return [bool]($v -and ($v.Trim().ToLower() -notin @('0', 'false', 'no', 'off', '')))
+}
+
+function Test-AccessDenied {
+    param($ErrorRecord)
+    return ("$($ErrorRecord.Exception.Message)" -match '(?i)access is denied' `
+            -or $ErrorRecord.Exception -is [UnauthorizedAccessException])
+}
+
+function New-TaskSpec {
+    # Single source of truth for the user-mode daemon task shape (both service
+    # and engine). AtLogon auto-run as the current user, no elevation, unlimited
+    # runtime, battery-safe, auto-restart, and start-when-available so a missed
+    # logon trigger still recovers.
+    param([string]$LauncherPath)
+    @{
+        Action    = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$LauncherPath`""
+        Trigger   = New-ScheduledTaskTrigger -AtLogOn
+        Settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+        Principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
+    }
+}
+
+function Test-TaskCurrent {
+    # True when an existing task already matches the desired user-mode shape, so
+    # registration can be skipped entirely (no churn, no elevation).
+    param([string]$TaskName, $Spec)
+    $t = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if (-not $t) { return $false }
+    $haveLogon = @($t.Triggers | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger' }).Count -gt 0
+    if (-not $haveLogon) { return $false }
+    if ("$($t.Settings.ExecutionTimeLimit)" -ne "$($Spec.Settings.ExecutionTimeLimit)") { return $false }
+    if ([bool]$t.Settings.StartWhenAvailable -ne [bool]$Spec.Settings.StartWhenAvailable) { return $false }
+    $ea = @($t.Actions)[0]
+    if ($ea.Execute -ne $Spec.Action.Execute) { return $false }
+    if (("$($ea.Arguments)").Trim() -ne ("$($Spec.Action.Arguments)").Trim()) { return $false }
+    # Principal drift that matters for a user-mode auto-run task: logon type and
+    # run level (a task escalated to RunLevel Highest, or flipped to a different
+    # logon type, is not "current" and should be normalized in place).
+    if ("$($t.Principal.LogonType)" -ne "$($Spec.Principal.LogonType)") { return $false }
+    if ("$($t.Principal.RunLevel)" -ne "$($Spec.Principal.RunLevel)") { return $false }
+    return $true
+}
+
+function Register-UserModeTask {
+    <#
+      Idempotent, user-mode task registration that never elevates the installer.
+      Returns $true when the task ends up in the desired state, else $false.
+    #>
+    param([string]$TaskName, $Spec, [string]$Kind = 'service')
+    if (Test-TaskCurrent -TaskName $TaskName -Spec $Spec) {
+        Write-Skip "$Kind task already current -- not re-registering: $TaskName"
+        return $true
+    }
+    # Update an existing task in place (no admin needed for a task the user owns).
+    if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+        try {
+            Set-ScheduledTask -TaskName $TaskName -Action $Spec.Action -Trigger $Spec.Trigger -Settings $Spec.Settings -Principal $Spec.Principal -ErrorAction Stop | Out-Null
+            Write-Ok "$Kind task updated in place: $TaskName"
+            return $true
+        } catch {
+            if (-not (Test-AccessDenied $_)) { Write-Warn "Could not update $Kind task '$TaskName': $($_.Exception.Message)"; return $false }
+            # else fall through to create/elevation handling
+        }
+    }
+    # Create a missing task (may be refused without admin on locked-down boxes).
+    try {
+        Register-ScheduledTask -TaskName $TaskName -Action $Spec.Action -Trigger $Spec.Trigger -Settings $Spec.Settings -Principal $Spec.Principal -Force -ErrorAction Stop | Out-Null
+        Write-Ok "$Kind task registered: $TaskName"
+        return $true
+    } catch {
+        if (-not (Test-AccessDenied $_)) { Write-Warn "Could not register $Kind task '$TaskName': $($_.Exception.Message)"; return $false }
+        Write-Warn ("$Kind task '$TaskName' needs creation but this machine refuses scheduled-task creation without elevation. " +
+            "Per policy the installer stays user-mode and does NOT elevate; any existing task keeps running. " +
+            "To create/normalize it: run  agent-index-install register-tasks -AllowTaskElevation  (elevates ONLY the task step).")
+        return $false
+    }
+}
+
+function Invoke-ScopedElevation {
+    # Re-run THIS installer elevated for a task-ONLY action (never install/update).
+    param([string]$ElevAction)
+    $childArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath, $ElevAction, '-AllowTaskElevation')
+    if ($InstallDir) { $childArgs += @('-InstallDir', $InstallDir) }
+    try {
+        Write-Host '  ...    Requesting elevation for the task-scheduling step ONLY (UAC)...'
+        $p = Start-Process pwsh -Verb RunAs -ArgumentList $childArgs -PassThru -Wait -ErrorAction Stop
+        if ($p.ExitCode -eq 0) { Write-Ok 'Task-scheduling step completed (elevated).'; return $true }
+        Write-Warn "Elevated task-scheduling step exited with code $($p.ExitCode)."
+        return $false
+    } catch {
+        Write-Warn "Elevation for the task-scheduling step was cancelled or failed: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+function Invoke-RegisterTasks {
+    # The ONLY task-scheduling entry point that may elevate -- and it elevates
+    # ONLY itself (task registration), never a full install/update. Opt-in via
+    # -AllowTaskElevation / AGENT_INDEX_ALLOW_TASK_ELEVATION=1.
+    if ((Test-TaskElevationOptIn) -and -not (Test-Elevated)) {
+        [void](Invoke-ScopedElevation -ElevAction 'register-tasks')
+        return
+    }
+    Register-EngineDaemon
+    Install-Service
+}
+
 function Register-EngineDaemon {
     # Register the persistent, platform-native daemon task that runs the warm
     # engine from the durable venv. A warm engine is left untouched (never
@@ -865,19 +1003,15 @@ function Register-EngineDaemon {
     if ($NoService) { Write-Skip 'Engine daemon task skipped (-NoService)'; return }
     if (-not (Test-Path $EngineVenvPython)) { Write-Skip 'Engine runtime not provisioned -- daemon task not registered'; return }
     Write-EngineFiles
-    try {
-        $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$EngineLauncher`""
-        $trigger = New-ScheduledTaskTrigger -AtLogOn
-        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-        $principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
-        Register-ScheduledTask -TaskName $EngineTaskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
+    $spec = New-TaskSpec -LauncherPath $EngineLauncher
+    if (Register-UserModeTask -TaskName $EngineTaskName -Spec $spec -Kind 'engine daemon') {
         if (Test-EnginePort) {
             Write-Skip "Engine daemon already serving -- leaving the warm engine untouched: $EngineTaskName"
         } else {
             Start-ScheduledTask -TaskName $EngineTaskName -ErrorAction SilentlyContinue
-            Write-Ok "Engine daemon task installed + started: $EngineTaskName"
+            Write-Ok "Engine daemon task active: $EngineTaskName"
         }
-    } catch { Write-Warn "Could not install/start engine daemon task: $($_.Exception.Message)" }
+    }
 }
 
 function Write-ServiceFiles {
@@ -916,15 +1050,10 @@ exit `$LASTEXITCODE
 function Install-Service {
     if ($NoService) { Write-Skip 'Service skipped (-NoService)'; return }
     Write-ServiceFiles
-    try {
-        $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$Launcher`""
-        $trigger = New-ScheduledTaskTrigger -AtLogOn
-        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-        $principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
-        Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
+    $spec = New-TaskSpec -LauncherPath $Launcher
+    if (Register-UserModeTask -TaskName $TaskName -Spec $spec -Kind 'service') {
         Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-        Write-Ok "Service task installed: $TaskName"
-    } catch { Write-Warn "Could not install/start service task: $($_.Exception.Message)" }
+    }
 }
 
 function Invoke-Status {
@@ -980,6 +1109,7 @@ switch ($Action) {
         }
     }
     'update' { Invoke-DowngradeGuard; Install-Runtime; Install-Service }  # engine venv + daemon left untouched by design
+    'register-tasks' { Invoke-RegisterTasks }  # task-scheduling ONLY -- the sole action that may (opt-in) self-elevate that step
     'engine' { Install-Engine | Out-Null; Register-EngineDaemon }        # explicit host-side provisioning (role-independent)
     'engine-update' { if (Install-Engine -Upgrade) { Restart-EngineDaemon } }  # rebuild durable engine venv + restart daemon (decoupled from service update)
     'status' { Invoke-Status }
