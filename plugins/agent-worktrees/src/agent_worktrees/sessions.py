@@ -32,6 +32,14 @@ class SessionContext:
     active_sessions: dict[str, list[str]] = field(default_factory=dict)
     """normalized_path → list of session_ids with live Copilot processes"""
 
+    stale_locks: dict[str, list[int]] = field(default_factory=dict)
+    """normalized_path → pids from ``inuse.<pid>.lock`` files whose process is
+    NOT a live Copilot (a crashed/killed session that never cleaned up its
+    lock). Distinct from ``active_sessions`` (a LIVE bound process): this is the
+    residue the Picker's Reclaim verb must clear "to the point where the pid
+    lock file is removed". A worktree with a stale lock but no mux/live-lock is
+    still offered Reclaim (file-only cleanup), never stranded ACTIVE."""
+
     latest_summary: dict[str, str] = field(default_factory=dict)
     """normalized_path → best available session display text (summary or name)"""
 
@@ -593,6 +601,12 @@ def _enrich_session_dir(
                     ctx.active_sessions[norm_path] = []
                 ctx.active_sessions[norm_path].append(session_id)
                 break
+            else:
+                # A lock file whose pid is no longer a live Copilot -- residue
+                # from a crashed/killed session. Record it so the Picker can
+                # offer Reclaim (file-only cleanup) instead of stranding the row
+                # or falsely reading it ACTIVE.
+                ctx.stale_locks.setdefault(norm_path, []).append(lock_pid)
 
 
 def scan_sessions_fast(

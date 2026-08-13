@@ -54,7 +54,7 @@ def _patch_resume(monkeypatch, *, mux_live=False, live_ids=None):
     monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: None)
     monkeypatch.setattr(m, "_build_launch_cmd",
                         lambda cfg, args, wd, profile=None: ["copilot"])
-    monkeypatch.setattr(m, "_build_env", lambda p, s: {})
+    monkeypatch.setattr(m, "_build_env", lambda p, s, work_dir=None: {})
     monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
     monkeypatch.setattr(m.sessions, "find_latest_session_id_fast",
                         lambda path, sess: "sid-abc-123")
@@ -254,6 +254,8 @@ class TestReclaimOne:
         monkeypatch.setattr(m.reclaim, "resolve_bound_copilots",
                             lambda **k: list(rows))
         monkeypatch.setattr(m.reclaim, "descendants_of", lambda pid, t: set())
+        monkeypatch.setattr(m.reclaim, "clear_lock_residue",
+                            lambda **k: [])
         captured = {}
         monkeypatch.setattr(
             m.reclaim, "reap_bound_copilots",
@@ -270,8 +272,36 @@ class TestReclaimOne:
     def test_nothing_bound_is_ok(self, monkeypatch):
         monkeypatch.setattr(m.reclaim, "build_process_table", lambda: {})
         monkeypatch.setattr(m.reclaim, "resolve_bound_copilots", lambda **k: [])
+        monkeypatch.setattr(m.reclaim, "clear_lock_residue", lambda **k: [])
         out = m.reclaim_one("wtX")
-        assert out == {"ok": True, "worktree_id": "wtX", "targets": 0, "reaped": []}
+        assert out == {"ok": True, "worktree_id": "wtX", "targets": 0,
+                       "reaped": [], "locks_cleared": []}
+
+    def test_clears_lock_residue_after_reap(self, monkeypatch):
+        # Reclaim must clear residual inuse.<pid>.lock "to the point where the
+        # pid lock file is removed" -- the killed pids are passed as force_pids
+        # (the OS may not have reaped them yet) and the cleared residue rides on
+        # the result.
+        monkeypatch.setattr(m.reclaim, "build_process_table", lambda: {})
+        monkeypatch.setattr(
+            m.reclaim, "resolve_bound_copilots",
+            lambda **k: [{"session_id": "s1", "pid": 111,
+                          "worktree_id": "wtX", "homing": "bare"}])
+        monkeypatch.setattr(m.reclaim, "descendants_of", lambda pid, t: set())
+        monkeypatch.setattr(
+            m.reclaim, "reap_bound_copilots",
+            lambda targets, **k: [{"pid": t["pid"], "killed": True,
+                                   "children_killed": 0} for t in targets])
+        seen = {}
+        monkeypatch.setattr(
+            m.reclaim, "clear_lock_residue",
+            lambda **k: seen.update(k)
+            or [{"session_id": "s1", "pid": 111, "path": "…/inuse.111.lock"}])
+        out = m.reclaim_one("wtX")
+        assert seen["worktree_id"] == "wtX"
+        assert seen["force_pids"] == {111}
+        assert out["locks_cleared"] == [
+            {"session_id": "s1", "pid": 111, "path": "…/inuse.111.lock"}]
 
 
 # ── _resume_decision carries the bare-resume option ────────────────────────
@@ -360,11 +390,14 @@ class TestSessionActionVerbs:
 
     def test_bare_orphan_offers_reclaim_not_stop(self):
         # A bare (un-muxed) bound Copilot -> Reclaim; no mux for Stop to reach.
+        # Resume/Bare-resume are SUPPRESSED (Resume XOR Reclaim): clear the
+        # bound process first, then resume.
         verbs = self._verbs(mux_live=False, session_lock_live=True,
                             session_bare_orphan=True, last_session_id="s1")
         assert "Reclaim" in verbs
         assert "Stop" not in verbs
-        assert verbs[0] == "Resume"  # stopped mux, history -> resume
+        assert "Resume" not in verbs and "Bare resume" not in verbs
+        assert verbs[0] == "Reclaim"
 
     def test_bare_orphan_reclaims_even_when_lock_scan_missed_it(self):
         # #662/#1416 blind spot: the cwd-keyed lock-scan never registered the
@@ -391,10 +424,41 @@ class TestSessionActionVerbs:
                             session_bare_orphan=False, last_session_id="s1")
         assert "Reclaim" in verbs
 
-    def test_muxed_plus_bare_offers_both(self):
+    def test_muxed_plus_bare_is_warning_stop_and_repair(self):
+        # The #662 double-binding (a healthy mux AND a separate stray bare
+        # orphan) is an INCONSISTENT/WARNING state: Stop reaches the mux, Repair
+        # reaps the stray orphan while preserving the mux. Reclaim/Open are NOT
+        # offered here (Reclaim would be unsafe beside a live mux).
         verbs = self._verbs(mux_live=True, session_lock_live=True,
                             session_bare_orphan=True, last_session_id="s1")
-        assert "Stop" in verbs and "Reclaim" in verbs
+        assert "Stop" in verbs and "Repair" in verbs
+        assert "Reclaim" not in verbs
+        assert "Open" not in verbs
+
+    def test_stale_lock_no_mux_offers_reclaim(self):
+        # Stale-lock residue (an inuse.<pid>.lock whose pid is dead) with no mux
+        # and no live lock -> Reclaim (file-only cleanup), never stranded and
+        # never falsely ACTIVE. Resume is suppressed until the residue is cleared.
+        verbs = self._verbs(mux_live=False, session_lock_stale=True,
+                            last_session_id="s1")
+        assert "Reclaim" in verbs
+        assert "Resume" not in verbs and "Stop" not in verbs
+
+    def test_resumable_offers_resume_and_bare_resume(self):
+        # No mux, no bound proc/lock/residue, has a head session, dir present ->
+        # the resumable group: Resume + Bare resume (Reclaim absent).
+        verbs = self._verbs(mux_live=False, last_session_id="s1")
+        assert verbs[0] == "Resume"
+        assert "Bare resume" in verbs
+        assert "Reclaim" not in verbs and "Stop" not in verbs
+
+    def test_gone_offers_cleanup_only(self):
+        # A gone worktree (dir missing) with no live mux/lock -> no launch verbs,
+        # just Cleanup (+ always Refresh) to prune the leftover record.
+        verbs = self._verbs(cleanup_bucket="gone")
+        assert "Open" not in verbs and "Resume" not in verbs
+        assert "Reclaim" not in verbs and "Stop" not in verbs
+        assert "Cleanup" in verbs and "Refresh" in verbs
 
     def test_sessionless_offers_neither(self):
         verbs = self._verbs(sessionless=True)
@@ -456,3 +520,87 @@ class TestStartReclaimFilter:
         type(self)._PS._start_reclaim(stub, rec)
         assert calls == []
         assert "no un-muxed bound" in stub.debug
+
+
+class TestStartRepairFilter:
+    """``_start_repair`` filters on :meth:`_warning` (mux + stray bare orphan)
+    and drives the bare-only ``reclaim`` op -- reaping the stray orphan while
+    the positively mux-homed session is left running (PRESERVED)."""
+
+    from agent_worktrees.picker_tui.engine import PickerScreen as _PS
+
+    def _stub(self):
+        import types
+        calls = []
+        stub = types.SimpleNamespace(
+            debug="",
+            _run_op_progress=lambda *a, **k: calls.append((a, k)),
+        )
+        return stub, calls
+
+    def test_warning_dispatches_reclaim_op(self):
+        stub, calls = self._stub()
+        rec = {"id4": "wtX", "mux_live": True, "session_bare_orphan": True}
+        type(self)._PS._start_repair(stub, rec)
+        assert len(calls) == 1
+        # Repair reuses the bare-only ``reclaim`` op (reap the stray orphan,
+        # preserve the mux) -- the verb label differs, the op does not.
+        assert calls[0][0][:3] == ("Repair", "reclaim", [rec])
+
+    def test_non_warning_is_no_op(self):
+        # A cleanly muxed session (no stray orphan) is not a warning -> nothing
+        # to repair, honest debug line.
+        stub, calls = self._stub()
+        rec = {"id4": "wtX", "mux_live": True, "session_bare_orphan": False}
+        type(self)._PS._start_repair(stub, rec)
+        assert calls == []
+        assert "no stray orphan" in stub.debug
+
+
+class TestClearLockResidue:
+    """``reclaim.clear_lock_residue`` -- removes inuse.<pid>.lock residue for a
+    worktree's session dirs, keeping a live muxed sibling's lock intact."""
+
+    def _session_dir(self, tmp_path, monkeypatch, sid, *, cwd, pids):
+        import agent_worktrees.reclaim as rc
+        from agent_worktrees import sessions
+        state = tmp_path / "session-state"
+        sdir = state / sid
+        sdir.mkdir(parents=True, exist_ok=True)
+        for pid in pids:
+            (sdir / f"inuse.{pid}.lock").write_text("x", encoding="utf-8")
+        monkeypatch.setattr(sessions, "_session_state_dir", lambda: state)
+        # Attribute the session dir to worktree "wtX" via its recorded cwd.
+        monkeypatch.setattr(rc, "_session_cwd", lambda entry: cwd)
+        monkeypatch.setattr(rc, "_resolve_worktree_id_for_cwd",
+                            lambda cwd: "wtX" if cwd else None)
+        return rc, sdir
+
+    def test_removes_stale_and_forced_keeps_live(self, tmp_path, monkeypatch):
+        from agent_worktrees import sessions
+        rc, sdir = self._session_dir(
+            tmp_path, monkeypatch, "s1", cwd="/w/wtX", pids=[111, 222, 333])
+        # 111 = a pid we just killed (force-remove); 222 = a live muxed sibling
+        # (keep); 333 = stale/dead (remove).
+        monkeypatch.setattr(
+            sessions, "_is_process_alive", lambda pid: pid in (111, 222))
+        monkeypatch.setattr(
+            sessions, "_is_copilot_process", lambda pid: pid in (111, 222))
+        removed = rc.clear_lock_residue(worktree_id="wtX", force_pids={111})
+        removed_pids = sorted(r["pid"] for r in removed)
+        assert removed_pids == [111, 333]
+        # The live muxed sibling's lock is preserved.
+        assert (sdir / "inuse.222.lock").exists()
+        assert not (sdir / "inuse.111.lock").exists()
+        assert not (sdir / "inuse.333.lock").exists()
+
+    def test_skips_unrelated_worktree(self, tmp_path, monkeypatch):
+        from agent_worktrees import sessions
+        rc, sdir = self._session_dir(
+            tmp_path, monkeypatch, "s1", cwd="/w/wtX", pids=[111])
+        monkeypatch.setattr(sessions, "_is_process_alive", lambda pid: False)
+        monkeypatch.setattr(sessions, "_is_copilot_process", lambda pid: False)
+        # Ask for a DIFFERENT worktree -> no match, nothing removed.
+        removed = rc.clear_lock_residue(worktree_id="other")
+        assert removed == []
+        assert (sdir / "inuse.111.lock").exists()

@@ -417,6 +417,12 @@ def norm(w, machine, env):
         # ``inuse.<pid>.lock`` binds a Copilot process right now (gates Reclaim).
         "last_session_id": w.get("last_session_id"),
         "session_lock_live": bool(w.get("session_lock_live")),
+        # Stale-lock residue: an ``inuse.<pid>.lock`` file whose pid is no longer
+        # a live Copilot (crashed/killed without cleanup). NOT a live binding, so
+        # it never reads ACTIVE -- but it gates Reclaim (file-only cleanup) so a
+        # no-mux/no-live-lock worktree with residue can be cleared to zero.
+        "session_lock_stale": bool(w.get("session_lock_stale")),
+        "stale_lock_pids": list(w.get("stale_lock_pids") or []),
         # #4057/#1416: worktree hosts a live bound Copilot per the OFF-hot-path
         # reconcile (mux OR bare) -- the cached signal that surfaces a
         # bare-resumed session (cwd=home) in the Active section. Distinct from

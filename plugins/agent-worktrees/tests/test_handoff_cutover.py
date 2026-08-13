@@ -288,7 +288,7 @@ class TestCmdHandoffCutover:
             m, "_build_launch_cmd",
             lambda cfg_, args, wd: ["bash", "setup.sh", "--allow-all-tools"],
         )
-        monkeypatch.setattr(m, "_build_env", lambda p, s: {})
+        monkeypatch.setattr(m, "_build_env", lambda p, s, work_dir=None: {})
         monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
 
         # Guard: a real window must NOT be created in dry-run.
@@ -319,7 +319,7 @@ class TestCmdHandoffCutover:
         monkeypatch.setattr(m.tracking, "load_record", lambda p: _Rec())
         monkeypatch.setattr(m, "_build_launch_cmd",
                             lambda c, a, wd: ["copilot"])
-        monkeypatch.setattr(m, "_build_env", lambda p, s: {})
+        monkeypatch.setattr(m, "_build_env", lambda p, s, work_dir=None: {})
         monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
 
         captured = {}

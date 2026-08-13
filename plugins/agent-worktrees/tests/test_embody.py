@@ -119,7 +119,7 @@ def _stub_config(monkeypatch):
         pass
     monkeypatch.setattr(m.cfg, "load_config", lambda: _Cfg())
     monkeypatch.setattr(m, "_build_launch_cmd", lambda c, a, w: ["copilot"])
-    monkeypatch.setattr(m, "_build_env", lambda p, s=None: {})
+    monkeypatch.setattr(m, "_build_env", lambda p, s=None, work_dir=None: {})
     monkeypatch.setattr(m, "_repo_session_env", lambda c, w="": {})
 
 

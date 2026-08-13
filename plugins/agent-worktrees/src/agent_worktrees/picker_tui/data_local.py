@@ -408,6 +408,35 @@ def refresh_one(worktree_id: str, machine: str | None = None,
         return None
     machine = machine if machine is not None else LOCAL[0]
     env = env if env is not None else LOCAL[1]
+    # Head-session recovery (Refresh's repair mechanic): a worktree whose
+    # session registry was lost reads as falsely "sessionless" -- no
+    # last_session_id, so the Actions menu offers a cold-start Open instead of
+    # Resume/Bare-resume, and the row can misclassify. Refresh is an EXPLICIT,
+    # per-row action -- the sanctioned repair path (like backfill-sessions /
+    # doctor) -- so recover the head session via the single sanctioned
+    # session-state sweep, scoped to THIS one record, and persist it so
+    # Resume/Bare-resume light up again on this same paint. Best-effort; a
+    # scan/write hiccup leaves the row as-is rather than failing the refresh.
+    if getattr(rec, "sessions", None) is None:
+        try:
+            discovered = sessions.backfill_sessions([rec])
+            sids = discovered.get(rec.worktree_id, [])
+            if sids:
+                rec.sessions = [
+                    tracking.SessionEntry(session_id=sid, started_at="")
+                    for sid in sids
+                ]
+                tracking.save_record(rec)
+            else:
+                # Mark indexed (empty) so a future routine read -- and a future
+                # Refresh -- doesn't re-sweep. Gated on ``is None`` (never
+                # indexed), NOT ``[]`` (indexed-empty), so recovery runs at most
+                # once per worktree; a genuinely stale ``[]`` registry is
+                # repaired by the explicit ``backfill-sessions`` / ``doctor``.
+                rec.sessions = []
+                tracking.save_record(rec)
+        except Exception:
+            pass
     session_ctx = sessions.scan_sessions_fast([rec])
     try:
         bare_orphan_wts = reclaim.bare_orphan_worktree_ids()
