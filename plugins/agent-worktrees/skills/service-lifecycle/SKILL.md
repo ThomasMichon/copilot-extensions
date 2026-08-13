@@ -157,9 +157,12 @@ live cutover. Everything a running system should become is a function of config;
   the daemon" or "cut over to the new path." A daemon MAY have an **internal**
   service entrypoint (what the OS service manager invokes) — but that is an
   implementation detail `install`/`update` wire up, never the operator's interface.
-- **`start` / `stop` / `status` / `uninstall` remain, but are not required.** They
-  exist for diagnostics, emergency control, and removal — not for normal
-  provisioning or cutover, which `install`/`update` fully own.
+- **`start` / `stop` / `status` / `update-config` / `uninstall` remain, but are not
+  required.** They exist for diagnostics, emergency control, config-only sync, and
+  removal — not for normal provisioning or cutover, which `install`/`update` fully
+  own. (`update` already performs the drift/config reconcile that `update-config`
+  does in isolation, so `update-config` is an optional convenience, never a
+  prerequisite.)
 - **Live cutover is convergence, not a step.** Flipping a running system from an
   old mechanism to a new one (e.g. moving credential-relay ownership into a new
   persistent daemon) happens *inside* `install`/`update` as a reconcile against
