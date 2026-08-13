@@ -176,3 +176,103 @@ def test_list_holds_persists_tenant_pruning(store):
     on_disk = json.loads((store / "connection-owner.json").read_text(encoding="utf-8"))
     assert on_disk["cs-one"]["tenants"] == {}  # stale tenant written out
     assert on_disk["cs-one"]["pinned"] is True
+
+
+# ---------------------------------------------------------------------------
+# Reconciler (increment 2) -- async, fake relay transport
+# ---------------------------------------------------------------------------
+
+
+class FakeRelay:
+    """A stand-in RelayChannel that records start/stop without any SSH."""
+
+    def __init__(self, codespace: str, *, fail_start: bool = False) -> None:
+        self.codespace = codespace
+        self.fail_start = fail_start
+        self.starts = 0
+        self.stops = 0
+        self._alive = False
+
+    def is_alive(self) -> bool:
+        return self._alive
+
+    async def start(self) -> None:
+        self.starts += 1
+        if self.fail_start:
+            raise RuntimeError("boom")
+        self._alive = True
+
+    async def stop(self) -> None:
+        self.stops += 1
+        self._alive = False
+
+
+def _factory(created: dict[str, FakeRelay], *, fail: set[str] | None = None):
+    fail = fail or set()
+
+    def make(codespace: str) -> FakeRelay:
+        relay = FakeRelay(codespace, fail_start=codespace in fail)
+        created[codespace] = relay
+        return relay
+
+    return make
+
+
+async def test_reconcile_starts_held_and_stops_unheld(store):
+    created: dict[str, FakeRelay] = {}
+    owner_mgr = owner.ConnectionOwner(_factory(created))
+
+    owner.hold("cs-one", "tenant-a", pin=True)
+    await owner_mgr.reconcile()
+    assert owner_mgr.active_codespaces() == {"cs-one"}
+    assert created["cs-one"].is_alive()
+    assert created["cs-one"].starts == 1
+
+    # A second reconcile is idempotent -- no extra start.
+    await owner_mgr.reconcile()
+    assert created["cs-one"].starts == 1
+
+    # Fully release the hold (drop the tenant *and* unpin) -> reconcile tears down.
+    owner.release("cs-one", "tenant-a", unpin=True)
+    await owner_mgr.reconcile()
+    assert owner_mgr.active_codespaces() == set()
+    assert created["cs-one"].stops == 1
+
+
+async def test_ensure_returns_false_when_not_held(store):
+    created: dict[str, FakeRelay] = {}
+    owner_mgr = owner.ConnectionOwner(_factory(created))
+    assert await owner_mgr.ensure("cs-missing") is False
+    assert owner_mgr.active_codespaces() == set()
+    assert created == {}
+
+
+async def test_reconcile_survives_a_failing_channel(store):
+    created: dict[str, FakeRelay] = {}
+    owner_mgr = owner.ConnectionOwner(_factory(created, fail={"cs-bad"}))
+
+    owner.hold("cs-bad", "t", pin=True)
+    owner.hold("cs-good", "t", pin=True)
+    await owner_mgr.reconcile()
+
+    # The good channel is up; the bad one is dropped (to retry next cycle).
+    assert "cs-good" in owner_mgr.active_codespaces()
+    assert created["cs-good"].is_alive()
+    assert "cs-bad" not in owner_mgr.active_codespaces()
+    assert created["cs-bad"].starts == 1
+
+
+async def test_shutdown_stops_all_without_touching_registry(store):
+    created: dict[str, FakeRelay] = {}
+    owner_mgr = owner.ConnectionOwner(_factory(created))
+    owner.hold("cs-one", "t", pin=True)
+    owner.hold("cs-two", "t", pin=True)
+    await owner_mgr.reconcile()
+    assert owner_mgr.active_codespaces() == {"cs-one", "cs-two"}
+
+    await owner_mgr.shutdown()
+    assert owner_mgr.active_codespaces() == set()
+    assert created["cs-one"].stops == 1
+    assert created["cs-two"].stops == 1
+    # Registry intent is untouched by a transport shutdown.
+    assert {h.codespace for h in owner.list_holds()} == {"cs-one", "cs-two"}
