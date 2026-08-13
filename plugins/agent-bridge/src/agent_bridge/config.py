@@ -9,11 +9,14 @@ from pathlib import Path
 
 import yaml
 
-from .models import ServiceConfig
+from .models import RepoBridgeConfig, ServiceConfig
 
 log = logging.getLogger("agent-bridge")
 
 _DEFAULT_CONFIG_DIR = "~/.agent-bridge"
+
+#: In-repo agent-bridge config location, relative to a repo root.
+REPO_CONFIG_RELPATH = ".agent-bridge/config.yaml"
 
 
 def config_dir() -> Path:
@@ -41,6 +44,25 @@ def load_config() -> ServiceConfig:
         except Exception:
             log.warning("Failed to parse %s, using defaults", cfg_path)
     return ServiceConfig()
+
+
+def load_repo_bridge_config(repo_root: Path) -> RepoBridgeConfig | None:
+    """Load a repo's in-repo agent-bridge config (``<repo>/.agent-bridge/config.yaml``).
+
+    Returns ``None`` when the file is absent (the common case) or unparseable --
+    the in-repo config is purely additive, so a missing/bad file simply means "no
+    repo-provided settings", never an error. ``repo_root`` is the repo the topology
+    profile derives its roster from (the parent of its ``machines.yaml``).
+    """
+    cfg_path = Path(repo_root).expanduser() / REPO_CONFIG_RELPATH
+    if not cfg_path.exists():
+        return None
+    try:
+        data = yaml.safe_load(cfg_path.read_text()) or {}
+        return RepoBridgeConfig(**data)
+    except Exception:
+        log.warning("Failed to parse in-repo config %s, ignoring", cfg_path)
+        return None
 
 
 def load_or_create_auth_token() -> str:

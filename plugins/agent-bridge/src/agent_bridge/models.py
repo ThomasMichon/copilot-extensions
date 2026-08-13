@@ -580,6 +580,24 @@ class TopologyProfile(BaseModel):
     default_env: dict[str, str] = Field(default_factory=dict)
 
 
+class RepoBridgeConfig(BaseModel):
+    """In-repo agent-bridge config: ``<repo>/.agent-bridge/config.yaml``.
+
+    A repo that a topology profile derives its roster from can carry its own
+    agent-bridge settings *in the repo*, so they travel with the code to every
+    machine that syncs it -- rather than being pinned in each machine's local
+    ``~/.agent-bridge/config.yaml``. Currently the facility spawn defaults
+    (``default_copilot_args`` / ``default_env``): the repo declares the model
+    target once, and every machine's derived roster inherits it on sync. Extra
+    keys are ignored so the file can grow without breaking older daemons.
+    """
+
+    model_config = {"extra": "ignore"}
+
+    default_copilot_args: list[str] = Field(default_factory=list)
+    default_env: dict[str, str] = Field(default_factory=dict)
+
+
 class ServiceConfig(BaseModel):
     """Root config loaded from ~/.agent-bridge/config.yaml."""
 

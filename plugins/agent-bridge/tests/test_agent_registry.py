@@ -1374,10 +1374,12 @@ from agent_bridge.agent_registry import (
     derive_topology_agents,
     infer_control_plane_project,
     load_local_repos,
+    _effective_spawn_defaults,
     _short_machine_agent_name,
     _match_machine_shortname,
     _load_related_entries,
 )
+from agent_bridge.models import RepoBridgeConfig, TopologyProfile
 from agent_bridge.topology import load_control_plane_project
 
 
@@ -1492,6 +1494,45 @@ class TestDerivedAgentDefaults:
         agents = derive_topology_agents(ms, "dotfiles", [], None)
         assert agents["dev6"].copilot_args == []
         assert agents["dev6"].env == {}
+
+
+class TestEffectiveSpawnDefaults:
+    """Machine-local topology profile wins per-dimension; else the in-repo config."""
+
+    def test_repo_config_used_when_profile_empty(self):
+        profile = TopologyProfile(machines_yaml="m.yaml")
+        repo_cfg = RepoBridgeConfig(default_copilot_args=["--model", "repo-m"])
+        args, env = _effective_spawn_defaults(profile, repo_cfg)
+        assert args == ["--model", "repo-m"]
+        assert env == {}
+
+    def test_profile_overrides_repo(self):
+        profile = TopologyProfile(
+            machines_yaml="m.yaml", default_copilot_args=["--model", "local-m"],
+        )
+        repo_cfg = RepoBridgeConfig(default_copilot_args=["--model", "repo-m"])
+        args, _ = _effective_spawn_defaults(profile, repo_cfg)
+        assert args == ["--model", "local-m"]  # machine-local wins
+
+    def test_per_dimension_precedence(self):
+        # profile sets env only; repo sets copilot_args only -> each dimension
+        # resolves independently.
+        profile = TopologyProfile(machines_yaml="m.yaml", default_env={"K": "local"})
+        repo_cfg = RepoBridgeConfig(default_copilot_args=["--model", "repo-m"])
+        args, env = _effective_spawn_defaults(profile, repo_cfg)
+        assert args == ["--model", "repo-m"]
+        assert env == {"K": "local"}
+
+    def test_no_repo_config_falls_back_to_profile(self):
+        profile = TopologyProfile(
+            machines_yaml="m.yaml", default_copilot_args=["--model", "local-m"],
+        )
+        args, _ = _effective_spawn_defaults(profile, None)
+        assert args == ["--model", "local-m"]
+
+    def test_both_empty(self):
+        args, env = _effective_spawn_defaults(TopologyProfile(machines_yaml="m.yaml"), None)
+        assert args == [] and env == {}
 
 
 class TestRelatedRemoteAgents:
