@@ -147,6 +147,19 @@ def cmd_launch(argv: list[str]) -> int:
         else:
             passthrough.append(arg)
 
+    # Bridge the resolved project to the launcher process. The python-first
+    # binstub routes bare `<project>` -> `python -m agent_worktrees --project
+    # <name>`, whose no-args path lands here; launch-session then runs as a
+    # *fresh* process that can only learn the project from the environment or by
+    # git-resolving its cwd. From a directory outside the anchor (e.g. $HOME) the
+    # cwd resolution fails, so without this a bare `<project>` dead-ends in the
+    # launcher with "WORKTREE_PROJECT is not set" (dotfiles/book2). Export it --
+    # exactly what the binstub's venv-missing fallback already does -- so a bare
+    # launch works from anywhere, not only from inside a worktree/anchor.
+    _launch_project = cfg.active_project()
+    if _launch_project:
+        _env_set("WORKTREE_PROJECT", _launch_project)
+
     # Resolve launch script path from installed location
     inst_dir = cfg.install_dir()
     plat = cfg.detect_platform()
