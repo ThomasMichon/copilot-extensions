@@ -141,6 +141,29 @@ def test_ai_plugin_dirs_shells_verb_and_splits_lines():
     ]
 
 
+def test_ai_plugin_dirs_passes_repo_dir_precedence():
+    # The Session-Host dispatch passes the target's known workspace_folder as
+    # --repo-dir even when the spawn command carried no --repo (dotfiles#1274).
+    ok = subprocess.CompletedProcess([], 0, "/workspaces/odsp-web/.ai/atomic\n", "")
+    seen = {}
+
+    def _run(argv, **_kw):
+        seen["argv"] = argv
+        return ok
+
+    with patch("shutil.which", return_value="/bin/agent-codespaces"), \
+         patch("subprocess.run", side_effect=_run):
+        dirs = session_manager._resolve_codespace_ai_plugin_dirs(
+            "my-cs", None, repo_dir="/workspaces/odsp-web",
+        )
+    assert dirs == ["/workspaces/odsp-web/.ai/atomic"]
+    assert seen["argv"] == [
+        "/bin/agent-codespaces", "resolve-ai-plugin-dirs", "my-cs",
+        "--repo-dir", "/workspaces/odsp-web",
+    ]
+    assert "--repo" not in seen["argv"]
+
+
 def test_ai_plugin_dirs_omits_repo_when_none_and_trims_blank_lines():
     ok = subprocess.CompletedProcess([], 0, "  /a/.ai/x  \n\n\n", "")
     seen = {}
