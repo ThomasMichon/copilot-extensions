@@ -125,3 +125,38 @@ def test_release_unknown_is_noop(store):
     h = owner.release("cs-one", "not-a-tenant")
     assert h is not None
     assert set(h.tenants) == {"tenant-a"}
+
+
+def test_corrupt_store_shapes_are_tolerated(store):
+    owner_file = store / "connection-owner.json"
+
+    # A non-object top level -> treated as empty (no crash).
+    owner_file.write_text("[]", encoding="utf-8")
+    assert owner.list_holds() == []
+
+    # A non-numeric tenant heartbeat is dropped on load (so should_hold can't
+    # crash on ``now - hb``); a non-dict record is skipped entirely. The record
+    # is pinned so it survives prune and we can inspect the sanitized tenants.
+    owner_file.write_text(
+        '{"cs-one": {"codespace": "cs-one", "host": "h", "created_at": 1.0, '
+        '"heartbeat_at": 1.0, "pinned": true, "tenants": {"t": "oops"}}, '
+        '"cs-bad": ["not", "a", "record"]}',
+        encoding="utf-8",
+    )
+    h = owner.get_hold("cs-one")
+    assert h is not None
+    assert h.pinned
+    assert h.tenants == {}  # non-numeric heartbeat dropped
+    assert owner.get_hold("cs-bad") is None
+
+
+def test_list_holds_persists_tenant_pruning(store):
+    owner.hold("cs-one", "tenant-a", pin=True)  # pinned so the hold survives
+    # ttl=0 makes the tenant stale; list_holds must persist the pruned tenants.
+    time.sleep(0.01)
+    owner.list_holds(ttl=0.0)
+    import json
+
+    on_disk = json.loads((store / "connection-owner.json").read_text(encoding="utf-8"))
+    assert on_disk["cs-one"]["tenants"] == {}  # stale tenant written out
+    assert on_disk["cs-one"]["pinned"] is True

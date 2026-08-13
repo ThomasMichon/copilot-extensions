@@ -141,15 +141,27 @@ def _read_holds() -> dict[str, OwnerHold]:
     except (OSError, json.JSONDecodeError):
         log.warning("connection-owner.json unreadable; treating as empty")
         return {}
+    if not isinstance(raw, dict):
+        log.warning("connection-owner.json is not an object; treating as empty")
+        return {}
     holds: dict[str, OwnerHold] = {}
-    for codespace, rec in (raw or {}).items():
+    for codespace, rec in raw.items():
+        if not isinstance(rec, dict):
+            continue
         try:
             hold = OwnerHold(**rec)
         except TypeError:
             continue
-        # Normalize: tenants must be a {str: float} mapping.
-        if not isinstance(hold.tenants, dict):
-            hold.tenants = {}
+        # Sanitize the tenants map: must be {str: float}. Drop any entry whose
+        # heartbeat isn't numeric so live_tenants() can't crash on ``now - hb``.
+        tenants: dict[str, float] = {}
+        if isinstance(hold.tenants, dict):
+            for tenant, hb in hold.tenants.items():
+                try:
+                    tenants[str(tenant)] = float(hb)
+                except (TypeError, ValueError):
+                    continue
+        hold.tenants = tenants
         holds[codespace] = hold
     return holds
 
@@ -197,14 +209,18 @@ def get_hold(codespace: str, ttl: float = DEFAULT_TTL) -> OwnerHold | None:
 
 
 def list_holds(ttl: float = DEFAULT_TTL, prune: bool = True) -> list[OwnerHold]:
-    """Return current holds (optionally pruned)."""
+    """Return current holds (optionally pruned).
+
+    When pruning, the cleaned state is written back **unconditionally** -- ``_prune``
+    mutates ``OwnerHold`` objects in place (dropping stale tenants), so a value-wise
+    dict comparison can't detect that change; writing always keeps the on-disk store
+    from retaining stale tenants.
+    """
     with _owner_lock():
         holds = _read_holds()
         if prune:
-            cleaned = _prune(holds, ttl)
-            if cleaned != holds:
-                _write_holds(cleaned)
-            holds = cleaned
+            holds = _prune(holds, ttl)
+            _write_holds(holds)
         return list(holds.values())
 
 
