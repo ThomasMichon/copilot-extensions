@@ -392,6 +392,60 @@ def _cmd_worktrees(rest: list[str]) -> int:
     return 0
 
 
+def _cmd_picker(rest: list[str]) -> int:
+    """Launch the interactive Picker, or capture a headless screenshot.
+
+    ``--demo`` renders the Aperture Labs fixture through the bundled fake engine
+    (no live agent-worktrees needed); ``--screenshot <file>`` writes an SVG and
+    exits instead of launching the TUI. A positional arg selects the project.
+    """
+    from . import picker_app
+
+    demo_mode = "--demo" in rest
+    screenshot = None
+    if "--screenshot" in rest:
+        i = rest.index("--screenshot")
+        if i + 1 >= len(rest):
+            print("error: --screenshot needs a file path")
+            return 2
+        screenshot = rest[i + 1]
+    positionals = [a for a in rest if not a.startswith("-")
+                   and a != screenshot]
+
+    if demo_mode:
+        from .demo import DEMO_PROJECT
+        project = DEMO_PROJECT
+        source = picker_app.demo_source()
+        subtitle = f"{project} · demo (Aperture Labs)"
+    else:
+        if not engine_available():
+            print()
+            print("  The agent-worktrees engine is not installed. Try `--demo` for a")
+            print("  mock preview, or `worktree-manager setup --apply` to install it.")
+            print()
+            return 1
+        projects = build_projects()
+        project = positionals[0] if positionals else (
+            projects[0].name if projects else "")
+        if not project:
+            print("error: no project to open. Adopt one, or pass a project name.")
+            return 2
+        if projects and project not in {p.name for p in projects}:
+            print(f"error: unknown project {project!r}. "
+                  f"Known: {', '.join(p.name for p in projects)}")
+            return 2
+        source = picker_app.engine_source(project)
+        subtitle = project
+
+    if screenshot:
+        svg = picker_app.capture_svg(source, project=project, subtitle=subtitle)
+        with open(screenshot, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(svg)
+        print(f"  wrote screenshot: {screenshot}")
+        return 0
+    return picker_app.run_picker(source, project=project, subtitle=subtitle)
+
+
 def _prereq_line(s) -> str:
     if not s.present:
         state = "optional, absent" if s.optional else "MISSING"
@@ -556,6 +610,9 @@ def main(argv: list[str] | None = None) -> int:
         print("  projects [<name>]      registered projects (harness repos: binstubs + profiles)")
         print("  repos [<name>]         every known repo + its config-state indicators")
         print("  worktrees [<project>]  live worktrees via the agent-worktrees engine (--json)")
+        print("  picker [<project>]     launch the interactive Picker (Textual)")
+        print("  picker --demo          preview the Picker with mock Aperture Labs data")
+        print("  picker [...] --screenshot F  render a headless SVG screenshot to F")
         print()
         print("Phase 2 provisions prerequisites + drives the core install; Phase 3")
         print("adds the Manager state views (projects/repos/plugin enablement); later")
@@ -569,6 +626,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_repos(args[1:])
     if args and args[0] == "worktrees":
         return _cmd_worktrees(args[1:])
+    if args and args[0] == "picker":
+        return _cmd_picker(args[1:])
     if args and args[0] == "doctor":
         return _cmd_doctor()
     if args and args[0] == "setup":
