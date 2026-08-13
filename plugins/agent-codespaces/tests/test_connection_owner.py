@@ -7,6 +7,7 @@ semantics, TTL-based tenant reclamation, pin stickiness, and persistence.
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 import pytest
@@ -193,6 +194,7 @@ class FakeRelay:
         self.stops = 0
         self._alive = False
 
+    @property
     def is_alive(self) -> bool:
         return self._alive
 
@@ -225,7 +227,7 @@ async def test_reconcile_starts_held_and_stops_unheld(store):
     owner.hold("cs-one", "tenant-a", pin=True)
     await owner_mgr.reconcile()
     assert owner_mgr.active_codespaces() == {"cs-one"}
-    assert created["cs-one"].is_alive()
+    assert created["cs-one"].is_alive
     assert created["cs-one"].starts == 1
 
     # A second reconcile is idempotent -- no extra start.
@@ -257,7 +259,7 @@ async def test_reconcile_survives_a_failing_channel(store):
 
     # The good channel is up; the bad one is dropped (to retry next cycle).
     assert "cs-good" in owner_mgr.active_codespaces()
-    assert created["cs-good"].is_alive()
+    assert created["cs-good"].is_alive
     assert "cs-bad" not in owner_mgr.active_codespaces()
     assert created["cs-bad"].starts == 1
     assert created["cs-bad"].stops == 1  # best-effort teardown, no leaked process
@@ -277,3 +279,87 @@ async def test_shutdown_stops_all_without_touching_registry(store):
     assert created["cs-two"].stops == 1
     # Registry intent is untouched by a transport shutdown.
     assert {h.codespace for h in owner.list_holds()} == {"cs-one", "cs-two"}
+
+
+# ---------------------------------------------------------------------------
+# Real factory + daemon runner (increment 3)
+# ---------------------------------------------------------------------------
+
+
+def test_make_supervised_relay_factory_wires_config_and_port():
+    built = {}
+
+    class FakeRelay:
+        def __init__(self, ssh_config, relay_port, *, host_port_resolver=None):
+            built.update(
+                ssh_config=ssh_config, relay_port=relay_port, resolver=host_port_resolver
+            )
+
+        @property
+        def is_alive(self):
+            return False
+
+        async def start(self):
+            pass
+
+        async def stop(self):
+            pass
+
+    class FakeConfigSource:
+        def __init__(self, name, gh_env=None):
+            self.name = name
+            built["gh_env"] = gh_env
+
+        def get_ssh_config(self):
+            return f"sshcfg:{self.name}"
+
+    factory = owner.make_supervised_relay_factory(
+        config="CFG",
+        gh_env={"GH_TOKEN": "x"},
+        relay_cls=FakeRelay,
+        config_source_cls=FakeConfigSource,
+        port_resolver=lambda cfg: 4321 if cfg == "CFG" else 0,
+    )
+    channel = factory("cs-x")
+    assert isinstance(channel, FakeRelay)
+    assert built["ssh_config"] == "sshcfg:cs-x"
+    assert built["relay_port"] == 4321
+    assert built["gh_env"] == {"GH_TOKEN": "x"}
+    # host_port_resolver re-resolves the (possibly drifted) host port on demand.
+    assert built["resolver"]() == 4321
+
+
+class _FakeOwner:
+    """Minimal ConnectionOwner stand-in for daemon-loop tests."""
+
+    def __init__(self, *, stop_after: int, fail_first: bool = False):
+        self.reconciles = 0
+        self.shutdowns = 0
+        self.stop_after = stop_after
+        self.fail_first = fail_first
+        self.stop_event = asyncio.Event()
+
+    async def reconcile(self):
+        self.reconciles += 1
+        if self.fail_first and self.reconciles == 1:
+            raise RuntimeError("cycle boom")
+        if self.reconciles >= self.stop_after:
+            self.stop_event.set()
+
+    async def shutdown(self):
+        self.shutdowns += 1
+
+
+async def test_run_owner_daemon_reconciles_until_stopped():
+    fake = _FakeOwner(stop_after=3)
+    await owner.run_owner_daemon(fake, interval=0, stop_event=fake.stop_event)
+    assert fake.reconciles >= 3
+    assert fake.shutdowns == 1  # channels stopped on exit
+
+
+async def test_run_owner_daemon_survives_a_failing_cycle():
+    fake = _FakeOwner(stop_after=2, fail_first=True)
+    # First reconcile raises; the loop logs and continues to the second, which stops.
+    await owner.run_owner_daemon(fake, interval=0, stop_event=fake.stop_event)
+    assert fake.reconciles >= 2
+    assert fake.shutdowns == 1
