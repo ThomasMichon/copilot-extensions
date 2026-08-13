@@ -1330,6 +1330,15 @@ async def _settle_codespace_on_disconnect(
     if coordination.settle_obligation(name, holder_ref):
         log.info("Settled CodeSpace %s obligation on %s -> at-rest",
                  name, holder_ref)
+        # Mirror the settled disposition onto the SHARED exclusion lease so a
+        # stale obligation on another machine (or a missed local settle) can be
+        # reclaimed by the agent-worktrees sweep reading the lease generically
+        # (resource-obligation-settlement item 2). Best-effort: needs the L2
+        # token from L1; a no-token / degraded mirror never fails the disconnect.
+        from . import lease as _lease
+        token = _lease.lease_token_for(name)
+        if coordination.mirror_disposition(name, "at-rest", token):
+            log.debug("Mirrored CodeSpace %s disposition -> at-rest on lease", name)
         return True
     return False
 

@@ -554,6 +554,25 @@ def claim(
         return lease
 
 
+def lease_token_for(codespace: str, ttl: float = DEFAULT_TTL) -> str | None:
+    """Return the cross-machine (L2) fencing token this box holds for ``codespace``.
+
+    Reads the local L1 lease store and returns the held lease's ``lease_token``
+    (the git-ref fencing token), or ``None`` when no live lease is held / it
+    carries no L2 token. Best-effort: any read error -> ``None``. Used to mirror
+    the obligation disposition onto the shared exclusion lease
+    (:func:`coordination.mirror_disposition`) at settle time, when the disconnect
+    hook has the CodeSpace name + holder but not the token in scope.
+    """
+    try:
+        with _lease_lock():
+            held = _prune(_read_leases(), ttl).get(codespace)
+        token = held.lease_token if held else ""
+        return token or None
+    except Exception:
+        return None
+
+
 def release_claim(codespace: str, owner: str, ttl: float = DEFAULT_TTL) -> bool:
     """Release ``codespace``'s claim iff it is owned by ``owner``. Idempotent.
 
