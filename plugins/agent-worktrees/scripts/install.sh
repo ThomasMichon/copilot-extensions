@@ -596,6 +596,80 @@ deploy_venv() {
     ok "Venv created at $VENV_DIR"
 }
 
+# --- self-provisioning helpers (runtime-self-provisioning pattern) -----------
+# These let the LIGHTWEIGHT, agent-bootstrappable half of agent-worktrees (the
+# in-worktree tools -- worktree/branch/change/session mgmt, esp. PR ops) come up
+# standalone in a confined host (Copilot app / cloud agent) where the full
+# launcher install never ran. The session-launcher half is out of scope here (it
+# relocates to the Configurator -- see the installer-configurator effort Phase 6).
+
+# Vendor a standalone uv into the runtime tool dir when uv is absent (pristine or
+# governed box) instead of dead-ending; add it to PATH for this run.
+_ensure_uv() {
+    command -v uv >/dev/null 2>&1 && return 0
+    local tooldir="$INSTALL_DIR/tool"
+    if [[ -x "$tooldir/uv" ]]; then export PATH="$tooldir:$PATH"; return 0; fi
+    changed "uv not found -- vendoring a standalone uv into $tooldir"
+    mkdir -p "$tooldir"
+    local url="https://astral.sh/uv/install.sh" script="$tooldir/uv-install.sh" got=""
+    if command -v curl >/dev/null 2>&1; then curl -LsSf "$url" -o "$script" 2>/dev/null && got=1; fi
+    if [[ -z "$got" ]] && command -v wget >/dev/null 2>&1; then wget -qO "$script" "$url" 2>/dev/null && got=1; fi
+    if [[ -z "$got" ]] && command -v python3 >/dev/null 2>&1; then
+        python3 - "$url" "$script" <<'PY' 2>/dev/null && got=1
+import sys, urllib.request
+urllib.request.urlretrieve(sys.argv[1], sys.argv[2])
+PY
+    fi
+    if [[ -n "$got" && -s "$script" ]]; then
+        env UV_INSTALL_DIR="$tooldir" UV_UNMANAGED_INSTALL="$tooldir" INSTALLER_NO_MODIFY_PATH=1 sh "$script" >/dev/null 2>&1 || true
+    fi
+    [[ -x "$tooldir/bin/uv" && ! -x "$tooldir/uv" ]] && ln -sf "$tooldir/bin/uv" "$tooldir/uv" 2>/dev/null || true
+    if [[ -x "$tooldir/uv" ]]; then export PATH="$tooldir:$PATH"; ok "Vendored uv into $tooldir"; return 0; fi
+    err "uv is required but not found, and vendoring failed (no reachable uv installer). Install uv, then retry."
+    return 1
+}
+
+# Mirror pip's configured index to uv on a governed box (public PyPI TLS-blocked):
+# uv does not read pip.conf, so derive index-url from pip config / the pip.conf
+# files and export it. No-op where pip has no index (e.g. pristine -- the index
+# then arrives via env / the clean-room fixture).
+_ensure_uv_index() {
+    [[ -n "${UV_INDEX_URL:-}${UV_DEFAULT_INDEX:-}" ]] && return 0
+    local idx=""
+    if command -v pip >/dev/null 2>&1; then idx="$(pip config get global.index-url 2>/dev/null | tr -d '[:space:]')"; fi
+    if [[ -z "$idx" ]] && command -v pip3 >/dev/null 2>&1; then idx="$(pip3 config get global.index-url 2>/dev/null | tr -d '[:space:]')"; fi
+    if [[ -z "$idx" ]]; then
+        local f
+        for f in "${PIP_CONFIG_FILE:-}" "$HOME/.config/pip/pip.conf" "$HOME/.pip/pip.conf" /etc/pip.conf /etc/xdg/pip/pip.conf; do
+            [[ -n "$f" && -f "$f" ]] || continue
+            idx="$(sed -n 's/^[[:space:]]*index-url[[:space:]]*=[[:space:]]*//p' "$f" | head -n1 | tr -d '[:space:]')"
+            [[ -n "$idx" ]] && break
+        done
+    fi
+    if [[ -n "$idx" ]]; then export UV_DEFAULT_INDEX="$idx"; changed "uv index derived from pip config (governed-feed bridge)"; fi
+}
+
+# Deploy ONLY the primary `agent-worktrees` TOOL binstub (the self-provisioning
+# POSIX-sh resolver shim in bin/agent-worktrees + its .cmd/.ps1 parity stubs) into
+# ~/.local/bin -- NOT the per-project launcher binstubs (those are a full-install /
+# adopt concern). This is what makes the tools callable standalone: the full
+# install only deploys this under $HAS_PROJECT, so a runtime-only / confined host
+# would otherwise have no `agent-worktrees` on PATH.
+deploy_tool_binstub() {
+    mkdir -p "$LOCAL_BIN"
+    local stub tmp
+    for stub in agent-worktrees agent-worktrees.cmd agent-worktrees.ps1; do
+        local stub_src="$PLUGIN_DIR/bin/$stub"
+        if [[ -f "$stub_src" ]]; then
+            tmp="$(mktemp "$LOCAL_BIN/$stub.XXXXXX")"
+            cp "$stub_src" "$tmp"
+            chmod +x "$tmp"
+            mv -f "$tmp" "$LOCAL_BIN/$stub"
+            ok "Tool binstub: $LOCAL_BIN/$stub"
+        fi
+    done
+}
+
 deploy_wrappers() {
     mkdir -p "$BIN_DIR"
     local src="$PLUGIN_DIR/bin/launch-session.sh"
@@ -1384,6 +1458,40 @@ except Exception as e:
 # ── Actions ──────────────────────────────────────────────────────────────
 
 case "$ACTION" in
+    stamp)
+        # Cheap 'stamp' (runtime-self-provisioning pattern): splat the
+        # self-provisioning tool binstub + record the payload dir, deferring the
+        # venv build to the binstub's first use. No venv, no uv -- fits a
+        # sessionStart hook's grace window. Only the TOOLS half; no launcher.
+        header "Stamping $SERVICE_NAME (defer runtime to first use)"
+        mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
+        printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
+        deploy_tool_binstub
+        ok "Stamped: agent-worktrees tool binstub on PATH; runtime provisions on first use."
+        ;;
+
+    provision)
+        # Lean runtime build (runtime-self-provisioning pattern): acquire uv,
+        # build+activate the versioned venv slot (writes the `current-version`
+        # marker the bin/agent-worktrees shim resolves), and ensure the tool
+        # binstub is present. Deliberately does NOT deploy wrappers, hooks,
+        # guards, terminal integration, the copilot plugin, or reconcile project
+        # binstubs -- those belong to the full launcher `install`, which is out of
+        # scope for the confined-host tools half. Invoked by the binstub on first
+        # use (see bin/agent-worktrees).
+        header "Provisioning $SERVICE_NAME runtime (lean; tools only, no launcher/hooks)"
+        command -v git >/dev/null 2>&1 || { err "Missing prerequisite: git"; exit 1; }
+        _ensure_uv || exit 1
+        _ensure_uv_index
+        mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
+        deploy_venv || exit 1
+        deploy_package || exit 1
+        _versioned_activate || exit 1
+        deploy_tool_binstub
+        write_deploy_manifest
+        ok "Runtime provisioned (marker -> versions/$SRC_VERSION); agent-worktrees tools ready."
+        ;;
+
     install)
         header "Installing $SERVICE_NAME"
 
@@ -1715,7 +1823,7 @@ case "$ACTION" in
         ;;
 
     *)
-        echo "Usage: $0 {install|uninstall|start|stop|status|update-config|update} [--project-name NAME] [--force] [--remove-config] [--machine NAME]" >&2
+        echo "Usage: $0 {install|stamp|provision|uninstall|start|stop|status|update-config|update} [--project-name NAME] [--force] [--remove-config] [--machine NAME]" >&2
         exit 1
         ;;
 esac
