@@ -113,6 +113,29 @@ def test_index_dispatches_and_emits_json(monkeypatch, capsys) -> None:
     }
 
 
+def test_index_signals_source_failure(monkeypatch, capsys) -> None:
+    """A per-source failure (swallowed by the run loop so other sources still
+    index) is surfaced as ``sources_failed`` + a non-zero exit, instead of
+    masquerading as a clean ``files_crawled: 0`` (#1350)."""
+    from agent_index.indexing import engine as indexing_engine
+
+    monkeypatch.setattr(
+        indexing_engine,
+        "run_reindex",
+        lambda *, full, source, progress_cb=None: {
+            "chunks_total": 0,
+            "files_crawled": 0,
+            "sources_failed": [{"source": "git", "error": "boom"}],
+        },
+    )
+
+    rc = cli.main(["index", "--full"])
+
+    assert rc == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["sources_failed"] == [{"source": "git", "error": "boom"}]
+
+
 def test_clusters_dispatches_and_emits_json(monkeypatch, capsys) -> None:
     import agent_index.store.cluster_store as cluster_store
 

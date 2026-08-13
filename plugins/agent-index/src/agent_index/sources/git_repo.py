@@ -158,11 +158,20 @@ class GitRepoConnector:
         self._requested_source = source
         self.repo_path = Path(repo_path or os.environ.get("AGENT_INDEX_GIT_REPO") or os.getcwd())
         self.repo_path = self.repo_path.expanduser().resolve()
-        self._name = self.repo_path.name
+
+        self._remote = remote or os.environ.get("AGENT_INDEX_GIT_REMOTE") or "origin"
+        # Identify the source by the REMOTE repo so every checkout/worktree of the
+        # same repo shares one source name. A linked worktree's folder basename
+        # differs from the anchor's, which otherwise minted a spurious per-worktree
+        # ``git:<worktree-dir>`` source and left the canonical one stale (#1350).
+        # Fall back to the checkout folder name when there is no remote -- the same
+        # condition under which we index the local working tree instead of
+        # origin/HEAD (see the module docstring), so naming and content stay
+        # consistent.
+        self._name = self._derive_repo_name()
         self._file_source = f"git:{self._name}"
         self._commit_source = f"{self._file_source}:commits"
 
-        self._remote = remote or os.environ.get("AGENT_INDEX_GIT_REMOTE") or "origin"
         self._ref = ref or os.environ.get("AGENT_INDEX_GIT_REF") or f"{self._remote}/HEAD"
         self._fetch = _env_flag("AGENT_INDEX_GIT_FETCH", True) if fetch is None else fetch
 
@@ -173,6 +182,27 @@ class GitRepoConnector:
         self._use_worktree = True
         self._index_ref: str | None = None
         self._index_commit: str | None = None
+
+    @staticmethod
+    def _repo_name_from_url(url: str) -> str | None:
+        """Extract a repo name from a git remote URL (``.../owner/repo(.git)``,
+        scp-like ``git@host:owner/repo.git``, or a local filesystem path with
+        either separator), or ``None`` when nothing usable."""
+        tail = url.strip().replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+        if ":" in tail and "/" not in tail:  # scp-like ``git@host:repo(.git)``
+            tail = tail.rsplit(":", 1)[-1]
+        if tail.endswith(".git"):
+            tail = tail[:-4]
+        tail = tail.strip()
+        return tail or None
+
+    def _derive_repo_name(self) -> str:
+        """Repo identity for the source name: the remote repo (stable across all
+        worktrees), falling back to the checkout folder name when there is no
+        remote (#1350)."""
+        url = self._git_quiet(["remote", "get-url", self._remote]).strip()
+        name = self._repo_name_from_url(url) if url else None
+        return name or self.repo_path.name
 
     @property
     def source_name(self) -> str:

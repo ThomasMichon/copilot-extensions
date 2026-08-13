@@ -325,7 +325,11 @@ def cmd_index(args: argparse.Namespace) -> int:
 
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             result = indexing_engine.run_reindex(full=args.full, source=args.source)
-        return _emit(result)
+        _emit(result)
+        # A per-source failure is swallowed by the run loop (so other sources
+        # still index); surface it here as a non-zero exit rather than letting a
+        # wholly-failed reindex look like a clean run (#1350).
+        return 1 if result.get("sources_failed") else 0
     except Exception as exc:
         return _emit_error(exc)
 
