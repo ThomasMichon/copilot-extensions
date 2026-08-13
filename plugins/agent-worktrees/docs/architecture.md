@@ -300,12 +300,15 @@ containers, bridge sessions) so finalizing never orphans unfinished work. (Effor
 [`../../../docs/architecture.md`](../../../docs/architecture.md#resource-obligations--accountability).)
 
 - **Disposition on the claim ledger.** Each `tracking.ResourceClaim.state` is a
-  disposition `∈ {active, at-rest, released}` (`agent_worktrees.obligations`).
+  disposition `∈ {active, at-rest, released, abandoned}` (`agent_worktrees.obligations`).
   `active` (and any missing/unknown value) **blocks**; `at-rest` (resource work
-  safe) and `released` (claim torn down) do not. `at-rest ≠ released` — a resource
-  can be safe yet its claim still held, or released without the resource being
-  destroyed. For a leaseable resource the disposition mirrors onto the lease
-  record's `context` (`disposition` key) for cross-machine visibility.
+  safe), `released` (claim torn down), and `abandoned` (reclaimed by the sweep) do
+  not. `at-rest ≠ released` — a resource can be safe yet its claim still held, or
+  released without the resource being destroyed. For a leaseable resource the
+  disposition mirrors onto the lease record's `context` (`disposition` key) for
+  cross-machine visibility — populated by the resource plugin at settle/release
+  (agent-codespaces at clean disconnect → `at-rest`) and read back by the reclaim
+  sweep.
 - **The gate is cheap + local + enforcing by default.** It reads only the owner's
   own `record.resources` for `is_unsettled` claims — O(claims), no traversal — and
   runs **before any destructive step**. `obligations.gate_mode()`
@@ -319,15 +322,27 @@ containers, bridge sessions) so finalizing never orphans unfinished work. (Effor
   and flips the claim its **parent** holds on it to `at-rest` (same-machine parent
   via `owner_claim_ref` → `project_dir(project)/worktrees/…`), so the parent's
   gate trusts the recorded verdict instead of recursing.
-- **Ledger CRUD.** `agent-worktrees claims {show,add,settle,release}`.
+- **Ledger CRUD + reclaim.** `agent-worktrees claims {show,add,settle,release}`.
   `claims add --owner-ref <machine/project/worktree_id>` journals onto a
   **cross-project** owner resolved by qualified ref (not the caller's cwd) — for a
   call-site whose cwd is not the owning worktree (e.g. agent-codespaces journaling
-  a CodeSpace claim from the daemon's cwd). A cross-machine owner-ref defers to
-  the lease mirror.
-- **Never-wedge.** The reclaim sweep (`claimant` liveness) may flip a
+  a CodeSpace claim from the daemon's cwd). `claims sweep [--apply]` runs the
+  never-wedge reclaim on demand; `claims orphans` / `claims cleanup [--apply]`
+  list and act on the durable orphanage.
+- **Never-wedge (`agent_worktrees.sweep`).** The reclaim sweep flips a
   provably-gone + provably-safe `active` obligation to `abandoned` (never
-  `at-rest`), so a crashed holder cannot freeze its parent. *(Phase 4.)*
+  `at-rest`), so a crashed/missed holder cannot freeze its parent. Per-kind
+  verdicts: a **worktree** proves gone+safe from the child's record/branch
+  (same-machine `claimant` liveness + squash-aware branch-merged check); a
+  **leaseable** kind (codespace/container) reads the **disposition mirror** off
+  the shared exclusion lease (`sweep.lease_disposition_of` →
+  `obligations.from_context`), which resolves both the **missed-settle** and the
+  **cross-machine** cases (the shared lease is the source of truth, so any
+  machine's sweep reclaims its own stale claim). The sweep runs automatically as a
+  **finalize self-heal** (`sweep.self_heal`) before the gate can block, and on
+  demand via `claims sweep`. A `finalize --abandon` re-homes still-unsettled
+  obligations to a durable **orphanage** (not dropped); `claims cleanup` reclaims
+  them. *(Phases 4–6 complete; effort `resource-obligation-settlement` closed.)*
 
 ### Recovery Mode
 

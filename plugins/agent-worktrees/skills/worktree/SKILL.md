@@ -195,14 +195,22 @@ The error lists each unsettled obligation. Resolve it -- don't bypass:
 - **A cross-repo worktree you created** -- finalize *it* first; its finalize
   flips this worktree's claim to `at-rest` automatically (no manual step).
 - **A borrowed CodeSpace/container** -- merge or move its work off-box, then
-  disconnect (the disconnect hook stamps it `at-rest`), or run
+  disconnect (the disconnect hook stamps it `at-rest` **and mirrors that onto the
+  shared lease**, so the settle is visible cross-machine), or run
   `agent-codespaces finalize <name>`.
 - **A bridge session** -- drive its worktree to final.
 - **A crashed/gone holder that never settled** -- `agent-worktrees claims sweep`
-  (dry-run) then `--apply` reclaims provably-gone-and-safe obligations.
+  (dry-run) then `--apply` reclaims provably-gone-and-safe obligations. (Finalize
+  also **self-heals** this automatically before it blocks.) A stale *codespace*
+  obligation -- including one owned on a different machine -- is reclaimed by
+  reading the disposition mirror off the shared lease, so a clean disconnect
+  anywhere unblocks it.
 - **Genuinely need to finalize anyway** -- `agent-worktrees finalize --abandon`
-  proceeds and **re-homes** the obligations for cleanup/adoption (always logged).
-  Use it deliberately, not as a reflex.
+  proceeds and **re-homes** the obligations to a durable orphanage for
+  cleanup/adoption (always logged), never dropping them. Use it deliberately, not
+  as a reflex. List the orphanage with `agent-worktrees claims orphans`; reclaim
+  the orphaned resources (delete the CodeSpace, finalize the cross-repo worktree)
+  with `agent-worktrees claims cleanup --apply`.
 
 Inspect the ledger any time with `agent-worktrees claims show`. (Relax the gate
 for a session with `AGENT_WORKTREES_OBLIGATION_GATE=warn` -- surface but proceed

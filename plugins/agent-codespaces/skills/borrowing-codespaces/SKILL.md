@@ -80,11 +80,21 @@ agent-codespaces leases                         # CODESPACE  EFFORT  HOST  PID
 > `agent-codespaces ssh` journals an `active` `codespace` claim onto the borrowing
 > worktree's ledger (resource-obligation-settlement); on **disconnect** the
 > cleanliness probe stamps it **`at-rest`** when the box has no unpushed/unmerged
-> work. That claim is why the worktree's `agent-worktrees finalize` **blocks by
-> default** while the CodeSpace still carries live work — settle it (disconnect a
-> clean box, or `agent-codespaces finalize <name>`) before finalizing the
-> worktree, or `finalize --abandon` to re-home it deliberately. Inspect with
-> `agent-worktrees claims show`.
+> work — and **mirrors that disposition onto the CodeSpace's shared exclusion
+> lease** (`lease renew … --disposition at-rest`) so the settle is visible
+> **cross-machine**. That claim is why the worktree's `agent-worktrees finalize`
+> **blocks by default** while the CodeSpace still carries live work — settle it
+> (disconnect a clean box, or `agent-codespaces finalize <name>`) before
+> finalizing the worktree, or `finalize --abandon` to re-home it deliberately
+> (then `agent-worktrees claims cleanup --apply` reclaims the orphaned box).
+> Inspect with `agent-worktrees claims show`.
+>
+> **Never-wedge:** if the disconnect settle was missed (a crash, or a
+> **bridge-driven** box dispatched without an `agent-codespaces ssh` session), or
+> the owner is on **another machine**, agent-worktrees' reclaim sweep reads the
+> lease's mirrored disposition and settles the stale claim — so a clean
+> interaction *anywhere* unblocks the owner's finalize. No manual step needed;
+> `agent-worktrees claims sweep` forces it on demand.
 
 > **Cross-machine coordination (v2 — atomic, shipped):** the host-local lease is
 > the same-machine **L1** fast path; cross-machine exclusion is now an **atomic
