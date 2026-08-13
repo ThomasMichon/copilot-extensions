@@ -48,6 +48,16 @@ worktrees programmatically, use `agent-worktrees create [--json]` (no launch) or
 > [engine ↔ Picker `--json` contract](engine-picker-contract.md). (The seam lives
 > in the CLI so bare invocation always resolves sanely even through a stale
 > binstub; see the Phase 6 effort for the never-break 6a→6b→6c sequence.)
+>
+> **When the bundled Picker is retired (6c).** The fallback then becomes a
+> **trustworthy install trigger**: with no Manager on PATH, bare `<project>`
+> prints the Manager's verifiable source
+> (`https://github.com/ThomasMichon/copilot-extensions`) and the platform install
+> one-liner (`configurator/bootstrap.{sh,ps1}`) so a user who was on the full
+> version is guided to install it — never a silent break, and never an
+> auto-executed remote script. This is capability-gated on the `picker_tui`
+> package, so it stays dormant (no nag) while the Picker still ships and activates
+> automatically once 6c removes it.
 
 ### ① Freshness done for you at launch
 

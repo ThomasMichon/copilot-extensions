@@ -836,19 +836,42 @@ def test_bare_prefers_worktree_manager_when_on_path(monkeypatch):
 
 
 def test_bare_falls_back_to_picker_without_manager(monkeypatch):
-    """No Manager on PATH → the bundled Picker is the fallback (6a)."""
+    """No Manager on PATH → the bundled Picker is the fallback while it ships."""
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
     monkeypatch.setattr(m, "_resolve_active_project", lambda proj: ("demo", None))
     monkeypatch.setattr(m, "_is_headless_project", lambda: False)
     monkeypatch.setattr(m, "_worktree_manager_path", lambda: None)
+    monkeypatch.setattr(m, "_bundled_picker_available", lambda: True)
 
     launched = {"v": False}
     monkeypatch.setattr(m, "cmd_launch", lambda argv: launched.__setitem__("v", True) or 0)
     monkeypatch.setattr(m, "_exec_worktree_manager",
                         lambda mgr, project: pytest.fail("should not exec manager"))
+    monkeypatch.setattr(m, "cmd_manager_install_trigger",
+                        lambda project: pytest.fail("picker present: no install trigger"))
     rc = m.main([])
     assert rc == 0
     assert launched["v"] is True
+
+
+def test_bare_shows_install_trigger_when_picker_retired(monkeypatch):
+    """No Manager AND the bundled Picker retired (6c) → the install trigger,
+    threaded with the active project, and NOT the Picker."""
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m, "_resolve_active_project", lambda proj: ("demo", None))
+    monkeypatch.setattr(m, "_is_headless_project", lambda: False)
+    monkeypatch.setattr(m.cfg, "active_project", lambda: "demo")
+    monkeypatch.setattr(m, "_worktree_manager_path", lambda: None)
+    monkeypatch.setattr(m, "_bundled_picker_available", lambda: False)
+    monkeypatch.setattr(m, "cmd_launch",
+                        lambda argv: pytest.fail("picker retired: must not launch"))
+
+    trig = {"project": "unset"}
+    monkeypatch.setattr(m, "cmd_manager_install_trigger",
+                        lambda project: trig.__setitem__("project", project) or 0)
+    rc = m.main([])
+    assert rc == 0
+    assert trig["project"] == "demo"
 
 
 def test_bare_no_project_prefers_manager_without_project_flag(monkeypatch):
@@ -868,6 +891,48 @@ def test_bare_no_project_prefers_manager_without_project_flag(monkeypatch):
     rc = m.main([])
     assert rc == 0
     assert seam == {"mgr": "/usr/bin/worktree-manager", "project": None}
+
+
+def test_bare_no_project_install_trigger_when_picker_retired(monkeypatch):
+    """No project, no Manager, Picker retired → the install trigger (not the
+    project-resolution balk)."""
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m, "_resolve_active_project", lambda proj: (None, None))
+    monkeypatch.setattr(m.cfg, "active_project", lambda: None)
+    monkeypatch.setattr(m, "_worktree_manager_path", lambda: None)
+    monkeypatch.setattr(m, "_bundled_picker_available", lambda: False)
+    monkeypatch.setattr(m, "cmd_help_unrouted",
+                        lambda **k: pytest.fail("picker retired: show install trigger"))
+    trig = {"project": "unset"}
+    monkeypatch.setattr(m, "cmd_manager_install_trigger",
+                        lambda project: trig.__setitem__("project", project) or 0)
+    rc = m.main([])
+    assert rc == 0
+    assert trig["project"] is None
+
+
+def test_install_trigger_shows_source_and_platform_command(monkeypatch, capsys):
+    """The install trigger prints the verifiable source URL and the correct
+    per-platform install command, and never auto-runs anything."""
+    monkeypatch.setattr(m.platform, "system", lambda: "Linux")
+    rc = m.cmd_manager_install_trigger("demo")
+    err = capsys.readouterr().err
+    assert rc == 0
+    assert m._WORKTREE_MANAGER_REPO_URL in err
+    assert "bootstrap.sh" in err and "curl -fsSL" in err
+    assert "bootstrap.ps1" not in err  # posix must not show the Windows one-liner
+
+    monkeypatch.setattr(m.platform, "system", lambda: "Windows")
+    rc = m.cmd_manager_install_trigger("demo")
+    err = capsys.readouterr().err
+    assert rc == 0
+    assert "bootstrap.ps1" in err and "irm " in err
+    assert "bootstrap.sh" not in err
+
+
+def test_bundled_picker_available_detects_package():
+    """While picker_tui ships, the fallback resolves to the bundled Picker."""
+    assert m._bundled_picker_available() is True
 
 
 def test_bare_headless_ignores_manager(monkeypatch):
