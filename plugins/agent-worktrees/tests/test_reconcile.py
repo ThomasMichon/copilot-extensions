@@ -514,6 +514,46 @@ def test_running_normalized_spelling_is_not_false_drift(env, monkeypatch):
     assert _runtime_updates(plan) == []
 
 
+def test_version_lt_orders_only_confidently():
+    """_version_lt is True only for a confidently-older `a`; ambiguity -> False."""
+    assert reconcile._version_lt("1.0.0", "2.0.0")
+    assert reconcile._version_lt("0.4.0-dev260", "0.4.0-dev262")
+    # PEP440 spelling tolerated (importlib vs plugin.json)
+    assert reconcile._version_lt("0.4.0.dev260", "0.4.0-dev262")
+    # equal / newer / missing -> not confidently older
+    assert not reconcile._version_lt("2.0.0", "2.0.0")
+    assert not reconcile._version_lt("2.0.0-dev1", "2.0.0.dev1")
+    assert not reconcile._version_lt("2.0.0", "1.0.0")
+    assert not reconcile._version_lt(None, "1.0.0")
+    assert not reconcile._version_lt("1.0.0", None)
+
+
+def test_monotonic_guard_suppresses_payload_downgrade(env, monkeypatch):
+    """Payload OLDER than the running build must NOT be redeployed (#1366).
+
+    A fresh `source: local` deploy that is newer than the (throttled/stale)
+    marketplace payload would otherwise be reverted on the next pass."""
+    monkeypatch.setattr(reconcile, "_pid_alive", lambda pid: True)
+    env.write_settings({f"context-handoff@{MKT}": True})
+    env.install_payload("context-handoff", "0.4.0-dev260", scope="universal")  # stale payload
+    env.deploy_runtime("context-handoff", "0.4.0-dev262")   # newer local deploy
+    env.deploy_running("context-handoff", "0.4.0-dev262")   # newer live process
+    plan = reconcile.build_plan(env.repo, machine="anywhere", cache={}, save=False)
+    assert _runtime_updates(plan) == [], "must not downgrade a newer build to a stale payload"
+
+
+def test_monotonic_guard_still_deploys_forward_upgrade(env, monkeypatch):
+    """A payload NEWER than the running build is still deployed (guard is one-way)."""
+    monkeypatch.setattr(reconcile, "_pid_alive", lambda pid: True)
+    env.write_settings({f"context-handoff@{MKT}": True})
+    env.install_payload("context-handoff", "0.4.0-dev262", scope="universal")  # newer payload
+    env.deploy_runtime("context-handoff", "0.4.0-dev260")   # older local deploy
+    env.deploy_running("context-handoff", "0.4.0-dev260")
+    plan = reconcile.build_plan(env.repo, machine="anywhere", cache={}, save=False)
+    rt = _runtime_updates(plan)
+    assert len(rt) == 1 and rt[0]["to_version"] == "0.4.0-dev262"
+
+
 def test_zero_downtime_appends_flag(tmp_path, monkeypatch):
     """A plugin declaring zeroDowntimeUpdate carries -ZeroDowntime into its
     reconcile-driven install.ps1 update (Windows); absence -> no flag (#533 B)."""
