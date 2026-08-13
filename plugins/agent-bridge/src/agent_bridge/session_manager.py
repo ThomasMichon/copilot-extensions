@@ -3140,22 +3140,34 @@ class SessionManager:
     def _handle_usage_update(
         self, session: Session, data: dict[str, Any]
     ) -> None:
-        """Persist context usage and emit threshold warnings."""
-        now = time.time()
-        ctx_size = data.get("context_size")
-        ctx_used = data.get("context_used")
-        model = data.get("model")
+        """Persist context usage and emit threshold warnings.
 
-        session.context_size = ctx_size
-        session.context_used = ctx_used
-        session.usage_model = model
+        Merge semantics: only the fields actually present in ``data`` are
+        advanced. In particular ``usage_model`` is preserved unless a *real*
+        model is reported -- copilot's ACP ``UsageUpdate`` carries ``model=None``
+        every turn, so a naive overwrite kept wiping the model the client applied
+        via ``session/set_config_option`` (dotfiles#790), leaving ``usage_model``
+        perpetually NULL so ``status`` could never show the dispatched agent's
+        model. The client re-emits the *applied* model through this same path
+        (a model-only ``usage_update``), so the last-known model sticks.
+        """
+        now = time.time()
+        if "context_size" in data:
+            session.context_size = data.get("context_size")
+        if "context_used" in data:
+            session.context_used = data.get("context_used")
+        model = data.get("model")
+        if model:
+            session.usage_model = model
         session.last_usage_at = now
 
+        ctx_size = session.context_size
+        ctx_used = session.context_used
         self._db.update_session_usage(
             session.session_id,
             context_size=ctx_size,
             context_used=ctx_used,
-            usage_model=model,
+            usage_model=session.usage_model,
             now=now,
         )
 

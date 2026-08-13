@@ -11,7 +11,12 @@ import pytest
 
 from agent_bridge.db import Database
 from agent_bridge.models import SessionStatus
-from agent_bridge.session_manager import SessionManager, _default_cwd, _STALL_AFTER_S
+from agent_bridge.session_manager import (
+    Session,
+    SessionManager,
+    _default_cwd,
+    _STALL_AFTER_S,
+)
 from agent_bridge.transport import SpawnTarget
 
 
@@ -47,6 +52,37 @@ class TestDefaultCwd:
     def test_posix_without_user_uses_filesystem_root(self) -> None:
         target = SpawnTarget(type="ssh", host="host-a", ssh_shell="bash")
         assert _default_cwd(target) == "/"
+
+
+class TestUsageModelMerge:
+    """`_handle_usage_update` must PRESERVE the applied model across the normal
+    (model-less) usage updates copilot emits, so a dispatched agent's model stays
+    verifiable in ``status`` (dotfiles#790/#1274 WS1-model)."""
+
+    def _sm_session(self, tmp_path):
+        sm = SessionManager(Database(tmp_path / "s.db"))
+        s = Session("sid", "name", SpawnTarget(type="local", cwd="/tmp/x"))
+        return sm, s
+
+    def test_model_none_update_does_not_wipe_applied_model(self, tmp_path) -> None:
+        sm, s = self._sm_session(tmp_path)
+        # The client emits the applied model as a model-only usage_update.
+        sm._handle_usage_update(s, {"model": "claude-opus-4.8"})
+        assert s.usage_model == "claude-opus-4.8"
+        # copilot's per-turn UsageUpdate carries model=None -- must NOT overwrite.
+        sm._handle_usage_update(s, {"context_size": 100, "context_used": 10, "model": None})
+        assert s.usage_model == "claude-opus-4.8"
+        assert s.context_size == 100
+        assert s.context_used == 10
+
+    def test_model_only_update_preserves_context(self, tmp_path) -> None:
+        sm, s = self._sm_session(tmp_path)
+        sm._handle_usage_update(s, {"context_size": 200, "context_used": 50, "model": None})
+        # A later model-only update (no context keys) must not wipe context.
+        sm._handle_usage_update(s, {"model": "gpt-5.6-sol"})
+        assert s.context_size == 200
+        assert s.context_used == 50
+        assert s.usage_model == "gpt-5.6-sol"
 
 
 @pytest.fixture
