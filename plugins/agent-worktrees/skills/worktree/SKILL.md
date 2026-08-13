@@ -44,6 +44,19 @@ description: >
 
 # Worktree Skill
 
+> **Before you start — readiness (self-provisioning tools, no launcher required).**
+> The agent-worktrees **tools** (worktree/branch/change/session management — esp. PR
+> ops: `push-changes` / `create-pr` / `finalize` / `pr-merge`) provision their own
+> runtime on first use and work standalone in any host (CLI, Copilot app, cloud
+> agent), even where the session-launcher never ran. If `command -v agent-worktrees`
+> fails, deploy its binstub first (it then self-provisions on first call):
+> `bash "$(ls ~/.copilot/installed-plugins/*/agent-worktrees/scripts/install.sh | head -1)" stamp`
+> The first call may take ~30–120s to provision (watch for `::agent-provisioning::`);
+> let it finish. If it reports a provisioning failure (e.g. missing uv / network),
+> surface the exact message — don't improvise a toolchain install. (Interactive
+> session *launching* is a separate, launcher-only concern and is not needed for the
+> tools above.)
+
 This system uses **git worktrees** to isolate concurrent Copilot CLI
 sessions. Each session creates or resumes a worktree — a lightweight copy
 of the repo with its own branch, working directory, and index.
