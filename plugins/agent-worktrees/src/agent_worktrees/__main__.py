@@ -4042,6 +4042,18 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
         )
         if _reminder is not None:
             result["reminder"] = _reminder.as_dict()
+        # Emit a ``pr`` envelope so ``run``'s claim recognizer
+        # (_claim_from_run_output) can journal the opened PR as a first-class
+        # ``pr`` claim on the caller -- symmetric with ``create``'s worktree
+        # envelope. The ref is the provider's PR URL (GitHub or ADO), which the
+        # settle-on-merge sweep (sweep.pr_merged) resolves directly.
+        if result.get("pr_opened") and result.get("url"):
+            result["pr"] = {
+                "ref": result.get("url"),
+                "url": result.get("url"),
+                "number": result.get("number"),
+                "provider": result.get("provider"),
+            }
         if use_json:
             _json_output(result)
         elif result.get("success"):
@@ -6142,10 +6154,11 @@ def _resolve_owner_ref() -> str | None:
 def _claim_from_run_output(stdout: str) -> tracking.ResourceClaim | None:
     """Recognize the resource an inner command produced from its JSON output.
 
-    Currently understands the ``create`` envelope (``{"worktree": {...}}``) and
-    the bare worktree dict. Unknown shapes yield None (no forward claim; the
-    backward link via the injected env still applies). New resource kinds add a
-    recognizer here without a schema change.
+    Understands the ``create`` envelope (``{"worktree": {...}}``) / bare worktree
+    dict -> a ``worktree`` claim, and the ``create-pr`` envelope
+    (``{"pr": {"ref": ...}}``) -> a ``pr`` claim. Unknown shapes yield None (no
+    forward claim; the backward link via the injected env still applies). New
+    resource kinds add a recognizer here without a schema change.
     """
     try:
         data = json.loads(stdout)
@@ -6157,21 +6170,32 @@ def _claim_from_run_output(stdout: str) -> tracking.ResourceClaim | None:
     if not isinstance(wt, dict):
         # Tolerate a bare worktree dict (``{"id": ..., "machine": ...}``).
         wt = data if data.get("id") and data.get("machine") else None
-    if not isinstance(wt, dict):
-        return None
-    wid = wt.get("id")
-    machine = wt.get("machine")
-    project = wt.get("repo")
-    if not wid or not machine:
-        return None
-    ref = tracking.format_claim_ref(str(machine), str(project) if project else None,
-                                    str(wid))
-    return tracking.ResourceClaim(
-        kind="worktree",
-        ref=ref,
-        created_at=tracking._now_iso(),
-        state="active",
-    )
+    if isinstance(wt, dict):
+        wid = wt.get("id")
+        machine = wt.get("machine")
+        project = wt.get("repo")
+        if wid and machine:
+            ref = tracking.format_claim_ref(
+                str(machine), str(project) if project else None, str(wid))
+            return tracking.ResourceClaim(
+                kind="worktree",
+                ref=ref,
+                created_at=tracking._now_iso(),
+                state="active",
+            )
+    # ``create-pr --json`` envelope: journal the opened PR as a ``pr`` claim so a
+    # PR produced through a ``run`` chain is a first-class accountable resource
+    # (settle-on-merge then reclaims it -- sweep.pr_merged, GitHub + ADO). The
+    # ref is the provider's PR URL, which the sweep resolves directly.
+    pr = data.get("pr")
+    if isinstance(pr, dict) and pr.get("ref"):
+        return tracking.ResourceClaim(
+            kind="pr",
+            ref=str(pr["ref"]),
+            created_at=tracking._now_iso(),
+            state="active",
+        )
+    return None
 
 
 def _journal_run_claim(owner_ref: str, stdout: str) -> tracking.ResourceClaim | None:
