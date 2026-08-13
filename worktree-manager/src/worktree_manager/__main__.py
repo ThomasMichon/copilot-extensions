@@ -1,11 +1,11 @@
-"""Entry point for the copilot-extensions Configurator.
+"""Entry point for the copilot-extensions Worktree Manager.
 
 Phase 1: on top of the Phase 0 out-of-plugin skeleton, this adds the
 **dependency-free plugin-knowledge model** — the installer's own declarative
 catalog of each plugin's prerequisites, managed config, and "what to do" to make
 it ready (see ``catalog.py`` + ``data/plugins.toml``). Later phases fill in the
 real work — prerequisite provisioning, core install via the harness's own flow,
-first-repo adoption + discovery, the non-agentic visual configurator, and
+first-repo adoption + discovery, the non-agentic visual worktree-manager, and
 Git-referenced presets — see the effort ``installer-configurator`` and umbrella
 issue #352.
 
@@ -32,8 +32,8 @@ from .provision import apply as provision_apply
 from .provision import plan as provision_plan
 from .provision import restart_needed
 
-_BANNER = "copilot-extensions Configurator"
-_TAGLINE = "the standalone, out-of-plugin installer & configurator"
+_BANNER = "copilot-extensions Worktree Manager"
+_TAGLINE = "the standalone, out-of-plugin harness control plane"
 
 # Plugins are shown most-setup-first: the core install engine, then services with
 # their own installers, then Python libraries, then skills-only knowledge plugins.
@@ -46,7 +46,7 @@ _ROADMAP = [
     ("1", "know each plugin's prerequisites & config (dependency-free)", "done"),
     ("2", "install prerequisites (restart-aware) + the agent-worktrees core", "you are here"),
     ("3", "adopt a first harness repo + discover/register others", ""),
-    ("4", "a non-agentic visual configurator (doctor / config / validate)", ""),
+    ("4", "a non-agentic visual worktree-manager (doctor / config / validate)", ""),
     ("5", "Git-referenced presets", ""),
 ]
 
@@ -62,9 +62,9 @@ def _print_intro() -> None:
         marker = f"  <- {here}" if here else ""
         print(f"    {num}. {desc}{marker}")
     print()
-    print("  Run `configurator doctor` to check prerequisites + the core install,")
-    print("  `configurator setup` to plan it (add --apply to execute), and")
-    print("  `configurator plugins` to see what the installer knows.")
+    print("  Run `worktree-manager doctor` to check prerequisites + the core install,")
+    print("  `worktree-manager setup` to plan it (add --apply to execute), and")
+    print("  `worktree-manager plugins` to see what the installer knows.")
     print()
 
 
@@ -106,7 +106,7 @@ def _print_plugins_table(model: Model) -> None:
         print("  * = discovered but not in the authored catalog — running on inferred")
         print("    defaults. Add an entry to data/plugins.toml to teach the installer.")
     print()
-    print("  `configurator plugins <name>` for detail · "
+    print("  `worktree-manager plugins <name>` for detail · "
           "`--prereqs` for the union · `--reconcile` for coverage.")
     print()
 
@@ -279,7 +279,7 @@ def _cmd_projects(rest: list[str]) -> int:
         print(f"    {p.name.ljust(width)}  [{klass}]  "
               f"profiles:{p.profiles}  plugins:{len(p.enabled_plugins)}{kr}")
     print()
-    print("  `configurator projects <name>` for detail.")
+    print("  `worktree-manager projects <name>` for detail.")
     print()
     return 0
 
@@ -315,7 +315,7 @@ def _cmd_repos(rest: list[str]) -> int:
               f"  {r.account or '-'}")
         print(f"    {' ' * width}   {r.path or '?'}")
     print()
-    print("  `configurator repos <name>` for detail.")
+    print("  `worktree-manager repos <name>` for detail.")
     print()
     return 0
 
@@ -352,7 +352,7 @@ def _cmd_doctor() -> int:
     print(f"    binstub: {core.binstub or 'not found in ~/.local/bin'}")
     print()
     selfst = self_status()
-    print("  configurator (self):")
+    print("  worktree-manager (self):")
     print(f"    installed version: {selfst.installed_version or '(not versioned-installed)'}")
     print(f"    running version:   {__version__}")
     print(f"    binstub: {selfst.binstub or 'not found in ~/.local/bin'}")
@@ -360,7 +360,7 @@ def _cmd_doctor() -> int:
     print()
     gaps = missing(statuses)
     if gaps or not core.installed:
-        print("  → not fully set up. Run `configurator setup` to see the plan "
+        print("  → not fully set up. Run `worktree-manager setup` to see the plan "
               "(add --apply to execute).")
     else:
         print("  ✓ prerequisites satisfied and the core is installed.")
@@ -400,7 +400,7 @@ def _cmd_setup(rest: list[str]) -> int:
         print("    ✓ already installed (idempotent — nothing to do).")
     elif cmd is None:
         print("    ! the real installer needs a copilot-extensions checkout;")
-        print("      run `configurator setup` from (or after adopting) a checkout.")
+        print("      run `worktree-manager setup` from (or after adopting) a checkout.")
     else:
         print(f"    state: {core.state} → drive the harness's own installer:")
         print(f"        $ {' '.join(cmd)}")
@@ -442,13 +442,13 @@ def _cmd_self_install(rest: list[str]) -> int:
         print("  ✓ already current — nothing to do (version-gated no-op).")
     elif res.action == "planned":
         print("  would install this version's slot, publish the current-version")
-        print("  marker, and deploy the ~/.local/bin/configurator binstub.")
+        print("  marker, and deploy the ~/.local/bin/worktree-manager binstub.")
         print("  (plan only — re-run with --apply to execute.)")
     elif res.action == "installed":
         print(f"  ✓ installed {res.version}: slot + marker written, binstub deployed:")
         for b in res.binstubs:
             print(f"      {b}")
-        print("  ensure ~/.local/bin is on PATH, then run `configurator` directly.")
+        print("  ensure ~/.local/bin is on PATH, then run `worktree-manager` directly.")
     else:
         print(f"  ! {res.reason}")
         return 1
@@ -464,12 +464,12 @@ def local_bin_hint() -> str:
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] in ("--version", "-V"):
-        print(f"configurator {__version__}")
+        print(f"worktree-manager {__version__}")
         return 0
     if args and args[0] in ("--help", "-h"):
-        print("usage: configurator [--version] [--help] <command>")
+        print("usage: worktree-manager [--version] [--help] <command>")
         print()
-        print("The standalone copilot-extensions installer & configurator.")
+        print("The standalone copilot-extensions harness control plane (installer, configurator & worktree launcher).")
         print()
         print("commands:")
         print("  (no args)              show the app banner + build-out roadmap")
@@ -486,7 +486,7 @@ def main(argv: list[str] | None = None) -> int:
         print()
         print("Phase 2 provisions prerequisites + drives the core install; Phase 3")
         print("adds the Manager state views (projects/repos/plugin enablement); later")
-        print("phases add the visual configurator and presets (issue #352).")
+        print("phases add the visual worktree-manager and presets (issue #352).")
         return 0
     if args and args[0] == "plugins":
         return _cmd_plugins(args[1:])

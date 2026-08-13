@@ -1,6 +1,6 @@
 """Core install driver (Phase 2 — drive the harness's OWN install flow).
 
-The Configurator does **not** reimplement the agent-worktrees install — it
+The Worktree Manager does **not** reimplement the agent-worktrees install — it
 locates and *calls* the plugin's own ``scripts/install.{ps1,sh} install``, which
 builds the shared runtime (``~/.agent-worktrees/``), the venv, and the
 ``~/.local/bin`` binstubs. This keeps the dependency-free boundary: the installer

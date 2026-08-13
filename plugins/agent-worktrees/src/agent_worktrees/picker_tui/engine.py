@@ -3063,7 +3063,7 @@ class PickerScreen(Widget):
 
     def topbar(self, W):
         # Right-side segments, dropped in this order as width shrinks:
-        # version, branch, env, repo. Always kept: "Agent Worktrees" + machine.
+        # version, branch, env, repo. Always kept: "Worktree Manager" + machine.
         ver = f" · v{VERSION}"
         m, e = self.src.LOCAL
         host = f"{m.lower()}"
@@ -3079,7 +3079,7 @@ class PickerScreen(Widget):
         upd_focused = self.sel[0] == "UPD"
 
         def build():
-            left = Text(" Agent Worktrees", style="bold")
+            left = Text(" Worktree Manager", style="bold")
             if present["version"]:
                 left.append(ver, style=C_DIM)
             # Update indicator (#1430): spinner while the launcher stages the

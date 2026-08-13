@@ -7,7 +7,7 @@ and ``data/plugins.toml``.
 
 from __future__ import annotations
 
-from configurator.catalog import (
+from worktree_manager.catalog import (
     KINDS,
     Catalog,
     all_prereqs,
@@ -15,8 +15,8 @@ from configurator.catalog import (
     load_catalog,
     published_prereq_names,
 )
-from configurator.model import coverage
-from configurator.__main__ import main
+from worktree_manager.model import coverage
+from worktree_manager.__main__ import main
 
 
 def test_catalog_loads_and_is_well_formed():

@@ -9,21 +9,21 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from configurator.catalog import Prereq
-from configurator.core_install import (
+from worktree_manager.catalog import Prereq
+from worktree_manager.core_install import (
     core_status,
     install_command,
     install_core,
 )
-from configurator.prereqs import (
+from worktree_manager.prereqs import (
     PrereqStatus,
     _ge,
     detect_baseline,
     detect_prereq,
     missing,
 )
-from configurator.provision import apply, plan, recipe_for, restart_needed
-from configurator.__main__ import main
+from worktree_manager.provision import apply, plan, recipe_for, restart_needed
+from worktree_manager.__main__ import main
 
 
 # ── detection ───────────────────────────────────────────────────────────────

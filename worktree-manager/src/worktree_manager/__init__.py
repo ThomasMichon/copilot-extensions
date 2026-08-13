@@ -1,4 +1,4 @@
-"""copilot-extensions Configurator — standalone, out-of-plugin installer & configurator.
+"""copilot-extensions Worktree Manager — standalone, out-of-plugin harness control plane.
 
 This package is deliberately **not** a Copilot plugin and is **not** delivered
 through the marketplace/plugin pipe. It is its own payload, fetched and run

@@ -1,6 +1,6 @@
 """Declarative plugin-knowledge model (Phase 1, effort ``installer-configurator``).
 
-The Configurator's **installer-owned** knowledge of the plugins: what each one
+The Worktree Manager's **installer-owned** knowledge of the plugins: what each one
 needs (prereqs), the config it manages, and the "what to do" to make it ready.
 The knowledge is DATA (``data/plugins.toml``, shipped inside this payload), read
 here into small typed records.
@@ -8,12 +8,12 @@ here into small typed records.
 **Dependency-free boundary (DQ2).** This module imports **no plugin code** and
 requires **no plugin** to publish anything installer-specific: the catalog stands
 alone. Where a plugin *already* publishes generic metadata for its own reasons —
-the marketplace entry, or ``scripts/service.yaml`` prereqs — the Configurator
+the marketplace entry, or ``scripts/service.yaml`` prereqs — the Worktree Manager
 *opportunistically reconciles* against it (:func:`reconcile`) when a repo checkout
 happens to be present, and simply skips that check when it is not. Reading
 pre-existing metadata creates no dependency edge: the plugin neither knows about
-nor produces anything for the Configurator, and behaves identically with the
-Configurator absent.
+nor produces anything for the Worktree Manager, and behaves identically with the
+Worktree Manager absent.
 """
 
 from __future__ import annotations
@@ -132,7 +132,7 @@ def _plugin(d: dict) -> Plugin:
 
 
 def _default_catalog_path() -> Path:
-    return Path(str(files("configurator") / "data" / "plugins.toml"))
+    return Path(str(files("worktree_manager") / "data" / "plugins.toml"))
 
 
 def load_catalog(path: str | Path | None = None) -> Catalog:
@@ -153,7 +153,7 @@ def find_repo_root(start: str | Path | None = None) -> Path | None:
     """Walk up from ``start`` (default: this file) to a copilot-extensions checkout.
 
     Returns the repo root if one is found (it carries ``.github/plugin/
-    marketplace.json`` and a ``plugins/`` tree), else ``None`` — the Configurator
+    marketplace.json`` and a ``plugins/`` tree), else ``None`` — the Worktree Manager
     may run with no checkout present, in which case discovery falls back to the
     remote marketplace (see :mod:`discovery`).
     """

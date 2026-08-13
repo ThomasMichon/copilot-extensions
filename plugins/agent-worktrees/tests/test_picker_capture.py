@@ -65,7 +65,7 @@ def _isolate_pivots(monkeypatch, tmp_path):
 
 # The topbar title carries a volatile version string + "update available" flag;
 # normalise it so the golden survives version bumps and update-state changes.
-_TOPBAR_RE = re.compile(r"^\s*Agent Worktrees.*$")
+_TOPBAR_RE = re.compile(r"^\s*Worktree Manager.*$")
 
 
 def _normalize(grid: str) -> str:

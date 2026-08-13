@@ -1,6 +1,6 @@
 """Dynamic plugin discovery (Phase 1 refinement — dynamic membership overlay).
 
-The Configurator learns *which* plugins exist by reading the marketplace, not
+The Worktree Manager learns *which* plugins exist by reading the marketplace, not
 from a hand-frozen list: a nearby copilot-extensions checkout when one is present,
 otherwise the **remote published** marketplace ref (the same ref the bootstrap
 fetches). This keeps the membership self-updating and needs zero maintenance — the
@@ -9,7 +9,7 @@ installer never goes stale when a plugin is added or removed.
 This is pure *awareness*, not a dependency: it reads metadata the plugins already
 publish for their own reasons (the marketplace entry, and — from a checkout —
 whether a plugin ships a ``scripts/service.yaml`` / ``pyproject.toml``). No plugin
-code is imported and nothing here requires a plugin to know the Configurator
+code is imported and nothing here requires a plugin to know the Worktree Manager
 exists.
 """
 
@@ -25,7 +25,7 @@ from pathlib import Path
 from .catalog import find_repo_root
 
 #: Where the published marketplace lives when there is no local checkout. ``ref``
-#: is filled from ``CONFIGURATOR_REF`` (set by the bootstrap) or defaults to main.
+#: is filled from ``WORKTREE_MANAGER_REF`` (set by the bootstrap) or defaults to main.
 RAW_MARKETPLACE_URL = (
     "https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/"
     "{ref}/.github/plugin/marketplace.json"
@@ -106,6 +106,6 @@ def discover(
     if root is not None:
         return _from_checkout(root)
     if allow_remote:
-        resolved_ref = ref or os.environ.get("CONFIGURATOR_REF") or DEFAULT_REF
+        resolved_ref = ref or os.environ.get("WORKTREE_MANAGER_REF") or DEFAULT_REF
         return _from_remote(resolved_ref, timeout)
     return DiscoverySource("none", "", ())

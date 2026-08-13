@@ -601,7 +601,7 @@ deploy_venv() {
 # in-worktree tools -- worktree/branch/change/session mgmt, esp. PR ops) come up
 # standalone in a confined host (Copilot app / cloud agent) where the full
 # launcher install never ran. The session-launcher half is out of scope here (it
-# relocates to the Configurator -- see the installer-configurator effort Phase 6).
+#   relocates to the Worktree Manager -- see the installer-configurator effort Phase 6).
 
 # Vendor a standalone uv into the runtime tool dir when uv is absent (pristine or
 # governed box) instead of dead-ending; add it to PATH for this run.
