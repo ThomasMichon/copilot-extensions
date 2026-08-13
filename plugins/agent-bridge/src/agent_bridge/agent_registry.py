@@ -1159,6 +1159,34 @@ def derive_topology_agents(
     return out
 
 
+def _effective_spawn_defaults(
+    profile: Any, repo_cfg: Any,
+) -> tuple[list[str], dict[str, str]]:
+    """Resolve the spawn defaults for a profile: machine-local wins, else in-repo.
+
+    ``profile`` is the machine-local :class:`TopologyProfile`; ``repo_cfg`` is the
+    optional in-repo :class:`RepoBridgeConfig` (``None`` when the repo carries no
+    ``.agent-bridge/config.yaml``). Each dimension resolves independently: if the
+    machine-local profile **explicitly set** the field it wins -- *including setting
+    it to empty*, so a local profile can deliberately clear a repo-provided default
+    (``default_env: {}``); otherwise the repo-declared default is used; otherwise
+    empty. "Explicitly set" is distinguished from "left at its default" via
+    Pydantic's ``model_fields_set``, so an absent local value falls through to the
+    repo, but a present-but-empty one overrides it."""
+    profile_set = getattr(profile, "model_fields_set", set())
+
+    def _pick(field: str, repo_value: object) -> object:
+        if field in profile_set:
+            return getattr(profile, field)
+        return repo_value if repo_cfg is not None else getattr(profile, field)
+
+    copilot_args = _pick(
+        "default_copilot_args", repo_cfg.default_copilot_args if repo_cfg else None
+    )
+    env = _pick("default_env", repo_cfg.default_env if repo_cfg else None)
+    return list(copilot_args), dict(env)
+
+
 def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
     """Build an AgentResolver from config profiles + local discovery.
 
@@ -1215,11 +1243,19 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
         repo_root = Path(profile.machines_yaml).expanduser().resolve().parent
         related = _load_related_entries(repo_root)
         local_machine, local_platform = _detect_local_machine(machines)
+        # In-repo config (<repo>/.agent-bridge/config.yaml) carries the facility
+        # spawn defaults *in the repo* so they ride to every machine on sync. The
+        # machine-local topology profile still wins when it sets a default (an
+        # explicit local override); otherwise the repo-declared default is used.
+        from .config import load_repo_bridge_config
+
+        repo_cfg = load_repo_bridge_config(repo_root)
+        eff_copilot_args, eff_env = _effective_spawn_defaults(profile, repo_cfg)
         derived = derive_topology_agents(
             machines, cp_project, related, local_machine, local_platform,
             local_repos, load_elevated_projects(),
-            default_copilot_args=profile.default_copilot_args,
-            default_env=profile.default_env,
+            default_copilot_args=eff_copilot_args,
+            default_env=eff_env,
         )
         for name, agent in derived.items():
             all_agents.setdefault(name, agent)  # explicit agents_config wins
