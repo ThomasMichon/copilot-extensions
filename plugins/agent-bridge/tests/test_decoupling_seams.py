@@ -113,3 +113,65 @@ def test_relay_launch_env_auth_light_when_unavailable():
     with patch("shutil.which", return_value=None), \
          patch.dict(sys.modules, {"agent_codespaces": None}):
         assert session_manager._resolve_relay_launch_env("cs", None) == ("", None)
+
+
+# --- _resolve_codespace_ai_plugin_dirs (session_manager) -----------------
+
+def test_ai_plugin_dirs_shells_verb_and_splits_lines():
+    ok = subprocess.CompletedProcess(
+        [], 0, "/workspaces/odsp-web/.ai/atomic\n/workspaces/odsp-web/.ai/od-web\n", "",
+    )
+    seen = {}
+
+    def _run(argv, **_kw):
+        seen["argv"] = argv
+        return ok
+
+    with patch("shutil.which", return_value="/bin/agent-codespaces"), \
+         patch("subprocess.run", side_effect=_run):
+        dirs = session_manager._resolve_codespace_ai_plugin_dirs(
+            "my-cs", "odsp-microsoft/odsp-web",
+        )
+    assert dirs == [
+        "/workspaces/odsp-web/.ai/atomic", "/workspaces/odsp-web/.ai/od-web",
+    ]
+    assert seen["argv"] == [
+        "/bin/agent-codespaces", "resolve-ai-plugin-dirs", "my-cs",
+        "--repo", "odsp-microsoft/odsp-web",
+    ]
+
+
+def test_ai_plugin_dirs_omits_repo_when_none_and_trims_blank_lines():
+    ok = subprocess.CompletedProcess([], 0, "  /a/.ai/x  \n\n\n", "")
+    seen = {}
+
+    def _run(argv, **_kw):
+        seen["argv"] = argv
+        return ok
+
+    with patch("shutil.which", return_value="/bin/agent-codespaces"), \
+         patch("subprocess.run", side_effect=_run):
+        dirs = session_manager._resolve_codespace_ai_plugin_dirs("my-cs", None)
+    assert dirs == ["/a/.ai/x"]
+    assert "--repo" not in seen["argv"]
+
+
+def test_ai_plugin_dirs_empty_on_nonzero_exit():
+    bad = subprocess.CompletedProcess([], 3, "junk\n", "boom")
+    with patch("shutil.which", return_value="/bin/agent-codespaces"), \
+         patch("subprocess.run", return_value=bad):
+        assert session_manager._resolve_codespace_ai_plugin_dirs("cs", "r") == []
+
+
+def test_ai_plugin_dirs_empty_on_cli_exception():
+    def _boom(*_a, **_kw):
+        raise OSError("no exec")
+
+    with patch("shutil.which", return_value="/bin/agent-codespaces"), \
+         patch("subprocess.run", side_effect=_boom):
+        assert session_manager._resolve_codespace_ai_plugin_dirs("cs", "r") == []
+
+
+def test_ai_plugin_dirs_empty_when_no_binstub():
+    with patch("shutil.which", return_value=None):
+        assert session_manager._resolve_codespace_ai_plugin_dirs("cs", "r") == []
