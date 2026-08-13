@@ -604,6 +604,93 @@ def test_resolve_codespace(tmp_path: Path):
     assert r.available_here is True
     assert any("agent-codespaces create org/example-web-codespaces" in s for s in r.steps)
     assert any("agent-bridge send codespace:" in s for s in r.steps)
+    # Non-local locus carries a read/explore nudge distinct from the change Plan.
+    assert r.explore
+    assert any("EXPLORE/READ" in e for e in r.explore)
+    assert any("agent-codespaces ssh example-web" in e for e in r.explore)
+
+
+def test_resolve_codespace_explore_uses_workspace_folder(tmp_path: Path):
+    e = RelatedEntry(
+        name="example-web", delegate="agent-codespaces",
+        locus=Locus(preferred="codespace",
+                    codespace={"repo": "org/example-web-codespaces",
+                               "workspace_folder": "/workspaces/example-web"}),
+    )
+    r = related.build_resolution(
+        e, current_machine="host-dev6", repo_class="reference",
+        repo_path=None, adopted=False,
+    )
+    assert any("/workspaces/example-web" in e for e in r.explore)
+
+
+def test_resolve_container_here_explore_prefers_local_checkout(tmp_path: Path):
+    e = RelatedEntry(
+        name="example-web", delegate="agent-containers",
+        locus=Locus(preferred="container",
+                    container={"repo": "org/example-web-codespaces",
+                               "workspace_folder": "/workspaces/example-web",
+                               "machines": ["dev6"]}),
+    )
+    r = related.build_resolution(
+        e, current_machine="host-dev6", repo_class="reference",
+        repo_path=None, adopted=False,
+    )
+    assert r.locus_kind == "container"
+    assert r.available_here is True
+    assert r.explore
+    assert any("agent-containers up example-web" in e for e in r.explore)
+    assert any("reuse" in e.lower() for e in r.explore)
+
+
+def test_resolve_container_elsewhere_explore_delegates(tmp_path: Path):
+    e = RelatedEntry(
+        name="example-web", delegate="agent-bridge",
+        locus=Locus(preferred="container",
+                    container={"repo": "org/example-web-codespaces",
+                               "machines": ["cloud1"]}),
+    )
+    r = related.build_resolution(
+        e, current_machine="host-dev6", repo_class="reference",
+        repo_path=None, adopted=False,
+    )
+    assert r.available_here is False
+    assert r.explore
+    assert any("cloud1" in e for e in r.explore)
+    assert any("agent-bridge send" in e for e in r.explore)
+
+
+def test_resolve_machine_elsewhere_has_explore_hint(tmp_path: Path):
+    e = RelatedEntry(name="x", locus=Locus(preferred="machine:cloud1"),
+                     delegate="agent-bridge")
+    r = related.build_resolution(
+        e, current_machine="host-dev6", repo_class="worktree",
+        repo_path=None, adopted=True,
+    )
+    assert r.explore
+    assert any("agent-bridge send cloud1" in e for e in r.explore)
+
+
+def test_resolve_local_here_has_no_explore_hint(tmp_path: Path):
+    # A checkout on THIS machine needs no nudge -- just grep/read it directly.
+    e = RelatedEntry(name="ce", locus=Locus(preferred="local"))
+    r = related.build_resolution(
+        e, current_machine="host-dev6", repo_class="worktree",
+        repo_path="D:/Src/ce", adopted=True,
+    )
+    assert r.explore == []
+
+
+def test_resolve_local_elsewhere_explore_delegates(tmp_path: Path):
+    e = RelatedEntry(name="x", locus=Locus(machines=["cloud1", "book2"]),
+                     delegate="agent-bridge")
+    r = related.build_resolution(
+        e, current_machine="host-dev6", repo_class="worktree",
+        repo_path=None, adopted=False,
+    )
+    assert r.available_here is False
+    assert r.explore
+    assert any("cloud1" in e for e in r.explore)
 
 
 def test_resolve_local_unavailable_on_this_machine(tmp_path: Path):

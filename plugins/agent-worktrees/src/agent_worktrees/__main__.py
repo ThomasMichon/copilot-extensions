@@ -12326,6 +12326,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                 "current_machine": current_machine,
                 "steps": resn.steps,
                 "notes": resn.notes,
+                "explore": resn.explore,
                 "via_control_plane": via_cp,
             })
             return 0
@@ -12352,6 +12353,11 @@ def cmd_related_dispatch(argv: list[str]) -> int:
         for n in resn.notes:
             output.warn(n)
         print()
+        if resn.explore:
+            print("  Explore (read/understand the code):")
+            for e in resn.explore:
+                print(f"    - {e}")
+            print()
         print("  Plan:")
         for s in resn.steps:
             print(f"    - {s}")
