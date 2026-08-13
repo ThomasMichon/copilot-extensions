@@ -632,6 +632,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Workspace repo the CodeSpace hosts (owner/name); resolves the "
         "in-CodeSpace checkout dir the `.ai` plugins live under.",
     )
+    resolve_ai_p.add_argument(
+        "--repo-dir", dest="repo_dir", default=None,
+        help="Concrete on-CodeSpace checkout dir to resolve against (e.g. "
+        "/workspaces/odsp-web). Takes precedence over --repo; the Session-Host "
+        "dispatch passes the target's known workspace_folder here since the "
+        "registered spawn command may carry no --repo.",
+    )
 
     # --- namespace-* (process-boundary resolver seam for agent-bridge, #892 Inc 3)
     # The `codespace:` namespace resolver, exposed over a process boundary so
@@ -1411,7 +1418,7 @@ async def _stage_plugins(manager, name: str, sources: list[str]) -> list[str]:
 
 
 async def _resolve_repo_ai_plugin_dirs(
-    manager, name: str, repo: str | None, config,
+    manager, name: str, repo: str | None, config, repo_dir: str | None = None,
 ) -> list[str]:
     """Resolve the venue repo's OWN enabled ``.ai`` plugins to remote --plugin-dir.
 
@@ -1425,6 +1432,15 @@ async def _resolve_repo_ai_plugin_dirs(
     the repo dir -- the same logic agent-bridge's ``repo_plugin_dir_args`` runs
     for a local checkout -- and fold each resolved dir into ``--plugin-dir``.
 
+    ``repo_dir`` (when given) is the **concrete** on-target checkout dir to
+    resolve against, used as-is; it takes precedence over deriving one from
+    ``repo`` via config. This is what the Session-Host dispatch passes -- the
+    codespace target already knows its ``workspace_folder`` (e.g.
+    ``/workspaces/odsp-web``, parsed from the launch ``cd``) even when the
+    registered spawn command carries no ``--repo``, so relying on ``repo`` alone
+    would resolve nothing (dotfiles#1274). Falls back to
+    ``config.resolved_workspace_folder_for(repo)`` when no explicit dir is given.
+
     Best-effort: any failure (no resolver package, no python on target, malformed
     settings) yields ``[]`` so the dispatch proceeds without repo-own plugins.
     Remote-marketplace enabled plugins (e.g. a ``github`` source) are reported as
@@ -1432,8 +1448,9 @@ async def _resolve_repo_ai_plugin_dirs(
     """
     from . import ai_plugin_staging as aps
 
-    resolver = getattr(config, "resolved_workspace_folder_for", None)
-    repo_dir = resolver(repo) if callable(resolver) else None
+    if not repo_dir:
+        resolver = getattr(config, "resolved_workspace_folder_for", None)
+        repo_dir = resolver(repo) if callable(resolver) else None
     if not repo_dir:
         return []
     pkg = aps.find_plugin_resolve_pkg()
@@ -4156,6 +4173,7 @@ def _cmd_resolve_ai_plugin_dirs(args: argparse.Namespace) -> int:
             await manager.ensure_connected(args.name, source, [])
             return await _resolve_repo_ai_plugin_dirs(
                 manager, args.name, getattr(args, "repo", None), config,
+                repo_dir=getattr(args, "repo_dir", None),
             )
         finally:
             await manager.disconnect(args.name)

@@ -98,7 +98,7 @@ def _resolve_relay_launch_env(
 
 
 def _resolve_codespace_ai_plugin_dirs(
-    codespace_name: str, repo: str | None
+    codespace_name: str, repo: str | None, repo_dir: str | None = None,
 ) -> list[str]:
     """Resolve the CodeSpace repo's OWN enabled ``.ai`` plugin dirs to fold into
     the Session-Host launch as ``--plugin-dir`` (dotfiles#1274 WS1-skills).
@@ -109,6 +109,14 @@ def _resolve_codespace_ai_plugin_dirs(
     ``agent_codespaces``. The verb SSHes to the CodeSpace and runs the canonical
     ``plugin_resolve`` resolver against the workspace checkout, printing each
     resolved ``/workspaces/<repo>/.ai/<name>`` dir (one per line).
+
+    ``repo_dir`` is the target's **concrete** ``workspace_folder`` (e.g.
+    ``/workspaces/odsp-web``); it is passed as ``--repo-dir`` and takes
+    precedence over ``--repo``. The codespace spawn command frequently carries
+    **no** ``--repo`` (so ``repo`` is empty), but ``workspace_folder`` is always
+    known (parsed from the launch ``cd``), so passing it directly is what makes
+    the resolve actually find the ``.ai`` plugins -- relying on ``repo`` alone
+    resolved nothing (dotfiles#1274).
 
     ``copilot --acp`` ignores ``enabledPlugins`` and only surfaces plugin skills
     via ``--plugin-dir``, so without this a dispatched agent never loads the
@@ -122,6 +130,8 @@ def _resolve_codespace_ai_plugin_dirs(
     argv = [binstub, "resolve-ai-plugin-dirs", codespace_name]
     if repo:
         argv += ["--repo", repo]
+    if repo_dir:
+        argv += ["--repo-dir", repo_dir]
     creationflags = (
         subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     )
@@ -2358,6 +2368,7 @@ class SessionManager:
                 # they land on the ``copilot`` invocation.
                 ai_plugin_dirs = _resolve_codespace_ai_plugin_dirs(
                     cs_target["name"], cs_target.get("repo") or None,
+                    repo_dir=cs_target.get("workspace_folder") or None,
                 )
                 for d in ai_plugin_dirs:
                     acp_command += f' --plugin-dir="{d}"'
