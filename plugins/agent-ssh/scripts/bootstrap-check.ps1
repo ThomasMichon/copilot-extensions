@@ -21,8 +21,20 @@ $ErrorActionPreference = 'SilentlyContinue'
 $InstallDir = Join-Path $env:USERPROFILE '.agent-ssh'
 $Manifest   = Join-Path $InstallDir 'deploy-manifest.json'
 
-# Not installed yet -> nothing to reconcile (first install is the setup step).
-if (-not (Test-Path $Manifest)) { exit 0 }
+# Not provisioned yet -> do the cheap FIRST install ('stamp') so the binstub is
+# on PATH this session; the self-provisioning binstub then builds the venv on
+# first use (#1393). Only fires when the installer declares a 'stamp' action
+# (and only resolves when run from the plugin payload, where install.ps1 is a
+# sibling); otherwise a safe no-op.
+if (-not (Test-Path $Manifest)) {
+    $installer = Join-Path $PSScriptRoot 'install.ps1'
+    if ((Test-Path $installer) -and (Select-String -Path $installer -Pattern "'stamp'" -Quiet)) {
+        $pw = Get-Command pwsh -ErrorAction SilentlyContinue
+        $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
+        & $exe -NoProfile -ExecutionPolicy Bypass -File $installer stamp *> $null
+    }
+    exit 0
+}
 
 try {
     $m = Get-Content $Manifest -Raw | ConvertFrom-Json
