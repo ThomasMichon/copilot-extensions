@@ -541,7 +541,6 @@ def clear_bridge_locks(
     if not worktree_id:
         return removed
     force_pids = set(force_pids or [])
-    table = build_process_table() if table is None else table
     state_dir = sessions._session_state_dir()
     if not state_dir.exists():
         return removed
