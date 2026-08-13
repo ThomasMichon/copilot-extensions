@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -95,7 +96,7 @@ def _terminate_pid(pid: int) -> None:
                 finally:
                     k32.CloseHandle(handle)
         else:
-            os.kill(int(pid), 15)
+            os.kill(int(pid), signal.SIGTERM)
     except Exception:  # best effort
         log.debug("terminate pid %s failed", pid, exc_info=True)
 
@@ -304,13 +305,16 @@ class TaskRunner:
         log.info("Task runner stopped")
 
     async def drain(self, *, timeout: float = 300.0, poll: float = 0.5) -> bool:
-        """Pause dequeueing for a cutover.
+        """Pause dequeueing for a cutover; always drains clean.
 
         In the worker-delegation model indexing runs in a DETACHED versioned
         subprocess that survives this service's exit (it runs from its pinned
         version folder) and is re-adopted by the next service — so a running
         index job never blocks a cutover. We only stop dequeueing new work;
-        in-flight searches are drained separately by the DrainGate.
+        in-flight searches are drained separately by the DrainGate. ``timeout``
+        and ``poll`` are accepted for signature compatibility but not needed
+        (there is no in-process indexing work to wait out), so this never returns
+        ``False``.
         """
         self._paused = True
         self._wake.set()
@@ -402,6 +406,13 @@ class TaskRunner:
         and survives a later cutover of the service (near-ZDD).
         """
         log_path = self.store.data_dir / "worker.log"
+        # Workers run one-at-a-time (no interleaving), but bound the shared log so
+        # it can't grow without limit over many runs: truncate once it is large.
+        try:
+            if log_path.exists() and log_path.stat().st_size > 2_000_000:
+                log_path.write_bytes(b"")
+        except OSError:
+            pass
         logf = open(log_path, "ab", buffering=0)  # child inherits this handle
         try:
             cmd = [sys.executable, "-m", "agent_index", "index-worker", "--task", task_id]
@@ -424,6 +435,12 @@ class TaskRunner:
 
     async def _launch_worker(self, task: TaskRecord) -> None:
         """Spawn + register a worker for a freshly dequeued (processing) task."""
+        # NOTE: this per-source lock is IN-PROCESS — it serializes the worker
+        # against THIS service's own ingest endpoints for the worker's lifetime.
+        # It does NOT coordinate across processes: after a cutover the new service
+        # does not hold it while the detached worker keeps writing. That narrow
+        # cross-process write window is left to the store's own file locking; a
+        # durable cross-process source lock is a follow-up.
         source_lock = None
         if self._source_lock_acquire is not None:
             source_key = task.source if task.source != "all" else "__all__"
