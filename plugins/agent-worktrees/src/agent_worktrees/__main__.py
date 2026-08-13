@@ -5572,6 +5572,8 @@ def cmd_claims(args: argparse.Namespace) -> int:
         return _claims_settle(args, target[1])
     if target and target[0] == "sweep":
         return _claims_sweep(args)
+    if target and target[0] == "orphans":
+        return _claims_orphans(args)
     worktree_id = target[0] if target else None
     return _claims_show(args, worktree_id)
 
@@ -5832,6 +5834,37 @@ def _claims_sweep(args: argparse.Namespace) -> int:
     print(f"{verb} {len(reclaimed)} obligation(s):")
     for r in reclaimed:
         print(f"  · {r['owner']}: {r['kind']} {r['ref']}")
+    return 0
+
+
+def _claims_orphans(args: argparse.Namespace) -> int:
+    """List the durable orphanage -- obligations re-homed by an ``--abandon``
+    finalize (resource-obligation-settlement, dotfiles#1161).
+
+    These name resources (a CodeSpace, a cross-repo worktree, a bridge session)
+    whose owning worktree was abandoned rather than settled, recorded here so
+    they are not silently dropped -- a cleanup/adoption pass reads this registry.
+    """
+    orphans = tracking.load_orphaned_obligations()
+    if args.json:
+        _json_output({"orphaned": orphans, "count": len(orphans)})
+        return 0
+    if not orphans:
+        print("claims orphans: no re-homed obligations "
+              "(nothing has been --abandon'd, or the registry is empty).")
+        return 0
+    print(f"Re-homed (abandoned) obligations -- {len(orphans)} pending cleanup:")
+    for e in orphans:
+        line = f"  · {e.get('kind')}: {e.get('ref')}"
+        src = e.get("source_worktree")
+        when = e.get("abandoned_at")
+        meta = ", ".join(x for x in (f"from {src}" if src else "",
+                                     f"@ {when}" if when else "") if x)
+        if meta:
+            line += f"  ({meta})"
+        if e.get("note"):
+            line += f" -- {e['note']}"
+        print(line)
     return 0
 
 
@@ -12994,7 +13027,8 @@ def build_parser() -> argparse.ArgumentParser:
                         "a new outbound claim, OR 'release <ref>' to retire one, "
                         "OR 'settle <ref>' to mark it at-rest (settled) / released, "
                         "OR 'sweep' to reclaim provably-gone+safe obligations "
-                        "(never-wedge)")
+                        "(never-wedge), OR 'orphans' to list obligations re-homed "
+                        "by an --abandon finalize (pending cleanup)")
     p.add_argument("--remove", action="store_true",
                    help="with release: drop the claim entry entirely instead of "
                         "marking it released")
