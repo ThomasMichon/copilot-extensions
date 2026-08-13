@@ -7319,6 +7319,16 @@ def reclaim_one(worktree_id: str, *, bare_only: bool = True) -> dict:
     """
     table = reclaim.build_process_table()
     found = reclaim.resolve_bound_copilots(worktree_id=worktree_id, table=table)
+    # #4272/#1416: a bare-resumed / bridge-owned session (cwd=home) is invisible
+    # to the cwd-keyed resolve above, so an ACTIVE-via-bridge worktree would
+    # offer Reclaim (see engine._reclaimable) but reap NOTHING -- stranding the
+    # row ACTIVE with no way to act. Its bridge.lock carries the worktree id +
+    # owner pid, so union those targets in (deduped by pid).
+    seen_pids = {f["pid"] for f in found}
+    for b in reclaim.resolve_bridge_bound(worktree_id, table=table):
+        if b["pid"] not in seen_pids:
+            found.append(b)
+            seen_pids.add(b["pid"])
     if bare_only:
         found = [f for f in found if f["homing"] != "mux"]
     me = os.getpid()
@@ -7333,15 +7343,23 @@ def reclaim_one(worktree_id: str, *, bare_only: bool = True) -> dict:
     # the pids we just terminated (the OS may not have reaped them yet, so a
     # liveness re-check could still read them alive) plus any pre-existing
     # stale-pid residue; a live muxed sibling's lock is preserved.
+    killed_pids = {r["pid"] for r in reaped if r.get("killed")}
     cleared = reclaim.clear_lock_residue(
         worktree_id=worktree_id,
-        force_pids={r["pid"] for r in reaped if r.get("killed")},
+        force_pids=killed_pids,
         table=table,
+    )
+    # A bridge Copilot reaped out from under agent-bridge can't run the bridge's
+    # on-exit lock cleanup, so unlink the now-dead bridge.lock too -- otherwise
+    # the file-first bridge scan keeps reading the worktree ACTIVE.
+    bridge_cleared = reclaim.clear_bridge_locks(
+        worktree_id, force_pids=killed_pids, table=table,
     )
     return {
         "ok": ok, "worktree_id": worktree_id,
         "targets": len(targets), "reaped": reaped,
         "locks_cleared": cleared,
+        "bridge_locks_cleared": bridge_cleared,
     }
 
 

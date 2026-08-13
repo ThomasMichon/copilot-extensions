@@ -471,6 +471,105 @@ def live_bridge_worktrees() -> set[str]:
     return out
 
 
+def resolve_bridge_bound(
+    worktree_id: str,
+    *,
+    table: dict[int, dict] | None = None,
+) -> list[dict]:
+    """Reap targets for a worktree's **live bridge-owned** Copilot session(s).
+
+    The Reclaim counterpart to :func:`live_bridge_worktrees`. A bare-resumed /
+    bridge-owned session runs with ``cwd=home`` and is often not registered
+    under the worktree, so :func:`resolve_bound_copilots` -- keyed on
+    ``cwd -> worktree_id`` -- cannot see it. The ``bridge.lock`` (#4272) carries
+    the bound ``worktree_id`` **and** the owner pid directly, so this reads it
+    file-first and returns targets shaped like ``resolve_bound_copilots`` items
+    (plus the ``bridge_lock`` path) for exactly the locks that are provably live
+    and match ``worktree_id``. A crashed owner leaves a stale lock that
+    :func:`locks.lock_is_live` rejects, so a dead session is never targeted.
+
+    Best-effort: an enumeration hiccup yields an empty list, never an exception.
+    """
+    out: list[dict] = []
+    if not worktree_id:
+        return out
+    table = build_process_table() if table is None else table
+    try:
+        state_dir = sessions._session_state_dir()
+        if not state_dir.exists():
+            return out
+        for lock_path in state_dir.glob("*/bridge.lock"):
+            data = locks.read_lock(lock_path)
+            if not (data and locks.lock_is_live(data)):
+                continue
+            if str(data.get("worktree_id") or "") != worktree_id:
+                continue
+            pid = data.get("pid")
+            if not isinstance(pid, int):
+                continue
+            out.append({
+                "session_id": lock_path.parent.name,
+                "pid": pid,
+                "cwd": None,
+                "worktree_id": worktree_id,
+                "homing": homing_of(pid, table),
+                "bridge_lock": str(lock_path),
+            })
+    except OSError:
+        return out
+    return out
+
+
+def clear_bridge_locks(
+    worktree_id: str,
+    *,
+    force_pids: set[int] | None = None,
+    table: dict[int, dict] | None = None,
+) -> list[dict]:
+    """Remove ``bridge.lock`` residue for a worktree after a Reclaim.
+
+    The bridge-lock counterpart to :func:`clear_lock_residue`: a Copilot reaped
+    out from under agent-bridge can't run the bridge's on-exit lock cleanup, so
+    its ``bridge.lock`` would linger. This unlinks each ``<session>/bridge.lock``
+    whose recorded ``worktree_id`` matches and whose owner is no longer a live
+    Copilot (or was just force-killed by this reclaim). A still-live bridge
+    owner's lock is **kept** -- never strip a lock out from under a running
+    session. Best-effort; a per-file ``OSError`` is skipped. Returns the removed
+    residue as ``[{session_id, pid, path}]``.
+    """
+    removed: list[dict] = []
+    if not worktree_id:
+        return removed
+    force_pids = set(force_pids or [])
+    state_dir = sessions._session_state_dir()
+    if not state_dir.exists():
+        return removed
+    for lock_path in state_dir.glob("*/bridge.lock"):
+        data = locks.read_lock(lock_path)
+        if not data:
+            continue
+        if str(data.get("worktree_id") or "") != worktree_id:
+            continue
+        pid = data.get("pid")
+        live = (
+            isinstance(pid, int)
+            and sessions._is_process_alive(pid)
+            and sessions._is_copilot_process(pid)
+        )
+        if live and pid not in force_pids:
+            continue
+        try:
+            lock_path.unlink()
+            removed.append({
+                "session_id": lock_path.parent.name,
+                "pid": pid,
+                "path": str(lock_path),
+            })
+        except OSError:
+            pass
+    return removed
+
+
 # ---------------------------------------------------------------------------
 # Reaping -- precise, subtree-scoped termination
 # ---------------------------------------------------------------------------
