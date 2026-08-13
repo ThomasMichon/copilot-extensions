@@ -718,18 +718,38 @@ function Write-V3Manifest {
     Write-ServiceOk "Deploy manifest written (source: $kind)"
 }
 
+function Ensure-UvIndex {
+    <# Bridge the governed pip index-url to uv. uv does not read pip.conf, so a
+       governed feed (where public PyPI is blocked) must be exported as
+       UV_DEFAULT_INDEX or uv resolves against public PyPI and fails. No-op when
+       already set or when pip has no configured index. Mirrors install.sh's
+       `_ensure_uv_index`. #>
+    if ($env:UV_DEFAULT_INDEX -or $env:UV_INDEX_URL) { return }
+    $idx = ''
+    try { $idx = (& pip config get global.index-url 2>$null | Out-String).Trim() } catch { $idx = '' }
+    if (-not $idx) {
+        try { $idx = (& python -m pip config get global.index-url 2>$null | Out-String).Trim() } catch { $idx = '' }
+    }
+    if ($idx) {
+        $env:UV_DEFAULT_INDEX = $idx
+        Write-ServiceChanged "uv index derived from pip config (governed-feed bridge)"
+    }
+}
+
 function Invoke-VenvPackageInstall {
     <# Install a local package dir into the venv, forcing the local code to
        refresh even when its (dev) version string is unchanged.
 
-       Prefers `<venv python> -m pip` whenever the venv has pip -- which it does
-       when the venv was built from a signed system Python via `python -m venv`
-       (the SAC path in Deploy-Venv). This avoids `uv` entirely on Smart App
-       Control / profile-mount Cloud PCs, where launching the
-       WinGet `uv.exe` reparse shim fails ("untrusted mount point"). Falls back
-       to `uv` only on venvs that lack pip (uv-created). Every command runs from
-       a trusted CWD (SystemDrive root), never the profile mount, so even the uv
-       fallback is safe there.
+       PREFERS `uv` (harness convention: always uv, never bare pip). uv is
+       immune to a failure class pip is not: pip's post-install "scripts on
+       PATH?" check `realpath`s EVERY %PATH% entry, so an untrusted junction on
+       PATH -- e.g. Agency's `%APPDATA%\agency\CurrentVersion` -- makes pip die
+       with `WinError 448` under Windows RedirectionGuard (dotfiles book2). uv
+       never resolves PATH entries, so it sidesteps it. Falls back to
+       `<venv python> -m pip` ONLY when uv is unavailable (uv strictly preferred
+       whenever present). Every command runs from a trusted CWD (SystemDrive
+       root), never the profile mount, so the WinGet uv.exe reparse shim is safe
+       on SAC / profile-mount Cloud PCs.
 
        Returns [pscustomobject]@{ ExitCode; Output }. #>
     param(
@@ -738,24 +758,36 @@ function Invoke-VenvPackageInstall {
         [Parameter(Mandatory)][string]$PkgDir
     )
 
-    $hasPip = $false
-    try { & $VenvPython -m pip --version *> $null; $hasPip = ($LASTEXITCODE -eq 0) } catch { $hasPip = $false }
+    $uvAvailable = [bool](Get-Command uv -ErrorAction SilentlyContinue)
+    $out = ''
+    $rc = 0
 
     $prevLoc = Get-Location
     Set-Location "$env:SystemDrive\"
     try {
-        if ($hasPip) {
-            # 1) Resolve + install dependencies (idempotent once present).
-            $out = & $VenvPython -m pip install "$PkgDir" --quiet 2>&1 | Out-String
-            if ($LASTEXITCODE -eq 0) {
-                # 2) Force just the local package's code to refresh (deps are
-                #    already satisfied) so unchanged dev versions still update.
-                $out += & $VenvPython -m pip install --force-reinstall --no-deps "$PkgDir" --quiet 2>&1 | Out-String
-            }
-        } else {
+        if ($uvAvailable) {
+            Ensure-UvIndex
             $out = & uv pip install --python $VenvPython --reinstall-package $PkgName "$PkgDir" --quiet 2>&1 | Out-String
+            $rc = $LASTEXITCODE
         }
-        $rc = $LASTEXITCODE
+        if (-not $uvAvailable -or $rc -ne 0) {
+            # Fallback only when uv is absent (or its install failed). pip may
+            # itself fail here on a machine whose PATH carries an untrusted
+            # junction (see the header) -- which is why uv is preferred.
+            $hasPip = $false
+            try { & $VenvPython -m pip --version *> $null; $hasPip = ($LASTEXITCODE -eq 0) } catch { $hasPip = $false }
+            if ($hasPip) {
+                # 1) Resolve + install dependencies (idempotent once present).
+                $pipOut = & $VenvPython -m pip install "$PkgDir" --quiet 2>&1 | Out-String
+                if ($LASTEXITCODE -eq 0) {
+                    # 2) Force just the local package's code to refresh (deps are
+                    #    already satisfied) so unchanged dev versions still update.
+                    $pipOut += & $VenvPython -m pip install --force-reinstall --no-deps "$PkgDir" --quiet 2>&1 | Out-String
+                }
+                $out = if ($out) { "$out`n$pipOut" } else { $pipOut }
+                $rc = $LASTEXITCODE
+            }
+        }
     } finally {
         Set-Location $prevLoc
     }
