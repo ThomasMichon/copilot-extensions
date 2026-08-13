@@ -32,6 +32,32 @@ plugin's *payload* and its *runtime*.
 
 Reference: https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/plugins-finding-installing
 
+## Decide the scope first (prefer repo-scoped)
+
+**Default to repo-scoped enablement.** Before enabling anything, pick the
+narrowest scope that works — almost always the repo:
+
+1. **The plugin belongs to a project/harness → repo-scoped**, declared in that
+   repo's committed `.github/copilot/settings.json`. It then travels with the
+   repo, stays consistent across machines and forks, and loads **only** in that
+   repo's sessions. This is the default.
+2. **The plugin is the repo's own modular skill/agent → the in-repo `.ai` local
+   marketplace** (a `directory` source) — still repo-scoped, one plugin per
+   capability.
+3. **Only a truly machine-universal plugin, on a box with no single control repo
+   → global.**
+
+> **Do NOT reach for `copilot plugin install` to enable a repo-scoped plugin.**
+> `copilot plugin install <name>@<market>` is the **global/user-level** path: it
+> writes the enablement into the **user** `~/.copilot/settings.json` and vendors
+> the payload for *every* repo/session on the machine — so the plugin (and any
+> sub-agent/MCP it ships) loads everywhere, including unrelated repos. That is
+> exactly the namespace pollution repo-scoping avoids. To enable a plugin
+> **repo-scoped, you do not run an install command at all** — you add a
+> declarative line to the repo's `.github/copilot/settings.json` (below) and
+> Copilot vendors the payload for sessions in that repo. Use `copilot plugin
+> install` **only** for the deliberate global case.
+
 ## Recommended: register at repo scope
 
 Pin the plugin set to a repo so it travels with the project and stays consistent
@@ -64,6 +90,12 @@ across machines.
    repo. A plugin's `extensions/` directory is only scanned when it is enabled,
    and a newly enabled plugin may only take effect after **restarting the active
    session** (plugins are scanned at startup).
+
+   **No `copilot plugin install` step is needed for this path** — the declarative
+   `enabledPlugins` line *is* the enablement, and Copilot vendors the payload for
+   sessions in the repo (a control harness may also reconcile it on launch; see
+   *Keeping a repo's plugins fresh automatically*). Running `copilot plugin
+   install` here would additionally enable it **globally**, which you don't want.
 
 A repo's `.github/copilot/settings.json` is merged with the user
 `~/.copilot/settings.json`; `enabledPlugins` may live in either.
@@ -154,18 +186,28 @@ agent-bridge, whose own-plugin staging resolves a repo's `.ai` `directory`
 marketplace by anchor-relative path). Loose `.github/skills/` trees only load for
 the launch repo and don't compose across those cases.
 
-## Alternative: global install
+## Alternative: global install (last resort — pollutes every session)
 
-Install into the user profile instead (handy for a machine with no single
-control repo):
+Install into the user profile **only** when the plugin is genuinely
+machine-universal and there is no single control repo to pin it to. A global
+install enables the plugin — and every sub-agent / MCP / hook it ships — for
+**all repos and sessions** on the machine, polluting the tool namespace
+everywhere; prefer repo-scoped or `.ai` enablement whenever a repo can own it.
 
 ```bash
 copilot plugin marketplace add owner/my-marketplace-repo
-copilot plugin install some-plugin@my-marketplace
+copilot plugin install some-plugin@my-marketplace   # writes USER-level enablement + vendors payload globally
 ```
 
 Manage with `copilot plugin list`, `copilot plugin update <name>@<market>`, and
 `copilot plugin uninstall <name>@<market>`.
+
+> **Fixing an accidental global enablement.** If you ran `copilot plugin install`
+> for something that should have been repo-scoped: add the declarative line to the
+> repo's `.github/copilot/settings.json`, then remove the stray
+> `"<name>@<market>": true` from the **user** `~/.copilot/settings.json`
+> `enabledPlugins` (the vendored payload under `~/.copilot/installed-plugins/` can
+> stay — it's a harmless cache the repo-scoped enablement reuses).
 
 ## Payload vs runtime
 
