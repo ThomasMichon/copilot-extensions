@@ -5,7 +5,11 @@
   worktree-backed agents of a project.
 - **Scope:** leaf (concrete component; child of the agent-fabric vision)
 - **Status:** Active
-- **Last revised:** 2026-07-30
+- **Last revised:** 2026-08-12
+- **Home:** delivered by the **Installer & Configurator** (the optional worktree-
+  and agent- control-plane) — see [installer](../installer/README.md). It is an
+  **optional** surface: the plugins provide the in-session tools agents use and
+  are fully self-sufficient without the Picker present.
 - **Reality docs:**
   [`plugins/agent-worktrees/docs/picker.md`](../../plugins/agent-worktrees/docs/picker.md) ·
   [`plugins/agent-worktrees/docs/architecture.md`](../../plugins/agent-worktrees/docs/architecture.md) ·
@@ -15,9 +19,11 @@
 
 The Picker is the **front door** to a project's fleet of worktree-backed agents.
 Registering a repo in the worktree system gives it a bare binstub; running that
-binstub with no arguments opens the Picker. From there the operator sees which
-agents exist and what they are doing, **resumes** or **joins** one, **creates** a
-new one, and manages the fleet — before any expensive launch is paid for.
+binstub with no arguments opens the Picker — **handed off to the Configurator's
+control-plane** when it is present (with a plain help/CLI fallback when it is
+not). From there the operator sees which agents exist and what they are doing,
+**resumes** or **joins** one, **creates** a new one, and manages the fleet —
+before any expensive launch is paid for.
 
 Its north star is **informed, low-regret operator decisions**. Spinning up or
 resuming an agent is *costly* — relaunching the Picker takes a moment, and
@@ -34,11 +40,16 @@ machine, and which versions** this surface represents. Confusing one terminal
 session for another is a class of error the Picker exists to abolish.
 
 Finally, the Picker is the fabric's **unified presentation surface**. It is
-shipped by the ground layer (agent-worktrees) but is *not* only about worktrees:
+delivered by the **Configurator** — the optional worktree/agent control-plane
+(see [installer](../installer/README.md)) — and is *not* only about worktrees:
 every fabric layer an operator installs — coordination, delegation, connectivity,
 venue providers, the vault, the model-context bridge — finds a **home** in the
 Picker. The more of the fabric a user adopts, the richer the Picker's capability
-becomes, without the base ever getting heavier for someone who adopted less.
+becomes, without the base ever getting heavier for someone who adopted less. And
+because it lives in the *optional* control-plane, a user who wants only the
+in-session plugin tools need never run it: the Picker enriches how a **human**
+drives the fleet; it is never a prerequisite for the plugins or their agents to
+function.
 
 ## Concepts & Components
 
@@ -237,6 +248,10 @@ regression is something a test can catch before an operator does.
   duplicate, uniform venue reach) the Picker renders.
 - Sibling context: [plugin-services](../plugin-services/README.md) — the per-host
   service model the fabric layers deploy as.
+- Delivering app: [installer](../installer/README.md) — the **Installer &
+  Configurator** is the optional worktree/agent control-plane that **delivers and
+  keeps this Picker current** (out-of-band, self-updating). The Picker is an
+  optional surface of that app; the plugins are self-sufficient without it.
 - CodeSpaces-pivot data owner: [agent-codespaces](../plugins/agent-codespaces/README.md)
   — the Picker's **CodeSpaces** pivot renders that venue's pool membership,
   per-venue state (in-use / idle / clean / stale), allocation, and budget
@@ -279,3 +294,15 @@ regression is something a test can catch before an operator does.
   producing a README hero image from real fleet data and the wish for an animated
   pivot/selection/menu walkthrough — one deterministic render path serving test,
   audit, still, and animation.
+- **2026-08-12** — **Relocated** the Picker's delivery from the agent-worktrees
+  ground layer into the **Installer & Configurator** (the optional worktree/agent
+  control-plane; see [installer](../installer/README.md)). Its role, guarantees,
+  and interaction promises are **unchanged** — this is a home/ownership move, not a
+  redefinition. The change makes the Picker an **optional** surface delivered and
+  **self-updated out-of-band** by an app that installs independently of any Copilot
+  session, reciprocal to making agent-worktrees lightweight and self-provisioning:
+  a launcher that *wraps* session launches cannot update itself from within the
+  sessions it spawns, so it belongs on the side that can. The bare project binstub
+  still opens the Picker, now via a hand-off to the control-plane (with a plain
+  CLI/help fallback when it is absent). Mined from the operator's direction during
+  the plugin self-provisioning rollout.

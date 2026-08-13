@@ -5,7 +5,7 @@
   local services on a user's machine.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-07-30
+- **Last revised:** 2026-08-12
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -97,20 +97,42 @@ never requires reconfiguring the survivors.
 ### platform-native-lifecycle
 A service is supervised by the host OS's own per-user service facility, giving
 auto-start, keep-alive, and restart-on-failure on every supported platform
-(Windows and Linux/WSL) through one coherent contract.
+(Windows and Linux/WSL) through one coherent contract. This supervision is the
+plugin's **own** — a plugin brings up, keeps alive, and restarts **its own
+daemon** with **no installer/configurator control-plane in the loop**; the
+optional control-plane may *observe* and *true-up* daemons across the set, but a
+daemon's existence and liveness never depend on it running.
 
 ### self-provisioning-runtime
 **Enabling** a runtime plugin is the whole action a user takes — its runtime
-then **provisions itself**. Whenever a session starts on a machine where the
-plugin is enabled (and, for a machine-scoped runtime, *permitted*), the runtime is
-installed if absent and **reconciled to match its enabled payload version** if it
-has drifted — with **no manual install step** and no dependence on one *particular*
-sibling being the launcher. Provisioning is **idempotent, version-keyed** (a no-op
-once already matched), **throttled**, **gated** to the machines a runtime belongs
-on, and **opt-out-able**, and it never blocks or slows a session that is already
-current. "Enabled" is the user's whole intent; "installed, running, and
-version-matched" is the model's job — the same self-healing that keeps a runtime
-immutable-versioned (above) also brings a *missing* runtime into existence.
+then **provisions itself**, driven by the plugin's **own** installer and **no
+particular sibling, launcher, or control-plane**. Provisioning is reached by a
+**layered, launcher-independent bootstrap**, so it fires in whatever the host
+offers: (1) the plugin's **binstub provisions on first use** — the broadest path,
+needing only a shell and the binstub on disk, so the runtime comes up the first
+time an agent (or a human) *calls the tool*, even in a confined host (the Copilot
+app, a cloud agent) where no launch-wrapper and no session hooks exist; (2) where
+session-start hooks fire, a cheap **stamp** lays the binstub ahead of first use as
+an optimization; (3) each plugin's **skills open with a fail-closed readiness
+check** that, if the runtime is absent, tells the agent the one command to bring
+it up — so the reach extends anywhere the plugin's skills load. Whenever a session
+starts on a machine where the plugin is enabled (and, for a machine-scoped
+runtime, *permitted*), an absent runtime is installed and a drifted one is
+**reconciled to match its enabled payload version** — with **no manual install
+step**. Because agents start sessions **out of order, concurrently, and ad-hoc**,
+provisioning is **idempotent, version-keyed** (a no-op once already matched),
+**throttled**, **lock-serialized** against concurrent first-callers, and **gated**
+to the machines a runtime belongs on — and it **never blocks or slows** a session
+already current. It is also **self-sufficient in acquiring its own toolchain**:
+where the venv/package manager it needs is missing, it obtains a private copy
+rather than dead-ending. "Enabled" is the user's whole intent; "installed,
+running, and version-matched" is the model's job — the same self-healing that
+keeps a runtime immutable-versioned (above) also brings a *missing* runtime into
+existence. None of this depends on the optional installer/configurator
+control-plane being present: it is a **convenience that can update the whole set
+and true-up alignment**, but a plugin **provisions and reconciles itself — and
+supervises its own daemon (see *platform-native-lifecycle*) — with that app
+entirely absent**.
 
 ### graceful-composition
 When multiple services are present they discover and use one another's optional
@@ -168,8 +190,9 @@ silently break.
 
 ### standalone-reachability
 A service is reachable using **only** what its own installer put on the machine.
-Reaching it never depends on an external proxy, tunnel, mesh, or registry being
-installed, configured, or running.
+Reaching it never depends on an external proxy, tunnel, mesh, registry, **or the
+optional installer/configurator control-plane** being installed, configured, or
+running.
 
 ### degrade-gracefully
 Absent an optional peer or coordinator, a service still performs its own local
@@ -346,3 +369,24 @@ spec-level, not fixed here.
   rendezvous infrastructure already existing — the standing intent is OS-assigned
   ephemeral (or socket/pipe) endpoints advertised through discovery, never fixed;
   carved as the *dynamic-endpoints* delta in dotfiles.
+
+- **2026-08-12** — Substantially strengthened **self-provisioning-runtime** and
+  reaffirmed the plugins' **independence from the optional control-plane**. The
+  original 2026-07-30 realization still pinned provisioning to *session start via
+  the agent-worktrees launcher*; this pass generalizes it to a **layered,
+  launcher-independent bootstrap** — (1) the plugin's **binstub provisions on first
+  use** (the broadest path; reaches the Copilot app / cloud agent where no
+  launch-wrapper or session hook exists), (2) a session-start **stamp** as an
+  optimization where hooks fire, (3) a **fail-closed skill readiness check** that
+  guides the agent to bring the runtime up. Made explicit that agents start
+  sessions **out of order, concurrently, and ad-hoc**, so provisioning is
+  idempotent, version-keyed, throttled, and **lock-serialized**, and that a plugin
+  **self-acquires its own toolchain** when the venv/package manager is absent.
+  Extended **platform-native-lifecycle** and **standalone-reachability** to state
+  that a plugin **supervises its own daemon and is reachable with the
+  installer/configurator control-plane entirely absent** — that app is an optional
+  convenience (whole-set update + cross-plugin alignment), never a dependency.
+  Reciprocal to the installer vision's broadening into the optional worktree/agent
+  control-plane. Mined from the operator's direction during, and the empirical
+  results of, the plugin self-provisioning rollout (all binstub/service-installing
+  agent-\* runtimes made self-provisioning + clean-room-validated).
