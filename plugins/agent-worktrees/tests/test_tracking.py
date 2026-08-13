@@ -1937,6 +1937,63 @@ class TestClaimRefHelpers:
         cr = parse_claim_ref("m/p/a/b")
         assert cr.machine == "m" and cr.project == "p" and cr.worktree_id == "a/b"
 
+    def test_anchor_ref_round_trip(self):
+        # format_anchor_ref uses the reserved @anchor sentinel; no grammar change.
+        from agent_worktrees.tracking import ANCHOR_ID, format_anchor_ref
+        ref = format_anchor_ref("lambda-core", "spo-core")
+        assert ref == "lambda-core/spo-core/@anchor"
+        cr = parse_claim_ref(ref)
+        assert cr.worktree_id == ANCHOR_ID and cr.is_qualified and cr.is_anchor
+        assert cr.canonical() == ref
+
+    def test_is_anchor_only_for_sentinel(self):
+        assert not parse_claim_ref("lambda-core/spo-core/wt-A").is_anchor
+        assert parse_claim_ref("lambda-core/spo-core/@anchor").is_anchor
+        # Bare @anchor (no machine/project) is still an anchor ref by id.
+        assert parse_claim_ref("@anchor").is_anchor
+
+
+class TestAnchorLedger:
+    """load_or_create_anchor_record lazily materializes a repo's @anchor claim
+    ledger and is idempotent."""
+
+    def test_lazy_create_then_load(self, tmp_path: Path):
+        from agent_worktrees.tracking import (
+            ANCHOR_ID,
+            load_or_create_anchor_record,
+        )
+        tdir = tmp_path / ".spo-core" / "worktrees"
+        tdir.mkdir(parents=True, exist_ok=True)
+        adir = tmp_path / "anchors" / "spo-core"
+        adir.mkdir(parents=True, exist_ok=True)
+        assert not (tdir / f"{ANCHOR_ID}.yaml").exists()
+        rec = load_or_create_anchor_record(
+            str(adir), "spo-core", "lambda-core", "wsl", tdir)
+        assert rec.worktree_id == ANCHOR_ID and rec.pair_kind == "anchor"
+        assert rec.repo == "spo-core" and rec.worktree_path == str(adir)
+        assert (tdir / f"{ANCHOR_ID}.yaml").exists()
+
+    def test_idempotent_returns_existing(self, tmp_path: Path):
+        from agent_worktrees.tracking import (
+            ResourceClaim,
+            add_resource_claim,
+            load_or_create_anchor_record,
+        )
+        tdir = tmp_path / ".spo-core" / "worktrees"
+        tdir.mkdir(parents=True, exist_ok=True)
+        adir = tmp_path / "anchors" / "spo-core"
+        rec = load_or_create_anchor_record(
+            str(adir), "spo-core", "lambda-core", "wsl", tdir)
+        add_resource_claim(rec, ResourceClaim(
+            kind="pr", ref="https://github.com/o/r/pull/9", state="active"),
+            save=False)
+        from agent_worktrees.tracking import ANCHOR_ID, save_record
+        save_record(rec, tdir / f"{ANCHOR_ID}.yaml")
+        # A second call returns the SAME ledger (claim preserved), not a fresh one.
+        rec2 = load_or_create_anchor_record(
+            str(adir), "spo-core", "lambda-core", "wsl", tdir)
+        assert [c.ref for c in rec2.resources] == ["https://github.com/o/r/pull/9"]
+
 
 class TestResourceClaimState:
     """ResourceClaim.is_live degrades unknown/absent state to live so a stray
