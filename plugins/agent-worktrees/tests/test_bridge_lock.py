@@ -123,6 +123,91 @@ def test_live_bridge_worktrees_multiple(tmp_path):
         assert reclaim.live_bridge_worktrees() == {"a", "b"}
 
 
+# ── reclaim.resolve_bridge_bound: bridge.lock -> reap targets (#4272) ──
+
+def test_resolve_bridge_bound_returns_live_owner_target(tmp_path):
+    # A live bridge.lock for the worktree -> a reap target carrying its pid +
+    # the lock path, so Reclaim can reach a cwd=home bridge session.
+    d = tmp_path / "sid-live"
+    locks.write_lock(d / "bridge.lock", extra={"worktree_id": "wt-aaaa"})
+    with patch("agent_worktrees.sessions._session_state_dir",
+               return_value=tmp_path), \
+         patch("agent_worktrees.reclaim.homing_of", return_value="bare"):
+        out = reclaim.resolve_bridge_bound("wt-aaaa", table={})
+    assert len(out) == 1
+    t = out[0]
+    assert t["pid"] == os.getpid() and t["worktree_id"] == "wt-aaaa"
+    assert t["session_id"] == "sid-live"
+    assert t["bridge_lock"].endswith("bridge.lock")
+
+
+def test_resolve_bridge_bound_skips_other_worktrees(tmp_path):
+    locks.write_lock(tmp_path / "s1" / "bridge.lock", extra={"worktree_id": "other"})
+    with patch("agent_worktrees.sessions._session_state_dir",
+               return_value=tmp_path):
+        assert reclaim.resolve_bridge_bound("wt-aaaa", table={}) == []
+
+
+def test_resolve_bridge_bound_skips_stale_lock(tmp_path):
+    d = tmp_path / "sid-dead"
+    payload = {"schema": locks.LOCK_SCHEMA, "pid": 999_999_999,
+               "start_time": "1", "worktree_id": "wt-aaaa"}
+    d.mkdir()
+    (d / "bridge.lock").write_text(json.dumps(payload), encoding="utf-8")
+    with patch("agent_worktrees.sessions._session_state_dir",
+               return_value=tmp_path):
+        assert reclaim.resolve_bridge_bound("wt-aaaa", table={}) == []
+
+
+def test_resolve_bridge_bound_empty_worktree_id_is_noop(tmp_path):
+    locks.write_lock(tmp_path / "s1" / "bridge.lock", extra={"worktree_id": "x"})
+    with patch("agent_worktrees.sessions._session_state_dir",
+               return_value=tmp_path):
+        assert reclaim.resolve_bridge_bound("", table={}) == []
+
+
+# ── reclaim.clear_bridge_locks: post-reap residue removal ──
+
+def test_clear_bridge_locks_removes_forced_pid(tmp_path):
+    # After Reclaim force-kills the owner, its bridge.lock is unlinked even though
+    # the pid (this live process) is still a "live Copilot" by the raw check.
+    d = tmp_path / "sid-forced"
+    locks.write_lock(d / "bridge.lock", extra={"worktree_id": "wt-aaaa"})
+    with patch("agent_worktrees.sessions._session_state_dir",
+               return_value=tmp_path), \
+         patch("agent_worktrees.sessions._is_copilot_process", return_value=True), \
+         patch("agent_worktrees.sessions._is_process_alive", return_value=True):
+        removed = reclaim.clear_bridge_locks(
+            "wt-aaaa", force_pids={os.getpid()}, table={})
+    assert len(removed) == 1 and removed[0]["session_id"] == "sid-forced"
+    assert not (d / "bridge.lock").exists()
+
+
+def test_clear_bridge_locks_keeps_live_owner(tmp_path):
+    # A still-live bridge owner (not force-killed) -> lock preserved.
+    d = tmp_path / "sid-live"
+    locks.write_lock(d / "bridge.lock", extra={"worktree_id": "wt-aaaa"})
+    with patch("agent_worktrees.sessions._session_state_dir",
+               return_value=tmp_path), \
+         patch("agent_worktrees.sessions._is_copilot_process", return_value=True), \
+         patch("agent_worktrees.sessions._is_process_alive", return_value=True):
+        removed = reclaim.clear_bridge_locks("wt-aaaa", force_pids=set(), table={})
+    assert removed == []
+    assert (d / "bridge.lock").exists()
+
+
+def test_clear_bridge_locks_removes_dead_owner(tmp_path):
+    # A crashed owner (pid not a live Copilot) -> stale lock unlinked.
+    d = tmp_path / "sid-dead"
+    locks.write_lock(d / "bridge.lock", extra={"worktree_id": "wt-aaaa"})
+    with patch("agent_worktrees.sessions._session_state_dir",
+               return_value=tmp_path), \
+         patch("agent_worktrees.sessions._is_copilot_process", return_value=False):
+        removed = reclaim.clear_bridge_locks("wt-aaaa", force_pids=set(), table={})
+    assert len(removed) == 1
+    assert not (d / "bridge.lock").exists()
+
+
 # ── Populate consume: _worktree_to_dict + _build_active_paths ──
 
 def _rec(wt_id="wt-aaaa", path="/tmp/a"):
