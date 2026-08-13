@@ -58,7 +58,7 @@ def run_reindex(
     full: bool = False,
     source: str | None = None,
     progress_cb: ProgressCallback | None = None,
-) -> dict[str, float]:
+) -> dict[str, object]:
     """Run the four-phase indexing pipeline.
 
     Args:
@@ -67,7 +67,11 @@ def run_reindex(
         progress_cb: Optional callback for progress reporting and cancellation.
 
     Returns:
-        Dict with keys: chunks_total, chunks_added, chunks_deleted, files_crawled.
+        Dict with keys ``chunks_total``, ``chunks_deleted``, ``files_crawled``,
+        and ``duration_seconds`` (plus ``clusters`` when the post-index cluster
+        pass runs). If one or more sources fail to index, the run continues past
+        them and a ``sources_failed`` list of ``{"source", "error"}`` entries is
+        also included (see #1350).
     """
     from agent_index.engine.client import EngineClient
     from agent_index.engine.lifecycle import ensure_engine, stop_engine
@@ -118,6 +122,7 @@ def run_reindex(
     total_chunks = 0
     total_deleted = 0
     total_files_crawled = 0
+    failed_sources: list[dict[str, str]] = []
     start = time.monotonic()
 
     try:
@@ -154,9 +159,13 @@ def run_reindex(
                 total_files_crawled += crawled
             except IndexingCancelled:
                 raise
-            except Exception:
+            except Exception as exc:
                 logger.exception("Failed to index source: %s", src_name)
                 print(f"  ERROR: {src_name} failed - continuing with next source")
+                # Record the failure so it is surfaced in the result instead of
+                # masquerading as a clean ``files_crawled: 0`` (a wholly-failed
+                # source otherwise looked identical to "found nothing new"; #1350).
+                failed_sources.append({"source": src_name, "error": str(exc)})
 
             if progress_cb:
                 progress_cb.source_complete(src_name, total_chunks)
@@ -223,12 +232,14 @@ def run_reindex(
     elapsed = time.monotonic() - start
     print(f"\nIndexing complete: {total_chunks} chunks in {elapsed:.1f}s")
 
-    result: dict[str, float] = {
+    result: dict[str, object] = {
         "chunks_total": total_chunks,
         "chunks_deleted": total_deleted,
         "files_crawled": total_files_crawled,
         "duration_seconds": round(elapsed, 1),
     }
+    if failed_sources:
+        result["sources_failed"] = failed_sources
 
     # Refresh the similarity-cluster artifact from the just-updated vectors.
     # Reuses stored embeddings (no re-embedding), so it runs post-index in the

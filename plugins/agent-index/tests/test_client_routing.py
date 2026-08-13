@@ -56,6 +56,16 @@ def test_host_falls_through_to_local(_iso, monkeypatch):
     assert config.client_url() == "http://127.0.0.1:8420"
 
 
+def test_host_ignores_stray_configured_endpoint(_iso, monkeypatch):
+    # A host with a stale machine-local ``endpoint`` (e.g. a fixed 127.0.0.1:8420
+    # left by an old setup) must NOT let it shadow the live zdd routing port, which
+    # changes every zero-downtime generation. Regression for #1349 (status/stop
+    # probing a dead static port and reporting the running service as down).
+    config.set_machine_config({"role": "host", "endpoint": "http://127.0.0.1:8420"})
+    monkeypatch.setattr(config, "_routing_url", lambda: "http://127.0.0.1:65019")
+    assert config.client_url() == "http://127.0.0.1:65019"
+
+
 # -- setup client routing ----------------------------------------------------
 
 
