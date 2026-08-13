@@ -1187,6 +1187,13 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
             plugin_dirs += await _stage_plugins(
                 manager, args.name, getattr(args, "stage_plugins", []),
             )
+            # Repo-own lane: resolve the venue repo's OWN enabled local-marketplace
+            # (`.ai`) plugins to their in-checkout dirs and fold them into
+            # --plugin-dir, so a dispatched ACP agent loads the product repo's own
+            # skills/MCP (copilot --acp ignores enabledPlugins). Best-effort.
+            plugin_dirs += await _resolve_repo_ai_plugin_dirs(
+                manager, args.name, getattr(args, "repo", None), config,
+            )
         remote_cmd = _finalize_remote_cmd(plugin_dirs)
 
         if args.stdio and remote_cmd:
@@ -1365,6 +1372,56 @@ async def _stage_plugins(manager, name: str, sources: list[str]) -> list[str]:
         except Exception as exc:
             log.warning("Staging %s on %s failed: %s", source, name, exc)
     return dirs
+
+
+async def _resolve_repo_ai_plugin_dirs(
+    manager, name: str, repo: str | None, config,
+) -> list[str]:
+    """Resolve the venue repo's OWN enabled ``.ai`` plugins to remote --plugin-dir.
+
+    The repo-own lane (venue-generic). The product repo checked out on the target
+    (e.g. ``/workspaces/odsp-web``) declares its own plugins in
+    ``.github/copilot/settings.json`` / ``.claude/settings.json`` and ships them
+    in a local (``directory``) marketplace such as ``.ai``. Those payloads are
+    **already on the target** (nothing to tar over); we only need to *resolve*
+    which enabled ``name@marketplace`` map to on-disk dirs. We ship the canonical
+    stdlib-only ``plugin_resolve`` package to the target and run it there against
+    the repo dir -- the same logic agent-bridge's ``repo_plugin_dir_args`` runs
+    for a local checkout -- and fold each resolved dir into ``--plugin-dir``.
+
+    Best-effort: any failure (no resolver package, no python on target, malformed
+    settings) yields ``[]`` so the dispatch proceeds without repo-own plugins.
+    Remote-marketplace enabled plugins (e.g. a ``github`` source) are reported as
+    unresolved and intentionally not staged (no launch-time fetch).
+    """
+    from . import ai_plugin_staging as aps
+
+    resolver = getattr(config, "resolved_workspace_folder_for", None)
+    repo_dir = resolver(repo) if callable(resolver) else None
+    if not repo_dir:
+        return []
+    pkg = aps.find_plugin_resolve_pkg()
+    if pkg is None:
+        log.debug("repo-own .ai resolve skipped: plugin_resolve package not found")
+        return []
+    try:
+        command = aps.build_resolve_command(aps.tar_pkg_b64(pkg), repo_dir)
+        result = await manager.exec_command(name, command, timeout=60.0)
+    except Exception as exc:
+        log.warning("repo-own .ai resolve on %s failed: %s", name, exc)
+        return []
+    resolved, unresolved = aps.parse_resolve_result(result.stdout)
+    if resolved:
+        log.info(
+            "Resolved %d repo-own .ai plugin(s) for %s at %s -> --plugin-dir: %s",
+            len(resolved), name, repo_dir, resolved,
+        )
+    if unresolved:
+        log.info(
+            "repo-own plugins for %s not locally resolvable (remote marketplace "
+            "or missing) -- NOT staged: %s", name, unresolved,
+        )
+    return resolved
 
 
 async def _check_cross_harness_fence(
