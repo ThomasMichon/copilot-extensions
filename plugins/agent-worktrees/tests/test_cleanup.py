@@ -116,6 +116,70 @@ def test_reclaim_codespace_empty_name(monkeypatch):
     assert r.status == "failed"
 
 
+# ── reclaim_worktree ─────────────────────────────────────────────────────────
+
+def _repo(anchor="D:/anchor"):
+    return types.SimpleNamespace(anchor=anchor)
+
+
+def test_reclaim_worktree_dry_run_reports_intent(monkeypatch):
+    monkeypatch.setattr(cleanup.sweep_mod, "repo_for_project",
+                        lambda project, config: _repo())
+    called = {"n": 0}
+    monkeypatch.setattr(cleanup, "_run_worktrees",
+                        lambda *a, **k: called.__setitem__("n", 1))
+    r = cleanup.reclaim_worktree("m/p/child", _config(), apply=False)
+    assert r.reclaimed and "would finalize" in r.detail and "child" in r.detail
+    assert called["n"] == 0
+
+
+def test_reclaim_worktree_apply_success_runs_in_anchor(monkeypatch):
+    monkeypatch.setattr(cleanup.sweep_mod, "repo_for_project",
+                        lambda project, config: _repo(anchor="D:/child-anchor"))
+    seen = {}
+
+    def _run(args, *, cwd=None, **k):
+        seen["args"] = args
+        seen["cwd"] = cwd
+        return _proc(0)
+    monkeypatch.setattr(cleanup, "_run_worktrees", _run)
+    r = cleanup.reclaim_worktree("m/p/child", _config(), apply=True)
+    assert r.status == "reclaimed"
+    assert seen["cwd"] == "D:/child-anchor"
+    assert seen["args"] == ["finalize", "child", "--abandon", "--json"]
+
+
+def test_reclaim_worktree_finalize_refusal_retains(monkeypatch):
+    monkeypatch.setattr(cleanup.sweep_mod, "repo_for_project",
+                        lambda project, config: _repo())
+    monkeypatch.setattr(
+        cleanup, "_run_worktrees",
+        lambda *a, **k: _proc(1, stderr="Work is not upstream"))
+    r = cleanup.reclaim_worktree("m/p/child", _config(), apply=True)
+    assert r.status == "failed" and "not upstream" in r.detail
+
+
+def test_reclaim_worktree_unresolvable_project_fails(monkeypatch):
+    monkeypatch.setattr(cleanup.sweep_mod, "repo_for_project",
+                        lambda project, config: None)
+    r = cleanup.reclaim_worktree("m/p/child", _config(), apply=True)
+    assert r.status == "failed" and "resolve project" in r.detail
+
+
+def test_reclaim_worktree_unparseable_ref_fails():
+    r = cleanup.reclaim_worktree("", _config(), apply=True)
+    assert r.status == "failed"
+
+
+def test_reclaim_orphan_worktree_dispatches(monkeypatch):
+    monkeypatch.setattr(cleanup.sweep_mod, "repo_for_project",
+                        lambda project, config: _repo())
+    monkeypatch.setattr(cleanup, "_run_worktrees", lambda *a, **k: _proc(0))
+    entry = {"kind": "worktree", "ref": "m/p/child", "machine": "m"}
+    r = cleanup.reclaim_orphan(entry, _config(machine="m"), apply=True)
+    assert r.status == "reclaimed"
+
+
 # ── reclaim_orphan dispatch ──────────────────────────────────────────────────
 
 def test_reclaim_orphan_cross_machine_skipped():
@@ -138,7 +202,7 @@ def test_reclaim_orphan_codespace_dispatches(monkeypatch):
 
 
 def test_reclaim_orphan_reclaimer_error_is_failed(monkeypatch):
-    def _boom(ref, apply):
+    def _boom(ref, apply, config):
         raise RuntimeError("kaboom")
     monkeypatch.setitem(cleanup._RECLAIMERS, "codespace", _boom)
     entry = {"kind": "codespace", "ref": "cs-x", "machine": "m"}
