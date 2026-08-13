@@ -15,7 +15,7 @@ param(
     # Allow the task-scheduling STEP to self-elevate (UAC) when this machine
     # refuses scheduled-task CREATION without admin. Opt-in only; default is
     # user-mode with no elevation. Never elevates install/update -- only the
-    # `register-tasks` action (see install-contract.md, dotfiles#1377).
+    # `register-tasks` action (see docs/install-contract.md § Hard rules).
     [switch]$AllowTaskElevation
 )
 
@@ -864,14 +864,14 @@ exit `$LASTEXITCODE
 }
 
 # ── Scheduled-task registration: user-mode by default; NEVER elevate the whole
-#    installer (install-contract § Hard rules; dotfiles#1377) ───────────────────
+#    installer (see docs/install-contract.md § Hard rules) ─────────────────────
 # The installer process is never elevated. Task registration is:
 #   1. idempotent -- a task already in the desired state is left untouched;
 #   2. in-place   -- an existing-but-drifted task is updated with Set-ScheduledTask,
 #                    which (unlike Register-ScheduledTask -Force) modifies a task
 #                    the user already owns WITHOUT admin -- so the common update
 #                    path never elevates, even on boxes that forbid non-admin task
-#                    CREATION (e.g. cloud1);
+#                    CREATION (as some locked-down machines do);
 #   3. create     -- a MISSING task is created with Register-ScheduledTask; if the
 #                    machine refuses that without admin we do NOT elevate the
 #                    installer -- we warn with remediation and continue.
@@ -924,6 +924,11 @@ function Test-TaskCurrent {
     $ea = @($t.Actions)[0]
     if ($ea.Execute -ne $Spec.Action.Execute) { return $false }
     if (("$($ea.Arguments)").Trim() -ne ("$($Spec.Action.Arguments)").Trim()) { return $false }
+    # Principal drift that matters for a user-mode auto-run task: logon type and
+    # run level (a task escalated to RunLevel Highest, or flipped to a different
+    # logon type, is not "current" and should be normalized in place).
+    if ("$($t.Principal.LogonType)" -ne "$($Spec.Principal.LogonType)") { return $false }
+    if ("$($t.Principal.RunLevel)" -ne "$($Spec.Principal.RunLevel)") { return $false }
     return $true
 }
 
