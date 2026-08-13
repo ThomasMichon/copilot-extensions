@@ -106,6 +106,18 @@ Always read the repo's `CONTRIBUTING.md` / `AGENTS.md` and its narrative
 - **not available on this machine** (per `locus.machines`) -- do **not**
   blind-clone. Follow the locus: delegate to a machine that has it.
 
+> **The locus governs EXPLORING too, not just changing.** Reading and
+> understanding a repo whose locus is a **CodeSpace / container / another
+> machine** belongs *in that venue*, against the full checkout -- not reassembled
+> from piecemeal remote/ADO-API file reads on this box. Bring the venue up **once**
+> (`agent-codespaces ssh <name>` / `agent-containers up <name>`; on a fleet host
+> like dev6 reuse an already-provisioned/exited container), then grep/read/build
+> there, or delegate a read-only task to it. `related resolve <name>` prints an
+> **Explore** block with the exact command for the repo's locus; follow it before
+> you start reading source one file at a time. (Piecemeal API reads are slow,
+> partial, and error-prone -- the venue gives you real search, cross-file tracing,
+> and a build to check assumptions against.)
+
 > **Mind cross-repo plan/effort state on a venue.** When you delegate to a
 > CodeSpace/container agent but the task tracks against a **plan, effort, or spec
 > doc that lives in a *different* repo** than the one on the venue, the on-venue
