@@ -154,11 +154,14 @@ def run_worker(task_id: str) -> int:
 
     src = task.source if task.source != "all" else None
     # On a retried task (attempt > 1) resume: skip files already stored at the
-    # same content hash within THIS task's window (created_at), so an interrupted
-    # reindex continues mid-source instead of restarting. A fresh task (attempt 1)
-    # re-embeds everything the crawl selected (full-rebuild semantics preserved).
-    resume_since = task.created_at if task.attempt_count > 1 else None
-    if resume_since is not None:
+    # same content hash within THIS task's window. Scope the window to the task's
+    # FIRST processing time (first_started_at) so files written by OTHER tasks
+    # while this one waited in the queue aren't wrongly skipped; fall back to
+    # created_at for rows migrated before that column existed. A fresh task
+    # (attempt 1) re-embeds everything the crawl selected (full-rebuild preserved).
+    resume_since: float | None = None
+    if task.attempt_count > 1:
+        resume_since = task.first_started_at or task.created_at
         log.info("worker: task %s resuming (attempt %d)", task_id, task.attempt_count)
     try:
         result = indexing_engine.run_reindex(

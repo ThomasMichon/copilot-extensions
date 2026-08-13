@@ -234,6 +234,24 @@ class PathIndex:
         finally:
             conn.close()
 
+    def get_all_entries(self) -> dict[tuple[str, str], tuple[str | None, float]]:
+        """Return ``{(source, file_path): (content_hash, indexed_at)}`` for all files.
+
+        A single-query bulk read for resume: the embed loop looks each file up in
+        this in-memory map instead of opening a SQLite connection per file.
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT source, file_path, content_hash, indexed_at FROM indexed_files"
+            ).fetchall()
+            return {
+                (r["source"], r["file_path"]): (r["content_hash"], r["indexed_at"])
+                for r in rows
+            }
+        finally:
+            conn.close()
+
     def get_content_hashes(self, source: str) -> dict[str, str | None]:
         """Return {file_path: content_hash} for all files in a source."""
         conn = self._connect()

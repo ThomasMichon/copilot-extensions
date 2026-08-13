@@ -526,6 +526,11 @@ def _embed_and_store_files(
     total_stored = 0
     stored_files: set[tuple[str, str]] = set()
     skipped = 0
+    # Bulk-load the stored-file map ONCE for resume lookups (avoids opening a
+    # SQLite connection per file on large sources).
+    resume_index: dict[tuple[str, str], tuple[str | None, float]] = (
+        path_index.get_all_entries() if resume_since is not None else {}
+    )
     # Files whose chunks are in the current (not-yet-flushed) batch, with their
     # content hash + chunk count — checkpointed to path_index on each flush. A
     # file's chunks never straddle a flush (a whole file is added before the
@@ -558,7 +563,7 @@ def _embed_and_store_files(
 
         # Resume-skip: already stored at this hash within THIS task's window.
         if resume_since is not None:
-            prior = path_index.get_entry(entry.source, entry.path)
+            prior = resume_index.get((entry.source, entry.path))
             if prior is not None and prior[0] == chash and prior[1] >= resume_since:
                 skipped += 1
                 continue
