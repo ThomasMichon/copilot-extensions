@@ -18,7 +18,12 @@ processes* -- this module reclaims *ledger obligations*.)
 """
 from __future__ import annotations
 
+import json
 import logging
+import re
+import shutil
+import subprocess
+import sys
 
 from . import claimant as _claimant
 from . import config as cfg
@@ -34,6 +39,13 @@ log = logging.getLogger(__name__)
 #: populates it for ``codespace`` (at clean disconnect -> ``at-rest``, at release
 #: -> ``released``); ``container`` is reserved for agent-containers.
 _LEASEABLE_KINDS: frozenset[str] = frozenset({"codespace", "container"})
+
+#: A full GitHub PR URL, e.g. ``https://github.com/owner/repo/pull/123``.
+_GH_PR_URL = re.compile(
+    r"^https?://github\.com/([^/]+/[^/]+)/pull/(\d+)/?$", re.IGNORECASE)
+#: The repo-qualified GitHub shorthand ``owner/repo#123`` (GitHub-only; ADO refs
+#: are full URLs and never match this).
+_GH_PR_SHORT = re.compile(r"^([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#(\d+)$")
 
 
 def load_claim_child_record(
@@ -217,18 +229,78 @@ def leaseable_settled(
     return None
 
 
+def _github_pr_view_args(ref: str) -> list[str] | None:
+    """Map a **GitHub** PR ref to ``gh pr view`` args, or ``None`` if not GitHub.
+
+    Accepts a full URL (``https://github.com/owner/repo/pull/N`` -> ``[url]``,
+    which ``gh`` resolves directly) or the repo-qualified shorthand
+    ``owner/repo#N`` (-> ``[N, --repo, owner/repo]``). An **ADO** URL
+    (``*.visualstudio.com`` / ``dev.azure.com``), a bare number, or any other
+    shape yields ``None`` -- the sweep spares it (ADO is Phase 2; a bare number is
+    ambiguous without a repo).
+    """
+    ref = (ref or "").strip()
+    m = _GH_PR_URL.match(ref)
+    if m:
+        return [ref]
+    m = _GH_PR_SHORT.match(ref)
+    if m:
+        return [m.group(2), "--repo", m.group(1)]
+    return None
+
+
+def pr_merged(ref: str) -> bool | None:
+    """Is a **GitHub** PR claim's PR provably **MERGED**? (tri-state).
+
+    Shells ``gh pr view <ref> --json state`` and returns ``True`` only on a
+    definitive ``MERGED`` state; an ``OPEN`` PR (still owed), a ``CLOSED`` but
+    unmerged PR (abandoned work -- never silently reclaimed), a non-GitHub/ADO
+    ref, a missing ``gh``, an auth/visibility failure (e.g. the ambient account
+    can't see the repo), or any error -> ``None`` (spare). Never raises. This is
+    the ``pr``-kind analog of the worktree branch-merged check: a merged PR is
+    provably safe AND its obligation discharged, so a stale (manually-journaled,
+    never-settled) cross-repo PR claim auto-reclaims once the PR lands.
+    """
+    args = _github_pr_view_args(ref)
+    if args is None:
+        return None
+    gh = shutil.which("gh")
+    if not gh:
+        return None
+    try:
+        proc = subprocess.run(
+            [gh, "pr", "view", *args, "--json", "state"],
+            capture_output=True, text=True, timeout=30,
+            creationflags=(subprocess.CREATE_NO_WINDOW if sys.platform == "win32"
+                           else 0),
+        )
+    except Exception as exc:
+        log.debug("gh pr view for %s degraded: %s", ref, exc)
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        state = json.loads(proc.stdout).get("state")
+    except (ValueError, TypeError):
+        return None
+    return True if state == "MERGED" else None
+
+
 def claim_gone(claim: tracking.ResourceClaim, config: cfg.Config) -> bool | None:
     """Tri-state **gone** verdict, dispatched by claim kind.
 
     A ``worktree`` claim reuses the same-machine claimant-liveness resolver
     (:func:`gone_of`). A leaseable kind (codespace/container) is *gone* when its
-    lease mirror shows the obligation settled (:func:`leaseable_settled`) -- the
-    resource is no longer a live liability. Every other kind is ``None`` (spare).
+    lease mirror shows the obligation settled (:func:`leaseable_settled`). A
+    ``pr`` claim is *gone* when its (GitHub) PR is provably merged
+    (:func:`pr_merged`). Every other kind is ``None`` (spare).
     """
     if claim.kind == "worktree":
         return gone_of(claim.ref)
     if claim.kind in _LEASEABLE_KINDS:
         return leaseable_settled(claim, config)
+    if claim.kind == "pr":
+        return pr_merged(claim.ref)
     return None
 
 
@@ -237,12 +309,15 @@ def claim_safe(claim: tracking.ResourceClaim, config: cfg.Config) -> bool | None
 
     A ``worktree`` claim proves safety from the child's record/branch
     (:func:`safe_of`). A leaseable kind proves it from the lease's settled
-    disposition mirror (:func:`leaseable_settled`). Every other kind is ``None``.
+    disposition mirror (:func:`leaseable_settled`). A ``pr`` claim proves it from
+    a provably-merged PR (:func:`pr_merged`). Every other kind is ``None``.
     """
     if claim.kind == "worktree":
         return safe_of(claim, config)
     if claim.kind in _LEASEABLE_KINDS:
         return leaseable_settled(claim, config)
+    if claim.kind == "pr":
+        return pr_merged(claim.ref)
     return None
 
 
