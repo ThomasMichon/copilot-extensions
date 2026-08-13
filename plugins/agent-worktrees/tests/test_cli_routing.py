@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from agent_worktrees import __main__ as m
 
 
@@ -802,6 +804,85 @@ def test_bare_non_headless_project_launches(monkeypatch):
     rc = m.main([])
     assert rc == 0
     assert launched["v"] is True
+
+
+# ── the binstub seam (Phase 6 / DQ7 / DQ8) ────────────────────────────
+
+
+def test_bare_prefers_worktree_manager_when_on_path(monkeypatch):
+    """Bare, non-headless invocation execs the Manager when it is on PATH,
+    threading the active project, and does NOT load the bundled Picker."""
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m, "_resolve_active_project", lambda proj: ("demo", None))
+    monkeypatch.setattr(m, "_is_headless_project", lambda: False)
+    monkeypatch.setattr(m.cfg, "active_project", lambda: "demo")
+    monkeypatch.setattr(m, "_worktree_manager_path", lambda: "/usr/bin/worktree-manager")
+
+    launched = {"v": False}
+    monkeypatch.setattr(m, "cmd_launch", lambda argv: launched.__setitem__("v", True) or 0)
+
+    seam = {"mgr": None, "project": "unset"}
+
+    def fake_exec(mgr, project):
+        seam["mgr"] = mgr
+        seam["project"] = project
+        return 0
+
+    monkeypatch.setattr(m, "_exec_worktree_manager", fake_exec)
+    rc = m.main([])
+    assert rc == 0
+    assert seam == {"mgr": "/usr/bin/worktree-manager", "project": "demo"}
+    assert launched["v"] is False
+
+
+def test_bare_falls_back_to_picker_without_manager(monkeypatch):
+    """No Manager on PATH → the bundled Picker is the fallback (6a)."""
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m, "_resolve_active_project", lambda proj: ("demo", None))
+    monkeypatch.setattr(m, "_is_headless_project", lambda: False)
+    monkeypatch.setattr(m, "_worktree_manager_path", lambda: None)
+
+    launched = {"v": False}
+    monkeypatch.setattr(m, "cmd_launch", lambda argv: launched.__setitem__("v", True) or 0)
+    monkeypatch.setattr(m, "_exec_worktree_manager",
+                        lambda mgr, project: pytest.fail("should not exec manager"))
+    rc = m.main([])
+    assert rc == 0
+    assert launched["v"] is True
+
+
+def test_bare_no_project_prefers_manager_without_project_flag(monkeypatch):
+    """With no resolvable project, a bare invocation still prefers the Manager
+    (its multi-project front door) and passes no --project."""
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m, "_resolve_active_project", lambda proj: (None, None))
+    monkeypatch.setattr(m.cfg, "active_project", lambda: None)
+    monkeypatch.setattr(m, "_worktree_manager_path", lambda: "/usr/bin/worktree-manager")
+
+    seam = {"mgr": None, "project": "unset"}
+    monkeypatch.setattr(
+        m, "_exec_worktree_manager",
+        lambda mgr, project: seam.update(mgr=mgr, project=project) or 0)
+    monkeypatch.setattr(m, "cmd_help_unrouted",
+                        lambda **k: pytest.fail("should not balk when manager present"))
+    rc = m.main([])
+    assert rc == 0
+    assert seam == {"mgr": "/usr/bin/worktree-manager", "project": None}
+
+
+def test_bare_headless_ignores_manager(monkeypatch):
+    """Headless projects are never interactive: the seam does not apply even
+    when the Manager is on PATH."""
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m, "_resolve_active_project", lambda proj: ("ext", None))
+    monkeypatch.setattr(m, "_is_headless_project", lambda: True)
+    monkeypatch.setattr(m, "_worktree_manager_path", lambda: "/usr/bin/worktree-manager")
+    monkeypatch.setattr(m, "_exec_worktree_manager",
+                        lambda mgr, project: pytest.fail("headless must not exec manager"))
+    monkeypatch.setattr(m, "cmd_worktree_dispatch", lambda argv: 0)
+    monkeypatch.setattr(m.cfg, "project_name", lambda: "ext")
+    rc = m.main([])
+    assert rc == 0
 
 
 # ---------------------------------------------------------------------------
