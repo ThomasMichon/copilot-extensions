@@ -136,6 +136,16 @@ Rules:
   `references/<topic>.md` and leave a one-line pointer. That keeps per-trigger
   context small; the trade is an extra read on demand. Link out *and* back; no
   orphan references. The same bias applies to any long doc a skill owns.
+- **Keep the skill body target-agnostic — factor target-specific reactions into a
+  linked "troubleshooting"/"errata" reference, indexed by target.** A skill teaches a
+  *general* procedure; the specific ways one downstream **target/project** reacts to it
+  (a build target that fails on stderr, a service that rejects a header, a repo whose CI
+  flags a warning) are **errata**, not general guidance — inlining them into the body
+  bloats it, dates it, and privileges one target over the skill's general audience.
+  Instead keep a `references/errata/` (or `references/troubleshooting.md`) **index
+  broken down by target/project**, add a row + a focused file per quirk, and give the
+  skill body a single neutral *"Troubleshooting specific errors"* pointer to the index.
+  The body then stays stable and general as targets come and go.
 - **`scripts/`** holds code the agent **executes by path** ("run `scripts/x.py`")
   rather than pasting inline -- more reliable, fewer tokens.
 - **`assets/`** holds templates/fixtures (e.g. a `TEMPLATE.md` the skill copies).
