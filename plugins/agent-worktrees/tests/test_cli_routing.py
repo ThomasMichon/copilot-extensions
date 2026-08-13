@@ -816,7 +816,7 @@ def test_bare_prefers_worktree_manager_when_on_path(monkeypatch):
     monkeypatch.setattr(m, "_resolve_active_project", lambda proj: ("demo", None))
     monkeypatch.setattr(m, "_is_headless_project", lambda: False)
     monkeypatch.setattr(m.cfg, "active_project", lambda: "demo")
-    monkeypatch.setattr(m, "_worktree_manager_path", lambda: "/usr/bin/worktree-manager")
+    monkeypatch.setattr(m, "_usable_worktree_manager", lambda: "/usr/bin/worktree-manager")
 
     launched = {"v": False}
     monkeypatch.setattr(m, "cmd_launch", lambda argv: launched.__setitem__("v", True) or 0)
@@ -880,7 +880,7 @@ def test_bare_no_project_prefers_manager_without_project_flag(monkeypatch):
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
     monkeypatch.setattr(m, "_resolve_active_project", lambda proj: (None, None))
     monkeypatch.setattr(m.cfg, "active_project", lambda: None)
-    monkeypatch.setattr(m, "_worktree_manager_path", lambda: "/usr/bin/worktree-manager")
+    monkeypatch.setattr(m, "_usable_worktree_manager", lambda: "/usr/bin/worktree-manager")
 
     seam = {"mgr": None, "project": "unset"}
     monkeypatch.setattr(
@@ -933,6 +933,70 @@ def test_install_trigger_shows_source_and_platform_command(monkeypatch, capsys):
 def test_bundled_picker_available_detects_package():
     """While picker_tui ships, the fallback resolves to the bundled Picker."""
     assert m._bundled_picker_available() is True
+
+
+# ── _usable_worktree_manager health gate (DQ8: never dead-end bare launch) ────
+
+def _fake_run(returncode):
+    import subprocess as _sp
+
+    def run(cmd, **kw):
+        return _sp.CompletedProcess(cmd, returncode, stdout="worktree-manager 0.1.0\n", stderr="")
+    return run
+
+
+def test_usable_manager_returns_path_when_healthy(monkeypatch):
+    """A Manager that answers `--version` with exit 0 is preferred."""
+    monkeypatch.setattr(m, "_worktree_manager_path", lambda: "/usr/bin/worktree-manager")
+    monkeypatch.setattr(m.subprocess, "run", _fake_run(0))
+    assert m._usable_worktree_manager() == "/usr/bin/worktree-manager"
+
+
+def test_usable_manager_none_when_absent(monkeypatch):
+    """No binstub on PATH → None, without probing."""
+    monkeypatch.setattr(m, "_worktree_manager_path", lambda: None)
+    monkeypatch.setattr(m.subprocess, "run",
+                        lambda *a, **k: pytest.fail("must not probe an absent manager"))
+    assert m._usable_worktree_manager() is None
+
+
+def test_usable_manager_rejects_broken_binstub(monkeypatch):
+    """A stale/broken binstub (non-zero `--version`) is treated as absent so the
+    seam can fall back -- the exact book2 failure (a pre-versioned stub that
+    demands WORKTREE_PROJECT and errors on every call)."""
+    monkeypatch.setattr(m, "_worktree_manager_path", lambda: "/usr/bin/worktree-manager")
+    monkeypatch.setattr(m.subprocess, "run", _fake_run(1))
+    assert m._usable_worktree_manager() is None
+
+
+def test_usable_manager_rejects_unrunnable_binstub(monkeypatch):
+    """A binstub that cannot even be spawned is treated as absent, not a crash."""
+    monkeypatch.setattr(m, "_worktree_manager_path", lambda: "/usr/bin/worktree-manager")
+
+    def boom(cmd, **kw):
+        raise OSError("cannot exec")
+
+    monkeypatch.setattr(m.subprocess, "run", boom)
+    assert m._usable_worktree_manager() is None
+
+
+def test_bare_falls_back_to_picker_when_manager_broken(monkeypatch):
+    """End-to-end: a broken Manager on PATH must NOT dead-end bare launch --
+    the seam falls back to the bundled Picker (DQ8 invariant)."""
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m, "_resolve_active_project", lambda proj: ("demo", None))
+    monkeypatch.setattr(m, "_is_headless_project", lambda: False)
+    monkeypatch.setattr(m.cfg, "active_project", lambda: "demo")
+    monkeypatch.setattr(m, "_worktree_manager_path", lambda: "/usr/bin/worktree-manager")
+    monkeypatch.setattr(m.subprocess, "run", _fake_run(1))  # broken stub
+    monkeypatch.setattr(m, "_bundled_picker_available", lambda: True)
+    monkeypatch.setattr(m, "_exec_worktree_manager",
+                        lambda mgr, project: pytest.fail("broken manager must not be exec'd"))
+    launched = {"v": False}
+    monkeypatch.setattr(m, "cmd_launch", lambda argv: launched.__setitem__("v", True) or 0)
+    rc = m.main([])
+    assert rc == 0
+    assert launched["v"] is True
 
 
 def test_bare_headless_ignores_manager(monkeypatch):
