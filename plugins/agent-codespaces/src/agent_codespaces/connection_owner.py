@@ -47,9 +47,10 @@ import logging
 import os
 import platform
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, fields
+from typing import Protocol
 
 from .config import RUNTIME_DIR, ensure_runtime_dir
 
@@ -326,3 +327,118 @@ def release(
         del holds[codespace]
         _write_holds(holds)
         return None
+
+
+# ---------------------------------------------------------------------------
+# Connection Owner reconciler (increment 2)
+# ---------------------------------------------------------------------------
+#
+# The registry above records *intent* (which CodeSpaces should be held). The
+# reconciler below turns that intent into *live* credential-relay channels: it
+# keeps exactly one relay channel per held CodeSpace and tears down channels for
+# CodeSpaces no longer held. The relay transport is supplied by an injected
+# ``factory`` so this stays additive + unit-testable; a later increment wires the
+# real ``ssh_manager.SupervisedRelayForward`` and a daemon loop that periodically
+# (and on hold/release) calls :meth:`ConnectionOwner.reconcile`.
+
+
+class RelayChannel(Protocol):
+    """The subset of ``ssh_manager.SupervisedRelayForward`` the Owner drives.
+
+    ``start`` establishes the reverse-forward and starts the self-healing
+    monitor; ``stop`` tears it down (idempotent); ``is_alive`` reports whether
+    the underlying ``ssh -N -R`` process is currently running.
+    """
+
+    def is_alive(self) -> bool: ...
+
+    async def start(self) -> None: ...
+
+    async def stop(self) -> None: ...
+
+
+# Build a (not-yet-started) relay channel for a CodeSpace by name.
+RelayFactory = Callable[[str], RelayChannel]
+
+
+class ConnectionOwner:
+    """Reconciles live credential-relay channels against the registry.
+
+    One :class:`ConnectionOwner` per machine owns the set of relay channels. It
+    is the single owner of each CodeSpace's relay (so the ``-R`` bind is
+    single-owner by construction, dotfiles#561); agent-bridge dispatch and one-off
+    ``agent-codespaces ssh`` are non-owning tenants that only ``hold``/``release``
+    in the registry. Nothing in production constructs this yet (increment 2 is
+    additive); a later increment supplies the real transport factory and runs the
+    reconcile loop in a persistent daemon.
+    """
+
+    def __init__(self, factory: RelayFactory, *, ttl: float = DEFAULT_TTL) -> None:
+        self._factory = factory
+        self._ttl = ttl
+        self._channels: dict[str, RelayChannel] = {}
+
+    def active_codespaces(self) -> set[str]:
+        """CodeSpaces with a currently-live relay channel under this Owner."""
+        return {cs for cs, channel in self._channels.items() if channel.is_alive()}
+
+    async def ensure(self, codespace: str) -> bool:
+        """Ensure a started relay channel for ``codespace`` iff it is held.
+
+        Returns ``True`` when a channel is present (already running or freshly
+        started), ``False`` when the CodeSpace is not held (any existing channel
+        is stopped and dropped). If starting the channel fails, the half-created
+        channel is dropped (so the next reconcile builds a fresh one) and the
+        error propagates to the caller.
+        """
+        if not should_hold(codespace, self._ttl):
+            await self.drop(codespace)
+            return False
+        channel = self._channels.get(codespace)
+        if channel is None:
+            channel = self._factory(codespace)
+            self._channels[codespace] = channel
+        if not channel.is_alive():
+            try:
+                await channel.start()
+            except Exception:
+                # start() may have spawned the ssh process before failing; stop it
+                # best-effort so we don't leak a relay we've stopped tracking.
+                try:
+                    await channel.stop()
+                except Exception:
+                    log.debug("relay stop after failed start also failed for %s", codespace)
+                self._channels.pop(codespace, None)
+                raise
+        return True
+
+    async def drop(self, codespace: str) -> None:
+        """Stop and forget the relay channel for ``codespace`` (idempotent)."""
+        channel = self._channels.pop(codespace, None)
+        if channel is not None:
+            await channel.stop()
+
+    async def reconcile(self) -> None:
+        """Bring live channels in line with the registry: start held, stop unheld.
+
+        Resilient per CodeSpace: a channel that fails to start is logged and
+        dropped (retried next cycle) without aborting reconciliation of the rest.
+        """
+        held = {h.codespace for h in list_holds(self._ttl)}
+        for codespace in list(self._channels):
+            if codespace not in held:
+                await self.drop(codespace)
+        for codespace in held:
+            try:
+                await self.ensure(codespace)
+            except Exception as exc:  # one bad CS must not stall the rest
+                log.warning(
+                    "Connection Owner: failed to ensure relay for %s: %s",
+                    codespace, exc,
+                )
+                self._channels.pop(codespace, None)
+
+    async def shutdown(self) -> None:
+        """Stop all relay channels (daemon shutdown). The registry is untouched."""
+        for codespace in list(self._channels):
+            await self.drop(codespace)
