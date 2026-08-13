@@ -11,9 +11,15 @@ INSTALL_DIR="$HOME/.agent-index"
 [ -f "$INSTALL_DIR/deploy-manifest.json" ] || exit 0
 
 # Fast health probe on the LIVE routing endpoint (active.json ephemeral port).
+# Prefer the runtime's OWN venv python (always present when installed) over a
+# global python3; fall back to curl so a host without either still works.
+pybin=""
+if [ -x "$INSTALL_DIR/.venv/bin/python" ]; then pybin="$INSTALL_DIR/.venv/bin/python"
+elif command -v python3 >/dev/null 2>&1; then pybin="python3"; fi
+
 healthy=0
-if command -v python3 >/dev/null 2>&1; then
-    if python3 - "$INSTALL_DIR/active.json" <<'PY' 2>/dev/null
+if [ -n "$pybin" ]; then
+    if "$pybin" - "$INSTALL_DIR/active.json" <<'PY' 2>/dev/null
 import json, sys, urllib.request
 try:
     p = json.load(open(sys.argv[1]))["active"]["port"]
@@ -23,6 +29,9 @@ except Exception:
     sys.exit(1)
 PY
     then healthy=1; fi
+elif command -v curl >/dev/null 2>&1; then
+    port="$(sed -n 's/.*"port"[: ]*\([0-9]\{1,\}\).*/\1/p' "$INSTALL_DIR/active.json" | head -n1)"
+    [ -n "$port" ] && curl -fsS --max-time 2 "http://127.0.0.1:$port/health" >/dev/null 2>&1 && healthy=1
 fi
 [ "$healthy" = "1" ] && exit 0
 
