@@ -156,7 +156,21 @@ try {
     while ((Get-Date) -lt $deadline -and @(Get-ChildItem $stageRoot -Directory -EA SilentlyContinue).Count -lt 2) { Start-Sleep -Milliseconds 200 }
     $dirs = @(Get-ChildItem $stageRoot -Directory -ErrorAction SilentlyContinue)
     Assert 'NO-COLLISION (2 concurrent -> >=2 distinct stage dirs)' ($dirs.Count -ge 2) "stage dirs: $($dirs.Count)"
-    Assert 'PAYLOAD-FREE under concurrent installs' (Test-Renamable $payload)
+    # Poll for the payload to become free WHILE both installs are still running
+    # (their smoke children sleep for $SmokeSleep). Two concurrent recursive
+    # Copy-Item stages briefly hold the payload -- the accepted "fast copy"
+    # window, which overlapping copies can stretch under load -- so sample for
+    # the STEADY state rather than at a fixed instant: a lingering CWD/handle
+    # hold (the #1366 bug) keeps the payload locked for the WHOLE sleep and never
+    # frees, while a correct installer frees it once its copy completes. Bounded
+    # well inside $SmokeSleep so we assert free-DURING-install, not after.
+    $freeBy = (Get-Date).AddSeconds([Math]::Max(2, $SmokeSleep - 1))
+    $concFree = $false
+    while ((Get-Date) -lt $freeBy) {
+        if (Test-Renamable $payload) { $concFree = $true; break }
+        Start-Sleep -Milliseconds 250
+    }
+    Assert 'PAYLOAD-FREE under concurrent installs' $concFree
     $c1.WaitForExit($TimeoutSec * 1000) | Out-Null
     $c2.WaitForExit($TimeoutSec * 1000) | Out-Null
 
