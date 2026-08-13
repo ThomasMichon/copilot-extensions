@@ -211,6 +211,21 @@ def test_repo_session_env_passthrough_on_bad_placeholder():
     assert out["K"] == "{unknown_placeholder}/x"  # passed through, no crash
 
 
+def test_cmd_launch_exports_active_project(monkeypatch, tmp_path):
+    """cmd_launch must bridge the resolved project to the launcher via
+    WORKTREE_PROJECT, so a bare `<project>` launched from outside the anchor
+    (e.g. $HOME) still resolves -- the dotfiles/book2 "WORKTREE_PROJECT is not
+    set" regression. We stop before the exec by pointing install_dir at a dir
+    with no launch script; the env is set first, which is what we assert."""
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m.cfg, "_ACTIVE_PROJECT", "dotfiles")
+    monkeypatch.setattr(m.cfg, "install_dir", lambda: tmp_path)
+    monkeypatch.setattr(m.cfg, "detect_platform", lambda: "linux")
+    rc = m.cmd_launch([])
+    assert rc == 1  # launch-session.sh not found under tmp_path -> early return
+    assert os.environ.get("WORKTREE_PROJECT") == "dotfiles"
+
+
 # ---------------------------------------------------------------------------
 # env_script: capture a repo env-priming script's environment for the exec.
 # See the agent-worktrees-env-script feature (declarative enlistment priming).
