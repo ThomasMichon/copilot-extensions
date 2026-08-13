@@ -37,6 +37,18 @@ worktrees programmatically, use `agent-worktrees create [--json]` (no launch) or
 [cli-reference.md](cli-reference.md). Why sessions run in a multiplexer at all
 (and when to skip it) is covered in [Multiplexed Sessions](mux.md).
 
+> **The bare-invocation seam (Phase 6).** A bare, no-args `<project>` is the
+> *human-facing* path, and it resolves through a **seam**: if the out-of-plugin
+> **Worktree Manager** (`worktree-manager`) is on PATH, the engine hands off to
+> it; otherwise it falls back to this bundled Picker. PATH presence of
+> `worktree-manager` is the whole signal — no registration file. Any *args* route
+> programmatically to the tool CLI and never touch the seam, so an agent running
+> `<project> <verb>` never loads a Picker. The Manager reaches the engine only via
+> its machine-readable verbs — see the
+> [engine ↔ Picker `--json` contract](engine-picker-contract.md). (The seam lives
+> in the CLI so bare invocation always resolves sanely even through a stale
+> binstub; see the Phase 6 effort for the never-break 6a→6b→6c sequence.)
+
 ### ① Freshness done for you at launch
 
 Before the Picker paints, the launcher brings the environment up to date so you
