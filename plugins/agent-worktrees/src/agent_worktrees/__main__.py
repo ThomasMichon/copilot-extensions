@@ -15572,6 +15572,49 @@ def _worktree_manager_path() -> str | None:
     return shutil.which(_WORKTREE_MANAGER_BIN)
 
 
+def _usable_worktree_manager() -> str | None:
+    """The Manager binstub, but only if it is actually invocable (DQ8 guard).
+
+    PATH-presence is the seam *signal* (DQ7), but presence alone is not enough:
+    a **stale or incompatible** ``worktree-manager`` binstub must never capture
+    the bare-launch seam and dead-end it. This is a real failure mode -- e.g. an
+    ancient pre-versioned stub (the ``services/worktree-manager`` era) that
+    demands a ``WORKTREE_PROJECT`` env var and errors on every call. Crucially,
+    ``<project> update`` runs the *agent-worktrees* installer, which does **not**
+    own the ``worktree-manager`` binstub (that belongs to the separate,
+    out-of-band Manager installer), so it can neither overwrite nor prune a stale
+    one -- the seam must protect itself.
+
+    So gate the handoff on a fast ``--version`` health probe: a healthy Manager
+    exits 0; the stale stub exits non-zero. On failure, treat the Manager as
+    absent so the seam falls back to the bundled Picker / install trigger --
+    upholding DQ8's invariant that a bare, no-args invocation ALWAYS resolves to
+    a sane action. The probe runs only on the human bare-launch path (never the
+    ``<project> <verb>`` agent hot path), so its cost is off the critical path.
+    """
+    mgr = _worktree_manager_path()
+    if not mgr:
+        return None
+    try:
+        proc = subprocess.run(
+            [mgr, "--version"], capture_output=True, text=True, timeout=15,
+            env={**os.environ, "PYTHONUTF8": "1"},
+        )
+    except (OSError, subprocess.SubprocessError):
+        output.err(
+            f"Ignoring an unusable '{_WORKTREE_MANAGER_BIN}' on PATH ({mgr}): "
+            "it could not be run. Falling back to the bundled picker.")
+        return None
+    if proc.returncode != 0:
+        output.err(
+            f"Ignoring a broken '{_WORKTREE_MANAGER_BIN}' on PATH ({mgr}): it "
+            f"failed a --version health check (exit {proc.returncode}). This is "
+            "usually a stale binstub from an old install; reinstall or remove "
+            "it. Falling back to the bundled picker.")
+        return None
+    return mgr
+
+
 def _exec_worktree_manager(mgr: str, project: str | None) -> int:
     """Hand a bare, no-args invocation off to the Worktree Manager (the seam).
 
@@ -16780,13 +16823,13 @@ def main(argv: list[str] | None = None) -> int:
         if has_project:
             if _is_headless_project():
                 return cmd_headless_bare()
-            mgr = _worktree_manager_path()
+            mgr = _usable_worktree_manager()
             if mgr:
                 return _exec_worktree_manager(mgr, cfg.active_project())
             if _bundled_picker_available():
                 return cmd_launch([])
             return cmd_manager_install_trigger(cfg.active_project())
-        mgr = _worktree_manager_path()
+        mgr = _usable_worktree_manager()
         if mgr:
             return _exec_worktree_manager(mgr, None)
         if _bundled_picker_available():
