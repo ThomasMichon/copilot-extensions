@@ -67,7 +67,11 @@ def run_reindex(
         progress_cb: Optional callback for progress reporting and cancellation.
 
     Returns:
-        Dict with keys: chunks_total, chunks_added, chunks_deleted, files_crawled.
+        Dict with keys ``chunks_total``, ``chunks_deleted``, ``files_crawled``,
+        and ``duration_seconds`` (plus ``clusters`` when the post-index cluster
+        pass runs). If one or more sources fail to index, the run continues past
+        them and a ``sources_failed`` list of ``{"source", "error"}`` entries is
+        also included (see #1350).
     """
     from agent_index.engine.client import EngineClient
     from agent_index.engine.lifecycle import ensure_engine, stop_engine

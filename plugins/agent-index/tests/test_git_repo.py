@@ -132,7 +132,7 @@ def test_git_repo_connector_falls_back_to_local_head_without_remote(tmp_path: Pa
 def test_source_name_from_url_parsing() -> None:
     """Repo-name extraction handles https, scp-like, trailing slash and .git."""
     f = GitRepoConnector._repo_name_from_url
-    assert f("https://github.com/tmichon_microsoft/dotfiles.git") == "dotfiles"
+    assert f("https://github.com/example-org/dotfiles.git") == "dotfiles"
     assert f("https://github.com/tmichon_microsoft/dotfiles") == "dotfiles"
     assert f("git@github.com:owner/dotfiles.git") == "dotfiles"
     assert f("https://host/owner/repo/") == "repo"
@@ -157,8 +157,8 @@ def test_source_name_is_stable_across_worktrees(tmp_path: Path) -> None:
     _git(seed, "push", "-u", "origin", "main")
 
     # Two checkouts with different folder basenames, same origin.
-    anchor = tmp_path / "dotfiles"
-    worktree = tmp_path / "tmichon-cloud1-win-20260812-xyz"
+    anchor = tmp_path / "anchor-checkout"
+    worktree = tmp_path / "linked-worktree-xyz"
     _git(tmp_path, "clone", str(origin), str(anchor))
     _git(tmp_path, "clone", str(origin), str(worktree))
 
