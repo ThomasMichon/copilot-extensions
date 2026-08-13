@@ -192,6 +192,42 @@ healthy deep-reasoning turn*, not a wedge.
   transport is actually gone (`disconnected` / `stopped` from connection loss --
   and even then, **`send` to reattach**, don't recreate; see below).
 
+### Answering a dispatched agent's questions (elicitation backstop)
+
+A dispatched agent can **reach for help** mid-turn via `ask_user` (a form
+question). The bridge does **not** auto-answer -- it *parks* the turn and waits,
+exactly as an interactive Copilot waits at its terminal. **You (the host) are
+the human it reached for.** A parked question sits forever until you answer, so
+watch for it and unblock it:
+
+```bash
+# `status` surfaces a parked question as an ASK: line with its fields + the
+# exact command to answer:
+agent-bridge status <sid>
+#   ASK:     Which database engine should I use?
+#            fields: db*=postgres|mysql|sqlite
+#            answer: `agent-bridge answer <sid> --field <key>=<value> …`
+
+# Answer it -- the agent's turn then continues:
+agent-bridge answer <sid> --field db=postgres
+# multiple fields: repeat --field; complex/typed values: --json '{"port": 5432}'
+# not going to answer: --decline (agent proceeds without) or --cancel
+```
+
+- `--tool-call-id` is only needed when **several** questions are pending at once
+  (status lists each id); with one parked question it defaults automatically.
+- Answering is the RIGHT move -- prefer it over `end`+`create`. A parked
+  `ask_user` is the agent asking for a decision, not a wedge; recreating the
+  session throws away its in-progress work.
+
+**Guidance for the remote/dispatched agent (fold into its prompt for
+consequential work):** *"You are running dispatched via agent-bridge with a host
+watching. When you hit a genuine decision point or are blocked on missing
+info/permissions, use `ask_user` to reach for the host rather than guessing or
+autopiloting down a risky path -- the host will answer. Do NOT use `ask_user` for
+routine choices you can make yourself; reserve it for decisions that are
+expensive to get wrong."*
+
 ### Context Window Monitoring
 
 The `CONTEXT` column in `agent-bridge sessions` shows token usage as a

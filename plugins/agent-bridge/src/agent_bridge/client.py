@@ -514,6 +514,31 @@ class BridgeClient:
             "GET", f"/api/v1/sessions/{session_id}/status", params=params
         ) or {}
 
+    def answer_ask_user(
+        self,
+        session_id: str,
+        tool_call_id: str,
+        content: dict[str, Any] | None = None,
+        *,
+        action: str = "accept",
+    ) -> dict[str, Any]:
+        """POST /api/v1/sessions/{id}/ask-user -- answer a parked ask_user.
+
+        Resolves the dispatched agent's blocked ``ask_user`` elicitation so its
+        turn continues (the host acting as the human the agent reached for;
+        dotfiles#1275). ``action`` is ``accept`` (with ``content``), ``decline``,
+        or ``cancel``. Raises ``BridgeClientError`` (409) when no matching
+        question is outstanding.
+        """
+        return self._request(
+            "POST", f"/api/v1/sessions/{session_id}/ask-user",
+            body={
+                "tool_call_id": tool_call_id,
+                "content": content or {},
+                "action": action,
+            },
+        ) or {}
+
     def start_session(
         self,
         *,
