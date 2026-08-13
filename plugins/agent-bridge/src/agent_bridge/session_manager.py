@@ -97,6 +97,54 @@ def _resolve_relay_launch_env(
         return "", None
 
 
+def _resolve_codespace_ai_plugin_dirs(
+    codespace_name: str, repo: str | None
+) -> list[str]:
+    """Resolve the CodeSpace repo's OWN enabled ``.ai`` plugin dirs to fold into
+    the Session-Host launch as ``--plugin-dir`` (dotfiles#1274 WS1-skills).
+
+    Process-boundary shell-out to ``agent-codespaces resolve-ai-plugin-dirs``
+    (from agent-codespaces' **own** venv), mirroring
+    :func:`_resolve_relay_launch_env`: agent-bridge can't import
+    ``agent_codespaces``. The verb SSHes to the CodeSpace and runs the canonical
+    ``plugin_resolve`` resolver against the workspace checkout, printing each
+    resolved ``/workspaces/<repo>/.ai/<name>`` dir (one per line).
+
+    ``copilot --acp`` ignores ``enabledPlugins`` and only surfaces plugin skills
+    via ``--plugin-dir``, so without this a dispatched agent never loads the
+    product repo's own in-repo ``.ai`` skills/MCP. Best-effort: returns ``[]`` on
+    a missing binstub / CLI failure / non-zero exit so the dispatch proceeds
+    unchanged (no repo-own plugins), never blocking the connect.
+    """
+    binstub = shutil.which("agent-codespaces")
+    if not binstub:
+        return []
+    argv = [binstub, "resolve-ai-plugin-dirs", codespace_name]
+    if repo:
+        argv += ["--repo", repo]
+    creationflags = (
+        subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    )
+    try:
+        r = subprocess.run(
+            argv, capture_output=True, text=True, timeout=90,
+            creationflags=creationflags,
+        )
+    except Exception:
+        log.debug(
+            "agent-codespaces resolve-ai-plugin-dirs CLI failed for %s",
+            codespace_name, exc_info=True,
+        )
+        return []
+    if r.returncode != 0:
+        log.debug(
+            "agent-codespaces resolve-ai-plugin-dirs exited %s for %s",
+            r.returncode, codespace_name,
+        )
+        return []
+    return [ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip()]
+
+
 # ``agent-codespaces claim`` exits with this code on a live claim conflict
 # (a different, still-alive worktree already controls the CodeSpace). Kept in
 # sync with ``agent_codespaces.__main__._BUSY_EXIT``.
@@ -2294,6 +2342,30 @@ class SessionManager:
                 # dotfiles#790) -- the single, uniform mechanism for every
                 # dispatch path.
                 acp_command = cs_target["acp_command"]
+                # Fold the CodeSpace repo's OWN enabled ``.ai`` plugin dirs into
+                # the launch as ``--plugin-dir`` so the dispatched ACP agent
+                # loads the product repo's own in-repo skills/MCP. ``copilot
+                # --acp`` ignores ``enabledPlugins`` -- only ``--plugin-dir``
+                # surfaces plugin skills -- and this Session-Host path (never the
+                # front-owns-stdio ``agent-codespaces ssh`` path) is where a real
+                # CodeSpace dispatch launches, so the fold MUST happen here
+                # (dotfiles#1274 WS1-skills). Resolved by shelling agent-codespaces'
+                # own venv (process boundary), mirroring the relay-launch-env
+                # seam. Best-effort: [] on any failure -> unchanged launch. The
+                # payloads already live in the checkout, so ``--plugin-dir`` at
+                # ``/workspaces/<repo>/.ai/<name>`` needs no install/egress. The
+                # flags append to the tail of ``cd <repo> && copilot --acp …``, so
+                # they land on the ``copilot`` invocation.
+                ai_plugin_dirs = _resolve_codespace_ai_plugin_dirs(
+                    cs_target["name"], cs_target.get("repo") or None,
+                )
+                for d in ai_plugin_dirs:
+                    acp_command += f' --plugin-dir="{d}"'
+                if ai_plugin_dirs:
+                    log.info(
+                        "Folded %d repo-own .ai --plugin-dir(s) into %s launch: %s",
+                        len(ai_plugin_dirs), cs_target["name"], ai_plugin_dirs,
+                    )
                 remote_argv = [
                     "bash", "-lc", relay_prelude + acp_command,
                 ]
