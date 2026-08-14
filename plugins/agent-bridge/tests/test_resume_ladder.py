@@ -84,3 +84,59 @@ async def test_resume_exhausts_ladder_then_raises(tmp_db, spawn_target, mock_acp
     assert retries[-1].data["will_retry"] is False
     # The type is preserved even though ``str(asyncio.TimeoutError())`` is empty.
     assert retries[-1].data["error"] == "TimeoutError"
+
+
+@pytest.mark.asyncio
+async def test_resume_recreates_when_allowed(tmp_db, spawn_target, mock_acp_client):
+    """allow_recreate: after the stop->resume ladder is exhausted, a FRESH ACP
+    session (new_session) is created in place -- same bridge id, new acp id,
+    context dropped -- recorded as acp_resume_recreated (#1468)."""
+    with patch("agent_bridge.session_manager.spawn", return_value=_mock_agent_proc()), \
+         patch("agent_bridge.session_manager.AcpClient", return_value=mock_acp_client):
+        sm = SessionManager(tmp_db)
+        session = await _make_stopped_session(sm, spawn_target, mock_acp_client)
+        old_acp = session.acp_session_id
+
+        # start() always succeeds; every load_session (resume) stalls; the fresh
+        # new_session (recreate) succeeds.
+        mock_acp_client.start = AsyncMock()
+        mock_acp_client.load_session = AsyncMock(side_effect=asyncio.TimeoutError())
+        mock_acp_client.new_session = AsyncMock(return_value="fresh-acp-999")
+        mock_acp_client.stderr_tail = MagicMock(return_value="Resuming...")
+
+        resumed = await sm.resume_session(
+            session.session_id, drain=False, allow_recreate=True
+        )
+
+    assert resumed.status == SessionStatus.IDLE
+    assert resumed.acp_session_id == "fresh-acp-999"
+    # The resume ladder still ran (3 stalled rounds) before the recreate.
+    assert len(_events(session, "acp_resume_retry")) == _MAX_RESUME_ROUNDS
+    recreated = _events(session, "acp_resume_recreated")
+    assert len(recreated) == 1
+    assert recreated[0].data["old_acp_session_id"] == old_acp
+    assert recreated[0].data["new_acp_session_id"] == "fresh-acp-999"
+    assert recreated[0].data["context_dropped"] is True
+
+
+@pytest.mark.asyncio
+async def test_resume_recreate_failure_raises(tmp_db, spawn_target, mock_acp_client):
+    """If even the fresh new_session recreate fails, the session is left STOPPED
+    and the error surfaces (no silent wedged session)."""
+    with patch("agent_bridge.session_manager.spawn", return_value=_mock_agent_proc()), \
+         patch("agent_bridge.session_manager.AcpClient", return_value=mock_acp_client):
+        sm = SessionManager(tmp_db)
+        session = await _make_stopped_session(sm, spawn_target, mock_acp_client)
+
+        mock_acp_client.start = AsyncMock()
+        mock_acp_client.load_session = AsyncMock(side_effect=asyncio.TimeoutError())
+        mock_acp_client.new_session = AsyncMock(side_effect=RuntimeError("no fresh"))
+        mock_acp_client.stderr_tail = MagicMock(return_value="")
+
+        with pytest.raises(RuntimeError):
+            await sm.resume_session(
+                session.session_id, drain=False, allow_recreate=True
+            )
+
+    assert session.status == SessionStatus.STOPPED
+    assert len(_events(session, "acp_resume_recreated")) == 0
