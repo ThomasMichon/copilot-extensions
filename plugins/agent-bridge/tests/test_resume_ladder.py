@@ -104,12 +104,24 @@ async def test_resume_recreates_when_allowed(tmp_db, spawn_target, mock_acp_clie
         mock_acp_client.new_session = AsyncMock(return_value="fresh-acp-999")
         mock_acp_client.stderr_tail = MagicMock(return_value="Resuming...")
 
+        # Stale context-pressure state from the (dropped) old ACP session.
+        session.context_used = 999
+        session.context_size = 1000
+        session._crossed_thresholds = {"warning", "critical"}
+        session._handoff_pending = True
+
         resumed = await sm.resume_session(
             session.session_id, drain=False, allow_recreate=True
         )
 
     assert resumed.status == SessionStatus.IDLE
     assert resumed.acp_session_id == "fresh-acp-999"
+    # Fresh empty session -> context-usage / handoff state is reset so stale
+    # "critical"/pending-handoff can't misfire.
+    assert resumed.context_used is None
+    assert resumed.context_size is None
+    assert resumed._crossed_thresholds == set()
+    assert resumed._handoff_pending is False
     # The resume ladder still ran (3 stalled rounds) before the recreate.
     assert len(_events(session, "acp_resume_retry")) == _MAX_RESUME_ROUNDS
     recreated = _events(session, "acp_resume_recreated")
@@ -117,6 +129,9 @@ async def test_resume_recreates_when_allowed(tmp_db, spawn_target, mock_acp_clie
     assert recreated[0].data["old_acp_session_id"] == old_acp
     assert recreated[0].data["new_acp_session_id"] == "fresh-acp-999"
     assert recreated[0].data["context_dropped"] is True
+    # A durable recreated lifecycle event is emitted for SSE/telemetry consumers.
+    scs = [e for e in _events(session, "session_state_changed") if e.data.get("recreated")]
+    assert len(scs) == 1 and scs[0].data["status"] == "idle"
 
 
 @pytest.mark.asyncio

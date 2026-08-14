@@ -2789,12 +2789,29 @@ class SessionManager:
                     session.client = recreate_client
                     session.acp_session_id = new_acp
                     session.status = SessionStatus.IDLE
+                    # The fresh ACP session starts EMPTY -- reset context-usage /
+                    # handoff state so stale "critical" usage or a pending
+                    # context-pressure handoff from the dropped session can't
+                    # misfire against the new (empty) session (review on #1468).
+                    session.context_size = None
+                    session.context_used = None
+                    session._crossed_thresholds = set()
+                    session._handoff_pending = False
                     self._db.update_session_acp_id(session_id, new_acp)
                     self._db.update_session_status(
                         session_id, SessionStatus.IDLE.value, time.time(),
                         pid=session.pid,
                     )
                     if session.event_log:
+                        # Durable lifecycle transition for SSE/telemetry consumers
+                        # (the recreate is still a resume-to-IDLE, just onto a
+                        # fresh ACP session).
+                        session.event_log.append("session_state_changed", {
+                            "status": SessionStatus.IDLE.value,
+                            "resumed": True,
+                            "recreated": True,
+                            "acp_session_id": new_acp,
+                        })
                         session.event_log.append("acp_resume_recreated", {
                             "old_acp_session_id": old_acp,
                             "new_acp_session_id": new_acp,
