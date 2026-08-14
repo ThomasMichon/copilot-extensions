@@ -74,7 +74,7 @@ async def test_resume_exhausts_ladder_then_raises(tmp_db, spawn_target, mock_acp
         mock_acp_client.start = AsyncMock(side_effect=asyncio.TimeoutError())
         mock_acp_client.stderr_tail = MagicMock(return_value="")
 
-        with pytest.raises(Exception):
+        with pytest.raises(asyncio.TimeoutError):
             await sm.resume_session(session.session_id, drain=False)
 
     assert session.status == SessionStatus.STOPPED
@@ -82,3 +82,5 @@ async def test_resume_exhausts_ladder_then_raises(tmp_db, spawn_target, mock_acp
     assert len(retries) == _MAX_RESUME_ROUNDS
     assert [r.data["attempt"] for r in retries] == list(range(1, _MAX_RESUME_ROUNDS + 1))
     assert retries[-1].data["will_retry"] is False
+    # The type is preserved even though ``str(asyncio.TimeoutError())`` is empty.
+    assert retries[-1].data["error"] == "TimeoutError"

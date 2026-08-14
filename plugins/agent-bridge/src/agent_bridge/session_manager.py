@@ -2693,6 +2693,10 @@ class SessionManager:
                     # Capture the child's startup stderr tail BEFORE tearing the
                     # client down, so the retry marker records why it stalled.
                     stderr_tail = client.stderr_tail() if client else ""
+                    # Many stall exceptions (notably ``asyncio.TimeoutError()``)
+                    # have an empty ``str()`` -- keep the type so markers/logs are
+                    # interpretable.
+                    exc_desc = f"{type(exc).__name__}: {exc}".rstrip(": ")
                     # Stop the wedged child before the next round (the "stop" in
                     # stop->resume); re-rolls the launch against the SAME ACP
                     # session, preserving prior-turn context.
@@ -2704,7 +2708,7 @@ class SessionManager:
                         session.event_log.append("acp_resume_retry", {
                             "attempt": attempt,
                             "of": _MAX_RESUME_ROUNDS,
-                            "error": str(exc),
+                            "error": exc_desc,
                             "stderr_tail": stderr_tail,
                             "will_retry": attempt < _MAX_RESUME_ROUNDS,
                         })
@@ -2712,7 +2716,7 @@ class SessionManager:
                         log.warning(
                             "Resume attempt %d/%d for session %s failed (%s); "
                             "stopping the wedged child and re-rolling",
-                            attempt, _MAX_RESUME_ROUNDS, session_id, exc,
+                            attempt, _MAX_RESUME_ROUNDS, session_id, exc_desc,
                         )
                         continue
                     # Ladder exhausted: leave STOPPED and surface the failure so
@@ -2724,11 +2728,11 @@ class SessionManager:
                     if session.event_log:
                         session.event_log.append("error", {
                             "message": f"Resume failed after {_MAX_RESUME_ROUNDS} "
-                                       f"attempts: {exc}",
+                                       f"attempts: {exc_desc}",
                         })
                     log.error(
                         "Failed to resume session %s after %d attempts: %s",
-                        session_id, _MAX_RESUME_ROUNDS, exc,
+                        session_id, _MAX_RESUME_ROUNDS, exc_desc,
                     )
                     raise
 
