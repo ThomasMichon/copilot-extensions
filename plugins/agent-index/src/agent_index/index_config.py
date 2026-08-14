@@ -145,16 +145,24 @@ def _default_stream_batch_size() -> int:
     """Chunks per embed+store batch, capability-aware (#115).
 
     An explicit ``AGENT_INDEX_STREAM_BATCH_SIZE`` always wins. Otherwise the
-    default keys off the indexing ``AGENT_INDEX_DEVICE``: a GPU host embeds a
-    large batch in well under the read timeout, so it keeps the high-throughput
-    500; a CPU host uses a small batch so each ``/embed/batch`` completes within
-    the embed read timeout instead of tripping it and emptying the index. Only
-    the *less-capable* (CPU) path is downgraded; GPU hosts keep full throughput.
+    default keys off the **resolved** indexing device (``_default_device()``): a
+    GPU host embeds a large batch in well under the read timeout, so it keeps the
+    high-throughput 500; a CPU host uses a small batch so each ``/embed/batch``
+    completes within the embed read timeout instead of tripping it and emptying
+    the index. Only the *less-capable* (CPU) path is downgraded; GPU hosts keep
+    full throughput.
+
+    Resolving the device the same way the engine does (env → recorded
+    ``machine_device()`` → ``cuda``) is essential: keying off the bare
+    ``AGENT_INDEX_DEVICE`` env with a ``cuda`` default made a CPU host whose
+    ``AGENT_INDEX_DEVICE`` is unset pick the 500 batch, so its CPU
+    ``/embed/batch`` calls exceeded the read timeout and whole sources failed
+    (#1452). ``_default_device()`` is the single source of truth.
     """
     explicit = os.environ.get("AGENT_INDEX_STREAM_BATCH_SIZE")
     if explicit:
         return max(1, int(explicit))
-    device = os.environ.get("AGENT_INDEX_DEVICE", "cuda").strip().lower()
+    device = _default_device().strip().lower()
     return 500 if device.startswith("cuda") else 64
 
 
