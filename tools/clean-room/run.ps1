@@ -69,6 +69,13 @@ param(
     [string]$Mode = 'run',
     [ValidateSet('base','pristine')]
     [string]$Image = 'base',
+    # Optional suffix to make the container + agent-bridge agent names UNIQUE, so
+    # a second clean-room of the SAME image can run concurrently without the
+    # `docker rm -f cr-<image>` in Start-Container clobbering another agent's box.
+    # e.g. -Image base -NameSuffix agc -> container `cr-base-agc`, agent
+    # `cleanroom-base-agc`. Empty = the legacy `cr-<image>` name. Docker-name-safe.
+    [ValidatePattern('^$|^[a-zA-Z0-9][a-zA-Z0-9_.-]*$')]
+    [string]$NameSuffix = '',
     # Scenario to run: a name under scenarios/ or an explicit dir path.
     [string]$Scenario = 'generic-single-plugin',
     # Stop the scenario after this stage number, or 'all' (default) for every stage.
@@ -120,11 +127,15 @@ if (-not (Test-Path (Join-Path $ScenarioDir 'scenario.sh'))) {
 $LibDir = Join-Path $Here 'lib'
 
 # --- image/tag/container naming (base keeps the legacy :authed tag) -----------
+# $NameSuffix makes the CONTAINER + agent names unique (concurrent clean-rooms of
+# the same image); the image/tag are shared (name-collision is only on the
+# container, so a suffix never forces a rebuild).
 $Dockerfile = if ($Image -eq 'pristine') { 'Dockerfile.pristine' } else { 'Dockerfile' }
 $BaseTag    = "copilot-cleanroom:$Image"
 $AuthTag    = if ($Image -eq 'base') { 'copilot-cleanroom:authed' } else { "copilot-cleanroom:$Image-authed" }
-$Container  = "cr-$Image"
-$AgentName  = "cleanroom-$Image"   # agent-bridge agent + provider name for this box
+$NameTail   = if ($NameSuffix) { "-$NameSuffix" } else { '' }
+$Container  = "cr-$Image$NameTail"
+$AgentName  = "cleanroom-$Image$NameTail"   # agent-bridge agent + provider name for this box
 
 if (-not $ResultsDir) { $ResultsDir = $env:CR_RESULTS_DIR }
 if (-not $ResultsDir) {
@@ -253,7 +264,7 @@ function Invoke-Run {
 function Invoke-Shell {
     Ensure-Container
     Write-Host "== entering $Container (interactive login shell; 'exit' to leave, container stays up) ==" -ForegroundColor Cyan
-    Write-Host "   run './run.ps1 -Image $Image -Mode down' to remove it." -ForegroundColor DarkGray
+    Write-Host "   run './run.ps1 -Image $Image$(if($NameSuffix){" -NameSuffix $NameSuffix"}) -Mode down' to remove it." -ForegroundColor DarkGray
     docker exec -it $Container /bin/bash -l
 }
 

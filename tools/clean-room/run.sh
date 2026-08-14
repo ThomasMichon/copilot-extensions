@@ -27,6 +27,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 IMAGE=base
+NAME_SUFFIX=""
 UNTIL=all
 THEN=none
 SCENARIO=generic-single-plugin
@@ -38,6 +39,7 @@ MODE=run
 while [ $# -gt 0 ]; do
     case "$1" in
         --image) IMAGE="$2"; shift 2 ;;
+        --name-suffix) NAME_SUFFIX="$2"; shift 2 ;;
         --until) UNTIL="$2"; shift 2 ;;
         --then)  THEN="$2"; shift 2 ;;
         --scenario) SCENARIO="$2"; shift 2 ;;
@@ -46,7 +48,7 @@ while [ $# -gt 0 ]; do
         --token-account) TOKEN_ACCOUNT="$2"; shift 2 ;;
         --no-token) NO_TOKEN=1; shift ;;
         build|auth|run|shell|down|bridge-register|bridge-unregister|all) MODE="$1"; shift ;;
-        *) echo "usage: $0 [--image base|pristine] [--scenario NAME|DIR] [--until N|all] [--then shell|down] [--npm-registry URL] [--uv-index URL] [--token-account USER] [--no-token] {build|auth|run|shell|down|bridge-register|bridge-unregister|all}" >&2; exit 2 ;;
+        *) echo "usage: $0 [--image base|pristine] [--name-suffix SUFFIX] [--scenario NAME|DIR] [--until N|all] [--then shell|down] [--npm-registry URL] [--uv-index URL] [--token-account USER] [--no-token] {build|auth|run|shell|down|bridge-register|bridge-unregister|all}" >&2; exit 2 ;;
     esac
 done
 
@@ -61,11 +63,18 @@ fi
 [ -f "$SCENARIO_DIR/scenario.sh" ] || { echo "scenario '$SCENARIO_NAME' has no scenario.sh" >&2; exit 2; }
 LIB_DIR="$HERE/lib"
 
+# $NAME_SUFFIX makes the CONTAINER + agent names unique (concurrent clean-rooms
+# of the same image); the image/tag are shared (name-collision is only on the
+# container). Docker-name-safe suffix only.
 case "$IMAGE" in base) DOCKERFILE=Dockerfile ;; pristine) DOCKERFILE=Dockerfile.pristine ;; *) echo "bad --image: $IMAGE" >&2; exit 2 ;; esac
+if [ -n "$NAME_SUFFIX" ] && ! printf '%s' "$NAME_SUFFIX" | grep -Eq '^[a-zA-Z0-9][a-zA-Z0-9_.-]*$'; then
+    echo "bad --name-suffix: '$NAME_SUFFIX' (must be docker-name-safe)" >&2; exit 2
+fi
 BASE_TAG="copilot-cleanroom:$IMAGE"
 if [ "$IMAGE" = base ]; then AUTH_TAG="copilot-cleanroom:authed"; else AUTH_TAG="copilot-cleanroom:$IMAGE-authed"; fi
-CONTAINER="cr-$IMAGE"
-AGENT_NAME="cleanroom-$IMAGE"   # agent-bridge agent + provider name for this box
+NAME_TAIL=""; [ -n "$NAME_SUFFIX" ] && NAME_TAIL="-$NAME_SUFFIX"
+CONTAINER="cr-$IMAGE$NAME_TAIL"
+AGENT_NAME="cleanroom-$IMAGE$NAME_TAIL"   # agent-bridge agent + provider name for this box
 
 if [ -n "${CR_RESULTS_DIR:-}" ]; then
     RESULTS="$CR_RESULTS_DIR"
@@ -147,7 +156,7 @@ ensure_container() { is_running "$CONTAINER" || start_container; }
 do_shell() {
     ensure_container
     echo "== entering $CONTAINER (interactive login shell; 'exit' leaves, container stays up) =="
-    echo "   run '$0 --image $IMAGE down' to remove it."
+    echo "   run '$0 --image $IMAGE${NAME_SUFFIX:+ --name-suffix $NAME_SUFFIX} down' to remove it."
     docker exec -it "$CONTAINER" /bin/bash -l
 }
 do_down() { docker rm -f "$CONTAINER" >/dev/null 2>&1 || true; echo "removed $CONTAINER"; }
