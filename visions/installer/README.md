@@ -364,6 +364,6 @@ the app to keep *itself* current.
   `§Behaviors/onboards-from-empty-gracefully` (a bare machine gets a setup-first,
   guided onboarding home — surfaces show what's missing + the action, never a dead
   load). The pilot also surfaced install-side prerequisites for this to work:
-  ThomasMichon/copilot-extensions#540 (`setup` checkout discovery) and #541
+  #540 (`setup` checkout discovery) and #541
   (unconditional tool-binstub deploy); the new surfaces are #543 / #544, and the
   Picker first-run behavior is #542. Umbrella #352; Phase 3/4 #356/#357.

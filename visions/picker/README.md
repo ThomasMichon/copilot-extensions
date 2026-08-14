@@ -362,5 +362,5 @@ regression is something a test can catch before an operator does.
   enable plugins): immediately after bootstrap the engine is absent (Worktrees has no
   source) and no machines are configured (the Machines switcher has nothing to switch),
   so the front door must guide provisioning rather than dead-load. Tracked as
-  ThomasMichon/copilot-extensions#542 (with #540/#541 the install-side prerequisites);
+  #542 (with #540/#541 the install-side prerequisites);
   see also #85 (advance-to-vision) and #357 (Phase-4 configurator).
