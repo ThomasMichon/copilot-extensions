@@ -324,7 +324,6 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
     import subprocess as _subprocess
     import sys as _sys
     import urllib.request as _urllib
-    from typing import Any
 
     from zdd import breadcrumb
     from zdd.cutover import CutoverOrchestrator
