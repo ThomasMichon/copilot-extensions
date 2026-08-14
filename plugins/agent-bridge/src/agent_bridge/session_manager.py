@@ -2590,6 +2590,7 @@ class SessionManager:
         permission_callback: Any | None = None,
         *,
         drain: bool = True,
+        allow_recreate: bool = False,
     ) -> Session:
         """Resume a stopped session by spawning a new process.
 
@@ -2602,6 +2603,15 @@ class SessionManager:
         ``submit_prompt``'s auto-resume path passes ``drain=False`` because it
         runs its own prompt next and that turn's settle drains the rest, so the
         resume never starts a second concurrent turn.
+
+        ``allow_recreate`` (default False): the **end+create last resort** of the
+        resume recovery ladder (#1468). When the ``_MAX_RESUME_ROUNDS`` stop->
+        resume rounds all fail (they preserve context by re-``load_session``-ing
+        the SAME ACP session), a truthy ``allow_recreate`` falls back to a FRESH
+        ACP session (``new_session``) under the **same bridge session id** --
+        recovering a working session at the cost of prior-turn context. The
+        ``send``/auto-resume path opts in; an explicit ``resume`` leaves it False
+        so a resume never silently drops context.
         """
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
@@ -2719,20 +2729,117 @@ class SessionManager:
                             attempt, _MAX_RESUME_ROUNDS, session_id, exc_desc,
                         )
                         continue
-                    # Ladder exhausted: leave STOPPED and surface the failure so
-                    # the caller can fall back to end+create (the last resort).
+                    # Ladder exhausted.
+                    if not allow_recreate:
+                        # No fresh-session fallback (e.g. an explicit `resume`):
+                        # surface the failure rather than silently drop context.
+                        session.status = SessionStatus.STOPPED
+                        self._db.update_session_status(
+                            session_id, SessionStatus.STOPPED.value, time.time()
+                        )
+                        if session.event_log:
+                            session.event_log.append("error", {
+                                "message": f"Resume failed after "
+                                           f"{_MAX_RESUME_ROUNDS} attempts: "
+                                           f"{exc_desc}",
+                            })
+                        log.error(
+                            "Failed to resume session %s after %d attempts: %s",
+                            session_id, _MAX_RESUME_ROUNDS, exc_desc,
+                        )
+                        raise
+                    # allow_recreate: fall through to the in-place end+create
+                    # (fresh ACP session, prior-turn context dropped) below.
+                    log.warning(
+                        "Resume ladder exhausted for session %s after %d "
+                        "attempts (%s); falling back to a fresh ACP session "
+                        "(end+create, prior-turn context dropped)",
+                        session_id, _MAX_RESUME_ROUNDS, exc_desc,
+                    )
+                    break
+
+            # End+create last resort (opt-in, ladder exhausted). The stop->resume
+            # rounds above all failed to reattach the persisted ACP session; as a
+            # final recovery, end it and create a FRESH ACP session in place --
+            # SAME bridge session id (delivery cursor / affinity intact), new
+            # (empty) ACP session -- so a wedged CodeSpace resume still yields a
+            # working session, trading prior-turn context for availability
+            # (#1468). Only reached when allow_recreate and no round succeeded.
+            if session.status != SessionStatus.IDLE:
+                recreate_client: AcpClient | None = None
+                try:
+                    agent_proc = await spawn(session.target)
+                    recreate_client = AcpClient(
+                        on_event=on_acp_event,
+                        on_permission=permission_callback,
+                    )
+                    if permission_callback:
+                        recreate_client.auto_approve = False
+                    await asyncio.wait_for(
+                        recreate_client.start(agent_proc.proc),
+                        timeout=self._timeouts.session_start,
+                    )
+                    new_acp = await asyncio.wait_for(
+                        recreate_client.new_session(
+                            cwd=session.target.cwd or _default_cwd(session.target),
+                        ),
+                        timeout=self._timeouts.session_new,
+                    )
+                    old_acp = session.acp_session_id
+                    session.client = recreate_client
+                    session.acp_session_id = new_acp
+                    session.status = SessionStatus.IDLE
+                    # The fresh ACP session starts EMPTY -- reset context-usage /
+                    # handoff state so stale "critical" usage or a pending
+                    # context-pressure handoff from the dropped session can't
+                    # misfire against the new (empty) session (review on #1468).
+                    session.context_size = None
+                    session.context_used = None
+                    session._crossed_thresholds = set()
+                    session._handoff_pending = False
+                    self._db.update_session_acp_id(session_id, new_acp)
+                    self._db.update_session_status(
+                        session_id, SessionStatus.IDLE.value, time.time(),
+                        pid=session.pid,
+                    )
+                    if session.event_log:
+                        # Durable lifecycle transition for SSE/telemetry consumers
+                        # (the recreate is still a resume-to-IDLE, just onto a
+                        # fresh ACP session).
+                        session.event_log.append("session_state_changed", {
+                            "status": SessionStatus.IDLE.value,
+                            "resumed": True,
+                            "recreated": True,
+                            "acp_session_id": new_acp,
+                        })
+                        session.event_log.append("acp_resume_recreated", {
+                            "old_acp_session_id": old_acp,
+                            "new_acp_session_id": new_acp,
+                            "context_dropped": True,
+                        })
+                    log.warning(
+                        "Session %s (%s) recreated with a fresh ACP session %s "
+                        "(was %s) after the resume ladder was exhausted -- "
+                        "prior-turn context dropped",
+                        session_id, session.name, new_acp, old_acp,
+                    )
+                except Exception as exc:
+                    if recreate_client:
+                        with contextlib.suppress(Exception):
+                            await recreate_client.shutdown()
+                    session.client = None
                     session.status = SessionStatus.STOPPED
                     self._db.update_session_status(
                         session_id, SessionStatus.STOPPED.value, time.time()
                     )
+                    exc_desc = f"{type(exc).__name__}: {exc}".rstrip(": ")
                     if session.event_log:
                         session.event_log.append("error", {
-                            "message": f"Resume failed after {_MAX_RESUME_ROUNDS} "
-                                       f"attempts: {exc_desc}",
+                            "message": f"Resume + recreate failed: {exc_desc}",
                         })
                     log.error(
-                        "Failed to resume session %s after %d attempts: %s",
-                        session_id, _MAX_RESUME_ROUNDS, exc_desc,
+                        "Resume + recreate failed for session %s: %s",
+                        session_id, exc_desc,
                     )
                     raise
 
@@ -2896,7 +3003,13 @@ class SessionManager:
             )
             # Mark as STOPPED so resume_session accepts it
             session.status = SessionStatus.STOPPED
-            await self.resume_session(session_id, drain=False)
+            # A `send`/prompt must land a working session, so opt into the
+            # end+create last resort: if the stop->resume ladder is exhausted,
+            # recreate a fresh ACP session in place rather than failing the send
+            # (#1468).
+            await self.resume_session(
+                session_id, drain=False, allow_recreate=True
+            )
             # resume_session sets status to IDLE and attaches a new client
 
         turn_index = session.turn_count
