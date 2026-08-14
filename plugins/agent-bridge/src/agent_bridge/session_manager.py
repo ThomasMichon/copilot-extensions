@@ -103,56 +103,42 @@ def _resolve_codespace_ai_plugin_dirs(
     """Resolve the CodeSpace repo's OWN enabled ``.ai`` plugin dirs to fold into
     the Session-Host launch as ``--plugin-dir`` (dotfiles#1274 WS1-skills).
 
-    Process-boundary shell-out to ``agent-codespaces resolve-ai-plugin-dirs``
-    (from agent-codespaces' **own** venv), mirroring
-    :func:`_resolve_relay_launch_env`: agent-bridge can't import
-    ``agent_codespaces``. The verb SSHes to the CodeSpace and runs the canonical
-    ``plugin_resolve`` resolver against the workspace checkout, printing each
-    resolved ``/workspaces/<repo>/.ai/<name>`` dir (one per line).
+    **In-agent-bridge resolve** (PR2, dotfiles#1422): ships the vendored
+    ``plugin_resolve`` package to the CodeSpace over the transport-exec seam
+    (:mod:`target_exec` -> ``agent-codespaces ssh --remote-cmd``) and runs the
+    canonical resolver against the workspace checkout -- the *same* logic as the
+    local :func:`repo_own_plugins.repo_plugin_dir_args`. Replaces the retired
+    ``agent-codespaces resolve-ai-plugin-dirs`` shell-out (agent-bridge is the
+    session brain; agent-codespaces is the transport).
 
     ``repo_dir`` is the target's **concrete** ``workspace_folder`` (e.g.
-    ``/workspaces/odsp-web``); it is passed as ``--repo-dir`` and takes
-    precedence over ``--repo``. The codespace spawn command frequently carries
-    **no** ``--repo`` (so ``repo`` is empty), but ``workspace_folder`` is always
-    known (parsed from the launch ``cd``), so passing it directly is what makes
-    the resolve actually find the ``.ai`` plugins -- relying on ``repo`` alone
-    resolved nothing (dotfiles#1274).
+    ``/workspaces/odsp-web``); the codespace spawn command frequently carries
+    **no** ``--repo`` but ``workspace_folder`` is always known (parsed from the
+    launch ``cd``), so the resolve keys off ``repo_dir``. ``repo`` is accepted
+    for call-site compatibility.
 
     ``copilot --acp`` ignores ``enabledPlugins`` and only surfaces plugin skills
     via ``--plugin-dir``, so without this a dispatched agent never loads the
     product repo's own in-repo ``.ai`` skills/MCP. Best-effort: returns ``[]`` on
-    a missing binstub / CLI failure / non-zero exit so the dispatch proceeds
-    unchanged (no repo-own plugins), never blocking the connect.
+    any failure so the dispatch proceeds unchanged, never blocking the connect.
     """
-    binstub = shutil.which("agent-codespaces")
-    if not binstub:
+    if not repo_dir:
         return []
-    argv = [binstub, "resolve-ai-plugin-dirs", codespace_name]
-    if repo:
-        argv += ["--repo", repo]
-    if repo_dir:
-        argv += ["--repo-dir", repo_dir]
-    creationflags = (
-        subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-    )
-    try:
-        r = subprocess.run(
-            argv, capture_output=True, text=True, timeout=90,
-            creationflags=creationflags,
+    from . import repo_own_plugins_remote as rpr
+
+    session = {"agent_name": f"codespace:{codespace_name}"}
+    resolved, unresolved = rpr.resolve_remote_repo_ai_plugin_dirs(session, repo_dir)
+    if resolved:
+        log.info(
+            "Resolved %d repo-own .ai plugin(s) for %s at %s -> --plugin-dir: %s",
+            len(resolved), codespace_name, repo_dir, resolved,
         )
-    except Exception:
-        log.debug(
-            "agent-codespaces resolve-ai-plugin-dirs CLI failed for %s",
-            codespace_name, exc_info=True,
+    if unresolved:
+        log.info(
+            "repo-own plugins for %s not locally resolvable (remote marketplace "
+            "or missing) -- NOT staged: %s", codespace_name, unresolved,
         )
-        return []
-    if r.returncode != 0:
-        log.debug(
-            "agent-codespaces resolve-ai-plugin-dirs exited %s for %s",
-            r.returncode, codespace_name,
-        )
-        return []
-    return [ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip()]
+    return resolved
 
 
 # ``agent-codespaces claim`` exits with this code on a live claim conflict

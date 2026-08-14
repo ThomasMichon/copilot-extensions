@@ -1,26 +1,23 @@
-"""Resolve a venue repo's OWN enabled local-marketplace plugins to ``--plugin-dir``.
+"""Resolve a REMOTE target repo's OWN enabled ``.ai`` plugins to ``--plugin-dir``.
 
-The **repo-own** plugin lane for a dispatched ACP agent. A product repo (e.g.
-``odsp-web``) declares its own plugins in ``.github/copilot/settings.json`` /
-``.claude/settings.json`` and ships them in-repo via a local (``directory``)
-marketplace such as the ``.ai`` standard (``/workspaces/<repo>/.ai/<plugin>``).
+The **remote** counterpart of :func:`repo_own_plugins.repo_plugin_dir_args`
+(local). agent-bridge owns transport-agnostic session logic; the venue repo
+checked out on the target (e.g. ``/workspaces/odsp-web``) declares its own
+plugins in ``.github/copilot/settings.json`` / ``.claude/settings.json`` and
+ships them in a local (``directory``) marketplace such as ``.ai``. Since
 ``copilot --acp`` ignores ``enabledPlugins`` and only surfaces plugin skills via
-``--plugin-dir``, so those in-repo plugins never load for a dispatched agent
-unless we point ``--plugin-dir`` at each resolved dir.
+``--plugin-dir``, those in-repo plugins never load for a dispatched agent unless
+we point ``--plugin-dir`` at each resolved dir.
 
-Because the plugin payloads **already live in the checkout on the target**
-(unlike the host-provided related-repo lane, which must tar the payload over),
-there is nothing to stage -- only to *resolve*: parse the repo's settings +
-local marketplace and map each enabled ``name@marketplace`` to its on-disk dir.
-That resolution is exactly what the shared, stdlib-only ``plugin_resolve``
-package already does for a **local** checkout (agent-bridge's
-``repo_plugin_dir_args``). To run the *same* logic where the repo is local to a
-**remote** venue (a CodeSpace or a dev-container), we ship the canonical
-``plugin_resolve`` package to the target and run it there against the repo dir --
-no duplicated logic, and identical results across venues.
+The payloads already live on the target, so there is nothing to stage -- only to
+*resolve*: ship the canonical, vendored ``plugin_resolve`` package to the target
+and run it there against the repo dir (identical logic to the local
+``repo_plugin_dir_args``), over the transport-exec seam (:mod:`target_exec`). No
+duplicated logic, identical results across venues.
 
-Pure helpers only (locate + tar the package, build the remote command, parse the
-result); the actual ``exec_command`` lives in ``__main__``.
+Moved here from agent-codespaces (PR2, dotfiles#1422): agent-bridge is the
+session brain; agent-codespaces is the transport. The old
+``agent-codespaces resolve-ai-plugin-dirs`` CLI seam is retired in favour of this.
 """
 
 from __future__ import annotations
@@ -33,7 +30,9 @@ import shlex
 import tarfile
 from pathlib import Path
 
-log = logging.getLogger("agent-codespaces")
+from . import target_exec as tx
+
+log = logging.getLogger("agent-bridge")
 
 # Marker the remote driver prefixes its JSON line with, so we can extract the
 # result from any surrounding login-shell / hook noise on the channel.
@@ -59,11 +58,7 @@ def find_plugin_resolve_pkg() -> Path | None:
 
 
 def tar_pkg_b64(pkg_dir: Path) -> str:
-    """Tar+gzip the ``plugin_resolve`` package (arcname ``plugin_resolve``) -> base64.
-
-    Extracting the result yields ``<dest>/plugin_resolve/*.py``, so ``<dest>`` on
-    ``sys.path`` makes ``import plugin_resolve`` work on the target.
-    """
+    """Tar+gzip the ``plugin_resolve`` package (arcname ``plugin_resolve``) -> base64."""
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tf:
         tf.add(str(pkg_dir), arcname="plugin_resolve")
@@ -88,9 +83,8 @@ def build_resolve_command(pkg_tar_b64: str, repo_dir: str) -> str:
     """Bash to ship + run the resolver on the target against ``repo_dir``.
 
     Extracts the shipped ``plugin_resolve`` package into a temp dir, runs the
-    driver against ``repo_dir`` (which may contain ``$HOME`` / be an absolute
-    ``/workspaces/<repo>`` path), and cleans up. Prefers ``python3`` then
-    ``python``. Never aborts the connect: on any failure it emits an empty result
+    driver against ``repo_dir``, and cleans up. Prefers ``python3`` then
+    ``python``. Never aborts the channel: on any failure it emits an empty result
     line so the caller degrades to "no repo-own plugins" rather than erroring.
     """
     repo_q = shlex.quote(repo_dir)
@@ -132,3 +126,32 @@ def parse_resolve_result(output: str) -> tuple[list[str], list[str]]:
         if isinstance(uv, list):
             unresolved = [str(s) for s in uv if s]
     return resolved, unresolved
+
+
+def resolve_remote_repo_ai_plugin_dirs(
+    session: dict, repo_dir: str, *, timeout: float = 90.0,
+) -> tuple[list[str], list[str]]:
+    """Resolve ``repo_dir``'s own enabled ``.ai`` plugins on ``session``'s target.
+
+    Ships ``plugin_resolve`` to the target and runs it there via the
+    transport-exec seam. Returns ``(resolved_dirs, unresolved_sources)``.
+    Best-effort: any failure (no vendored resolver, no python on target,
+    transport error, malformed output) yields ``([], [])`` so the dispatch
+    proceeds without repo-own plugins -- never blocking the connect.
+    """
+    if not repo_dir:
+        return [], []
+    pkg = find_plugin_resolve_pkg()
+    if pkg is None:
+        log.debug("repo-own .ai resolve skipped: plugin_resolve package not found")
+        return [], []
+    try:
+        command = build_resolve_command(tar_pkg_b64(pkg), repo_dir)
+        output = tx.exec_bash_on_target(session, command, timeout=timeout)
+    except tx.TargetExecError as exc:
+        log.debug("repo-own .ai resolve transport failed: %s", exc)
+        return [], []
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning("repo-own .ai resolve failed: %s", exc)
+        return [], []
+    return parse_resolve_result(output)
