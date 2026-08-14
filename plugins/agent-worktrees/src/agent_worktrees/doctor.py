@@ -99,6 +99,7 @@ _AUTOFIXABLE = {
     "overlay_redundant_branch",
     "overlay_redundant_base_repo",
     "overlay_conflicting_srcroot",
+    "overlay_conflicting_branch",
 }
 
 
@@ -396,10 +397,16 @@ def _overlay_findings(
                         repo=pname, kind="overlay_conflicting_branch",
                         severity=SEV_WARNING,
                         detail=(f"overlay default_branch '{repo_over['default_branch']}'"
-                                f" != registry '{reg_branch}'; overlay wins at launch"),
-                        fixable=False,
-                        fix_detail="align the registry or remove the overlay key",
+                                f" != registry '{reg_branch}'; default_branch is a"
+                                f" repo-invariant owned by the registry / in-repo"
+                                f" config, so a machine-local override that"
+                                f" contradicts it is stale (e.g. a stray 'master'"
+                                f" from the ambient git default) -- removing it"
+                                f" lets the registry value win"),
+                        fixable=True,
+                        fix_detail="remove overlay 'default_branch' (registry wins)",
                     ))
+                    strip_repo.add("default_branch")
 
             proj_base = proj.get("base_repo")
             if "base_repo" in repo_over and proj_base is not None:
