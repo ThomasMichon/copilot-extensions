@@ -142,6 +142,115 @@ def read_indexer(root: Path | None) -> dict | None:
     return ind if isinstance(ind, dict) else None
 
 
+def read_corpus_sources() -> list[dict]:
+    """Return the effective ``corpus.sources`` — a **virtual config grafted** from
+    every adopted local project's own ``.agent-index/config.yaml``.
+
+    Read **dynamically** (no caching) so edits are picked up on the next reindex
+    without a service restart (each reindex runs in a fresh worker process). The
+    sweep:
+
+    1. Enumerate adopted local **projects** from the sibling agent-worktrees
+       registry (``~/.agent-worktrees/projects.yaml`` — the set of repos that have
+       a project binstub), resolving each to its checkout path via
+       ``repos.yaml``.
+    2. Read each project's committed ``<repo>/.agent-index/config.yaml`` and graft
+       its ``corpus.sources`` into one list, deduped by source ``name`` (first
+       contributor wins). The originating project's checkout path is attached as
+       ``_repo_path`` so a ``git`` source resolves without a second lookup.
+    3. Also graft the **machine-local** config's own ``corpus.sources``
+       (``config_path()``) as a supplement, so a box may add machine-specific
+       sources.
+
+    Each element is a mapping like
+    ``{name, type?, repo?, auth?: {account}, trust_domain?}``, plus internal keys
+    ``_repo_path`` (the contributing project's checkout) and ``_contributed_by``
+    (its project name). Malformed entries are dropped defensively. Returns ``[]``
+    when nothing is declared anywhere.
+    """
+    def _sources_of(path: Path) -> list[dict]:
+        corpus = _load_yaml(path).get("corpus")
+        if not isinstance(corpus, dict):
+            return []
+        srcs = corpus.get("sources")
+        if not isinstance(srcs, list):
+            return []
+        return [s for s in srcs if isinstance(s, dict) and s.get("name")]
+
+    graft: dict[str, dict] = {}
+
+    # (1)+(2) adopted projects, each self-declaring its index targets
+    for name, root in _local_project_roots().items():
+        for spec in _sources_of(repo_config_path(root)):
+            spec = dict(spec)
+            spec.setdefault("_repo_path", str(root))
+            spec.setdefault("_contributed_by", name)
+            graft.setdefault(str(spec["name"]), spec)
+
+    # (3) machine-local supplement
+    for spec in _sources_of(config_path()):
+        graft.setdefault(str(spec["name"]), dict(spec))
+
+    return list(graft.values())
+
+
+def _agent_worktrees_home() -> Path:
+    """The sibling agent-worktrees registry dir (``~/.agent-worktrees``)."""
+    env = os.environ.get("AGENT_WORKTREES_HOME")
+    return Path(env).expanduser() if env else (Path.home() / ".agent-worktrees")
+
+
+def _registry_platform_key() -> str:
+    """Which per-repo path key to read from ``repos.yaml`` on this host."""
+    import sys
+
+    if sys.platform == "win32":
+        return "windows"
+    if os.environ.get("WSL_DISTRO_NAME"):
+        return "wsl"
+    return "linux"
+
+
+def _local_project_roots() -> dict[str, Path]:
+    """Map adopted-project name → local checkout path.
+
+    Sources the set from ``projects.yaml`` (adopted projects with a binstub) and
+    the path from ``repos.yaml`` (the owning path registry). Tolerates a missing
+    or malformed registry ({}) so the indexer degrades to the machine-local /
+    repo config rather than failing.
+    """
+    home = _agent_worktrees_home()
+    projects = _load_yaml(home / "projects.yaml").get("projects")
+    repos = _load_yaml(home / "repos.yaml").get("repos")
+    if not isinstance(projects, dict) or not isinstance(repos, dict):
+        return {}
+    key = _registry_platform_key()
+    out: dict[str, Path] = {}
+    for name in projects:
+        entry = repos.get(name)
+        if not isinstance(entry, dict):
+            continue
+        raw = entry.get(key) or entry.get("windows") or entry.get("linux") or entry.get("wsl")
+        if isinstance(raw, str) and raw.strip():
+            out[name] = Path(raw.strip()).expanduser()
+    return out
+
+
+def repo_checkout_path(name: str) -> Path | None:
+    """Resolve a repo name to its local checkout path from the agent-worktrees
+    ``repos.yaml`` registry (platform-appropriate key), or ``None`` if unknown."""
+    home = _agent_worktrees_home()
+    repos = _load_yaml(home / "repos.yaml").get("repos")
+    if not isinstance(repos, dict):
+        return None
+    entry = repos.get(name)
+    if not isinstance(entry, dict):
+        return None
+    key = _registry_platform_key()
+    raw = entry.get(key) or entry.get("windows") or entry.get("linux") or entry.get("wsl")
+    return Path(raw.strip()).expanduser() if isinstance(raw, str) and raw.strip() else None
+
+
 def _dump_yaml(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     import yaml
