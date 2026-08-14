@@ -62,6 +62,7 @@ robust across `copilot` versions and records the CLI surface + full logs it saw.
 ./run.ps1                                # run generic-single-plugin against the base image
 ./run.ps1 -Scenario generic-single-plugin  # (the default) run a named scenario
 ./run.ps1 -Image pristine -Mode shell    # drop into a pristine fresh box (headed copilot)
+./run.ps1 -Image base -NameSuffix agc    # a SECOND concurrent base clean-room (container cr-base-agc) -- won't clobber another agent's cr-base
 ./run.ps1 -Until 1 -Then shell           # prepare up to stage 1, then hand off to a shell
 ./run.ps1 -UvIndex https://…/pypi/simple/  # opt-in uv-index fixture (governed box)
 ./run.ps1 -Mode bridge-register          # expose the box as an agent-bridge agent
@@ -73,6 +74,7 @@ robust across `copilot` versions and records the CLI surface + full logs it saw.
 ./run.sh all
 ./run.sh --scenario generic-single-plugin
 ./run.sh --image pristine shell
+./run.sh --image base --name-suffix agc   # a SECOND concurrent base clean-room (container cr-base-agc)
 ./run.sh --until 1 --then shell run
 ./run.sh --uv-index https://…/pypi/simple/ run
 ./run.sh bridge-register
