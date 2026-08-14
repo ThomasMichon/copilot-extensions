@@ -22,8 +22,20 @@ $InstallDir = Join-Path $env:USERPROFILE '.agent-machines'
 $Manifest   = Join-Path $InstallDir 'deploy-manifest.json'
 $Binstub    = Join-Path $env:USERPROFILE '.local\bin\agent-machines.cmd'
 
-# Not installed yet -> nothing to reconcile (first install is the setup skill).
-if (-not (Test-Path $Manifest)) { exit 0 }
+# Not provisioned yet -> do the cheap FIRST install ('stamp') so the binstub is
+# on PATH this session; the self-provisioning binstub then builds the venv on
+# first use (#1393). hooks.json runs the PAYLOAD copy, so $PSScriptRoot is the
+# plugin's scripts/ dir even on a fresh box. Fires only when init.ps1 declares a
+# 'stamp' action; else a safe no-op.
+if (-not (Test-Path $Manifest)) {
+    $payloadInit = Join-Path $PSScriptRoot 'init.ps1'
+    if ((Test-Path $payloadInit) -and (Select-String -Path $payloadInit -Pattern "'stamp'" -Quiet)) {
+        $pw = Get-Command pwsh -ErrorAction SilentlyContinue
+        $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
+        & $exe -NoProfile -ExecutionPolicy Bypass -File $payloadInit stamp *> $null
+    }
+    exit 0
+}
 
 try {
     $m = Get-Content $Manifest -Raw | ConvertFrom-Json

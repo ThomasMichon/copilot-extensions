@@ -19,7 +19,19 @@ InstallDir="$HOME/.agent-machines"
 Manifest="$InstallDir/deploy-manifest.json"
 Binstub="$HOME/.local/bin/agent-machines"
 
-[ -f "$Manifest" ] || exit 0
+# Not provisioned yet -> do the cheap FIRST install ('stamp') so the binstub is
+# on PATH this session; the self-provisioning binstub then builds the venv on
+# first use (#1393). hooks.json runs the PAYLOAD copy, so this script's own dir
+# is the plugin's scripts/ dir even on a fresh box. Fires only when init.sh
+# declares a 'stamp' action; else a safe no-op.
+if [ ! -f "$Manifest" ]; then
+  _selfdir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  _init="$_selfdir/init.sh"
+  if [ -f "$_init" ] && grep -q 'stamp)' "$_init" 2>/dev/null; then
+    bash "$_init" stamp >/dev/null 2>&1 || true
+  fi
+  exit 0
+fi
 
 py="$(command -v python3 || command -v python || true)"
 [ -n "$py" ] || exit 0
