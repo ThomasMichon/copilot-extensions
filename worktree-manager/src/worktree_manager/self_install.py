@@ -32,21 +32,26 @@ VERSIONS_DIR = "versions"
 STAGING_DIR = "staging"
 _VERSION_RE = re.compile(r'__version__\s*=\s*"([^"]+)"')
 
-#: The Worktree Manager's out-of-band source (same as the bootstrap one-liners).
-_MANAGER_REPO = "https://github.com/ThomasMichon/copilot-extensions.git"
 
-
-def manager_repo() -> str:
+def manager_repo(root: Path | None = None) -> str:
     """The git source :func:`self_update` fetches from.
 
-    Defaults to the canonical GitHub repo (:data:`_MANAGER_REPO`) but honors a
-    ``WORKTREE_MANAGER_REPO`` override, mirroring the existing
-    ``WORKTREE_MANAGER_REF`` / ``WORKTREE_MANAGER_ROOT`` env knobs. This keeps the
-    updater usable behind a **mirror / fork / air-gapped clone** (and lets the
-    end-to-end delivery test drive it against a local remote), without weakening
-    the out-of-plugin, dependency-free boundary.
+    Resolves the **user-level source config** (``[source].repo`` in
+    ``<root>/config.toml``), else the canonical GitHub repo. The override is a
+    config file managed by ``worktree-manager source`` — deliberately **not** an
+    env var — so it can point the updater at a **fork** or a **canary branch**
+    for future updates, without weakening the out-of-plugin boundary.
     """
-    return os.environ.get("WORKTREE_MANAGER_REPO") or _MANAGER_REPO
+    from .source_config import resolved_repo
+
+    return resolved_repo(root)
+
+
+def manager_ref(root: Path | None = None) -> str:
+    """The branch/ref :func:`self_update` fetches, from the source config or default."""
+    from .source_config import resolved_ref
+
+    return resolved_ref(root)
 
 
 def default_root() -> Path:
@@ -281,7 +286,8 @@ def self_update(
     (normal versioned-install semantics -- no in-process hot-swap).
     """
     r = root or default_root()
-    ref = ref or os.environ.get("WORKTREE_MANAGER_REF") or "main"
+    ref = ref or manager_ref(r)
+    repo = manager_repo(r)
     previous = current_version(r)
 
     if not shutil.which("git"):
@@ -293,14 +299,14 @@ def self_update(
         staging.mkdir(parents=True, exist_ok=True)
         if (staging / ".git").is_dir():
             subprocess.run(["git", "-C", str(staging), "fetch", "--depth", "1",
-                            manager_repo(), ref], check=True, capture_output=True,
+                            repo, ref], check=True, capture_output=True,
                            text=True, timeout=180)
             subprocess.run(["git", "-C", str(staging), "checkout", "-q",
                             "FETCH_HEAD"], check=True, capture_output=True,
                            text=True, timeout=60)
         else:
             subprocess.run(["git", "clone", "--depth", "1", "--branch", ref,
-                            manager_repo(), str(staging)], check=True,
+                            repo, str(staging)], check=True,
                            capture_output=True, text=True, timeout=300)
     except (OSError, subprocess.SubprocessError) as e:
         return SelfUpdateResult(action="error", previous=previous,
