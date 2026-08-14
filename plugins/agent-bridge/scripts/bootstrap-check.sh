@@ -20,7 +20,20 @@ name="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1])).get("name",
 [ -n "$name" ] || exit 0
 InstallDir="$HOME/.$name"
 Manifest="$InstallDir/deploy-manifest.json"
-[ -f "$Manifest" ] || exit 0
+if [ ! -f "$Manifest" ]; then
+  # Not provisioned yet -- do the cheap FIRST install (stamp) so the
+  # self-provisioning binstub is on PATH this session; the binstub then builds
+  # the venv on first use (#1393). Without this, a freshly `copilot plugin
+  # install`-ed agent-bridge left NO binstub until a manual install -- and
+  # agent-bridge is the `codespace:` dispatch transport, so the 3-plugin golden
+  # path never got off the ground. Fires only when the installer declares a
+  # 'stamp' action (a safe no-op otherwise).
+  installer="$PluginDir/scripts/install.sh"
+  if [ -f "$installer" ] && grep -qE '^[[:space:]]*stamp\)' "$installer" 2>/dev/null; then
+    bash "$installer" stamp >/dev/null 2>&1 || true
+  fi
+  exit 0
+fi
 deployed="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1]))["source"].get("version",""))' "$Manifest" 2>/dev/null)"
 current="$deployed"
 pyproj="$PluginDir/pyproject.toml"
