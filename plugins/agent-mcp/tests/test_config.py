@@ -389,3 +389,43 @@ def test_deep_merge_semantics():
         "list": [9],                    # list replaced
         "scalar": "y",                  # scalar replaced
     }
+
+
+# --- ${config_dir} command expansion ---------------------------------------
+
+def _write_cfg_file(path, doc):
+    import yaml
+
+    path.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    return path
+
+
+def test_config_dir_expands_in_auth_command(tmp_path):
+    doc = {
+        "server": {"type": "http", "url": "https://mcp.example/o"},
+        "auth": {"kind": "command",
+                 "command": ["python", "${config_dir}/mint.py", "--r", "R"],
+                 "parse": "raw"},
+    }
+    cfg = load_config(str(_write_cfg_file(tmp_path / "spark.mcp.yaml", doc)))
+    assert cfg.auth.command == ["python", f"{tmp_path}/mint.py", "--r", "R"]
+
+
+def test_config_dir_expands_in_server_command(tmp_path):
+    doc = {
+        "server": {"type": "stdio",
+                   "command": ["python", "${config_dir}/server.py"]},
+        "auth": {"kind": "none"},
+    }
+    cfg = load_config(str(_write_cfg_file(tmp_path / "b.mcp.yaml", doc)))
+    assert cfg.server.command == ["python", f"{tmp_path}/server.py"]
+
+
+def test_config_dir_left_intact_without_source_path():
+    # parse_config on a bare dict has no directory -> token is preserved verbatim.
+    doc = {
+        "server": {"type": "http", "url": "https://mcp.example/o"},
+        "auth": {"kind": "command", "command": ["python", "${config_dir}/m.py"]},
+    }
+    cfg = parse_config(doc)
+    assert cfg.auth.command == ["python", "${config_dir}/m.py"]

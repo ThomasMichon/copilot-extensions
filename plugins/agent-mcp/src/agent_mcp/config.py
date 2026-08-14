@@ -389,6 +389,22 @@ def _as_command(value: Any) -> list[str]:
     raise ConfigError("server.command must be a string or a list")
 
 
+def _expand_config_dir(argv: list[str], base_dir: str) -> list[str]:
+    """Expand ``${config_dir}`` in each command arg to the bridge config's dir.
+
+    Lets a **plugin-shipped bridge run a plugin-shipped command** -- a sibling
+    script next to the ``.mcp.yaml`` (e.g. an auth minter or a stdio server
+    launcher) -- without deploying anything to ``PATH``. Only applies when the
+    config was loaded from a file (its directory is known); ``parse_config`` on a
+    bare dict leaves the token intact. Invoke the sibling via an interpreter on
+    ``PATH`` (``python``/``node``/``pwsh``), e.g.
+    ``command: [python, "${config_dir}/mint.py", ...]``.
+    """
+    if not argv:
+        return argv
+    return [a.replace("${config_dir}", base_dir) for a in argv]
+
+
 # Secret placeholders in a ``server.url`` -- ``${name}`` tokens resolved at spawn
 # from ``server.url_secrets``. The name charset is deliberately narrow (word
 # chars, dash, dot) so an accidental ``${`` in a real URL is unlikely to match,
@@ -544,6 +560,16 @@ def parse_config(data: dict[str, Any], *, name: str | None = None,
         raise ConfigError("'auth' must be a mapping or a list of mappings")
     auth = auth_specs[0]
     extra_auths = auth_specs[1:]
+
+    # Expand ${config_dir} in every command argv against the bridge config's own
+    # directory, so a plugin-shipped bridge can run a plugin-shipped sibling
+    # command without a PATH deploy. Only when loaded from a file (source_path
+    # known); a bare-dict parse leaves the token intact.
+    if source_path is not None:
+        base_dir = str(source_path.parent)
+        server.command = _expand_config_dir(server.command, base_dir)
+        for spec in (*auth_specs, *url_secrets.values()):
+            spec.command = _expand_config_dir(spec.command, base_dir)
 
     raw_tools = data.get("tools") or {}
     tools = ToolFilter(
