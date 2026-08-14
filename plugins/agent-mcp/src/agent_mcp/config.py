@@ -16,6 +16,7 @@ explicit path (``--config <file>``) is loaded directly.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 from dataclasses import dataclass, field
@@ -417,12 +418,24 @@ def _parse_cache_spec(raw: Any) -> CacheSpec:
     scope = str(raw.get("scope", "memory"))
     if scope not in ("memory", "shared", "none"):
         raise ConfigError(f"auth.cache.scope must be memory|shared|none, got {scope!r}")
+    ttl = str(raw.get("ttl", "auto")).strip()
+    if ttl.lower() != "auto":
+        try:
+            secs = float(ttl)
+        except ValueError:
+            raise ConfigError(
+                f"auth.cache.ttl must be 'auto' or a positive number of seconds, got {ttl!r}"
+            ) from None
+        if not math.isfinite(secs) or secs <= 0:
+            raise ConfigError("auth.cache.ttl must be a positive, finite number of seconds")
     try:
         skew = int(raw.get("skew", 60))
     except (TypeError, ValueError):
         raise ConfigError("auth.cache.skew must be an integer") from None
-    return CacheSpec(scope=scope, ttl=str(raw.get("ttl", "auto")),
-                     key=raw.get("key"), skew=skew)
+    if skew < 0:
+        raise ConfigError("auth.cache.skew must be >= 0")
+    key = raw.get("key")
+    return CacheSpec(scope=scope, ttl=ttl, key=None if key is None else str(key), skew=skew)
 
 
 def _parse_auth_spec(raw_auth: dict[str, Any]) -> AuthSpec:

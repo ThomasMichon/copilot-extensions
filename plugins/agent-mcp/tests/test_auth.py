@@ -348,6 +348,21 @@ def test_parse_auth_cache_bad_scope():
         _cfg({"kind": "command", "command": ["x"], "cache": {"scope": "bogus"}})
 
 
+def test_parse_auth_cache_bad_ttl_and_skew():
+    import pytest
+
+    from agent_mcp.config import ConfigError
+
+    for bad in ("nan", "inf", "-5", "0", "garbage"):
+        with pytest.raises(ConfigError):
+            _cfg({"kind": "command", "command": ["x"], "cache": {"ttl": bad}})
+    with pytest.raises(ConfigError):
+        _cfg({"kind": "command", "command": ["x"], "cache": {"skew": -1}})
+    # a positive numeric ttl is accepted verbatim
+    assert _cfg({"kind": "command", "command": ["x"], "cache": {"ttl": "3600"}}
+                ).auths[0].cache.ttl == "3600"
+
+
 async def test_shared_cache_persists_across_instances(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path))
     import time

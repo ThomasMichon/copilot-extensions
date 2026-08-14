@@ -71,3 +71,32 @@ def test_invalidate_removes(tmp_path, monkeypatch):
     token_cache.invalidate("k6")
     assert token_cache.read("k6") is None
     token_cache.invalidate("k6")  # idempotent
+
+
+def test_command_serialization_disambiguates_key():
+    a = token_cache.default_key(kind="command", command=["a", "b"])
+    b = token_cache.default_key(kind="command", command=["a b"])
+    assert a != b  # ["a","b"] must not collide with ["a b"]
+
+
+def test_key_with_path_separators_cannot_escape(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path))
+    evil = "../../../../etc/passwd"
+    assert token_cache.write(evil, "s", ttl="3600") is True
+    # nothing written outside the cache dir
+    cache_dir = tmp_path / "token-cache"
+    files = list(cache_dir.glob("*.json"))
+    assert len(files) == 1
+    assert ".." not in files[0].name and "/" not in files[0].name
+    assert token_cache.read(evil) == "s"  # still round-trips via the sanitized name
+
+
+def test_write_rejects_bad_and_expired_ttl(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path))
+    assert token_cache.write("z1", "s", ttl="0") is False        # non-positive
+    assert token_cache.write("z2", "s", ttl="-5") is False       # negative
+    assert token_cache.write("z3", "s", ttl="nan") is False      # non-finite
+    assert token_cache.write("z4", "s", ttl="garbage") is False  # unparsable
+    # an already-expired JWT is not persisted
+    assert token_cache.write("z5", _jwt(int(time.time()) - 1), ttl="auto") is False
+    assert list((tmp_path / "token-cache").glob("*.json")) == []

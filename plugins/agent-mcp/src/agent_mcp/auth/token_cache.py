@@ -30,7 +30,9 @@ import base64
 import hashlib
 import json
 import logging
+import math
 import os
+import re
 import tempfile
 import time
 from pathlib import Path
@@ -61,7 +63,7 @@ def default_key(
     """
     parts = [
         kind or "",
-        " ".join(command or []),
+        json.dumps(command or [], separators=(",", ":")),
         resource or "",
         scope or "",
         tenant or "",
@@ -70,8 +72,21 @@ def default_key(
     return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()[:32]
 
 
+def _safe_key(key: str) -> str:
+    """A filesystem-safe cache-file stem for ``key``.
+
+    Derived keys are already a bare 32-hex hash and pass through unchanged; a
+    caller-supplied ``auth.cache.key`` that is not a plain ``[A-Za-z0-9_-]`` token
+    is hashed instead, so a value containing ``..`` or a path separator can never
+    escape the cache directory or name an arbitrary file.
+    """
+    if key and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", key):
+        return key
+    return hashlib.sha256((key or "").encode("utf-8")).hexdigest()[:32]
+
+
 def _path(key: str) -> Path:
-    return _root() / f"{key}.json"
+    return _root() / f"{_safe_key(key)}.json"
 
 
 def jwt_exp(token: str) -> int | None:
@@ -109,14 +124,19 @@ def write(key: str, token: str, *, ttl: str = "auto") -> bool:
     exp: float | None
     if ttl == "auto":
         e = jwt_exp(token)
-        exp = float(e) if e else None
+        exp = float(e) if e is not None else None
     else:
         try:
-            exp = time.time() + float(ttl)
+            secs = float(ttl)
         except ValueError:
-            exp = None
+            secs = None
+        if secs is None or not math.isfinite(secs) or secs <= 0:
+            return False
+        exp = time.time() + secs
     if exp is None:
         return False
+    if exp <= time.time():
+        return False  # already expired -- don't leave a useless cache file
     root = _root()
     try:
         root.mkdir(parents=True, exist_ok=True)
