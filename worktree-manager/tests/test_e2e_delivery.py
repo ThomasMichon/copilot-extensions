@@ -9,8 +9,9 @@ venv only materializes when the *binstub* later runs). It closes the Phase-6 "6b
 self-updating delivery validated end-to-end (bootstrap fetch → versioned slot)"
 item as always-on CI coverage.
 
-The remote is pointed at via the ``WORKTREE_MANAGER_REPO`` override (the same knob
-that enables mirror / fork / air-gapped installs).
+The remote is selected via the **user-level source config** (`[source]` in
+``config.toml``), the same override that lets the updater track a fork / canary
+branch.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from pathlib import Path
 import pytest
 
 import worktree_manager.self_install as si
+from worktree_manager import source_config as sc
 from worktree_manager.self_install import (
     current_version,
     self_install,
@@ -51,11 +53,11 @@ def _write_payload(root: Path, version: str) -> None:
     )
 
 
-def _make_remote(tmp: Path, version: str) -> Path:
-    """A local git repo (branch ``main``) serving a bumped worktree-manager payload."""
+def _make_remote(tmp: Path, version: str, branch: str = "main") -> Path:
+    """A local git repo (on ``branch``) serving a bumped worktree-manager payload."""
     remote = tmp / "remote"
     remote.mkdir(parents=True)
-    subprocess.run(["git", "init", "-q", "-b", "main", str(remote)], check=True)
+    subprocess.run(["git", "init", "-q", "-b", branch, str(remote)], check=True)
     _write_payload(remote, version)
     subprocess.run(["git", "-C", str(remote), *_GIT_ID, "add", "-A"], check=True)
     subprocess.run(["git", "-C", str(remote), *_GIT_ID, "commit", "-q", "-m", "payload"],
@@ -77,7 +79,7 @@ def test_self_update_fetches_local_remote_and_publishes_new_slot(tmp_path, monke
     _seed_older_install(tmp_path, root, "1.0.0")
 
     remote = _make_remote(tmp_path, "9.9.9")
-    monkeypatch.setenv("WORKTREE_MANAGER_REPO", str(remote))
+    sc.set_source(repo=str(remote), root=root)  # user-level source override
 
     # First self_update: clones the remote (no staging yet) and publishes the new slot.
     res = self_update(root=root, ref="main", dry_run=False)
@@ -98,7 +100,7 @@ def test_self_update_second_run_is_version_gated(tmp_path, monkeypatch):
     _seed_older_install(tmp_path, root, "1.0.0")
 
     remote = _make_remote(tmp_path, "9.9.9")
-    monkeypatch.setenv("WORKTREE_MANAGER_REPO", str(remote))
+    sc.set_source(repo=str(remote), root=root)
 
     assert self_update(root=root, ref="main", dry_run=False).action == "updated"
     # Second run re-fetches into the existing staging (fetch path) and is a
@@ -109,8 +111,8 @@ def test_self_update_second_run_is_version_gated(tmp_path, monkeypatch):
     assert current_version(root) == "9.9.9"
 
 
-def test_self_update_fetch_path_honors_switched_repo(tmp_path, monkeypatch):
-    """After the first update, pointing WORKTREE_MANAGER_REPO at a different remote
+def test_self_update_fetch_path_honors_switched_source(tmp_path, monkeypatch):
+    """After the first update, re-pointing the source config at a different remote
     must take effect on the *fetch* path (staging already exists) — i.e. the
     override is authoritative every run, not just on the initial clone."""
     root = tmp_path / "root"
@@ -118,13 +120,13 @@ def test_self_update_fetch_path_honors_switched_repo(tmp_path, monkeypatch):
     _seed_older_install(tmp_path, root, "1.0.0")
 
     remote_a = _make_remote(tmp_path / "a", "9.9.9")
-    monkeypatch.setenv("WORKTREE_MANAGER_REPO", str(remote_a))
+    sc.set_source(repo=str(remote_a), root=root)
     assert self_update(root=root, ref="main", dry_run=False).version == "9.9.9"
 
-    # Switch the source to a second remote with a newer payload; staging now
-    # exists, so this exercises the fetch path — which must honor the new repo.
+    # Switch the configured source to a second remote with a newer payload; staging
+    # now exists, so this exercises the fetch path — which must honor the new repo.
     remote_b = _make_remote(tmp_path / "b", "9.9.10")
-    monkeypatch.setenv("WORKTREE_MANAGER_REPO", str(remote_b))
+    sc.set_source(repo=str(remote_b), root=root)
     res = self_update(root=root, ref="main", dry_run=False)
     assert res.action == "updated"
     assert res.version == "9.9.10"
@@ -132,8 +134,17 @@ def test_self_update_fetch_path_honors_switched_repo(tmp_path, monkeypatch):
     assert version_slot("9.9.10", root).is_dir()
 
 
-def test_manager_repo_honors_override(monkeypatch):
-    monkeypatch.delenv("WORKTREE_MANAGER_REPO", raising=False)
-    assert si.manager_repo() == si._MANAGER_REPO
-    monkeypatch.setenv("WORKTREE_MANAGER_REPO", "https://example.invalid/mirror.git")
-    assert si.manager_repo() == "https://example.invalid/mirror.git"
+def test_self_update_uses_configured_ref(tmp_path, monkeypatch):
+    """With no explicit ref, self_update fetches the branch from the source config."""
+    root = tmp_path / "root"
+    monkeypatch.setattr(si, "local_bin", lambda: tmp_path / "localbin")
+    _seed_older_install(tmp_path, root, "1.0.0")
+
+    # Remote whose payload lives on a 'canary' branch, not 'main'.
+    remote = _make_remote(tmp_path, "9.9.11", branch="canary")
+    sc.set_source(repo=str(remote), ref="canary", root=root)
+
+    res = self_update(root=root, dry_run=False)  # ref resolved from config
+    assert res.action == "updated"
+    assert res.version == "9.9.11"
+    assert current_version(root) == "9.9.11"

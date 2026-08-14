@@ -11,16 +11,28 @@
 # version-gated (a no-op when already current).
 #
 # Phase 0 assumes git + uv are already present; automatic prerequisite
-# provisioning lands in Phase 2 (issue #355). Override the fetched ref with
-# $env:WORKTREE_MANAGER_REF, the git source (mirror/fork) with
-# $env:WORKTREE_MANAGER_REPO, and the install root with $env:WORKTREE_MANAGER_ROOT.
+# provisioning lands in Phase 2 (issue #355). The git source (repo + ref) is
+# taken from the user-level source config ($Root/config.toml [source]) when
+# present — set it with `worktree-manager source set` to track a fork / canary
+# branch — otherwise the canonical defaults below. Relocate the install root
+# with $env:WORKTREE_MANAGER_ROOT.
 
 $ErrorActionPreference = 'Stop'
 
-$Repo    = if ($env:WORKTREE_MANAGER_REPO) { $env:WORKTREE_MANAGER_REPO } else { 'https://github.com/ThomasMichon/copilot-extensions.git' }
-$Ref     = if ($env:WORKTREE_MANAGER_REF) { $env:WORKTREE_MANAGER_REF } else { 'main' }
 $Root    = if ($env:WORKTREE_MANAGER_ROOT) { $env:WORKTREE_MANAGER_ROOT } else { Join-Path $env:USERPROFILE '.worktree-manager' }
 $Staging = Join-Path $Root 'staging'
+$Config  = Join-Path $Root 'config.toml'
+
+# Source (repo + ref): user-level config file [source] overrides, else defaults.
+$Repo = 'https://github.com/ThomasMichon/copilot-extensions.git'
+$Ref  = 'main'
+if (Test-Path $Config) {
+    $cfg = Get-Content $Config -Raw
+    $mRepo = [regex]::Match($cfg, '(?m)^\s*repo\s*=\s*"(.*?)"')
+    $mRef  = [regex]::Match($cfg, '(?m)^\s*ref\s*=\s*"(.*?)"')
+    if ($mRepo.Success) { $Repo = $mRepo.Groups[1].Value }
+    if ($mRef.Success)  { $Ref  = $mRef.Groups[1].Value }
+}
 
 Write-Host 'copilot-extensions Worktree Manager - bootstrap'
 

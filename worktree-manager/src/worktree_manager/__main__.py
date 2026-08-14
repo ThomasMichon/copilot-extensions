@@ -538,6 +538,10 @@ def _cmd_doctor() -> int:
     print(f"    running version:   {__version__}")
     print(f"    binstub: {selfst.binstub or 'not found in ~/.local/bin'}")
     print(f"    root: {selfst.root}")
+    from . import source_config as _sc
+    _cfg_repo, _cfg_ref = _sc.configured_source()
+    print(f"    update source: {_sc.resolved_repo()} @ {_sc.resolved_ref()}"
+          f"{' (default)' if not (_cfg_repo or _cfg_ref) else ' (configured)'}")
     print()
     gaps = missing(statuses)
     if gaps or not core.installed:
@@ -642,6 +646,64 @@ def local_bin_hint() -> str:
     return str(local_bin())
 
 
+def _flag_value(rest: list[str], flag: str) -> str | None:
+    """Return the value following ``flag`` in ``rest`` (or None if absent)."""
+    if flag in rest:
+        i = rest.index(flag)
+        if i + 1 < len(rest):
+            return rest[i + 1]
+    return None
+
+
+def _cmd_source(rest: list[str]) -> int:
+    """Show or manage the self-update **source** (git repo + ref/branch).
+
+    The source override is a user-level config file
+    (``~/.worktree-manager/config.toml`` ``[source]``) — not an env var — so the
+    updater can durably track a **fork** or a **canary branch** for future
+    updates. ``set`` persists an override; ``reset`` clears it.
+    """
+    from . import source_config as sc
+
+    action = rest[0] if rest else "show"
+
+    if action == "set":
+        repo = _flag_value(rest, "--repo")
+        ref = _flag_value(rest, "--ref")
+        if repo is None and ref is None:
+            print("usage: worktree-manager source set [--repo URL] [--ref BRANCH]")
+            print("  (provide at least one of --repo / --ref)")
+            return 2
+        sc.set_source(repo=repo, ref=ref)
+    elif action == "reset":
+        # --repo / --ref clear just that field; neither clears both.
+        sc.reset_source(repo="--repo" in rest, ref="--ref" in rest)
+    elif action in ("show", "--help", "-h"):
+        pass
+    else:
+        print(f"unknown source subcommand: {action!r}")
+        print("usage: worktree-manager source [show | set [--repo URL] [--ref BRANCH] | reset [--repo] [--ref]]")
+        return 2
+
+    cfg_repo, cfg_ref = sc.configured_source()
+    print()
+    print(f"  {_BANNER} — source")
+    print()
+    print(f"    repo:  {sc.resolved_repo()}"
+          f"{'' if cfg_repo else '  (default)'}")
+    print(f"    ref:   {sc.resolved_ref()}"
+          f"{'' if cfg_ref else '  (default)'}")
+    print(f"    config: {sc.config_path()}"
+          f"{'' if (cfg_repo or cfg_ref) else '  (none — using defaults)'}")
+    print()
+    if not (cfg_repo or cfg_ref):
+        print("  Track a fork / canary branch for future self-updates, e.g.:")
+        print("    worktree-manager source set --repo <fork-url> --ref canary")
+        print("  Clear with `worktree-manager source reset`.")
+        print()
+    return 0
+
+
 def _strip_project(rest: list[str]) -> list[str]:
     """Drop a threaded ``--project <name>`` (update is harness-wide, not scoped)."""
     out: list[str] = []
@@ -717,6 +779,9 @@ def main(argv: list[str] | None = None) -> int:
         print("  doctor                 report prerequisites + the agent-worktrees core")
         print("  setup [--apply]        plan (default) or run prereq provisioning + core install")
         print("  self-install [--apply] version the app: current-version marker + ~/.local/bin binstub")
+        print("  source                 show the self-update source (git repo + ref/branch)")
+        print("  source set [--repo URL] [--ref BRANCH]   track a fork / canary branch for updates")
+        print("  source reset [--repo] [--ref]            clear the source override(s)")
         print("  update                 self-update the Manager, then update the harness plugins/runtimes")
         print("  plugins                list the plugins the installer knows about")
         print("  plugins <name>         show one plugin's prereqs / config / steps")
@@ -751,6 +816,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_setup(args[1:])
     if args and args[0] == "self-install":
         return _cmd_self_install(args[1:])
+    if args and args[0] == "source":
+        return _cmd_source(args[1:])
     if args and args[0] == "update":
         return _cmd_update(args[1:])
     _print_intro()

@@ -56,11 +56,35 @@ binstub (`.cmd`/`.ps1` on Windows) — then launches it. Re-running the one-line
 `git` and `uv` are already present; automatic prerequisite provisioning (and
 restart prompts) lands in Phase 2
 ([#355](https://github.com/ThomasMichon/copilot-extensions/issues/355)). Set
-`WORKTREE_MANAGER_REF` to fetch a ref other than `main`, `WORKTREE_MANAGER_REPO` to
-fetch from a **mirror / fork / air-gapped clone** instead of the canonical GitHub
-repo, or `WORKTREE_MANAGER_ROOT` to relocate the install root. Inspect/repair the
-versioned install with `worktree-manager self-install` (dry-run) / `--apply`, and
-see it in `worktree-manager doctor`.
+`WORKTREE_MANAGER_ROOT` to relocate the install root. Inspect/repair the versioned
+install with `worktree-manager self-install` (dry-run) / `--apply`, and see it in
+`worktree-manager doctor`.
+
+## Choose the update source (fork / canary branch)
+
+By default the self-updater pulls the Worktree Manager payload from the canonical
+GitHub repo's `main`. To track a **fork** or a **canary / different source
+branch** for future updates, set a **user-level source override** — a small config
+file at `~/.worktree-manager/config.toml` (`[source]` table), managed with the
+`source` command (there is **no** environment variable for this):
+
+```bash
+worktree-manager source                                   # show the effective repo + ref
+worktree-manager source set --ref canary                  # track a different branch
+worktree-manager source set --repo https://github.com/<fork>/copilot-extensions.git
+worktree-manager source reset                             # back to the canonical default
+```
+
+The override is honored by both `worktree-manager update` (the self-update step)
+and the bootstrap one-liner (it reads the same config file on re-run), and shows
+up in `worktree-manager doctor`. Resolution is simply **config file → built-in
+default**; the file is human-editable:
+
+```toml
+[source]
+repo = "https://github.com/<fork>/copilot-extensions.git"
+ref  = "canary"
+```
 
 ## Manage the harness (state views)
 
@@ -99,7 +123,7 @@ a knowledge repo, per-plugin config, adoption) is being built out under Phase 3/
 
 The Worktree Manager learns **which** plugins exist dynamically from the marketplace
 — a nearby checkout when present, otherwise the remote published marketplace ref
-(the same ref the bootstrap fetches; override with `WORKTREE_MANAGER_REF`). Its
+(the same ref the bootstrap fetches; set with `worktree-manager source set --ref`). Its
 installer-owned catalog
 ([`src/worktree_manager/data/plugins.toml`](src/worktree_manager/data/plugins.toml), read
 by [`catalog.py`](src/worktree_manager/catalog.py) + composed in

@@ -12,16 +12,27 @@
 # version-gated (a no-op when already current).
 #
 # Phase 0 assumes git + uv are already present; automatic prerequisite
-# provisioning lands in Phase 2 (issue #355). Override the fetched ref with
-# $WORKTREE_MANAGER_REF, the git source (mirror/fork) with $WORKTREE_MANAGER_REPO,
-# and the install root with $WORKTREE_MANAGER_ROOT.
+# provisioning lands in Phase 2 (issue #355). The git source (repo + ref) is
+# taken from the user-level source config ($ROOT/config.toml [source]) when
+# present — set it with `worktree-manager source set` to track a fork / canary
+# branch — otherwise the canonical defaults below. Relocate the install root
+# with $WORKTREE_MANAGER_ROOT.
 
 set -euo pipefail
 
-REPO="${WORKTREE_MANAGER_REPO:-https://github.com/ThomasMichon/copilot-extensions.git}"
-REF="${WORKTREE_MANAGER_REF:-main}"
 ROOT="${WORKTREE_MANAGER_ROOT:-$HOME/.worktree-manager}"
 STAGING="$ROOT/staging"
+CONFIG="$ROOT/config.toml"
+
+# Source (repo + ref): user-level config file [source] overrides, else defaults.
+REPO='https://github.com/ThomasMichon/copilot-extensions.git'
+REF='main'
+if [ -f "$CONFIG" ]; then
+    cfg_repo=$(sed -n 's/^[[:space:]]*repo[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "$CONFIG" | head -1)
+    cfg_ref=$(sed -n 's/^[[:space:]]*ref[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "$CONFIG" | head -1)
+    [ -n "${cfg_repo:-}" ] && REPO="$cfg_repo"
+    [ -n "${cfg_ref:-}" ] && REF="$cfg_ref"
+fi
 
 echo 'copilot-extensions Worktree Manager - bootstrap'
 
