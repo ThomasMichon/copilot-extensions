@@ -703,8 +703,10 @@ function Write-Manifest {
 }
 
 function Get-InstallRole {
-    # host runs the engine; client is service-only. Precedence: AGENT_INDEX_ROLE
-    # env, then the freshly-installed CLI resolver (config.yaml), else client.
+    # host runs the engine + the local indexer service; a client runs NEITHER
+    # (its MCP/CLI route to the designated host over SSH). Precedence:
+    # AGENT_INDEX_ROLE env, then the freshly-installed CLI resolver (config.yaml),
+    # else client.
     if ($env:AGENT_INDEX_ROLE) {
         $r = ($env:AGENT_INDEX_ROLE).Trim().ToLower()
         if ($r -in @('host', 'client')) { return $r }
@@ -1098,6 +1100,16 @@ function Ensure-ServiceRunning {
     # primitive (`agent-index deploy`), which spawns a DETACHED user-mode daemon
     # and flips routing -- robust to a stale/dead active.json. Never a task.
     if ($NoService) { Write-Skip 'Service ensure skipped (-NoService)'; return }
+    # A client runs NO local indexer daemon: its MCP/CLI reach the designated
+    # host's service over the trusted SSH transport (config.client_url ->
+    # configured endpoint). Only a host runs a local service. This mirrors the
+    # engine gate in Ensure-Running and the single-host-service architecture
+    # (docs/architecture.md: a fleet fans in SSH forwards to ONE host service,
+    # never a fleet of listeners).
+    if ((Get-InstallRole) -ne 'host') {
+        Write-Skip 'Local indexer service skipped (role: client) -- a client runs no local daemon; MCP/CLI route to the designated host over SSH'
+        return
+    }
     if (-not (Test-Path $LinkPython)) { Write-Skip 'Runtime not installed -- service not ensured'; return }
     Write-ServiceFiles
     if (Test-ServiceHealthy) { Write-Skip 'Service already healthy (user-mode daemon serving)'; return }
@@ -1118,8 +1130,10 @@ function Ensure-EngineRunning {
 }
 
 function Ensure-Running {
-    # The DEFAULT user-mode lifecycle: engine (host) then service. No task, no
-    # elevation. Called by install/update/start and the sessionStart `ensure`.
+    # The DEFAULT user-mode lifecycle. No task, no elevation. Called by
+    # install/update/start and the sessionStart `ensure`. A host runs the engine
+    # then the local service; a client runs neither (Ensure-ServiceRunning
+    # self-gates on role), so this is a no-op on a client.
     if ((Get-InstallRole) -eq 'host') { Ensure-EngineRunning }
     Ensure-ServiceRunning
 }
