@@ -18,8 +18,8 @@ behavior), and ``show``/``list`` render exactly as before.
 machine, not just the local one. An SSH-pushed dispatch (8a) lives on the
 target's coordinator and embodies on the target's bridge, so its ``owner`` names
 a *remote* machine. When that machine is not the local one, the live-session
-resolve runs on it over the facility SSH mesh (``ssh <machine> agent-bridge ...``
--- the machine name **is** its facility alias, per the ``facility-ssh``
+resolve runs on it over the SSH mesh (``ssh <machine> agent-bridge ...``
+-- the machine name **is** its SSH alias, per the SSH-alias discipline
 discipline), making a remote-dispatched task as observable as a local one. Still
 best-effort: no ``ssh`` on PATH, an unreachable host, or a missing remote
 ``agent-bridge`` collapses to "no overlay", exactly like the local miss.
@@ -72,11 +72,11 @@ def worktree_from_owner(owner: str | None) -> str | None:
 
 
 def machine_from_owner(owner: str | None) -> str | None:
-    """Extract the machine (its facility SSH alias) from a
+    """Extract the machine (its SSH alias) from a
     ``"<machine>/<worktree>"`` owner.
 
     Mirrors :func:`worktree_from_owner`. Returns None when the owner is unset or
-    not in ``machine/worktree`` form. The machine name is the target's facility
+    not in ``machine/worktree`` form. The machine name is the target's
     SSH alias (8a's SSH-push invariant), so it doubles as the mesh address for a
     cross-machine live-session resolve.
     """
@@ -90,7 +90,7 @@ def _bridge_resolve_argv(worktree: str, *, machine: str | None) -> list[str] | N
     """Build the argv that resolves a worktree handle to its live session.
 
     Local (``machine`` None): the ``agent-bridge`` binstub directly. Remote:
-    ``ssh <machine> agent-bridge ...`` over the facility SSH mesh -- the machine
+    ``ssh <machine> agent-bridge ...`` over the SSH mesh -- the machine
     name is its alias. Returns None when the required client (``agent-bridge``
     locally, or ``ssh`` for a remote) is not on PATH, so the caller degrades.
     """
@@ -105,7 +105,7 @@ def _bridge_resolve_argv(worktree: str, *, machine: str | None) -> list[str] | N
     if ssh is None:
         return None
     remote_cmd = " ".join(shlex.quote(a) for a in remote_argv)
-    # `machine` is the facility SSH alias (never a raw IP). BatchMode + a short
+    # `machine` is the SSH alias (never a raw IP). BatchMode + a short
     # ConnectTimeout so an unreachable peer fails fast instead of hanging.
     return [ssh, "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", machine, remote_cmd]
 
@@ -119,7 +119,7 @@ def resolve_live_session(
     the same shell-the-binstub pattern agent-dispatch uses for spawn, keeping the
     plugin decoupled (no cross-plugin import, no bridge URL/token discovery). When
     ``machine`` names a *remote* host, the same command runs **on that host** over
-    the facility SSH mesh (Phase 8 Slice 8b). All failure modes (no CLI/ssh,
+    the SSH mesh (Phase 8 Slice 8b). All failure modes (no CLI/ssh,
     non-zero exit, timeout, empty/invalid JSON, no live session) collapse to None
     so the caller degrades cleanly.
     """

@@ -23,18 +23,18 @@ def _args(argv):
 
 
 def test_resolve_target_explicit_url_wins(monkeypatch):
-    monkeypatch.setenv("AGENT_DISPATCH_SHARED_URL", "https://gateway/dispatch")
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_URL", "https://coordinator.example/dispatch")
     args = _args(["--url", "http://direct:9847", "--shared", "list"])
     url, _ = _resolve_client_target(args)
     assert url == "http://direct:9847"  # --url trumps --shared
 
 
 def test_resolve_target_shared_routes_to_shared_coordinator(monkeypatch):
-    monkeypatch.setenv("AGENT_DISPATCH_SHARED_URL", "https://gateway/dispatch")
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_URL", "https://coordinator.example/dispatch")
     monkeypatch.setenv("AGENT_DISPATCH_SHARED_TOKEN", "shared-secret")
     args = _args(["--shared", "list"])
     url, token = _resolve_client_target(args)
-    assert url == "https://gateway/dispatch"
+    assert url == "https://coordinator.example/dispatch"
     assert token == "shared-secret"
 
 

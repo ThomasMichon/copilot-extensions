@@ -26,7 +26,7 @@ account per agent.
 `agent-dispatch` is a `machine-gated` plugin: the agent-worktrees launch-time
 reconciler installs/updates its runtime automatically on the machines listed in
 the control repo's gate manifest (`external-repos.yaml` `deploy_machines`), and
-the facility path `aperture-labs services agent-dispatch <action>` drives it too
+the `aperture-labs services agent-dispatch <action>` path drives it too
 -- the same model as agent-bridge. To install/manage it directly:
 
 ```bash
@@ -102,7 +102,7 @@ A queue needs an **atomic leased claim** to be a correct coordinator: two agents
 must never both "win" the same task, and a crashed agent must not hold work
 forever. Git and issue trackers give neither cheaply. `agent-dispatch` provides
 that primitive as a single-writer SQLite (WAL) queue, reachable over HTTP --
-loopback on a lone dev box, one designated host in a facility. Same code, one
+loopback on a lone dev box, one designated host in a multi-machine system. Same code, one
 config switch.
 
 ## The engine (`agent_dispatch.queue`)
@@ -485,7 +485,7 @@ by worktree and badge handoffs. The machine is resolved from the CWD via
 ### Worker identity
 
 An agent's identity is the **`machine`/`worktree_id`** pair — the only durable
-agent id the facility has. `claim` and `worktree-status` **resolve it from the
+agent id a multi-machine system has. `claim` and `worktree-status` **resolve it from the
 current directory** by delegating to `agent-worktrees` (the same CWD resolution
 git uses), so an agent in its worktree just runs `agent-dispatch worktree-status`
 / `agent-dispatch claim` with no arguments. Claiming stamps that pair as the

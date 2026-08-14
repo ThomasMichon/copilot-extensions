@@ -29,7 +29,7 @@ def test_none_when_federation_disabled(monkeypatch):
 
 
 def test_soft_fails_when_enabled_but_no_gateway(monkeypatch):
-    # role set, but no shared/Gateway URL -> runner_from_config raises -> swallowed.
+    # role set, but no shared/hosted URL -> runner_from_config raises -> swallowed.
     monkeypatch.setenv("AGENT_DISPATCH_FEDERATION_ROLE", "coordinator")
     monkeypatch.setenv("AGENT_DISPATCH_FEDERATION_INSTANCE", "host-a")
     monkeypatch.delenv("AGENT_DISPATCH_SHARED_URL", raising=False)

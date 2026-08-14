@@ -5,7 +5,7 @@
 # Manages the agent-dispatch coordinator lifecycle: install, update, status,
 # start, stop, uninstall -- the same shape as the agent-bridge installer, so
 # the agent-worktrees plugin reconciler (runtimeScope: machine-gated) and the
-# facility `aperture-labs services agent-dispatch <action>` path both drive it.
+# `aperture-labs services agent-dispatch <action>` path both drive it.
 #
 # On a standalone Linux deploy host it ALSO installs the **embody supervisor**
 # (`agent-dispatch-supervisor.service`), a second systemd user unit that runs
