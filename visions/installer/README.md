@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** leaf (concrete component; links its sibling capability visions)
 - **Status:** Active
-- **Last revised:** 2026-08-13
+- **Last revised:** 2026-08-14
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -124,6 +124,26 @@ and fix how it is wired.
 
 ## Features
 
+### repo-plugin-enablement
+Sets a **repo's own enabled-plugin configuration** — declaring the marketplace(s)
+and the plugins a repo turns on for the agents that run in it — by writing the
+repo-level settings the Copilot CLI **reads but does not itself manage**. Enabling
+the harness's plugins for a newly-adopted repo is a Configurator gesture, not a
+hand-edit; the app owns this write-surface precisely **because the plugin pipe
+won't** touch a repo's own plugin config. It merges rather than clobbers, chooses
+from the plugin set it already knows, and is the natural completion of adopting a
+repo.
+
+### machine-and-connectivity-config
+Helps author the **minimal multi-machine / SSH configuration** the harness needs to
+reach beyond one box — the machine inventory and connectivity the control-plane's
+machine-scoped views (and cross-machine dispatch) build on. Without at least this
+minimum, a machine switcher has nothing to switch between; standing up that baseline
+is part of making the harness turnkey and is the **source** the control-plane's
+per-machine scope derives from. It authors the *minimum* to make multi-machine
+legible and coordinates with (never replaces) a dedicated connectivity/SSH-mesh
+layer where one is present.
+
 ### one-line-bootstrap
 A single published command takes a bare machine into the installer without any
 pre-installed harness tooling.
@@ -221,6 +241,16 @@ environment.
 It shows what it found and what it will do before acting; destructive or
 scope-widening steps (installing, cloning, registering) are prompted, not
 assumed — the user stays in control.
+
+### onboards-from-empty-gracefully
+On a bare machine the app is a coherent **onboarding home**, not a broken console.
+Its surfaces present **what is missing and the action to provision it** (core, first
+repo, machines, a repo's plugins) rather than dead-loading, and the interactive
+control-plane lands **setup-first** until the fabric exists — shifting to the fleet
+view once an engine and an adopted repo are present. A **non-interactive** bare
+invocation yields a legible status + next-steps instead of forcing the TUI. (The
+Picker's per-pivot empty-state behavior is owned by the [picker](../picker/README.md)
+vision; this is the app-level commitment that first-run is guided, never a wall.)
 
 ### knows-the-plugins-without-coupling-to-them
 The installer holds an **external, declarative understanding** of each plugin —
@@ -324,3 +354,16 @@ the app to keep *itself* current.
   operator's Phase-6 design decisions (DQ6/DQ7/DQ9). The detailed installer flows,
   the bare-invocation binstub seam, and the never-break migration live in the
   dotfiles `installer-configurator` effort.
+- **2026-08-14** — Added two Configurator write-surfaces and a first-run behavior,
+  mined from a **clean-room pilot** of the golden path (upstream `worktree-manager`
+  bootstrap → `setup` → adopt → enable plugins): `§Features/repo-plugin-enablement`
+  (the app writes a repo's own `.github/copilot/settings.json` `enabledPlugins` +
+  marketplace — the config the Copilot CLI reads but **does not manage**),
+  `§Features/machine-and-connectivity-config` (author the minimal machine/SSH config
+  the control-plane's Machines scope derives from), and
+  `§Behaviors/onboards-from-empty-gracefully` (a bare machine gets a setup-first,
+  guided onboarding home — surfaces show what's missing + the action, never a dead
+  load). The pilot also surfaced install-side prerequisites for this to work:
+  ThomasMichon/copilot-extensions#540 (`setup` checkout discovery) and #541
+  (unconditional tool-binstub deploy); the new surfaces are #543 / #544, and the
+  Picker first-run behavior is #542. Umbrella #352; Phase 3/4 #356/#357.

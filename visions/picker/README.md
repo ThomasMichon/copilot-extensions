@@ -5,7 +5,7 @@
   worktree-backed agents of a project.
 - **Scope:** leaf (concrete component; child of the agent-fabric vision)
 - **Status:** Active
-- **Last revised:** 2026-08-12
+- **Last revised:** 2026-08-14
 - **Home:** delivered by the **Installer & Configurator** (the optional worktree-
   and agent- control-plane) — see [installer](../installer/README.md). It is an
   **optional** surface: the plugins provide the in-session tools agents use and
@@ -95,6 +95,20 @@ the single obvious entry to the entire worktree lifecycle — view, join, resume
 create, and fleet management all reachable from it. A programmatic path exists
 for automation, but the human's default door is this one, and it is uniform
 across every project.
+
+### first-run-onboarding-entry
+On an **unprovisioned** machine — the fabric's ground layer (the worktree engine)
+not yet installed, no machines yet configured — the front door still opens onto a
+coherent **onboarding home**, not a broken console. The same bare gesture that
+opens the Picker serves the newcomer: it lands **setup-first**, guiding the steps
+that make the fabric real (install the core, adopt a first repo, configure a
+machine, enable a repo's plugins), and it **derives its landing from context** —
+setup-first while nothing is provisioned, shifting to the fleet (**Worktrees**)
+home once an engine and an adopted repo exist. The door is the same one an expert
+uses; only where it lands differs. Because it is the *interactive* front door, it
+opens as the TUI in an interactive terminal and yields a legible textual
+status/next-steps when invoked non-interactively, rather than forcing the TUI into
+a non-terminal.
 
 ### decision-support-before-cost
 The Picker presents enough status **upfront** — per fleet member and in
@@ -209,6 +223,19 @@ door** — coarse but whole. Installing a higher fabric layer *adds* its pivot,
 actions, or configuration section without altering or breaking the base
 experience. Capability scales with what the operator has adopted; nothing a lower
 configuration relied on is removed by adding more.
+
+### provisioning-aware-empty-states
+A pivot whose underlying source is **not yet provisioned** — no worktree engine, no
+configured machines, no adopted repo — is **never a dead or blank load and never a
+bare error**. It renders a **guided empty state that names what is missing and
+offers the action to provision it** (install the core, adopt a repo, add a machine,
+enable a repo's plugins), so the absence *becomes the next step* rather than a wall.
+This is the "never a silent dead end — always guide to the next correct step"
+contract applied to the front door, and the **zero-layer floor** of
+`§Behaviors/graceful-capability-scaling`: below "coarse but whole with only the
+ground layer" sits "coherent and self-guiding with **no** layer yet." The Picker
+never presents a promise (a Worktrees list, a Machines switcher) it cannot yet
+source; it presents the path to earning it.
 
 ### renderable-and-assertable-headless
 The Picker can be instantiated **headlessly** — no live terminal, no human, no
@@ -325,3 +352,15 @@ regression is something a test can catch before an operator does.
   Phase-6 boundary clarification; the mux/session-launch allocation (agent-bridge also
   hosts muxed sessions) is deliberately left as a downstream design question, not fixed
   here.
+- **2026-08-14** — Added the **unprovisioned first-run** regime:
+  `§Features/first-run-onboarding-entry` (the bare front door is also the newcomer's
+  onboarding home — setup-first landing, context-derived, TUI-in-a-terminal /
+  status-when-not) and `§Behaviors/provisioning-aware-empty-states` (a pivot with no
+  source yet renders a **guided empty state + the provisioning action**, never a dead
+  load — the zero-layer floor of graceful-capability-scaling). Mined from a clean-room
+  pilot of the golden path (upstream `worktree-manager` bootstrap → `setup` → adopt →
+  enable plugins): immediately after bootstrap the engine is absent (Worktrees has no
+  source) and no machines are configured (the Machines switcher has nothing to switch),
+  so the front door must guide provisioning rather than dead-load. Tracked as
+  ThomasMichon/copilot-extensions#542 (with #540/#541 the install-side prerequisites);
+  see also #85 (advance-to-vision) and #357 (Phase-4 configurator).
