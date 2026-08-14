@@ -15439,7 +15439,8 @@ _NO_PROJECT_COMMANDS = {
     "--version", "-V", "--help", "-h", "repos", "accounts", "related", "install", "register", "hook",
     "picker", "reap-shells", "status-updater", "restart", "register-session",
     "head-session", "conclude-session", "link-succession", "config-migrate",
-    "session-lock", "machine-context",
+    "session-lock", "machine-context", "reconcile-binstubs",
+    "register-project-entry",
 }
 
 
