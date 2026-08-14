@@ -62,15 +62,15 @@ CANONICAL_CONFIG_REL = f"{CONFIG_DIR_NAME}/{CONFIG_FILE_IN_DIR}"
 CONFIG_FILENAME = "codespaces.yaml"
 
 # ── User-level drop-in config providers (config.d) ──────────────────────────
-# A plugin (e.g. odsp-web-harness) can make its shipped CodeSpace *target* config
-# discoverable WITHOUT a control-plane repo and WITHOUT writing into any repo: it
-# drops a small **pointer** file into ``~/.agent-codespaces/config.d/`` naming its
-# config.yaml. agent-codespaces reads each pointer, loads the referenced config,
-# and merges it at the LOWEST precedence (a provider default -- any adopted-repo /
-# cwd config still overrides). This keeps the provider edge one-way and
-# dependency-free: the plugin ships a default and points at it in place; agent-
-# codespaces discovers it dynamically; neither writes into the other's repo, and a
-# plugin update keeps the pointed config live (no stale copy).
+# A harness plugin can make its shipped CodeSpace *target* config discoverable
+# WITHOUT a control-plane repo and WITHOUT writing into any repo: it drops a small
+# **pointer** file into ``~/.agent-codespaces/config.d/`` naming its config.yaml.
+# agent-codespaces reads each pointer, loads the referenced config, and merges it
+# at the LOWEST precedence (a provider default -- any adopted-repo / cwd config
+# still overrides). This keeps the provider edge one-way and dependency-free: the
+# plugin ships a default and points at it in place; agent-codespaces discovers it
+# dynamically; neither writes into the other's repo, and a plugin update keeps the
+# pointed config live (no stale copy).
 CONFIG_D_DIR_NAME = "config.d"
 
 
@@ -101,7 +101,7 @@ def discover_dropin_configs() -> list[Path]:
             continue
         try:
             text = entry.read_text("utf-8")
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             continue
         target: Path | None = None
         for line in text.splitlines():
@@ -827,9 +827,9 @@ def load_merged_config(include_cwd: bool = True) -> CodespacesConfig:
         sources.append((raw, config_dir, repo_root))
     for cfg_file in discover_dropin_configs():
         try:
-            with open(cfg_file) as f:
+            with open(cfg_file, encoding="utf-8") as f:
                 dropin_raw = yaml.safe_load(f) or {}
-        except (OSError, yaml.YAMLError):
+        except (OSError, UnicodeDecodeError, yaml.YAMLError):
             continue
         if isinstance(dropin_raw, dict) and dropin_raw:
             # config_dir = the pointed config's own dir, so its provision `src`
