@@ -58,10 +58,42 @@ class TestCLI:
         assert "No CodeSpace config found" in capsys.readouterr().out
 
     def test_list_json_empty(self, capsys):
-        with patch("agent_codespaces.__main__.list_codespaces", return_value=[]):
+        with patch("agent_codespaces.__main__._gh_binary_available",
+                   return_value=True), \
+             patch("agent_codespaces.__main__.list_codespaces", return_value=[]):
             rc = main(["list", "--json"])
         assert rc == 0
         assert "[]" in capsys.readouterr().out
+
+    def test_gh_required_verb_balks_when_gh_missing(self, capsys):
+        """dotfiles#1462: a CodeSpace-operating verb must balk with an actionable
+        'install gh' message (not an opaque FileNotFoundError) when gh is absent.
+        """
+        with patch("agent_codespaces.__main__._gh_binary_available",
+                   return_value=False):
+            rc = main(["list", "--json"])
+        assert rc == 1
+        err = capsys.readouterr().err
+        assert "gh" in err.lower()
+        assert "cli.github.com" in err
+        # It names the specific verb and points at doctor.
+        assert "list" in err
+        assert "doctor" in err
+
+    def test_gh_required_verb_proceeds_when_gh_present(self, capsys):
+        """The balk must NOT fire when gh is on PATH -- the verb runs normally."""
+        with patch("agent_codespaces.__main__._gh_binary_available",
+                   return_value=True), \
+             patch("agent_codespaces.__main__.list_codespaces", return_value=[]):
+            rc = main(["list", "--json"])
+        assert rc == 0
+
+    def test_local_verb_does_not_balk_without_gh(self, capsys):
+        """A local/report-only verb (version) must keep working with no gh."""
+        with patch("agent_codespaces.__main__._gh_binary_available",
+                   return_value=False):
+            rc = main(["version"])
+        assert rc == 0
 
     def test_config_migrate_relocates_legacy(
         self, tmp_path, monkeypatch, capsys

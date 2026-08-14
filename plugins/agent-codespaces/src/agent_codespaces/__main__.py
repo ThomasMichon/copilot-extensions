@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import shlex
+import shutil
 import sys
 import time
 from datetime import datetime, timezone
@@ -83,6 +84,45 @@ _BUSY_EXIT = 75
 # (credentials.enforce_ado_rest_login) -- the connect aborts cleanly rather than
 # proceeding into a silent mid-dispatch ADO-REST failure (#77).
 _ADO_AUTH_EXIT = 77
+
+
+# Verbs whose PRIMARY function shells out to `gh` (gh codespace / gh api) to
+# operate on live CodeSpaces. On a box with no `gh` these would otherwise fail
+# with an opaque FileNotFoundError mid-dispatch; instead we BALK up front with a
+# clear, actionable "install gh" message (dotfiles#1462). Local/report-only verbs
+# (status, version, leases, doctor, namespace-*, relay-*, config-migrate, …) are
+# deliberately excluded -- they must keep working without gh. `doctor` in
+# particular self-reports a missing/mis-authed gh, so it never balks.
+_GH_REQUIRED_COMMANDS = frozenset({
+    "ssh", "list", "delete", "finalize", "stop", "verify",
+    "create", "prune", "wait", "pool", "allocate",
+})
+
+
+def _gh_binary_available() -> bool:
+    """True if the `gh` CLI is resolvable on PATH.
+
+    Isolated as a one-liner so the balk preflight is trivially patchable in tests
+    (and so the check has a single call site).
+    """
+    return shutil.which("gh") is not None
+
+
+def _balk_missing_gh(command: str) -> None:
+    """Emit the actionable 'install gh' guidance for a gh-dependent verb.
+
+    A single clear message (no traceback), naming `gh` as the missing hard
+    prerequisite and how to install + authenticate it, and pointing at `doctor`
+    for the auth/scope check.
+    """
+    print(
+        f"ERROR: `gh` (GitHub CLI) is required for `agent-codespaces {command}` "
+        "but was not found on PATH.\n"
+        "  Install it: https://cli.github.com/  then authenticate: "
+        "gh auth login -h github.com -s codespace\n"
+        "  (`agent-codespaces doctor` checks gh auth + the 'codespace' scope.)",
+        file=sys.stderr,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -710,6 +750,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.command:
         parser.print_help()
+        return 1
+
+    # gh-prerequisite balk (dotfiles#1462): a CodeSpace-operating verb needs the
+    # `gh` CLI; without it, fail fast with actionable install guidance rather
+    # than an opaque mid-dispatch FileNotFoundError.
+    if args.command in _GH_REQUIRED_COMMANDS and not _gh_binary_available():
+        _balk_missing_gh(args.command)
         return 1
 
     try:
