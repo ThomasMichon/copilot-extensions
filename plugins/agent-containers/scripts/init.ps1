@@ -17,6 +17,8 @@
 #>
 [CmdletBinding()]
 param(
+    [ValidateSet('install', 'init', 'stamp', 'provision')]
+    [string]$Action = 'install',
     [string]$InstallDir,
     [switch]$Force
 )
@@ -385,6 +387,128 @@ function Get-GitInfo {
     }
 }
 
+function Deploy-SelfProvisioningBinstub {
+    # Windows tool binstub (.ps1 primary + .cmd fallback), SELF-PROVISIONING
+    # (#1393): fast-path the built versioned slot's python; if no slot is built
+    # yet (a `stamp` deferred the venv), provision on first use by running the
+    # slot-local snapshot's `scripts/init.ps1 provision`, then dispatch. Opt out
+    # with AGENT_CONTAINERS_NO_SELFPROVISION=1. POSIX gets its sh shim.
+    if ($env:OS -ne 'Windows_NT') {
+        $stubPath = Join-Path $LocalBin 'agent-containers'
+        $stubContent = @"
+#!/usr/bin/env bash
+export PYTHONUTF8=1
+exec "`$HOME/.agent-containers/.venv/bin/python" -m agent_containers "`$@"
+"@
+        [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
+        Write-Ok "Binstub: $stubPath"
+        return
+    }
+    $ps1Path = Join-Path $LocalBin 'agent-containers.ps1'
+    $ps1Content = @'
+$env:PYTHONUTF8 = '1'
+$_root = Join-Path $env:USERPROFILE '.agent-containers'
+function _resolve_ac_py {
+    $ver = ''
+    try { $ver = ([IO.File]::ReadAllText((Join-Path $_root 'current-version'))).Trim() } catch {}
+    $p = if ($ver) { Join-Path $_root ('versions\' + $ver + '\Scripts\python.exe') } else { '' }
+    if ($p -and (Test-Path -LiteralPath $p)) { return $p }
+    Get-ChildItem (Join-Path $_root 'versions') -Directory -ErrorAction SilentlyContinue |
+        Sort-Object Name | ForEach-Object { Join-Path $_.FullName 'Scripts\python.exe' } |
+        Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Last 1
+}
+$_py = _resolve_ac_py
+if ($_py) { & $_py -m agent_containers @args; exit $LASTEXITCODE }
+if ($env:AGENT_CONTAINERS_NO_SELFPROVISION) { [Console]::Error.WriteLine('[agent-containers] runtime not provisioned (AGENT_CONTAINERS_NO_SELFPROVISION set).'); exit 1 }
+$_snap = ''
+try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
+$_inst = if ($_snap) { Join-Path $_snap 'scripts\init.ps1' } else { '' }
+if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) { [Console]::Error.WriteLine('[agent-containers] cannot self-provision: snapshot installer not found. Re-enable the plugin, then retry.'); exit 127 }
+[Console]::Error.WriteLine('[agent-containers] runtime not provisioned -- provisioning on first use (acquires uv + builds a venv; ~30-120s). Do not kill; extend your timeout.')
+[Console]::Error.WriteLine('::agent-provisioning:: plugin=agent-containers eta_seconds=120 reason=first-use')
+$_pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
+$_exe = if ($_pwsh) { $_pwsh.Source } else { 'powershell.exe' }
+& $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
+$_py = _resolve_ac_py
+if ($_py) { & $_py -m agent_containers @args; exit $LASTEXITCODE }
+[Console]::Error.WriteLine('[agent-containers] provisioning did not yield a runtime. See the log above; retry, or run the snapshot installer manually.')
+exit 1
+'@
+    [System.IO.File]::WriteAllText($ps1Path, $ps1Content, $utf8NoBom)
+
+    $cmdPath = Join-Path $LocalBin 'agent-containers.cmd'
+    $cmdContent = @'
+@echo off
+setlocal
+set "PYTHONUTF8=1"
+set "_ROOT=%USERPROFILE%\.agent-containers"
+call :_resolve
+if not defined _PY goto _prov
+"%_PY%" -m agent_containers %*
+exit /b %ERRORLEVEL%
+:_prov
+if defined AGENT_CONTAINERS_NO_SELFPROVISION goto _nope
+set "_SNAP="
+if exist "%_ROOT%\payload-dir" set /p _SNAP=<"%_ROOT%\payload-dir"
+set "_INST=%_SNAP%\scripts\init.ps1"
+if not exist "%_INST%" goto _noinst
+echo [agent-containers] runtime not provisioned -- provisioning on first use ^(~30-120s^). Do not kill.>&2
+where pwsh >nul 2>&1
+if %ERRORLEVEL%==0 (pwsh -NoProfile -ExecutionPolicy Bypass -File "%_INST%" provision 1>&2) else (powershell -NoProfile -ExecutionPolicy Bypass -File "%_INST%" provision 1>&2)
+call :_resolve
+if not defined _PY goto _failprov
+"%_PY%" -m agent_containers %*
+exit /b %ERRORLEVEL%
+:_noinst
+echo [agent-containers] cannot self-provision: snapshot installer not found.>&2
+exit /b 127
+:_nope
+echo [agent-containers] runtime not provisioned ^(AGENT_CONTAINERS_NO_SELFPROVISION set^).>&2
+exit /b 1
+:_failprov
+echo [agent-containers] provisioning did not yield a runtime.>&2
+exit /b 1
+:_resolve
+set "_PY="
+set "_VER="
+if exist "%_ROOT%\current-version" set /p _VER=<"%_ROOT%\current-version"
+if defined _VER if exist "%_ROOT%\versions\%_VER%\Scripts\python.exe" set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
+goto :eof
+'@
+    [System.IO.File]::WriteAllText($cmdPath, $cmdContent, $utf8NoBom)
+    Write-Ok "Binstub: $ps1Path (+ .cmd fallback, self-provisioning)"
+}
+
+function Invoke-Stamp {
+    # Fast base install (#1393, snapshot slot model): copy the payload SOURCE
+    # into ~/.agent-containers/snapshots/<ver>/, record markers, and deploy the
+    # self-provisioning binstub -- deferring the heavy venv build to first use.
+    # No venv, no uv; never holds the marketplace payload open.
+    Write-Host ''
+    Write-Host '=== agent-containers stamp (defer runtime to first use) ===' -ForegroundColor Cyan
+    if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
+    foreach ($dir in @($InstallDir, $LocalBin)) {
+        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    }
+    $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
+    $snapTmp = "$snapDir.tmp-$PID"
+    if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
+    New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
+    $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+    Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+    }
+    if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
+    Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
+    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
+    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
+    Write-Ok "Snapshot: $snapDir"
+    Deploy-SelfProvisioningBinstub
+    Write-Ok 'Stamped: agent-containers binstub on PATH; runtime provisions on first use.'
+}
+
+if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
+
 # -- Preflight checks --------------------------------------------------
 
 Write-Host ''
@@ -565,49 +689,7 @@ if ($VersionedRuntime) {
 
 # -- 4. Deploy binstub -------------------------------------------------
 
-$stubName = 'agent-containers'
-if ($env:OS -eq 'Windows_NT') {
-    # Primary .ps1 (PowerShell prefers it over the .cmd in the same dir; @args
-    # forwards argv verbatim so quoting/&&/|/;/! survive). The .cmd is kept as a
-    # fallback for non-PowerShell callers. Both launch the signed venv python
-    # via -m, never the SAC-blocked console-script trampoline .exe.
-    $ps1Path = Join-Path $LocalBin "$stubName.ps1"
-    $ps1Content = @'
-$env:PYTHONUTF8 = '1'
-$_venv = "$env:USERPROFILE\.agent-containers\.venv"
-$_py = Join-Path $_venv 'Scripts\python.exe'
-$_root = Split-Path $_venv
-$_ver = ''
-try { $_ver = ([IO.File]::ReadAllText((Join-Path $_root 'current-version'))).Trim() } catch {}
-$_py = if ($_ver) { Join-Path $_root ('versions\' + $_ver + '\Scripts\python.exe') } else { '' }
-if (-not ($_py -and (Test-Path -LiteralPath $_py))) { $_py = Get-ChildItem (Join-Path $_root 'versions') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Join-Path $_.FullName 'Scripts\python.exe' } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Last 1 }
-& $_py -m agent_containers @args
-exit $LASTEXITCODE
-'@
-    [System.IO.File]::WriteAllText($ps1Path, $ps1Content, $utf8NoBom)
-
-    $stubPath = Join-Path $LocalBin "$stubName.cmd"
-    $stubContent = @"
-@echo off
-set "PYTHONUTF8=1"
-set "_ROOT=%USERPROFILE%\.agent-containers"
-set "_VER="
-if exist "%_ROOT%\current-version" set /p _VER=<"%_ROOT%\current-version"
-set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
-"%_PY%" -m agent_containers %*
-"@
-    [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
-    $stubPath = "$ps1Path (+ .cmd fallback)"
-} else {
-    $stubPath = Join-Path $LocalBin $stubName
-    $stubContent = @"
-#!/usr/bin/env bash
-export PYTHONUTF8=1
-exec "`$HOME/.agent-containers/.venv/bin/python" -m agent_containers "`$@"
-"@
-    [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
-}
-Write-Ok "Binstub: $stubPath"
+Deploy-SelfProvisioningBinstub
 
 # -- 5. Write deploy manifest ------------------------------------------
 
