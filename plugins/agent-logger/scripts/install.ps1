@@ -21,7 +21,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('install', 'update', 'uninstall', 'status')]
+    [ValidateSet('install', 'update', 'uninstall', 'status', 'stamp', 'provision')]
     [string]$Action = 'status'
 )
 
@@ -566,10 +566,12 @@ function Write-Binstubs {
        plus a .cmd fallback. PowerShell resolves a .ps1 (ExternalScript) ahead of
        a .cmd (Application) in the same dir; both launch the venv's signed python
        via `-m`, never the unsigned console-script trampoline .exe that Smart App
-       Control blocks (3077). Covers both the service CLIs (session-sync,
-       agent-logger) and the segmenter tools the log-session skill and
-       session-log-writer agent call (collate-session, read-session-digest,
-       prepare-session-log). #>
+       Control blocks (3077). Covers the service CLI (session-sync) and the
+       segmenter tools the log-session skill and session-log-writer agent call
+       (collate-session, read-session-digest, prepare-session-log,
+       ramp-up-session). The primary `agent-logger` entrypoint is deployed
+       separately as a SELF-PROVISIONING binstub (Deploy-SelfProvisioningBinstub),
+       so it can rebuild the runtime on first use on a stamped-only box. #>
     param([Parameter(Mandatory)][string]$PythonExe)
 
     # Resolve the .venv link's reparse target and launch the slot python DIRECTLY,
@@ -582,7 +584,6 @@ function Write-Binstubs {
 
     $stubs = [ordered]@{
         'session-sync'        = 'agent_logger.sync.engine'
-        'agent-logger'        = 'agent_logger'
         'collate-session'     = 'agent_logger.segmenter.collate'
         'read-session-digest' = 'agent_logger.segmenter.read_digest'
         'prepare-session-log' = 'agent_logger.segmenter.prepare_log'
@@ -680,6 +681,10 @@ function Install-Package {
     # (never the SAC-blocked console-script trampolines). Point at the stable
     # `.venv` link ($LinkPython), never a versions/<v> absolute a `gc` could remove.
     Write-Binstubs -PythonExe $LinkPython
+    # The primary `agent-logger` entrypoint is a SELF-PROVISIONING binstub
+    # (deployed byte-identically at stamp + here) so it rebuilds the runtime on
+    # first use on a stamped-only box; post-provision it fast-paths the slot.
+    Deploy-SelfProvisioningBinstub
 
     # Machine-local config schema migration (idempotent + atomic). Non-fatal.
     try {
@@ -741,7 +746,141 @@ function Register-SyncTask {
     }
 }
 
+function Deploy-SelfProvisioningBinstub {
+    # The primary `agent-logger` binstub (.ps1 primary + .cmd fallback), SELF-
+    # PROVISIONING (#1393): fast-path the built versioned slot's python; if no
+    # slot is built yet (a `stamp` deferred the venv), provision on first use by
+    # running the slot-local snapshot's `scripts/install.ps1 provision`, then
+    # dispatch. Opt out with AGENT_LOGGER_NO_SELFPROVISION=1. Deployed byte-
+    # identically at stamp AND during Install-Package so a provision triggered by
+    # this very binstub never rewrites the .cmd it is mid-execution.
+    if (-not (Test-Path $LocalBin)) { New-Item -ItemType Directory -Path $LocalBin -Force | Out-Null }
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    if ($env:OS -ne 'Windows_NT') {
+        $stubPath = Join-Path $LocalBin 'agent-logger'
+        $stubContent = @'
+#!/usr/bin/env bash
+export PYTHONUTF8=1
+exec "$HOME/.agent-logger/.venv/bin/python" -m agent_logger "$@"
+'@
+        [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
+        Write-Ok "Binstub: $stubPath"
+        return
+    }
+    $ps1Path = Join-Path $LocalBin 'agent-logger.ps1'
+    $ps1Content = @'
+$env:PYTHONUTF8 = '1'
+$_root = Join-Path $env:USERPROFILE '.agent-logger'
+function _resolve_al_py {
+    $ver = ''
+    try { $ver = ([IO.File]::ReadAllText((Join-Path $_root 'current-version'))).Trim() } catch {}
+    $p = if ($ver) { Join-Path $_root ('versions\' + $ver + '\Scripts\python.exe') } else { '' }
+    if ($p -and (Test-Path -LiteralPath $p)) { return $p }
+    Get-ChildItem (Join-Path $_root 'versions') -Directory -ErrorAction SilentlyContinue |
+        Sort-Object Name | ForEach-Object { Join-Path $_.FullName 'Scripts\python.exe' } |
+        Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Last 1
+}
+$_py = _resolve_al_py
+if ($_py) { & $_py -m agent_logger @args; exit $LASTEXITCODE }
+if ($env:AGENT_LOGGER_NO_SELFPROVISION) { [Console]::Error.WriteLine('[agent-logger] runtime not provisioned (AGENT_LOGGER_NO_SELFPROVISION set).'); exit 1 }
+$_snap = ''
+try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
+$_inst = if ($_snap) { Join-Path $_snap 'scripts\install.ps1' } else { '' }
+if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) { [Console]::Error.WriteLine('[agent-logger] cannot self-provision: snapshot installer not found. Re-enable the plugin, then retry.'); exit 127 }
+[Console]::Error.WriteLine('[agent-logger] runtime not provisioned -- provisioning on first use (acquires uv + builds a venv; ~30-120s). Do not kill; extend your timeout.')
+[Console]::Error.WriteLine('::agent-provisioning:: plugin=agent-logger eta_seconds=120 reason=first-use')
+$_pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
+$_exe = if ($_pwsh) { $_pwsh.Source } else { 'powershell.exe' }
+& $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
+$_py = _resolve_al_py
+if ($_py) { & $_py -m agent_logger @args; exit $LASTEXITCODE }
+[Console]::Error.WriteLine('[agent-logger] provisioning did not yield a runtime. See the log above; retry, or run the snapshot installer manually.')
+exit 1
+'@
+    [System.IO.File]::WriteAllText($ps1Path, $ps1Content, $utf8NoBom)
+
+    $cmdPath = Join-Path $LocalBin 'agent-logger.cmd'
+    $cmdContent = @'
+@echo off
+setlocal
+set "PYTHONUTF8=1"
+set "_ROOT=%USERPROFILE%\.agent-logger"
+call :_resolve
+if not defined _PY goto _prov
+"%_PY%" -m agent_logger %*
+exit /b %ERRORLEVEL%
+:_prov
+if defined AGENT_LOGGER_NO_SELFPROVISION goto _nope
+set "_SNAP="
+if exist "%_ROOT%\payload-dir" set /p _SNAP=<"%_ROOT%\payload-dir"
+set "_INST=%_SNAP%\scripts\install.ps1"
+if not exist "%_INST%" goto _noinst
+echo [agent-logger] runtime not provisioned -- provisioning on first use ^(~30-120s^). Do not kill.>&2
+where pwsh >nul 2>&1
+if %ERRORLEVEL%==0 (pwsh -NoProfile -ExecutionPolicy Bypass -File "%_INST%" provision 1>&2) else (powershell -NoProfile -ExecutionPolicy Bypass -File "%_INST%" provision 1>&2)
+call :_resolve
+if not defined _PY goto _failprov
+"%_PY%" -m agent_logger %*
+exit /b %ERRORLEVEL%
+:_noinst
+echo [agent-logger] cannot self-provision: snapshot installer not found.>&2
+exit /b 127
+:_nope
+echo [agent-logger] runtime not provisioned ^(AGENT_LOGGER_NO_SELFPROVISION set^).>&2
+exit /b 1
+:_failprov
+echo [agent-logger] provisioning did not yield a runtime.>&2
+exit /b 1
+:_resolve
+set "_PY="
+set "_VER="
+if exist "%_ROOT%\current-version" set /p _VER=<"%_ROOT%\current-version"
+if defined _VER if exist "%_ROOT%\versions\%_VER%\Scripts\python.exe" set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
+goto :eof
+'@
+    [System.IO.File]::WriteAllText($cmdPath, $cmdContent, $utf8NoBom)
+    Write-Ok "Binstub: $cmdPath (+ .ps1, self-provisioning)"
+}
+
+function Invoke-Stamp {
+    # Fast base install (#1393, snapshot slot model): copy the payload SOURCE into
+    # ~/.agent-logger/snapshots/<ver>/, record markers, and deploy ONLY the
+    # self-provisioning `agent-logger` binstub -- deferring the venv build (and the
+    # 5 auxiliary binstubs + scheduled task) to a provision on first use. No venv,
+    # no uv; never holds the marketplace payload open (copies from the already
+    # self-staged $PluginDir).
+    Write-Host ''
+    Write-Host '=== agent-logger stamp (defer runtime to first use) ===' -ForegroundColor Cyan
+    if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    foreach ($dir in @($InstallDir, $LocalBin)) {
+        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    }
+    $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
+    $snapTmp = "$snapDir.tmp-$PID"
+    if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
+    New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
+    $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+    Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+    }
+    if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
+    Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
+    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
+    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
+    Write-Ok "Snapshot: $snapDir"
+    Deploy-SelfProvisioningBinstub
+    Write-Ok 'Stamped: agent-logger binstub on PATH; runtime provisions on first use.'
+}
+
 switch ($Action) {
+    'stamp' {
+        Invoke-Stamp
+    }
+    'provision' {
+        Install-Package
+        Write-Ok "runtime provisioned"
+    }
     'install' {
         Install-Package
         Register-SyncTask
