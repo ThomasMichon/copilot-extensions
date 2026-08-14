@@ -40,6 +40,14 @@ from .transport import SpawnTarget, spawn, _agent_worktrees_python
 
 log = logging.getLogger("agent-bridge")
 
+# The resume recovery ladder (#1468): a resume stall is Copilot CLI's ACP
+# startup race, not a broken session -- so on a failed/stalled resume attempt we
+# stop the wedged child and re-resume (a fresh Copilot launch re-rolls the race)
+# against the SAME persisted ACP session, preserving prior-turn context. Only
+# after this many rounds all fail is the resume surfaced as a failure (the
+# caller's end+create is then the last resort).
+_MAX_RESUME_ROUNDS = 3
+
 
 def _resolve_relay_launch_env(
     codespace_name: str, relay_port: int | None
@@ -2637,54 +2645,92 @@ class SessionManager:
                     self._handle_usage_update(session, data)
 
             client: AcpClient | None = None
-            try:
-                agent_proc = await spawn(session.target)
-                client = AcpClient(
-                    on_event=on_acp_event,
-                    on_permission=permission_callback,
-                )
-                if permission_callback:
-                    client.auto_approve = False
-                await client.start(agent_proc.proc)
-                await client.load_session(
-                    cwd=session.target.cwd or _default_cwd(session.target),
-                    session_id=session.acp_session_id,
-                )
+            for attempt in range(1, _MAX_RESUME_ROUNDS + 1):
+                client = None
+                try:
+                    agent_proc = await spawn(session.target)
+                    client = AcpClient(
+                        on_event=on_acp_event,
+                        on_permission=permission_callback,
+                    )
+                    if permission_callback:
+                        client.auto_approve = False
+                    # Bound each round so a stalled Copilot ACP launch (the
+                    # "Resuming…"/extension-reload race, #1468) fails fast and we
+                    # re-roll, rather than hanging in STARTING.
+                    await asyncio.wait_for(
+                        client.start(agent_proc.proc),
+                        timeout=self._timeouts.session_start,
+                    )
+                    await asyncio.wait_for(
+                        client.load_session(
+                            cwd=session.target.cwd or _default_cwd(session.target),
+                            session_id=session.acp_session_id,
+                        ),
+                        timeout=self._timeouts.session_new,
+                    )
 
-                session.client = client
-                session.status = SessionStatus.IDLE
-                self._db.update_session_status(
-                    session_id, SessionStatus.IDLE.value, time.time(),
-                    pid=session.pid,
-                )
-                if session.event_log:
-                    session.event_log.append("session_state_changed", {
-                        "status": SessionStatus.IDLE.value,
-                        "resumed": True,
-                        "acp_session_id": session.acp_session_id,
-                    })
-                log.info(
-                    "Session %s (%s) resumed, pid=%s",
-                    session_id, session.name, session.pid,
-                )
-            except Exception as exc:
-                # Clean up the client/process on failure
-                if client:
-                    try:
-                        await client.shutdown()
-                    except Exception:
-                        pass
-                session.client = None
-                session.status = SessionStatus.STOPPED
-                self._db.update_session_status(
-                    session_id, SessionStatus.STOPPED.value, time.time()
-                )
-                if session.event_log:
-                    session.event_log.append("error", {
-                        "message": f"Resume failed: {exc}",
-                    })
-                log.error("Failed to resume session %s: %s", session_id, exc)
-                raise
+                    session.client = client
+                    session.status = SessionStatus.IDLE
+                    self._db.update_session_status(
+                        session_id, SessionStatus.IDLE.value, time.time(),
+                        pid=session.pid,
+                    )
+                    if session.event_log:
+                        session.event_log.append("session_state_changed", {
+                            "status": SessionStatus.IDLE.value,
+                            "resumed": True,
+                            "acp_session_id": session.acp_session_id,
+                            "resume_attempt": attempt,
+                        })
+                    log.info(
+                        "Session %s (%s) resumed, pid=%s (attempt %d/%d)",
+                        session_id, session.name, session.pid,
+                        attempt, _MAX_RESUME_ROUNDS,
+                    )
+                    break  # success -- leave the ladder
+                except Exception as exc:
+                    # Capture the child's startup stderr tail BEFORE tearing the
+                    # client down, so the retry marker records why it stalled.
+                    stderr_tail = client.stderr_tail() if client else ""
+                    # Stop the wedged child before the next round (the "stop" in
+                    # stop->resume); re-rolls the launch against the SAME ACP
+                    # session, preserving prior-turn context.
+                    if client:
+                        with contextlib.suppress(Exception):
+                            await client.shutdown()
+                    session.client = None
+                    if session.event_log:
+                        session.event_log.append("acp_resume_retry", {
+                            "attempt": attempt,
+                            "of": _MAX_RESUME_ROUNDS,
+                            "error": str(exc),
+                            "stderr_tail": stderr_tail,
+                            "will_retry": attempt < _MAX_RESUME_ROUNDS,
+                        })
+                    if attempt < _MAX_RESUME_ROUNDS:
+                        log.warning(
+                            "Resume attempt %d/%d for session %s failed (%s); "
+                            "stopping the wedged child and re-rolling",
+                            attempt, _MAX_RESUME_ROUNDS, session_id, exc,
+                        )
+                        continue
+                    # Ladder exhausted: leave STOPPED and surface the failure so
+                    # the caller can fall back to end+create (the last resort).
+                    session.status = SessionStatus.STOPPED
+                    self._db.update_session_status(
+                        session_id, SessionStatus.STOPPED.value, time.time()
+                    )
+                    if session.event_log:
+                        session.event_log.append("error", {
+                            "message": f"Resume failed after {_MAX_RESUME_ROUNDS} "
+                                       f"attempts: {exc}",
+                        })
+                    log.error(
+                        "Failed to resume session %s after %d attempts: %s",
+                        session_id, _MAX_RESUME_ROUNDS, exc,
+                    )
+                    raise
 
         session.touch()
         # Queue outlived the restart? Deliver it now that the session is IDLE.
