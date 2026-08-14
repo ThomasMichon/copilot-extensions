@@ -695,9 +695,11 @@ EOF
 }
 
 _install_role() {
-    # Resolve this machine's role (host runs the engine; client is service-only).
-    # Precedence: AGENT_INDEX_ROLE env, then the freshly-installed CLI's resolver
-    # (config.yaml role:/engine:), else client. No machine names live here.
+    # Resolve this machine's role: host runs the engine + the local indexer
+    # service; a client runs NEITHER (its MCP/CLI route to the designated host
+    # over SSH). Precedence: AGENT_INDEX_ROLE env, then the freshly-installed
+    # CLI's resolver (config.yaml role:/engine:), else client. No machine names
+    # live here.
     if [[ -n "${AGENT_INDEX_ROLE:-}" ]]; then
         local r
         r="$(printf '%s' "$AGENT_INDEX_ROLE" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
@@ -1002,6 +1004,14 @@ _ensure_service_running() {
     # Idempotent, user-mode. If a healthy daemon already serves, do nothing; else
     # start it (systemd --user is user-mode; nohup fallback). Never elevated.
     if [[ "$NO_SERVICE" -eq 1 ]]; then _skip 'Service ensure skipped (--no-service)'; return 0; fi
+    # A client runs NO local indexer daemon: its MCP/CLI reach the designated
+    # host's service over the trusted SSH transport (config.client_url). Only a
+    # host runs a local service -- mirrors the engine gate and the single-host-
+    # service architecture (a fleet fans in SSH forwards to ONE host service).
+    if [[ "$(_install_role)" != "host" ]]; then
+        _skip 'Local indexer service skipped (role: client) -- a client runs no local daemon; MCP/CLI route to the designated host over SSH'
+        return 0
+    fi
     [[ -x "$LINK_PYTHON" ]] || { _skip 'Runtime not installed -- service not ensured'; return 0; }
     if _service_healthy; then _skip 'Service already healthy (user-mode daemon serving)'; return 0; fi
     # Unhealthy: if a systemd unit exists, RESTART it -- a hung-but-"active" unit
@@ -1030,7 +1040,9 @@ _ensure_engine_running() {
 }
 
 _ensure_running() {
-    # The DEFAULT user-mode lifecycle: engine (host) then service. No elevation.
+    # The DEFAULT user-mode lifecycle. No elevation. A host runs the engine then
+    # the local service; a client runs neither (_ensure_service_running self-gates
+    # on role), so this is a no-op on a client.
     if [[ "$(_install_role)" == "host" ]]; then _ensure_engine_running; fi
     _ensure_service_running
 }

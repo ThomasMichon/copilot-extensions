@@ -19,6 +19,25 @@ try {
     # Only act on a box where agent-index is actually deployed.
     if (-not (Test-Path (Join-Path $InstallDir 'deploy-manifest.json'))) { exit 0 }
 
+    # A client runs NO local indexer daemon -- its MCP/CLI route to the designated
+    # host's service over SSH -- so there is nothing to keep alive here. Skip fast
+    # (no background install.ps1 spawn) on any non-host. Mirrors config.resolve_role
+    # precedence: a VALID AGENT_INDEX_ROLE env (host/client) wins; otherwise the
+    # config.yaml role:/engine: scalar; else client. An unrecognized env value is
+    # ignored (falls through), never treated as a role.
+    $role = ''
+    $envRole = if ($env:AGENT_INDEX_ROLE) { ($env:AGENT_INDEX_ROLE).Trim().ToLower() } else { '' }
+    if ($envRole -in @('host', 'client')) {
+        $role = $envRole
+    } else {
+        $cfg = Join-Path $InstallDir 'config.yaml'
+        if (Test-Path $cfg) {
+            $rm = Select-String -Path $cfg -Pattern '^\s*(?:role|engine)\s*:\s*"?([A-Za-z]+)"?' -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($rm) { $role = $rm.Matches[0].Groups[1].Value.ToLower() }
+        }
+    }
+    if ($role -notin @('host', 'engine', 'server', 'indexer')) { exit 0 }
+
     # Fast health probe on the LIVE routing endpoint (active.json ephemeral port);
     # a stale active.json pointing at a dead pid correctly reads as unhealthy.
     $healthy = $false
