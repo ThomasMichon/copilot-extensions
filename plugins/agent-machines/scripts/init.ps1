@@ -17,6 +17,8 @@
 #>
 [CmdletBinding()]
 param(
+    [ValidateSet('install', 'init', 'stamp', 'provision')]
+    [string]$Action = 'install',
     [string]$InstallDir,
     [switch]$Force
 )
@@ -373,6 +375,102 @@ function Get-GitInfo {
     }
 }
 
+function Deploy-SelfProvisioningBinstub {
+    # agent-machines ships a SINGLE self-provisioning .cmd (no .ps1): it is
+    # spawned by Copilot as a bare ``command: agent-machines`` stdio MCP server,
+    # where a .cmd forwards stdin verbatim (a .ps1 shim does not) and wins
+    # PATHEXT/PowerShell resolution. Fast-path the built slot python; if no slot
+    # is built yet (a ``stamp`` deferred the venv), provision on first use from
+    # the slot-local snapshot (``init.ps1 provision``) then dispatch. Opt out with
+    # AGENT_MACHINES_NO_SELFPROVISION=1. POSIX gets its sh shim. (#1393)
+    if ($env:OS -ne 'Windows_NT') {
+        $stubPath = Join-Path $LocalBin 'agent-machines'
+        $stubContent = @"
+#!/usr/bin/env bash
+export PYTHONUTF8=1
+exec "`$HOME/.agent-machines/.venv/bin/python" -m agent_machines "`$@"
+"@
+        [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
+        Write-Ok "Binstub: $stubPath"
+        return
+    }
+    # Remove any stale .ps1 so it can't shadow the stdio-safe .cmd.
+    $ps1Path = Join-Path $LocalBin 'agent-machines.ps1'
+    if (Test-Path $ps1Path) { Remove-Item $ps1Path -Force -ErrorAction SilentlyContinue }
+    $cmdPath = Join-Path $LocalBin 'agent-machines.cmd'
+    $cmdContent = @'
+@echo off
+setlocal
+set "PYTHONUTF8=1"
+set "_ROOT=%USERPROFILE%\.agent-machines"
+call :_resolve
+if not defined _PY goto _prov
+"%_PY%" -m agent_machines %*
+exit /b %ERRORLEVEL%
+:_prov
+if defined AGENT_MACHINES_NO_SELFPROVISION goto _nope
+set "_SNAP="
+if exist "%_ROOT%\payload-dir" set /p _SNAP=<"%_ROOT%\payload-dir"
+set "_INST=%_SNAP%\scripts\init.ps1"
+if not exist "%_INST%" goto _noinst
+echo [agent-machines] runtime not provisioned -- provisioning on first use ^(~30-120s^). Do not kill.>&2
+where pwsh >nul 2>&1
+if %ERRORLEVEL%==0 (pwsh -NoProfile -ExecutionPolicy Bypass -File "%_INST%" provision 1>&2) else (powershell -NoProfile -ExecutionPolicy Bypass -File "%_INST%" provision 1>&2)
+call :_resolve
+if not defined _PY goto _failprov
+"%_PY%" -m agent_machines %*
+exit /b %ERRORLEVEL%
+:_noinst
+echo [agent-machines] cannot self-provision: snapshot installer not found.>&2
+exit /b 127
+:_nope
+echo [agent-machines] runtime not provisioned ^(AGENT_MACHINES_NO_SELFPROVISION set^).>&2
+exit /b 1
+:_failprov
+echo [agent-machines] provisioning did not yield a runtime.>&2
+exit /b 1
+:_resolve
+set "_PY="
+set "_VER="
+if exist "%_ROOT%\current-version" set /p _VER=<"%_ROOT%\current-version"
+if defined _VER if exist "%_ROOT%\versions\%_VER%\Scripts\python.exe" set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
+goto :eof
+'@
+    [System.IO.File]::WriteAllText($cmdPath, $cmdContent, $utf8NoBom)
+    Write-Ok "Binstub: $cmdPath (self-provisioning)"
+}
+
+function Invoke-Stamp {
+    # Fast base install (#1393, snapshot slot model): copy the payload SOURCE
+    # into ~/.agent-machines/snapshots/<ver>/, record markers, and deploy the
+    # self-provisioning binstub -- deferring the heavy venv build to first use.
+    # No venv, no uv; never holds the marketplace payload open (copies from the
+    # already self-staged $PluginDir).
+    Write-Host ''
+    Write-Host '=== agent-machines stamp (defer runtime to first use) ===' -ForegroundColor Cyan
+    if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
+    foreach ($dir in @($InstallDir, $LocalBin)) {
+        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    }
+    $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
+    $snapTmp = "$snapDir.tmp-$PID"
+    if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
+    New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
+    $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+    Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+    }
+    if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
+    Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
+    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
+    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
+    Write-Ok "Snapshot: $snapDir"
+    Deploy-SelfProvisioningBinstub
+    Write-Ok 'Stamped: agent-machines binstub on PATH; runtime provisions on first use.'
+}
+
+if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
+
 # -- Preflight checks --------------------------------------------------
 
 Write-Host ''
@@ -551,44 +649,7 @@ if ($VersionedRuntime) {
 
 # -- 4. Deploy binstub -------------------------------------------------
 
-$stubName = 'agent-machines'
-if ($env:OS -eq 'Windows_NT') {
-    # Single .cmd binstub (npx / uv parity) -- and NO .ps1.
-    #
-    # Unlike the sibling plugins (CLIs invoked interactively, where a .ps1 wins
-    # PowerShell's command discovery and forwards argv verbatim), agent-machines is
-    # spawned by Copilot as a stdio MCP server via a bare `command: agent-machines`.
-    # PowerShell prefers a same-named .ps1 over a .cmd, but a .ps1 shim does not
-    # reliably stream stdin into the child python the way an stdio MCP requires.
-    # A .cmd forwards stdin verbatim and is what `where`/PATHEXT resolution and
-    # (absent a .ps1) PowerShell both pick. So ship ONLY the .cmd, and remove any
-    # stale .ps1 from earlier installs so it can't shadow the .cmd. The .cmd
-    # launches the signed venv python via -m, never the SAC-blocked console-script
-    # trampoline .exe.
-    $ps1Path = Join-Path $LocalBin "$stubName.ps1"
-    if (Test-Path $ps1Path) { Remove-Item $ps1Path -Force -ErrorAction SilentlyContinue }
-
-    $stubPath = Join-Path $LocalBin "$stubName.cmd"
-    $stubContent = @"
-@echo off
-set "PYTHONUTF8=1"
-set "_ROOT=%USERPROFILE%\.agent-machines"
-set "_VER="
-if exist "%_ROOT%\current-version" set /p _VER=<"%_ROOT%\current-version"
-set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
-"%_PY%" -m agent_machines %*
-"@
-    [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
-} else {
-    $stubPath = Join-Path $LocalBin $stubName
-    $stubContent = @"
-#!/usr/bin/env bash
-export PYTHONUTF8=1
-exec "`$HOME/.agent-machines/.venv/bin/python" -m agent_machines "`$@"
-"@
-    [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
-}
-Write-Ok "Binstub: $stubPath"
+Deploy-SelfProvisioningBinstub
 
 # -- 5. Write deploy manifest ------------------------------------------
 
