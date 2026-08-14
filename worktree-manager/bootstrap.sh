@@ -34,7 +34,7 @@ done
 
 mkdir -p "$STAGING"
 if [ -d "$STAGING/.git" ]; then
-    git -C "$STAGING" fetch --depth 1 origin "$REF" >/dev/null 2>&1
+    git -C "$STAGING" fetch --depth 1 "$REPO" "$REF" >/dev/null 2>&1
     git -C "$STAGING" checkout -q FETCH_HEAD
 else
     git clone --depth 1 --branch "$REF" "$REPO" "$STAGING" >/dev/null 2>&1

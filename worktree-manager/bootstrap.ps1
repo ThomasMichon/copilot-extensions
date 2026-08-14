@@ -32,7 +32,7 @@ foreach ($tool in 'git', 'uv') {
 
 New-Item -ItemType Directory -Force -Path $Staging | Out-Null
 if (Test-Path (Join-Path $Staging '.git')) {
-    git -C $Staging fetch --depth 1 origin $Ref | Out-Null
+    git -C $Staging fetch --depth 1 $Repo $Ref | Out-Null
     git -C $Staging checkout -q FETCH_HEAD
 } else {
     git clone --depth 1 --branch $Ref $Repo $Staging | Out-Null

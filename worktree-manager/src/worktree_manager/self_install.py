@@ -293,7 +293,7 @@ def self_update(
         staging.mkdir(parents=True, exist_ok=True)
         if (staging / ".git").is_dir():
             subprocess.run(["git", "-C", str(staging), "fetch", "--depth", "1",
-                            "origin", ref], check=True, capture_output=True,
+                            manager_repo(), ref], check=True, capture_output=True,
                            text=True, timeout=180)
             subprocess.run(["git", "-C", str(staging), "checkout", "-q",
                             "FETCH_HEAD"], check=True, capture_output=True,

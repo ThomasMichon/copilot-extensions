@@ -54,7 +54,7 @@ def _write_payload(root: Path, version: str) -> None:
 def _make_remote(tmp: Path, version: str) -> Path:
     """A local git repo (branch ``main``) serving a bumped worktree-manager payload."""
     remote = tmp / "remote"
-    remote.mkdir()
+    remote.mkdir(parents=True)
     subprocess.run(["git", "init", "-q", "-b", "main", str(remote)], check=True)
     _write_payload(remote, version)
     subprocess.run(["git", "-C", str(remote), *_GIT_ID, "add", "-A"], check=True)
@@ -107,6 +107,29 @@ def test_self_update_second_run_is_version_gated(tmp_path, monkeypatch):
     assert again.action == "already-current"
     assert again.version == "9.9.9"
     assert current_version(root) == "9.9.9"
+
+
+def test_self_update_fetch_path_honors_switched_repo(tmp_path, monkeypatch):
+    """After the first update, pointing WORKTREE_MANAGER_REPO at a different remote
+    must take effect on the *fetch* path (staging already exists) — i.e. the
+    override is authoritative every run, not just on the initial clone."""
+    root = tmp_path / "root"
+    monkeypatch.setattr(si, "local_bin", lambda: tmp_path / "localbin")
+    _seed_older_install(tmp_path, root, "1.0.0")
+
+    remote_a = _make_remote(tmp_path / "a", "9.9.9")
+    monkeypatch.setenv("WORKTREE_MANAGER_REPO", str(remote_a))
+    assert self_update(root=root, ref="main", dry_run=False).version == "9.9.9"
+
+    # Switch the source to a second remote with a newer payload; staging now
+    # exists, so this exercises the fetch path — which must honor the new repo.
+    remote_b = _make_remote(tmp_path / "b", "9.9.10")
+    monkeypatch.setenv("WORKTREE_MANAGER_REPO", str(remote_b))
+    res = self_update(root=root, ref="main", dry_run=False)
+    assert res.action == "updated"
+    assert res.version == "9.9.10"
+    assert current_version(root) == "9.9.10"
+    assert version_slot("9.9.10", root).is_dir()
 
 
 def test_manager_repo_honors_override(monkeypatch):
