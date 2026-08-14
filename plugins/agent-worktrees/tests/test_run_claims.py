@@ -144,6 +144,73 @@ class TestJournalRunClaim:
         reloaded = tracking.load_record(tmp_path / "wt-A.yaml")
         assert reloaded.resources == []
 
+    def test_anchor_owner_lazily_creates_ledger(self, tmp_path: Path, monkeypatch):
+        # A run from a singleton anchor journals onto @anchor, creating the
+        # ledger on first use (no pre-existing record).
+        import types
+        monkeypatch.setattr("agent_worktrees.config.tracking_dir",
+                            lambda: tmp_path)
+        monkeypatch.setattr("agent_worktrees.config.load_config",
+                            lambda *a, **k: types.SimpleNamespace(
+                                machine="lambda-core", platform="wsl",
+                                repo_name="spo-core"))
+        adir = tmp_path / "anchors" / "spo-core"
+        adir.mkdir(parents=True)
+        monkeypatch.setattr(
+            "agent_worktrees.repos.find_repo",
+            lambda name: types.SimpleNamespace(
+                repo_class="singleton", local_path=lambda plat=None: str(adir)))
+        owner_ref = "lambda-core/spo-core/@anchor"
+        out = json.dumps({"success": True, "pr_opened": True,
+                          "pr": {"ref": "https://github.com/o/r/pull/7"}})
+        assert not (tmp_path / "@anchor.yaml").exists()
+        claim = m._journal_run_claim(owner_ref, out)
+        assert claim is not None and claim.kind == "pr"
+        assert (tmp_path / "@anchor.yaml").exists()
+        reloaded = tracking.load_record(tmp_path / "@anchor.yaml")
+        assert reloaded.pair_kind == "anchor"
+        assert [(c.kind, c.ref) for c in reloaded.resources] == \
+            [("pr", "https://github.com/o/r/pull/7")]
+
+
+class TestResolveAnchorOwnerRef:
+    """_resolve_owner_ref falls back to a singleton's @anchor owner when the CWD
+    is that repo's anchor (and NOT for a worktree-class anchor)."""
+
+    def _wire(self, tmp_path, monkeypatch, repo_class, *, cwd_in_anchor=True):
+        import types
+        monkeypatch.delenv("COPILOT_AGENT_SESSION_ID", raising=False)
+        adir = tmp_path / "anchors" / "spo-core"
+        adir.mkdir(parents=True)
+        monkeypatch.setattr("agent_worktrees.config.load_config",
+                            lambda *a, **k: types.SimpleNamespace(
+                                machine="lambda-core", platform="wsl",
+                                repo_name="spo-core"))
+        monkeypatch.setattr("agent_worktrees.config.project_name",
+                            lambda: "spo-core")
+        monkeypatch.setattr("agent_worktrees.__main__._infer_worktree_id_from_cwd",
+                            lambda config=None: None)  # not a worktree
+        monkeypatch.setattr(
+            "agent_worktrees.repos.find_repo",
+            lambda name: types.SimpleNamespace(
+                repo_class=repo_class, local_path=lambda plat=None: str(adir)))
+        target = adir if cwd_in_anchor else tmp_path / "elsewhere"
+        target.mkdir(parents=True, exist_ok=True)
+        monkeypatch.chdir(target)
+
+    def test_singleton_anchor_resolves_to_anchor_ref(self, tmp_path, monkeypatch):
+        self._wire(tmp_path, monkeypatch, "singleton")
+        assert m._resolve_owner_ref() == "lambda-core/spo-core/@anchor"
+
+    def test_worktree_class_anchor_is_no_owner(self, tmp_path, monkeypatch):
+        # The class == singleton gate is the worktree-class mis-fire guard.
+        self._wire(tmp_path, monkeypatch, "worktree")
+        assert m._resolve_owner_ref() is None
+
+    def test_cwd_outside_anchor_is_no_owner(self, tmp_path, monkeypatch):
+        self._wire(tmp_path, monkeypatch, "singleton", cwd_in_anchor=False)
+        assert m._resolve_owner_ref() is None
+
 
 class TestLocalClaimantAlive:
     """_local_claimant_alive resolves same-machine owners and biases to sparing:
