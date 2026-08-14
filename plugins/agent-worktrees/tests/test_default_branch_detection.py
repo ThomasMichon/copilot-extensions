@@ -140,3 +140,23 @@ def test_detect_upstream_falls_back_to_config_hint(tmp_path):
     _git("init", "-b", "feature", str(repo), cwd=tmp_path)
     _git("commit", "--allow-empty", "-m", "x", cwd=repo)
     assert m._detect_upstream_branch(str(repo), "origin", "develop") == "develop"
+
+
+# ---------------------------------------------------------------------------
+# _write_config -- machine-local config generator (dotfiles#1090)
+# ---------------------------------------------------------------------------
+
+def test_write_config_does_not_stamp_default_branch(tmp_path):
+    """The machine-local config must NOT persist ``default_branch`` -- it is a
+    repo-invariant owned by the in-repo config / registry (backfilled by
+    ``load_config``). Stamping it here (from the ambient system git default,
+    e.g. ``master``, when detection fell back) shadowed the correct in-repo
+    value and broke create-pr against a non-existent ``origin/master`` (#1090)."""
+    cfg = tmp_path / ".proj" / "config.yaml"
+    m._write_config(cfg, tmp_path / "src" / "proj", "dev6", "linux", "proj",
+                    "master")
+    text = cfg.read_text(encoding="utf-8")
+    assert "default_branch" not in text
+    # It still records the machine facts + project marker.
+    assert "anchor:" in text
+    assert "repo_name: proj" in text
