@@ -61,6 +61,32 @@ config then works on both vault-enabled and daemon-less hosts.
 > the cache (`vault get … --refresh` / re-populate) **and restart the MCP/agent**
 > so the child re-reads it. http bridges auto-refresh and retry once on a `401`.
 
+### Token caching (`auth.cache`) — opt-in, shared across sessions
+
+By default a token injector caches its acquired token **in-process** (re-minted per
+bridge process, refreshed on a `401`). Add a `cache` policy to any token auth
+(`command`/`entra`/`gh`/`env`) to make that caching **shared and persistent**, so a
+new session reuses a still-valid token instead of re-acquiring — no per-plugin
+token-cache code required:
+
+```yaml
+auth:
+  kind: command
+  command: [ mint-my-token, --resource, R ]
+  parse: raw
+  cache:
+    scope: shared     # shared = on-disk, cross-process/session | memory (default) | none
+    ttl: auto         # auto = derive expiry from the token's JWT `exp` | <seconds>
+    skew: 60          # refresh this many seconds before expiry
+    # key: <override>  default = a stable hash of kind + command/resource + tenant + header
+```
+
+Shared entries live under `<AGENT_MCP_HOME|~/.agent-mcp>/token-cache/<key>.json` and
+are served only while unexpired (minus `skew`); a `401` `invalidate` drops the entry
+so the next call re-acquires. With `ttl: auto` a non-JWT secret (no derivable expiry)
+is **not** persisted — set an explicit `ttl` to cache such secrets. *(v1 writes
+plaintext with `0600` perms; sealing at rest is a planned follow-up.)*
+
 ## Config location — in-repo vs. user-global
 
 A bridge config can be referenced two ways (both read the same schema; only the
