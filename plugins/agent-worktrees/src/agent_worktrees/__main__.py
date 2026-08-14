@@ -12896,8 +12896,14 @@ def _write_config(
     Machine-wide fields (srcroot/machine/platform/copilot_profiles) live in the
     global ~/.agent-worktrees/config.yaml; repo settings may live in-repo at
     <anchor>/.agent-worktrees/config.yaml. This file keeps only the project
-    marker and machine paths (anchor / worktree_root) plus repo defaults that a
-    foreign repo without in-repo config still needs.
+    marker and machine paths (anchor / worktree_root). It does **not** stamp
+    repo-invariant settings such as ``default_branch``: that is owned by the
+    repo's in-repo ``.agent-worktrees/config.yaml`` and backfilled from
+    ``repos.yaml`` by ``load_config``. Stamping ``default_branch`` here (from the
+    ambient system git default, e.g. ``master``, when detection fell back)
+    shadowed the correct in-repo value and broke ``create-pr`` against a
+    non-existent ``origin/master`` (dotfiles #1090). The ``default_branch``
+    parameter is retained for call-site compatibility but is no longer persisted.
 
     ``no_terminal_profile`` seeds an explicit empty ``terminal_profiles: []`` so
     the Windows-Terminal generator emits **no** profile for this project (used
@@ -12931,7 +12937,6 @@ repos:
     # worktree_root defaults to {wt_root} -- a sibling
     # <anchor>.worktrees dir, matching Copilot CLI's /worktree layout.
     # Uncomment and set an absolute path to override.
-    default_branch: {default_branch}
     remote: origin
 """
     path.parent.mkdir(parents=True, exist_ok=True)

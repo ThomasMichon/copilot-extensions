@@ -448,6 +448,30 @@ def test_overlay_conflicting_anchor_is_report_only(home: Path):
     assert "anchor" in (cfg_dir / "config.yaml").read_text(encoding="utf-8")
 
 
+def test_overlay_conflicting_branch_healed(home: Path):
+    # dotfiles#1090: a stray machine-local default_branch that CONTRADICTS the
+    # registry (e.g. a 'master' stamped from the ambient git default) is stale --
+    # default_branch is a repo-invariant, so --fix strips the override and lets
+    # the registry value win, rather than only warning.
+    repo_dir = home / "src" / "proj"; repo_dir.mkdir(parents=True)
+    cfg_dir = home / ".proj"
+    _write_global(home, srcroot=str(home / "src"), machine="dev6",
+                  platform="linux")
+    _adopted(home, repo_dir, cfg_dir)  # registry default_branch: main
+    _overlay(home, cfg_dir, """repo_name: proj
+repos:
+  proj:
+    default_branch: master
+""")
+    findings = doctor.diagnose(plat="linux")
+    conflict = [f for f in findings if f.kind == "overlay_conflicting_branch"]
+    assert conflict and conflict[0].fixable
+    fixed = doctor.reconcile(fix=True, plat="linux")
+    healed = [f for f in fixed if f.kind == "overlay_conflicting_branch"]
+    assert healed and healed[0].fixed  # reported as fixed (in _AUTOFIXABLE)
+    assert "default_branch" not in (cfg_dir / "config.yaml").read_text(encoding="utf-8")
+
+
 def test_overlay_conflicting_srcroot_stripped(home: Path):
     repo_dir = home / "src" / "proj"; repo_dir.mkdir(parents=True)
     cfg_dir = home / ".proj"
