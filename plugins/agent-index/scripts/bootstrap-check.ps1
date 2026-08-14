@@ -36,7 +36,20 @@ try {
         $vl = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
         if ($vl) { $current = ($vl.Line -replace '.*=\s*"([^"]+)".*', '$1') }
     }
-    if ((Test-Path (Join-Path $InstallDir '.venv')) -and $deployed -eq $current) { exit 0 }
+    # "Provisioned" no longer implies a `.venv`: the marker runtime model (#581)
+    # publishes the active slot via a `current-version` marker with NO junction on
+    # Windows (RedirectionGuard), so a healthy current runtime has no `.venv` there.
+    # Treat a marker whose slot python exists as provisioned too -- otherwise a
+    # current runtime needlessly background-rebuilds every session.
+    $provisioned = Test-Path (Join-Path $InstallDir '.venv')
+    if (-not $provisioned) {
+        $cvMarker = Join-Path $InstallDir 'current-version'
+        if (Test-Path $cvMarker) {
+            $cv = ('' + (Get-Content $cvMarker -Raw)).Trim()
+            if ($cv -and ((Test-Path (Join-Path $InstallDir "versions\$cv\Scripts\python.exe")) -or (Test-Path (Join-Path $InstallDir "versions/$cv/bin/python")))) { $provisioned = $true }
+        }
+    }
+    if ($provisioned -and $deployed -eq $current) { exit 0 }
     $init = Join-Path $PluginDir 'scripts\init.ps1'
     if (Test-Path $init) {
         $targs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $init)

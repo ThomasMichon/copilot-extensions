@@ -52,7 +52,20 @@ try {
     }
 
     # Up to date and runtime present -> fast no-op (the common case).
-    if ((Test-Path (Join-Path $InstallDir '.venv')) -and $deployed -eq $current) { exit 0 }
+    # "Provisioned" no longer implies a `.venv`: the marker runtime model (#581)
+    # publishes the active slot via a `current-version` marker with NO junction on
+    # Windows (RedirectionGuard), so a healthy current runtime has no `.venv` there.
+    # Treat a marker whose slot python exists as provisioned too -- otherwise a
+    # current runtime needlessly background-rebuilds every session.
+    $provisioned = Test-Path (Join-Path $InstallDir '.venv')
+    if (-not $provisioned) {
+        $cvMarker = Join-Path $InstallDir 'current-version'
+        if (Test-Path $cvMarker) {
+            $cv = ('' + (Get-Content $cvMarker -Raw)).Trim()
+            if ($cv -and ((Test-Path (Join-Path $InstallDir "versions\$cv\Scripts\python.exe")) -or (Test-Path (Join-Path $InstallDir "versions/$cv/bin/python")))) { $provisioned = $true }
+        }
+    }
+    if ($provisioned -and $deployed -eq $current) { exit 0 }
 
     $init = Join-Path $pluginDir 'scripts\init.ps1'
     if (-not (Test-Path $init)) { exit 0 }

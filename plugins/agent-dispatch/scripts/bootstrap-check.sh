@@ -32,7 +32,17 @@ if [ -f "$pyproj" ]; then
   v="$(grep -m1 -E '^[[:space:]]*version[[:space:]]*=' "$pyproj" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')"
   [ -n "$v" ] && current="$v"
 fi
-if [ -e "$InstallDir/.venv" ] && [ "$deployed" = "$current" ]; then exit 0; fi
+# "Provisioned" no longer implies a .venv: the marker runtime model (#581) publishes
+# the active slot via a current-version marker (POSIX keeps a .venv symlink, but a
+# marker+slot is authoritative). Treat a marker whose slot python exists as
+# provisioned too, so a current runtime is a clean no-op, not a needless rebuild.
+provisioned=0
+[ -e "$InstallDir/.venv" ] && provisioned=1
+if [ "$provisioned" = 0 ] && [ -f "$InstallDir/current-version" ]; then
+  cv="$(tr -d '[:space:]' < "$InstallDir/current-version")"
+  if [ -n "$cv" ] && { [ -x "$InstallDir/versions/$cv/bin/python" ] || [ -f "$InstallDir/versions/$cv/Scripts/python.exe" ]; }; then provisioned=1; fi
+fi
+if [ "$provisioned" = 1 ] && [ "$deployed" = "$current" ]; then exit 0; fi
 if [ -f "$PluginDir/scripts/init.sh" ]; then
   target=("$PluginDir/scripts/init.sh")
 elif [ -f "$PluginDir/scripts/install.sh" ]; then
