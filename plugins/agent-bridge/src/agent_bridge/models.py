@@ -150,8 +150,8 @@ class StartSessionRequest(BaseModel):
     # opts out of caller-affinity reuse, and does NOT bypass the head guard).
     reclaim: bool = False
     # Per-session MCP servers mounted into the ACP session at session/new, giving
-    # this session a bespoke, run-bound toolset (e.g. the Intelligence Dampener
-    # review tools). Each entry is an ACP MCP server spec; ``type`` selects the
+    # this session a bespoke, run-bound toolset (e.g. an AI code-review
+    # toolset). Each entry is an ACP MCP server spec; ``type`` selects the
     # transport and defaults to ``stdio``:
     #   {"type": "stdio", "name": ..., "command": ..., "args": [...], "env": {...}}
     #   {"type": "http" | "sse", "name": ..., "url": ..., "headers": {...}}

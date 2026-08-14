@@ -861,7 +861,7 @@ AGENT_DISPATCH_SUPERVISE_MAX_CONCURRENT=1
 # Max failed spawn attempts before a task is dead-lettered (default 3; 0=disable):
 AGENT_DISPATCH_SUPERVISE_MAX_ATTEMPTS=3
 # Per-label overrides of MAX_ATTEMPTS (space- or comma-separated LABEL=N pairs),
-# e.g. "intelligence-dampener=3 coherence-adjudication-board=1" so raising one
+# e.g. "code-review=3 coherence-adjudication-board=1" so raising one
 # label's bound never revives another label's stale tasks (N=0 = retry forever):
 AGENT_DISPATCH_SUPERVISE_LABEL_MAX_ATTEMPTS=
 # Labels whose tasks embody as a HEADLESS agent-bridge ACP session (no mux, no

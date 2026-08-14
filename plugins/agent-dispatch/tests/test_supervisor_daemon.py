@@ -172,7 +172,7 @@ def test_build_command_all_repos():
 
 def test_build_command_evaluator_inline_spec():
     reg = _reg("e", kind="evaluator", spec={
-        "evaluator_spec": {"states": {}}, "all_repos": True, "labels": ["dampener"],
+        "evaluator_spec": {"states": {}}, "all_repos": True, "labels": ["code-review"],
     })
     materialized = {}
 

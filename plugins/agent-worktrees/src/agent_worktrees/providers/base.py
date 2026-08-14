@@ -257,7 +257,7 @@ class PRProvider(Protocol):
 
         The zombie-PR self-heal probe (#1375/#1703): a PR whose merge *content*
         landed on the default branch but whose PR object was never flipped
-        (Gitea merge non-atomic under load / a Dampener squash that didn't close
+        (Gitea merge non-atomic under load / an AI-reviewer squash that didn't close
         the object) lingers ``state=open`` and shows as an open PR in the Picker.
         A head that is 0 commits *ahead* of the base means the base already
         contains it -- the PR is effectively merged and can be reconciled to a

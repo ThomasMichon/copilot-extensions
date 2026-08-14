@@ -744,7 +744,7 @@ does **not** quietly undo it.
   goal durable/resumable; it does not drive the worker's loop) and
   *complete-means-done* (deferred, self-judged completion). Mined from an operator
   design conversation on standing "pick one thing and improve it" board charters
-  and an Intelligence-Dampener-style "drive this change to ready" goal — the intent
+  and an AI-reviewer-style "drive this change to ready" goal — the intent
   the implementing work then closes.
 - **2026-07-31** — Extended for **supervised auto-recovery** (the full-auto slice):
   added the *verify-the-completion-claim* behavior (a goal-bearing `complete` is

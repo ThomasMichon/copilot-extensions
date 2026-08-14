@@ -785,7 +785,7 @@ def _reconcile_active_pr(
     Also self-heals a **zombie open PR** (#1375/#1703): when the provider still
     reports the PR open but its head is already *contained in the base branch*
     (its content merged, but the PR object was never flipped -- a Gitea
-    non-atomic merge under load, or a Dampener squash that didn't close the
+    non-atomic merge under load, or an AI-reviewer squash that didn't close the
     object), reconcile it to ``merged`` so the Picker stops showing a phantom
     open PR. Only a *definite* containment (0 commits ahead) heals; an unknown
     result leaves the state untouched.

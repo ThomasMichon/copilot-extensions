@@ -235,7 +235,7 @@ in-repo overlay (below); the in-repo version wins when both are present.
 > `pr-status`) to its review backend. The plugin ships them **empty**: absent a
 > binding the family is a no-op, never a crash. Verdict semantics
 > (approve / request-changes) are provider-intrinsic, not a binding; a
-> `dampener:*`-style status tag needs no binding — being neither the auto-merge
+> `review:*`-style status tag needs no binding — being neither the auto-merge
 > nor a hold label, the classifier ignores it. See the `pr-command-family` effort in
 > aperture-labs.
 

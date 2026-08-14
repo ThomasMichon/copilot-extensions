@@ -716,7 +716,7 @@ async def stop_session(
     ``reap_host=true`` additionally FREES the Session-Host child immediately
     (the same primitive the idle-reaper uses) instead of merely detaching it to
     keep it reattachable. A caller that never reattaches over the bridge (e.g.
-    the Intelligence Dampener reviewer, which resumes from on-disk session-state
+    the AI reviewer, which resumes from on-disk session-state
     + worktree via a fresh child) uses this to reclaim the ~280 MB child on the
     spot rather than waiting out the idle-reaper TTL -- while the session stays
     STOPPED and resumable via ``load_session`` replay. Default ``false`` keeps

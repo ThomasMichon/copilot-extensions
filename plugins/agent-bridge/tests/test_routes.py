@@ -1288,7 +1288,7 @@ class TestBackgroundTaskTeardownGate:
 
     def test_stop_reap_host_param_plumbs_through(self, client, app) -> None:
         # #2960: ?reap_host=true must reach mgr.stop_session(reap_host=True) so
-        # a non-reattaching caller (the ID reviewer) frees the child on the spot
+        # a non-reattaching caller (the AI reviewer) frees the child on the spot
         # rather than after the idle-reaper TTL. Default stays reap_host=False.
         mgr: SessionManager = app.state.session_manager
         mgr.stop_session = AsyncMock()
