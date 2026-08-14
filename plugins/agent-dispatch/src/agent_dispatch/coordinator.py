@@ -431,7 +431,7 @@ def create_app(
     # any seat (awareness plane); a coordinator advertises itself so peers
     # *discover* it (claim plane) rather than electing one. A satellite is just
     # a directory entry with role="satellite" -- an outbound-only field machine
-    # the facility never dials into.
+    # the coordinator never dials into.
     @app.post("/directory/register")
     def directory_register(body: DirectoryRegisterBody) -> dict:
         return directory.register(

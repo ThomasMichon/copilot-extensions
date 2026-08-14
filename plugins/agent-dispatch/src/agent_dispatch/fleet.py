@@ -50,7 +50,7 @@ _LIVENESS_TTL = 15.0
 
 
 def _ssh_alias(host: str) -> str:
-    """Lowercased SSH alias for ``host`` (facility ``Host`` blocks are lowercase)."""
+    """Lowercased SSH alias for ``host`` (SSH ``Host`` blocks are lowercase)."""
     return host.strip().lower()
 
 
@@ -58,7 +58,7 @@ def host_can_embody(host: str, *, timeout: float = 8.0) -> bool:
     """True when ``host`` is reachable over SSH **and** has ``agent-worktrees``.
 
     A single cheap probe that doubles as reachability + capability: SSH to the
-    host (its facility alias, never a raw IP; ``BatchMode`` so a missing key fails
+    host (its SSH alias, never a raw IP; ``BatchMode`` so a missing key fails
     fast) and check ``command -v agent-worktrees``. Any failure -- ssh absent,
     unreachable host, timeout, or no ``agent-worktrees`` -- returns False, so an
     asleep or unprovisioned host is simply not a candidate.
@@ -79,7 +79,7 @@ def host_can_bridge(host: str, *, timeout: float = 8.0) -> bool:
 
 
 def _host_has_command(host: str, command: str, *, timeout: float = 8.0) -> bool:
-    """SSH to ``host`` (facility alias) and check ``command -v <command>``.
+    """SSH to ``host`` (SSH alias) and check ``command -v <command>``.
 
     The shared reachability + capability probe behind :func:`host_can_embody` and
     :func:`host_can_bridge`. ``BatchMode`` so a missing key fails fast; any

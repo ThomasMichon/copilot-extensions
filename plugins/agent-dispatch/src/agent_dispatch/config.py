@@ -14,13 +14,13 @@ lone dev box or against a designated coordinator host on a shared network:
 - ``AGENT_DISPATCH_URL`` -- the coordinator base URL the CLI talks to (defaults to
   ``http://<host>:<port>``); set this to point the CLI at a remote coordinator.
 - ``AGENT_DISPATCH_SHARED_URL`` -- the **shared/elected coordinator** endpoint used
-  for cross-machine dispatch (facility binding: the always-on gateway endpoint).
+  for cross-machine dispatch (multi-machine binding: the always-on hosted-coordinator endpoint).
   A client keeps its **local** loopback coordinator for same-machine work and
   reaches this one only when it opts in (``--shared``), so the single-machine /
   works-with-no-service property is preserved (hybrid topology).
 - ``AGENT_DISPATCH_SHARED_TOKEN`` -- bearer token for the shared coordinator
   (independent of the local ``AGENT_DISPATCH_TOKEN``; per-client, as the shared
-  endpoint is exposed only through the gateway/secured mesh).
+  endpoint is exposed only through the secured mesh).
 - ``AGENT_DISPATCH_NO_AUTOSTART`` -- set to any value to disable the CLI's
   lazy on-demand coordinator start (a client command that finds no live local
   coordinator otherwise starts one detached, then proceeds).
@@ -261,7 +261,7 @@ def client_token() -> str | None:
 def shared_url() -> str | None:
     """The **shared/elected coordinator** base URL for cross-machine dispatch.
 
-    ``AGENT_DISPATCH_SHARED_URL`` (facility binding: the always-on gateway
+    ``AGENT_DISPATCH_SHARED_URL`` (multi-machine binding: the always-on hosted-coordinator
     endpoint). ``None`` when no shared coordinator is configured -- the client is
     then local-only and a ``--shared`` command errors loudly rather than silently
     falling back to the local queue (which would strand a cross-machine task).
@@ -274,7 +274,7 @@ def shared_token() -> str | None:
 
     Independent of the local ``AGENT_DISPATCH_TOKEN`` (``AGENT_DISPATCH_SHARED_TOKEN``):
     the two coordinators authenticate separately -- the shared one is exposed only
-    through the gateway/secured mesh atop its own per-client bearer.
+    through the secured mesh atop its own per-client bearer.
     """
     return os.environ.get("AGENT_DISPATCH_SHARED_TOKEN") or None
 
@@ -282,7 +282,7 @@ def shared_token() -> str | None:
 # -- federation (relay-rendezvous directory + fenced-epoch lease) -------------
 #
 # Federation lets the operator's coordinators federate across machines over a
-# rendezvous directory (the fleet directory served by the shared/Gateway
+# rendezvous directory (the fleet directory served by the shared/hosted
 # coordinator). A node opts in by declaring a *role*; the runtime
 # (:class:`~agent_dispatch.federation_runner.FederationRunner`) then keeps it
 # present in the directory and -- for a lease-eligible role -- drives the

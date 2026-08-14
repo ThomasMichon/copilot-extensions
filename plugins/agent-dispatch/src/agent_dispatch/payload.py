@@ -11,7 +11,7 @@ Content-addressing is deliberate: identical payloads share one file (free
 dedup), writes are idempotent (re-storing the same content is a no-op), and a
 ref is a stable, verifiable name for its bytes. The store is a plain directory
 with no external dependencies, so it works the same on a lone dev box and a
-facility coordinator host.
+multi-machine coordinator host.
 
 The store is a *server-side* concern -- the coordinator (the single writer) owns
 the blob directory alongside its queue DB; clients send/receive payload content
