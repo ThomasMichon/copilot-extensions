@@ -6155,13 +6155,56 @@ def _resolve_owner_ref() -> str | None:
         return None
     caller_id = _infer_worktree_id_from_cwd(config)
     if not caller_id:
-        return None
+        # Not inside a worktree -- but a singleton/whole-repo enlistment is
+        # worked in its ANCHOR (no worktree), so its resources are owned by the
+        # project's @anchor ledger. Returns None for a worktree-class anchor.
+        return _resolve_anchor_owner_ref(config)
     try:
         project = cfg.project_name()
     except Exception:
         project = config.repo_name
     session = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
     return tracking.format_claim_ref(config.machine, project, caller_id, session)
+
+
+def _resolve_anchor_owner_ref(config: cfg.Config) -> str | None:
+    """Resolve an ANCHOR owner ref when the CWD is a **singleton** repo's anchor.
+
+    A singleton / whole-repo enlistment (``repos.yaml`` ``class: singleton``) is
+    worked in its anchor checkout with no worktree, so a resource it produces (a
+    PR) has no worktree owner -- the accountable owner is the project's
+    ``@anchor`` ledger (``<machine>/<project>/@anchor``). Returns None for a
+    **worktree-class** anchor (you never own via a worktree-class anchor -- you
+    work a linked worktree there), an unresolvable project, a CWD that isn't
+    actually inside the anchor, or any error -- so the caller falls back to "no
+    owner" exactly as before. The ``class == "singleton"`` gate is the
+    worktree-class mis-fire guard.
+    """
+    try:
+        from . import repos as _repos
+        project = cfg.project_name()
+    except Exception:
+        return None
+    if not project:
+        return None
+    try:
+        entry = _repos.find_repo(project)
+    except Exception:
+        return None
+    if entry is None or entry.repo_class != "singleton":
+        return None
+    anchor = entry.local_path()
+    if not anchor:
+        return None
+    try:
+        cwd = Path.cwd().resolve()
+        anchor_p = Path(anchor).resolve()
+        if cwd != anchor_p and anchor_p not in cwd.parents:
+            return None  # not actually inside the anchor -> no false owner
+    except Exception:
+        return None
+    session = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
+    return tracking.format_anchor_ref(config.machine, project, session)
 
 
 def _claim_from_run_output(stdout: str) -> tracking.ResourceClaim | None:
@@ -6211,12 +6254,53 @@ def _claim_from_run_output(stdout: str) -> tracking.ResourceClaim | None:
     return None
 
 
+def _ensure_anchor_ledger(
+    parsed: tracking.ClaimRef, tracking_dir,
+) -> tracking.WorktreeRecord | None:
+    """Lazily materialize a singleton project's ``@anchor`` claim ledger.
+
+    Called when a ``run`` journals a resource onto an anchor owner whose ledger
+    doesn't exist yet -- it creates ``<tracking_dir>/@anchor.yaml`` (via
+    :func:`tracking.load_or_create_anchor_record`) so the anchor becomes an
+    accountable owner on first use. Best-effort: any resolution failure returns
+    None (the caller then declines to journal, exactly as for a missing worktree
+    record).
+    """
+    try:
+        from . import repos as _repos
+        config = cfg.load_config()
+    except Exception:
+        return None
+    project = parsed.project or getattr(config, "repo_name", None)
+    if not project:
+        return None
+    anchor = None
+    try:
+        entry = _repos.find_repo(project)
+        anchor = entry.local_path() if entry else None
+    except Exception:
+        anchor = None
+    if not anchor:
+        try:
+            anchor = config.default_repo.anchor
+        except Exception:
+            return None
+    try:
+        return tracking.load_or_create_anchor_record(
+            anchor, project, config.machine, config.platform, tracking_dir)
+    except Exception:
+        return None
+
+
 def _journal_run_claim(owner_ref: str, stdout: str) -> tracking.ResourceClaim | None:
     """Append the produced-resource claim to the caller's tracking record.
 
     The caller (owner) record lives in the active project's tracking dir --
     which is the caller's project, since ``main`` resolved context from the
-    caller's CWD before ``run`` executed the (possibly cross-repo) child.
+    caller's CWD before ``run`` executed the (possibly cross-repo) child. An
+    **anchor** owner (a singleton's ``@anchor``) whose ledger doesn't exist yet
+    is lazily created (:func:`_ensure_anchor_ledger`) so an anchor becomes
+    accountable on the first PR it opens.
     """
     claim = _claim_from_run_output(stdout)
     if claim is None:
@@ -6224,10 +6308,17 @@ def _journal_run_claim(owner_ref: str, stdout: str) -> tracking.ResourceClaim | 
     parsed = tracking.parse_claim_ref(owner_ref)
     if parsed is None:
         return None
-    rec_path = cfg.tracking_dir() / f"{parsed.worktree_id}.yaml"
+    tdir = cfg.tracking_dir()
+    rec_path = tdir / f"{parsed.worktree_id}.yaml"
     if not rec_path.exists():
-        return None
-    record = tracking.load_record(rec_path)
+        if parsed.is_anchor:
+            record = _ensure_anchor_ledger(parsed, tdir)
+            if record is None:
+                return None
+        else:
+            return None
+    else:
+        record = tracking.load_record(rec_path)
     tracking.add_resource_claim(record, claim, save=False)
     tracking.save_record(record, rec_path)
     return claim
