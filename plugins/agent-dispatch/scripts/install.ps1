@@ -6,7 +6,7 @@
     Canonical installer for the agent-dispatch runtime -- the same lifecycle
     shape as the agent-bridge installer (install|update|status|start|stop|
     uninstall), so the agent-worktrees plugin reconciler (runtimeScope:
-    machine-gated) and `aperture-labs services agent-dispatch <action>` both
+    machine-gated) and `test-chamber services agent-dispatch <action>` both
     drive it.
 
     Creates the runtime at ~/.agent-dispatch/ (venv + package), a
@@ -534,7 +534,7 @@ function Invoke-DowngradeGuard {
         Write-Host ''
         Write-Fail "Refusing to downgrade agent-dispatch: installed $installed > source $source"
         Write-Fail 'This checkout is OLDER than the deployed runtime. Use the sanctioned path:'
-        Write-Fail '    aperture-labs services agent-dispatch update'
+        Write-Fail '    test-chamber services agent-dispatch update'
         Write-Fail 'Or override intentionally (deliberate rollback):'
         Write-Fail "    install.ps1 -Action $Action -Force"
         Write-Host ''

@@ -5,7 +5,7 @@
 # Manages the agent-dispatch coordinator lifecycle: install, update, status,
 # start, stop, uninstall -- the same shape as the agent-bridge installer, so
 # the agent-worktrees plugin reconciler (runtimeScope: machine-gated) and the
-# `aperture-labs services agent-dispatch <action>` path both drive it.
+# `test-chamber services agent-dispatch <action>` path both drive it.
 #
 # On a standalone Linux deploy host it ALSO installs the **embody supervisor**
 # (`agent-dispatch-supervisor.service`), a second systemd user unit that runs
@@ -415,7 +415,7 @@ _downgrade_guard() {
         echo ""
         _fail "Refusing to downgrade agent-dispatch: installed $installed > source $source"
         _fail "This checkout is OLDER than the deployed runtime. Use the sanctioned path:"
-        _fail "    aperture-labs services agent-dispatch update"
+        _fail "    test-chamber services agent-dispatch update"
         _fail "Or override intentionally (deliberate rollback):"
         _fail "    $0 $ACTION --force"
         echo ""
