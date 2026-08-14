@@ -87,6 +87,26 @@ so the next call re-acquires. With `ttl: auto` a non-JWT secret (no derivable ex
 is **not** persisted — set an explicit `ttl` to cache such secrets. *(v1 writes
 plaintext with `0600` perms; sealing at rest is a planned follow-up.)*
 
+### Plugin-shipped commands (`${config_dir}`)
+
+A command arg (`server.command` or `auth.command`) may contain the token
+`${config_dir}`, which expands to the **directory of the bridge config file**. This
+lets a plugin-shipped bridge run a **plugin-shipped sibling script** — an auth
+minter or a stdio server launcher next to the `.mcp.yaml` — with **no PATH deploy
+and no install**:
+
+```yaml
+auth:
+  kind: command
+  command: [ python, "${config_dir}/mint.py", --resource, https://... ]
+  parse: raw
+```
+
+Invoke the sibling through an interpreter on `PATH` (`python`/`node`/`pwsh`) rather
+than as `argv[0]` directly (a bare `.ps1`/`.py` is not itself executable). The token
+is only expanded when the config is loaded from a file (its directory is known); a
+`--config <path>` or plugin-discovered bridge both qualify.
+
 ## Config location — in-repo vs. user-global
 
 A bridge config can be referenced two ways (both read the same schema; only the
