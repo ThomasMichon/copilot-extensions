@@ -56,10 +56,11 @@ binstub (`.cmd`/`.ps1` on Windows) — then launches it. Re-running the one-line
 `git` and `uv` are already present; automatic prerequisite provisioning (and
 restart prompts) lands in Phase 2
 ([#355](https://github.com/ThomasMichon/copilot-extensions/issues/355)). Set
-`WORKTREE_MANAGER_REF` to fetch a ref other than `main`, or `WORKTREE_MANAGER_ROOT` to
-relocate the install root. Inspect/repair the versioned install with
-`worktree-manager self-install` (dry-run) / `--apply`, and see it in `worktree-manager
-doctor`.
+`WORKTREE_MANAGER_REF` to fetch a ref other than `main`, `WORKTREE_MANAGER_REPO` to
+fetch from a **mirror / fork / air-gapped clone** instead of the canonical GitHub
+repo, or `WORKTREE_MANAGER_ROOT` to relocate the install root. Inspect/repair the
+versioned install with `worktree-manager self-install` (dry-run) / `--apply`, and
+see it in `worktree-manager doctor`.
 
 ## Manage the harness (state views)
 
