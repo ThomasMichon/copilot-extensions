@@ -155,16 +155,20 @@ def _resolve_gh_token(account: str) -> str | None:
 
 
 def _connector_kwargs(spec: SourceSpec) -> dict[str, object]:
-    """Per-source connector kwargs. Raises on an unresolvable source so the run
-    loop records it as failed (never a silent no-op; #1350)."""
+    """Per-source connector kwargs. Raises on an *explicitly-targeted* source that
+    can't be resolved so the run loop records it as failed (never a silent no-op;
+    #1350). The bare default ``git`` source (no repo/repo_path) resolves to no
+    kwargs, letting ``GitRepoConnector`` fall back to its cwd/env default."""
     if spec.type == "git":
         path = _resolve_repo_path(spec)
-        if not path:
+        if path:
+            return {"repo_path": path}
+        if spec.repo or spec.repo_path:
             raise RuntimeError(
                 f"git source {spec.name!r}: could not resolve a checkout path "
                 f"(repo={spec.repo!r}) via the agent-worktrees registry"
             )
-        return {"repo_path": path}
+        return {}  # bare default 'git' — connector uses cwd / AGENT_INDEX_GIT_REPO
     if spec.type == "github":
         if not spec.auth_account:
             return {}  # anonymous (low rate limit) — the connector warns

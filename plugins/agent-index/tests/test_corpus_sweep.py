@@ -100,3 +100,6 @@ def test_default_when_no_registry(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(cfg, "repo_root", lambda explicit=None: None)
     specs = engine.configured_source_specs()
     assert [s.name for s in specs] == ["git"]
+    # The bare default 'git' source must resolve to NO connector kwargs (the
+    # connector falls back to cwd) — not raise for an unresolvable registry path.
+    assert engine._connector_kwargs(specs[0]) == {}
