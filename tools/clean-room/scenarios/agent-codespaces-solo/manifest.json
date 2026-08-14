@@ -1,0 +1,26 @@
+{
+  "name": "agent-codespaces-solo",
+  "description": "Tier-P F1 solo scenario: install ONLY agent-codespaces and assert its DEGRADE-SAFE contract -- it shells the agent-worktrees binstub at every AW touch point (account map, L2 leases, worktree claims, --project, state-root) and falls open to ambient behavior when AW is absent, so installed alone it must still provision, expose a binstub with a real version, and answer its read verbs (list/status/leases/validate) rather than hard-fail. Distinct from the downstream Tier-E CAPABILITY eval of the same name (the 6-step CodeSpace workflow, judged). Name-free / public.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": [] },
+  "auth": { "copilot": "required", "gh": "optional (real venue ops need it)", "ado": "none" },
+  "base": "without-agent-worktrees",
+  "config": {
+    "CR_MARKETPLACE_REPO": "ThomasMichon/copilot-extensions",
+    "CR_MARKETPLACE_NAME": "copilot-extensions",
+    "CR_UV_INDEX": "(opt-in uv-index fixture)"
+  },
+  "expected_artifacts": [
+    "~/.copilot/installed-plugins/<marketplace>/agent-codespaces",
+    "~/.local/bin/agent-codespaces (binstub)"
+  ],
+  "stages": [
+    { "n": 0, "title": "environment (fresh machine)" },
+    { "n": 1, "title": "install ONLY agent-codespaces" },
+    { "n": 2, "title": "runtime provisions on first session" },
+    { "n": 3, "title": "binstub on PATH + reports a REAL version" },
+    { "n": 4, "title": "DEGRADE-SAFE: read verbs fall open without an agent-worktrees base" }
+  ]
+}

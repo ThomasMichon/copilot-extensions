@@ -1,0 +1,26 @@
+{
+  "name": "agent-bridge-solo",
+  "description": "Tier-P F1 solo scenario: install ONLY agent-bridge (the without-agent-worktrees degenerate case) and assert the DEGRADE-SAFE contract -- agent-bridge is loose-coupled to agent-worktrees (no hard import; reads AW data files + shells binstubs when present, falls open when absent), so installed alone it must still provision, expose a binstub with a real version, and answer its read verbs (agents/machines/sessions/status) rather than crash on a missing base. Name-free / public.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": [] },
+  "auth": { "copilot": "required", "gh": "optional", "ado": "none" },
+  "base": "without-agent-worktrees",
+  "config": {
+    "CR_MARKETPLACE_REPO": "ThomasMichon/copilot-extensions",
+    "CR_MARKETPLACE_NAME": "copilot-extensions",
+    "CR_UV_INDEX": "(opt-in uv-index fixture)"
+  },
+  "expected_artifacts": [
+    "~/.copilot/installed-plugins/<marketplace>/agent-bridge",
+    "~/.local/bin/agent-bridge (binstub)"
+  ],
+  "stages": [
+    { "n": 0, "title": "environment (fresh machine)" },
+    { "n": 1, "title": "install ONLY agent-bridge (no agent-worktrees base)" },
+    { "n": 2, "title": "runtime provisions on first session" },
+    { "n": 3, "title": "binstub on PATH + reports a REAL version" },
+    { "n": 4, "title": "DEGRADE-SAFE: read verbs answer without an agent-worktrees base" }
+  ]
+}
