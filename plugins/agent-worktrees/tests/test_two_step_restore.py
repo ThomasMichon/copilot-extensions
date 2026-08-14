@@ -266,6 +266,12 @@ class TestReclaimOne:
         monkeypatch.setattr(m.reclaim, "descendants_of", lambda pid, t: set())
         monkeypatch.setattr(m.reclaim, "clear_lock_residue",
                             lambda **k: [])
+        # The muxed row's wt-<id> session is live + reachable (Stop-able) -> it
+        # is preserved by the reachability-aware filter (dotfiles #1447).
+        monkeypatch.setattr(
+            m.reclaim.sessions, "mux_status_many",
+            lambda ids: {i: m.reclaim.sessions.MuxInfo(exists=True, clients=1)
+                         for i in ids})
         captured = {}
         monkeypatch.setattr(
             m.reclaim, "reap_bound_copilots",
@@ -273,8 +279,8 @@ class TestReclaimOne:
             or [{"pid": t["pid"], "killed": True, "children_killed": 0}
                 for t in targets])
         out = m.reclaim_one("wtX")
-        # mux (222) filtered as positively muxed; self (me) guarded; bare (111)
-        # and unknown (444) both reaped as un-muxed.
+        # mux (222) filtered as a live, Stop-able mux; self (me) guarded; bare
+        # (111) and unknown (444) both reaped as Stop-unreachable.
         assert captured["t"] == [111, 444]
         assert out["ok"] is True
         assert out["targets"] == 2
@@ -286,7 +292,7 @@ class TestReclaimOne:
         out = m.reclaim_one("wtX")
         assert out == {"ok": True, "worktree_id": "wtX", "targets": 0,
                        "reaped": [], "locks_cleared": [],
-                       "bridge_locks_cleared": []}
+                       "bridge_locks_cleared": [], "mux_servers_torn_down": []}
 
     def test_bridge_bound_unions_and_reaps(self, monkeypatch):
         # #4272: a bare-resumed / bridge-owned session (cwd=home) is invisible to
@@ -344,6 +350,38 @@ class TestReclaimOne:
         assert seen["force_pids"] == {111}
         assert out["locks_cleared"] == [
             {"session_id": "s1", "pid": 111, "path": "…/inuse.111.lock"}]
+
+    def test_teardown_only_for_killed_targets(self, monkeypatch):
+        # A mux-homed detached target whose Copilot FAILED to terminate
+        # (killed=False) must NOT have its psmux server torn down -- the Copilot
+        # is still live in it. Only actually-killed targets reach teardown.
+        rows = [
+            {"session_id": "s1", "pid": 111, "worktree_id": "wtX", "homing": "mux"},
+            {"session_id": "s2", "pid": 222, "worktree_id": "wtX", "homing": "mux"},
+        ]
+        monkeypatch.setattr(m.reclaim, "build_process_table", lambda: {})
+        monkeypatch.setattr(m.reclaim, "resolve_bound_copilots",
+                            lambda **k: list(rows))
+        monkeypatch.setattr(m.reclaim, "descendants_of", lambda pid, t: set())
+        monkeypatch.setattr(m.reclaim, "clear_lock_residue", lambda **k: [])
+        # Both detached (unreachable) so filter_stop_unreachable keeps them.
+        monkeypatch.setattr(
+            m.reclaim.sessions, "mux_status_many",
+            lambda ids: {i: m.reclaim.sessions.MuxInfo(exists=False, clients=0)
+                         for i in ids})
+        # 111 killed, 222 failed to terminate.
+        monkeypatch.setattr(
+            m.reclaim, "reap_bound_copilots",
+            lambda targets, **k: [
+                {"pid": 111, "killed": True, "children_killed": 0},
+                {"pid": 222, "killed": False, "children_killed": 0}])
+        seen = {}
+        monkeypatch.setattr(
+            m.reclaim, "teardown_detached_mux",
+            lambda targets, **k: seen.update(t=[x["pid"] for x in targets]) or [])
+        out = m.reclaim_one("wtX")
+        assert seen["t"] == [111]            # only the killed target
+        assert out["ok"] is False            # 222 failed -> not all killed
 
 
 # ── _resume_decision carries the bare-resume option ────────────────────────
@@ -588,7 +626,7 @@ class TestStartReclaimFilter:
                "session_lock_live": True, "mux_live": True}
         type(self)._PS._start_reclaim(stub, rec)
         assert calls == []
-        assert "no un-muxed bound" in stub.debug
+        assert "no Stop-unreachable bound" in stub.debug
 
 
 class TestStartRepairFilter:
