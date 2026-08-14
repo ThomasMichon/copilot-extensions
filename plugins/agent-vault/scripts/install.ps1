@@ -29,7 +29,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('install', 'update', 'status', 'start', 'stop', 'uninstall')]
+    [ValidateSet('install', 'update', 'status', 'start', 'stop', 'uninstall', 'stamp', 'provision')]
     [string]$Action = 'install',
 
     [Alias('install-dir')]
@@ -594,43 +594,89 @@ function Test-KeePassXCCli {
 }
 
 function Write-Binstubs {
-    param([Parameter(Mandatory)][string]$PythonExe)
+    param([string]$PythonExe)
 
-    # Resolve the .venv link's reparse target and launch the slot python DIRECTLY,
-    # never *traversing* the junction (a RedirectionGuard-enforcing process is
-    # blocked from that but may still *read* the target) -- dotfiles #637. The .ps1
-    # reads the current-version marker; the .cmd reads the same marker. Newest slot falls back.
-    $stubVenv = Split-Path (Split-Path $PythonExe)
-    $stubRoot = Split-Path $stubVenv
-    if ((Split-Path -Leaf $stubRoot) -eq 'versions') { $stubRoot = Split-Path $stubRoot }
+    # Self-provisioning binstubs (#1393): fast-path the built versioned slot's
+    # python; if no slot is built yet (a `stamp` deferred the venv), provision on
+    # first use by running the slot-local snapshot's `scripts/install.ps1 provision`,
+    # then dispatch. Opt out with AGENT_VAULT_NO_SELFPROVISION=1. Launch the slot
+    # python DIRECTLY via -m (never the SAC-blocked console-script trampoline, and
+    # never *traversing* a junction -- dotfiles #637).
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
-    $ps1 = @(
-        "`$env:PYTHONUTF8 = '1'",
-        "`$_venv = '$stubVenv'",
-        "`$_py = Join-Path `$_venv 'Scripts\python.exe'",
-        "`$_root = Split-Path `$_venv
-if ((Split-Path -Leaf `$_root) -eq 'versions') { `$_root = Split-Path `$_root }
-`$_ver = ''
-try { `$_ver = ([IO.File]::ReadAllText((Join-Path `$_root 'current-version'))).Trim() } catch {}
-`$_py = if (`$_ver) { Join-Path `$_root ('versions\' + `$_ver + '\Scripts\python.exe') } else { '' }
-if (-not (`$_py -and (Test-Path -LiteralPath `$_py))) { `$_py = Get-ChildItem (Join-Path `$_root 'versions') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Join-Path `$_.FullName 'Scripts\python.exe' } | Where-Object { Test-Path -LiteralPath `$_ } | Select-Object -Last 1 }",
-        "& `$_py -m agent_vault @args",
-        "exit `$LASTEXITCODE"
-    ) -join "`r`n"
+    $ps1 = @'
+$env:PYTHONUTF8 = '1'
+$_root = Join-Path $env:USERPROFILE '.agent-vault'
+function _resolve_av_py {
+    $ver = ''
+    try { $ver = ([IO.File]::ReadAllText((Join-Path $_root 'current-version'))).Trim() } catch {}
+    $p = if ($ver) { Join-Path $_root ('versions\' + $ver + '\Scripts\python.exe') } else { '' }
+    if ($p -and (Test-Path -LiteralPath $p)) { return $p }
+    Get-ChildItem (Join-Path $_root 'versions') -Directory -ErrorAction SilentlyContinue |
+        Sort-Object Name | ForEach-Object { Join-Path $_.FullName 'Scripts\python.exe' } |
+        Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Last 1
+}
+$_py = _resolve_av_py
+if ($_py) { & $_py -m agent_vault @args; exit $LASTEXITCODE }
+if ($env:AGENT_VAULT_NO_SELFPROVISION) { [Console]::Error.WriteLine('[agent-vault] runtime not provisioned (AGENT_VAULT_NO_SELFPROVISION set).'); exit 1 }
+$_snap = ''
+try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
+$_inst = if ($_snap) { Join-Path $_snap 'scripts\install.ps1' } else { '' }
+if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) { [Console]::Error.WriteLine('[agent-vault] cannot self-provision: snapshot installer not found. Re-enable the plugin, then retry.'); exit 127 }
+[Console]::Error.WriteLine('[agent-vault] runtime not provisioned -- provisioning on first use (acquires uv + builds a venv; ~30-120s). Do not kill; extend your timeout.')
+[Console]::Error.WriteLine('::agent-provisioning:: plugin=agent-vault eta_seconds=120 reason=first-use')
+$_pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
+$_exe = if ($_pwsh) { $_pwsh.Source } else { 'powershell.exe' }
+& $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
+$_py = _resolve_av_py
+if ($_py) { & $_py -m agent_vault @args; exit $LASTEXITCODE }
+[Console]::Error.WriteLine('[agent-vault] provisioning did not yield a runtime. See the log above; retry, or run the snapshot installer manually.')
+exit 1
+'@
     [System.IO.File]::WriteAllText($BinstubPs1, $ps1, $utf8NoBom)
 
-    $cmd = @(
-        "@echo off",
-        "set `"PYTHONUTF8=1`"",
-        "set `"_ROOT=$stubRoot`"",
-        "set `"_VER=`"",
-        "if exist `"%_ROOT%\current-version`" set /p _VER=<`"%_ROOT%\current-version`"",
-        "set `"_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe`"",
-        "`"%_PY%`" -m agent_vault %*"
-    ) -join "`r`n"
+    $cmd = @'
+@echo off
+setlocal
+set "PYTHONUTF8=1"
+set "_ROOT=%USERPROFILE%\.agent-vault"
+call :_resolve
+if not defined _PY goto _prov
+"%_PY%" -m agent_vault %*
+exit /b %ERRORLEVEL%
+:_prov
+if defined AGENT_VAULT_NO_SELFPROVISION goto _nope
+set "_SNAP="
+if exist "%_ROOT%\payload-dir" set /p _SNAP=<"%_ROOT%\payload-dir"
+set "_INST=%_SNAP%\scripts\install.ps1"
+if not exist "%_INST%" goto _noinst
+echo [agent-vault] runtime not provisioned -- provisioning on first use ^(~30-120s^). Do not kill.>&2
+where pwsh >nul 2>&1
+if %ERRORLEVEL%==0 (pwsh -NoProfile -ExecutionPolicy Bypass -File "%_INST%" provision 1>&2) else (powershell -NoProfile -ExecutionPolicy Bypass -File "%_INST%" provision 1>&2)
+call :_resolve
+if not defined _PY goto _failprov
+"%_PY%" -m agent_vault %*
+exit /b %ERRORLEVEL%
+:_noinst
+echo [agent-vault] cannot self-provision: snapshot installer not found.>&2
+exit /b 127
+:_nope
+echo [agent-vault] runtime not provisioned ^(AGENT_VAULT_NO_SELFPROVISION set^).>&2
+exit /b 1
+:_failprov
+echo [agent-vault] provisioning did not yield a runtime.>&2
+exit /b 1
+:_resolve
+set "_PY="
+set "_VER="
+if exist "%_ROOT%\current-version" set /p _VER=<"%_ROOT%\current-version"
+if defined _VER if exist "%_ROOT%\versions\%_VER%\Scripts\python.exe" set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
+if not defined _PY for /f "delims=" %%D in ('dir /b /ad /o-n "%_ROOT%\versions" 2^>nul') do if not defined _PY if exist "%_ROOT%\versions\%%D\Scripts\python.exe" set "_PY=%_ROOT%\versions\%%D\Scripts\python.exe"
+exit /b 0
+'@
     [System.IO.File]::WriteAllText($BinstubCmd, $cmd, $utf8NoBom)
 
-    Write-Ok "Binstub: $BinstubPs1 (+ .cmd fallback)"
+    Write-Ok "Binstub: $BinstubPs1 (+ .cmd fallback, self-provisioning)"
 }
 
 function Write-Manifest {
@@ -834,6 +880,72 @@ function Register-AgentVaultTask {
     Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 }
 
+function Invoke-Stamp {
+    # Fast base install (#1393, snapshot slot model): copy the payload SOURCE into
+    # ~/.agent-vault/snapshots/<ver>/, record markers, and deploy the self-
+    # provisioning binstub -- deferring the heavy venv build (and the daemon
+    # service registration) to the binstub's first use. No venv, no uv; fits a
+    # sessionStart grace window and NEVER holds the marketplace payload open (it
+    # copies from the already self-staged $PluginDir, freeing the singleton).
+    Write-Host ''; Write-Host '=== agent-vault stamp (defer runtime to first use) ===' -ForegroundColor Cyan; Write-Host ''
+    if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    foreach ($dir in @($InstallDir, $LocalBin)) {
+        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    }
+    $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
+    $snapTmp = "$snapDir.tmp-$PID"
+    if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
+    New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
+    $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+    Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+    }
+    if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
+    Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
+    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
+    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
+    Write-Ok "Snapshot: $snapDir"
+    Write-Binstubs
+    Write-Ok 'Stamped: agent-vault binstub on PATH; runtime provisions on first use.'
+}
+
+function Stop-VaultDaemonGraceful {
+    <# Graceful drain-stop of the running vault daemon before a version cutover
+       (Thread B, lightest tier; docs/patterns/graceful-daemon-cutover.md).
+       agent-vault serves a FIXED endpoint (Unix socket / named pipe / fixed TCP),
+       so an active/passive port flip is inapplicable -- the new daemon rebinds the
+       SAME endpoint after the old releases it. The daemon's `--stop` sends a
+       cooperative shutdown that lets the in-flight request finish (drain) and
+       closes its listeners cleanly; it is NOT a kill. The unlocked in-memory
+       master is intentionally released -- the RECONNECT is the opt-in persistent
+       encrypted credential cache (credential-cache.enc, DPAPI-wrapped key) that a
+       fresh daemon reads on demand without a re-prompt, or (cache off) a single
+       re-unlock on first post-cutover use. Returns $true when a daemon was
+       drained+stopped. #>
+    $py = if (Test-Path $LinkPython) { $LinkPython } elseif (Test-Path $VenvPython) { $VenvPython } else { $null }
+    if (-not $py) { return $false }
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    # Only stop if one is actually running (ping), so a fresh install/update on a
+    # box with no live daemon skips straight to a normal start.
+    & $py -m agent_vault.service --ping 2>$null | Out-Null
+    $running = ($LASTEXITCODE -eq 0)
+    if (-not $running) { $ErrorActionPreference = $prevEAP; return $false }
+    Write-Step 'Graceful cutover: draining the in-flight request and stopping the old vault daemon (auth state reconnects via the persistent cache or a single re-unlock)...'
+    & $py -m agent_vault.service --stop 2>$null | Out-Null
+    # Give the old daemon a moment to close its listeners so the new one can rebind
+    # the fixed endpoint (Unix socket / named pipe / TCP).
+    for ($i = 0; $i -lt 20; $i++) {
+        Start-Sleep -Milliseconds 250
+        & $py -m agent_vault.service --ping 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) { break }
+    }
+    $ErrorActionPreference = $prevEAP
+    Write-Ok 'Old vault daemon drained + stopped (in-flight request finished; endpoint released for the new build)'
+    return $true
+}
+
 function Invoke-Install {
     Write-Host ''; Write-Host '=== agent-vault install ===' -ForegroundColor Cyan; Write-Host ''
     Install-Runtime
@@ -845,6 +957,15 @@ function Invoke-Update {
     Write-Host ''; Write-Host '=== agent-vault update ===' -ForegroundColor Cyan; Write-Host ''
     Invoke-DowngradeGuard
     Install-Runtime
+    # Thread B (lightest tier; docs/patterns/graceful-daemon-cutover.md): a version
+    # update must never kill in-flight, non-resumable work. Install-Runtime built +
+    # activated the new slot; now gracefully DRAIN + STOP the old daemon (finish the
+    # in-flight request, close cleanly -- not a kill) so the new slot can rebind the
+    # FIXED endpoint. Auth state reconnects on the new daemon via the opt-in
+    # persistent encrypted cache (no re-prompt) or a single re-unlock on first use.
+    # Skipped for a client-only host (-NoService). Register-AgentVaultTask then
+    # starts the new daemon on the now-free endpoint.
+    if (-not $NoService) { [void](Stop-VaultDaemonGraceful) }
     Register-AgentVaultTask
     Write-Host ''; Write-Host '=== agent-vault update complete ===' -ForegroundColor Cyan
 }
@@ -947,5 +1068,7 @@ switch ($Action) {
     'stop'      { Invoke-Stop }
     'status'    { Invoke-Status }
     'uninstall' { Invoke-Uninstall }
+    'stamp'     { Invoke-Stamp }
+    'provision' { Invoke-Install }
 }
 exit 0
