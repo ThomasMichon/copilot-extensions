@@ -42,7 +42,9 @@ provisioned=0
 [ -e "$InstallDir/.venv" ] && provisioned=1
 if [ "$provisioned" = 0 ] && [ -f "$InstallDir/current-version" ]; then
   cv="$(tr -d '[:space:]' < "$InstallDir/current-version")"
-  if [ -n "$cv" ] && { [ -x "$InstallDir/versions/$cv/bin/python" ] || [ -f "$InstallDir/versions/$cv/Scripts/python.exe" ]; }; then provisioned=1; fi
+  # ...and only when it names the CURRENT payload version (the marker is authoritative
+  # for the active slot; a stale marker must not suppress reconcile).
+  if [ -n "$cv" ] && [ "$cv" = "$current" ] && { [ -x "$InstallDir/versions/$cv/bin/python" ] || [ -f "$InstallDir/versions/$cv/Scripts/python.exe" ]; }; then provisioned=1; fi
 fi
 if [ "$provisioned" = 1 ] && [ "$deployed" = "$current" ]; then exit 0; fi
 

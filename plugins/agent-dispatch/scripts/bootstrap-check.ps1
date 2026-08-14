@@ -46,7 +46,10 @@ try {
         $cvMarker = Join-Path $InstallDir 'current-version'
         if (Test-Path $cvMarker) {
             $cv = ('' + (Get-Content $cvMarker -Raw)).Trim()
-            if ($cv -and ((Test-Path (Join-Path $InstallDir "versions\$cv\Scripts\python.exe")) -or (Test-Path (Join-Path $InstallDir "versions/$cv/bin/python")))) { $provisioned = $true }
+            # ...and only when it names the CURRENT payload version: the marker is
+            # authoritative for the ACTIVE slot, so a stale/corrupt marker naming an
+            # older slot must NOT suppress reconcile and strand the wrong runtime.
+            if ($cv -and $cv -eq $current -and ((Test-Path (Join-Path $InstallDir "versions\$cv\Scripts\python.exe")) -or (Test-Path (Join-Path $InstallDir "versions/$cv/bin/python")))) { $provisioned = $true }
         }
     }
     if ($provisioned -and $deployed -eq $current) { exit 0 }
