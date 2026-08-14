@@ -647,10 +647,10 @@ def local_bin_hint() -> str:
 
 
 def _flag_value(rest: list[str], flag: str) -> str | None:
-    """Return the value following ``flag`` in ``rest`` (or None if absent)."""
+    """Return the value following ``flag`` (None if absent or followed by a flag)."""
     if flag in rest:
         i = rest.index(flag)
-        if i + 1 < len(rest):
+        if i + 1 < len(rest) and not rest[i + 1].startswith("--"):
             return rest[i + 1]
     return None
 

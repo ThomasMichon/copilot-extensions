@@ -49,9 +49,13 @@ def _load(root: Path | None = None) -> dict:
 
 def configured_source(root: Path | None = None) -> tuple[str | None, str | None]:
     """The explicitly-configured ``(repo, ref)`` overrides, ``None`` where unset."""
-    src = _load(root).get("source") or {}
-    repo = src.get("repo") or None
-    ref = src.get("ref") or None
+    src = _load(root).get("source")
+    if not isinstance(src, dict):  # tolerate a malformed / non-table [source]
+        return None, None
+    repo = src.get("repo")
+    ref = src.get("ref")
+    repo = repo if isinstance(repo, str) and repo else None
+    ref = ref if isinstance(ref, str) and ref else None
     return repo, ref
 
 
@@ -68,7 +72,16 @@ def resolved_ref(root: Path | None = None) -> str:
 
 
 def _escape(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"')
+    # Emit a valid TOML basic string: escape backslash/quote first, then the
+    # control chars TOML represents with escapes (so a stray newline/tab in a
+    # repo/ref can't corrupt the file).
+    return (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+    )
 
 
 def _render(repo: str | None, ref: str | None) -> str:

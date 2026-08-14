@@ -28,8 +28,16 @@ CONFIG="$ROOT/config.toml"
 REPO='https://github.com/ThomasMichon/copilot-extensions.git'
 REF='main'
 if [ -f "$CONFIG" ]; then
-    cfg_repo=$(sed -n 's/^[[:space:]]*repo[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "$CONFIG" | head -1)
-    cfg_ref=$(sed -n 's/^[[:space:]]*ref[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "$CONFIG" | head -1)
+    # Read a key only from within the [source] table (ignore other tables).
+    _wm_src_cfg() {
+        awk -v k="$1" '
+            /^[[:space:]]*\[/ { insrc = ($0 ~ /^[[:space:]]*\[source\][[:space:]]*$/); next }
+            insrc && match($0, "^[[:space:]]*" k "[[:space:]]*=[[:space:]]*\"") {
+                s = substr($0, RSTART + RLENGTH); sub(/".*/, "", s); print s; exit
+            }' "$CONFIG"
+    }
+    cfg_repo=$(_wm_src_cfg repo)
+    cfg_ref=$(_wm_src_cfg ref)
     [ -n "${cfg_repo:-}" ] && REPO="$cfg_repo"
     [ -n "${cfg_ref:-}" ] && REF="$cfg_ref"
 fi

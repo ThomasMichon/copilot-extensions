@@ -28,10 +28,15 @@ $Repo = 'https://github.com/ThomasMichon/copilot-extensions.git'
 $Ref  = 'main'
 if (Test-Path $Config) {
     $cfg = Get-Content $Config -Raw
-    $mRepo = [regex]::Match($cfg, '(?m)^\s*repo\s*=\s*"(.*?)"')
-    $mRef  = [regex]::Match($cfg, '(?m)^\s*ref\s*=\s*"(.*?)"')
-    if ($mRepo.Success) { $Repo = $mRepo.Groups[1].Value }
-    if ($mRef.Success)  { $Ref  = $mRef.Groups[1].Value }
+    # Isolate the [source] table (up to the next [table] header or EOF).
+    $sec = [regex]::Match($cfg, '(?ms)^\s*\[source\]\s*(.*?)(?=^\s*\[|\z)')
+    if ($sec.Success) {
+        $body  = $sec.Groups[1].Value
+        $mRepo = [regex]::Match($body, '(?m)^\s*repo\s*=\s*"(.*?)"')
+        $mRef  = [regex]::Match($body, '(?m)^\s*ref\s*=\s*"(.*?)"')
+        if ($mRepo.Success) { $Repo = $mRepo.Groups[1].Value }
+        if ($mRef.Success)  { $Ref  = $mRef.Groups[1].Value }
+    }
 }
 
 Write-Host 'copilot-extensions Worktree Manager - bootstrap'
