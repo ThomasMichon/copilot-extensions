@@ -811,17 +811,9 @@ BINSTUB_BODY
     mv -f "$tmp" "$LOCAL_BIN/$PROJECT_NAME"
     ok "Binstub: $LOCAL_BIN/$PROJECT_NAME"
 
-    # Tool binstubs (parity with Windows .cmd stubs)
-    for stub in agent-worktrees; do
-        local stub_src="$PLUGIN_DIR/bin/$stub"
-        if [[ -f "$stub_src" ]]; then
-            tmp="$(mktemp "$LOCAL_BIN/$stub.XXXXXX")"
-            cp "$stub_src" "$tmp"
-            chmod +x "$tmp"
-            mv -f "$tmp" "$LOCAL_BIN/$stub"
-            ok "Binstub: $LOCAL_BIN/$stub"
-        fi
-    done
+    # The `agent-worktrees` tool binstub is deployed unconditionally by
+    # deploy_tool_binstub in the install/update actions (project or not), so it
+    # is not re-deployed here.
 }
 
 deploy_global_config() {
@@ -1531,6 +1523,13 @@ case "$ACTION" in
         remove_legacy_scripts
         remove_legacy_binstubs
         reconcile_binstubs
+        # Deploy the self-provisioning `agent-worktrees` TOOL binstub
+        # unconditionally (project or not). A bare / runtime-only `install`
+        # (no --project-name, e.g. the Worktree Manager core-install path) must
+        # still leave `agent-worktrees` callable on PATH; the per-project
+        # deploy_binstub below only runs under $HAS_PROJECT, so relying on it
+        # left a project-less install with no tool binstub at all.
+        deploy_tool_binstub
         deploy_copilot_plugin
         ensure_copilot_experimental
         assert_path
@@ -1788,6 +1787,9 @@ case "$ACTION" in
         remove_legacy_scripts
         remove_legacy_binstubs
         reconcile_binstubs
+        # Deploy the tool binstub unconditionally (see the install action) so a
+        # project-less `update` also keeps `agent-worktrees` on PATH.
+        deploy_tool_binstub
         deploy_copilot_plugin
         ensure_copilot_experimental
         # Machine-wide terminal integration: redeploy the per-session options +

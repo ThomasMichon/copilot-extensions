@@ -592,6 +592,14 @@ def _cmd_setup(rest: list[str]) -> int:
     core_res = install_core(dry_run=not do_apply)
     if do_apply and core_res.ran:
         print(f"    installer exit code: {core_res.returncode}")
+        # Refresh: the `core` snapshot above predates the install we just ran, so
+        # basing the summary/exit code on it would report failure on a successful
+        # first-time install (it would only "pass" on a second run).
+        core = core_status()
+        if core.installed:
+            print("    ✓ core install complete.")
+        else:
+            print(f"    ! core still {core.state} after install — see output above.")
 
     print()
     if not do_apply:

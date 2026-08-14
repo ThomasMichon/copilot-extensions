@@ -81,9 +81,34 @@ def core_status(home: Path | None = None) -> CoreStatus:
     )
 
 
+def _is_checkout(d: Path) -> bool:
+    """True if ``d`` looks like a copilot-extensions checkout root."""
+    return (d / ".github" / "plugin" / "marketplace.json").is_file() and (d / "plugins").is_dir()
+
+
+def resolve_checkout() -> Path | None:
+    """Find a copilot-extensions checkout to drive the core install from.
+
+    Order: the **current directory** (walk up, git-style) → the **bootstrap's own
+    clone** at ``<root>/staging`` (always a full ce checkout after the one-line
+    bootstrap). Unlike ``catalog.find_repo_root()`` alone — whose default start is
+    *this package's installed slot*, so it sees neither cwd nor staging — this lets
+    ``setup`` drive the real installer right after a bootstrap with no extra step
+    (cd into, or separately clone, a checkout).
+    """
+    cwd_root = find_repo_root(Path.cwd())
+    if cwd_root is not None:
+        return cwd_root
+    from .self_install import default_root
+
+    staging = default_root() / "staging"
+    return staging if _is_checkout(staging) else None
+
+
 def install_script(repo_root: Path | None = None) -> Path | None:
-    """Locate agent-worktrees' own installer for this OS. Requires a checkout."""
-    root = repo_root or find_repo_root()
+    """Locate agent-worktrees' own installer for this OS. Requires a checkout
+    (resolved from cwd or the bootstrap staging clone when not given)."""
+    root = repo_root or resolve_checkout()
     if root is None:
         return None
     scripts = root / "plugins" / "agent-worktrees" / "scripts"
