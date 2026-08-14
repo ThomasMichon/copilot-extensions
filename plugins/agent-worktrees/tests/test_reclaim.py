@@ -58,6 +58,96 @@ class TestHoming:
         assert reclaim.descendants_of(3, table) == set()
 
 
+# ── mux_ancestors_of / filter_stop_unreachable / teardown (dotfiles #1447) ──
+class TestDetachedMuxReclaim:
+    def test_mux_ancestors_of_finds_server(self):
+        # copilot -> pwsh -> pwsh -> psmux server (detached) -> root
+        table = {
+            800: {"ppid": 240, "name": "copilot.exe"},
+            240: {"ppid": 150, "name": "pwsh.exe"},
+            150: {"ppid": 295, "name": "pwsh.exe"},
+            295: {"ppid": 106, "name": "psmux.exe"},
+        }
+        assert reclaim.mux_ancestors_of(800, table) == [295]
+        assert reclaim.mux_ancestors_of(999, table) == []   # absent pid
+        # a bare chain has no mux ancestor
+        bare = {5: {"ppid": 4, "name": "copilot"}, 4: {"ppid": 1, "name": "pwsh"}}
+        assert reclaim.mux_ancestors_of(5, bare) == []
+
+    def test_filter_keeps_unreachable_mux_drops_reachable(self, monkeypatch):
+        found = [
+            {"pid": 1, "worktree_id": "wtA", "homing": "bare"},
+            {"pid": 2, "worktree_id": "wtA", "homing": "mux"},     # detached
+            {"pid": 3, "worktree_id": "wtB", "homing": "mux"},     # live/reachable
+            {"pid": 4, "worktree_id": "wtC", "homing": "unknown"},
+            {"pid": 5, "worktree_id": None, "homing": "mux"},      # no wt -> dropped
+        ]
+        status = {
+            "wtA": reclaim.sessions.MuxInfo(exists=False, clients=0),  # detached
+            "wtB": reclaim.sessions.MuxInfo(exists=True, clients=1),   # reachable
+        }
+        monkeypatch.setattr(reclaim.sessions, "mux_status_many",
+                            lambda ids: {i: status.get(i) for i in ids})
+        kept = [f["pid"] for f in reclaim.filter_stop_unreachable(found)]
+        # bare(1), detached-mux(2), unknown(4) kept; reachable-mux(3) and
+        # wt-less mux(5) dropped.
+        assert kept == [1, 2, 4]
+
+    def test_filter_treats_mux_query_error_as_unreachable(self, monkeypatch):
+        found = [{"pid": 2, "worktree_id": "wtA", "homing": "mux"}]
+        def _boom(ids):
+            raise RuntimeError("psmux not available")
+        monkeypatch.setattr(reclaim.sessions, "mux_status_many", _boom)
+        assert [f["pid"] for f in reclaim.filter_stop_unreachable(found)] == [2]
+
+    def test_teardown_kills_detached_server_not_warm_pool(self, monkeypatch):
+        # server 295 hosts the reaped copilot's pane; it also pre-spawned a
+        # nested __warm__ psmux server (249) with its OWN pane child (250) --
+        # both must be SPARED (the pool's, not this session's).
+        table = {
+            800: {"ppid": 240, "name": "copilot.exe"},
+            240: {"ppid": 150, "name": "pwsh.exe"},
+            150: {"ppid": 295, "name": "pwsh.exe"},
+            295: {"ppid": 106, "name": "psmux.exe"},   # detached server
+            249: {"ppid": 295, "name": "psmux.exe"},   # __warm__ pool child
+            250: {"ppid": 249, "name": "pwsh.exe"},    # warm server's pane
+        }
+        killed = []
+        monkeypatch.setattr(reclaim, "build_process_table", lambda: table)
+        from agent_worktrees import procs
+        monkeypatch.setattr(procs, "terminate_pid",
+                            lambda pid: (killed.append(pid), True)[1])
+        # wtA is unreachable (detached)
+        monkeypatch.setattr(
+            reclaim.sessions, "mux_status_many",
+            lambda ids: {i: reclaim.sessions.MuxInfo(exists=False, clients=0)
+                         for i in ids})
+        targets = [{"pid": 800, "worktree_id": "wtA", "homing": "mux"}]
+        out = reclaim.teardown_detached_mux(targets, table=table)
+        assert out == [295]                 # the detached server was reaped
+        assert 295 in killed                # server killed
+        assert 240 in killed and 150 in killed  # pane shell subtree killed
+        assert 249 not in killed            # __warm__ pool server spared
+        assert 250 not in killed            # ...and its pane subtree spared
+
+    def test_teardown_skips_reachable_mux(self, monkeypatch):
+        table = {
+            800: {"ppid": 295, "name": "copilot.exe"},
+            295: {"ppid": 106, "name": "psmux.exe"},
+        }
+        killed = []
+        from agent_worktrees import procs
+        monkeypatch.setattr(procs, "terminate_pid",
+                            lambda pid: (killed.append(pid), True)[1])
+        monkeypatch.setattr(
+            reclaim.sessions, "mux_status_many",
+            lambda ids: {i: reclaim.sessions.MuxInfo(exists=True, clients=1)
+                         for i in ids})
+        targets = [{"pid": 800, "worktree_id": "wtA", "homing": "mux"}]
+        assert reclaim.teardown_detached_mux(targets, table=table) == []
+        assert killed == []                 # a live, Stop-able mux is untouched
+
+
 # ── _worktree_id_from_path (pure) ──────────────────────────────────────────
 class TestWorktreeIdFromPath:
     def test_dotworktrees_container(self):
@@ -330,12 +420,39 @@ class TestCmdReclaim:
              "homing": "unknown"},
         ]
         self._stub_resolution(monkeypatch, rows)
+        # The mux row's wt-<id> session is a live, Stop-able mux -> preserved.
+        monkeypatch.setattr(
+            m.reclaim.sessions, "mux_status_many",
+            lambda ids: {i: m.reclaim.sessions.MuxInfo(exists=True, clients=1)
+                         for i in ids})
         monkeypatch.setattr(m.reclaim, "reap_bound_copilots", lambda *a, **k: [])
         rc = m.cmd_reclaim(_ns(worktree_id=None, session_id="s1", bare_only=True))
         assert rc == 0
         out = json.loads(capfd.readouterr().out)
         # bare + unknown kept (un-muxed); only the positively muxed one dropped.
         assert [t["pid"] for t in out["targets"]] == [200, 202]
+
+    def test_bare_only_keeps_detached_mux(self, monkeypatch, capfd):
+        # dotfiles #1447: a mux-homed Copilot in a DETACHED psmux server is
+        # invisible to the mux control socket (has-session/list-sessions), so
+        # Stop cannot reach it. bare_only must NOT drop it, else Reclaim no-ops.
+        rows = [
+            {"session_id": "s1", "pid": 200, "cwd": "/w", "worktree_id": "wt",
+             "homing": "bare"},
+            {"session_id": "s1", "pid": 201, "cwd": "/w", "worktree_id": "wt",
+             "homing": "mux"},
+        ]
+        self._stub_resolution(monkeypatch, rows)
+        # wt-<id> session unreachable (detached server) -> mux row stays.
+        monkeypatch.setattr(
+            m.reclaim.sessions, "mux_status_many",
+            lambda ids: {i: m.reclaim.sessions.MuxInfo(exists=False, clients=0)
+                         for i in ids})
+        monkeypatch.setattr(m.reclaim, "reap_bound_copilots", lambda *a, **k: [])
+        rc = m.cmd_reclaim(_ns(worktree_id=None, session_id="s1", bare_only=True))
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert [t["pid"] for t in out["targets"]] == [200, 201]
 
     def test_no_target_and_neutral_cwd_errors(self, monkeypatch, capfd):
         monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: None)
