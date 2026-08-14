@@ -38,7 +38,7 @@ def test_full_general_pool_declaration():
             "concurrency": 2,
             "interval": 30,
             "body": {"type": "headless", "agent": "general-loop-worker"},
-            "owner": "aperture-labs",
+            "owner": "test-chamber",
             "description": "General-purpose loop pool",
         }
     )
@@ -46,7 +46,7 @@ def test_full_general_pool_declaration():
     assert d.concurrency == 2
     assert d.body.type == "headless"
     assert d.body.agent == "general-loop-worker"
-    assert d.owner == "aperture-labs"
+    assert d.owner == "test-chamber"
 
 
 def test_name_is_required():
@@ -130,10 +130,10 @@ def test_supervise_args_embody_body_has_no_headless_label():
 
 
 def test_supervise_args_lane_scoped():
-    d = load_declaration({"name": "x", "labels": ["l"], "repos": "aperture-labs"})
+    d = load_declaration({"name": "x", "labels": ["l"], "repos": "test-chamber"})
     args = d.to_supervise_args()
     assert "--all-repos" not in args
-    assert _flag_val(args, "--repo") == "aperture-labs"
+    assert _flag_val(args, "--repo") == "test-chamber"
 
 
 def test_supervise_args_fleet():

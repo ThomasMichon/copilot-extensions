@@ -161,12 +161,12 @@ def test_spawn_embodied_worker_threads_project_as_global(monkeypatch):
                            or types.SimpleNamespace(returncode=0, stdout="{}", stderr="")),
     )
     embody.spawn_embodied_worker(
-        "t", coordinator_url="http://c", worker_id="w", project="aperture-labs",
+        "t", coordinator_url="http://c", worker_id="w", project="test-chamber",
     )
     cmd = captured["cmd"]
-    # [exe, "--project", "aperture-labs", "embody", ...] -- project BEFORE embody.
+    # [exe, "--project", "test-chamber", "embody", ...] -- project BEFORE embody.
     assert cmd[:4] == [
-        "/usr/bin/agent-worktrees", "--project", "aperture-labs", "embody",
+        "/usr/bin/agent-worktrees", "--project", "test-chamber", "embody",
     ]
     assert cmd.index("--project") < cmd.index("embody")
 
@@ -192,10 +192,10 @@ def test_project_for_task_prefers_registry_name(monkeypatch):
     """The authoritative lane->name registry mapping wins when known."""
     monkeypatch.setattr(
         "agent_dispatch.identity.name_for_repo",
-        lambda canonical: "aperture-labs" if "aperture-labs" in (canonical or "") else None,
+        lambda canonical: "test-chamber" if "test-chamber" in (canonical or "") else None,
     )
-    task = {"repo": "gitea.michon.ski/example-user/aperture-labs"}
-    assert embody.project_for_task(task) == "aperture-labs"
+    task = {"repo": "gitea.example.com/example-user/test-chamber"}
+    assert embody.project_for_task(task) == "test-chamber"
 
 
 def test_project_for_task_falls_back_to_lane_tail(monkeypatch):
@@ -225,11 +225,11 @@ def test_fleet_spawn_threads_project_before_embody(monkeypatch):
     )
     embody.spawn_fleet_embodied_worker(
         "emancipation-cube", "t", origin="mantis-counter", owner="fleet-t-abc",
-        worker_id="fleet-t-abc", project="aperture-labs",
+        worker_id="fleet-t-abc", project="test-chamber",
     )
     # cmd == [ssh, -o, BatchMode=yes, host, "<remote_cmd string>"]
     remote_cmd = captured["cmd"][-1]
-    assert "--project aperture-labs embody" in remote_cmd
+    assert "--project test-chamber embody" in remote_cmd
     assert remote_cmd.index("--project") < remote_cmd.index("embody")
 
 
