@@ -13,7 +13,7 @@ The same SSH-exec pattern also powers **peer-queue browse** (Slice 8c):
 stream back its JSON, so an operator can inspect a peer's queue -- and, since 8b
 runs there, its live embodiment overlays -- without leaving the local box.
 
-The machine name **is** its facility SSH alias (``ssh borealis``) -- never a raw
+The machine name **is** its facility SSH alias (``ssh emancipation-cube``) -- never a raw
 IP (the ``facility-ssh`` discipline). The payload is streamed over the SSH pipe's
 stdin (``create --payload-file -``) so no shell-escaping of a large body is
 needed; the remaining args are shell-quoted argv.
@@ -48,8 +48,8 @@ def _norm_machine(name: str | None) -> str:
 
     Facility machine names (a machine's registry key / SSH alias) are lowercase
     by convention, but a caller may hand us a display-cased variant -- e.g. the
-    worktree picker passes the ``machines.yaml`` ``display_name`` (``Lambda-Core``)
-    while this machine's resolved identity is the registry key (``lambda-core``).
+    worktree picker passes the ``machines.yaml`` ``display_name`` (``Anomalous-Potato``)
+    while this machine's resolved identity is the registry key (``anomalous-potato``).
     A case-sensitive ``==`` would then misread the *local* machine as a remote
     peer and try to SSH to itself. Comparing casefolded values keeps local/peer
     detection case-insensitive. Returns ``""`` for ``None``/empty.
@@ -61,9 +61,9 @@ def _ssh_alias(machine: str) -> str:
     """The SSH alias to connect to for ``machine``: lowercased.
 
     SSH ``Host`` matching is case-sensitive, and facility ``Host`` blocks are
-    lowercase by convention (``Host borealis``). A display-cased name
-    (``Borealis``) would miss its ``Host`` block and fall back to a literal
-    ``Borealis`` hostname on the default port -- which fails. Lowercasing keeps a
+    lowercase by convention (``Host emancipation-cube``). A display-cased name
+    (``Emancipation-Cube``) would miss its ``Host`` block and fall back to a literal
+    ``Emancipation-Cube`` hostname on the default port -- which fails. Lowercasing keeps a
     case-insensitive caller reaching the intended peer over the mesh. The
     original (caller-supplied) name is still used for human-facing diagnostics.
     """

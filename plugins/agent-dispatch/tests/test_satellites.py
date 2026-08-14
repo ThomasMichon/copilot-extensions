@@ -205,15 +205,15 @@ def test_register_defaults_to_peer_role(reg):
 
 def test_register_records_role_epoch_and_distinct_machine(reg):
     e = reg.register(
-        "wheatley/wt-boards",
+        "mantis-counter/wt-sweep",
         role=ROLE_COORDINATOR,
         epoch=7,
-        machine="wheatley",
+        machine="mantis-counter",
     )
     assert e["role"] == ROLE_COORDINATOR
     assert e["epoch"] == 7
-    assert e["instance"] == "wheatley/wt-boards"
-    assert e["machine"] == "wheatley"
+    assert e["instance"] == "mantis-counter/wt-sweep"
+    assert e["machine"] == "mantis-counter"
 
 
 def test_heartbeat_can_promote_role_and_bump_epoch(reg):

@@ -255,5 +255,5 @@ def test_federation_interval_default_and_override(monkeypatch):
 
 
 def test_federation_instance_explicit_override(monkeypatch):
-    monkeypatch.setenv("AGENT_DISPATCH_FEDERATION_INSTANCE", "wheatley/wt-x")
-    assert config.federation_instance() == "wheatley/wt-x"
+    monkeypatch.setenv("AGENT_DISPATCH_FEDERATION_INSTANCE", "mantis-counter/wt-x")
+    assert config.federation_instance() == "mantis-counter/wt-x"

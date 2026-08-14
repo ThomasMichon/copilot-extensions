@@ -37,7 +37,7 @@ def test_is_wsl_false_standalone_linux(monkeypatch, tmp_path):
     monkeypatch.setattr(netinfo.sys, "platform", "linux")
     monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
     osrelease = tmp_path / "osrelease"
-    osrelease.write_text("6.1.0-18-amd64\n")  # plain Debian (Wheatley)
+    osrelease.write_text("6.1.0-18-amd64\n")  # plain Debian (Mantis-Counter)
     monkeypatch.setattr(netinfo, "_WSL_PROBE_FILES", (str(osrelease),))
     assert netinfo.is_wsl() is False
 

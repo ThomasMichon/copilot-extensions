@@ -31,9 +31,9 @@ def test_exclude_by_capability_blocks_matching_worker(q):
 
 
 def test_exclude_by_machine_identity(q):
-    q.create("work", excludes=["machine:lambda-core"])
-    assert q.claim_one("lambda-core/wt", machine="lambda-core", worktree="wt") is None
-    assert q.claim_one("borealis/wt", machine="borealis", worktree="wt") is not None
+    q.create("work", excludes=["machine:anomalous-potato"])
+    assert q.claim_one("anomalous-potato/wt", machine="anomalous-potato", worktree="wt") is None
+    assert q.claim_one("emancipation-cube/wt", machine="emancipation-cube", worktree="wt") is not None
 
 
 def test_exclude_by_worktree_identity(q):
@@ -43,11 +43,11 @@ def test_exclude_by_worktree_identity(q):
 
 
 def test_require_identity_token_via_folded_caps(q):
-    # includes generalize the same way: a task requiring machine:borealis is
+    # includes generalize the same way: a task requiring machine:emancipation-cube is
     # claimable only by that machine (identity folded into the advertised set)
-    q.create("work", requires=["machine:borealis"])
-    assert q.claim_one("lambda-core/wt", machine="lambda-core", worktree="wt") is None
-    assert q.claim_one("borealis/wt", machine="borealis", worktree="wt") is not None
+    q.create("work", requires=["machine:emancipation-cube"])
+    assert q.claim_one("anomalous-potato/wt", machine="anomalous-potato", worktree="wt") is None
+    assert q.claim_one("emancipation-cube/wt", machine="emancipation-cube", worktree="wt") is not None
 
 
 def test_excludes_round_trip_on_task(q):
@@ -67,17 +67,17 @@ def test_existing_capability_requires_unaffected_by_folding(q):
 
 def test_yield_appends_worktree_scoped_not_me(q):
     t = q.create("work")
-    q.claim_one("borealis/wt", machine="borealis", worktree="wt", task_id=t.id)
-    q.yield_task(t.id, "borealis/wt", exclude="worktree:wt")
+    q.claim_one("emancipation-cube/wt", machine="emancipation-cube", worktree="wt", task_id=t.id)
+    q.yield_task(t.id, "emancipation-cube/wt", exclude="worktree:wt")
     got = q.get(t.id)
     assert got.status == Status.QUEUED
     assert "worktree:wt" in got.excludes
     # the same worktree can't re-claim; a different worktree still can
     assert q.claim_one(
-        "borealis/wt", machine="borealis", worktree="wt", task_id=t.id
+        "emancipation-cube/wt", machine="emancipation-cube", worktree="wt", task_id=t.id
     ) is None
     assert q.claim_one(
-        "borealis/other", machine="borealis", worktree="other", task_id=t.id
+        "emancipation-cube/other", machine="emancipation-cube", worktree="other", task_id=t.id
     ) is not None
 
 
@@ -90,11 +90,11 @@ def test_yield_exclude_is_idempotent(q):
 
 def test_machine_scoped_not_me_excludes_all_its_worktrees(q):
     t = q.create("work")
-    q.claim_one("lambda-core/a", machine="lambda-core", worktree="a", task_id=t.id)
-    q.yield_task(t.id, "lambda-core/a", exclude="machine:lambda-core")
-    assert q.claim_one("lambda-core/a", machine="lambda-core", worktree="a", task_id=t.id) is None
-    assert q.claim_one("lambda-core/b", machine="lambda-core", worktree="b", task_id=t.id) is None
-    assert q.claim_one("borealis/a", machine="borealis", worktree="a", task_id=t.id) is not None
+    q.claim_one("anomalous-potato/a", machine="anomalous-potato", worktree="a", task_id=t.id)
+    q.yield_task(t.id, "anomalous-potato/a", exclude="machine:anomalous-potato")
+    assert q.claim_one("anomalous-potato/a", machine="anomalous-potato", worktree="a", task_id=t.id) is None
+    assert q.claim_one("anomalous-potato/b", machine="anomalous-potato", worktree="b", task_id=t.id) is None
+    assert q.claim_one("emancipation-cube/a", machine="emancipation-cube", worktree="a", task_id=t.id) is not None
 
 
 def test_monotonic_exclusion_converges_to_unclaimable(q):
@@ -121,9 +121,9 @@ def test_yield_without_exclude_leaves_excludes_untouched(q):
 
 
 def test_create_claim_mints_task_already_claimed(q):
-    t = q.create("work", claim_as="borealis/wt")
+    t = q.create("work", claim_as="emancipation-cube/wt")
     assert t.status == Status.CLAIMED
-    assert t.owner == "borealis/wt"
+    assert t.owner == "emancipation-cube/wt"
     assert t.attempts == 1
     # already claimed -> no other worker can take it (no queued gap)
     assert q.claim_one("other/wt", machine="other", worktree="wt", task_id=t.id) is None

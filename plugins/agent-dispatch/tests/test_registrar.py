@@ -123,7 +123,7 @@ def test_supervise_args_general_pool_headless():
 
 
 def test_supervise_args_embody_body_has_no_headless_label():
-    d = load_declaration({"name": "boards", "labels": ["cab"], "repos": "all"})
+    d = load_declaration({"name": "sweeps", "labels": ["review"], "repos": "all"})
     args = d.to_supervise_args()
     assert "--headless-label" not in args
     assert "--headless-agent" not in args
@@ -140,14 +140,14 @@ def test_supervise_args_fleet():
     d = load_declaration(
         {
             "name": "fleetpool",
-            "labels": ["cab"],
-            "fleet": {"pool": ["lambda-core-wsl"], "origin": "wheatley", "headless": True},
+            "labels": ["review"],
+            "fleet": {"pool": ["anomalous-potato-wsl"], "origin": "mantis-counter", "headless": True},
             "body": {"type": "headless", "agent": "task-worker"},
         }
     )
     args = d.to_supervise_args()
-    assert _flag_val(args, "--pool") == "lambda-core-wsl"
-    assert _flag_val(args, "--origin") == "wheatley"
+    assert _flag_val(args, "--pool") == "anomalous-potato-wsl"
+    assert _flag_val(args, "--origin") == "mantis-counter"
     assert "--headless" in args
     # fleet mode does not emit --headless-label
     assert "--headless-label" not in args
@@ -176,13 +176,13 @@ def test_env_migration_matches_dib_profile():
 
 def test_env_migration_parses_extra_args_fleet():
     env = {
-        "AGENT_DISPATCH_SUPERVISE_LABELS": "cab",
+        "AGENT_DISPATCH_SUPERVISE_LABELS": "review",
         "AGENT_DISPATCH_SUPERVISE_HEADLESS_AGENT": "task-worker",
-        "AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS": "--pool lambda-core-wsl --origin wheatley --headless",
+        "AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS": "--pool anomalous-potato-wsl --origin mantis-counter --headless",
     }
-    d = declaration_from_env("cab", env)
-    assert d.fleet.pool == ("lambda-core-wsl",)
-    assert d.fleet.origin == "wheatley"
+    d = declaration_from_env("review", env)
+    assert d.fleet.pool == ("anomalous-potato-wsl",)
+    assert d.fleet.origin == "mantis-counter"
     assert d.fleet.headless is True
     assert d.body.type == "headless"
 
@@ -321,7 +321,7 @@ def test_shorthand_task_type_from_name_and_labels():
     ef = d.effective_filters()
     assert ef.permit["task-type"] == frozenset({"general", "loop"})
     assert d.permits({"task-type": "loop"})
-    assert not d.permits({"task-type": "cab"})
+    assert not d.permits({"task-type": "review"})
 
 
 def test_shorthand_repo_from_lane():

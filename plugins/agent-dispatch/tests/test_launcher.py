@@ -105,7 +105,7 @@ def _install_coordinator_task_body() -> str:
 
 def test_coordinator_task_runs_headless_via_s4u():
     """The coordinator task must use LogonType S4U so it runs on a headless box
-    with no interactive login (Borealis is SSH-only). Interactive registered but
+    with no interactive login (Emancipation-Cube is SSH-only). Interactive registered but
     never fired there."""
     body = _install_coordinator_task_body()
     assert "-LogonType S4U" in body, (

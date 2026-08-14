@@ -76,8 +76,8 @@ def machine_matches(target: str | None, machine: str | None) -> bool:
 
     Facility machine names (a machine's registry key / SSH alias) are lowercase
     by convention, but a caller may pass a display-cased variant (the worktree
-    picker scopes ``inbox`` by the ``machines.yaml`` display name ``Lambda-Core``
-    while a task's ``target_machine`` is stored as the identity ``lambda-core``).
+    picker scopes ``inbox`` by the ``machines.yaml`` display name ``Anomalous-Potato``
+    while a task's ``target_machine`` is stored as the identity ``anomalous-potato``).
     A case-sensitive comparison would then hide legitimately-targeted work. An
     unset ``target_machine`` (a machine-agnostic task) matches any caller.
     """
@@ -850,7 +850,7 @@ class TaskQueue:
         # ``repo:``). This is what ``requires`` (affinity) and ``excludes``
         # (anti-affinity) are matched against, so a selector can target or
         # exclude by machine/worktree/repo generically -- e.g. a task with
-        # ``excludes=['machine:lambda-core']`` is invisible to that machine.
+        # ``excludes=['machine:anomalous-potato']`` is invisible to that machine.
         full_caps = set(caps)
         if machine:
             full_caps.add(f"machine:{machine}")
