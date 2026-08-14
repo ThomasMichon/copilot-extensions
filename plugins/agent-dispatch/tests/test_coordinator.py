@@ -573,16 +573,16 @@ def test_satellite_deregister_absent(api):
 def test_directory_register_and_list(api):
     r = api.post(
         "/directory/register",
-        json={"instance": "wheatley", "role": "coordinator", "epoch": 3},
+        json={"instance": "mantis-counter", "role": "coordinator", "epoch": 3},
     )
     assert r.status_code == 200
     entry = r.json()
-    assert entry["instance"] == "wheatley"
+    assert entry["instance"] == "mantis-counter"
     assert entry["role"] == "coordinator"
     assert entry["epoch"] == 3
 
     listing = api.get("/directory").json()
-    assert [e["instance"] for e in listing] == ["wheatley"]
+    assert [e["instance"] for e in listing] == ["mantis-counter"]
 
 
 def test_directory_list_filters_by_role(api):

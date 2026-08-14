@@ -87,15 +87,15 @@ def test_validate_rejects_malformed(kind, spec, needle):
 
 
 def test_derive_id_is_deterministic_and_scope_sensitive():
-    a = derive_registration_id("supervised-lane", _lane(), "lambda-core", "default")
-    b = derive_registration_id("supervised-lane", _lane(), "lambda-core", "default")
+    a = derive_registration_id("supervised-lane", _lane(), "anomalous-potato", "default")
+    b = derive_registration_id("supervised-lane", _lane(), "anomalous-potato", "default")
     assert a == b  # deterministic -> re-register upserts
     assert a.startswith("supervised-lane-")
     # different scope (env / machine / spec) -> different id
-    assert a != derive_registration_id("supervised-lane", _lane(), "lambda-core", "prod")
-    assert a != derive_registration_id("supervised-lane", _lane(), "wheatley", "default")
+    assert a != derive_registration_id("supervised-lane", _lane(), "anomalous-potato", "prod")
+    assert a != derive_registration_id("supervised-lane", _lane(), "mantis-counter", "default")
     assert a != derive_registration_id(
-        "supervised-lane", _lane(labels=["x"]), "lambda-core", "default"
+        "supervised-lane", _lane(labels=["x"]), "anomalous-potato", "default"
     )
 
 
@@ -103,9 +103,9 @@ def test_derive_id_is_deterministic_and_scope_sensitive():
 
 
 def test_register_and_get_roundtrips(q):
-    rec = q.register_registration("supervised-lane", _lane(), machine="lambda-core")
+    rec = q.register_registration("supervised-lane", _lane(), machine="anomalous-potato")
     assert rec.kind == "supervised-lane"
-    assert rec.machine == "lambda-core"
+    assert rec.machine == "anomalous-potato"
     assert rec.env == "default"
     assert rec.status == RegistrationStatus.ACTIVE
     assert rec.spec["repo"] == TEST_REPO
@@ -223,7 +223,7 @@ def client(tmp_path):
 
 def test_http_register_list_status_remove(client):
     rec = client.register_registration(
-        "supervised-lane", {"repo": TEST_REPO}, reg_id="lane", machine="lambda-core"
+        "supervised-lane", {"repo": TEST_REPO}, reg_id="lane", machine="anomalous-potato"
     )
     assert rec["id"] == "lane"
     assert rec["status"] == "active"

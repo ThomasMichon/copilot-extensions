@@ -1270,7 +1270,7 @@ try {
 # serve logs via uvicorn to STDERR; under `$ErrorActionPreference = 'Stop'`
 # PowerShell wraps a native command's stderr as a terminating NativeCommandError
 # and would kill the long-lived coordinator on its very first log line (observed
-# on Lambda-Core: task launched, banner written, no listener). Drop to
+# on Anomalous-Potato: task launched, banner written, no listener). Drop to
 # 'Continue' for the serve invocation so stderr is captured, never fatal.
 `$ErrorActionPreference = 'Continue'
 try {
@@ -1312,7 +1312,7 @@ try {
         -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$launcher`""
     # Two triggers: -AtStartup makes the coordinator a true always-on service that
     # comes up at boot with NO interactive login (essential for a headless box
-    # like Borealis, accessed only over SSH); -AtLogOn additionally (re)starts it
+    # like Emancipation-Cube, accessed only over SSH); -AtLogOn additionally (re)starts it
     # when the operator logs in (covers a manually-stopped task on a
     # console-driven box). The dev58 bounded bind-host retry
     # (_resolve_bind_host_resilient) rides out the boot-before-WSL race on NAT,
@@ -1330,8 +1330,8 @@ try {
     # password): the coordinator must run headless. The prior Interactive logon
     # type only ran while the user had an interactive console session, so on a
     # headless SSH-only box the task registered but never fired (observed on
-    # Borealis: State=Ready, LastRunTime=never). S4U runs it in a non-interactive
-    # session at boot; validated binding the vEthernet(WSL) IP on Borealis NAT and
+    # Emancipation-Cube: State=Ready, LastRunTime=never). S4U runs it in a non-interactive
+    # session at boot; validated binding the vEthernet(WSL) IP on Emancipation-Cube NAT and
     # loopback on mirrored hosts. Set-ScheduledTask/Register with S4U succeeds
     # non-elevated (unlike a password-backed Password logon). NOTE: the supervisor
     # task below deliberately stays Interactive -- it spawns embody CLI sessions
@@ -1574,7 +1574,7 @@ AGENT_DISPATCH_SUPERVISE_HEADLESS_LABELS=
 # agent-bridge agent name used for headless embody bodies (default: task-worker):
 AGENT_DISPATCH_SUPERVISE_HEADLESS_AGENT=
 # Extra raw flags appended to the invocation (advanced; e.g. fleet mode:
-#   --pool host-a,host-b --origin lambda-core):
+#   --pool host-a,host-b --origin anomalous-potato):
 AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=
 "@
         [System.IO.File]::WriteAllText($envFile, $envDefault, $utf8NoBom)

@@ -206,7 +206,7 @@ def test_parser_claimant():
 def test_split_owner():
     from agent_dispatch.__main__ import _split_owner
 
-    assert _split_owner("lambda-core/wt-abc") == ("lambda-core", "wt-abc")
+    assert _split_owner("anomalous-potato/wt-abc") == ("anomalous-potato", "wt-abc")
     assert _split_owner(None) == (None, None)
     assert _split_owner("") == (None, None)
     # No slash -> treat the whole value as the machine, worktree unknown.
@@ -228,7 +228,7 @@ def test_claimant_reports_owner_when_claimed(monkeypatch):
         def get(self, task_id):
             return {
                 "id": task_id, "status": "started",
-                "owner": "lambda-core/wt-abc",
+                "owner": "anomalous-potato/wt-abc",
                 "owner_session_id": "sess-9", "repo": "r",
                 "target_worktree": "wt-pin", "target_machine": "m2",
             }
@@ -244,8 +244,8 @@ def test_claimant_reports_owner_when_claimed(monkeypatch):
     assert rc == 0
     out = json.loads(buf.getvalue())
     assert out["claimed"] is True
-    assert out["machine"] == "lambda-core" and out["worktree"] == "wt-abc"
-    assert out["worker_id"] == "lambda-core/wt-abc"
+    assert out["machine"] == "anomalous-potato" and out["worktree"] == "wt-abc"
+    assert out["worker_id"] == "anomalous-potato/wt-abc"
     assert out["resolved_from"] == "owner"
     assert out["owner_session_id"] == "sess-9"
 
@@ -430,7 +430,7 @@ def test_yield_exclude_self_appends_scoped_exclusion(monkeypatch):
             return None
 
     monkeypatch.setattr(__main__, "_client", lambda args: _C())
-    monkeypatch.setattr(identity, "resolve_identity", lambda: ("lambda-core", "wt-7"))
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("anomalous-potato", "wt-7"))
 
     args = build_parser().parse_args(["yield", "t1", "--exclude-self", "worktree"])
     args.func(args)
@@ -495,14 +495,14 @@ def test_progress_resolves_owner_from_identity(monkeypatch):
             return None
 
     monkeypatch.setattr(__main__, "_client", lambda args: _C())
-    monkeypatch.setattr(identity, "resolve_identity", lambda: ("lambda-core", "wt-7"))
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("anomalous-potato", "wt-7"))
 
     args = build_parser().parse_args(
         ["progress", "T5", "--phase", "impl", "--summary", "wired it", "--pr", "pr/1"]
     )
     assert args.func(args) == 0
     assert seen == {
-        "task_id": "T5", "worker_id": "lambda-core/wt-7", "phase": "impl",
+        "task_id": "T5", "worker_id": "anomalous-potato/wt-7", "phase": "impl",
         "summary": "wired it", "blocker": None, "pr": "pr/1",
     }
 
@@ -526,11 +526,11 @@ def test_start_resolves_owner_from_identity(monkeypatch):
             return None
 
     monkeypatch.setattr(__main__, "_client", lambda args: _C())
-    monkeypatch.setattr(identity, "resolve_identity", lambda: ("lambda-core", "wt-7"))
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("anomalous-potato", "wt-7"))
 
     args = build_parser().parse_args(["start", "T5"])
     assert args.func(args) == 0
-    assert seen == {"task_id": "T5", "owner": "lambda-core/wt-7"}
+    assert seen == {"task_id": "T5", "owner": "anomalous-potato/wt-7"}
 
 
 def test_yield_resolves_owner_from_identity(monkeypatch):
@@ -554,12 +554,12 @@ def test_yield_resolves_owner_from_identity(monkeypatch):
             return None
 
     monkeypatch.setattr(__main__, "_client", lambda args: _C())
-    monkeypatch.setattr(identity, "resolve_identity", lambda: ("lambda-core", "wt-7"))
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("anomalous-potato", "wt-7"))
 
     args = build_parser().parse_args(["yield", "T5", "--note", "blocked"])
     assert args.func(args) == 0
     assert seen == {
-        "task_id": "T5", "owner": "lambda-core/wt-7", "note": "blocked", "exclude": None,
+        "task_id": "T5", "owner": "anomalous-potato/wt-7", "note": "blocked", "exclude": None,
     }
 
 
@@ -646,11 +646,11 @@ def test_complete_resolves_owner_from_identity(monkeypatch, capsys):
             return None
 
     monkeypatch.setattr(__main__, "_client", lambda args: _C())
-    monkeypatch.setattr(identity, "resolve_identity", lambda: ("lambda-core", "wt-7"))
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("anomalous-potato", "wt-7"))
 
     args = build_parser().parse_args(["complete", "T5"])
     assert args.func(args) == 0
-    assert completed == {"task_id": "T5", "worker_id": "lambda-core/wt-7"}
+    assert completed == {"task_id": "T5", "worker_id": "anomalous-potato/wt-7"}
 
 
 def test_claim_positional_is_the_task(monkeypatch, capsys):
@@ -851,8 +851,8 @@ def test_consume_completed_non_handoff_still_prints_payload(monkeypatch, capsys)
     assert fake.transitions == ["payload"]
     a = build_parser().parse_args(["focus", "working on X"])
     assert a.focus_text == "working on X" and a.list is False
-    b = build_parser().parse_args(["focus", "--list", "--machine", "borealis"])
-    assert b.list is True and b.machine == "borealis" and b.focus_text is None
+    b = build_parser().parse_args(["focus", "--list", "--machine", "emancipation-cube"])
+    assert b.list is True and b.machine == "emancipation-cube" and b.focus_text is None
 
 
 def test_focus_writes_through_status_core(monkeypatch):
@@ -867,7 +867,7 @@ def test_focus_writes_through_status_core(monkeypatch):
         return True
 
     monkeypatch.setattr(identity, "aw_set_summary", _set_summary)
-    monkeypatch.setattr(identity, "resolve_identity", lambda: ("lambda-core", "wt-7"))
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("anomalous-potato", "wt-7"))
     args = build_parser().parse_args(["focus", "driving Phase 8"])
     assert args.func(args) == 0
     assert seen["summary"] == "driving Phase 8"
@@ -879,9 +879,9 @@ def test_focus_list_derives_from_records(monkeypatch, capsys):
     from agent_dispatch import identity
 
     monkeypatch.setattr(identity, "aw_list_records", lambda machine=None: [
-        {"machine": "lambda-core", "id": "wt-7", "summary": "Phase 8",
+        {"machine": "anomalous-potato", "id": "wt-7", "summary": "Phase 8",
          "status_note_at": "2026-07-15T10:00:00"},
-        {"machine": "lambda-core", "id": "wt-8", "summary": ""},
+        {"machine": "anomalous-potato", "id": "wt-8", "summary": ""},
     ])
     args = build_parser().parse_args(["focus", "--list"])
     assert args.func(args) == 0
@@ -893,7 +893,7 @@ def test_focus_list_derives_from_records(monkeypatch, capsys):
 def test_focus_write_through_failure_errors(monkeypatch, capsys):
     from agent_dispatch import identity
 
-    monkeypatch.setattr(identity, "resolve_identity", lambda: ("lambda-core", "wt-7"))
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("anomalous-potato", "wt-7"))
     monkeypatch.setattr(identity, "aw_set_summary", lambda _s: False)
     args = build_parser().parse_args(["focus", "x"])
     assert args.func(args) == 2
@@ -913,9 +913,9 @@ def test_focus_without_identity_errors(monkeypatch, capsys):
 
 
 def test_parser_list_machine_flag():
-    args = build_parser().parse_args(["list", "--machine", "borealis"])
+    args = build_parser().parse_args(["list", "--machine", "emancipation-cube"])
     assert args.command == "list"
-    assert args.machine == "borealis"
+    assert args.machine == "emancipation-cube"
 
 
 def test_list_peer_browse_delegates_over_ssh(monkeypatch, capsys):
@@ -924,7 +924,7 @@ def test_list_peer_browse_delegates_over_ssh(monkeypatch, capsys):
     from agent_dispatch import __main__, remote_dispatch
 
     monkeypatch.setattr(__main__, "_scope_repo", lambda args: "gitea/lane")
-    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "lambda-core")
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "anomalous-potato")
 
     captured = {}
 
@@ -940,10 +940,10 @@ def test_list_peer_browse_delegates_over_ssh(monkeypatch, capsys):
         lambda args: (_ for _ in ()).throw(AssertionError("local client used for peer browse")),
     )
 
-    args = build_parser().parse_args(["list", "--machine", "borealis", "--status", "started"])
+    args = build_parser().parse_args(["list", "--machine", "emancipation-cube", "--status", "started"])
     rc = args.func(args)
     assert rc == 0
-    assert captured["machine"] == "borealis"
+    assert captured["machine"] == "emancipation-cube"
     assert captured["argv"][:2] == ["agent-dispatch", "list"]
     assert "--repo" in captured["argv"]  # locally-resolved lane forwarded
     assert "--machine" not in captured["argv"]  # list drops it (old-peer compatible)
@@ -955,7 +955,7 @@ def test_inbox_peer_browse_delegates_over_ssh(monkeypatch, capsys):
 
     from agent_dispatch import __main__, remote_dispatch
 
-    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "lambda-core")
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "anomalous-potato")
 
     captured = {}
 
@@ -970,25 +970,25 @@ def test_inbox_peer_browse_delegates_over_ssh(monkeypatch, capsys):
         lambda args: (_ for _ in ()).throw(AssertionError("local client used for peer browse")),
     )
 
-    args = build_parser().parse_args(["inbox", "--machine", "borealis"])
+    args = build_parser().parse_args(["inbox", "--machine", "emancipation-cube"])
     rc = args.func(args)
     assert rc == 0
-    assert captured["machine"] == "borealis"
+    assert captured["machine"] == "emancipation-cube"
     assert captured["argv"][:2] == ["agent-dispatch", "inbox"]
-    assert captured["argv"][captured["argv"].index("--machine") + 1] == "borealis"
+    assert captured["argv"][captured["argv"].index("--machine") + 1] == "emancipation-cube"
 
 
 def test_peer_browse_degrades_when_ssh_unavailable(monkeypatch, capsys):
     from agent_dispatch import remote_dispatch
 
-    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "lambda-core")
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "anomalous-potato")
 
     def fake_browse(machine, argv, **kw):
         raise remote_dispatch.RemoteDispatchUnavailable("ssh not found on PATH")
 
     monkeypatch.setattr(remote_dispatch, "browse_remote", fake_browse)
 
-    args = build_parser().parse_args(["inbox", "--machine", "borealis"])
+    args = build_parser().parse_args(["inbox", "--machine", "emancipation-cube"])
     assert args.func(args) == 2
     assert "unavailable" in capsys.readouterr().err
 
@@ -998,7 +998,7 @@ def test_peer_browse_surfaces_actionable_diagnosis_on_127(monkeypatch, capsys):
 
     from agent_dispatch import remote_dispatch
 
-    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "lambda-core")
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "anomalous-potato")
 
     def fake_browse(machine, argv, **kw):
         return types.SimpleNamespace(
@@ -1007,11 +1007,11 @@ def test_peer_browse_surfaces_actionable_diagnosis_on_127(monkeypatch, capsys):
 
     monkeypatch.setattr(remote_dispatch, "browse_remote", fake_browse)
 
-    args = build_parser().parse_args(["inbox", "--machine", "wheatley"])
+    args = build_parser().parse_args(["inbox", "--machine", "mantis-counter"])
     rc = args.func(args)
     assert rc == 127
     err = capsys.readouterr().err
-    assert "wheatley" in err
+    assert "mantis-counter" in err
     assert "not installed" in err
     # The raw remote line is not dumped verbatim.
     assert "command not found" not in err

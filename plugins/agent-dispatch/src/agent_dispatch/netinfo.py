@@ -50,7 +50,7 @@ def is_wsl() -> bool:
     """True on a WSL guest (a Linux env hosted by a Windows box).
 
     A WSL guest installs **client-only** and resolves the Windows coordinator; a
-    standalone Linux host (e.g. Wheatley) installs the **full** coordinator.
+    standalone Linux host (e.g. Mantis-Counter) installs the **full** coordinator.
     Detected via ``WSL_DISTRO_NAME`` or ``microsoft`` in the kernel osrelease /
     ``/proc/version`` (case-insensitive). Only meaningful on Linux -- Windows and
     macOS return False.

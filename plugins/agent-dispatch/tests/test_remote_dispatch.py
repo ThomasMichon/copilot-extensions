@@ -11,7 +11,7 @@ from agent_dispatch import remote_dispatch
 def _args(**kw) -> argparse.Namespace:
     base = dict(
         title="do X", prompt="", spawn=True, proposed=False,
-        spawn_backend="embody", target_machine="borealis",
+        spawn_backend="embody", target_machine="emancipation-cube",
         label=None, require=None, affinity=None, target_repo=None,
         target_worktree=None, source=None, dedup_key=None, verify_timeout=0,
     )
@@ -20,27 +20,27 @@ def _args(**kw) -> argparse.Namespace:
 
 
 def test_is_cross_machine_true_for_remote_embody(monkeypatch):
-    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "lambda-core")
-    assert remote_dispatch.is_cross_machine(_args(target_machine="borealis")) is True
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "anomalous-potato")
+    assert remote_dispatch.is_cross_machine(_args(target_machine="emancipation-cube")) is True
 
 
 def test_is_cross_machine_false_for_local_target(monkeypatch):
-    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "borealis")
-    assert remote_dispatch.is_cross_machine(_args(target_machine="borealis")) is False
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "emancipation-cube")
+    assert remote_dispatch.is_cross_machine(_args(target_machine="emancipation-cube")) is False
 
 
 def test_is_cross_machine_false_without_target(monkeypatch):
-    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "lambda-core")
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "anomalous-potato")
     assert remote_dispatch.is_cross_machine(_args(target_machine=None)) is False
 
 
 def test_is_cross_machine_false_for_bridge_backend(monkeypatch):
-    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "lambda-core")
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "anomalous-potato")
     assert remote_dispatch.is_cross_machine(_args(spawn_backend="bridge")) is False
 
 
 def test_is_cross_machine_false_when_not_spawning(monkeypatch):
-    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "lambda-core")
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "anomalous-potato")
     assert remote_dispatch.is_cross_machine(_args(spawn=False)) is False
 
 
@@ -52,9 +52,9 @@ def test_is_cross_machine_false_when_local_unresolvable(monkeypatch):
 def test_is_cross_machine_case_insensitive_local_target(monkeypatch):
     # A display-cased target that names *this* machine must read as local, not a
     # remote peer (else we'd SSH to ourselves).
-    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "lambda-core")
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "anomalous-potato")
     assert remote_dispatch.is_cross_machine(
-        _args(target_machine="Lambda-Core")
+        _args(target_machine="Anomalous-Potato")
     ) is False
 
 
@@ -94,11 +94,11 @@ def test_dispatch_to_remote_builds_ssh_command(monkeypatch):
     monkeypatch.setattr(remote_dispatch.subprocess, "run", fake_run)
 
     remote_dispatch.dispatch_to_remote(
-        "borealis", _args(prompt="go"), repo="gitea/x", payload="the brief"
+        "emancipation-cube", _args(prompt="go"), repo="gitea/x", payload="the brief"
     )
     cmd = captured["cmd"]
     assert cmd[0] == "/usr/bin/ssh"
-    assert "borealis" in cmd  # the facility alias, never a raw IP
+    assert "emancipation-cube" in cmd  # the facility alias, never a raw IP
     assert "BatchMode=yes" in cmd
     # the remote command is a single shell-quoted string
     remote_cmd = cmd[-1]
@@ -114,7 +114,7 @@ def test_dispatch_to_remote_unavailable_without_ssh(monkeypatch):
 
     with pytest.raises(remote_dispatch.RemoteDispatchUnavailable):
         remote_dispatch.dispatch_to_remote(
-            "borealis", _args(), repo="r", payload=None
+            "emancipation-cube", _args(), repo="r", payload=None
         )
 
 
@@ -123,7 +123,7 @@ def test_dispatch_to_remote_unavailable_without_ssh(monkeypatch):
 
 def _browse_args(**kw) -> argparse.Namespace:
     base = dict(
-        machine="borealis", status=None, label=None, limit=200,
+        machine="emancipation-cube", status=None, label=None, limit=200,
         repo=None, target_machine=None, target_repo=None,
     )
     base.update(kw)
@@ -131,39 +131,39 @@ def _browse_args(**kw) -> argparse.Namespace:
 
 
 def test_is_peer_machine_true_for_remote(monkeypatch):
-    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "lambda-core")
-    assert remote_dispatch.is_peer_machine("borealis") is True
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "anomalous-potato")
+    assert remote_dispatch.is_peer_machine("emancipation-cube") is True
 
 
 def test_is_peer_machine_false_for_local_and_unset(monkeypatch):
-    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "borealis")
-    assert remote_dispatch.is_peer_machine("borealis") is False
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "emancipation-cube")
+    assert remote_dispatch.is_peer_machine("emancipation-cube") is False
     assert remote_dispatch.is_peer_machine(None) is False
 
 
 def test_is_peer_machine_false_when_local_unresolvable(monkeypatch):
     # Can't prove it's remote -> stay local (safe degrade).
     monkeypatch.setattr(remote_dispatch, "local_machine", lambda: None)
-    assert remote_dispatch.is_peer_machine("borealis") is False
+    assert remote_dispatch.is_peer_machine("emancipation-cube") is False
 
 
 def test_is_peer_machine_case_insensitive_local(monkeypatch):
-    # The picker passes the machines.yaml display_name ("Lambda-Core") while the
-    # resolved identity is the registry key ("lambda-core"); a display-cased name
+    # The picker passes the machines.yaml display_name ("Anomalous-Potato") while the
+    # resolved identity is the registry key ("anomalous-potato"); a display-cased name
     # for *this* machine must not be treated as a peer (no self-SSH).
-    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "lambda-core")
-    assert remote_dispatch.is_peer_machine("Lambda-Core") is False
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "anomalous-potato")
+    assert remote_dispatch.is_peer_machine("Anomalous-Potato") is False
 
 
 def test_is_peer_machine_case_insensitive_remote_still_peer(monkeypatch):
     # A display-cased name for a *different* machine is still a peer.
-    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "lambda-core")
-    assert remote_dispatch.is_peer_machine("Borealis") is True
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "anomalous-potato")
+    assert remote_dispatch.is_peer_machine("Emancipation-Cube") is True
 
 
 def test_build_remote_browse_argv_list_forwards_filters_drops_machine():
     args = _browse_args(status="queued,started", label="bug", limit=50,
-                        target_machine="borealis", target_repo="x")
+                        target_machine="emancipation-cube", target_repo="x")
     argv = remote_dispatch.build_remote_browse_argv("list", args, repo="gitea/lane")
     assert argv[:2] == ["agent-dispatch", "list"]
     # list needs no machine identity (scopes by --repo); dropping --machine keeps
@@ -173,7 +173,7 @@ def test_build_remote_browse_argv_list_forwards_filters_drops_machine():
     assert argv[argv.index("--label") + 1] == "bug"
     assert argv[argv.index("--limit") + 1] == "50"
     assert argv[argv.index("--repo") + 1] == "gitea/lane"  # locally-resolved lane
-    assert argv[argv.index("--target-machine") + 1] == "borealis"
+    assert argv[argv.index("--target-machine") + 1] == "emancipation-cube"
     assert argv[argv.index("--target-repo") + 1] == "x"
 
 
@@ -181,7 +181,7 @@ def test_build_remote_browse_argv_inbox_minimal():
     args = _browse_args(status="proposed", label=None, limit=200)
     argv = remote_dispatch.build_remote_browse_argv("inbox", args)
     assert argv[:2] == ["agent-dispatch", "inbox"]
-    assert argv[argv.index("--machine") + 1] == "borealis"  # peer identity forwarded
+    assert argv[argv.index("--machine") + 1] == "emancipation-cube"  # peer identity forwarded
     assert "--repo" not in argv  # inbox is cross-lane; no repo forwarded
     assert argv[argv.index("--status") + 1] == "proposed"
 
@@ -196,10 +196,10 @@ def test_browse_remote_builds_ssh_command(monkeypatch):
     monkeypatch.setattr(remote_dispatch.shutil, "which", lambda _n: "/usr/bin/ssh")
     monkeypatch.setattr(remote_dispatch.subprocess, "run", fake_run)
 
-    out = remote_dispatch.browse_remote("borealis", ["agent-dispatch", "list"])
+    out = remote_dispatch.browse_remote("emancipation-cube", ["agent-dispatch", "list"])
     cmd = captured["cmd"]
     assert cmd[0] == "/usr/bin/ssh"
-    assert "borealis" in cmd
+    assert "emancipation-cube" in cmd
     assert "BatchMode=yes" in cmd
     assert "ConnectTimeout=5" in cmd
     assert cmd[-1] == "agent-dispatch list"
@@ -211,12 +211,12 @@ def test_browse_remote_unavailable_without_ssh(monkeypatch):
 
     monkeypatch.setattr(remote_dispatch.shutil, "which", lambda _n: None)
     with pytest.raises(remote_dispatch.RemoteDispatchUnavailable):
-        remote_dispatch.browse_remote("borealis", ["agent-dispatch", "inbox"])
+        remote_dispatch.browse_remote("emancipation-cube", ["agent-dispatch", "inbox"])
 
 
 def test_browse_remote_lowercases_display_cased_alias(monkeypatch):
-    # A display-cased peer name ("Borealis") must connect via its lowercase
-    # `Host borealis` block, not a literal "Borealis" hostname.
+    # A display-cased peer name ("Emancipation-Cube") must connect via its lowercase
+    # `Host emancipation-cube` block, not a literal "Emancipation-Cube" hostname.
     captured = {}
 
     def fake_run(cmd, **kwargs):
@@ -226,10 +226,10 @@ def test_browse_remote_lowercases_display_cased_alias(monkeypatch):
     monkeypatch.setattr(remote_dispatch.shutil, "which", lambda _n: "/usr/bin/ssh")
     monkeypatch.setattr(remote_dispatch.subprocess, "run", fake_run)
 
-    remote_dispatch.browse_remote("Borealis", ["agent-dispatch", "list"])
+    remote_dispatch.browse_remote("Emancipation-Cube", ["agent-dispatch", "list"])
     cmd = captured["cmd"]
-    assert "borealis" in cmd
-    assert "Borealis" not in cmd
+    assert "emancipation-cube" in cmd
+    assert "Emancipation-Cube" not in cmd
 
 
 def test_dispatch_to_remote_lowercases_display_cased_alias(monkeypatch):
@@ -243,11 +243,11 @@ def test_dispatch_to_remote_lowercases_display_cased_alias(monkeypatch):
     monkeypatch.setattr(remote_dispatch.subprocess, "run", fake_run)
 
     remote_dispatch.dispatch_to_remote(
-        "Borealis", _args(prompt="go"), repo="gitea/x", payload="brief"
+        "Emancipation-Cube", _args(prompt="go"), repo="gitea/x", payload="brief"
     )
     cmd = captured["cmd"]
-    assert "borealis" in cmd
-    assert "Borealis" not in cmd
+    assert "emancipation-cube" in cmd
+    assert "Emancipation-Cube" not in cmd
 
 
 # -- Actionable degradation for failed remote invocations (issue #2735) -------
@@ -255,9 +255,9 @@ def test_dispatch_to_remote_lowercases_display_cased_alias(monkeypatch):
 
 def test_diagnose_remote_failure_not_installed_127():
     msg = remote_dispatch.diagnose_remote_failure(
-        "wheatley", 127, "bash: agent-dispatch: command not found\n"
+        "mantis-counter", 127, "bash: agent-dispatch: command not found\n"
     )
-    assert "wheatley" in msg
+    assert "mantis-counter" in msg
     assert "not installed" in msg
     assert "PATH" in msg
 
@@ -268,8 +268,8 @@ def test_diagnose_remote_failure_coordinator_unreachable():
         "httpx.ConnectError: [WinError 10061] No connection could be made "
         "because the target machine actively refused it\n"
     )
-    msg = remote_dispatch.diagnose_remote_failure("borealis", 1, stderr)
-    assert "borealis" in msg
+    msg = remote_dispatch.diagnose_remote_failure("emancipation-cube", 1, stderr)
+    assert "emancipation-cube" in msg
     assert "coordinator" in msg
     assert "running" in msg
     # The raw traceback is not echoed.
@@ -278,13 +278,13 @@ def test_diagnose_remote_failure_coordinator_unreachable():
 
 def test_diagnose_remote_failure_generic_tail():
     msg = remote_dispatch.diagnose_remote_failure(
-        "borealis", 3, "line one\nsomething specific went wrong\n"
+        "emancipation-cube", 3, "line one\nsomething specific went wrong\n"
     )
     assert "exit 3" in msg
     assert "something specific went wrong" in msg  # last non-empty line
 
 
 def test_diagnose_remote_failure_no_stderr():
-    msg = remote_dispatch.diagnose_remote_failure("borealis", 2, "")
-    assert "borealis" in msg
+    msg = remote_dispatch.diagnose_remote_failure("emancipation-cube", 2, "")
+    assert "emancipation-cube" in msg
     assert "exit 2" in msg

@@ -335,7 +335,7 @@ By default a fleet body is a **CLI/mux embody** on the pool host
 (`agent-worktrees embody`). But a seeded CLI session can *race the input caret and
 never deliver its startup seed* (the documented "Loading…" hang,
 github/copilot-agent-runtime#13492) — so a kicked fleet body may never claim its
-task, exactly the failure the boards hit on lambda-core-wsl. `--headless`
+task, exactly the failure headless sweeps hit on anomalous-potato-wsl. `--headless`
 (fleet-wide) instead embodies each fleet body as a **headless agent-bridge ACP
 session** on the pool host — `ssh <host> agent-bridge create <agent> "<fleet
 seed>" --no-wait` (`fleet.py` → `embody.spawn_fleet_headless_worker`) — spawning
@@ -456,7 +456,7 @@ AGENT_DISPATCH_SUPERVISE_INTERVAL=30
 AGENT_DISPATCH_SUPERVISE_MAX_CONCURRENT=1
 AGENT_DISPATCH_SUPERVISE_MAX_ATTEMPTS=3
 AGENT_DISPATCH_SUPERVISE_HEADLESS_AGENT=review-worker
-AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=--pool lambda-core-wsl --origin wheatley --headless
+AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=--pool anomalous-potato-wsl --origin mantis-counter --headless
 ```
 
 ## Genericity

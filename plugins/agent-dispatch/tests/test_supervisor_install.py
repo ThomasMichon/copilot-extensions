@@ -285,7 +285,7 @@ class TestWindowsSupervisorInstall:
         Regression: the generated launchers set ``$ErrorActionPreference = 'Stop'``
         and wrote a banner to a fixed ``serve-service.log`` / ``supervise-service.log``
         with ``Out-File``. When another process held that log (observed on
-        Lambda-Core), the banner write threw and killed the launch before the
+        Anomalous-Potato), the banner write threw and killed the launch before the
         coordinator/supervisor ever started. Both launchers must instead resolve a
         WRITABLE log -- the canonical file, else a version+pid-aware fallback -- and
         never let a banner-write failure be fatal.

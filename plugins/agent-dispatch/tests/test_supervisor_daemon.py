@@ -130,7 +130,7 @@ def _reg(rid, **over) -> dict:
         "id": rid,
         "kind": "supervised-lane",
         "spec": {"repo": TEST_REPO, "max_concurrent": 1, "max_attempts": 3},
-        "machine": "lambda-core",
+        "machine": "anomalous-potato",
         "env": "default",
         "status": "active",
     }
@@ -140,7 +140,7 @@ def _reg(rid, **over) -> dict:
 
 def _daemon(client, launcher, **kw):
     return SupervisorDaemon(
-        client, "lambda-core", "default",
+        client, "anomalous-potato", "default",
         launcher=launcher, sleep=lambda _s: None, **kw,
     )
 
@@ -229,8 +229,8 @@ def test_build_command_rejects_unsupported_kind():
 
 
 def test_lease_scope_format():
-    assert supervisor_lease_scope("lambda-core", "default") == \
-        "supervisor:lambda-core:default"
+    assert supervisor_lease_scope("anomalous-potato", "default") == \
+        "supervisor:anomalous-potato:default"
     assert supervisor_lease_scope(None, "") == "supervisor:local:default"
 
 

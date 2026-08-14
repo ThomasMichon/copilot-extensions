@@ -315,7 +315,7 @@ def test_parse_fleet_body_session_reads_session_id():
     import subprocess
     # the real `create --json` output has human preamble before the JSON object
     real = (
-        "[>] Starting session for agent 'lambda-core-wsl'...\n"
+        "[>] Starting session for agent 'anomalous-potato-wsl'...\n"
         "[>] Session f0c4c81e-351 (bold-flame) created\n"
         '{\n  "session_id": "f0c4c81e-351",\n  "status": "running"\n}\n'
     )
@@ -379,13 +379,13 @@ def test_headless_call_encodes_fleet_body_recovery_handle():
         )
 
     f = fleet.FleetSpawner(
-        ["lambda-core-wsl"], origin="orig", headless=True, agent="review-worker",
+        ["anomalous-potato-wsl"], origin="orig", headless=True, agent="review-worker",
         liveness=lambda h: True, spawn_fn=spawn,
     )
     ok, handle = f({"id": "t1"})
     assert ok is True
     assert handle["worktree"] is None
-    assert handle["session"] == "fleet-body:lambda-core-wsl:brg-77"
+    assert handle["session"] == "fleet-body:anomalous-potato-wsl:brg-77"
 
 
 def test_headless_call_without_session_id_falls_back_to_owner():

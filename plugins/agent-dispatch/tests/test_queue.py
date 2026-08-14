@@ -424,29 +424,29 @@ def test_claim_gated_by_target_machine(q):
 
 def test_machine_matches_case_insensitive():
     # Unset target -> machine-agnostic, matches anyone (including no machine).
-    assert machine_matches(None, "lambda-core") is True
+    assert machine_matches(None, "anomalous-potato") is True
     assert machine_matches(None, None) is True
     # Same name in different case still matches (display_name vs identity).
-    assert machine_matches("lambda-core", "Lambda-Core") is True
-    assert machine_matches("Lambda-Core", "lambda-core") is True
+    assert machine_matches("anomalous-potato", "Anomalous-Potato") is True
+    assert machine_matches("Anomalous-Potato", "anomalous-potato") is True
     # Genuinely different machines don't match; a set target needs a machine.
-    assert machine_matches("borealis", "lambda-core") is False
-    assert machine_matches("lambda-core", None) is False
+    assert machine_matches("emancipation-cube", "anomalous-potato") is False
+    assert machine_matches("anomalous-potato", None) is False
 
 
 def test_claim_gated_by_target_machine_case_insensitive(q):
     # A task stored with a display-cased target_machine is still claimable by the
     # agent whose (canonical, lowercase) identity names the same machine.
-    q.create("cased", target_machine="Lambda-Core")
-    got = q.claim_one("a", machine="lambda-core", worktree="w")
-    assert got is not None and got.target_machine == "Lambda-Core"
+    q.create("cased", target_machine="Anomalous-Potato")
+    got = q.claim_one("a", machine="anomalous-potato", worktree="w")
+    assert got is not None and got.target_machine == "Anomalous-Potato"
 
 
 def test_list_target_machine_filter_case_insensitive(q):
-    q.create("t", target_machine="lambda-core")
-    assert len(q.list(target_machine="Lambda-Core")) == 1
-    assert len(q.list(target_machine="lambda-core")) == 1
-    assert len(q.list(target_machine="borealis")) == 0
+    q.create("t", target_machine="anomalous-potato")
+    assert len(q.list(target_machine="Anomalous-Potato")) == 1
+    assert len(q.list(target_machine="anomalous-potato")) == 1
+    assert len(q.list(target_machine="emancipation-cube")) == 0
 
 
 def test_claim_gated_by_target_worktree(q):
@@ -498,8 +498,8 @@ def test_mine_returns_assigned_and_owned(q):
 def test_mine_matches_machine_wide_assignment_case_insensitively(q):
     # A machine-wide assignment stored display-cased is still "mine" when my
     # identity names the same machine in canonical (lowercase) form.
-    machine_wide = q.create("for-machine", target_machine="Lambda-Core")
-    inbox = q.mine("lambda-core", "wt-1")
+    machine_wide = q.create("for-machine", target_machine="Anomalous-Potato")
+    inbox = q.mine("anomalous-potato", "wt-1")
     assert machine_wide.id in {t.id for t in inbox["assigned"]}
 
 

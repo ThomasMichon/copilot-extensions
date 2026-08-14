@@ -116,8 +116,8 @@ def test_discover_coordinator_picks_highest_epoch(rv):
 
 def test_register_carries_epoch_and_distinct_machine(rv):
     entry = rv.register(
-        "wheatley/wt-boards", role="coordinator", epoch=4, machine="wheatley"
+        "mantis-counter/wt-sweep", role="coordinator", epoch=4, machine="mantis-counter"
     )
     assert entry["epoch"] == 4
-    assert entry["machine"] == "wheatley"
-    assert entry["instance"] == "wheatley/wt-boards"
+    assert entry["machine"] == "mantis-counter"
+    assert entry["instance"] == "mantis-counter/wt-sweep"
