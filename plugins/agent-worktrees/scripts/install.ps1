@@ -31,7 +31,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('install', 'uninstall', 'start', 'stop', 'status', 'update-config', 'update', 'refresh-profiles')]
+    [ValidateSet('install', 'uninstall', 'start', 'stop', 'status', 'update-config', 'update', 'refresh-profiles', 'stamp', 'provision')]
     [string]$Action = 'status',
 
     [string]$ProjectName,
@@ -2728,7 +2728,58 @@ function Reconcile-Binstubs {
 
 # -- Actions --------------------------------------------------------------
 
+function Invoke-Stamp {
+    # Fast base install (#1393, snapshot slot model): copy the payload SOURCE into
+    # ~/.agent-worktrees/snapshots/<ver>/, record markers, and deploy ONLY the
+    # self-provisioning GLOBAL `agent-worktrees` tool binstub -- deferring the venv
+    # build (and the full launcher install: wrappers, hooks, guards, terminal,
+    # copilot plugin, per-project binstubs) to a LEAN `provision` on first use. No
+    # venv, no uv; never holds the marketplace payload open (copies from the
+    # already self-staged $PluginDir). Mirrors the POSIX install.sh `stamp`.
+    Write-ServiceHeader "$ServiceName stamp (defer runtime to first use)"
+    if (-not $SrcVersion) { Write-ServiceErr 'Cannot stamp: no version in pyproject.toml'; exit 1 }
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    foreach ($dir in @($InstallDir, $LocalBin)) { Ensure-InstallDir $dir }
+    $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
+    $snapTmp = "$snapDir.tmp-$PID"
+    if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
+    New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
+    $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+    Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+    }
+    if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
+    Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
+    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), "$snapDir", $utf8NoBom)
+    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
+    Write-ServiceOk "Snapshot: $snapDir"
+    Deploy-GlobalBinstub
+    Write-ServiceOk 'Stamped: agent-worktrees tool binstub on PATH; runtime provisions on first use.'
+}
+
 switch ($Action) {
+    'stamp' {
+        Invoke-Stamp
+    }
+    'provision' {
+        # Lean runtime build (#1393): venv + package + activate + the global tool
+        # binstub + manifest. Deliberately NOT the wrappers/hooks/guards/terminal/
+        # copilot-plugin/per-project binstubs -- those belong to the full launcher
+        # `install`. Invoked by the self-provisioning binstub on first use. Mirrors
+        # the POSIX install.sh `provision`.
+        Write-ServiceHeader "Provisioning $ServiceName runtime (lean; tools only, no launcher/hooks)"
+        $provMissing = @()
+        try { git --version 2>&1 | Out-Null } catch { $provMissing += 'git' }
+        try { uv --version 2>&1 | Out-Null } catch { $provMissing += 'uv' }
+        if ($provMissing.Count -gt 0) { Write-ServiceErr "Missing prerequisites: $($provMissing -join ', ')"; exit 1 }
+        foreach ($dir in @($InstallDir, $LocalBin)) { Ensure-InstallDir $dir }
+        if (-not (Deploy-Venv)) { exit 1 }
+        if (-not (Deploy-Package)) { exit 1 }
+        if (-not (Invoke-VersionedActivate)) { exit 1 }
+        Deploy-GlobalBinstub
+        Write-V3Manifest
+        Write-ServiceOk "Runtime provisioned (marker -> versions/$SrcVersion); agent-worktrees tools ready."
+    }
     'install' {
         Write-ServiceHeader "Installing $ServiceName"
 
