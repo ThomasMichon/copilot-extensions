@@ -206,6 +206,27 @@ class DispatchClient:
     def recover(self) -> dict:
         return self._unwrap(self._http.post("/recover"))
 
+    # -- graceful-cutover seams (zdd CutoverOrchestrator client protocol) -----
+    # Internal: the installer's in-process cutover drives these against the OLD
+    # coordinator to quiesce it at the safe point (between claims) before retiring
+    # it. Not operator-facing. See docs/patterns/graceful-daemon-cutover.md.
+
+    def drain(self, *, timeout: float, poll: float, force: bool) -> dict:
+        return self._unwrap(
+            self._http.post(
+                "/drain", json={"timeout": timeout, "poll": poll, "force": force}
+            )
+        )
+
+    def undrain(self) -> dict:
+        return self._unwrap(self._http.post("/undrain"))
+
+    def shutdown(self) -> dict:
+        return self._unwrap(self._http.post("/shutdown"))
+
+    def adopt_relay(self) -> dict:
+        return self._unwrap(self._http.post("/adopt-relay"))
+
     # -- fleet directory (federation awareness plane) ------------------------
 
     def directory_register(

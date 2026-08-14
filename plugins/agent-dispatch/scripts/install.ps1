@@ -544,6 +544,62 @@ function Invoke-DowngradeGuard {
 
 # -- Runtime install (venv + package + binstub + manifest + verify + pivot) --
 
+function Resolve-VendoredLib {
+    param([Parameter(Mandatory)][string]$LibName)
+    # 1. Vendored inside agent-dispatch (marketplace install layout)
+    $candidate = Join-Path $PluginDir "libs\$LibName"
+    if (Test-Path (Join-Path $candidate 'pyproject.toml')) {
+        return (Resolve-Path $candidate).Path
+    }
+    # 2. Relative path (git checkout layout)
+    $candidate = Join-Path $PluginDir "..\..\libs\$LibName"
+    if (Test-Path (Join-Path $candidate 'pyproject.toml')) {
+        return (Resolve-Path $candidate).Path
+    }
+    # 3. Git repo registry (~/.git-repos) -- use Python for safe YAML parsing
+    $gitRepos = Join-Path $env:USERPROFILE '.git-repos'
+    if (Test-Path $gitRepos) {
+        try {
+            $result = & python3 -c @"
+import pathlib, os
+try:
+    import yaml
+except ImportError:
+    raise SystemExit(1)
+reg = yaml.safe_load(pathlib.Path.home().joinpath('.git-repos').read_text())
+repo = (reg or {}).get('repos', {}).get('copilot-extensions', {})
+if repo:
+    p = repo.get('path', os.path.join(reg.get('srcroot', ''), 'copilot-extensions'))
+    p = os.path.expanduser(p)
+    lib = os.path.join(p, 'libs', '$LibName')
+    if os.path.isfile(os.path.join(lib, 'pyproject.toml')):
+        print(lib)
+        raise SystemExit(0)
+raise SystemExit(1)
+"@ 2>$null
+            if ($LASTEXITCODE -eq 0 -and $result) {
+                return $result.Trim()
+            }
+        } catch { }
+    }
+    # 4. Common checkout path (repo exists but registry absent/stale)
+    $candidate = Join-Path $env:USERPROFILE "src\copilot-extensions\libs\$LibName"
+    if (Test-Path (Join-Path $candidate 'pyproject.toml')) {
+        return (Resolve-Path $candidate).Path
+    }
+    return $null
+}
+
+# zero-downtime graceful-cutover primitives (module ``zdd``).
+function Resolve-Zdd { return (Resolve-VendoredLib -LibName 'zdd') }
+
+# Check if the zdd cutover lib is already importable in the venv.
+function Test-ZddInstalled {
+    if (-not (Test-Path $VenvPython)) { return $false }
+    & $VenvPython -c 'from zdd.cutover import CutoverOrchestrator' 2>$null
+    return $LASTEXITCODE -eq 0
+}
+
 function Deploy-SelfProvisioningBinstub {
     <# Deploy the agent-dispatch CLI binstubs into ~/.local/bin, SELF-PROVISIONING
        (#1393): fast-path the built versioned slot's python; if no slot is built
@@ -734,6 +790,31 @@ function Install-Runtime {
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     Remove-ConsoleTrampolines -VenvDir $VenvDir
+
+    # zdd (zero-downtime graceful-cutover primitives: routing table + orchestrator).
+    # Declared as `agent-zdd` in pyproject but NOT on PyPI, so `uv pip install .`
+    # cannot resolve it -- install it from the vendored lib FIRST so the package
+    # install below finds the requirement already satisfied.
+    $ZddDir = Resolve-Zdd
+    if ($ZddDir) {
+        if (Get-Command uv -ErrorAction SilentlyContinue) {
+            $zddOut = & uv pip install --python $VenvPython "$ZddDir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet 2>&1
+        } else {
+            $zddOut = & $VenvPython -m pip install "$ZddDir" 2>&1
+        }
+        if ($LASTEXITCODE -ne 0) {
+            $ErrorActionPreference = $prevEAP
+            Write-Fail "zdd install failed (exit $LASTEXITCODE)"
+            if ($zddOut) { Write-Host ($zddOut | Out-String) }
+            exit 1
+        }
+        Write-Ok 'zdd (graceful-cutover primitives) installed'
+    } elseif (Test-ZddInstalled) {
+        Write-Skip 'zdd already installed in venv (marketplace layout)'
+    } else {
+        Write-Fail 'Cannot locate zdd library. Reinstall the agent-dispatch plugin from the marketplace (copilot plugin install agent-dispatch@copilot-extensions), then rerun this installer.'
+        exit 1
+    }
 
     $installPkg = {
         param([string]$Spec)
@@ -1138,6 +1219,11 @@ function Install-CoordinatorTask {
     # host runs the full coordinator and the WSL guest is a client. This reverses
     # the #2777 model (WSL-owned, Windows client). Explicit -NoService still forces
     # a client-only host (e.g. a box that intentionally has no coordinator).
+    #
+    # -NoStart: register/refresh the boot task but do NOT start the coordinator NOW
+    # -- used after a graceful cutover already brought the new coordinator up, so a
+    # Start-ScheduledTask here would race a SECOND coordinator (Thread B).
+    param([switch]$NoStart)
     if ($NoService) {
         # Remove a coordinator task left from a prior full install so a host asked
         # to be client-only stops running one. Removal may be blocked without
@@ -1356,11 +1442,15 @@ try {
     } catch {
         $regOk = $false
     }
-    if ($regOk) { Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue }
+    if ($regOk) { if (-not $NoStart) { Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue } }
     $ErrorActionPreference = $prevEAP
 
     if ($regOk) {
-        Write-Ok "Coordinator service installed + started (Scheduled Task '$TaskName')"
+        if ($NoStart) {
+            Write-Ok "Coordinator boot task registered (Scheduled Task '$TaskName'); not started -- the graceful cutover already brought the new coordinator up"
+        } else {
+            Write-Ok "Coordinator service installed + started (Scheduled Task '$TaskName')"
+        }
         # The Scheduled Task now owns startup -- drop any non-elevated logon
         # fallback from a prior unprivileged install so two coordinators don't race.
         if (Remove-CoordinatorAutostart) {
@@ -1958,31 +2048,90 @@ function Invoke-Install {
     Write-Host ''; Write-Host '=== agent-dispatch install complete ===' -ForegroundColor Cyan
 }
 
+function Test-CoordinatorRouted {
+    <# True when a live coordinator has published the zdd routing table (i.e. it is
+       a Thread-B build with a /drain seam that can be gracefully cut over). A
+       pre-Thread-B coordinator serves the rendezvous endpoint but has no routing
+       entry and no /drain -- it must be stop-and-swapped once (invariant #2). #>
+    $py = if (Test-Path $VenvPython) { $VenvPython } elseif (Test-Path $LinkPython) { $LinkPython } else { $null }
+    if (-not $py) { return $false }
+    & $py -c 'import sys; from zdd.routing import read_active_endpoint; from agent_dispatch.config import routing_dir; sys.exit(0 if read_active_endpoint(routing_dir()) else 1)' 2>$null
+    return ($LASTEXITCODE -eq 0)
+}
+
+function Invoke-CoordinatorCutover {
+    <# Graceful installer-driven cutover (Thread B; docs/patterns/graceful-daemon-cutover.md).
+       Runs the zdd cutover IN-PROCESS from the freshly-built NEW slot python:
+       spawn the new coordinator PASSIVE on a fresh port -> health-gate -> flip the
+       routing table -> drain the OLD coordinator at the safe point (between task
+       claims) -> retire it. In-flight work is never killed; the supervisor +
+       spawned workers OUTLIVE the swap and re-adopt the new coordinator via the
+       durable queue DB + routing table (so they are deliberately NOT stopped).
+       Returns $true when the cutover brought up the new coordinator (so the
+       caller skips a normal task-start), $false to fall back to a normal start. #>
+    $py = if (Test-Path $VenvPython) { $VenvPython } elseif (Test-Path $LinkPython) { $LinkPython } else { $null }
+    if (-not $py) { return $false }
+    Write-Step 'Graceful cutover: standing the new coordinator up beside the old, then flipping routing...'
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $out = & $py -m agent_dispatch _cutover --json 2>&1 | Out-String
+    $rc = $LASTEXITCODE
+    $ErrorActionPreference = $prevEAP
+    $ok = $false
+    try {
+        # The JSON result is the last brace-balanced object on stdout; steps go to stderr.
+        $jsonLine = ($out -split "`n" | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
+        if ($jsonLine) { $ok = [bool]((ConvertFrom-Json $jsonLine).ok) }
+    } catch { $ok = $false }
+    if ($ok -or $rc -eq 0) {
+        Write-Ok 'Coordinator cut over to the new build (no in-flight work killed; supervisor/workers re-adopt via the queue DB + routing table)'
+        return $true
+    }
+    Write-Warn 'Graceful cutover did not complete -- falling back to a normal restart'
+    if ($out.Trim()) { Write-Step ($out.Trim()) }
+    return $false
+}
+
 function Invoke-Update {
     Write-Host ''; Write-Host '=== agent-dispatch update ===' -ForegroundColor Cyan; Write-Host ''
     Invoke-DowngradeGuard
     Install-Runtime
-    # Cycle the running services so the freshly-rebuilt venv build actually takes
-    # over: `conhost --headless` detaches the coordinator/supervisor from the
-    # Scheduled Task, so re-registering + Start-ScheduledTask alone leaves the OLD
-    # build serving (MultipleInstances=IgnoreNew no-ops against the survivor, and
-    # the non-elevated fallback sees a healthy old build and declines) -- the exact
-    # version-drift symptom of #3602. Terminate the old process(es) first; the
-    # (re)install below then starts a clean one.
+    # Thread B (graceful daemon cutover): a version update must NEVER kill
+    # in-flight, non-resumable work. Install-Runtime built + activated the new
+    # slot WITHOUT stopping the running daemon; now, if a live coordinator is
+    # serving the old slot, stand the new slot up passive, flip the routing table,
+    # drain the old coordinator at its safe cutover point (between task claims),
+    # and retire it -- in-process, automatic, no operator step. The supervisor and
+    # spawned workers are deliberately LEFT RUNNING: they outlive the coordinator
+    # swap and re-adopt the new coordinator via the durable SQLite queue DB + the
+    # routing table (they run detached). Falls back to a normal start only when no
+    # live coordinator exists to cut over from, or the cutover cannot run.
     if (-not $NoService) {
-        $stoppedCoord = Stop-DispatchProcess -Subcommand serve
-        if ($stoppedCoord -gt 0) {
-            Write-Step "Stopped $stoppedCoord stale coordinator process(es) before restart"
+        $didCutover = $false
+        if (Test-CoordinatorHealthy) {
+            if (Test-CoordinatorRouted) {
+                # A Thread-B coordinator (routed, /drain seam) -> graceful cutover.
+                $didCutover = Invoke-CoordinatorCutover
+            } else {
+                # Pre-Thread-B coordinator (unrouted, no /drain): one-time
+                # stop-and-swap (invariant #2 fallback). Every future update from a
+                # Thread-B build is graceful. The supervisor is left running.
+                $stopped = Stop-DispatchProcess -Subcommand serve
+                if ($stopped -gt 0) {
+                    Write-Step "Stopped $stopped pre-cutover coordinator process(es) -- one-time transition to graceful cutover"
+                }
+            }
         }
+        Remove-CoordinatorFirewallRule
+        # Refresh the boot task definition either way; -NoStart avoids launching a
+        # SECOND coordinator when the cutover already brought the new one up.
+        Install-CoordinatorTask -NoStart:$didCutover
+        Install-SupervisorTask
+        if (-not $didCutover) { Confirm-CoordinatorRunning }
+    } else {
+        Install-CoordinatorTask
+        Install-SupervisorTask
     }
-    $stoppedSup = Stop-DispatchProcess -Subcommand supervise
-    if ($stoppedSup -gt 0) {
-        Write-Step "Stopped $stoppedSup stale supervisor process(es) before restart"
-    }
-    Install-CoordinatorTask
-    Remove-CoordinatorFirewallRule
-    Install-SupervisorTask
-    if (-not $NoService) { Confirm-CoordinatorRunning }
     Write-Host ''; Write-Host '=== agent-dispatch update complete ===' -ForegroundColor Cyan
 }
 
