@@ -53,10 +53,10 @@ RUN groupadd -f operator \
 USER operator
 WORKDIR /home/operator
 
-# The harness scripts (driver + assertions) are mounted or copied in at run
-# time so iterating on them does not force an image rebuild.
-COPY --chown=operator:operator validate.sh /home/operator/validate.sh
-RUN chmod +x /home/operator/validate.sh
-
+# The harness scripts (driver + assertions) are mounted in at run time so
+# iterating on them does not force an image rebuild. Nothing is baked in: the
+# base box is driven by a mounted scenario (`run -Scenario …`) or entered
+# interactively (`run -Mode shell`). Idle by default so the runner can start it
+# detached and `docker exec` into it (matching Dockerfile.pristine).
 ENTRYPOINT ["/bin/bash", "-lc"]
-CMD ["/home/operator/validate.sh"]
+CMD ["sleep infinity"]
