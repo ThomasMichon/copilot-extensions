@@ -261,6 +261,27 @@ write deploy-manifest.json  (schema_version 3, source block, atomic temp+move)
      (e.g. don't `if (Register-Task) { Start }` — a locked-down box that can't
      create the task would then never start the daemon). Registration and
      start are independent; start is always user-mode.
+10. **Fast install + deferred self-provision — the entrypoint declares `stamp`
+    and `provision` (dotfiles#1393).** The base install a `sessionStart` hook /
+    `copilot plugin update` triggers must be **fast** and must never hold the
+    singleton marketplace payload open long enough to wedge a concurrent update:
+    - **`stamp`** — snapshot the payload SOURCE into the versioned slot area
+      (Windows: `~/.<name>/snapshots/<ver>/` + a `payload-dir`/`stamped-version`
+      marker; POSIX records a `payload-dir` pointer) and deploy the
+      **self-provisioning binstub** — **no inline venv build**. Fits a hook grace
+      window; frees the payload immediately (it copies from the already
+      self-staged `$PluginDir`).
+    - **`provision`** — the deferred heavy build (venv + `uv pip install` +
+      versioned activate + manifest), run **from the slot-local snapshot** the
+      binstub invokes on first use. Decoupled from a payload Copilot may have
+      already replaced.
+    - The **self-provisioning binstub** fast-paths the built slot python; if no
+      slot is built yet (a `stamp` deferred it), it runs the snapshot's
+      `<entry> provision` then dispatches. Opt out with `<NAME>_NO_SELFPROVISION=1`.
+    - Enforced by `tools/check-install-contract.py` (`_declares_stamp_provision`);
+      the ps1-lane exemption seam `BASELINE_NO_STAMP_PS1` tracks the not-yet-ported
+      Thread-B service runtimes and must shrink as each lands. See the
+      `correct-install-flows` effort.
 
 ## Update-flow robustness — self-stage, watchdog, completion markers (#935)
 

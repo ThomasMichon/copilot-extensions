@@ -83,6 +83,36 @@ FORBIDDEN_TRAMPOLINE = re.compile(
 # time-boxed exemption should one ever be genuinely needed.
 EXEMPT_SESSION_HOOK: frozenset[str] = frozenset()
 
+# Thread-A self-provision invariant (dotfiles#1393): every Python runtime plugin's
+# canonical entrypoint (install.* if present, else init.*) MUST declare a `stamp`
+# action (fast base install: snapshot/pointer + a self-provisioning binstub, NO
+# inline venv) and a `provision` action (the deferred heavy build the binstub runs
+# on first use). This keeps a sessionStart install fast and never wedges/pins the
+# marketplace payload. See docs/install-contract.md § "Fast install + deferred
+# self-provision" and the correct-install-flows effort.
+#
+# BASELINE_NO_STAMP is the explicit, greppable, time-boxed exemption for plugins
+# whose Windows `install.ps1` lane has NOT yet been ported -- the Thread-B service
+# runtimes (detached daemons + graceful cutover), tracked separately. Their POSIX
+# `.sh` already declares stamp/provision, so the exemption is ps1-only. SHRINK this
+# set as each is ported; do NOT add plugins here to silence the check.
+BASELINE_NO_STAMP_PS1: frozenset[str] = frozenset({
+    "agent-bridge", "agent-dispatch", "agent-index", "agent-vault",
+})
+
+
+def _declares_stamp_provision(text: str, ext: str) -> bool:
+    """True if an entrypoint declares BOTH a `stamp` and a `provision` action.
+
+    ps1: the tokens ``'stamp'`` / ``'provision'`` appear (ValidateSet + switch).
+    sh:  ``stamp`` / ``provision`` appear as a case label -- immediately followed
+    by ``)`` or ``|`` -- so a combined ``stamp|provision|init)`` label and the
+    incidental phrase "stamp build info" are handled correctly.
+    """
+    if ext == "ps1":
+        return ("'stamp'" in text) and ("'provision'" in text)
+    return bool(re.search(r"\bstamp[)|]", text)) and bool(re.search(r"\bprovision[)|]", text))
+
 
 def _session_hook_problem(plugin: Path) -> str | None:
     """Return a violation string if a runtime plugin lacks the sessionStart
@@ -230,6 +260,19 @@ def check() -> int:
                     f"{name}/{script}: missing the '{VERSIONED_MARKER}' block -- the "
                     f"installer must wire the immutable-versioned venv layout (#581)"
                 )
+            # Thread-A fast-install + deferred self-provision (#1393): the
+            # entrypoint must declare both a `stamp` and a `provision` action.
+            # ps1-lane exemptions (not yet ported) are tracked in
+            # BASELINE_NO_STAMP_PS1; the POSIX .sh lane is fully ported (no
+            # exemptions). Payload runtimes build no venv and are exempt.
+            if not is_payload:
+                exempt = ext == "ps1" and name in BASELINE_NO_STAMP_PS1
+                if not exempt and not _declares_stamp_provision(text, ext):
+                    violations.append(
+                        f"{name}/{script}: missing a 'stamp' and/or 'provision' action "
+                        "-- Thread-A requires a fast 'stamp' (self-provisioning binstub, "
+                        "no inline venv) + a deferred 'provision' (#1393)"
+                    )
             if FORBIDDEN_PYTHONPATH.search(text):
                 violations.append(f"{name}/{script}: binstub sets PYTHONPATH to a runtime lib/ dir")
             if "schema_version" not in text or '"source"' not in text and "source " not in text:
