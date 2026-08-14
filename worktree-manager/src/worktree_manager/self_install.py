@@ -36,6 +36,19 @@ _VERSION_RE = re.compile(r'__version__\s*=\s*"([^"]+)"')
 _MANAGER_REPO = "https://github.com/ThomasMichon/copilot-extensions.git"
 
 
+def manager_repo() -> str:
+    """The git source :func:`self_update` fetches from.
+
+    Defaults to the canonical GitHub repo (:data:`_MANAGER_REPO`) but honors a
+    ``WORKTREE_MANAGER_REPO`` override, mirroring the existing
+    ``WORKTREE_MANAGER_REF`` / ``WORKTREE_MANAGER_ROOT`` env knobs. This keeps the
+    updater usable behind a **mirror / fork / air-gapped clone** (and lets the
+    end-to-end delivery test drive it against a local remote), without weakening
+    the out-of-plugin, dependency-free boundary.
+    """
+    return os.environ.get("WORKTREE_MANAGER_REPO") or _MANAGER_REPO
+
+
 def default_root() -> Path:
     """Install root, mirroring ``~/.agent-worktrees`` for the core installer."""
     env = os.environ.get("WORKTREE_MANAGER_ROOT")
@@ -287,7 +300,7 @@ def self_update(
                            text=True, timeout=60)
         else:
             subprocess.run(["git", "clone", "--depth", "1", "--branch", ref,
-                            _MANAGER_REPO, str(staging)], check=True,
+                            manager_repo(), str(staging)], check=True,
                            capture_output=True, text=True, timeout=300)
     except (OSError, subprocess.SubprocessError) as e:
         return SelfUpdateResult(action="error", previous=previous,

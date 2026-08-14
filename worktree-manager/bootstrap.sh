@@ -13,11 +13,12 @@
 #
 # Phase 0 assumes git + uv are already present; automatic prerequisite
 # provisioning lands in Phase 2 (issue #355). Override the fetched ref with
-# $WORKTREE_MANAGER_REF and the install root with $WORKTREE_MANAGER_ROOT.
+# $WORKTREE_MANAGER_REF, the git source (mirror/fork) with $WORKTREE_MANAGER_REPO,
+# and the install root with $WORKTREE_MANAGER_ROOT.
 
 set -euo pipefail
 
-REPO='https://github.com/ThomasMichon/copilot-extensions.git'
+REPO="${WORKTREE_MANAGER_REPO:-https://github.com/ThomasMichon/copilot-extensions.git}"
 REF="${WORKTREE_MANAGER_REF:-main}"
 ROOT="${WORKTREE_MANAGER_ROOT:-$HOME/.worktree-manager}"
 STAGING="$ROOT/staging"

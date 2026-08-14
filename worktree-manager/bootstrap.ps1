@@ -12,11 +12,12 @@
 #
 # Phase 0 assumes git + uv are already present; automatic prerequisite
 # provisioning lands in Phase 2 (issue #355). Override the fetched ref with
-# $env:WORKTREE_MANAGER_REF and the install root with $env:WORKTREE_MANAGER_ROOT.
+# $env:WORKTREE_MANAGER_REF, the git source (mirror/fork) with
+# $env:WORKTREE_MANAGER_REPO, and the install root with $env:WORKTREE_MANAGER_ROOT.
 
 $ErrorActionPreference = 'Stop'
 
-$Repo    = 'https://github.com/ThomasMichon/copilot-extensions.git'
+$Repo    = if ($env:WORKTREE_MANAGER_REPO) { $env:WORKTREE_MANAGER_REPO } else { 'https://github.com/ThomasMichon/copilot-extensions.git' }
 $Ref     = if ($env:WORKTREE_MANAGER_REF) { $env:WORKTREE_MANAGER_REF } else { 'main' }
 $Root    = if ($env:WORKTREE_MANAGER_ROOT) { $env:WORKTREE_MANAGER_ROOT } else { Join-Path $env:USERPROFILE '.worktree-manager' }
 $Staging = Join-Path $Root 'staging'
