@@ -10,7 +10,8 @@ from dataclasses import replace
 from pathlib import Path
 
 from . import telemetry
-from .config import Config, load_config, requires_token_bind, run_dir
+from . import __version__
+from .config import Config, load_config, requires_token_bind, routing_dir, run_dir
 from .coordinator import create_app
 from .queue import TaskQueue
 from .rendezvous import clear_endpoint, write_endpoint
@@ -71,7 +72,45 @@ def advertise_endpoint(cfg: Config):
         return None
 
 
-def serve(cfg: Config | None = None) -> None:
+def _publish_routing(cfg: Config, bound_port: int, *, passive: bool = False) -> None:
+    """Publish this coordinator into the shared zdd routing table (best-effort).
+
+    A passive cutover instance must NOT seize the active route until the
+    orchestrator flips it on promotion (invariant #5), so it publishes nothing.
+    """
+    if passive:
+        return
+    try:
+        from zdd import routing
+
+        routing.publish_active(
+            routing_dir(),
+            bind=cfg.host,
+            port=bound_port,
+            pid=os.getpid(),
+            version=__version__,
+            demote_existing=True,
+        )
+    except Exception as exc:  # noqa: BLE001 -- routing is additive, never fatal
+        log.warning("could not publish zdd routing table (%s); discovery degraded", exc)
+
+
+def _clear_routing() -> None:
+    """Retract our active entry from the zdd routing table on shutdown (best-effort).
+
+    Only clears when we are still the recorded active (a successor that already
+    flipped the table is left untouched), so a clean exit never blanks a newer
+    coordinator's route.
+    """
+    try:
+        from zdd import routing
+
+        routing.clear_if_owner(routing_dir(), os.getpid())
+    except Exception:
+        log.debug("zdd routing clear-on-shutdown skipped", exc_info=True)
+
+
+def serve(cfg: Config | None = None, *, passive: bool = False) -> None:
     """Bind and serve the coordinator (blocking).
 
     Stage C: the coordinator binds an **OS-assigned** ephemeral port
@@ -80,6 +119,12 @@ def serve(cfg: Config | None = None) -> None:
     rendezvous file -- so no fixed loopback port is reserved and discovery-capable
     clients follow the real port. ``Config.port`` remains the legacy client
     fallback (fixed 9847) until Stage D retires it.
+
+    When ``passive`` is set (a graceful-cutover passive instance, spawned by the
+    installer's in-process cutover), the coordinator serves the full app on a
+    fresh port but does **not** publish the zdd routing table -- the cutover
+    orchestrator flips the route to it only after it health-gates, so it never
+    seizes the active route from the live coordinator (invariant #5).
     """
     import uvicorn
 
@@ -105,6 +150,9 @@ def serve(cfg: Config | None = None) -> None:
     # and docs/patterns/local-endpoint-discovery.md). Additive: discovery-capable
     # clients resolve this dynamic port from the rendezvous file.
     advertise_endpoint(replace(cfg, port=bound_port))
+    # Publish the zdd routing table (skipped while passive) so clients follow this
+    # generation across a graceful cutover (docs/patterns/graceful-daemon-cutover.md).
+    _publish_routing(cfg, bound_port, passive=passive)
     # Record the *actually-running* version so the launch-path reconciler can tell
     # a lagging live coordinator from an up-to-date on-disk manifest (dotfiles
     # #533). Best-effort; a dead-pid/missing file is treated as absent by readers.
@@ -112,13 +160,23 @@ def serve(cfg: Config | None = None) -> None:
 
     write_running_version()
     fed_runner = _maybe_start_federation()
+    app = build_app(cfg)
+    server = uvicorn.Server(uvicorn.Config(app, log_level="info"))
+    # Expose the uvicorn server so the app's /shutdown drain-seam can request a
+    # clean exit when the cutover orchestrator retires this daemon.
+    app.state.uvicorn_server = server
     try:
-        uvicorn.Server(uvicorn.Config(build_app(cfg), log_level="info")).run(sockets=[sock])
+        server.run(sockets=[sock])
     finally:
         if fed_runner is not None:
             fed_runner.stop()
+        _clear_routing()
         clear_endpoint(run_dir())
         sock.close()
+
+
+#: (reserved) -- the live uvicorn server is attached to ``app.state.uvicorn_server``
+#: in :func:`serve` so the coordinator's /shutdown route can request a clean exit.
 
 
 def _maybe_start_federation():

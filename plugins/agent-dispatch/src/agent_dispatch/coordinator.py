@@ -12,10 +12,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from contextlib import asynccontextmanager
+import time
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import asdict
+from threading import Condition
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
@@ -30,6 +32,69 @@ from .satellites import (
 )
 
 log = logging.getLogger("agent-dispatch.coordinator")
+
+
+class DrainGate:
+    """Process-wide drain state for the graceful daemon cutover.
+
+    The **safe cutover point** for the coordinator is *between task claims*:
+    draining means stop handing out new claims and let any in-flight ``/claim``
+    settle. A claimed-but-unstarted task is already durable in the SQLite queue
+    (``queued``/held with a lease the liveness GC recovers), so once no claim is
+    mid-flight the old coordinator can be retired without losing non-resumable
+    work. See docs/patterns/graceful-daemon-cutover.md.
+    """
+
+    def __init__(self) -> None:
+        self._condition = Condition()
+        self._draining = False
+        self._claims = 0
+
+    @property
+    def draining(self) -> bool:
+        with self._condition:
+            return self._draining
+
+    @property
+    def claims(self) -> int:
+        with self._condition:
+            return self._claims
+
+    def set_draining(self, value: bool) -> None:
+        with self._condition:
+            self._draining = value
+            self._condition.notify_all()
+
+    @contextmanager
+    def track_claim(self):
+        """Count an in-flight claim so drain can wait for the safe point."""
+        with self._condition:
+            self._claims += 1
+        try:
+            yield
+        finally:
+            with self._condition:
+                self._claims = max(0, self._claims - 1)
+                self._condition.notify_all()
+
+    def wait_for_claims(self, *, timeout: float, poll: float) -> bool:
+        """Block until no claim is in flight (True) or ``timeout`` elapses (False)."""
+        deadline = time.monotonic() + max(0.0, timeout)
+        with self._condition:
+            while self._claims > 0:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._condition.wait(timeout=min(max(poll, 0.05), remaining))
+            return True
+
+
+class DrainRequest(BaseModel):
+    """Request body for the zdd drain endpoint."""
+
+    timeout: float = 300.0
+    poll: float = 1.0
+    force: bool = False
 
 
 def _resolve_owner_session_id(worker_id: str | None) -> str | None:
@@ -317,6 +382,8 @@ def create_app(
     app.state.directory = directory
     # Back-compat alias for the pre-generalization attribute name.
     app.state.satellites = directory
+    # Graceful-cutover drain gate (docs/patterns/graceful-daemon-cutover.md).
+    app.state.drain_gate = DrainGate()
 
     def _require(task: Task | None) -> Task:
         if task is None:
@@ -341,10 +408,12 @@ def create_app(
         return result
 
     @app.get("/health")
-    def health(repo: str | None = None) -> dict:
+    def health(request: Request, repo: str | None = None) -> dict:
+        gate: DrainGate = request.app.state.drain_gate
         return {
-            "status": "ok",
+            "status": "draining" if gate.draining else "ok",
             "version": __version__,
+            "draining": gate.draining,
             "subscribers": bus.subscriber_count,
             "backlog": queue.backlog_health(repo=repo),
         }
@@ -515,7 +584,14 @@ def create_app(
         return _guard(lambda: queue.approve(task_id), "task.approved")
 
     @app.post("/claim")
-    def claim(body: ClaimBody) -> dict | None:
+    def claim(request: Request, body: ClaimBody) -> dict | None:
+        gate: DrainGate = request.app.state.drain_gate
+        # Safe cutover point: once draining, stop handing out new claims so the
+        # old coordinator can be retired between claims without stranding work.
+        # A worker that gets None simply retries and lands on the new coordinator
+        # (clients follow the routing-table flip).
+        if gate.draining:
+            return None
         owner = body.worker_id
         if owner is None and body.machine and body.worktree:
             owner = worker_id_for(body.machine, body.worktree)
@@ -523,21 +599,67 @@ def create_app(
             raise HTTPException(
                 status_code=422, detail="claim requires worker_id, or both machine and worktree"
             )
-        task = queue.claim_one(
-            owner,
-            body.capabilities,
-            repo=body.repo,
-            machine=body.machine,
-            worktree=body.worktree,
-            task_id=body.task_id,
-            lease_seconds=body.lease_seconds,
-            evaluation=body.evaluation,
-        )
+        with gate.track_claim():
+            task = queue.claim_one(
+                owner,
+                body.capabilities,
+                repo=body.repo,
+                machine=body.machine,
+                worktree=body.worktree,
+                task_id=body.task_id,
+                lease_seconds=body.lease_seconds,
+                evaluation=body.evaluation,
+            )
         if task is None:
             return None
         result = _task_dict(task)
         _emit("task.claimed", result)
         return result
+
+    @app.post("/drain")
+    async def drain(request: Request, body: DrainRequest | None = None) -> dict:
+        """Internal cutover seam: stop claiming and wait for the safe point.
+
+        Not an operator surface -- the installer's in-process cutover calls this
+        (via the zdd CutoverOrchestrator) to quiesce the old coordinator between
+        task claims before retiring it. The supervisor + spawned workers are NOT
+        drained here: they outlive the swap and re-adopt the new coordinator via
+        the durable queue DB + the routing table.
+        """
+        gate: DrainGate = request.app.state.drain_gate
+        opts = body or DrainRequest()
+        timeout = max(0.0, float(opts.timeout))
+        poll = max(0.05, float(opts.poll))
+        gate.set_draining(True)
+        clean = await asyncio.to_thread(gate.wait_for_claims, timeout=timeout, poll=poll)
+        forced = bool(opts.force and not clean)
+        drained = clean or forced
+        return {
+            "drained": drained,
+            "clean": clean,
+            "forced": forced,
+            "busy_claims": gate.claims,
+        }
+
+    @app.post("/undrain")
+    async def undrain(request: Request) -> dict:
+        """Internal cutover seam: reopen claiming (rollback of an aborted cutover)."""
+        gate: DrainGate = request.app.state.drain_gate
+        gate.set_draining(False)
+        return {"draining": False}
+
+    @app.post("/shutdown")
+    def shutdown(request: Request) -> dict:
+        """Internal cutover seam: request a clean uvicorn exit (retire this daemon)."""
+        server = getattr(request.app.state, "uvicorn_server", None)
+        if server is not None:
+            server.should_exit = True
+        return {"shutdown": True}
+
+    @app.post("/adopt-relay")
+    def adopt_relay() -> dict:
+        """Internal cutover seam: agent-dispatch owns no shared relay (no-op)."""
+        return {"adopted": False, "reason": "agent-dispatch has no relay"}
 
     @app.post("/tasks/{task_id}/start")
     def start(task_id: str, body: WorkerBody) -> dict:

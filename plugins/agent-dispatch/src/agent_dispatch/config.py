@@ -49,6 +49,17 @@ def run_dir() -> Path:
     """The runtime dir that holds the rendezvous (endpoint) file."""
     return Path(os.environ.get(RUN_DIR_ENV) or (Path.home() / ".agent-dispatch" / "run"))
 
+
+def routing_dir() -> Path:
+    """Stable zdd routing-table directory shared by all installed versions.
+
+    The graceful daemon-cutover (docs/patterns/graceful-daemon-cutover.md) flips a
+    file-based routing table (``active.json``) here so a version update stands the
+    new coordinator up beside the old and moves clients over without a restart.
+    It lives at the install root (never a version slot) so it survives every swap.
+    """
+    return Path.home() / ".agent-dispatch"
+
 #: Wildcard bind addresses that expose the coordinator on **every** interface
 #: (including the LAN). Binding one of these without a bearer token would put the
 #: powerful task-control API on the network unauthenticated, so it is guarded
@@ -150,6 +161,24 @@ def _discovered_wsl_port(default_port: int) -> int:
     return default_port
 
 
+def _routing_url() -> str | None:
+    """The zdd routing-table active coordinator URL, or ``None``.
+
+    The graceful daemon-cutover flips ``active.json`` (routing_dir) so clients
+    follow a new coordinator generation without a restart. This is the authority
+    on the coordinator *host*; it self-heals a dead ``active`` to ``previous``.
+    Defensive: any failure (zdd absent, table missing/corrupt) returns ``None`` so
+    resolution falls through to the legacy rendezvous ladder.
+    """
+    try:
+        from zdd.routing import read_active_endpoint
+
+        ep = read_active_endpoint(routing_dir())
+    except Exception:
+        return None
+    return ep.base_url if ep is not None else None
+
+
 def _discover_local_endpoint():
     """The coordinator endpoint from the local discovery ladder, or ``None``.
 
@@ -169,10 +198,16 @@ def _discover_local_endpoint():
 def has_live_local_coordinator() -> bool:
     """True if a local coordinator is discoverable **and** answering its probe.
 
-    Wraps the local discovery ladder (``AGENT_DISPATCH_ENDPOINT`` -> the rendezvous
-    file, probed for a live listener). The CLI's lazy-start uses this to decide
-    whether it must spawn a local coordinator before a client command runs.
+    Consults the zdd routing table first (authoritative on the host; it self-heals
+    a dead ``active`` to ``previous`` and verifies a live listener), then the
+    legacy discovery ladder (``AGENT_DISPATCH_ENDPOINT`` -> the rendezvous file,
+    probed for a live listener). The CLI's lazy-start uses this to decide whether
+    it must spawn a local coordinator before a client command runs -- so honoring
+    the routing table here prevents a spurious second coordinator during/after a
+    graceful cutover (when the rendezvous file may momentarily lag the flip).
     """
+    if _routing_url() is not None:
+        return True
     return _discover_local_endpoint() is not None
 
 
@@ -200,6 +235,13 @@ def client_url() -> str:
 
         if is_wsl():
             return resolve_wsl_client_url(_discovered_wsl_port(cfg.port))
+        # On the coordinator host, the zdd routing table is the authority: a
+        # graceful cutover flips it to the new coordinator generation, so clients
+        # follow the live port without a restart. Fall back to the rendezvous file
+        # (legacy discovery) when no routing table is published yet.
+        routed = _routing_url()
+        if routed:
+            return routed
         ep = _discover_local_endpoint()
         if ep is not None and ep.transport == "tcp":
             host, port = ep.tcp_host_port

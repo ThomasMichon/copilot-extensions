@@ -304,8 +304,118 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         db_path=args.db or base.db_path,
         token=args.token or base.token,
     )
-    serve(cfg)
+    serve(cfg, passive=bool(getattr(args, "passive", False)))
     return 0
+
+
+def _cmd_cutover(args: argparse.Namespace) -> int:
+    """Internal graceful-cutover seam -- driven by the installer, not operators.
+
+    Stands the freshly-installed coordinator slot up PASSIVE on a fresh port,
+    health-gates it, flips the zdd routing table, drains the old coordinator at
+    the safe cutover point (between task claims), and retires it -- so a version
+    update never kills in-flight work. The supervisor + spawned workers outlive
+    the swap and re-adopt the new coordinator via the durable queue DB + routing
+    table. Rolls back before the commit point; commits forward after. See
+    docs/patterns/graceful-daemon-cutover.md. NOT an operator command.
+    """
+    import json as _json
+    import socket as _socket
+    import subprocess as _subprocess
+    import sys as _sys
+    import urllib.request as _urllib
+    from typing import Any
+
+    from zdd import breadcrumb
+    from zdd.cutover import CutoverOrchestrator
+
+    from .config import client_token, load_config, routing_dir
+
+    cfg = load_config()
+    token = client_token()
+    wildcard_v4 = ".".join(("0", "0", "0", "0"))
+    host = cfg.host if cfg.host not in (wildcard_v4, "", "::") else "127.0.0.1"
+    if cfg.host == "::":
+        host = "::1"
+
+    def pick_free_port() -> int:
+        family = _socket.AF_INET6 if ":" in host else _socket.AF_INET
+        with _socket.socket(family, _socket.SOCK_STREAM) as sock:
+            sock.bind((host, 0))
+            return int(sock.getsockname()[1])
+
+    def spawn_passive(port: int):
+        cmd = [
+            _sys.executable, "-m", "agent_dispatch", "serve",
+            "--host", cfg.host, "--port", str(port), "--passive",
+        ]
+        # The coordinator binds AGENT_DISPATCH_PORT (Stage C: else an ephemeral
+        # port); ``serve --port`` alone is only the client fallback. Pin the
+        # passive to the orchestrator's pre-selected free port via the env so it
+        # binds EXACTLY that port and the health-gate/flip target the right one.
+        child_env = dict(os.environ)
+        child_env["AGENT_DISPATCH_PORT"] = str(port)
+        kwargs: dict[str, Any] = {"env": child_env}
+        if _sys.platform == "win32":
+            kwargs["creationflags"] = (
+                _subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
+                | _subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]
+            )
+        else:
+            kwargs["start_new_session"] = True
+        return _subprocess.Popen(cmd, **kwargs)  # noqa: S603
+
+    def health_check(check_host: str, port: int) -> bool:
+        try:
+            req = _urllib.Request(f"http://{check_host}:{port}/health")
+            if token:
+                req.add_header("Authorization", f"Bearer {token}")
+            with _urllib.urlopen(req, timeout=2) as resp:  # noqa: S310 -- loopback
+                if resp.status != 200:
+                    return False
+                payload = _json.loads(resp.read().decode("utf-8"))
+                return payload.get("status") != "draining"
+        except Exception:
+            return False
+
+    def make_client(base_url: str):
+        return DispatchClient(base_url, token=token, timeout=float(args.drain_timeout) + 60.0)
+
+    recovery = breadcrumb.recover_stale_cutover(
+        routing_dir(), make_client, health_check=health_check
+    )
+    if getattr(args, "recover", False):
+        _emit(recovery)
+        return 0
+    if recovery.get("recovered"):
+        print(f"[>] Recovered a prior aborted cutover: {recovery.get('reason')}", file=sys.stderr)
+
+    orch = CutoverOrchestrator(
+        routing_dir(),
+        bind=cfg.host,
+        version=__import__("agent_dispatch").__version__,
+        spawn_passive=spawn_passive,
+        health_check=health_check,
+        make_client=make_client,
+        pick_free_port=pick_free_port,
+    )
+    result = orch.run(
+        health_timeout=args.health_timeout,
+        drain_timeout=args.drain_timeout,
+        force=args.force,
+    )
+    if getattr(args, "json", False):
+        _emit(result.to_dict())
+    else:
+        for step in result.steps:
+            print(f"  - {step}", file=sys.stderr)
+        if result.ok:
+            print(f"Cutover complete: coordinator now on port {result.new_port}.", file=sys.stderr)
+        elif result.rolled_back:
+            print(f"[WARN] Cutover rolled back: {result.error}", file=sys.stderr)
+        else:
+            print(f"[FAIL] Cutover failed: {result.error}", file=sys.stderr)
+    return 0 if result.ok else 1
 
 
 def _resolve_serve_host(args: argparse.Namespace, base: Config) -> str:
@@ -2461,7 +2571,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--host")
     p.add_argument("--port", type=int)
     p.add_argument("--db")
+    p.add_argument(
+        "--passive",
+        action="store_true",
+        help=argparse.SUPPRESS,  # internal: a graceful-cutover passive instance
+    )
     p.set_defaults(func=_cmd_serve)
+
+    # Internal graceful-cutover seam (installer-driven, not an operator command).
+    p = sub.add_parser("_cutover", help=argparse.SUPPRESS)
+    p.add_argument("--health-timeout", type=float, default=60.0)
+    p.add_argument("--drain-timeout", type=float, default=300.0)
+    p.add_argument("--force", action="store_true")
+    p.add_argument("--recover", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=_cmd_cutover)
 
     create_parent = _create_args_parent()
     p = sub.add_parser(
