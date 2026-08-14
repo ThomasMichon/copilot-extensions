@@ -11,7 +11,8 @@ from agent_mcp.auth import (
     build_injector,
     parse_response,
 )
-from agent_mcp.config import parse_config
+from agent_mcp.auth.base import TokenInjector
+from agent_mcp.config import AuthSpec, CacheSpec, parse_config
 
 
 def _cfg(auth, server=None):
@@ -293,5 +294,104 @@ async def test_composite_invalidate_fans_out():
     await inj.invalidate()
     await inj.child_env()
     assert counts == {"a": 2, "b": 2}  # both refreshed
+
+
+# --- shared / on-disk token caching (auth.cache) ---------------------------
+
+def _jwt(exp: int) -> str:
+    import base64
+    import json
+
+    p = base64.urlsafe_b64encode(json.dumps({"exp": exp}).encode()).rstrip(b"=").decode()
+    return "h." + p + ".s"
+
+
+class _Counter(TokenInjector):
+    """A TokenInjector whose _acquire returns a fixed token and counts calls."""
+
+    name = "counter"
+
+    def __init__(self, spec: AuthSpec, token: str) -> None:
+        super().__init__(spec)
+        self._token = token
+        self.calls = 0
+
+    async def _acquire(self) -> str | None:
+        self.calls += 1
+        return self._token
+
+
+def _shared_spec() -> AuthSpec:
+    return AuthSpec(kind="command", command=["mint", "R"], resource="R",
+                    cache=CacheSpec(scope="shared"))
+
+
+def test_parse_auth_cache_policy():
+    cfg = _cfg({"kind": "command", "command": ["x"],
+                "cache": {"scope": "shared", "ttl": "3600", "skew": 30}})
+    c = cfg.auths[0].cache
+    assert (c.scope, c.ttl, c.skew) == ("shared", "3600", 30)
+
+
+def test_parse_auth_cache_default_and_shorthand():
+    assert _cfg({"kind": "none"}).auths[0].cache.scope == "memory"
+    assert _cfg({"kind": "command", "command": ["x"], "cache": "shared"}
+                ).auths[0].cache.scope == "shared"
+
+
+def test_parse_auth_cache_bad_scope():
+    import pytest
+
+    from agent_mcp.config import ConfigError
+
+    with pytest.raises(ConfigError):
+        _cfg({"kind": "command", "command": ["x"], "cache": {"scope": "bogus"}})
+
+
+async def test_shared_cache_persists_across_instances(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path))
+    import time
+
+    tok = _jwt(int(time.time()) + 3600)
+    a = _Counter(_shared_spec(), tok)
+    assert await a.acquire_secret() == tok
+    assert a.calls == 1
+    b = _Counter(_shared_spec(), tok)  # simulate a fresh process
+    assert await b.acquire_secret() == tok
+    assert b.calls == 0  # served from the shared on-disk cache
+
+
+async def test_shared_cache_invalidate_forces_reacquire(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path))
+    import time
+
+    tok = _jwt(int(time.time()) + 3600)
+    a = _Counter(_shared_spec(), tok)
+    await a.acquire_secret()
+    await a.invalidate()
+    b = _Counter(_shared_spec(), tok)
+    assert await b.acquire_secret() == tok
+    assert b.calls == 1  # disk entry invalidated -> re-acquired
+
+
+async def test_memory_scope_is_in_process_only(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path))
+    spec = AuthSpec(kind="command", command=["m"], cache=CacheSpec(scope="memory"))
+    a = _Counter(spec, "opaque")
+    assert await a.acquire_secret() == "opaque"
+    assert await a.acquire_secret() == "opaque"
+    assert a.calls == 1  # in-process memoization
+    b = _Counter(spec, "opaque")
+    await b.acquire_secret()
+    assert b.calls == 1  # no shared disk state -> b re-acquires
+
+
+async def test_none_scope_never_caches(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path))
+    spec = AuthSpec(kind="command", command=["m"], cache=CacheSpec(scope="none"))
+    a = _Counter(spec, "tok")
+    await a.acquire_secret()
+    await a.acquire_secret()
+    assert a.calls == 2  # no caching at all
 
 

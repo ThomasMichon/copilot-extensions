@@ -168,6 +168,23 @@ class ServerSpec:
 
 
 @dataclass
+class CacheSpec:
+    """Optional token-cache policy for an :class:`AuthSpec` (opt-in).
+
+    ``scope`` selects where a minted token is cached: ``memory`` (in-process only,
+    the historical default), ``shared`` (on-disk, reused across processes and
+    sessions), or ``none`` (never cache). ``ttl`` is ``auto`` (derive expiry from
+    the token's JWT ``exp``) or a fixed number of seconds; ``skew`` refreshes that
+    many seconds early; ``key`` overrides the derived cache key.
+    """
+
+    scope: str = "memory"
+    ttl: str = "auto"
+    key: str | None = None
+    skew: int = 60
+
+
+@dataclass
 class AuthSpec:
     """How to acquire and inject credentials (the ``auth`` block)."""
 
@@ -189,6 +206,8 @@ class AuthSpec:
     header: str = "Authorization"
     format: str = "Bearer {token}"
     target_env: str | None = None
+    # optional shared/on-disk token caching (see auth.token_cache)
+    cache: CacheSpec = field(default_factory=CacheSpec)
 
     @property
     def normalized_kind(self) -> str:
@@ -387,6 +406,25 @@ def url_placeholder_names(url: str | None) -> list[str]:
     return list(seen)
 
 
+def _parse_cache_spec(raw: Any) -> CacheSpec:
+    """Parse an ``auth.cache`` policy (mapping, or a bare ``scope`` string)."""
+    if raw is None:
+        return CacheSpec()
+    if isinstance(raw, str):
+        raw = {"scope": raw}
+    if not isinstance(raw, dict):
+        raise ConfigError("'auth.cache' must be a mapping or a scope string")
+    scope = str(raw.get("scope", "memory"))
+    if scope not in ("memory", "shared", "none"):
+        raise ConfigError(f"auth.cache.scope must be memory|shared|none, got {scope!r}")
+    try:
+        skew = int(raw.get("skew", 60))
+    except (TypeError, ValueError):
+        raise ConfigError("auth.cache.skew must be an integer") from None
+    return CacheSpec(scope=scope, ttl=str(raw.get("ttl", "auto")),
+                     key=raw.get("key"), skew=skew)
+
+
 def _parse_auth_spec(raw_auth: dict[str, Any]) -> AuthSpec:
     """Build one :class:`AuthSpec` from a parsed ``auth`` mapping."""
     if not isinstance(raw_auth, dict):
@@ -408,6 +446,7 @@ def _parse_auth_spec(raw_auth: dict[str, Any]) -> AuthSpec:
         header=str(raw_auth.get("header", "Authorization")),
         format=str(raw_auth.get("format", "Bearer {token}")),
         target_env=raw_auth.get("target_env"),
+        cache=_parse_cache_spec(raw_auth.get("cache")),
     )
 
 

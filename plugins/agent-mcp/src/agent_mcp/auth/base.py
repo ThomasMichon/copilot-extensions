@@ -16,6 +16,7 @@ from __future__ import annotations
 import abc
 
 from ..config import AuthSpec
+from . import token_cache
 
 
 class AuthInjector:
@@ -102,9 +103,29 @@ class TokenInjector(AuthInjector, abc.ABC):
         """Fetch a fresh token (or None on failure)."""
 
     async def _get(self) -> str | None:
-        if self._cached is None:
-            self._cached = await self._acquire()
+        cache = getattr(self.spec, "cache", None)
+        scope = cache.scope if cache else "memory"
+        if scope == "none":
+            return await self._acquire()  # caching disabled entirely
+        if self._cached is not None:
+            return self._cached
+        if scope == "shared":
+            key = cache.key or self._cache_key()
+            hit = token_cache.read(key, skew=cache.skew)
+            if hit:
+                self._cached = hit
+                return hit
+        self._cached = await self._acquire()
+        if self._cached and scope == "shared":
+            token_cache.write(cache.key or self._cache_key(), self._cached, ttl=cache.ttl)
         return self._cached
+
+    def _cache_key(self) -> str:
+        s = self.spec
+        return token_cache.default_key(
+            kind=s.normalized_kind, command=s.command, resource=s.resource,
+            scope=s.scope, tenant=s.tenant, header=s.header,
+        )
 
     async def acquire_secret(self) -> str | None:
         """The raw acquired token (for URL/secret interpolation, not injection)."""
@@ -112,6 +133,9 @@ class TokenInjector(AuthInjector, abc.ABC):
 
     async def invalidate(self) -> None:
         self._cached = None
+        cache = getattr(self.spec, "cache", None)
+        if cache and cache.scope == "shared":
+            token_cache.invalidate(cache.key or self._cache_key())
 
     async def headers(self) -> dict[str, str]:
         token = await self._get()
