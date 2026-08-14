@@ -1330,6 +1330,17 @@ class SessionManager:
                     timeout=self._timeouts.session_new,
                 )
             except (TimeoutError, asyncio.TimeoutError) as exc:
+                # Leave a queryable marker so a stalled session-host resume/launch
+                # is not a silent [starting]->[stopped] (#1468). The child's
+                # stderr lives in the Session Host here (not this frontend), so
+                # the tail is empty -- the always-logged child stderr carries it.
+                with contextlib.suppress(Exception):
+                    on_acp_event("acp_launch_timeout", {
+                        "stage": "LAUNCH_ACP",
+                        "mode": "session-host",
+                        "handshake_timeout_s": self._timeouts.session_start,
+                        "session_new_timeout_s": self._timeouts.session_new,
+                    })
                 raise ConnectError(
                     ConnectStage.LAUNCH_ACP,
                     f"Copilot ACP launch (session host) timed out "
@@ -2470,6 +2481,17 @@ class SessionManager:
                             timeout=self._timeouts.session_new,
                         )
                     except (TimeoutError, asyncio.TimeoutError) as exc:
+                        # Leave a queryable marker so a stalled launch is not a
+                        # silent [starting]->[stopped] (#1468). Local-mode client
+                        # captured the child's startup stderr -- include the tail.
+                        with contextlib.suppress(Exception):
+                            on_acp_event("acp_launch_timeout", {
+                                "stage": "LAUNCH_ACP",
+                                "mode": "local",
+                                "handshake_timeout_s": self._timeouts.session_start,
+                                "session_new_timeout_s": self._timeouts.session_new,
+                                "stderr_tail": client.stderr_tail(),
+                            })
                         raise ConnectError(
                             ConnectStage.LAUNCH_ACP,
                             f"Copilot ACP launch timed out "

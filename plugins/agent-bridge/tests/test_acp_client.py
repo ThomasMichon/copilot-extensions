@@ -193,6 +193,52 @@ def test_child_exit_during_prompt_emits_error() -> None:
     assert client._prompt_error is not None
 
 
+class _FakeStderrStream:
+    def __init__(self, lines: list[bytes]) -> None:
+        self._lines = list(lines)
+
+    async def readline(self) -> bytes:
+        return self._lines.pop(0) if self._lines else b""  # b"" = EOF
+
+
+class _FakeProcWithStderr:
+    def __init__(self, stderr: _FakeStderrStream) -> None:
+        self.stderr = stderr
+        self.stdin = object()
+        self.stdout = object()
+        self.returncode = 0
+
+
+def test_read_stderr_always_captures_and_persists_child_log() -> None:
+    """Child stderr is captured unconditionally (no AGENT_BRIDGE_DEBUG gate) and a
+    bounded prefix is persisted as acp_child_log events, so an ACP launch/resume
+    hang leaves a queryable trace (#1468)."""
+    client, events = _client_with_recorder()
+    client._prompt_in_flight = False  # idle resume -> _handle_child_exit no-ops
+    client._process = _FakeProcWithStderr(
+        _FakeStderrStream([b"Resuming...\n", b"loading extension foo\n"])
+    )
+    asyncio.run(client._read_stderr())
+
+    child_logs = [d["text"] for t, d in events if t == "acp_child_log"]
+    assert child_logs == ["Resuming...", "loading extension foo"]
+    assert "loading extension foo" in client.stderr_tail()
+    assert client._prompt_error is None  # idle exit is not an error
+
+
+def test_read_stderr_caps_persisted_child_log_events() -> None:
+    """acp_child_log persistence is capped to the startup window so a chatty child
+    cannot grow the event log unbounded (#1468)."""
+    client, events = _client_with_recorder()
+    client._prompt_in_flight = False
+    n = AcpClient.MAX_CHILD_LOG_EVENTS + 25
+    client._process = _FakeProcWithStderr(_FakeStderrStream([b"line\n"] * n))
+    asyncio.run(client._read_stderr())
+
+    child_logs = [1 for t, _ in events if t == "acp_child_log"]
+    assert len(child_logs) == AcpClient.MAX_CHILD_LOG_EVENTS
+
+
 def test_transport_lost_wakes_in_flight_prompt() -> None:
     """A host-mode transport drop mid-turn must fail the in-flight prompt
     instead of hanging forever on a reply that will never arrive (issue #22).
