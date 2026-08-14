@@ -3522,6 +3522,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--stale-hours", dest="stale_hours", type=float, default=6.0,
         help="Age past which a session is 'cold' in the verdict (default 6h)",
     )
+    peek_p.add_argument("--json", action="store_true", help="Emit JSON.")
     peek_p.set_defaults(func=_cmd_peek)
 
     gc_p = sub.add_parser(
