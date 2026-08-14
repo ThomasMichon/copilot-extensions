@@ -103,6 +103,20 @@ report shape (`cr-report.json`) keeps its historical top-level keys and adds an
 **`generic-single-plugin`** is the reference scenario — today's Layer-0 install
 check — proving the substrate generalises without an internal dependency.
 
+### Available scenarios (F1 — the public suite)
+
+| Scenario | Tier | What it validates |
+|----------|------|-------------------|
+| [`generic-single-plugin`](scenarios/generic-single-plugin/) | P | The reference: register the marketplace + install ONE (configurable) plugin on a fresh box; assert the filesystem outcomes of install → bootstrap → binstub → plugin-load → register. |
+| [`agent-worktrees-solo`](scenarios/agent-worktrees-solo/) | P | The **worktree base** stands up solo: provisions, binstub reports a real version, read verbs enumerate, and a worktree **round-trips** (register → create → finalize). |
+| [`agent-bridge-solo`](scenarios/agent-bridge-solo/) | P | **agent-bridge without an agent-worktrees base** — the degrade-safe contract: it provisions, exposes a versioned binstub, and its read verbs (agents/machines/sessions) answer rather than crash on a missing base. |
+| [`agent-codespaces-solo`](scenarios/agent-codespaces-solo/) | P | **agent-codespaces without an agent-worktrees base** — its AW shell-out touch points (account map / leases / state-root) fall open to ambient behavior; read verbs (list/status/leases/validate) answer rather than hard-fail. |
+
+Downstream/internal scenarios (naming a specific harness's repos — e.g.
+`harness-health`, the citadel north-star) live with the **consuming harness** and
+are mounted verbatim via `-Scenario <dir>`, per the ownership split in
+[`ARCHITECTURE.md`](ARCHITECTURE.md).
+
 ## Driving the box over agent-bridge
 
 Beyond the interactive shell, the runner can register the container as an
