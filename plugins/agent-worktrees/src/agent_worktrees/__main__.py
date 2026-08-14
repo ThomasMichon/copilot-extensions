@@ -13811,6 +13811,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--peek", action="store_true",
                     help="Print the plan WITHOUT persisting the reconcile cache "
                          "(read-only preview; no throttle side effects).")
+    sp.add_argument("--with-payload-refresh", action="store_true",
+                    help="Include marketplace payload install/refresh phases "
+                         "(`copilot plugin install/update`). OFF by default: the "
+                         "programmatic path is runtime-only + pull-free. Only the "
+                         "Picker/operator update flow opts in (#1393).")
 
     # reconcile-binstubs (project launchers in ~/.local/bin vs projects.yaml)
     sub.add_parser(
@@ -14852,6 +14857,7 @@ def cmd_reconcile_plugins(args: argparse.Namespace) -> int:
         return 0
 
     machine = getattr(args, "machine", None)
+    with_payload = getattr(args, "with_payload_refresh", False)
 
     if getattr(args, "apply", False):
         # Execute in-process (background self-provisioning path). Log to stderr
@@ -14860,7 +14866,10 @@ def cmd_reconcile_plugins(args: argparse.Namespace) -> int:
             print(msg, file=sys.stderr, flush=True)
 
         try:
-            summary = reconcile.apply_plan(Path(repo_dir), machine=machine, log=_log)
+            summary = reconcile.apply_plan(
+                Path(repo_dir), machine=machine,
+                include_payload_refresh=with_payload, log=_log,
+            )
         except Exception as e:  # never raise from a background provision
             print(f"provision: error: {e}", file=sys.stderr)
             return 0
@@ -14869,7 +14878,9 @@ def cmd_reconcile_plugins(args: argparse.Namespace) -> int:
 
     try:
         plan = reconcile.build_plan(
-            Path(repo_dir), machine=machine, save=not getattr(args, "peek", False)
+            Path(repo_dir), machine=machine,
+            include_payload_refresh=with_payload,
+            save=not getattr(args, "peek", False),
         )
     except Exception as e:  # never break the launch
         print(json.dumps({"action": "continue", "reason": f"error: {e}"}))

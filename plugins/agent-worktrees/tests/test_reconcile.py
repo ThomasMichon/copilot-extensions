@@ -161,13 +161,22 @@ def test_no_settings_returns_empty(env):
 
 def test_missing_payload_emits_install(env):
     env.write_settings({f"agent-bridge@{MKT}": True})
-    plan = reconcile.build_plan(env.repo, machine="m1", cache={}, save=False)
+    plan = reconcile.build_plan(env.repo, machine="m1", cache={}, save=False,
+                                include_payload_refresh=True)
     assert plan["action"] == "reconcile"
     pay = [u for u in plan["updates"] if u["service"] == "agent-bridge"]
     assert pay and pay[0]["argv"] == [
         "copilot", "plugin", "install", f"agent-bridge@{MKT}"
     ]
     assert pay[0]["phase"] == "payload"
+
+
+def test_missing_payload_suppressed_by_default(env):
+    """Programmatic default is pull-free: a missing payload emits NO install
+    (installing is a marketplace pull -- Picker/operator update flow only, #1393)."""
+    env.write_settings({f"agent-bridge@{MKT}": True})
+    plan = reconcile.build_plan(env.repo, machine="m1", cache={}, save=False)
+    assert _services(plan, phase="payload") == set()
 
 
 # ---------------------------------------------------------------------------
@@ -307,7 +316,8 @@ def test_payload_refresh_throttled_when_recent(env):
     env.install_payload("agent-mcp", "1.0.0", scope="none")
     cache = {"plugins": {"agent-mcp": {"last_payload_update": 1_000_000.0}}}
     plan = reconcile.build_plan(
-        env.repo, machine="m1", now=1_000_100.0, cache=cache, save=False
+        env.repo, machine="m1", now=1_000_100.0, cache=cache, save=False,
+        include_payload_refresh=True,
     )
     assert plan["action"] == "continue"
 
@@ -318,10 +328,25 @@ def test_payload_refresh_due_after_interval(env):
     cache = {"plugins": {"agent-mcp": {"last_payload_update": 0.0}}}
     now = 10 * 24 * 3600.0
     plan = reconcile.build_plan(
-        env.repo, machine="m1", now=now, cache=cache, save=False
+        env.repo, machine="m1", now=now, cache=cache, save=False,
+        include_payload_refresh=True,
     )
     assert _services(plan, phase="payload") == {"agent-mcp"}
     assert cache["plugins"]["agent-mcp"]["last_payload_update"] == now
+
+
+def test_payload_refresh_suppressed_by_default(env):
+    """Default (programmatic) path never refreshes payloads, even when due, and
+    does NOT advance the throttle clock (#1393)."""
+    env.write_settings({f"agent-mcp@{MKT}": True})
+    env.install_payload("agent-mcp", "1.0.0", scope="none")
+    cache = {"plugins": {"agent-mcp": {"last_payload_update": 0.0}}}
+    now = 10 * 24 * 3600.0
+    plan = reconcile.build_plan(
+        env.repo, machine="m1", now=now, cache=cache, save=False,
+    )
+    assert _services(plan, phase="payload") == set()
+    assert cache["plugins"]["agent-mcp"]["last_payload_update"] == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -403,7 +428,8 @@ def test_payload_before_runtime_ordering(env):
     cache = {"plugins": {"context-handoff": {"last_payload_update": 0.0}}}
     now = 10 * 24 * 3600.0
     plan = reconcile.build_plan(
-        env.repo, machine="m1", now=now, cache=cache, save=False
+        env.repo, machine="m1", now=now, cache=cache, save=False,
+        include_payload_refresh=True,
     )
     phases = [u["phase"] for u in plan["updates"]
               if u["service"] == "context-handoff"]
@@ -679,7 +705,7 @@ def test_apply_plan_skips_copilot_when_absent(env, monkeypatch):
 
     calls: list = []
     summary = reconcile.apply_plan(
-        env.repo, machine="anywhere", passes=1,
+        env.repo, machine="anywhere", passes=1, include_payload_refresh=True,
         runner=lambda argv: calls.append(list(argv)) or 0,
     )
     # The copilot step was planned but skipped (not executed).
@@ -687,7 +713,17 @@ def test_apply_plan_skips_copilot_when_absent(env, monkeypatch):
     assert summary["executed"] == []
 
 
-def test_apply_plan_records_step_failure(env):
+def test_apply_plan_default_is_runtime_only(env):
+    """The provision-check path (apply_plan default) never emits a marketplace
+    pull: a missing payload yields no copilot step (#1393)."""
+    env.write_settings({f"agent-bridge@{MKT}": True})  # no installed payload
+    calls: list = []
+    summary = reconcile.apply_plan(
+        env.repo, machine="anywhere", passes=1,
+        runner=lambda argv: calls.append(list(argv)) or 0,
+    )
+    assert calls == []
+    assert summary["executed"] == []
     """A non-zero runner exit is recorded as ok=False, never raised."""
     import time
     env.write_settings({f"agent-bridge@{MKT}": True})
@@ -766,7 +802,7 @@ def test_apply_plan_substitutes_resolved_copilot_path(env, monkeypatch, tmp_path
 
     calls: list = []
     summary = reconcile.apply_plan(
-        env.repo, machine="anywhere", passes=1,
+        env.repo, machine="anywhere", passes=1, include_payload_refresh=True,
         runner=lambda argv: calls.append(list(argv)) or 0,
     )
     assert len(calls) == 1
