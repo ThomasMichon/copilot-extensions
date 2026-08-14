@@ -97,7 +97,7 @@ EXEMPT_SESSION_HOOK: frozenset[str] = frozenset()
 # `.sh` already declares stamp/provision, so the exemption is ps1-only. SHRINK this
 # set as each is ported; do NOT add plugins here to silence the check.
 BASELINE_NO_STAMP_PS1: frozenset[str] = frozenset({
-    "agent-bridge", "agent-index",
+    "agent-bridge",
 })
 
 
