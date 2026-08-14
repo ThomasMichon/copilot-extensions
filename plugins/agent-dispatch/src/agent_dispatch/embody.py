@@ -410,7 +410,7 @@ def spawn_fleet_headless_worker(
     kicked CLI body may never claim its task. A headless ACP body sidesteps the
     CLI-start-prompt path entirely, so a fleet body embodies reliably on the pool
     host without a human attach -- the right body for bounded, self-contained
-    sweeps (the Adjudication Boards).
+    sweeps.
 
     Unlike the CLI body, a headless body is **not a parallel worktree**, so no
     worktree handle is recovered (the caller records ``worktree=None``); the
