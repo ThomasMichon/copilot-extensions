@@ -7271,13 +7271,14 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
         worktree_path=wt_path, table=table,
     )
     if getattr(args, "bare_only", False):
-        # "un-muxed orphans": every bound Copilot Stop cannot reach -- a walkable
-        # non-mux ancestry ("bare") AND one whose homing could not be positively
-        # classified ("unknown", e.g. the pid missing from a racing process-table
-        # snapshot). Only a positively mux-homed session is left to restart/Stop,
-        # so a live-but-unclassifiable bound Copilot is still reclaimable instead
-        # of stranding its worktree ACTIVE with no lifecycle verb.
-        found = [f for f in found if f["homing"] != "mux"]
+        # "orphans Stop cannot reach": a walkable non-mux ancestry ("bare"), one
+        # whose homing could not be positively classified ("unknown", e.g. the
+        # pid missing from a racing process-table snapshot), OR one homed in a
+        # mux whose wt-<id> session is unreachable by the mux control socket (a
+        # DETACHED psmux server -- dotfiles #1447). Only a live, Stop-able muxed
+        # session is left to restart/Stop, so a bound Copilot Stop can't reach
+        # stays reclaimable instead of stranding its worktree ACTIVE.
+        found = reclaim.filter_stop_unreachable(found, table=table)
 
     # Safety guard: never reap the process subtree that contains this very
     # command (it runs as a child of the orchestrating Copilot).
@@ -7307,6 +7308,19 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
             table=table,
         )
 
+    # Tear down any DETACHED (Stop-unreachable) psmux server left hosting a
+    # reaped mux-homed target, so a reclaimed still-ACTIVE worktree leaks no
+    # orphaned server/pane (dotfiles #1447). Parity with reclaim_one. Only for
+    # targets we ACTUALLY killed -- a Copilot that failed to terminate is still
+    # live in its server, so its server must not be torn down.
+    mux_torn_down: list[int] = []
+    if do_kill and reaped:
+        _killed = {r["pid"] for r in reaped if r.get("killed")}
+        _killed_targets = [t for t in targets if t["pid"] in _killed]
+        if _killed_targets:
+            mux_torn_down = reclaim.teardown_detached_mux(
+                _killed_targets, table=table)
+
     payload = {
         "ok": True,
         "action": "reclaim" if do_kill else "dry-run",
@@ -7318,6 +7332,7 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
         "self_skipped": self_skipped,
         "reaped": reaped,
         "locks_cleared": cleared,
+        "mux_servers_torn_down": mux_torn_down,
     }
 
     if as_json:
@@ -7413,13 +7428,14 @@ def reclaim_one(worktree_id: str, *, bare_only: bool = True) -> dict:
     The in-process executor behind the Picker's per-row **Reclaim** action:
     resolves the exact Copilot process(es) bound to *worktree_id*'s session(s)
     via :func:`reclaim.resolve_bound_copilots` and terminates them (and their
-    Copilot child tree). ``bare_only`` (default) restricts to **un-muxed**
-    orphans -- a bound Copilot with no mux ancestor, i.e. homing ``bare`` OR
-    ``unknown`` (an un-walkable/racing ancestry that still is not positively
-    mux-homed) -- so a healthy muxed sibling is left to the graceful
-    ``restart``/Stop path while a live-but-unclassifiable bound Copilot is still
-    reclaimable. Never reaps the process subtree containing this command. Returns
-    a JSON-able ``{ok, worktree_id, targets, reaped}``.
+    Copilot child tree). ``bare_only`` (default) restricts to bound Copilots
+    **Stop cannot reach** -- a bound Copilot with no mux ancestor (homing
+    ``bare``), one whose ancestry couldn't be classified (``unknown``), OR one
+    homed in a mux whose ``wt-<id>`` session is unreachable by the mux control
+    socket (a **detached** psmux server -- dotfiles #1447). A live, Stop-able
+    muxed sibling is left to the graceful ``restart``/Stop path. Never reaps the
+    process subtree containing this command. Returns a JSON-able
+    ``{ok, worktree_id, targets, reaped}``.
     """
     table = reclaim.build_process_table()
     found = reclaim.resolve_bound_copilots(worktree_id=worktree_id, table=table)
@@ -7434,7 +7450,10 @@ def reclaim_one(worktree_id: str, *, bare_only: bool = True) -> dict:
             found.append(b)
             seen_pids.add(b["pid"])
     if bare_only:
-        found = [f for f in found if f["homing"] != "mux"]
+        # Reachability-aware: keep a mux-homed target when its wt-<id> mux is
+        # unreachable by Stop (a detached psmux server -- dotfiles #1447), so
+        # Reclaim isn't a no-op on it; preserve only a live, Stop-able mux.
+        found = reclaim.filter_stop_unreachable(found, table=table)
     me = os.getpid()
     targets = [
         f for f in found
@@ -7459,11 +7478,23 @@ def reclaim_one(worktree_id: str, *, bare_only: bool = True) -> dict:
     bridge_cleared = reclaim.clear_bridge_locks(
         worktree_id, force_pids=killed_pids, table=table,
     )
+    # A reaped mux-homed target in a DETACHED (Stop-unreachable) psmux server
+    # leaves the server + its pane shell running; nothing else GCs it while the
+    # worktree is still ACTIVE. Tear those orphaned servers down by pid so the
+    # worktree ends with zero residue (dotfiles #1447). Only for targets we
+    # ACTUALLY killed -- a Copilot that failed to terminate is still live in its
+    # server, so its server must not be torn down.
+    killed_targets = [t for t in targets if t["pid"] in killed_pids]
+    mux_torn_down = (
+        reclaim.teardown_detached_mux(killed_targets, table=table)
+        if killed_targets else []
+    )
     return {
         "ok": ok, "worktree_id": worktree_id,
         "targets": len(targets), "reaped": reaped,
         "locks_cleared": cleared,
         "bridge_locks_cleared": bridge_cleared,
+        "mux_servers_torn_down": mux_torn_down,
     }
 
 
@@ -13532,9 +13563,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--all", action="store_true",
                    help="Target every bound Copilot on the machine")
     p.add_argument("--bare-only", action="store_true",
-                   help="Restrict to un-muxed orphans (homing bare or "
-                        "unclassifiable) -- the common intent; leaves only "
-                        "positively mux-homed sessions to restart/reap")
+                   help="Restrict to bound Copilots Stop cannot reach (homing "
+                        "bare or unclassifiable, OR homed in a mux whose wt-<id> "
+                        "session is unreachable -- a detached psmux server) -- "
+                        "the common intent; leaves only live, Stop-able muxed "
+                        "sessions to restart/reap")
     p.add_argument("--yes", action="store_true",
                    help="Actually terminate the matched processes (without it, "
                         "the command is a dry run that kills nothing)")

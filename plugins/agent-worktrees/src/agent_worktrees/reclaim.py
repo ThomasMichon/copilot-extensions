@@ -36,11 +36,14 @@ __all__ = [
     "build_process_table",
     "homing_of",
     "descendants_of",
+    "mux_ancestors_of",
     "resolve_bound_copilots",
     "find_bare_orphans",
     "bare_orphan_worktree_ids",
     "live_bridge_worktrees",
     "reap_bound_copilots",
+    "filter_stop_unreachable",
+    "teardown_detached_mux",
 ]
 
 _MUX_NAMES = ("psmux", "tmux")
@@ -185,6 +188,31 @@ def descendants_of(pid: int, table: dict[int, dict]) -> set[int]:
             continue
         out.add(c)
         stack.extend(children.get(c, []))
+    return out
+
+
+def mux_ancestors_of(pid: int, table: dict[int, dict]) -> list[int]:
+    """Ancestor pids whose image name is a multiplexer (``psmux``/``tmux``).
+
+    Walks ``pid``'s ancestry (``pid`` itself excluded), nearest-first. A
+    **detached** mux server (Windows: ``psmux server -s wt-<id>`` with no
+    attached client) appears here as the sole mux ancestor of its pane's
+    Copilot -- the handle by which a Stop-unreachable orphan session is torn
+    down *by pid* when the control socket cannot reach it (see
+    :func:`teardown_detached_mux`).
+    """
+    if pid not in table:
+        return []
+    out: list[int] = []
+    seen: set[int] = {pid}
+    cur = table[pid]["ppid"]
+    guard = 0
+    while cur in table and cur not in seen and guard < 64:
+        seen.add(cur)
+        if any(m in table[cur]["name"] for m in _MUX_NAMES):
+            out.append(cur)
+        cur = table[cur]["ppid"]
+        guard += 1
     return out
 
 
@@ -620,6 +648,126 @@ def reap_bound_copilots(
             "children_killed": children_killed,
         })
     return out
+
+
+def _mux_reachability(worktree_ids) -> dict[str, bool]:
+    """Map each worktree id -> whether its ``wt-<id>`` mux session is reachable
+    by the mux control socket (``has-session``/``list-sessions``) -- i.e. a live
+    session **Stop** (``kill-session``) can act on.
+
+    Resolved in a **single batched** :func:`sessions.mux_status_many` call (which
+    folds every session into one ``list-sessions``), so an ``--all`` / multi-
+    worktree scan pays O(1) mux queries, not O(N). A **detached** psmux server
+    (Windows: no attached client) is alive but invisible to every control-socket
+    verb, so it reads ``False`` here -- deliberately, since Stop cannot reach it
+    (dotfiles #1447). Degrades to all-``False`` on any error (treat an
+    unverifiable mux as unreachable, so its bound Copilot stays reclaimable
+    rather than stranded).
+    """
+    ids = sorted({w for w in worktree_ids if w})
+    if not ids:
+        return {}
+    try:
+        status = sessions.mux_status_many(ids)
+    except Exception:
+        return {w: False for w in ids}
+    return {w: bool(status.get(w) and status[w].exists) for w in ids}
+
+
+def filter_stop_unreachable(
+    found: list[dict], *, table: dict[int, dict] | None = None,
+) -> list[dict]:
+    """The ``bare_only`` reclaim filter, made **reachability-aware**.
+
+    ``bare_only`` means "every bound Copilot that **Stop cannot reach**". A
+    ``mux``-homed Copilot is normally left to the graceful ``restart``/Stop path
+    -- but *only when its ``wt-<id>`` mux session is actually reachable* by the
+    multiplexer control socket. On Windows a **detached** psmux server
+    (``psmux server -s wt-<id>`` with no attached client) keeps its Copilot
+    alive yet is invisible to ``has-session``/``list-sessions``/``kill-session``/
+    ``attach-session``, so Stop *and every other control-socket verb* miss it.
+    Such a mux-homed Copilot must stay reclaimable, else the Picker offers
+    Reclaim (``mux_live=False``, since the socket can't see the session) yet
+    reaps nothing -- stranding the worktree ACTIVE with no lifecycle verb
+    (dotfiles #1447).
+
+    Keeps a target when its homing is ``bare``/``unknown`` (never mux-homed),
+    OR its ``wt-<id>`` mux is unreachable. Drops only a target homed in a live,
+    Stop-able mux -- the Repair-beside-a-healthy-mux case, where preserving the
+    mux (and reaping just the stray bare orphan) is the point. A mux-homed
+    target with no resolvable worktree id keeps the prior behavior (dropped:
+    left to Stop), since reachability can't be checked.
+    """
+    reach = _mux_reachability(
+        f.get("worktree_id") for f in found if f.get("homing") == "mux")
+    kept: list[dict] = []
+    for f in found:
+        if f.get("homing") != "mux":
+            kept.append(f)
+            continue
+        wt = f.get("worktree_id")
+        if not wt or reach.get(wt, False):
+            continue  # healthy, Stop-able mux (or unverifiable) -> preserve
+        kept.append(f)  # detached / control-socket-unreachable mux -> reclaimable
+    return kept
+
+
+def teardown_detached_mux(
+    targets: list[dict], *, table: dict[int, dict] | None = None,
+) -> list[int]:
+    """Tear down the **detached** mux server(s) hosting reaped mux-homed targets.
+
+    :func:`reap_bound_copilots` is precise -- it kills the bound Copilot (and its
+    Copilot child tree) but never the mux server **ancestor** that hosts the
+    pane. For a *reachable* session that server is the operator's live mux
+    (Stop's job); for a **detached/unreachable** psmux server (invisible to the
+    control socket) nothing else will ever reap it -- ``reap-sessions`` GCs only
+    finalized/done worktrees -- so a reclaimed still-ACTIVE worktree would leak
+    the server plus its pane shell. This kills those orphaned servers *by pid*
+    (best-effort) so a reclaimed detached-mux worktree ends with **zero**
+    residue.
+
+    Only servers whose ``wt-<id>`` session is UNREACHABLE are touched (a live,
+    Stop-able mux is left alone), and a **nested** mux server the orphan may have
+    pre-spawned (e.g. a ``__warm__`` pool server) is skipped along with its
+    **entire subtree** -- server and panes both belong to the shared pool, not
+    this session. Never tears down the subtree containing this process. Returns
+    the killed server pids.
+    """
+    from . import procs
+
+    table = build_process_table() if table is None else table
+    me = os.getpid()
+    reach = _mux_reachability(
+        t.get("worktree_id") for t in targets if t.get("homing") == "mux")
+    killed: list[int] = []
+    done: set[int] = set()
+    for t in targets:
+        if t.get("homing") != "mux":
+            continue
+        wt = t.get("worktree_id")
+        if not wt or reach.get(wt, False):
+            continue
+        for server in mux_ancestors_of(t["pid"], table):
+            if server in done:
+                continue
+            done.add(server)
+            subtree = descendants_of(server, table)
+            if me == server or me in subtree:
+                continue  # never reap our own tree
+            # Shield any NESTED mux server (a __warm__ pool server the detached
+            # server pre-spawned) AND everything under it -- server + panes are
+            # the shared pool's, not this orphan session's.
+            protected: set[int] = set()
+            for c in subtree:
+                if any(mx in table.get(c, {}).get("name", "") for mx in _MUX_NAMES):
+                    protected |= {c} | descendants_of(c, table)
+            for c in subtree:
+                if c not in protected:
+                    procs.terminate_pid(c)
+            if procs.terminate_pid(server):
+                killed.append(server)
+    return killed
 
 
 def clear_lock_residue(

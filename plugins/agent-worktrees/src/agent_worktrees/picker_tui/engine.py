@@ -3690,21 +3690,23 @@ class PickerScreen(Widget):
 
         Runs the same maintenance progress path as Stop, but drives the
         ``reclaim`` op (kill the exact Copilot process holding the session's
-        ``inuse.<pid>.lock``, **un-muxed bindings only**) instead of a mux quit.
-        Offered -- and here filtered -- on :meth:`_reclaimable`: a bound Copilot
-        with no mux for Stop to reach (a bare orphan, or a live lock whose homing
-        could not be classified ``bare``). Filtering on the same predicate the
-        executor acts on keeps the verb honest -- a positively muxed session is
-        left to Stop, a bare orphan the cwd-keyed lock-scan never registered
-        (#662/#1416) still reaps, and a bound-but-unclassifiable Copilot is no
-        longer stranded. After it finishes the touched machines reload, so the
-        row re-renders without the stale bound process -- ready for a fresh Open /
+        ``inuse.<pid>.lock``, **only bindings Stop cannot reach**) instead of a
+        mux quit. Offered -- and here filtered -- on :meth:`_reclaimable`: a
+        bound Copilot with no mux for Stop to reach (a bare orphan, a live lock
+        whose homing could not be classified ``bare``, or one homed in a mux
+        whose ``wt-<id>`` session is unreachable -- a detached psmux server,
+        dotfiles #1447). Filtering on the same predicate the executor acts on
+        keeps the verb honest -- a live, Stop-able muxed session is left to Stop,
+        a bare orphan the cwd-keyed lock-scan never registered (#662/#1416) still
+        reaps, and a bound-but-unclassifiable-or-detached Copilot is no longer
+        stranded. After it finishes the touched machines reload, so the row
+        re-renders without the stale bound process -- ready for a fresh Open /
         Bare resume.
         """
         recs = [recs] if isinstance(recs, dict) else list(recs)
         live = [r for r in recs if PickerScreen._reclaimable(r)]
         if not live:
-            self.debug = "no un-muxed bound process to reclaim"
+            self.debug = "no Stop-unreachable bound process to reclaim"
             return
         self._run_op_progress("Reclaim", "reclaim", live, armed=True)
 
@@ -3713,13 +3715,15 @@ class PickerScreen(Widget):
         action, offered only in the WARNING state -- see :meth:`_warning`).
 
         Drives the SAME ``reclaim`` op as :meth:`_start_reclaim` (bare-only reap
-        via ``reclaim_one``), which by construction reaps only the **un-muxed**
-        (bare/unknown-homing) orphan and leaves the positively **mux-homed**
-        session untouched -- so the healthy ``wt-<id>`` mux is PRESERVED while the
-        stray orphan and its lock residue are cleared. Filtered on the same
-        ``_warning`` predicate the verb is gated on, so it acts if and only if the
-        double-binding is real. After it finishes the touched machines reload and
-        the row re-renders as a clean, singly-bound mux -- ready to Open/Stop.
+        via ``reclaim_one``), which reaps only the bindings Stop cannot reach --
+        here the **un-muxed** (bare/unknown-homing) stray orphan -- and leaves the
+        live, **Stop-able mux-homed** session untouched (its ``wt-<id>`` mux is
+        reachable, so ``filter_stop_unreachable`` preserves it). So the healthy
+        ``wt-<id>`` mux is PRESERVED while the stray orphan and its lock residue
+        are cleared. Filtered on the same ``_warning`` predicate the verb is gated
+        on, so it acts if and only if the double-binding is real. After it
+        finishes the touched machines reload and the row re-renders as a clean,
+        singly-bound mux -- ready to Open/Stop.
         """
         recs = [recs] if isinstance(recs, dict) else list(recs)
         live = [r for r in recs if PickerScreen._warning(r)]
