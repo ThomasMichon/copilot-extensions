@@ -22,10 +22,18 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
+import sys
 
 log = logging.getLogger("agent-bridge")
 
 _CODESPACE_PREFIX = "codespace:"
+
+# Suppress a flashing console window when spawning the transport subprocess on a
+# Windows host (parity with the retired session_manager shell-out, which set this
+# on its ``agent-codespaces`` call). ``CREATE_NO_WINDOW`` exists only on win32.
+_CREATE_NO_WINDOW = (
+    subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0  # type: ignore[attr-defined]
+)
 
 
 class TargetExecError(RuntimeError):
@@ -71,6 +79,7 @@ def exec_bash_on_target(session: dict, command: str, *, timeout: float) -> str:
         try:
             proc = subprocess.run(
                 argv, capture_output=True, text=True, timeout=timeout + 60,
+                creationflags=_CREATE_NO_WINDOW,
             )
         except subprocess.TimeoutExpired as exc:
             raise TargetExecError(f"codespace exec timed out after {timeout}s") from exc
@@ -85,7 +94,7 @@ def exec_bash_on_target(session: dict, command: str, *, timeout: float) -> str:
         try:
             proc = subprocess.run(
                 [bash, "-lc", command], capture_output=True, text=True,
-                timeout=timeout + 10,
+                timeout=timeout + 10, creationflags=_CREATE_NO_WINDOW,
             )
         except subprocess.TimeoutExpired as exc:
             raise TargetExecError(f"local exec timed out after {timeout}s") from exc
