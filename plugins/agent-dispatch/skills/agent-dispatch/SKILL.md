@@ -668,7 +668,7 @@ headless supervisor persistently, put the watched labels in
 
 > **Cross-machine dispatch (Phase 8, SSH-push).** Add `--target-machine <Y>` to an
 > `embody` spawn to dispatch **on another machine**: `agent-dispatch create <task>
-> --target-machine borealis --spawn --spawn-backend embody`. Because
+> --target-machine emancipation-cube --spawn --spawn-backend embody`. Because
 > agent-dispatch is per-host (each machine owns a loopback coordinator + local
 > embody), the whole create+embody is run **on Y** over the facility SSH mesh (Y's
 > name is its SSH alias -- never a raw IP); the task lives on Y's coordinator and
@@ -680,8 +680,8 @@ headless supervisor persistently, put the watched labels in
 
 > **Peer-queue browse (Phase 8 8c).** Add `--machine <Y>` to `list` or `inbox`
 > to read **Y's own queue** over the SSH mesh instead of the local coordinator:
-> `agent-dispatch list --machine borealis --status started` /
-> `agent-dispatch inbox --machine borealis`. When `Y` is a remote peer, the read
+> `agent-dispatch list --machine emancipation-cube --status started` /
+> `agent-dispatch inbox --machine emancipation-cube`. When `Y` is a remote peer, the read
 > command is run **on Y** (`ssh Y agent-dispatch …`), so it reads Y's loopback
 > coordinator and — via 8b — enriches against Y's own bridge; the JSON streams
 > straight back. `list` forwards the locally-resolved repo lane (+ any

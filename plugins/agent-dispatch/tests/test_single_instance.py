@@ -10,9 +10,9 @@ from agent_dispatch.single_instance import (
 
 
 def test_lock_path_slugifies_scope(tmp_path):
-    p = lock_path_for(tmp_path, "supervisor:lambda-core:default")
+    p = lock_path_for(tmp_path, "supervisor:anomalous-potato:default")
     assert p.parent == tmp_path
-    assert p.name == "supervisor-lambda-core-default.lock"
+    assert p.name == "supervisor-anomalous-potato-default.lock"
 
 
 def test_second_acquire_is_refused_while_held(tmp_path):

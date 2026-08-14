@@ -186,11 +186,11 @@ def test_max_concurrent_caps_spawns(q, client):
 
 
 def test_label_opt_in(q, client):
-    marked = q.create("marked", labels=["cab-sweep"])
+    marked = q.create("marked", labels=["nightly-sweep"])
     q.create("unmarked")
     spawn = _ok_spawn()
     sup = Supervisor(
-        client, spawn_fn=spawn, repo=TEST_REPO, labels=["cab-sweep"], max_concurrent=5
+        client, spawn_fn=spawn, repo=TEST_REPO, labels=["nightly-sweep"], max_concurrent=5
     )
 
     spawned = sup.poll_once()
@@ -542,20 +542,20 @@ def test_cli_supervise_pool_headless_builds_headless_fleet(monkeypatch, q, clien
     monkeypatch.setattr(m, "client_url", lambda: "http://coord")
     monkeypatch.setattr(m, "_scope_repo", lambda _args: TEST_REPO)
     monkeypatch.setattr(fleet_mod, "FleetSpawner", FakeFleet)
-    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "wheatley")
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "mantis-counter")
 
     args = types.SimpleNamespace(
-        all_repos=False, repo=None, url=None, token=None, label=["cab"],
+        all_repos=False, repo=None, url=None, token=None, label=["review"],
         max_concurrent=5, verify_timeout=0, once=True, interval=30.0,
         no_heartbeat=False, max_attempts=3,
-        pool="lambda-core-wsl", origin=None, headless=True,
+        pool="anomalous-potato-wsl", origin=None, headless=True,
         headless_label=None, headless_agent="review-worker",
     )
     assert m._cmd_supervise(args) == 0
     assert captured["headless"] is True
     assert captured["agent"] == "review-worker"
-    assert captured["pool"] == ["lambda-core-wsl"]
-    assert captured["origin"] == "wheatley"
+    assert captured["pool"] == ["anomalous-potato-wsl"]
+    assert captured["origin"] == "mantis-counter"
 
 
 
@@ -871,8 +871,8 @@ def _fleet_spawn(handle_session):
 def test_parse_fleet_body_handle_decodes_host_and_session():
     from agent_dispatch.supervisor import _parse_fleet_body_handle
 
-    assert _parse_fleet_body_handle("fleet-body:lambda-core-wsl:brg-9") == (
-        "lambda-core-wsl", "brg-9",
+    assert _parse_fleet_body_handle("fleet-body:anomalous-potato-wsl:brg-9") == (
+        "anomalous-potato-wsl", "brg-9",
     )
     # non-fleet handles (worktree embody, synthetic owner, empty) -> None
     assert _parse_fleet_body_handle("wt-1") is None
@@ -886,7 +886,7 @@ def test_recover_gone_fleet_body_releases_for_reembody(q, client):
     recovery handle) is recovered via the fleet verdict probe: its reservation is
     released so the next cycle re-embodies it (resuming from progress_log)."""
     t = q.create("work")
-    spawn = _fleet_spawn("fleet-body:lambda-core-wsl:brg-1")
+    spawn = _fleet_spawn("fleet-body:anomalous-potato-wsl:brg-1")
     sup = Supervisor(
         client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5,
         fleet_verdict_fn=lambda host, sid: "gone",
@@ -896,7 +896,7 @@ def test_recover_gone_fleet_body_releases_for_reembody(q, client):
     )
     assert sup.poll_once() == [t.id]  # spawn #1 -> SPAWNED w/ fleet-body handle
     assert q.latest_reservation(t.id).state == SpawnState.SPAWNED
-    assert q.latest_reservation(t.id).session_handle == "fleet-body:lambda-core-wsl:brg-1"
+    assert q.latest_reservation(t.id).session_handle == "fleet-body:anomalous-potato-wsl:brg-1"
 
     # next cycle: recover_gone sees the fleet body GONE -> releases -> re-embodies
     assert sup.poll_once() == [t.id]

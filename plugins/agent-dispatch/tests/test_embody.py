@@ -224,7 +224,7 @@ def test_fleet_spawn_threads_project_before_embody(monkeypatch):
                            or types.SimpleNamespace(returncode=0, stdout="{}", stderr="")),
     )
     embody.spawn_fleet_embodied_worker(
-        "borealis", "t", origin="wheatley", owner="fleet-t-abc",
+        "emancipation-cube", "t", origin="mantis-counter", owner="fleet-t-abc",
         worker_id="fleet-t-abc", project="aperture-labs",
     )
     # cmd == [ssh, -o, BatchMode=yes, host, "<remote_cmd string>"]

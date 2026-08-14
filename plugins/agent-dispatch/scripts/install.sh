@@ -16,7 +16,7 @@
 # `supervisor.env`; with none set the unit is installed but left inert (#2869).
 #
 # Runtime lives at ~/.agent-dispatch/ (venv, config, DB). Binstub goes to
-# ~/.local/bin/agent-dispatch. A STANDALONE Linux host (e.g. Wheatley) runs the
+# ~/.local/bin/agent-dispatch. A STANDALONE Linux host (e.g. Mantis-Counter) runs the
 # full coordinator as a systemd **user** service (loopback 127.0.0.1, an
 # OS-assigned dynamic port advertised via the rendezvous file -- Stage C). A
 # WSL guest installs CLIENT-ONLY (no service): the always-on Windows host owns
@@ -706,7 +706,7 @@ _register_pivot() {
 # True (0) on a WSL guest -- a Linux env hosted by a Windows box. A WSL guest
 # installs CLIENT-ONLY (venv + binstub, no coordinator service): the always-on
 # Windows host owns the coordinator now (Phase 2, issue #2818), reversing the
-# #2777 model. A standalone Linux host (e.g. Wheatley) is NOT WSL and installs
+# #2777 model. A standalone Linux host (e.g. Mantis-Counter) is NOT WSL and installs
 # the full coordinator. Detect via WSL_DISTRO_NAME or `microsoft` in the kernel
 # osrelease / /proc/version (case-insensitive) -- mirrors netinfo.is_wsl().
 _is_wsl() {
@@ -872,7 +872,7 @@ AGENT_DISPATCH_SUPERVISE_HEADLESS_LABELS=
 # agent-bridge agent name used for headless embody bodies (default: task-worker):
 AGENT_DISPATCH_SUPERVISE_HEADLESS_AGENT=
 # Extra raw flags appended to the invocation (advanced; e.g. fleet mode:
-#   --pool host-a,host-b --origin wheatley):
+#   --pool host-a,host-b --origin mantis-counter):
 AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=
 ENVEOF
         _ok "Supervisor env: $SUPERVISOR_ENV_FILE (no labels -> service stays inert; add a label to enable)"
