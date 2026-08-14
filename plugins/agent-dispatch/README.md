@@ -26,7 +26,7 @@ account per agent.
 `agent-dispatch` is a `machine-gated` plugin: the agent-worktrees launch-time
 reconciler installs/updates its runtime automatically on the machines listed in
 the control repo's gate manifest (`external-repos.yaml` `deploy_machines`), and
-the `aperture-labs services agent-dispatch <action>` path drives it too
+the `test-chamber services agent-dispatch <action>` path drives it too
 -- the same model as agent-bridge. To install/manage it directly:
 
 ```bash

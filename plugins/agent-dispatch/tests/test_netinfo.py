@@ -145,7 +145,7 @@ def test_client_url_uses_valid_cache(monkeypatch):
 
 def test_client_url_prefers_loopback_mirrored(monkeypatch):
     monkeypatch.setattr(netinfo, "_read_url_cache", lambda: None)
-    monkeypatch.setattr(netinfo, "wsl_default_gateway", lambda: "192.168.0.1")
+    monkeypatch.setattr(netinfo, "wsl_default_gateway", lambda: "192.0.2.1")
     monkeypatch.setattr(netinfo, "_probe_health", lambda url, timeout: "127.0.0.1" in url)
     saved = {}
     monkeypatch.setattr(netinfo, "_write_url_cache", lambda u: saved.setdefault("u", u))
