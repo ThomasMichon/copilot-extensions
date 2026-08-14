@@ -1,7 +1,7 @@
 """The task registrar -- declarative supervised-work profiles (Phase 1: schema).
 
 A **profile declaration** is the durable, declarative description of one unit of
-supervised work -- a label-gated pool, a board's schedule lane, a fleet dispatch.
+supervised work -- a label-gated pool, a scheduled lane, a fleet dispatch.
 It is the source of truth the singleton supervisor reconciles (vision:
 *declarative-discovered-registrar* / *discover-and-live-reconcile*). This module is
 **pure**: it parses an already-decoded mapping (from YAML or JSON -- reading files

@@ -258,7 +258,7 @@ def test_label_max_attempts_raises_one_labels_bound(q, client):
 def test_label_max_attempts_leaves_other_labels_on_global_bound(q, client):
     """A label with no override still uses the global bound -- reviving one
     label's tasks does not revive another's (the decoupling #3492 exists for)."""
-    t = q.create("work", labels=["coherence-adjudication-board"])
+    t = q.create("work", labels=["nightly-scan"])
     sup = Supervisor(
         client, spawn_fn=lambda _t: (False, {"error": "x"}),
         repo=TEST_REPO, max_concurrent=5, max_attempts=1,
@@ -401,12 +401,12 @@ def test_make_headless_spawn_uses_bridge_with_autopilot_seed(monkeypatch):
         lambda task_id, *, coordinator_url, worker_id: f"SEED::{task_id}",
     )
 
-    spawn = make_headless_spawn("http://coord", agent="board-worker")
+    spawn = make_headless_spawn("http://coord", agent="review-worker")
     ok, handle = spawn({"id": "task-1"})
 
     assert ok is True
     assert handle["worktree"] is None  # headless body is not a worktree
-    assert calls["agent"] == "board-worker"
+    assert calls["agent"] == "review-worker"
     assert calls["prompt"] == "SEED::task-1"  # the CLI autopilot seed, verbatim
     assert calls["wait"] is False  # fire-and-forget; the worker drives itself
 
@@ -476,7 +476,7 @@ def test_cli_supervise_headless_label_routes(monkeypatch, q, client):
     from agent_dispatch import __main__ as m
     from agent_dispatch import supervisor as sup_mod
 
-    marked = q.create("sweep work", labels=["board-sweep"])
+    marked = q.create("sweep work", labels=["nightly-scan"])
     plain = q.create("interactive work")
 
     embody_calls: list[str] = []
@@ -500,7 +500,7 @@ def test_cli_supervise_headless_label_routes(monkeypatch, q, client):
         all_repos=False, repo=None, url=None, token=None, label=None,
         max_concurrent=5, verify_timeout=0, once=True, interval=30.0,
         no_heartbeat=False, max_attempts=3,
-        headless_label=["board-sweep"], headless_agent="task-worker",
+        headless_label=["nightly-scan"], headless_agent="task-worker",
     )
     assert m._cmd_supervise(args) == 0
     assert headless_calls == [marked.id]
@@ -549,11 +549,11 @@ def test_cli_supervise_pool_headless_builds_headless_fleet(monkeypatch, q, clien
         max_concurrent=5, verify_timeout=0, once=True, interval=30.0,
         no_heartbeat=False, max_attempts=3,
         pool="lambda-core-wsl", origin=None, headless=True,
-        headless_label=None, headless_agent="board-worker",
+        headless_label=None, headless_agent="review-worker",
     )
     assert m._cmd_supervise(args) == 0
     assert captured["headless"] is True
-    assert captured["agent"] == "board-worker"
+    assert captured["agent"] == "review-worker"
     assert captured["pool"] == ["lambda-core-wsl"]
     assert captured["origin"] == "wheatley"
 

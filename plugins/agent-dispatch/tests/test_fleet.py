@@ -284,7 +284,7 @@ def test_spawn_fleet_headless_worker_builds_ssh_agent_bridge_argv(monkeypatch):
 
     embody.spawn_fleet_headless_worker(
         "Host-B", "t7", origin="brain", owner="fleet-t7-xyz", worker_id="fleet-t7-xyz",
-        agent="board-worker",
+        agent="review-worker",
     )
     cmd = captured["cmd"]
     assert cmd[0] == "/usr/bin/ssh"
@@ -293,7 +293,7 @@ def test_spawn_fleet_headless_worker_builds_ssh_agent_bridge_argv(monkeypatch):
     remote = cmd[4]
     # a headless ACP body via the pool host's agent-bridge, fire-and-forget, with
     # --json (global) so the created session_id rides stdout for the recovery handle
-    assert remote.startswith("agent-bridge --json create board-worker ")
+    assert remote.startswith("agent-bridge --json create review-worker ")
     assert "--no-wait" in remote
     # the SAME fleet seed as the CLI body rides inside the remote command
     assert "ssh brain agent-dispatch claim --task t7 --worker fleet-t7-xyz" in remote
@@ -379,7 +379,7 @@ def test_headless_call_encodes_fleet_body_recovery_handle():
         )
 
     f = fleet.FleetSpawner(
-        ["lambda-core-wsl"], origin="orig", headless=True, agent="board-worker",
+        ["lambda-core-wsl"], origin="orig", headless=True, agent="review-worker",
         liveness=lambda h: True, spawn_fn=spawn,
     )
     ok, handle = f({"id": "t1"})
@@ -420,7 +420,7 @@ def test_headless_call_routes_agent_and_records_no_worktree():
     agent, and its handle carries NO worktree (a headless body is not a worktree)."""
     rec: list = []
     f = fleet.FleetSpawner(
-        ["a"], origin="orig", headless=True, agent="board-worker",
+        ["a"], origin="orig", headless=True, agent="review-worker",
         liveness=lambda h: True, spawn_fn=_fake_headless_spawn(rec),
     )
     ok, handle = f({"id": "t1", "repo": "gitea.example/org/widgets"})
@@ -430,7 +430,7 @@ def test_headless_call_routes_agent_and_records_no_worktree():
     assert handle["session"] == handle["owner"]
     assert handle["owner"].startswith("fleet-t1-")
     # the configured agent-bridge agent was handed to the headless body
-    assert rec[0]["agent"] == "board-worker"
+    assert rec[0]["agent"] == "review-worker"
     assert rec[0]["owner"] == handle["owner"]
 
 

@@ -448,14 +448,14 @@ WSL guest or client-only host (`--no-service`) installs none and removes stale
 supervisors; `--no-supervisor` opts a full host out of all supervisors while
 leaving the coordinator installed.
 
-Example board-fleet profile (`~/.agent-dispatch/supervisors/boards.env`):
+Example multi-label supervisor profile (`~/.agent-dispatch/supervisors/review.env`):
 
 ```
-AGENT_DISPATCH_SUPERVISE_LABELS=coherence-adjudication-board,reality-adjudication-board,efficiency-adjudication-board
+AGENT_DISPATCH_SUPERVISE_LABELS=code-review,nightly-scan
 AGENT_DISPATCH_SUPERVISE_INTERVAL=30
 AGENT_DISPATCH_SUPERVISE_MAX_CONCURRENT=1
 AGENT_DISPATCH_SUPERVISE_MAX_ATTEMPTS=3
-AGENT_DISPATCH_SUPERVISE_HEADLESS_AGENT=lambda-core-wsl
+AGENT_DISPATCH_SUPERVISE_HEADLESS_AGENT=review-worker
 AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=--pool lambda-core-wsl --origin wheatley --headless
 ```
 
