@@ -61,6 +61,58 @@ CANONICAL_CONFIG_REL = f"{CONFIG_DIR_NAME}/{CONFIG_FILE_IN_DIR}"
 # ``agent-codespaces config migrate`` relocates it to CANONICAL_CONFIG_REL.
 CONFIG_FILENAME = "codespaces.yaml"
 
+# ── User-level drop-in config providers (config.d) ──────────────────────────
+# A plugin (e.g. odsp-web-harness) can make its shipped CodeSpace *target* config
+# discoverable WITHOUT a control-plane repo and WITHOUT writing into any repo: it
+# drops a small **pointer** file into ``~/.agent-codespaces/config.d/`` naming its
+# config.yaml. agent-codespaces reads each pointer, loads the referenced config,
+# and merges it at the LOWEST precedence (a provider default -- any adopted-repo /
+# cwd config still overrides). This keeps the provider edge one-way and
+# dependency-free: the plugin ships a default and points at it in place; agent-
+# codespaces discovers it dynamically; neither writes into the other's repo, and a
+# plugin update keeps the pointed config live (no stale copy).
+CONFIG_D_DIR_NAME = "config.d"
+
+
+def config_d_dir() -> Path:
+    """The user-level drop-in config directory (~/.agent-codespaces/config.d/)."""
+    return RUNTIME_DIR / CONFIG_D_DIR_NAME
+
+
+def discover_dropin_configs() -> list[Path]:
+    """Resolve the drop-in config providers under ~/.agent-codespaces/config.d/.
+
+    Each file in ``config.d/`` is a **pointer**: its content's first non-empty,
+    non-comment line is a path to a ``config.yaml``. Returns the resolved,
+    existing config-file paths in deterministic (sorted-filename) order. A pointer
+    naming a missing file is skipped -- a stale/uninstalled provider must never
+    break discovery. As a convenience a ``config.d/`` entry that is itself a
+    ``.yaml``/``.yml`` file is used directly.
+    """
+    d = config_d_dir()
+    if not d.is_dir():
+        return []
+    resolved: list[Path] = []
+    for entry in sorted(d.iterdir()):
+        if not entry.is_file():
+            continue
+        if entry.suffix in (".yaml", ".yml"):
+            resolved.append(entry)
+            continue
+        try:
+            text = entry.read_text("utf-8")
+        except OSError:
+            continue
+        target: Path | None = None
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#"):
+                target = Path(stripped).expanduser()
+                break
+        if target is not None and target.is_file():
+            resolved.append(target)
+    return resolved
+
 
 def repo_config_path(repo_path: Path) -> Path | None:
     """Return a repo's CodeSpace config file, or ``None`` if it has none.
@@ -747,12 +799,16 @@ def load_merged_config(include_cwd: bool = True) -> CodespacesConfig:
             and repo_has_config(cwd_root)
         ):
             roots.append(cwd_root)
-    if not roots:
-        return CodespacesConfig()
 
     merged = CodespacesConfig()
     defaults_set = False
 
+    # Ordered list of (raw_config, config_dir, source_path) to merge; order =
+    # precedence. Adopted repos + cwd first, then USER-LEVEL drop-in providers
+    # (config.d) LAST so an adopted-repo / cwd config always wins on conflicts.
+    # The drop-in seam makes a plugin-shipped target config discoverable with NO
+    # control-plane repo (the golden-path config-provider seam).
+    sources: list[tuple[dict[str, Any], Path, Path]] = []
     for repo_root in roots:
         # E1e knowledge overlay (config-graft, #947): read the config from the
         # repo itself, or -- when it has none and is a stateless harness -- from
@@ -768,8 +824,20 @@ def load_merged_config(include_cwd: bool = True) -> CodespacesConfig:
         raw = load_repo_config(config_dir)
         if raw is None:
             continue
+        sources.append((raw, config_dir, repo_root))
+    for cfg_file in discover_dropin_configs():
+        try:
+            with open(cfg_file) as f:
+                dropin_raw = yaml.safe_load(f) or {}
+        except (OSError, yaml.YAMLError):
+            continue
+        if isinstance(dropin_raw, dict) and dropin_raw:
+            # config_dir = the pointed config's own dir, so its provision `src`
+            # paths resolve relative to the plugin payload it ships in.
+            sources.append((dropin_raw, cfg_file.parent, cfg_file.parent))
 
-        merged.source_paths.append(repo_root)
+    for raw, config_dir, source_path in sources:
+        merged.source_paths.append(source_path)
 
         # Defaults (first wins)
         defaults = raw.get("defaults", {})
