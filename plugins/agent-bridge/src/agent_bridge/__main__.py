@@ -1430,6 +1430,117 @@ def _cmd_sessions(args: argparse.Namespace) -> None:
             print(f"    Liveness: {live}")
 
 
+def _peek_iso(ts: object) -> str:
+    """Trim an events.jsonl ISO timestamp to ``YYYY-MM-DD HH:MM:SS`` for display."""
+    s = str(ts or "")
+    return s[:19].replace("T", " ") if s else "-"
+
+
+def _cmd_peek(args: argparse.Namespace) -> None:
+    """Copilot-free peek at a target's CURRENT session transcript.
+
+    Reads the Copilot CLI's own ``events.jsonl`` for the session agent-bridge
+    tracks on the target (by ``acp_session_id``) and distills a compact snapshot
+    + reuse-worthiness verdict -- WITHOUT launching ``copilot --acp`` (which can
+    stall on the ACP resume race, dotfiles#1422). ``target`` is a session id or
+    an agent name (e.g. ``codespace:<name>``); the newest session for an agent is
+    treated as current.
+    """
+    from . import peek_snapshot as ps
+    from . import target_exec as tx
+
+    client = _get_client()
+    target = args.target
+
+    session = None
+    try:
+        session = client.get_session(target)
+    except Exception:
+        session = None
+    if not session:
+        try:
+            sessions = client.list_sessions()
+        except Exception:
+            sessions = []
+        cands = [s for s in sessions if s.get("agent_name") == target]
+        if not cands and not target.startswith("codespace:"):
+            alt = f"codespace:{target}"
+            cands = [s for s in sessions if s.get("agent_name") == alt]
+        # list_sessions is newest-first, so the first match is the current session.
+        session = cands[0] if cands else None
+    if not session:
+        print(f"[FAIL] no session found for '{target}' "
+              f"(pass a session id or agent name)", file=sys.stderr)
+        sys.exit(1)
+
+    sid = session.get("session_id") or session.get("id") or ""
+    agent = session.get("agent_name") or ""
+    acp = session.get("acp_session_id")
+    if not acp:
+        msg = (f"session {sid} ({agent}) has no acp_session_id yet -- "
+               f"copilot has not written a transcript")
+        if args.json:
+            _json_out({"ok": False, "reason": msg, "session_id": sid, "agent": agent})
+        else:
+            print(f"[peek] {msg}")
+        return
+
+    try:
+        if tx.target_kind(session) == "codespace":
+            cmd = ps.build_peek_command(
+                acp, tail_lines=args.tail, recent_messages=args.recent,
+                message_chars=args.message_chars,
+            )
+            out = tx.exec_bash_on_target(session, cmd, timeout=float(args.timeout))
+            snap = ps.parse_peek_result(out)
+        else:
+            snap = ps.snapshot_local(
+                acp, tail_lines=args.tail, recent_messages=args.recent,
+                message_chars=args.message_chars,
+            )
+    except tx.TargetExecError as exc:
+        print(f"[FAIL] peek transport error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    verdict, reason = ps.reuse_verdict(
+        snap, stale_after_seconds=float(args.stale_hours) * 3600
+    )
+
+    if args.json:
+        _json_out({
+            "session_id": sid, "agent": agent, "acp_session_id": acp,
+            "verdict": verdict, "verdict_reason": reason, "snapshot": snap,
+        })
+        return
+
+    print(f"  {sid}  ({agent})  [{session.get('status', '')}]")
+    print(f"    acp:     {acp}")
+    print(f"    reuse:   {verdict.upper()} -- {reason}")
+    if not snap.get("ok"):
+        print(f"    (no snapshot: {snap.get('reason', '?')})")
+        return
+    life = snap.get("lifecycle") or {}
+    usage = snap.get("usage") or {}
+    print(f"    turns:   {snap.get('turns')}    model: {snap.get('model') or '?'}"
+          f"    size: {(snap.get('size_bytes') or 0) // 1024}k")
+    print(f"    life:    started={_peek_iso(life.get('started_at'))}  "
+          f"resumed={_peek_iso(life.get('resumed_at'))}  "
+          f"shutdown={(life.get('last_shutdown') or {}).get('type') or 'none'}")
+    if usage:
+        print(f"    usage:   premium={usage.get('premium_requests')} "
+              f"nanoAiu={usage.get('nano_aiu')}")
+    recent = snap.get("recent_messages") or []
+    if recent:
+        print("    recent:")
+        for m in recent:
+            role = (m.get("role") or "?")[:9].ljust(9)
+            text = " ".join((m.get("text") or "").split())
+            print(f"      {role} {text[:140]}")
+    tools = snap.get("recent_tool_calls") or []
+    if tools:
+        print("    tools:   " + ", ".join(str(t.get("title", "?")) for t in tools[:6]))
+
+
 def _read_prompt_from_file(path: str) -> str:
     """Read a prompt from *path*, or from stdin when *path* is ``-``.
 
@@ -3382,6 +3493,36 @@ def build_parser() -> argparse.ArgumentParser:
     sessions_p = sub.add_parser("sessions", help="List sessions")
     sessions_p.add_argument("--status", help="Filter by status")
     sessions_p.set_defaults(func=_cmd_sessions)
+
+    peek_p = sub.add_parser(
+        "peek",
+        help="Copilot-free peek at a target's current session transcript "
+             "(events.jsonl snapshot + reuse-worthiness) without launching ACP",
+    )
+    peek_p.add_argument(
+        "target", help="Session ID or agent name (e.g. codespace:<name>)"
+    )
+    peek_p.add_argument(
+        "--tail", type=int, default=400,
+        help="Trailing events.jsonl lines to scan (default 400)",
+    )
+    peek_p.add_argument(
+        "--recent", type=int, default=8,
+        help="Recent user+assistant messages / tool calls to surface (default 8)",
+    )
+    peek_p.add_argument(
+        "--message-chars", dest="message_chars", type=int, default=400,
+        help="Max chars per surfaced message (default 400)",
+    )
+    peek_p.add_argument(
+        "--timeout", type=float, default=90.0,
+        help="Remote read timeout seconds for a codespace target (default 90)",
+    )
+    peek_p.add_argument(
+        "--stale-hours", dest="stale_hours", type=float, default=6.0,
+        help="Age past which a session is 'cold' in the verdict (default 6h)",
+    )
+    peek_p.set_defaults(func=_cmd_peek)
 
     gc_p = sub.add_parser(
         "gc",
