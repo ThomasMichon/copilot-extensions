@@ -20,7 +20,7 @@ import hashlib
 import logging
 import os
 import time
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 # UTF-8 stdio so human-facing status glyphs render safely (Rule B, #769).
@@ -45,13 +45,137 @@ STREAM_BATCH_SIZE = 500  # fallback default; the live value is config.stream_bat
 
 
 def configured_sources() -> list[str]:
-    """Return the configured default source list for indexing."""
+    """Return the configured default source **names** for indexing.
+
+    Precedence: the ``AGENT_INDEX_SOURCES`` env override (legacy/testing), then
+    the grafted ``corpus.sources`` swept from adopted local projects, else the
+    single default ``["git"]``. See ``configured_source_specs`` for the richer
+    per-source spec (type/repo/auth) that drives connector construction.
+    """
+    return [spec.name for spec in configured_source_specs()]
+
+
+@dataclass(frozen=True)
+class SourceSpec:
+    """A resolved corpus source: its name, connector type, and how to reach it."""
+
+    name: str
+    type: str = "git"
+    repo: str | None = None
+    auth_account: str | None = None
+    trust_domain: str | None = None
+    repo_path: str | None = None
+
+
+def _type_from_name(name: str) -> str:
+    """Infer a connector type from a source name prefix (``git:``/``github:``/…)."""
+    head = name.split(":", 1)[0].strip().lower()
+    return head or "git"
+
+
+def configured_source_specs() -> list[SourceSpec]:
+    """Resolve the corpus source specs to index (dynamic; re-read each call).
+
+    Precedence:
+    1. ``AGENT_INDEX_SOURCES`` env — a comma-separated name list (legacy/testing);
+       each name's type is inferred from its prefix.
+    2. The grafted ``corpus.sources`` from adopted local projects
+       (``config.read_corpus_sources()`` — the federated virtual config).
+    3. The single default ``git``.
+    """
     raw = os.environ.get("AGENT_INDEX_SOURCES")
     if raw:
-        sources = [source.strip() for source in raw.split(",") if source.strip()]
-        if sources:
-            return sources
-    return ["git"]
+        names = [s.strip() for s in raw.split(",") if s.strip()]
+        if names:
+            return [SourceSpec(name=n, type=_type_from_name(n)) for n in names]
+
+    from agent_index import config as _cfg
+
+    specs: list[SourceSpec] = []
+    for entry in _cfg.read_corpus_sources():
+        name = str(entry.get("name"))
+        auth = entry.get("auth")
+        specs.append(
+            SourceSpec(
+                name=name,
+                type=str(entry.get("type") or _type_from_name(name)),
+                repo=entry.get("repo"),
+                auth_account=(auth or {}).get("account") if isinstance(auth, dict) else None,
+                trust_domain=entry.get("trust_domain"),
+                repo_path=entry.get("_repo_path"),
+            )
+        )
+    if specs:
+        return specs
+    return [SourceSpec(name="git", type="git")]
+
+
+def _resolve_repo_path(spec: SourceSpec) -> str | None:
+    """Local checkout path for a ``git`` source.
+
+    Precedence: an explicit ``repo:`` target resolved via the agent-worktrees
+    registry (so a *central* config can list OTHER repos, not just the declaring
+    one), then the grafted ``_repo_path`` (a self-declaring repo's own checkout),
+    then the source name's tail resolved via the registry.
+    """
+    from agent_index import config as _cfg
+
+    if spec.repo:
+        p = _cfg.repo_checkout_path(spec.repo)
+        if p:
+            return str(p)
+    if spec.repo_path:
+        return spec.repo_path
+    tail = spec.name.split(":", 1)[-1]
+    if tail:
+        p = _cfg.repo_checkout_path(tail)
+        if p:
+            return str(p)
+    return None
+
+
+def _resolve_gh_token(account: str) -> str | None:
+    """Resolve a GitHub token for ``account`` via ``gh auth token --user`` (no
+    stored secret). Used for ``github`` issue/PR sources whose owning account
+    differs per repo (EMU vs personal)."""
+    try:
+        import subprocess
+
+        out = subprocess.run(  # noqa: S603
+            ["gh", "auth", "token", "--user", account],  # noqa: S607
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip().splitlines()[-1].strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return None
+
+
+def _connector_kwargs(spec: SourceSpec) -> dict[str, object]:
+    """Per-source connector kwargs. Raises on an unresolvable source so the run
+    loop records it as failed (never a silent no-op; #1350)."""
+    if spec.type == "git":
+        path = _resolve_repo_path(spec)
+        if not path:
+            raise RuntimeError(
+                f"git source {spec.name!r}: could not resolve a checkout path "
+                f"(repo={spec.repo!r}) via the agent-worktrees registry"
+            )
+        return {"repo_path": path}
+    if spec.type == "github":
+        if not spec.auth_account:
+            return {}  # anonymous (low rate limit) — the connector warns
+        token = _resolve_gh_token(spec.auth_account)
+        if not token:
+            raise RuntimeError(
+                f"github source {spec.name!r}: could not resolve a token for "
+                f"account {spec.auth_account!r} (gh auth token --user)"
+            )
+        return {"token": token}
+    return {}
 
 
 def run_reindex(
@@ -121,11 +245,16 @@ def run_reindex(
     started_engines: list[ModelProfile] = []
     ensure_engines = os.environ.get("AGENT_INDEX_INDEX_ENSURE_ENGINES", "1") != "0"
 
-    sources_to_index: list[str]
+    sources_to_index: list[SourceSpec]
     if source is None:
-        sources_to_index = configured_sources()
+        sources_to_index = configured_source_specs()
     else:
-        sources_to_index = [source]
+        # An explicit --source names one source: prefer its configured spec so
+        # its repo/auth still resolve; otherwise synthesize a bare spec.
+        by_name = {s.name: s for s in configured_source_specs()}
+        sources_to_index = [
+            by_name.get(source) or SourceSpec(name=source, type=_type_from_name(source))
+        ]
 
     total_chunks = 0
     total_deleted = 0
@@ -146,12 +275,14 @@ def run_reindex(
                 if ensure_engine(profile, multi_clients[profile.model_id]):
                     started_engines.append(profile)
 
-        for src_name in sources_to_index:
+        for spec in sources_to_index:
+            src_name = spec.name
             if progress_cb:
                 progress_cb.check_cancelled()
                 progress_cb.source_started(src_name)
 
             try:
+                connector_kwargs = _connector_kwargs(spec)
                 stored, deleted, crawled = _index_source(
                     src_name,
                     config=config,
@@ -162,6 +293,7 @@ def run_reindex(
                     full=full,
                     progress_cb=progress_cb,
                     resume_since=resume_since,
+                    connector_kwargs=connector_kwargs,
                 )
                 total_chunks += stored
                 total_deleted += deleted
@@ -301,6 +433,7 @@ def _index_source(
     full: bool,
     progress_cb: ProgressCallback | None = None,
     resume_since: float | None = None,
+    connector_kwargs: dict[str, object] | None = None,
 ) -> tuple[int, int, int]:
     """Index a single data source using the four-phase pipeline.
 
@@ -326,6 +459,7 @@ def _index_source(
         path_index=path_index,
         full=full,
         progress_cb=progress_cb,
+        connector_kwargs=connector_kwargs,
     )
 
     if manifest.is_empty:
@@ -421,6 +555,7 @@ def _crawl_source(
     path_index: PathIndex,
     full: bool,
     progress_cb: ProgressCallback | None = None,
+    connector_kwargs: dict[str, object] | None = None,
 ) -> CrawlManifest:
     """Phase 1: Crawl a source and produce a CrawlManifest.
 
@@ -431,7 +566,7 @@ def _crawl_source(
     from agent_index.indexing.manifest import CrawlManifest, CrawlStats, DeletedFile
     from agent_index.sources import get_connector
 
-    connector = get_connector(source_name)
+    connector = get_connector(source_name, **(connector_kwargs or {}))
     commit = connector.current_commit()
 
     # Build a cancel checker from the progress callback
