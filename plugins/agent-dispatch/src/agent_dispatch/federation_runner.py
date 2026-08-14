@@ -10,11 +10,11 @@ instance present in the directory and -- for a lease-eligible node -- advances t
 instance and fails over safely (see the ``agent-dispatch-federation`` effort,
 Phase 3).
 
-The rendezvous the runner drives is built by a factory over the **shared/Gateway**
-coordinator URL (:func:`agent_dispatch.config.shared_url`): the facility Gateway is
-simply the stable URL the shared coordinator rides, so the "Gateway backend" needs
+The rendezvous the runner drives is built by a factory over the **shared/hosted**
+coordinator URL (:func:`agent_dispatch.config.shared_url`): the hosted coordinator is
+simply the stable URL the shared coordinator rides, so the "hosted backend" needs
 no new transport code -- it is the :class:`~agent_dispatch.federation.CoordinatorRendezvous`
-pointed *through* the Gateway. Phase 4 adds a Dev Tunnels factory as a sibling; the
+pointed *through* the hosted coordinator. Phase 4 adds a Dev Tunnels factory as a sibling; the
 runner above the factory is unchanged.
 """
 
@@ -42,10 +42,10 @@ def build_rendezvous(url: str, *, token: str | None = None) -> CoordinatorRendez
     return CoordinatorRendezvous(DispatchClient(url, token=token))
 
 
-def gateway_rendezvous() -> CoordinatorRendezvous | None:
-    """The rendezvous over the **shared/Gateway** coordinator, or ``None`` when no
+def hosted_rendezvous() -> CoordinatorRendezvous | None:
+    """The rendezvous over the **shared/hosted** coordinator, or ``None`` when no
     ``AGENT_DISPATCH_SHARED_URL`` is configured (federation has no directory to
-    reach). The Gateway is just the stable URL this shared coordinator rides."""
+    reach). The hosted coordinator is just the stable URL this shared coordinator rides."""
     url = config.shared_url()
     if not url:
         return None
@@ -220,7 +220,7 @@ def runner_from_config(rendezvous: Rendezvous | None = None) -> FederationRunner
     """Build a :class:`FederationRunner` from the environment, or ``None`` when
     federation is not enabled (no valid ``AGENT_DISPATCH_FEDERATION_ROLE``).
 
-    Uses the Gateway rendezvous (:func:`gateway_rendezvous`) unless one is passed
+    Uses the hosted rendezvous (:func:`hosted_rendezvous`) unless one is passed
     in; raises :class:`RuntimeError` if federation is enabled but no directory URL
     is reachable, so a misconfiguration fails loud rather than silently idling."""
     role = config.federation_role()
@@ -229,9 +229,9 @@ def runner_from_config(rendezvous: Rendezvous | None = None) -> FederationRunner
     instance = config.federation_instance()
     if not instance:
         raise RuntimeError("federation enabled but no instance id could be resolved")
-    rv = rendezvous if rendezvous is not None else gateway_rendezvous()
+    rv = rendezvous if rendezvous is not None else hosted_rendezvous()
     if rv is None:
         raise RuntimeError(
-            "federation enabled but no AGENT_DISPATCH_SHARED_URL (Gateway) configured"
+            "federation enabled but no AGENT_DISPATCH_SHARED_URL (hosted coordinator) configured"
         )
     return FederationRunner(rv, instance, role=role, machine=instance)

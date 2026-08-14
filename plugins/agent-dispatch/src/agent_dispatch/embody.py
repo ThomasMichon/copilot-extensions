@@ -264,7 +264,7 @@ def fleet_autopilot_worker_prompt(
     Two differences from the local :func:`autopilot_worker_prompt`:
 
     - **Reach the origin over SSH.** Lifecycle verbs run as
-      ``ssh <origin> agent-dispatch <verb> ...`` (the origin is a facility SSH
+      ``ssh <origin> agent-dispatch <verb> ...`` (the origin is an SSH
       alias, never a raw IP).
     - **Carry an explicit owner.** The CWD-based owner resolution can't work over
       ``ssh <origin>`` (that shell lands in the origin's home dir, not this body's
@@ -338,7 +338,7 @@ def spawn_fleet_embodied_worker(
     """Spawn a CLI-backed autopilot body on a **remote pool ``host``** via SSH.
 
     Runs ``agent-worktrees [--project <project>] embody --new --seed "<fleet
-    seed>" ...`` **on** ``host`` (its facility SSH alias) -- creating a fresh
+    seed>" ...`` **on** ``host`` (its SSH alias) -- creating a fresh
     detached worktree + Copilot session there, seeded
     (:func:`fleet_autopilot_worker_prompt`) to drive the ``task_id`` lease back to
     the ``origin`` coordinator over SSH (Model C). The remote ``embody --json``
@@ -371,7 +371,7 @@ def spawn_fleet_embodied_worker(
     if verify_timeout:
         remote_argv += ["--verify-timeout", str(verify_timeout)]
     remote_cmd = " ".join(shlex.quote(a) for a in remote_argv)
-    # `host` is the facility SSH alias (never a raw IP). BatchMode so a missing key
+    # `host` is the SSH alias (never a raw IP). BatchMode so a missing key
     # fails fast instead of hanging on a password prompt.
     cmd = [exe, "-o", "BatchMode=yes", host.strip().lower(), remote_cmd]
     return subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
@@ -397,7 +397,7 @@ def spawn_fleet_headless_worker(
 
     The headless-fleet embodiment (Model C, headless variant). Runs
     ``agent-bridge create <agent> "<fleet seed>" --no-wait`` **on** ``host`` (its
-    facility SSH alias) over the SSH mesh -- spawning a headless ACP session in
+    SSH alias) over the SSH mesh -- spawning a headless ACP session in
     that host's own persistent agent-bridge service, seeded
     (:func:`fleet_autopilot_worker_prompt`) to drive the ``task_id`` lease back to
     the ``origin`` coordinator over SSH under the supervisor-assigned synthetic
@@ -433,7 +433,7 @@ def spawn_fleet_headless_worker(
     # re-embody -- see parse_fleet_body_session / fleet_body_verdict.
     remote_argv = ["agent-bridge", "--json", "create", agent, seed, "--no-wait"]
     remote_cmd = " ".join(shlex.quote(a) for a in remote_argv)
-    # `host` is the facility SSH alias (never a raw IP). BatchMode so a missing key
+    # `host` is the SSH alias (never a raw IP). BatchMode so a missing key
     # fails fast instead of hanging on a password prompt.
     cmd = [exe, "-o", "BatchMode=yes", host.strip().lower(), remote_cmd]
     return subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which

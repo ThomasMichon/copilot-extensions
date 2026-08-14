@@ -184,7 +184,7 @@ def _maybe_start_federation():
     role is configured (``AGENT_DISPATCH_FEDERATION_ROLE``); return it (so
     :func:`serve` can stop it) or ``None``.
 
-    **Fail-soft:** a misconfiguration (role set but no Gateway / no resolvable
+    **Fail-soft:** a misconfiguration (role set but no hosted coordinator / no resolvable
     instance) logs a warning and leaves the coordinator serving *without*
     federation -- federation is an overlay, never a reason to fail the queue. The
     runner's own loop tolerates the coordinator not yet being bound on the first

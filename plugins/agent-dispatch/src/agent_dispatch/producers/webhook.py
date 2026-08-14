@@ -17,7 +17,7 @@ Every task carries a deterministic ``dedup_key`` so a redelivered webhook (or
 a retry) doesn't double-enqueue. The app talks to the coordinator through an
 ordinary :class:`DispatchClient` -- it is a *producer*, not part of the
 coordinator core (which stays free of any PR/alert logic). This keeps the
-public substrate generic; facility-specific routing (which forge, which
+public substrate generic; deployment-specific routing (which forge, which
 alertmanager, which lane) lives in the deployer's config, not here.
 
 Config (JSON), all keys optional::

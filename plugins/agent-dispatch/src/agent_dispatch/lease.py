@@ -12,7 +12,7 @@ elected* + *peers-discover-and-federate*).
 
 Two halves of one mechanism, both **backing-agnostic** (they speak only the
 :class:`~agent_dispatch.federation.Rendezvous` Protocol, never a concrete queue,
-so the Gateway (Phase 3) and Dev Tunnels (Phase 4) backends drive the *same* code):
+so the hosted-coordinator (Phase 3) and Dev Tunnels (Phase 4) backends drive the *same* code):
 
 * :class:`CoordinatorLease` -- the write-side state machine. A periodic
   :meth:`~CoordinatorLease.tick` renews our own lease, stands by behind a healthy
@@ -26,7 +26,7 @@ so the Gateway (Phase 3) and Dev Tunnels (Phase 4) backends drive the *same* cod
 This module deliberately holds no transport keepalive/backoff (Phase 4) and no
 server-side wiring of the guard onto claim/write endpoints -- there is no shared
 external directory in the coordinator-hosted/local backend, so that enforcement
-lands with the Gateway / Dev Tunnels backends where a real multi-coordinator
+lands with the hosted-coordinator / Dev Tunnels backends where a real multi-coordinator
 directory exists. Phase 2 lays only the lease + fence *mechanism*.
 
 .. note::
@@ -245,7 +245,7 @@ class FencingGuard:
     token is **below** the current coordinator epoch -- i.e. it came from a writer
     that has since been superseded (fenced). Backing-agnostic: it consults the
     directory, not any queue, so Phases 3-4 place the same guard at the concrete
-    Gateway / Dev Tunnels transport unchanged.
+    hosted-coordinator / Dev Tunnels transport unchanged.
     """
 
     def __init__(self, rendezvous: Rendezvous) -> None:

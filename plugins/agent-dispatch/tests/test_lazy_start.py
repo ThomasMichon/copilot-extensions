@@ -29,7 +29,7 @@ def test_ensure_skips_explicit_url(monkeypatch):
 
 
 def test_ensure_skips_shared(monkeypatch):
-    monkeypatch.setenv("AGENT_DISPATCH_SHARED_URL", "https://gateway/dispatch")
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_URL", "https://coordinator.example/dispatch")
     calls = _record_lazy(monkeypatch)
     m._ensure_local_coordinator(_args(["--shared", "list"]))
     assert calls == []

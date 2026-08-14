@@ -17,11 +17,11 @@ the others through. Federation splits into two planes over it:
   through, *discovered* (highest live epoch) rather than elected.
 
 The point of the interface is **substrate-independence**: the same federation
-logic runs whether the directory is served by the facility **bespoke Gateway**,
+logic runs whether the directory is served by a bespoke **hosted coordinator**,
 a single-user **Dev Tunnels** management directory, or -- the first
 implementation here -- a coordinator's own in-process
 :class:`~agent_dispatch.satellites.FleetDirectory` reached over HTTP. Phases 3-4
-add the Gateway and Dev Tunnels backends as sibling implementations of this same
+add the hosted-coordinator and Dev Tunnels backends as sibling implementations of this same
 Protocol; nothing above the interface changes when the backend swaps (see the
 ``agent-dispatch-federation`` effort and
 ``visions/agent-fabric/agent-dispatch`` §Behaviors/*peers-discover-and-federate*
@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 class Rendezvous(Protocol):
     """The pluggable federation directory seam.
 
-    Every backend (coordinator-hosted, Gateway, Dev Tunnels) implements these
+    Every backend (coordinator-hosted, hosted-coordinator, Dev Tunnels) implements these
     five operations; callers depend only on this Protocol.
     """
 
@@ -96,8 +96,8 @@ class CoordinatorRendezvous:
 
     Wraps a :class:`~agent_dispatch.client.DispatchClient` pointed at a
     coordinator (the local loopback one for same-machine federation, or the
-    shared/Gateway one) and speaks to its ``/directory`` endpoints. This is the
-    default backend and the reference for the Gateway / Dev Tunnels backends that
+    shared/hosted one) and speaks to its ``/directory`` endpoints. This is the
+    default backend and the reference for the hosted-coordinator / Dev Tunnels backends that
     follow: they implement the same :class:`Rendezvous` Protocol over their own
     transports.
 

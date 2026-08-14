@@ -17,7 +17,7 @@ from agent_dispatch.federation import CoordinatorRendezvous
 from agent_dispatch.federation_runner import (
     FederationRunner,
     build_rendezvous,
-    gateway_rendezvous,
+    hosted_rendezvous,
     local_rendezvous,
     runner_from_config,
 )
@@ -195,12 +195,12 @@ def test_build_rendezvous_returns_backend():
 
 def test_gateway_rendezvous_none_without_shared_url(monkeypatch):
     monkeypatch.delenv("AGENT_DISPATCH_SHARED_URL", raising=False)
-    assert gateway_rendezvous() is None
+    assert hosted_rendezvous() is None
 
 
 def test_gateway_rendezvous_uses_shared_url(monkeypatch):
     monkeypatch.setenv("AGENT_DISPATCH_SHARED_URL", "http://gw.example:9847")
-    rv = gateway_rendezvous()
+    rv = hosted_rendezvous()
     assert isinstance(rv, CoordinatorRendezvous)
 
 

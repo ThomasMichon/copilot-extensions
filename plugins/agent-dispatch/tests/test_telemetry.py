@@ -227,7 +227,7 @@ def test_make_spool_sink_noop_without_path(monkeypatch) -> None:
     _reset()
     # Isolate from any ambient telemetry config on the host: with no explicit
     # path AND no configured spool, the factory must fail open to None. Stub the
-    # config lookup so a real facility config file can't leak a path in.
+    # config lookup so a real multi-machine config file can't leak a path in.
     monkeypatch.setattr(telemetry, "_configured_spool_path", lambda: None)
     assert telemetry.make_spool_sink("") is None
     assert telemetry.make_spool_sink(None) is None  # no config file -> None

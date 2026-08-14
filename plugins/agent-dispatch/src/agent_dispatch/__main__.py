@@ -38,17 +38,17 @@ def _emit(value: Any) -> int:
 
 def _federation_rendezvous(args: argparse.Namespace):
     """Resolve the rendezvous a federation command targets: an explicit ``--url``,
-    else the Gateway (shared) coordinator. Errors loudly when neither exists."""
-    from .federation_runner import build_rendezvous, gateway_rendezvous
+    else the hosted (shared) coordinator. Errors loudly when neither exists."""
+    from .federation_runner import build_rendezvous, hosted_rendezvous
 
     url = getattr(args, "url", None)
     if url:
         return build_rendezvous(url, token=getattr(args, "token", None) or client_token())
-    rv = gateway_rendezvous()
+    rv = hosted_rendezvous()
     if rv is None:
         print(
-            "no Gateway configured -- set AGENT_DISPATCH_SHARED_URL (facility: the "
-            "gateway endpoint) or pass --url",
+            "no hosted coordinator configured -- set AGENT_DISPATCH_SHARED_URL (the "
+            "hosted-coordinator endpoint) or pass --url",
             file=sys.stderr,
         )
         raise SystemExit(2)
@@ -97,7 +97,7 @@ def _resolve_client_target(args: argparse.Namespace) -> tuple[str, str | None]:
     1. An explicit ``--url`` (with ``--token``/``AGENT_DISPATCH_TOKEN``) -- the
        operator's direct override, always wins.
     2. ``--shared`` -- route to the **shared/elected coordinator**
-       (``AGENT_DISPATCH_SHARED_URL``; facility: the gateway) for cross-machine
+       (``AGENT_DISPATCH_SHARED_URL``; the hosted coordinator) for cross-machine
        dispatch, authenticated with its own ``AGENT_DISPATCH_SHARED_TOKEN``. If no
        shared coordinator is configured, error loudly rather than silently using
        the local queue (which would strand a cross-machine task on one host).
@@ -113,7 +113,7 @@ def _resolve_client_target(args: argparse.Namespace) -> tuple[str, str | None]:
         if not surl:
             print(
                 "no shared coordinator configured -- set AGENT_DISPATCH_SHARED_URL "
-                "(facility: the gateway endpoint) or pass --url",
+                "(the hosted-coordinator endpoint) or pass --url",
                 file=sys.stderr,
             )
             raise SystemExit(2)
@@ -324,7 +324,6 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
     import subprocess as _subprocess
     import sys as _sys
     import urllib.request as _urllib
-    from typing import Any
 
     from zdd import breadcrumb
     from zdd.cutover import CutoverOrchestrator
@@ -504,7 +503,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
         print(_REPO_UNRESOLVED, file=sys.stderr)
         return 2
     # Cross-machine dispatch (Phase 8 8a): an embody spawn targeted at *another*
-    # machine runs the whole create+embody THERE over the facility SSH mesh, so
+    # machine runs the whole create+embody THERE over the SSH mesh, so
     # the task lives on the target's coordinator and the autopilot session runs
     # + completes on the target. agent-dispatch is per-host, so there is no local
     # task in this path.
@@ -2562,7 +2561,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--shared", action="store_true",
         help="target the SHARED/elected coordinator (AGENT_DISPATCH_SHARED_URL; "
-             "facility: the gateway) for cross-machine dispatch, instead of this "
+             "the hosted coordinator) for cross-machine dispatch, instead of this "
              "host's local coordinator. Authenticated with AGENT_DISPATCH_SHARED_TOKEN.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -3272,7 +3271,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "federation",
         help="federation runtime: register presence + drive the fenced-epoch "
-             "coordinator lease over the rendezvous directory (Gateway backend)",
+             "coordinator lease over the rendezvous directory (hosted backend)",
     )
     fed_sub = p.add_subparsers(dest="federation_command", required=True)
     sp = fed_sub.add_parser(
@@ -3289,7 +3288,7 @@ def build_parser() -> argparse.ArgumentParser:
              "the machine id)",
     )
     sp.add_argument(
-        "--url", help="rendezvous coordinator URL (default: the Gateway / "
+        "--url", help="rendezvous coordinator URL (default: the hosted coordinator / "
                       "AGENT_DISPATCH_SHARED_URL)",
     )
     sp.add_argument("--token", help="bearer token for --url")
@@ -3309,7 +3308,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = fed_sub.add_parser(
         "status", help="print the discovered coordinator + live peers"
     )
-    sp.add_argument("--url", help="rendezvous coordinator URL (default: the Gateway)")
+    sp.add_argument("--url", help="rendezvous coordinator URL (default: the hosted coordinator)")
     sp.add_argument("--token", help="bearer token for --url")
     sp.set_defaults(func=_cmd_federation_status)
 

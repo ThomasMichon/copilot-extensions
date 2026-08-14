@@ -2,7 +2,7 @@
 
 agent-dispatch is **per-host**: each machine runs its own loopback coordinator
 and ``agent-worktrees embody`` spawns a detached session *locally*. So "dispatch
-to machine Y" runs the **same-machine** embody-dispatch **on Y** over the facility
+to machine Y" runs the **same-machine** embody-dispatch **on Y** over the
 SSH mesh -- the task lives on Y's coordinator and the autopilot session runs +
 completes explicitly on Y (Slice 8a). Reuses Tier-1 SSH + per-host embody; no
 coordinator federation, no reverse tunnels, no dependency on the (unbuilt)
@@ -13,8 +13,8 @@ The same SSH-exec pattern also powers **peer-queue browse** (Slice 8c):
 stream back its JSON, so an operator can inspect a peer's queue -- and, since 8b
 runs there, its live embodiment overlays -- without leaving the local box.
 
-The machine name **is** its facility SSH alias (``ssh emancipation-cube``) -- never a raw
-IP (the ``facility-ssh`` discipline). The payload is streamed over the SSH pipe's
+The machine name **is** its SSH alias (``ssh emancipation-cube``) -- never a raw
+IP (the SSH-alias discipline). The payload is streamed over the SSH pipe's
 stdin (``create --payload-file -``) so no shell-escaping of a large body is
 needed; the remaining args are shell-quoted argv.
 """
@@ -32,7 +32,7 @@ class RemoteDispatchUnavailable(RuntimeError):
 
 
 def local_machine() -> str | None:
-    """This machine's name (its facility SSH alias), or None if unresolvable."""
+    """This machine's name (its SSH alias), or None if unresolvable."""
     from .identity import resolve_identity
 
     return resolve_identity()[0]
@@ -46,7 +46,7 @@ def ssh_available() -> bool:
 def _norm_machine(name: str | None) -> str:
     """Normalize a machine name for **identity comparison**: trimmed + casefolded.
 
-    Facility machine names (a machine's registry key / SSH alias) are lowercase
+    Machine names (a machine's registry key / SSH alias) are lowercase
     by convention, but a caller may hand us a display-cased variant -- e.g. the
     worktree picker passes the ``machines.yaml`` ``display_name`` (``Anomalous-Potato``)
     while this machine's resolved identity is the registry key (``anomalous-potato``).
@@ -60,7 +60,7 @@ def _norm_machine(name: str | None) -> str:
 def _ssh_alias(machine: str) -> str:
     """The SSH alias to connect to for ``machine``: lowercased.
 
-    SSH ``Host`` matching is case-sensitive, and facility ``Host`` blocks are
+    SSH ``Host`` matching is case-sensitive, and SSH ``Host`` blocks are
     lowercase by convention (``Host emancipation-cube``). A display-cased name
     (``Emancipation-Cube``) would miss its ``Host`` block and fall back to a literal
     ``Emancipation-Cube`` hostname on the default port -- which fails. Lowercasing keeps a
@@ -141,7 +141,7 @@ def dispatch_to_remote(
     payload: str | None,
     timeout: float | None = None,
 ) -> subprocess.CompletedProcess:
-    """SSH to ``machine`` (its facility alias) and run the create+embody there.
+    """SSH to ``machine`` (its SSH alias) and run the create+embody there.
 
     Raises :class:`RemoteDispatchUnavailable` if ``ssh`` is not on PATH; the
     caller degrades from there. The payload (if any) is streamed to the remote
@@ -154,7 +154,7 @@ def dispatch_to_remote(
         args, repo=repo, has_payload=payload is not None
     )
     remote_cmd = " ".join(shlex.quote(a) for a in remote_argv)
-    # `machine` is the facility SSH alias (never a raw IP). BatchMode so a missing
+    # `machine` is the SSH alias (never a raw IP). BatchMode so a missing
     # key fails fast instead of hanging on a password prompt. Lowercased so a
     # display-cased name still matches its lowercase `Host` block.
     cmd = [exe, "-o", "BatchMode=yes", _ssh_alias(machine), remote_cmd]
@@ -234,7 +234,7 @@ def build_remote_browse_argv(
 def browse_remote(
     machine: str, argv: list[str], *, timeout: float | None = None
 ) -> subprocess.CompletedProcess:
-    """SSH to ``machine`` (its facility alias) and run an ``agent-dispatch`` read
+    """SSH to ``machine`` (its SSH alias) and run an ``agent-dispatch`` read
     command there, returning its captured result (JSON on stdout).
 
     Raises :class:`RemoteDispatchUnavailable` if ``ssh`` is not on PATH; the

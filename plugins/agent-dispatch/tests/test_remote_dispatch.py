@@ -98,7 +98,7 @@ def test_dispatch_to_remote_builds_ssh_command(monkeypatch):
     )
     cmd = captured["cmd"]
     assert cmd[0] == "/usr/bin/ssh"
-    assert "emancipation-cube" in cmd  # the facility alias, never a raw IP
+    assert "emancipation-cube" in cmd  # the SSH alias, never a raw IP
     assert "BatchMode=yes" in cmd
     # the remote command is a single shell-quoted string
     remote_cmd = cmd[-1]

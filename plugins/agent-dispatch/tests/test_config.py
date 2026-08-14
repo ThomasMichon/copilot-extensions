@@ -138,8 +138,8 @@ def test_shared_url_unset_is_none(monkeypatch):
 
 
 def test_shared_url_from_env(monkeypatch):
-    monkeypatch.setenv("AGENT_DISPATCH_SHARED_URL", "https://gateway.example/dispatch")
-    assert config_mod.shared_url() == "https://gateway.example/dispatch"
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_URL", "https://coordinator.example/dispatch")
+    assert config_mod.shared_url() == "https://coordinator.example/dispatch"
 
 
 def test_shared_token_is_independent_of_local_token(monkeypatch):

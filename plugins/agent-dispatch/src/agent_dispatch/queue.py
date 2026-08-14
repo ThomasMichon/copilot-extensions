@@ -63,7 +63,7 @@ _MAX_AFFINITY = 1000
 def worker_id_for(machine: str, worktree: str) -> str:
     """The canonical agent identity: the ``machine/worktree`` composite.
 
-    This pair is the only durable agent id the facility has; the coordinator
+    This pair is the only durable agent id a multi-machine system has; the coordinator
     stamps it as a task's ``owner`` on claim, and an agent finds its own work by
     querying with the same pair (see :meth:`TaskQueue.mine`).
     """
@@ -74,7 +74,7 @@ def machine_matches(target: str | None, machine: str | None) -> bool:
     """True when a task's stored ``target_machine`` matches the ``machine`` a
     caller is scoping to -- **case-insensitively**.
 
-    Facility machine names (a machine's registry key / SSH alias) are lowercase
+    Machine names (a machine's registry key / SSH alias) are lowercase
     by convention, but a caller may pass a display-cased variant (the worktree
     picker scopes ``inbox`` by the ``machines.yaml`` display name ``Anomalous-Potato``
     while a task's ``target_machine`` is stored as the identity ``anomalous-potato``).
@@ -840,7 +840,7 @@ class TaskQueue:
         deterministically claiming *its* task) — still subject to the same gates,
         including the ``repo`` lane.
 
-        ``worker_id`` is stamped as the task ``owner``; in the facility it is the
+        ``worker_id`` is stamped as the task ``owner``; in a multi-machine system it is the
         canonical ``machine/worktree`` composite (see :func:`worker_id_for`).
         """
         ts = self._now(now)
@@ -1360,7 +1360,7 @@ class TaskQueue:
         In a healthy system tasks are short-lived; a growing, undraining backlog
         is a system-health signal that warrants attention (see the vision's
         *buildup-is-a-health-signal*). This surfaces the raw numbers -- it takes
-        **no** action (escalate-or-demote is a consumer/facility policy, not the
+        **no** action (escalate-or-demote is a consumer policy, not the
         engine). Reports, scoped to ``repo`` when given:
 
         - ``queued`` / ``proposed`` / ``held`` / ``dead_letter`` -- counts by phase.

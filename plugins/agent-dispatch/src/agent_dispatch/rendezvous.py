@@ -1,6 +1,6 @@
 # Vendored from libs/endpoint-rendezvous (the canonical shared module). Kept
 # in-package -- not a distribution dependency -- so agent-dispatch installs as a
-# self-contained git dependency (the facility deploys it that way) with no
+# self-contained git dependency (a multi-machine system deploys it that way) with no
 # external package to resolve. Sync changes from the canonical source.
 """Rendezvous (port-mapping) files for discoverable, collision-free local endpoints.
 

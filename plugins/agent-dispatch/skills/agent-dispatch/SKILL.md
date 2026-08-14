@@ -114,15 +114,15 @@ work (handoffs, local scheduling), and point at a **shared/elected coordinator**
 only for **cross-machine** dispatch — the queue every machine claims from. A
 client picks per command:
 
-- Set `AGENT_DISPATCH_SHARED_URL` to the shared endpoint (in a facility, the
-  always-on **gateway**; standalone, whichever mesh peer is elected to host it),
+- Set `AGENT_DISPATCH_SHARED_URL` to the shared endpoint (in a multi-machine system, the
+  always-on **hosted coordinator**; standalone, whichever mesh peer is elected to host it),
   and `AGENT_DISPATCH_SHARED_TOKEN` for its bearer (independent of the local
   token — the two authenticate separately).
 - Add `--shared` to any client verb to target it: `agent-dispatch --shared
   create …`, `agent-dispatch --shared list`, `agent-dispatch --shared claim …`,
   `agent-dispatch --shared supervise --pool …`. Omit `--shared` for the local
   coordinator. An explicit `--url` always overrides both.
-- The shared coordinator **binds loopback behind the gateway/secured mesh** and
+- The shared coordinator **binds loopback behind the secured mesh** and
   is reached by **client-initiated outbound** calls + bearer — never a raw LAN
   bind. A tunnel-only machine (reachable outbound only) therefore participates
   natively: it just calls out like everyone else.
@@ -252,7 +252,7 @@ agent-dispatch list --status queued,started  # filter by status (comma-separate 
 > agent-driven sweep over descriptive task text; a semantic index (VEI) is a
 > pluggable *performance* layer over the same corpus that can be added later
 > without changing the flow. Keep the plugin portable -- it must dedup fine on a
-> lone box with no facility VEI.
+> lone box with no shared VEI.
 
 ### 2. Create a task
 
@@ -670,7 +670,7 @@ headless supervisor persistently, put the watched labels in
 > `embody` spawn to dispatch **on another machine**: `agent-dispatch create <task>
 > --target-machine emancipation-cube --spawn --spawn-backend embody`. Because
 > agent-dispatch is per-host (each machine owns a loopback coordinator + local
-> embody), the whole create+embody is run **on Y** over the facility SSH mesh (Y's
+> embody), the whole create+embody is run **on Y** over the SSH mesh (Y's
 > name is its SSH alias -- never a raw IP); the task lives on Y's coordinator and
 > the autopilot session runs + completes there. Observe it with `ssh Y
 > agent-dispatch show <id>`, or — since **8b** — directly from the originator:
@@ -714,7 +714,7 @@ headers. The CLI and MCP tools are interchangeable — use whichever fits.
 |---------|------|
 | `AGENT_DISPATCH_URL` | coordinator base URL the CLI talks to (point at a remote host) |
 | `AGENT_DISPATCH_TOKEN` | bearer token (client sends, server validates) |
-| `AGENT_DISPATCH_SHARED_URL` | shared/elected coordinator endpoint for cross-machine dispatch (facility: the gateway); used only with `--shared` |
+| `AGENT_DISPATCH_SHARED_URL` | shared/elected coordinator endpoint for cross-machine dispatch (the hosted coordinator); used only with `--shared` |
 | `AGENT_DISPATCH_SHARED_TOKEN` | bearer for the shared coordinator (independent of `AGENT_DISPATCH_TOKEN`) |
 | `AGENT_DISPATCH_HOST` / `AGENT_DISPATCH_PORT` | where the coordinator binds (server side) |
 | `AGENT_DISPATCH_DB` | SQLite queue file (server side) |
