@@ -34,7 +34,19 @@ if [ -f "$pyproj" ]; then
 fi
 
 # Up to date and runtime present -> fast no-op.
-if [ -e "$InstallDir/.venv" ] && [ "$deployed" = "$current" ]; then exit 0; fi
+# "Provisioned" no longer implies a .venv: the marker runtime model (#581) publishes
+# the active slot via a current-version marker (POSIX keeps a .venv symlink, but a
+# marker+slot is authoritative). Treat a marker whose slot python exists as
+# provisioned too, so a current runtime is a clean no-op, not a needless rebuild.
+provisioned=0
+[ -e "$InstallDir/.venv" ] && provisioned=1
+if [ "$provisioned" = 0 ] && [ -f "$InstallDir/current-version" ]; then
+  cv="$(tr -d '[:space:]' < "$InstallDir/current-version")"
+  # ...and only when it names the CURRENT payload version (the marker is authoritative
+  # for the active slot; a stale marker must not suppress reconcile).
+  if [ -n "$cv" ] && [ "$cv" = "$current" ] && { [ -x "$InstallDir/versions/$cv/bin/python" ] || [ -f "$InstallDir/versions/$cv/Scripts/python.exe" ]; }; then provisioned=1; fi
+fi
+if [ "$provisioned" = 1 ] && [ "$deployed" = "$current" ]; then exit 0; fi
 
 init="$pluginDir/scripts/init.sh"
 [ -f "$init" ] || exit 0
