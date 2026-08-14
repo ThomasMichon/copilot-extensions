@@ -26,7 +26,24 @@ try {
     if (-not $name) { exit 0 }
     $InstallDir = Join-Path $env:USERPROFILE ".$name"
     $Manifest = Join-Path $InstallDir 'deploy-manifest.json'
-    if (-not (Test-Path $Manifest)) { exit 0 }
+    if (-not (Test-Path $Manifest)) {
+        # Not provisioned yet -- do the cheap FIRST install ('stamp') so the
+        # self-provisioning binstub is on PATH this session; the binstub then
+        # builds the venv on first use (#1393). Fires only when the installer
+        # (init.ps1 or install.ps1) declares a 'stamp' action; else a safe no-op.
+        # NOTE: agent-bridge's install.ps1 does not yet expose a 'stamp' action
+        # (the Windows self-provisioning lane is a follow-up), so on Windows this
+        # is currently a no-op -- matching prior behavior, with no regression.
+        $stampInst = @("$PluginDir\scripts\init.ps1", "$PluginDir\scripts\install.ps1") |
+            Where-Object { (Test-Path $_) -and (Select-String -Path $_ -Pattern "'stamp'" -Quiet) } |
+            Select-Object -First 1
+        if ($stampInst) {
+            $pw = Get-Command pwsh -ErrorAction SilentlyContinue
+            $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
+            & $exe -NoProfile -ExecutionPolicy Bypass -File $stampInst stamp *> $null
+        }
+        exit 0
+    }
     $deployed = "" + (Get-Content $Manifest -Raw | ConvertFrom-Json).source.version
     $current = $deployed
     $pyproj = Join-Path $PluginDir 'pyproject.toml'
