@@ -25,7 +25,8 @@ from pathlib import Path
 from .catalog import find_repo_root
 
 #: Where the published marketplace lives when there is no local checkout. ``ref``
-#: is filled from ``WORKTREE_MANAGER_REF`` (set by the bootstrap) or defaults to main.
+#: is filled from the configured source ref (``worktree-manager source``), else
+#: ``WORKTREE_MANAGER_REF`` (set by the bootstrap), else defaults to main.
 RAW_MARKETPLACE_URL = (
     "https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/"
     "{ref}/.github/plugin/marketplace.json"
@@ -106,6 +107,10 @@ def discover(
     if root is not None:
         return _from_checkout(root)
     if allow_remote:
-        resolved_ref = ref or os.environ.get("WORKTREE_MANAGER_REF") or DEFAULT_REF
+        from .source_config import configured_source
+        _, cfg_ref = configured_source()
+        resolved_ref = (
+            ref or cfg_ref or os.environ.get("WORKTREE_MANAGER_REF") or DEFAULT_REF
+        )
         return _from_remote(resolved_ref, timeout)
     return DiscoverySource("none", "", ())
