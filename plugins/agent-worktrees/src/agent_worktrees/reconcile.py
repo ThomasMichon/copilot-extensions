@@ -25,8 +25,13 @@ Runtime reconciliation is **local and version-keyed**: it compares the
 installed payload version (``plugin.json``) against the deployed runtime
 version (``~/.<plugin>/deploy-manifest.json`` -> ``source.version``) and only
 acts on drift, so a re-launch with no version change does ~no work. The
-payload refresh (``copilot plugin update``, a network call) is throttled via a
-small cache so it does not run on every launch.
+marketplace **payload** install/refresh (``copilot plugin install/update``, a
+network pull that also holds the Windows payload dir open) is **off by default**
+and emitted only when a caller opts in via ``include_payload_refresh`` -- the
+Picker/operator "update flow". The programmatic path (the ``provision-check``
+sessionStart hook + the launch reconcile) is therefore **runtime-only, pull-free
+and lock-free** (#1393): agents never run ``copilot plugin update``; the operator
+does that outside-in (``<repo> update`` via the Worktree Manager).
 
 This module emits a JSON action plan with the same shape as ``pre-launch``
 so the shell/PowerShell launchers can execute the ``argv`` vectors and
@@ -651,6 +656,7 @@ def build_plan(
     machine: str | None = None,
     now: float | None = None,
     payload_update_interval_h: float = DEFAULT_PAYLOAD_UPDATE_INTERVAL_H,
+    include_payload_refresh: bool = False,
     cache: dict[str, Any] | None = None,
     save: bool = True,
 ) -> dict[str, Any]:
@@ -685,33 +691,45 @@ def build_plan(
         pdir = installed_payload_dir(name)
 
         if pdir is None:
-            # Payload not installed yet -- install it. The runtime (if any)
-            # is reconciled on the next pass once the manifest is readable.
-            updates.append({
-                "service": name,
-                "phase": "payload",
-                "reason": "payload-missing",
-                "command": f"copilot plugin install {name}@{MARKETPLACE}",
-                "argv": ["copilot", "plugin", "install", f"{name}@{MARKETPLACE}"],
-            })
-            entry["last_payload_update"] = now
+            # Payload not installed yet. Installing it is a MARKETPLACE PULL
+            # (``copilot plugin install``) -- an operator / Worktree-Manager /
+            # Picker "update flow" action, NOT something a programmatic
+            # session-launch may do. The default programmatic reconcile path
+            # (the ``provision-check`` sessionStart hook + launch reconcile) is
+            # runtime-only + pull-free + lock-free (#1393); only a caller that
+            # explicitly opts in (``--with-payload-refresh``, the Picker/operator
+            # update flow) emits a marketplace pull.
+            if include_payload_refresh:
+                updates.append({
+                    "service": name,
+                    "phase": "payload",
+                    "reason": "payload-missing",
+                    "command": f"copilot plugin install {name}@{MARKETPLACE}",
+                    "argv": ["copilot", "plugin", "install", f"{name}@{MARKETPLACE}"],
+                })
+                entry["last_payload_update"] = now
             continue
 
         pver = payload_version(pdir)
         entry["payload_version"] = pver
 
-        # Throttled payload refresh (network). Skipped within the throttle
-        # window so the common re-launch case stays near-zero work.
-        last_update = float(entry.get("last_payload_update", 0) or 0)
-        if (now - last_update) >= payload_update_interval_h * 3600:
-            updates.append({
-                "service": name,
-                "phase": "payload",
-                "reason": "payload-refresh",
-                "command": f"copilot plugin update {name}@{MARKETPLACE}",
-                "argv": ["copilot", "plugin", "update", f"{name}@{MARKETPLACE}"],
-            })
-            entry["last_payload_update"] = now
+        # Throttled payload refresh (network / MARKETPLACE PULL). Same rule as
+        # payload-missing above: the Picker/operator update flow owns it; the
+        # programmatic reconcile path never pulls (so it can't stall or hold the
+        # Windows payload dir open -- #1366/#1393). Opt in via
+        # ``include_payload_refresh``; the throttle clock is only advanced when a
+        # refresh is actually emitted, so a pull-free launch doesn't reset it.
+        if include_payload_refresh:
+            last_update = float(entry.get("last_payload_update", 0) or 0)
+            if (now - last_update) >= payload_update_interval_h * 3600:
+                updates.append({
+                    "service": name,
+                    "phase": "payload",
+                    "reason": "payload-refresh",
+                    "command": f"copilot plugin update {name}@{MARKETPLACE}",
+                    "argv": ["copilot", "plugin", "update", f"{name}@{MARKETPLACE}"],
+                })
+                entry["last_payload_update"] = now
 
         # Runtime reconciliation (local, version-keyed, gated).
         scope = manifest_runtime_scope(pdir) or "none"
@@ -772,6 +790,7 @@ def apply_plan(
     *,
     machine: str | None = None,
     passes: int = 2,
+    include_payload_refresh: bool = False,
     log: Callable[[str], None] | None = None,
     runner: Callable[[Sequence[str]], int] | None = None,
 ) -> dict[str, Any]:
@@ -811,7 +830,10 @@ def apply_plan(
     final_action = "continue"
 
     for pass_no in range(1, passes + 1):
-        plan = build_plan(repo_dir, machine=machine)
+        plan = build_plan(
+            repo_dir, machine=machine,
+            include_payload_refresh=include_payload_refresh,
+        )
         if plan.get("action") != "reconcile":
             if pass_no == 1:
                 _log("provision: nothing to do (runtimes current)")
