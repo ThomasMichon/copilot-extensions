@@ -1,4 +1,11 @@
-"""Tests for the repo-own ``.ai`` plugin resolution lane (ai_plugin_staging)."""
+"""Tests for the remote repo-own ``.ai`` plugin resolve (repo_own_plugins_remote).
+
+Moved from agent-codespaces' ``test_ai_plugin_staging`` in PR2 (dotfiles#1422):
+the venue-generic repo-own ``.ai`` resolve now lives in agent-bridge atop the
+transport-exec seam. The staging helpers (ship ``plugin_resolve`` + build the
+remote command + parse the marker) are unchanged; the driver runs over
+``target_exec`` instead of an agent-codespaces ``manager.exec_command``.
+"""
 
 from __future__ import annotations
 
@@ -9,8 +16,10 @@ import subprocess
 import sys
 import tarfile
 from pathlib import Path
+from unittest.mock import patch
 
-from agent_codespaces import ai_plugin_staging as aps
+from agent_bridge import repo_own_plugins_remote as aps
+from agent_bridge import target_exec as tx
 
 
 def test_find_plugin_resolve_pkg_locates_installed_package():
@@ -26,8 +35,6 @@ def test_tar_pkg_b64_roundtrips_with_package_arcname():
     buf = io.BytesIO(base64.b64decode(b64))
     with tarfile.open(fileobj=buf, mode="r:gz") as tf:
         names = tf.getnames()
-    # Extracts under a top-level ``plugin_resolve/`` dir so ``<dest>`` on sys.path
-    # makes ``import plugin_resolve`` work on the target.
     assert any(n == "plugin_resolve" or n.startswith("plugin_resolve/") for n in names)
     assert any(n.endswith("plugin_resolve/__init__.py") for n in names)
 
@@ -37,7 +44,6 @@ def test_build_resolve_command_quotes_and_embeds_repo():
     assert "base64 -d" in cmd and "tar -xzf" in cmd
     assert "/workspaces/odsp-web" in cmd
     assert "python3" in cmd and "command -v python" in cmd
-    # Degrades to an empty result marker rather than erroring.
     assert aps.RESULT_MARKER in cmd
 
 
@@ -59,11 +65,9 @@ def test_parse_resolve_result_failsafe_on_garbage():
 
 
 def _make_ai_repo(root: Path) -> None:
-    """A synthetic repo with a `.claude/settings.json` + `.ai` local marketplace.
-
-    One local plugin (``atomic`` -> ``atomic-dir``) and one remote-marketplace
-    plugin (``flt@remote``) that must NOT resolve to a dir.
-    """
+    """Synthetic repo: a `.claude/settings.json` + `.ai` local marketplace with
+    one local plugin (``atomic`` -> ``atomic-dir``) and one remote-marketplace
+    plugin (``flt@remote``) that must NOT resolve to a dir."""
     (root / ".claude").mkdir(parents=True)
     (root / ".claude" / "settings.json").write_text(json.dumps({
         "extraKnownMarketplaces": {
@@ -87,22 +91,19 @@ def _make_ai_repo(root: Path) -> None:
 
 
 def test_end_to_end_driver_resolves_local_skips_remote(tmp_path: Path):
-    """Ship-and-run the resolver driver portably: extract the shipped package and
-    run the exact driver via this interpreter against a synthetic `.ai` repo. The
-    local plugin dir must resolve; the remote-marketplace one must not."""
+    """Ship-and-run the resolver driver portably against a synthetic `.ai` repo:
+    the local plugin dir resolves; the remote-marketplace one does not."""
     repo = tmp_path / "repo"
     repo.mkdir()
     _make_ai_repo(repo)
 
     pkg = aps.find_plugin_resolve_pkg()
     assert pkg is not None
-    # Extract the shipped tar exactly as the remote command would.
     dest = tmp_path / "shipped"
     dest.mkdir()
     buf = io.BytesIO(base64.b64decode(aps.tar_pkg_b64(pkg)))
     with tarfile.open(fileobj=buf, mode="r:gz") as tf:
         tf.extractall(dest)
-    # Run the embedded driver verbatim (portable: real paths, this interpreter).
     proc = subprocess.run(
         [sys.executable, "-c", aps._DRIVER, str(dest), str(repo)],
         capture_output=True, text=True, timeout=60,
@@ -114,9 +115,7 @@ def test_end_to_end_driver_resolves_local_skips_remote(tmp_path: Path):
 
 
 def test_full_bash_command_runs_on_posix(tmp_path: Path):
-    """The full remote bash command (mktemp+tar+python) end-to-end -- POSIX only
-    (Windows git-bash hands POSIX temp paths to a native python, a test-env-only
-    path mismatch that does not occur on a Linux CodeSpace/container)."""
+    """The full remote bash command (mktemp+tar+python) end-to-end -- POSIX only."""
     import os
     import shutil
 
@@ -138,55 +137,39 @@ def test_full_bash_command_runs_on_posix(tmp_path: Path):
     assert "flt@remote" in unresolved
 
 
-def test_resolve_repo_ai_plugin_dirs_prefers_explicit_repo_dir():
-    """``_resolve_repo_ai_plugin_dirs`` uses an explicit ``repo_dir`` as-is and
-    does NOT fall back to config derivation (dotfiles#1274): the Session-Host
-    dispatch passes the target's known ``workspace_folder`` even when the spawn
-    command carried no ``--repo`` (so config-from-repo would resolve nothing)."""
-    import asyncio
-    from types import SimpleNamespace
-    from unittest.mock import patch
+# --- resolve_remote_repo_ai_plugin_dirs (the target_exec-driven entrypoint) ---
 
-    from agent_codespaces.__main__ import _resolve_repo_ai_plugin_dirs
-
+def test_resolve_remote_uses_transport_seam():
+    payload = json.dumps({"resolved": {"a@m": "/ws/.ai/a"}, "unresolved": ["b@remote"]})
+    out = f"noise\n{aps.RESULT_MARKER}{payload}\n"
     seen = {}
 
-    class _FakeManager:
-        async def exec_command(self, name, command, timeout=None):
-            seen["command"] = command
-            payload = (
-                f'{aps.RESULT_MARKER}'
-                '{"resolved": {"atomic@m": "/workspaces/odsp-web/.ai/atomic"}, '
-                '"unresolved": []}'
-            )
-            return SimpleNamespace(stdout=payload, stderr="", exit_code=0)
+    def _exec(session, command, *, timeout):
+        seen["session"] = session
+        seen["has_cmd"] = "base64 -d" in command
+        return out
 
-    # config.resolved_workspace_folder_for MUST NOT be consulted when repo_dir
-    # is given -- make it explode to prove precedence.
-    def _boom(_repo):
-        raise AssertionError("config derivation must not run when repo_dir given")
-
-    config = SimpleNamespace(resolved_workspace_folder_for=_boom)
-
-    with patch.object(aps, "find_plugin_resolve_pkg", return_value=Path(".")), \
-         patch.object(aps, "tar_pkg_b64", return_value="B64"):
-        dirs = asyncio.run(_resolve_repo_ai_plugin_dirs(
-            _FakeManager(), "my-cs", None, config,
-            repo_dir="/workspaces/odsp-web",
-        ))
-    assert dirs == ["/workspaces/odsp-web/.ai/atomic"]
-    assert "/workspaces/odsp-web" in seen["command"]
+    with patch("agent_bridge.target_exec.exec_bash_on_target", side_effect=_exec):
+        resolved, unresolved = aps.resolve_remote_repo_ai_plugin_dirs(
+            {"agent_name": "codespace:my-cs"}, "/ws",
+        )
+    assert resolved == ["/ws/.ai/a"]
+    assert unresolved == ["b@remote"]
+    assert seen["session"] == {"agent_name": "codespace:my-cs"}
+    assert seen["has_cmd"] is True
 
 
-def test_resolve_repo_ai_plugin_dirs_empty_when_no_dir():
-    """No explicit ``repo_dir`` and config yields nothing -> ``[]``."""
-    import asyncio
-    from types import SimpleNamespace
+def test_resolve_remote_empty_when_no_repo_dir():
+    assert aps.resolve_remote_repo_ai_plugin_dirs(
+        {"agent_name": "codespace:x"}, "",
+    ) == ([], [])
 
-    from agent_codespaces.__main__ import _resolve_repo_ai_plugin_dirs
 
-    config = SimpleNamespace(resolved_workspace_folder_for=lambda _r: None)
-    dirs = asyncio.run(_resolve_repo_ai_plugin_dirs(
-        object(), "my-cs", None, config,
-    ))
-    assert dirs == []
+def test_resolve_remote_best_effort_on_transport_error():
+    with patch(
+        "agent_bridge.target_exec.exec_bash_on_target",
+        side_effect=tx.TargetExecError("no transport"),
+    ):
+        assert aps.resolve_remote_repo_ai_plugin_dirs(
+            {"agent_name": "codespace:x"}, "/ws",
+        ) == ([], [])

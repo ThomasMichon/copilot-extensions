@@ -115,86 +115,60 @@ def test_relay_launch_env_auth_light_when_unavailable():
         assert session_manager._resolve_relay_launch_env("cs", None) == ("", None)
 
 
-# --- _resolve_codespace_ai_plugin_dirs (session_manager) -----------------
+# --- _resolve_codespace_ai_plugin_dirs (session_manager, PR2) -------------
+# Now resolves in-agent-bridge via repo_own_plugins_remote over the
+# transport-exec seam -- no longer shells `agent-codespaces resolve-ai-plugin-dirs`.
 
-def test_ai_plugin_dirs_shells_verb_and_splits_lines():
-    ok = subprocess.CompletedProcess(
-        [], 0, "/workspaces/odsp-web/.ai/atomic\n/workspaces/odsp-web/.ai/od-web\n", "",
-    )
+def test_ai_plugin_dirs_uses_in_bridge_remote_resolve():
     seen = {}
 
-    def _run(argv, **_kw):
-        seen["argv"] = argv
-        return ok
+    def _resolve(session, repo_dir, **_kw):
+        seen["session"] = session
+        seen["repo_dir"] = repo_dir
+        return (
+            ["/workspaces/odsp-web/.ai/atomic", "/workspaces/odsp-web/.ai/od-web"],
+            ["odsp-ai-hub-ecs@agency-playground"],
+        )
 
-    with patch("shutil.which", return_value="/bin/agent-codespaces"), \
-         patch("subprocess.run", side_effect=_run):
+    with patch(
+        "agent_bridge.repo_own_plugins_remote.resolve_remote_repo_ai_plugin_dirs",
+        side_effect=_resolve,
+    ):
         dirs = session_manager._resolve_codespace_ai_plugin_dirs(
-            "my-cs", "odsp-microsoft/odsp-web",
+            "my-cs", "odsp-microsoft/odsp-web", repo_dir="/workspaces/odsp-web",
         )
     assert dirs == [
         "/workspaces/odsp-web/.ai/atomic", "/workspaces/odsp-web/.ai/od-web",
     ]
-    assert seen["argv"] == [
-        "/bin/agent-codespaces", "resolve-ai-plugin-dirs", "my-cs",
-        "--repo", "odsp-microsoft/odsp-web",
-    ]
+    # target identified as a codespace by agent_name; repo_dir threaded through.
+    assert seen["session"] == {"agent_name": "codespace:my-cs"}
+    assert seen["repo_dir"] == "/workspaces/odsp-web"
 
 
-def test_ai_plugin_dirs_passes_repo_dir_precedence():
-    # The Session-Host dispatch passes the target's known workspace_folder as
-    # --repo-dir even when the spawn command carried no --repo (dotfiles#1274).
-    ok = subprocess.CompletedProcess([], 0, "/workspaces/odsp-web/.ai/atomic\n", "")
-    seen = {}
+def test_ai_plugin_dirs_empty_when_no_repo_dir():
+    # repo_dir is the concrete workspace_folder; without it we can't resolve, and
+    # repo-alone resolution never worked (dotfiles#1274) -> [] without a remote call.
+    called = {"n": 0}
 
-    def _run(argv, **_kw):
-        seen["argv"] = argv
-        return ok
+    def _resolve(*_a, **_kw):
+        called["n"] += 1
+        return ([], [])
 
-    with patch("shutil.which", return_value="/bin/agent-codespaces"), \
-         patch("subprocess.run", side_effect=_run):
-        dirs = session_manager._resolve_codespace_ai_plugin_dirs(
-            "my-cs", None, repo_dir="/workspaces/odsp-web",
-        )
-    assert dirs == ["/workspaces/odsp-web/.ai/atomic"]
-    assert seen["argv"] == [
-        "/bin/agent-codespaces", "resolve-ai-plugin-dirs", "my-cs",
-        "--repo-dir", "/workspaces/odsp-web",
-    ]
-    assert "--repo" not in seen["argv"]
+    with patch(
+        "agent_bridge.repo_own_plugins_remote.resolve_remote_repo_ai_plugin_dirs",
+        side_effect=_resolve,
+    ):
+        assert session_manager._resolve_codespace_ai_plugin_dirs("cs", "repo") == []
+    assert called["n"] == 0
 
 
-def test_ai_plugin_dirs_omits_repo_when_none_and_trims_blank_lines():
-    ok = subprocess.CompletedProcess([], 0, "  /a/.ai/x  \n\n\n", "")
-    seen = {}
-
-    def _run(argv, **_kw):
-        seen["argv"] = argv
-        return ok
-
-    with patch("shutil.which", return_value="/bin/agent-codespaces"), \
-         patch("subprocess.run", side_effect=_run):
-        dirs = session_manager._resolve_codespace_ai_plugin_dirs("my-cs", None)
-    assert dirs == ["/a/.ai/x"]
-    assert "--repo" not in seen["argv"]
-
-
-def test_ai_plugin_dirs_empty_on_nonzero_exit():
-    bad = subprocess.CompletedProcess([], 3, "junk\n", "boom")
-    with patch("shutil.which", return_value="/bin/agent-codespaces"), \
-         patch("subprocess.run", return_value=bad):
-        assert session_manager._resolve_codespace_ai_plugin_dirs("cs", "r") == []
-
-
-def test_ai_plugin_dirs_empty_on_cli_exception():
-    def _boom(*_a, **_kw):
-        raise OSError("no exec")
-
-    with patch("shutil.which", return_value="/bin/agent-codespaces"), \
-         patch("subprocess.run", side_effect=_boom):
-        assert session_manager._resolve_codespace_ai_plugin_dirs("cs", "r") == []
-
-
-def test_ai_plugin_dirs_empty_when_no_binstub():
-    with patch("shutil.which", return_value=None):
-        assert session_manager._resolve_codespace_ai_plugin_dirs("cs", "r") == []
+def test_ai_plugin_dirs_empty_on_best_effort_failure():
+    # resolve_remote_repo_ai_plugin_dirs is best-effort ([],[]) on any transport /
+    # resolver failure -> the dispatch proceeds with no repo-own plugins.
+    with patch(
+        "agent_bridge.repo_own_plugins_remote.resolve_remote_repo_ai_plugin_dirs",
+        return_value=([], []),
+    ):
+        assert session_manager._resolve_codespace_ai_plugin_dirs(
+            "cs", None, repo_dir="/workspaces/odsp-web",
+        ) == []

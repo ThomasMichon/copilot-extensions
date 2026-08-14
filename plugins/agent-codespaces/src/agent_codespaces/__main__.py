@@ -651,34 +651,11 @@ def main(argv: list[str] | None = None) -> int:
         "published/config port when omitted).",
     )
 
-    # --- resolve-ai-plugin-dirs (repo-own .ai --plugin-dir seam for the
-    # Session-Host dispatch, dotfiles#1274 WS1-skills) --------------------------
-    # The process-to-process seam agent-bridge's Session-Host CodeSpace dispatch
-    # shells out to (it cannot import ``agent_codespaces`` in the bridge venv;
-    # mirrors the ``acp-model-flags`` / ``relay-launch-env`` seams). SSHes to the
-    # CodeSpace, resolves the venue repo's OWN enabled ``.ai`` plugins to their
-    # in-checkout dirs, and prints each (one per line) so the daemon can fold
-    # them into the launch ``acp_command`` as ``--plugin-dir`` -- the only
-    # mechanism that surfaces plugin skills under ``copilot --acp`` (which
-    # ignores ``enabledPlugins``).
-    resolve_ai_p = sub.add_parser(
-        "resolve-ai-plugin-dirs",
-        help="Print the CodeSpace repo's OWN enabled `.ai` plugin dirs (one per "
-        "line) for agent-bridge to fold into the acp launch as --plugin-dir.",
-    )
-    resolve_ai_p.add_argument("name", help="CodeSpace name")
-    resolve_ai_p.add_argument(
-        "--repo", default=None,
-        help="Workspace repo the CodeSpace hosts (owner/name); resolves the "
-        "in-CodeSpace checkout dir the `.ai` plugins live under.",
-    )
-    resolve_ai_p.add_argument(
-        "--repo-dir", dest="repo_dir", default=None,
-        help="Concrete on-CodeSpace checkout dir to resolve against (e.g. "
-        "/workspaces/odsp-web). Takes precedence over --repo; the Session-Host "
-        "dispatch passes the target's known workspace_folder here since the "
-        "registered spawn command may carry no --repo.",
-    )
+    # (retired PR2, dotfiles#1422) The `resolve-ai-plugin-dirs` seam moved into
+    # agent-bridge (`repo_own_plugins_remote`) atop its transport-exec seam --
+    # the venue-generic repo-own `.ai` resolve is agent-bridge's job now, not an
+    # agent-codespaces command. (The `codespacePlugins` recommendation lane stays
+    # here.)
 
     # --- namespace-* (process-boundary resolver seam for agent-bridge, #892 Inc 3)
     # The `codespace:` namespace resolver, exposed over a process boundary so
@@ -814,8 +791,6 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_provision_command()
         if args.command == "relay-launch-env":
             return _cmd_relay_launch_env(args)
-        if args.command == "resolve-ai-plugin-dirs":
-            return _cmd_resolve_ai_plugin_dirs(args)
         if args.command == "namespace-list":
             return _cmd_namespace_list()
         if args.command == "namespace-resolve":
@@ -1269,12 +1244,12 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         # CodeSpace ACP dispatch never runs through this front-owns-stdio ``ssh``
         # path -- ``session_manager`` refuses a non-Session-Host codespace target
         # -- so folding ``.ai`` --plugin-dir here would silently no-op for real
-        # dispatches. The canonical repo-own lane lives in the Session-Host path,
-        # which shells the ``resolve-ai-plugin-dirs`` seam (reusing
-        # ``_resolve_repo_ai_plugin_dirs``) and folds the dirs into its own
-        # ``acp_command`` (dotfiles#1274 WS1-skills). This path keeps only the
-        # related-repo staging above, which serves genuine interactive/diagnostic
-        # ``agent-codespaces ssh`` use.
+        # dispatches. The canonical repo-own lane lives in the Session-Host path
+        # in agent-bridge, which resolves the dirs itself
+        # (``repo_own_plugins_remote`` over its transport-exec seam,
+        # PR2/dotfiles#1422) and folds them into its own ``acp_command``. This
+        # path keeps only the related-repo staging above, which serves genuine
+        # interactive/diagnostic ``agent-codespaces ssh`` use.
         remote_cmd = _finalize_remote_cmd(plugin_dirs)
 
         if args.stdio and remote_cmd:
@@ -1462,66 +1437,6 @@ async def _stage_plugins(manager, name: str, sources: list[str]) -> list[str]:
         except Exception as exc:
             log.warning("Staging %s on %s failed: %s", source, name, exc)
     return dirs
-
-
-async def _resolve_repo_ai_plugin_dirs(
-    manager, name: str, repo: str | None, config, repo_dir: str | None = None,
-) -> list[str]:
-    """Resolve the venue repo's OWN enabled ``.ai`` plugins to remote --plugin-dir.
-
-    The repo-own lane (venue-generic). The product repo checked out on the target
-    (e.g. ``/workspaces/odsp-web``) declares its own plugins in
-    ``.github/copilot/settings.json`` / ``.claude/settings.json`` and ships them
-    in a local (``directory``) marketplace such as ``.ai``. Those payloads are
-    **already on the target** (nothing to tar over); we only need to *resolve*
-    which enabled ``name@marketplace`` map to on-disk dirs. We ship the canonical
-    stdlib-only ``plugin_resolve`` package to the target and run it there against
-    the repo dir -- the same logic agent-bridge's ``repo_plugin_dir_args`` runs
-    for a local checkout -- and fold each resolved dir into ``--plugin-dir``.
-
-    ``repo_dir`` (when given) is the **concrete** on-target checkout dir to
-    resolve against, used as-is; it takes precedence over deriving one from
-    ``repo`` via config. This is what the Session-Host dispatch passes -- the
-    codespace target already knows its ``workspace_folder`` (e.g.
-    ``/workspaces/odsp-web``, parsed from the launch ``cd``) even when the
-    registered spawn command carries no ``--repo``, so relying on ``repo`` alone
-    would resolve nothing (dotfiles#1274). Falls back to
-    ``config.resolved_workspace_folder_for(repo)`` when no explicit dir is given.
-
-    Best-effort: any failure (no resolver package, no python on target, malformed
-    settings) yields ``[]`` so the dispatch proceeds without repo-own plugins.
-    Remote-marketplace enabled plugins (e.g. a ``github`` source) are reported as
-    unresolved and intentionally not staged (no launch-time fetch).
-    """
-    from . import ai_plugin_staging as aps
-
-    if not repo_dir:
-        resolver = getattr(config, "resolved_workspace_folder_for", None)
-        repo_dir = resolver(repo) if callable(resolver) else None
-    if not repo_dir:
-        return []
-    pkg = aps.find_plugin_resolve_pkg()
-    if pkg is None:
-        log.debug("repo-own .ai resolve skipped: plugin_resolve package not found")
-        return []
-    try:
-        command = aps.build_resolve_command(aps.tar_pkg_b64(pkg), repo_dir)
-        result = await manager.exec_command(name, command, timeout=60.0)
-    except Exception as exc:
-        log.warning("repo-own .ai resolve on %s failed: %s", name, exc)
-        return []
-    resolved, unresolved = aps.parse_resolve_result(result.stdout)
-    if resolved:
-        log.info(
-            "Resolved %d repo-own .ai plugin(s) for %s at %s -> --plugin-dir: %s",
-            len(resolved), name, repo_dir, resolved,
-        )
-    if unresolved:
-        log.info(
-            "repo-own plugins for %s not locally resolvable (remote marketplace "
-            "or missing) -- NOT staged: %s", name, unresolved,
-        )
-    return resolved
 
 
 async def _check_cross_harness_fence(
@@ -4189,51 +4104,6 @@ def _cmd_relay_launch_env(args: argparse.Namespace) -> int:
         args.codespace, relay_port=getattr(args, "relay_port", None)
     )
     print(json.dumps({"prelude": prelude, "port": port}))
-    return 0
-
-
-def _cmd_resolve_ai_plugin_dirs(args: argparse.Namespace) -> int:
-    """Print the CodeSpace repo's OWN enabled ``.ai`` plugin dirs, one per line.
-
-    The process-to-process seam agent-bridge's **Session-Host** CodeSpace
-    dispatch shells out to (it cannot import ``agent_codespaces`` in the bridge
-    venv; mirrors the ``acp-model-flags`` / ``relay-launch-env`` seams). SSHes to
-    the CodeSpace, runs the canonical ``plugin_resolve`` resolver against the
-    workspace checkout (via :func:`_resolve_repo_ai_plugin_dirs`), and prints
-    each resolved ``/workspaces/<repo>/.ai/<name>`` dir so the daemon can fold it
-    into the launch ``acp_command`` as ``--plugin-dir``. ``copilot --acp``
-    ignores ``enabledPlugins`` and only surfaces plugin skills via
-    ``--plugin-dir``, so this is what makes a dispatched agent load the product
-    repo's own in-repo skills/MCP (dotfiles#1274). Best-effort: prints nothing
-    and exits 0 on any failure so the dispatch proceeds without repo-own plugins.
-    """
-    from ssh_manager import ConnectionManager
-
-    from .lifecycle import account_for_codespace
-
-    source = CodespaceSource(args.name, account=account_for_codespace(args.name))
-    config = load_merged_config()
-    manager = ConnectionManager()
-
-    async def _run() -> list[str]:
-        try:
-            await manager.ensure_connected(args.name, source, [])
-            return await _resolve_repo_ai_plugin_dirs(
-                manager, args.name, getattr(args, "repo", None), config,
-                repo_dir=getattr(args, "repo_dir", None),
-            )
-        finally:
-            await manager.disconnect(args.name)
-
-    try:
-        dirs = asyncio.run(_run())
-    except Exception as exc:
-        log.warning(
-            "resolve-ai-plugin-dirs for %s failed: %s", args.name, exc
-        )
-        return 0
-    for d in dirs:
-        print(d)
     return 0
 
 
