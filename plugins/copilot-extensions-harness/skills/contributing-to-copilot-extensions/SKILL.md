@@ -88,6 +88,16 @@ installer. Know which kind you are changing.
    (`plugins/<plugin>/`). agent-worktrees has no suite yet — verify worktree ops
    end-to-end. Lint touched Python with `ruff check --select F,E9`. Respect the
    repo's `TESTING.md` for how to run the suites and the opt-in e2e smoke tests.
+   **Clean-room validation (install/bootstrap/provision/behavior changes).** When a
+   change affects how a plugin installs, bootstraps, self-provisions, or behaves on
+   a fresh machine, **run or extend the relevant clean-room scenario when
+   practical** — the disposable fresh-box rig (`tools/clean-room/`) turns those
+   flows into a hard PASS/FAIL instead of a field belief. See the
+   **`validating-in-clean-room`** skill (run / evaluate / author more) and the
+   [clean-room-validation vision](../../../../visions/clean-room-validation/README.md).
+   This is a **norm, not a blocking gate** — a below-altitude fix skips it with a
+   word; a change to a provisioning hook, installer, binstub, or readiness signal
+   owes it.
 4. **Install-contract gate (runtime plugins).** Run
    `python tools/check-install-contract.py` — it must report **zero
    violations**.
