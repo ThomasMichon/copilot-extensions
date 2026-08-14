@@ -240,11 +240,11 @@ def test_max_attempts_zero_retries_forever(q, client):
 def test_label_max_attempts_raises_one_labels_bound(q, client):
     """A per-label override raises one label's dead-letter bound above the
     global default (#3492) -- so its tasks retry longer, independently."""
-    t = q.create("work", labels=["intelligence-dampener"])
+    t = q.create("work", labels=["code-review"])
     sup = Supervisor(
         client, spawn_fn=lambda _t: (False, {"error": "x"}),
         repo=TEST_REPO, max_concurrent=5, max_attempts=1,
-        label_max_attempts={"intelligence-dampener": 3},
+        label_max_attempts={"code-review": 3},
     )
     # Global bound is 1, but the label override is 3: it retries up to 3.
     for _ in range(3):
@@ -262,7 +262,7 @@ def test_label_max_attempts_leaves_other_labels_on_global_bound(q, client):
     sup = Supervisor(
         client, spawn_fn=lambda _t: (False, {"error": "x"}),
         repo=TEST_REPO, max_concurrent=5, max_attempts=1,
-        label_max_attempts={"intelligence-dampener": 5},
+        label_max_attempts={"code-review": 5},
     )
     assert sup.poll_once() == []  # 1 attempt burned
     assert sup.poll_once() == []  # dead-lettered at the global bound of 1

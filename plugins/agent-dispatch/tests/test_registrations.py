@@ -278,12 +278,12 @@ def test_cli_build_spec_from_lane_flags():
     from agent_dispatch.__main__ import _build_registration_spec
 
     args = _parse(
-        ["supervise", "register", "--all-repos", "--label", "dampener",
+        ["supervise", "register", "--all-repos", "--label", "code-review",
          "--max-attempts", "5"]
     )
     spec = _build_registration_spec(args)
     assert spec["all_repos"] is True
-    assert spec["labels"] == ["dampener"]
+    assert spec["labels"] == ["code-review"]
     assert spec["max_attempts"] == 5
 
 
@@ -337,12 +337,12 @@ def test_cli_build_spec_evaluator_convenience():
 
     args = _parse(
         ["supervise", "register", "--kind", "evaluator", "--all-repos",
-         "--evaluator", "eval.json", "--label", "dampener"]
+         "--evaluator", "eval.json", "--label", "code-review"]
     )
     spec = _build_registration_spec(args)
     assert spec["evaluator"] == "eval.json"
     assert spec["all_repos"] is True
-    assert spec["labels"] == ["dampener"]
+    assert spec["labels"] == ["code-review"]
 
 
 def test_cli_build_spec_evaluator_requires_evaluator():

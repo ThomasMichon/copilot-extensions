@@ -2953,7 +2953,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--label-max-attempts", action="append", metavar="LABEL=N",
         help="per-label override of --max-attempts (repeatable), e.g. "
-             "--label-max-attempts intelligence-dampener=3 so raising one "
+             "--label-max-attempts code-review=3 so raising one "
              "label's bound doesn't revive another label's stale tasks "
              "(N=0 = retry forever for that label)",
     )

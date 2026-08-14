@@ -154,7 +154,7 @@ class PRConfig:
     #
     # Verdict semantics (approve / request-changes / comment) are NOT a binding:
     # they are intrinsic to the review backend and live in the provider. A
-    # ``dampener:*`` status tag needs no binding -- it is simply neither the
+    # ``review:*`` status tag needs no binding -- it is simply neither the
     # auto-merge label nor a hold label, so the classifier ignores it.
     automerge_label: str = ""
     hold_labels: tuple[str, ...] = ()
