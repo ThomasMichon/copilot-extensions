@@ -433,6 +433,11 @@ class AcpClient:
     """
 
     MAX_STDERR_LINES = 50
+    # Cap the number of child-stderr lines persisted as ``acp_child_log`` events
+    # per client -- enough to capture the startup/resume window (where an ACP
+    # launch hang prints its "Resuming…"/extension-reload output) without letting
+    # a chatty child grow the event log unbounded. #1468.
+    MAX_CHILD_LOG_EVENTS = 200
 
     def __init__(
         self,
@@ -1427,22 +1432,44 @@ class AcpClient:
     # -- Stderr reader -------------------------------------------------------
 
     async def _read_stderr(self) -> None:
-        """Background task to capture child stderr."""
+        """Background task to capture child stderr.
+
+        The child's stderr carries the ACP startup diagnostics -- notably the
+        "Resuming…" / extension-reload output that an ACP launch/resume hang
+        prints (#1468). It is **always logged** (previously gated behind
+        ``AGENT_BRIDGE_DEBUG``, which hid exactly the output needed to diagnose a
+        hang after the fact), and a bounded startup prefix is persisted as
+        ``acp_child_log`` events so a hung/stalled launch leaves a queryable
+        trace (for a local/host-side client, ``_emit`` lands it in the session's
+        EventLog).
+        """
         if not self._process or not self._process.stderr:
             return
+        child_log_events = 0
         with contextlib.suppress(Exception):
             while True:
                 line = await self._process.stderr.readline()
                 if not line:
                     break
                 text = line.decode("utf-8", errors="replace").rstrip()
-                if os.environ.get("AGENT_BRIDGE_DEBUG"):
-                    log.info("[child stderr] %s", text)
+                log.info("[child stderr] %s", text)
                 self._stderr_buffer.append(text)
                 if len(self._stderr_buffer) > self.MAX_STDERR_LINES:
                     self._stderr_buffer = self._stderr_buffer[-self.MAX_STDERR_LINES:]
+                if child_log_events < self.MAX_CHILD_LOG_EVENTS:
+                    self._emit("acp_child_log", {"text": text})
+                    child_log_events += 1
 
         self._handle_child_exit()
+
+    def stderr_tail(self, n: int = 10) -> str:
+        """The last ``n`` captured child-stderr lines, as a diagnostic tail.
+
+        Empty in host mode (the child's stderr lives in the Session Host, not
+        this frontend client). Used to enrich the launch-timeout marker and the
+        unexpected-exit error.
+        """
+        return "\n".join(self._stderr_buffer[-n:]) if self._stderr_buffer else ""
 
     def _handle_child_exit(self) -> None:
         """Handle the child process exiting.
@@ -1453,7 +1480,7 @@ class AcpClient:
         """
         if self._prompt_in_flight and not self._prompt_error:
             rc = self._process.returncode if self._process else None
-            stderr_tail = "\n".join(self._stderr_buffer[-10:]) if self._stderr_buffer else ""
+            stderr_tail = self.stderr_tail()
             self._prompt_error = (
                 f"Child process exited unexpectedly (code={rc})"
                 + (f"\n{stderr_tail}" if stderr_tail else "")
