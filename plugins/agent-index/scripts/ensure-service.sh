@@ -10,6 +10,20 @@ INSTALL_DIR="$HOME/.agent-index"
 # Only act on a box where agent-index is actually deployed.
 [ -f "$INSTALL_DIR/deploy-manifest.json" ] || exit 0
 
+# A client runs NO local indexer daemon -- its MCP/CLI route to the designated
+# host's service over SSH -- so there is nothing to keep alive here. Skip fast
+# (no background install.sh spawn) on any non-host. Mirrors config.resolve_role
+# precedence: a VALID AGENT_INDEX_ROLE env (host/client) wins; otherwise the
+# config.yaml role:/engine: scalar; else client. An unrecognized env value is
+# ignored (falls through), never treated as a role.
+role=""
+envrole="$(printf '%s' "${AGENT_INDEX_ROLE:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+case "$envrole" in
+    host|client) role="$envrole" ;;
+    *) [ -f "$INSTALL_DIR/config.yaml" ] && role="$(sed -n 's/^[[:space:]]*\(role\|engine\)[[:space:]]*:[[:space:]]*"\?\([A-Za-z]\+\)"\?.*/\2/p' "$INSTALL_DIR/config.yaml" | head -n1 | tr '[:upper:]' '[:lower:]')" ;;
+esac
+case "$role" in host|engine|server|indexer) : ;; *) exit 0 ;; esac
+
 # Fast health probe on the LIVE routing endpoint (active.json ephemeral port).
 # Prefer the runtime's OWN venv python (always present when installed) over a
 # global python3; fall back to curl so a host without either still works.
