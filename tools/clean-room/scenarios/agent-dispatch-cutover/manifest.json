@@ -1,0 +1,27 @@
+{
+  "name": "agent-dispatch-cutover",
+  "description": "Tier-P F1 cutover-resilience scenario: install + provision agent-dispatch on a fresh box, then drive the installer-internal `agent-dispatch _cutover` seam (the OS-agnostic zdd active/passive graceful cutover) through a battery of THORNY situations and assert the binding invariant of the correct-install-flows effort (dotfiles#1393) -- a version cutover must NEVER kill in-flight, non-resumable work. Checks: (survive-inflight) a queued task survives the cutover; (held-task-readopt) a claimed+started held task survives and the worker re-adopts the new coordinator via the durable SQLite queue DB; (breadcrumb-recover) an aborted cutover that strands a DRAINED survivor is healed by recovery (undrain); (two-slot-wedged-fd) a wedged daemon holding an open FD in its slot is stood-up-beside and retired, proving the versioned beside-not-in-place model. The heavy orchestration lives in a portable stdlib-only probe so it is verifiable off-Docker too. Name-free / public.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": [] },
+  "auth": { "copilot": "required", "gh": "optional", "ado": "none" },
+  "validates": "graceful-daemon-cutover",
+  "config": {
+    "CR_MARKETPLACE_REPO": "ThomasMichon/copilot-extensions",
+    "CR_MARKETPLACE_NAME": "copilot-extensions",
+    "CR_UV_INDEX": "(opt-in uv-index fixture)",
+    "CR_CUTOVER_CHECKS": "comma-separated subset of: survive-inflight,held-task-readopt,breadcrumb-recover,two-slot-wedged-fd"
+  },
+  "expected_artifacts": [
+    "~/.copilot/installed-plugins/<marketplace>/agent-dispatch",
+    "~/.agent-dispatch/versions/<ver>/bin/python (built slot with zdd)",
+    "~/.local/bin/agent-dispatch (self-provisioning binstub)"
+  ],
+  "stages": [
+    { "n": 0, "title": "environment (fresh machine)" },
+    { "n": 1, "title": "install agent-dispatch" },
+    { "n": 2, "title": "runtime provisions on first session" },
+    { "n": 3, "title": "cutover resilience battery (thorny situations)" }
+  ]
+}

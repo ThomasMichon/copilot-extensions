@@ -380,8 +380,25 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
     def make_client(base_url: str):
         return DispatchClient(base_url, token=token, timeout=float(args.drain_timeout) + 60.0)
 
+    def liveness_check(check_host: str, port: int) -> bool:
+        # Recovery MUST use a plain liveness probe, NOT the draining-aware
+        # health_check above: an aborted cutover strands the old coordinator
+        # DRAINING, and the whole point of recovery is to undrain it. A
+        # draining-aware probe reports a drained survivor as "unreachable", so
+        # recovery would retire the breadcrumb without undraining -- leaving the
+        # coordinator permanently closed to new claims. A drained daemon still
+        # answers /health 200, so treat any 200 as alive here.
+        try:
+            req = _urllib.Request(f"http://{check_host}:{port}/health")
+            if token:
+                req.add_header("Authorization", f"Bearer {token}")
+            with _urllib.urlopen(req, timeout=2) as resp:  # noqa: S310 -- loopback
+                return resp.status == 200
+        except Exception:
+            return False
+
     recovery = breadcrumb.recover_stale_cutover(
-        routing_dir(), make_client, health_check=health_check
+        routing_dir(), make_client, health_check=liveness_check
     )
     if getattr(args, "recover", False):
         _emit(recovery)

@@ -460,8 +460,21 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     def make_client(base_url: str) -> AgentIndexClient:
         return AgentIndexClient(base_url, timeout=float(args.drain_timeout) + 60.0)
 
+    def liveness_check(check_host: str, port: int) -> bool:
+        # Recovery MUST use a plain liveness probe, NOT the draining-aware
+        # health_check above: an aborted cutover strands the old service DRAINING,
+        # and the point of recovery is to undrain it. A draining-aware probe
+        # reports a drained survivor as "unreachable", so recovery would retire the
+        # breadcrumb without undraining -- leaving the service permanently closed to
+        # new work. A drained daemon still answers /health 200, so any 200 is alive.
+        try:
+            with urllib.request.urlopen(f"http://{check_host}:{port}/health", timeout=2) as resp:
+                return resp.status == 200
+        except Exception:
+            return False
+
     recovery = breadcrumb.recover_stale_cutover(
-        routing_dir(), make_client, health_check=health_check
+        routing_dir(), make_client, health_check=liveness_check
     )
     if getattr(args, "recover", False):
         if args.json:
