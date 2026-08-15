@@ -54,8 +54,8 @@ After full installation and project registration:
 ### Registry paths -- home-relative resolution (invariant)
 
 Anchor paths in `repos.yaml` are stored **per-platform** (`windows` / `wsl` /
-`linux`) and **may be home-relative** -- the WSL aperture-labs anchor, for
-instance, is registered as `~/src/aperture-labs`. Because `pathlib.Path` does
+`linux`) and **may be home-relative** -- the WSL test-chamber anchor, for
+instance, is registered as `~/src/test-chamber`. Because `pathlib.Path` does
 **not** treat a leading `~` as special, every consumer **must** read a registry
 path through **`RepoEntry.local_path(plat)`**, which calls `os.path.expanduser`
 (a no-op on already-absolute entries) -- never `entry.paths[plat]` raw.

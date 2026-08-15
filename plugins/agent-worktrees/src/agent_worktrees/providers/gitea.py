@@ -16,7 +16,7 @@ from .base import ProviderError, PRScope, PullResult, run_cli
 
 # HTTP statuses (plus the synthetic 0 = curl-level failure) worth retrying when
 # resolving/attaching labels.  A label apply is a small, idempotent call against
-# the facility Gitea; a single transient hiccup must not silently drop a
+# the multi-machine system Gitea; a single transient hiccup must not silently drop a
 # *required* label (auto-merge / source:<machine>).  4xx (auth / not-found /
 # bad-request) is permanent and not retried.
 _TRANSIENT_LABEL_HTTP = frozenset({0, 408, 429, 500, 502, 503, 504})

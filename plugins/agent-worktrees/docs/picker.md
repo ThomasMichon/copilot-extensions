@@ -84,7 +84,7 @@ with `Tab`:
 ```
 ┌ my-project ───────────────────────────────────── ⚙ Configuration ┐   ← title + Config menu
 │  ◀ Worktrees │ Tasks ▶                                            │   ← view pivots
-│  ◀ lambda-core · win │ borealis │ All machines ▶                  │   ← machine tabs
+│  ◀ anomalous-potato · win │ emancipation-cube │ All machines ▶                  │   ← machine tabs
 ├───────────────────────────────────────────────────────────────────┤
 │  ▸ feat-abc  win  copilot-extensions:8e45   WIP ↑2                 │   ← worktree rows
 │    fix-xyz   win  copilot-extensions:1c07   DIRTY                  │     (state + sync tags)

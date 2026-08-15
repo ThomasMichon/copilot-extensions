@@ -1,6 +1,6 @@
 """Worktree Picker TUI (Textual) -- the overhauled multi-machine picker.
 
-Ported from the aperture-labs ``worktree-picker-tty-overhaul`` prototype. The
+Ported from the test-chamber ``worktree-picker-tty-overhaul`` prototype. The
 ``engine`` renders over any *source* exposing ``LOCAL`` / ``LOCAL_LABEL`` /
 ``machines()`` / ``load()`` / ``bucket`` / ``for_machine`` (and ``make_loader``
 for live multi-machine). ``data_local`` is the real local source.

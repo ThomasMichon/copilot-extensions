@@ -30,7 +30,7 @@ Either way the worktree stays on its own branch at the squashed commit; the
 ``head_scheme`` toggle is purely about PR-head naming + publish mechanism, not
 about whether the worktree is reset.
 
-See ``docs/plans/pr-workflow.md`` in aperture-labs.
+See ``docs/plans/pr-workflow.md`` in test-chamber.
 """
 
 from __future__ import annotations

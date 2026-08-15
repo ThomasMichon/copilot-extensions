@@ -2364,7 +2364,7 @@ def _run_machine_menu(config: cfg.Config) -> int | None:
     """Show the remote machines sub-menu.
 
     Each SSH environment on each remote machine gets its own entry
-    (e.g., Borealis Windows and Borealis WSL are separate choices).
+    (e.g., Emancipation-Cube Windows and Emancipation-Cube WSL are separate choices).
 
     Returns an exit code if a remote machine was selected and the plan
     was emitted, or None to return to the main picker.
@@ -2958,9 +2958,9 @@ def _emit_remote_plan_for_env(
     """Emit a remote SSH handoff plan for a specific machine **and env**.
 
     The TUI picker labels a target by ``machines.yaml`` display name *and* env
-    ("Lambda-Core WSL"). The legacy ``_try_machine_handoff`` only knows the
+    ("Anomalous-Potato WSL"). The legacy ``_try_machine_handoff`` only knows the
     machine and resolves the machine's *primary* alias via
-    ``_resolve_ssh_alias`` -- so picking "Lambda-Core WSL" on a Windows host
+    ``_resolve_ssh_alias`` -- so picking "Anomalous-Potato WSL" on a Windows host
     would hand off to the Windows alias (SSHing the host back into itself and
     hanging). This resolves the **env-specific** alias instead.
 
@@ -8102,7 +8102,7 @@ def cmd_profiles(args: argparse.Namespace) -> int:
     target matrix) as JSON. ``apply --set <json>`` persists a new column into
     ``~/.<project>/config.yaml`` and, unless ``--no-mirror``, regenerates the
     terminal profiles to match. Both are SSH-able so the Picker can read/write
-    a remote host's column over its facility alias.
+    a remote host's column over its SSH alias.
     """
     from . import profiles as profiles_mod
 
@@ -8530,7 +8530,7 @@ def _validate_machine_registry(
         output.info(f"      display_name: {machine.title()}")
         output.info('      environment: "<OS and version>"')
         output.info(
-            '      # alias: "<facility-name>"  '
+            '      # alias: "<multi-machine system-name>"  '
             '# colloquial name if different from hostname'
         )
         return None
@@ -9468,7 +9468,7 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
 
     # Step 1b -- refresh EVERY registered copilot-extensions plugin payload.
     # All plugin payloads are updated first (this step), then service payloads /
-    # runtimes below. This is the fix for the "phantom deploy" (aperture-labs
+    # runtimes below. This is the fix for the "phantom deploy" (test-chamber
     # #2554): payload-only plugins (runtimeScope: none) such as context-handoff
     # were never touched by update, so they stayed on a stale version. The
     # agent-worktrees payload update above stays first (it provides this flow);
@@ -11072,7 +11072,7 @@ def _repos_usage() -> None:
     print(f"  {project} repos migrate")
     print(f"  {project} repos find dotfiles")
     print(f"  {project} repos add my-lib D:\\Src\\my-lib --class reference")
-    print(f"  {project} repos sync --tag facility")
+    print(f"  {project} repos sync --tag multi-machine system")
 
 
 def _clarify_registration_account(
@@ -14874,7 +14874,7 @@ def cmd_reconcile_plugins(args: argparse.Namespace) -> int:
     Reads the anchor repo's ``.github/copilot/settings.json`` ``enabledPlugins``
     and emits a declarative action plan (same shape as ``pre-launch``): ensure
     each plugin's payload is installed, and its runtime is deployed per the
-    plugin's ``runtimeScope`` + facility machine gate. The launcher executes the
+    plugin's ``runtimeScope`` + multi-machine system machine gate. The launcher executes the
     ``argv`` vectors and re-invokes for a second pass (payload, then runtime).
 
     With ``--apply`` the plan is executed **in-process** (the same 2-pass loop),
@@ -16358,7 +16358,7 @@ def _pr_merge_usage() -> None:
     print(file=out)
     print("Signal merge consent on an APPROVED PR by applying the repo's", file=out)
     print("merge-consent label (the .agent-worktrees/config.yaml binding", file=out)
-    print("automerge_label; facility: auto-merge). Applies by default; it never", file=out)
+    print("automerge_label; multi-machine system: auto-merge). Applies by default; it never", file=out)
     print("merges -- the review gate still decides. Only eligible PRs are", file=out)
     print("touched (approved at head, mergeable, not draft/WIP, no hold label,", file=out)
     print("targeting the default branch).", file=out)
@@ -16664,7 +16664,7 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
                 "repo's CONTRIBUTING / review process for who merges.\n"
                 "  - Stale anchor (if you EXPECTED an auto-merge label here): "
                 "this checkout is likely behind -- update the anchor "
-                "('aperture-labs update' / 'git sync' on the anchor) so the "
+                "('test-chamber update' / 'git sync' on the anchor) so the "
                 "binding is present, then retry pr-merge. Do NOT hand-merge or "
                 "escalate to an admin. Nothing applied."
             )

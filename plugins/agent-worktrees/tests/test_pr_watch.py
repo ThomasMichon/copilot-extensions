@@ -333,7 +333,7 @@ def _pr_payload(**over):
         "title": "A change", "draft": False,
         "head": {"sha": "deadbeef"}, "base": {"ref": "master"},
         "user": {"login": "cjohnson"},
-        "labels": [{"name": "auto-merge"}, {"name": "source:wheatley"}],
+        "labels": [{"name": "auto-merge"}, {"name": "source:mantis-counter"}],
     }
     base_pr.update(over)
     return base_pr
@@ -370,7 +370,7 @@ class TestGiteaGetSnapshot:
         assert snap.author == "cjohnson"
         assert snap.title == "A change"
         assert snap.draft is False
-        assert snap.labels == ("auto-merge", "source:wheatley")
+        assert snap.labels == ("auto-merge", "source:mantis-counter")
         assert snap.reviews == ()
 
     def test_merged_pr(self, monkeypatch):
@@ -392,7 +392,7 @@ class TestGiteaGetSnapshot:
              "submitted_at": "t", "commit_id": "c", "dismissed": False}
             for i in range(1, 51)
         ]
-        page2 = [{"id": 51, "state": "APPROVED", "user": {"login": "wheatley"},
+        page2 = [{"id": 51, "state": "APPROVED", "user": {"login": "mantis-counter"},
                   "submitted_at": "t2", "commit_id": "deadbeef", "dismissed": False}]
         monkeypatch.setattr(gitea, "run_cli",
                             self._fake_run(_pr_payload(), [page1, page2, []]))
@@ -400,7 +400,7 @@ class TestGiteaGetSnapshot:
         assert len(snap.reviews) == 51
         assert snap.reviews[-1].id == 51
         assert snap.reviews[-1].state == "APPROVED"
-        assert snap.reviews[-1].user == "wheatley"
+        assert snap.reviews[-1].user == "mantis-counter"
 
     def test_needs_token(self):
         with pytest.raises(ProviderError, match="needs a token"):

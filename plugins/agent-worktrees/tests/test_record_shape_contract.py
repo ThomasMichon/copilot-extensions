@@ -44,8 +44,8 @@ _INTERACTION_LAYER_KEYS = (
 
 def _raw(**kw):
     base = dict(
-        id="lambda-core-win-20260803-0000-abcd",
-        machine="lambda-core", title="Chamber work", status="active",
+        id="anomalous-potato-win-20260803-0000-abcd",
+        machine="anomalous-potato", title="Chamber work", status="active",
         started_at="2026-08-03T10:00:00",
     )
     base.update(kw)
@@ -64,7 +64,7 @@ def test_norm_carries_both_efforts_signals():
             last_session_id="sid-abcd",
             live_intent="Reticulating splines", live_intent_at=fresh_at,
         ),
-        "lambda-core", "win",
+        "anomalous-potato", "win",
     )
     for k in _SESSION_STATE_SIGNAL_KEYS + _INTERACTION_LAYER_KEYS:
         assert k in rec, f"normalized record dropped '{k}' (cross-effort contract)"
@@ -90,13 +90,13 @@ def test_liveness_markers_baked_into_title():
 
     rec = derive.norm(
         _raw(session_bare_orphan=True, follow_up=True, title="Wedged"),
-        "lambda-core", "win")
+        "anomalous-potato", "win")
     assert rec["session_bare_orphan"] is True and rec["follow_up"] is True
     # Orphan marker is outermost (leftmost); the follow-up marker is also present.
     assert rec["title"].startswith(orphan_glyph)
     assert fu_glyph in rec["title"]
 
-    clean = derive.norm(_raw(title="Fine"), "lambda-core", "win")
+    clean = derive.norm(_raw(title="Fine"), "anomalous-potato", "win")
     assert not clean["title"].startswith(orphan_glyph)
 
 
@@ -104,7 +104,7 @@ def test_signals_absent_default_off_not_missing():
     """A raw dict WITHOUT the signals still yields the keys (defaulted off), so a
     filter/sort/select transform can rely on them existing on EVERY row rather
     than guarding for absence."""
-    rec = derive.norm(_raw(), "lambda-core", "win")
+    rec = derive.norm(_raw(), "anomalous-potato", "win")
     for k in _SESSION_STATE_SIGNAL_KEYS:
         assert k in rec
     assert rec["mux_live"] is False

@@ -2636,7 +2636,7 @@ function Ensure-CopilotExperimental {
 function Deploy-GitHooksPath {
     <# Point core.hooksPath at tools/hooks ONLY for repos that actually ship a
        tools/hooks dir (the legacy scheme). Repos using the PR-workflow hook
-       facility keep the DEFAULT .git/hooks (where install_hooks writes the
+       multi-machine system keep the DEFAULT .git/hooks (where install_hooks writes the
        shims) -- pointing hooksPath at a missing tools/hooks silently disables
        them (dotfiles#234). Also self-heal a stale pointer an older installer
        left behind when the repo no longer ships tools/hooks. #>
@@ -2904,7 +2904,7 @@ switch ($Action) {
             $lnkPath = Join-Path $LocalBin $lnk
             if (Test-Path $lnkPath) { Remove-Item $lnkPath -Force }
         }
-        # Also remove distro-specific WSL shortcuts (e.g. "Aperture Labs (WSL: Ubuntu).lnk")
+        # Also remove distro-specific WSL shortcuts (e.g. "Test Chamber (WSL: Ubuntu).lnk")
         Get-ChildItem -Path $LocalBin -Filter "$displayName (WSL: *).lnk" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
         Write-ServiceChanged "Removed shortcuts"
 

@@ -157,7 +157,7 @@ The normal, expected flow for a worktree with work to land:
    review gate is satisfied.
 3. **`set-pr`** — record the PR URL/number (Step 3).
 4. **Wait for review.** The PR goes through the repo's review gate (e.g. the
-   facility's automated reviewer). Poll the PR via the provider sub-agent for
+   multi-machine system's automated reviewer). Poll the PR via the provider sub-agent for
    review state and comments.
 5. **Address feedback** in the **same** worktree (keep-alive disposition):
    edit -> commit on the feature branch -> `push-changes` updates the PR
@@ -220,7 +220,7 @@ origin/master  <—  worktree/{id}  ——snapshot——>  feature/{slug}-{suffi
 
 Snapshot needs no pre-push-hook cooperation, so it is the safe opt-out
 (`head_scheme: snapshot`) for a repo whose hook still blocks the refspec push.
-Set `head_scheme` per repo to choose; the facility default is `refspec`.
+Set `head_scheme` per repo to choose; the multi-machine system default is `refspec`.
 
 > **`feature/` is reclaimed under refspec.** Under the refspec scheme the per-PR
 > head lives in the `pr/` namespace, freeing `feature/<name>` for its other

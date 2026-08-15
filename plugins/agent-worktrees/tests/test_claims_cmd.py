@@ -37,7 +37,7 @@ def test_claims_registered():
 
 def test_inbound_unavailable_without_dispatch(monkeypatch):
     monkeypatch.setattr(m.shutil, "which", lambda name: None)
-    res = m._inbound_claims("lambda-core", "wt-a", "")
+    res = m._inbound_claims("anomalous-potato", "wt-a", "")
     assert res["available"] is False
     assert "not installed" in res["reason"]
 
@@ -60,7 +60,7 @@ def test_inbound_parses_dispatch_output(monkeypatch, tmp_path):
         return _Proc()
 
     monkeypatch.setattr(m.subprocess, "run", _run)
-    res = m._inbound_claims("lambda-core", "wt-a", str(tmp_path))
+    res = m._inbound_claims("anomalous-potato", "wt-a", str(tmp_path))
     assert res["available"] is True
     assert [t["id"] for t in res["assigned"]] == ["t1"]
     assert [t["id"] for t in res["owned"]] == ["t2"]
@@ -79,7 +79,7 @@ def test_inbound_handles_dispatch_error(monkeypatch):
         stderr = "boom"
 
     monkeypatch.setattr(m.subprocess, "run", lambda *a, **k: _Proc())
-    res = m._inbound_claims("lambda-core", "wt-a", "")
+    res = m._inbound_claims("anomalous-potato", "wt-a", "")
     assert res["available"] is False and res["reason"] == "boom"
 
 
@@ -92,8 +92,8 @@ def _seed(tmp_path, monkeypatch, *, owner_ref=None, resources=None):
     wdir = tmp_path / "wt-A"
     wdir.mkdir(exist_ok=True)
     rec = tracking.create_new_record(
-        "wt-A", "worktree/wt-A", str(wdir), "aperture-labs",
-        "lambda-core", "wsl", tdir, owner_ref=owner_ref,
+        "wt-A", "worktree/wt-A", str(wdir), "test-chamber",
+        "anomalous-potato", "wsl", tdir, owner_ref=owner_ref,
     )
     if resources:
         for c in resources:
@@ -102,7 +102,7 @@ def _seed(tmp_path, monkeypatch, *, owner_ref=None, resources=None):
     # config + inference stubs
     import types
     monkeypatch.setattr("agent_worktrees.config.load_config",
-                        lambda *a, **k: types.SimpleNamespace(machine="lambda-core"))
+                        lambda *a, **k: types.SimpleNamespace(machine="anomalous-potato"))
     monkeypatch.setattr(m, "_infer_worktree_id", lambda wid, cfg_: wid or "wt-A")
     monkeypatch.setattr(m, "_inbound_claims",
                         lambda machine, wid, cwd: {"available": False,
@@ -112,18 +112,18 @@ def _seed(tmp_path, monkeypatch, *, owner_ref=None, resources=None):
 
 def test_claims_json_outbound_and_owner(monkeypatch, tmp_path, capfd):
     claim = tracking.ResourceClaim(
-        kind="worktree", ref="lambda-core/copilot-extensions/wt-B",
+        kind="worktree", ref="anomalous-potato/copilot-extensions/wt-B",
         created_at="2026-07-31T00:00:00")
     _seed(tmp_path, monkeypatch,
-          owner_ref="lambda-core/aperture-labs/wt-owner#s1",
+          owner_ref="anomalous-potato/test-chamber/wt-owner#s1",
           resources=[claim])
     rc = m.cmd_claims(argparse.Namespace(target=["wt-A"], json=True))
     assert rc == 0
     out = json.loads(capfd.readouterr().out)
     assert out["worktree_id"] == "wt-A"
-    assert out["owner_ref"] == "lambda-core/aperture-labs/wt-owner#s1"
+    assert out["owner_ref"] == "anomalous-potato/test-chamber/wt-owner#s1"
     assert len(out["outbound"]) == 1
-    assert out["outbound"][0]["ref"] == "lambda-core/copilot-extensions/wt-B"
+    assert out["outbound"][0]["ref"] == "anomalous-potato/copilot-extensions/wt-B"
     assert out["inbound"]["available"] is False
 
 
@@ -149,7 +149,7 @@ def test_claims_missing_worktree(monkeypatch, tmp_path):
 
 def test_claims_human_output(monkeypatch, tmp_path):
     claim = tracking.ResourceClaim(
-        kind="worktree", ref="lambda-core/copilot-extensions/wt-B")
+        kind="worktree", ref="anomalous-potato/copilot-extensions/wt-B")
     _seed(tmp_path, monkeypatch, resources=[claim])
     buf = io.StringIO()
     with redirect_stdout(buf):
@@ -157,7 +157,7 @@ def test_claims_human_output(monkeypatch, tmp_path):
     assert rc == 0
     text = buf.getvalue()
     assert "Claim ledger for wt-A" in text
-    assert "lambda-core/copilot-extensions/wt-B" in text
+    assert "anomalous-potato/copilot-extensions/wt-B" in text
     assert "Inbound" in text
 
 
@@ -170,7 +170,7 @@ def _release_args(ref, *, remove=False, json_=True):
 
 
 def test_claims_release_marks_released(monkeypatch, tmp_path, capfd):
-    ref = "lambda-core/copilot-extensions/wt-B"
+    ref = "anomalous-potato/copilot-extensions/wt-B"
     _seed(tmp_path, monkeypatch,
           resources=[tracking.ResourceClaim(kind="worktree", ref=ref)])
     rc = m.cmd_claims(_release_args(ref))
@@ -185,7 +185,7 @@ def test_claims_release_marks_released(monkeypatch, tmp_path, capfd):
 
 
 def test_claims_release_remove_drops_entry(monkeypatch, tmp_path, capfd):
-    ref = "lambda-core/copilot-extensions/wt-B"
+    ref = "anomalous-potato/copilot-extensions/wt-B"
     _seed(tmp_path, monkeypatch,
           resources=[tracking.ResourceClaim(kind="worktree", ref=ref)])
     rc = m.cmd_claims(_release_args(ref, remove=True))
@@ -199,8 +199,8 @@ def test_claims_release_remove_drops_entry(monkeypatch, tmp_path, capfd):
 def test_claims_release_unknown_ref(monkeypatch, tmp_path):
     _seed(tmp_path, monkeypatch,
           resources=[tracking.ResourceClaim(
-              kind="worktree", ref="lambda-core/copilot-extensions/wt-B")])
-    rc = m.cmd_claims(_release_args("lambda-core/copilot-extensions/wt-Z"))
+              kind="worktree", ref="anomalous-potato/copilot-extensions/wt-B")])
+    rc = m.cmd_claims(_release_args("anomalous-potato/copilot-extensions/wt-Z"))
     assert rc == 1
 
 
@@ -262,7 +262,7 @@ def _add_ownerref_args(kind, ref, owner_ref, *, note="", json_=True):
         claim_owner_ref=owner_ref, json=json_)
 
 
-def _seed_ownerref(tmp_path, monkeypatch, *, machine="lambda-core"):
+def _seed_ownerref(tmp_path, monkeypatch, *, machine="anomalous-potato"):
     """Seed a borrowing-worktree record in ITS OWN project dir, and point the
     'current' cwd at a DIFFERENT project (the daemon-cwd gotcha)."""
     import types
@@ -293,7 +293,7 @@ def _seed_ownerref(tmp_path, monkeypatch, *, machine="lambda-core"):
 def test_claims_add_owner_ref_lands_on_cross_project_record(monkeypatch, tmp_path, capfd):
     owner_wt_dir = _seed_ownerref(tmp_path, monkeypatch)
     rc = m.cmd_claims(_add_ownerref_args(
-        "codespace", "cs-xyz", "lambda-core/odsp-web/wt-borrower", note="borrow"))
+        "codespace", "cs-xyz", "anomalous-potato/odsp-web/wt-borrower", note="borrow"))
     assert rc == 0
     out = json.loads(capfd.readouterr().out)
     assert out["worktree_id"] == "wt-borrower" and out["ref"] == "cs-xyz"
@@ -327,7 +327,7 @@ def test_claims_add_owner_ref_rejects_unqualified(monkeypatch, tmp_path):
 def test_claims_add_owner_ref_missing_record(monkeypatch, tmp_path):
     _seed_ownerref(tmp_path, monkeypatch)
     rc = m.cmd_claims(_add_ownerref_args(
-        "codespace", "cs-x", "lambda-core/odsp-web/no-such-wt"))
+        "codespace", "cs-x", "anomalous-potato/odsp-web/no-such-wt"))
     assert rc == 1  # resolved to a same-machine path that doesn't exist
 
 
@@ -377,11 +377,11 @@ def test_claims_settle_owner_ref_lands_on_cross_project_record(monkeypatch, tmp_
     owner_wt_dir = _seed_ownerref(tmp_path, monkeypatch)
     # First journal an active claim onto the borrowing record via owner-ref.
     m.cmd_claims(_add_ownerref_args(
-        "codespace", "cs-xyz", "lambda-core/odsp-web/wt-borrower"))
+        "codespace", "cs-xyz", "anomalous-potato/odsp-web/wt-borrower"))
     capfd.readouterr()
     # Now settle it via owner-ref (disconnect-hook path).
     rc = m.cmd_claims(_settle_ownerref_args(
-        "cs-xyz", "lambda-core/odsp-web/wt-borrower"))
+        "cs-xyz", "anomalous-potato/odsp-web/wt-borrower"))
     assert rc == 0
     out = json.loads(capfd.readouterr().out)
     assert out["disposition"] == "at-rest" and out["worktree_id"] == "wt-borrower"

@@ -34,7 +34,7 @@ def env(tmp_path: Path, monkeypatch):
         reconcile.cfg, "install_dir", lambda: home / ".agent-worktrees"
     )
     # Isolate the runtime gate: load_runtime_gate() falls back to the real
-    # aperture-labs external-repos.yaml (resolved via the repos registry) when
+    # test-chamber external-repos.yaml (resolved via the repos registry) when
     # the test repo lacks one. Pin resolve_path to None so the gate is derived
     # solely from the test repo -- otherwise these tests are non-hermetic and
     # fail on any host where the real manifest gates a tested plugin.
@@ -232,9 +232,9 @@ def test_machine_gated_allowed_machine(env):
     env.write_settings({f"agent-bridge@{MKT}": True})
     env.install_payload("agent-bridge", "3.0.0", scope="machine-gated")
     env.deploy_runtime("agent-bridge", "2.0.0")  # drift
-    env.write_gate({"agent-bridge": ["lambda-core", "borealis"]})
+    env.write_gate({"agent-bridge": ["anomalous-potato", "emancipation-cube"]})
     plan = reconcile.build_plan(
-        env.repo, machine="lambda-core", cache={}, save=False
+        env.repo, machine="anomalous-potato", cache={}, save=False
     )
     assert _services(plan, phase="runtime") == {"agent-bridge"}
 
@@ -243,7 +243,7 @@ def test_machine_gated_disallowed_machine(env):
     env.write_settings({f"agent-bridge@{MKT}": True})
     env.install_payload("agent-bridge", "3.0.0", scope="machine-gated")
     env.deploy_runtime("agent-bridge", "2.0.0")  # drift, but wrong machine
-    env.write_gate({"agent-bridge": ["lambda-core", "borealis"]})
+    env.write_gate({"agent-bridge": ["anomalous-potato", "emancipation-cube"]})
     plan = reconcile.build_plan(
         env.repo, machine="host-book2", cache={}, save=False
     )
@@ -258,7 +258,7 @@ def test_machine_gated_no_manifest_provisions_locally(env):
     env.write_settings({f"agent-bridge@{MKT}": True})
     env.install_payload("agent-bridge", "3.0.0", scope="machine-gated")
     env.deploy_runtime("agent-bridge", "2.0.0")  # drift
-    plan = reconcile.build_plan(env.repo, machine="lambda-core", cache={}, save=False)
+    plan = reconcile.build_plan(env.repo, machine="anomalous-potato", cache={}, save=False)
     assert _services(plan, phase="runtime") == {"agent-bridge"}
 
 
@@ -268,8 +268,8 @@ def test_machine_gated_manifest_present_but_omits_plugin_skips(env):
     env.write_settings({f"agent-bridge@{MKT}": True})
     env.install_payload("agent-bridge", "3.0.0", scope="machine-gated")
     env.deploy_runtime("agent-bridge", "2.0.0")  # drift
-    env.write_gate({"some-other-plugin": ["lambda-core"]})
-    plan = reconcile.build_plan(env.repo, machine="lambda-core", cache={}, save=False)
+    env.write_gate({"some-other-plugin": ["anomalous-potato"]})
+    plan = reconcile.build_plan(env.repo, machine="anomalous-potato", cache={}, save=False)
     assert _services(plan, phase="runtime") == set()
 
 
@@ -277,8 +277,8 @@ def test_invalid_scope_treated_as_none(env):
     env.write_settings({f"agent-bridge@{MKT}": True})
     env.install_payload("agent-bridge", "3.0.0", scope="bogus")
     env.deploy_runtime("agent-bridge", "2.0.0")
-    env.write_gate({"agent-bridge": ["lambda-core"]})
-    plan = reconcile.build_plan(env.repo, machine="lambda-core", cache={}, save=False)
+    env.write_gate({"agent-bridge": ["anomalous-potato"]})
+    plan = reconcile.build_plan(env.repo, machine="anomalous-potato", cache={}, save=False)
     assert _services(plan, phase="runtime") == set()
 
 
@@ -303,7 +303,7 @@ def test_runtime_allowed_gate_present_semantics():
 
 def test_gate_manifest_present_detects_repo_file(env):
     assert reconcile.gate_manifest_present(env.repo) is False
-    env.write_gate({"agent-bridge": ["lambda-core"]})
+    env.write_gate({"agent-bridge": ["anomalous-potato"]})
     assert reconcile.gate_manifest_present(env.repo) is True
 
 
@@ -370,22 +370,22 @@ def test_installer_argv_prefers_install_then_init(env, monkeypatch):
 
 def test_load_runtime_gate_parses_deploy_machines(env):
     env.write_gate({
-        "agent-bridge": ["lambda-core", "borealis"],
+        "agent-bridge": ["anomalous-potato", "emancipation-cube"],
         "agent-codespaces": ["host-book2"],
     })
     gate = reconcile.load_runtime_gate(env.repo)
-    assert gate["agent-bridge"] == {"lambda-core", "borealis"}
+    assert gate["agent-bridge"] == {"anomalous-potato", "emancipation-cube"}
     assert gate["agent-codespaces"] == {"host-book2"}
 
 
 def test_load_runtime_gate_parses_plugins_schema(env):
     # Native services.yaml shape: a top-level ``plugins:`` list.
     env.write_gate_services({
-        "agent-mcp": ["lambda-core", "borealis"],
+        "agent-mcp": ["anomalous-potato", "emancipation-cube"],
         "agent-dispatch": ["host-book2"],
     })
     gate = reconcile.load_runtime_gate(env.repo)
-    assert gate["agent-mcp"] == {"lambda-core", "borealis"}
+    assert gate["agent-mcp"] == {"anomalous-potato", "emancipation-cube"}
     assert gate["agent-dispatch"] == {"host-book2"}
 
 

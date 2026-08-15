@@ -34,8 +34,8 @@ class TestSlugFromUrl:
         ("https://github.com/owner/repo.git", "owner/repo"),
         ("git@github.com:owner/repo.git", "owner/repo"),
         ("ssh://git@host/owner/repo", "owner/repo"),
-        ("https://host/gitea/example-user/aperture-labs.git",
-         "example-user/aperture-labs"),
+        ("https://host/gitea/example-user/test-chamber.git",
+         "example-user/test-chamber"),
         ("https://host/deep/path/org/proj.git/", "org/proj"),
         # Azure DevOps https: {project}/_git/{repo} -> project/repo.
         ("https://your-org.visualstudio.com/Developer/_git/example-repo",

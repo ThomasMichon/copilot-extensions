@@ -423,12 +423,12 @@ function Get-CurrentEnvironment {
         return "$machine-wsl"
     }
 
-    # Windows detection (PowerShell is always Windows in this facility)
+    # Windows detection (PowerShell is always Windows in this multi-machine system)
     if ($env:OS -eq 'Windows_NT') {
         return "$machine-windows"
     }
 
-    # Native Linux (Wheatley, HA)
+    # Native Linux (Mantis-Counter, HA)
     return $machine
 }
 

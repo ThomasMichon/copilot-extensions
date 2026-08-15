@@ -149,25 +149,25 @@ def _msgview_open(scr):
 
 def _fixture_source():
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
-    local = ("lambda-core", "Win")
+    local = ("anomalous-potato", "Win")
     raws = [
-        {"id": "lambda-core-win-20260627-aaaa", "title": "Fix the thing",
+        {"id": "anomalous-potato-win-20260627-aaaa", "title": "Fix the thing",
          "status": "active", "started_at": "2026-06-27T17:00:00",
          "turn_count": 4, "state": "wip", "ahead": 2, "behind": 1,
          "mux_session": True, "mux_attached": True, "mux_clients": 1,
          "pr": {"number": 42, "state": "open"}},
-        {"id": "lambda-core-win-20260620-bbbb", "title": "Old idle wt",
+        {"id": "anomalous-potato-win-20260620-bbbb", "title": "Old idle wt",
          "status": "active", "started_at": "2026-06-20T10:00:00",
          "turn_count": 0, "state": "unused"},
-        {"id": "lambda-core-win-20260626-cccc", "title": "Done work",
+        {"id": "anomalous-potato-win-20260626-cccc", "title": "Done work",
          "status": "finalized", "completed_at": "2026-06-26T10:00:00",
          "started_at": "2026-06-25T10:00:00", "turn_count": 9,
          "state": "completed", "pr": {"number": 40, "state": "merged"}},
     ]
     src = types.SimpleNamespace()
     src.LOCAL = local
-    src.LOCAL_LABEL = "lambda-core · win"
-    src.machines = lambda: [("lambda-core Win", "lambda-core", "Win", True)]
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
     src.for_machine = derive.for_machine
     src.load = lambda: [derive.norm(w, *local) for w in raws]
@@ -982,7 +982,7 @@ def test_selection_survives_reload_and_focus_rehomes_by_index():
             gone = recs[0]["raw"]["id"]
             base = src.load
             src.load = lambda: [r for r in base() if r["raw"]["id"] != gone]
-            scr._refresh_after_maint({"recs": [{"machine": "lambda-core",
+            scr._refresh_after_maint({"recs": [{"machine": "anomalous-potato",
                                                 "env": "Win"}]})
             survivors = {r["id4"] for r in scr.list_records()}
             assert ids[0] not in survivors               # deleted row is gone
@@ -1033,7 +1033,7 @@ def test_live_reconcile_deferred_until_reload_settles():
             state_holder = {"s": "loading"}
             scr.loader = types.SimpleNamespace(
                 state=lambda m, e: state_holder["s"])
-            scr._wt_reconcile_after = {("lambda-core", "Win")}
+            scr._wt_reconcile_after = {("anomalous-potato", "Win")}
 
             # Still loading -> reconcile is deferred, selection intact.
             scr._process_pending_wt_reconcile()
@@ -1063,17 +1063,17 @@ def test_machine_rotate_clears_and_resets_selection():
                 "started_at": "2026-06-27T17:00:00", "cleanup_bucket": "clean"}
 
     src = types.SimpleNamespace()
-    src.LOCAL = ("lambda-core", "Win")
-    src.LOCAL_LABEL = "lambda-core · win"
+    src.LOCAL = ("anomalous-potato", "Win")
+    src.LOCAL_LABEL = "anomalous-potato · win"
     src.machines = lambda: [
-        ("lambda-core Win", "lambda-core", "Win", True),
-        ("borealis Win", "borealis", "Win", True),
+        ("anomalous-potato Win", "anomalous-potato", "Win", True),
+        ("emancipation-cube Win", "emancipation-cube", "Win", True),
     ]
     src.bucket = derive.bucket
     src.for_machine = derive.for_machine
     src.load = lambda: (
-        [derive.norm(raw("lambda-core-win", "aa00"), "lambda-core", "Win")]
-        + [derive.norm(raw("borealis-win", "bb00"), "borealis", "Win")]
+        [derive.norm(raw("anomalous-potato-win", "aa00"), "anomalous-potato", "Win")]
+        + [derive.norm(raw("emancipation-cube-win", "bb00"), "emancipation-cube", "Win")]
     )
 
     async def run():
@@ -1090,7 +1090,7 @@ def test_machine_rotate_clears_and_resets_selection():
             scr.wt_sel.replace(both)
             scr.wt_anchor = 1
             scr.sel = ("L", 1)
-            scr._rotate_machine(1)         # All -> lambda-core Win
+            scr._rotate_machine(1)         # All -> anomalous-potato Win
             recs = scr.list_records()
             assert scr.sel == ("L", 0)
             assert scr.wt_sel == {recs[0]["id4"]}
@@ -1099,7 +1099,7 @@ def test_machine_rotate_clears_and_resets_selection():
             # Focus outside the table -> rotate just clears the selection.
             scr.wt_sel.replace({recs[0]["id4"]})
             scr.sel = ("BTN", 0)
-            scr._rotate_machine(1)         # lambda-core Win -> borealis Win
+            scr._rotate_machine(1)         # anomalous-potato Win -> emancipation-cube Win
             assert not scr.wt_sel
             assert scr.wt_anchor is None
 
@@ -1286,26 +1286,26 @@ def _bridge_source():
     the #1424 jump-to-host flow."""
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
     raws_local = [
-        {"id": "lambda-core-win-1111", "title": "Local wt", "status": "active",
+        {"id": "anomalous-potato-win-1111", "title": "Local wt", "status": "active",
          "started_at": "2026-06-27T17:00:00", "turn_count": 3},
     ]
     raws_bor = [
-        {"id": "borealis-win-bridge-2222", "title": "Bridge wt",
+        {"id": "emancipation-cube-win-bridge-2222", "title": "Bridge wt",
          "status": "active", "started_at": "2026-06-27T17:00:00",
          "kind": "bridge", "turn_count": 1},
     ]
     src = types.SimpleNamespace()
-    src.LOCAL = ("lambda-core", "Win")
-    src.LOCAL_LABEL = "lambda-core · win"
+    src.LOCAL = ("anomalous-potato", "Win")
+    src.LOCAL_LABEL = "anomalous-potato · win"
     src.machines = lambda: [
-        ("lambda-core Win", "lambda-core", "Win", True),
-        ("borealis Win", "borealis", "Win", True),
+        ("anomalous-potato Win", "anomalous-potato", "Win", True),
+        ("emancipation-cube Win", "emancipation-cube", "Win", True),
     ]
     src.bucket = derive.bucket
     src.for_machine = derive.for_machine
     src.load = lambda: (
-        [derive.norm(w, "lambda-core", "Win") for w in raws_local]
-        + [derive.norm(w, "borealis", "Win") for w in raws_bor]
+        [derive.norm(w, "anomalous-potato", "Win") for w in raws_local]
+        + [derive.norm(w, "emancipation-cube", "Win") for w in raws_bor]
     )
     return src
 
@@ -1370,11 +1370,11 @@ def test_jump_to_host_switches_machine_and_highlights(tmp_path):
             await pilot.press("enter")
             await pilot.pause()
             assert not _sub_menu_open(scr)
-            assert scr.machine_idx == scr._machine_index_for("borealis", "Win")
+            assert scr.machine_idx == scr._machine_index_for("emancipation-cube", "Win")
             assert scr.show_hidden is True
             assert scr.sel[0] == "L"
             landed = scr.list_records()[scr.sel[1]]
-            assert (landed.get("raw") or {}).get("id") == "borealis-win-bridge-2222"
+            assert (landed.get("raw") or {}).get("id") == "emancipation-cube-win-bridge-2222"
             assert app.result is None          # internal nav -- never exited
 
     asyncio.run(run())
@@ -1413,14 +1413,14 @@ def test_open_worktree_cli_exits_with_resume_decision():
             scr = app.query_one(PickerScreen)
             await pilot.pause()
             ok, msg = scr._internal_pivot_action(
-                "open-cli", {"worktree": "borealis-win-bridge-2222"})
+                "open-cli", {"worktree": "emancipation-cube-win-bridge-2222"})
             assert ok is True
             assert "CLI session" in msg
             # The picker recorded a resume decision for that worktree and exited.
             assert app.result is not None
             assert app.result["action"] == "resume"
-            assert app.result["worktree_id"] == "borealis-win-bridge-2222"
-            assert app.result["machine"] == "borealis"
+            assert app.result["worktree_id"] == "emancipation-cube-win-bridge-2222"
+            assert app.result["machine"] == "emancipation-cube"
             assert app.result["env"] == "Win"
             assert app.result["is_local"] is False
 
@@ -1449,25 +1449,25 @@ def test_jump_to_caller_targets_caller_worktree():
     """A bridge worktree with a recorded caller offers 'Jump to caller', which
     navigates to the CALLER worktree (not the bridge itself) (#2178)."""
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
-    caller_raw = {"id": "lambda-core-win-caller-9999", "title": "Caller wt",
+    caller_raw = {"id": "anomalous-potato-win-caller-9999", "title": "Caller wt",
                   "status": "active", "started_at": "2026-06-27T17:00:00",
                   "turn_count": 2}
-    bridge_raw = {"id": "borealis-win-bridge-8888", "title": "Bridge wt",
+    bridge_raw = {"id": "emancipation-cube-win-bridge-8888", "title": "Bridge wt",
                   "status": "active", "started_at": "2026-06-27T17:00:00",
                   "kind": "bridge", "turn_count": 1,
-                  "caller_worktree": "lambda-core-win-caller-9999"}
+                  "caller_worktree": "anomalous-potato-win-caller-9999"}
     src = types.SimpleNamespace()
-    src.LOCAL = ("lambda-core", "Win")
-    src.LOCAL_LABEL = "lambda-core · win"
+    src.LOCAL = ("anomalous-potato", "Win")
+    src.LOCAL_LABEL = "anomalous-potato · win"
     src.machines = lambda: [
-        ("lambda-core Win", "lambda-core", "Win", True),
-        ("borealis Win", "borealis", "Win", True),
+        ("anomalous-potato Win", "anomalous-potato", "Win", True),
+        ("emancipation-cube Win", "emancipation-cube", "Win", True),
     ]
     src.bucket = derive.bucket
     src.for_machine = derive.for_machine
     src.load = lambda: (
-        [derive.norm(caller_raw, "lambda-core", "Win")]
-        + [derive.norm(bridge_raw, "borealis", "Win")]
+        [derive.norm(caller_raw, "anomalous-potato", "Win")]
+        + [derive.norm(bridge_raw, "emancipation-cube", "Win")]
     )
 
     async def run():
@@ -1492,10 +1492,10 @@ def test_jump_to_caller_targets_caller_worktree():
                 await pilot.press("down")
             await pilot.press("enter")
             await pilot.pause()
-            # Landed on the CALLER worktree (lambda-core tab), not the bridge.
-            assert scr.machine_idx == scr._machine_index_for("lambda-core", "Win")
+            # Landed on the CALLER worktree (anomalous-potato tab), not the bridge.
+            assert scr.machine_idx == scr._machine_index_for("anomalous-potato", "Win")
             landed = scr.list_records()[scr.sel[1]]
-            assert (landed.get("raw") or {}).get("id") == "lambda-core-win-caller-9999"
+            assert (landed.get("raw") or {}).get("id") == "anomalous-potato-win-caller-9999"
             assert app.result is None
 
     asyncio.run(run())
@@ -1549,10 +1549,10 @@ def test_configuration_menu_opens_profiles():
 def _maint_source():
     """Fixture with one worktree per cleanup bucket + one FF-eligible."""
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
-    local = ("lambda-core", "Win")
+    local = ("anomalous-potato", "Win")
 
     def raw(code, bucket, ff=False):
-        return {"id": f"lambda-core-win-{code}", "title": code,
+        return {"id": f"anomalous-potato-win-{code}", "title": code,
                 "status": "active", "started_at": "2026-06-27T17:00:00",
                 "cleanup_bucket": bucket, "ff_eligible": ff}
 
@@ -1567,8 +1567,8 @@ def _maint_source():
     ]
     src = types.SimpleNamespace()
     src.LOCAL = local
-    src.LOCAL_LABEL = "lambda-core · win"
-    src.machines = lambda: [("lambda-core Win", "lambda-core", "Win", True)]
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
     src.for_machine = derive.for_machine
     src.load = lambda: [derive.norm(w, *local) for w in raws]
@@ -1802,10 +1802,10 @@ def _profiles_source():
     """Fixture source exposing config-bound axes + profile IO hooks (no SSH)."""
     src = _fixture_source()
     src.host_cols = lambda: [
-        ("Lambda-Core·Win", "Lambda-Core", "Win"),
-        ("Borealis·Win", "Borealis", "Win"),
+        ("Anomalous-Potato·Win", "Anomalous-Potato", "Win"),
+        ("Emancipation-Cube·Win", "Emancipation-Cube", "Win"),
     ]
-    src.target_envs = lambda: [("Lambda-Core", "Win"), ("Borealis", "Win")]
+    src.target_envs = lambda: [("Anomalous-Potato", "Win"), ("Emancipation-Cube", "Win")]
     # In-memory column store keyed by (machine, env).
     store: dict = {}
     applied_calls: list = []
@@ -1824,8 +1824,8 @@ def _profiles_source():
     src._store = store
     src._applied_calls = applied_calls
     # The engine resolves the local host from the source LOCAL; align it with a
-    # host column so the self-diagonal lock lands on Lambda-Core Win.
-    src.LOCAL = ("Lambda-Core", "Win")
+    # host column so the self-diagonal lock lands on Anomalous-Potato Win.
+    src.LOCAL = ("Anomalous-Potato", "Win")
     return src
 
 
@@ -1840,7 +1840,7 @@ def test_profiles_apply_writes_changed_columns():
             scr = app.query_one(PickerScreen)
             scr.htab = 2
             await pilot.pause()
-            # Find a non-locked cell in the Borealis column (host index 1) and
+            # Find a non-locked cell in the Emancipation-Cube column (host index 1) and
             # toggle it on.
             hi = 1
             ti = next(t for t in range(len(scr.targets))
@@ -1871,8 +1871,8 @@ def test_profiles_apply_writes_changed_columns():
             assert scr.progress["done"]
             scr._key_progress("enter")
             await pilot.pause()
-        # The Borealis column was written and is no longer dirty.
-        assert any(m == "Borealis" for m, _e, _mir in src._applied_calls)
+        # The Emancipation-Cube column was written and is no longer dirty.
+        assert any(m == "Emancipation-Cube" for m, _e, _mir in src._applied_calls)
         assert not scr.grid_dirty()
 
     asyncio.run(run())
@@ -1913,14 +1913,14 @@ def test_profiles_apply_confirm_cancel_is_noop():
 
 
 def _profiles_source_unavailable():
-    """Profiles fixture where the Borealis host column fails to load, as an
+    """Profiles fixture where the Emancipation-Cube host column fails to load, as an
     old/unreachable remote does over SSH (#1370)."""
     from agent_worktrees.picker_tui import profiles_io
     src = _profiles_source()
     inner = src.load_profile_column
 
     def load_col(machine, env):
-        if machine == "Borealis":
+        if machine == "Emancipation-Cube":
             return profiles_io.UNAVAILABLE
         return inner(machine, env)
 
@@ -1941,7 +1941,7 @@ def test_profiles_unavailable_column_is_readonly():
             deadline = time.monotonic() + 3.0
             while time.monotonic() < deadline and not scr._prof_loaded:
                 await pilot.pause()
-            # Borealis (host col 1) is unavailable; the local col 0 is not.
+            # Emancipation-Cube (host col 1) is unavailable; the local col 0 is not.
             assert 1 in scr._prof_unavailable
             assert 0 not in scr._prof_unavailable
             # Cells in the unavailable column render the "unknown" marker.
@@ -2309,7 +2309,7 @@ def test_sessionless_flag_only_when_count_known_zero():
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
 
     def n(**extra):
-        base = {"id": "lambda-core-win-zzzz", "status": "active",
+        base = {"id": "anomalous-potato-win-zzzz", "status": "active",
                 "state": "wip", "started_at": "2026-06-27T17:00:00"}
         base.update(extra)
         return derive.norm(base, "m", "Win")
@@ -2325,20 +2325,20 @@ def test_sessionless_flag_only_when_count_known_zero():
 def _sessionless_source():
     """One normal (owned) worktree + one sessionless orphan (session_count 0)."""
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
-    local = ("lambda-core", "Win")
+    local = ("anomalous-potato", "Win")
     raws = [
-        {"id": "lambda-core-win-owned", "title": "Owned wip",
+        {"id": "anomalous-potato-win-owned", "title": "Owned wip",
          "status": "active", "started_at": "2026-06-27T17:00:00",
          "turn_count": 4, "state": "wip", "session_count": 1},
-        {"id": "lambda-core-win-orph", "title": "Orphan wip",
+        {"id": "anomalous-potato-win-orph", "title": "Orphan wip",
          "status": "active", "started_at": "2026-06-27T16:00:00",
          "turn_count": 0, "state": "wip", "session_count": 0,
          "pr": {"number": 99, "state": "open"}},
     ]
     src = types.SimpleNamespace()
     src.LOCAL = local
-    src.LOCAL_LABEL = "lambda-core · win"
-    src.machines = lambda: [("lambda-core Win", "lambda-core", "Win", True)]
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
     src.for_machine = derive.for_machine
     src.load = lambda: [derive.norm(w, *local) for w in raws]
@@ -2521,16 +2521,16 @@ def test_bucket_fallback_no_classify_finalized_is_clean_not_wip():
     """An old remote (no --classify -> no state) must not show FINAL + unmerged."""
     # status finalized, no git classification -> display FINAL, bucket clean.
     w = derive.norm(
-        {"id": "borealis-wsl-1234", "status": "finalized",
-         "started_at": "2026-06-25T10:00:00"}, "Borealis", "WSL")
+        {"id": "emancipation-cube-wsl-1234", "status": "finalized",
+         "started_at": "2026-06-25T10:00:00"}, "Emancipation-Cube", "WSL")
     assert w["state"] == "FINAL"
     assert w["cleanup_bucket"] == "clean"          # not 'wip'/'unmerged'
     assert derive.BUCKET_DISPO[w["cleanup_bucket"]] == "SAFE"
 
     # status active, no classification, no PR -> unknown (neutral, not unmerged).
     w2 = derive.norm(
-        {"id": "borealis-wsl-5678", "status": "active",
-         "started_at": "2026-06-25T10:00:00"}, "Borealis", "WSL")
+        {"id": "emancipation-cube-wsl-5678", "status": "active",
+         "started_at": "2026-06-25T10:00:00"}, "Emancipation-Cube", "WSL")
     assert w2["cleanup_bucket"] == "unknown"
     assert derive.BUCKET_DISPO[w2["cleanup_bucket"]] == ""   # no chip
 
@@ -2556,19 +2556,19 @@ def test_tui_renders_local_worktrees():
             scr = app.query_one(PickerScreen)
             out = pcap.screen_to_text(scr)
             assert "Worktree Manager" in out
-            # Canonical state vocabulary (aperture-labs #1290).
+            # Canonical state vocabulary (test-chamber #1290).
             assert "WIP" in out
             assert "UNUSED" in out
             assert "FINAL" in out
             # Real machine identity from the source.
-            assert "lambda-core" in out
+            assert "anomalous-potato" in out
 
     asyncio.run(run())
 
 
 def test_topbar_repo_branch_are_data_backed():
     """The top bar's repo + default-branch segments come from the data source
-    (config), not a hardcoded ``aperture-labs`` / ``master``."""
+    (config), not a hardcoded ``test-chamber`` / ``master``."""
     src = _fixture_source()
     src.REPO = "copilot-extensions"
     src.BRANCH = "main"
@@ -2581,7 +2581,7 @@ def test_topbar_repo_branch_are_data_backed():
             assert "copilot-extensions" in out
             assert "main" in out
             # The old hardcoded values must not leak in.
-            assert "aperture-labs" not in out
+            assert "test-chamber" not in out
             assert "master" not in out
 
     asyncio.run(run())
@@ -2598,7 +2598,7 @@ def test_topbar_drops_repo_branch_when_source_omits_them():
             scr = app.query_one(PickerScreen)
             out = pcap.screen_to_text(scr)
             assert "Worktree Manager" in out
-            assert "aperture-labs" not in out
+            assert "test-chamber" not in out
 
     asyncio.run(run())
 
@@ -2637,12 +2637,12 @@ class _FakeLoader:
 
 def _live_fixture_source():
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
-    local = ("Lambda-Core", "Win")
-    remote = ("Borealis", "Win")
-    local_raw = {"id": "lambda-core-win-20260627-aaaa", "title": "Local wip",
+    local = ("Anomalous-Potato", "Win")
+    remote = ("Emancipation-Cube", "Win")
+    local_raw = {"id": "anomalous-potato-win-20260627-aaaa", "title": "Local wip",
                  "status": "active", "started_at": "2026-06-27T17:00:00",
                  "turn_count": 4, "state": "wip"}
-    remote_raw = {"id": "borealis-win-20260627-bbbb", "title": "Remote work",
+    remote_raw = {"id": "emancipation-cube-win-20260627-bbbb", "title": "Remote work",
                   "status": "active", "started_at": "2026-06-27T16:30:00",
                   "turn_count": 2, "state": "wip"}
     records_by_key = {
@@ -2650,15 +2650,15 @@ def _live_fixture_source():
         remote: [derive.norm(remote_raw, *remote)],
     }
     states = {local: "ready", remote: "ready",
-              ("Wheatley", "Linux"): "loading"}
+              ("Mantis-Counter", "Linux"): "loading"}
 
     src = types.SimpleNamespace()
     src.LOCAL = local
-    src.LOCAL_LABEL = "lambda-core · win"
+    src.LOCAL_LABEL = "anomalous-potato · win"
     src.machines = lambda: [
-        ("Lambda-Core Win", "Lambda-Core", "Win", True),
-        ("Borealis Win", "Borealis", "Win", True),
-        ("Wheatley Linux", "Wheatley", "Linux", True),
+        ("Anomalous-Potato Win", "Anomalous-Potato", "Win", True),
+        ("Emancipation-Cube Win", "Emancipation-Cube", "Win", True),
+        ("Mantis-Counter Linux", "Mantis-Counter", "Linux", True),
     ]
     src.bucket = derive.bucket
     src.for_machine = derive.for_machine
@@ -2709,8 +2709,8 @@ def test_live_loader_classify_fallback(monkeypatch):
 
     monkeypatch.setattr(data_ssh, "_run", fake_run)
     src = data_ssh.Source(
-        "Borealis", "Win",
-        ["ssh", "borealis", "pwsh -NoProfile -Command 'p list --json "
+        "Emancipation-Cube", "Win",
+        ["ssh", "emancipation-cube", "pwsh -NoProfile -Command 'p list --json "
          "--classify --mux-details --include-other-platforms'"],
         ready=True,
     )
@@ -2787,26 +2787,26 @@ def _verb_fixture_source():
     """Local source with an ACTIVE (live-mux), a STOPPED (history, no mux), and
     a SESSIONLESS worktree -- for the state-driven submenu verb tests."""
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
-    local = ("lambda-core", "Win")
+    local = ("anomalous-potato", "Win")
     raws = [
         # Live mux -> Open (+ Stop).
-        {"id": "lambda-core-win-20260627-live", "title": "Live session",
+        {"id": "anomalous-potato-win-20260627-live", "title": "Live session",
          "status": "active", "started_at": "2026-06-27T17:00:00",
          "turn_count": 4, "state": "wip", "session_count": 1,
          "mux_session": True, "mux_attached": True, "mux_clients": 1},
         # Prior session, no live mux -> Resume (no Stop).
-        {"id": "lambda-core-win-20260627-stop", "title": "Stopped session",
+        {"id": "anomalous-potato-win-20260627-stop", "title": "Stopped session",
          "status": "active", "started_at": "2026-06-27T16:00:00",
          "turn_count": 3, "state": "wip", "session_count": 1},
         # No session ever -> Open only (cold), no Resume/Stop.
-        {"id": "lambda-core-win-20260627-none", "title": "Never opened",
+        {"id": "anomalous-potato-win-20260627-none", "title": "Never opened",
          "status": "active", "started_at": "2026-06-27T15:00:00",
          "turn_count": 0, "state": "unused", "session_count": 0},
     ]
     src = types.SimpleNamespace()
     src.LOCAL = local
-    src.LOCAL_LABEL = "lambda-core · win"
-    src.machines = lambda: [("lambda-core Win", "lambda-core", "Win", True)]
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
     src.for_machine = derive.for_machine
     src.load = lambda: [derive.norm(w, *local) for w in raws]
@@ -2969,7 +2969,7 @@ def test_msgview_local_load_populates_and_closes(monkeypatch):
     monkeypatch.setattr(
         _tracking, "list_records",
         lambda *_a, **_k: [types.SimpleNamespace(
-            worktree_id="lambda-core-win-20260627-stop")])
+            worktree_id="anomalous-potato-win-20260627-stop")])
     payload = {"session_id": "sess-abc12345",
                "messages": [{"role": "user", "text": "do the thing"},
                             {"role": "assistant", "text": "done"}],
@@ -3700,7 +3700,7 @@ def test_live_loader_local_streams_without_blocking_start(monkeypatch):
     (including the SSH fan-out) had resolved."""
     from agent_worktrees.picker_tui import data_ssh
 
-    sentinel = [{"id4": "abcd", "machine": "lambda-core", "env": "Win"}]
+    sentinel = [{"id4": "abcd", "machine": "anomalous-potato", "env": "Win"}]
     gate = threading.Event()
 
     def _slow_local(m=None, e=None, *, classify=True):
@@ -3709,9 +3709,9 @@ def test_live_loader_local_streams_without_blocking_start(monkeypatch):
 
     monkeypatch.setattr(data_ssh.data_local, "load", _slow_local)
 
-    local = data_ssh.Source("lambda-core", "Win", None, local=True)
-    remote = data_ssh.Source("borealis", "Win", _sleeper_argv(30),
-                             local=False, alias="borealis", shell="pwsh")
+    local = data_ssh.Source("anomalous-potato", "Win", None, local=True)
+    remote = data_ssh.Source("emancipation-cube", "Win", _sleeper_argv(30),
+                             local=False, alias="emancipation-cube", shell="pwsh")
     loader = data_ssh.LiveLoader(sources=[local, remote])
     t0 = time.perf_counter()
     loader.start()
@@ -3719,13 +3719,13 @@ def test_live_loader_local_streams_without_blocking_start(monkeypatch):
     try:
         # start() returned immediately -- it did NOT wait on the slow local load.
         assert elapsed < 1.0
-        assert loader.state("lambda-core", "Win") == "loading"
+        assert loader.state("anomalous-potato", "Win") == "loading"
         # Release the local load; it resolves on its thread and streams in.
         gate.set()
-        assert _wait_state(loader, "lambda-core", "Win", "ready") == "ready"
+        assert _wait_state(loader, "anomalous-potato", "Win", "ready") == "ready"
         assert loader.records() == sentinel
         # The remote is still loading throughout -- never blocked on.
-        assert loader.state("borealis", "Win") == "loading"
+        assert loader.state("emancipation-cube", "Win") == "loading"
     finally:
         gate.set()
         loader.cancel()
@@ -3746,14 +3746,14 @@ def test_live_loader_reload_local_refetches(monkeypatch):
         return list(state["rows"])
 
     monkeypatch.setattr(data_ssh.data_local, "load", _load)
-    local = data_ssh.Source("lambda-core", "Win", None, local=True)
+    local = data_ssh.Source("anomalous-potato", "Win", None, local=True)
     loader = data_ssh.LiveLoader(sources=[local])
     loader.start()
-    assert _wait_state(loader, "lambda-core", "Win", "ready") == "ready"
+    assert _wait_state(loader, "anomalous-potato", "Win", "ready") == "ready"
     assert loader.records() == [{"id4": "a"}]
     state["rows"] = [{"id4": "b"}]
-    assert loader.reload("lambda-core", "Win") is True
-    assert _wait_state(loader, "lambda-core", "Win", "ready") == "ready"
+    assert loader.reload("anomalous-potato", "Win") is True
+    assert _wait_state(loader, "anomalous-potato", "Win", "ready") == "ready"
     # Give the reload's two-phase fill a beat to swap the authoritative rows in.
     for _ in range(200):
         if loader.records() == [{"id4": "b"}]:
@@ -3782,13 +3782,13 @@ def test_live_loader_local_two_phase_fast_then_fill(monkeypatch):
         return [{"id4": "fast", "state": "?"}]
 
     monkeypatch.setattr(data_ssh.data_local, "load", _load)
-    local = data_ssh.Source("lambda-core", "Win", None, local=True)
+    local = data_ssh.Source("anomalous-potato", "Win", None, local=True)
     loader = data_ssh.LiveLoader(sources=[local])
     loader.start()
     try:
         # Phase 1 (fast) resolves first -> provisional rows visible, ready.
         fast_gate.set()
-        assert _wait_state(loader, "lambda-core", "Win", "ready") == "ready"
+        assert _wait_state(loader, "anomalous-potato", "Win", "ready") == "ready"
         assert loader.records() == [{"id4": "fast", "state": "?"}]
         # Phase 2 (full git classification) then swaps authoritative rows in.
         full_gate.set()
@@ -4225,15 +4225,15 @@ def test_native_list_sticky_header(monkeypatch):
 
     def _tall_src():
         derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
-        local = ("lambda-core", "Win")
-        raws = [{"id": f"lambda-core-win-2026062{i % 9}-r{i:02d}",
+        local = ("anomalous-potato", "Win")
+        raws = [{"id": f"anomalous-potato-win-2026062{i % 9}-r{i:02d}",
                  "title": f"Row {i}", "status": "active",
                  "started_at": "2026-06-27T17:00:00", "turn_count": i,
                  "state": "active" if i % 2 else "wip"} for i in range(20)]
         s = types.SimpleNamespace()
         s.LOCAL = local
         s.LOCAL_LABEL = "lc"
-        s.machines = lambda: [("lambda-core Win", "lambda-core", "Win", True)]
+        s.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
         s.bucket = derive.bucket
         s.for_machine = derive.for_machine
         s.load = lambda: [derive.norm(w, *local) for w in raws]
@@ -4284,7 +4284,7 @@ def test_native_list_sticky_no_reflow_flicker(monkeypatch):
         # Mixed statuses / ages so bucket() yields several sections (Active /
         # Recent / Completed), i.e. multiple header rows to scroll past.
         derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
-        local = ("lambda-core", "Win")
+        local = ("anomalous-potato", "Win")
         raws = []
         for i in range(30):
             if i % 3 == 0:
@@ -4293,14 +4293,14 @@ def test_native_list_sticky_no_reflow_flicker(monkeypatch):
                 started, status = "2026-06-20T17:00:00", "idle"
             else:
                 started, status = "2026-05-01T17:00:00", "done"
-            raws.append({"id": f"lambda-core-win-2026062{i % 9}-r{i:02d}",
+            raws.append({"id": f"anomalous-potato-win-2026062{i % 9}-r{i:02d}",
                          "title": f"Row {i}", "status": status,
                          "started_at": started, "turn_count": i,
                          "state": "active" if i % 2 else "wip"})
         s = types.SimpleNamespace()
         s.LOCAL = local
         s.LOCAL_LABEL = "lc"
-        s.machines = lambda: [("lambda-core Win", "lambda-core", "Win", True)]
+        s.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
         s.bucket = derive.bucket
         s.for_machine = derive.for_machine
         s.load = lambda: [derive.norm(w, *local) for w in raws]
@@ -4377,7 +4377,7 @@ def test_native_list_no_rowwrap_and_incremental_repaint(monkeypatch):
 
     def _src():
         derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
-        local = ("lambda-core", "Win")
+        local = ("anomalous-potato", "Win")
         raws = []
         for i in range(30):
             if i % 3 == 0:
@@ -4386,7 +4386,7 @@ def test_native_list_no_rowwrap_and_incremental_repaint(monkeypatch):
                 started, status = "2026-06-20T17:00:00", "idle"
             else:
                 started, status = "2026-05-01T17:00:00", "done"
-            raws.append({"id": f"lambda-core-win-2026062{i % 9}-r{i:02d}",
+            raws.append({"id": f"anomalous-potato-win-2026062{i % 9}-r{i:02d}",
                          # a full-width-ish title so a scrollbar-shrunk content
                          # region would wrap it (the dev376 failure mode)
                          "title": f"Row {i} with a longish descriptive title here",
@@ -4395,7 +4395,7 @@ def test_native_list_no_rowwrap_and_incremental_repaint(monkeypatch):
         s = types.SimpleNamespace()
         s.LOCAL = local
         s.LOCAL_LABEL = "lc"
-        s.machines = lambda: [("lambda-core Win", "lambda-core", "Win", True)]
+        s.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
         s.bucket = derive.bucket
         s.for_machine = derive.for_machine
         s.load = lambda: [derive.norm(w, *local) for w in raws]
@@ -4533,18 +4533,18 @@ def test_hidden_worktrees_filtered_and_toggle():
     """Bridge/system (kind=system) worktrees are hidden by default; Toggle-hidden
     reveals them, and the button appears only when there's something to reveal (#1422)."""
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
-    local = ("lambda-core", "Win")
+    local = ("anomalous-potato", "Win")
     raws = [
-        {"id": "lambda-core-win-aaaa", "title": "Real work", "status": "active",
+        {"id": "anomalous-potato-win-aaaa", "title": "Real work", "status": "active",
          "started_at": "2026-06-27T17:00:00", "turn_count": 3, "state": "wip"},
-        {"id": "lambda-core-win-ssss", "title": "daemon wt", "status": "active",
+        {"id": "anomalous-potato-win-ssss", "title": "daemon wt", "status": "active",
          "started_at": "2026-06-27T17:00:00", "turn_count": 0, "state": "wip",
          "kind": "system", "owner": "permanent-record"},
     ]
     src = types.SimpleNamespace()
     src.LOCAL = local
-    src.LOCAL_LABEL = "lambda-core · win"
-    src.machines = lambda: [("lambda-core Win", "lambda-core", "Win", True)]
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
     src.for_machine = derive.for_machine
     src.load = lambda: [derive.norm(w, *local) for w in raws]
@@ -4594,14 +4594,14 @@ def test_bridge_and_system_hidden_and_marked_distinctly():
     """Bridge and system worktrees are both hidden by default and marked
     distinctly in the title ([bridge] vs [system]) (#1424 tracking)."""
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
-    local = ("lambda-core", "Win")
+    local = ("anomalous-potato", "Win")
     raws = [
-        {"id": "lambda-core-win-aaaa", "title": "Real", "status": "active",
+        {"id": "anomalous-potato-win-aaaa", "title": "Real", "status": "active",
          "started_at": "2026-06-27T17:00:00", "turn_count": 3, "state": "wip"},
-        {"id": "lambda-core-win-ssss", "title": "daemon", "status": "active",
+        {"id": "anomalous-potato-win-ssss", "title": "daemon", "status": "active",
          "started_at": "2026-06-27T17:00:00", "turn_count": 0, "state": "wip",
          "kind": "system", "owner": "permanent-record"},
-        {"id": "lambda-core-win-bbbb", "title": "acp", "status": "active",
+        {"id": "anomalous-potato-win-bbbb", "title": "acp", "status": "active",
          "started_at": "2026-06-27T17:00:00", "turn_count": 0, "state": "wip",
          "kind": "bridge"},
     ]
@@ -4614,8 +4614,8 @@ def test_bridge_and_system_hidden_and_marked_distinctly():
 
     src = types.SimpleNamespace()
     src.LOCAL = local
-    src.LOCAL_LABEL = "lambda-core · win"
-    src.machines = lambda: [("lambda-core Win", "lambda-core", "Win", True)]
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
     src.for_machine = derive.for_machine
     src.load = lambda: [derive.norm(w, *local) for w in raws]
@@ -4648,21 +4648,21 @@ def test_origin_marks_drive_visibility_and_labels():
       ``[system]``.
     """
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
-    local = ("lambda-core", "Win")
+    local = ("anomalous-potato", "Win")
     raws = [
         # Operator-owned ACP session (Neuron Forge) -- bridge kind, but user
         # origin, so picker_hidden is False -> shown.
-        {"id": "lambda-core-win-nfnf", "title": "forge work", "status": "active",
+        {"id": "anomalous-potato-win-nfnf", "title": "forge work", "status": "active",
          "started_at": "2026-06-27T17:00:00", "turn_count": 2, "state": "wip",
          "kind": "bridge", "interface": "acp", "origin": "user",
          "picker_hidden": False},
         # Delegate ACP session -- bridge kind, delegate origin -> hidden.
-        {"id": "lambda-core-win-dldl", "title": "delegated", "status": "active",
+        {"id": "anomalous-potato-win-dldl", "title": "delegated", "status": "active",
          "started_at": "2026-06-27T17:00:00", "turn_count": 0, "state": "wip",
          "kind": "bridge", "interface": "acp", "origin": "delegate",
          "picker_hidden": True},
         # System worktree -> hidden.
-        {"id": "lambda-core-win-syst", "title": "daemon", "status": "active",
+        {"id": "anomalous-potato-win-syst", "title": "daemon", "status": "active",
          "started_at": "2026-06-27T17:00:00", "turn_count": 0, "state": "wip",
          "kind": "system", "interface": "cli", "origin": "system",
          "picker_hidden": True},
@@ -4679,8 +4679,8 @@ def test_origin_marks_drive_visibility_and_labels():
 
     src = types.SimpleNamespace()
     src.LOCAL = local
-    src.LOCAL_LABEL = "lambda-core · win"
-    src.machines = lambda: [("lambda-core Win", "lambda-core", "Win", True)]
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
     src.for_machine = derive.for_machine
     src.load = lambda: [derive.norm(w, *local) for w in raws]
@@ -5379,7 +5379,7 @@ def test_registered_pivot_action_menu_runs_and_invalidates(tmp_path, monkeypatch
             # Placeholders resolved: {task_id} -> the entry id.
             _key, ctx = rt.actions[0]
             assert ctx["task_id"] == "t1"
-            assert ctx["machine"] == "lambda-core"
+            assert ctx["machine"] == "anomalous-potato"
             assert rt.invalidated is True
 
     asyncio.run(run())
@@ -6092,8 +6092,8 @@ def test_msgview_overlay_lists_full_session_ids_and_titles():
             scr = app.query_one(PickerScreen)
             scr.machine_idx = scr.local_index()
             await pilot.pause()
-            rec = {"raw": {"id": "lambda-core-win-20260627-aaaa"},
-                   "machine": "lambda-core", "env": "Win",
+            rec = {"raw": {"id": "anomalous-potato-win-20260627-aaaa"},
+                   "machine": "anomalous-potato", "env": "Win",
                    "id4": "aaaa", "title": "Fix the thing", "state": "wip"}
             scr.msgview = {
                 "rec": rec, "limit": 3, "loading": False, "error": None,

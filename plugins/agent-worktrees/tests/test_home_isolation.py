@@ -1,6 +1,6 @@
 """Regression: the test suite must never touch real ~/.agent-worktrees state.
 
-aperture-labs #4349: a test that reached a real registry *writer* (e.g.
+test-chamber #4349: a test that reached a real registry *writer* (e.g.
 ``reconcile_binstubs`` -> ``prune_reserved_projects`` -> ``write_projects_registry``)
 while patching only the reader clobbered the developer's real
 ``~/.agent-worktrees/projects.yaml``. The autouse ``_isolate_agent_worktrees_home``

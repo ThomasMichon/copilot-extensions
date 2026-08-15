@@ -10,7 +10,7 @@ whole grid means reading every reachable host's column; applying a column writes
   mirror via ``__main__._mirror_terminal_profiles`` (lazy-imported to keep the
   picker_tui <-> __main__ cycle broken).
 - **Remote host** -- shell ``<project> profiles get|apply`` over the machine's
-  facility SSH alias (argv from ``data_ssh.profiles_argv``).
+  SSH alias (argv from ``data_ssh.profiles_argv``).
 
 The SSH runner is injected (default: real subprocess) so tests drive this with
 no network.

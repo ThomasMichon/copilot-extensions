@@ -37,24 +37,24 @@ from agent_worktrees.picker_tui import derive  # noqa: E402
 def _demo_source():
     """A hermetic demo fleet (frozen clock; no git/SSH/subprocess)."""
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
-    local = ("lambda-core", "Win")
+    local = ("anomalous-potato", "Win")
     raws = [
-        {"id": "lambda-core-win-20260627-aaaa", "title": "Fix the parser bug",
+        {"id": "anomalous-potato-win-20260627-aaaa", "title": "Fix the parser bug",
          "status": "active", "started_at": "2026-06-27T17:00:00",
          "turn_count": 12, "state": "wip", "ahead": 2, "behind": 1,
          "session_count": 1, "mux_session": True, "mux_attached": True,
          "mux_clients": 1},
-        {"id": "lambda-core-win-20260627-bbbb",
+        {"id": "anomalous-potato-win-20260627-bbbb",
          "title": "Add SelectionList to picker", "status": "active",
          "started_at": "2026-06-27T14:30:00", "turn_count": 5, "state": "active"},
-        {"id": "lambda-core-win-20260620-cccc", "title": "Old idle experiment",
+        {"id": "anomalous-potato-win-20260620-cccc", "title": "Old idle experiment",
          "status": "active", "started_at": "2026-06-20T10:00:00",
          "turn_count": 0, "state": "unused"},
     ]
     s = types.SimpleNamespace()
     s.LOCAL = local
-    s.LOCAL_LABEL = "lambda-core \u00b7 win"
-    s.machines = lambda: [("lambda-core Win", "lambda-core", "Win", True)]
+    s.LOCAL_LABEL = "anomalous-potato \u00b7 win"
+    s.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     s.bucket = derive.bucket
     s.for_machine = derive.for_machine
     s.load = lambda: [derive.norm(w, *local) for w in raws]
@@ -120,16 +120,16 @@ async def _open_prof(scr, pilot):
         return types.SimpleNamespace(machine=machine, env=env, kind=kind)
 
     host_cols = [
-        ("Lambda-Core·Win", "Lambda-Core", "Win"),
-        ("Borealis·Win", "Borealis", "Win"),
+        ("Anomalous-Potato·Win", "Anomalous-Potato", "Win"),
+        ("Emancipation-Cube·Win", "Emancipation-Cube", "Win"),
     ]
     cf = {
         "changed": [1],
         "diffs": {
             1: (
-                [_sel("Lambda-Core", "Win", "worktree"),
-                 _sel("Wheatley", "WSL", "bridge")],
-                [_sel("Borealis", "Win", "stale")],
+                [_sel("Anomalous-Potato", "Win", "worktree"),
+                 _sel("Mantis-Counter", "WSL", "bridge")],
+                [_sel("Emancipation-Cube", "Win", "stale")],
             ),
         },
     }

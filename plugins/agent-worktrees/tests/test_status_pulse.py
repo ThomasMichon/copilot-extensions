@@ -32,7 +32,7 @@ def _iso(dt: _dt.datetime) -> str:
 
 
 def _raw(**kw):
-    base = dict(id="lambda-core-win-20260625-0000-abcd", machine="lambda-core",
+    base = dict(id="anomalous-potato-win-20260625-0000-abcd", machine="anomalous-potato",
                 title="Feeder cam", status="active", state="active")
     base.update(kw)
     return base
@@ -47,7 +47,7 @@ class TestPulseFreshness:
         now_iso = _iso(derive.NOW - _dt.timedelta(seconds=10))
         n = derive.norm(
             _raw(live_intent="Wiring the pulse extension", live_intent_at=now_iso),
-            "lambda-core", "win")
+            "anomalous-potato", "win")
         assert n["live_pulse"] == "fresh"
         assert n["live_intent"] == "Wiring the pulse extension"
 
@@ -60,14 +60,14 @@ class TestPulseFreshness:
         ).isoformat().replace("+00:00", "Z")
         n = derive.norm(
             _raw(live_intent="from a real session", live_intent_at=z_iso),
-            "lambda-core", "win")
+            "anomalous-potato", "win")
         assert n["live_pulse"] == "fresh"
 
     def test_stale_when_aged(self):
         old_iso = _iso(derive.NOW - _dt.timedelta(seconds=derive._PULSE_FRESH_SECS + 60))
         n = derive.norm(
             _raw(live_intent="older intent", live_intent_at=old_iso),
-            "lambda-core", "win")
+            "anomalous-potato", "win")
         assert n["live_pulse"] == "stale"
 
     def test_idle_is_never_fresh(self):
@@ -75,7 +75,7 @@ class TestPulseFreshness:
         n = derive.norm(
             _raw(live_intent="just finished", live_intent_at=now_iso,
                  live_intent_idle=True),
-            "lambda-core", "win")
+            "anomalous-potato", "win")
         assert n["live_pulse"] == "stale"
 
     def test_never_expires_shows_last_intent(self):
@@ -85,19 +85,19 @@ class TestPulseFreshness:
         ancient_iso = _iso(derive.NOW - _dt.timedelta(days=3))
         n = derive.norm(
             _raw(live_intent="ancient", live_intent_at=ancient_iso),
-            "lambda-core", "win")
+            "anomalous-potato", "win")
         assert n["live_pulse"] == "stale"
         assert n["live_intent"] == "ancient"
 
     def test_no_pulse_when_absent(self):
-        n = derive.norm(_raw(), "lambda-core", "win")
+        n = derive.norm(_raw(), "anomalous-potato", "win")
         assert n["live_pulse"] is None
         assert n["live_intent"] == ""
 
     def test_unparseable_timestamp_is_safe(self):
         n = derive.norm(
             _raw(live_intent="x", live_intent_at="not-a-date"),
-            "lambda-core", "win")
+            "anomalous-potato", "win")
         assert n["live_pulse"] is None
 
     def test_pulse_never_sets_follow_up(self):
@@ -105,7 +105,7 @@ class TestPulseFreshness:
         now_iso = _iso(derive.NOW - _dt.timedelta(seconds=5))
         n = derive.norm(
             _raw(live_intent="busy", live_intent_at=now_iso),
-            "lambda-core", "win")
+            "anomalous-potato", "win")
         assert n["follow_up"] is False
         assert not n["title"].startswith("\u271a")
 
@@ -122,7 +122,7 @@ class TestPulseRestGrading:
         n = derive.norm(
             _raw(live_intent="Waiting on you", live_intent_at=old_iso,
                  live_rest="awaiting-operator"),
-            "lambda-core", "win")
+            "anomalous-potato", "win")
         assert n["live_pulse"] == "awaiting"
         assert n["awaiting_operator"] is True
         assert n["live_rest"] == "awaiting-operator"
@@ -132,13 +132,13 @@ class TestPulseRestGrading:
         # marker, kept just inside the outermost orphan ⚠.
         n = derive.norm(
             _raw(live_intent="x", live_rest="awaiting-operator", title="Needs me"),
-            "lambda-core", "win")
+            "anomalous-potato", "win")
         assert "\u23f3" in n["title"]
         # Orphan stays outermost when both are present.
         both = derive.norm(
             _raw(live_intent="x", live_rest="awaiting-operator",
                  session_bare_orphan=True, title="Wedged"),
-            "lambda-core", "win")
+            "anomalous-potato", "win")
         assert both["title"].startswith("\u26a0")
         assert "\u23f3" in both["title"]
 
@@ -152,20 +152,20 @@ class TestPulseRestGrading:
         old_iso = _iso(derive.NOW - _dt.timedelta(seconds=derive._PULSE_FRESH_SECS + 60))
         n = derive.norm(
             _raw(live_intent="churning", live_intent_at=old_iso, live_rest="busy"),
-            "lambda-core", "win")
+            "anomalous-potato", "win")
         assert n["live_pulse"] == "fresh"
 
     def test_idle_rest_is_stale(self):
         now_iso = _iso(derive.NOW - _dt.timedelta(seconds=5))
         n = derive.norm(
             _raw(live_intent="done", live_intent_at=now_iso, live_rest="idle"),
-            "lambda-core", "win")
+            "anomalous-potato", "win")
         assert n["live_pulse"] == "stale"
 
     def test_rest_only_without_intent_has_no_line(self):
         # The coarse backbone can carry live_rest with NO intent text (extension
         # not loaded); the sub-line is intent-driven, so there is nothing to show.
-        n = derive.norm(_raw(live_rest="idle"), "lambda-core", "win")
+        n = derive.norm(_raw(live_rest="idle"), "anomalous-potato", "win")
         assert n["live_pulse"] is None
         assert n["live_intent"] == ""
         assert "\u23f3" not in n["title"]
@@ -180,8 +180,8 @@ def _make_record(wt_id, wt_path, sessions=None):
         worktree_id=wt_id,
         branch=f"worktree/{wt_id}",
         worktree_path=wt_path,
-        repo="aperture-labs",
-        machine="lambda-core",
+        repo="test-chamber",
+        machine="anomalous-potato",
         platform="windows",
         started_at="",
         last_resumed_at="",

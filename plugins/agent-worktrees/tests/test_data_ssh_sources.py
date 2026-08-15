@@ -73,18 +73,18 @@ def test_local_machine_matched_by_hostname_field(monkeypatch):
 def test_local_machine_needs_no_ssh_profile(monkeypatch):
     """A current machine with NO ssh environments still gets a local tab."""
     entries = {
-        "lambda-core": _entry("lambda-core", "Lambda-Core", [], ssh_ready=False),
+        "anomalous-potato": _entry("anomalous-potato", "Anomalous-Potato", [], ssh_ready=False),
     }
     _install_roster(
-        monkeypatch, entries, machine="lambda-core",
-        local_id=("lambda-core", "windows"))
+        monkeypatch, entries, machine="anomalous-potato",
+        local_id=("anomalous-potato", "windows"))
 
     sources = data_ssh._build_sources()
     assert len(sources) == 1
     local = sources[0]
     assert local.local is True
     assert local.ready is True
-    assert local.machine == "Lambda-Core"
+    assert local.machine == "Anomalous-Potato"
     assert local.env == "Win"  # derived from the running platform
     assert local.argv is None
     assert local.alias == ""
@@ -94,21 +94,21 @@ def test_local_env_is_local_even_when_machine_not_ssh_ready(monkeypatch):
     """The current machine's native env is local; its other env is a disabled
     tab because the machine is not ssh_ready."""
     envs = [
-        cfg.SSHEnvironment(name="windows", alias="lambda-core", shell="pwsh"),
-        cfg.SSHEnvironment(name="wsl", alias="lambda-core-wsl", shell="bash"),
+        cfg.SSHEnvironment(name="windows", alias="anomalous-potato", shell="pwsh"),
+        cfg.SSHEnvironment(name="wsl", alias="anomalous-potato-wsl", shell="bash"),
     ]
-    entries = {"lambda-core": _entry("lambda-core", "Lambda-Core", envs,
+    entries = {"anomalous-potato": _entry("anomalous-potato", "Anomalous-Potato", envs,
                                      ssh_ready=False)}
     _install_roster(
-        monkeypatch, entries, machine="lambda-core",
-        local_id=("lambda-core", "windows"))
+        monkeypatch, entries, machine="anomalous-potato",
+        local_id=("anomalous-potato", "windows"))
 
     by = _by_key(data_ssh._build_sources())
-    assert by[("Lambda-Core", "Win")].local is True
-    assert by[("Lambda-Core", "Win")].ready is True
+    assert by[("Anomalous-Potato", "Win")].local is True
+    assert by[("Anomalous-Potato", "Win")].ready is True
     # WSL of the current machine is not local and the machine is not ready:
     # disabled tab, never contacted.
-    wsl = by[("Lambda-Core", "WSL")]
+    wsl = by[("Anomalous-Potato", "WSL")]
     assert wsl.local is False
     assert wsl.ready is False
     assert wsl.argv is None
@@ -119,15 +119,15 @@ def test_env_without_alias_is_disabled_not_connected(monkeypatch):
     even when the machine is ssh_ready -- it is never connected to."""
     envs = [cfg.SSHEnvironment(name="linux", alias="", shell="bash")]
     entries = {
-        "lambda-core": _entry(
-            "lambda-core", "Lambda-Core",
-            [cfg.SSHEnvironment(name="windows", alias="lambda-core",
+        "anomalous-potato": _entry(
+            "anomalous-potato", "Anomalous-Potato",
+            [cfg.SSHEnvironment(name="windows", alias="anomalous-potato",
                                 shell="pwsh")]),
         "ghost": _entry("ghost", "Ghost", envs, ssh_ready=True),
     }
     _install_roster(
-        monkeypatch, entries, machine="lambda-core",
-        local_id=("lambda-core", "windows"))
+        monkeypatch, entries, machine="anomalous-potato",
+        local_id=("anomalous-potato", "windows"))
 
     by = _by_key(data_ssh._build_sources())
     ghost = by[("Ghost", "Linux")]
@@ -139,43 +139,43 @@ def test_env_without_alias_is_disabled_not_connected(monkeypatch):
 def test_ready_remote_env_with_alias_is_connected(monkeypatch):
     """A remote ssh_ready env with a real alias gets an SSH argv (reachable)."""
     entries = {
-        "lambda-core": _entry(
-            "lambda-core", "Lambda-Core",
-            [cfg.SSHEnvironment(name="windows", alias="lambda-core",
+        "anomalous-potato": _entry(
+            "anomalous-potato", "Anomalous-Potato",
+            [cfg.SSHEnvironment(name="windows", alias="anomalous-potato",
                                 shell="pwsh")]),
-        "wheatley": _entry(
-            "wheatley", "Wheatley",
-            [cfg.SSHEnvironment(name="linux", alias="wheatley", shell="bash")],
+        "mantis-counter": _entry(
+            "mantis-counter", "Mantis-Counter",
+            [cfg.SSHEnvironment(name="linux", alias="mantis-counter", shell="bash")],
             ssh_ready=True),
     }
     _install_roster(
-        monkeypatch, entries, machine="lambda-core",
-        local_id=("lambda-core", "windows"))
+        monkeypatch, entries, machine="anomalous-potato",
+        local_id=("anomalous-potato", "windows"))
 
     by = _by_key(data_ssh._build_sources())
-    wheatley = by[("Wheatley", "Linux")]
-    assert wheatley.ready is True
-    assert wheatley.local is False
-    assert wheatley.alias == "wheatley"
-    assert wheatley.argv and wheatley.argv[0] == "ssh"
-    assert "wheatley" in wheatley.argv
+    mantis_counter = by[("Mantis-Counter", "Linux")]
+    assert mantis_counter.ready is True
+    assert mantis_counter.local is False
+    assert mantis_counter.alias == "mantis-counter"
+    assert mantis_counter.argv and mantis_counter.argv[0] == "ssh"
+    assert "mantis-counter" in mantis_counter.argv
 
 
 def _remote_roster(monkeypatch):
-    """A local machine + one ready remote (Wheatley/Linux) for op-argv tests."""
+    """A local machine + one ready remote (Mantis-Counter/Linux) for op-argv tests."""
     entries = {
-        "lambda-core": _entry(
-            "lambda-core", "Lambda-Core",
-            [cfg.SSHEnvironment(name="windows", alias="lambda-core",
+        "anomalous-potato": _entry(
+            "anomalous-potato", "Anomalous-Potato",
+            [cfg.SSHEnvironment(name="windows", alias="anomalous-potato",
                                 shell="pwsh")]),
-        "wheatley": _entry(
-            "wheatley", "Wheatley",
-            [cfg.SSHEnvironment(name="linux", alias="wheatley", shell="bash")],
+        "mantis-counter": _entry(
+            "mantis-counter", "Mantis-Counter",
+            [cfg.SSHEnvironment(name="linux", alias="mantis-counter", shell="bash")],
             ssh_ready=True),
     }
     _install_roster(
-        monkeypatch, entries, machine="lambda-core",
-        local_id=("lambda-core", "windows"))
+        monkeypatch, entries, machine="anomalous-potato",
+        local_id=("anomalous-potato", "windows"))
 
 
 def test_remote_op_argv_restart_uses_positional_id_and_json(monkeypatch):
@@ -183,7 +183,7 @@ def test_remote_op_argv_restart_uses_positional_id_and_json(monkeypatch):
     verb is ``restart`` even though the picker labels it 'Stop'); the id is
     positional, not ``--worktree-id``."""
     _remote_roster(monkeypatch)
-    argv = data_ssh.remote_op_argv("Wheatley", "Linux", "restart", "wt-xyz")
+    argv = data_ssh.remote_op_argv("Mantis-Counter", "Linux", "restart", "wt-xyz")
     assert argv is not None and argv[0] == "ssh"
     inner = argv[-1]
     assert "proj restart wt-xyz --json" in inner
@@ -194,14 +194,14 @@ def test_remote_op_argv_restart_local_returns_none(monkeypatch):
     """A local target yields no SSH argv (the caller runs it in-process)."""
     _remote_roster(monkeypatch)
     assert data_ssh.remote_op_argv(
-        "Lambda-Core", "Win", "restart", "wt-xyz") is None
+        "Anomalous-Potato", "Win", "restart", "wt-xyz") is None
 
 
 def test_remote_op_argv_finalize_uses_positional_id_and_json(monkeypatch):
     """The remote 'finalize' op runs ``<proj> finalize <id> --json`` -- the id
     is positional (the ``finalize`` CLI has no ``--worktree-id`` flag)."""
     _remote_roster(monkeypatch)
-    argv = data_ssh.remote_op_argv("Wheatley", "Linux", "finalize", "wt-xyz")
+    argv = data_ssh.remote_op_argv("Mantis-Counter", "Linux", "finalize", "wt-xyz")
     assert argv is not None and argv[0] == "ssh"
     inner = argv[-1]
     assert "proj finalize wt-xyz --json" in inner
@@ -212,7 +212,7 @@ def test_recent_messages_argv_remote_builds_worktree_scoped_cli(monkeypatch):
     """The remote recent-messages fetch runs
     ``<proj> recent-messages --worktree <id> --limit N --json``."""
     _remote_roster(monkeypatch)
-    argv = data_ssh.recent_messages_argv("Wheatley", "Linux", "wt-xyz", limit=5)
+    argv = data_ssh.recent_messages_argv("Mantis-Counter", "Linux", "wt-xyz", limit=5)
     assert argv is not None and argv[0] == "ssh"
     inner = argv[-1]
     assert "proj recent-messages --worktree wt-xyz --limit 5 --json" in inner
@@ -221,7 +221,7 @@ def test_recent_messages_argv_remote_builds_worktree_scoped_cli(monkeypatch):
 def test_recent_messages_argv_local_returns_none(monkeypatch):
     """A local target yields no SSH argv (the caller loads it in-process)."""
     _remote_roster(monkeypatch)
-    assert data_ssh.recent_messages_argv("Lambda-Core", "Win", "wt-xyz") is None
+    assert data_ssh.recent_messages_argv("Anomalous-Potato", "Win", "wt-xyz") is None
 
 
 def test_list_sessions_argv_remote_builds_worktree_scoped_cli(monkeypatch):
@@ -229,7 +229,7 @@ def test_list_sessions_argv_remote_builds_worktree_scoped_cli(monkeypatch):
     ``<proj> list-sessions --worktree <id> --json`` (the enriched registry with
     id + title + is_head, for the picker's diagnostic session list)."""
     _remote_roster(monkeypatch)
-    argv = data_ssh.list_sessions_argv("Wheatley", "Linux", "wt-xyz")
+    argv = data_ssh.list_sessions_argv("Mantis-Counter", "Linux", "wt-xyz")
     assert argv is not None and argv[0] == "ssh"
     inner = argv[-1]
     assert "proj list-sessions --worktree wt-xyz --json" in inner
@@ -238,15 +238,15 @@ def test_list_sessions_argv_remote_builds_worktree_scoped_cli(monkeypatch):
 def test_list_sessions_argv_local_returns_none(monkeypatch):
     """A local target yields no SSH argv (the caller loads it in-process)."""
     _remote_roster(monkeypatch)
-    assert data_ssh.list_sessions_argv("Lambda-Core", "Win", "wt-xyz") is None
+    assert data_ssh.list_sessions_argv("Anomalous-Potato", "Win", "wt-xyz") is None
 
 
 def test_ssh_not_ready_remote_env_is_disabled(monkeypatch):
     """A ssh.ready:false machine's remote env stays a disabled tab."""
     entries = {
-        "lambda-core": _entry(
-            "lambda-core", "Lambda-Core",
-            [cfg.SSHEnvironment(name="windows", alias="lambda-core",
+        "anomalous-potato": _entry(
+            "anomalous-potato", "Anomalous-Potato",
+            [cfg.SSHEnvironment(name="windows", alias="anomalous-potato",
                                 shell="pwsh")]),
         "book2": _entry(
             "book2", "host-book2",
@@ -254,8 +254,8 @@ def test_ssh_not_ready_remote_env_is_disabled(monkeypatch):
             ssh_ready=False),
     }
     _install_roster(
-        monkeypatch, entries, machine="lambda-core",
-        local_id=("lambda-core", "windows"))
+        monkeypatch, entries, machine="anomalous-potato",
+        local_id=("anomalous-potato", "windows"))
 
     by = _by_key(data_ssh._build_sources())
     book2 = by[("host-book2", "Win")]
@@ -266,9 +266,9 @@ def test_ssh_not_ready_remote_env_is_disabled(monkeypatch):
 
 def test_copilot_false_machine_is_skipped(monkeypatch):
     entries = {
-        "lambda-core": _entry(
-            "lambda-core", "Lambda-Core",
-            [cfg.SSHEnvironment(name="windows", alias="lambda-core",
+        "anomalous-potato": _entry(
+            "anomalous-potato", "Anomalous-Potato",
+            [cfg.SSHEnvironment(name="windows", alias="anomalous-potato",
                                 shell="pwsh")]),
         "nas": _entry(
             "nas", "NAS",
@@ -276,8 +276,8 @@ def test_copilot_false_machine_is_skipped(monkeypatch):
             copilot=False),
     }
     _install_roster(
-        monkeypatch, entries, machine="lambda-core",
-        local_id=("lambda-core", "windows"))
+        monkeypatch, entries, machine="anomalous-potato",
+        local_id=("anomalous-potato", "windows"))
 
     by = _by_key(data_ssh._build_sources())
     assert ("NAS", "Linux") not in by
@@ -289,9 +289,9 @@ def test_absent_local_machine_still_gets_local_source(monkeypatch):
     hasn't landed yet), ``_build_sources`` still yields exactly one local
     source, so the picker always has a 'this host' tab and never crashes."""
     entries = {
-        "wheatley": _entry(
-            "wheatley", "Wheatley",
-            [cfg.SSHEnvironment(name="linux", alias="wheatley", shell="bash")],
+        "mantis-counter": _entry(
+            "mantis-counter", "Mantis-Counter",
+            [cfg.SSHEnvironment(name="linux", alias="mantis-counter", shell="bash")],
             ssh_ready=True),
     }
     _install_roster(
@@ -308,7 +308,7 @@ def test_absent_local_machine_still_gets_local_source(monkeypatch):
     assert local.argv is None
     assert local.ready is True
     # The remote roster entry is unaffected.
-    assert ("Wheatley", "Linux") in _by_key(sources)
+    assert ("Mantis-Counter", "Linux") in _by_key(sources)
 
 
 # ── #1421 continuous background poll: LiveLoader.repoll_silent ────────────────
@@ -381,7 +381,7 @@ def test_repoll_silent_skips_non_ready_and_cancelled(monkeypatch):
 # ── #2102 remote-tab PR reconcile: argv flag + LiveLoader.reconcile_remote_prs ─
 
 def test_argv_for_reconcile_includes_flag():
-    argv = data_ssh._argv_for("bash", "wheatley", "proj",
+    argv = data_ssh._argv_for("bash", "mantis-counter", "proj",
                               classify=True, reconcile=True)
     inner = argv[-1]
     assert "--reconcile-prs" in inner
@@ -389,7 +389,7 @@ def test_argv_for_reconcile_includes_flag():
 
 
 def test_argv_for_without_reconcile_omits_flag():
-    argv = data_ssh._argv_for("bash", "wheatley", "proj", classify=True)
+    argv = data_ssh._argv_for("bash", "mantis-counter", "proj", classify=True)
     assert "--reconcile-prs" not in argv[-1]
 
 
@@ -426,7 +426,7 @@ def test_wrap_remote_pwsh_uses_encoded_command():
     enc = remote.split("-EncodedCommand ", 1)[1]
     assert base64.b64decode(enc).decode("utf-16-le") == "dotfiles cleanup --json"
     # bash path stays a plain -lc invocation
-    b = data_ssh._wrap_remote("bash", "wheatley", "dotfiles cleanup --json")
+    b = data_ssh._wrap_remote("bash", "mantis-counter", "dotfiles cleanup --json")
     assert b[-1] == "bash -lc 'dotfiles cleanup --json'"
 
 
@@ -536,35 +536,35 @@ def test_reconcile_remote_prs_noop_when_cancelled(monkeypatch):
 
 def test_machine_key_map_maps_display_names_to_registry_keys(monkeypatch):
     entries = {
-        "lambda-core": _entry("lambda-core", "Lambda-Core", []),
-        "borealis": _entry("borealis", "Borealis", []),
+        "anomalous-potato": _entry("anomalous-potato", "Anomalous-Potato", []),
+        "emancipation-cube": _entry("emancipation-cube", "Emancipation-Cube", []),
     }
     _install_roster(
-        monkeypatch, entries, machine="lambda-core",
-        local_id=("lambda-core", "windows"))
+        monkeypatch, entries, machine="anomalous-potato",
+        local_id=("anomalous-potato", "windows"))
 
     assert data_ssh.machine_key_map() == {
-        "Lambda-Core": "lambda-core",
-        "Borealis": "borealis",
+        "Anomalous-Potato": "anomalous-potato",
+        "Emancipation-Cube": "emancipation-cube",
     }
 
 
 def test_machine_key_translates_display_to_key(monkeypatch):
-    entries = {"lambda-core": _entry("lambda-core", "Lambda-Core", [])}
+    entries = {"anomalous-potato": _entry("anomalous-potato", "Anomalous-Potato", [])}
     _install_roster(
-        monkeypatch, entries, machine="lambda-core",
-        local_id=("lambda-core", "windows"))
+        monkeypatch, entries, machine="anomalous-potato",
+        local_id=("anomalous-potato", "windows"))
 
     # A tab's display name resolves to the canonical (lowercase) identity that
     # agent-dispatch and the SSH alias expect.
-    assert data_ssh.machine_key("Lambda-Core") == "lambda-core"
+    assert data_ssh.machine_key("Anomalous-Potato") == "anomalous-potato"
 
 
 def test_machine_key_falls_back_to_display_when_unknown(monkeypatch):
-    entries = {"lambda-core": _entry("lambda-core", "Lambda-Core", [])}
+    entries = {"anomalous-potato": _entry("anomalous-potato", "Anomalous-Potato", [])}
     _install_roster(
-        monkeypatch, entries, machine="lambda-core",
-        local_id=("lambda-core", "windows"))
+        monkeypatch, entries, machine="anomalous-potato",
+        local_id=("anomalous-potato", "windows"))
 
     # An unknown display name (roster gap) degrades to itself, not None.
     assert data_ssh.machine_key("Unlisted") == "Unlisted"

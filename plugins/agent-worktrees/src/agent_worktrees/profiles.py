@@ -17,8 +17,8 @@ Storage: a top-level ``terminal_profiles`` list in the machine-local, per-repo
 key there is implicitly scoped to this repo + this machine):
 
     terminal_profiles:
-      - {machine: Lambda-Core, env: Win, kind: agent}   # self (locked)
-      - {machine: Borealis,    env: WSL, kind: shell}
+      - {machine: Anomalous-Potato, env: Win, kind: agent}   # self (locked)
+      - {machine: Emancipation-Cube,    env: WSL, kind: shell}
 
 This module only models + persists the *selection*. Mirroring it to terminal
 apps is the installer's job (PowerShell ``Build-TerminalFragment``).

@@ -10,7 +10,7 @@ shells never drift from config.
 
 A :class:`LiveLoader` runs ``<project> list --json --classify --mux-details``
 on a background daemon thread per machine: the local machine in-process (reusing
-``data_local.load``, no subprocess), every reachable remote over its facility
+``data_local.load``, no subprocess), every reachable remote over its multi-machine system
 SSH alias. The picker shows the connect spinner while a machine loads and
 resolves it to ``ready`` (data) or ``failed`` (unreachable / errored).
 
@@ -494,7 +494,7 @@ def machine_key_map() -> dict[str, str]:
 
     A machine's registry key is its canonical identity (lowercase; it doubles as
     the SSH-alias base) -- the value ``agent-worktrees get machine`` returns and
-    that other facility tools (agent-dispatch, agent-bridge) match against. The
+    that other multi-machine system tools (agent-dispatch, agent-bridge) match against. The
     picker's tab labels carry the *display* name, so a registered pivot that
     scopes its CLI ``{machine}`` needs this translation to hand over the identity,
     not the label. Best-effort: an unreadable roster yields ``{}`` (the caller

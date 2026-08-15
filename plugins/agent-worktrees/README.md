@@ -27,7 +27,7 @@ session's.
 **Left segment** (`status-context`) -- who and where you are:
 
 ```
- lambda-core  [ win ]  aperture-labs:8e45
+ anomalous-potato  [ win ]  test-chamber:8e45
 ```
 
 - **Machine** -- the host designation (black)

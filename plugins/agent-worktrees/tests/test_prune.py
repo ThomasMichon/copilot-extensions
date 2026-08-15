@@ -426,7 +426,7 @@ class TestAssessClaimedResource:
     """A resource worktree with a live / not-confirmed-gone claimant is never
     prunable, above the git/PR verdict (claimed-resource-not-reclaimed)."""
 
-    OWNER = "lambda-core/aperture-labs/wt-A#s1"
+    OWNER = "anomalous-potato/test-chamber/wt-A#s1"
 
     def test_claimed_alive_overrides_empty(self):
         rec = _rec_owned(self.OWNER, status="active")
@@ -468,7 +468,7 @@ class TestAssessClaimedResource:
 
 
 class TestCleanupDispositionClaimed:
-    OWNER = "lambda-core/aperture-labs/wt-A#s1"
+    OWNER = "anomalous-potato/test-chamber/wt-A#s1"
 
     def test_claimed_overrides_finalized_clean(self):
         # Even a finalized resource is spared while its claimant is alive.

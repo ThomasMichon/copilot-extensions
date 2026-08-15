@@ -8,7 +8,7 @@ the plugin.  The provider is selected per-repo by the existing ``provider``
 config value (``gitea`` / ``github`` / ``azure-devops``).
 
 Credentials resolve, in order: ``pr.token_command`` (a shell command that
-prints a token -- how the facility points at its vault), then ``pr.token_env``
+prints a token -- how the multi-machine system points at its vault), then ``pr.token_env``
 (an env-var name); GitHub additionally falls back to ``gh`` auth.
 """
 
@@ -493,7 +493,7 @@ def scope_from_create_result(
     """Build a :class:`PRScope` from create_pr's result dict + config.
 
     ``labels`` are templated with ``{machine}`` so a config entry like
-    ``source:{machine}`` becomes ``source:lambda-core``.
+    ``source:{machine}`` becomes ``source:anomalous-potato``.
     """
     labels = tuple(
         lbl.replace("{machine}", machine) for lbl in (getattr(prcfg, "labels", ()) or ())

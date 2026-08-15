@@ -39,7 +39,7 @@ def _project_repo() -> tuple[str, str]:
     """``(repo name, default branch)`` for the active project's default repo.
 
     Data-backs the picker top bar's repo/branch segments (formerly hardcoded to
-    ``aperture-labs`` / ``master``). Returns empty strings when config can't be
+    ``test-chamber`` / ``master``). Returns empty strings when config can't be
     resolved, so the engine simply drops the segment rather than showing a
     fabricated value.
     """

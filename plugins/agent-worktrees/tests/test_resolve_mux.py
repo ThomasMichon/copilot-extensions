@@ -1,6 +1,6 @@
 """Regression: `resolve --new` produces a MUXED session unless --no-mux is
 passed, so the picker's cross-env "New worktree" handoff (e.g. Windows ->
-Lambda-Core WSL) wraps in tmux/psmux like a local launch. agent-bridge still
+Anomalous-Potato WSL) wraps in tmux/psmux like a local launch. agent-bridge still
 gets no-mux because it passes --no-mux (and --json) explicitly.
 """
 
@@ -27,7 +27,7 @@ def _args(**over):
 def _fake_config():
     # default_repo.base_repo must be falsy so resolve takes the worktree path.
     repo = SimpleNamespace(base_repo=False)
-    return SimpleNamespace(default_repo=repo, machine="lambda-core")
+    return SimpleNamespace(default_repo=repo, machine="anomalous-potato")
 
 
 def _run_new(args, *, tty=True):

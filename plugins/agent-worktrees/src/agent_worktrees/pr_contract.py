@@ -2,7 +2,7 @@
 
 This is the single **pure** seam that ``pr-watch`` (transition events) and
 ``pr-status`` (glance verdict / conflict / merge state) both build on.  It
-unifies the pure cores of the two facility tools -- ``tools/pr-watch`` (the
+unifies the pure cores of the two multi-machine system tools -- ``tools/pr-watch`` (the
 transition diff + cursor) and ``tools/pr-consent`` (the head-aware verdict
 reduction + consent eligibility) -- into one place so the family speaks one
 vocabulary regardless of provider.
@@ -11,7 +11,7 @@ Design constraints that keep it a *contract*, not an implementation:
 
 - **No network.**  Every function is a pure transform of its inputs; the
   provider fetches a :class:`PRSnapshot` and hands it in.
-- **No config import.**  The facility binding (auto-merge label, hold labels, WIP
+- **No config import.**  The multi-machine system binding (auto-merge label, hold labels, WIP
   title prefixes) is passed in as explicit arguments, so this module never
   couples to ``config`` or a specific hosting service.  Binding-absent (empty
   arguments) degrades cleanly -- no holds, no WIP, verdict/mergeability still
@@ -19,7 +19,7 @@ Design constraints that keep it a *contract*, not an implementation:
 - **Stdlib only.**  No new dependency.
 
 The heavier machinery -- polling a provider, the CLI surface, moving the
-facility tools onto this seam -- lands in later phases of the
+multi-machine system tools onto this seam -- lands in later phases of the
 ``pr-command-family`` effort.  Phase 1 ships only this contract + its tests.
 """
 
@@ -386,7 +386,7 @@ def title_is_wip(title: str, wip_title_prefixes: Iterable[str]) -> bool:
     return any(t.startswith(p.strip().lower()) for p in wip_title_prefixes if p.strip())
 
 
-#: Canonical prefix used when *marking* a PR draft. Gitea (<= 1.26, the facility
+#: Canonical prefix used when *marking* a PR draft. Gitea (<= 1.26, the multi-machine system
 #: server) has no native ``draft`` boolean -- a WIP title prefix IS its native
 #: draft mechanism, and the API's ``draft`` field is derived from it. ``WIP:`` is
 #: Gitea's default ``WORK_IN_PROGRESS_PREFIXES`` entry, so the server recognises
@@ -503,17 +503,17 @@ def classify_state(
 ) -> PRState:
     """Map a provider snapshot onto the unified :class:`PRState`.
 
-    The one classifier the family shares.  The facility binding
+    The one classifier the family shares.  The multi-machine system binding
     (``automerge_label`` / ``hold_labels`` / ``wip_title_prefixes``) is passed
     in; with everything empty it degrades cleanly -- no holds, no WIP, and
     ``consent_action`` still reflects the verdict + mergeability (it just reports
     that no auto-merge label is configured rather than proposing to apply one).
 
     "Consent" is the *concept* (has the author authorized the merge?);
-    ``automerge_label`` is the concrete label that expresses it (facility value:
+    ``automerge_label`` is the concrete label that expresses it (multi-machine system value:
     ``auto-merge``; think ADO's "auto-complete").
 
-    ``consent_action`` mirrors the facility ``pr-consent`` eligibility rules:
+    ``consent_action`` mirrors the multi-machine system ``pr-consent`` eligibility rules:
 
     - ``already`` -- the auto-merge label is already present (nothing to do).
     - ``apply``   -- open, not draft/WIP, no hold, mergeable, approved at head,
@@ -688,7 +688,7 @@ class PRFlowProfile:
 
     Not a per-PR classification (that is :class:`PRState`); a per-*repo* one.
     Agents should read this **before** driving a PR so they pick the right flow
-    for the target repo instead of assuming the local facility's shape.
+    for the target repo instead of assuming the local multi-machine system's shape.
 
     - ``profile``       -- one of the ``PROFILE_*`` tokens.
     - ``requires_pr``   -- direct-to-default-branch is refused (``pr.required``).
@@ -755,7 +755,7 @@ def classify_pr_flow(
       worktree to the default branch; the pr-* verbs do not apply.
     - **pr-agent-merge** (enabled + an ``automerge_label`` is bound): the author
       signals **merge consent** with that label after approval, and the review
-      gate merges. The full pr-* family applies -- this is the facility's own
+      gate merges. The full pr-* family applies -- this is the multi-machine system's own
       auto-review + auto-merge shape.
     - **pr-human-merge** (enabled but **no** ``automerge_label``): PR-gated, but
       the agent has no consent/merge mechanism -- a **human** approves and
@@ -766,7 +766,7 @@ def classify_pr_flow(
     The one ambiguity a caller must resolve out-of-band: an ``enabled`` repo
     that *should* have an ``automerge_label`` but is missing it because the
     checkout's anchor is stale looks identical to a genuine human-merge repo.
-    Callers that expect agent-merge (e.g. the facility) should confirm the
+    Callers that expect agent-merge (e.g. the multi-machine system) should confirm the
     anchor is current before treating an empty label as "human-merge".
 
     A fourth shape, **pr-self-merge**, sits between agent-consent and

@@ -33,7 +33,7 @@ class TestSlugify:
 class TestFeatureBranchName:
     def test_uses_suffix_and_slug(self):
         name = pr_ops.feature_branch_name(
-            "feature", "Fix auth", "lambda-core-win-20260618-173440-ac0d"
+            "feature", "Fix auth", "anomalous-potato-win-20260618-173440-ac0d"
         )
         assert name == "feature/fix-auth-ac0d"
 
@@ -1237,7 +1237,7 @@ class TestWorktreeToDictPRs:
 
 
 # ---------------------------------------------------------------------------
-# _worktree_to_dict state exposure (list --json --classify, aperture-labs #1290)
+# _worktree_to_dict state exposure (list --json --classify, test-chamber #1290)
 # ---------------------------------------------------------------------------
 
 class TestWorktreeToDictState:
@@ -1270,7 +1270,7 @@ class TestWorktreeToDictState:
 
 
 # ---------------------------------------------------------------------------
-# _classify_records shares the status bar's CONVO refinement (aperture-labs #1290)
+# _classify_records shares the status bar's CONVO refinement (test-chamber #1290)
 # ---------------------------------------------------------------------------
 
 class TestClassifyRecordsConvo:

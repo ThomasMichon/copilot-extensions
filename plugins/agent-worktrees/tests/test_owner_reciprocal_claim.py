@@ -14,7 +14,7 @@ from agent_worktrees import config as cfg
 from agent_worktrees import tracking
 
 
-def _seed_owner(tmp_path, monkeypatch, *, machine="lambda-core", project="odsp-web",
+def _seed_owner(tmp_path, monkeypatch, *, machine="anomalous-potato", project="odsp-web",
                 owner_id="wt-owner"):
     """Create an owner record under project_dir(project)/worktrees and point
     project_dir at a scratch tree."""
@@ -30,27 +30,27 @@ def _seed_owner(tmp_path, monkeypatch, *, machine="lambda-core", project="odsp-w
     return owner_dir
 
 
-def _config(machine="lambda-core", repo_name="copilot-extensions"):
+def _config(machine="anomalous-potato", repo_name="copilot-extensions"):
     return types.SimpleNamespace(machine=machine, repo_name=repo_name)
 
 
 def test_journals_worktree_claim_on_same_machine_owner(tmp_path, monkeypatch):
     owner_dir = _seed_owner(tmp_path, monkeypatch)
     ok = m._journal_owner_reciprocal_claim(
-        _config(), "wt-child", "lambda-core/odsp-web/wt-owner")
+        _config(), "wt-child", "anomalous-potato/odsp-web/wt-owner")
     assert ok is True
     rec = tracking.load_record(owner_dir / "wt-owner.yaml")
     assert len(rec.resources) == 1
     c = rec.resources[0]
     assert c.kind == "worktree"
-    assert c.ref == "lambda-core/copilot-extensions/wt-child"  # child's qualified ref
+    assert c.ref == "anomalous-potato/copilot-extensions/wt-child"  # child's qualified ref
     assert c.is_unsettled  # active
 
 
 def test_cross_machine_owner_defers_no_write(tmp_path, monkeypatch):
     _seed_owner(tmp_path, monkeypatch)
     ok = m._journal_owner_reciprocal_claim(
-        _config(machine="lambda-core"), "wt-child",
+        _config(machine="anomalous-potato"), "wt-child",
         "other-box/odsp-web/wt-owner")
     assert ok is False  # cross-machine -> deferred to the lease mirror
 
@@ -64,13 +64,13 @@ def test_no_owner_ref_is_noop(tmp_path, monkeypatch):
 def test_missing_owner_record_is_safe_noop(tmp_path, monkeypatch):
     _seed_owner(tmp_path, monkeypatch)
     ok = m._journal_owner_reciprocal_claim(
-        _config(), "wt-child", "lambda-core/odsp-web/no-such-owner")
+        _config(), "wt-child", "anomalous-potato/odsp-web/no-such-owner")
     assert ok is False  # resolved path doesn't exist -> no write, no raise
 
 
 def test_idempotent_dedups_by_ref(tmp_path, monkeypatch):
     owner_dir = _seed_owner(tmp_path, monkeypatch)
-    ref = "lambda-core/odsp-web/wt-owner"
+    ref = "anomalous-potato/odsp-web/wt-owner"
     m._journal_owner_reciprocal_claim(_config(), "wt-child", ref)
     m._journal_owner_reciprocal_claim(_config(), "wt-child", ref)
     rec = tracking.load_record(owner_dir / "wt-owner.yaml")

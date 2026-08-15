@@ -43,7 +43,7 @@ _CONCLUDED_SESSION_STATES: tuple[SessionState, ...] = ("handed-off", "concluded"
 # "bridge" are both **managed** kinds: hidden from the launch Picker by default
 # and exempt from routine cleanup (each is torn down by its owner). They are
 # tracked as distinct kinds so the Picker can mark and manage them separately.
-# See the agent-worktrees docs and the aperture-labs system-worktrees effort.
+# See the agent-worktrees docs and the test-chamber system-worktrees effort.
 WorktreeKind = Literal["session", "system", "bridge"]
 
 # Agent/daemon-owned kinds: exempt from routine cleanup/reap and never
@@ -53,7 +53,7 @@ WorktreeKind = Literal["session", "system", "bridge"]
 # shown in the Picker (visibility keys on ``origin`` -- see MANAGED_ORIGINS).
 MANAGED_KINDS: tuple[WorktreeKind, ...] = ("system", "bridge")
 
-# A worktree's two orthogonal marks (see the aperture-labs
+# A worktree's two orthogonal marks (see the test-chamber
 # worktree-origin-interface-visibility effort / agent-fabric vision behavior
 # ``origin-and-interface-are-marked``):
 #

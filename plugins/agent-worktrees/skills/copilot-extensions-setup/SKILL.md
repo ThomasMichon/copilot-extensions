@@ -392,7 +392,7 @@ profile** in `~/.agent-bridge/config.yaml` pointing to the same
 
 ```bash
 # Auto-discovers machines.yaml (the roster is derived from it)
-agent-bridge config adopt --repo /path/to/repo --profile facility
+agent-bridge config adopt --repo /path/to/repo --profile multi-machine system
 
 # Verify
 agent-bridge config show
@@ -425,7 +425,7 @@ guide the user interactively through:
 
 ```bash
 agent-bridge config adopt \
-  --repo /path/to/repo --profile facility \
+  --repo /path/to/repo --profile multi-machine system \
   --machines-yaml /custom/machines.yaml \
   --agents-config /custom/agents.json
 ```

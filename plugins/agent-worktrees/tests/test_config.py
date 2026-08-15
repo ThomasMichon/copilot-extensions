@@ -183,7 +183,7 @@ class TestPRConfigParsing:
         path.write_text(
             "repo_name: ext\n"
             "srcroot: /tmp/src\n"
-            "machine: lambda-core\n"
+            "machine: anomalous-potato\n"
             "platform: wsl\n"
             "repos:\n"
             "  ext:\n"
@@ -319,7 +319,7 @@ class TestPRConfigParsing:
         assert pr.wip_title_prefixes == ()
 
     def test_review_vocabulary_binding_parsed(self, tmp_path: Path):
-        # The facility hook: the pr: block supplies the review vocabulary.
+        # The multi-machine system hook: the pr: block supplies the review vocabulary.
         cfgfile = tmp_path / "config.yaml"
         self._write(
             cfgfile,
@@ -357,7 +357,7 @@ class TestInRepoPRPolicy:
         path.write_text(
             "repo_name: ext\n"
             "srcroot: /tmp/src\n"
-            "machine: lambda-core\n"
+            "machine: anomalous-potato\n"
             "platform: wsl\n"
             "repos:\n"
             "  ext:\n"
@@ -434,7 +434,7 @@ class TestLayeredConfig:
         path.write_text(
             "repo_name: ext\n"
             "srcroot: /tmp/src\n"
-            "machine: lambda-core\n"
+            "machine: anomalous-potato\n"
             "platform: wsl\n"
             "repos:\n"
             "  ext:\n"
@@ -562,7 +562,7 @@ class TestLayeredConfig:
         # Machine-local omits srcroot -> falls back to global.
         cfgfile = tmp_path / "config.yaml"
         cfgfile.write_text(
-            "repo_name: ext\nmachine: lambda-core\nplatform: wsl\n"
+            "repo_name: ext\nmachine: anomalous-potato\nplatform: wsl\n"
             "repos:\n  ext:\n"
             f"    anchor: {anchor}\n"
             "    worktree_root: /tmp/wt\n"
@@ -578,7 +578,7 @@ class TestLayeredConfig:
         anchor.mkdir()
         cfgfile = tmp_path / "config.yaml"
         cfgfile.write_text(
-            "repo_name: ext\nsrcroot: /machine/src\nmachine: lambda-core\n"
+            "repo_name: ext\nsrcroot: /machine/src\nmachine: anomalous-potato\n"
             "platform: wsl\nrepos:\n  ext:\n"
             f"    anchor: {anchor}\n    worktree_root: /tmp/wt\n"
         )
@@ -631,7 +631,7 @@ class TestLayeredConfig:
         anchor.mkdir()  # no .agent-worktrees config in the repo
         cfgfile = tmp_path / "config.yaml"
         cfgfile.write_text(
-            "repo_name: ext\nmachine: lambda-core\nplatform: wsl\n"
+            "repo_name: ext\nmachine: anomalous-potato\nplatform: wsl\n"
             "repos:\n  ext:\n"
             f"    anchor: {anchor}\n    worktree_root: /tmp/wt\n"
             "    default_branch: develop\n"
@@ -682,7 +682,7 @@ class TestWorktreeRootDerivation:
         path.write_text(
             "repo_name: ext\n"
             "srcroot: /tmp/src\n"
-            "machine: lambda-core\n"
+            "machine: anomalous-potato\n"
             "platform: wsl\n"
             "repos:\n"
             "  ext:\n"
@@ -714,7 +714,7 @@ class TestHeadlessConfig:
         path.write_text(
             "repo_name: ext\n"
             "srcroot: /tmp/src\n"
-            "machine: lambda-core\n"
+            "machine: anomalous-potato\n"
             "platform: wsl\n"
             f"{headless_line}"
             "repos:\n"
@@ -845,7 +845,7 @@ class TestAutoFastForwardConfig:
         path.write_text(
             "repo_name: ext\n"
             "srcroot: /tmp/src\n"
-            "machine: lambda-core\n"
+            "machine: anomalous-potato\n"
             "platform: wsl\n"
             f"{extra_line}"
             "repos:\n"

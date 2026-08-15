@@ -17,14 +17,14 @@ _ORPHAN = "\u26a0"  # WARNING SIGN -- the orphan marker prefixed on the title
 def _norm(**over):
     derive.NOW = datetime.datetime(2026, 7, 28, 12, 0, 0)
     raw = {
-        "id": "lambda-core-win-20260728-abcd",
+        "id": "anomalous-potato-win-20260728-abcd",
         "title": "Some work",
         "status": "active",
         "started_at": "2026-07-28T10:00:00",
         "turn_count": 1,
     }
     raw.update(over)
-    return derive.norm(raw, "lambda-core", "Win")
+    return derive.norm(raw, "anomalous-potato", "Win")
 
 
 def test_bare_orphan_sets_field_and_prefixes_glyph():

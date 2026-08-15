@@ -17,7 +17,7 @@ from agent_worktrees import health
 _CORRUPT = (
     "worktree_id: wt-1\n"
     "branch: worktree/wt-1\n"
-    "title: session-sync: native SSH transport via Wheatley\n"
+    "title: session-sync: native SSH transport via Mantis-Counter\n"
     "status: complete\n"
 )
 _CLEAN = "worktree_id: wt-2\nbranch: worktree/wt-2\ntitle: 'plain title'\nstatus: complete\n"
@@ -28,7 +28,7 @@ class TestYamlIntegrity:
         fixed = health.repair_yaml_text(_CORRUPT)
         assert fixed is not None
         data = yaml.safe_load(fixed)
-        assert data["title"] == "session-sync: native SSH transport via Wheatley"
+        assert data["title"] == "session-sync: native SSH transport via Mantis-Counter"
 
     def test_repair_yaml_text_noop_on_clean(self):
         assert health.repair_yaml_text(_CLEAN) is None

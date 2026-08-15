@@ -204,11 +204,11 @@ class TestSaveLoadRoundTrip:
     def test_caller_worktree_round_trip(self, tmp_path: Path):
         # #2178: the bridge caller-worktree pointer survives save/load and is
         # omitted when unset.
-        rec = self._make_record(caller_worktree="lambda-core-win-20260101-abcd")
+        rec = self._make_record(caller_worktree="anomalous-potato-win-20260101-abcd")
         path = tmp_path / "wt.yaml"
         save_record(rec, path)
-        assert "caller_worktree: lambda-core-win-20260101-abcd" in path.read_text()
-        assert load_record(path).caller_worktree == "lambda-core-win-20260101-abcd"
+        assert "caller_worktree: anomalous-potato-win-20260101-abcd" in path.read_text()
+        assert load_record(path).caller_worktree == "anomalous-potato-win-20260101-abcd"
         rec2 = self._make_record()
         path2 = tmp_path / "wt2.yaml"
         save_record(rec2, path2)
@@ -218,7 +218,7 @@ class TestSaveLoadRoundTrip:
     def test_owner_ref_round_trip(self, tmp_path: Path):
         # resource-claims: the backward owner link survives save/load, is
         # omitted when unset, and parses into a qualified ClaimRef.
-        ref = "lambda-core/aperture-labs/wt-A#sess1"
+        ref = "anomalous-potato/test-chamber/wt-A#sess1"
         rec = self._make_record(owner_ref=ref)
         path = tmp_path / "wt.yaml"
         save_record(rec, path)
@@ -227,7 +227,7 @@ class TestSaveLoadRoundTrip:
         assert loaded.owner_ref == ref
         cr = loaded.owner_claim_ref
         assert cr is not None and cr.worktree_id == "wt-A"
-        assert cr.machine == "lambda-core" and cr.project == "aperture-labs"
+        assert cr.machine == "anomalous-potato" and cr.project == "test-chamber"
         assert cr.session == "sess1" and cr.is_qualified
         rec2 = self._make_record()
         path2 = tmp_path / "wt2.yaml"
@@ -299,7 +299,7 @@ class TestSaveLoadRoundTrip:
         # omitted when empty (legacy YAMLs stay byte-identical).
         claim = ResourceClaim(
             kind="worktree",
-            ref="lambda-core/copilot-extensions/wt-B",
+            ref="anomalous-potato/copilot-extensions/wt-B",
             created_at="2026-07-31T15:00:00",
         )
         rec = self._make_record(resources=[claim])
@@ -307,12 +307,12 @@ class TestSaveLoadRoundTrip:
         save_record(rec, path)
         txt = path.read_text()
         assert "resources:" in txt
-        assert "ref: lambda-core/copilot-extensions/wt-B" in txt
+        assert "ref: anomalous-potato/copilot-extensions/wt-B" in txt
         loaded = load_record(path)
         assert len(loaded.resources) == 1
         got = loaded.resources[0]
         assert got.kind == "worktree" and got.is_live
-        assert got.ref == "lambda-core/copilot-extensions/wt-B"
+        assert got.ref == "anomalous-potato/copilot-extensions/wt-B"
         assert loaded.live_resources == loaded.resources
         # empty list omits the key entirely
         rec2 = self._make_record()
@@ -1769,13 +1769,13 @@ class TestForwardCompatContract:
 
     def _full(self):
         return WorktreeRecord(
-            worktree_id="lambda-core-win-20260715-abcd",
+            worktree_id="anomalous-potato-win-20260715-abcd",
             branch="worktree/x", worktree_path="/tmp/x", repo="r",
-            machine="lambda-core", platform="wsl",
+            machine="anomalous-potato", platform="wsl",
             started_at="2026-07-15T00:00:00", last_resumed_at="2026-07-15T00:00:00",
             resume_count=2, title="t", status="active", completed_at=None,
             interface="cli", origin="user",
-            parent_session="sess-1", caller_worktree="lambda-core-win-caller",
+            parent_session="sess-1", caller_worktree="anomalous-potato-win-caller",
             follow_up=True, summary="work left", status_note_at="2026-07-15T01:00:00",
         )
 
@@ -1783,7 +1783,7 @@ class TestForwardCompatContract:
         assert r.interface == "cli"
         assert r.origin == "user"
         assert r.parent_session == "sess-1"
-        assert r.caller_worktree == "lambda-core-win-caller"
+        assert r.caller_worktree == "anomalous-potato-win-caller"
         assert r.follow_up is True
         assert r.summary == "work left"
         assert r.status_note_at
@@ -1850,7 +1850,7 @@ class TestResolveWorktreePath:
         self, tmp_path: Path, tmp_tracking_dir: Path, monkeypatch_config
     ):
         # Old-layout worktree that lives somewhere other than worktree_root/id.
-        actual = tmp_path / "old-layout" / "aperture-labs" / "wt-xyz"
+        actual = tmp_path / "old-layout" / "test-chamber" / "wt-xyz"
         actual.mkdir(parents=True)
         worktree_root = str(tmp_path / "new-layout.worktrees")  # derivation misses
         save_record(self._record("wt-xyz", str(actual)),
@@ -1903,10 +1903,10 @@ class TestClaimRefHelpers:
     bare (legacy same-repo) forms."""
 
     def test_qualified_round_trip(self):
-        ref = format_claim_ref("lambda-core", "aperture-labs", "wt-A", "sess1")
-        assert ref == "lambda-core/aperture-labs/wt-A#sess1"
+        ref = format_claim_ref("anomalous-potato", "test-chamber", "wt-A", "sess1")
+        assert ref == "anomalous-potato/test-chamber/wt-A#sess1"
         cr = parse_claim_ref(ref)
-        assert cr == ClaimRef("wt-A", "lambda-core", "aperture-labs", "sess1")
+        assert cr == ClaimRef("wt-A", "anomalous-potato", "test-chamber", "sess1")
         assert cr.is_qualified and cr.canonical() == ref
 
     def test_qualified_without_session(self):
@@ -1940,15 +1940,15 @@ class TestClaimRefHelpers:
     def test_anchor_ref_round_trip(self):
         # format_anchor_ref uses the reserved @anchor sentinel; no grammar change.
         from agent_worktrees.tracking import ANCHOR_ID, format_anchor_ref
-        ref = format_anchor_ref("lambda-core", "spo-core")
-        assert ref == "lambda-core/spo-core/@anchor"
+        ref = format_anchor_ref("anomalous-potato", "spo-core")
+        assert ref == "anomalous-potato/spo-core/@anchor"
         cr = parse_claim_ref(ref)
         assert cr.worktree_id == ANCHOR_ID and cr.is_qualified and cr.is_anchor
         assert cr.canonical() == ref
 
     def test_is_anchor_only_for_sentinel(self):
-        assert not parse_claim_ref("lambda-core/spo-core/wt-A").is_anchor
-        assert parse_claim_ref("lambda-core/spo-core/@anchor").is_anchor
+        assert not parse_claim_ref("anomalous-potato/spo-core/wt-A").is_anchor
+        assert parse_claim_ref("anomalous-potato/spo-core/@anchor").is_anchor
         # Bare @anchor (no machine/project) is still an anchor ref by id.
         assert parse_claim_ref("@anchor").is_anchor
 
@@ -1968,7 +1968,7 @@ class TestAnchorLedger:
         adir.mkdir(parents=True, exist_ok=True)
         assert not (tdir / f"{ANCHOR_ID}.yaml").exists()
         rec = load_or_create_anchor_record(
-            str(adir), "spo-core", "lambda-core", "wsl", tdir)
+            str(adir), "spo-core", "anomalous-potato", "wsl", tdir)
         assert rec.worktree_id == ANCHOR_ID and rec.pair_kind == "anchor"
         assert rec.repo == "spo-core" and rec.worktree_path == str(adir)
         assert (tdir / f"{ANCHOR_ID}.yaml").exists()
@@ -1983,7 +1983,7 @@ class TestAnchorLedger:
         tdir.mkdir(parents=True, exist_ok=True)
         adir = tmp_path / "anchors" / "spo-core"
         rec = load_or_create_anchor_record(
-            str(adir), "spo-core", "lambda-core", "wsl", tdir)
+            str(adir), "spo-core", "anomalous-potato", "wsl", tdir)
         add_resource_claim(rec, ResourceClaim(
             kind="pr", ref="https://github.com/o/r/pull/9", state="active"),
             save=False)
@@ -1991,7 +1991,7 @@ class TestAnchorLedger:
         save_record(rec, tdir / f"{ANCHOR_ID}.yaml")
         # A second call returns the SAME ledger (claim preserved), not a fresh one.
         rec2 = load_or_create_anchor_record(
-            str(adir), "spo-core", "lambda-core", "wsl", tdir)
+            str(adir), "spo-core", "anomalous-potato", "wsl", tdir)
         assert [c.ref for c in rec2.resources] == ["https://github.com/o/r/pull/9"]
 
 
@@ -2052,21 +2052,21 @@ class TestAddResourceClaim:
 
     def _rec(self, tmp_path: Path) -> WorktreeRecord:
         return create_new_record(
-            "wt-A", "worktree/wt-A", str(tmp_path / "wt-A"), "aperture-labs",
-            "lambda-core", "wsl", tmp_path,
+            "wt-A", "worktree/wt-A", str(tmp_path / "wt-A"), "test-chamber",
+            "anomalous-potato", "wsl", tmp_path,
         )
 
     def test_append_and_persist(self, tmp_path: Path):
         rec = self._rec(tmp_path)
-        claim = ResourceClaim(kind="worktree", ref="lambda-core/copilot-extensions/wt-B")
+        claim = ResourceClaim(kind="worktree", ref="anomalous-potato/copilot-extensions/wt-B")
         add_resource_claim(rec, claim, save=False)
         save_record(rec, tmp_path / "wt-A.yaml")
         loaded = load_record(tmp_path / "wt-A.yaml")
-        assert [c.ref for c in loaded.resources] == ["lambda-core/copilot-extensions/wt-B"]
+        assert [c.ref for c in loaded.resources] == ["anomalous-potato/copilot-extensions/wt-B"]
 
     def test_dedup_by_ref_refreshes(self, tmp_path: Path):
         rec = self._rec(tmp_path)
-        ref = "lambda-core/copilot-extensions/wt-B"
+        ref = "anomalous-potato/copilot-extensions/wt-B"
         add_resource_claim(rec, ResourceClaim(kind="worktree", ref=ref, note="first"),
                            save=False)
         add_resource_claim(rec, ResourceClaim(kind="worktree", ref=ref, state="released",
@@ -2079,9 +2079,9 @@ class TestAddResourceClaim:
         # create_new_record stamps the backward owner link on the resource.
         create_new_record(
             "wt-B", "worktree/wt-B", str(tmp_path / "wt-B"), "copilot-extensions",
-            "lambda-core", "wsl", tmp_path,
-            owner_ref="lambda-core/aperture-labs/wt-A#s1",
+            "anomalous-potato", "wsl", tmp_path,
+            owner_ref="anomalous-potato/test-chamber/wt-A#s1",
         )
         loaded = load_record(tmp_path / "wt-B.yaml")
-        assert loaded.owner_ref == "lambda-core/aperture-labs/wt-A#s1"
+        assert loaded.owner_ref == "anomalous-potato/test-chamber/wt-A#s1"
         assert loaded.owner_claim_ref.worktree_id == "wt-A"

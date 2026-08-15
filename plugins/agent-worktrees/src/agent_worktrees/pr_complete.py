@@ -7,14 +7,14 @@ already present on the *new* upstream (folded into one squash commit).  Two
 existing moves both misbehave here:
 
 - a strict **fast-forward** refuses (the branch is ``ahead > 0`` -- the pain in
-  aperture-labs #2147, where ``finalize`` balks after an external squash-merge);
+  test-chamber #2147, where ``finalize`` balks after an external squash-merge);
 - a plain **rebase** *replays* the local commit onto the new upstream, which can
   hit a phantom conflict when the squash-merge folded/re-ordered the change.
 
 ``pr-complete`` **rebases the branch forward first** -- a non-destructive replay
 that drops commits already applied upstream (by patch-id) while **preserving any
 genuinely-new commit**, including one authored *after* the merge whose content
-happens to coincide with upstream (the aperture-labs #2854 regression, where a
+happens to coincide with upstream (the test-chamber #2854 regression, where a
 blanket hard reset silently discarded such a commit and left ``create-pr``
 reporting "nothing ahead").  Only when that rebase **phantom-conflicts** -- the
 squash-merge case where several branch commits were folded into one upstream
@@ -182,7 +182,7 @@ def complete_worktree(
     # is genuinely new, *including one authored after the merge whose content
     # happens to coincide with upstream*.  A blanket ``reset --hard upstream``
     # (the old ``fully_merged`` fast-path) silently discarded such a commit and
-    # left create-pr reporting "nothing ahead" -- aperture-labs #2854.  Only
+    # left create-pr reporting "nothing ahead" -- test-chamber #2854.  Only
     # fall back to the hard reset when the rebase cannot proceed.
     if git_ops.rebase(upstream, cwd=worktree_path):
         kept = git_ops._rev_count(f"{upstream}..{branch}", cwd=worktree_path)
