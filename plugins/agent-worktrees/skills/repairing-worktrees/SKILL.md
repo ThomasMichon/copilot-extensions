@@ -26,7 +26,7 @@ description: >
 
 `agent-worktrees doctor` is the single repeatable primitive for worktree/session
 health. It is **per-project** (run it through each project's binstub, e.g.
-`dotfiles worktrees doctor`, `aperture-labs worktrees doctor`) and **read-only by default**.
+`dotfiles worktrees doctor`, `test-chamber worktrees doctor`) and **read-only by default**.
 
 ## What it checks/repairs
 
@@ -60,7 +60,7 @@ health. It is **per-project** (run it through each project's binstub, e.g.
    <project> worktrees doctor --fix --gc-sessions
    ```
 
-Run it per project (`dotfiles`, `aperture-labs`, …) — the command scopes to the
+Run it per project (`dotfiles`, `test-chamber`, …) — the command scopes to the
 current project's tracking store; the Copilot session-state/store it cleans is
 shared across projects, so the guards (current + registered session ids) protect
 live work regardless of which project you invoke it from.

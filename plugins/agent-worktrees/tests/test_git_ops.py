@@ -176,7 +176,7 @@ class TestCrossAccountAuth:
         assert go._parse_github_owner(url) == owner
 
     @pytest.mark.parametrize("url,slug", [
-        ("https://host/gitea/example-user/aperture-labs.git", "example-user/aperture-labs"),
+        ("https://host/gitea/example-user/test-chamber.git", "example-user/test-chamber"),
         ("https://github.com/owner/copilot-extensions.git", "owner/copilot-extensions"),
         ("git@github.com:owner/repo.git", "owner/repo"),
         ("ssh://git@host/owner/repo", "owner/repo"),

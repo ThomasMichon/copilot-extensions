@@ -424,7 +424,7 @@ class TestFindTrackingFileAcrossProjects:
         proj = tmp_path / ".proj-a" / "worktrees"
         proj.mkdir(parents=True)
         rec = WorktreeRecord(
-            worktree_id="wheatley-linux-20260101-000000-abcd",
+            worktree_id="mantis-counter-linux-20260101-000000-abcd",
             branch="b", worktree_path="/tmp/x", repo="r", machine="test",
             platform="wsl", started_at="t", last_resumed_at="t", resume_count=0,
             title=None, status="active", completed_at=None, sessions=[],

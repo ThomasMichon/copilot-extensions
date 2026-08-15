@@ -18,69 +18,69 @@ class _Proc:
 def test_load_local_column_reads_config(monkeypatch, tmp_path):
     cfg_path = tmp_path / "config.yaml"
     profiles_mod.save_selection(
-        cfg_path, [TargetSel("Borealis", "Win", "shell")],
-        self_machine="Lambda-Core", self_env="Win")
-    monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Lambda-Core", "Win"))
+        cfg_path, [TargetSel("Emancipation-Cube", "Win", "shell")],
+        self_machine="Anomalous-Potato", self_env="Win")
+    monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Anomalous-Potato", "Win"))
     monkeypatch.setattr(
         "agent_worktrees.config.default_config_path", lambda: cfg_path)
 
-    col = profiles_io.load_column("Lambda-Core", "Win")
-    assert TargetSel("Lambda-Core", "Win", "agent") in col   # self, locked
-    assert TargetSel("Borealis", "Win", "shell") in col
+    col = profiles_io.load_column("Anomalous-Potato", "Win")
+    assert TargetSel("Anomalous-Potato", "Win", "agent") in col   # self, locked
+    assert TargetSel("Emancipation-Cube", "Win", "shell") in col
 
 
 def test_load_local_unmanaged_returns_none(monkeypatch, tmp_path):
     """A config with no terminal_profiles key is unmanaged -> None (the caller
     renders the default column)."""
     cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text("machine: lambda-core\n", encoding="utf-8")
-    monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Lambda-Core", "Win"))
+    cfg_path.write_text("machine: anomalous-potato\n", encoding="utf-8")
+    monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Anomalous-Potato", "Win"))
     monkeypatch.setattr(
         "agent_worktrees.config.default_config_path", lambda: cfg_path)
 
-    assert profiles_io.load_column("Lambda-Core", "Win") is None
+    assert profiles_io.load_column("Anomalous-Potato", "Win") is None
 
 
 def test_load_remote_unmanaged_returns_none(monkeypatch):
-    monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Lambda-Core", "Win"))
+    monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Anomalous-Potato", "Win"))
     monkeypatch.setattr(
         profiles_io.data_ssh, "profiles_argv",
-        lambda m, e, **k: ["ssh", "borealis", "..."])
+        lambda m, e, **k: ["ssh", "emancipation-cube", "..."])
 
     payload = json.dumps({"version": 1, "managed": False, "targets": []})
 
     def fake_runner(argv, timeout):
         return _Proc(0, stdout=payload)
 
-    assert profiles_io.load_column("Borealis", "Win", runner=fake_runner) is None
+    assert profiles_io.load_column("Emancipation-Cube", "Win", runner=fake_runner) is None
 
 
 def test_load_remote_column_parses_ssh_json(monkeypatch):
-    monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Lambda-Core", "Win"))
+    monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Anomalous-Potato", "Win"))
     monkeypatch.setattr(
         profiles_io.data_ssh, "profiles_argv",
-        lambda m, e, **k: ["ssh", "borealis", "..."])
+        lambda m, e, **k: ["ssh", "emancipation-cube", "..."])
 
-    payload = json.dumps({"version": 1, "machine": "Borealis", "env": "Win",
+    payload = json.dumps({"version": 1, "machine": "Emancipation-Cube", "env": "Win",
                           "managed": True,
-                          "targets": [{"machine": "Borealis", "env": "Win",
+                          "targets": [{"machine": "Emancipation-Cube", "env": "Win",
                                        "kind": "agent"},
-                                      {"machine": "Wheatley", "env": "Linux",
+                                      {"machine": "Mantis-Counter", "env": "Linux",
                                        "kind": "shell"}]})
 
     def fake_runner(argv, timeout):
         return _Proc(0, stdout="banner noise\n" + payload)
 
-    col = profiles_io.load_column("Borealis", "Win", runner=fake_runner)
-    assert TargetSel("Wheatley", "Linux", "shell") in col
-    assert TargetSel("Borealis", "Win", "agent") in col   # self diagonal forced
+    col = profiles_io.load_column("Emancipation-Cube", "Win", runner=fake_runner)
+    assert TargetSel("Mantis-Counter", "Linux", "shell") in col
+    assert TargetSel("Emancipation-Cube", "Win", "agent") in col   # self diagonal forced
 
 
 def test_load_remote_failure_marks_unavailable(monkeypatch):
-    monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Lambda-Core", "Win"))
+    monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Anomalous-Potato", "Win"))
     monkeypatch.setattr(
         profiles_io.data_ssh, "profiles_argv",
-        lambda m, e, **k: ["ssh", "borealis", "..."])
+        lambda m, e, **k: ["ssh", "emancipation-cube", "..."])
 
     def boom(argv, timeout):
         raise OSError("ssh down")
@@ -88,56 +88,56 @@ def test_load_remote_failure_marks_unavailable(monkeypatch):
     # An SSH failure means we can't read the remote's real column, so the column
     # is UNAVAILABLE (read-only) -- never a fabricated selection we'd try to
     # write back and fail (#1370).
-    assert profiles_io.load_column("Borealis", "Win", runner=boom) \
+    assert profiles_io.load_column("Emancipation-Cube", "Win", runner=boom) \
         is profiles_io.UNAVAILABLE
 
 
 def test_load_remote_nonzero_marks_unavailable(monkeypatch):
     """An older remote without the ``profiles`` subcommand exits nonzero -> the
     column is unavailable/read-only, not a fabricated selection (#1370)."""
-    monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Lambda-Core", "Win"))
+    monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Anomalous-Potato", "Win"))
     monkeypatch.setattr(
         profiles_io.data_ssh, "profiles_argv",
-        lambda m, e, **k: ["ssh", "borealis", "..."])
+        lambda m, e, **k: ["ssh", "emancipation-cube", "..."])
 
     def old_remote(argv, timeout):
         return _Proc(2, stderr="error: unrecognized command 'profiles'")
 
-    assert profiles_io.load_column("Borealis", "Win", runner=old_remote) \
+    assert profiles_io.load_column("Emancipation-Cube", "Win", runner=old_remote) \
         is profiles_io.UNAVAILABLE
 
 
 def test_load_remote_no_argv_marks_unavailable(monkeypatch):
     """No SSH argv (unreachable / not-ready host) -> unavailable, read-only."""
-    monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Lambda-Core", "Win"))
+    monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Anomalous-Potato", "Win"))
     monkeypatch.setattr(
         profiles_io.data_ssh, "profiles_argv", lambda m, e, **k: None)
 
-    assert profiles_io.load_column("Borealis", "Win") is profiles_io.UNAVAILABLE
+    assert profiles_io.load_column("Emancipation-Cube", "Win") is profiles_io.UNAVAILABLE
 
 
 def test_apply_local_writes_config(monkeypatch, tmp_path):
     cfg_path = tmp_path / "config.yaml"
-    monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Lambda-Core", "Win"))
+    monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Anomalous-Potato", "Win"))
     monkeypatch.setattr(
         "agent_worktrees.config.default_config_path", lambda: cfg_path)
 
     ok, _detail = profiles_io.apply_column(
-        "Lambda-Core", "Win",
-        [TargetSel("Borealis", "WSL", "agent")], mirror=False)
+        "Anomalous-Potato", "Win",
+        [TargetSel("Emancipation-Cube", "WSL", "agent")], mirror=False)
     assert ok
     loaded = profiles_mod.load_selection(cfg_path)
-    assert TargetSel("Borealis", "WSL", "agent") in loaded
-    assert TargetSel("Lambda-Core", "Win", "agent") in loaded
+    assert TargetSel("Emancipation-Cube", "WSL", "agent") in loaded
+    assert TargetSel("Anomalous-Potato", "Win", "agent") in loaded
 
 
 def test_apply_remote_sends_ssh(monkeypatch):
-    monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Lambda-Core", "Win"))
+    monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Anomalous-Potato", "Win"))
     seen = {}
 
     def fake_argv(m, e, *, action, set_json=None, no_mirror=False):
         seen["set_json"] = set_json
-        return ["ssh", "borealis", "..."]
+        return ["ssh", "emancipation-cube", "..."]
 
     monkeypatch.setattr(profiles_io.data_ssh, "profiles_argv", fake_argv)
 
@@ -145,23 +145,23 @@ def test_apply_remote_sends_ssh(monkeypatch):
         return _Proc(0, stdout='{"version":1,"targets":[]}')
 
     ok, detail = profiles_io.apply_column(
-        "Borealis", "Win", [TargetSel("Borealis", "Win", "agent")],
+        "Emancipation-Cube", "Win", [TargetSel("Emancipation-Cube", "Win", "agent")],
         runner=fake_runner)
     assert ok
     assert detail == "pushed"
-    assert "Borealis" in seen["set_json"]
+    assert "Emancipation-Cube" in seen["set_json"]
 
 
 def test_apply_remote_failure_reports(monkeypatch):
-    monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Lambda-Core", "Win"))
+    monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Anomalous-Potato", "Win"))
     monkeypatch.setattr(
         profiles_io.data_ssh, "profiles_argv",
-        lambda m, e, **k: ["ssh", "borealis", "..."])
+        lambda m, e, **k: ["ssh", "emancipation-cube", "..."])
 
     def fake_runner(argv, timeout):
         return _Proc(1, stderr="boom")
 
     ok, detail = profiles_io.apply_column(
-        "Borealis", "Win", [], runner=fake_runner)
+        "Emancipation-Cube", "Win", [], runner=fake_runner)
     assert not ok
     assert "boom" in detail

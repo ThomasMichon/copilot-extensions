@@ -111,7 +111,7 @@ def test_skip_still_reconciles_terminal_state_on_windows(wired, monkeypatch):
     """Even when the installer is version-skipped, a plain `update` must still
     reconcile live Windows Terminal state -- that drift is independent of our
     version, so gating it behind the skip would leave the dropdown broken
-    (Aperture Labs hidden / orphan cruft) forever."""
+    (Test Chamber hidden / orphan cruft) forever."""
     monkeypatch.setattr(reconcile, "payload_version", lambda d: "1.5.3-dev9")
     monkeypatch.setattr(reconcile, "runtime_deployed_version",
                         lambda name, home=None: "1.5.3-dev9")

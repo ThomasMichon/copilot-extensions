@@ -2,14 +2,14 @@
 
 agent-bridge spawns a Windows SSH ACP session through the project binstub as::
 
-    aperture-labs --json --worktree-id <id> --no-mux --no-update --no-resume \\
+    test-chamber --json --worktree-id <id> --no-mux --no-update --no-resume \\
         '--' --acp --stdio --allow-all
 
 launch-session.ps1 must split ``$args`` on the ``--`` separator so the Copilot
 flags after it (``--acp --stdio --allow-all``) are appended to the Copilot
 command rather than leaking into ``agent_worktrees resolve`` -- argparse rejects
 unknown flags, which would abort the launch before Copilot ever starts (the
-class of failure investigated in aperture-labs #1559 / #1677).
+class of failure investigated in test-chamber #1559 / #1677).
 
 Two guards, mirroring test_launch_session_unwrap.py:
 

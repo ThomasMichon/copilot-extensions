@@ -2,7 +2,7 @@
 
 Manages ``~/.agent-worktrees/repos.yaml``, the canonical multi-repo
 registry.  Each repo is tagged with a management *class* describing how
-the facility interacts with its local checkout:
+the multi-machine system interacts with its local checkout:
 
 - **reference** -- read-only; tracked only for path resolution, cloning,
   and indexing.  Never edited locally.
@@ -37,7 +37,7 @@ from . import output
 # Data model
 # ---------------------------------------------------------------------------
 
-# A repo's management class -- how the facility interacts with its checkout:
+# A repo's management class -- how the multi-machine system interacts with its checkout:
 #
 #   reference  Read-only.  Tracked only for path resolution, cloning, and
 #              indexing (e.g. VEI).  Never edited locally.  (= external-repos
@@ -97,7 +97,7 @@ class RepoEntry:
 
         Expands a leading ``~`` so every consumer gets a usable absolute path.
         Registry entries may store a home-relative path (e.g. the WSL
-        ``~/src/aperture-labs``); ``pathlib.Path`` does NOT treat ``~`` as
+        ``~/src/test-chamber``); ``pathlib.Path`` does NOT treat ``~`` as
         special, so a raw return breaks every ``Path(local_path()).is_dir()`` /
         normalize consumer -- ``_anchor_for_project``,
         ``cfg._resolve_anchor_from_registry``, and ``_reverse_lookup_project``'s

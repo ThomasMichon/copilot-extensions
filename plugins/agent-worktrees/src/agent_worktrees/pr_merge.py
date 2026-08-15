@@ -1,8 +1,8 @@
 """``pr-merge`` -- signal merge consent on an approved PR (apply the label).
 
-The provider-generic port of the facility ``tools/pr-consent`` script.  The
+The provider-generic port of the multi-machine system ``tools/pr-consent`` script.  The
 author, after seeing an approval, runs ``pr-merge`` to **consent** to the merge;
-this applies the repo's configured merge-consent label (facility:
+this applies the repo's configured merge-consent label (multi-machine system:
 ``auto-merge``), which is the signal the review gate acts on.  It NEVER merges
 anything itself -- it only applies the label; the gate still decides.
 
@@ -13,7 +13,7 @@ Two modes, both driven by the same pure classifier (:func:`pr_contract.classify_
 - **sweep** (``--all``, the transition-helper carryover): classify every open PR
   and apply the label to each eligible one, optionally looping.
 
-The merge-consent vocabulary is a facility **binding** on ``PRConfig``
+The merge-consent vocabulary is a multi-machine system **binding** on ``PRConfig``
 (``automerge_label`` / ``hold_labels`` / ``wip_title_prefixes``); with no binding
 the verb is a no-op ("no auto-merge label configured"), never a crash.  Eligibility
 also requires the PR to target the repo's default branch.
@@ -119,7 +119,7 @@ def sweep_once(
     """One classification pass over the open PRs (or a single ``only`` PR).
 
     Returns a summary ``{repo, open, eligible, applied, failed, apply,
-    decisions}``.  Mirrors the facility ``pr-consent`` summary shape.
+    decisions}``.  Mirrors the multi-machine system ``pr-consent`` summary shape.
     """
     provider = provider or get_provider(getattr(prcfg, "provider", "gitea") or "gitea")
     base = (api_base or getattr(prcfg, "api_base", "") or "").strip()

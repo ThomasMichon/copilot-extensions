@@ -16,11 +16,11 @@ def _ns(**kw):
 
 def _record(**kw):
     base = dict(
-        worktree_id="lambda-core-win-20260625-221940-8e45",
-        branch="worktree/lambda-core-win-20260625-221940-8e45",
-        worktree_path="/w/lambda-core-win-20260625-221940-8e45",
-        repo="aperture-labs",
-        machine="lambda-core",
+        worktree_id="anomalous-potato-win-20260625-221940-8e45",
+        branch="worktree/anomalous-potato-win-20260625-221940-8e45",
+        worktree_path="/w/anomalous-potato-win-20260625-221940-8e45",
+        repo="test-chamber",
+        machine="anomalous-potato",
         platform="windows",
         started_at="",
         last_resumed_at="",
@@ -48,7 +48,7 @@ def test_status_context_plain_with_record(monkeypatch, capsys):
     monkeypatch.setattr(m, "_find_record_for_path", lambda _p: _record())
     rc = m.cmd_status_context(_ns())
     assert rc == 0
-    assert capsys.readouterr().out.strip() == "lambda-core  win  aperture-labs:8e45"
+    assert capsys.readouterr().out.strip() == "anomalous-potato  win  test-chamber:8e45"
 
 
 def test_status_context_styled_with_record(monkeypatch, capsys):
@@ -57,9 +57,9 @@ def test_status_context_styled_with_record(monkeypatch, capsys):
     assert rc == 0
     out = capsys.readouterr().out
     # Identity values present, wrapped in tmux style directives.
-    assert "lambda-core" in out
+    assert "anomalous-potato" in out
     assert "win" in out
-    assert "aperture-labs:8e45" in out
+    assert "test-chamber:8e45" in out
     assert "#[fg=" in out and "#[default]" in out
     # Environment renders as an OS-colored badge; no pipe delimiters.
     assert f"bg={m._ENV_BG['win']}" in out
@@ -68,9 +68,9 @@ def test_status_context_styled_with_record(monkeypatch, capsys):
 
 def test_status_context_fallback_no_record(monkeypatch, capsys):
     monkeypatch.setattr(m, "_find_record_for_path", lambda _p: None)
-    monkeypatch.setattr(m.cfg, "detect_machine", lambda *a, **k: "borealis")
+    monkeypatch.setattr(m.cfg, "detect_machine", lambda *a, **k: "emancipation-cube")
     monkeypatch.setattr(m.cfg, "detect_platform", lambda: "wsl")
     rc = m.cmd_status_context(_ns())
     assert rc == 0
     # No record -> machine + env only, repo:id4 omitted.
-    assert capsys.readouterr().out.strip() == "borealis  wsl"
+    assert capsys.readouterr().out.strip() == "emancipation-cube  wsl"

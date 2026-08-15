@@ -411,7 +411,7 @@ class TestResumeDecisionOption:
 class TestDeriveFields:
     def _raw(self, **kw):
         base = {
-            "id": "lambda-core-win-20260101-abcd", "status": "active",
+            "id": "anomalous-potato-win-20260101-abcd", "status": "active",
             "started_at": "2026-01-01T10:00:00",
         }
         base.update(kw)
@@ -420,12 +420,12 @@ class TestDeriveFields:
     def test_surfaces_session_id_and_lock(self):
         rec = derive.norm(
             self._raw(last_session_id="sid-xyz", session_lock_live=True),
-            "lambda-core", "win")
+            "anomalous-potato", "win")
         assert rec["last_session_id"] == "sid-xyz"
         assert rec["session_lock_live"] is True
 
     def test_absent_fields_default_off(self):
-        rec = derive.norm(self._raw(), "lambda-core", "win")
+        rec = derive.norm(self._raw(), "anomalous-potato", "win")
         assert rec["last_session_id"] is None
         assert rec["session_lock_live"] is False
 
@@ -440,7 +440,7 @@ class TestMaintenanceReclaimOp:
         monkeypatch.setattr(m, "reclaim_one",
                             lambda wt, **k: {"ok": True, "worktree_id": wt})
         task = maintenance._make_task(
-            "reclaim", "wtX", "lambda-core", "win", True,
+            "reclaim", "wtX", "anomalous-potato", "win", True,
             include_unused=False, include_conversations=False)
         assert task() == {"ok": True, "worktree_id": "wtX"}
 

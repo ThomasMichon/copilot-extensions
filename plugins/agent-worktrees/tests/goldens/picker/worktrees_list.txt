@@ -2,9 +2,9 @@
   WORKTREES                                                                                           ⚙ Configuration
 ───────────────────────────────────────────────────────── ▲ ──────────────────────────────────────────────────────────
  Machine  Ctrl ◀▶                                                                      ● 0 active · 2 recent · 0 done
-    All     lambda-core Win ✓
+    All     anomalous-potato Win ✓
 
-   + New worktree…     ✕ Clean     ⟳ Sync     creates on lambda-core Win  (this host)
+   + New worktree…     ✕ Clean     ⟳ Sync     creates on anomalous-potato Win  (this host)
 
   ID     STATE    AGE    SESS   T     PR         TITLE
   ── Active ──────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -37,4 +37,4 @@
 
 
 ───────────────────────────────────────────────────────── ▼ ──────────────────────────────────────────────────────────
- Enter: new worktree on lambda-core Win · Tab region · ^◀▶ machine                                            · ready
+ Enter: new worktree on anomalous-potato Win · Tab region · ^◀▶ machine                                            · ready

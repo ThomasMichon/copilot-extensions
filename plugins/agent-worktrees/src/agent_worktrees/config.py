@@ -69,7 +69,7 @@ class PRConfig:
 
     When ``enabled`` is false (the default), the repo uses the direct-push
     finalization flow unchanged.  When enabled, finalization runs the
-    PR-based flow (see ``docs/plans/pr-workflow.md`` in aperture-labs).
+    PR-based flow (see ``docs/plans/pr-workflow.md`` in test-chamber).
 
     ``required`` is the enforcement switch.  With ``enabled`` alone, PR mode
     is *available* but optional: ``push-changes``/``finalize`` only take the
@@ -103,8 +103,8 @@ class PRConfig:
     # - ``refspec`` (default, #1815/#1899) -- push ``worktree/<id>`` directly to
     #   the PR head ref via a refspec (no local feature branch; PR head named
     #   ``pr/<slug>``). Requires every PR-mode repo's pre-push hook to allow the
-    #   mediated refspec push (a facility hook that blocks ``worktree/*`` by ref
-    #   name must honor ``AGENT_WORKTREES_PR_PUSH=1`` first -- see aperture-labs
+    #   mediated refspec push (a multi-machine system hook that blocks ``worktree/*`` by ref
+    #   name must honor ``AGENT_WORKTREES_PR_PUSH=1`` first -- see test-chamber
     #   #1815/#1889). A parallel ``--new`` PR auto-falls-back to a snapshot ref.
     # - ``snapshot`` (legacy/compatible) -- copy the squashed commit onto a
     #   separate local ``{prefix}/<slug>`` branch (older ``feature/`` namespace)
@@ -135,10 +135,10 @@ class PRConfig:
     token_command: str = ""
     labels: tuple[str, ...] = ()
     auto_open: bool = False        # opt-in: open the PR via the provider after push
-    # Review-vocabulary binding (the "facility hook" for the pr-* command
+    # Review-vocabulary binding (the "multi-machine system hook" for the pr-* command
     # family: pr-watch / pr-merge / pr-status). The plugin ships these EMPTY so
     # it stays provider-generic -- a repo with no binding gets a no-op, never a
-    # crash. The facility supplies its vocabulary in .agent-worktrees/config.yaml
+    # crash. The multi-machine system supplies its vocabulary in .agent-worktrees/config.yaml
     # (e.g. automerge_label: auto-merge; hold_labels: [do-not-merge,
     # needs-rebase, wip]; wip_title_prefixes: ["wip:", "[wip]", "draft:", ...]).
     #
@@ -213,7 +213,7 @@ class PRConfig:
     merge_actor: str = ""
     conflict_retriggers_review: bool = True
     # ── Merge/update policy defaults (repo-overridable; #225). Express the
-    # facility's default PR-flow policy so every pr-* surface reports it and the
+    # multi-machine system's default PR-flow policy so every pr-* surface reports it and the
     # update/merge paths honor it. All optional + defaulted -> backward
     # compatible. Provider-neutral: each provider maps the policy or reports
     # "unsupported" and falls back.
@@ -525,7 +525,7 @@ def load_machines_yaml(repo_dir: str | Path) -> dict[str, MachineEntry]:
 def machine_name(entry: MachineEntry) -> str:
     """Return the canonical name for a machine entry.
 
-    Returns the alias if one is defined (the colloquial facility name),
+    Returns the alias if one is defined (the colloquial multi-machine system name),
     otherwise the key (which is the real hostname).
     """
     return entry.alias or entry.key

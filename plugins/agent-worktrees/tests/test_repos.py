@@ -63,7 +63,7 @@ def test_write_read_roundtrip(home: Path):
         repo_class="worktree",
         remote="https://github.com/ThomasMichon/copilot-extensions.git",
         default_branch="main",
-        tags=["facility"],
+        tags=["multi-machine system"],
         contributing="CONTRIBUTING.md",
         plat="windows",
     )
@@ -71,7 +71,7 @@ def test_write_read_roundtrip(home: Path):
     e = reg.repos["copilot-extensions"]
     assert e.repo_class == "worktree"
     assert e.default_branch == "main"
-    assert e.tags == ["facility"]
+    assert e.tags == ["multi-machine system"]
     assert e.contributing == "CONTRIBUTING.md"
     assert e.local_path("windows") == "D:/Src/copilot-extensions"
     assert reg.srcroot["windows"] == "D:/Src"
@@ -164,12 +164,12 @@ def test_local_path_expands_home_relative(home: Path, monkeypatch):
                         lambda p: p.replace("~", fake_home, 1)
                         if p.startswith("~") else p)
     e = repos.RepoEntry(name="r", paths={
-        "wsl": "~/src/aperture-labs",          # home-relative (the #4190 case)
-        "linux": "/home/tester/src/aperture-labs",  # already absolute
+        "wsl": "~/src/test-chamber",          # home-relative (the #4190 case)
+        "linux": "/home/tester/src/test-chamber",  # already absolute
     })
-    assert e.local_path("wsl") == "/home/tester/src/aperture-labs"
+    assert e.local_path("wsl") == "/home/tester/src/test-chamber"
     # expanduser is a no-op on an already-absolute path.
-    assert e.local_path("linux") == "/home/tester/src/aperture-labs"
+    assert e.local_path("linux") == "/home/tester/src/test-chamber"
     # No tilde ever leaks through to a consumer.
     assert "~" not in e.local_path("wsl")
 
@@ -194,7 +194,7 @@ def test_migrate_git_repos(home: Path):
         "  sample-project:\n"
         "    remote: https://example/sample-project.git\n"
         "    default_branch: master\n"
-        "    tags: [facility]\n"
+        "    tags: [multi-machine system]\n"
         "  some-lib:\n"
         "    remote: https://github.com/x/some-lib.git\n"
         "    default_branch: main\n"
@@ -216,7 +216,7 @@ def test_migrate_git_repos(home: Path):
     al = reg.repos["sample-project"]
     assert al.repo_class == "worktree"            # adopted project
     assert al.default_branch == "master"
-    assert al.tags == ["facility"]
+    assert al.tags == ["multi-machine system"]
     assert al.local_path("windows") == str(Path("D:/Src/sample-project"))
 
     lib = reg.repos["some-lib"]

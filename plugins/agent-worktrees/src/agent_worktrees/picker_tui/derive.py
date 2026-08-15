@@ -6,7 +6,7 @@ canonical ``state`` from ``--classify``) into the normalized record the engine
 renders. The state-label vocabulary mirrors the PSMux/TMux status segment's
 ``_SEGMENT_STYLE`` so the picker and the status bar never disagree.
 
-Ported from the aperture-labs prototype's ``mockdata`` derivation; the
+Ported from the test-chamber prototype's ``mockdata`` derivation; the
 fixture-loading half is replaced by real data sources (``data_local`` / SSH).
 """
 from __future__ import annotations

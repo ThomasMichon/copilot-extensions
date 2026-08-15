@@ -11,11 +11,11 @@ from agent_worktrees import git_ops, sessions, tracking
 
 def _record(**kw):
     base = dict(
-        worktree_id="lambda-core-win-20260625-221940-8e45",
-        branch="worktree/lambda-core-win-20260625-221940-8e45",
+        worktree_id="anomalous-potato-win-20260625-221940-8e45",
+        branch="worktree/anomalous-potato-win-20260625-221940-8e45",
         worktree_path="/w/wt",
-        repo="aperture-labs",
-        machine="lambda-core",
+        repo="test-chamber",
+        machine="anomalous-potato",
         platform="windows",
         started_at="",
         last_resumed_at="",
