@@ -1386,22 +1386,27 @@ do_update() {
     fi
 
     # Decide the swap strategy:
-    #   - Zero-downtime cutover (opt-in via AGENT_BRIDGE_ZERO_DOWNTIME=1): leave
-    #     the old daemon RUNNING, build the new venv, then `agent-bridge deploy`
-    #     stands the new daemon up beside it on a fresh port, flips the routing
-    #     table, drains the old daemon, and retires it. No API-unavailable
-    #     window and no hard-killed turns. EXPERIMENTAL: the survivor runs
-    #     outside systemd until service-manager reconciliation lands -- validate
-    #     before relying on it. Falls back to stop/start on any failure.
-    #   - Default (drain-then-swap): drain in-flight work for a grace window,
-    #     then stop/reinstall/start. No active turn is hard-killed up to the
-    #     drain timeout, though a brief API-unavailable window remains.
+    #   - Graceful zero-downtime cutover (Thread B DEFAULT whenever a live daemon
+    #     is running -- the AGENT_BRIDGE_ZERO_DOWNTIME opt-in is RETIRED, matching
+    #     install.ps1): leave the old daemon RUNNING, build the new venv, then
+    #     `agent-bridge deploy` (the installer-internal cutover seam) stands the new
+    #     daemon up beside it on a fresh port, flips the routing table, drains the
+    #     old daemon, and retires it. No API-unavailable window and no hard-killed
+    #     turns. Under systemd the old (unit-tracked) daemon exits cleanly (0), so
+    #     Restart=on-failure never resurrects it; the detached survivor serves and
+    #     the refreshed unit starts the new slot at next boot (the POSIX twin of
+    #     Windows conhost detaching the daemon from its Scheduled Task).
+    #   - Fallback (drain-then-swap): when a cutover cannot run or fails, drain
+    #     in-flight work for a grace window, then stop/reinstall/start -- no active
+    #     turn is hard-killed up to the drain timeout, though a brief API-unavailable
+    #     window remains. (AGENT_BRIDGE_ZERO_DOWNTIME is still ACCEPTED as a
+    #     deprecated no-op so existing callers don't break.)
     #
     # Versioned layout: the new version builds into its OWN slot, so cutover no
     # longer needs the (new) venv to pre-exist -- gate only on "running".
     local cutover=false
     if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
-        if [[ "${AGENT_BRIDGE_ZERO_DOWNTIME:-0}" == "1" && "$was_running" == true ]]; then
+        if [[ "$was_running" == true ]]; then
             cutover=true
             # Cutover onto the same slot is impossible; downgrade to stop-and-rebuild.
             if [[ "$SRC_VERSION" == "$prev_version" ]]; then
@@ -1409,8 +1414,7 @@ do_update() {
                 cutover=false
             fi
         fi
-    elif [[ "${AGENT_BRIDGE_ZERO_DOWNTIME:-0}" == "1" && "$was_running" == true \
-          && -x "$VENV_DIR/bin/agent-bridge" ]]; then
+    elif [[ "$was_running" == true && -x "$VENV_DIR/bin/agent-bridge" ]]; then
         cutover=true
     fi
 
