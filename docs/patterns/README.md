@@ -33,7 +33,7 @@ Choose the simplest shape that fits; don't impose structure a plugin doesn't nee
 | **Payload-only** | Skills / hooks / a session extension; enabling the plugin is the whole install — no runtime | efforts, visions, context-handoff, customizing-copilot, harness-* |
 | **Runtime CLI** | venv + `~/.local/bin` binstub, invoked on demand; no daemon | agent-mcp, agent-containers |
 | **Runtime service** | Runtime CLI **plus** a long-lived local service under platform-native supervision | agent-bridge, agent-dispatch, agent-vault |
-| **Resolver-import** | A plugin whose package is *imported into a sibling service's venv* to add a namespace resolver, rather than running its own daemon | agent-codespaces / agent-containers (imported by agent-bridge) |
+| **Namespace-provider** | A plugin that registers a namespace with a sibling service via a filesystem **manifest** (its binstub driven over a process boundary), rather than running its own daemon | agent-codespaces / agent-containers (providers to agent-bridge) |
 
 ## Design principles
 
@@ -184,7 +184,7 @@ the exemplars, and the vision it serves):
 | [service-lifecycle-supervision](service-lifecycle-supervision.md) | Platform-native always-on supervision (Windows Scheduled Task / systemd user unit) and its lifecycle verbs |
 | [install-vs-adopt-boundary](install-vs-adopt-boundary.md) | Which lifecycle verb may mutate what — `install`/`update` is machine-local (schema-migrate + warn), `register`/`adopt` is the only repo-mutating verb (repo config + git hooks), and ownership falls out of adoption |
 | [config-schema-migration](config-schema-migration.md) | How a machine-local YAML config gains an explicit `schema_version` + scripted `vN -> vN+1` migrate-by-rewrite (the vendored `config-migrate` primitive), applied lazily on read + eagerly on install/update, with a fixture-guarded backward-compat window |
-| [a-la-carte-independence](a-la-carte-independence.md) | Standalone-first plugins that compose gracefully, incl. the resolver-import pattern |
+| [a-la-carte-independence](a-la-carte-independence.md) | Standalone-first plugins that compose gracefully, incl. the provider-manifest registry pattern |
 | [runtime-self-provisioning](runtime-self-provisioning.md) | How a plugin provisions its own runtime with no manual step and **no dependency on a sibling launcher** — the layered bootstrap (self-provisioning binstub → sessionStart auto-stamp → skill-driven readiness self-check) + toolchain self-acquisition (vendored uv, pip-index bridge), reaching confined envs (Copilot app, cloud agent) |
 | [cross-platform-parity](cross-platform-parity.md) | One behavior across Windows and Linux/WSL: shells, UTF-8, the WSL/Windows boundary, binstubs |
 | [project-scoped-invocation](project-scoped-invocation.md) | Reach any layer against an explicitly named project (`--project`), CWD-independently, and the per-project `<repo>` binstub as a uniform `<repo> <layer> …` dispatcher over the agent-* fleet |

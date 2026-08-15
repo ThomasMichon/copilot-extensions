@@ -18,8 +18,8 @@ internals, follow the links in each section.
 |--------|------|--------------|---------|-----------|
 | [agent-worktrees](../plugins/agent-worktrees/) | Session plugin (skills + `sessionStart` hook) | `~/.agent-worktrees/` | `~/.local/bin/agent-worktrees` + per-project binstubs | Per session (launched by binstub); runtime auto-updates on session start |
 | [agent-bridge](../plugins/agent-bridge/) | Persistent HTTP service | `~/.agent-bridge/` | `~/.local/bin/agent-bridge` | Always-on daemon (Windows scheduled task / Linux systemd user unit) |
-| [agent-codespaces](../plugins/agent-codespaces/) | CLI + credential relay | `~/.agent-codespaces/` | `~/.local/bin/agent-codespaces` | On-demand CLI; relay + `codespace:` resolver run inside the agent-bridge service process |
-| [agent-containers](../plugins/agent-containers/) | CLI + `container:` resolver | `~/.agent-containers/` | `~/.local/bin/agent-containers` | On-demand CLI; `container:` resolver runs inside the agent-bridge service process |
+| [agent-codespaces](../plugins/agent-codespaces/) | CLI + credential relay | `~/.agent-codespaces/` | `~/.local/bin/agent-codespaces` | On-demand CLI; self-registers a `codespace:` namespace **provider** (+ credential relay) with the agent-bridge daemon via a `~/.agent-bridge/providers.d/` manifest — the daemon drives its binstub over a process boundary |
+| [agent-containers](../plugins/agent-containers/) | CLI + `container:` provider | `~/.agent-containers/` | `~/.local/bin/agent-containers` | On-demand CLI; self-registers a `container:` namespace **provider** with the agent-bridge daemon via a `~/.agent-bridge/providers.d/` manifest (process-boundary binstub invocation) |
 | [agent-mcp](../plugins/agent-mcp/) | Standalone MCP bridge (stdio) | `~/.agent-mcp/` | `~/.local/bin/agent-mcp` | Spawned per-call by an agent's `mcp-servers` entry; no bridge integration |
 | [agent-ssh](../plugins/agent-ssh/) | SSH profile emitter + verifier | `~/.agent-ssh/` | `~/.local/bin/agent-ssh` | On-demand CLI; owns the transport-provider contract for SSH profile modules |
 | [agent-logger](../plugins/agent-logger/) | Session-logging CLI + writer agent + sync task | `~/.agent-logger/` | `~/.local/bin/agent-logger` | On-demand CLI + a scheduled `session-sync` (Windows task / Linux systemd timer) |
@@ -101,8 +101,8 @@ flowchart TB
     RL --> BIN
     RD --> BIN
     RV --> BIN
-    AC -.->|package imported into bridge venv| RB
-    AN -.->|package imported into bridge venv| RB
+    AC -.->|providers.d/ manifest → binstub over process boundary| RB
+    AN -.->|providers.d/ manifest → binstub over process boundary| RB
 ```
 
 > The `PO` node — `efforts`, `visions`, `context-handoff`, `customizing-copilot`,
@@ -110,13 +110,19 @@ flowchart TB
 > marketplace payload — no installer, no `~/.agent-*` runtime, no binstub.
 
 Key rule: the **agent-codespaces and agent-containers binstubs are owned by
-their own runtimes** (`~/.agent-codespaces`, `~/.agent-containers`). The
-agent-bridge installer also installs the `agent_codespaces` and
-`agent_containers` *packages* into its own venv so the service can import the
-`codespace:` / `container:` namespace resolvers (and, for codespaces, the
-credential relay) — but it must not repoint those binstubs. This keeps one
-canonical CLI per plugin and avoids version skew. agent-mcp is standalone: no
-bridge import, no resolver — agents invoke its binstub directly.
+their own runtimes** (`~/.agent-codespaces`, `~/.agent-containers`). agent-bridge
+sources their `codespace:` / `container:` namespaces from a **filesystem provider
+registry** — it does **not** import their packages. Each provider drops a small
+JSON manifest into `~/.agent-bridge/providers.d/<name>.json` from its own
+`sessionStart` bootstrap hook (carrying the namespace and an **absolute** binstub
+command), and the daemon scans that directory and drives the provider's binstub
+**over a process boundary** (`<command> namespace-list` / `namespace-resolve …`).
+The daemon runs from its own isolated versioned venv where a provider package is
+neither importable nor on `PATH`, so this seam never depends on importing the
+provider — a malformed or missing manifest is simply skipped with a warning
+(discovery never raises). This keeps one canonical CLI per plugin and avoids
+version skew. agent-mcp is standalone: no bridge integration, no resolver —
+agents invoke its binstub directly.
 
 ## Ports
 
