@@ -176,7 +176,7 @@ function agentDispatchAvailable() {
   }
 }
 
-// Run a facility CLI binary cross-platform, returning stdout (throws on error).
+// Run a multi-machine system CLI binary cross-platform, returning stdout (throws on error).
 // On Windows the `agent-worktrees` / `agent-dispatch` binstubs are `.cmd` files,
 // which Node's `execFileSync` CANNOT spawn directly (CreateProcess won't execute
 // a batch file without a shell -- it fails ENOENT). So on win32 we go through the

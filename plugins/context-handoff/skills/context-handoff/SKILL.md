@@ -35,7 +35,7 @@ seamlessly resume work from the current session.
 | Skill | Question | Scope | Primary Source |
 |-------|----------|-------|----------------|
 | **context-handoff** (this) | "What did last session queue up?" | Per-worktree | Dedicated handoff system |
-| **recap** | "What did I last do?" | Facility-wide | Permanent Record logs |
+| **recap** | "What did I last do?" | System-wide | Permanent Record logs |
 | **backlog** | "What's next for ___?" | Per-service/tool | Gitea → plans → ROADMAP |
 
 Handoff is a relay baton — it carries structured state from one session
@@ -71,7 +71,7 @@ context), a **live cutover** that spins up the successor *in place* (the
 **primary** path — no copy/paste), and a **short reply prompt** as the fallback
 when a cutover isn't possible.
 
-**Live cutover is the default.** Facility sessions run inside a `wt-<id>` mux
+**Live cutover is the default.** Operator sessions run inside a `wt-<id>` mux
 wrapper (picker-launched or `embody`-spawned), so a handoff should **take over
 in place**: store the handoff task, then spin up a successor Copilot in the same
 mux and retire this session — the operator is **never handed a paste prompt** to

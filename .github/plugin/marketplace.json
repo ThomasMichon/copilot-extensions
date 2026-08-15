@@ -42,7 +42,7 @@
     {
       "name": "agent-ssh",
       "description": "SSH connectivity layer for the agent fabric: emit and verify machine-name SSH profiles from a normalized registry, and define the public transport-provider contract for pluggable direct or tunnel transports.",
-      "version": "0.1.0-dev25",
+      "version": "0.1.0-dev26",
       "source": "plugins/agent-ssh"
     },
     {
@@ -54,25 +54,25 @@
     {
       "name": "context-handoff",
       "description": "Context window monitoring and session handoff - a Copilot CLI session extension that tracks token utilization and nudges toward a continuation prompt before auto-compaction, plus the /handoff skill (sits on top of agent-dispatch: stores the handoff as a claimable worktree-pinned task when a coordinator is present, else a session file) and the /resume-handoff slash command that digs up this worktree's pending handoff and injects its continuation prompt into the current session",
-      "version": "0.1.0-dev28",
+      "version": "0.1.0-dev29",
       "source": "plugins/context-handoff"
     },
     {
       "name": "efforts",
       "description": "Efforts planning system - comprehensive planning folders that represent a stretch of work (premise + plan + validation plan + journal + participant coordination), with a README-as-shared-contract; ships the planning-efforts and efforts-setup skills",
-      "version": "0.1.0-dev7",
+      "version": "0.1.0-dev8",
       "source": "plugins/efforts"
     },
     {
       "name": "visions",
       "description": "Visions system - persistent, in-place-revised north-star documents stating what a system/service/tool/product is ultimately meant to be (purpose + concepts + expected features + expected behaviors); intent-level, not a specification; efforts are carved from the vision-vs-reality delta. Ships the envisioning and visions-setup skills",
-      "version": "0.1.0-dev12",
+      "version": "0.1.0-dev13",
       "source": "plugins/visions"
     },
     {
       "name": "customizing-copilot",
       "description": "Customize and extend the Copilot CLI - authoring skills, defining sub-agents, registering MCP servers, installing plugins, building an agent control-harness, reviewing customizations, and authoring <repo>-harness plugins - with the per-skill folder conventions and Agent Skills best practices; ships the authoring-skills, defining-subagents, registering-mcp-servers, installing-plugins, building-harnesses, reviewing-customizations, and authoring-harness-plugins skills",
-      "version": "0.1.0-dev25",
+      "version": "0.1.0-dev26",
       "source": "plugins/customizing-copilot"
     },
     {
@@ -90,7 +90,7 @@
     {
       "name": "copilot-extensions-harness",
       "description": "Operator harness for the copilot-extensions repo - portable, owner-authored skills to work ON the plugin suite (contribute changes, diagnose the deployed runtimes, and validate them on a fresh box). Any control repo can enable it instead of hand-writing a per-repo narrative. Reference implementation of the <repo>-harness plugin standard; ships the contributing-to-copilot-extensions, diagnosing-copilot-extensions, and validating-in-clean-room skills plus the clean-room-judge evaluator sub-agent.",
-      "version": "0.1.0-dev11",
+      "version": "0.1.0-dev12",
       "source": "plugins/copilot-extensions-harness"
     },
     {

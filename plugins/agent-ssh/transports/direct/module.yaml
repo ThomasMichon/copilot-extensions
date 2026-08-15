@@ -1,7 +1,7 @@
 # First-party in-box transport: plain SSH to a routable address, only where
 # inbound is permitted. It ships NO proxy_command recipe -> the core emits plain
 # `Host` blocks with no ProxyCommand. Self-contained (the OpenSSH client is the
-# common floor; nothing to install and no provider/facility config), so it ships
+# common floor; nothing to install and no provider/multi-machine system config), so it ships
 # in-box alongside dtssh. A machine opts into it via its registry `transport: direct`.
 module: direct
 kind: transport
