@@ -712,8 +712,9 @@ class AcpClient:
         respawn.
 
         NOTE: whether a live copilot child accepts a re-``initialize`` on an
-        existing session is validated empirically against real copilot before
-        the ``session_host_enabled`` flag is turned on in production.
+        existing session was validated empirically against real copilot before
+        Session-Host mode was shipped as the default (now the only mode,
+        dotfiles#1478).
         """
         self._acp_session_id = acp_session_id
 

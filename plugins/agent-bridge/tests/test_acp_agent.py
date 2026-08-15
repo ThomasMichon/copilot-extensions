@@ -211,7 +211,16 @@ class TestBridgeAgentSessions:
                 client_inst.new_session = AsyncMock(return_value="acp-123")
                 MockClient.return_value = client_inst
 
-                resp = await bridge_agent.new_session(cwd="/tmp/test")
+                # Session Hosts are always on (dotfiles#1478): a local start now
+                # connects via _connect_via_session_host, which can't stand up in
+                # a unit test. Stub it to return the mock client + acp id.
+                async def _fake_host_connect(self, target, **kwargs):
+                    return client_inst, "acp-123"
+
+                with patch.object(
+                    SessionManager, "_connect_via_session_host", _fake_host_connect
+                ):
+                    resp = await bridge_agent.new_session(cwd="/tmp/test")
 
                 assert resp.session_id is not None
                 assert resp.session_id in bridge_agent._owned_sessions

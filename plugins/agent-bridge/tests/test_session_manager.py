@@ -95,8 +95,23 @@ def _patch_spawn():
 
 @pytest.fixture
 def _patch_acp(mock_acp_client):
-    """Patch AcpClient construction to return a mock."""
-    with patch("agent_bridge.session_manager.AcpClient") as mock_cls:
+    """Patch AcpClient construction to return a mock.
+
+    Session Hosts are always on (dotfiles#1478), so a local ``start_session``
+    now connects through ``_connect_via_session_host`` (a survivable host +
+    loopback socket) rather than the classic ``spawn`` + ``AcpClient`` path.
+    That machinery can't stand up in a unit test, so we also stub the host
+    connect to hand back the mock client + a stable acp session id. (``resume``
+    still uses the classic ``spawn``/``load_session`` path -- ``_patch_spawn``
+    covers that -- so resume tests keep asserting ``load_session``.)
+    """
+    async def _fake_host_connect(self, target, **kwargs):
+        return mock_acp_client, mock_acp_client.acp_session_id
+
+    with patch("agent_bridge.session_manager.AcpClient") as mock_cls, \
+            patch.object(
+                SessionManager, "_connect_via_session_host", _fake_host_connect
+            ):
         mock_cls.return_value = mock_acp_client
         yield mock_cls
 
@@ -248,7 +263,7 @@ async def _start_codespace_session(tmp_db, monkeypatch):
         "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
         lambda *args, **kwargs: object(),
     )
-    manager = SessionManager(tmp_db, session_host_enabled=True)
+    manager = SessionManager(tmp_db)
     captured: dict[str, list[str] | None] = {}
 
     async def fake_connect(self, target, **kwargs):
@@ -376,7 +391,7 @@ class TestRemoteForwardRelaySupervision:
     @pytest.mark.asyncio
     async def test_ensure_forward_rebuilds_l_only_and_starts_relay(self, tmp_db, tmp_path):
         manager = SessionManager(
-            tmp_db, session_host_enabled=True, session_host_state_dir=str(tmp_path),
+            tmp_db, session_host_state_dir=str(tmp_path),
         )
         rec = SimpleNamespace(
             session_id="s1",
@@ -399,7 +414,7 @@ class TestRemoteForwardRelaySupervision:
         self, tmp_db, tmp_path,
     ):
         manager = SessionManager(
-            tmp_db, session_host_enabled=True, session_host_state_dir=str(tmp_path),
+            tmp_db, session_host_state_dir=str(tmp_path),
         )
         rec = SimpleNamespace(
             session_id="s1",
@@ -421,7 +436,7 @@ class TestRemoteForwardRelaySupervision:
     @pytest.mark.asyncio
     async def test_ensure_forward_replaces_dead_prior_relay(self, tmp_db, tmp_path):
         manager = SessionManager(
-            tmp_db, session_host_enabled=True, session_host_state_dir=str(tmp_path),
+            tmp_db, session_host_state_dir=str(tmp_path),
         )
         rec = SimpleNamespace(
             session_id="s1",
@@ -442,7 +457,7 @@ class TestRemoteForwardRelaySupervision:
     @pytest.mark.asyncio
     async def test_drop_forward_stops_relay_and_l_forward(self, tmp_db, tmp_path):
         manager = SessionManager(
-            tmp_db, session_host_enabled=True, session_host_state_dir=str(tmp_path),
+            tmp_db, session_host_state_dir=str(tmp_path),
         )
         forward = self._Forward(None, 51000)
         relay = self._Relay(None, 9857)
@@ -778,7 +793,13 @@ class TestResumeSession:
             mock_client.active_background_tasks = []
             mock_cls.return_value = mock_client
 
-            session = await session_manager.start_session(spawn_target)
+            async def _fake_host_connect(self, target, **kwargs):
+                return mock_client, "acp-1"
+
+            with patch.object(
+                SessionManager, "_connect_via_session_host", _fake_host_connect
+            ):
+                session = await session_manager.start_session(spawn_target)
             await session_manager.stop_session(session.session_id)
 
         # Now resume with failing ACP
@@ -1422,22 +1443,6 @@ class TestCodespaceRequiresSessionHost:
                            "--remote-cmd", "ls"],
         )) is False
 
-    @pytest.mark.asyncio
-    async def test_codespace_target_fails_loud_instead_of_classic(self, tmp_db) -> None:
-        """With host mode OFF, starting a CodeSpace target must FAIL LOUD (a
-        clear session-host-required error) rather than silently degrade to the
-        classic, non-survivable process-owned path."""
-        from agent_bridge.transport import SpawnTarget
-        mgr = SessionManager(tmp_db, session_host_enabled=False)
-        meta = {"name": "cs-foo", "repo": "org/repo",
-                "acp_command": "cd /workspaces/x && copilot --acp --stdio"}
-        target = SpawnTarget(type="command", spawn_command=["x"], codespace=meta)
-        session = await mgr.start_session(target, agent_name="cs-foo")
-        assert session.status == SessionStatus.FAILED
-        msgs = [e.data.get("message", "") for e in session.event_log.get_events()
-                if e.event == "error"]
-        assert any("session-host mode" in m for m in msgs), msgs
-
 
 class TestDurablePromptQueue:
     """Durable send-or-queue (pending_prompts) + drain-on-settle (#4114)."""
@@ -1602,7 +1607,7 @@ class TestCodespaceExclusiveClaim:
         monkeypatch.setattr(
             SessionManager, "_connect_via_session_host", fake_connect,
         )
-        manager = SessionManager(tmp_db, session_host_enabled=True)
+        manager = SessionManager(tmp_db)
         session = await manager.start_session(
             self._cs_target(caller_worktree),
             agent_name="codespace:example",

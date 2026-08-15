@@ -976,7 +976,7 @@ async def test_start_session_host_mode_end_to_end(tmp_path, monkeypatch):
 
     db = Database(tmp_path / "s.db")
     mgr = SessionManager(
-        db, session_host_enabled=True,
+        db,
         session_host_state_dir=str(tmp_path / "hosts"),
     )
     host_pid = None
@@ -1038,7 +1038,7 @@ async def test_reattach_session_hosts_on_restart(tmp_path, monkeypatch):
     try:
         # --- frontend generation 1: start a host-backed session ---
         db1 = Database(dbpath)
-        mgr1 = SessionManager(db1, session_host_enabled=True, session_host_state_dir=statedir)
+        mgr1 = SessionManager(db1, session_host_state_dir=statedir)
         target = SpawnTarget(type="local", cwd=str(tmp_path))
         session = await asyncio.wait_for(mgr1.start_session(target), timeout=30)
         sid = session.session_id
@@ -1053,7 +1053,7 @@ async def test_reattach_session_hosts_on_restart(tmp_path, monkeypatch):
 
         # --- frontend generation 2: reattach to the surviving host ---
         db2 = Database(dbpath)
-        mgr2 = SessionManager(db2, session_host_enabled=True, session_host_state_dir=statedir)
+        mgr2 = SessionManager(db2, session_host_state_dir=statedir)
         assert mgr2.get_session(sid) is not None  # rehydrated (STOPPED)
 
         n = await asyncio.wait_for(mgr2.reattach_session_hosts(), timeout=30)
@@ -1159,7 +1159,7 @@ async def test_recover_disconnected_hosts_reattaches_in_session(tmp_path, monkey
 
     db = Database(tmp_path / "s.db")
     mgr = SessionManager(
-        db, session_host_enabled=True,
+        db,
         session_host_state_dir=str(tmp_path / "hosts"),
     )
     host_pid = None
@@ -1809,7 +1809,7 @@ async def test_reattach_strands_then_reaps_incompatible_host(tmp_path, monkeypat
     try:
         # gen 1: start a host-backed session, then simulate a frontend restart.
         db1 = Database(dbpath)
-        mgr1 = SessionManager(db1, session_host_enabled=True,
+        mgr1 = SessionManager(db1,
                               session_host_state_dir=statedir)
         target = SpawnTarget(type="local", cwd=str(tmp_path))
         session = await asyncio.wait_for(mgr1.start_session(target), timeout=30)
@@ -1827,7 +1827,7 @@ async def test_reattach_strands_then_reaps_incompatible_host(tmp_path, monkeypat
 
         # gen 2: reattach must STRAND the incompatible host, not drive it.
         db2 = Database(dbpath)
-        mgr2 = SessionManager(db2, session_host_enabled=True,
+        mgr2 = SessionManager(db2,
                               session_host_state_dir=statedir)
         n = await asyncio.wait_for(mgr2.reattach_session_hosts(), timeout=30)
         assert n == 0                                   # not reattached
@@ -1848,7 +1848,7 @@ async def test_reattach_strands_then_reaps_incompatible_host(tmp_path, monkeypat
         assert not pid_alive(child_pid)
 
         db3 = Database(dbpath)
-        mgr3 = SessionManager(db3, session_host_enabled=True,
+        mgr3 = SessionManager(db3,
                               session_host_state_dir=statedir)
         n3 = await asyncio.wait_for(mgr3.reattach_session_hosts(), timeout=30)
         assert n3 == 0
@@ -1908,7 +1908,7 @@ async def test_sweep_strands_then_force_reaps_over_bound(tmp_path, monkeypatch):
     child_pid = None
     try:
         db = Database(dbpath)
-        mgr = SessionManager(db, session_host_enabled=True,
+        mgr = SessionManager(db,
                              session_host_state_dir=statedir,
                              session_host_stale_reap_seconds=0)  # bound off
         target = SpawnTarget(type="local", cwd=str(tmp_path))
@@ -1985,7 +1985,7 @@ async def test_graceful_cancel_for_redeploy(tmp_path):
 
     db = Database(tmp_path / "s.db")
     try:
-        mgr = SessionManager(db, session_host_enabled=True,
+        mgr = SessionManager(db,
                              session_host_state_dir=str(tmp_path / "hosts"),
                              graceful_cancel_settle_seconds=5)
         cancels: list[str] = []
@@ -2018,20 +2018,6 @@ async def test_graceful_cancel_for_redeploy(tmp_path):
         assert mgr._host_index.get("run-a").resume_on_reattach is True   # flagged
         assert mgr._host_index.get("run-self").resume_on_reattach is False  # spared
         assert mgr._host_index.get("idle-c").resume_on_reattach is False   # not mid-turn
-    finally:
-        db.close()
-
-
-@pytest.mark.asyncio
-async def test_graceful_cancel_noop_when_flag_off(tmp_path):
-    from agent_bridge.db import Database
-    from agent_bridge.session_manager import SessionManager
-
-    db = Database(tmp_path / "s.db")
-    try:
-        mgr = SessionManager(db, session_host_enabled=False)
-        res = await mgr.graceful_cancel_for_redeploy()
-        assert res == {"cancelled": [], "settled": True, "enabled": False}
     finally:
         db.close()
 
@@ -2231,7 +2217,7 @@ async def test_end_session_reaps_host(tmp_path, monkeypatch):
     db = Database(tmp_path / "s.db")
     host_pid = child_pid = None
     try:
-        mgr = SessionManager(db, session_host_enabled=True,
+        mgr = SessionManager(db,
                              session_host_state_dir=str(tmp_path / "hosts"))
         session = await asyncio.wait_for(
             mgr.start_session(SpawnTarget(type="local", cwd=str(tmp_path))),
@@ -2277,7 +2263,7 @@ async def test_reattach_reaps_orphaned_host(tmp_path, monkeypatch):
     host_pid = child_pid = None
     try:
         db1 = Database(dbpath)
-        mgr1 = SessionManager(db1, session_host_enabled=True,
+        mgr1 = SessionManager(db1,
                               session_host_state_dir=statedir)
         session = await asyncio.wait_for(
             mgr1.start_session(SpawnTarget(type="local", cwd=str(tmp_path))),
@@ -2295,7 +2281,7 @@ async def test_reattach_reaps_orphaned_host(tmp_path, monkeypatch):
         # Fresh frontend: rehydrate won't see the deleted session, so reattach
         # finds a live host with no adoptable session -> reap it.
         db2 = Database(dbpath)
-        mgr2 = SessionManager(db2, session_host_enabled=True,
+        mgr2 = SessionManager(db2,
                               session_host_state_dir=statedir)
         assert sid in mgr2._host_index          # orphan record present pre-reattach
         n = await asyncio.wait_for(mgr2.reattach_session_hosts(), timeout=30)

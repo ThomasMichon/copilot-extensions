@@ -28,6 +28,14 @@ async def _make_stopped_session(sm, spawn_target, mock_acp_client):
     """Create an IDLE session, then mark it STOPPED so it is resumable."""
     mock_acp_client.start = AsyncMock()
     mock_acp_client.load_session = AsyncMock()
+    # Session Hosts are always on (dotfiles#1478): a local start now connects via
+    # _connect_via_session_host (a survivable host over a loopback socket) which
+    # can't stand up in a unit test. Stub it to hand back the mock client + a
+    # stable acp id. (resume_session still uses the classic spawn/load_session
+    # path the module-level patches cover.)
+    async def _fake_host_connect(target, **kwargs):
+        return mock_acp_client, mock_acp_client.acp_session_id
+    sm._connect_via_session_host = _fake_host_connect
     session = await sm.start_session(spawn_target, agent_name="a")
     session.status = SessionStatus.STOPPED
     sm._db.update_session_status(

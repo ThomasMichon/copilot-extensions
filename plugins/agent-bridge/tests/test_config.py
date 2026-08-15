@@ -55,42 +55,20 @@ class TestSaveConfig:
         save_config(ServiceConfig(enable_credential_relay=False))
         assert load_config().enable_credential_relay is False
 
-    def test_session_host_enabled_default_on(self, config_home):
-        # Session Hosts are the durable-dispatch default now (#145/#177).
-        assert ServiceConfig().session_host_enabled is True
+    def test_persisted_session_host_toggle_is_ignored(self, config_home):
+        # The session_host_enabled toggle was removed (dotfiles#1478): Session
+        # Hosts are the only mode. A config file written by an older build that
+        # still carries the key must load cleanly (extra=ignore) rather than
+        # raise, and the stale key is dropped on the next write.
+        (config_home / "config.yaml").write_text(
+            yaml.dump({"session_host_enabled": False, "port": 1234})
+        )
+        loaded = load_config()
+        assert loaded.port == 1234
+        assert not hasattr(loaded, "session_host_enabled")
 
 
 class TestMigrateConfig:
-    def test_flips_stale_off_to_on_once(self, config_home):
-        from agent_bridge.config import migrate_config
-
-        # A machine still on the OLD explicit default (off)...
-        save_config(ServiceConfig(session_host_enabled=False))
-        migrated = migrate_config(load_config())
-        assert migrated.session_host_enabled is True
-        # ...persisted to disk...
-        assert load_config().session_host_enabled is True
-        # ...and the marker is written.
-        assert (config_home / ".migrations" / "session_host_default_on").exists()
-
-    def test_respects_opt_out_after_marker(self, config_home):
-        from agent_bridge.config import migrate_config
-
-        # Marker already present (migration ran) -> a deliberate opt-out sticks.
-        (config_home / ".migrations").mkdir(parents=True)
-        (config_home / ".migrations" / "session_host_default_on").write_text("applied\n")
-        save_config(ServiceConfig(session_host_enabled=False))
-        migrated = migrate_config(load_config())
-        assert migrated.session_host_enabled is False
-        assert load_config().session_host_enabled is False
-
-    def test_idempotent_leaves_on_untouched(self, config_home):
-        from agent_bridge.config import migrate_config
-
-        save_config(ServiceConfig(session_host_enabled=True))
-        migrated = migrate_config(load_config())
-        assert migrated.session_host_enabled is True
-
     def test_idle_reap_default_armed(self, config_home):
         # The idle-session reaper is armed by default now (#1826 complement to
         # Session Hosts being default-on).

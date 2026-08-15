@@ -39,7 +39,16 @@ def _patch_spawn():
 
 @pytest.fixture
 def _patch_acp(mock_acp_client):
-    with patch("agent_bridge.session_manager.AcpClient") as mock_cls:
+    # Session Hosts are always on (dotfiles#1478): a local start now connects via
+    # _connect_via_session_host, which can't stand up in a unit test. Stub it to
+    # return the mock client + a stable acp id so the predecessor start lands IDLE.
+    async def _fake_host_connect(self, target, **kwargs):
+        return mock_acp_client, mock_acp_client.acp_session_id
+
+    with patch("agent_bridge.session_manager.AcpClient") as mock_cls, \
+            patch.object(
+                SessionManager, "_connect_via_session_host", _fake_host_connect
+            ):
         mock_cls.return_value = mock_acp_client
         yield mock_cls
 

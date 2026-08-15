@@ -124,34 +124,21 @@ def migrate_config(cfg: ServiceConfig) -> ServiceConfig:
     though ``load_config`` runs on every daemon start, and a deliberate operator
     override set *after* a migration sticks (the marker prevents re-flipping).
 
-    **session_host_default_on:** Session Hosts are now the durable-dispatch
-    default (see #145/#177). A machine still on the OLD default (``session_host_
-    enabled: false``, written explicitly by the full-serialization config writer)
-    adopts the new default **once**.
-
     **idle_reap_default_on:** The idle-session reaper (#1826) is now armed by
     default (``idle_reap_ttl_seconds`` model default ``0 -> 600``) -- the natural
-    complement to Session Hosts being default-on, so an idle Session Host child
+    complement to always-on Session Hosts, so an idle Session Host child
     can't leak indefinitely if a consumer crashes or forgets to ``DELETE`` its
     session. A machine still carrying the OLD explicit ``idle_reap_ttl_seconds:
     0`` (full-serialization writer) adopts the armed default **once**; a
     deliberate ``0`` set *after* this migration sticks.
+
+    (The former ``session_host_default_on`` value-migration is retired: Session
+    Hosts are now the *only* mode -- the ``session_host_enabled`` toggle was
+    removed -- so a persisted ``session_host_enabled: false`` is simply ignored
+    on load and dropped on the next config write. See dotfiles#1478.)
     """
     changed = False
     mig_dir = config_dir() / _MIGRATION_DIR
-
-    # -- session_host_default_on ------------------------------------------
-    marker = mig_dir / "session_host_default_on"
-    if not marker.exists():
-        if not cfg.session_host_enabled:
-            cfg = cfg.model_copy(update={"session_host_enabled": True})
-            changed = True
-            log.info(
-                "Config migration: session_host_enabled -> True "
-                "(Session Hosts are now default-on)"
-            )
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text("applied\n", encoding="utf-8")
 
     # -- idle_reap_default_on ---------------------------------------------
     marker = mig_dir / "idle_reap_default_on"

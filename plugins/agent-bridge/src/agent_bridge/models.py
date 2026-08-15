@@ -601,6 +601,12 @@ class RepoBridgeConfig(BaseModel):
 class ServiceConfig(BaseModel):
     """Root config loaded from ~/.agent-bridge/config.yaml."""
 
+    # Unknown keys are ignored (pydantic default, pinned explicitly): a config
+    # written by an OLDER build carrying a since-removed field -- notably the
+    # retired ``session_host_enabled`` toggle (dotfiles#1478) -- loads cleanly as
+    # the current always-on shape and the stale key is dropped on the next write.
+    model_config = {"extra": "ignore"}
+
     # Schema version marker for the config-migrate framework. A real field (not
     # an ignored extra) so it round-trips through model_dump / save_config. Keep
     # in sync with agent_bridge.config_migrations.CONFIG_VERSION.
@@ -639,17 +645,6 @@ class ServiceConfig(BaseModel):
         "never evicts) the primary's relay -- local elevated agents reuse the "
         "primary's relay on the same host.",
     )
-    session_host_enabled: bool = Field(
-        default=True,
-        description="Default ON. A dispatched copilot child is spawned inside a "
-        "survivable Session Host process that outlives an agent-bridge restart, so "
-        "a frontend update/redeploy does not kill or corrupt an active session; the "
-        "frontend reattaches over a loopback endpoint (local) or a re-established "
-        "SSH -L forward (machine-mesh / CodeSpace). This is the durable-dispatch "
-        "default for the whole mesh (see the session_host package + the "
-        "codespace-dispatch-reliability effort, #145/#177). Set False to opt a "
-        "machine back onto the legacy front-owns-stdio path.",
-    )
     session_host_stale_reap_seconds: int = Field(
         default=0,
         description="Version-mux sprawl bound (Phase 4, #1765). When > 0, a "
@@ -658,8 +653,7 @@ class ServiceConfig(BaseModel):
         "once it has outlived this many seconds, so an immortal session cannot "
         "pin an old on-disk install forever. A stranded host whose child has "
         "already stopped is always reaped regardless. 0 disables the age bound "
-        "(the default -- such a host then strands until its child's own stop). "
-        "Only meaningful when session_host_enabled is True.",
+        "(the default -- such a host then strands until its child's own stop).",
     )
     graceful_cancel_settle_seconds: int = Field(
         default=45,
@@ -669,7 +663,7 @@ class ServiceConfig(BaseModel):
         "waits up to this many seconds for the cancelled turns to reach their own "
         "stop (capturing final streamed messages) before stopping. Mid-turn "
         "sessions are flagged to receive a 'Resume' nudge once the restarted "
-        "frontend reattaches. Only meaningful when session_host_enabled is True.",
+        "frontend reattaches.",
     )
     idle_reap_ttl_seconds: int = Field(
         default=600,
@@ -686,15 +680,14 @@ class ServiceConfig(BaseModel):
         "session_host_stale_reap_seconds (which bounds a never-idle stranded "
         "old-version host). Default 600s: armed by default so an idle Session "
         "Host child can't leak indefinitely if a consumer crashes/forgets to "
-        "DELETE its session -- the natural complement to session_host_enabled "
-        "being default-on. 0 disables. Only meaningful when session_host_enabled "
-        "is True.",
+        "DELETE its session -- the natural complement to always-on Session "
+        "Hosts. 0 disables.",
     )
     idle_reap_sweep_seconds: int = Field(
         default=120,
         description="How often the idle-session reaper sweep runs, in seconds "
         "(#1826). Clamped to a 30s floor. Only meaningful when "
-        "session_host_enabled and idle_reap_ttl_seconds are both > 0.",
+        "idle_reap_ttl_seconds > 0.",
     )
     session_host_unexpected_reap_seconds: int = Field(
         default=60,
@@ -711,8 +704,7 @@ class ServiceConfig(BaseModel):
         "resumable from disk + worktree (fresh child + load_session replay), so "
         "freeing the idle child loses nothing; it only reclaims memory much "
         "sooner than the daemon-side idle_reap_ttl_seconds backstop. 0 disables "
-        "the unexpected-grace timer (the graceful fast path still acts). Only "
-        "meaningful when session_host_enabled is True.",
+        "the unexpected-grace timer (the graceful fast path still acts).",
     )
     session_host_active_reap_seconds: int = Field(
         default=1800,
@@ -728,8 +720,7 @@ class ServiceConfig(BaseModel):
         "no persisted work. Default 1800s (30 min): a severed connection during a "
         "long build/tool call keeps the task alive for half an hour to give the "
         "client a chance to reconnect and recover control. A reattach cancels the "
-        "timer. 0 disables (legacy: an active child lives indefinitely). Only "
-        "meaningful when session_host_enabled is True.",
+        "timer. 0 disables (legacy: an active child lives indefinitely).",
     )
     live_stall_interrupt_after_s: int = Field(
         default=900,

@@ -245,6 +245,11 @@ class Database:
         self._writer_error: BaseException | None = None
         self._init_schema()
 
+    @property
+    def db_path(self) -> Path:
+        """The resolved on-disk path of this database file."""
+        return self._db_path
+
     def _get_conn(self) -> sqlite3.Connection:
         """Get a thread-local connection."""
         if not hasattr(self._local, "conn") or self._local.conn is None:

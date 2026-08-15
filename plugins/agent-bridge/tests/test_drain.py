@@ -16,6 +16,10 @@ def _fake_session(status=SessionStatus.IDLE, bg=False):
     return SimpleNamespace(
         status=status,
         has_active_background_tasks=bg,
+        # Session Hosts are always on (dotfiles#1478): drain() now always
+        # graceful-cancels in-flight turns, which reads session.client (a
+        # clientless session is skipped). Give the fake the attribute.
+        client=None,
     )
 
 

@@ -126,20 +126,19 @@ async def lifespan(app: FastAPI):
     mgr = session_manager_from_config(db, cfg)
     app.state.session_manager = mgr
 
-    # Session-Host mode: reattach to any Session Hosts that survived a prior
-    # frontend restart (goal 3), instead of leaving those sessions STOPPED.
-    # Best-effort: a reattach failure must never block daemon startup.
-    if cfg.session_host_enabled:
-        try:
-            n = await mgr.reattach_session_hosts()
-            if n:
-                logging.getLogger("agent-bridge").info(
-                    "Reattached %d session(s) to surviving Session Hosts", n
-                )
-        except Exception:
-            logging.getLogger("agent-bridge").warning(
-                "Session-Host reattach on startup failed", exc_info=True
+    # Reattach to any Session Hosts that survived a prior frontend restart
+    # (goal 3), instead of leaving those sessions STOPPED. Best-effort: a
+    # reattach failure must never block daemon startup.
+    try:
+        n = await mgr.reattach_session_hosts()
+        if n:
+            logging.getLogger("agent-bridge").info(
+                "Reattached %d session(s) to surviving Session Hosts", n
             )
+    except Exception:
+        logging.getLogger("agent-bridge").warning(
+            "Session-Host reattach on startup failed", exc_info=True
+        )
 
     # Load topology profiles + auto-discover local agents. Always a resolver
     # (empty when there is no topology) so declarative namespace providers
@@ -219,19 +218,18 @@ async def lifespan(app: FastAPI):
             # dropped transport (a host-backed session reading `disconnected`
             # while its Session Host + child survive); this *acts* on it,
             # redialing the host and resuming by cursor with no restart and no
-            # lost turn. No-op unless Session-Host mode is enabled.
-            if mgr.session_host_enabled:
-                try:
-                    await mgr.recover_disconnected_hosts()
-                except Exception:
-                    log.warning("Liveness-driven reattach failed", exc_info=True)
-                # Reconcile each host-backed session's reapable state to its
-                # host so a subsequently-lost front can self-reap an idle child
-                # (#51). Backstop beneath the precise turn-boundary pushes.
-                try:
-                    await mgr.refresh_host_reapable()
-                except Exception:
-                    log.warning("Host reapable-state refresh failed", exc_info=True)
+            # lost turn.
+            try:
+                await mgr.recover_disconnected_hosts()
+            except Exception:
+                log.warning("Liveness-driven reattach failed", exc_info=True)
+            # Reconcile each host-backed session's reapable state to its
+            # host so a subsequently-lost front can self-reap an idle child
+            # (#51). Backstop beneath the precise turn-boundary pushes.
+            try:
+                await mgr.refresh_host_reapable()
+            except Exception:
+                log.warning("Host reapable-state refresh failed", exc_info=True)
             # Eventual-terminal reconciliation (#2384): heal any session wedged
             # in RUNNING with no live turn (output stopped, no prompt task) so it
             # cannot mirror "Responding..." forever. Runs regardless of host mode;
@@ -282,34 +280,31 @@ async def lifespan(app: FastAPI):
     # Version-mux sprawl sweep (Phase 4, #1765) -- periodically reap stranded
     # incompatible Session Hosts once their child stops (or they outlive the
     # configured age bound), so an old host-layer generation cannot pin an old
-    # on-disk install for a whole frontend lifetime. Only runs in Session-Host
-    # mode; harmless (empty) unless a breaking host-protocol change left older
-    # hosts running.
-    host_sweep_task = None
-    if cfg.session_host_enabled:
-        async def _host_sweep_loop() -> None:
-            # A few times per bound (min 60s) when a bound is set; otherwise an
-            # hourly cadence just to reap children that reached their own stop.
-            bound = cfg.session_host_stale_reap_seconds
-            interval = max(60.0, bound / 4) if bound and bound > 0 else 3600.0
-            while True:
-                await asyncio.sleep(interval)
-                try:
-                    n = await asyncio.to_thread(mgr.sweep_stranded_hosts)
-                    if n:
-                        log.info("Version-mux sweep reaped %d stranded host(s)", n)
-                except Exception:
-                    log.warning("Version-mux stranded-host sweep failed", exc_info=True)
+    # on-disk install for a whole frontend lifetime. Harmless (empty) unless a
+    # breaking host-protocol change left older hosts running.
+    async def _host_sweep_loop() -> None:
+        # A few times per bound (min 60s) when a bound is set; otherwise an
+        # hourly cadence just to reap children that reached their own stop.
+        bound = cfg.session_host_stale_reap_seconds
+        interval = max(60.0, bound / 4) if bound and bound > 0 else 3600.0
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                n = await asyncio.to_thread(mgr.sweep_stranded_hosts)
+                if n:
+                    log.info("Version-mux sweep reaped %d stranded host(s)", n)
+            except Exception:
+                log.warning("Version-mux stranded-host sweep failed", exc_info=True)
 
-        host_sweep_task = asyncio.create_task(_host_sweep_loop())
+    host_sweep_task = asyncio.create_task(_host_sweep_loop())
 
     # Idle-session reaper (#1826, ownership inversion) -- the bridge owns
     # session process lifetime by connection + state, so a front need only
     # connect/disconnect. Periodically stop idle, unwatched sessions past the
-    # TTL, freeing their Copilot children (resumable via replay). Only runs in
-    # Session-Host mode with a positive TTL configured.
+    # TTL, freeing their Copilot children (resumable via replay). Only runs with
+    # a positive TTL configured.
     idle_reap_task = None
-    if cfg.session_host_enabled and cfg.idle_reap_ttl_seconds > 0:
+    if cfg.idle_reap_ttl_seconds > 0:
         async def _idle_reap_loop() -> None:
             interval = max(30.0, float(cfg.idle_reap_sweep_seconds or 300))
             while True:
@@ -460,16 +455,14 @@ async def lifespan(app: FastAPI):
     from .routes.worktrees import get_cache
     await get_cache().stop()
 
-    # Shutdown: Session-Host mode -- assertively-but-nicely cancel in-flight
-    # turns (ACP session/cancel + a resume_on_reattach flag) before tearing the
-    # sessions down, so a bare `systemctl restart` (no installer drain) is fast
-    # and clean, and mid-turn sessions get a "Resume" once the new frontend
-    # reattaches. No-op unless session_host_enabled.
-    if cfg.session_host_enabled:
-        try:
-            await mgr.graceful_cancel_for_redeploy()
-        except Exception:
-            log.warning("Graceful-cancel on shutdown failed", exc_info=True)
+    # Shutdown: assertively-but-nicely cancel in-flight turns (ACP session/cancel
+    # + a resume_on_reattach flag) before tearing the sessions down, so a bare
+    # `systemctl restart` (no installer drain) is fast and clean, and mid-turn
+    # sessions get a "Resume" once the new frontend reattaches.
+    try:
+        await mgr.graceful_cancel_for_redeploy()
+    except Exception:
+        log.warning("Graceful-cancel on shutdown failed", exc_info=True)
 
     # Shutdown: stop all active sessions gracefully
     for session in mgr.list_sessions():
