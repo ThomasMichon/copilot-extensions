@@ -84,8 +84,10 @@ by the resolver; see the `agent-codespaces:codespaces-lifecycle` skill.)
 ## 7. Agent-Containers Init
 
 Install the agent-containers runtime (CLI binstub + `~/.agent-containers`
-home). The `container:` namespace resolver runs inside the agent-bridge
-service (installed as a sibling import); this step gives you the standalone
+home). agent-containers registers the `container:` namespace with the
+agent-bridge daemon via a `~/.agent-bridge/providers.d/` manifest (the daemon
+drives the `agent-containers` binstub over a process boundary, not a venv
+import); this step gives you the standalone
 `agent-containers` CLI for fleet/lease management and owns the
 `~/.local/bin/agent-containers` binstub.
 
