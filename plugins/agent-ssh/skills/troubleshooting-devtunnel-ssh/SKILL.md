@@ -21,9 +21,13 @@ ssh -v dt-<host>     # verbose connect
 On the host:
 
 ```powershell
-Get-Process dtssh                                   # is `dtssh host` running?
-Test-NetConnection -ComputerName localhost -Port 2222  # dedicated loopback sshd up?
+# from plugins\agent-ssh (checkout or installed payload)
+pwsh -File .\transports\dtssh\scripts\install-host.ps1 status -Alias <host>
 ```
+
+`status` checks more than process presence: it verifies the dedicated loopback
+`sshd` emits an SSH banner, reports the watchdog, and shows the persisted tunnel
+when the `devtunnel` CLI can resolve it.
 
 ---
 
@@ -35,7 +39,7 @@ Test-NetConnection -ComputerName localhost -Port 2222  # dedicated loopback sshd
 | Login shows device-code flow or fails under Conditional Access | Login ran inline/headless and WAM could not open | Cancel the device-code flow; re-run `dtssh login` from an interactive desktop session. |
 | `ssh dt-<host>` unknown / not in SSH config | Client never ran `dtssh discover`, or the host isn't hosting | Run `dtssh discover`; on the host confirm `dtssh host --persist` (Startup launcher) is running. |
 | Connects to the tunnel but no host answers | Host has 0 connections — the interactive session isn't up (sessions are user-side) | Log on to the host once (RDP/console) so its Startup launcher starts `dtssh host`, then disconnect — the listener persists. |
-| `ssh <alias>` closes pre-banner (`Connection closed by UNKNOWN port 65535`) from **every** client *and* from the host itself, while `dtssh host` is running, `:2222` is listening, and the tunnel shows host connections > 0 | **sshd pre-auth WEDGE** — half-open/idle pre-auth connections piled up past OpenSSH's `MaxStartups` (default 10:30:100), so sshd accepts TCP but drops new handshakes before the banner. dtssh's generated `sshd_config` sets no `MaxStartups`/`LoginGraceTime`. Confirm with the banner test below and a high Established count on :2222. | Restart the host to reap the pileup: `install-host.ps1 stop; install-host.ps1 start` (or stop the `dtssh host` PID + the launcher pwsh, then relaunch). The self-healing launcher (agent-ssh ≥ 0.1.0-dev22) now detects this via a banner probe and auto-restarts within ~`HealthCheckSec × ConsecutiveFailures`. |
+| `ssh <alias>` closes pre-banner (`Connection closed by UNKNOWN port 65535`) from **every** client *and* from the host itself, while `dtssh host` is running, `:2222` is listening, and the tunnel shows host connections > 0 | **sshd pre-auth WEDGE** — half-open/idle pre-auth connections piled up past OpenSSH's `MaxStartups` (default 10:30:100), so sshd accepts TCP but drops new handshakes before the banner. Confirm with `install-host.ps1 status` or the banner test below and a high Established count on :2222. | Restart the host to reap the pileup: `install-host.ps1 stop; install-host.ps1 start` (or stop the `dtssh host` PID + the launcher pwsh, then relaunch). The self-healing launcher detects this via a banner probe and auto-restarts within ~`HealthCheckSec × ConsecutiveFailures`; it also preemptively restarts at a pathological Established-count threshold. |
 | `Permission denied` / not admitted | Client and host are on **different** Entra identities (owner-only tunnel) | Sign both into dtssh with the **same** account (`dtssh login`); verify with `devtunnel user show`. |
 | `ga_init unable to resolve user` in OpenSSH logs | You're hitting a **manual** Windows `sshd` that can't resolve an Entra-only cloud account (`S-1-12-1-*`) | This is exactly what dtssh avoids — use `dtssh host` (its own loopback listener runs as the real user), not a hand-rolled OpenSSH host. |
 | Lands but `psmux.exe` "cannot execute" over SSH | WinGet `Links\*.exe` App-Execution-Alias shims don't run over non-interactive SSH | Invoke the real exe under `…\WinGet\Packages\…` or wrap in `pwsh -Command`. |
@@ -46,10 +50,10 @@ Test-NetConnection -ComputerName localhost -Port 2222  # dedicated loopback sshd
 ## Is the sshd actually *serving*? (banner, not just a listener)
 
 A bare `Test-NetConnection -Port 2222` (or `Get-Process dtssh`) is **not enough**:
-both a dead sshd child (#576) and a pre-auth **wedge** (MaxStartups saturated)
-can leave the port apparently up while remote reach is broken. The listener
-either isn't there, or accepts TCP but never sends its SSH banner. Read the
-banner to tell "serving" from "wedged":
+both a dead sshd child and a pre-auth **wedge** (MaxStartups saturated) can leave
+the port apparently up while remote reach is broken. The listener either isn't
+there, or accepts TCP but never sends its SSH banner. Read the banner to tell
+"serving" from "wedged":
 
 ```powershell
 # Serving  -> prints "SSH-2.0-OpenSSH_for_Windows_..."; wedged -> times out / empty.
@@ -66,12 +70,11 @@ try {
 
 If it reads NOT SERVING (or a high Established count), restart the host —
 `install-host.ps1 stop; install-host.ps1 start` — which reaps the pileup.
-`install-host.ps1 status` now performs this banner check for you. The launcher
+`install-host.ps1 status` performs this banner check for you. The launcher
 also **preemptively reaps** the pileup (restarts) once the Established count on
-:2222 crosses a pathological threshold, and the true fix is upstream — dtssh now
-emits `MaxStartups`/`LoginGraceTime`/`ClientAlive*` in its generated
-`sshd_config` ([bmiddha/devtunnel-ssh#13](https://github.com/bmiddha/devtunnel-ssh/pull/13)),
-so an updated dtssh binary can't accumulate the pileup in the first place.
+:2222 crosses a pathological threshold. Updated dtssh builds that include
+`MaxStartups`/`LoginGraceTime`/`ClientAlive*` in their generated `sshd_config`
+reduce the root cause; the launcher health checks remain the in-box guard.
 
 ---
 
@@ -99,14 +102,16 @@ Test-NetConnection -ComputerName localhost -Port 2222  # loopback sshd listening
 # confirm the Startup-folder launcher shortcut exists and points at the dtssh host launcher
 ```
 
+Prefer `install-host.ps1 status` for the full in-box check; the raw commands
+above are only the individual pieces.
+
 > `Test-NetConnection` only proves the port *accepts TCP* — it stays green on a
 > wedged sshd. Use the **banner check** above to prove sshd is actually serving.
 
 If the host process isn't running, log on interactively (its launcher is
 logon-triggered), or start it manually with `dtssh host --persist`. There is no
 `sshd` service or `authorized_keys` file to check — dtssh owns the listener, the
-key, and the tunnel lifecycle. Note dtssh **regenerates** its
-`%LOCALAPPDATA%\dtssh\host\sshd_config` on every host start with no
-`MaxStartups`/`LoginGraceTime` override, so hand-edits to that file do not
-persist — the durable mitigation for the pre-auth wedge is the launcher's
-banner-probe auto-restart (agent-ssh ≥ 0.1.0-dev22).
+key, and the tunnel lifecycle. Avoid hand-editing
+`%LOCALAPPDATA%\dtssh\host\sshd_config`: dtssh regenerates it on host start, and
+the durable in-box mitigation is the launcher's banner-probe / pre-auth-pressure
+restart logic plus updating dtssh through `install-host.ps1 update`.

@@ -28,9 +28,10 @@ Pure decision logic + a shell probe builder + a defensive parser (mirrors
 
 The caller settles the obligation (`agent-worktrees claims settle <cs-ref>` +
 the lease `--disposition` mirror, see *Wiring* below) only on a *definitive*
-at-rest verdict. Anything the probe cannot determine reads as **not** at-rest, so
-an un-probeable CodeSpace stays an active (blocking) obligation rather than being
-settled blind.
+at-rest verdict. The same probe also publishes the no-SSH
+`codespace-clean` beacon used by pool/recycle UX. Anything the probe cannot
+determine reads as **not** at-rest, so an un-probeable CodeSpace stays an active
+(blocking) obligation rather than being settled blind.
 
 ## The read-only probe (`probe_command` / `parse_probe`)
 
@@ -81,6 +82,16 @@ was corrected.
   --disposition at-rest` (the L2 fencing `token` is read from the local L1 store
   via `lease.lease_token_for`). Best-effort: a no-token / degraded mirror is a
   no-op and never perturbs the disconnect.
+- **Cleanliness beacon:** every disconnect probe publishes a `codespace-clean`
+  verdict (`coordination.publish_cleanliness`) whether clean or dirty, so pool
+  and picker surfaces can reason about off-box safety without re-SSHing.
+  `agent-codespaces verify <name>` is the on-demand version of the same SSH
+  probe; it exits `0` only for a known-clean verdict and `3` for dirty/unknown.
+- **Destructive close-out gate:** `agent-codespaces finalize <name> --delete`
+  refuses deletion unless the `codespace-clean` beacon says the box is
+  definitively off-box safe (or the operator passes `--force`). Plain
+  `finalize <name>` is the preserve path: recover sessions, stop the CodeSpace,
+  and mark it `recovered` for later reuse/prune promotion.
 
 ### Why the lease mirror matters (cross-machine + missed-settle)
 

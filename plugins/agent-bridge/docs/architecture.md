@@ -68,22 +68,30 @@ also have distinct config dirs, so each gets its own single instance.
 
 ## Credential Relay
 
-Agent-bridge starts a credential relay server during its FastAPI
-lifespan in `app.py` by instantiating agent-codespaces'
-`CredentialRelayServer`. The relay binds an **OS-assigned ephemeral** loopback
-port (dotfiles #694) and publishes it (via the daemon's live `relay-port` state)
-so SSH-tunnel clients discover it; it proxies
-requests to the local Git Credential Manager via agent-codespaces'
-credential source integration.
+Agent-bridge owns and hosts the shared credential relay during its FastAPI
+lifespan (`app.py`). It builds a `credential_relay.RelayBuilder` and lets
+optional provider plugins contribute sources/policy through `relay-profile`
+CLI seams (`agent_registry.py` -> `register_credential_sources`). That process
+boundary is the primary path: sibling runtimes keep ownership of their own
+binstubs and venvs, and a sibling fix reaches the bridge without vendoring the
+sibling into the bridge venv. A legacy in-process `register_relay` import remains
+only as a degrade-safe fallback.
+
+If no provider contributes any sources, the relay is disabled and the bridge
+still starts. If sources exist, the relay binds the provider-requested port
+(`0` means an OS-assigned loopback port) or the relay library's default fallback,
+then publishes the live port through `relay_state` so transports discover the
+actual endpoint.
 
 For SSH-spawned agents, the transport layer reads per-machine
 `auth.hooks` from `machines.yaml` and converts them into SSH reverse port
 forwards plus environment variable exports. This makes the local relay
 available inside remote agent sessions without separate relay setup.
 
-The relay speaks the git credential protocol over TCP and supports the
-standard `get`, `store`, and `erase` actions plus `get-access-token`,
-which returns a raw ADO PAT for callers that need an access token.
+The relay speaks the git credential protocol over TCP and supports the standard
+`get`/`fill`, `store`/`approve`, and `erase`/`reject` shapes plus token actions
+such as `get-github-token`, `get-azure-token`, and `get-access-token`; provider
+profiles decide which sources and token gates are enabled.
 
 **Single owner of the credential relay.** Only the **primary** daemon hosts the relay. The
 Windows elevated sub-daemon sets `enable_credential_relay: false` in its seeded
@@ -119,7 +127,8 @@ cursor** when `after` is omitted and `caller_id` is supplied; pass an explicit
 /cursor` acks (confirmed delivery), never from server-side production -- so an
 ungraceful client death never skips output. `/events/range` is the only way to
 re-read already-consumed content and never moves the cursor. See
-[Streaming & the delivery cursor](#) in the README for the consumer model.
+[Streaming & the delivery cursor](../README.md#streaming--the-delivery-cursor)
+in the README for the consumer model.
 
 ### Health
 
@@ -133,7 +142,7 @@ GET    /health                           # Service health (no auth); reports {st
 POST   /api/v1/drain                     # Open the drain gate; wait for busy sessions to settle
 POST   /api/v1/undrain                   # Release the drain gate (cutover rollback)
 POST   /api/v1/shutdown                  # Clean daemon shutdown (retires its own routing-table entry)
-POST   /api/v1/relay/adopt               # Bind the credential relay (ephemeral) on this daemon
+POST   /api/v1/relay/adopt               # Bind/adopt the provider-configured credential relay on this daemon
 POST   /api/v1/gc                        # Prune aged terminal/disconnected sessions
 ```
 
@@ -180,8 +189,10 @@ downstream agent.
 
 | Action | Description |
 |--------|-------------|
-| `install` | Full deploy: venv, package, binstub, service, manifest |
-| `update` | **Drain-then-swap** by default (drain in-flight work, then reinstall + restart); opt-in **zero-downtime cutover** via `AGENT_BRIDGE_ZERO_DOWNTIME=1`. See [Zero-Downtime Redeploy](#zero-downtime-redeploy). |
+| `stamp` | Fast first-install path: snapshot the payload and write the self-provisioning binstub; defers venv/service work to first use. |
+| `provision` | First-use path invoked by the binstub when no runtime slot exists; equivalent to a full install from the stamped snapshot. |
+| `install` | Full deploy: versioned venv slot, package/libs, binstub, service, manifest |
+| `update` | Build/verify a new versioned slot, activate it, then perform installer-driven graceful cutover when a daemon is live; falls back to drain/stop/start on failure. |
 | `start` | Start the service (`--passive` for a cutover spare -- see below) |
 | `stop` | Stop the service |
 | `status` | Show service status |
@@ -196,40 +207,35 @@ The installer writes `~/.agent-bridge/deploy-manifest.json` tracking:
 
 ### Restart Behavior and What Survives
 
-The daemon process model sets the floor for what a redeploy can preserve. **Each
-session owns a live `copilot --acp` subprocess connected by stdin/stdout pipes to
-the daemon.** The child leads its own process group, but the *pipes* are owned by
-the daemon -- when the daemon exits the pipe breaks and the child dies. A live
-pipe-connected subprocess cannot be serialized or handed to a successor process,
-so a daemon exit inherently tears down every live child. Two things mitigate
-this:
+The current process model uses a **Session Host** for owned ACP sessions. The
+Session Host is the stable process that owns the `copilot --acp` child and its
+stdio pipes; the agent-bridge daemon is a frontend that attaches to the host over
+a reattachable loopback protocol (`session_host/`). On Windows the host breaks
+away from the daemon's job; on POSIX it runs in its own session, so a daemon
+restart does not inherently close the child's pipes.
 
 - **Idle / stopped sessions survive transparently.** Session metadata, turns,
-  and events are persisted to SQLite, and on startup the daemon `_rehydrate()`s
-  them: formerly-RUNNING sessions are marked STOPPED (resumable) and **lazily
-  reattach** to their persisted ACP conversation via `load_session()` on next
-  access. No work is lost for a parked session.
-- **Active turns are drained, not killed (default path).** A plain `update`
-  now **drains first** (see below): it opens the drain gate and waits for
-  in-flight turns and active background sub-agents to settle before stopping the
-  daemon, so an actively-streaming turn is no longer hard-killed up to the drain
-  timeout. A *hard* kill (crash, `kill`, drain timeout without enough grace)
-  still marks an in-flight turn `interrupted` -- history up to that point
-  survives, the in-flight turn does not.
-
-The remaining gap a plain drain-then-swap leaves is a brief **API-unavailable
-window** while the old daemon stops and the new one binds the port. The
-zero-downtime cutover path (opt-in) removes even that.
+  events, and host connection data are persisted to SQLite/host state. On startup
+  the daemon reattaches to compatible surviving Session Hosts; otherwise it can
+  lazily resume from persisted Copilot state.
+- **Active turns are preserved across frontend restarts when the Session Host
+  survives.** A streaming `send`/`read`/`wait` reconnects through the routing
+  table and resumes from the caller's acked delivery cursor. If a host is
+  incompatible with the newly deployed frontend, version-mux leaves a live child
+  stranded until it reaches its own stop rather than killing it mid-turn.
+- **Drain is still the safe cutover boundary.** The installer-driven cutover
+  opens the drain gate on the old daemon so no new work enters it, then retires
+  it once busy sessions have settled (or force proceeds when explicitly told to).
 
 ## Zero-Downtime Redeploy
 
 A redeploy no longer has to hard-kill live work or strand clients on a dead
 port. Three cooperating pieces make this work; all are **OS-agnostic and
-app-level** (the effort's deliberate conclusion: systemd and Windows Scheduled
-Tasks share almost no lifecycle surface, so the drain/handoff logic must not
-live in the service manager). Design and validation are tracked in the
-test-chamber effort `agent-bridge-zero-downtime-deploy` (umbrella issue
-[test-chamber #1236](https://home.thomasmichon.com/gitea/example-user/test-chamber/issues/1236)).
+app-level** (systemd and Windows Scheduled Tasks share almost no lifecycle
+surface, so the drain/handoff logic does not live in the service manager). This
+is the plugin's implementation of the repo-level
+[`graceful-daemon-cutover`](../../../docs/patterns/graceful-daemon-cutover.md)
+pattern.
 
 ### 1. Routing table (`<config_dir>/active.json`)
 
@@ -271,7 +277,7 @@ releases the gate (used by cutover rollback).
 permitted while draining -- teardown is exactly the operation the drain waits
 for, so gating it would self-deadlock a redeploy (the operator could not clear
 the very sessions blocking the drain). The gate blocks only *new* work
-(create/turn). (test-chamber #1755.)
+(create/turn).
 
 **Drain observability + bounded lifetime.** Opening and releasing the gate are
 logged with a `source`/`reason`, and `/health` exposes a `drain` block (`since`,
@@ -281,12 +287,13 @@ a stuck drain is visible to monitoring without grepping logs. A drain has a
 **auto-releases** it after `SessionManager.DRAIN_AUTO_RELEASE_S` (default 900s)
 if no cutover ever retires the daemon -- so an aborted cutover (or a diagnosis
 session that is itself 503'd by the gate it is investigating) self-heals instead
-of returning 503 forever. (test-chamber #1757.)
+of returning 503 forever.
 
-### 3. Active/passive cutover (`agent-bridge deploy`)
+### 3. Active/passive cutover (installer-driven `agent-bridge deploy`)
 
-`agent-bridge deploy [--drain-timeout SECONDS] [--force]` runs a reversible
-cutover (`zdd.cutover.CutoverOrchestrator`):
+`agent-bridge deploy [--drain-timeout SECONDS] [--force]` is an internal seam
+the installer invokes during `update`/activation when a live daemon exists. It
+runs a reversible cutover (`zdd.cutover.CutoverOrchestrator`):
 
 1. pick a free port and spawn the new daemon `--passive` (no self-route, no
    relay);
@@ -316,32 +323,29 @@ to the cutover that drained it. `agent-bridge deploy` heals such a stale
 breadcrumb on its next run (undraining the stranded survivor); `agent-bridge
 deploy --recover` runs *only* that heal and exits. Combined with the drain
 watchdog (#1757), a stranded survivor self-heals even if no deploy is re-run.
-(test-chamber #1756.)
 
 ### Installer wiring (both platforms)
 
 The installer `update` path on **both** Linux/WSL (`install.sh`) and Windows
-(`install.ps1`) chooses a strategy:
+(`install.ps1`) now uses graceful cutover by default whenever a live daemon is
+running and the new versioned slot differs from the active slot:
 
-- **Default -- drain-then-swap:** drain in-flight work for a grace window
-  (`AGENT_BRIDGE_DRAIN_TIMEOUT`, default 120s), then stop / reinstall / start.
-  No active turn is hard-killed up to the drain timeout; a brief
-  API-unavailable window remains.
-- **Opt-in -- full cutover** (`AGENT_BRIDGE_ZERO_DOWNTIME=1`): leave the old
-  daemon running, reinstall the venv, then `agent-bridge deploy` stands the new
-  daemon up beside it and retires the old one -- **no** API-unavailable window
-  and **no** hard-killed turns. **Experimental:** the survivor currently runs
-  outside the service manager until service-manager reconciliation lands, so
-  validate before relying on it; it falls back to stop/start on any failure.
+- Build and verify the new slot while the old daemon keeps serving.
+- Atomically activate the new slot (`current-version` / stable `venv` link).
+- Invoke the internal `agent-bridge deploy` seam to start the new daemon
+  passive, flip the routing table, drain the old daemon, and retire it.
+- If cutover cannot run or fails, fall back to drain/stop/start. The drain grace
+  is controlled by `AGENT_BRIDGE_DRAIN_TIMEOUT` (120s default on the classic
+  path; 300s default for the deploy seam).
 
-**Redeploying the daemon that hosts your own driving session — run the installer
-detached.** When the update is invoked *from a Copilot session that is itself
-hosted by this bridge* (common: an agent working in a bridge-managed worktree
-redeploys the bridge), the install script is a **child of that session**. Its
-drain-then-swap stops the daemon mid-run, which tears down the session — and
-takes the still-running install script with it, aborting the update with nothing
-landed (no new version, no partial venv). Run the installer **detached** so the
-cutover cannot sever it, and read progress from a logfile:
+`AGENT_BRIDGE_ZERO_DOWNTIME` is still accepted by installers for compatibility
+but no longer enables a separate mode.
+
+**Redeploying the daemon that hosts your own driving session — prefer a detached
+installer.** A Session Host lets the Copilot child survive a frontend restart,
+but the installer is still changing the service that carries its own control
+path and may fall back to classic drain/stop/start. For manual updates from a
+bridge-hosted agent, run the installer detached and read progress from a logfile:
 
 ```bash
 setsid bash -c 'bash plugins/agent-bridge/scripts/install.sh update \
@@ -351,10 +355,10 @@ setsid bash -c 'bash plugins/agent-bridge/scripts/install.sh update \
 # (Session-Host keeps the child alive) and the manifest shows the new version.
 ```
 
-Sessions themselves survive the restart (the session host keeps the `copilot`
+Sessions themselves survive the restart (the Session Host keeps the `copilot`
 child alive across the daemon swap — see
 [Restart Behavior](#restart-behavior-and-what-survives)); the detach only
-protects the *installer* from being killed by the very drain it triggers.
+protects the *installer* from being coupled to the very service it is updating.
 
 **Verifying a redeploy: the manifest version is not proof the daemon runs it.**
 The deploy manifest (`~/.agent-bridge/deploy-manifest.json`) and the versioned
@@ -369,18 +373,15 @@ not just that the manifest names the new version. If the running process predate
 the deploy, restart it (`install.sh stop`/`start`, or the platform service verb)
 so it re-execs the current venv slot.
 
-### Still future: seamless mid-stream migration
+### Session Host migration boundary
 
-Cutover **drains** in-flight turns (waits for them to finish on the old daemon)
-rather than *migrating* a live, actively-streaming turn to the new daemon --
-because a live pipe-connected `copilot --acp` child still cannot be handed to a
-successor process (see [Restart Behavior](#restart-behavior-and-what-survives)).
-Truly seamless mid-stream cutover would require splitting the daemon into a
-stable **per-session supervisor** that owns the child over an **AF_UNIX socket**
-and a **restartable frontend** that adopts supervisors on restart (and a rework
-of the Windows kill-on-job-close so supervisors survive frontend exit). That
-supervisor/broker split is **not implemented** and remains tracked in effort
-[#1236](https://home.thomasmichon.com/gitea/example-user/test-chamber/issues/1236).
+The old "pipe-owned-by-daemon" model has been replaced by Session Host: the
+host owns the child and a reattachable frame stream, while the daemon frontend
+can restart and reattach. That gives mid-turn survival for compatible host
+protocol versions. The remaining boundary is **wire compatibility**: if a future
+frontend cannot speak a surviving host's protocol, version-mux leaves that host
+running until its child stops (or until an opt-in stale-host reap bound fires)
+rather than killing the child mid-turn.
 
 ## Persistence
 
@@ -392,12 +393,16 @@ supervisor/broker split is **not implemented** and remains tracked in effort
   absent until a daemon publishes itself, atomically rewritten on each cutover.
 - **Logs:** Structured logging to stderr (captured by service manager)
 
-## Development Phases
+## Implemented Surfaces
 
-- **Phase 1** (complete): Service scaffold, local sessions, SQLite, SSE
-- **Phase 2** (complete): SSH transport, machine topology, connection pooling
-- **Phase 3** (in progress): CLI tools, Copilot CLI integration, namespace resolvers
-- **Phase 4**: Consumer migration (upstream agents, agent-worktrees)
+- Persistent FastAPI daemon with SQLite-backed sessions/events and SSE delivery
+  cursors.
+- Session Host frontend/child split for restart-survivable ACP sessions.
+- Local, SSH, elevated, and provider-backed namespace dispatch.
+- Live interactive session registry, messaging, representation, and progress
+  beats.
+- Installer-managed versioned runtime, self-provisioning binstub, drain, and
+  graceful cutover.
 
 ## Namespace Resolvers
 
@@ -405,6 +410,15 @@ Agent-bridge supports **namespace resolvers** for prefixed agent names
 (e.g. `codespace:my-cs`, `admin:local-agent`). When a colon appears in
 an agent name, the prefix is looked up in the namespace registry and
 resolution is delegated to the matching resolver.
+
+The core bridge does not require or vendor provider packages. External provider
+plugins self-register by writing JSON manifests under
+`~/.agent-bridge/providers.d/`; the daemon scans that directory at startup and
+again on demand (throttled) and drives each provider's CLI over a process
+boundary (`namespace-list`, `namespace-resolve`, `namespace-ensure-ready`,
+`namespace-target-repo`). Missing or malformed provider manifests are skipped
+with a warning, so a bad sibling never breaks daemon startup. The built-in
+`admin:` resolver is registered in-process.
 
 ### Architecture
 
@@ -416,8 +430,7 @@ agent name: "codespace:my-cs"
               |
               v
     NamespaceResolver (ABC)
-    +-- CodespaceResolver    (agent-codespaces package)
-    +-- ContainerResolver    (agent-containers package)
+    +-- CliNamespaceResolver (provider manifest: codespace/container/...)
     +-- AdminResolver        (built-in)
 ```
 
@@ -425,8 +438,8 @@ agent name: "codespace:my-cs"
 
 | Prefix | Resolver | Source | Description |
 |--------|----------|--------|-------------|
-| `codespace:` | `CodespaceResolver` | `agent-codespaces` package | Queries `gh codespace list`, builds SpawnTargets via `agent-codespaces ssh --stdio` |
-| `container:` | `ContainerResolver` | `agent-containers` package | Queries `docker ps`, builds SpawnTargets via `docker exec -i` into local dev containers (GH_TOKEN forwarded by name) |
+| `codespace:` | `CliNamespaceResolver` | Provider manifest from `agent-codespaces` | Delegates list/resolve/ready checks to the `agent-codespaces` CLI. |
+| `container:` | `CliNamespaceResolver` | Provider manifest from `agent-containers` | Delegates list/resolve/ready checks to the `agent-containers` CLI. |
 | `admin:` | `AdminResolver` | Built-in (`admin_resolver.py`) | Wraps local agents in elevation (gsudo / sudo -A) |
 
 ### NamespaceResolver Interface
@@ -435,16 +448,23 @@ agent name: "codespace:my-cs"
 class NamespaceResolver(ABC):
     @property
     def prefix(self) -> str: ...
-    async def resolve(self, name: str) -> SpawnTarget: ...
+    async def resolve(
+        self, name: str, *,
+        extra_plugins: list[PluginRef] = (),
+        repo: str | None = None,
+        repo_remote: str | None = None,
+    ) -> SpawnTarget: ...
     async def list(self) -> list[NamespaceAgentInfo]: ...
+    @property
+    def bare_addressable(self) -> bool: ...
     async def ensure_ready(self, name: str) -> None: ...  # optional
+    async def target_repo(self, name: str) -> str | None: ...  # optional
 ```
 
 ### Registration
 
-Resolvers are auto-discovered and registered at startup by
-`_register_namespace_resolvers()` in `agent_registry.py`. Import
-failures are gracefully skipped (resolvers are optional extensions).
-
-The installer installs sibling plugin packages (e.g. `agent-codespaces`)
-into the agent-bridge venv to make their resolvers importable.
+Resolvers are auto-discovered and registered by `_register_namespace_resolvers()`
+and `AgentResolver.refresh_provider_resolvers()` in `agent_registry.py`. Provider
+manifests are additive and idempotent; a provider dropped after daemon start is
+picked up on the next scan without a restart. The installer deliberately leaves
+sibling plugin packages and binstubs to their own installers.

@@ -1,20 +1,55 @@
 # agent-ssh
 
-The **connectivity layer** of the agent fabric: it provisions and keeps the SSH
-mesh real, and owns the **transport-provider contract** every transport plugs
-into. It realizes the `visions/plugins/agent-ssh/` connectivity-layer intent.
+The **SSH connectivity layer** for the agent fabric. It provides a standalone
+`agent-ssh` CLI that renders machine-name SSH profiles, verifies reachability,
+and defines the transport-provider contract used by direct and tunnel
+transports.
+
+## What you can do with only this plugin
+
+`agent-ssh` does not require a harness, daemon, or sibling plugin. From a
+registry plus a transport `module.yaml` it writes one managed SSH fragment:
+
+```powershell
+agent-ssh emit-profile registry.yaml --module transports\direct\module.yaml
+agent-ssh verify --timeout 8 my-machine
+agent-ssh explore my-machine --json
+```
+
+The CLI manages only SSH aliases. Once `ssh <name>` works, sibling plugins such
+as agent-bridge or agent-codespaces can use that OpenSSH surface, but agent-ssh
+does not import their runtimes or require them to be installed.
+
+## Minimal setup
+
+When the plugin is enabled, its skills and hook are available immediately. The
+runtime can be stamped cheaply, then self-provisions on first `agent-ssh` use:
+
+```powershell
+# Windows, from this plugin directory (checkout or installed payload)
+pwsh -File .\scripts\install.ps1 stamp
+
+# POSIX / WSL
+bash ./scripts/install.sh stamp
+```
+
+Use `install` instead of `stamp` to build the runtime eagerly. The installer
+deploys a binstub under the user's local bin directory and a version-gated
+session-start reconcile hook under `~/.agent-ssh/bin`; the first self-provisioning
+call prints a `::agent-provisioning::` line and fails loud if the runtime cannot
+be built.
 
 ## The split (core + in-box vs. external transports)
 
 | Piece | Home | Owns |
 |---|---|---|
-| **agent-ssh core + contract** (this plugin) | copilot-extensions (public) | SSH-profile creation/validation, `~/.ssh/config.d` coexistence, `verify`, and the `module.yaml`/registry-record contract schemas. |
-| **In-box transports** (`transports/<module>/`) | this plugin (public) | **Self-contained** transports with **no non-public provider/multi-machine system config** — today `direct` (plain SSH), `dtssh` (real-user reach over public Microsoft Dev Tunnels; operator identity injected at deploy), and `wsl` (local-to-WSL reach via the `wsl.exe` interop stdio pipe — GSA-safe, needs no ProxyJump/localhostForwarding). |
+| **agent-ssh core + contract** (this plugin) | copilot-extensions (public) | SSH-profile creation/validation, `~/.ssh/config.d` coexistence, `verify`, `explore`, and the `module.yaml`/registry-record contract schemas. |
+| **In-box transports** (`transports/<module>/`) | this plugin (public) | **Self-contained** transports with **no non-public provider/multi-machine system config** — today `direct` (plain SSH), `dtssh` (real-user reach over public Microsoft Dev Tunnels; operator identity injected at deploy), and `wsl` (local-to-WSL reach via the `wsl.exe` interop stdio pipe — needs no ProxyJump/localhostForwarding). |
 | **External provider transports** | provider-owned marketplaces | Transports needing **multi-machine system/provider config or credentials** — e.g. the Cloudflare transport (Access org / SSO / multi-machine system hostnames), which ships as its own plugin and registers against this contract. |
 
 **Where a transport lives is decided by one axis: does it carry non-public
 provider/multi-machine system config?** If not, it ships **in-box** under `transports/`
-(direct, dtssh). If it does, it stays an **external plugin** in its audience's
+(direct, dtssh, wsl). If it does, it stays an **external plugin** in its audience's
 marketplace and keeps its hostnames, identifiers, and secrets out of this public
 core (cloudflare). Either way it plugs in through the same `module.yaml` contract.
 
@@ -47,9 +82,19 @@ plugins/agent-ssh/
     direct/module.yaml              # plain SSH (no recipe, no installer)
     dtssh/                          # module.yaml + scripts/ (install-host/client + launcher)
                                     #   + deploy/emit-registry + schema/ + examples/
+    wsl/                            # local WSL interop transport + deploy/emit-registry
   scripts/{install,init,emit-profile,verify}.{sh,ps1}
   docs/transport-provider-contract.md
 ```
+
+## Usage path
+
+- **Core CLI / contract:** `skills/agent-ssh/SKILL.md` and
+  `docs/transport-provider-contract.md`.
+- **dtssh host/client setup:** `skills/setting-up-ssh-host/SKILL.md` and
+  `skills/setting-up-ssh-client/SKILL.md`.
+- **Key handling:** `skills/sharing-ssh-keys/SKILL.md`.
+- **Failures:** start with `skills/troubleshooting-devtunnel-ssh/SKILL.md`.
 
 ## Writing a transport
 

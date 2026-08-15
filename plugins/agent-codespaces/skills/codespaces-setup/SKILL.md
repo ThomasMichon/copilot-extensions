@@ -47,8 +47,10 @@ app**, or a **cloud agent**. Before any agent-codespaces command, do this
    install. On a governed box, provide the internal index
    (`UV_DEFAULT_INDEX=<pip index-url>`) or install `uv`, then retry.
 
-This is agent-codespaces' own runtime readiness — distinct from the external
-**Prerequisites** below (`gh`, `ssh-manager`), which it cannot self-install.
+This is agent-codespaces' own runtime readiness. Its vendored Python libraries
+(`ssh-manager`, `credential-relay`, `config-migrate`, `plugin-resolve`) are
+installed into that runtime automatically; the external prerequisites below are
+only host tools/sibling services it cannot self-install.
 
 ## Most repos need no config -- start here
 
@@ -58,14 +60,16 @@ agent-codespaces works **out of the box** on standard GitHub CodeSpaces by
 - machine `largePremiumLinux`, location `EastUs`
 - in-CodeSpace checkout at `/workspaces/<repo-basename>`
 - credential relay serving `github.com` **and** Azure DevOps (through the host
-  Git Credential Manager -- always on, no config)
+  Git Credential Manager) when the optional agent-bridge relay is running;
+  relay-free lifecycle/diagnostic commands still work without it
 
 So for a repo whose CodeSpaces match convention, there is **nothing to
 configure**:
 
 ```bash
 agent-codespaces create <your-org>/<standard-repo>   # just works
-agent-bridge send codespace:<name> "<task>"          # dispatch
+agent-codespaces doctor                              # verify gh auth/scope
+agent-bridge send codespace:<name> "<task>"          # if agent-bridge is installed
 ```
 
 Add config **only** when a repo deviates from convention. The rest of this skill
@@ -79,10 +83,12 @@ is about that supplementary config.
   gh auth refresh -h github.com -s codespace   # default login scopes omit this
   ```
   Without the `codespace` scope, CodeSpace operations fail with
-  `HTTP 403 ... needs the "codespace" scope`. `agent-codespaces config init`
-  runs a preflight that flags this with the exact fix.
-- **ssh-manager** -- installed via the copilot-extensions plugin.
-- **agent-bridge** (optional) -- only needed for bridge provider features.
+  `HTTP 403 ... needs the "codespace" scope`. `agent-codespaces doctor` checks
+  the ambient account and any mapped accounts and prints the exact remedy.
+- **agent-bridge** (optional sibling) -- needed for `codespace:<name>`
+  dispatch and for the managed host credential relay. The agent-codespaces
+  CLI/binstub itself remains standalone; lifecycle commands and relay-free
+  diagnostic SSH (`--no-relay`) still work without a bridge daemon.
 
 ## When you DO need config -- `.agent-codespaces/config.yaml`
 
@@ -366,12 +372,20 @@ agent-codespaces config adopt       # Register a repo's config for the daemon
 agent-codespaces config migrate     # Relocate legacy codespaces.yaml -> .agent-codespaces/config.yaml
 agent-codespaces config show        # Show resolved config
 agent-codespaces config validate    # Validate config
+agent-codespaces doctor             # Check gh auth + codespace scope
 ```
 
 ## Troubleshooting
 
 - **"No CodeSpace config found"** -- expected for a convention repo; only add a
   file when you need supplementary config.
+- **`gh` missing or auth/scope wrong** -- run `agent-codespaces doctor`; it
+  reports missing `gh`, unauthenticated accounts, or a missing `codespace` scope
+  with the exact `gh auth ...` command to run.
+- **No agent-bridge** -- setup is still valid. You lose `codespace:<name>`
+  dispatch and the managed credential relay, but `agent-codespaces list/create`
+  and `agent-codespaces ssh --no-relay --remote-cmd "echo ok"` still diagnose
+  CodeSpace reachability.
 - **Headless `create` prompts/hangs** -- the repo ships >1 devcontainer; pin
   `devcontainer_path` (per-repo or per-create).
 - **Agent lands in the wrong folder on a split repo** -- set `workspace_repo`.

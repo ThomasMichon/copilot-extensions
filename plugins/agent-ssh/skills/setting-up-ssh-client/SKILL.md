@@ -8,16 +8,20 @@ description: Configure outbound SSH over Microsoft Dev Tunnels as the real inter
 Configure a client machine to reach a host whose interactive session is published
 through **[dtssh](https://github.com/bmiddha/devtunnel-ssh)** (see
 `setting-up-ssh-host`). dtssh provisions and pins keys for you, so there is **no
-per-machine keypair to generate or share, no ProxyCommand, and no host-key
-prompt** — three commands and you're in, landing as the **real Entra user**.
+per-machine keypair to generate or share**. The in-box `dtssh` transport can then
+translate live dtssh state into an agent-ssh `config.d` fragment.
 
 ## 1. Install dtssh
 
 ```powershell
-irm https://raw.githubusercontent.com/bmiddha/devtunnel-ssh/main/scripts/install-release.ps1 | iex
+# from plugins\agent-ssh (checkout or installed payload)
+pwsh -File .\transports\dtssh\scripts\install-client.ps1
 ```
 
-dtssh auto-downloads the `devtunnel` CLI on first use.
+That script installs dtssh if missing, adds its real binary directory to the
+User PATH, signs in unless `-SkipLogin` is supplied, runs discovery unless
+`-SkipDiscover` is supplied, and finishes with `dtssh list`. On POSIX / WSL, use
+`bash ./transports/dtssh/scripts/install-client.sh`.
 
 ## 2. Sign in with Entra — the SAME account as the host
 
@@ -45,7 +49,28 @@ ssh dt-<host>         # lands as the real Entra user
 ProxyCommand) automatically. Re-run it whenever a new host comes online or a host
 is re-provisioned.
 
-## 4. Verify
+## 4. Adopt the same reach into agent-ssh (optional, config.d-managed)
+
+If this client should use agent-ssh's coexistence-safe profile layout, emit a
+normalized dtssh registry from the live dtssh state, then render the fragment:
+
+```powershell
+pwsh -File .\transports\dtssh\deploy\emit-registry.ps1 `
+  -MachinesYaml <path-to-machines.yaml> `
+  -OutFile .\dtssh-registry.yaml
+
+agent-ssh emit-profile .\dtssh-registry.yaml --module .\transports\dtssh\module.yaml
+agent-ssh verify dt-<host>
+```
+
+`emit-registry` runs `dtssh discover -q` and `dtssh list`, maps configured
+aliases to their current tunnel ids, and by default strips the inline
+`# >>> dtssh ... <<<` blocks that `dtssh discover` wrote to `~/.ssh/config`
+because agent-ssh now owns those hosts through
+`~/.ssh/config.d/50-agent-ssh-dtssh.conf`. Use `-KeepInline` only when you
+explicitly want both copies.
+
+## 5. Verify
 
 ```powershell
 ssh dt-<host> "whoami && hostname"
