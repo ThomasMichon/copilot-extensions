@@ -73,15 +73,12 @@ If it exists, skip cloning.
 ### 4. Validate prerequisites inside WSL
 
 ```powershell
-wsl.exe -d <distro> -- bash -c 'command -v git && command -v uv'
+wsl.exe -d <distro> -- bash -c 'command -v git && command -v bash'
 ```
 
 If `git` is missing, instruct the user to install it.
-If `uv` is missing, install it:
-
-```powershell
-wsl.exe -d <distro> -- bash -c 'curl -LsSf https://astral.sh/uv/install.sh | sh'
-```
+`uv` does not need a separate prerequisite step: `install.sh` bootstraps it if
+missing.
 
 ### 5. Clone the repo
 
@@ -115,19 +112,15 @@ layout.  If the repo uses a different layout, adjust accordingly.
 After successful installation in WSL, update the Windows projects
 registry to reflect WSL adoption:
 
-```python
-from agent_worktrees import installer
-installer.register_project(
-    project,
-    repo_dir=windows_repo_dir,
-    wsl_state="adopted",
-    wsl_distro="Ubuntu",
-    wsl_path="~/src/{project}",
-)
+```powershell
+{project} register-project-entry {project} `
+  --repo-dir <windows-repo-dir> `
+  --wsl-state adopted `
+  --wsl-distro <distro> `
+  --wsl-path "~/src/{project}"
 ```
 
-Or equivalently, re-run `install.ps1 update` to regenerate terminal
-profiles.
+Then re-run the Windows-side update/repair path to regenerate terminal profiles.
 
 ### 8. Refresh terminal profiles
 

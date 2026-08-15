@@ -168,7 +168,9 @@ am_dir=$(find ~/.copilot/installed-plugins -name plugin.json -exec grep -l agent
 
 ## 1. Agent-Worktrees Init
 
-Install the worktree runtime. Run **once per machine**.
+Install the worktree runtime. Run **once per machine**. This is a standalone
+runtime; the optional mesh plugins below are not required for local worktree
+isolation.
 
 ```powershell
 # Windows
@@ -184,9 +186,11 @@ bash "$aw_dir/scripts/init.sh"
 
 ```
 ~/.agent-worktrees/
-  .venv/                    Python venv with pyyaml
-  lib/agent_worktrees/      Python package (copied from plugin)
-  bin/                      launch-session, bootstrap-check
+  versions/<version>/       immutable Python venv slot with agent_worktrees
+  current-version           marker naming the active slot
+  payload-dir               installed payload pointer used for self-provisioning
+  bin/                      launchers, hook shims, guard scripts
+  pivots/                   cross-plugin picker pivot manifests
   deploy-manifest.json
 
 ~/.local/bin/
@@ -209,10 +213,13 @@ $env:PATH = "$env:USERPROFILE\.local\bin;$env:PATH"   # Windows
 export PATH="$HOME/.local/bin:$PATH"                   # Linux
 ```
 
-### Update
+### Update / self-provisioning
 
-The plugin contributes a `sessionStart` hook that auto-detects stale
-runtimes and re-deploys automatically. Manual updates: re-run init.
+The global `agent-worktrees` binstub resolves the runtime through the
+`current-version` marker (falling back to the newest installed slot). If no slot
+exists but the payload is discoverable, it runs the lean `install.{ps1,sh}
+provision` path on first use. For normal updates, run `agent-worktrees update`:
+it refreshes payloads, reconciles runtimes, and fast-forwards managed anchors.
 
 ---
 
@@ -223,12 +230,14 @@ Register a repo for worktree-managed sessions. Run **from inside the repo**.
 ### Flow
 
 1. **Detect repo** -- `git rev-parse --show-toplevel`, identify default branch
-2. **Sweep for machines.yaml** -- check `{repo}/machines.yaml`,
-   `{repo}/config/machines.yaml`, `{repo}/.github/machines.yaml`.
+2. **Resolve machines.yaml if present** -- prefer
+   `{repo}/.agent-worktrees/machines.yaml`, falling back to legacy
+   `{repo}/machines.yaml`.
    If found, ask user which machine this is. If not, auto-detect from hostname.
 3. **Sweep for services** -- look for `services/*/service.yaml`
 4. **Detect launch command** -- check for `tools/setup/setup.ps1` or `.sh`
-5. **Choose worktree root** -- default: `{parent}/.worktrees/{repo-name}/`
+5. **Choose worktree root** -- default: `<anchor>.worktrees` (a sibling folder,
+   matching the Copilot CLI `/worktree` layout)
 6. **Generate config** -- write `~/.{repo-name}/config.yaml`
 7. **Create project binstub** -- `~/.local/bin/{repo-name}[.cmd]`
 
@@ -236,34 +245,21 @@ Register a repo for worktree-managed sessions. Run **from inside the repo**.
 
 The binstub names its project via `--project` (context otherwise resolves from
 CWD, git-like) and routes through the Python CLI, which dispatches subcommands
-and launches sessions. It falls back to `launch-session` only when the venv is
+and launches sessions. It falls back to `launch-session` only when the runtime is
 missing (recovery), passing the project via `WORKTREE_PROJECT` on that degraded
 path.
 
-**Windows (`{repo-name}.cmd`):**
-```bat
-@echo off
-set "PYTHONUTF8=1"
-set "_PY=%USERPROFILE%\.agent-worktrees\.venv\Scripts\python.exe"
-if not exist "%_PY%" goto :_aw_fallback
-"%_PY%" -m agent_worktrees --project {repo-name} %*
-exit /b %ERRORLEVEL%
-:_aw_fallback
-set "WORKTREE_PROJECT={repo-name}"
-"%USERPROFILE%\.agent-worktrees\bin\launch-session.cmd" %*
+The generated project binstub routes to the versioned runtime slot named by
+`~/.agent-worktrees/current-version` and invokes:
+
+```text
+python -m agent_worktrees --project {repo-name} ...
 ```
 
-**Linux (`{repo-name}`):**
-```bash
-#!/usr/bin/env bash
-export PYTHONUTF8=1
-_AW="$HOME/.agent-worktrees/.venv/bin/agent-worktrees"
-if [[ -x "$_AW" ]]; then
-    exec "$_AW" --project {repo-name} "$@"
-fi
-export WORKTREE_PROJECT="{repo-name}"
-exec "$HOME/.agent-worktrees/bin/launch-session.sh" "$@"
-```
+On Windows both `{repo}.ps1` and `{repo}.cmd` are emitted; on POSIX a bare
+`{repo}` shell stub is emitted. The fallback path is only for a missing runtime:
+it sets `WORKTREE_PROJECT` and hands off to `launch-session.{cmd,sh}` so the
+launcher can still recover.
 
 ### WSL Support (Windows)
 
@@ -281,9 +277,9 @@ The next install/update generates the `(WSL)` terminal profile.
 
 ### Terminal Profiles (Optional)
 
-If the repo has terminal templates (`terminal/{repo-name}.json`),
-offer to deploy Windows Terminal fragments to
-`%LOCALAPPDATA%\Microsoft\Windows Terminal\Fragments\`.
+Windows Terminal profiles are generated from the project registry, machine
+rosters, and `terminal_profiles` selection in config. They are written to
+`%LOCALAPPDATA%\Microsoft\Windows Terminal\Fragments\AgentWorktrees\`.
 
 ### Verify
 
@@ -403,7 +399,7 @@ agent-bridge config validate
 
 | File | Locations checked |
 |------|-------------------|
-| machines.yaml | `{repo}/machines.yaml`, `{repo}/config/machines.yaml`, `{repo}/.github/machines.yaml` |
+| machines.yaml | canonical `{repo}/.agent-worktrees/machines.yaml`, with legacy `{repo}/machines.yaml` fallback where supported |
 
 > `acp-agents.json` is **retired** — the roster is derived from `machines.yaml`
 > (+ `.agent-worktrees/related.yaml`). An explicit `--agents-config` is still
