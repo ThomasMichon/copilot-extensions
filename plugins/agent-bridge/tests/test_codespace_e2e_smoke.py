@@ -126,7 +126,6 @@ def _manager(tmp_path) -> SessionManager:
     return SessionManager(
         db,
         timeouts=timeouts,
-        session_host_enabled=True,
         session_host_state_dir=str(tmp_path / "hosts"),
     )
 

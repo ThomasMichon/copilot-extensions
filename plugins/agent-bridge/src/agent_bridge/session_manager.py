@@ -636,7 +636,6 @@ class SessionManager:
         retention: RetentionConfig | None = None,
         drain_auto_release_s: float | None = None,
         drain_warn_interval_s: float | None = None,
-        session_host_enabled: bool = False,
         session_host_state_dir: str | None = None,
         session_host_stale_reap_seconds: float = 0.0,
         graceful_cancel_settle_seconds: float = 45.0,
@@ -647,15 +646,12 @@ class SessionManager:
     ) -> None:
         self._db = db
         self._sessions: dict[str, Session] = {}
-        # Session-Host mode: local children live in a survivable Session Host
-        # that outlives a frontend restart. The host index is the durable
-        # session_id -> host-endpoint map used to reattach. The SERVICE config
-        # default is ON (ServiceConfig.session_host_enabled, #145/#177); this
-        # constructor param defaults off only for embedding/test ergonomics, so
-        # every real entrypoint that wires from config (app.py, ACP-agent mode)
-        # MUST pass cfg.session_host_enabled -- omitting it silently disables
-        # survival for that process.
-        self._session_host_enabled = session_host_enabled
+        # Session-Host mode is now the ONLY mode (dotfiles#1478): every local and
+        # CodeSpace child lives in a survivable Session Host that outlives a
+        # frontend restart. The host index is the durable session_id ->
+        # host-endpoint map used to reattach. (ssh/command targets still use the
+        # process-owned transport in start_session -- an SshSpawner/ElevatedSpawner
+        # to host those far-side is the remaining gap, ThomasMichon/copilot-extensions#566.)
         self._session_host_stale_reap_seconds = session_host_stale_reap_seconds
         self._graceful_cancel_settle_seconds = graceful_cancel_settle_seconds
         # Idle-session reaper TTL (#1826): stop an idle, unwatched session past
@@ -692,13 +688,23 @@ class SessionManager:
         # Strong refs to in-flight best-effort remote-reap tasks (so they are not
         # GC'd mid-flight); each removes itself on completion.
         self._remote_reap_tasks: set[Any] = set()
-        if session_host_enabled:
-            from pathlib import Path as _Path
+        from pathlib import Path as _Path
 
-            from .session_host.host_index import HostIndex
-            sd = _Path(session_host_state_dir or "~/.agent-bridge/hosts").expanduser()
-            sd.mkdir(parents=True, exist_ok=True)
-            self._host_index = HostIndex(sd / "index.json")
+        from .session_host.host_index import HostIndex
+        # Default the host state dir next to the DB (isolated per Database) rather
+        # than a hardcoded ~/.agent-bridge/hosts. In production the DB is
+        # ~/.agent-bridge/sessions.db, so this still resolves to
+        # ~/.agent-bridge/hosts -- identical behavior -- but a test/embedded use
+        # with a temp DB gets an isolated index instead of writing into (and
+        # sharing, across parallel runs) the real developer/CI home. Now that
+        # Session Hosts are always on the index is ALWAYS constructed, so this
+        # isolation matters (dotfiles#1478 review).
+        if session_host_state_dir:
+            sd = _Path(session_host_state_dir).expanduser()
+        else:
+            sd = _Path(self._db.db_path).expanduser().parent / "hosts"
+        sd.mkdir(parents=True, exist_ok=True)
+        self._host_index = HostIndex(sd / "index.json")
         self._thresholds = context_thresholds or ContextThresholds()
         # Context-pressure handoff policy (off by default). When enabled, a
         # session crossing the critical threshold rolls the worktree in place
@@ -737,15 +743,6 @@ class SessionManager:
     def is_draining(self) -> bool:
         """True once drain() has begun -- new sessions/turns are refused."""
         return self._draining
-
-    @property
-    def session_host_enabled(self) -> bool:
-        """True when sessions run inside survivable Session Hosts (goal 1/3).
-
-        Gates the liveness-driven reattach driver (``recover_disconnected_hosts``)
-        that the app's heartbeat loop calls each beat.
-        """
-        return self._session_host_enabled
 
     def set_draining(
         self,
@@ -914,12 +911,10 @@ class SessionManager:
            reach their own stop (capturing the final streamed messages), so the
            subsequent stop is clean and fast.
 
-        No-op unless ``session_host_enabled``. Returns a summary.
+        Returns a summary.
         """
         import asyncio as _asyncio
 
-        if not self._session_host_enabled:
-            return {"cancelled": [], "settled": True, "enabled": False}
         settle = (self._graceful_cancel_settle_seconds
                   if settle_timeout is None else settle_timeout)
         # Only in-flight turns (goal: "only in-flight turns"); background-busy
@@ -995,10 +990,9 @@ class SessionManager:
         import asyncio as _asyncio
 
         self.set_draining(True, reason=reason, source=source)
-        if self._session_host_enabled:
-            await self.graceful_cancel_for_redeploy(
-                exclude_session_id=exclude_session_id,
-            )
+        await self.graceful_cancel_for_redeploy(
+            exclude_session_id=exclude_session_id,
+        )
         deadline = time.monotonic() + max(0.0, timeout)
         busy = [s for s in self.busy_sessions() if s != exclude_session_id]
         log.info(
@@ -1435,7 +1429,7 @@ class SessionManager:
         whose process is still alive, re-establishes the ACP connection over the
         reattached loopback endpoint and **adopts** the existing ACP session --
         no child respawn, no lost session. Dead hosts are pruned. Returns the
-        count reattached. No-op unless ``session_host_enabled``.
+        count reattached. No-op when no host index exists.
 
         **Version-mux (Phase 4).** A host advertising a wire-envelope protocol
         this frontend no longer speaks (a rare breaking host-layer change) is
@@ -1445,7 +1439,7 @@ class SessionManager:
         own stop (goal 1 -- never reap mid-turn); an incompatible host whose
         child has already stopped is reaped so it stops pinning its old install.
         """
-        if not self._session_host_enabled or self._host_index is None:
+        if self._host_index is None:
             return 0
         from .session_host.version_mux import HostDisposition, plan_host
 
@@ -1710,7 +1704,7 @@ class SessionManager:
         prompt drives the turn itself, and it avoids re-entering ``submit_prompt``
         from within a resume.
         """
-        if not self._session_host_enabled or self._host_index is None:
+        if self._host_index is None:
             return False
         if not session.acp_session_id:
             return False
@@ -1751,10 +1745,9 @@ class SessionManager:
         the host + child processes survive, redial the host and resume by cursor
         (no restart, no lost turn). A merely ``stalled`` session (channel up,
         agent silent) is surfaced but not reattached -- reconnecting cannot
-        un-wedge a silent agent. Returns the count reattached. No-op unless
-        ``session_host_enabled``.
+        un-wedge a silent agent. Returns the count reattached.
         """
-        if not self._session_host_enabled or self._host_index is None:
+        if self._host_index is None:
             return 0
         from .session_host.version_mux import HostDisposition, plan_host
 
@@ -1924,7 +1917,7 @@ class SessionManager:
         are still pinned. Empty (the common case) unless a breaking host-layer
         change has left older hosts running.
         """
-        if not self._session_host_enabled or self._host_index is None:
+        if self._host_index is None:
             return []
         from .session_host.version_mux import is_compatible
 
@@ -2070,10 +2063,9 @@ class SessionManager:
         one may outlive the configured ``session_host_stale_reap_seconds`` sprawl
         bound. This re-evaluates every live host and reaps those whose disposition
         is REAP_STOPPED or FORCE_REAP -- never touching a compatible host or a
-        stranded host still within the bound. Returns the count reaped. No-op
-        unless ``session_host_enabled``.
+        stranded host still within the bound. Returns the count reaped.
         """
-        if not self._session_host_enabled or self._host_index is None:
+        if self._host_index is None:
             return 0
         from .session_host.version_mux import HostDisposition, plan_host
 
@@ -2136,7 +2128,7 @@ class SessionManager:
         Session-Host mode.
         """
         ttl = self._idle_reap_ttl_seconds
-        if not ttl or ttl <= 0 or not self._session_host_enabled:
+        if not ttl or ttl <= 0:
             return 0
         now = now if now is not None else time.time()
         reaped = 0
@@ -2306,17 +2298,16 @@ class SessionManager:
 
         try:
             cs_target = None
-            if self._session_host_enabled:
-                # Prefer the structured provider metadata (#177); fall back to
-                # shape-detecting the spawn_command for agents registered before
-                # the metadata seam existed (back-compat).
-                if isinstance(target.codespace, dict) and target.codespace.get("name"):
-                    cs_target = target.codespace
-                elif target.spawn_command:
-                    from .session_host.codespace_transport import parse_codespace_target
-                    cs_target = parse_codespace_target(target.spawn_command)
+            # Prefer the structured provider metadata (#177); fall back to
+            # shape-detecting the spawn_command for agents registered before
+            # the metadata seam existed (back-compat).
+            if isinstance(target.codespace, dict) and target.codespace.get("name"):
+                cs_target = target.codespace
+            elif target.spawn_command:
+                from .session_host.codespace_transport import parse_codespace_target
+                cs_target = parse_codespace_target(target.spawn_command)
 
-            if self._session_host_enabled and target.type == "local":
+            if target.type == "local":
                 # Session-Host mode: the child lives in a survivable host that
                 # outlives this frontend (goal 1/3). resolve->launch host->
                 # reattach over loopback->drive ACP.
@@ -2443,19 +2434,27 @@ class SessionManager:
                 # a transport drop (tunnel flap, daemon restart, credential-relay
                 # TTL) merely detaches the front instead of closing the child's
                 # stdio and self-cancelling its in-flight turn ("Operation
-                # cancelled by user"). Reaching this branch means host mode is
-                # disabled or the codespace target was unresolved -- fail loud
-                # rather than silently degrade to a non-survivable classic
-                # session that loses in-flight work on any hiccup.
+                # cancelled by user"). Session Hosts are always on (dotfiles#1478),
+                # so reaching this branch means the codespace target could not be
+                # resolved to a spawner -- fail loud rather than silently degrade
+                # to a non-survivable process-owned session that loses in-flight
+                # work on any hiccup.
                 raise RuntimeError(
                     f"CodeSpace target {getattr(target, 'agent_name', None)!r} "
-                    f"requires session-host mode, but none was established "
-                    f"(session_host_enabled={self._session_host_enabled}, "
-                    f"cs_target={'resolved' if cs_target else 'unresolved'}). "
-                    f"Refusing to run classic (non-survivable) mode."
+                    f"was detected but could not be resolved to a CodeSpace "
+                    f"spawner/transport (cs_target=unresolved). Session Hosts are "
+                    f"always on, so this is a resolution/configuration failure, "
+                    f"not a disabled mode. Refusing to fall back to the "
+                    f"process-owned (non-survivable) path."
                 )
             else:
-                # Spawn the subprocess (local/SSH/command). Emits per-stage
+                # Process-owned (front-owns-stdio) transport for ssh/command
+                # targets (mesh, elevated, spawn_command providers). Local +
+                # CodeSpace always run under a survivable Session Host above;
+                # ssh/command have no host-boundary spawner yet (SshSpawner /
+                # ElevatedSpawner are the remaining gap -- see
+                # ThomasMichon/copilot-extensions#566), so this is their only
+                # path. It is NOT reachable for a local target. Emits per-stage
                 # checkpoints (auth-env, ssh-connect, worktree) into the event log.
                 agent_proc = await spawn(
                     target,
@@ -2490,12 +2489,13 @@ class SessionManager:
                         )
                     except (TimeoutError, asyncio.TimeoutError) as exc:
                         # Leave a queryable marker so a stalled launch is not a
-                        # silent [starting]->[stopped] (#1468). Local-mode client
-                        # captured the child's startup stderr -- include the tail.
+                        # silent [starting]->[stopped] (#1468). The process-owned
+                        # client captured the child's startup stderr -- include
+                        # the tail.
                         with contextlib.suppress(Exception):
                             on_acp_event("acp_launch_timeout", {
                                 "stage": "LAUNCH_ACP",
-                                "mode": "local",
+                                "mode": "process",
                                 "handshake_timeout_s": self._timeouts.session_start,
                                 "session_new_timeout_s": self._timeouts.session_new,
                                 "stderr_tail": client.stderr_tail(),
@@ -3421,10 +3421,10 @@ class SessionManager:
     def _is_codespace_target(self, target: "SpawnTarget") -> bool:
         """True if this target is a CodeSpace boundary agent -- structured
         ``codespace`` metadata, or a codespace-shaped ``spawn_command``. Such a
-        target must run under a Session Host (never classic), so ``connect``
-        refuses to fall through to the process-owned path for one. Detection is
-        independent of ``session_host_enabled`` on purpose: a CodeSpace with host
-        mode disabled is a misconfiguration to surface, not to silently honor."""
+        target must run under a Session Host (never the process-owned path), so
+        ``connect`` refuses to fall through to that path for one. A CodeSpace
+        target that cannot be resolved to a spawner is a misconfiguration to
+        surface, not to silently honor."""
         cs = getattr(target, "codespace", None)
         if isinstance(cs, dict) and cs.get("name"):
             return True
@@ -3472,9 +3472,7 @@ class SessionManager:
         run no turn yet, and background-sub-agent transitions that occur outside
         a turn boundary -- so the host's ``_last_reapable`` never drifts stale
         enough to reap a session that is actually busy, or to miss reaping a
-        genuinely idle one (#51). No-op unless Session-Host mode is on."""
-        if not self._session_host_enabled:
-            return
+        genuinely idle one (#51)."""
         for session in list(self._sessions.values()):
             await self._notify_host_reapable(session)
 
@@ -3628,7 +3626,7 @@ class SessionManager:
 
         # Idle-reaper only: free the Session Host child (a plain stop detaches
         # to keep it reattachable). Safe here because the session is idle.
-        if reap_host and self._session_host_enabled and self._host_index is not None:
+        if reap_host and self._host_index is not None:
             rec = self._host_index.get(session_id)
             if rec is not None:
                 self._reap_host_record(rec, "idle reap (#1826)")
@@ -3682,7 +3680,7 @@ class SessionManager:
         # detaches to keep the child reattachable. Without this the host + child
         # survive with a dangling index record and are never collected (#1786;
         # goal 1: termination is intentional, not inadvertent).
-        if self._session_host_enabled and self._host_index is not None:
+        if self._host_index is not None:
             rec = self._host_index.get(session_id)
             if rec is not None:
                 self._reap_host_record(rec, "session ended")
@@ -4055,13 +4053,10 @@ def session_manager_from_config(db: Database, cfg: ServiceConfig) -> SessionMana
 
     The **single** construction site for a config-driven manager, so every
     entrypoint -- the HTTP daemon (``app.py``) and ACP-agent mode
-    (``__main__._cmd_agent``) -- honors the operator's session-host settings
-    identically. Constructing ``SessionManager`` inline and omitting a
-    session-host param silently falls back to the constructor defaults (chiefly
-    ``session_host_enabled=False``), which disables survival for that process --
-    the ACP-agent-mode CodeSpace regression where a bridged remote child died on
-    a brief SSH drop (#145/#177, codespace-dispatch-reliability). Route every
-    config-driven construction through here.
+    (``__main__._cmd_agent``) -- wires the same session-host settings. Session
+    Hosts are always on (dotfiles#1478); this factory forwards the operator's
+    host tunables (reap/idle/stall budgets). Route every config-driven
+    construction through here.
     """
     return SessionManager(
         db,
@@ -4069,7 +4064,6 @@ def session_manager_from_config(db: Database, cfg: ServiceConfig) -> SessionMana
         auto_handoff=cfg.auto_handoff,
         timeouts=cfg.timeouts,
         retention=cfg.retention,
-        session_host_enabled=cfg.session_host_enabled,
         session_host_stale_reap_seconds=cfg.session_host_stale_reap_seconds,
         graceful_cancel_settle_seconds=cfg.graceful_cancel_settle_seconds,
         idle_reap_ttl_seconds=cfg.idle_reap_ttl_seconds,

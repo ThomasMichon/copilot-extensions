@@ -26,7 +26,6 @@ def _mgr(tmp_path, *, ttl: float = 0.0) -> SessionManager:
     db = Database(tmp_path / "reap.db")
     return SessionManager(
         db,
-        session_host_enabled=True,
         session_host_state_dir=str(tmp_path / "hosts"),
         idle_reap_ttl_seconds=ttl,
     )
@@ -155,11 +154,3 @@ async def test_reaper_skips_zero_turn_session(tmp_path) -> None:
     s = _session(mgr, "s1", idle_for=99999, turns=0)
     assert await mgr.sweep_idle_sessions() == 0
     assert s.status == SessionStatus.IDLE
-
-
-@pytest.mark.asyncio
-async def test_reaper_no_op_when_session_host_disabled(tmp_path) -> None:
-    db = Database(tmp_path / "d.db")
-    mgr = SessionManager(db, session_host_enabled=False, idle_reap_ttl_seconds=60)
-    _session(mgr, "s1", idle_for=99999)
-    assert await mgr.sweep_idle_sessions() == 0
