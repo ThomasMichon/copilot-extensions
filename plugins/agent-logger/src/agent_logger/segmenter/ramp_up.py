@@ -197,8 +197,8 @@ def _is_local_machine(name: str | None) -> bool:
     """True if *name* refers to the machine we're running on.
 
     Compared against the detected hostname (``-wsl`` suffix ignored), tolerating
-    the machine-designation prefix worktree names carry (e.g. ``lambda-core``
-    vs ``lambda-core-win``).
+    the machine-designation prefix worktree names carry (e.g. ``anomalous-potato``
+    vs ``anomalous-potato-win``).
     """
     if not name:
         return True
@@ -212,7 +212,7 @@ def _delegate_remote(machine: str, ref: str, passthrough: list[str]) -> int:
 
     The session's raw ``events.jsonl`` lives on the machine that produced it, so
     a worktree on another host is ramped up *there*. ``machine`` is used as the
-    SSH destination directly — in a facility whose SSH aliases are the machine
+    SSH destination directly — in a multi-machine system whose SSH aliases are the machine
     names this "just works"; anywhere else it must be an SSH-resolvable host
     with ``ramp-up-session`` on PATH.
     """

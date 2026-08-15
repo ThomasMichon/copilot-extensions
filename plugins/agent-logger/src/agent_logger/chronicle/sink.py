@@ -9,7 +9,7 @@ touching scan/digest:
 * **Router** -- maps a discovered session to a sink id by its **recorded origin
   repo** (``workspace.yaml`` ``repository``), with a machine-default fallback.
   This is the generalization of permanent-record's origin resolver: an
-  aperture-labs-origin session routes to the aperture-labs sink; everything else
+  test-chamber-origin session routes to the test-chamber sink; everything else
   on a dotfiles machine routes to the dotfiles sink.
 * **Profile** -- the output voice/shape. ``narration_style`` defaults to
   ``"objective"`` (matter-of-fact chronicle); a consumer may layer a character
@@ -19,7 +19,7 @@ touching scan/digest:
   **not** hardcode landing; each sink supplies a strategy. Reference strategies:
   :class:`DirectCommitLanding` (dotfiles: one scoped daily commit) and
   :class:`SquashPRLanding` (one daily squash PR, auto-merged). A consumer that
-  needs a governed single-flight merge-queue (aperture-labs permanent-record)
+  needs a governed single-flight merge-queue (test-chamber permanent-record)
   supplies its own :class:`LandingPolicy` -- the seam is the extension point, so
   the merge-queue never has to live in the daemon core.
 """
@@ -62,14 +62,14 @@ class RouteRule:
     """One origin-repo -> sink mapping.
 
     *repository* is matched case-insensitively as a substring of the session's
-    recorded ``workspace.yaml`` ``repository`` (so ``aperture-labs`` matches
-    ``git@host:org/aperture-labs.git``). The first matching rule wins.
+    recorded ``workspace.yaml`` ``repository`` (so ``test-chamber`` matches
+    ``git@host:org/test-chamber.git``). The first matching rule wins.
 
     ``sink_id=None`` is the **skip sentinel**: a session matching such a rule is
     dropped (routed nowhere), *without* falling through to the router's
     ``default_sink``. This expresses "some other harness owns this origin's
-    chronicle" -- e.g. aperture-labs-origin sessions that are already chronicled
-    facility-side by permanent-record, so cloud1 must neither file them into
+    chronicle" -- e.g. test-chamber-origin sessions that are already chronicled
+    multi-machine system-side by permanent-record, so cloud1 must neither file them into
     dotfiles nor double-file them.
     """
 
@@ -105,11 +105,11 @@ class OriginRepoRouter(Router):
       the router functioning during the transition; once Phase-4 backfill has
       stamped every session, the recorded origin is always authoritative.
 
-    The one hard job on the aperture-labs side: an aperture-labs-origin session
+    The one hard job on the test-chamber side: an test-chamber-origin session
     must match a rule (a **skip** sentinel in v1) and **never** fall through to
     the dotfiles default. Because a matched skip returns None *before* the
     fallback, ``default_sink="dotfiles"`` can safely catch every other
-    dotfiles-machine origin while aperture-labs-origin is explicitly skipped.
+    dotfiles-machine origin while test-chamber-origin is explicitly skipped.
     """
 
     def __init__(self, rules: list[RouteRule], default_sink: str | None) -> None:

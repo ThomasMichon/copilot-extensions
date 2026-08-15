@@ -1,4 +1,4 @@
-"""Tests for the de-facility-ized segmenter wiring.
+"""Tests for the de-multi-machine system-ized segmenter wiring.
 
 These assert the config-driven store paths and that the three console-script
 entry points are importable and callable. End-to-end collation is covered by

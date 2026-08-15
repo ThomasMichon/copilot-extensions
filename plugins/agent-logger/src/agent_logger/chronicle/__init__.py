@@ -21,7 +21,7 @@ pluggable seams the daemon runs between:
 
 The daemon core is deliberately transport-, repo-, and voice-neutral: every
 policy that differs between consumers (origin routing rules, output voice,
-landing mechanism) is injected through a seam so a consumer (e.g. aperture-labs
+landing mechanism) is injected through a seam so a consumer (e.g. test-chamber
 permanent-record) can adopt the daemon without re-implementing scan/digest.
 """
 

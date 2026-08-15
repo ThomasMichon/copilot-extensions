@@ -182,10 +182,10 @@ def test_scan_skips_journaled(tmp_path: Path) -> None:
 
 def test_scan_reads_origin_repository(tmp_path: Path) -> None:
     corpus = tmp_path / "sessions"
-    _write_session(corpus, "book2", "one", repository="org/aperture-labs")
+    _write_session(corpus, "book2", "one", repository="org/test-chamber")
     src = SyncedSessionSource(corpus, ReservationStore(tmp_path / "c.db"))
     sessions = src.scan()
-    assert sessions[0].repository == "org/aperture-labs"
+    assert sessions[0].repository == "org/test-chamber"
     assert sessions[0].day == "2026-07-28"
     assert sessions[0].ref == SegmentRef("one", 0)
     # No origin sidecar written -> no recorded origin.
@@ -199,7 +199,7 @@ def test_scan_reads_recorded_origin_sidecar(tmp_path: Path) -> None:
     corpus = tmp_path / "sessions"
     _write_session(
         corpus, "book2", "harnessed", repository="owner/fork",
-        source_repo="aperture-labs",
+        source_repo="test-chamber",
     )
     _write_session(
         corpus, "book2", "machine-only", repository="owner/random",
@@ -208,7 +208,7 @@ def test_scan_reads_recorded_origin_sidecar(tmp_path: Path) -> None:
     src = SyncedSessionSource(corpus, ReservationStore(tmp_path / "c.db"))
     by_id = {s.session_id: s for s in src.scan()}
     assert by_id["harnessed"].origin_recorded is True
-    assert by_id["harnessed"].source_repo == "aperture-labs"
+    assert by_id["harnessed"].source_repo == "test-chamber"
     # A recorded machine-only origin: sidecar present, source_repo null.
     assert by_id["machine-only"].origin_recorded is True
     assert by_id["machine-only"].source_repo is None
@@ -241,24 +241,24 @@ def test_router_routes_by_recorded_origin() -> None:
     """A recorded origin (origin.json source_repo) is authoritative, not the
     raw workspace repository -- derive-the-origin-never-guess."""
     router = OriginRepoRouter(
-        [RouteRule("aperture-labs", None)], default_sink="dotfiles"
+        [RouteRule("test-chamber", None)], default_sink="dotfiles"
     )
-    # Recorded aperture-labs origin -> skipped, regardless of raw repository.
+    # Recorded test-chamber origin -> skipped, regardless of raw repository.
     assert (
         router.route(
             _session(
-                "a", "owner/some-fork", source_repo="aperture-labs",
+                "a", "owner/some-fork", source_repo="test-chamber",
                 origin_recorded=True,
             )
         )
         is None
     )
     # Recorded work origin -> machine default (dotfiles), even if the raw
-    # repository happens to contain "aperture-labs" noise.
+    # repository happens to contain "test-chamber" noise.
     assert (
         router.route(
             _session(
-                "b", "aperture-labs-mirror", source_repo="acme-webapp",
+                "b", "test-chamber-mirror", source_repo="acme-webapp",
                 origin_recorded=True,
             )
         )
@@ -271,14 +271,14 @@ def test_router_recorded_machine_only_takes_default() -> None:
     repo to match and authoritatively takes the machine default -- it does NOT
     fall back to the raw repository string."""
     router = OriginRepoRouter(
-        [RouteRule("aperture-labs", None)], default_sink="dotfiles"
+        [RouteRule("test-chamber", None)], default_sink="dotfiles"
     )
-    # Raw repository names aperture-labs, but the RECORDED origin is machine-only
-    # -> machine default, never the aperture-labs skip rule.
+    # Raw repository names test-chamber, but the RECORDED origin is machine-only
+    # -> machine default, never the test-chamber skip rule.
     assert (
         router.route(
             _session(
-                "a", "org/aperture-labs", source_repo=None, origin_recorded=True,
+                "a", "org/test-chamber", source_repo=None, origin_recorded=True,
             )
         )
         == "dotfiles"
@@ -289,18 +289,18 @@ def test_router_no_sidecar_falls_back_to_raw_repository() -> None:
     """Pre-backfill transition: with NO recorded origin, the router falls back
     to matching the raw workspace repository (legacy behavior)."""
     router = OriginRepoRouter(
-        [RouteRule("aperture-labs", None)], default_sink="dotfiles"
+        [RouteRule("test-chamber", None)], default_sink="dotfiles"
     )
-    assert router.route(_session("a", "org/aperture-labs")) is None
+    assert router.route(_session("a", "org/test-chamber")) is None
     assert router.route(_session("b", "owner/acme-webapp")) == "dotfiles"
 
 
 def test_router_routes_by_origin_with_default_fallback() -> None:
     router = OriginRepoRouter(
-        [RouteRule("aperture-labs", "aperture-labs")], default_sink="dotfiles"
+        [RouteRule("test-chamber", "test-chamber")], default_sink="dotfiles"
     )
-    # aperture-labs origin -> its sink (never misfiled into dotfiles).
-    assert router.route(_session("a", "git@host:org/aperture-labs.git")) == "aperture-labs"
+    # test-chamber origin -> its sink (never misfiled into dotfiles).
+    assert router.route(_session("a", "git@host:org/test-chamber.git")) == "test-chamber"
     # any other origin -> machine-default sink.
     assert router.route(_session("b", "owner/webapp")) == "dotfiles"
     # no recorded repository -> machine-default sink.
@@ -308,17 +308,17 @@ def test_router_routes_by_origin_with_default_fallback() -> None:
 
 
 def test_router_none_default_drops_unmatched() -> None:
-    router = OriginRepoRouter([RouteRule("aperture-labs", "ap")], default_sink=None)
+    router = OriginRepoRouter([RouteRule("test-chamber", "ap")], default_sink=None)
     assert router.route(_session("b", "owner/webapp")) is None
 
 
 def test_router_skip_sentinel_beats_default() -> None:
     """A null-sink rule skips its origin without falling through to default."""
     router = OriginRepoRouter(
-        [RouteRule("aperture-labs", None)], default_sink="dotfiles"
+        [RouteRule("test-chamber", None)], default_sink="dotfiles"
     )
-    # aperture-labs-origin is dropped (skipped), NOT misfiled into dotfiles.
-    assert router.route(_session("a", "git@host:org/aperture-labs.git")) is None
+    # test-chamber-origin is dropped (skipped), NOT misfiled into dotfiles.
+    assert router.route(_session("a", "git@host:org/test-chamber.git")) is None
     # every other dotfiles-machine origin still defaults to dotfiles.
     assert router.route(_session("b", "owner/webapp")) == "dotfiles"
     assert router.route(_session("c", "owner/copilot-extensions")) == "dotfiles"
@@ -327,11 +327,11 @@ def test_router_skip_sentinel_beats_default() -> None:
 
 def test_group_by_day_drops_skipped_origin() -> None:
     router = OriginRepoRouter(
-        [RouteRule("aperture-labs", None)], default_sink="dotfiles"
+        [RouteRule("test-chamber", None)], default_sink="dotfiles"
     )
     digests = group_by_day(
         [
-            _session("a", "org/aperture-labs"),
+            _session("a", "org/test-chamber"),
             _session("b", "owner/dotfiles"),
         ],
         router,
@@ -342,10 +342,10 @@ def test_group_by_day_drops_skipped_origin() -> None:
 
 def test_group_by_day_buckets_by_sink_and_day() -> None:
     router = OriginRepoRouter(
-        [RouteRule("aperture-labs", "ap")], default_sink="dotfiles"
+        [RouteRule("test-chamber", "ap")], default_sink="dotfiles"
     )
     sessions = [
-        _session("a", "org/aperture-labs"),
+        _session("a", "org/test-chamber"),
         _session("b", "owner/webapp"),
         _session("c", "owner/dotfiles"),
     ]
@@ -450,11 +450,11 @@ class _NullLanding(DirectCommitLanding):
 def _chronicler(tmp_path: Path, writer, *, holder="cloud1") -> Chronicler:
     corpus = tmp_path / "sessions"
     _write_session(corpus, "book2", "s1", repository="owner/dotfiles")
-    _write_session(corpus, "book2", "s2", repository="org/aperture-labs")
+    _write_session(corpus, "book2", "s2", repository="org/test-chamber")
     reservations = ReservationStore(tmp_path / "c.db")
     source = SyncedSessionSource(corpus, reservations)
     router = OriginRepoRouter(
-        [RouteRule("aperture-labs", "ap")], default_sink="dotfiles"
+        [RouteRule("test-chamber", "ap")], default_sink="dotfiles"
     )
     sinks = {
         "dotfiles": LogSink("dotfiles", tmp_path, landing_policy=_NullLanding()),
@@ -522,7 +522,7 @@ def test_manifest_writer_persists_manifest(tmp_path: Path) -> None:
 
 
 def test_factory_skip_repositories_builds_skip_rule(tmp_path: Path) -> None:
-    """The dotfiles v1 config: skip aperture-labs-origin, default -> dotfiles."""
+    """The dotfiles v1 config: skip test-chamber-origin, default -> dotfiles."""
     import copy
 
     from agent_logger.chronicle.factory import build_chronicler
@@ -536,14 +536,14 @@ def test_factory_skip_repositories_builds_skip_rule(tmp_path: Path) -> None:
             "db_path": str(tmp_path / "c.db"),
             "manifests_dir": str(tmp_path / "m"),
             "default_sink": "dotfiles",
-            "skip_repositories": ["aperture-labs"],
+            "skip_repositories": ["test-chamber"],
             "sinks": {"dotfiles": {"repo_path": str(tmp_path / "repo")}},
         }
     )
     cfg = Config(data, home=tmp_path)
     chronicler = build_chronicler(cfg)
     router = chronicler.router
-    # aperture-labs-origin skipped; everything else -> dotfiles.
-    assert router.route(_session("a", "org/aperture-labs")) is None
+    # test-chamber-origin skipped; everything else -> dotfiles.
+    assert router.route(_session("a", "org/test-chamber")) is None
     assert router.route(_session("b", "owner/webapp")) == "dotfiles"
     assert "dotfiles" in chronicler.sinks
