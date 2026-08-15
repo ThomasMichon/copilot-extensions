@@ -861,20 +861,36 @@ function Write-Manifest {
 function Get-InstallRole {
     # host runs the engine + the local indexer service; a client runs NEITHER
     # (its MCP/CLI route to the designated host over SSH). Precedence:
-    # AGENT_INDEX_ROLE env, then the freshly-installed CLI resolver (config.yaml),
-    # else client.
+    # AGENT_INDEX_ROLE env, then the CLI resolver run from the ACTIVE
+    # (current-version marker) slot -- NOT $LinkPython, whose build slot may not
+    # exist when this install.ps1's version differs from the active one (#1504) --
+    # then a venv-free machine-local config.yaml read, else client.
     if ($env:AGENT_INDEX_ROLE) {
         $r = ($env:AGENT_INDEX_ROLE).Trim().ToLower()
         if ($r -in @('host', 'client')) { return $r }
     }
-    if (Test-Path $LinkPython) {
+    $rolePy = Get-ActiveSlotPython
+    if (Test-Path $rolePy) {
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        $out = & $LinkPython -m agent_index role 2>$null
+        $out = & $rolePy -m agent_index role 2>$null
         $ErrorActionPreference = $prevEAP
         if ($LASTEXITCODE -eq 0 -and $out) {
             $r = ("$out" -replace '\s', '').ToLower()
             if ($r -in @('host', 'client')) { return $r }
+        }
+    }
+    # Venv-free fallback: read the machine-local config.yaml role:/engine: scalar
+    # directly (mirrors config.resolve_role + ensure-service.ps1), so role resolves
+    # even when no slot python is available (a snapshot whose venv isn't built).
+    $cfg = Join-Path $InstallDir 'config.yaml'
+    if (Test-Path $cfg) {
+        $rm = Select-String -Path $cfg -Pattern '^\s*(?:role|engine)\s*:\s*"?([A-Za-z]+)"?' -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($rm) {
+            $r = $rm.Matches[0].Groups[1].Value.ToLower()
+            if ($r -in @('host', 'client')) { return $r }
+            if ($r -in @('engine', 'server', 'indexer')) { return 'host' }
+            if ($r -in @('none', 'consumer')) { return 'client' }
         }
     }
     return 'client'
@@ -1265,6 +1281,33 @@ function Get-ActiveServicePort {
     try { return [int]((Get-Content $aj -Raw | ConvertFrom-Json).active.port) } catch { return $null }
 }
 
+function Get-ActiveSlotPython {
+    # The python of the ACTIVE (current-version marker) slot -- the single source
+    # of truth for "which version serves". The sessionStart `ensure` runs the
+    # INSTALLED-snapshot's install.ps1, whose $LinkPython/$SrcVersion may be OLDER
+    # than the active marker (a newer version was activated by a different
+    # install.ps1 -- a local/worktree deploy, or a not-yet-reconciled marketplace
+    # update). Deploying $LinkPython there would drag the running service BACKWARD;
+    # deploying the marker slot keeps the active version serving (dotfiles #1504).
+    # Falls back to $LinkPython when the marker/slot is missing (e.g. first install,
+    # before the marker is written).
+    try {
+        $ver = ([IO.File]::ReadAllText((Join-Path $InstallDir 'current-version'))).Trim()
+    } catch { $ver = '' }
+    if ($ver) {
+        $p = Join-Path $InstallDir "versions\$ver\Scripts\python.exe"
+        if (Test-Path -LiteralPath $p) { return $p }
+    }
+    # Marker missing/stale: match the binstub's resolution -- fall back to the
+    # LATEST built slot under versions\* (a real installed runtime) before the
+    # build's $LinkPython, so a present-but-unmarked runtime is still found.
+    $latest = Get-ChildItem (Join-Path $InstallDir 'versions') -Directory -ErrorAction SilentlyContinue |
+        Sort-Object Name | ForEach-Object { Join-Path $_.FullName 'Scripts\python.exe' } |
+        Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Last 1
+    if ($latest) { return $latest }
+    return $LinkPython
+}
+
 function Test-ServiceHealthy {
     # Health-gate on the LIVE routing endpoint (active.json), not a static port:
     # a stale active.json pointing at a dead pid correctly reads as unhealthy.
@@ -1292,10 +1335,14 @@ function Ensure-ServiceRunning {
         Write-Skip 'Local indexer service skipped (role: client) -- a client runs no local daemon; MCP/CLI route to the designated host over SSH'
         return
     }
-    if (-not (Test-Path $LinkPython)) { Write-Skip 'Runtime not installed -- service not ensured'; return }
+    # Deploy the ACTIVE (current-version marker) slot -- NOT $LinkPython (this
+    # install.ps1's own build): a sessionStart `ensure` from an older installed
+    # snapshot must keep the active version serving, never drag it back (#1504).
+    $activePy = Get-ActiveSlotPython
+    if (-not (Test-Path $activePy)) { Write-Skip 'Runtime not installed -- service not ensured'; return }
     Write-ServiceFiles
     if (Test-ServiceHealthy) { Write-Skip 'Service already healthy (user-mode daemon serving)'; return }
-    & $LinkPython -m agent_index deploy 2>&1 | Out-Host
+    & $activePy -m agent_index deploy 2>&1 | Out-Host
     if (Test-ServiceHealthy) { Write-Ok 'Service ensured (user-mode daemon)' }
     else { Write-Warn 'Service ensure attempted -- endpoint not yet healthy (it may still be starting)' }
 }
