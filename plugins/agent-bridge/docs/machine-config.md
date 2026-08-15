@@ -1,7 +1,10 @@
 # Agent Bridge -- Machine Configuration
 
-This guide covers how to configure the machine topology that agent-bridge
-uses to discover and connect to agents across your infrastructure.
+This guide covers the optional machine topology that agent-bridge uses to
+discover and connect to named machine/repo agents. The bridge itself is
+standalone: provider namespaces from `~/.agent-bridge/providers.d/` and explicit
+local agents can work without a `machines.yaml`; explicit local agents only need
+a minimal profile that points at an `agents_config` file.
 
 Agent-bridge and agent-worktrees both consume **the same `machines.yaml`
 file** -- agent-worktrees uses it for terminal profiles and SSH sessions;
@@ -10,9 +13,10 @@ agent-bridge uses it for agent subprocess spawning and SSH transport.
 ## Overview
 
 Agent-bridge topology is configured via **profiles** in
-`~/.agent-bridge/config.yaml`. Each profile points to a `machines.yaml` in
-your project repo, from which agent-bridge **derives** its agent roster
-(machines × repos × environments):
+`~/.agent-bridge/config.yaml`. A derived-roster profile points to a
+`machines.yaml` in your project repo, from which agent-bridge derives machine ×
+repo × environment agents; a legacy local-only profile may instead point only at
+an explicit `agents_config` file:
 
 | File | Purpose |
 |------|---------|
@@ -27,10 +31,11 @@ your project repo, from which agent-bridge **derives** its agent roster
 agent-bridge config adopt --repo /path/to/repo --profile my-project
 ```
 
-This searches for `machines.yaml` at conventional paths and creates a
-topology profile. The agent roster is derived from it (plus any
-`.agent-worktrees/related.yaml`); a legacy `acp-agents.json`, if present, is
-adopted as a deprecated explicit override.
+This searches for `machines.yaml` at conventional paths and creates a topology
+profile. The agent roster is derived from it (plus `.agent-worktrees/related.yaml`
+and local repo registry data when available). A legacy `acp-agents.json` is **not
+auto-discovered** anymore; pass `--agents-config` explicitly if you need that
+deprecated override.
 
 ### Verify
 
@@ -183,8 +188,9 @@ the remote agent process, where `<relay-port>` is the daemon's live relay port
 `config adopt` searches these paths (first match wins):
 
 1. `{repo}/machines.yaml`
-2. `{repo}/config/machines.yaml`
-3. `{repo}/.github/machines.yaml`
+2. `{repo}/.agent-worktrees/machines.yaml`
+3. `{repo}/config/machines.yaml`
+4. `{repo}/.github/machines.yaml`
 
 ---
 
@@ -286,11 +292,13 @@ agent-bridge send build-server "Run the test suite"
 
 ### File Locations
 
-`config adopt` searches these paths (first match wins):
+`config adopt` no longer searches for `acp-agents.json`. To use this deprecated
+override, pass it explicitly:
 
-1. `{repo}/tools/mcp/acp-agents.json`
-2. `{repo}/acp-agents.json`
-3. `{repo}/config/acp-agents.json`
+```bash
+agent-bridge config adopt --repo /path/to/repo --profile my-project \
+  --agents-config /path/to/acp-agents.json
+```
 
 ---
 
@@ -345,8 +353,8 @@ agent-bridge end <session-id>
 
 ### Minimal Setup (Local-Only)
 
-For a machine that only needs same-machine agents, `machines.yaml` can
-be minimal or even absent. Only `acp-agents.json` is needed:
+For a machine that only needs same-machine agents, `machines.yaml` can be absent.
+Create an `acp-agents.json` and point a profile's `agents_config` at it:
 
 ```json
 {
@@ -358,8 +366,15 @@ be minimal or even absent. Only `acp-agents.json` is needed:
 }
 ```
 
-No `machines.yaml`, no SSH config, no topology profiles -- just define
-the agent and go.
+No `machines.yaml` or SSH config is needed; the profile exists only to name the
+explicit agent file.
+
+```yaml
+# ~/.agent-bridge/config.yaml
+topologies:
+  local-only:
+    agents_config: /home/user/agents/acp-agents.json
+```
 
 ---
 
@@ -420,7 +435,7 @@ Both plugins consume `machines.yaml` but for different purposes:
 
 | Aspect | agent-worktrees | agent-bridge |
 |--------|----------------|-------------|
-| **Reads** | `machines.yaml` | `machines.yaml` + `acp-agents.json` |
+| **Reads** | `machines.yaml` | `machines.yaml`; optional explicit deprecated `agents_config`; local repo registry/projects data when available |
 | **Uses for** | Terminal profiles, SSH session targets | Agent spawning, SSH transport |
 | **Config location** | `~/.{project}/config.yaml` | `~/.agent-bridge/config.yaml` |
 | **When configured** | During repo adoption (`register`) | During topology adoption (`config adopt`) |
@@ -433,8 +448,8 @@ The schema is identical -- both read the same `machines:` structure with
 differences are strictness (agent-worktrees errors on missing `machines:`
 key; agent-bridge tolerates it) and one optional field (`ssh.ip`).
 
-The `copilot-extensions-setup` skill handles both in sequence: adopt the
-repo for worktrees, then wire the topology for agent-bridge.
+The `copilot-extensions-setup` skill can handle both when you want an
+agent-worktrees-backed harness, but agent-bridge does not require that flow.
 
 ---
 
@@ -480,7 +495,9 @@ machines:
           shell: bash
 ```
 
-Then create `acp-agents.json` alongside it (note: dict format, not array):
+If you need explicit legacy agents in addition to the derived roster, create an
+`acp-agents.json` and pass it with `--agents-config` (note: dict format, not
+array):
 
 ```json
 {
@@ -504,6 +521,8 @@ Then create `acp-agents.json` alongside it (note: dict format, not array):
 
 ```bash
 agent-bridge config adopt --repo /path/to/repo --profile my-infra
+# optional deprecated explicit override:
+# agent-bridge config adopt --repo /path/to/repo --profile my-infra --agents-config /path/to/acp-agents.json
 agent-bridge config validate
 agent-bridge machines
 agent-bridge agents
@@ -522,8 +541,10 @@ agent-bridge agents
 ### "Agent not found"
 
 - Run `agent-bridge agents` to see available agents
-- Check that the agent's `host` in `acp-agents.json` matches a machine
-  key in `machines.yaml`
+- For derived agents, check `control_plane.project`, related repo entries, and
+  the local repo registry/projects data that feed the roster
+- For a deprecated explicit override, check that the agent's `host` in
+  `acp-agents.json` matches a machine key in `machines.yaml`
 - Local agents (no `host`) don't need a `machines.yaml` entry
 
 ### SSH connection failures

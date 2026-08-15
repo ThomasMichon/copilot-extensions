@@ -1,8 +1,9 @@
 ---
 name: codespaces-lifecycle
 description: >
-  GitHub Codespaces operations -- SSH into codespaces, list/stop/delete/status,
-  credential relay monitoring, and agent-bridge registration. Use this skill
+  GitHub Codespaces operations -- bridge dispatch to codespace agents,
+  diagnostic SSH, list/pool/wait/stop/finalize/delete/status, and credential
+  relay troubleshooting. Use this skill
   for day-to-day codespace management.
   Trigger phrases include:
   - 'codespace'
@@ -14,6 +15,8 @@ description: >
   - 'codespace status'
   - 'credential relay'
   - 'relay status'
+  - 'codespace doctor'
+  - 'codespace troubleshooting'
   - 'codespace agent'
 ---
 
@@ -32,7 +35,7 @@ first-time setup and config changes, see the `codespaces-setup` skill.
 
 ## Connecting to CodeSpaces
 
-All CodeSpace interaction should go through **agent-bridge**, not raw SSH.
+Routine **dispatch** should go through **agent-bridge**, not raw SSH.
 CodeSpace agents are discovered **automatically** via the agent-codespaces
 namespace resolver — **no manual registration is needed past installation**
 (see *Agent-Bridge Integration* below). Any CodeSpace (running or stopped) is
@@ -127,9 +130,10 @@ agent-bridge end abc123-def
   takes 60–120 s; the SSH layer retries automatically (up to ~180 s).
 - **Do NOT pre-start CodeSpaces with manual SSH** — the bridge handles
   startup end-to-end.
-- **Concurrency limit:** Max 4 active CodeSpaces. Check before creating:
-  `gh codespace list --json name,state -q '[.[] | select(.state == "Available")] | length'`
-- **Throttling:** 30 seconds between create/resume operations.
+- **Pool pressure:** `agent-codespaces create` consults the pool planner before
+  spending another box: it prefers reusing a suitable idle CodeSpace and refuses
+  over-budget creates unless `--force-create` is passed. Inspect with
+  `agent-codespaces pool` or preflight with `agent-codespaces allocate <repo>`.
 
 ### Exclusive control: claim + cross-harness fence
 
@@ -192,7 +196,11 @@ agent-codespaces ssh <codespace-name> --no-relay
 ```bash
 agent-codespaces list
 agent-codespaces list --json
+agent-codespaces pool
+agent-codespaces pool --json
+agent-codespaces allocate <owner/repo> --json
 agent-codespaces status
+agent-codespaces doctor
 agent-codespaces version
 ```
 
@@ -202,6 +210,8 @@ agent-codespaces version
 # Create a CodeSpace on a repo + run on_create provisioning from config
 agent-codespaces create <owner/repo>
 agent-codespaces create <owner/repo> --branch <branch> --display-name <name>
+agent-codespaces create <owner/repo> --devcontainer-path .devcontainer/devcontainer.json
+agent-codespaces create <owner/repo> --force-create  # bypass reuse/budget guard
 agent-codespaces create <owner/repo> --no-wait        # don't wait / skip provisioning
 
 agent-codespaces delete <codespace-name>
@@ -227,25 +237,35 @@ agent-logger's `session-sync push`. Only the `session-state` tree and the
 `session-store.db` index are pulled — never credentials, keys, or settings.
 
 ```bash
-# Recover sessions only (no delete) — safe to run any time
+# Recover sessions, stop the CodeSpace, and mark it recovered/reusable
 agent-codespaces finalize <codespace-name>
 
-# Recover sessions, then delete only if recovery succeeded
+# Recover sessions, require a fresh off-box-safety verdict, then delete
+agent-codespaces verify <codespace-name>
 agent-codespaces finalize <codespace-name> --delete
 ```
 
-> 🛑 **If `finalize --delete` refuses (recovery failed), diagnose — don't bypass.**
-> A failed recovery is usually a still-booting CodeSpace, an SSH/relay hiccup, or
-> a real problem worth understanding. Resolve the underlying cause and **re-run
-> `finalize`** so the sessions are captured and the delete proceeds. For a
-> genuinely unrecoverable CodeSpace (broken/corrupted, SSH unavailable), deletion
-> is a deliberate break-glass step — see `agent-codespaces delete --help`. When
-> unsure, surface the error rather than bypassing recovery.
+Plain `finalize` is the preserve path: it recovers Copilot session-state, stops
+the CodeSpace (idempotent if already `Shutdown`), marks it `recovered`, and
+releases the borrow so the box can be reused later. It does **not** delete.
 
-`delete` also runs this recovery automatically as a **best-effort pre-delete
-hook** (skip with `--no-sync`); unlike `finalize --delete`, a failed recovery
-there only warns and still deletes. Prefer `finalize --delete` when you want
-the delete gated on a successful recovery.
+`finalize --delete` is the destructive path. It first checks the no-SSH
+`codespace-clean` beacon; if safety is unknown, run `agent-codespaces verify
+<name>` to SSH-probe git cleanliness and publish a fresh verdict, then retry.
+It also refuses deletion after failed session recovery unless `--force` is
+explicitly supplied.
+
+> 🛑 **If `finalize --delete` refuses, diagnose — don't bypass.** Common causes:
+> unknown/dirty off-box safety (`verify` or push/settle the work), a
+> still-booting CodeSpace, or an SSH/relay hiccup. For a genuinely unrecoverable
+> CodeSpace, deletion is break-glass:
+> `agent-codespaces finalize <name> --delete --force` or
+> `agent-codespaces delete <name> --force --no-sync`.
+
+`delete` also runs recovery automatically as a **best-effort pre-delete hook**
+(skip with `--no-sync`); unlike `finalize --delete`, it does not gate on
+recovery or the cleanliness beacon. Prefer `finalize --delete` for normal
+retirement, and reserve `delete` for deliberate break-glass cleanup.
 
 > **Closing out a CodeSpace settles the borrowing worktree's obligation.** A
 > borrowed CodeSpace is an `active` `codespace` claim on the borrowing worktree's
@@ -317,16 +337,20 @@ agent-codespaces ssh <name> --no-relay --remote-cmd "bash /workspaces/.codespace
 
 ## Credential Relay
 
-The credential relay is a TCP server (default port 9857) that runs on
-the host machine. CodeSpaces connect to it via SSH reverse port
-forwarding. It proxies credential requests to local credential stores.
+The credential relay is a host-side TCP server owned by the agent-bridge daemon.
+Its port is dynamic by default (`credentials.relay_port: 0`): the daemon
+publishes the live port, and agent-codespaces follows that when creating the SSH
+reverse-forward. A positive `credentials.relay_port` pins a fixed port; `9857`
+is only a last-resort compatibility fallback when no live/pinned port is known.
+It proxies credential requests to local credential stores.
 
 ### How It Works
 
-1. Host runs the relay server on `127.0.0.1:9857`
-2. SSH connection includes `-R 9857:localhost:9857`
-3. CodeSpace sends git-credential-protocol requests to `localhost:9857`
-4. Relay routes to matching source (GCM, gh-auth, az-login)
+1. agent-bridge runs the relay server on `127.0.0.1:<live-port>`
+2. `agent-codespaces ssh` includes an SSH reverse-forward for that live port
+3. CodeSpace sends git-credential-protocol requests to `localhost:<live-port>`
+4. Relay routes to matching source (GCM / `git-credential`, plus `az-login` for
+   allowed Azure resources)
 5. Response flows back through the tunnel
 
 ### Available Sources
@@ -334,8 +358,7 @@ forwarding. It proxies credential requests to local credential stores.
 | Source | Action | What It Does |
 |--------|--------|-------------|
 | `git-credential` | `get`/`store`/`erase` | Proxies to local Git Credential Manager |
-| `gh-auth` | `get-github-token` | Returns `gh auth token` output |
-| `az-login` | `get-azure-token` | Returns Azure access tokens (opt-in) |
+| `az-login` | `get-azure-token` | Returns Azure access tokens for the built-in ADO/Storage resources plus configured `allowed_resources` |
 
 ### Policy Enforcement
 
@@ -358,23 +381,32 @@ with no expiry, including newly-created CodeSpaces.
 
 Because discovery is declarative (a dropped manifest carrying an absolute
 command), it works even though the agent-bridge daemon runs from its own
-isolated venv and cannot import agent-codespaces or find its binstub on `PATH`.
-There is **no imperative `bridge register` step** — installing the plugin is all
+isolated venv and does not need agent-codespaces importable or on `PATH`. There
+is **no imperative `bridge register` step** — installing the plugin is all
 that's needed.
+
+The bridge-facing relay/session-host paths are likewise CLI-seam first:
+agent-bridge calls `agent-codespaces relay-profile`, `relay-launch-env`, and
+`provision-command` when it needs the CodeSpace relay policy or launch prelude.
+In-process imports remain only as degrade-safe fallbacks when the bridge venv
+happens to vendor the package; the agent-codespaces CLI/runtime is still owned
+by agent-codespaces.
 
 ## Troubleshooting
 
 - **SSH hangs** -- test with `agent-codespaces ssh <name> --remote-cmd "echo ok" --no-relay`.
   If that works, check credential relay. If it doesn't, verify
-  `gh auth status` is authenticated.
+  `agent-codespaces doctor` / `gh auth status` is authenticated.
 - **Bridge connection fails** -- the bridge auto-starts Shutdown
   CodeSpaces and retries SSH (up to ~180 s). If it still fails, try
   `agent-codespaces ssh <name> --remote-cmd "echo ok" --no-relay`.
   Check `agent-bridge status` and `~/.agent-bridge/agent-bridge-err.log`.
 - **Session fails on start** -- check `~/.agent-bridge/agent-bridge-err.log`.
   Common cause: wrong `ssh_user` in `.agent-codespaces/config.yaml`.
-- **Credential relay not working** -- ensure relay port (9857) is not
-  blocked. Check that `--no-relay` was not accidentally passed.
+- **Credential relay not working** -- check that `--no-relay` was not
+  accidentally passed, then confirm agent-bridge's relay is up (`agent-bridge
+  service restart` repairs the owner daemon). agent-codespaces warns when the
+  host relay is not listening before connect.
 - **Quota exceeded** -- creating or connecting to a CodeSpace (a Shutdown one
   boots on connect) returns HTTP 400 "too many codespaces running" once the
   concurrently-running cap is hit. `agent-codespaces stop <name>` idle

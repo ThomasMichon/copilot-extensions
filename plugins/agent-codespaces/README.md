@@ -9,12 +9,15 @@ A copilot-extensions plugin that provides:
 
 - **SSH transport** -- multiplexed SSH connections to CodeSpaces via
   ssh-manager, wrapping `gh codespace ssh --config`
-- **Lifecycle management** -- create, delete, list, and status for CodeSpaces
-- **Credential relay** -- forward git credentials, GitHub tokens, and
-  Azure tokens to CodeSpaces over SSH tunnels (pluggable sources:
-  git-credential, gh-auth, az-login)
-- **Agent-bridge provider** -- register CodeSpaces as dynamic agents in
-  agent-bridge for inter-agent communication
+- **Lifecycle management** -- list/pool, create/reuse, wait, stop, finalize,
+  prune/delete, and status for CodeSpaces
+- **Credential relay** -- contribute the CodeSpace relay profile to the
+  agent-bridge-owned relay, then expose it to the CodeSpace over SSH reverse
+  forwards (git credentials through host GCM; optional Azure tokens through
+  `az-login`)
+- **Agent-bridge provider** -- when agent-bridge is installed, a session-start
+  hook drops a `providers.d` manifest so `codespace:<name>` agents resolve live
+  over the agent-codespaces CLI boundary
 - **Resource obligations** -- a borrowed CodeSpace is an accountable
   **obligation** on the borrowing worktree: `ssh` journals an `active`
   `codespace` claim onto its ledger, a clean disconnect settles it to `at-rest`
@@ -35,7 +38,7 @@ standard GitHub CodeSpaces by **convention**:
 - machine `largePremiumLinux`, location `EastUs`
 - in-CodeSpace checkout at `/workspaces/<repo-basename>`
 - credential relay serving `github.com` **and** Azure DevOps (via the host Git
-  Credential Manager)
+  Credential Manager) when the agent-bridge relay is running
 
 So `agent-codespaces create <your-org>/<standard-repo>` just works -- no file to
 author.
@@ -78,11 +81,25 @@ credentials:
 
 ## CLI
 
+agent-codespaces is a standalone CLI/binstub. Listing, creating, deleting,
+waiting, stopping, and diagnostic SSH do not require registering the current
+repo as an agent-worktrees harness. The bridge namespace and shared credential
+relay are optional sibling composition: if agent-bridge is absent or stopped,
+`codespace:` dispatch and relay-backed auth stay dark, but the CLI remains
+usable (use `--no-relay` for relay-free diagnostics).
+
 ```bash
 agent-codespaces ssh <name>           # SSH into a CodeSpace
 agent-codespaces ssh --stdio <name>   # Structured SSH for agent-bridge
 agent-codespaces list                 # List active CodeSpaces
-agent-codespaces create <owner/repo>  # Create a CodeSpace + run provisioning
+agent-codespaces pool                 # Pool view: disposition + core budget
+agent-codespaces allocate <owner/repo> # Reuse/create/recycle/pressure decision
+agent-codespaces create <owner/repo>  # Create, guarded by reuse/budget checks
+agent-codespaces wait <name>          # Patiently wait for Available
+agent-codespaces stop <name>          # Recover sessions, then stop (preserve)
+agent-codespaces finalize <name>      # Recover, stop, mark recovered/reusable
+agent-codespaces finalize <name> --delete  # Recover, verify off-box safety, delete
+agent-codespaces verify <name>        # Publish git-cleanliness safety verdict
 agent-codespaces delete <name>        # Delete a CodeSpace (--force to skip prompt)
 agent-codespaces config init          # Scaffold .agent-codespaces/config.yaml (+ auto-adopt)
 agent-codespaces config adopt         # Register a repo's config for the daemon
@@ -90,9 +107,15 @@ agent-codespaces config migrate       # Relocate legacy codespaces.yaml -> .agen
 agent-codespaces config show          # Show resolved config
 agent-codespaces config validate      # Validate resolved config
 agent-codespaces cleanup              # Remove stale local state (SSH configs, sockets)
-agent-codespaces status               # Service + relay + tunnel state
+agent-codespaces doctor               # Check gh auth + codespace scope
+agent-codespaces status               # Runtime/config/gh/ssh overview
 agent-codespaces version              # Show version
 ```
+
+There are also bridge-facing seams (`namespace-list`, `namespace-resolve`,
+`namespace-target-repo`, `namespace-ensure-ready`, `relay-profile`,
+`relay-launch-env`, `provision-command`, `acp-model-flags`). They are invoked by
+agent-bridge and are not the normal human/operator surface.
 
 ### `create` options
 
@@ -100,14 +123,18 @@ agent-codespaces version              # Show version
 agent-codespaces create <owner/repo> \
   --branch <branch> \           # branch to create on (default: repo default)
   --display-name <name> \       # CodeSpace display name
+  --devcontainer-path <path> \  # only needed to override multi-devcontainer resolution
   --timeout 300 \               # seconds to wait for Available (default 300)
+  --force-create \              # bypass reuse-before-create / core-budget guard
   --no-wait                     # don't wait / skip provisioning
 ```
 
 Machine type and location default by convention (`largePremiumLinux` / `EastUs`)
 and can be overridden per-repo in `.agent-codespaces/config.yaml`. After the
 CodeSpace is Available, any `on_create` provisioning hooks from that config run
-automatically.
+automatically. Without `--force-create`, `create` first consults the pool
+planner: it reuses a suitable idle CodeSpace or refuses when the configured core
+budget is already under pressure.
 
 ### Agent-bridge integration (automatic)
 
@@ -116,9 +143,16 @@ namespace-provider manifest into `~/.agent-bridge/providers.d/`. agent-bridge
 discovers it there and registers the live `codespace:` namespace resolver, so
 CodeSpaces are addressable as `codespace:<name>` (raw or friendly) — listed and
 resolved live, with no expiry, including newly-created ones. There is **no
-`bridge register` step**; installing the plugin is all that's needed. The
-manifest carries the absolute agent-codespaces binstub, so the bridge daemon
-drives it over a process boundary without importing it or needing it on `PATH`.
+`bridge register` step**; installing the plugin is all that's needed.
+
+The current bridge integration is process-boundary first, not PATH/import
+coupled: the manifest carries the absolute agent-codespaces binstub, and
+agent-bridge invokes `namespace-*` commands to list/resolve targets. The
+credential-relay and Session Host helper paths similarly prefer CLI seams
+(`relay-profile`, `relay-launch-env`, `provision-command`) with in-process import
+fallbacks only when the bridge venv happens to vendor the package. This follows
+the repo's à-la-carte independence pattern: the agent-codespaces CLI owns its
+runtime; agent-bridge only lights up optional dispatch/relay features.
 
 ## Multi-account gh (per-repo identity)
 
@@ -182,7 +216,9 @@ first and restore afterward.
 The relay forwards git-credential requests from a CodeSpace back to the host
 over the SSH tunnel, resolving them through the host's Git Credential Manager
 (GCM) — which serves **both** GitHub (`github.com`) and Azure DevOps
-(`*.visualstudio.com`, `dev.azure.com`) credentials.
+(`*.visualstudio.com`, `dev.azure.com`) credentials. The relay server is owned
+by agent-bridge; agent-codespaces contributes the CodeSpace policy/profile and
+sets up the SSH reverse-forward on connect.
 
 To avoid the failure mode where a missing/expired credential causes a CodeSpace
 `git fetch` to hang indefinitely on `git credential fill`:
@@ -231,7 +267,8 @@ any repo, so it is never committed.
 ## Development
 
 ```bash
-cd plugins/agent-codespaces
-pip install -e ".[dev]" -e "../../libs/ssh-manager[dev]"
-pytest tests/
+cd plugins\agent-codespaces
+uv venv .venv
+uv pip install --python .venv\Scripts\python.exe -e ".[dev]"
+python ..\..\tools\run-plugin-tests.py agent-codespaces --guards
 ```

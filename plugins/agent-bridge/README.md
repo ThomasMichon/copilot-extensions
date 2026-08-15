@@ -1,21 +1,28 @@
 # Agent Bridge
 
-Persistent inter-agent communication service for Copilot CLI. One
-instance per machine, providing session management, SSE event streaming,
-and agent subprocess spawning across local and remote machines.
+Persistent inter-agent communication service for Copilot CLI. One instance per
+machine, providing session management, SSE event streaming, live-session
+messaging, and agent subprocess spawning across local, SSH, CodeSpace, and
+container venues.
 
 Supports **Windows** and **Linux/WSL** (macOS planned).
 
 ## How It Works
 
-Agent Bridge runs as a local HTTP service (`localhost:9280`) that manages
-agent conversations on your behalf. Multiple Copilot CLI sessions can
-start, stop, and resume conversations with agents running on any
-configured machine via local subprocess or SSH transport.
+Agent Bridge runs as a local HTTP service on an OS-assigned loopback port by
+default. The daemon advertises its live endpoint in `~/.agent-bridge/active.json`
+and the CLI discovers it there, so callers should use `agent-bridge status`
+rather than hardcoding a port. Multiple Copilot CLI sessions can start, stop,
+resume, and observe conversations with agents running locally, over SSH, or via
+optional namespace providers such as `codespace:` and `container:`.
 
-Unlike agent-worktrees (a per-session plugin), agent-bridge is a
-**persistent daemon** -- it runs continuously and survives session
-restarts.
+agent-bridge is a **standalone persistent daemon** -- enabling only this plugin
+is enough for its core service, static/local agents, WebSocket ACP surface, and
+live-session registry. Sibling plugins compose opportunistically: when a sibling
+drops a provider manifest into `~/.agent-bridge/providers.d/`, its namespace
+(for example `codespace:` or `container:`) appears; when it also exposes a
+credential-relay profile, agent-bridge folds those sources into its relay. If a
+sibling is absent, only that sibling's namespace/relay feature is absent.
 
 ## Streaming & the delivery cursor
 
@@ -145,8 +152,11 @@ drive a remote agent through the bridge — for example
 
 | URL | Target |
 |-----|--------|
-| `ws://<host>:9280/acp/<agent>` | spawn a fresh session for a registered agent |
-| `ws://<host>:9280/acp/session/<session-id>` | *adopt* an already-running bridge session (observe/steer) — it is **not** stopped when the client disconnects |
+| `ws://<host>:<port>/acp/<agent>` | spawn a fresh session for a registered agent |
+| `ws://<host>:<port>/acp/session/<session-id>` | *adopt* an already-running bridge session (observe/steer) — it is **not** stopped when the client disconnects |
+
+Use the port printed by `agent-bridge status`, `agent-bridge token --verbose`,
+or `/ui`; the default service port is dynamic unless pinned in config.
 
 **Auth.** Browsers cannot set WebSocket headers, so the bridge token is carried
 as a `bearer.<token>` WebSocket subprotocol (acp-ui's convention); a plain
@@ -168,10 +178,14 @@ kept in `localStorage`), so no data is exposed without auth.
 > Enabled by the pure-Python `wsproto` dependency (uvicorn keeps its plain h11
 > HTTP path; no native build, preserving win-arm64 support).
 
-## Getting Started
+## Getting Started / Usage
 
-See [Getting Started](docs/getting-started.md) for install, configuration,
-and service startup.
+Start with [Getting Started](docs/getting-started.md) for the standalone install
+and first health check. Then use the [`agent-bridge` skill](skills/agent-bridge/SKILL.md)
+and [CLI reference](skills/agent-bridge/references/cli-commands.md) for
+day-to-day dispatch, live-session messaging, handoff, and service control.
+Use [`agent-bridge-troubleshooting`](skills/agent-bridge-troubleshooting/SKILL.md)
+for wedged dispatches, resume issues, relay/auth failures, and repair drills.
 
 ## Docs
 
@@ -185,8 +199,9 @@ and service startup.
 
 | Skill | Description |
 |-------|-------------|
-| `agent-bridge` | CLI control plane -- sessions, agents, machines, config |
-| `copilot-extensions-setup` | Install and adopt (shared with agent-worktrees) |
+| `agent-bridge` | CLI control plane -- send/create/read/wait, sessions, live sessions, service/config |
+| `agent-bridge-troubleshooting` | Diagnose and recover stuck dispatches, resume hangs, relay/auth failures, and split-brain |
+| `copilot-extensions-setup` | Marketplace/runtime setup when a host needs guided installation |
 
 ## Platforms
 

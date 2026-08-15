@@ -211,7 +211,7 @@ agent-bridge status
 agent-bridge version
 ```
 
-### Zero-Downtime Redeploy (routing table + drain + cutover)
+### Graceful Redeploy (routing table + drain + installer-driven cutover)
 
 A redeploy no longer has to hard-kill live work. Clients resolve the daemon
 through a **routing table** (`~/.agent-bridge/active.json`) instead of the
@@ -230,20 +230,20 @@ it, and the old daemon retire -- with no client ever dialing a dead port.
 agent-bridge drain --timeout 300
 agent-bridge undrain                 # release the gate (rollback)
 
-# Active/passive cutover: spawn the new daemon on a free port, flip the routing
-# table, drain + retire the old one. Rolls back on any pre-commit failure.
-# Writes a durable breadcrumb (cutover.json) so an aborted cutover is traceable
-# and its stranded survivor can be undrained (#1756).
-agent-bridge deploy --drain-timeout 300 [--force]
-agent-bridge deploy --recover        # only heal a prior aborted cutover, then exit
+# Active/passive cutover is installer-driven. Operators normally do NOT run this
+# seam directly; `install.* update` invokes it after building/activating the new
+# versioned runtime slot. It remains exposed for installer internals and recovery:
+agent-bridge deploy --recover        # heal a prior aborted cutover, then exit
 ```
 
-The installer `update` path drains before stopping by default (no hard-killed
-turns up to `AGENT_BRIDGE_DRAIN_TIMEOUT`). Full zero-downtime cutover is opt-in
-while service-manager reconciliation is validated:
+The installer `update` path performs graceful cutover automatically when a live
+daemon is running and the new slot differs from the active slot; it falls back
+to drain/stop/start only if cutover cannot run or fails. `AGENT_BRIDGE_ZERO_DOWNTIME`
+is accepted for compatibility but is no longer an opt-in switch.
 
 ```bash
-AGENT_BRIDGE_ZERO_DOWNTIME=1 test-chamber services agent-bridge update
+install.ps1 update    # Windows, from the plugin payload
+install.sh update     # Linux/WSL, from the plugin payload
 ```
 
 > A passive instance (`agent-bridge start --passive`) does not self-publish the
