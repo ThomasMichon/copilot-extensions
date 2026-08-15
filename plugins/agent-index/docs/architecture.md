@@ -82,6 +82,24 @@ multi-machine deployment (e.g. a single GPU-backed indexer serving a fleet) is
 therefore a fan-in of SSH forwards to one host-resident service, never a fleet of
 network listeners.
 
+### Ordered indexers + client failover
+
+A repo may designate **more than one** indexer — an ordered `indexers:` list
+(primary first, secondaries after), each entry carrying its **own** `{machine, ssh,
+endpoint}`. Every indexer hosts its **own parallel** service+engine and indexes the
+same corpus independently (no cross-host replication — redundancy comes from
+parallelism; see the vision's *recoverable-rebuildable-index*). A client records the
+ordered endpoints in its machine-local config and, at routing time
+(`config.client_url`), **health-probes each in order and uses the first reachable**
+one — so a down primary or a broken SSH hop transparently falls back to a secondary.
+When none answer it returns the primary deterministically so the caller surfaces the
+connect error. The probe timeout is `AGENT_INDEX_ROUTE_PROBE_TIMEOUT_S` (default
+1.5s). Because each indexer carries its own ssh alias, *which machines index* and
+*which server a given client dials* are independent. Back-compatible: a singular
+`indexer:` block and a lone machine-local `endpoint:` still resolve exactly as
+before (a single target is returned as-is, never probed).
+
+
 ## Later slices
 
 Phase 2 will introduce the indexing engine core, source connectors, durable work

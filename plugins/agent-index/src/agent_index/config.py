@@ -134,12 +134,49 @@ def repo_config_path(root: Path) -> Path:
 
 def read_indexer(root: Path | None) -> dict | None:
     """Read the shared indexer designation (``indexer:`` block) from the repo
-    config, or ``None`` when unset."""
+    config, or ``None`` when unset.
+
+    Back-compat singular accessor: it returns the singular ``indexer:`` mapping,
+    or, for a plural ``indexers:`` deployment, the **primary** (first) indexer.
+    Callers that need the full ordered set use :func:`read_indexers`.
+    """
     if root is None:
         return None
     data = _load_yaml(repo_config_path(root))
     ind = data.get("indexer")
-    return ind if isinstance(ind, dict) else None
+    if isinstance(ind, dict) and ind.get("machine"):
+        return ind
+    plural = read_indexers(root)
+    return plural[0] if plural else None
+
+
+def read_indexers(root: Path | None) -> list[dict]:
+    """Read the ordered indexer designation(s) from the repo config (primary first).
+
+    A multi-indexer deployment declares a plural ``indexers:`` list -- each element a
+    ``{machine, ssh?, endpoint?}`` mapping -- whose **order is the failover
+    preference**: the first is the primary (freshness/authority), the rest are
+    secondaries a client falls back to when the primary is unreachable
+    (vision §adoption-designates-ordered-indexers; SSH-mesh robustness). A
+    single-indexer deployment's singular ``indexer:`` block is accepted and returned
+    as a one-element list. Each machine gets its **own** ssh alias + endpoint, so
+    "which machine indexes" and "which server a given client dials" stay independent.
+
+    Malformed entries (no ``machine``) are dropped defensively. Returns ``[]`` when
+    neither key is set.
+    """
+    if root is None:
+        return []
+    data = _load_yaml(repo_config_path(root))
+    items = data.get("indexers")
+    if isinstance(items, list):
+        out = [it for it in items if isinstance(it, dict) and it.get("machine")]
+        if out:
+            return out
+    ind = data.get("indexer")
+    if isinstance(ind, dict) and ind.get("machine"):
+        return [ind]
+    return []
 
 
 def read_corpus_sources() -> list[dict]:
@@ -269,10 +306,14 @@ def write_machine_role(role: str) -> Path:
     return set_machine_config({"role": role})
 
 
-def set_machine_config(updates: dict) -> Path:
-    """Merge *updates* into the machine-local config file. Returns its path."""
+def set_machine_config(updates: dict, remove: list[str] | None = None) -> Path:
+    """Merge *updates* into the machine-local config file, optionally removing the
+    keys in *remove* (e.g. clearing stale client routing when a box becomes a host).
+    Returns its path."""
     path = config_path()
     data = _load_yaml(path)
+    for key in remove or ():
+        data.pop(key, None)
     data.update(updates)
     _dump_yaml(path, data)
     return path
@@ -298,6 +339,34 @@ def write_indexer_designation(
     if endpoint:
         ind["endpoint"] = endpoint
     data["indexer"] = ind
+    _dump_yaml(path, data)
+    return path
+
+
+def write_indexers_designation(root: Path, indexers: list[dict]) -> Path:
+    """Record an **ordered** multi-indexer designation (``indexers:`` list, primary
+    first) into ``<repo>/.agent-index/config.yaml`` (merging other keys). Each entry
+    is normalized to ``{machine, ssh?, endpoint?}``; entries without a ``machine`` are
+    dropped. The singular ``indexer:`` key is removed so the plural list is the single
+    source of truth. Returns the repo config path
+    (vision §adoption-designates-ordered-indexers)."""
+    path = repo_config_path(root)
+    data = _load_yaml(path)
+    norm: list[dict] = []
+    for it in indexers:
+        if not isinstance(it, dict):
+            continue
+        m = str(it.get("machine", "")).strip()
+        if not m:
+            continue
+        entry: dict = {"machine": m}
+        if it.get("ssh"):
+            entry["ssh"] = str(it["ssh"]).strip()
+        if it.get("endpoint"):
+            entry["endpoint"] = str(it["endpoint"]).strip()
+        norm.append(entry)
+    data["indexers"] = norm
+    data.pop("indexer", None)
     _dump_yaml(path, data)
     return path
 
@@ -377,6 +446,56 @@ def configured_endpoint() -> str | None:
     return val.strip() if isinstance(val, str) and val.strip() else None
 
 
+def configured_endpoints() -> list[str]:
+    """The **ordered** remote endpoints a client may route to (primary first).
+
+    A multi-indexer client records a plural ``endpoints:`` list in its machine-local
+    config -- the failover order across the designated indexers. A single-indexer
+    client records only the singular ``endpoint:``; it is returned as a one-element
+    list. Returns ``[]`` when neither is set (a host resolves its own local service).
+    """
+    data = _load_yaml(config_path())
+    eps = data.get("endpoints")
+    if isinstance(eps, list):
+        out = [e.strip() for e in eps if isinstance(e, str) and e.strip()]
+        if out:
+            return out
+    single = configured_endpoint()
+    return [single] if single else []
+
+
+def _route_probe_timeout() -> float:
+    """Per-endpoint failover probe timeout (seconds), from
+    ``AGENT_INDEX_ROUTE_PROBE_TIMEOUT_S``. Defensively falls back to 1.5s on a
+    missing/malformed/non-positive value so a stray env setting never crashes
+    routing."""
+    default = 1.5
+    raw = os.environ.get("AGENT_INDEX_ROUTE_PROBE_TIMEOUT_S")
+    if not raw:
+        return default
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return default
+    return val if val > 0 else default
+
+
+def _endpoint_healthy(base_url: str, timeout: float) -> bool:
+    """Best-effort reachability probe of a service endpoint's ``GET /health``.
+
+    Stdlib-only (no httpx in the light routing path) and fully defensive: any
+    connect/timeout/HTTP error is treated as unreachable. A 2xx (``ok`` or the
+    transient ``draining``) counts as reachable."""
+    import urllib.request
+
+    url = base_url.rstrip("/") + "/health"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310
+            return 200 <= getattr(resp, "status", 200) < 300
+    except Exception:
+        return False
+
+
 def client_url() -> str | None:
     """Return the active service URL.
 
@@ -391,9 +510,22 @@ def client_url() -> str | None:
     ``status``/``stop`` probe a dead static port and report the running service as
     down (#1349)."""
     if resolve_role() == "client":
-        configured = configured_endpoint()
-        if configured:
-            return configured
+        endpoints = configured_endpoints()
+        if len(endpoints) > 1:
+            # Ordered failover across the designated indexers (primary first): use
+            # the first reachable one, so a down primary or a broken SSH hop
+            # transparently falls back to a secondary (SSH-mesh robustness;
+            # vision §adoption-designates-ordered-indexers). When none answer, return
+            # the primary deterministically so the caller surfaces its connect error.
+            timeout = _route_probe_timeout()
+            for ep in endpoints:
+                if _endpoint_healthy(ep, timeout):
+                    return ep
+            return endpoints[0]
+        if endpoints:
+            # Single configured target (singular ``endpoint:`` or a one-element
+            # ``endpoints:`` list): returned as-is, never health-probed (back-compat).
+            return endpoints[0]
 
     routed = _routing_url()
     if routed:

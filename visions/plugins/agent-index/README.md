@@ -276,18 +276,29 @@ a prerequisite the plugin bakes in. A machine that only consumes search installs
 **no model stack** and reaches the engine-hosting service over that transport, so
 the heavy runtime lives on **one host**, not on every consumer.
 
-### adoption-designates-one-indexer
+### adoption-designates-ordered-indexers
 Adopting agent-index into a harness repo is an explicit **onboarding act**, not an
-implicit per-machine guess: it designates **exactly one machine** as the indexer
-that hosts the service and engine, and every other machine installs as a **search
-client** that reaches out to it. A **single-machine** repo is offered the **full
-local stack** (host and client on one box). The designation and each machine's role
-are written to **configuration** (the source repo's `.agent-index` and/or
+implicit per-machine guess: it designates an **ordered set of indexer machines** —
+a **primary** that hosts the service and engine, plus zero or more **secondaries**
+that host their own parallel index — and every other machine installs as a **search
+client** that reaches out to them. The **order is the failover preference**: a
+client routes to the **first reachable** indexer, so a down primary or a broken SSH
+hop transparently falls back to a secondary — robustness for an SSH-mesh where any
+one host may be asleep or unreachable. The common cases are the degenerate ones:
+**exactly one** indexer (a client dials the single host), and a **single-machine**
+repo offered the **full local stack** (host and client on one box). Each indexer
+carries its **own** SSH alias and endpoint, so *which machines index* and *which
+server a given client dials* stay independent — a client can prefer a
+topologically-closer indexer. The designation (the ordered list) and each machine's
+role are written to **configuration** (the source repo's `.agent-index` and/or
 machine-local), so role stays config-resolved with **no machine names baked into
-the plugin** — adoption is simply what *writes* that configuration. Running
-install/setup **on the designated machine** configures and starts (or restarts) the
-local service and engine; running it **elsewhere** installs the client and its
-routing to the designated host.
+the plugin** — adoption is simply what *writes* (or reads) that configuration.
+Running install/setup **on a designated machine** configures and starts (or
+restarts) its local service and engine; running it **elsewhere** installs the client
+and its ordered routing to reach the designated indexers. Parallel indexers each
+rebuild from source independently (per **recoverable-rebuildable-index**), so no
+cross-host replication or consensus is assumed — redundancy comes from parallelism,
+not coordination.
 
 ### capability-matched-engine-runtime
 The indexer's engine is matched to the host's **real capabilities** rather than
@@ -402,3 +413,19 @@ generic is what lets many different products reuse it.
   capability both resolve into **configuration** at adoption — still no machine
   names in the plugin. Extends the `agent-index-engine-daemon` effort (its
   role-aware install and external-seam defaults are the foundation this builds on).
+
+- **2026-08-14** — Evolved **adoption-designates-one-indexer** →
+  **adoption-designates-ordered-indexers**: the designation is now an **ordered set**
+  (a primary + optional secondaries), each indexer carrying its **own** SSH alias and
+  endpoint, and a client routes to the **first reachable** one — **failover** for
+  SSH-mesh robustness where a host may be asleep or unreachable. Mined from an
+  operator directive while bringing up a **second, parallel indexer** (dev6 alongside
+  cloud1): *every client must know which server(s) to reach, and one hard-coded target
+  is too brittle for an SSH mesh; the routing target should be independent of which
+  machine holds the indexer role.* Parallel indexers each rebuild from source
+  independently (per **recoverable-rebuildable-index**) — redundancy through
+  parallelism, not cross-host replication or consensus. The single-indexer and
+  single-machine cases remain the degenerate forms (back-compatible: a singular
+  `indexer:` block and a lone `endpoint:` still work). Realized in config
+  (`indexers:` list, `read_indexers`, ordered-failover `client_url`), adoption
+  (`setup` resolves role/routing from an authored list), and tests.
