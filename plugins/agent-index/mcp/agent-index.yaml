@@ -1,0 +1,23 @@
+# agent-index read toolset as a `cli` bridge.
+#
+# The `@agent-index` sub-agent reaches retrieval through this bridge instead of
+# the direct `agent-index mcp` HTTP-client MCP. Each tool invokes an `agent-index`
+# read subcommand, whose CLI transport (agent_index/transport.py) resolves the
+# backing project from CWD and routes: a host runs locally; a client runs the same
+# command on the designated indexer over SSH. So a client needs no port-forward,
+# no gateway, and no AGENT_INDEX_ENDPOINT -- the transport handles reach.
+#
+# Resolved by bare name: a plugin-shipped bridge config at
+# `<plugin>/mcp/agent-index.yaml` is found by `agent-mcp bridge agent-index`.
+# `tools_from` paths are relative to THIS file.
+#
+# Read-only discipline: `agent_index_reindex` is deliberately NOT exposed here.
+server:
+  type: cli
+  tools_from:
+    - tools/agent_index_search.md
+    - tools/agent_index_find_similar.md
+    - tools/agent_index_clusters.md
+    - tools/agent_index_status.md
+tools:
+  allow: ["agent_index_*"]
