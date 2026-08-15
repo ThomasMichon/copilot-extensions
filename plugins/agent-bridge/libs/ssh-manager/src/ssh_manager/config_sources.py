@@ -15,7 +15,7 @@ from typing import Protocol, runtime_checkable
 class SSHConfig:
     """SSH connection parameters produced by a ConfigSource."""
 
-    host_alias: str  # SSH target name (e.g., "borealis", "cs.fluffy-parakeet.org/repo")
+    host_alias: str  # SSH target name (e.g., "emancipation-cube", "cs.fluffy-parakeet.org/repo")
     hostname: str | None = None  # resolved hostname (if different from alias)
     user: str | None = None
     port: int | None = None
@@ -75,7 +75,7 @@ class SSHProfileSource:
     """ConfigSource that reads from the local SSH config.
 
     For static machines defined in ~/.ssh/config. The host_alias is
-    the SSH config Host entry (e.g., "borealis", "lambda-core-wsl").
+    the SSH config Host entry (e.g., "emancipation-cube", "anomalous-potato-wsl").
     All connection details (hostname, user, port, key, proxy) are
     resolved by OpenSSH from the config file.
     """

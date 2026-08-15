@@ -1,6 +1,6 @@
 # zdd -- zero-downtime cutover library
 
-Shared active/passive redeploy primitives for Copilot CLI plugins and facility
+Shared active/passive redeploy primitives for Copilot CLI plugins and multi-machine
 services. Extracted from agent-bridge (which proved the design in production) so
 multiple consumers reuse one implementation instead of reinventing it.
 

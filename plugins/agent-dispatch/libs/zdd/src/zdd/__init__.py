@@ -1,7 +1,7 @@
 """zdd -- zero-downtime active/passive cutover primitives.
 
 A service-neutral library for zero-downtime redeploys, extracted from
-agent-bridge so any Copilot CLI plugin or facility service can reuse it:
+agent-bridge so any Copilot CLI plugin or multi-machine service can reuse it:
 
 - ``routing`` -- a file-based client-read routing table (``active.json``):
   publish the live endpoint, atomically flip active/previous on cutover, and
