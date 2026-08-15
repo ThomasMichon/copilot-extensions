@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent_bridge.models import SessionStatus
+from agent_bridge.session_manager import SessionManager
 from agent_bridge.transport import SpawnTarget
 
 
@@ -31,7 +32,19 @@ def _patch_spawn():
 
 @pytest.fixture
 def _patch_acp(mock_acp_client):
-    with patch("agent_bridge.session_manager.AcpClient") as mock_cls:
+    # Session Hosts are always on (dotfiles#1478): a local start now connects via
+    # _connect_via_session_host, which can't stand up in a unit test. Stub it to
+    # hand back the mock client + a stable acp id so the predecessor's initial
+    # start lands IDLE. (The handoff successor uses the classic spawn/AcpClient
+    # path, which _patch_spawn + this AcpClient patch still cover -- including the
+    # failing-successor test that re-patches AcpClient.)
+    async def _fake_host_connect(self, target, **kwargs):
+        return mock_acp_client, mock_acp_client.acp_session_id
+
+    with patch("agent_bridge.session_manager.AcpClient") as mock_cls, \
+            patch.object(
+                SessionManager, "_connect_via_session_host", _fake_host_connect
+            ):
         mock_cls.return_value = mock_acp_client
         yield mock_cls
 
@@ -126,12 +139,16 @@ class TestHandoffPrimitive:
         self, session_manager, spawn_target, _patch_spawn, _patch_acp,
     ) -> None:
         pred = await session_manager.start_session(spawn_target, caller_id="wt-5")
-        # Now make the NEXT AcpClient construction (the successor) fail to start,
-        # overriding the fixture's patch for the duration of the handoff.
-        with patch("agent_bridge.session_manager.AcpClient") as mock_cls:
-            failing = MagicMock()
-            failing.start = AsyncMock(side_effect=RuntimeError("boom"))
-            mock_cls.return_value = failing
+        # Now make the successor's start FAIL. Session Hosts are always on
+        # (dotfiles#1478), so a local successor starts via
+        # _connect_via_session_host -- override the fixture's succeeding stub with
+        # one that raises, so only the successor's start fails.
+        async def _failing_host_connect(self, target, **kwargs):
+            raise RuntimeError("boom")
+
+        with patch.object(
+            SessionManager, "_connect_via_session_host", _failing_host_connect
+        ):
             with pytest.raises(RuntimeError, match="failed to start"):
                 await session_manager.handoff_session(pred.session_id)
 

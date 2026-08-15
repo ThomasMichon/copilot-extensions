@@ -3141,11 +3141,10 @@ def _cmd_agent(args: argparse.Namespace) -> None:
     cfg = load_config()
 
     # Initialize DB and session manager via the shared config factory so
-    # ACP-agent mode honors session-host settings identically to the HTTP daemon
-    # -- chiefly session_host_enabled (default ON). Constructing SessionManager
-    # inline here previously omitted it, silently falling back to the off default
-    # so a CodeSpace bridged via ACP-agent mode ran the legacy front-owns-stdio
-    # path and its remote child died on a brief SSH drop (#145/#177).
+    # ACP-agent mode wires session-host settings identically to the HTTP daemon.
+    # Session Hosts are always on (dotfiles#1478): a CodeSpace bridged via
+    # ACP-agent mode survives a brief SSH drop instead of dying with it
+    # (#145/#177).
     db_path = Path(cfg.db_path).expanduser()
     db = Database(db_path)
     sm = session_manager_from_config(db, cfg)

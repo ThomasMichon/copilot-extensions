@@ -22,6 +22,41 @@ def _isolate_local_discovery(tmp_path, monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def _route_local_start_via_classic(monkeypatch):
+    """Session Hosts are always on (dotfiles#1478), so a local ``start_session``
+    now connects through ``_connect_via_session_host`` (a survivable host over a
+    loopback socket) rather than the classic ``spawn`` + ``AcpClient`` path that
+    these route tests mock and assert on (the target handed to ``spawn``). That
+    real host machinery can't stand up in a unit test, so re-route the host
+    connect back through the module-level ``spawn`` + ``AcpClient`` -- both still
+    patched per-test -- preserving each test's contract. Never invoked unless a
+    test actually starts a local session, so it is inert elsewhere.
+    """
+    import agent_bridge.session_manager as sm
+
+    async def _fake_connect(
+        self, target, *, tracker, session_id, on_acp_event,
+        permission_callback=None, mcp_servers=None, spawner=None,
+        remote_child_argv=None, remote_cwd=None,
+    ):
+        proc = await sm.spawn(
+            target, tracker=tracker, connect_timeout=0, session_id=session_id,
+        )
+        client = sm.AcpClient(
+            on_event=on_acp_event, on_permission=permission_callback,
+        )
+        await client.start(proc.proc)
+        acp_sid = await client.new_session(
+            cwd=target.cwd or "/", mcp_servers=mcp_servers,
+        )
+        return client, acp_sid
+
+    monkeypatch.setattr(
+        sm.SessionManager, "_connect_via_session_host", _fake_connect
+    )
+
+
 @pytest.fixture
 def app(tmp_path):
     """Create a FastAPI test app with real DB but mocked session starts."""
@@ -29,9 +64,6 @@ def app(tmp_path):
         port=0,
         bind="127.0.0.1",
         db_path=str(tmp_path / "test.db"),
-        # These route tests exercise the legacy front-owns-stdio spawn path
-        # (mocked). Session Hosts are default-on now, so pin it off here.
-        session_host_enabled=False,
     )
     return create_app(config=cfg, token="test-token")
 
