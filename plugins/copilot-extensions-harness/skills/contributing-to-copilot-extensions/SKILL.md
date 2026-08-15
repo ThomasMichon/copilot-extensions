@@ -214,7 +214,7 @@ Owners push directly to `main`, so treat `main` as a single-writer lane:
 Everything that lands here is **world-readable**: commits, issues, code
 comments, docs, `AGENTS.md`. Never put downstream-private material in them.
 
-- **No** employer/facility names, internal service or host names, topology
+- **No** employer/multi-machine system names, internal service or host names, topology
   details, persona/role-play machinery, private URLs, or the specific downstream
   reason a change is wanted.
 - **Do** describe changes in self-contained, general-purpose terms — as if for a
