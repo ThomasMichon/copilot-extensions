@@ -96,9 +96,9 @@ EXEMPT_SESSION_HOOK: frozenset[str] = frozenset()
 # runtimes (detached daemons + graceful cutover), tracked separately. Their POSIX
 # `.sh` already declares stamp/provision, so the exemption is ps1-only. SHRINK this
 # set as each is ported; do NOT add plugins here to silence the check.
-BASELINE_NO_STAMP_PS1: frozenset[str] = frozenset({
-    "agent-bridge",
-})
+# EMPTY: all Thread-B service runtimes (agent-dispatch, agent-vault, agent-index,
+# agent-bridge) are ported -- their install.ps1 now declares stamp/provision.
+BASELINE_NO_STAMP_PS1: frozenset[str] = frozenset()
 
 
 def _declares_stamp_provision(text: str, ext: str) -> bool:
