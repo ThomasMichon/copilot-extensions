@@ -29,6 +29,10 @@ pwsh -File .\transports\dtssh\scripts\install-host.ps1 status -Alias <host>
 `sshd` emits an SSH banner, reports the watchdog, and shows the persisted tunnel
 when the `devtunnel` CLI can resolve it.
 
+> Throughout this skill, bare `install-host.ps1 <verb>` is shorthand for the full
+> `pwsh -File .\transports\dtssh\scripts\install-host.ps1 <verb>` invocation shown
+> above (run from `plugins\agent-ssh`, checkout or installed payload).
+
 ---
 
 ## Symptom → cause → action

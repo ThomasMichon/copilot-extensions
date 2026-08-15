@@ -27,20 +27,20 @@ relay:
 # Codespaces-style (docker cp to target, then optional install command).
 # Per-user / optional -- omit `repo` to skip entirely.
 dotfiles:
-  repo: D:/Src/dotfiles                  # host path to the dotfiles repo
+  repo: /path/to/your/dotfiles                  # host path to the dotfiles repo
   target: /workspaces/.codespaces/.persistedshare/dotfiles   # default
   install_command: bash install.sh       # run in `target` as the remote user; "" skips
 
 # Optional: copy a separate control-plane harness checkout into the container
 # for reference at /workspaces/<basename>. No install step by default.
 harness:
-  repo: D:/Src/control-plane
+  repo: /path/to/your/control-plane
   # install_command: ""                  # omitted/empty means no install
 
 fleets:
   myrepo:
     repo: your-org/your-repo
-    devcontainer_path: D:/Src/myrepo-devcontainer   # dir holding .devcontainer/
+    devcontainer_path: /path/to/myrepo-devcontainer   # dir holding .devcontainer/
     # Needed when the spec is NOT at the default
     # .devcontainer/devcontainer.json -- passed to the devcontainer CLI as
     # --config. Relative paths resolve against devcontainer_path.
