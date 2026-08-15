@@ -14,7 +14,6 @@ description: >
   - 'codespace status'
   - 'credential relay'
   - 'relay status'
-  - 'bridge register codespace'
   - 'codespace agent'
 ---
 
@@ -348,31 +347,20 @@ All requests pass through a policy gate before reaching any source:
 ## Agent-Bridge Integration
 
 **No manual registration is required.** When agent-codespaces is installed, its
-package is also imported into the agent-bridge service venv, and the bridge
-auto-registers the `codespace:` **namespace resolver** at startup. That resolver
-lists and resolves your CodeSpaces **live** (via `gh codespace list`) on demand —
-so `agent-bridge agents` shows them and `agent-bridge send codespace:<name>`
-works immediately, with no expiry, including newly-created CodeSpaces. This is
-the recommended path.
+sessionStart hook drops a small **namespace-provider manifest** into
+`~/.agent-bridge/providers.d/` (declaring the `codespace:` namespace and the
+absolute path to the agent-codespaces binstub). agent-bridge discovers that
+manifest there and registers the `codespace:` **namespace resolver**, driving
+agent-codespaces over a process boundary. That resolver lists and resolves your
+CodeSpaces **live** (via `gh codespace list`) on demand — so `agent-bridge
+agents` shows them and `agent-bridge send codespace:<name>` works immediately,
+with no expiry, including newly-created CodeSpaces.
 
-### `bridge register` (optional / legacy)
-
-`agent-codespaces bridge register` POSTs a **static snapshot** of your current
-CodeSpaces to the bridge as `cs-<name>` provider agents with a TTL. The live
-namespace resolver supersedes it (live, no TTL, friendly names), so you rarely
-need this. It remains for HTTP consumers that prefer a pre-registered provider
-list over on-demand resolution.
-
-```bash
-agent-codespaces bridge register          # static cs-* snapshot (TTL 300s)
-agent-codespaces bridge register --ttl 600
-agent-codespaces bridge status
-agent-codespaces bridge unregister
-```
-
-Snapshot agents expire after the TTL (default 300s) and are named
-`cs-<codespace-name>` — distinct from the live `codespace:<name>` resolver
-targets. For day-to-day dispatch, prefer `codespace:<name>`.
+Because discovery is declarative (a dropped manifest carrying an absolute
+command), it works even though the agent-bridge daemon runs from its own
+isolated venv and cannot import agent-codespaces or find its binstub on `PATH`.
+There is **no imperative `bridge register` step** — installing the plugin is all
+that's needed.
 
 ## Troubleshooting
 

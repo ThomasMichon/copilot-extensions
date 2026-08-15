@@ -34,6 +34,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from .provider_sources import discover_provider_manifests
 from .topology import MachineConfig, SshEnvironment
 from .transport import PluginRef, SpawnTarget
 
@@ -144,25 +145,6 @@ class AgentConfig:
     codespace: dict | None = None  # structured CS metadata (#177) for the
     #                                CodeSpaceSpawner path (name/repo/acp_command/
     #                                workspace_folder); avoids parsing spawn_command
-
-
-@dataclass
-class AgentProvider:
-    """A registered external agent provider (e.g. codespaces).
-
-    Providers contribute dynamic agents that are merged into the resolver.
-    Agents expire after ``ttl`` seconds from ``registered_at`` (monotonic).
-    """
-
-    name: str
-    agents: dict[str, AgentConfig] = field(default_factory=dict)
-    registered_at: float = 0.0  # time.monotonic()
-    ttl: float = 300.0  # seconds before agents expire (0 = no expiry)
-    # The provider's declared HTTP wire-contract protocol version (dotfiles
-    # #632), or None when the provider predates protocol negotiation. Recorded
-    # so a skewed provider (newer/older than the bridge) can be gated by
-    # capability rather than assumed to match.
-    protocol_version: int | None = None
 
 
 @dataclass
@@ -336,10 +318,16 @@ class CliNamespaceResolver(NamespaceResolver):
     def __init__(
         self, prefix: str, binstub: str,
         fallback: NamespaceResolver | None = None,
+        *, command: list[str] | None = None,
     ) -> None:
         self._prefix = prefix
         self._binstub = binstub
         self._fallback = fallback
+        # An explicit, already-resolved argv prefix (e.g. from a providers.d
+        # manifest). When set it bypasses ``shutil.which(binstub)`` so the
+        # daemon -- whose venv/PATH cannot see the provider's binstub -- can
+        # still drive the provider over the process boundary.
+        self._command = list(command) if command else None
 
     @property
     def prefix(self) -> str:
@@ -357,16 +345,20 @@ class CliNamespaceResolver(NamespaceResolver):
         """Run ``<binstub> <argv...>``; return ``(rc, stdout, stderr)`` or
         ``None`` when the process could not be launched (binstub absent / spawn
         error) -- the signal to fall back to the in-process resolver."""
-        exe = shutil.which(self._binstub)
-        if not exe:
-            return None
+        if self._command:
+            cmd = [*self._command, *argv]
+        else:
+            exe = shutil.which(self._binstub)
+            if not exe:
+                return None
+            cmd = [exe, *argv]
 
         def _call() -> subprocess.CompletedProcess[str]:
             creationflags = (
                 subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
             )
             return subprocess.run(
-                [exe, *argv], capture_output=True, text=True, timeout=timeout,
+                cmd, capture_output=True, text=True, timeout=timeout,
                 creationflags=creationflags,
             )
 
@@ -1300,124 +1292,37 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
     return None
 
 
-def _sibling_plugin_installed(plugin_name: str) -> bool:
-    """Whether a sibling copilot-extensions plugin is installed on this machine.
+def daemon_resolver(cfg) -> AgentResolver:  # noqa: ANN001
+    """Resolver for the long-running daemon -- ALWAYS returns one.
 
-    Used to distinguish a *legitimate opt-out* (the plugin isn't installed at all,
-    so its namespace being unavailable is expected) from a *regression* (the plugin
-    IS installed but didn't make it into the agent-bridge runtime venv, so its
-    namespace silently vanished). Best-effort + never raises -- it only decides a
-    log level.
+    Unlike :func:`build_resolver` (which returns ``None`` when there is no static
+    topology), the daemon must always hold a resolver so declarative namespace
+    providers (``codespace:``, ``container:``) discovered from
+    ``~/.agent-bridge/providers.d/`` can attach and be enumerated/dispatched even
+    on a box with **no** ``machines.yaml``/topology (the golden path). When there
+    is no static topology, an empty resolver is stood up and its namespace
+    resolvers registered, so ``codespace:<name>`` works without any topology.
     """
-    try:
-        root = (
-            Path.home()
-            / ".copilot"
-            / "installed-plugins"
-            / "copilot-extensions"
-            / plugin_name
-        )
-        return (root / "pyproject.toml").exists()
-    except Exception:
-        return False
-
-
-def _log_missing_namespace(plugin_name: str, namespace: str) -> None:
-    """Log a skipped optional namespace resolver at the right severity.
-
-    If ``plugin_name`` is installed on the machine but not importable in the bridge
-    runtime venv, the runtime slot was built without carrying the extension forward
-    (e.g. a version-env upgrade that skipped the sibling install) -- the namespace
-    then silently disappears and dispatch to it 404s. That is a **regression**, so
-    log it at WARNING with the remedy. If the plugin simply isn't installed, it's a
-    legitimate opt-out -> debug (no false-alarm noise on machines that don't use it).
-    """
-    if _sibling_plugin_installed(plugin_name):
-        log.warning(
-            "%s is installed on this machine but not importable in the agent-bridge "
-            "runtime -- the '%s' namespace is UNAVAILABLE, so dispatch to those "
-            "agents will fail with 'not a known agent'. The runtime venv slot was "
-            "built without the sibling extension; reinstall/redeploy agent-bridge "
-            "to repopulate it.",
-            plugin_name,
-            namespace,
-        )
-    else:
-        log.debug("%s not installed -- %s namespace unavailable", plugin_name, namespace)
+    resolver = build_resolver(cfg)
+    if resolver is None:
+        resolver = AgentResolver({}, {})
+        _register_namespace_resolvers(resolver)
+    return resolver
 
 
 def _register_namespace_resolvers(resolver: AgentResolver) -> None:
-    """Auto-discover and register namespace resolvers from optional packages.
+    """Register namespace resolvers: declarative providers + built-in ``admin:``.
 
-    Each resolver is imported from its package and registered on the
-    AgentResolver. A missing optional extension is skipped: at WARNING when the
-    extension is installed on the machine but not importable here (a regression --
-    the runtime slot lost it), otherwise at debug (a legitimate opt-out). See
-    :func:`_log_missing_namespace`.
+    External providers (codespace:, container:, ...) are discovered from the
+    ``~/.agent-bridge/providers.d/`` manifest registry via
+    :meth:`AgentResolver.refresh_provider_resolvers` -- a provider self-registers
+    by dropping a manifest from its own bootstrap hook, so the daemon needs
+    neither the provider package importable nor its binstub on ``PATH``. The
+    built-in ``admin:`` modifier is registered directly (it is part of
+    agent-bridge itself, not an external provider).
     """
-    # codespace: -- GitHub Codespaces (agent-codespaces package)
-    # #892 Inc 3: drive the resolver over a process boundary (the
-    # `agent-codespaces namespace-*` CLI) via CliNamespaceResolver, so an
-    # agent-codespaces resolver fix reaches dispatch from its OWN venv with no
-    # bridge redeploy. The in-process CodespaceResolver is kept as the
-    # degrade-safe fallback (used only if the binstub is absent / the CLI
-    # misfires) until the vendoring is removed in a later increment.
-    try:
-        from agent_codespaces.resolver import CodespaceResolver
-
-        resolver.register_namespace_resolver(
-            CliNamespaceResolver(
-                "codespace", "agent-codespaces", CodespaceResolver()
-            )
-        )
-        log.info("Registered codespace: namespace resolver (CLI seam #892)")
-    except ImportError:
-        # No in-process import, but the CLI seam still works if the binstub is
-        # present -- register a fallback-less shim so dispatch keeps working.
-        if shutil.which("agent-codespaces"):
-            resolver.register_namespace_resolver(
-                CliNamespaceResolver("codespace", "agent-codespaces")
-            )
-            log.info(
-                "Registered codespace: namespace resolver (CLI-only seam #892)"
-            )
-        else:
-            _log_missing_namespace("agent-codespaces", "codespace:")
-    except Exception:
-        log.warning(
-            "Failed to register codespace: namespace resolver",
-            exc_info=True,
-        )
-
-    # container: -- local Docker dev containers (agent-containers package)
-    # #892 Inc 3b: drive the container resolver over the process boundary via the
-    # RESTRICTED shim (containers don't support cross-repo / plugin injection, so
-    # its narrow resolve(name) signature keeps agent-bridge from offering them),
-    # with the in-process ContainerResolver as the degrade-safe fallback.
-    try:
-        from agent_containers.resolver import ContainerResolver
-
-        resolver.register_namespace_resolver(
-            RestrictedCliNamespaceResolver(
-                "container", "agent-containers", ContainerResolver()
-            )
-        )
-        log.info("Registered container: namespace resolver (CLI seam #892)")
-    except ImportError:
-        if shutil.which("agent-containers"):
-            resolver.register_namespace_resolver(
-                RestrictedCliNamespaceResolver("container", "agent-containers")
-            )
-            log.info(
-                "Registered container: namespace resolver (CLI-only seam #892)"
-            )
-        else:
-            _log_missing_namespace("agent-containers", "container:")
-    except Exception:
-        log.warning(
-            "Failed to register container: namespace resolver",
-            exc_info=True,
-        )
+    # External providers from the declarative providers.d registry.
+    resolver.refresh_provider_resolvers(force=True)
 
     # admin: -- elevated execution (built-in)
     try:
@@ -1622,8 +1527,10 @@ class AgentResolver:
     ) -> None:
         self._agents = agents
         self._machines = machines
-        self._providers: dict[str, AgentProvider] = {}
         self._namespace_resolvers: dict[str, NamespaceResolver] = {}
+        # Throttle for the declarative providers.d re-scan (monotonic seconds).
+        self._provider_scan_ts: float = 0.0
+        self._provider_scan_ttl: float = 10.0
         # Build alias -> (machine, env) index for fast lookup
         self._alias_index: dict[str, tuple[MachineConfig, SshEnvironment]] = {}
         for machine in machines.values():
@@ -1650,97 +1557,6 @@ class AgentResolver:
     @property
     def machines(self) -> dict[str, MachineConfig]:
         return self._machines
-
-    # --- Provider management ---
-
-    def register_provider(
-        self,
-        name: str,
-        agents: dict[str, AgentConfig],
-        ttl: float = 300.0,
-        protocol_version: int | None = None,
-    ) -> AgentProvider:
-        """Register or refresh an agent provider.
-
-        Provider agents are merged into the resolver with lowest
-        precedence -- static and auto-discovered agents always win
-        on name conflicts. ``protocol_version`` records the provider's declared
-        HTTP wire-contract version for skew-aware capability gating (#632).
-        """
-        provider = AgentProvider(
-            name=name,
-            agents=agents,
-            registered_at=time.monotonic(),
-            ttl=ttl,
-            protocol_version=protocol_version,
-        )
-        self._providers[name] = provider
-        log.info(
-            "Registered provider '%s' with %d agents (ttl=%.0fs, protocol=%s)",
-            name, len(agents), ttl, protocol_version,
-        )
-        return provider
-
-    def unregister_provider(self, name: str) -> bool:
-        """Remove a provider. Returns True if it existed."""
-        removed = self._providers.pop(name, None)
-        if removed:
-            log.info(
-                "Unregistered provider '%s' (%d agents removed)",
-                name, len(removed.agents),
-            )
-        return removed is not None
-
-    def _is_provider_expired(self, provider: AgentProvider) -> bool:
-        """Check if a provider's TTL has elapsed (monotonic clock)."""
-        if provider.ttl <= 0:
-            return False
-        return (time.monotonic() - provider.registered_at) > provider.ttl
-
-    def _live_provider_agents(self) -> dict[str, AgentConfig]:
-        """Collect all non-expired provider agents.
-
-        Expired providers are purged lazily. Static/auto-discovered
-        agents override provider agents on name conflict.
-        """
-        expired = [
-            name for name, p in self._providers.items()
-            if self._is_provider_expired(p)
-        ]
-        for name in expired:
-            log.info("Provider '%s' expired (ttl elapsed), removing", name)
-            del self._providers[name]
-
-        result: dict[str, AgentConfig] = {}
-        for provider in self._providers.values():
-            for agent_name, agent in provider.agents.items():
-                if agent_name in self._agents:
-                    continue  # static/auto-discovered wins
-                if agent_name in result:
-                    continue  # first provider wins
-                result[agent_name] = agent
-        return result
-
-    def list_providers(self) -> list[dict[str, Any]]:
-        """List registered providers with status metadata."""
-        result = []
-        for provider in self._providers.values():
-            expired = self._is_provider_expired(provider)
-            conflicts = [
-                name for name in provider.agents
-                if name in self._agents
-            ]
-            result.append({
-                "name": provider.name,
-                "agents": len(provider.agents),
-                "active_agents": len(provider.agents) - len(conflicts),
-                "conflicts": conflicts,
-                "ttl": provider.ttl,
-                "age": time.monotonic() - provider.registered_at,
-                "expired": expired,
-                "protocol_version": provider.protocol_version,
-            })
-        return result
 
     # --- Namespace resolver management ---
 
@@ -1772,6 +1588,56 @@ class AgentResolver:
     def namespace_resolvers(self) -> dict[str, NamespaceResolver]:
         """Read-only view of registered namespace resolvers."""
         return dict(self._namespace_resolvers)
+
+    def refresh_provider_resolvers(self, *, force: bool = False) -> None:
+        """Register namespace resolvers from the ``providers.d`` manifest registry.
+
+        Scans ``~/.agent-bridge/providers.d/`` and registers a
+        :class:`CliNamespaceResolver` (or :class:`RestrictedCliNamespaceResolver`
+        when ``restricted``) for any manifest whose namespace is not already
+        registered. Additive and idempotent: an existing resolver (built-in or a
+        prior scan) is never replaced, so a provider that self-registered earlier
+        keeps working. Throttled to at most once per ``_provider_scan_ttl``
+        seconds unless ``force`` -- so a manifest a provider drops after the
+        daemon started is picked up on the next enumeration/resolution without a
+        daemon restart, at negligible cost. Never raises.
+        """
+        now = time.monotonic()
+        if not force and (now - self._provider_scan_ts) < self._provider_scan_ttl:
+            return
+        self._provider_scan_ts = now
+
+        try:
+            manifests = discover_provider_manifests()
+        except Exception:
+            log.warning("Provider manifest discovery failed", exc_info=True)
+            return
+
+        for manifest in manifests.values():
+            if manifest.namespace in self._namespace_resolvers:
+                continue
+            cls = (
+                RestrictedCliNamespaceResolver
+                if manifest.restricted
+                else CliNamespaceResolver
+            )
+            try:
+                self.register_namespace_resolver(
+                    cls(
+                        manifest.namespace,
+                        manifest.command[0],
+                        command=list(manifest.command),
+                    )
+                )
+                log.info(
+                    "Registered %s: namespace resolver from %s",
+                    manifest.namespace, manifest.source_path,
+                )
+            except Exception:
+                log.warning(
+                    "Failed to register '%s:' from %s",
+                    manifest.namespace, manifest.source_path, exc_info=True,
+                )
 
     def _parse_namespaced_agent(
         self, agent_name: str,
@@ -1866,6 +1732,8 @@ class AgentResolver:
             ValueError: Agent not spawnable.
             RuntimeError: Namespace resolver failed.
         """
+        # Pick up any provider manifest dropped since the last scan.
+        self.refresh_provider_resolvers()
         ns = self._parse_namespaced_agent(agent_name)
         if ns:
             prefix, name = ns
@@ -2106,8 +1974,6 @@ class AgentResolver:
         from . import elevated
 
         config = self._agents.get(agent_name)
-        if config is None:
-            config = self._live_provider_agents().get(agent_name)
         if config is None or not config.requires_admin:
             return None
         if not elevated.relay_applicable(config.requires_admin):
@@ -2130,7 +1996,7 @@ class AgentResolver:
         """Find every agent a bare name matches, across static + namespaces.
 
         Returns ``(qualified_name, resolver_or_None, resolve_name)`` tuples:
-        ``resolver`` is None for static/provider agents (resolved via
+        ``resolver`` is None for static agents (resolved via
         :meth:`_resolve_static`); otherwise it is the namespace resolver and
         ``resolve_name`` is the raw name to hand it. ``qualified_name`` is what
         the collision message enumerates (``prefix:name`` for namespace agents,
@@ -2138,8 +2004,8 @@ class AgentResolver:
         """
         candidates: list[tuple[str, "NamespaceResolver | None", str]] = []
 
-        # Static / provider agents have no namespace prefix.
-        if name in self._agents or name in self._live_provider_agents():
+        # Static agents have no namespace prefix.
+        if name in self._agents:
             candidates.append((name, None, name))
 
         lname = name.lower()
@@ -2192,12 +2058,8 @@ class AgentResolver:
             return []
 
     def _resolve_static(self, agent_name: str) -> SpawnTarget:
-        """Resolve via static/auto-discovered/provider registries."""
+        """Resolve via the static / auto-discovered registry."""
         config = self._agents.get(agent_name)
-        if not config:
-            # Check provider agents
-            provider_agents = self._live_provider_agents()
-            config = provider_agents.get(agent_name)
         if not config:
             raise KeyError(f"Agent '{agent_name}' not found in registry")
 
@@ -2207,7 +2069,7 @@ class AgentResolver:
                 "it cannot be started via agent-bridge transport"
             )
 
-        # Provider agents with spawn_command bypass topology resolution
+        # Agents carrying an explicit spawn_command bypass topology resolution
         if config.spawn_command:
             return SpawnTarget(
                 type="command",
@@ -2384,16 +2246,12 @@ class AgentResolver:
     def list_agents(self) -> list[dict[str, Any]]:
         """List all agents with metadata for the API.
 
-        Includes static, auto-discovered, and live provider agents.
-        Namespace agents are NOT included here (they require async
-        enumeration). Use :meth:`list_agents_async` for the full list.
+        Includes static and auto-discovered agents. Namespace agents (e.g. live
+        codespaces) are NOT included here (they require async enumeration). Use
+        :meth:`list_agents_async` for the full list.
         """
         result = []
         for config in self._agents.values():
-            result.append(self._agent_to_dict(config))
-
-        # Add non-conflicting provider agents
-        for config in self._live_provider_agents().values():
             result.append(self._agent_to_dict(config))
 
         return result
@@ -2404,6 +2262,7 @@ class AgentResolver:
         Calls ``list()`` on each registered namespace resolver to
         include dynamically discovered agents (e.g. live codespaces).
         """
+        self.refresh_provider_resolvers()
         result = self.list_agents()
 
         for prefix, resolver in self._namespace_resolvers.items():

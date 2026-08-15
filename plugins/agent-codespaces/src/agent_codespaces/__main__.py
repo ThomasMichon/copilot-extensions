@@ -415,48 +415,6 @@ def main(argv: list[str] | None = None) -> int:
              "is at its core budget.",
     )
 
-    # --- bridge ---
-    bridge_parser = sub.add_parser(
-        "bridge", help="Agent-bridge provider integration",
-    )
-    bridge_sub = bridge_parser.add_subparsers(dest="bridge_command")
-    bridge_reg = bridge_sub.add_parser(
-        "register", help="Register codespace agents with agent-bridge",
-    )
-    bridge_reg.add_argument(
-        "--ttl", type=float, default=300.0,
-        help="TTL in seconds (0 = no expiry, default: 300)",
-    )
-    bridge_reg.add_argument(
-        "--bridge-url", default="http://127.0.0.1:9280",
-        help="Agent-bridge URL (default: http://127.0.0.1:9280)",
-    )
-    bridge_unreg = bridge_sub.add_parser(
-        "unregister", help="Remove codespace agents from agent-bridge",
-    )
-    bridge_unreg.add_argument(
-        "--bridge-url", default="http://127.0.0.1:9280",
-        help="Agent-bridge URL",
-    )
-    bridge_status = bridge_sub.add_parser(
-        "status", help="Show provider registration status",
-    )
-    bridge_status.add_argument(
-        "--bridge-url", default="http://127.0.0.1:9280",
-        help="Agent-bridge URL",
-    )
-    bridge_refresh = bridge_sub.add_parser(
-        "refresh", help="Re-register with current live codespace state",
-    )
-    bridge_refresh.add_argument(
-        "--ttl", type=float, default=300.0,
-        help="TTL in seconds (default: 300)",
-    )
-    bridge_refresh.add_argument(
-        "--bridge-url", default="http://127.0.0.1:9280",
-        help="Agent-bridge URL",
-    )
-
     # --- cleanup ---
     cleanup_parser = sub.add_parser(
         "cleanup", help="Remove stale local state (SSH configs, sockets)",
@@ -759,8 +717,6 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_prune(args)
         if args.command == "mark":
             return _cmd_mark(args)
-        if args.command == "bridge":
-            return _cmd_bridge(args)
         if args.command == "cleanup":
             return _cmd_cleanup(args)
         if args.command == "borrow":
@@ -3483,66 +3439,6 @@ def _cmd_create(args: argparse.Namespace) -> int:
     if rc == 0:
         print(f"[OK] {info.name} created and provisioned")
     return rc
-
-
-def _cmd_bridge(args: argparse.Namespace) -> int:
-    """Agent-bridge provider integration subcommands."""
-    from .bridge_provider import (
-        get_bridge_status,
-        register_with_bridge,
-        unregister_from_bridge,
-    )
-
-    if args.bridge_command == "register":
-        result = register_with_bridge(
-            bridge_url=args.bridge_url,
-            ttl=args.ttl,
-        )
-        print(
-            f"[OK] Registered {result.get('agents', 0)} agent(s) "
-            f"with agent-bridge (ttl={result.get('ttl', 0):.0f}s)"
-        )
-        return 0
-
-    if args.bridge_command == "unregister":
-        unregister_from_bridge(bridge_url=args.bridge_url)
-        print("[OK] Unregistered codespace agents from agent-bridge")
-        return 0
-
-    if args.bridge_command == "status":
-        status = get_bridge_status(bridge_url=args.bridge_url)
-        if status is None:
-            print("[--] Not registered (or agent-bridge not reachable)")
-            return 0
-        expired = status.get("expired", False)
-        state = "EXPIRED" if expired else "ACTIVE"
-        print(f"[{state}] Provider '{status.get('name', 'codespaces')}'")
-        print(f"  Agents: {status.get('agents', 0)}")
-        print(f"  Active: {status.get('active_agents', 0)}")
-        print(f"  TTL: {status.get('ttl', 0):.0f}s")
-        print(f"  Age: {status.get('age', 0):.0f}s")
-        conflicts = status.get("conflicts", [])
-        if conflicts:
-            print(f"  Conflicts: {', '.join(conflicts)}")
-        return 0
-
-    if args.bridge_command == "refresh":
-        # Re-register with fresh codespace state (drops stale agents)
-        result = register_with_bridge(
-            bridge_url=args.bridge_url,
-            ttl=args.ttl,
-        )
-        print(
-            f"[OK] Refreshed: {result.get('agents', 0)} agent(s) "
-            f"registered (ttl={result.get('ttl', 0):.0f}s)"
-        )
-        return 0
-
-    print(
-        "Usage: agent-codespaces bridge {register|unregister|status|refresh}",
-        file=sys.stderr,
-    )
-    return 1
 
 
 def _cmd_borrow(args: argparse.Namespace) -> int:
