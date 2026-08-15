@@ -3,6 +3,7 @@
 Subcommands:
   emit-profile   Render/write a managed SSH profile fragment.
   explore        Introspect a reachable SSH target (repos, runtimes, agents).
+  mesh-status    Render the calling repo's SSH machine mesh from machines.yaml.
   verify         Probe machine-name SSH reachability using the active profile.
   version        Show package version.
 """
@@ -15,9 +16,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import __version__
+from . import __version__, ssh_profile
 from . import explore as explore_mod
-from . import ssh_profile
+from . import mesh as mesh_mod
 
 
 def _cmd_emit_profile(args: argparse.Namespace) -> int:
@@ -87,6 +88,29 @@ def _cmd_explore(args: argparse.Namespace) -> int:
     return 0 if result.reachable else 1
 
 
+def _cmd_mesh_status(args: argparse.Namespace) -> int:
+    path = args.path
+    if path is None:
+        path = mesh_mod.find_machines_file()
+    if path is None or not Path(path).is_file():
+        msg = "no machines.yaml found for this repo"
+        if args.json:
+            print(json.dumps({"project": "", "source": "", "machines": []}))
+        elif args.summary:
+            print(msg)
+        else:
+            print(f"agent-ssh mesh-status: {msg}")
+        return 0
+    mesh = mesh_mod.load_mesh(Path(path))
+    if args.json:
+        print(json.dumps(mesh.to_dict(), indent=2))
+    elif args.summary:
+        print(mesh_mod.summary_line(mesh))
+    else:
+        print(mesh_mod.format_report(mesh))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-ssh",
@@ -124,6 +148,25 @@ def build_parser() -> argparse.ArgumentParser:
         "--json", action="store_true", help="Emit the structured result as JSON."
     )
     explore.set_defaults(func=_cmd_explore)
+
+    mesh = sub.add_parser(
+        "mesh-status",
+        help="Render the calling repo's SSH machine mesh from machines.yaml "
+        "(per-host role, reachability, and aliases). Config-driven, read-only.",
+    )
+    mesh.add_argument(
+        "--path",
+        type=Path,
+        default=None,
+        help="Path to a machines.yaml (default: resolve from the current repo).",
+    )
+    mesh.add_argument(
+        "--json", action="store_true", help="Emit the structured mesh as JSON."
+    )
+    mesh.add_argument(
+        "--summary", action="store_true", help="Print a one-line summary only."
+    )
+    mesh.set_defaults(func=_cmd_mesh_status)
 
     sub.add_parser("version", help="Show version")
     return parser

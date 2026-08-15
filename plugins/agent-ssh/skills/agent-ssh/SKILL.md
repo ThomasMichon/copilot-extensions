@@ -45,6 +45,9 @@ plugins and register against the same contract.
   for provider plugins.
 - **Live introspection** (`agent-ssh explore`) -- read-only SSH probe of a
   reachable target's fabric runtimes, repos, and derived agents.
+- **Mesh status** (`agent-ssh mesh-status`) -- render the calling repo's SSH
+  machine mesh from its `machines.yaml` (per-host role, reachability, aliases).
+  Config-driven and read-only; no probe.
 
 ## Emit a profile
 
@@ -84,6 +87,26 @@ purpose). `--json` emits the structured result.
 mutates local or remote state. Repo locations are read live from the machine at
 query time (derive-don't-duplicate). It targets POSIX shells (Linux / WSL); a
 PowerShell-host probe is a follow-on.
+
+## Show the machine mesh
+
+```bash
+agent-ssh mesh-status [--path machines.yaml] [--json] [--summary]
+```
+
+Renders the **calling repo's** SSH machine mesh from its `machines.yaml` — for
+each machine: `display_name`, `role`, `environment`, declared reachability
+(`ssh.ready`), the per-environment SSH aliases (windows/wsl/…), and dtssh notes
+(alias + best-effort). It is **config-driven and repo-specific**: it resolves
+`machines.yaml` from the current git repo (or `--path`) and says nothing when the
+repo ships none, so one repo's mesh never leaks into another. **Read-only** — it
+parses config, it does not probe; `ssh.ready` is the operator's declared state,
+so use `agent-ssh verify <alias>` to probe a host live.
+
+A cwd-gated `sessionStart` hook (`scripts/emit-mesh-pointer.*`) emits only a
+**succinct pointer** to this command when the repo has a `machines.yaml`, rather
+than injecting the whole table every session — run `mesh-status` on demand for
+the detail.
 
 ## Writing a transport
 

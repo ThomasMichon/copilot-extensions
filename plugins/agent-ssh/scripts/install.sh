@@ -454,7 +454,7 @@ _ok "Directories: $INSTALL_DIR"
 # re-runs this installer only when the deployed version drifts from the payload.
 BIN_HOOK_DIR="$INSTALL_DIR/bin"
 mkdir -p "$BIN_HOOK_DIR"
-for h in bootstrap-check.ps1 bootstrap-check.sh; do
+for h in bootstrap-check.ps1 bootstrap-check.sh emit-mesh-pointer.ps1 emit-mesh-pointer.sh; do
     [ -f "$SCRIPT_DIR/$h" ] && cp -f "$SCRIPT_DIR/$h" "$BIN_HOOK_DIR/$h"
 done
 _ok "Session-start hook: $BIN_HOOK_DIR/bootstrap-check.sh"
