@@ -759,19 +759,36 @@ _install_engine() {
     fi
 
     # agent-index[engine] -- the heavy embedding stack into the DURABLE venv only.
-    # Default PyPI torch is the CPU wheel; set AGENT_INDEX_TORCH_INDEX to a CUDA
-    # wheel index (e.g. https://download.pytorch.org/whl/cu121) for a GPU host.
+    #
+    # Torch install is TWO STEPS so a GPU host works even behind a managed/CFS
+    # package feed:
+    #   1. Install agent-index[engine] from the DEFAULT feed (governed mirror or
+    #      public PyPI) -- CPU torch wheel + ALL of torch's pure-python deps
+    #      (sympy, networkx, ...) + the rest of the engine stack.
+    #   2. If AGENT_INDEX_TORCH_INDEX is set (a CUDA wheel index), SWAP the torch
+    #      wheel ONLY from that index with --no-deps. Essential on a CFS box: the
+    #      CUDA index links torch's pure-python deps to files.pythonhosted.org
+    #      (often network-blocked), so we take deps from the reachable default feed
+    #      (step 1) and only the reachable CUDA torch wheel here; --no-deps skips
+    #      re-resolving the CUDA build's exact dep pins through the blocked host.
     local rc=0
+    local torch_idx="${AGENT_INDEX_TORCH_INDEX:-}"
     if [[ "$have_uv" -eq 1 ]]; then
         local uv_args=(pip install --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR[engine]")
         [[ "$upgrade" -eq 1 ]] && uv_args+=(--upgrade)
-        [[ -n "${AGENT_INDEX_TORCH_INDEX:-}" ]] && uv_args+=(--extra-index-url "$AGENT_INDEX_TORCH_INDEX")
         uv "${uv_args[@]}" || rc=$?
+        if [[ "$rc" -eq 0 && -n "$torch_idx" ]]; then
+            _step "Swapping in CUDA torch from the configured CUDA wheel index (wheel only, --no-deps)"
+            uv pip install --python "$ENGINE_VENV_PYTHON" --index-url "$torch_idx" --no-deps --reinstall-package torch torch || rc=$?
+        fi
     else
         local pip_args=(-m pip install "$PLUGIN_DIR[engine]")
         [[ "$upgrade" -eq 1 ]] && pip_args+=(--upgrade)
-        [[ -n "${AGENT_INDEX_TORCH_INDEX:-}" ]] && pip_args+=(--extra-index-url "$AGENT_INDEX_TORCH_INDEX")
         "$ENGINE_VENV_PYTHON" "${pip_args[@]}" || rc=$?
+        if [[ "$rc" -eq 0 && -n "$torch_idx" ]]; then
+            _step "Swapping in CUDA torch from the configured CUDA wheel index (wheel only, --no-deps)"
+            "$ENGINE_VENV_PYTHON" -m pip install --index-url "$torch_idx" --no-deps --force-reinstall torch || rc=$?
+        fi
     fi
     if [[ "$rc" -ne 0 ]]; then
         _warn 'Engine runtime install failed (torch stack) -- light service unaffected; provision later with the "engine" action'
