@@ -1,9 +1,9 @@
 # Architecture — agent-logger
 
 `agent-logger` packages the **reusable ends** of a Copilot session-logging
-pipeline as a Copilot CLI plugin. It deliberately stops short of any single
-bespoke "process everything" service: it gives you the pieces and three ways
-to run them.
+pipeline as a Copilot CLI plugin. It gives you standalone runtime tools,
+manifest-driven agents, and optional sync/chronicling cores; any host-specific
+scheduling, voice, or landing policy is configuration or an injected runner.
 
 ```
    capture            transform                 present
@@ -15,6 +15,10 @@ to run them.
    targets:                              └────────────────────────┘
    local · onedrive · ssh · ssh-tunnel · ingest
 ```
+
+The diagram is the per-session logging path. The optional chronicle path starts
+from a synced corpus and produces daily `mode: digest` manifests for the same
+writer agent.
 
 ## Components
 
@@ -42,14 +46,18 @@ chunks. Four console scripts:
   absorbs the large transcript and returns a compact takeover briefing, so the
   dormant session never floods the main session's context).
 
-All machine/path/voice coupling is configuration — there is no multi-machine system
-hostname, NAS path, or persona baked in.
+All machine/path/voice coupling is configuration — there is no
+deployment-specific hostname, shared-folder path, or persona baked in.
 
 ### Session sync (`agent_logger.sync`)
 
-A transport-blind engine that pushes raw session data to a configurable
-**target**, under a `{machine}/` subpath, with optional repo-allowlist
-filtering. Targets implement a small `Target` interface
+A transport-blind engine that pushes raw Copilot session data to a configurable
+**target**, under a `{machine}/` subpath. It archives only `session-state/` and,
+when unfiltered, the session-store index files; it never copies installed
+plugins, credentials, settings, or other `~/.copilot` state. Sync scoping can
+use a repo allowlist, denylist, fail-closed behavior for unclassified sessions,
+and harness-repo origin sidecars for downstream routing. Targets implement a
+small `Target` interface
 (`push` / `prune` / `doctor` / `describe`):
 
 | Target | Destination |
@@ -63,14 +71,16 @@ filtering. Targets implement a small `Target` interface
 best-effort HTTP `POST` (JSON `{"machine": <machine>}`; `{machine}` in the URL
 is also substituted, optional bearer token) after **any** successful push,
 regardless of target — so a downstream consumer can crunch immediately. It is
-multi-machine system-neutral: point it at a processing service directly, or at a public
+deployment-neutral: point it at a processing service directly, or at a public
 webhook callback (e.g. a Home Assistant webhook that relays to a private
 service). The `ingest` target's own `notify_url` option remains for back-compat
 and now shares the same best-effort helper (`agent_logger.sync.notify`).
 
-Deployed as a 4-hourly **Scheduled Task** (Windows) or **systemd user
-timer** (Linux) via `scripts/install.ps1` / `install.sh`. Configure with the
-`session-sync-setup` skill.
+Deployed as a 4-hourly **Scheduled Task** (Windows) or **systemd user timer**
+(Linux) via `scripts/install.ps1` / `install.sh`. The scheduled command is
+`session-sync run --prune`; failed pushes return non-zero and `doctor` prints
+per-check `[ok]` / `[FAIL]` readiness lines. Configure and troubleshoot with
+the `session-sync-setup` skill.
 
 ### Log writer (`agents/` + `skills/`)
 
@@ -96,8 +106,9 @@ dir is **local-only** — never place it inside a cloud-synced folder.
 Repo-local config is discovered at the current git root from
 `.agent-logger.yaml`, `.agent-logger.yml`, `.config/agent-logger.yaml`, or
 `.config/agent-logger.yml`. The version-1 schema accepts only `root`,
-`path_template`, `timezone`, `note_marker`, and an optional Markdown
-`template` under `log:`. Invalid configuration and paths outside the
+`path_template`, `timezone`, `note_marker`, optional Markdown `template`, and
+the optional voice-seam fields `narration_style`, `exemplars`, and
+`closing_remark` under `log:`. Invalid configuration and paths outside the
 repository fail explicitly. Non-logging components ignore repo-local
 configuration, so a layout error cannot disrupt session sync or digest storage.
 
@@ -109,23 +120,24 @@ hub (many machines sync to one shared folder).
 
 ## Background chronicling (`agent_logger.chronicle`)
 
-The **orchestrator daemon** — the automated "sessions → committed logs"
-service — turns the *synced* Copilot session corpus into objective,
-matter-of-fact **daily** logs landed in a target harness repo. It is the
-scheduled, fleet-wide, single-elected chronicler: `agent-dispatch`'s schedule
-management + single-producer job-lease drives *when* and *where-once* (pinned to
-one machine, idempotent catch-up); `agent_logger.chronicle` supplies *what* and
-*how-once-per-segment*.
+The **chronicling core** is the optional "synced sessions → daily digest
+manifest" path. It is not installed as a service by `agent-logger` itself and
+does not contain an agent-dispatch dependency or lease. A host that wants
+fleet-wide automation runs `agent-logger chronicle tick` on its elected machine
+(or wraps `Chronicler.run_once`) and owns schedule/lease semantics externally.
+Out of the box, the CLI's default writer persists manifest JSON files; a runner
+then invokes the `session-log-writer` agent and, if it returns produced log
+paths, the sink landing policy can commit or push them.
 
 One `Chronicler.run_once` pass is `scan → digest (daily) → reserve → manifest →
-writer → land`, running between two pluggable seams so a consumer can adopt the
-daemon without re-implementing scan/digest:
+writer → land-if-log-paths`, running between two pluggable seams so a consumer
+can adopt the core without re-implementing scan/digest:
 
 **Session-source seam** (`chronicle.source`) — discovers loggable units and
 enforces the idempotency locks:
 
 - **Settle gate** — never claim a session whose synced state changed within
-  `settle_seconds` (~10 min); it may be mid-sync.
+  `settle_seconds` (default 600s); it may be mid-sync.
 - **Already-journaled skip** — a journaled segment is never rescanned, so
   multi-day gaps and catch-up replays never re-file a day.
 - **Continuation-segment reservation** (`ReservationStore`) — a chronicle unit
@@ -145,13 +157,13 @@ enforces the idempotency locks:
   `objective` (neutral, factual; consumers may layer a character voice on their
   own sink) plus a compact daily-digest template distinct from the per-session
   Summary/Key-Changes shape.
-- **Landing-policy** — how a produced log commits, pluggable per sink so the
-  daemon core never hardcodes landing: `DirectCommitLanding` (dotfiles: one
-  scoped daily commit), `SquashPRLanding`, or a consumer-supplied strategy (e.g.
-  a governed single-flight merge-queue).
+- **Landing-policy** — how produced log paths commit, pluggable per sink so the
+  core never hardcodes landing: `DirectCommitLanding`, `SquashPRLanding`, or a
+  consumer-supplied strategy. The default `ManifestWriter` produces no log paths,
+  so `tick` reports `written` and leaves segments reserved for the runner that
+  actually renders the log.
 
-CLI: `agent-logger chronicle status | scan | tick`. Only the elected host sets
-`chronicle.enabled`; its scheduled `chronicle tick` is the recurring job the
-`agent-dispatch` registry + job-lease pins fleet-wide. See the
+CLI: `agent-logger chronicle status | scan | tick` (`tick --force` runs even
+when `chronicle.enabled` is false). See the
 [manifest contract](manifest-contract.md) for the `mode: digest` manifest the
-daemon produces for the writer agent.
+core produces for the writer agent.

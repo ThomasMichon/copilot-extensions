@@ -18,20 +18,18 @@ session-to-log pipeline out of any single bespoke service:
   (see [`docs/manifest-contract.md`](docs/manifest-contract.md)).
 - **session-sync** — push raw session data to a configurable target: a
   `local` dotfolder, `onedrive`, `ssh`/`ssh-tunnel`, or a generic `ingest`
-  endpoint, with optional repo-allowlist scoping. Configure with the
-  `session-sync-setup` skill; deploy as a 4-hourly Scheduled Task (Windows)
-  or systemd user timer (Linux).
-- **Background chronicling** (`agent_logger.chronicle`) — a scheduled,
-  fleet-wide, single-elected daemon that turns the *synced* session corpus into
-  objective **daily** logs landed in the routed harness repo. Two pluggable
-  seams: **session-source** (settle gate + already-journaled skip + a
-  continuation-segment reservation that fences a unit's inputs so a racing pass
-  never double-logs) and **log-sink** `{router, profile, landing-policy}`
-  (origin-repo routing, an `objective` default voice, and per-sink landing —
-  direct-commit / squash-pr / a consumer-supplied merge-queue). Driven by
-  `agent-dispatch`'s schedule management + single-producer job-lease (pinned to
-  one machine, idempotent catch-up). CLI: `agent-logger chronicle status |
-  scan | tick`.
+  endpoint. It archives only Copilot session state, can scope by repo
+  allow/deny lists, and can fire a target-independent best-effort HTTP notify
+  after a successful push. Configure with the `session-sync-setup` skill; deploy
+  as a 4-hourly Scheduled Task (Windows) or systemd user timer (Linux).
+- **Background chronicling core** (`agent_logger.chronicle`) — an optional
+  `agent-logger chronicle status | scan | tick` pass over a *synced* corpus. It
+  discovers settled sessions, routes them by recorded origin, groups them into
+  compact daily digest manifests, and reserves segment identities in SQLite so
+  racing passes do not double-log. The plugin does **not** install a chronicle
+  scheduler or job lease by itself; a host/runner owns scheduling and, when it
+  wants real logs rather than manifests, runs the `session-log-writer` agent and
+  applies the configured landing policy.
 
 ## Design principles
 
@@ -39,18 +37,38 @@ session-to-log pipeline out of any single bespoke service:
   repo-local Markdown skeletons, and machine naming are configuration, not
   hard-coded. The plugin ships **no persona** — a repository opts into styling
   through manifest fields in its organization config.
+- **Standalone runtime.** The plugin does not require a repo to be registered
+  as an agent-worktrees harness. A session-start hook cheaply stamps a
+  self-provisioning `agent-logger` binstub when hooks are available, and the
+  operational skills include the same readiness path for hosts that only load
+  skills.
 - **Local state stays local.** The runtime home (`~/.agent-logger/`, or
-  `$AGENT_LOGGER_HOME`) holds digests (and, once the orchestrator ships, a
-  SQLite state DB). It must never be a cloud-synced folder.
+  `$AGENT_LOGGER_HOME`) holds digests, sync locks, deployment metadata, and the
+  optional chronicle SQLite DB. It must never be a cloud-synced folder.
 - **Three deployment topologies** from one plugin — see
   [`docs/deployment-topologies.md`](docs/deployment-topologies.md).
 
 ## Status
 
-**v0.1.1 — alpha.** Shipped and usable: the segmenter, session-sync (5
-targets + installers), the log-writer agent + `log-session` /
-`process-backlog` skills, and the **background-chronicling** orchestrator
-daemon (`agent_logger.chronicle`) with its session-source + log-sink seams.
+**0.1.1-dev series — alpha.** Shipped and usable: the segmenter, session-sync
+(5 targets + installers), the log-writer/ramp-up agents, the `log-session`,
+`process-backlog`, `ramp-up-session`, and `session-sync-setup` skills, and the
+optional background-chronicling core with its session-source + log-sink seams.
+
+## Quick start
+
+1. Enable the plugin in Copilot CLI. In a plain host, run `agent-logger version`;
+   if the runtime was only stamped, the binstub self-provisions on first use and
+   prints `::agent-provisioning::` while it builds.
+2. For one-off logs, use the `log-session` skill for the current session or
+   `process-backlog` for a local batch. Both hand a manifest to the neutral
+   `session-log-writer` agent.
+3. To archive raw sessions continuously, use `session-sync-setup`, choose a
+   target in `~/.agent-logger/config.yaml`, verify with `session-sync doctor`,
+   then install the 4-hourly timer (`scripts\install.ps1 install` on Windows or
+   `scripts/install.sh install` on Linux/WSL).
+4. For takeover, use `ramp-up-session`; it delegates the transcript-heavy read
+   to the neutral `session-rampup` agent by default.
 
 ## Documentation
 
@@ -76,8 +94,9 @@ manifest with `agent-logger organization`.
 
 Repository files use schema version 1 (an omitted version is accepted as v1
 for compatibility) and may set only `log.root`, `log.path_template`,
-`log.timezone`, `log.note_marker`, and `log.template`. Invalid or unsafe
-configuration fails explicitly instead of silently falling back.
+`log.timezone`, `log.note_marker`, `log.template`, `log.narration_style`,
+`log.exemplars`, and `log.closing_remark`. Invalid or unsafe configuration
+fails explicitly instead of silently falling back.
 
 ## License
 

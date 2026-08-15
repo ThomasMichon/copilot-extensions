@@ -14,13 +14,18 @@ description: >
 
 > **Before you start — readiness (self-provisioning, no agent-worktrees required).**
 > agent-logger provisions its own runtime on first use and works standalone in any
-> host (CLI, Copilot app, cloud agent). If `command -v agent-logger` fails, deploy
-> its binstub first (it then self-provisions on first call):
-> `bash "$(ls ~/.copilot/installed-plugins/*/agent-logger/scripts/install.sh | head -1)" stamp`
-> then run `agent-logger version` once — the first call provisions the runtime
-> (~30–120s; watch for `::agent-provisioning::`) and deploys `session-sync` and the
-> other auxiliary tools. If it reports a provisioning failure (e.g. missing uv /
-> network), surface the exact message — don't improvise a toolchain install.
+> host (CLI, Copilot app, cloud agent). If `agent-logger` is not on PATH, deploy
+> this plugin's own binstub first; it then self-provisions on first call.
+>
+> - Windows:
+>   `pwsh -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.copilot\installed-plugins\copilot-extensions\agent-logger\scripts\install.ps1" stamp`
+> - Linux/WSL:
+>   `bash "$(ls ~/.copilot/installed-plugins/*/agent-logger/scripts/install.sh | head -1)" stamp`
+>
+> Then run `agent-logger version` once. The first call provisions the runtime
+> (~30–120s; watch for `::agent-provisioning::`) and deploys `session-sync` and
+> the other auxiliary tools. If it reports a provisioning failure (e.g. missing
+> uv / network), surface the exact message — don't improvise a toolchain install.
 
 `session-sync` pushes raw Copilot session data from `~/.copilot` to a
 configurable **target**, under a `{machine}/` subpath, so any consumer sees
@@ -28,8 +33,8 @@ the same layout. Configuration lives at `~/.agent-logger/config.yaml`
 (override the home dir with `$AGENT_LOGGER_HOME`).
 
 > **Keep the home dir out of any cloud-synced folder.** `~/.agent-logger`
-> holds the sync lock and (in later phases) a SQLite state DB. The *target*
-> may be a synced folder; the *home* must not be.
+> holds the sync lock, deployment metadata, and the optional chronicle SQLite
+> DB. The *target* may be a synced folder; the *home* must not be.
 
 ## Targets
 
@@ -60,6 +65,20 @@ sync:
 
 See [`references/config.yaml`](references/config.yaml) for the `onedrive`,
 `ssh`, `ssh-tunnel`, and `ingest` target blocks.
+
+Optional sync controls:
+
+- `sync.source` — source state root; defaults to `~/.copilot`.
+- `sync.repo_allowlist` — include only sessions whose workspace/origin matches.
+- `sync.repo_denylist` — exclude matching repos; with an empty allowlist this
+  becomes "sync everything except these repos".
+- `sync.repo_allowlist_fail_closed` — with an allowlist, exclude sessions that
+  cannot be classified instead of keeping metadata-less sessions.
+- `sync.harness_repos` — repo names used to stamp each session's `origin.json`
+  sidecar for downstream chronicle routing.
+- `sync.notify` — target-independent best-effort HTTP `POST` after any
+  successful push (`url`, optional `bearer_token_file`, `timeout`). Notify
+  failures are logged only in verbose runs and do not fail the sync.
 
 ## Repo-local log organization
 
@@ -122,12 +141,30 @@ session-sync run --prune
 on "OneDrive root resolved" means no `OneDrive*` environment variable and no
 `~/OneDrive` -- set `sync.targets.onedrive.root` explicitly.
 
+## Troubleshoot
+
+- **Runtime not ready:** run `agent-logger version` and keep the exact
+  self-provisioning error if it fails. The plugin owns uv acquisition on
+  Linux/WSL; on Windows, a missing signed Python may be reported by the
+  installer.
+- **Target unreachable:** run `session-sync doctor`; fix the first `[FAIL]`
+  before retrying `session-sync run --dry-run --verbose`.
+- **Scheduled sync not firing:** use the plugin installer status command first:
+  `pwsh -File plugins\agent-logger\scripts\install.ps1 status` or
+  `bash plugins/agent-logger/scripts/install.sh status`. On Windows the task is
+  `Agent Logger Session Sync`; on Linux/WSL inspect
+  `systemctl --user status agent-logger-sync.timer agent-logger-sync.service`.
+- **Expected fail-loud behavior:** a missing source or failed push returns exit
+  code 1 and writes the reason to stderr. A held sync lock exits successfully
+  with "another sync holds the lock; skipping". HTTP notify failures are
+  best-effort and never fail a push.
+
 ## Schedule (deployed service)
 
 Installed via the plugin's installers, which register a 4-hourly run of
 `session-sync run --prune`:
 
-- **Windows:** `pwsh -File plugins/agent-logger/scripts/install.ps1 install`
+- **Windows:** `pwsh -File plugins\agent-logger\scripts\install.ps1 install`
   (Scheduled Task).
 - **Linux/WSL:** `bash plugins/agent-logger/scripts/install.sh install`
   (systemd user timer).
