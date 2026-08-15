@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -86,6 +88,46 @@ class TestConnectionManagerDirect:
         info1 = await manager.ensure_connected("test-host", source)
         info2 = await manager.ensure_connected("test-host", source)
         assert info1 is info2
+
+    @pytest.mark.asyncio
+    async def test_ensure_connected_offloads_blocking_config_fetch(
+        self, win_platform
+    ):
+        """A blocking get_ssh_config() must not stall the event loop (#166).
+
+        A CodespaceConfigSource's get_ssh_config() runs a synchronous
+        ``gh codespace ssh --config`` that cold-starts a Shutdown CodeSpace and
+        can block 60-120s. If ensure_connected() called it directly on the loop
+        the daemon would stop serving /health and the watchdog would force-exit
+        it mid-connect. This proves the call is off-loaded: a concurrent coroutine
+        keeps making progress while get_ssh_config() blocks.
+        """
+        inner = SSHProfileSource(host_alias="test-host")
+
+        class _BlockingSource:
+            def get_ssh_config(self):
+                time.sleep(0.3)  # synchronous stall, like a cold-boot config fetch
+                return inner.get_ssh_config()
+
+        manager = ConnectionManager(platform=win_platform)
+        ticks = 0
+
+        async def _ticker():
+            nonlocal ticks
+            while True:
+                ticks += 1
+                await asyncio.sleep(0.01)
+
+        ticker = asyncio.create_task(_ticker())
+        try:
+            info = await manager.ensure_connected("test-host", _BlockingSource())
+        finally:
+            ticker.cancel()
+
+        assert info.host == "test-host"
+        # On-loop the 0.3s block would let the 10ms ticker fire at most once;
+        # off-loaded it keeps ticking (~25-30 times). A margin guards flake.
+        assert ticks >= 5
 
     @pytest.mark.asyncio
     async def test_disconnect_removes_connection(self, win_platform, source):

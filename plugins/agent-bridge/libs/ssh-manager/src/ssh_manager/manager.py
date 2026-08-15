@@ -193,12 +193,12 @@ class ConnectionManager:
             # Check existing connection
             if host in self._connections:
                 existing = self._connections[host]
-                # Off-load the config fetch: a CodespaceConfigSource runs a
-                # blocking ``gh codespace ssh --config`` here, which on a
+                # Off-load the config fetch. For a CodespaceConfigSource this
+                # runs a blocking ``gh codespace ssh --config``, which on a
                 # *Shutdown* CodeSpace cold-starts the box and can block for
-                # 60-120s. Run synchronously on the event loop, that stall freezes
-                # the daemon's /health endpoint and trips the serving watchdog ->
-                # the daemon force-exits mid-connect (#166). to_thread keeps the
+                # 60-120s. Left on the event loop that blocking call would freeze
+                # the daemon's /health endpoint and trip the serving watchdog,
+                # force-exiting the daemon mid-connect (#166). to_thread keeps the
                 # loop serving while the boot proceeds.
                 config = await asyncio.to_thread(config_source.get_ssh_config)
 
