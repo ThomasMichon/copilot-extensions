@@ -228,8 +228,8 @@ operator's product):
   efforts/                   # planning (Phase 7; scaffolded by efforts-setup)
   visions/                   # north-star (Phase 7; scaffolded by visions-setup)
   tools/setup/               # session setup script(s) (optional; see below)
-  machines.yaml              # topology, if multi-machine (Phase 5)
-  acp-agents.json            # bridged agents, if any (Phase 5)
+  machines.yaml              # topology, if multi-machine (Phase 5); the bridge
+                             #   derives its agent roster from this + related.yaml
 ```
 
 **Keep the harness-driving helpers lightweight — but the repo may be a
@@ -463,13 +463,16 @@ in an SSH command — aliases survive IP changes and off-network access.
 
 ### agent-bridge topology
 
-Describe the mesh in two repo files (templates + guidance live in the installed
+Describe the mesh in your topology file (templates + guidance live in the installed
 agent-bridge plugin payload / the upstream `copilot-extensions` repo at
 `plugins/agent-bridge/docs/machine-config.md` — read it from there, not from the
 harness):
 
-- **`machines.yaml`** — machines, platforms, SSH aliases.
-- **`acp-agents.json`** — the agents the bridge can address.
+- **`machines.yaml`** — machines, platforms, SSH aliases, roles, and
+  `control_plane.project`. agent-bridge **derives** its agent roster from this
+  topology (machines × repos × environments) plus each repo's
+  `.agent-worktrees/related.yaml`; the hand-authored `acp-agents.json` is
+  deprecated (honored only if a profile's `agents_config` points at one).
 
 Then wire and start (skill: **`copilot-extensions-setup`** §3–4, or the
 **`agent-bridge`** skill):

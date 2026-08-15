@@ -70,12 +70,16 @@ payload split, and the per-plugin lifecycle tables** live in
 **Don't re-enumerate the plugin roster here** — that duplicate is exactly what
 drifts. All binstubs live in `~/.local/bin/`.
 
-> The agent-bridge installer also imports the `agent_codespaces` **and**
-> `agent_containers` packages into its venv (for the `codespace:` / `container:`
-> resolvers + relay) but does **not** own their binstubs — those belong to
-> `~/.agent-codespaces` and `~/.agent-containers` respectively. agent-mcp is
-> standalone: it has no bridge resolver and is invoked directly from an agent's
-> `mcp-servers` config.
+> agent-bridge sources the `codespace:` / `container:` namespaces from a
+> **filesystem provider registry** — each provider drops a manifest into
+> `~/.agent-bridge/providers.d/` on session start and the daemon drives that
+> provider's binstub **over a process boundary** (it does **not** import the
+> `agent_codespaces` / `agent_containers` packages into its venv). It does
+> **not** own their binstubs — those belong to `~/.agent-codespaces` and
+> `~/.agent-containers` respectively. (The credential relay itself is host-side,
+> run in-process by the bridge from the vendored `credential-relay` lib.)
+> agent-mcp is standalone: it has no bridge resolver and is invoked directly from
+> an agent's `mcp-servers` config.
 
 ---
 
