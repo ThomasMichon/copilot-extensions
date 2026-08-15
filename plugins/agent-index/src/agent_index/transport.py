@@ -120,38 +120,58 @@ def _emit_error(payload: dict[str, Any]) -> int:
 def maybe_delegate(sub: str, raw_argv: list[str]) -> int | None:
     """Route a read subcommand.
 
-    Returns ``None`` when the command should run **locally** (this machine is the
-    host for the resolved project, or the machine-global role is host). Otherwise
-    delegates over SSH to the project's indexer and returns the remote exit code.
-    A client with no resolvable project/indexer transport is refused (exit 1).
+    Returns ``None`` when the command should run **locally**; otherwise delegates
+    over SSH to the project's indexer and returns the remote exit code.
+
+    Decision:
+
+    * A positively-resolved indexer designation for the current project routes:
+      this machine is the ``host`` (``machine_id() == indexer.machine``) → run
+      local (``None``); otherwise → delegate ``agent-index <argv>`` to
+      ``indexer.ssh``.
+    * No usable indexer for the current directory: **refuse** only when truly
+      bare — not inside any repo — on a ``client``-role machine (there is no
+      project to pick a transport target, and a client has no local store).
+      Everywhere else (inside a project without a designation, or a
+      host/standalone box) run locally, preserving direct local dispatch. This
+      also terminates the SSH recursion: the delegated command runs in the host's
+      home dir (no project), where the host resolves to local.
     """
     if sub not in DELEGABLE:
         return None
-    role, indexer = plan_route()
-    if role == "host":
-        return None
-    # client
-    if not indexer or not indexer.get("ssh"):
+    root = config.repo_root()
+    indexer = config.read_indexer(root) if root is not None else None
+
+    if indexer and indexer.get("ssh"):
+        designated = str(indexer.get("machine", "")).strip().lower()
+        if config.machine_id().strip().lower() == designated:
+            return None  # this machine is the host for this project -> run local
+        # client -> run the same command on the indexer host over SSH
+        argv = build_ssh_argv(indexer, _forward_argv(sub, raw_argv))
+        try:
+            proc = subprocess.run(argv, check=False)  # noqa: S603 - argv built from config
+        except OSError as exc:
+            return _emit_error(
+                {
+                    "error": (
+                        f"agent-index: SSH transport to indexer '{indexer.get('ssh')}' "
+                        f"failed: {exc}"
+                    ),
+                    "hits": [],
+                }
+            )
+        return proc.returncode
+
+    if root is None and config.resolve_role() == "client":
         return _emit_error(
             {
                 "error": (
                     "agent-index: no indexer transport resolvable here. This machine is a "
                     "client, so read commands run on the designated indexer over SSH — but "
-                    "no project/indexer was found for the current directory. Run inside an "
-                    "adopted repo (with .agent-index/config.yaml indexer.ssh) or set "
-                    "AGENT_INDEX_REPO."
+                    "the current directory is not inside an adopted repo. Run inside a repo "
+                    "with .agent-index/config.yaml indexer.ssh, or set AGENT_INDEX_REPO."
                 ),
                 "hits": [],
             }
         )
-    argv = build_ssh_argv(indexer, _forward_argv(sub, raw_argv))
-    try:
-        proc = subprocess.run(argv, check=False)  # noqa: S603 - argv built from config
-    except OSError as exc:
-        return _emit_error(
-            {
-                "error": f"agent-index: SSH transport to indexer '{indexer.get('ssh')}' failed: {exc}",
-                "hits": [],
-            }
-        )
-    return proc.returncode
+    return None

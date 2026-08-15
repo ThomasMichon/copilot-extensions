@@ -81,6 +81,20 @@ def test_maybe_delegate_client_no_project_errors(monkeypatch, capsys):
     assert "no indexer transport" in out
 
 
+def test_maybe_delegate_in_project_without_indexer_runs_local(monkeypatch):
+    # Inside a repo with no indexer designation (e.g. copilot-extensions itself)
+    # -> run local; never intercept direct CLI dispatch, even on a client box.
+    _patch(monkeypatch, root="/repo", indexer=None, machine="anybox", role="client")
+    assert transport.maybe_delegate("search", ["search", "q"]) is None
+
+
+def test_maybe_delegate_bare_host_runs_local(monkeypatch):
+    # Truly bare on a host-role box (also the delegated-over-SSH home-dir case)
+    # -> run local, terminating the recursion at the host.
+    _patch(monkeypatch, root=None, indexer=None, machine="cloud1", role="host")
+    assert transport.maybe_delegate("status", ["status"]) is None
+
+
 def test_maybe_delegate_client_delegates_over_ssh(monkeypatch):
     _patch(monkeypatch, root="/repo", indexer={"machine": "tmichon-cloud1", "ssh": "tmichon-cloud1"},
            machine="tmichon-book2")
