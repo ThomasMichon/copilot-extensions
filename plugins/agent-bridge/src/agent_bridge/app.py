@@ -13,7 +13,7 @@ from pathlib import Path
 from fastapi import FastAPI
 
 from . import __version__, telemetry
-from .agent_registry import build_resolver
+from .agent_registry import daemon_resolver
 from .auth import BearerAuthMiddleware
 from .config import load_config, load_or_create_auth_token
 from .db import Database
@@ -23,7 +23,6 @@ from .routes import (
     agents,
     health,
     live_sessions,
-    providers,
     sessions,
     ui,
     worktrees,
@@ -142,12 +141,14 @@ async def lifespan(app: FastAPI):
                 "Session-Host reattach on startup failed", exc_info=True
             )
 
-    # Load topology profiles + auto-discover local agents
-    resolver = build_resolver(cfg)
+    # Load topology profiles + auto-discover local agents. Always a resolver
+    # (empty when there is no topology) so declarative namespace providers
+    # (codespace:, container:) from providers.d attach even without machines.yaml.
+    resolver = daemon_resolver(cfg)
     app.state.resolver = resolver
 
     # Start worktree discovery if topology is available
-    if resolver:
+    if resolver.agents or resolver.machines:
         from .routes.worktrees import get_cache
         wt_cache = get_cache()
         wt_cache.configure(interval=cfg.worktree_discovery_interval)
@@ -530,7 +531,6 @@ def create_app(*, config=None, token: str | None = None) -> FastAPI:
     app.include_router(sessions.router)
     app.include_router(live_sessions.router)
     app.include_router(agents.router)
-    app.include_router(providers.router)
     app.include_router(worktrees.router)
     app.include_router(admin.router)
 

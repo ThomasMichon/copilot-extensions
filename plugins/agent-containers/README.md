@@ -37,7 +37,6 @@ agent-containers borrow <effort>     # lease a free container -> prints name
 agent-containers release <target>    # release by container or effort name
 agent-containers leases              # show active leases
 agent-containers exec <name>         # run the ACP launch command (testing)
-agent-containers bridge register     # push provider registrations (optional)
 ```
 
 ## Configuration

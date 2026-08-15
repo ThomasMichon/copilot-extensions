@@ -89,7 +89,6 @@ agent-codespaces config adopt         # Register a repo's config for the daemon
 agent-codespaces config migrate       # Relocate legacy codespaces.yaml -> .agent-codespaces/config.yaml
 agent-codespaces config show          # Show resolved config
 agent-codespaces config validate      # Validate resolved config
-agent-codespaces bridge register      # Register CodeSpaces as bridge agents
 agent-codespaces cleanup              # Remove stale local state (SSH configs, sockets)
 agent-codespaces status               # Service + relay + tunnel state
 agent-codespaces version              # Show version
@@ -110,25 +109,16 @@ and can be overridden per-repo in `.agent-codespaces/config.yaml`. After the
 CodeSpace is Available, any `on_create` provisioning hooks from that config run
 automatically.
 
-### `bridge` options
+### Agent-bridge integration (automatic)
 
-> **Usually unnecessary.** Once agent-codespaces is installed, agent-bridge
-> auto-registers the live `codespace:` namespace resolver, so CodeSpaces are
-> addressable as `codespace:<name>` (raw or friendly) with no registration.
-> `bridge register` only POSTs a static `cs-<name>` snapshot (with a TTL) for
-> HTTP consumers that prefer a pre-registered provider list; it is optional and
-> superseded by the resolver.
-
-```bash
-agent-codespaces bridge register   [--ttl 300] [--bridge-url <url>]
-agent-codespaces bridge refresh    [--ttl 300] [--bridge-url <url>]
-agent-codespaces bridge status     [--bridge-url <url>]
-agent-codespaces bridge unregister [--bridge-url <url>]
-```
-
-> **Linux/WSL:** the bridge defaults to port **9281**, but these commands
-> default `--bridge-url` to `http://127.0.0.1:9280`. On Linux/WSL pass
-> `--bridge-url http://127.0.0.1:9281` explicitly.
+Once agent-codespaces is installed, its sessionStart hook drops a
+namespace-provider manifest into `~/.agent-bridge/providers.d/`. agent-bridge
+discovers it there and registers the live `codespace:` namespace resolver, so
+CodeSpaces are addressable as `codespace:<name>` (raw or friendly) — listed and
+resolved live, with no expiry, including newly-created ones. There is **no
+`bridge register` step**; installing the plugin is all that's needed. The
+manifest carries the absolute agent-codespaces binstub, so the bridge daemon
+drives it over a process boundary without importing it or needing it on `PATH`.
 
 ## Multi-account gh (per-repo identity)
 

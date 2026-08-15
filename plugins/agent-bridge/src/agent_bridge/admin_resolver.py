@@ -208,15 +208,10 @@ class AdminResolver:
 
     async def ensure_ready(self, name: str) -> None:
         """Verify the inner agent exists, opted into admin, and tools exist."""
-        # Verify agent exists and opted into elevation. Provider agents
+        # Verify agent exists and opted into elevation. Namespace agents
         # (e.g. codespaces) are remote and never admin-eligible here.
         config = self._parent.agents.get(name)
         if config is None:
-            if name in self._parent._live_provider_agents():
-                raise RuntimeError(
-                    f"Agent '{name}' is a provider agent and cannot be "
-                    "elevated from the bridge side"
-                )
             raise RuntimeError(
                 f"Agent '{name}' not found for admin elevation"
             )
