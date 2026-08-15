@@ -691,7 +691,18 @@ class SessionManager:
         from pathlib import Path as _Path
 
         from .session_host.host_index import HostIndex
-        sd = _Path(session_host_state_dir or "~/.agent-bridge/hosts").expanduser()
+        # Default the host state dir next to the DB (isolated per Database) rather
+        # than a hardcoded ~/.agent-bridge/hosts. In production the DB is
+        # ~/.agent-bridge/sessions.db, so this still resolves to
+        # ~/.agent-bridge/hosts -- identical behavior -- but a test/embedded use
+        # with a temp DB gets an isolated index instead of writing into (and
+        # sharing, across parallel runs) the real developer/CI home. Now that
+        # Session Hosts are always on the index is ALWAYS constructed, so this
+        # isolation matters (dotfiles#1478 review).
+        if session_host_state_dir:
+            sd = _Path(session_host_state_dir).expanduser()
+        else:
+            sd = _Path(self._db.db_path).expanduser().parent / "hosts"
         sd.mkdir(parents=True, exist_ok=True)
         self._host_index = HostIndex(sd / "index.json")
         self._thresholds = context_thresholds or ContextThresholds()
@@ -2430,9 +2441,11 @@ class SessionManager:
                 # work on any hiccup.
                 raise RuntimeError(
                     f"CodeSpace target {getattr(target, 'agent_name', None)!r} "
-                    f"requires session-host mode, but none was established "
-                    f"(cs_target={'resolved' if cs_target else 'unresolved'}). "
-                    f"Refusing to run the process-owned (non-survivable) path."
+                    f"was detected but could not be resolved to a CodeSpace "
+                    f"spawner/transport (cs_target=unresolved). Session Hosts are "
+                    f"always on, so this is a resolution/configuration failure, "
+                    f"not a disabled mode. Refusing to fall back to the "
+                    f"process-owned (non-survivable) path."
                 )
             else:
                 # Process-owned (front-owns-stdio) transport for ssh/command
