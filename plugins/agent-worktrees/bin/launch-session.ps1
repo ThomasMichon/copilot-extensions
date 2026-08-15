@@ -28,7 +28,6 @@ if (-not (Test-Path $script:SetupLogDir)) {
 }
 $script:SetupLog = Join-Path $script:SetupLogDir "setup-$PID.log"
 $env:WORKTREE_SETUP_LOG = $script:SetupLog
-$env:APERTURE_SETUP_LOG = $script:SetupLog  # backward compat
 
 # ---------------------------------------------------------------------------
 # Launch-flow correlation id -- minted once per launcher run and threaded
@@ -98,11 +97,9 @@ foreach ($arg in $CopilotArgs) {
     } elseif ($arg -eq '--recovery' -or $arg -eq '-Recovery' -or $arg -eq 'recovery') {
         $RecoveryMode = $true
         $env:WORKTREE_RECOVERY = '1'
-        $env:APERTURE_RECOVERY = '1'  # backward compat
         Write-SetupLog 'Recovery mode requested via CLI arg'
     } elseif ($arg -eq '--no-update') {
         $env:WORKTREE_NO_UPDATE = '1'
-        $env:APERTURE_NO_UPDATE = '1'  # backward compat
         Write-SetupLog '--no-update: pre-launch update disabled'
     } else {
         $FilteredArgs += $arg
@@ -246,7 +243,7 @@ function Invoke-AwPostExit {
 # Guard: WORKTREE_NO_UPDATE=1 skips this block entirely (set by --no-update
 # and by the re-exec below to prevent infinite loops).
 
-$noUpdate = ($env:WORKTREE_NO_UPDATE -eq '1') -or ($env:APERTURE_NO_UPDATE -eq '1')
+$noUpdate = ($env:WORKTREE_NO_UPDATE -eq '1')
 $script:UpdateApplied = $false
 $script:StageJob = $null
 
@@ -534,7 +531,7 @@ if ($plan.action -ne 'exec') {
 # surgical gate without reordering the rest of the launcher.
 function Test-AwJoiningLiveSession {
     # No-mux launches always (re)start Copilot directly -- the update is relevant.
-    $noMuxNow = ($env:WORKTREE_NO_MUX -eq '1') -or ($env:APERTURE_NO_MUX -eq '1') -or [bool]$plan.no_mux
+    $noMuxNow = ($env:WORKTREE_NO_MUX -eq '1') -or [bool]$plan.no_mux
     if ($noMuxNow) { return $false }
     $cmd = Get-Command psmux -ErrorAction SilentlyContinue
     if (-not $cmd) { return $false }
@@ -592,7 +589,6 @@ if ($plan.env) {
 # $plan.worktree_id (never $env) for its own psmux + post-exit logic, and its
 # $env:WORKTREE_PROJECT uses (recovery / self-update) are all earlier.
 Remove-Item Env:WORKTREE_ID -ErrorAction SilentlyContinue
-Remove-Item Env:APERTURE_WORKTREE_ID -ErrorAction SilentlyContinue
 Remove-Item Env:WORKTREE_PROJECT -ErrorAction SilentlyContinue
 
 $cmd = @($plan.cmd)
@@ -626,7 +622,7 @@ if ($CopilotPassthrough.Count -gt 0) {
 # Mirrors the Linux tmux integration in launch-session.sh.
 # --no-mux / WORKTREE_NO_MUX=1 bypasses psmux for debugging.
 
-$noMux = ($env:WORKTREE_NO_MUX -eq '1') -or ($env:APERTURE_NO_MUX -eq '1') -or [bool]$plan.no_mux
+$noMux = ($env:WORKTREE_NO_MUX -eq '1') -or [bool]$plan.no_mux
 if ($noMux) {
     Write-SetupLog 'Mux disabled; launching directly'
 }
@@ -865,7 +861,6 @@ if (-not $noMux -and $psmuxCmd) {
         }
     }
     $mergedEnv['WORKTREE_SETUP_LOG'] = [string]$script:SetupLog
-    $mergedEnv['APERTURE_SETUP_LOG'] = [string]$script:SetupLog
     if ($script:LaunchId) { $mergedEnv['WORKTREE_LAUNCH_ID'] = [string]$script:LaunchId }
 
     $envFlags = @()

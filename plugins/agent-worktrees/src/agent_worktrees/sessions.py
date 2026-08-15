@@ -1536,7 +1536,7 @@ def _stamp_mux_live_quiet(worktree_id: str, live: bool) -> None:
 # Identity env vars stripped from a child Copilot so the session carries no
 # ambient project/worktree identity (in-session tools resolve from CWD). Mirror
 # of the ``env -u`` prefix in launch-session.sh.
-_IDENTITY_ENV_VARS = ("WORKTREE_PROJECT", "WORKTREE_ID", "APERTURE_WORKTREE_ID")
+_IDENTITY_ENV_VARS = ("WORKTREE_PROJECT", "WORKTREE_ID")
 
 
 def _mux_bin(mux: str | None = None) -> str:
