@@ -27,7 +27,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('install', 'uninstall', 'start', 'stop', 'status', 'update')]
+    [ValidateSet('install', 'uninstall', 'start', 'stop', 'status', 'update', 'stamp', 'provision')]
     [string]$Action = 'status',
 
     [switch]$Purge,
@@ -40,12 +40,11 @@ param(
     # existing non-interactive task is preserved across updates.
     [switch]$NonInteractive,
 
-    # Zero-downtime update (dotfiles #533 Part B). Set by the launch-path
-    # reconciler for a routine version-bump redeploy: update the venv in place
-    # (no stop) and hand off via `agent-bridge deploy` (ZDD active/passive
-    # cutover: new daemon on a fresh port -> flip routing -> drain + retire the
-    # old one), so a live dispatch is never collapsed. Falls back to the classic
-    # stop-and-swap if the cutover can't run or fails.
+    # DEPRECATED / no-op (Thread B): the graceful ZDD cutover is now the DEFAULT on
+    # `update` whenever a live daemon is running -- activation always cuts over
+    # automatically (invariant #1), so this opt-in is no longer required. The switch
+    # is still ACCEPTED (so existing callers, e.g. the launch-path reconciler, don't
+    # break) but has no effect; it will be removed in a later cleanup.
     [switch]$ZeroDowntime
 )
 
@@ -1110,38 +1109,117 @@ function Write-Binstubs {
        console-script trampoline .exe that Smart App Control blocks (3077). #>
     param([string]$PythonExe)  # accepted for call-site compatibility; unused (marker-driven)
 
-    # SINGLE dynamic router. The binstub reads the `current-version` marker at
-    # every invocation and redirects into versions/<current>/Scripts/python.exe.
-    # It is version-AGNOSTIC (written once), so a cutover only rewrites the marker
-    # and EVERY entry point -- CLI, tool call, scheduled task, internal spawn --
-    # resolves the active version through this one binstub. No junction/reparse is
-    # traversed (the marker is a plain file; versions/<v> is a real dir), so
-    # RedirectionGuard/WinError 448 can't bite. A missing/torn marker falls back to
-    # the newest installed slot (gc never removes the active one).
+    # SINGLE dynamic router, now SELF-PROVISIONING (#1393). The binstub reads the
+    # `current-version` marker at every invocation and redirects into
+    # versions/<current>/Scripts/python.exe (version-AGNOSTIC, written once, so a
+    # cutover only rewrites the marker). If NO slot is built yet (a `stamp`
+    # deferred the venv), it provisions on first use from the slot-local snapshot,
+    # then dispatches. Opt out with AGENT_BRIDGE_NO_SELFPROVISION=1. No junction is
+    # traversed (marker is a plain file), so RedirectionGuard can't bite. Launches
+    # the PSF-signed venv python via -m, never the SAC-blocked trampoline .exe.
     $rootLit = $InstallDir -replace "'", "''"
-    $ps1 = @(
-        "`$env:PYTHONUTF8 = '1'",
-        "`$_root = '$rootLit'",
-        "`$_ver = ''",
-        "try { `$_ver = ([IO.File]::ReadAllText((Join-Path `$_root 'current-version'))).Trim() } catch {}",
-        "`$_py = if (`$_ver) { Join-Path `$_root ('versions\' + `$_ver + '\Scripts\python.exe') } else { '' }",
-        "if (-not (`$_py -and (Test-Path -LiteralPath `$_py))) { `$_py = Get-ChildItem (Join-Path `$_root 'versions') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Join-Path `$_.FullName 'Scripts\python.exe' } | Where-Object { Test-Path -LiteralPath `$_ } | Select-Object -Last 1 }",
-        "& `$_py -m agent_bridge @args",
-        "exit `$LASTEXITCODE"
-    ) -join "`r`n"
+    $ps1 = @'
+$env:PYTHONUTF8 = '1'
+$_root = '__ROOT__'
+function _resolve_ab_py {
+    $ver = ''
+    try { $ver = ([IO.File]::ReadAllText((Join-Path $_root 'current-version'))).Trim() } catch {}
+    $p = if ($ver) { Join-Path $_root ('versions\' + $ver + '\Scripts\python.exe') } else { '' }
+    if ($p -and (Test-Path -LiteralPath $p)) { return $p }
+    Get-ChildItem (Join-Path $_root 'versions') -Directory -ErrorAction SilentlyContinue |
+        Sort-Object Name | ForEach-Object { Join-Path $_.FullName 'Scripts\python.exe' } |
+        Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Last 1
+}
+$_py = _resolve_ab_py
+if ($_py) { & $_py -m agent_bridge @args; exit $LASTEXITCODE }
+if ($env:AGENT_BRIDGE_NO_SELFPROVISION) { [Console]::Error.WriteLine('[agent-bridge] runtime not provisioned (AGENT_BRIDGE_NO_SELFPROVISION set).'); exit 1 }
+$_snap = ''
+try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
+$_inst = if ($_snap) { Join-Path $_snap 'scripts\install.ps1' } else { '' }
+if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) { [Console]::Error.WriteLine('[agent-bridge] cannot self-provision: snapshot installer not found. Re-enable the plugin, then retry.'); exit 127 }
+[Console]::Error.WriteLine('[agent-bridge] runtime not provisioned -- provisioning on first use (acquires uv + builds a venv; ~30-120s). Do not kill; extend your timeout.')
+[Console]::Error.WriteLine('::agent-provisioning:: plugin=agent-bridge eta_seconds=120 reason=first-use')
+$_pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
+$_exe = if ($_pwsh) { $_pwsh.Source } else { 'powershell.exe' }
+& $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
+$_py = _resolve_ab_py
+if ($_py) { & $_py -m agent_bridge @args; exit $LASTEXITCODE }
+[Console]::Error.WriteLine('[agent-bridge] provisioning did not yield a runtime. See the log above; retry, or run the snapshot installer manually.')
+exit 1
+'@ -replace '__ROOT__', $rootLit
     [System.IO.File]::WriteAllText($BinstubPs1, $ps1, (New-Object System.Text.UTF8Encoding($false)))
 
-    $cmd = @(
-        "@echo off",
-        "set `"PYTHONUTF8=1`"",
-        "set `"_ROOT=$InstallDir`"",
-        "set `"_VER=`"",
-        "if exist `"%_ROOT%\current-version`" set /p _VER=<`"%_ROOT%\current-version`"",
-        "`"%_ROOT%\versions\%_VER%\Scripts\python.exe`" -m agent_bridge %*"
-    ) -join "`r`n"
+    $cmd = @'
+@echo off
+setlocal
+set "PYTHONUTF8=1"
+set "_ROOT=__ROOT__"
+call :_resolve
+if not defined _PY goto _prov
+"%_PY%" -m agent_bridge %*
+exit /b %ERRORLEVEL%
+:_prov
+if defined AGENT_BRIDGE_NO_SELFPROVISION goto _nope
+set "_SNAP="
+if exist "%_ROOT%\payload-dir" set /p _SNAP=<"%_ROOT%\payload-dir"
+set "_INST=%_SNAP%\scripts\install.ps1"
+if not exist "%_INST%" goto _noinst
+echo [agent-bridge] runtime not provisioned -- provisioning on first use ^(~30-120s^). Do not kill.>&2
+where pwsh >nul 2>&1
+if %ERRORLEVEL%==0 (pwsh -NoProfile -ExecutionPolicy Bypass -File "%_INST%" provision 1>&2) else (powershell -NoProfile -ExecutionPolicy Bypass -File "%_INST%" provision 1>&2)
+call :_resolve
+if not defined _PY goto _failprov
+"%_PY%" -m agent_bridge %*
+exit /b %ERRORLEVEL%
+:_noinst
+echo [agent-bridge] cannot self-provision: snapshot installer not found.>&2
+exit /b 127
+:_nope
+echo [agent-bridge] runtime not provisioned ^(AGENT_BRIDGE_NO_SELFPROVISION set^).>&2
+exit /b 1
+:_failprov
+echo [agent-bridge] provisioning did not yield a runtime.>&2
+exit /b 1
+:_resolve
+set "_PY="
+set "_VER="
+if exist "%_ROOT%\current-version" set /p _VER=<"%_ROOT%\current-version"
+if defined _VER if exist "%_ROOT%\versions\%_VER%\Scripts\python.exe" set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
+if not defined _PY for /f "delims=" %%D in ('dir /b /ad /o-n "%_ROOT%\versions" 2^>nul') do if not defined _PY if exist "%_ROOT%\versions\%%D\Scripts\python.exe" set "_PY=%_ROOT%\versions\%%D\Scripts\python.exe"
+exit /b 0
+'@ -replace '__ROOT__', $InstallDir
     [System.IO.File]::WriteAllText($BinstubCmd, $cmd)
 
-    Write-Ok "Binstub: $BinstubPs1 (+ .cmd fallback) -- marker-routed"
+    Write-Ok "Binstub: $BinstubPs1 (+ .cmd fallback) -- marker-routed, self-provisioning"
+}
+
+function Invoke-Stamp {
+    # Fast base install (#1393, snapshot slot model): copy the payload SOURCE into
+    # ~/.agent-bridge/snapshots/<ver>/, record markers, and deploy the self-
+    # provisioning binstub -- deferring the heavy venv build (and the daemon/service
+    # registration) to the binstub's first use. No venv, no uv; fits a sessionStart
+    # grace window and NEVER holds the marketplace payload open.
+    Write-Host ''; Write-Host '=== agent-bridge stamp (defer runtime to first use) ===' -ForegroundColor Cyan; Write-Host ''
+    if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    foreach ($dir in @($InstallDir, $LocalBin)) {
+        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    }
+    $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
+    $snapTmp = "$snapDir.tmp-$PID"
+    if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
+    New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
+    $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+    Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+    }
+    if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
+    Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
+    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
+    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
+    Write-Ok "Snapshot: $snapDir"
+    Write-Binstubs
+    Write-Ok 'Stamped: agent-bridge binstub on PATH; runtime provisions on first use.'
 }
 
 function Invoke-Install {
@@ -1682,10 +1760,12 @@ function Invoke-Update {
     # not race a live bridge holding python.exe open.
     $wasRunning = $null -ne (Get-RunningProcess)
 
-    # Zero-downtime path (dotfiles #533 Part B): when the reconciler asks for it
-    # and a healthy venv is already serving, hand off via `agent-bridge deploy`
-    # (ZDD cutover) at the end instead of the classic drain -> stop -> rebuild ->
-    # restart (which blips a live dispatch).
+    # Thread B: the ZDD active/passive cutover is now the DEFAULT whenever a live
+    # daemon is running -- activation always cuts over automatically (no opt-in).
+    # It hands off via the installer-internal `agent_bridge deploy` seam (new
+    # daemon on a fresh port -> flip routing -> drain + retire the old), so a live
+    # dispatch is never collapsed; it falls back to the classic stop-and-swap only
+    # when the cutover can't run or fails.
     #
     # Legacy layout: the venv is updated IN PLACE, so cutover requires the venv to
     # already exist (we must not rebuild python.exe under a running daemon).
@@ -1696,7 +1776,7 @@ function Invoke-Update {
     $prevVersion = ''
     if ($VersionedRuntime) {
         $prevVersion = Get-VersionedCurrent
-        $useCutover = $ZeroDowntime -and $wasRunning
+        $useCutover = $wasRunning
         # Cutover onto the *same* slot is impossible (there is only one dir of that
         # name and the live daemon holds it). A same-version refresh downgrades to
         # the classic stop-and-rebuild.
@@ -1705,10 +1785,10 @@ function Invoke-Update {
             $useCutover = $false
         }
     } else {
-        $useCutover = $ZeroDowntime -and $wasRunning -and (Test-Path $VenvPython)
+        $useCutover = $wasRunning -and (Test-Path $VenvPython)
     }
     if ($useCutover) {
-        Write-Step 'Zero-downtime mode: building the new runtime; will cut over (no stop)'
+        Write-Step 'Graceful cutover: building the new runtime; will cut over (no stop)'
     }
 
     # Snapshot the current healthy venv so a failed install can roll back to the
@@ -1976,4 +2056,6 @@ switch ($Action) {
     'stop'      { Invoke-Stop }
     'status'    { Invoke-Status }
     'update'    { Invoke-Update }
+    'stamp'     { Invoke-Stamp }
+    'provision' { Invoke-Install }
 }
