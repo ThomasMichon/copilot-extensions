@@ -2,9 +2,9 @@
 name: installing-plugins
 description: >
   Install and enable Copilot CLI plugins -- repo-scoped registration via
-  .github/copilot/settings.json (extraKnownMarketplaces + enabledPlugins) with
-  experimental mode, versus global installs, the in-repo `.ai` local plugin
-  marketplace (directory source) for modular in-repo capability, plus the
+  .github/copilot/settings.json (extraKnownMarketplaces + enabledPlugins),
+  versus global installs, the in-repo `.ai` local plugin marketplace (directory
+  source) for modular in-repo capability, plus the
   payload-vs-runtime model and launch-time reconciliation. Use when installing,
   enabling, or updating a plugin, adding a marketplace, packaging a repo's own
   skills/agents as in-repo plugins, or setting up a repo's or machine's plugin set.
@@ -15,7 +15,6 @@ description: >
   - 'copilot plugin install'
   - 'plugin marketplace'
   - 'extraKnownMarketplaces'
-  - 'experimental mode'
   - 'repo plugins'
   - 'settings.json plugins'
   - 'local marketplace'
@@ -63,14 +62,7 @@ narrowest scope that works — almost always the repo:
 Pin the plugin set to a repo so it travels with the project and stays consistent
 across machines.
 
-1. **Enable experimental mode once per machine** -- the CLI gates **all**
-   extension loading on it (`~/.copilot/settings.json`):
-
-   ```json
-   { "experimental": true }
-   ```
-
-2. **Declare the marketplace + enable the plugins** in the repo's committed
+1. **Declare the marketplace + enable the plugins** in the repo's committed
    `.github/copilot/settings.json`:
 
    ```json
@@ -90,6 +82,11 @@ across machines.
    repo. A plugin's `extensions/` directory is only scanned when it is enabled,
    and a newly enabled plugin may only take effect after **restarting the active
    session** (plugins are scanned at startup).
+
+   Current Copilot CLI plugin loading does **not** require experimental mode.
+   Some adjacent features (for example MCP registry search) may be experimental,
+   but `extraKnownMarketplaces` + `enabledPlugins` is ordinary settings
+   configuration.
 
    **No `copilot plugin install` step is needed for this path** — the declarative
    `enabledPlugins` line *is* the enablement, and Copilot vendors the payload for
@@ -134,10 +131,11 @@ in-repo plugins.
 ```
 
 > The CLI looks for the marketplace manifest at `marketplace.json`,
-> `.plugin/marketplace.json`, `.github/plugin/marketplace.json`, **or**
-> `.claude-plugin/marketplace.json`; a plugin's own manifest may be `plugin.json`
-> or `.claude-plugin/plugin.json`. The `.ai` + `.claude-plugin` spelling is the
-> cross-tool convention.
+> `.plugin/marketplace.json`, `.github/plugin/marketplace.json`, or
+> `.claude-plugin/marketplace.json`; a plugin's own manifest may be
+> `.plugin/plugin.json`, `plugin.json`, `.github/plugin/plugin.json`, or
+> `.claude-plugin/plugin.json`. The `.ai` + `.claude-plugin` spelling is the
+> cross-tool local-marketplace convention used here.
 
 **Declaring the `.ai` marketplace is REQUIRED — the directory alone does
 nothing.** The `.ai/` tree is inert until the repo **declares it as a

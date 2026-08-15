@@ -3,11 +3,12 @@ name: troubleshooting-wsl-networking
 description: >
   Diagnose and fix WSL2 networking failures on locked-down Windows - no internet
   egress from WSL (apt "No route to host") behind a corporate host-vNIC filter,
-  host<->WSL loopback that times out under mirrored networking, and services that
+  host<->WSL localhost failures under mirrored networking, and services that
   vanish when the distro idles. Provides the diagnosis order, the NAT vs mirrored
-  fix, offline package sideloading, and the keepalive. Use when WSL can't reach
-  the internet, apt fails, a WSL service is unreachable from Windows, or a WSL
-  listener disappears. Trigger phrases include:
+  fix, offline package sideloading, port-shadowing checks, and the windowless
+  keepalive helper. Use when WSL can't reach the internet, apt fails, a WSL
+  service is unreachable from Windows, or a WSL listener disappears. Trigger
+  phrases include:
   - 'WSL no internet'
   - 'WSL apt No route to host'
   - 'WSL egress blocked'
@@ -29,7 +30,7 @@ you have first.
 | Symptom | Likely cause | Go to |
 |---------|--------------|-------|
 | `apt`/`curl` from WSL time out; host is fine | Corp host-vNIC filter blocks the WSL adapter's **egress** | § A |
-| `Windows localhost:PORT` (or in-WSL `127.0.0.1:PORT`) times out, service is listening | **mirrored** networking loopback redirect | § B |
+| `Windows localhost:PORT` times out/refuses while the service works inside WSL | **mirrored** networking relay failure on a locked-down host, or the wrong mode for service hosting | § B |
 | Service was reachable, now **refused**; distro shows `Stopped` | Distro **idled out** (service died) | § C |
 | `Windows localhost:PORT` reaches the **wrong** service / unexpected auth failure (esp. `:22`) | A **Windows** process binds the port and shadows the WSL forward | § D |
 
@@ -41,6 +42,9 @@ Invoke-WebRequest https://archive.ubuntu.com -Method Head -TimeoutSec 8   # host
 wsl -d <distro> -u root bash -c "curl -m8 -sSI https://archive.ubuntu.com >/dev/null && echo WSL-OK || echo WSL-BLOCKED"
 # service reachability from Windows
 Test-NetConnection localhost -Port <PORT>
+# service reachability inside WSL (separates service config from host relay)
+wsl -d <distro> -- bash -lc "ss -tlnp | grep ':<PORT>'"
+wsl -d <distro> -- bash -lc "timeout 3 bash -c '</dev/tcp/127.0.0.1/<PORT>' && echo WSL-LOCAL-OK || echo WSL-LOCAL-FAIL"
 # distro state
 wsl -l -v
 ```
@@ -96,20 +100,24 @@ missing strict dep — fetch and add it the same way.
 
 ---
 
-## § B. Host↔WSL loopback broken (mirrored networking)
+## § B. Host↔WSL localhost broken (mirrored networking on a locked-down host)
 
-**Signature:** the service is listening (`ss -tlnp | grep :PORT` inside WSL shows
-`0.0.0.0:PORT`), yet **in-WSL `127.0.0.1:PORT` and Windows `localhost:PORT` both
-time out**. `.wslconfig` has `networkingMode=mirrored`.
+**Signature:** the service is listening and reachable inside WSL (`ss -tlnp |
+grep :PORT`, then an app-level `127.0.0.1:PORT` check), but **Windows
+`localhost:PORT` times out/refuses** or reaches the host side. `.wslconfig` has
+`networkingMode=mirrored`.
 
-**Cause:** in mirrored mode WSL rewrites `127.0.0.1` routing through a special
-loopback device to the host relay (shared-localhost), so a "loopback" connection
-is forwarded to the **Windows** localhost (where nothing listens) instead of the
-WSL service. Corp host-vNIC filters compound this by dropping the relay traffic.
+**Cause:** mirrored mode is designed to support localhost between Windows and
+WSL, and WSL documentation recommends it for VPN compatibility. On some
+locked-down corporate host-vNIC/filter stacks, however, that localhost relay path
+is filtered or lands on the host-side listener instead of the WSL service. Also,
+`localhostForwarding=true` is ignored in mirrored mode; it only applies to NAT.
 
 **Confirm:**
 ```powershell
-wsl -d <distro> -u root bash -c "ip rule; ip route show table 127"   # 127.0.0.1 via loopback0
+wsl -d <distro> -- bash -lc "ss -tlnp | grep ':<PORT>'"
+wsl -d <distro> -- bash -lc "timeout 3 bash -c '</dev/tcp/127.0.0.1/<PORT>' && echo WSL-LOCAL-OK || echo WSL-LOCAL-FAIL"
+Test-NetConnection localhost -Port <PORT>
 ```
 
 **Fix — switch to NAT + localhostForwarding** (the robust, well-understood path):
@@ -124,15 +132,19 @@ dnsTunneling=true
 ```powershell
 wsl --shutdown   # bounces all distros incl. Docker (auto-recovers)
 ```
-After reboot, in-WSL `127.0.0.1:PORT` opens and Windows `localhost:PORT` reaches
-the service via the host relay. **No Hyper-V/Windows firewall rule is needed** for
-this loopback path.
+After WSL restarts, Windows `localhost:PORT` reaches the service through NAT's
+host relay. **No Hyper-V/Windows firewall rule is needed** for this loopback
+path.
 
 > Tried-and-insufficient in mirrored mode (documented so you don't repeat them):
-> `hostAddressLoopback=true` flips *refused* → *timeout* (forwards but the corp
-> filter still drops), and a Hyper-V VM firewall inbound-allow for the port
+> `hostAddressLoopback=true` (an `[experimental]` mirrored-mode key) affects
+> host-assigned IP addresses, not the NAT `localhostForwarding` relay; it may
+> change *refused* into *timeout* without making the WSL service reachable. A
+> Hyper-V VM firewall inbound allow
 > (`New-NetFirewallHyperVRule -VMCreatorId '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}'`)
-> did **not** restore reachability. NAT is the fix; don't burn time on mirrored.
+> is for mirrored/LAN inbound exposure, not the NAT localhost path. For a
+> Windows/tunnel-to-WSL service hop, switch to NAT instead of burning time on
+> mirrored.
 
 **Preserve intent:** if the user chose `mirrored`+`dnsTunneling` for corp VPN,
 NAT keeps `dnsTunneling`; note the change is reversible if VPN DNS/routing regresses.
@@ -146,14 +158,22 @@ shows the distro `Stopped`. Even with systemd, WSL terminates an **idle** distro
 and Docker Desktop keeps only the *WSL VM* up, not your distro.
 
 **Fix — keepalive:** a `sleep infinity` process pins the distro; a logon
-Scheduled Task makes it survive reboots. See `setting-up-wsl` § "Keep the distro
-alive". Verify:
+Scheduled Task makes it survive reboots. Use the bundled windowless helper from
+`setting-up-wsl` § "Keep the distro alive":
 
 ```powershell
-Start-Process -WindowStyle Hidden wsl.exe -ArgumentList '-d','<distro>','-u','root','--exec','/bin/sh','-c','systemctl start <svc>; exec sleep infinity'
-Start-Sleep 5; wsl -l -v            # distro -> Running
+# install/uninstall need elevation; status does not.
+$ka = 'plugins\wsl-setup\skills\setting-up-wsl\references\wsl-keepalive.ps1'
+pwsh -File $ka install -Distro <distro> -Service <svc> -TaskName WSL-Keepalive-<svc>
+pwsh -File $ka status  -TaskName WSL-Keepalive-<svc> -Distro <distro> -Service <svc>
+wsl -l -v                            # distro -> Running
 1..3 | % { Start-Sleep 3; Test-NetConnection localhost -Port <PORT> | Select -Expand TcpTestSucceeded }
 ```
+
+`-Service` starts the systemd service once before pinning (`systemctl start
+<svc>; exec sleep infinity`); the helper is not a service monitor. Use
+`systemctl enable <svc>` and the service unit's own restart policy for ongoing
+service recovery.
 
 ---
 
@@ -179,7 +199,9 @@ If a Windows process (not the WSL relay) owns it, that's the shadow.
 **Fix — give the WSL service its own port.** Run the WSL listener on an unused
 port (e.g. sshd on `2200` via `/etc/ssh/sshd_config.d/*.conf` → `Port 2200`) and
 reference that port everywhere. Never co-locate a WSL service on a port a Windows
-service also uses.
+service also uses. Mirrored mode's `ignoredPorts` can let Linux bind a port that
+Windows also uses, but it does not make Windows `localhost:PORT` unambiguously
+reach the Linux service; a dedicated port is still the clean fix.
 
 ---
 

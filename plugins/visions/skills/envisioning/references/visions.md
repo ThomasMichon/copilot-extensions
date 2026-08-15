@@ -43,6 +43,13 @@ Three properties define a vision:
 > two: a vision is the target, a doc is the record of the target being (partly)
 > hit.
 
+Some repos also carry a prescriptive **patterns** layer. Keep that layer out of
+the vision body: **Vision** says what should ultimately be true; **Patterns** say
+how the repo builds that class of thing; **Architecture** records what exists
+now; **Contribution** explains how to land a change. A vision may link to a
+pattern doc as context or as a design contract, but should not restate the
+pattern's mechanics.
+
 ## Visions and efforts go hand in hand
 
 The load-bearing relationship in the whole system:

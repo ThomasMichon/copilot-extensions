@@ -19,7 +19,7 @@ description: >
   - 'update the vision'
   - 'vision vs reality'
   - 'carve an effort from the vision'
-  - 'what features should X have'
+  - 'what should the vision say'
 ---
 
 # Envisioning
@@ -51,6 +51,13 @@ addendum sets:
 
 If no addendum exists, the repo hasn't adopted visions yet — use the
 `visions-setup` skill first.
+
+If the repo has a prescriptive pattern layer (for example
+`docs/patterns/README.md`), treat it as a sibling layer, not vision content:
+**Vision** says what should ultimately be true; **Patterns** say how the repo
+builds that kind of thing; **Architecture/reality docs** say what exists now;
+**Contribution** docs say how changes land. Link to patterns when a vision needs
+that context; do not copy pattern rules into the vision.
 
 ## What a vision is (and is not)
 
@@ -144,10 +151,13 @@ then re-elaborate the private one.
 
 ### Repos that require an external state root: build-out vs. personal visions
 
-When the launch repo **requires an external state root** — the repo-level
-setting `requires_external_state_root: true` in its
-`.agent-worktrees/config.yaml`, which a stateless harness sets implicitly —
-visions split by subject. Resolve the **state root** first:
+This plugin does **not** require `agent-worktrees`; in a normal repo, visions
+live in that repo's `visions/` tree per the addendum. The following rule applies
+only when the launch repo already uses `agent-worktrees` and **requires an
+external state root** — the repo-level setting
+`requires_external_state_root: true` in its `.agent-worktrees/config.yaml`, which
+a stateless harness sets implicitly. In that case, visions split by subject.
+Resolve the **state root** first:
 
 ```
 agent-worktrees state-root --json    # source/repo/stateless/requires_external/bound

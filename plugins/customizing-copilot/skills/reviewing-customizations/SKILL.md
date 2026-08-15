@@ -39,8 +39,9 @@ Gather the harness's customization surfaces:
 - **Instructions** — root `AGENTS.md` and any nested `AGENTS.md` / custom
   instruction files.
 - **Hooks** — `.github/hooks/*.json` (or `hooks.json`).
-- **MCP configs** — per-agent `mcp-servers`, project `.copilot/mcp.json` /
-  `mcp-config.json`, and any `agent-mcp` bridge configs.
+- **MCP configs** — per-agent `mcp-servers`, project `.mcp.json` /
+  `.github/mcp.json`, user `~/.copilot/mcp-config.json` if it is relevant to
+  the loaded session, plugin `mcpServers`, and any `agent-mcp` bridge configs.
 
 ## Method: mechanical scan, then design critique
 
@@ -119,9 +120,9 @@ is overwritten on update; fix it in-repo or upstream.
 
 ### 1. Design critique (rubber-duck)
 
-Hand the gathered files to a **review sub-agent** — the Copilot CLI built-in
-**`rubber-duck`** task sub-agent where available, or any equivalent reviewer the
-harness provides. Ask it for **bugs and design flaws, not style**:
+Hand the gathered files to a **reviewer** — the Copilot CLI **`/rubber-duck`**
+critique command where available, a harness-provided review sub-agent, or an
+equivalent independent reviewer. Ask it for **bugs and design flaws, not style**:
 
 - ambiguous, overlapping, or colliding **trigger phrases** across skills;
 - **duplicate or redundant** skills that should merge (context-budget waste);
@@ -150,7 +151,7 @@ Cross-check each artifact against the skill that governs its format:
 | Skills | **`authoring-skills`** | frontmatter (`name`, `description` with triggers), folder convention, description length, discoverable triggers |
 | Sub-agents | **`defining-subagents`** | `.agent.md` frontmatter, valid `tools` aliases, per-agent MCP ownership, anti-recursion pattern |
 | MCP servers | **`registering-mcp-servers`** | registration scope (per-agent vs project vs global), config shape, env substitution, no inline secrets |
-| Plugin registration | **`installing-plugins`** | repo `settings.json` (`extraKnownMarketplaces` + `enabledPlugins`), experimental mode, payload-vs-runtime, no "just in case" plugins |
+| Plugin registration | **`installing-plugins`** | repo `settings.json` (`extraKnownMarketplaces` + `enabledPlugins`), payload-vs-runtime, no "just in case" plugins |
 | Instructions | this skill + `authoring-skills` | `AGENTS.md` points at skills instead of restating them; rules are consistent and non-redundant |
 
 ## Output and follow-through

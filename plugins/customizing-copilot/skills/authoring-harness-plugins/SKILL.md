@@ -106,12 +106,13 @@ Non-negotiables:
   **partially** does. A `-harness` plugin especially must state which config/artifacts it
   **produces** vs. **assumes** — an operator should never discover after install that
   "set up X" silently required hand-writing three config files.
-- **Declare real dependencies in `plugin.json`.** If a skill *cannot function* without
-  another plugin's sub-agent/MCP/skill, that is a **hard dependency**
-  (`dependencies: [{ "name": "<plugin>" }]`, adding `"marketplace"` + the root
-  `allowCrossMarketplaceDependenciesOn` entry for cross-marketplace), not merely a
-  "recommended companion." Every `@sub-agent` / MCP a README mentions is either a declared
-  dependency or an explicitly-documented optional companion with graceful degradation.
+- **Document real dependencies explicitly.** Current Copilot CLI plugin
+  manifests do not enforce transitive plugin installation, so if a skill *cannot
+  function* without another plugin's sub-agent/MCP/skill, the README and adoption
+  snippet must say that the consumer must enable both plugins. Every
+  `@sub-agent` / MCP a README mentions is either a required companion that is
+  shown in `enabledPlugins`, or an explicitly-documented optional companion with
+  graceful degradation.
 - **No dead references** — every file/skill/plugin you link must exist.
 - **Bump the manifest + marketplace catalog version together** on any change (README
   included).

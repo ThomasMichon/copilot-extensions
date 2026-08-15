@@ -83,8 +83,8 @@ when relevant.
 
 | Scope | Path |
 |-------|------|
-| Project | `.github/skills/<skill-name>/SKILL.md` or `.copilot/skills/<skill-name>/SKILL.md` |
-| Personal | `~/.copilot/skills/<skill-name>/SKILL.md` |
+| Project | `.github/skills/<skill-name>/SKILL.md`, `.claude/skills/<skill-name>/SKILL.md`, or `.agents/skills/<skill-name>/SKILL.md` |
+| Personal | `~/.copilot/skills/<skill-name>/SKILL.md` or `~/.agents/skills/<skill-name>/SKILL.md` |
 | Plugin | `plugins/<plugin>/skills/<skill-name>/SKILL.md` (shipped by an enabled plugin) |
 | In-repo plugin (`.ai`) | `.ai/<capability>/skills/<capability>/SKILL.md` — a plugin in the repo's own **local marketplace**, enabled via a `directory` source in `.github/copilot/settings.json`. **Preferred** for a repo's modular, individually-toggleable, travels-with-the-repo skills; see the `installing-plugins` skill. |
 
@@ -175,7 +175,9 @@ When creating or modifying a skill, validate against Anthropic's best practices:
 - **Explicit:** `/skill-name` in a prompt. **Auto-match:** Copilot matches the
   prompt against skill descriptions and loads relevant skills automatically.
 - Commands: `/skills list`, `/skills info`, `/skills` (toggle), `/skills add`,
-  `/skills reload`, `/skills remove DIR`.
+  `/skills reload`, `/skills remove DIR`. The same list/add/remove operations
+  are available outside an interactive session as `copilot skill list`,
+  `copilot skill add <FILE|URL|DIRECTORY>`, and `copilot skill remove ...`.
 
 ### Skills vs custom instructions
 
@@ -211,9 +213,11 @@ Always-on context injected into every prompt.
 
 | Scope | File |
 |-------|------|
-| Repo (always loaded) | `AGENTS.md` in repo root or cwd |
+| Repo (always loaded) | `AGENTS.md` in git root and cwd |
 | Repo (always loaded) | `.github/copilot-instructions.md` |
+| Repo (always loaded) | `.github/instructions/**/*.instructions.md` |
 | Personal (all repos) | `~/.copilot/copilot-instructions.md` |
+| Personal (all repos) | `~/.copilot/instructions/**/*.instructions.md` |
 | Host/machine-scoped (deployed) | a generated instructions directory loaded via `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` |
 
 Suppress with `--no-custom-instructions`.
@@ -273,8 +277,10 @@ the name of "keeping it lean."
 
 Shell commands that run at agent lifecycle points. The `preToolUse` hook can
 **block** tool execution -- the primary mechanism for guardrails and policy
-enforcement. Config lives in `.github/hooks/*.json` (discovered from the cwd;
-for cloud agent, on the default branch).
+enforcement. Config lives in `.github/hooks/*.json` at the repository root, user-level
+`~/.copilot/hooks/*.json` (or `%USERPROFILE%\.copilot\hooks\*.json` on Windows),
+inline `hooks` blocks in Copilot settings, and plugin-declared `hooks.json`.
+Cloud agent reads only `.github/hooks/*.json` from the cloned repository.
 
 ### Config format
 
@@ -308,7 +314,8 @@ text or a slash command.
 |-------|-----------|--------|
 | `sessionStart` | New or resumed session begins | Can inject **`additionalContext`** |
 | `sessionEnd` | Session completes or terminates | Ignored |
-| `userPromptSubmitted` | User submits a prompt | Ignored |
+| `userPromptSubmitted` | User submits a prompt | Command/HTTP output ignored; SDK programmatic hooks can rewrite |
+| `userPromptTransformed` | Prompt is transformed into model-facing content | Can rewrite `modifiedTransformedPrompt` |
 | `preToolUse` | Before any tool invocation | **Allow/deny/modify** -- `{"permissionDecision":"deny","permissionDecisionReason":"..."}` or `modifiedArgs` |
 | `postToolUse` | After a tool completes successfully | **Inject `additionalContext`** (appended to the result, same turn) or `modifiedResult` |
 | `postToolUseFailure` | After a tool fails | Recovery guidance via **`additionalContext`** |

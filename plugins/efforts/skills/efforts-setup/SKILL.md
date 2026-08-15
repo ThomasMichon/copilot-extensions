@@ -22,7 +22,8 @@ One-time adoption and convention management for the efforts planning system.
 For day-to-day work (start/plan/resume/archive an effort), see the
 `planning-efforts` skill. The canonical pattern lives in that skill and its
 [reference guide](../planning-efforts/references/efforts.md); this skill wires a
-repo into it.
+repo into it. The plugin itself has no runtime setup; this skill only scaffolds
+repo-local effort state.
 
 ## The model: skill governs, repo adds an addendum
 
@@ -45,9 +46,9 @@ efforts/
 └── active/        # in-flight efforts (add a .gitkeep so the dir is tracked)
 ```
 
-- Copy `assets/TEMPLATE.md` from the `planning-efforts` skill to
-  `efforts/TEMPLATE.md`, adjusting it to match the addendum (e.g. rename
-  `Participants` → the repo's label, drop a section the repo won't use).
+- Copy `../planning-efforts/assets/TEMPLATE.md` to `efforts/TEMPLATE.md`,
+  adjusting it to match the addendum (e.g. rename `Participants` → the repo's
+  label, or omit optional sections the repo won't use).
 - `efforts/README.md` is the repo's effort landing page: a one-paragraph
   description, the active-effort index table, and the **Local conventions**
   addendum (below).
@@ -80,7 +81,7 @@ Name the executor the repo dispatches to, and how the effort reaches it:
 | machine fleet | a workstation/server | SSH alias, agent-bridge | `agent-bridge` |
 | CodeSpaces | a GitHub CodeSpace | `agent-codespaces` | `agent-codespaces` |
 | containers | a local dev container | `agent-containers` | `agent-containers` |
-| branches | a working branch | git | — |
+| branches | a working branch | git; agent-worktrees helpers when present | optional `agent-worktrees` |
 
 Record the chosen binding (and the section name, e.g. `## Machines`) in the
 addendum so `planning-efforts` uses it.

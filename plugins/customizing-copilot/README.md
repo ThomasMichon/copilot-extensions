@@ -1,22 +1,33 @@
 # customizing-copilot
 
 A **payload-only** Copilot CLI plugin that teaches an agent how to customize and
-extend the GitHub Copilot CLI. It bundles seven focused skills covering the main
-extensibility surfaces, with the per-skill folder conventions and Agent Skills
-best practices baked in.
+extend the GitHub Copilot CLI. There is no runtime, service, venv, or binstub:
+**enable the plugin and restart the session** so the seven skills are available
+on demand.
 
-| Skill | Covers |
-|-------|--------|
-| [authoring-skills](skills/authoring-skills/SKILL.md) | The SKILL.md format, the per-skill folder convention (`SKILL.md` + `references/` + `scripts/` + `assets/`), the validation checklist, and the related **hook** and **custom-instruction** surfaces |
-| [defining-subagents](skills/defining-subagents/SKILL.md) | Custom agents (sub-agents): `.agent.md` format, frontmatter, tool aliases, invocation, per-agent MCP ownership, and the anti-recursion / MCP-readiness pattern |
-| [registering-mcp-servers](skills/registering-mcp-servers/SKILL.md) | The MCP registration hierarchy (per-agent / project / global), config formats, env-var substitution, the MCP CLI, and writing a server |
-| [installing-plugins](skills/installing-plugins/SKILL.md) | Repo-scoped plugin registration via `.github/copilot/settings.json` (+ experimental mode) vs global installs, the **in-repo `.ai` local marketplace** (`directory` source) as the preferred way to drive modular in-repo plugins, the payload-vs-runtime model, and launch-time reconciliation |
-| [building-harnesses](skills/building-harnesses/SKILL.md) | The in-session entry point to the [Control-Harness Runbook](../../docs/harness-runbook.md) — greenfield / brownfield / audit build of an agent harness, the opinion contract, and the phase map |
-| [reviewing-customizations](skills/reviewing-customizations/SKILL.md) | A structured review pass over a harness's skills, sub-agents, `AGENTS.md`, hooks, and MCP configs — a rubber-duck design critique plus a conformance check against the four authoring skills |
-| [authoring-harness-plugins](skills/authoring-harness-plugins/SKILL.md) | The `<repo>-harness` standard — ship a payload-only plugin from a repo that provides the skills to work *on* it (contribute + diagnose), portable to any control repo that enables it |
+The skills are standalone authoring guidance. They work in any repo that enables
+the plugin; they do **not** require that repo to be registered as an agent
+harness. Some skills teach harness/plugin patterns, but the install itself is
+just plugin enablement.
 
-Each skill supplements knowledge the CLI does not ship natively and points at the
-authoritative GitHub Copilot CLI and Anthropic Agent Skills documentation.
+## What it does (and how to use it)
+
+Ask for the customization task in natural language (or explicitly mention a
+skill name) and Copilot loads the matching skill:
+
+| Skill | Use it when... | Covers |
+|-------|----------------|--------|
+| [authoring-skills](skills/authoring-skills/SKILL.md) | creating or auditing `SKILL.md`, hooks, or custom instructions | Skill locations and frontmatter, folder conventions, validation checklist, hooks, and custom-instruction surfaces |
+| [defining-subagents](skills/defining-subagents/SKILL.md) | creating a `.agent.md` or delegating work to a custom agent | Agent frontmatter, tool aliases, invocation, per-agent MCP ownership, and anti-recursion / MCP-readiness guards |
+| [registering-mcp-servers](skills/registering-mcp-servers/SKILL.md) | adding or debugging MCP servers | Per-agent / project / global registration, config formats, env-var substitution, CLI commands, and server authoring |
+| [installing-plugins](skills/installing-plugins/SKILL.md) | enabling plugins or adding a marketplace | Repo-scoped `.github/copilot/settings.json` (`extraKnownMarketplaces` + `enabledPlugins`), global installs, `.ai` directory marketplaces, payload-vs-runtime, and launch-time reconciliation |
+| [building-harnesses](skills/building-harnesses/SKILL.md) | building or auditing an agent control harness | Entry point to the [Control-Harness Runbook](../../docs/harness-runbook.md): plugin set, repo adoption, `AGENTS.md`, delegation, validation, efforts, and visions |
+| [reviewing-customizations](skills/reviewing-customizations/SKILL.md) | reviewing a repo's customization surfaces | Mechanical scan + design critique over skills, sub-agents, instructions, hooks, MCP configs, and loaded plugins |
+| [authoring-harness-plugins](skills/authoring-harness-plugins/SKILL.md) | packaging a repo's operator guidance for other control repos | The payload-only `<repo>-harness` pattern: contribute/diagnose skills, README bar, marketplace wiring, and adoption |
+
+Each skill supplements the base CLI documentation with this repo's authoring
+patterns, and points at authoritative GitHub Copilot CLI and Anthropic Agent
+Skills documentation where relevant.
 
 ## Choosing a surface: declarative first
 
@@ -59,7 +70,25 @@ requires **`session.send()`** (an extension) or the runtime's own
 agent-initiated scheduled prompts. That gap is the strongest reason the
 Extensions API is not yet fully replaceable.
 
-## Install
+## What this plugin provides — and what it doesn't
+
+Provides:
+
+- Seven skills and the bundled `reviewing-customizations` scanner.
+- Guidance for both loose repo customizations and plugin-packaged
+  customizations, including the in-repo `.ai` local marketplace pattern.
+- References to authoritative GitHub Copilot CLI docs and this repo's
+  prescriptive pattern docs where the skill depends on them.
+
+Does **not** provide:
+
+- A runtime installer, daemon, binstub, MCP server, or session extension.
+- Automatic edits to your repo. The skills tell the agent what to change; the
+  agent still edits the target files in the current task.
+- Harness registration by itself. `building-harnesses` teaches that workflow,
+  but enabling this plugin does not adopt a repo or install runtime plugins.
+
+## Install / enable
 
 No runtime — the skills load from the marketplace payload when enabled.
 
@@ -73,6 +102,25 @@ Or enable it per-repo in that repo's `.github/copilot/settings.json`:
 ```json
 { "enabledPlugins": { "customizing-copilot@copilot-extensions": true } }
 ```
+
+For a repo-scoped enablement that has not already registered the marketplace,
+also declare it in `extraKnownMarketplaces`:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "copilot-extensions": {
+      "source": { "source": "github", "repo": "ThomasMichon/copilot-extensions" }
+    }
+  },
+  "enabledPlugins": {
+    "customizing-copilot@copilot-extensions": true
+  }
+}
+```
+
+Restart the active Copilot session after changing plugin enablement; plugin
+payloads are scanned at session start.
 
 ## License
 

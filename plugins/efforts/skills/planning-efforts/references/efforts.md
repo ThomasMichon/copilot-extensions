@@ -20,14 +20,15 @@ outlives any single one.
 
 | Construct | Question it answers | Tense | Home |
 |-----------|---------------------|-------|------|
-| **Effort** | "What are we doing, and how's it going?" | *should be* | `efforts/` |
+| **Effort** | "What are we doing, and how's it going?" | plan + progress | `efforts/` |
 | **Doc** | "How does this actually work?" | *is* (truth) | docs |
 | **Issue** | "What discrete thing needs doing?" | *to do* | the tracker |
 
 > A doc describing the efforts *system* (like this guide) is truthful "what is"
-> documentation. The efforts themselves are "what should be." Don't conflate
-> the two: when an effort establishes durable truth about how something works,
-> promote that into a doc — the archived effort is a record, not living docs.
+> documentation. An effort is the temporary plan and coordination record for a
+> stretch of work. Don't conflate the two: when an effort establishes durable
+> truth about how something works, promote that into a doc — the archived effort
+> is a record, not living docs.
 
 ### Efforts and issues go hand in hand
 
@@ -58,18 +59,19 @@ efforts/
 - **Decompose liberally.** The `README.md` is loaded whole every time an agent
   resumes the effort, so keep it a navigable map. When a phase or slice grows a
   large self-contained body (detailed sub-plan, deep design notes, its own
-  validation matrix), extract it to a sibling sub-doc (`<slug>/<phase>.md`) and
+  validation matrix), extract it to a sibling sub-doc
+  (`<effort-folder>/<phase>.md`) and
   leave the Plan a checklist item with a one-line summary and a link. The agent
   reads a sub-doc only when working that phase — upfront context stays small, at
   the cost of an extra read on demand. Link out *and* back; no orphan sub-docs.
 - **Split a large journal by date.** The Journal is append-only, so it is the
   one section that grows without bound. When it (as an inline README section or
   an extracted `journal.md`) approaches the ~800-line soft cap, break it into
-  dated files: `<slug>/journal/<YYYY>/MM.DD <title>.md`, one per day (or per
-  notable entry), mirroring the archive's date scheme. Leave `journal.md` (or
-  the README Journal section) as a **thin chronological index** that links each
-  dated file newest-first — so a resuming agent skims the index and opens only
-  the day it needs. Link out *and* back; no orphan entries.
+  dated files: `<effort-folder>/journal/<YYYY>/MM.DD <title>.md`, one per day
+  (or per notable entry), mirroring the archive's date scheme. Leave
+  `journal.md` (or the README Journal section) as a **thin chronological index**
+  that links each dated file newest-first — so a resuming agent skims the index
+  and opens only the day it needs. Link out *and* back; no orphan entries.
 - **Grouping (a binding — set by the addendum):**
   - *flat* — `efforts/active/<slug>/` (default; for a repo that is itself the
     primary unit of work).
@@ -99,10 +101,11 @@ same file. It — not the conversation transcript — is the source of truth.
 | **Proposal** | optional detailed findings once the plan firms up |
 | **Journal** | dated, append-only log of what actually happened |
 
-An addendum may rename sections (e.g. **Participants** → **Machines**), add one
-(some repos add nothing beyond the core), or drop **Validation Plan** for a
-repo that doesn't want it. The header, Guiding Intent, Request, Plan, and
-Journal are the irreducible core.
+An addendum may rename sections (e.g. **Participants** → **Machines**), add
+repo-specific sections, or omit optional sections such as **Coordination** or
+**Proposal**. The header, Guiding Intent, Request, Plan, Validation Plan, and
+Journal are the irreducible core. **Participants** is the canonical executor
+seam, but a single local effort may omit it.
 
 ### Validation-driven
 
@@ -115,10 +118,11 @@ coordinates: validate against the real target, feed failures back to whoever
 
 ### Additive and subtractive efforts
 
-An effort is carved from a **delta** — a gap between what should be and what is.
-Most deltas are **additive** (a required capability is missing → build it), but a
-delta can equally be **subtractive** (a capability should *no longer* exist →
-remove it). The two are not symmetric, and the distinction is a safety property:
+An effort is carved from a **delta** — a gap between a requested/desired outcome
+and current reality. Most deltas are **additive** (a required capability is
+missing → build it), but a delta can equally be **subtractive** (a capability
+should *no longer* exist → remove it). The two are not symmetric, and the
+distinction is a safety property:
 
 - A **subtractive / removal effort** must trace to an **explicit removal intent**
   — a stated decision to decommission the capability (e.g. a "no X" boundary in a
@@ -145,14 +149,14 @@ repo binds it to its own executor provider:
 | machine fleet | a workstation / server | SSH alias, agent-bridge |
 | CodeSpaces | a GitHub CodeSpace | `agent-codespaces` |
 | containers | a local dev container | `agent-containers` |
-| branches | a shared feature branch several agents build on | git -- the `agent-worktrees` **`git-collaboration`** skill (turn-key `git sync` / `feature-branch` / `merge-to-feature` helpers); delegates dispatched via **agent-bridge** |
+| branches | a shared feature branch several agents build on | git; in an agent-worktrees repo, the **`git-collaboration`** skill provides turn-key `git sync` / `feature-branch` / `merge-to-feature` helpers; delegates may be dispatched via **agent-bridge** |
 
 When the binding is **branches**, the effort README's `## Coordination` section
 holds the topology: a **shared feature branch** (delegates ff-push slices; the
 **host** owns PRs) for interdependent work, or **independent worktrees with
-per-slice PRs** when each PR leaves the default branch green on its own. The
-mechanics are turn-key helpers in the `git-collaboration` skill -- the effort
-records only the plan and who owns what.
+per-slice PRs** when each PR leaves the default branch green on its own. In an
+agent-worktrees repo, the mechanics are turn-key helpers in the
+`git-collaboration` skill -- the effort records only the plan and who owns what.
 
 The effort README is where multi-participant coordination is planned and
 journaled, so a fresh agent can pick up the effort from the file alone. Keep
@@ -163,15 +167,17 @@ separation is what lets one plugin serve many repos and many executor plugins.
 ## Lifecycle
 
 1. **Start** — point at an existing issue, plan, roadmap, or idea. Derive a
-   kebab-case slug, copy `TEMPLATE.md` to `efforts/active/<slug>/README.md`,
-   and capture the **Request** verbatim plus the **Guiding Intent**. Open an
-   umbrella issue if the work warrants tracking, and cross-link it.
+   kebab-case slug, copy the repo's `efforts/TEMPLATE.md` to the grouped active
+   effort path (for example, `efforts/active/<slug>/README.md`), and capture the
+   **Request** verbatim plus the **Guiding Intent**. Open an umbrella issue if
+   the work warrants tracking, and cross-link it.
 2. **Plan** — fill in Context, Plan, and Validation Plan. File sub-issues for
    discrete tracked work and link them.
 3. **Review gate** — before executing, route the *plan* through review. After the
    operator's own review rounds, **if the control repo offers automated PR
    review**, submit the effort as a PR (with auto-merge), let it be approved +
    merged, then **pull the worktree forward onto the merged plan** (the
+   repo's normal pull-forward command; in an agent-worktrees repo this is the
    `git-collaboration` skill's `git sync` helper) and execute on top. The operator
    may waive their own review; the agent's gate is non-optional when automated
    review exists. It guarantees a reviewed plan, makes the effort visible to other
@@ -251,12 +257,14 @@ conventions` section of its `efforts/README.md`, or a dedicated binding doc
 
 ## For executor plugins
 
-An executor plugin (e.g. `agent-codespaces`, `agent-containers`) integrates by
-**owning the participants seam** for repos that adopt it:
+An executor plugin (e.g. `agent-codespaces`, `agent-containers`) can integrate by
+**owning the participants seam** for repos that adopt it. The efforts plugin does
+not require those plugins; when present, they provide the concrete binding:
 
 - Provide the concrete participant binding the addendum points at (how a
   CodeSpace / container is named, created, reached, and torn down).
-- Register/deregister participants on an effort as they are commissioned and
-  reclaimed, and journal those transitions in the effort README.
+- When the executor manages leases/claims, provide the commands or skills that
+  commission and reclaim participants, and journal those transitions in the
+  effort README.
 - Leave the planning document and lifecycle to the efforts plugin — do not
   embed planning structure in the executor.

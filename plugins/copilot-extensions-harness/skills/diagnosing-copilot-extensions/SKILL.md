@@ -32,28 +32,30 @@ retry is a fine first move; never force-deploy or kill a process on a hunch.
 | What | Path |
 |------|------|
 | Installed plugin payloads | `~/.copilot/installed-plugins/copilot-extensions/<plugin>/` |
-| Runtime venvs | `~/.agent-worktrees/`, `~/.agent-bridge/`, `~/.agent-codespaces/`, `~/.agent-containers/`, `~/.agent-mcp/`, `~/.agent-logger/`, `~/.agent-dispatch/`, `~/.agent-vault/` |
-| Binstubs | `~/.local/bin/agent-*` |
-| Enablement | `~/.copilot/settings.json` (`experimental: true`) + repo `.github/copilot/settings.json` (`enabledPlugins`) |
+| Runtime roots | `~/.agent-*` (for example `~/.agent-worktrees/`, `~/.agent-bridge/`, `~/.agent-codespaces/`, `~/.agent-containers/`, `~/.agent-mcp/`, `~/.agent-logger/`, `~/.agent-dispatch/`, `~/.agent-index/`, `~/.agent-vault/`) |
+| Versioned slots | Python runtimes build immutable slots under `~/.agent-<name>/versions/<version>/`, publish `current-version`, and stamp `deploy-manifest.json` / completion markers |
+| Binstubs | `~/.local/bin/agent-*` (`.ps1` primary + `.cmd` fallback on Windows) |
+| Enablement | `~/.copilot/settings.json` (`experimental: true`) + repo `.github/copilot/settings.json` (`enabledPlugins` / `extraKnownMarketplaces`) |
 | Catalog | `.github/plugin/marketplace.json` in the repo |
 
 ## Symptom → cause → action
 
 | Symptom | Likely cause | Action |
 |---------|--------------|--------|
-| `copilot plugin update` says **"already at latest"** but the code is stale | Version not bumped in the push (marketplace compares versions) | Check the plugin's `plugins[N].version` in the repo vs the deployed `plugin.json`; the fix is a version bump on the *source* side (see `contributing-to-copilot-extensions`). |
-| `plugin update` **succeeded** but the runtime behaves unchanged | Payload refreshed, **runtime not redeployed** — the CLI's "updated" message is payload-only | Run the plugin's own installer step: `agent-worktrees update`; `install.* update` (bridge/codespaces); `init.* --force` (containers/mcp/dispatch); logger installer. |
-| `agent-worktrees` / `agent-bridge` **command not found** | Runtime not installed, or `~/.local/bin` not on PATH | `Test-Path ~/.local/bin/agent-worktrees`; add `~/.local/bin` to PATH; re-run the plugin's `init.*`/`install.*` if the runtime is absent. |
+| `copilot plugin update` says **"already at latest"** but the code is stale | Version not bumped before merge (marketplace compares versions) | Check the plugin's `plugins[N].version` in the repo vs the deployed `plugin.json`; the fix is a version bump on the *source* side (see `contributing-to-copilot-extensions`). |
+| `plugin update` **succeeded** but the runtime behaves unchanged | Payload refreshed, **runtime not redeployed** — the CLI's "updated" message is payload-only | Use the unified deploy path: `<repo> update` (normally `agent-worktrees update`) on the machine. If the payload/runtime have the same version but content drift is suspected, use `<repo> update --force`. Per-plugin `install.*` / `init.*` is only a local-testing or recovery path. |
+| `agent-worktrees` / `agent-bridge` **command not found** | Runtime not installed, `~/.local/bin` not on PATH, or an earlier PATH entry shadows the binstub | Check `Get-Command agent-worktrees -All` / `which -a agent-worktrees`; ensure `~/.local/bin` wins; run `<repo> update` to reconcile missing runtime/binstubs. |
 | A **skill won't load** in a session | `experimental` off, plugin not enabled, or session not restarted (plugins scan at startup) | Confirm `experimental: true` in `~/.copilot/settings.json`; confirm the plugin in `enabledPlugins`; **restart the session**. |
-| **agent-bridge not responding** | Service (systemd user unit / Windows scheduled task) not running | `agent-bridge status`; start via `install.* start` / `systemctl --user status agent-bridge`; on Windows check the "Agent Bridge" scheduled task. |
+| **agent-bridge not responding** | Service not running, stale routing table, or client assuming an old fixed port | `agent-bridge status` (it resolves the live dynamic port); use `<repo> update` / `agent-bridge status` evidence before restarting. On POSIX check the user service; on Windows current service lifecycle may be user-mode, with legacy scheduled-task artifacts only if installed earlier. |
 | Bridge runs but a **remote send fails** | SSH transport, not the bridge | Test the SSH alias directly; check topology with `agent-bridge machines` / `agent-bridge agents`; fix the alias/key before touching the service. |
 | **MCP tools unavailable** in a sub-agent | agent-mcp bridge not wired / not ready | Verify the agent's `mcp-servers` entry and the `agent-mcp` bridge config; honor the MCP-readiness pattern (report unavailability, fall back to CLI). |
-| Runtime seems **half-upgraded / corrupt** | Interrupted install, drifted venv | Re-run the plugin's installer with `-Force`/`--force`; if still broken, use the baseline reset (below). |
+| Runtime seems **half-upgraded / corrupt** | Interrupted install, incomplete versioned slot, or same-version drift | Run `<repo> update --force`; if still broken, use the runtime's own uninstall/reinstall path or the baseline reset scope below. |
 
 ## Diagnostic commands
 
 ```bash
 copilot plugin list                          # what's installed + enabled
+agent-worktrees update --force               # unified payload + runtime reconcile, forced
 agent-worktrees --version && agent-worktrees status
 agent-bridge version && agent-bridge status  # service health
 agent-codespaces version                     # if adopted
@@ -66,10 +68,16 @@ behind or the source was never bumped.
 
 ## Baseline reset (escape hatch)
 
-When a machine's runtimes are wedged and you want a clean baseline, the repo
-ships an idempotent reset that stops services, removes the installer-based
-runtimes/binstubs/tasks, and (optionally) uninstalls the plugins — it works even
-when the CLIs are broken:
+When the core runtimes are wedged and you want a clean baseline, the repo ships
+an idempotent reset that works even when the CLIs are broken. **Current reset
+scope is the original core trio**: `agent-worktrees`, `agent-bridge`, and
+`agent-codespaces`; it removes their `~/.agent-*` runtime roots, bridge/relay
+service artifacts, project binstubs, and (optionally) marketplace plugins /
+per-project configs. Verify `~/.local/bin` afterward, especially on Windows
+where current runtimes deploy `.ps1` + `.cmd` binstub siblings. The reset does
+**not** claim to reset every newer runtime root (for example agent-mcp,
+agent-dispatch, agent-index, agent-vault); use that plugin's uninstall/reinstall
+path or remove its `~/.agent-*` root only after verifying it is not running.
 
 ```powershell
 pwsh -File tools\reset.ps1                       # prompts; -Yes to skip
@@ -80,8 +88,7 @@ bash tools/reset.sh                              # prompts; --yes to skip
 bash tools/reset.sh --yes --remove-plugins
 ```
 
-Your source repos and their `.worktrees` are never touched. `agent-containers`
-and `agent-mcp` may need manual removal of `~/.agent-*` until reset covers them.
+Your source repos and their `.worktrees` are never touched.
 
 ## Reference
 
