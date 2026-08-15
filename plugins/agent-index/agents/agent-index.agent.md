@@ -5,8 +5,8 @@ tools: ["*"]
 mcp-servers:
   agent-index:
     type: stdio
-    command: agent-index
-    args: ['mcp']
+    command: agent-mcp
+    args: ['bridge', 'agent-index']
     tools: ['*']
 ---
 
@@ -14,15 +14,19 @@ mcp-servers:
 
 Provides **semantic + lexical retrieval** over the harness repo's code, docs,
 commits, efforts, and logs (and any other configured corpus source) through the
-**agent-index** runtime's MCP toolset. The sub-agent spawns `agent-index mcp`
-(stdio), a thin, transport-agnostic HTTP client over the **running agent-index
-service**; it resolves the live service endpoint automatically on-box
-(`client_url()` / the zdd routing table) or from `AGENT_INDEX_ENDPOINT` when the
-service is reached over an SSH-forwarded port or gateway (remote clients).
+**agent-index** runtime's read toolset. The sub-agent spawns an **agent-mcp
+`cli` bridge** (`agent-mcp bridge agent-index`, stdio) that exposes four read
+tools; each invokes an `agent-index` read subcommand
+(`search`/`similar`/`clusters`/`status`). The CLI's **project-aware transport**
+resolves the backing project from the working directory and routes the call: on
+the **indexer host** it runs locally; on a **client** it runs the same command on
+the designated indexer **over SSH** (no port-forward, no gateway, no
+`AGENT_INDEX_ENDPOINT` — the transport handles reach). Tools return the CLI's raw
+**JSON** on stdout.
 
-This wraps the agent-index MCP in a sub-agent per the harness MCP policy (keep MCP
-tool schemas out of the main context; `AGENTS.md` § MCP policy). Callers
-**delegate retrieval** here rather than registering the MCP globally.
+This wraps agent-index in a sub-agent per the harness MCP policy (keep MCP tool
+schemas out of the main context; `AGENTS.md` § MCP policy). Callers **delegate
+retrieval** here rather than registering the MCP globally.
 
 ## MCP Readiness
 
@@ -30,19 +34,20 @@ tool schemas out of the main context; `AGENTS.md` § MCP policy). Callers
   lightweight call: **`agent_index_status`**. A healthy reply reports the running
   version, `available: true`, total `chunks`, and the per-source breakdown (your
   coverage map). If `agent_index_status` returns cleanly, search is ready.
-- **The toolset needs the agent-index SERVICE running.** These tools are an HTTP
-  client, not the index itself. If a call fails to connect, the service is down
-  or unreachable:
-  - On the indexer host, it self-provisions and normally auto-runs (user-mode
-    AtLogon). Report that the service appears down and suggest `agent-index
+- **The tools need the indexer's agent-index SERVICE reachable.** Each tool runs
+  an `agent-index` read subcommand that talks to the running service. If a call
+  fails, the indexer is down or the transport can't reach it:
+  - On the indexer **host**, the service self-provisions and normally auto-runs
+    (user-mode AtLogon). Report that it appears down and suggest `agent-index
     status` / a redeploy — **do not** shell out to reindex or fabricate results.
-  - As a remote client, ensure `AGENT_INDEX_ENDPOINT` points at the
-    SSH-forwarded/gateway URL. If it is unset and local discovery fails, report
-    that and stop.
-- **Only a handful of tools (~5) — no deferred-load concern.** Unlike large
-  MCPs, these register directly; if they are genuinely absent after startup, the
-  server didn't spawn (service/endpoint problem above), not a deferred-load
-  state.
+  - On a **client**, the transport runs the command on the designated indexer
+    over SSH (from the `.agent-index/config.yaml` `indexer.ssh`). A failure here
+    usually means the SSH hop is down or the current directory is not inside an
+    adopted repo (so no indexer is resolvable). Report that and stop — there is
+    **no** `AGENT_INDEX_ENDPOINT`/port-forward to set; the transport owns reach.
+- **Only a handful of tools (4) — no deferred-load concern.** They register
+  directly; if genuinely absent after startup, the bridge didn't spawn (an
+  `agent-mcp`/agent-index install problem), not a deferred-load state.
 - **Do NOT spawn another `agent-index` sub-agent** to work around missing tools —
   it fails the same way. Report and stop.
 
