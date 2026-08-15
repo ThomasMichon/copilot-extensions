@@ -2,13 +2,12 @@
 name: validating-in-clean-room
 description: >
   How to validate copilot-extensions plugins and assembled harnesses in the
-  disposable clean-room rig (tools/clean-room/): RUN a scenario on a fresh box,
-  EVALUATE the PASS/FAIL result (the cr-report.json + jam taxonomy, and Tier-E
-  eval judging via the clean-room-judge sub-agent), and AUTHOR MORE scenarios
-  against the scenario contract. Use when standing up, running, reading, or
-  extending clean-room validation of the install/bootstrap/provision/behave
-  flow, or when a contribution touches those flows and should be validated on a
-  fresh box. Trigger phrases include:
+  disposable clean-room rig (tools/clean-room/): run a scenario on a fresh box,
+  evaluate cr-report.json / cr-logs and classified jams, delegate Tier-E
+  literal-mode judging to clean-room-judge, and author scenarios against the
+  scenario contract. Use when running, reading, or extending clean-room
+  validation of install/bootstrap/provision/behavior flows. Trigger phrases
+  include:
   - 'clean room'
   - 'clean-room test'
   - 'validate plugin install'
@@ -51,19 +50,26 @@ ARCHITECTURE.md).
   literal mode** (below). Costs credits; gate it behind Tier P.
 
 The **rig is name-free and public**; scenarios that name specific repos live with
-the consuming harness and are mounted in via `-Scenario <dir>`.
+the consuming harness and are mounted in via `-Scenario <dir>`. The checked-in
+public scenarios are currently Tier-P/F1 (plus the configurable
+`generic-single-plugin` reference); Tier-E is supported by the bridge transport
+and the judge, but eval scenarios may live downstream.
 
 ## 1. Run
 
 From `tools/clean-room/` (`run.ps1` on Windows, `run.sh` on Linux/WSL/macOS):
 
 ```powershell
-./run.ps1 -Mode all                          # build -> one-time login -> run the default scenario
+./run.ps1 -Mode all                          # build -> run the default scenario
 ./run.ps1                                     # run generic-single-plugin (base image)
 ./run.ps1 -Scenario <name|dir>               # run a named/self-contained scenario
 ./run.ps1 -Image pristine -Mode shell        # drop into the harshest fresh box (headed copilot)
+./run.ps1 -Image base -NameSuffix agc        # second concurrent base box (cr-base-agc)
 ./run.ps1 -Until 3 -Then shell               # prepare through stage 3, then hand off to a shell
+./run.ps1 -NpmRegistry https://…/npm/        # build-time Copilot CLI feed on governed hosts
 ./run.ps1 -UvIndex https://…/pypi/simple/    # opt-in uv-index fixture (governed box)
+./run.ps1 -TokenAccount <user>               # choose the host gh account for token injection
+./run.ps1 -NoToken -Mode auth                # fallback device-code cached :authed image path
 ./run.ps1 -Mode bridge-register              # expose the box as an agent-bridge agent (Tier-E transport)
 ./run.ps1 -Image pristine -Mode down         # remove the container
 ```
@@ -72,18 +78,23 @@ From `tools/clean-room/` (`run.ps1` on Windows, `run.sh` on Linux/WSL/macOS):
 ./run.sh all
 ./run.sh --scenario <name|dir>
 ./run.sh --image pristine shell
+./run.sh --image base --name-suffix agc
 ./run.sh --until 3 --then shell run
+./run.sh --npm-registry https://…/npm/ run
 ./run.sh bridge-register
 ```
 
 Notes:
-- **Pick the image by what you're falsifying.** `base` (stock toolchain) for a
-  plain install check; `pristine` (Copilot + git only) to force self-provisioning
-  so uv/venv/pip-feed jams **surface**.
-- **Auth is borrowed, not tested.** A Copilot token from your host `gh` is
-  injected automatically; the account must have Copilot entitlement
-  (`-TokenAccount <user>` to pick which `gh` account). Never bake credentials into
-  an image.
+- **Pick the image by what you're falsifying.** `base` (git, python3, node, uv)
+  for a plain install check; `pristine` (Copilot + git, with only the system
+  `python3` a real box would have — no venv module, pip, uv, `~/.local/bin`, or
+  feed governance) to force self-provisioning so uv/venv/pip-feed jams
+  **surface**.
+- **Auth is borrowed, not tested.** By default a Copilot token from your host
+  `gh` is injected automatically; the account must have Copilot entitlement
+  (`-TokenAccount <user>` / `--token-account <user>` to pick which `gh` account).
+  `-NoToken` / `--no-token` falls back to the explicit device-code `auth` image.
+  Never bake credentials into a base/pristine image.
 - **Governed box.** Pass an internal npm feed explicitly to install the Copilot
   prereq (`-NpmRegistry …`); the runner does **not** auto-forward host config
   (that would bias the fresh-machine experiment). The `toolchain-uv` asymmetry
@@ -92,9 +103,11 @@ Notes:
   dir outside the repo (the run prints its exact path). The rig may run from an
   anchor checkout; per-run state in a repo is a hazard.
 
-Parameterize the reference scenario for a quick single-plugin check via `CR_*`
-env: `CR_PRIMARY_PLUGIN`, `CR_EXPECT_DEPS`, `CR_MARKETPLACE_REPO/NAME`,
-`CR_UV_INDEX`, `CR_UNTIL`.
+Parameterize the reference scenario for a quick single-plugin check via
+PowerShell params (`-MarketplaceRepo`, `-MarketplaceName`, `-PrimaryPlugin`,
+`-ExpectDeps`) or cross-platform `CR_*` env: `CR_PRIMARY_PLUGIN`,
+`CR_EXPECT_DEPS`, `CR_MARKETPLACE_REPO/NAME`, `CR_UV_INDEX`, `CR_UNTIL`,
+`CR_RESULTS_DIR`.
 
 ## 2. Evaluate
 
@@ -153,6 +166,20 @@ A scenario is a **self-describing directory** (contract in ARCHITECTURE.md §4):
 - **Pick the family + tier deliberately.** A deterministic CLI assertion is Tier P;
   a "can a fresh agent carry out the plugin's stated purpose" check is Tier E under
   literal mode (and scored by `clean-room-judge`).
+
+### Current public scenarios
+
+Under `tools/clean-room/scenarios/` today:
+
+| Scenario | Tier/family | Purpose |
+|----------|-------------|---------|
+| `generic-single-plugin` | reference | Configurable install → bootstrap → binstub → plugin-load → register check. |
+| `agent-worktrees-solo` | P/F1 | Worktree base stands up solo and round-trips `register` → `create` → `finalize`. |
+| `agent-bridge-solo` | P/F1 | agent-bridge provisions and read verbs answer without an agent-worktrees base. |
+| `agent-codespaces-solo` | P/F1 | agent-codespaces read verbs degrade safely without an agent-worktrees base. |
+| `agent-bridge-cutover` | P/F1 | agent-bridge zdd cutover mechanism: routing flip, drain gate, recovery. |
+| `agent-dispatch-cutover` | P/F1 | agent-dispatch cutover preserves queued/held work and heals aborted/wedged cases. |
+| `agent-index-cutover` | P/F1 | agent-index service cutover preserves durable queue state and heals drain/recovery cases. |
 
 **The matrix to build toward** (per the vision): each plugin **solo** → **reasonable
 combinations** → the **full assembled harness**, each **with and without** the

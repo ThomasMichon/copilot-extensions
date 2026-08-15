@@ -4,32 +4,41 @@ A **payload-only** Copilot CLI plugin that ships the **operator harness** for th
 copilot-extensions repo — the skills to work *on* the plugin suite. Enable it in
 any control repo and your agent knows how to **contribute** changes to the
 plugins, **diagnose** the deployed runtimes, and **validate** them on a fresh box,
-without you hand-writing a per-repo guide.
+without you hand-writing a per-repo guide or installing a runtime.
 
 | Skill | Covers |
 |-------|--------|
-| [contributing-to-copilot-extensions](skills/contributing-to-copilot-extensions/SKILL.md) | Repo layout, the worktree contribution flow, the **mandatory version bump**, test + install-contract gates, deploy-after-push, and source-of-truth rules |
+| [contributing-to-copilot-extensions](skills/contributing-to-copilot-extensions/SKILL.md) | Repo layout, the PR-required worktree flow (`create` → `create-pr`/`push-changes` → `pr-merge --now` → `finalize`), the **mandatory version bump**, test + install-contract gates, deploy-after-merge, and source-of-truth rules |
 | [diagnosing-copilot-extensions](skills/diagnosing-copilot-extensions/SKILL.md) | Symptom → cause → action for deployed plugins, key paths, diagnostic commands, and the baseline-reset escape hatch |
-| [validating-in-clean-room](skills/validating-in-clean-room/SKILL.md) | **Run · evaluate · author** clean-room validation (`tools/clean-room/`): fresh-box scenarios, the `cr-report.json` + jam taxonomy, Tier-E literal-mode judging, and the scenario contract |
+| [validating-in-clean-room](skills/validating-in-clean-room/SKILL.md) | **Run · evaluate · author** clean-room validation (`tools/clean-room/`): fresh-box scenarios, `cr-report.json` + `cr-logs/`, jam taxonomy, Tier-E literal-mode judging, and the scenario contract |
 
 | Sub-agent | Covers |
 |-----------|--------|
 | [clean-room-judge](agents/clean-room-judge.agent.md) | Read-only Tier-E evaluator: scores a clean-room eval run against a scenario's stated outcome under **literal-mode** rules (credits only the literal task; a self-heal "pass" is a false pass), emitting PASS/FAIL + classified jams |
 
-## Install
+## Enable
 
-No runtime — the skills load from the marketplace payload when enabled.
+No runtime, binstub, service, or setup script is involved. Enabling the plugin is
+the whole install; restart the session so the skills/agent are scanned.
 
-```bash
-copilot plugin marketplace add ThomasMichon/copilot-extensions
-copilot plugin install copilot-extensions-harness@copilot-extensions
-```
-
-Or enable it per-repo in that repo's `.github/copilot/settings.json`:
+In a control repo, declare the marketplace (if it is not already declared) and
+enable the plugin in `.github/copilot/settings.json`:
 
 ```json
-{ "enabledPlugins": { "copilot-extensions-harness@copilot-extensions": true } }
+{
+  "extraKnownMarketplaces": {
+    "copilot-extensions": {
+      "source": { "source": "github", "repo": "ThomasMichon/copilot-extensions" }
+    }
+  },
+  "enabledPlugins": {
+    "copilot-extensions-harness@copilot-extensions": true
+  }
+}
 ```
+
+Then use the skills directly by asking to contribute to copilot-extensions,
+diagnose an installed plugin/runtime, or validate a plugin in the clean room.
 
 ## The `<repo>-harness` standard
 

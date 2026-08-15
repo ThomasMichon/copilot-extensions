@@ -22,7 +22,9 @@ One-time adoption and convention management for the visions system. For
 day-to-day work (create/revise a vision, derive the delta into efforts), see the
 `envisioning` skill. The canonical pattern lives in that skill and its
 [reference guide](../envisioning/references/visions.md); this skill wires a repo
-into it.
+into it. The visions plugin is payload-only and standalone: enabling it is the
+install, and a repo does not need to be registered with `agent-worktrees` to use
+the `visions/` layout.
 
 ## The model: skill governs, repo adds an addendum
 
@@ -83,6 +85,10 @@ So visions are actually used, add to the repo's agent instructions
 
 - Introduce the vision↔effort↔doc↔issue relationship: a **vision** is the
   standing *what-should-be*; **efforts are carved from its delta** vs. reality.
+- If the repo has a prescriptive pattern layer, point at it rather than
+  re-explaining it in visions: **Vision** (what should be) → **Patterns** (how to
+  build it here) → **Architecture** (what exists now) → **Contribution** (how
+  changes land).
 - A knowledge-routing entry: *the standing intent for a system → a **vision**
   under `visions/…`; a stretch of work to realize it → an **effort**.*
 - Note the key discipline: visions are **revised in place** (Git history), stay

@@ -63,7 +63,7 @@ opinionated one, apply the opinion and move on.
 
 ## Phase map (full detail in the runbook)
 
-0. Prereqs + experimental mode.
+0. Prereqs + repo-scoped plugin settings.
 1. Repo structure (harness scaffold; keep helpers lightweight).
 2. Register repo-scoped plugins in `.github/copilot/settings.json` (skill:
    `installing-plugins`), restart, deploy runtimes (skill:

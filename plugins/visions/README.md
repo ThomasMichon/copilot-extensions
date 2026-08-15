@@ -33,15 +33,24 @@ features/behaviors against what the docs say exists, and each misalignment is a
 file-able issue that efforts then close. Visions **feed** efforts; efforts
 **realize** visions; docs **record** the result.
 
+In repos that also carry a prescriptive pattern library, keep the layers
+separate: **Vision** (what should be) → **Patterns** (how the repo builds it
+reusably) → **Architecture** (what exists now) → **Contribution** (how changes
+land). Reference the repo's pattern docs (for this suite,
+[`docs/patterns/`](../../docs/patterns/README.md)); do not restate those
+prescriptive rules inside a vision.
+
 ## What this plugin ships
 
-This is a **pure skill plugin** — no runtime, no service, no installer. It
-delivers two skills via the Copilot CLI plugin marketplace:
+This is a **pure skill plugin** — no runtime, no service, no installer. It is
+usable in any repo; no `agent-worktrees` registration is required. It delivers
+these skills via the Copilot CLI plugin marketplace:
 
 | Skill | Role |
 |-------|------|
 | **envisioning** | The workflow: create, revise-in-place, and (rarely) supersede a vision; keep it intent-level and pure should-be; derive the delta → issues → efforts. Governs the canonical vision pattern (folder-per-vision layout, README schema, lifecycle, the organization seam). Ships the reference guide and the vision README template as skill assets. |
 | **visions-setup** | Adoption: how a repo takes on the visions system — create the `visions/` tree and write a short repo **addendum** that specializes the bindings (chiefly *organization*). |
+| **backporting-visions** | A specialization for subjects that already exist: derive or repair a vision from reality while keeping the vision a deliberate superset of that reality, then carve additive deltas into issues/efforts. |
 
 ## The skill governs the pattern; each repo adds an addendum
 
@@ -76,17 +85,19 @@ remedy is a *separate* **specifications** middle layer between visions (intent)
 and reality (implementation), **not** hardening a vision into a spec. That layer
 is a future option; this plugin names it as the escape hatch and stops there.
 
-## Install
+## Usage
 
-A pure skill plugin needs no runtime install. Add the marketplace and the
-plugin:
+A pure skill plugin needs no runtime install: **enable the plugin** in the
+Copilot CLI marketplace/config for the repo or user. There is no follow-up
+script, service, or binstub to run.
 
-```bash
-copilot plugin marketplace add ThomasMichon/copilot-extensions
-copilot plugin install visions@copilot-extensions
-```
+Then invoke the skill that matches the job:
 
-Then run the **visions-setup** skill in a repo to adopt the system.
+1. **visions-setup** — first-time adoption or convention repair for a repo's
+   `visions/` tree and local addendum.
+2. **envisioning** — create/revise a vision or derive the vision→reality delta.
+3. **backporting-visions** — seed or repair a vision from an already-built
+   subject.
 
 ## See also
 
