@@ -528,7 +528,7 @@ function Remove-ConsoleTrampolines {
 }
 
 function Get-SignedBasePython {
-    <# Return the path to an Authenticode-signed base Python (>=3.11), or $null.
+    <# Return the path to an Authenticode-signed base Python (>=3.10), or $null.
        A `uv venv` builds the slot python.exe as a uv *trampoline* that resolves
        its base interpreter lazily; over a NON-interactive SSH logon that
        resolution fails with "uv trampoline failed to spawn Python child
@@ -543,18 +543,19 @@ function Get-SignedBasePython {
        its own: the `py` launcher (absent on some Cloud PCs), the well-known
        all-users / per-user install roots, and any `python`/`python3` on PATH --
        skipping the WindowsApps App-Execution-Alias 0-byte reparse stub. Each
-       candidate is verified to be a real interpreter >=3.11 before its
-       signature is checked. #>
+       candidate is verified to be a real interpreter >=3.10 (the plugin's
+       requires-python floor) before its signature is checked. #>
     $cands = @()
 
     if (Get-Command py -ErrorAction SilentlyContinue) {
-        foreach ($v in '3.13', '3.12', '3.11') {
+        foreach ($v in '3.13', '3.12', '3.11', '3.10') {
             $p = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null | Out-String).Trim()
             if ($LASTEXITCODE -eq 0 -and $p) { $cands += $p }
         }
     }
 
-    $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, (Join-Path $env:LOCALAPPDATA 'Programs\Python'))
+    $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)})
+    if ($env:LOCALAPPDATA) { $roots += (Join-Path $env:LOCALAPPDATA 'Programs\Python') }
     foreach ($root in $roots) {
         if (-not $root) { continue }
         Get-ChildItem -Path $root -Filter 'Python3*' -Directory -ErrorAction SilentlyContinue |
@@ -575,7 +576,7 @@ function Get-SignedBasePython {
         if (-not (Test-Path $c)) { continue }
         $ver = (& $c -c "import sys;print('%d.%d' % sys.version_info[:2])" 2>$null | Out-String).Trim()
         if (-not ($ver -match '^(\d+)\.(\d+)$')) { continue }
-        if ([int]$Matches[1] -lt 3 -or ([int]$Matches[1] -eq 3 -and [int]$Matches[2] -lt 11)) { continue }
+        if ([int]$Matches[1] -lt 3 -or ([int]$Matches[1] -eq 3 -and [int]$Matches[2] -lt 10)) { continue }
         try {
             if ((Get-AuthenticodeSignature $c).Status -eq 'Valid') { return $c }
         } catch {}
@@ -705,7 +706,7 @@ function Install-Runtime {
             Write-Warn 'Existing slot python is a uv trampoline / unsigned (not SSH-invocable) -- rebuilding from signed Python'
             try { Invoke-Stop | Out-Null } catch {}
             try { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop }
-            catch { Write-Warn "Could not remove existing venv (in use?): $_ -- keeping it" }
+            catch { Write-Fail "Could not remove the unsigned slot venv (in use?): $_ -- refusing to leave a non-SSH-invocable runtime in place"; exit 1 }
         }
     }
 
@@ -721,7 +722,9 @@ function Install-Runtime {
         $signedBase = Get-SignedBasePython
         $created = $false
         if ($signedBase) {
-            & $signedBase -m venv --copies $VenvDir 2>&1 | Out-Null
+            # --clear so a leftover non-empty slot dir (partial prior build)
+            # doesn't fail `venv` and force the uv (trampoline) fallback.
+            & $signedBase -m venv --copies --clear $VenvDir 2>&1 | Out-Null
             if ($LASTEXITCODE -eq 0 -and (Test-Path $VenvPython)) {
                 $created = $true
                 Write-Ok "Venv created from signed Python ($signedBase)"
