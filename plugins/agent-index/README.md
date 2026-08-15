@@ -1,64 +1,91 @@
 # agent-index
 
-`agent-index` is the portable indexing and semantic-search engine plugin for a
-harness repo and its immediate ecosystem: it crawls configured sources, chunks
-and stores content in a local LanceDB vector store, and serves semantic search
-over an MCP tool surface and a CLI. It is a self-contained runtime plugin with
-local service supervision and rendezvous-based endpoint discovery.
+`agent-index` is a runtime plugin that builds and serves a local semantic +
+lexical index for a repo and its configured corpus. The shipped plugin is no
+longer just a service shell: it includes the service, CLI, indexing pipeline,
+source connectors, LanceDB-backed stores, a warm embedding-engine split, query
+surfaces, and the `@agent-index` read-only retrieval agent.
 
-## Architecture — router adapter + pluggable embedding engine
+## What ships today
 
-agent-index is split into a light **router/adapter** and a heavy **embedding
-engine**, so the accelerated work is isolated from the always-on service:
+- **Runtime service**: FastAPI service on loopback with an OS-assigned port,
+published through `~/.agent-index/active.json` (zdd routing) and the legacy
+`~/.agent-index/run/endpoint.json` rendezvous file.
+- **Durable data**: index state, LanceDB tables, task queue, clusters, and worker
+logs live under `~/.agent-index/data/`, outside the versioned service runtime.
+- **Indexing pipeline**: incremental-by-default crawl/chunk/embed/store/reconcile
+for local git files + commits, GitHub issues/PRs, and Azure DevOps work
+items/PRs. `--full` is explicit.
+- **Search surfaces**: CLI, HTTP, direct `agent-index mcp`, and a read-only
+`agent-mcp bridge agent-index` used by the `@agent-index` sub-agent.
+- **Engine split**: the light service runtime is torch-free by default; embedding
+runs through a durable engine daemon at `127.0.0.1:8421` unless an operator opts
+into another engine mode.
+- **Lifecycle hooks**: session-start hooks stamp/self-provision the binstub,
+ensure the host-side user-mode daemon is healthy, and emit configured scope
+binding when the current repo has `.agent-index/config.yaml` `corpus.sources`.
 
-- **Router (the service you talk to)** — owns the MCP/CLI surface, the LanceDB
-  store, chunking, source connectors, and query orchestration. The versioned
-  service runtime is **torch-free and light**.
-- **Embedding engine (the core)** — a separate HTTP worker
-  (`agent_index.engine.app`, `/embed`, `/embed/batch`, `/spinup`, `/health`) that
-  runs the embedding model. Heavy (PyTorch), GPU-capable, isolatable, restartable.
+## Minimal setup
 
-The router reaches the engine over HTTP and never embeds the heavy model in its
-own process by default.
+1. Enable the plugin from the `copilot-extensions` marketplace.
+2. Start a new Copilot session. The `sessionStart` hook performs a fast **stamp**
+when needed and installs a self-provisioning `agent-index` binstub under
+`~/.local/bin`.
+3. First CLI use may provision the runtime (`::agent-provisioning::`, usually
+~30-120s). Let it finish.
+4. Pick a role:
+   - single-machine/local indexer: `agent-index setup --single`
+   - remote indexer: run `agent-index setup --indexer <machine> --ssh <alias>`
+     from the repo; clients route read commands to that host over SSH.
 
-## Engine modes — where the core runs
+A machine whose resolved role is `client` runs no local indexer daemon. A host
+runs the local service and, when provisioned, the durable engine daemon.
 
-`AGENT_INDEX_ENGINE_MODE` selects how the engine is provided:
+## Usage
 
-| Mode | The engine is… | For |
-|------|----------------|-----|
-| **`external`** *(default)* | owned by a durable/containerized daemon the service only probes for reachability | the shipped, torch-free service against a persistent engine |
-| `subprocess` | spawned as a local child by the service on demand | a single-venv install that manages its own engine |
-| `systemd` | started via a systemd unit (socket-activation supported) | Linux system deployments |
-| `auto` | `systemd` if a unit is configured and `systemctl` is present, else `subprocess` | — |
+| Need | Use |
+|------|-----|
+| Search by meaning within indexed scopes | Delegate to `@agent-index` and call `agent_index_search` |
+| Pivot from one result | `agent_index_find_similar` |
+| Find near-duplicate clusters | `agent_index_clusters` |
+| Check coverage/health | `agent_index_status` or `agent-index status` |
+| Refresh the index | `agent-index index [--source S] [--full]` or `POST /reindex` |
+| Manage runtime | `agent-index start`, `stop`, `status`, `deploy --recover` |
+| Manage the engine daemon | `agent-index engine status|start|stop|run` |
+| Adopt host/client routing | `agent-index setup`, `role`, `capability --json` |
 
-The engine endpoint is `http://$AGENT_INDEX_ENGINE_HOST:$AGENT_INDEX_ENGINE_PORT`
-(default `127.0.0.1:8421`); set `AGENT_INDEX_ENGINE_URL` to point at a wired
-engine (e.g. a container, or `host.docker.internal` from inside one).
+The `@agent-index` agent intentionally exposes only the four read tools. The
+lower-level `agent-index mcp` server also has `agent_index_reindex`, but the
+retrieval agent does not expose it; reindexing is an operator/runtime action.
 
-## Standalone operation & the user-mode CPU path
+## Corpus configuration
 
-The **shipped default is the external engine daemon** (a deliberate, torch-free
-service design — see the `agent-index-engine-daemon` effort): the light service
-routes all embedding, including query embedding, through the daemon
-(`AGENT_INDEX_SEARCH_IN_PROCESS=0`).
+The runtime belongs to this plugin; scope is data/config:
 
-A fully **self-contained, user-mode CPU** deployment — no GPU, no container, no
-external daemon — is **available as an opt-in single-venv install**:
+- With no corpus config, `agent-index index` indexes the current git checkout
+(`git`) and its commit history.
+- `AGENT_INDEX_SOURCES` overrides the default with a comma-separated source list.
+- For multi-repo harness-style use, each repo may carry
+`.agent-index/config.yaml` with `corpus.sources`; the runtime grafts sources from
+locally adopted projects plus any machine-local supplement in
+`~/.agent-index/config.yaml`.
+- The session-start scope-binding hook reads the current repo's
+`.agent-index/config.yaml` directly and tells agents which configured scopes are
+safe to prefer `@agent-index` for.
 
-- install the embedding runtime with the **`[engine]` extra** (adds PyTorch), then
-- run in-process query embedding and a local engine:
-  `AGENT_INDEX_SEARCH_IN_PROCESS=1` and `AGENT_INDEX_ENGINE_MODE=subprocess`.
+## Troubleshooting quick checks
 
-In that configuration agent-index indexes and searches on CPU using only what its
-own installer put on the machine — the plugin never *requires* an external engine
-to be reachable on its own host. Absent an optional wired engine, the opt-in local
-path still performs the plugin's own function; a missing engine degrades an
-accelerated feature, not the whole service.
+- `agent-index status` — service reachability, version, chunk count, sources,
+and indexing state.
+- `agent-index role` — whether this machine is acting as `host` or `client`.
+- `agent-index engine status` — durable engine health, PID, endpoint, and venv.
+- `agent-index deploy --recover` — recover an interrupted zdd cutover.
+- `~/.agent-index/deploy-manifest.json`, `active.json`, and `data/worker.log` —
+local diagnostics.
 
-## Endpoints
-
-- `GET /health` — service liveness.
-- `GET /status` — plugin/version plus index counts.
-
-Plus the MCP tool surface and the `agent-index` CLI for indexing and search.
+For the architecture details, see `docs/architecture.md`. For the reusable
+patterns this plugin follows rather than restating them here, see
+`../../docs/patterns/durable-vs-versioned-runtime.md`,
+`../../docs/patterns/graceful-daemon-cutover.md`,
+`../../docs/patterns/service-lifecycle-supervision.md`, and
+`../../docs/patterns/local-endpoint-discovery.md`.
