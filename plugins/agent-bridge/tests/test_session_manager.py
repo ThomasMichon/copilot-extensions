@@ -786,6 +786,7 @@ class TestResumeSession:
             fail_client = MagicMock()
             fail_client.start = AsyncMock(side_effect=RuntimeError("spawn failed"))
             fail_client.shutdown = AsyncMock()
+            fail_client.stderr_tail = MagicMock(return_value="")
             mock_cls.return_value = fail_client
 
             with pytest.raises(RuntimeError, match="spawn failed"):
