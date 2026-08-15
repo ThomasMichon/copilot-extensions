@@ -193,7 +193,14 @@ class ConnectionManager:
             # Check existing connection
             if host in self._connections:
                 existing = self._connections[host]
-                config = config_source.get_ssh_config()
+                # Off-load the config fetch. For a CodespaceConfigSource this
+                # runs a blocking ``gh codespace ssh --config``, which on a
+                # *Shutdown* CodeSpace cold-starts the box and can block for
+                # 60-120s. Left on the event loop that blocking call would freeze
+                # the daemon's /health endpoint and trip the serving watchdog,
+                # force-exiting the daemon mid-connect (#166). to_thread keeps the
+                # loop serving while the boot proceeds.
+                config = await asyncio.to_thread(config_source.get_ssh_config)
 
                 # Verify identity matches (same user, host, port, proxy)
                 if existing.connection_identity != config.connection_identity:
@@ -219,7 +226,7 @@ class ConnectionManager:
                     return existing
 
             # Establish new connection
-            config = config_source.get_ssh_config()
+            config = await asyncio.to_thread(config_source.get_ssh_config)
             return await self._connect(host, config, forwards)
 
     async def _connect(
