@@ -39,8 +39,8 @@ from . import config
 # Read subcommands that route through the transport.
 DELEGABLE = ("search", "similar", "clusters", "status")
 
-# Default remote shell when a project's ``indexer.shell`` is unset. The mesh's
-# indexer is Windows (pwsh); a Linux indexer must declare ``shell: bash``.
+# Default remote shell when a project's ``indexer.shell`` is unset. A Windows
+# indexer uses pwsh; a Linux indexer must declare ``shell: bash``.
 DEFAULT_SHELL = "pwsh"
 
 
@@ -70,8 +70,8 @@ def _pwsh_remote(inner: str) -> str:
 
     Uses base64 of UTF-16LE (mirrors agent-worktrees' ``_pwsh_remote``): a plain
     ``-Command '<inner>'`` is mangled when the remote sshd default shell is
-    cmd.exe (the Windows dtssh hosts), which echoes the single-quoted text
-    instead of running it. ``-EncodedCommand`` carries no shell-special
+    cmd.exe (a common Windows sshd configuration), which echoes the single-quoted
+    text instead of running it. ``-EncodedCommand`` carries no shell-special
     characters, so it executes correctly regardless of the remote default shell.
     """
     enc = base64.b64encode(inner.encode("utf-16-le")).decode("ascii")
