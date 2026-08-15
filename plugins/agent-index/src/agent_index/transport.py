@@ -187,7 +187,7 @@ def maybe_delegate(sub: str, raw_argv: list[str]) -> int | None:
         me = config.machine_id().strip().lower()
         if any(str(ix.get("machine", "")).strip().lower() == me for ix in indexers):
             return None  # this machine is a designated indexer -> run local
-        candidates = [ix for ix in indexers if ix.get("ssh")]
+        candidates = [ix for ix in indexers if str(ix.get("ssh") or "").strip()]
         if candidates:
             return _delegate_over_ssh(sub, raw_argv, candidates)
         # designation without any ssh alias -> fall through to bare handling

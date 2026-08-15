@@ -276,6 +276,22 @@ def test_failover_skips_indexers_without_ssh(monkeypatch):
     assert calls == ["secondary"]
 
 
+def test_failover_skips_whitespace_only_ssh_alias(monkeypatch):
+    # A blank/whitespace ssh alias strips to '' in build_ssh_argv -> not
+    # reachable; it must be filtered out, not treated as a candidate.
+    _patch_multi(
+        monkeypatch, root="/repo",
+        indexers=[{"machine": "primary", "ssh": "   "},
+                  {"machine": "secondary", "ssh": "secondary"}],
+        machine="client-host",
+    )
+    run, calls = _runner([0])
+    monkeypatch.setattr(transport.subprocess, "run", run)
+    rc = transport.maybe_delegate("status", ["status"])
+    assert rc == 0
+    assert calls == ["secondary"]
+
+
 # -- inner command / argv builders --------------------------------------------
 
 def test_build_inner_pwsh_quotes_special_chars():
