@@ -132,7 +132,7 @@ fuller rationale).
   **public / portable** repo *and* a **fuller, downstream-private** vision in the
   control repo that **links to it**. The **public vision is canonical** — it is
   the north star agents cite and the one the vision→reality delta is derived
-  against; the private vision *elaborates* it with facility-specific intent
+  against; the private vision *elaborates* it with deployment-specific intent
   (private subjects, downstream constraints) and links back. Keep the public
   artifact **generic** per the repo's public-artifact rule.
 

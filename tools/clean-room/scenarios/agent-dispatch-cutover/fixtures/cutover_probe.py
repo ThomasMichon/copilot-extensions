@@ -264,7 +264,7 @@ def check_breadcrumb_recover(python):
         # Simulate an ABORTED cutover: open the drain gate on the live coordinator
         # (it is now drained-but-alive = a "stranded survivor") and drop a
         # breadcrumb naming it, exactly as an orchestrator killed mid-cutover would.
-        dr = _post(port, "/drain")
+        _post(port, "/drain")
         r.check(_health(port, home).get("status") == "draining", "survivor is drained (closed to new claims)")
         # Write the breadcrumb the recovery path reads.
         bc = {

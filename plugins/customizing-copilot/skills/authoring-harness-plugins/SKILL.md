@@ -75,7 +75,7 @@ status). Substance in the plugin; keep the narrative thin.
 2. **Payload-only.** No runtime, no venv — it ships skills. Enabling it is the
    whole install. (See `installing-plugins` for the payload-vs-runtime model.)
 3. **POV-neutral.** Write for *any* adopter, not one control repo. Don't bake in
-   a specific machine, operator, or facility. Resolve the checkout path at
+   a specific machine, operator, or multi-machine system. Resolve the checkout path at
    runtime; never hardcode it.
 4. **Point at the repo's own authoritative docs.** The skills are the operator's
    map; the repo's `CONTRIBUTING.md` / `AGENTS.md` / architecture docs remain the

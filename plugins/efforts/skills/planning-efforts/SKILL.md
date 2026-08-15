@@ -212,7 +212,7 @@ the fuller rationale).
   **public / portable** repo *and* a **fuller, downstream-private** effort in the
   control repo that **links to it**. The **public effort is canonical** — it is
   what other agents cite and what the plan is reviewed as; the private effort
-  *elaborates* it with facility-specific context (private names, hosts, downstream
+  *elaborates* it with deployment-specific context (private names, hosts, downstream
   wiring) and links back. Keep the public artifact **generic** — no
   downstream-private names — per the repo's public-artifact rule.
 

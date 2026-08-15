@@ -6,15 +6,15 @@ the transport never re-implements profile rendering, coexistence, or
 verification.
 
 **Two homes, one contract.** A transport lives in-box or external on a single
-axis — **does it carry non-public provider/facility config?**
+axis — **does it carry non-public provider/multi-machine system config?**
 
 - **In-box** (`transports/<module>/`, this plugin): self-contained transports with
   no non-public config — `direct` (plain SSH) and `dtssh` (real-user reach over
   the public Microsoft Dev Tunnels service; the operator's identity and live
   tunnel ids are injected at deploy time, not baked in).
 - **External** (its own plugin in its audience's marketplace): transports needing
-  facility/provider config or credentials — e.g. Cloudflare (Access org / SSO /
-  facility hostnames). These keep their concrete values out of this public core
+  multi-machine system/provider config or credentials — e.g. Cloudflare (Access org / SSO /
+  multi-machine system hostnames). These keep their concrete values out of this public core
   and register against this same contract.
 
 Either way, the recipe shape and the core's obligations are identical.

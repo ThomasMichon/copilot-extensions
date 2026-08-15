@@ -3,7 +3,7 @@ kind: transport
 summary: Zero-inbound real-user interactive reach through dtssh over Microsoft Dev Tunnels.
 # First-party in-box transport (self-contained: the public `dtssh` tool over the
 # public Microsoft Dev Tunnels service; operator identity is injected at deploy
-# time, so there is no non-public provider/facility config to externalize).
+# time, so there is no non-public provider/multi-machine system config to externalize).
 # agent-ssh's public contract exposes {hostname}, not a provider-specific
 # {tunnel}. The deploy glue resolves the live dtssh tunnel id and writes it into
 # each normalized machine record's hostname field.
