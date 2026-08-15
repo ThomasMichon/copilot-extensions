@@ -25,14 +25,17 @@ copilot-extensions create-pr         # squashes the worktree, pushes pr/<slug>,
                                      # and (auto_open) opens the GitHub PR
 #   → Copilot posts its review on the PR (non-blocking)
 #   …address anything worth addressing, re-run push-changes to update the PR…
-gh pr merge <#> --squash --delete-branch   # MANUAL merge (you own the merge)
+copilot-extensions pr-merge ThomasMichon/copilot-extensions <#> --now   # MANUAL squash-merge (you own the merge)
 copilot-extensions finalize          # clean up the worktree
 ```
 
 - **Update an open PR** with `copilot-extensions push-changes` (it re-pushes the
   `pr/<slug>` head; it will NOT land on `main`).
-- **Merge is deliberately manual.** No auto-merge label is bound: open the PR,
-  give Copilot's review a chance to land, then squash-merge it yourself. (0
+- **Merge is deliberately manual.** No auto-merge label is bound (the repo's
+  `pr-self-merge` profile authorizes the submitter to merge directly): open the
+  PR, give Copilot's review a chance to land, then squash-merge it yourself with
+  `pr-merge <#> --now` (equivalent to a plain `gh pr merge <#> --squash
+  --delete-branch`, but it resolves the right account and squashes uniformly). (0
   approvals are required by policy — a solo owner can't approve their own PR, and
   Copilot's review is advisory.)
 - **Never** `git push origin main` or `push-changes` direct-to-`main`; both the
