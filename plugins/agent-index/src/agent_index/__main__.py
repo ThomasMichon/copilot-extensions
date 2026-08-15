@@ -102,6 +102,84 @@ def cmd_role(args: argparse.Namespace) -> int:
     return 0
 
 
+def _setup_multi(cfg, args, this: str, root, indexers: list[dict]) -> int:
+    """Adopt this machine against an authored **ordered** ``indexers:`` list.
+
+    This box is a ``host`` if it is any listed indexer, else a ``client`` that routes
+    to the ordered endpoints with failover. Only THIS machine's machine-local role /
+    routing is written; the operator-authored repo list is left as the source of
+    truth (vision §adoption-designates-ordered-indexers)."""
+    machines = [str(i["machine"]).strip() for i in indexers if i.get("machine")]
+    is_host = any(m.lower() == this.lower() for m in machines)
+    role = "host" if is_host else "client"
+
+    device = None
+    if role == "host":
+        from agent_index import capability
+
+        decision = capability.decide_device()
+        device = decision["device"]
+        if not decision["ok"] and not getattr(args, "force", False):
+            if getattr(args, "json", False):
+                _emit({"machine": this, "role": role, "blocked": True, **decision})
+            else:
+                print(
+                    f"[FAIL] '{this}' is an underpowered indexer: {decision['reason']}.\n"
+                    f"       Designate a stronger machine, or re-run with --force to override.",
+                    file=sys.stderr,
+                )
+            return 1
+
+    machine_updates: dict = {"role": role}
+    if device:
+        machine_updates["device"] = device
+    endpoints: list[str] = []
+    ssh_targets: list[str] = []
+    if role == "client":
+        endpoints = [str(i["endpoint"]).strip() for i in indexers if i.get("endpoint")]
+        ssh_targets = [str(i["ssh"]).strip() for i in indexers if i.get("ssh")]
+        if endpoints:
+            # Ordered failover list (primary first) + singular back-compat mirror.
+            machine_updates["endpoints"] = endpoints
+            machine_updates["endpoint"] = endpoints[0]
+        role_path = cfg.set_machine_config(machine_updates)
+    else:
+        # This box is a host: clear any stale client routing a prior client
+        # adoption may have left, so it never shadows the live local service.
+        role_path = cfg.set_machine_config(machine_updates, remove=["endpoint", "endpoints"])
+
+    result = {
+        "machine": this,
+        "role": role,
+        "device": device,
+        "indexers": machines,
+        "endpoints": endpoints,
+        "ssh_targets": ssh_targets,
+        "repo": str(root) if root else None,
+        "written": {"machine_config": str(role_path)},
+    }
+    if getattr(args, "json", False):
+        return _emit(result)
+
+    print(f"agent-index adoption: this machine '{this}' -> role: {role}")
+    print(f"  designated indexers (primary first): {', '.join(machines)}")
+    if device:
+        print(f"  engine device: {device}")
+    if role == "client":
+        if endpoints:
+            print(f"  routing endpoints (failover order): {', '.join(endpoints)}")
+            if ssh_targets:
+                print(f"  ssh targets: {', '.join(ssh_targets)} -- establish an SSH "
+                      "port-forward per target so each endpoint reaches its indexer")
+        else:
+            print("  routing endpoints: (unset) -- add endpoints to the repo's indexers list")
+    else:
+        print("  next: run the installer here to provision the service + engine daemon "
+              "(agent-index-install install)")
+    print(f"  machine config: {role_path}")
+    return 0
+
+
 def cmd_setup(args: argparse.Namespace) -> int:
     """Adopt agent-index: designate one indexer, then write role + designation config.
 
@@ -121,6 +199,17 @@ def cmd_setup(args: argparse.Namespace) -> int:
     indexer = getattr(args, "indexer", None)
     ssh = getattr(args, "ssh", None)
     endpoint = getattr(args, "endpoint", None)
+
+    # Multi-indexer adoption: when neither --single nor an explicit --indexer is
+    # given, honor an **authored** plural ``indexers:`` list already in the repo
+    # config (primary first). This box is a host if it is ANY listed indexer;
+    # otherwise a client that routes to the ordered list with failover. The list is
+    # operator-authored, so setup only resolves THIS machine's role/routing from it
+    # and never rewrites it (vision §adoption-designates-ordered-indexers).
+    if not single and not indexer and root is not None:
+        raw = cfg._load_yaml(cfg.repo_config_path(root))
+        if isinstance(raw.get("indexers"), list) and cfg.read_indexers(root):
+            return _setup_multi(cfg, args, this, root, cfg.read_indexers(root))
 
     if not single and not indexer:
         if interactive:
