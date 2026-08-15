@@ -12,14 +12,14 @@ description: >
   and loopback-vs-remote coordinator config.
   Trigger phrases include:
   - 'agent-dispatch'
-  - 'task queue'
+  - 'agent-dispatch task queue'
   - 'dispatch a task'
-  - 'queue a task'
-  - 'claim a task'
-  - 'pick up a task'
-  - 'my task inbox'
+  - 'queue an agent-dispatch task'
+  - 'claim an agent-dispatch task'
+  - 'pick up an agent-dispatch task'
+  - 'agent-dispatch inbox'
   - 'worktree-status'
-  - 'coordinator'
+  - 'agent-dispatch coordinator'
   - 'graduate a handoff'
   - 'dispatch work to an agent'
 ---
@@ -92,15 +92,18 @@ agent-dispatch vision (`visions/plugins/agent-dispatch/` in the source repo).
 ## Prerequisite: a reachable coordinator
 
 Every verb except `serve` is a thin client that talks to a coordinator over
-HTTP. Point the CLI at one with `AGENT_DISPATCH_URL` (defaults to the loopback
-`http://127.0.0.1:9847`); add `AGENT_DISPATCH_TOKEN` if it requires bearer auth.
+HTTP. Point the CLI at one with `AGENT_DISPATCH_URL`; otherwise the client
+discovers the local coordinator through the zdd routing table /
+`~/.agent-dispatch/run/endpoint.json`, then falls back to legacy
+`http://127.0.0.1:9847`. Add `AGENT_DISPATCH_TOKEN` if it requires bearer auth.
 
 ```bash
 agent-dispatch health          # confirm a coordinator is reachable first
 ```
 
 - **Lone dev box:** run a loopback coordinator locally: `agent-dispatch serve`
-  (or install it as a service -- see the plugin README).
+  (or install it as a service -- see the plugin README). Local client verbs
+  lazy-start a detached coordinator when none answers; `health` does not.
 - **Shared network:** set `AGENT_DISPATCH_URL` to the designated coordinator
   host; don't run a local one.
 
@@ -177,8 +180,10 @@ agent-dispatch list --status queued
   does **not** spawn a `shared-lib` harness. (Some repos are edited only as a
   target, never run as a harness.)
 - **Targeting another lane is explicit.** `--repo <name|remote>` scopes a command
-  to a specific other lane (`--repo webapp` or a full remote URL). There
-  is **no** all-repos view -- the queue never exposes tasks globally.
+  to a specific other lane (`--repo webapp` or a full remote URL). `list`,
+  `find`, and `sweep` are lane-scoped by default; `inbox` is the intentional
+  machine-scoped, cross-lane picker view, and `supervise --all-repos` is an
+  explicit service opt-in.
 - **Hybrid keys.** The wire/DB stores a device-independent **canonical remote**
   (so one shared coordinator keys every machine the same); the CLI lets you
   *type* and *reads back* the local repo **name** (resolved through the
@@ -212,7 +217,7 @@ proposed -> queued -> claimed -> started -> completed        (terminal)
 - **claimed -> started** when the worker commits; **claimed -> queued**
   (`yield`, a decline) if it evaluates and passes. The `claimed` window is the
   **evaluation window** (`claim --evaluation`) -- a semantic "evaluating, not yet
-  committed" marker; a claim carries **no wall-clock expiry** (see below).
+  committed" marker; elapsed time alone does **not** recover it (see below).
 - **started -> queued** yields **with a note** on a recoverable snag (merge
   conflict, needs a later cycle); **started -> completed** on success.
 - **abandon requires permission** (`--permit`, or `--duplicate-of <ref>` which
@@ -259,8 +264,8 @@ agent-dispatch list --status queued,started  # filter by status (comma-separate 
 ```bash
 agent-dispatch create "Add narration track" \
   --prompt "segment 42 needs a narration pass" \
-  --require logger \                 # hard AFFINITY: only a worker advertising 'logger' can claim
-  --exclude machine:flaky-box \      # hard ANTI-AFFINITY: a worker matching this can NOT claim
+  --require logger \                 # hard selector: only a worker advertising 'logger' can claim
+  --exclude machine:flaky-box \      # hard anti-selector: that machine can NOT claim
   --affinity worktree=same \         # soft: bias toward the same worktree, never exclude
   --label media \
   --target-repo copilot-extensions \ # OPTIONAL: the cross-repo *code* target (stays in THIS lane)
@@ -526,14 +531,16 @@ agent-dispatch abandon <id> --worker-id <owner> --permit --reason "dropped prior
 `claim` and `start` are **two steps on purpose** — between them is an
 **evaluation window** where you hold the task exclusively but haven't committed
 to running it. `claim --evaluation` marks the window as an *evaluation* (a
-worker signals "assessing, not yet committed"); a claim carries **no** wall-clock
-lease, so an evaluator is reclaimed only if its worker goes away (liveness GC),
-and `start` simply commits the task to ``started``.
+worker signals "assessing, not yet committed"). The row carries lease timestamps
+for heartbeats/observability, but recovery is **not** driven by elapsed time:
+an evaluator is reclaimed only if its worker is confirmed gone (liveness GC), and
+`start` commits the task to `started` while capturing the owner session id when
+available.
 
 ```bash
 agent-dispatch claim --task <id> --evaluation    # win a short exclusive eval window
 # ...assess: dup-check (agent-dispatch list / sweep), feasibility, is-this-for-me...
-agent-dispatch start   <id>                      # ACCEPT -> extends to the full work lease
+agent-dispatch start   <id>                      # ACCEPT -> commit to doing the work
 agent-dispatch yield   <id> --exclude-self worktree --note "not my capability"  # DECLINE
 agent-dispatch abandon <id> --duplicate-of <ref>                                # DUPLICATE
 ```
@@ -595,9 +602,10 @@ agent-dispatch watch              # stream task.* events (SSE) as JSON lines
 ## Routing: `requires` (hard) vs `affinity` (soft)
 
 - **`requires`** (repeatable `--require`) -- capability tokens (`logger`,
-  `review`, `merge`) or an identity pin (`agent:review-bot`). A task is
-  claimable only when `requires` is a **subset** of the worker's advertised
-  `--capability` set. Two machines advertising the same capability give
+  `review`, `merge`) or identity tokens (`machine:<m>`, `worktree:<w>`,
+  `repo:<lane>`, `agent:review-bot`). A task is claimable only when `requires`
+  is a **subset** of the worker's advertised token set. Two machines advertising
+  the same capability give
   **cooperative, redundant** coverage: first writer wins; if one worker goes
   away, a liveness GC pass requeues its task and the other reclaims it -- no
   leader election.
@@ -698,8 +706,8 @@ queued for any worker to claim. agent-dispatch stays fully usable standalone.
 ## MCP tools instead of the CLI
 
 `agent-dispatch mcp` runs a local **stdio MCP server** exposing the same
-operations as tools (`dispatch_create`, `dispatch_find`, `dispatch_claim`,
-`dispatch_start`, `dispatch_complete`, `dispatch_payload`,
+operations as tools (`dispatch_create`, `dispatch_find`, `dispatch_sweep`,
+`dispatch_claim`, `dispatch_start`, `dispatch_complete`, `dispatch_payload`,
 `dispatch_worktree_status`, ...). It resolves your `machine`/`worktree` identity
 from the working directory just like the CLI, so `dispatch_claim` /
 `dispatch_worktree_status` are auto-scoped with no arguments. Point a sub-agent's
@@ -726,10 +734,10 @@ routes the command at the shared/elected coordinator instead of the local one.
 
 ## Gotchas
 
-- **Everything is lane-scoped.** By default you only see/claim **your repo's**
-  tasks. An "empty" sweep or "no claimable task" may just mean *your lane* is
-  empty -- another repo's tasks are invisible by design. Use `--repo <name>` to
-  look at a specific other lane; there is no all-repos view.
+- **Most reads are lane-scoped.** By default `list`/`find`/`sweep` show **your
+  repo's** tasks. An "empty" sweep or "no claimable task" may just mean *your
+  lane* is empty. Use `--repo <name>` to look at a specific other lane; use
+  `inbox` for the intentional machine-scoped cross-lane picker view.
 - **Lane != code target.** `--repo` is the owning lane (defaults to the calling
   repo). `--target-repo` is the cross-repo *code* a task touches -- the task
   still lives in the producing lane and a same-lane agent does the work via

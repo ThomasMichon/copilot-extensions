@@ -7,15 +7,42 @@ It replaces single-purpose wrapper scripts -- e.g. a script hardcoded to one
 upstream endpoint and one auth command -- with a config-driven, multi-transport,
 multi-auth bridge packaged as a Copilot CLI plugin.
 
+## Standalone quick start
+
+agent-mcp is the **standalone** MCP-wrapper path: it is launched directly from a
+Copilot agent's `mcp-servers` entry, imports no agent-bridge code, uses no
+worktree/repo resolver, and needs no resident daemon. The optional `serve`
+command only warms repeated shell `call`/materialized-stub usage; it is not part
+of normal agent wiring.
+
+1. Enable/install the `agent-mcp` plugin so the `agent-mcp` binstub is on `PATH`
+   (if the binstub is missing, run `scripts/init.* stamp`; the first real call
+   may self-provision the runtime).
+2. Write one bridge config (`.mcp.yaml`/`.json`) that names the upstream
+   `server`, `auth`, and any filters/decorators.
+3. Point the consuming agent at that file:
+
+```yaml
+mcp-servers:
+  my-upstream:
+    type: stdio
+    command: agent-mcp
+    args: ['bridge', '--config', '.github/agents/my-upstream.mcp.yaml']
+    tools: ['*']
+```
+
+For setup steps use the bundled **`agent-mcp`** skill; for per-machine tuning of
+an existing bridge use **`customizing-bridges`**.
+
 ## Concepts
 
 - **Bridge** — one upstream MCP server exposed locally over stdio. Defined by a
   single JSON/YAML config file.
 - **`server` block** — the *original upstream launch info*, the same shape as a
-  `.mcp.json` / `mcpServers` entry. `server.type` (`http` | `stdio`) selects the
-  transport. Lift an existing server entry in unchanged. A third type, **`cli`**,
-  has no upstream at all — it exposes a set of native CLIs *as* MCP tools (see
-  [CLI → MCP](#cli--mcp-the-cli-server-type)).
+  `.mcp.json` / `mcpServers` entry. `server.type` is one of `http`, `stdio`, or
+  `cli`: `http` wraps a Streamable-HTTP/SSE upstream, `stdio` wraps a child MCP
+  process, and `cli` has no upstream at all — it exposes a set of native CLIs
+  *as* MCP tools (see [CLI → MCP](#cli--mcp-the-cli-server-type)).
 - **Auth injector** — declares *what form of auth to inject*. Token acquisition
   reuses the `credential-relay` host-credential sources (`az_login`, `gh_auth`,
   `git_credential`) — this plugin does not re-implement `az`/`gh`/GCM shell-outs.
@@ -56,10 +83,11 @@ config then works on both vault-enabled and daemon-less hosts.
 > programs. Treat a bridge config like a script: do **not** run an unreviewed or
 > untrusted `.mcp.yaml`. Prefer in-repo, version-controlled bridge configs.
 
-> **Secret rotation.** Vault reads are cache-first and a stdio bridge injects the
-> secret into the MCP child **once at spawn**. After rotating a secret, refresh
-> the cache (`vault get … --refresh` / re-populate) **and restart the MCP/agent**
-> so the child re-reads it. http bridges auto-refresh and retry once on a `401`.
+> **Secret rotation.** A stdio bridge injects env credentials into the MCP child
+> **once at spawn**. After rotating a command/env-sourced secret, refresh that
+> source (and any `auth.cache` entry) **and restart the MCP/agent** so the child
+> re-reads it. http bridges invalidate cached credentials and retry once on a
+> `401`.
 
 ### Token caching (`auth.cache`) — opt-in, shared across sessions
 
@@ -677,6 +705,39 @@ mcp-servers:
 > doesn't reliably stream stdin -- hence the deliberate `.cmd`-only layout.) On
 > Linux/WSL the binstub is the usual bash script.
 
+## Troubleshooting
+
+There is no special bridge resolver, agent-bridge daemon, or
+`agent-mcp-troubleshooting` command. Diagnose the exact bridge process the agent
+will spawn:
+
+```sh
+agent-mcp validate .github/agents/ado.mcp.yaml
+agent-mcp --log-level debug call .github/agents/ado.mcp.yaml some_tool '{"x":1}'
+```
+
+- **Config/load failures are fail-fast.** `validate` loads the same config path,
+  plugin-shipped bridge, and machine-local overlay that `bridge`/`call` will use;
+  schema errors (unknown `server.type`, bad `server.protocol`, invalid
+  decorator, mismatched `server.url_secrets`, unsupported auth list) fail before
+  any upstream is contacted.
+- **Protocol negotiation is dual-era.** In `server.protocol: auto`, a
+  `server/discover` probe that gets a non-modern result, timeout, or legacy HTTP
+  rejection falls back to the legacy `initialize` handshake. Use
+  `server.protocol: legacy` to skip the probe for a known legacy endpoint, or
+  `modern`/an explicit date to pin a modern upstream.
+- **Credential failures surface at their injection point.** `server.url_secrets`
+  must resolve before the first HTTP connect and raises if a secret is missing.
+  `command` auth logs command-not-found, timeout, and non-zero exit to stderr; if
+  no token is produced, an HTTP bridge sends no auth header and normally returns
+  the upstream's 401/error (with one invalidate+retry on 401). A stdio bridge has
+  no 401 channel: it spawns the child with whatever env could be injected, so a
+  missing `target_env`/secret is diagnosed from the child MCP's stderr/error.
+- **Runtime provisioning is separate from bridge config.** If `agent-mcp` itself
+  is not found, install/stamp the plugin binstub first; if the binstub prints
+  `::agent-provisioning::`, let the first-use provision complete and preserve the
+  exact failure text if it cannot build the runtime.
+
 ## CLI → MCP: the `cli` server type
 
 The `http`/`stdio` bridges proxy an upstream MCP. The **`cli`** server type is
@@ -844,7 +905,8 @@ agent-mcp serve [--socket PATH] [--idle-timeout SECONDS]
 ```
 
 `call` (and every materialized stub, unchanged) pays a fresh upstream
-cold-start — spawn the runner + MCP `initialize` — on **every** invocation.
+cold-start — spawn the runner + protocol negotiation (`server/discover` or
+legacy `initialize`) — on **every** invocation.
 `serve` runs a resident daemon that keeps one **warm session per bridge** and
 answers `call`/`list` requests over a local IPC socket (default handle
 `$AGENT_MCP_HOME/serve.sock`), so repeated calls skip the cold-start entirely.
@@ -878,6 +940,10 @@ list_issues '{"owner":"me","repo":"x"}' # now warm: no per-call cold-start
 
 ## Install
 
+Normal plugin enablement installs the runtime reconcile hook. For direct setup
+from a checkout, run the installer directly; for a cheap first-use setup, pass
+`stamp` to deploy only the self-provisioning binstub:
+
 ```powershell
 .\scripts\init.ps1     # Windows -- venv at ~/.agent-mcp, binstub in ~/.local/bin
 ```
@@ -885,19 +951,24 @@ list_issues '{"owner":"me","repo":"x"}' # now warm: no per-call cold-start
 ./scripts/init.sh      # Linux/WSL
 ```
 
+No daemon is required for a Copilot agent. `agent-mcp serve` is only an optional
+warmth tier for repeated shell `call`/materialized-stub use.
+
 ## Architecture
 
 ```
 stdin/stdout        Bridge        Decorator pipeline           UpstreamClient        Transport
-(JSON-RPC)   <->   loop   <->   d0 <-> d1 <-> ... <-> dN  <->  (id correlation)  <->  (http|stdio)  <->  upstream MCP
-                                 ^                                                         ^
-                          filter/rename/defer/                                      Auth injector -> credential-relay
-                          code-mode/storage
+(JSON-RPC)   <->   loop   <->   d0 <-> d1 <-> ... <-> dN  <->  (id correlation)  <->  http|stdio  <->  upstream MCP
+                                 ^                                                   or cli responder
+                          filter/rename/defer/                                      Auth injector -> credential_relay.sources
+                          code-mode/storage/
+                          transform/gate
 ```
 
 - `config.py` — load + validate the per-bridge config file (incl. `decorators:`).
 - `auth/` — `AuthInjector` protocol + injectors (reuse `credential_relay.sources`).
-- `transports/` — `http` (Streamable HTTP + SSE) and `stdio` (child process).
+- `transports/` — `http` (Streamable HTTP + SSE), `stdio` (child process), and
+  `cli` (local sidecar-backed responder; no upstream).
 - `pipeline.py` — `UpstreamClient` (JSON-RPC id correlation over a transport) +
   `Pipeline` (compose decorators around the upstream core call).
 - `decorators/` — `base` (Decorator + BridgeContext), `_catalog` (catalog
@@ -914,4 +985,3 @@ stdin/stdout        Bridge        Decorator pipeline           UpstreamClient   
   (the engine under `call` and the introspection step of `materialize`).
 - `materialize.py` — project a `tools/list` catalog into the on-disk stub fleet
   (symlink farm on POSIX, `.ps1`/`.cmd` shim farm on Windows) + plated sidecars.
-

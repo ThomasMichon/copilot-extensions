@@ -5,23 +5,27 @@ description: >-
   inject host credentials, and set up repo-scoped Copilot sub-agents backed by
   it. Use when asked to "wrap an MCP", "bridge an MCP", "add auth to an MCP
   server", "proxy an MCP", "use an MCP that needs az/gh login", "set up a
-  sub-agent for <service>", or to expose a remote/authenticated MCP to Copilot.
+  sub-agent for <service>", "troubleshoot an agent-mcp bridge", or to expose a
+  remote/authenticated MCP to Copilot.
 ---
 
 # agent-mcp
 
 > **Before you start — readiness (self-provisioning, no agent-worktrees required).**
 > agent-mcp provisions its own runtime on first use and works standalone in any
-> host (CLI, Copilot app, cloud agent). If `command -v agent-mcp` fails, deploy its
-> binstub first (it then self-provisions on first call):
-> `bash "$(ls ~/.copilot/installed-plugins/*/agent-mcp/scripts/init.sh | head -1)" stamp`
+> host (CLI, Copilot app, cloud agent). If `agent-mcp` is not on `PATH`, deploy
+> its binstub first (it then self-provisions on first call): on POSIX,
+> `bash "$(ls ~/.copilot/installed-plugins/*/agent-mcp/scripts/init.sh | head -1)" stamp`;
+> on Windows, run the installed `scripts\init.ps1 stamp`.
 > The first call may take ~30–120s to provision (watch for `::agent-provisioning::`);
 > let it finish. If it reports a provisioning failure (e.g. missing uv / network),
 > surface the exact message — don't improvise a toolchain install.
 
 `agent-mcp` wraps one upstream MCP server as a local **stdio** MCP server and
-injects host credentials, driven by a single per-bridge config file. It
-replaces single-purpose, hardcoded MCP wrapper scripts with a config-driven,
+injects host credentials, driven by a single per-bridge config file. It is
+standalone: a sub-agent launches `agent-mcp` directly from its `mcp-servers`
+entry; there is no agent-bridge integration, repo resolver, or required daemon.
+It replaces single-purpose, hardcoded MCP wrapper scripts with a config-driven,
 multi-transport, multi-auth bridge.
 
 ## When to use
@@ -44,6 +48,7 @@ A bridge config can be referenced two ways:
 |------|-----------|----------|---------|
 | **In-repo `--config`** (preferred) | `bridge --config <path>` | the repo (e.g. `.github/agents/<name>.mcp.yaml`) | **repo-scoped agents** -- config is version-controlled, travels with the repo, needs no deploy |
 | **Named bridge** | `bridge <name>` | `~/.agent-mcp/bridges/<name>.{yaml,yml,json}` | **personal / cross-repo** MCPs not tied to one repo |
+| **Plugin-shipped bridge** | `bridge <name>` | installed plugin `agents/` or `mcp/` directory | a plugin ships its own sub-agent + bridge config; user-space bridge file is not required |
 
 > **Prefer the in-repo `--config` form for any agent that ships inside a repo.**
 > Reserve named bridges (user-global `~/.agent-mcp/bridges/`) for MCPs you use
@@ -138,8 +143,10 @@ tool (e.g. fetch a repo). A clean way to prove the bridge -- not a stale runtime
 | `env` / `static` | host env var or literal | templated header / target env |
 | `none` | -- | nothing |
 
-Token acquisition reuses the `credential-relay` sources; the bridge refreshes the
-credential and retries once on an upstream `401`.
+Token acquisition reuses the `credential-relay` sources. HTTP bridges invalidate
+the cached credential and retry once on an upstream `401`; stdio/cli bridges
+inject env at child spawn and rely on the child tool/server error if a required
+secret is missing.
 
 The `command` kind runs **any** external command that speaks the git-credential
 protocol — `auth.request` fields are fed on stdin, and stdout supplies the
@@ -302,10 +309,27 @@ reliable default.
 agent-mcp bridge --config FILE    # run the bridge from an in-repo config (preferred)
 agent-mcp bridge <name>           # run a named bridge (~/.agent-mcp/bridges/<name>.*)
 agent-mcp validate <name|FILE>    # parse + schema-check
-agent-mcp status                  # prerequisites + available named bridges
+agent-mcp status                  # prerequisites + named/plugin-shipped bridges
 agent-mcp call <bridge> <tool> [JSON]     # one-shot: invoke one upstream tool
 agent-mcp materialize <bridge>            # project the catalog into a CLI stub fleet
+agent-mcp serve [--socket PATH]           # optional warmth daemon for repeated call/stub use
 ```
+
+## Troubleshooting checklist
+
+- Start with `agent-mcp validate <name-or-config>`; it loads the same in-repo,
+  named, plugin-shipped, and machine-overlay config path as `bridge`/`call`, but
+  does not contact the upstream or credential source.
+- Reproduce outside Copilot with `agent-mcp --log-level debug call <bridge>
+  <tool> '<arguments-json>'`. A `server/discover` rejection in `auto` is normal
+  for a legacy server; set `server.protocol: legacy` to skip that probe.
+- Separate runtime provisioning from bridge config: if `agent-mcp` is missing,
+  stamp/install the binstub first; if it prints `::agent-provisioning::`, let the
+  first-use provision finish and preserve the exact failure.
+- Credential failures differ by transport: `server.url_secrets` fail before HTTP
+  connect; `command` auth logs command-not-found/timeout/non-zero exit; HTTP gets
+  a 401/error path with one retry, while stdio/cli children must report missing
+  env/credential themselves.
 
 ## MCP -> CLI: `call` and `materialize`
 
@@ -314,8 +338,9 @@ shell** -- for agents (or humans) that prefer to `ls`/`cat`/pipe tools instead
 of speaking JSON-RPC.
 
 - **`call`** is the one-shot engine: it connects to the bridge's upstream,
-  runs `initialize`, invokes one tool, and prints the result. Arguments are the
-  tool's **raw MCP `arguments` object** as JSON -- via an inline arg, `--arguments`,
+  negotiates the configured protocol era (`server/discover` in modern/auto, or
+  legacy `initialize`), invokes one tool, and prints the result. Arguments are
+  the tool's **raw MCP `arguments` object** as JSON -- via an inline arg, `--arguments`,
   `--request-file PATH`, or stdin. Output is **raw passthrough** (the upstream's
   text content verbatim; the advertised `structuredContent` as JSON when there is
   no text). A tool error is a non-zero exit + a stderr message -- never a hang

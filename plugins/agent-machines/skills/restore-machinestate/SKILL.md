@@ -19,9 +19,11 @@ description: >
 # restore-machinestate
 
 `agent-machines` converges the current machine to desired state declared in
-**requirement packages** carried by one or more repos at
-`.github/machine-state/`. Restore is **machine-scoped**: it reconciles the union
-of every discovered package, not one anchor repo.
+**requirement packages** carried by adopted repos at `.github/machine-state/`.
+Restore is **machine-scoped**: it reconciles the union of every discovered
+package, not one anchor repo. The CLI itself is standalone; if the
+agent-worktrees registries are absent, discovery returns no packages instead of
+failing.
 
 ## Workflow
 
@@ -30,7 +32,8 @@ of every discovered package, not one anchor repo.
    agent-machines discover
    ```
    Lists the registered repos that carry gated requirement packages for this
-   machine (derived from `~/.agent-worktrees/repos.yaml` when present).
+   machine. The candidate set is `~/.agent-worktrees/projects.yaml`; paths are
+   resolved from `~/.agent-worktrees/repos.yaml` when present.
 
 2. **Plan** (read-only) -- the managed surfaces and a content drift key:
    ```
@@ -54,7 +57,7 @@ of every discovered package, not one anchor repo.
    Restore previews by default; `--apply` makes changes; `--only` scopes to named
    surfaces/modules so you review and apply section by section. Surfaces back up
    before writing; a module runs in a dry-run only if it declares `dry_run_args`.
-   Restore refuses to apply while the validator reports errors.
+   Restore refuses to run (dry-run or apply) while the validator reports errors.
 
 ## Dispositions
 
@@ -62,4 +65,6 @@ Each managed key declares one: `enforce`, `ensure-present`, `capture-only`,
 `ignore` (default -- the manifest is an allowlist), `exclude` (secret guard),
 `prune` (opt-in GC), `prerequisite-check` (assert a prerequisite, never store a
 secret). Maps/lists compose by union (`ensure-present`); scalar singletons are
-`enforce` and are the validator's conflict domain.
+`enforce` and are the validator's conflict domain. Current restore applies
+`enforce` and `ensure-present`; `capture` and `prune` are placeholder CLI verbs
+today.

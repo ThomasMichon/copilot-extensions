@@ -1,10 +1,12 @@
 # agent-dispatch — Embody Spawn Supervisor (design)
 
 Status: **in progress** — the spawn-reservation primitive, the supervisor loop
-(spawn-at-most-once), the liveness-gated lease heartbeat, **and fleet dispatch (a
-health-gated remote embody pool, Model C)** are built; dead-embody
-*auto-recovery* (needs confirmed-death detection), the backlog-catch-up policy,
-and the authenticated container transport land in follow-up slices.
+(spawn-at-most-once), the liveness-gated lease heartbeat, **confirmed-gone
+auto-recovery** (local CLI worktree bodies, local headless bodies, and headless
+fleet bodies), **nudge-before-recover**, reactive turn-end polling, and **fleet
+dispatch (a health-gated remote embody pool, Model C)** are built. The
+backlog-catch-up policy, authenticated container transport, per-host fleet
+concurrency caps, and load-aware pool selection land in follow-up slices.
 Public trackers: [#44](https://github.com/ThomasMichon/copilot-extensions/issues/44)
 (supervisor) · [#49](https://github.com/ThomasMichon/copilot-extensions/issues/49)
 (fleet dispatch).
@@ -27,10 +29,11 @@ runs `embody`") has a fatal gap for an **autonomous PR-authoring** trigger:
   embody` in a subprocess).
 
 Between *observing* a spawn-eligible task and *actually spawning* it there is an
-open window. A crash, a re-poll, or a lease-expiry in that window **double-spawns**
-(two autonomous sessions competing on one task, opening rival PRs) or **loses**
-the spawn. Concretely, `create --spawn` on a colliding `dedup_key` returns the
-existing task but still invoked spawn a second time.
+open window. A crash, a re-poll, or any later re-surface of the same queued task
+in that window **double-spawns** (two autonomous sessions competing on one task,
+opening rival PRs) or **loses** the spawn. Concretely, `create --spawn` on a
+colliding `dedup_key` returned the existing task but still invoked spawn a second
+time.
 
 "Usually once" is unacceptable precisely because the side effect is autonomous.
 
@@ -104,9 +107,9 @@ invariant:
 
 Because `reserve_spawn` returns `reserved=False` whenever an *active*
 (`reserving`/`spawned`) reservation already exists, a task that is already being
-spawned — or was spawned and later re-queued (its lease expired while the embody
-is merely **slow**) — is skipped. **Lease expiry is not treated as death**, so a
-slow-but-alive embody is never double-spawned. Each cycle:
+spawned — or is still held by a slow-but-alive embody — is skipped. **Elapsed
+time is not treated as death**, so a slow-but-alive embody is never
+double-spawned. Each cycle:
 
 1. **reconcile** — settle `spawned` reservations whose task reached a **terminal**
    state (`completed`/`abandoned`). This is the *only* automatic release, and only
@@ -115,15 +118,18 @@ slow-but-alive embody is never double-spawned. Each cycle:
    optional **label opt-in**), up to `--max-concurrent` in-flight: `reserve_spawn`
    → if reserved, spawn embody → `record_spawn` (or `fail_spawn` on error, which
    releases a fresh attempt). A task that accumulates `--max-attempts` **failed**
-   spawn attempts is **dead-lettered** — held, no longer auto-retried, its failed
-   history left queryable via `reservations list --state failed` for a human — so
-   a persistently-unspawnable task can't drive a retry storm.
+   spawn attempts is treated as **spawn-dead-lettered** by the supervisor — held
+   out of auto-retry, with its failed history queryable via `reservations list
+   --state failed` for a human — so a persistently-unspawnable task can't drive a
+   retry storm. This does **not** mutate the task's queue status to
+   `dead_letter`; it is a reservation-history guard.
 
 CLI:
 
 ```
 agent-dispatch supervise [--repo R | --all-repos] [--label L ...] \
     [--max-concurrent N] [--max-attempts N] [--no-heartbeat] \
+    [--no-reactive] [--reactive-interval S] \
     [--headless-label L ...] [--headless-agent AGENT] [--interval S] [--once]
 agent-dispatch reservations list [--task ID] [--state S]
 agent-dispatch reservations fail|settle <key> [--detail ...]
@@ -250,26 +256,39 @@ embody session's liveness (`tracking.resolve_live_session` → the agent-bridge
 live-session registry, cross-machine over SSH for a remote owner) and, **only on
 a confirmed-alive result**, sends a lease heartbeat on the task's behalf. This
 keeps a live-but-quiet worker (one not emitting progress between phases) from
-having its lease expire and being wrongly re-queued — closing the "don't trust
-the LLM to emit progress to hold its lease" gap.
+being misclassified as recoverable — closing the "don't trust the LLM to emit
+progress to prove it is alive" gap.
 
 The safety hinge: heartbeats fire **only** on a positive liveness result. A
 `None` probe collapses *dead* and *bridge-unreachable* together, so it is treated
 as neither alive (no heartbeat) nor proof-of-death (no recovery). A genuinely
-dead worker therefore stops being heartbeated, its lease expires naturally, and
-its task is *held* (its `spawned` reservation blocks re-spawn) for recovery — a
-transient bridge miss can't mask a live worker, whose own activity still extends
-its lease.
+dead worker is recovered only once a later probe returns a positive `gone`
+verdict; a transient bridge miss can't mask a live worker, whose own activity
+still updates its task.
 
-### Deliberately deferred (needs *confirmed-death* detection)
+### Recovery and nudging (built) — confirmed death only
 
-- **Auto-recovery of a dead-but-non-terminal embody.** Auto-releasing a held
-  reservation for a fresh attempt requires distinguishing *confirmed dead* from
-  *bridge-unreachable* — the current liveness probe collapses both to `None`, so
-  auto-recovery on `None` would double-spawn on a transient outage. Until a
-  positive "session is gone" signal (or a consecutive-confirmation + grace
-  scheme) exists, a dead embody's task is held and surfaced via
-  `reservations list` for a manual `reservations fail <key>`.
+The supervisor now has the positive-death signal the earlier design deferred to:
+`recover_gone` probes each spawned body with a tri-state verdict and acts only on
+`gone`.
+
+- **local CLI/worktree body** — probe the owner worktree's captured
+  `owner_session_id` through the agent-bridge live-session registry (local or over
+  SSH for a remote owner). A different/absent session is `gone`.
+- **local headless body** — parse the local `agent-bridge` session id from the
+  reservation handle and probe that session on this host.
+- **headless fleet body** — parse `fleet-body:<host>:<session-id>` and probe the
+  pool host over SSH (`agent-bridge --json status <session-id>`).
+
+For a confirmed-gone body, the supervisor yields the task on the dead owner's
+behalf when it is still leased (preserving `goal` and `progress_log`), marks the
+reservation failed, and the next cycle can reserve a fresh attempt. `live` bodies
+are heartbeated; `unknown` bodies are left untouched. A confirmed-alive but quiet
+worktree body can also be nudged once per stall window (`nudge_stalled`) instead
+of being recovered. The remaining unsupported recovery path is **CLI/mux fleet**
+auto-recovery: without a headless bridge session handle, a synthetic-owner fleet
+body is still not auto-joined to the origin's live-session registry; use
+headless fleet for recoverable remote sweeps.
 
 ## Transport for a containerized producer
 
@@ -277,8 +296,10 @@ A producer running in a **Docker container** (e.g. a scheduled sweep container)
 reaches the host coordinator over `host.docker.internal` (with
 `extra_hosts: host.docker.internal:host-gateway`). Two facts shape the safe bind:
 
-- The coordinator defaults to **loopback** (`127.0.0.1:9847`), which a container
-  **cannot** reach.
+- The coordinator defaults to **loopback on an OS-assigned port** (advertised by
+  `~/.agent-dispatch/run/endpoint.json`; `AGENT_DISPATCH_PORT` pins a legacy
+  fixed port when deliberately set), which a container **cannot** reach through
+  the host's `127.0.0.1`.
 - On Linux, each compose service gets its **own** bridge network with its own
   host-local gateway (all in `172.16/12`, none LAN-routed), so no *single*
   host-local IP is reachable from every container. The address reachable from all

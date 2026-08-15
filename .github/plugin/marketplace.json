@@ -36,7 +36,7 @@
     {
       "name": "agent-mcp",
       "description": "Swiss-army MCP bridge - wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP, inject host credentials, and apply a decorator stack (filter, rename, defer, code-mode, storage, transform, gate). Dual-era: speaks modern MCP 2.x (2026-07-28) and the legacy handshake, in both directions.",
-      "version": "0.2.0-dev44",
+      "version": "0.2.0-dev45",
       "source": "plugins/agent-mcp"
     },
     {
@@ -78,7 +78,7 @@
     {
       "name": "agent-dispatch",
       "description": "Portable agent task-queue + per-host coordinator: a single-writer SQLite work queue (seven-state model, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.1.0-dev154",
+      "version": "0.1.0-dev155",
       "source": "plugins/agent-dispatch"
     },
     {
@@ -102,13 +102,13 @@
     {
       "name": "agent-index",
       "description": "Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem, with good-citizen ingestion.",
-      "version": "0.1.0-dev54",
+      "version": "0.1.0-dev55",
       "source": "plugins/agent-index"
     },
     {
       "name": "agent-machines",
       "description": "Portable restore-machinestate for Copilot CLI - converge the current machine to desired state declared in in-repo requirement packages (Copilot settings first, then repo-local modules). Machine-scoped union restore discovered from the adopted-projects registry, a seven-disposition model (enforce/ensure-present/capture-only/ignore/exclude/prune/prerequisite-check), a conflict validator that detects (never auto-arbitrates) cross-package clashes, and a repo-local module runner (dry-run-aware, gated, cross-platform) so sensitive OS-mutating modules stay in each harness repo while the engine stays generic.",
-      "version": "0.1.0-dev21",
+      "version": "0.1.0-dev22",
       "source": "plugins/agent-machines"
     },
     {

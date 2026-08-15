@@ -6,13 +6,14 @@ producers) coordinate work through a single, low-latency authority -- instead of
 racing each other through `origin/master` pushes or needing a dedicated user
 account per agent.
 
-> **Status: early but installable.** This ships the queue **engine**
+> **Status: installable runtime.** This ships the queue **engine**
 > (`agent_dispatch.queue`), the per-host **coordinator daemon**
 > (`agent-dispatch serve`), the **`agent-dispatch` CLI**, **local MCP tools**
 > (`agent-dispatch mcp`), a **lifecycle installer** (marketplace-registered;
 > `scripts/install.sh` / `scripts/install.ps1` --
-> `install|update|status|start|stop|uninstall` -- deploy a venv + binstub +
-> deploy manifest), an **SSE event stream** (`GET /events` /
+> `stamp|provision|install|update|status|start|stop|uninstall` -- stamp a
+> self-provisioning binstub, then deploy a versioned venv + binstub + deploy
+> manifest), an **SSE event stream** (`GET /events` /
 > `agent-dispatch watch`), **agent-bridge spawn** (`create --spawn`), and a
 > label-gated **embody supervisor** that can run locally or fan bodies out to a
 > remote host pool (`supervise --pool`, with `--headless` for headless
@@ -23,11 +24,11 @@ account per agent.
 
 ## Install
 
-`agent-dispatch` is a `machine-gated` plugin: the agent-worktrees launch-time
-reconciler installs/updates its runtime automatically on the machines listed in
-the control repo's gate manifest (`external-repos.yaml` `deploy_machines`), and
-the `test-chamber services agent-dispatch <action>` path drives it too
--- the same model as agent-bridge. To install/manage it directly:
+`agent-dispatch` is a standalone runtime plugin. Enabling the plugin installs the
+payload; the session-start hook can **stamp** a binstub into `~/.local/bin` so
+the first `agent-dispatch` invocation self-provisions the runtime. Repos that use
+agent-worktrees may also machine-gate the runtime and reconcile it automatically,
+but that is composition, not a requirement. To install/manage it directly:
 
 ```bash
 # via the marketplace (once published):
@@ -38,12 +39,14 @@ bash "$(copilot plugin path agent-dispatch)/scripts/install.sh" install    # Lin
 ```
 
 `scripts/install.{sh,ps1}` is a lifecycle manager --
-`install | update | status | start | stop | uninstall` (`init.{sh,ps1}` is a
-thin alias for `install`). `install`/`update` build a versioned runtime under
-`~/.agent-dispatch/versions/<v>/` (published by the `current-version` marker),
-an `agent-dispatch` binstub in `~/.local/bin`, a schema-3 deploy manifest, the
-**"Tasks" picker pivot** (see below), and -- unless `--no-service` (`-NoService`)
--- the coordinator service (a per-host local coordinator, matching agent-bridge).
+`stamp | provision | install | update | status | start | stop | uninstall`
+(`init.{sh,ps1}` is a thin alias for `install`). `stamp` only writes the
+self-provisioning binstub + payload marker; `provision`/`install`/`update` build
+a versioned runtime under `~/.agent-dispatch/versions/<v>/` (published by the
+`current-version` marker), an `agent-dispatch` binstub in `~/.local/bin`, a
+deploy manifest, the **"Tasks" picker pivot** (see below), and -- unless
+`--no-service` (`-NoService`) -- the coordinator service (a per-host local
+coordinator, matching agent-bridge).
 `update` is downgrade-guarded (a stale checkout won't silently roll back a newer
 deployed runtime; override with `--force`).
 
@@ -95,6 +98,13 @@ Get-ScheduledTask -TaskName agent-dispatch | Get-ScheduledTaskInfo   # manage it
 Both read an editable `service.env` (host/port/db/token) beside the runtime. A
 client-only machine installs with `--no-service` (`-NoService`) and points
 `AGENT_DISPATCH_URL` at the coordinator host.
+
+The service uses the local-endpoint-discovery pattern: by default `serve` binds
+loopback on an OS-assigned port, writes `~/.agent-dispatch/run/endpoint.json`,
+and publishes the active generation in the zdd routing table for graceful
+cutover. Set `AGENT_DISPATCH_PORT` only when you deliberately need a fixed
+legacy port; clients resolve `AGENT_DISPATCH_URL` first, then the routing table /
+rendezvous file, then the legacy `127.0.0.1:9847` fallback.
 
 ## Why
 
@@ -173,14 +183,18 @@ alive-but-quiet worker rather than yanking its goal. See the **`agent-dispatch`*
 skill § *Goal-loop tasks* and the vision leaf (*resumable-goal*,
 *resume-the-goal-not-restart-it*) for the full contract.
 
-### Routing: `requires` (hard) vs `affinity` (soft)
+### Routing: `requires` / `excludes` (hard) vs `affinity` (soft)
 
-- **`requires`** -- a set of capability tokens (e.g. `logger`, `review`) or an
-  identity pin (`agent:review-bot`). A task is claimable only when `requires` is
-  a subset of the worker's advertised capabilities. This is how the same
-  capability on two machines gives **cooperative, redundant** coverage: first
-  writer wins; when a worker goes away, a liveness GC pass requeues its task and
-  the other reclaims it.
+- **`requires`** -- a set of capability or identity tokens (e.g. `logger`,
+  `review`, `machine:<m>`, `worktree:<w>`, `repo:<lane>`). A task is claimable
+  only when `requires` is a subset of the worker's advertised token set. This is
+  how the same capability on two machines gives **cooperative, redundant**
+  coverage: first writer wins; when a worker goes away, a liveness GC pass
+  requeues its task and the other reclaims it.
+- **`excludes`** -- hard anti-affinity tokens. At claim time the worker's
+  capability set is augmented with identity tokens (`machine:<m>`,
+  `worktree:<w>`, `repo:<lane>`); any matching exclude makes that worker
+  ineligible.
 - **`affinity`** -- soft preferences (preferred agent/worktree) that order
   candidates but never exclude.
 
@@ -457,7 +471,8 @@ ruff check .
 Run the per-host coordinator (loopback by default), then drive it with the CLI:
 
 ```bash
-agent-dispatch serve                     # binds 127.0.0.1:9847 (AGENT_DISPATCH_* to override)
+agent-dispatch serve                     # binds loopback on an OS-assigned port
+                                         # (AGENT_DISPATCH_PORT pins if needed)
 
 # from any agent/producer (AGENT_DISPATCH_URL points at the coordinator):
 agent-dispatch create "Add narration track" --require logger --dedup-key seg42
@@ -524,8 +539,8 @@ worker **exactly once**; the rest skip. See
 The supervisor turns **queued** tasks into host embody autopilots — **exactly
 once each** — over the same reservation primitive. It's generic (no
 producer-specific logic) and safety-first: a task is spawned only when a *fresh*
-reservation is acquired, so a slow-but-alive embody whose lease expired is never
-double-spawned.
+reservation is acquired, so a slow-but-alive embody with an active reservation is
+never double-spawned.
 
 ```bash
 agent-dispatch supervise --once                       # one cycle (this repo's lane)
@@ -533,6 +548,7 @@ agent-dispatch supervise --label autopilot            # loop; only spawn opted-i
 agent-dispatch supervise --all-repos --max-concurrent 3
 agent-dispatch supervise --label sweep --headless-label sweep   # embody 'sweep' headless-ACP
 agent-dispatch supervise --pool host-a,host-b --origin origin --headless --label sweep
+agent-dispatch supervise --no-reactive --interval 30            # fixed polling only
 agent-dispatch supervise --evaluator eval.json        # + advance loops across terminal events
 agent-dispatch reservations list --state spawned      # what's in flight
 agent-dispatch reservations fail <key>                # release a confirmed-dead spawn
@@ -541,10 +557,15 @@ agent-dispatch reservations fail <key>                # release a confirmed-dead
 Each cycle **reconciles** (settles reservations of terminal tasks), optionally runs
 the **evaluator pass**, then **polls** (reserve → embody → record, up to
 `--max-concurrent`). It also **heartbeats the lease of every confirmed-alive
-worker** so a quiet-but-alive session isn't wrongly re-queued (disable with
-`--no-heartbeat`). Auto-recovery of a *dead*-but-non-terminal embody needs
-confirmed-death detection and is deferred (see the design doc); until then a dead
-embody's task is *held* and surfaced for `reservations fail`.
+worker** so a quiet-but-alive session is not wrongly recovered (disable with
+`--no-heartbeat`), **releases and re-queues confirmed-gone bodies** for
+re-embodiment, and can **nudge stalled-but-live workers** before recovery. An
+`unknown` liveness probe is always left alone. Repeated spawn failures are
+treated as a supervisor dead-letter condition (failed reservation history; no
+more auto-retry until a human intervenes), not as a second task state change.
+The serve loop is reactive by default: within the poll interval it wakes early
+when an embodied worker's turn goes `running -> idle`; `--no-reactive` restores
+plain fixed-interval polling.
 
 The bare `supervise` above runs the loop in the foreground. The
 `supervise register|status|list|remove` subcommands instead manage durable
@@ -617,22 +638,21 @@ Point a Copilot sub-agent (or any MCP client) at it:
   "mcpServers": {
     "agent-dispatch": {
       "command": "agent-dispatch",
-      "args": ["mcp"],
-      "env": { "AGENT_DISPATCH_URL": "http://127.0.0.1:9847" }
+      "args": ["mcp"]
     }
   }
 }
 ```
 
-It exposes the queue as tools: `dispatch_create` / `dispatch_find` /
-`dispatch_list` / `dispatch_show` / `dispatch_events` / `dispatch_payload` /
+It exposes the queue as 20 tools: `dispatch_create` / `dispatch_approve` /
+`dispatch_find` / `dispatch_sweep` / `dispatch_recipe_list` /
+`dispatch_recipe_render` / `dispatch_recipe_kick` / `dispatch_list` /
+`dispatch_show` / `dispatch_events` / `dispatch_payload` /
 `dispatch_worktree_status` / `dispatch_claim` / `dispatch_start` /
 `dispatch_yield` / `dispatch_complete` / `dispatch_abandon` /
-`dispatch_heartbeat` / `dispatch_approve` / `dispatch_detach` /
-`dispatch_recover` -- plus the recipe tools `dispatch_recipe_list` /
-`dispatch_recipe_render` / `dispatch_recipe_kick` (kick an ad-hoc loop archetype;
-see **Recipes** above). `dispatch_create` takes an inline `payload` the
-coordinator spills to a blob when large.
+`dispatch_heartbeat` / `dispatch_detach` / `dispatch_recover`.
+`dispatch_create` takes an inline `payload` the coordinator spills to a blob when
+large.
 
 ### Two MCP surfaces
 
@@ -641,17 +661,39 @@ There are **two** ways to reach the tools — pick by where the client runs:
 | Surface | Command / endpoint | Identity | Use when |
 |---------|--------------------|----------|----------|
 | **Local stdio shim** | `agent-dispatch mcp` | resolved from the caller's **CWD** (like the CLI) | the agent has `agent-dispatch` installed locally in its worktree |
-| **Coordinator-hosted HTTP** | mounted at **`/mcp`** on the coordinator | `X-Agent-Machine` / `X-Agent-Worktree` **request headers** (or explicit tool args) | a remote MCP client (e.g. an `agent-mcp` bridge on another host) that can't resolve local identity |
+| **Coordinator-hosted HTTP** | mounted at **`/mcp`** on the discovered coordinator endpoint | `X-Agent-Machine` / `X-Agent-Worktree` **request headers** (or explicit tool args) | a remote MCP client (e.g. an `agent-mcp` bridge on another host) that can't resolve local identity |
 
 Both expose the same 20 `dispatch_*` tools and publish the same `task.*` events;
 they only differ in how identity is supplied. The coordinator mounts `/mcp`
 automatically when the `mcp` extra is installed (pass `enable_mcp=False` to
 `create_app` to suppress it); if a bearer token is configured it also guards the
 `/mcp` mount. A remote client points at, e.g.,
-`http://<coordinator-host>:9847/mcp` and sets the identity headers per agent.
+`http://<discovered-coordinator-endpoint>/mcp` and sets the identity headers per
+agent.
 
-Configuration (all optional): `AGENT_DISPATCH_HOST`, `AGENT_DISPATCH_PORT`,
-`AGENT_DISPATCH_DB`, `AGENT_DISPATCH_TOKEN` (bearer auth),
-`AGENT_DISPATCH_GC_INTERVAL` (liveness garbage-collection cadence in seconds; `0`
-disables), and `AGENT_DISPATCH_URL` (the base URL the CLI talks to -- point it at
-a remote coordinator on a shared network).
+Configuration (all optional): `AGENT_DISPATCH_HOST`, `AGENT_DISPATCH_PORT`
+(server bind pin; omitted means OS-assigned port), `AGENT_DISPATCH_DB`,
+`AGENT_DISPATCH_TOKEN` (bearer auth), `AGENT_DISPATCH_GC_INTERVAL` (liveness
+garbage-collection cadence in seconds; `0` disables), `AGENT_DISPATCH_RUN_DIR` /
+`AGENT_DISPATCH_ENDPOINT` (local endpoint discovery), `AGENT_DISPATCH_URL` (client
+override), `AGENT_DISPATCH_SHARED_URL` / `AGENT_DISPATCH_SHARED_TOKEN` (opt-in
+shared coordinator), and `AGENT_DISPATCH_NO_AUTOSTART` (disable lazy local
+coordinator start).
+
+## Troubleshooting
+
+- `agent-dispatch health` checks the selected coordinator without lazy-starting
+  one. Other local client verbs lazy-start a detached coordinator unless
+  `AGENT_DISPATCH_NO_AUTOSTART` is set, a remote `--url`/`--shared` is used, or
+  the caller is in WSL (the Windows host owns the coordinator).
+- `scripts/install.{sh,ps1} status` reports the deployed version/manifest, the
+  coordinator service, and every supervisor profile. Runtime logs live under
+  `~/.agent-dispatch/` (`serve-service.log`, `reconcile.err.log`,
+  `running-version.json`, `current-version`).
+- Version drift is intentionally fail-loud: the session-start hook compares the
+  installed payload version with `deploy-manifest.json` / `current-version` and
+  reconciles in the background; a running coordinator writes
+  `running-version.json` so the launcher can distinguish the live imported
+  version from the on-disk slot.
+- Wildcard binds (`0.0.0.0`, `::`) require `AGENT_DISPATCH_TOKEN`; otherwise the
+  server refuses to start rather than expose the task-control API on the LAN.
