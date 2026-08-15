@@ -731,6 +731,21 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not hasattr(args, "func"):
         args = parser.parse_args(["status"])
+
+    # Project-aware, role-routed transport: a client runs the read subcommands on
+    # the designated indexer host over SSH (see transport.py). The host (or a
+    # no-project fallback whose machine-global role is host) runs locally.
+    from . import transport
+
+    sub = getattr(args, "command", None)
+    raw = list(sys.argv[1:] if argv is None else argv)
+    if sub is None:
+        sub, raw = "status", ["status"]
+    if sub in transport.DELEGABLE:
+        rc = transport.maybe_delegate(sub, raw)
+        if rc is not None:
+            return rc
+
     return int(args.func(args))
 
 
