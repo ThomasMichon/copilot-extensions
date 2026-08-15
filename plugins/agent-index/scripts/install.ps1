@@ -979,7 +979,7 @@ function Install-Engine {
         $engOut = & uv @pipArgs 2>&1
         $engRc = $LASTEXITCODE
         if ($engRc -eq 0 -and $torchIdx) {
-            Write-Host "  ...    Swapping in CUDA torch from $torchIdx (wheel only, --no-deps)" -ForegroundColor DarkGray
+            Write-Host "  ...    Swapping in CUDA torch from the configured CUDA wheel index (wheel only, --no-deps)" -ForegroundColor DarkGray
             $torchOut = & uv pip install --python $EngineVenvPython --index-url $torchIdx --no-deps --reinstall-package torch torch 2>&1
             $engRc = $LASTEXITCODE
             $engOut = @($engOut) + @($torchOut)
@@ -990,7 +990,7 @@ function Install-Engine {
         $engOut = & $EngineVenvPython @pipArgs 2>&1
         $engRc = $LASTEXITCODE
         if ($engRc -eq 0 -and $torchIdx) {
-            Write-Host "  ...    Swapping in CUDA torch from $torchIdx (wheel only, --no-deps)" -ForegroundColor DarkGray
+            Write-Host "  ...    Swapping in CUDA torch from the configured CUDA wheel index (wheel only, --no-deps)" -ForegroundColor DarkGray
             $torchOut = & $EngineVenvPython -m pip install --index-url $torchIdx --no-deps --force-reinstall torch 2>&1
             $engRc = $LASTEXITCODE
             $engOut = @($engOut) + @($torchOut)

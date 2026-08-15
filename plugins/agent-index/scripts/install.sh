@@ -778,7 +778,7 @@ _install_engine() {
         [[ "$upgrade" -eq 1 ]] && uv_args+=(--upgrade)
         uv "${uv_args[@]}" || rc=$?
         if [[ "$rc" -eq 0 && -n "$torch_idx" ]]; then
-            _step "Swapping in CUDA torch from $torch_idx (wheel only, --no-deps)"
+            _step "Swapping in CUDA torch from the configured CUDA wheel index (wheel only, --no-deps)"
             uv pip install --python "$ENGINE_VENV_PYTHON" --index-url "$torch_idx" --no-deps --reinstall-package torch torch || rc=$?
         fi
     else
@@ -786,7 +786,7 @@ _install_engine() {
         [[ "$upgrade" -eq 1 ]] && pip_args+=(--upgrade)
         "$ENGINE_VENV_PYTHON" "${pip_args[@]}" || rc=$?
         if [[ "$rc" -eq 0 && -n "$torch_idx" ]]; then
-            _step "Swapping in CUDA torch from $torch_idx (wheel only, --no-deps)"
+            _step "Swapping in CUDA torch from the configured CUDA wheel index (wheel only, --no-deps)"
             "$ENGINE_VENV_PYTHON" -m pip install --index-url "$torch_idx" --no-deps --force-reinstall torch || rc=$?
         fi
     fi
