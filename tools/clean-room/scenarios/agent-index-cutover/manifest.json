@@ -1,0 +1,27 @@
+{
+  "name": "agent-index-cutover",
+  "description": "Tier-P F1 cutover-resilience scenario: install + provision agent-index on a fresh box, then drive the installer's real `agent-index deploy` seam (the OS-agnostic zdd active/passive graceful cutover) through a battery of THORNY situations and assert the binding invariant of the correct-install-flows effort (dotfiles#1393) -- a version cutover must NEVER kill in-flight, non-resumable work. agent-index's durable unit is the SQLite indexing queue ($AGENT_INDEX_HOME/data/tasks.db). Checks: (survive-queued-batch) a queued index task survives the cutover -- routing flips, the old service is retired, the new service is healthy, and the task row is still present in the shared durable tasks.db (re-adoption via the durable queue); (drain-gate) /drain closes the service to new work (/health -> draining, /reindex refused) and the cutover then yields a FRESH non-draining service that accepts work again; (breadcrumb-recover) an aborted cutover that strands a DRAINED survivor is healed by recovery (deploy --recover undrains it). The heavy embedding engine (separate unit, fixed port 8421) is left untouched by a service cutover and is not exercised. The probe is dependency-light (enqueues straight into the pure-SQLite TaskStore, so it needs neither torch nor lancedb) and portable stdlib-only, so it is verifiable off-Docker too. Name-free / public.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": [] },
+  "auth": { "copilot": "required", "gh": "optional", "ado": "none" },
+  "validates": "graceful-daemon-cutover",
+  "config": {
+    "CR_MARKETPLACE_REPO": "ThomasMichon/copilot-extensions",
+    "CR_MARKETPLACE_NAME": "copilot-extensions",
+    "CR_UV_INDEX": "(opt-in uv-index fixture)",
+    "CR_CUTOVER_CHECKS": "comma-separated subset of: survive-queued-batch,drain-gate,breadcrumb-recover"
+  },
+  "expected_artifacts": [
+    "~/.copilot/installed-plugins/<marketplace>/agent-index",
+    "~/.agent-index/versions/<ver>/bin/python (built service slot with zdd)",
+    "~/.local/bin/agent-index (self-provisioning binstub)"
+  ],
+  "stages": [
+    { "n": 0, "title": "environment (fresh machine)" },
+    { "n": 1, "title": "install agent-index" },
+    { "n": 2, "title": "runtime provisions on first session" },
+    { "n": 3, "title": "cutover resilience battery (thorny situations)" }
+  ]
+}
