@@ -217,6 +217,19 @@ VENV_PYTHON="$VENV_DIR/bin/python"
 
 _versioned_activate() {
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
+    # Monotonic activation (dotfiles #1508): never flip the active runtime BACKWARD.
+    # An install/ensure run from a STALE payload (older than the active
+    # current-version marker) must not downgrade the running runtime; the marker is
+    # authoritative (#1504). Keep it and skip activating the older slot unless a
+    # downgrade is explicitly forced -- guards every caller, not just _downgrade_guard.
+    if [[ "${FORCE:-0}" != 1 && -n "${SRC_VERSION:-}" && -f "$INSTALL_DIR/current-version" ]]; then
+        local cur_ver
+        cur_ver="$(tr -d ' \t\r\n' < "$INSTALL_DIR/current-version")"
+        if [[ -n "$cur_ver" ]] && _version_lt "$SRC_VERSION" "$cur_ver"; then
+            _skip "Keeping active runtime $cur_ver -- not activating older $SRC_VERSION (monotonic; dotfiles #1508)"
+            return 0
+        fi
+    fi
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py="$VENV_DIR/bin/python"
     [[ -x "$py" ]] || py="$LINK_DIR/bin/python"

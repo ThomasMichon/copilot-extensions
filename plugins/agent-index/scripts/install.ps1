@@ -254,6 +254,23 @@ function Test-VenvIsLink {
 
 function Invoke-VersionedActivate {
     if (-not $VersionedRuntime) { return $true }
+    # Monotonic activation (dotfiles #1508): never flip the active runtime BACKWARD.
+    # An install/ensure run from a STALE payload (older than the active
+    # current-version marker -- e.g. a not-yet-reconciled marketplace snapshot, or a
+    # different local/worktree deploy that activated a newer slot) must not
+    # downgrade the running runtime. The current-version marker is authoritative
+    # (#1504); keep it and skip activating the older slot (it stays built-but-
+    # inactive) unless a downgrade is explicitly forced. This guards EVERY caller
+    # (install, update, ...), not just the `update` action's Invoke-DowngradeGuard,
+    # so a stale payload can't split-brain the service by re-activating an old slot.
+    if (-not $Force -and $SrcVersion) {
+        $curVer = ''
+        try { $curVer = ([IO.File]::ReadAllText((Join-Path $InstallDir 'current-version'))).Trim() } catch {}
+        if ($curVer -and (Test-VersionLt -A $SrcVersion -B $curVer)) {
+            Write-Skip "Keeping active runtime $curVer -- not activating older $SrcVersion (monotonic; dotfiles #1508)"
+            return $true
+        }
+    }
     if ((Test-Path $LinkDir) -and -not (Test-VenvIsLink $LinkDir)) {
         try { Invoke-Stop | Out-Null } catch {}
     }
