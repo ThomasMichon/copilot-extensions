@@ -9,9 +9,10 @@ verification.
 axis — **does it carry non-public provider/multi-machine system config?**
 
 - **In-box** (`transports/<module>/`, this plugin): self-contained transports with
-  no non-public config — `direct` (plain SSH) and `dtssh` (real-user reach over
+  no non-public config — `direct` (plain SSH), `dtssh` (real-user reach over
   the public Microsoft Dev Tunnels service; the operator's identity and live
-  tunnel ids are injected at deploy time, not baked in).
+  tunnel ids are injected at deploy time, not baked in), and `wsl` (local
+  Windows-to-WSL reach through the `wsl.exe` interop stdio pipe).
 - **External** (its own plugin in its audience's marketplace): transports needing
   multi-machine system/provider config or credentials — e.g. Cloudflare (Access org / SSO /
   multi-machine system hostnames). These keep their concrete values out of this public core
@@ -27,6 +28,13 @@ Either way, the recipe shape and the core's obligations are identical.
 - **Transport owns the recipe:** a single `proxy_command` template describing
   how to dial a host (or nothing, for plain SSH), a `proxy_binary_default`, an
   optional `install-client` script, and its own config schema extensions.
+
+The JSON schemas in `contract/` are the published contract for authors and
+callers. The current CLI is intentionally thin: `agent-ssh emit-profile` requires
+only that the module file contain a string `module` name, then consumes the
+fields it knows (`proxy_command`, `proxy_binary_default`, registry `machines`,
+`gate`, `options`, and so on). Schema validation is a caller/test responsibility
+today, not an extra runtime pass inside the emitter.
 
 ## The `proxy_command` template
 
@@ -48,7 +56,9 @@ Examples:
 ## Topology
 
 - `per-machine` (default) -- each host dials its own hostname via the recipe.
-- `jumpbox` -- one `gate` host carries the recipe; other hosts `ProxyJump` it.
+- `jumpbox` -- when the registry sets `topology: jumpbox` and a top-level `gate`,
+  the core emits the gate host with the transport recipe; machines that set
+  `via: jumpbox` get `ProxyJump <gate.name>`.
 
 ## Coexistence rules (binding)
 
@@ -67,29 +77,43 @@ Examples:
 | `install-client` | transport (if it needs a client binary) |
 | `provision-server` | transport (optional; may be operator-manual) |
 
-## `install-client` on Windows — no App Execution Alias shims (binding)
+`entrypoints` in `module.yaml` are metadata for installers/orchestrators. The
+core `emit-profile` and `verify` commands do not call transport `install-client`
+or `provision-server` scripts.
 
-A transport whose `install-client` installs a helper CLI on **Windows** MUST put a
-**real standalone executable on PATH** — it must NOT rely on a WinGet *App
+## Failure behavior
+
+- `emit-profile` exits `2` when the module file lacks a string `module` name.
+  File/permission errors and invalid jumpbox records fail loud instead of
+  producing a partial profile.
+- `verify` exits `2` when no host names are supplied, exits `1` if any probed
+  alias is unreachable, and prints one `[OK]` / `[FAIL]` line per alias.
+
+## `install-client` on Windows — App Execution Alias shims break over SSH
+
+A transport whose `install-client` installs a helper CLI on **Windows** should put
+a **real standalone executable on PATH** rather than relying on a WinGet *App
 Execution Alias* shim (`%LOCALAPPDATA%\Microsoft\WinGet\Links\<tool>.exe`). Those
 shims are reparse points that Windows refuses to execute over a **non-interactive
 SSH logon** (`the path cannot be traversed because it contains an untrusted mount
 point`). Because agent-ssh exists to drive machines *over SSH* — including a
 control plane re-running `install-client` / `emit-profile` / discovery on a remote
 box (e.g. after a tunnel rotation) — a shim-only helper breaks exactly the
-over-SSH path the transport is meant to enable.
+over-SSH path the transport is meant to enable. The core does not enforce this;
+it is a provider/installer responsibility and a troubleshooting checkpoint.
 
-Requirement: `install-client` (windows entrypoint) installs the helper as a plain
+Preferred shape: `install-client` (windows entrypoint) installs the helper as a plain
 binary into a transport-owned dir that it prepends to the **User PATH ahead of**
 `WinGet\Links` (direct-download the vendor exe rather than `winget install …`, or
 copy the real exe out of `WinGet\Packages\…`). Prefer this even when a winget
 package exists, so the tool resolves shim-free both interactively and over SSH.
 
-> **Worked example — the in-box `dtssh` transport.** dtssh shells out to
-> `devtunnel`. `winget install Microsoft.devtunnel` lands only the Links shim, so
-> `dtssh discover` fails when run over SSH. The dtssh `install-client` instead
-> drops the standalone `devtunnel.exe` (`aka.ms/TunnelsCliDownload/win-x64`) into
-> its bin dir on PATH ahead of the shim. Reference implementation:
-> `transports/dtssh/scripts/install-client.ps1` (and `install-host.ps1` for the
-> host side). The same caution applies to any Windows helper a transport installs
-> (e.g. `cloudflared` for the external Cloudflare transport).
+> **Current in-box `dtssh` shape.** The dtssh transport installs dtssh itself
+> under `%LOCALAPPDATA%\dtssh\bin` via the upstream dtssh installer and puts that
+> real binary on the User PATH. Its Windows scripts resolve `devtunnel.exe` from
+> a sibling copy when present, otherwise from PATH; if no `devtunnel` is found,
+> `install-client.ps1` falls back to `winget install Microsoft.devtunnel`. Because
+> that fallback can land a WinGet Links shim, the troubleshooting guidance still
+> treats shim-only helper binaries as a known over-SSH failure mode. Reference:
+> `transports/dtssh/scripts/install-client.ps1`,
+> `transports/dtssh/scripts/install-host.ps1`.

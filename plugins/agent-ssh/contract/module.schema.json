@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/ThomasMichon/copilot-extensions/plugins/agent-ssh/contract/module.schema.json",
   "title": "agent-ssh transport-provider contract",
-  "description": "The contract every transport module registers against. A transport is its OWN plugin (in its audience's marketplace) that ships a module.yaml conforming to this schema. agent-ssh's generic core consumes it to emit name-keyed SSH profiles. PUBLIC contract; transport instances (Cloudflare, dtssh) live in their own repos.",
+  "description": "The contract every transport module registers against. A self-contained transport can ship in-box under plugins/agent-ssh/transports; a provider/system-specific transport can ship as its own plugin in its audience's marketplace. agent-ssh's generic core consumes module.yaml to emit name-keyed SSH profiles. PUBLIC contract; provider-specific instances keep their concrete values out of this core.",
   "type": "object",
   "properties": {
     "module": {
@@ -47,7 +47,7 @@
       "type": "object",
       "description": "Which lifecycle verbs the transport implements. emit-profile + verify are satisfied by the core; install-client and provision-server are transport-owned.",
       "properties": {
-        "install-client":   { "type": "boolean", "description": "Transport installs a client binary. On Windows the install-client entrypoint MUST place a real standalone exe on PATH ahead of WinGet\\Links (NOT a WinGet App Execution Alias shim, which fails over non-interactive SSH). See docs/transport-provider-contract.md." },
+        "install-client":   { "type": "boolean", "description": "Transport installs a client binary. On Windows the install-client entrypoint should prefer a real standalone exe on PATH ahead of WinGet\\Links; App Execution Alias shims fail over non-interactive SSH. See docs/transport-provider-contract.md." },
         "emit-profile":     { "type": "boolean" },
         "verify":           { "type": "boolean" },
         "provision-server": { "type": "boolean" }

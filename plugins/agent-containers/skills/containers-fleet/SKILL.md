@@ -4,17 +4,22 @@ description: >-
   Manage a local Docker dev-container fleet and dispatch Copilot agents into
   containers via agent-bridge. Use when asked to "set up containers", "borrow a
   container", "release a container", "container fleet", "dispatch to a
-  container", or to run work inside a local Docker dev container instead of a
-  CodeSpace.
+  container", "troubleshoot agent-containers", or to run work inside a local
+  Docker dev container instead of a CodeSpace.
 ---
 
 # Containers Fleet
 
 > **Before you start — readiness (self-provisioning, no agent-worktrees required).**
-> agent-containers provisions its own runtime on first use and works standalone in
-> any host (CLI, Copilot app, cloud agent). If `command -v agent-containers` fails,
-> deploy its binstub first (it then self-provisions on first call):
-> `bash "$(ls ~/.copilot/installed-plugins/*/agent-containers/scripts/init.sh | head -1)" stamp`
+> agent-containers owns its own binstub/runtime and works standalone. If
+> `agent-containers version` is not found, stamp the binstub from the installed
+> plugin payload (the first real call then self-provisions the venv):
+>
+> - Windows:
+>   `pwsh -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.copilot\installed-plugins\copilot-extensions\agent-containers\scripts\init.ps1" stamp`
+> - POSIX:
+>   `bash "$(ls ~/.copilot/installed-plugins/*/agent-containers/scripts/init.sh | head -1)" stamp`
+>
 > The first call may take ~30–120s to provision (watch for `::agent-provisioning::`);
 > let it finish. If it reports a provisioning failure (e.g. missing uv / network),
 > surface the exact message — don't improvise a toolchain install. (Docker is a
@@ -24,7 +29,8 @@ description: >-
 and brokers exclusive *leases* so an effort can borrow one without two parallel
 worktrees driving the same container. Containers are reached over `docker exec`
 (Docker Desktop WSL2 backend) and run a Copilot ACP agent addressable via
-agent-bridge as `container:<name>`.
+agent-bridge as `container:<name>` when agent-bridge is installed. Without
+agent-bridge, the fleet/lease CLI still works; only bridge dispatch is absent.
 
 ## Provision a fleet
 
@@ -40,8 +46,10 @@ restarts them, `rm` removes them.
 
 ## Configuration (`containers.yaml`)
 
-Looked up from `$AGENT_CONTAINERS_CONFIG`, `./containers.yaml`, or
-`~/.agent-containers/containers.yaml`. Copy the full annotated example,
+Looked up from `$AGENT_CONTAINERS_CONFIG`, `./containers.yaml`,
+`~/.agent-containers/containers.yaml`, then (only when agent-worktrees is present
+and the current harness is bound to external state) a knowledge-overlay
+`containers.yaml`. Copy the starter example,
 [`references/containers.yaml`](references/containers.yaml), and adapt. A fleet
 built from a devcontainer spec, at a glance:
 
@@ -86,19 +94,9 @@ agent-containers release my-effort          # free it when done
 Leases are **advisory** and persist across processes until `release` or TTL
 (default 24h). `borrow` will not hand out a container already leased to another
 effort; re-borrowing for the same effort is idempotent.
-
-> **A borrowed container is an obligation on the borrowing worktree** — the same
-> resource-accountability model as CodeSpaces (`resource-obligation-settlement`).
-> A `container`-kind claim on the borrowing worktree's ledger keeps
-> `agent-worktrees finalize` gated (`block` by default) until the container's
-> work is safe (merged / moved off-box) and the claim is settled. Inspect with
-> `agent-worktrees claims show`; `finalize --abandon` re-homes it to the durable
-> orphanage for later cleanup. agent-worktrees' reclaim sweep reads a leaseable
-> resource's disposition **mirror** off its shared lease
-> (`obligations.CONTEXT_KEY`) generically — so once agent-containers mirrors a
-> settled disposition onto the container lease at release (the codespace
-> `mirror_disposition` pattern; a documented follow-on), the same cross-machine
-> never-wedge reclaim applies to containers with no agent-worktrees change.
+Use `agent-containers leases` to inspect active leases. Release by either effort
+name or container name; a missing target returns non-zero so callers can notice
+cleanup drift.
 
 ## Dispatch work
 
@@ -106,9 +104,26 @@ effort; re-borrowing for the same effort is idempotent.
 agent-bridge send container:myrepo-1 "run the unit tests in packages/foo"
 ```
 
-The resolver launches `copilot --acp --stdio --allow-all-tools` inside the
-container, forwarding the host `gh auth token` as `GH_TOKEN` so the in-container
-Copilot CLI is authenticated headlessly.
+The provider manifest in `~/.agent-bridge/providers.d/agent-containers.json`
+lets agent-bridge discover `container:` without importing this package into the
+bridge venv. The resolver launches `agent-containers exec --stdio <name>`, which
+then runs `copilot --acp --stdio --allow-all-tools` inside the container,
+forwarding the host `gh auth token` as `GH_TOKEN` by environment name so the
+token is not persisted in bridge state or logs.
+
+## Troubleshooting
+
+- `agent-containers version` — binstub/runtime health.
+- `agent-containers fleet --json` — Docker reachability + fleet discovery.
+- `agent-containers leases` / `agent-containers release <target>` — stale lease
+  inspection and cleanup. Leases are advisory and TTL-reclaimed.
+- `agent-containers namespace-list` — bridge-facing provider CLI health. If
+  bridge dispatch cannot see containers, check that the provider manifest exists
+  under `~/.agent-bridge/providers.d/` and points at the absolute binstub.
+- `agent-containers config-migrate` — migrate/stamp only the machine-local
+  `~/.agent-containers/containers.yaml`; repo/cwd configs are never rewritten.
+
+There is no `agent-containers doctor` command today.
 
 ## Notes
 

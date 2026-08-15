@@ -1,8 +1,8 @@
 # EXEMPLAR: `direct` transport module (contract reference).
 # Plain SSH to a routable address, only where inbound is permitted. It ships NO
 # proxy_command recipe -> the core emits plain `Host` blocks with no ProxyCommand.
-# This exemplar validates that the contract renders a recipe-less transport. A
-# real `direct` transport would be its own plugin.
+# This exemplar validates that the contract renders a recipe-less transport; the
+# same shape is also shipped as the in-box direct transport under transports/direct.
 module: direct
 kind: transport
 summary: Plain SSH to a routable address (no tunnel).

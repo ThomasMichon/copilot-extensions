@@ -14,7 +14,7 @@ The tool is **[dtssh](https://github.com/bmiddha/devtunnel-ssh)** (a turn-key
 dev-tunnel-with-SSH). It provisions a dedicated per-user loopback `sshd`,
 auto-manages the SSH key, pins the host key, and hosts an **owner-only** Dev
 Tunnel — so there is **no OpenSSH Server, no `sshd_config`, no `authorized_keys`
-ACL, and no local service account** to manage by hand.
+ACL, and no local service account** to manage by hand on the system OpenSSH path.
 
 ## Why dtssh (the Entra-`sshd` wall)
 
@@ -30,45 +30,43 @@ user-side psmux / editor / agent sessions, which a service account never could.
 > (the session and listener persist) → drive over `ssh dt-<host>` from anywhere.**
 > True headless (cold boot, nobody logged in) is out of scope by design.
 
-## 1. Authenticate
+## 1. Install and host with the in-box transport script
 
-Launch WAM in its own window — inline login often falls back to device-code flow,
-which corporate Conditional Access blocks.
-
-```powershell
-Start-Process devtunnel -ArgumentList "user","login","--entra"
-# confirm before continuing:
-devtunnel user show
-```
-
-`dtssh login` works too. dtssh auto-downloads the `devtunnel` CLI on first use.
-
-## 2. Install dtssh
+From the `agent-ssh` plugin directory (checkout or installed payload):
 
 ```powershell
-irm https://raw.githubusercontent.com/bmiddha/devtunnel-ssh/main/scripts/install-release.ps1 | iex
+pwsh -File .\transports\dtssh\scripts\install-host.ps1 install -Alias <host>
 ```
 
-Single self-contained binary to `%LOCALAPPDATA%/dtssh/bin`.
+The script installs or updates dtssh under `%LOCALAPPDATA%\dtssh\bin`, installs a
+no-admin Win32-OpenSSH `sshd` when needed, prompts `dtssh login` if the
+Dev Tunnel account is not signed in (unless `-SkipLogin`), installs the hidden
+Startup-folder launcher, and starts it unless `-NoStart`.
 
 ### AV / Defender caveat
 
 Scripts that download and install networking binaries are sometimes flagged as
-trojan-like. Prefer the upstream signed `install-release.ps1` above over ad-hoc
-`Invoke-WebRequest`-of-an-exe patterns.
+trojan-like. Prefer this plugin's script (which uses the upstream dtssh installer
+and a scoped Win32-OpenSSH download) over ad-hoc `Invoke-WebRequest`-of-an-exe
+patterns.
 
-## 3. Host your session
+## 2. Authentication
+
+The script calls `dtssh login` when needed. If login falls back to a blocked
+device-code flow, launch WAM in its own window and retry:
 
 ```powershell
-dtssh host --persist
+Start-Process devtunnel -ArgumentList "user","login","--entra"
+devtunnel user show
 ```
 
-This provisions the key, pins the host key, and hosts a dedicated loopback `sshd`
-(`:2222`) reachable **only** through an **owner-only** Dev Tunnel — private to your
-Entra identity by construction (no `--allow-anonymous`, no `--tenant`/`--repo`
-grant). The SSH key is a second factor; the identity gate is the tunnel owner.
+`dtssh host --persist` provisions the key, pins the host key, and hosts a
+dedicated loopback `sshd` (`:2222`) reachable **only** through an **owner-only**
+Dev Tunnel — private to your Entra identity by construction (no
+`--allow-anonymous`, no `--tenant`/`--repo` grant). The SSH key is a second
+factor; the identity gate is the tunnel owner.
 
-## 4. Persist across logon
+## 3. Persist across logon
 
 The session is user-side, so host it from a **logon Startup launcher** (not a
 SYSTEM/scheduled task — the sessions need your interactive token, and non-elevated
@@ -76,11 +74,11 @@ task creation is often blocked on managed Dev Boxes). Point a hidden Startup-fol
 shortcut at a small launcher that runs `dtssh host --persist` at logon; it then
 fires whenever you RDP/console-log-on and persists after you disconnect.
 
-A reference implementation (launcher + installer) ships **in-box with the
-`agent-ssh` plugin** as its `dtssh` transport — `transports/dtssh/scripts/install-host.ps1`
-(idempotent `install` / `update` / `status` / `stop` / `uninstall`) drives a
-self-healing `transports/dtssh/scripts/dtssh-host-launcher.ps1` from a hidden
-Startup-folder shortcut.
+That is exactly what `transports/dtssh/scripts/install-host.ps1` installs. Its
+actions are `install`, `update`, `status`, `start`, `stop`, and `uninstall`; it
+drives the self-healing
+`transports/dtssh/scripts/dtssh-host-launcher.ps1` from a hidden Startup-folder
+shortcut.
 
 ### Updating dtssh
 
@@ -97,15 +95,15 @@ pwsh -File transports/dtssh/scripts/install-host.ps1 update -Alias <host> -Dtssh
 
 The host reconnects on the new binary within ~1–2 min (first start of dtssh
 ≥ v0.2.0 downloads its bundled portable OpenSSH). No manual rename-aside /
-hand-download is needed — that was a gap (`update` used to no-op on an existing
-binary; dotfiles#850) and is now fixed. On Linux the sibling `install-host.sh
-update` (honoring `DTSSH_VERSION`) does the same via `dtssh service`.
+hand-download is needed — `update` now refreshes an existing binary instead of
+silently no-oping. On Linux the sibling `install-host.sh update` (honoring
+`DTSSH_VERSION`) does the same via `dtssh service`.
 
-## 5. Validate
+## 4. Validate
 
 ```powershell
-# host is up and hosting:
-Get-Process dtssh
+# host is up, launcher is installed, and sshd is serving an SSH banner:
+pwsh -File .\transports\dtssh\scripts\install-host.ps1 status -Alias <host>
 # a client on the SAME Entra account then runs `dtssh discover` + `ssh dt-<host>`
 ```
 

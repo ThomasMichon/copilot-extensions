@@ -1,16 +1,22 @@
 ---
 name: agent-bridge
 description: >
-  Agent-bridge control plane -- send prompts to agents on OTHER MACHINES
-  via CLI commands. Use this for cross-machine communication, NOT the
-  Task tool.
+  Agent-bridge control plane -- send prompts to persistent Copilot sessions
+  over the local bridge service: local agents, SSH machines, CodeSpaces,
+  containers, and live interactive sessions. Use this for durable/cross-venue
+  communication, NOT the Task tool.
   Trigger phrases include:
   - 'agent-bridge'
   - 'agent-bridge send'
+  - 'agent-bridge create'
+  - 'agent-bridge status'
   - 'remote agent'
+  - 'local bridge agent'
   - 'send to agent'
   - 'bridge to'
   - 'cross-machine'
+  - 'codespace agent'
+  - 'container agent'
   - 'external agent'
   - 'inter-agent'
   - 'relay to'
@@ -36,15 +42,16 @@ problems:
 
 | | agent-bridge | Task tool (sub-agents) |
 |---|---|---|
-| **What** | Communicates with Copilot sessions on **other physical machines** | Spawns local background agents in **this session** |
+| **What** | Communicates with persistent Copilot sessions outside this turn: local bridge agents, SSH machines, CodeSpaces, containers, or live interactive sessions | Spawns local background agents in **this session** |
 | **How** | `agent-bridge send <agent> "prompt"` CLI command | `task` function call in your response |
-| **Transport** | SSH to remote machines | Local subprocess |
-| **Scope** | Cross-machine, cross-network | Same machine only |
+| **Transport** | Local bridge service + local process / SSH / provider namespaces / live-session inbox | Local subprocess |
+| **Scope** | Durable cross-session or cross-venue work | Same machine/session only |
 
-**Rule:** When asked to "talk to", "send to", "relay to", or
-"communicate with" a named machine or agent from the topology, **ALWAYS
-use `agent-bridge send <agent-name> "prompt"`**. Never use the Task
-tool for cross-machine communication -- it cannot reach other machines.
+**Rule:** When asked to "talk to", "send to", "relay to", or "communicate with"
+a named bridge agent/venue (topology agent, `codespace:...`, `container:...`, or
+live session), **use `agent-bridge send <agent-name> "prompt"`**. Never use the
+Task tool for cross-machine or durable cross-session communication -- it cannot
+reach those bridge venues.
 
 Run `agent-bridge agents` to see which agent names are available. If
 your deployment includes a deployment-specific adapter skill (e.g.
@@ -112,7 +119,8 @@ plugin. Source code lives in the installed plugin directory at
 `~/.copilot/installed-plugins/copilot-extensions/agent-bridge/`.
 
 **Config lives at:** `~/.agent-bridge/config.yaml` (topology profiles
-pointing to this repo's `machines.yaml`; the roster is derived from it)
+pointing to optional `machines.yaml`; the roster is derived from it when present.
+Provider namespaces from `~/.agent-bridge/providers.d/` work without a topology.)
 
 
 ## CLI Commands
@@ -125,6 +133,10 @@ agent-bridge send <agent|machine|codespace:name|container:name> "<prompt>"
 agent-bridge agents          # list registered agents (--json)
 agent-bridge machines        # list machines + SSH readiness (--json)
 ```
+
+Core service setup is standalone. Optional sibling providers compose through
+their own manifests/CLIs; if `agent-codespaces` or `agent-containers` is absent,
+the corresponding namespace is simply absent.
 
 The full command reference -- `send` (sync/async, sessions, timeouts), agent
 and machine listing, session management, config adopt/show, and service
@@ -344,8 +356,8 @@ Write the prompt to a file (or pipe it on stdin) and hand `send`/`create` a path
 
 ```powershell
 # From a file:
-Set-Content -Path $env:TEMP\dispatch.md -Value $prompt -Encoding UTF8
-agent-bridge create --no-wait <agent> --prompt-file $env:TEMP\dispatch.md
+Set-Content -Path .\dispatch.md -Value $prompt -Encoding UTF8
+agent-bridge create --no-wait <agent> --prompt-file .\dispatch.md
 
 # ...or straight from stdin:
 $prompt | agent-bridge create --no-wait <agent> --prompt-file -
@@ -538,8 +550,9 @@ venue (machine / codespace / container). Address them two ways:
   - `dotfiles@<example-web-codespace>` → **error**: launching a *different* repo's
     checkout on a CodeSpace is not yet supported (a CodeSpace hosts one repo).
 
-With the inter-machine SSH mesh retired, machine venues are **loopback-only**
-(same box); remote machine dispatch reappears if `ssh.ready` is restored.
+Machine venues dispatch locally when they resolve to the current host/environment
+(loopback detection), and over SSH when the target machine has `ssh.ready: true`
+and a matching SSH environment.
 
 ### CodeSpace agents — friendly names
 

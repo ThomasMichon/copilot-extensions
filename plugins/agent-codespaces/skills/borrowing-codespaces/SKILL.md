@@ -72,9 +72,10 @@ agent-codespaces leases                         # CODESPACE  EFFORT  HOST  PID
   conflicting live lease **warns** but still connects; use `borrow --force` to
   take over explicitly. (`ssh --force`, the SSH-lock takeover, also forces the
   lease takeover.)
-- **Check-in on teardown:** `agent-codespaces delete <name>` and
-  `finalize <name> --delete` **auto-release** the lease. Releasing by effort
-  name frees whatever CodeSpace it held.
+- **Check-in on teardown:** `agent-codespaces finalize <name>` (recover + stop +
+  mark `recovered`), `agent-codespaces finalize <name> --delete`, and
+  `agent-codespaces delete <name>` **auto-release** the lease. Releasing by
+  effort name frees whatever CodeSpace it held.
 
 > **A borrowed CodeSpace is an obligation on the borrowing worktree.** On borrow,
 > `agent-codespaces ssh` journals an `active` `codespace` claim onto the borrowing
@@ -84,9 +85,10 @@ agent-codespaces leases                         # CODESPACE  EFFORT  HOST  PID
 > lease** (`lease renew … --disposition at-rest`) so the settle is visible
 > **cross-machine**. That claim is why the worktree's `agent-worktrees finalize`
 > **blocks by default** while the CodeSpace still carries live work — settle it
-> (disconnect a clean box, or `agent-codespaces finalize <name>`) before
-> finalizing the worktree, or `finalize --abandon` to re-home it deliberately
-> (then `agent-worktrees claims cleanup --apply` reclaims the orphaned box).
+> (disconnect a clean box, or `agent-codespaces finalize <name>` to recover,
+> stop, mark `recovered`, and release it) before finalizing the worktree, or
+> `agent-worktrees finalize --abandon` to re-home it deliberately (then
+> `agent-worktrees claims cleanup --apply` reclaims the orphaned box).
 > Inspect with `agent-worktrees claims show`.
 >
 > **Never-wedge:** if the disconnect settle was missed (a crash, or a

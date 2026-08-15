@@ -11,11 +11,11 @@ no longer imports a provider package.
 
 ## Why a shared lib (not inside agent-bridge)
 
-The agent-bridge daemon venv has every provider installed, but each provider also
-runs in its own standalone venv that does **not** contain `agent_bridge` (e.g.
-agent-codespaces `auth_preflight`). Shared relay code must therefore be importable
-from every venv — hence a lib installed into each, vendored the same way as
-`ssh-manager`.
+agent-bridge and each provider run in separate standalone venvs. Providers expose
+their relay profile over their own CLI (`relay-profile`), while agent-bridge
+hosts the shared server and applies those profiles. Shared relay code must
+therefore be importable from every participating venv — hence a lib installed
+into each, vendored the same way as `ssh-manager`.
 
 ## Contents
 

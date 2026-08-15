@@ -4,23 +4,31 @@ description: >-
   Create and verify machine-name SSH profiles for the agent fabric, and use the
   transport-provider contract for direct or tunnel transports. Use when deriving
   ~/.ssh/config from a registry, validating reachability, adopting a machine into
-  an SSH mesh, or authoring a transport module.yaml.
+  an SSH mesh, exploring a reachable SSH target, or authoring a transport
+  module.yaml.
 ---
 
 # agent-ssh (core + transport-provider contract)
 
-> **Before you start — readiness (self-provisioning, no agent-worktrees required).**
-> agent-ssh provisions its own runtime on first use and works standalone in any
-> host (CLI, Copilot app, cloud agent). If `command -v agent-ssh` fails, deploy its
-> binstub first (it then self-provisions on first call):
-> `bash "$(ls ~/.copilot/installed-plugins/*/agent-ssh/scripts/install.sh | head -1)" stamp`
-> The first call may take ~30–120s to provision (watch for `::agent-provisioning::`);
-> let it finish. If it reports a provisioning failure (e.g. missing uv / network),
-> surface the exact message — don't improvise a toolchain install.
+> **Before you start — readiness (standalone runtime).** agent-ssh does not
+> require agent-worktrees, agent-bridge, or a harness. It has its own installer
+> and self-provisioning binstub. If `agent-ssh` is not on PATH, stamp the binstub
+> from the plugin payload or checkout:
+>
+> ```powershell
+> pwsh -File .\scripts\install.ps1 stamp   # Windows, from plugins\agent-ssh
+> bash ./scripts/install.sh stamp          # POSIX / WSL, from plugins/agent-ssh
+> ```
+>
+> The first CLI call may take ~30–120s to build the runtime (watch for
+> `::agent-provisioning::`). Let it finish. If provisioning fails, surface the
+> exact message; do not improvise a toolchain install.
 
 The connectivity layer that makes machine-name SSH profiles real for the agent
 fabric. The public runtime ships the transport-agnostic core and the provider
-contract; concrete transports live in their own provider plugins.
+contract, plus the self-contained in-box transports (`direct`, `dtssh`, `wsl`).
+Transports with provider/system-specific config can live in their own provider
+plugins and register against the same contract.
 
 ## What lives here
 
@@ -31,9 +39,12 @@ contract; concrete transports live in their own provider plugins.
   per-transport drop-in `50-agent-ssh-<module>.conf`. Each transport owns only
   its own fragment.
 - **Reachability verification** (`agent-ssh verify`) -- probes the active SSH
-  profile by machine name.
+  profile by machine name and exits non-zero on missing names or unreachable
+  aliases.
 - **Transport-provider contract** (`contract/`) -- schemas and public exemplars
   for provider plugins.
+- **Live introspection** (`agent-ssh explore`) -- read-only SSH probe of a
+  reachable target's fabric runtimes, repos, and derived agents.
 
 ## Emit a profile
 
@@ -79,3 +90,8 @@ PowerShell-host probe is a follow-on.
 Ship a `module.yaml` conforming to `contract/module.schema.json`. Provide a
 `proxy_command` template, or omit it for plain SSH. The core renders the SSH
 profile, manages the managed Include, and verifies reachability.
+
+`entrypoints` in a transport module are metadata for installers/orchestrators;
+`agent-ssh emit-profile` and `agent-ssh verify` do not run transport setup
+scripts. Use the relevant transport skill (`setting-up-ssh-host`,
+`setting-up-ssh-client`, or provider-owned docs) for install/provision steps.
