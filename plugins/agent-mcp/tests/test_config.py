@@ -477,6 +477,21 @@ def test_resolve_python_prefers_platform_names(monkeypatch):
     assert seen[0] == "python3"  # POSIX probes python3 first
 
 
+def test_resolve_python_windows_probes_python_first(monkeypatch):
+    import agent_mcp.config as cfgmod
+
+    monkeypatch.setattr(cfgmod.os, "name", "nt")
+    seen: list[str] = []
+
+    def fake_which(name):
+        seen.append(name)
+        return r"C:\Python\python.exe" if name == "python" else None
+
+    monkeypatch.setattr(cfgmod.shutil, "which", fake_which)
+    assert cfgmod._resolve_python() == r"C:\Python\python.exe"
+    assert seen[0] == "python"  # Windows probes python first
+
+
 def test_resolve_python_falls_back_to_sys_executable(monkeypatch):
     import agent_mcp.config as cfgmod
 

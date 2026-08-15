@@ -102,11 +102,12 @@ auth:
   parse: raw
 ```
 
-Invoke the sibling through an interpreter on `PATH` (`${python}`/`node`/`pwsh`)
-rather than as `argv[0]` directly (a bare `.ps1`/`.py` is not itself executable).
-The `${config_dir}` token is only expanded when the config is loaded from a file
-(its directory is known); a `--config <path>` or plugin-discovered bridge both
-qualify.
+Invoke the sibling through an interpreter (`${python}`/`node`/`pwsh`) rather than
+as `argv[0]` directly (a bare `.ps1`/`.py` is not itself executable). `${python}`
+resolves to a full interpreter path (an absolute `sys.executable` when neither
+`python`/`python3` is on `PATH`); `node`/`pwsh` are looked up on `PATH`. The
+`${config_dir}` token is only expanded when the config is loaded from a file (its
+directory is known); a `--config <path>` or plugin-discovered bridge both qualify.
 
 #### Portable interpreter (`${python}`)
 
