@@ -908,6 +908,13 @@ WantedBy=default.target
 EOF
     systemctl --user daemon-reload 2>/dev/null || true
     systemctl --user enable "$SYSTEMD_UNIT" 2>/dev/null || true
+    # --no-restart: refresh the unit (for next boot) but do NOT restart now --
+    # used after a graceful zdd cutover already stood the new service up beside
+    # the old (Thread B). A `systemctl restart` here would spawn a SECOND daemon.
+    if [[ "${1:-}" == "--no-restart" ]]; then
+        _ok "Service unit refreshed ($SYSTEMD_UNIT); not restarted -- the graceful cutover already brought the new service up"
+        return 0
+    fi
     systemctl --user restart "$SYSTEMD_UNIT" 2>/dev/null || true
     if systemctl --user is-active "$SYSTEMD_UNIT" >/dev/null 2>&1; then
         _ok "Service installed + started ($SYSTEMD_UNIT)"
@@ -1047,6 +1054,31 @@ _ensure_running() {
     _ensure_service_running
 }
 
+# Thread B graceful cutover (parity with install.ps1 Invoke-ServiceCutover):
+# if a LIVE routed service (published active.json + healthy /health) is serving,
+# stand the new slot up beside it and flip routing via the OS-agnostic zdd
+# `agent_index deploy` seam -- so no in-flight request is dropped -- instead of a
+# systemctl restart. Returns 0 when the cutover brought a healthy service up (so
+# the caller refreshes the unit with --no-restart); 1 to fall back to the
+# SIGTERM-graceful `systemctl restart` (uvicorn drains, so the invariant holds).
+# The warm embedding engine is a SEPARATE unit on a fixed port -- left untouched.
+_service_cutover() {
+    [[ "$NO_SERVICE" -eq 1 ]] && return 1
+    command -v systemctl >/dev/null 2>&1 || return 1
+    # Only a host runs a local service; a client routes to the host over SSH.
+    [[ "$(_install_role)" == "host" ]] || return 1
+    [[ -x "$LINK_PYTHON" ]] || return 1
+    # Cut over only a LIVE routed service; no live endpoint -> fall back.
+    _service_healthy || return 1
+    _step 'Graceful cutover: moving the live service to the new build (zdd active/passive flip)...'
+    if "$LINK_PYTHON" -m agent_index deploy >/dev/null 2>&1 && _service_healthy; then
+        _ok 'Service cut over to the new build (routing flipped; old drained + retired; warm engine untouched)'
+        return 0
+    fi
+    _warn 'Graceful cutover did not complete -- falling back to a SIGTERM-graceful systemctl restart'
+    return 1
+}
+
 case "$ACTION" in
     install)
         _ensure_runtime
@@ -1059,7 +1091,18 @@ case "$ACTION" in
             _skip "Engine runtime skipped (role: $_role) -- set 'role: host' in $INSTALL_DIR/config.yaml or AGENT_INDEX_ROLE=host to host the durable engine"
         fi
         ;;
-    update) _downgrade_guard; _ensure_runtime; _install_service ;;  # engine venv + daemon left untouched by design
+    update)                                                         # Thread B: installer-driven graceful zdd cutover (a version update must never kill in-flight work)
+        _downgrade_guard
+        _ensure_runtime
+        # Engine: warm-preserving OUTLIVE -- leave a serving engine untouched
+        # (fixed port 8421); only start one if it is down (host only), so the
+        # service cutover always has a reconnect target.
+        if [[ "$(_install_role)" == "host" ]]; then _ensure_engine_running; fi
+        # Service: move a live (even healthy) routed service to the new slot via
+        # the zdd flip rather than leaving stale code serving; else fall back to
+        # _install_service's SIGTERM-graceful `systemctl restart`.
+        if _service_cutover; then _install_service --no-restart; else _install_service; fi
+        ;;
     ensure) _ensure_running ;;  # user-mode auto-run safety net (sessionStart hook) -- start if not already healthy
     stamp) do_stamp ;;
     provision) _ensure_runtime; _install_service ;;

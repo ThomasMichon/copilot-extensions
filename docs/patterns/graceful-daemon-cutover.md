@@ -204,7 +204,7 @@ in-flight, non-resumable work) by different, OS-appropriate routes:
 |---|---|---|
 | Service manager | Scheduled Task, but `conhost --headless` **detaches** the daemon — the task never tracks the live process | systemd `--user` unit **tracks** the daemon (its `ExecStart` PID) |
 | A plain "stop" is… | a **hard kill** (no clean SIGTERM-drain path) — so the zdd cutover is **required** to avoid dropping in-flight work | a **SIGTERM**: `Type=simple` + `Restart=on-failure`, and the daemons drain on SIGTERM (uvicorn for the coordinator/index service; a signal handler for agent-vault). So `systemctl restart` is already **graceful** (drains in-flight work, exits 0 → no resurrect), just with a brief API-unavailable blip |
-| Default update path | in-process zdd cutover (no opt-in) | **zdd cutover when a live routed daemon is serving** (agent-bridge, agent-dispatch), **falling back** to the SIGTERM-graceful `systemctl restart` when a cutover can't run or fails |
+| Default update path | in-process zdd cutover (no opt-in) | **zdd cutover when a live routed daemon is serving** (agent-bridge, agent-dispatch, agent-index), **falling back** to the SIGTERM-graceful `systemctl restart` when a cutover can't run or fails |
 | Post-cutover reconcile | re-register the boot task **without starting** it (`-NoStart`); the detached daemon serves; next boot starts the new slot | refresh the unit **without restarting** (`_install_service --no-restart`); the old (unit-tracked) daemon exits cleanly so `Restart=on-failure` never resurrects it; the detached survivor serves; next boot starts the new slot |
 
 Consequences of this equivalence:
