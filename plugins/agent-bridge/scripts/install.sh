@@ -22,7 +22,7 @@
 #   --force    On install/update: bypass the downgrade guard and install an
 #              older version over a newer one (see #1790). The sanctioned
 #              update path is the marketplace flow
-#              (`aperture-labs services agent-bridge update`), NOT a raw
+#              (`test-chamber services agent-bridge update`), NOT a raw
 #              checkout installer -- the guard exists to stop a stale checkout
 #              silently downgrading (and de-featuring) the running daemon.
 # =============================================================================
@@ -1216,7 +1216,7 @@ _downgrade_guard() {
         _fail "and can strand active Copilot sessions (#1790)."
         _fail ""
         _fail "Use the sanctioned marketplace update instead:"
-        _fail "    aperture-labs services agent-bridge update"
+        _fail "    test-chamber services agent-bridge update"
         _fail "Or, to override intentionally (e.g. a deliberate rollback):"
         _fail "    $0 $ACTION --force"
         echo ""

@@ -6,7 +6,7 @@ old local checkout (0.4.0-dev71) over a live dev87 daemon, silently
 *downgrading* it -- reverting the Session-Host survival code and the
 ``KillMode=process`` fix, and stranding the agent's own Copilot session. The
 sanctioned update path is the marketplace flow
-(``aperture-labs services agent-bridge update``); the raw installer must at
+(``test-chamber services agent-bridge update``); the raw installer must at
 least refuse an unforced downgrade.
 
 These are file-shape assertions over ``scripts/install.sh`` (bash is not

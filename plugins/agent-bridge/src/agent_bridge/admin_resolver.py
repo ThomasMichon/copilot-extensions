@@ -22,7 +22,7 @@ Usage:
     admin = AdminResolver(parent_resolver)
     parent_resolver.register_namespace_resolver(admin)
 
-    # Then: agent-bridge send admin:lambda-core-wsl "install the thing"
+    # Then: agent-bridge send admin:anomalous-potato-wsl "install the thing"
 """
 
 from __future__ import annotations

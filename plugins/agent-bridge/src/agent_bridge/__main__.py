@@ -3868,7 +3868,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     config_adopt_p.add_argument(
         "--profile", required=True,
-        help="Topology profile name (e.g. 'facility', 'my-control-harness')",
+        help="Topology profile name (e.g. 'multi-machine system', 'my-control-harness')",
     )
     config_adopt_p.add_argument(
         "--machines-yaml",

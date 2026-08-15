@@ -1,4 +1,4 @@
-"""Stub Session Host for the Phase-0 spike (aperture-labs #1761).
+"""Stub Session Host for the Phase-0 spike (test-chamber #1761).
 
 Owns exactly one child process (synthetic ``child_sim`` or a real
 ``copilot --acp --stdio``) and its stdio pipes -- it is the child's *real*

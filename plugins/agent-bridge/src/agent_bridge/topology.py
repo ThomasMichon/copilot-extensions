@@ -1,6 +1,6 @@
 """Topology -- parse machines.yaml into typed machine configs.
 
-Reads the facility's machine topology from machines.yaml and provides
+Reads the multi-machine system's machine topology from machines.yaml and provides
 typed access to machine metadata, SSH environments, and readiness state.
 """
 

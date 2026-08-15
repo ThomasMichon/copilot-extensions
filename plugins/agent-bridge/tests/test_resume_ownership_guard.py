@@ -39,7 +39,7 @@ def client(tmp_db: Database) -> TestClient:
 
 def _register_live(db: Database, sid: str, worktree_id: str, now: float) -> None:
     db.register_live_session(
-        sid, machine="lambda-core", cwd=None, worktree_id=worktree_id,
+        sid, machine="anomalous-potato", cwd=None, worktree_id=worktree_id,
         repo=None, branch=None, pid=None, role=None, now=now,
     )
 

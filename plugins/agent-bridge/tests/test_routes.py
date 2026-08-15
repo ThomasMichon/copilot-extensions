@@ -324,7 +324,7 @@ class TestSessionRoutes:
             "/api/v1/sessions",
             json={
                 "agent": "test-agent",
-                "worktree_id": "lambda-core-wsl-20250101-120000-abc1",
+                "worktree_id": "anomalous-potato-wsl-20250101-120000-abc1",
             },
         )
         assert resp.status_code == 201
@@ -335,7 +335,7 @@ class TestSessionRoutes:
         # Verify the resolved target got worktree_id set
         spawn_call = mock_spawn.call_args
         target = spawn_call.args[0]
-        assert target.worktree_id == "lambda-core-wsl-20250101-120000-abc1"
+        assert target.worktree_id == "anomalous-potato-wsl-20250101-120000-abc1"
 
     @patch("agent_bridge.session_manager.spawn")
     @patch("agent_bridge.session_manager.AcpClient")
@@ -600,7 +600,7 @@ class TestWorktreeRoutes:
         wt_routes.get_cache()._cache = {}
 
     def test_worktree_links_to_latest_session(self, client, app) -> None:
-        wt_id = "lambda-core-wsl-20250101-120000-link"
+        wt_id = "anomalous-potato-wsl-20250101-120000-link"
         self._seed_worktree("test-agent", wt_id)
 
         mgr: SessionManager = app.state.session_manager
@@ -619,7 +619,7 @@ class TestWorktreeRoutes:
         assert entry["session_live"] is True
 
     def test_worktree_without_session_has_null_linkage(self, client) -> None:
-        wt_id = "lambda-core-wsl-20250101-130000-nolink"
+        wt_id = "anomalous-potato-wsl-20250101-130000-nolink"
         self._seed_worktree("test-agent", wt_id)
 
         resp = client.get("/api/v1/worktrees")
@@ -631,7 +631,7 @@ class TestWorktreeRoutes:
         assert entry["session_live"] is False
 
     def test_stopped_session_is_not_live(self, client, app) -> None:
-        wt_id = "lambda-core-wsl-20250101-140000-stopped"
+        wt_id = "anomalous-potato-wsl-20250101-140000-stopped"
         self._seed_worktree("test-agent", wt_id)
 
         mgr: SessionManager = app.state.session_manager
@@ -648,7 +648,7 @@ class TestWorktreeRoutes:
         assert entry["session_live"] is False
 
     def test_worktree_linkage_includes_acp_session_id(self, client, app) -> None:
-        wt_id = "lambda-core-wsl-20250101-150000-acp"
+        wt_id = "anomalous-potato-wsl-20250101-150000-acp"
         self._seed_worktree("test-agent", wt_id)
 
         mgr: SessionManager = app.state.session_manager
@@ -665,7 +665,7 @@ class TestWorktreeRoutes:
 
     def test_worktree_without_mux_reports_no_interactive_cli(self, client) -> None:
         """Default (no mux session) decorates as interactive_cli=none (#1883)."""
-        wt_id = "lambda-core-wsl-20250101-150500-nomux"
+        wt_id = "anomalous-potato-wsl-20250101-150500-nomux"
         self._seed_worktree("test-agent", wt_id)
 
         resp = client.get("/api/v1/worktrees")
@@ -677,7 +677,7 @@ class TestWorktreeRoutes:
         """An attached wt-<id> mux session -> interactive_cli=held (#1883)."""
         from agent_bridge.routes import worktrees as wt_routes
 
-        wt_id = "lambda-core-wsl-20250101-150600-held"
+        wt_id = "anomalous-potato-wsl-20250101-150600-held"
         entry = wt_routes._WorktreeEntry(
             id=wt_id, agent_name="test-agent", machine="test-agent",
             path=f"/wt/{wt_id}", branch=f"worktree/{wt_id}", status="active",
@@ -811,16 +811,16 @@ class TestWorktreeRoutes:
         assert d["live_intent"] is None
 
     def test_resume_worktree_with_no_session_404s(self, client) -> None:
-        self._seed_worktree("test-agent", "lambda-core-wsl-20250101-160000-empty")
+        self._seed_worktree("test-agent", "anomalous-potato-wsl-20250101-160000-empty")
         resp = client.post(
-            "/api/v1/worktrees/lambda-core-wsl-20250101-160000-empty/resume",
+            "/api/v1/worktrees/anomalous-potato-wsl-20250101-160000-empty/resume",
         )
         assert resp.status_code == 404
 
     def test_resume_worktree_returns_already_live_session(
         self, client, app,
     ) -> None:
-        wt_id = "lambda-core-wsl-20250101-170000-live"
+        wt_id = "anomalous-potato-wsl-20250101-170000-live"
         self._seed_worktree("test-agent", wt_id)
 
         mgr: SessionManager = app.state.session_manager
@@ -842,7 +842,7 @@ class TestWorktreeRoutes:
         """If the stopped session can't be resumed, start a fresh one."""
         from unittest.mock import AsyncMock
 
-        wt_id = "lambda-core-wsl-20250101-180000-fallback"
+        wt_id = "anomalous-potato-wsl-20250101-180000-fallback"
         self._seed_worktree("test-agent", wt_id)
 
         mgr: SessionManager = app.state.session_manager
@@ -878,13 +878,13 @@ class TestWorktreeRoutes:
         if getattr(app.state, "resolver", None) is None:
             app.state.resolver = MagicMock(agents={})
         app.state.resolver.agents[agent_name] = AgentConfig(
-            name=agent_name, project="aperture-labs",
+            name=agent_name, project="test-chamber",
         )
 
     def test_list_worktree_sessions_proxies_to_agent(self, client, app) -> None:
         from unittest.mock import AsyncMock, patch
 
-        wt_id = "lambda-core-wsl-20250101-190000-sess"
+        wt_id = "anomalous-potato-wsl-20250101-190000-sess"
         self._seed_worktree("test-agent", wt_id)
         self._register_agent(app, "test-agent")
 
@@ -911,7 +911,7 @@ class TestWorktreeRoutes:
         # keeps no head of its own).
         from unittest.mock import AsyncMock, patch
 
-        wt_id = "lambda-core-wsl-20250101-190500-head"
+        wt_id = "anomalous-potato-wsl-20250101-190500-head"
         self._seed_worktree("test-agent", wt_id)
         self._register_agent(app, "test-agent")
 
@@ -937,7 +937,7 @@ class TestWorktreeRoutes:
         # A legacy ground-layer envelope without head_session -> null, not a KeyError.
         from unittest.mock import AsyncMock, patch
 
-        wt_id = "lambda-core-wsl-20250101-190600-nohead"
+        wt_id = "anomalous-potato-wsl-20250101-190600-nohead"
         self._seed_worktree("test-agent", wt_id)
         self._register_agent(app, "test-agent")
 
@@ -957,7 +957,7 @@ class TestWorktreeRoutes:
     ) -> None:
         from unittest.mock import AsyncMock, patch
 
-        wt_id = "lambda-core-wsl-20250101-191000-fail"
+        wt_id = "anomalous-potato-wsl-20250101-191000-fail"
         self._seed_worktree("test-agent", wt_id)
         self._register_agent(app, "test-agent")
 
@@ -971,7 +971,7 @@ class TestWorktreeRoutes:
     def test_get_worktree_session_transcript_proxies(self, client, app) -> None:
         from unittest.mock import AsyncMock, patch
 
-        wt_id = "lambda-core-wsl-20250101-192000-tx"
+        wt_id = "anomalous-potato-wsl-20250101-192000-tx"
         self._seed_worktree("test-agent", wt_id)
         self._register_agent(app, "test-agent")
 
@@ -1003,7 +1003,7 @@ class TestWorktreeRoutes:
     def test_restart_worktree_copilot_proxies(self, client, app) -> None:
         from unittest.mock import AsyncMock, patch
 
-        wt_id = "lambda-core-wsl-20250101-193000-restart"
+        wt_id = "anomalous-potato-wsl-20250101-193000-restart"
         self._seed_worktree("test-agent", wt_id)
         self._register_agent(app, "test-agent")
 
@@ -1033,7 +1033,7 @@ class TestWorktreeRoutes:
     ) -> None:
         from unittest.mock import AsyncMock, patch
 
-        wt_id = "lambda-core-wsl-20250101-193100-force"
+        wt_id = "anomalous-potato-wsl-20250101-193100-force"
         self._seed_worktree("test-agent", wt_id)
         self._register_agent(app, "test-agent")
 
@@ -1061,7 +1061,7 @@ class TestWorktreeRoutes:
     ) -> None:
         from unittest.mock import AsyncMock, patch
 
-        wt_id = "lambda-core-wsl-20250101-193200-fail"
+        wt_id = "anomalous-potato-wsl-20250101-193200-fail"
         self._seed_worktree("test-agent", wt_id)
         self._register_agent(app, "test-agent")
 
@@ -1080,7 +1080,7 @@ class TestWorktreeRoutes:
         import time
         from unittest.mock import AsyncMock, patch
 
-        wt_id = "lambda-core-wsl-20250101-193300-takeover"
+        wt_id = "anomalous-potato-wsl-20250101-193300-takeover"
         self._seed_worktree("test-agent", wt_id)
         self._register_agent(app, "test-agent")
 
@@ -1117,7 +1117,7 @@ class TestWorktreeRoutes:
         import time
         from unittest.mock import AsyncMock, patch
 
-        wt_id = "lambda-core-wsl-20250101-193400-noop"
+        wt_id = "anomalous-potato-wsl-20250101-193400-noop"
         self._seed_worktree("test-agent", wt_id)
         self._register_agent(app, "test-agent")
 
@@ -1149,7 +1149,7 @@ class TestWorktreeRoutes:
 
         from agent_bridge.transport import SpawnTarget
 
-        wt_id = "lambda-core-wsl-20250101-193500-fresh"
+        wt_id = "anomalous-potato-wsl-20250101-193500-fresh"
         self._seed_worktree("test-agent", wt_id)
         self._register_agent(app, "test-agent")
         # resolver.resolve must yield a real SpawnTarget (replace() needs a
@@ -1197,7 +1197,7 @@ class TestWorktreeRoutes:
 
         from agent_bridge.transport import SpawnTarget
 
-        wt_id = "lambda-core-wsl-20250101-193600-failstart"
+        wt_id = "anomalous-potato-wsl-20250101-193600-failstart"
         self._seed_worktree("test-agent", wt_id)
         self._register_agent(app, "test-agent")
         app.state.resolver.resolve = MagicMock(
