@@ -16,7 +16,8 @@ mcp:
         description: Embedding space ("code" or "prose").
       exact_dupes_only:
         type: boolean
-        description: Only clusters that contain a byte-identical pair.
+        enum: [true]
+        description: "Set to true to return ONLY clusters that contain a byte-identical pair; omit otherwise. (Presence-based flag — a value of false is not accepted; leave it out to keep all clusters.)"
       limit:
         type: integer
         description: Max clusters (default 50).
@@ -34,5 +35,7 @@ mcp:
 # agent_index_clusters
 
 Invokes `agent-index clusters [--source ..] [--bucket ..] [--model ..]
-[--exact-dupes-only] [--limit N]`. `exact_dupes_only` is a boolean-presence flag.
-Routed to the indexer by the CLI transport. Output is the raw JSON cluster array.
+[--exact-dupes-only] [--limit N]`. `exact_dupes_only` is a presence-based flag:
+the schema accepts only `true` (callers omit it otherwise), so a stray `false`
+can't accidentally emit `--exact-dupes-only` and narrow the results. Routed to
+the indexer by the CLI transport. Output is the raw JSON cluster array.
