@@ -4,17 +4,27 @@ Copilot CLI plugin for worktree-isolated sessions. Every Copilot CLI
 session gets its own git worktree -- no branch conflicts, no stale state,
 no stepping on parallel sessions.
 
+agent-worktrees is **standalone-first**: enable this plugin, bootstrap the
+runtime, and register any git repo you want to manage. You do **not** need a
+separate "control harness", agent-bridge, CodeSpaces, containers, or any other
+sibling plugin to use local worktree isolation. Those sibling plugins compose
+gracefully when installed (extra picker pivots, cross-machine delegation,
+CodeSpace/container resolvers), but their absence only disables those features.
+
 ## How It Works
 
-Agent Worktrees has two layers:
+Agent Worktrees has three shipped pieces:
 
-- **Plugin** (skills, hooks) -- loaded into every Copilot CLI session
-- **Runtime** (Python CLI) -- manages worktrees, launches sessions,
-  handles finalization
+- **Plugin payload** (skills, hooks, live-pulse extension) -- loaded by Copilot
+  CLI when the plugin is enabled
+- **Runtime** (versioned Python CLI) -- manages worktrees, launches sessions,
+  handles finalization, and self-provisions on first CLI use when possible
+- **Project binstubs** -- one launcher per registered project, plus the global
+  `agent-worktrees` CLI
 
 The plugin installs via the Copilot CLI marketplace. The runtime installs
-separately via init scripts and provides the `agent-worktrees` CLI and
-per-project binstubs.
+via init/install scripts (or first-use provisioning from the global binstub)
+and provides the `agent-worktrees` CLI and per-project binstubs.
 
 ## Status Bar at a Glance
 
@@ -69,8 +79,10 @@ agent-worktrees no longer owns `~/.psmux.conf`.) See the CLI Reference's
 
 ## Getting Started
 
-See [Getting Started](docs/getting-started.md) for install, repo
-adoption, and session launch.
+See [Getting Started](docs/getting-started.md) for the minimal standalone path:
+install, runtime bootstrap, project registration, and first launch. Then use
+the [CLI Reference](docs/cli-reference.md) for headless/scripted commands and
+the skills below for in-session guidance.
 
 ## Docs
 
@@ -83,24 +95,43 @@ adoption, and session launch.
 | [Architecture](docs/architecture.md) | Plugin/runtime layers, installed layout, session lifecycle |
 | [CLI Reference](docs/cli-reference.md) | Commands, installer actions, config format |
 
+## Validation
+
+Fresh-machine install/bootstrap behavior is covered by the repo's clean-room
+rig. The
+[`agent-worktrees-solo`](../../tools/clean-room/scenarios/agent-worktrees-solo)
+scenario installs **only** agent-worktrees, verifies first-use runtime
+provisioning and the versioned runtime slot, then round-trips register → create
+→ finalize. Run or extend that scenario for installer, bootstrap, or
+standalone-behavior changes.
+
 ## Skills
 
 | Skill | Description |
 |-------|-------------|
 | `worktree` | Worktree lifecycle -- creation, finalization, cleanup, safety rules |
+| `git-collaboration` | Pull-forward and shared feature-branch git primitives |
 | `service-lifecycle` | Service installer patterns -- deploy, update, status |
-| `copilot-extensions-setup` | Install and adopt for all three plugins |
+| `copilot-extensions-setup` | Bootstrap agent-worktrees and optional sibling plugins |
 | `agent-worktrees-wsl-provision` | Provision the current project in WSL |
 | `agent-worktrees-repos` | Repos registry -- known repos and source roots |
+| `agent-worktrees-related` | Directional related-repo index and locus/delegation plan |
 | `repairing-worktrees` | Diagnose/repair worktree+session health via `doctor` |
 | `create-setup-script` | Generate repo-specific session setup scripts |
 | `agent-ssh` | SSH transport helpers |
+| `working-cross-repo` | Good-citizen workflow for work in another registered repo |
 
 ## Hooks
 
 | Hook | Trigger | What it does |
 |------|---------|--------------|
-| `sessionStart` | Every session | Verifies runtime is installed; prints setup hint if not |
+| `preToolUse` | Tool calls | Runs statelessness, cross-repo, and anchor-write guards from `~/.agent-worktrees/bin/` when deployed |
+| `sessionStart` | Every session | Emits worktree/account/machine context, reload guidance, runtime bootstrap hints, repo-plugin provisioning, project hooks, session registration, anchor hygiene, and provision checks |
+| `sessionEnd` | Session end | Deregisters the session from the worktree record |
+
+The bundled live-pulse extension writes `substatus.json` beside Copilot session
+state so the picker can show live intent/rest state. It is passive; durable
+worktree disposition still comes only from `agent-worktrees status`.
 
 ## Platforms
 
@@ -108,4 +139,4 @@ adoption, and session launch.
 |----------|-----------|---------------------|
 | Windows | `install.ps1` | Windows Terminal fragments, psmux |
 | Linux/WSL | `install.sh` | tmux, Tabby profiles |
-| macOS | Planned | -- |
+| macOS | `install.sh` (POSIX path; reported as `linux` internally) | tmux where available |

@@ -29,7 +29,7 @@ subsets. Query the repo's **flow profile** up front:
 ```
 agent-worktrees get pr-profile      # direct | pr-human-merge | pr-agent-merge
 agent-worktrees get pr-enabled      # "true" or "false"
-agent-worktrees get pr-required     # "true" -> direct-to-master is blocked
+agent-worktrees get pr-required     # "true" -> direct-to-default-branch is blocked
 agent-worktrees get pr-provider     # gitea | github | azure-devops (empty in direct mode)
 ```
 
@@ -111,7 +111,7 @@ Check before signing off:
 In **direct mode** (the default), use the two-phase `push-changes` +
 `finalize` flow above. In **PR mode**, the flow becomes
 `create-pr -> [delegate PR creation] -> finalize`, and `push-changes` targets
-the *feature* branch instead of master.
+the *feature* branch instead of the default branch.
 
 ### Where PR config lives (machine-local vs in-repo)
 
@@ -135,9 +135,9 @@ These are two distinct switches:
 - **`pr.enabled: true`** makes the PR path *available*. The mode is **opt-in
   per worktree**: `push-changes`/`finalize` only take the PR path once a PR
   record exists (you ran `create-pr`). A worktree that never runs `create-pr`
-  still finalizes **direct-to-master**.
+  still finalizes **direct-to-default-branch**.
 - **`pr.required: true`** makes the PR path *mandatory* (it implies
-  `enabled`). The direct-to-master path is **refused**: `push-changes` will
+  `enabled`). The direct-to-default-branch path is **refused**: `push-changes` will
   not push to the default branch, and `finalize` will not prune a worktree
   with unmerged work. The **only** way to land work is `create-pr` -> open PR
   -> merge. There is no local bypass — when `pr-required` is `true`, every
@@ -161,7 +161,7 @@ The normal, expected flow for a worktree with work to land:
    review state and comments.
 5. **Address feedback** in the **same** worktree (keep-alive disposition):
    edit -> commit on the feature branch -> `push-changes` updates the PR
-   branch (never master). Note: new commits **dismiss stale approvals**, so
+   branch (never the default branch). Note: new commits **dismiss stale approvals**, so
    re-request / await review again.
 6. **Repeat 4–5** until the PR is **approved and merged upstream**. With
    auto-merge set, merge happens automatically on approval; otherwise a human
@@ -175,7 +175,7 @@ The normal, expected flow for a worktree with work to land:
 when the operator approves, open the PR and immediately `finalize` (detach
 disposition), leaving the open PR for asynchronous review + auto-merge rather
 than waiting in-session. This still goes through a PR — it is **not** a
-direct-to-master bypass. Use it sparingly: the default is to see the PR
+direct-to-default-branch bypass. Use it sparingly: the default is to see the PR
 through to merge. Never skip the PR entirely when `pr-required` is `true`.
 
 ### Head scheme + branch topology (PR mode)
@@ -184,7 +184,7 @@ through to merge. Never skip the PR entirely when `pr-required` is `true`.
 `worktree/{id}` branch, and it always lands on the squashed commit.**
 `create-pr` squashes the worktree's commits in place on `worktree/{id}`, rebases
 onto upstream, and leaves HEAD there at that squashed commit — it is **never
-reset off it** (#1804). `worktree/{id}` sits one commit ahead of master while
+reset off it** (#1804). `worktree/{id}` sits one commit ahead of the default branch while
 the PR is open; a later `git sync` (or the finalize reconcile) realigns it clean
 on merge.
 
@@ -195,7 +195,7 @@ push mechanism — never the local worktree state:
 *directly* to a disposable PR head ref via a refspec — no local feature branch:
 
 ```
-origin/master  <—  worktree/{id}  ——push——>  origin/pr/{slug}-{suffix}
+origin/<default>  <—  worktree/{id}  ——push——>  origin/pr/{slug}-{suffix}
   (upstream)       (the only local branch;     (the PR head; deleted on merge)
                     sits ahead while open)
 ```
@@ -213,7 +213,7 @@ checkout dance** (HEAD stays on `worktree/{id}`, which keeps the squashed
 commit):
 
 ```
-origin/master  <—  worktree/{id}  ——snapshot——>  feature/{slug}-{suffix}
+origin/<default>  <—  worktree/{id}  ——snapshot——>  feature/{slug}-{suffix}
   (upstream)       (keeps the squashed             (the pushed PR head)
                     commit, sits ahead)
 ```
@@ -416,7 +416,7 @@ when none are live.
   `create-pr --new`. Address a specific one with `push-changes` (from its
   feature branch) or `set-pr --pr <n>`.
 - **Cleanup safety:** a worktree with any **open** PR is never reaped by
-  cleanup, even if its current HEAD's content is already on master.
+  cleanup, even if its current HEAD's content is already on the default branch.
 
 ### Iterating on review feedback (keep-alive disposition)
 
@@ -427,9 +427,9 @@ then update the PR branch with:
 agent-worktrees push-changes
 ```
 
-In PR mode `push-changes` updates the PR head, never master. Feedback commits
+In PR mode `push-changes` updates the PR head, never the default branch. Feedback commits
 ride on `worktree/{id}` (create-pr leaves HEAD there); `push-changes` rebases
-`worktree/{id}` onto master and then publishes per scheme — under **refspec**
+`worktree/{id}` onto the default branch and then publishes per scheme — under **refspec**
 (default) it force-with-lease pushes `worktree/{id}` to the PR head ref
 (`pr/{slug}`); under **snapshot** it snapshots the `feature/{slug}` branch to the
 new tip and force-with-lease pushes that. Either way HEAD stays on

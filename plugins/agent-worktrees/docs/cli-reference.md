@@ -91,12 +91,16 @@ continue to work unchanged.
 | `status` | Show worktree git status |
 | `recent-messages` | Show a worktree's latest session's last N conversation messages (`--worktree <id>` `--limit N`, JSON) -- the read-side companion to the disposition summary; reads `events.jsonl` directly. Backs the picker's **Messages** viewer |
 | `list-sessions` | List a worktree's Copilot sessions with metadata (JSON) |
+| `head-session` | Project-agnostic read of a worktree's asserted current session/head pointer (JSON; fail-open when untracked) |
+| `conclude-session` / `link-succession` | Project-agnostic write primitives for session conclusion and handoff succession links (JSON) |
 | `session-transcript` | Emit a Copilot session's renderable transcript events by session id (JSON) |
+| `session-lock` | Write/remove a session-state lattice lock beside Copilot's session state (bridge/mux liveness marker) |
 | `status-segment` | Print a styled status-bar segment for the worktree at the cwd (for a tmux/psmux status line) |
 | `status-context` | Print a styled left status-bar segment: machine, environment, and repo:id4 for the worktree at the cwd |
 | `status-updater` | Background loop that keeps a session's `@aw_ctx`/`@aw_seg` status vars fresh **off the paint path** (no per-render binstub spawn) |
 | `list` | List worktrees from tracking records |
-| `handoff` | Manage handoff prompt state on a worktree |
+| `handoff-cutover` | Internal live-handoff primitive: spawn a seeded successor window in the existing mux or retire an old pane |
+| `embody` | Agent-facing primitive to create/resume a detached mux+Copilot session in a worktree |
 
 ## Pull-request workflow
 
@@ -119,8 +123,8 @@ narrative in [worktree-lifecycle.md § Landing the change](worktree-lifecycle.md
 | `pr` | Namespace grouping the `pr-*` verbs |
 
 `get pr-profile` / `get pr-required` / `get pr-provider` report the repo's PR
-disposition (`direct` | `pr-human-merge` | `pr-agent-merge`) so you know which
-verbs apply before signing off.
+disposition (`direct` | `pr-human-merge` | `pr-agent-merge` |
+`pr-self-merge`) so you know which verbs apply before signing off.
 
 
 
@@ -360,7 +364,8 @@ plugin's `runtimeScope` (`none` | `universal` | `machine-gated`) and a multi-mac
 machine gate (`external-repos.yaml` `deploy_machines`). It is local and
 version-keyed, so an unchanged re-launch does ~no work. Runs only after the
 direct-dispatch boundary (plain subcommands never trigger it); opt out with
-`WORKTREE_NO_RECONCILE=1`. See `docs/install-contract.md` § "Automatic
+`WORKTREE_NO_RECONCILE=1`. See
+[`docs/install-contract.md`](../../../docs/install-contract.md#automatic-reconciliation-at-launch-runtimescope) § "Automatic
 reconciliation at launch" for the full policy. Headless `copilot -p` launches do
 **not** reconcile (repo settings aren't merged there).
 
@@ -423,6 +428,9 @@ actions:
 | `status` | Check deployed runtime, config, PATH, worktrees, provenance |
 | `update` | Re-deploy runtime + binstub, refresh marketplace plugin |
 | `update-config` | Regenerate config.yaml (`--force` to overwrite) |
+| `refresh-profiles` | Regenerate only Windows Terminal profiles/state |
+| `provision` | Lean first-use runtime provision (venv + package + version marker) |
+| `stamp` | Stamp the payload pointer/build metadata used by self-provisioning |
 
 ### Installer Flags
 
