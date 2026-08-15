@@ -1298,6 +1298,13 @@ function Get-ActiveSlotPython {
         $p = Join-Path $InstallDir "versions\$ver\Scripts\python.exe"
         if (Test-Path -LiteralPath $p) { return $p }
     }
+    # Marker missing/stale: match the binstub's resolution -- fall back to the
+    # LATEST built slot under versions\* (a real installed runtime) before the
+    # build's $LinkPython, so a present-but-unmarked runtime is still found.
+    $latest = Get-ChildItem (Join-Path $InstallDir 'versions') -Directory -ErrorAction SilentlyContinue |
+        Sort-Object Name | ForEach-Object { Join-Path $_.FullName 'Scripts\python.exe' } |
+        Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Last 1
+    if ($latest) { return $latest }
     return $LinkPython
 }
 

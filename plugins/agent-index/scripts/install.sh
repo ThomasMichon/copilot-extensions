@@ -710,6 +710,23 @@ _install_role() {
         out="$("$LINK_PYTHON" -m agent_index role 2>/dev/null | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
         if [[ "$out" == "host" || "$out" == "client" ]]; then printf '%s' "$out"; return 0; fi
     fi
+    # Venv-free fallback: read the machine-local config.yaml role:/engine: scalar
+    # directly (mirrors config.resolve_role + ensure-service.sh), so role resolves
+    # even if the .venv active-slot symlink is dangling (parity with install.ps1,
+    # #1504). NOTE: unlike Windows (marker-only, no junction), $LINK_PYTHON here is
+    # the `.venv` symlink that _versioned_activate repoints to the ACTIVE slot, so
+    # the deploy/cutover paths already follow the active version -- only this
+    # role-resolution fallback is added.
+    local cfg="$INSTALL_DIR/config.yaml"
+    if [[ -f "$cfg" ]]; then
+        local cr
+        cr="$(sed -n 's/^[[:space:]]*\(role\|engine\)[[:space:]]*:[[:space:]]*"\?\([A-Za-z]*\)"\?.*/\2/p' "$cfg" | head -n1 | tr '[:upper:]' '[:lower:]')"
+        case "$cr" in
+            host|client) printf '%s' "$cr"; return 0 ;;
+            engine|server|indexer) printf 'host'; return 0 ;;
+            none|consumer) printf 'client'; return 0 ;;
+        esac
+    fi
     printf 'client'
 }
 
