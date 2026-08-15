@@ -1,25 +1,19 @@
 ---
 name: agent-bridge-troubleshooting
 description: >
-  Diagnose and recover a wedged agent-bridge CodeSpace dispatch -- two failure
-  modes. (1) The ACP resume-hang where `agent-bridge send codespace:<name>`
-  resuming a stopped multi-turn session stalls `[starting]`->`[stopped]` and
-  never reaches `[idle]` (the copilot-agent-runtime #13492/#13494 "Resuming..."
-  race, extended to ACP). (2) The credential-relay flap where a dispatched agent
-  authors work fine but then CANNOT fetch/push/PR -- git fails with `unable to
-  get password` / `relay unreachable` -- because the CodeSpace credential-relay
-  reverse-forward keeps re-establishing on a flapping/oscillating host relay
-  port. Covers the immediate end+recreate workaround (do NOT try to repair an
-  in-flight session's relay -- there is no non-destructive way; end + recreate a
-  fresh session, context loss is safe once work is committed), the resume-race +
-  relay-flap signatures, `agent-bridge peek`, pulling the persisted child trace
-  from sessions.db (`acp_child_log` "host relay port changed" flaps), the
-  split-brain / stale-`relay-port` check, the automatic resume recovery ladder,
-  and cheap CLI mitigations. Use when asked to "agent-bridge session is
-  stuck/wedged", "resume hang", "dispatch stuck in starting", "codespace session
-  won't resume", "send returns 409 not idle", "codespace can't push / git auth
-  fails / relay unreachable / unable to get password", "credential relay died /
-  won't repair", "peek at a bridge session", or "diagnose an agent-bridge
+  Diagnose and recover a wedged agent-bridge CodeSpace dispatch. Two failure
+  modes: (1) the ACP resume-hang where `send`/`resume` of a stopped multi-turn
+  session stalls `[starting]`->`[stopped]` and never reaches `[idle]` (the
+  copilot-agent-runtime #13492/#13494 race, extended to ACP); (2) the
+  credential-relay flap where a dispatched agent works fine but then cannot
+  fetch/push/PR (`unable to get password` / `relay unreachable`) because the
+  CodeSpace relay reverse-forward re-establishes on a flapping host relay port.
+  Covers the end+recreate workaround (never repair an in-flight session's relay),
+  the signatures, `agent-bridge peek`, the persisted sessions.db trace, and the
+  split-brain/stale-relay-port check. Use when asked to "agent-bridge session
+  stuck/wedged", "resume hang", "dispatch stuck in starting", "send returns 409
+  not idle", "codespace can't push / git auth fails / relay unreachable / unable
+  to get password", "credential relay died", or "diagnose an agent-bridge
   dispatch".
 ---
 
@@ -40,7 +34,7 @@ the trace. The resume-hang root cause is the Copilot CLI startup race
 github/copilot-agent-runtime **#13492** (fix **#13494**), originally scoped to
 *headed* sessions but it reproduces on **ACP** sessions too. The relay-flap fix
 (sticky port + buffered token-fetch + single-owner republish) is tracked in
-[copilot-extensions#580](https://github.com/ThomasMichon/copilot-extensions/issues/580).
+**#580**.
 
 > The examples use Windows PowerShell (the primary control-plane host). On a
 > POSIX daemon host substitute the obvious equivalents: `ss -tlnp` / `lsof -i`
@@ -161,8 +155,7 @@ Root cause: the CodeSpace credential-relay **reverse-forward** (`-R
 <listen>:127.0.0.1:<host_relay_port>`) keeps re-establishing because the **host
 relay port is unstable** -- it oscillates (competing publishers / a cutover /
 a stale published port), so every git credential fetch that lands in a
-re-establish window hits a dead port. Fix tracked in
-[copilot-extensions#580](https://github.com/ThomasMichon/copilot-extensions/issues/580).
+re-establish window hits a dead port. Fix tracked in **#580**.
 
 ## Immediate workaround -- end + recreate, do NOT try to repair in-flight
 
@@ -193,13 +186,27 @@ to **STOP and report the exact error if git auth fails** rather than retry-loop.
 ## Diagnose the flap (persisted, non-destructive)
 
 The reverse-forward activity is captured as `acp_child_log` events + the daemon
-log. Count the flaps and read the port churn:
+log. Count the flaps and read the port churn -- from the daemon log (simplest,
+PowerShell):
 
-```bash
-# flap events (each "port changed (X -> Y)" is one re-establish)
-python -c "import sqlite3,os,json,re; d=os.path.expanduser('~/.agent-bridge/sessions.db'); c=sqlite3.connect(d); rows=c.execute(\"SELECT data_json FROM events WHERE event_type='acp_child_log'\").fetchall(); f=[r for (r,) in rows if 'port changed' in r]; print('flaps:',len(f)); [print(x[:160]) for x in f[-8:]]"
-# or from the daemon log:
-Select-String -Path "$env:USERPROFILE\.agent-bridge\agent-bridge-err.log" -Pattern "reverse-forward|port changed|relay unreachable"
+```powershell
+Select-String -Path "$env:USERPROFILE\.agent-bridge\agent-bridge-err.log" `
+  -Pattern "reverse-forward|host relay port changed|relay unreachable"
+```
+
+...or from the persisted events, as a short Python script (avoids per-shell
+quoting of the SQL; run with `python flaps.py`):
+
+```python
+import sqlite3, os
+d = os.path.expanduser("~/.agent-bridge/sessions.db")
+rows = sqlite3.connect(d).execute(
+    "SELECT data_json FROM events WHERE event_type='acp_child_log'"
+).fetchall()
+flaps = [r for (r,) in rows if "port changed" in r]
+print("flaps:", len(flaps))
+for x in flaps[-8:]:
+    print(x[:160])
 ```
 
 A steady cadence of `host relay port changed (A -> B)` where the port never
@@ -217,7 +224,7 @@ by `get_live_relay_port()`. Two ways it goes bad:
   daemon's relay is on a *different* port, the publication is stale (a cutover
   that didn't republish). Sub-daemons resolve via this file, so they forward to
   a dead port.
-  ```bash
+  ```powershell
   Get-Content "$env:USERPROFILE\.agent-bridge\relay-port"          # published port
   Get-NetTCPConnection -State Listen | ? { $_.LocalPort -eq <that port> }   # is anything there?
   Get-CimInstance Win32_Process -Filter "Name='python.exe'" | ? CommandLine -match 'agent_bridge' | select ProcessId,ParentProcessId,CommandLine
@@ -231,7 +238,7 @@ by `get_live_relay_port()`. Two ways it goes bad:
   daemon with `Stop-Process -Id <pid>` -- never hand-hack `relay-port` /
   `current-version` / `active.json`.
 
-Until the durable fix (copilot-extensions#580) lands, **end + recreate** is the
+Until the durable fix (**#580**) lands, **end + recreate** is the
 reliable recovery.
 
 ## Cheap mitigations (relay flap)
