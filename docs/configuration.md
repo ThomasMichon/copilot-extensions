@@ -38,14 +38,14 @@ while **`register` / `adopt` is the only verb that writes into the repo**. So
 
 | File | Purpose | Written by |
 |------|---------|-----------|
-| `.github/copilot/settings.json` | Which plugins the repo enables + the marketplace (`enabledPlugins`, `extraKnownMarketplaces`) | `installing-plugins` skill / adopt |
+| `.github/copilot/settings.json` | Which plugins the repo enables + the marketplace (`enabledPlugins`, `extraKnownMarketplaces`) | `customizing-copilot:installing-plugins` skill / adopt |
 | `<repo>/.agent-worktrees/config.yaml` | The repo's own worktree settings — PR mode (`pr:`), workflow, defaults shared by every machine | `register` / adopt |
 | `<repo>/.agent-logger.yaml` (or documented aliases) | Shared session-log location, naming/template, and optional writer voice seams | you / adopt |
 | `<repo>/.agent-worktrees/related.yaml` | The related-repo index (role, locus, delegate) from this repo's POV | `related add` |
 | `machines.yaml` | SSH machine topology the mesh plugins read (control repo) | you / adopt |
 | `<repo>/.agent-codespaces/config.yaml` | **Supplementary** Codespace overrides + credential-relay policy (control repo). Most repos need none — machine defaults, `/workspaces/<basename>`, and the git-credential relay are convention-derived. Legacy repo-root `codespaces.yaml` still read (relocate with `config migrate`). | `codespaces-setup` |
 | `containers.yaml` | Container fleet defaults (control repo) | `containers-fleet` |
-| `.github/agents/<name>.mcp.yaml` | A **repo-scoped** agent-mcp bridge config | you (per the `agent-mcp` skill) |
+| `.github/agents/<name>.mcp.yaml` | A **repo-scoped** agent-mcp bridge config | you (per the `agent-mcp:agent-mcp` skill) |
 | `tools/setup/setup.{ps1,sh}` | The session setup script run before Copilot launches | `create-setup-script` |
 
 ### Machine-local / user-global (never committed)
@@ -58,7 +58,7 @@ while **`register` / `adopt` is the only verb that writes into the repo**. So
 | `~/.{project}/config.yaml` | Per-machine overrides + the adapter that makes a *foreign* repo compatible | `register` (machine wiring) |
 | `~/.agent-bridge/config.yaml` · `auth.yaml` | Bridge service config + bearer token (**secret**) | `install` / the service |
 | `~/.agent-logger/config.yaml` | Session-logging config (store dir, sync target) | `install` / you |
-| `~/.agent-mcp/bridges/<name>` | A **personal / cross-repo** agent-mcp bridge config | you (per the `agent-mcp` skill) |
+| `~/.agent-mcp/bridges/<name>` | A **personal / cross-repo** agent-mcp bridge config | you (per the `agent-mcp:agent-mcp` skill) |
 | `~/.agent-*/deploy-manifest.json`, runtime state | Per-machine runtime footprint (version, source, venv) | `install` / `update` |
 
 ## Two things that trip people up

@@ -11,7 +11,7 @@ repo via the Copilot CLI marketplace.
 > **backtick faux-links** (`` `docs/architecture.md` ``) rather than
 > `[text](path)` links: Copilot auto-loads real Markdown links from an always-on
 > `AGENTS.md` into *every* session, so faux-links keep this a lean map read on
-> demand (see the `authoring-skills` skill). Don't "fix" them into clickable
+> demand (see the `customizing-copilot:authoring-skills` skill). Don't "fix" them into clickable
 > links.
 
 ---
@@ -24,12 +24,12 @@ repo via the Copilot CLI marketplace.
 | Understand **how the suite works today** (as-is) | `docs/architecture.md` |
 | See **how we build plugins here** (reusable design) | `docs/patterns/README.md` |
 | See **what a subject should ultimately be** (intent) | `visions/README.md` |
-| **Make a change and land it correctly** | the **`contributing-to-copilot-extensions`** skill (+ *Contribution Rules* below) |
+| **Make a change and land it correctly** | the **`copilot-extensions-harness:contributing-to-copilot-extensions`** skill (+ *Contribution Rules* below) |
 | **Test** a plugin | `TESTING.md` |
 | Decide **where config lives** (repo vs machine) | `docs/configuration.md` |
-| Turn a repo into an **agent harness** | `docs/harness-runbook.md` + the **`building-harnesses`** skill |
+| Turn a repo into an **agent harness** | `docs/harness-runbook.md` + the **`customizing-copilot:building-harnesses`** skill |
 | Author a **skill / sub-agent / harness plugin** | the **`authoring-skills`** / **`defining-subagents`** / **`authoring-harness-plugins`** skills |
-| **Diagnose** a broken plugin or deploy | the **`diagnosing-copilot-extensions`** skill |
+| **Diagnose** a broken plugin or deploy | the **`copilot-extensions-harness:diagnosing-copilot-extensions`** skill |
 | The **deploy / install contract** | `docs/install-contract.md` |
 
 ---
@@ -225,7 +225,7 @@ After pushing to `main`, deploy on each target machine. **Payload-only plugins**
 customizing-copilot, copilot-extensions-harness) need only `copilot plugin
 update` — no runtime installer. **Runtime plugins** additionally run their own
 installer; the examples below are illustrative, with the
-`contributing-to-copilot-extensions` skill and each plugin's `scripts/` as the
+`copilot-extensions-harness:contributing-to-copilot-extensions` skill and each plugin's `scripts/` as the
 authority:
 
 ```bash

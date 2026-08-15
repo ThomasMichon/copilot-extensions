@@ -69,7 +69,9 @@ flowchart TB
       AL["agent-logger/<br/>scripts • src"]
       AD["agent-dispatch/<br/>scripts • src"]
       AV["agent-vault/<br/>scripts • src"]
-      PO["efforts/ • visions/ • context-handoff/ • customizing-copilot/ • copilot-extensions-harness/ • wsl-setup/<br/>(payload-only: skills / extension)"]
+      AI["agent-index/<br/>scripts • src"]
+      AK["agent-machines/<br/>scripts • src"]
+      PO["efforts/ • visions/ • context-handoff/ • customizing-copilot/ • copilot-extensions-harness/ • wsl-setup/ • harness-knowledge/<br/>(payload-only: skills / extension)"]
     end
     subgraph RT["Local runtimes"]
       RW["~/.agent-worktrees/<br/>versions/ • current-version • bin"]
@@ -81,8 +83,10 @@ flowchart TB
       RL["~/.agent-logger/<br/>versions/ • current-version • digests • sync task"]
       RD["~/.agent-dispatch/<br/>versions/ • current-version • queue db • coordinator • supervisor profiles"]
       RV["~/.agent-vault/<br/>versions/ • current-version • secret store service"]
+      RI["~/.agent-index/<br/>versions/ • current-version • service + engine"]
+      RK["~/.agent-machines/<br/>versions/ • current-version"]
     end
-    BIN["~/.local/bin/<br/>agent-worktrees • agent-bridge • agent-codespaces • agent-containers • agent-mcp • agent-ssh • agent-logger • agent-dispatch • agent-vault"]
+    BIN["~/.local/bin/<br/>agent-worktrees • agent-bridge • agent-codespaces • agent-containers • agent-mcp • agent-ssh • agent-logger • agent-dispatch • agent-vault • agent-index • agent-machines"]
     MP --> AW --> RW
     MP --> AB --> RB
     MP --> AC --> RC
@@ -92,6 +96,8 @@ flowchart TB
     MP --> AL --> RL
     MP --> AD --> RD
     MP --> AV --> RV
+    MP --> AI --> RI
+    MP --> AK --> RK
     MP --> PO
     RW --> BIN
     RB --> BIN
@@ -101,12 +107,14 @@ flowchart TB
     RL --> BIN
     RD --> BIN
     RV --> BIN
+    RI --> BIN
+    RK --> BIN
     AC -.->|providers.d/ manifest → binstub over process boundary| RB
     AN -.->|providers.d/ manifest → binstub over process boundary| RB
 ```
 
 > The `PO` node — `efforts`, `visions`, `context-handoff`, `customizing-copilot`,
-> `copilot-extensions-harness`, and `wsl-setup` — deploys entirely from the
+> `copilot-extensions-harness`, `wsl-setup`, and `harness-knowledge` — deploys entirely from the
 > marketplace payload — no installer, no `~/.agent-*` runtime, no binstub.
 
 Key rule: the **agent-codespaces and agent-containers binstubs are owned by
@@ -145,10 +153,10 @@ The word **harness** lands in two unrelated places; keep them apart:
    teach an agent how to work *on one specific repo* (contribute, deploy,
    diagnose). `copilot-extensions-harness` is the reference implementation:
    enable it in a control repo instead of hand-writing a per-repo narrative.
-   Authoring one is the **`authoring-harness-plugins`** skill's job.
+   Authoring one is the **`customizing-copilot:authoring-harness-plugins`** skill's job.
 2. **A control-_harness_ repo** — *your own* control-plane repo (a dotfiles-style
    hub) that drives Copilot sessions across many repos and machines. Building one
-   is the **`building-harnesses`** skill + the
+   is the **`customizing-copilot:building-harnesses`** skill + the
    [harness runbook](harness-runbook.md); its config lives in
    [§ The control-harness repo](#the-control-harness-repo) below.
 

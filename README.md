@@ -89,7 +89,11 @@ flowchart TB
       AM["agent-mcp<br/>MCP bridge CLI"]
       AS["agent-ssh<br/>SSH profile CLI"]
       AL["agent-logger<br/>session-sync + log writer"]
-      PO["efforts · visions · context-handoff<br/>customizing-copilot · copilot-extensions-harness<br/>(payload-only: skills / extension)"]
+      AD["agent-dispatch<br/>task-queue service + CLI"]
+      AI["agent-index<br/>index/search service"]
+      AK["agent-machines<br/>machine-state reconciler CLI"]
+      AV["agent-vault<br/>secret store CLI + service"]
+      PO["efforts · visions · context-handoff · customizing-copilot<br/>copilot-extensions-harness · wsl-setup · harness-knowledge<br/>(payload-only: skills / extension)"]
     end
     subgraph RT["Local runtimes — ~/.* + ~/.local/bin"]
       RW["~/.agent-worktrees<br/>agent-worktrees"]
@@ -99,6 +103,10 @@ flowchart TB
       RM["~/.agent-mcp<br/>agent-mcp"]
       RS["~/.agent-ssh<br/>agent-ssh"]
       RL["~/.agent-logger<br/>session-sync task + digests"]
+      RD["~/.agent-dispatch<br/>queue db + coordinator"]
+      RI["~/.agent-index<br/>service + engine"]
+      RK["~/.agent-machines<br/>reconciler"]
+      RV["~/.agent-vault<br/>secret store service"]
     end
     MP -->|copilot plugin install| AW
     MP -->|copilot plugin install| AB
@@ -107,6 +115,10 @@ flowchart TB
     MP -->|copilot plugin install| AM
     MP -->|copilot plugin install| AS
     MP -->|copilot plugin install| AL
+    MP -->|copilot plugin install| AD
+    MP -->|copilot plugin install| AI
+    MP -->|copilot plugin install| AK
+    MP -->|copilot plugin install| AV
     MP -->|copilot plugin install| PO
     AW -->|init.ps1 / init.sh| RW
     AB -->|install.ps1 / install.sh| RB
@@ -115,6 +127,10 @@ flowchart TB
     AM -->|init.ps1 / init.sh| RM
     AS -->|install.ps1 / install.sh| RS
     AL -->|install.ps1 / install.sh| RL
+    AD -->|install.ps1 / install.sh| RD
+    AI -->|install.ps1 / install.sh| RI
+    AK -->|install.ps1 / install.sh| RK
+    AV -->|install.ps1 / install.sh| RV
     AC -.->|codespace: provider via providers.d/ manifest| RB
     AN -.->|container: provider via providers.d/ manifest| RB
 ```
@@ -203,13 +219,13 @@ binstub in `~/.local/bin`.
 > Step 2 deploys the runtimes, and every subsequent launch via the
 > binstub/terminal profile runs `agent-worktrees reconcile-plugins` to keep the
 > payloads and runtimes fresh automatically. See
-> [`copilot-extensions-setup`](plugins/agent-worktrees/skills/copilot-extensions-setup/SKILL.md)
+> [`agent-worktrees:copilot-extensions-setup`](plugins/agent-worktrees/skills/copilot-extensions-setup/SKILL.md)
 > § 0 and [install-contract.md](docs/install-contract.md).
 
 ### 2. Bootstrap the runtimes
 
 Start a Copilot CLI session and say **"set up copilot extensions"** — the
-[`copilot-extensions-setup`](plugins/agent-worktrees/skills/copilot-extensions-setup/SKILL.md)
+[`agent-worktrees:copilot-extensions-setup`](plugins/agent-worktrees/skills/copilot-extensions-setup/SKILL.md)
 skill runs each installer so the runtimes land under `~/.agent-*` with binstubs
 in `~/.local/bin`. (Prefer to do it by hand? See each plugin's Getting Started,
 linked below.)

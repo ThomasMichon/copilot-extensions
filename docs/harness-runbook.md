@@ -33,7 +33,7 @@ this file (`docs/harness-runbook.md`) plus the
 the very plugins whose skills the later phases lean on.
 
 > **In a loaded session**, the `customizing-copilot` plugin's
-> **`building-harnesses`** skill is the trigger-discoverable entry point to this
+> **`customizing-copilot:building-harnesses`** skill is the trigger-discoverable entry point to this
 > runbook (it routes here and frames the run), and **`reviewing-customizations`**
 > operationalizes [Phase 8](#phase-8--validate-skills-and-agents).
 
@@ -244,7 +244,7 @@ instead).
 
 **Session setup script (optional but recommended).** If sessions should run
 setup before the agent launches (install deps, print status, set env), use the
-**`create-setup-script`** skill to generate an ACP-safe
+**`agent-worktrees:create-setup-script`** skill to generate an ACP-safe
 `tools/setup/setup.ps1` / `setup.sh`. The script **must launch `copilot` last**
 and must pass through `--acp`/`--stdio` unchanged.
 
@@ -257,7 +257,7 @@ and product code is untouched.
 
 **Opinionated:** register plugins **at repo scope**, not globally. It pins the
 set to the repo, keeps machines consistent, and lets the launcher keep payloads
-and runtimes fresh automatically. (Skill: **`installing-plugins`**.) This is your
+and runtimes fresh automatically. (Skill: **`customizing-copilot:installing-plugins`**.) This is your
 first **in-repo** config file; for the full in-repo-vs-machine-local map see
 [Configuration](configuration.md).
 
@@ -297,13 +297,13 @@ effect after a restart.)
 plugins also need a venv + binstub deployed once. Split by installer:
 
 - **agent-worktrees, agent-bridge, agent-codespaces, agent-containers,
-  agent-mcp** — run the **`copilot-extensions-setup`** skill ("set up copilot
+  agent-mcp** — run the **`agent-worktrees:copilot-extensions-setup`** skill ("set up copilot
   extensions"); it installs each under `~/.agent-*` with binstubs in
   `~/.local/bin`.
 - **agent-logger** — deploy via its own installer / the **`session-sync-setup`**
   skill (not covered by `copilot-extensions-setup`).
 - **agent-dispatch** — deploy via its own `scripts/init.*` / the
-  **`agent-dispatch`** skill.
+  **`agent-dispatch:agent-dispatch`** skill.
 - **Payload-only** (`customizing-copilot`, `efforts`, `visions`,
   `context-handoff`) — nothing to deploy beyond being enabled.
 
@@ -321,8 +321,8 @@ drives is registered as a **related** repo — not copied in.
 
 ### Adopt the harness repo
 
-From inside the harness repo (skill: **`copilot-extensions-setup`** §2, or the
-**`agent-worktrees-repos`** skill):
+From inside the harness repo (skill: **`agent-worktrees:copilot-extensions-setup`** §2, or the
+**`agent-worktrees:agent-worktrees-repos`** skill):
 
 ```bash
 agent-worktrees register <harness-repo-name>
@@ -336,7 +336,7 @@ This writes `~/.<harness>/config.yaml`, picks a worktree root
 
 The harness *drives* other repos; it does not absorb them. For each product
 repo, first make sure agent-worktrees knows the repo — register it in the
-per-machine **repos registry** (skill: **`agent-worktrees-repos`**; e.g.
+per-machine **repos registry** (skill: **`agent-worktrees:agent-worktrees-repos`**; e.g.
 `agent-worktrees repos add <name> <path-or-remote>`) so `related resolve` can
 report its class, path, and remote. Then use the **`agent-worktrees-related`**
 skill to link it and write a **related narrative**
@@ -349,7 +349,7 @@ agent-worktrees related resolve <name>        # reports class, path, locus, plan
 agent-worktrees related resolve <name> --json
 ```
 
-Then, when acting across repos, follow the **`working-cross-repo`** skill: honor
+Then, when acting across repos, follow the **`agent-worktrees:working-cross-repo`** skill: honor
 the repo's management **class**, its **locus**, prefer **delegation** over
 reaching across machines, and never hardcode a checkout path (resolve with
 `agent-worktrees repos find <name>`).
@@ -365,7 +365,7 @@ reaching across machines, and never hardcode a checkout path (resolve with
 > it** in `.github/copilot/settings.json` instead of hand-writing the operator
 > guidance. Keep the local narrative/redirect thin — just the consumer-specific
 > bits (which machines deploy it, adoption status). See the
-> `authoring-harness-plugins` skill; `copilot-extensions-harness` is the
+> `customizing-copilot:authoring-harness-plugins` skill; `copilot-extensions-harness` is the
 > reference example.
 
 > **Reference / machine-specific / not-locally-checked-out related repos.** Not
@@ -389,7 +389,7 @@ matching registry entry somewhere.
 
 **Opinionated:** the plugin skills are **generic**; the harness supplies the
 **connective tissue** that binds them to *this* repo. Two surfaces do that.
-(Skills: **`authoring-skills`**, **`defining-subagents`** from
+(Skills: **`customizing-copilot:authoring-skills`**, **`customizing-copilot:defining-subagents`** from
 `customizing-copilot`.)
 
 ### `AGENTS.md` — the harness's identity and rules
@@ -412,9 +412,9 @@ states, concisely:
   *ambient-guidance* principle — `authoring-skills` § Action-sequence vs
   ambient-guidance skills). A plugin that ships such a rule installs it here via
   its `-setup` skill (the "install a persistent rule into `AGENTS.md`" seam —
-  `installing-plugins`); the on-demand skill then **loads and enforces** the rule
+  `customizing-copilot:installing-plugins`); the on-demand skill then **loads and enforces** the rule
   for the session rather than embedding a decaying one-shot copy. Phase 8's review
-  (`reviewing-customizations`) flags any skill that violates this.
+  (`customizing-copilot:reviewing-customizations`) flags any skill that violates this.
 
 Keep it **voice-neutral** unless the operator explicitly wants personality
 (unopinionated seam #7).
@@ -433,7 +433,7 @@ kinds:
   specialize the generic pattern to this repo.
 - **Domain glue** — any repo-specific convention worth a trigger phrase.
 
-Author these with the **`authoring-skills`** skill (SKILL.md frontmatter,
+Author these with the **`customizing-copilot:authoring-skills`** skill (SKILL.md frontmatter,
 folder convention, validation checklist). Prefer **many small, well-triggered
 skills** over one giant skill — but only add a skill when a real trigger
 justifies it (mind context budget).
@@ -457,7 +457,7 @@ phase (agent-bridge still works locally via `agent-bridge send local ...`).
 
 ### SSH mesh — aliases, never raw IPs
 
-Use the **`agent-ssh`** skill. Define a named SSH alias for every machine in the
+Use the **`agent-ssh:agent-ssh`** skill. Define a named SSH alias for every machine in the
 mesh (encoding user, port, key, and any ProxyJump). **Never** put a raw IP
 in an SSH command — aliases survive IP changes and off-network access.
 
@@ -474,8 +474,8 @@ harness):
   `.agent-worktrees/related.yaml`; the hand-authored `acp-agents.json` is
   deprecated (honored only if a profile's `agents_config` points at one).
 
-Then wire and start (skill: **`copilot-extensions-setup`** §3–4, or the
-**`agent-bridge`** skill):
+Then wire and start (skill: **`agent-worktrees:copilot-extensions-setup`** §3–4, or the
+**`agent-bridge:agent-bridge`** skill):
 
 ```bash
 agent-bridge config adopt --repo . --profile <harness>
@@ -540,10 +540,10 @@ cleanly (or, when auditing, that path is verified configured without a commit).
 
 ### efforts — the planning system
 
-Run the **`efforts-setup`** skill ("set up efforts"): it scaffolds `efforts/`
+Run the **`efforts:efforts-setup`** skill ("set up efforts"): it scaffolds `efforts/`
 (README index + TEMPLATE) and writes a short **repo addendum** specializing the
 bindings (grouping, participants seam, archive layout). Day-to-day work uses the
-**`planning-efforts`** skill. Start new planning as an **effort**, not an ad-hoc
+**`efforts:planning-efforts`** skill. Start new planning as an **effort**, not an ad-hoc
 `docs/plans/*.md`.
 
 > **Legacy plan trees are a transitional backlog, not instant drift.** A mature
@@ -556,9 +556,9 @@ bindings (grouping, participants seam, archive layout). Day-to-day work uses the
 
 ### visions — the north-star
 
-Run the **`visions-setup`** skill ("set up visions"): it scaffolds `visions/`
+Run the **`visions:visions-setup`** skill ("set up visions"): it scaffolds `visions/`
 (README index + TEMPLATE) and writes the repo addendum (chiefly the
-organization seam). Day-to-day work uses the **`envisioning`** skill. A vision is
+organization seam). Day-to-day work uses the **`visions:envisioning`** skill. A vision is
 **pure should-be**, revised in place; **efforts are carved from the delta**
 between a vision and reality.
 
@@ -576,7 +576,7 @@ references the reconcile-to-vision habit and the "plan as an effort" rule.
 
 **Opinionated:** the harness's own skills and sub-agents get **reviewed** before
 they are trusted. Two tools do this. In a loaded session this whole phase is the
-**`reviewing-customizations`** skill (`customizing-copilot`) — trigger it with
+**`customizing-copilot:reviewing-customizations`** skill — trigger it with
 "review my skills" / "rubber-duck my agents"; the steps below are what it runs.
 
 ### rubber-duck — critique the design
@@ -594,7 +594,7 @@ Cross-check each authored artifact against its authoring skill:
 
 - **Skills** → **`authoring-skills`** (frontmatter, folder convention,
   trigger phrasing, validation checklist).
-- **Sub-agents** → **`defining-subagents`** (`.agent.md` format, tool aliases,
+- **Sub-agents** → **`customizing-copilot:defining-subagents`** (`.agent.md` format, tool aliases,
   per-agent MCP ownership, the anti-recursion / MCP-readiness pattern).
 - **MCP servers** → **`registering-mcp-servers`** (registration hierarchy,
   config format, env substitution).
@@ -619,14 +619,14 @@ heavy MCP toolsets into the primary session.
 MCP and injects **host credentials** (Entra/`az`, `gh`, git-credential, env) —
 so no PATs are baked into config. It is **standalone**: invoked directly from an
 agent's `mcp-servers` config, one bridge file per server. Prefer an **in-repo**
-`--config` bridge for repo-scoped servers. (Skill: **`agent-mcp`**.)
+`--config` bridge for repo-scoped servers. (Skill: **`agent-mcp:agent-mcp`**.)
 
 ### Delegate MCP to sub-agents
 
 Give each MCP-backed capability its **own sub-agent** that owns that MCP server,
 instead of registering many MCP tools on the primary agent. This keeps the
 primary context lean and isolates credential scope. Define these with the
-**`defining-subagents`** skill, and honor its **MCP-readiness / anti-recursion**
+**`customizing-copilot:defining-subagents`** skill, and honor its **MCP-readiness / anti-recursion**
 pattern: a sub-agent checks its MCP tools are actually available before using
 them, and reports back to the host when they are not (the host can fall back to
 a CLI). If `agent-dispatch` is in the set, its MCP surface is a natural fit for a
