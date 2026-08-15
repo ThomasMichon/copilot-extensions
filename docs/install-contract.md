@@ -34,8 +34,8 @@ Consequence — a rule for every plugin in this repo:
      the plugin's `scripts/install.* update` from the source dir (the marketplace
      plugin dir, or a local checkout — see
      [Source = where the installer runs from](#source--where-the-installer-runs-from-no-flag)).
-     Existing examples: `copilot-extensions-setup` (agent-worktrees +
-     agent-bridge), `codespaces-setup` (agent-codespaces), `containers-fleet`
+     Existing examples: `agent-worktrees:copilot-extensions-setup` (agent-worktrees +
+     agent-bridge), `agent-codespaces:codespaces-setup` (agent-codespaces), `agent-containers:containers-fleet`
      (agent-containers).
 
 So the full deploy of a runtime plugin is two steps — a payload refresh **then**

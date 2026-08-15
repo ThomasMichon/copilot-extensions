@@ -204,4 +204,4 @@ runtime split) is its own established pattern doc:
 - Reality: [`architecture.md`](../architecture.md) — the as-is topology, ports,
   and install map.
 - Contribution: [`AGENTS.md`](../../AGENTS.md), `CONTRIBUTING.md`, and the
-  `contributing-to-copilot-extensions` harness skill (routes design work here).
+  `copilot-extensions-harness:contributing-to-copilot-extensions` harness skill (routes design work here).
