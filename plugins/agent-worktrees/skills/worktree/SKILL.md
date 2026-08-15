@@ -292,9 +292,9 @@ The **profile** tells you how the repo lands work and which `pr-*` verbs apply:
   approval the author runs `pr-merge` to signal consent and the review gate
   merges. The full `pr-*` family applies.
 - **`pr-self-merge`** -- PR-gated and the submitter is authorized to merge
-  directly: use `create-pr` / `pr-watch` / `pr-status`, then `pr-merge <pr>
-  --now` when the PR is ready. Bare `pr-merge` deliberately refuses in this
-  profile.
+  directly: use `create-pr` / `pr-watch` / `pr-status`, then
+  `pr-merge <pr> --now` when the PR is ready. Bare `pr-merge` deliberately
+  refuses in this profile.
 
 The verbs are **self-describing**: `pr-status` prints the `flow:` profile, and
 `pr-merge` refuses (naming the reason + the right next step) on a repo where it

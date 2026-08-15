@@ -76,9 +76,12 @@ If it exists, skip cloning.
 wsl.exe -d <distro> -- bash -c 'command -v git && command -v bash'
 ```
 
-If `git` is missing, instruct the user to install it.
-`uv` does not need a separate prerequisite step: `install.sh` bootstraps it if
-missing.
+If `git` is missing, instruct the user to install it. `uv` needs no separate
+step **as long as a downloader is present**: `install.sh`'s `_ensure_uv`
+bootstraps uv from `astral.sh` via `curl` (else `wget`, else `python3`'s
+urllib), so at least one of `curl`/`wget`/`python3` must exist in the distro
+(most ship `python3`, so this is usually satisfied). If none is present,
+pre-install `uv` in the distro before provisioning.
 
 ### 5. Clone the repo
 
