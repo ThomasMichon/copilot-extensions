@@ -2347,6 +2347,51 @@ def _reuse_existing(client, session: dict, agent_name: str) -> str:
     return sid
 
 
+# A reused session caught mid-startup (a CodeSpace cold-booting, a host resuming)
+# is transiently ``created``/``starting``. Submitting a prompt then races the
+# bring-up and the bridge rejects it ("... is starting, not idle" -> HTTP 409,
+# ce#606). Wait bounded for it to leave the coming-up state so the caller routes
+# on its *settled* status (idle -> submit; running -> the busy-guard) instead of
+# racing to a 409.
+_COMING_UP_STATES = ("created", "starting")
+_COMING_UP_SETTLE_TIMEOUT = 180.0  # covers a cold CodeSpace boot (60-120s)
+_COMING_UP_POLL_INTERVAL = 2.0
+
+
+def _await_coming_up_settled(client, session: dict) -> dict:
+    """Return *session* refreshed once it has left the transient coming-up state.
+
+    A reused session still ``created``/``starting`` (e.g. a CodeSpace mid
+    cold-boot, or a host mid-resume) rejects a prompt with a 409 "starting, not
+    idle" (ce#606). Poll (bounded) until it settles to a routable status --
+    idle/running/stopped/terminal -- then let the caller route on that. On
+    timeout, return the last-seen session so the caller falls through to its
+    prior behavior (the pre-fix race) rather than hanging forever.
+    """
+    import time as _time
+
+    if session.get("status", "") not in _COMING_UP_STATES:
+        return session
+    sid = session.get("session_id", "")
+    name = session.get("name", "")
+    print(
+        f"[>] Session {sid} ({name}) is coming up; waiting for it to be ready...",
+    )
+    deadline = _time.monotonic() + _COMING_UP_SETTLE_TIMEOUT
+    while _time.monotonic() < deadline:
+        _time.sleep(_COMING_UP_POLL_INTERVAL)
+        try:
+            refreshed = client.get_session(sid)
+        except Exception:
+            continue
+        if not refreshed:
+            return session
+        session = refreshed
+        if session.get("status", "") not in _COMING_UP_STATES:
+            return session
+    return session
+
+
 def _find_caller_session(client, agent_name: str, caller_id: str | None) -> dict | None:
     """Return this caller's newest reusable session for *agent_name*, or None.
 
@@ -2398,6 +2443,10 @@ def _start_agent_session(
     if not force_new:
         existing = _find_caller_session(client, agent_name, caller_id)
         if existing is not None:
+            # A reused session may be transiently coming up (CodeSpace cold-boot
+            # / host resume). Wait for it to settle before routing so a prompt
+            # doesn't race the bring-up into a 409 "starting, not idle" (ce#606).
+            existing = _await_coming_up_settled(client, existing)
             # Concurrent-dispatch guard (#21): never pile a second prompt onto a
             # session that is mid-turn -- the bridge would reject it (or, worse,
             # the caller would block on an idle-wait timeout). Fail fast with an
@@ -2446,6 +2495,10 @@ def _start_agent_session(
             except Exception:
                 session = {"session_id": existing_sid}
             session.setdefault("session_id", existing_sid)
+            # A conflict-adopted session may also be transiently coming up; let
+            # it settle before the running-guard so we don't race to a 409
+            # "starting, not idle" (ce#606).
+            session = _await_coming_up_settled(client, session)
             # Same #21 guard for a session held by *another* caller: if it is
             # mid-turn, don't silently adopt-and-block -- fail fast (or take
             # over with --force).
