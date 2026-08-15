@@ -4,6 +4,12 @@ Agent Worktrees gives each Copilot CLI session its own isolated git
 worktree — no branch conflicts, no stale state, no stepping on other
 sessions. This guide covers what you need to get started.
 
+This is the **standalone** path. You only need this plugin plus its runtime to
+manage local git worktrees. Optional sibling plugins (agent-bridge,
+agent-codespaces, agent-containers, agent-dispatch, and others) add pivots,
+delegation, or remote/container resolvers when present; missing siblings do not
+block local worktree use.
+
 ## How It Works
 
 ```
@@ -44,16 +50,21 @@ copilot plugin install agent-worktrees@copilot-extensions
 
 ### 2. Bootstrap the runtime
 
-`copilot plugin install` only vendors the plugin **payload** (source, skills,
-the `sessionStart` hook) into `~/.copilot/installed-plugins/`. agent-worktrees
-is a **Python package** (`plugins/agent-worktrees/src/agent_worktrees`); the init
-script below deploys its **runtime** — it builds a venv with `uv venv` and
-installs the package with `uv pip install <plugin_dir>` into a versioned slot
-under `~/.agent-worktrees/versions/<v>/` (published by the `current-version`
-marker), then drops the marker-routed `agent-worktrees` binstub in
-`~/.local/bin`. (`uv` is bootstrapped automatically if missing; nothing here
-uses `uvx`/`pipx`.) So a full update is always two steps: `copilot plugin
-update` (payload) **then** the init script (runtime).
+`copilot plugin install` vendors the plugin **payload** (source, skills, hooks,
+and the live-pulse extension) into `~/.copilot/installed-plugins/`.
+agent-worktrees is also a **Python package**
+(`plugins/agent-worktrees/src/agent_worktrees`); the init script below deploys
+its **runtime** — it builds a venv with `uv venv` and installs the package with
+`uv pip install <plugin_dir>` into a versioned slot under
+`~/.agent-worktrees/versions/<v>/` (published by the `current-version` marker),
+then drops the marker-routed `agent-worktrees` binstub in `~/.local/bin`. (`uv`
+is bootstrapped automatically if missing; nothing here uses `uvx`/`pipx`.)
+
+The global `agent-worktrees` binstub also has a first-use provisioning fallback:
+if no runtime slot exists but the installed payload is discoverable, it runs the
+lean `install.{ps1,sh} provision` path and then dispatches. For normal ongoing
+updates, use `agent-worktrees update`; it refreshes payloads and reconciles
+runtimes rather than requiring hand-run `copilot plugin update` plus init.
 
 Start a Copilot CLI session and ask: *"set up agent-worktrees"*
 
@@ -75,6 +86,10 @@ bash "$plugin_dir/scripts/init.sh"
 ```
 
 ### 3. Register your first project
+
+Registration adopts a git repo for worktree management. It does **not** make the
+repo a special harness or require agent-bridge/topology; it writes the
+per-project config/registry entries and project binstub this plugin needs.
 
 ```bash
 cd /path/to/your/repo

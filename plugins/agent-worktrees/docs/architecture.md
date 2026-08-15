@@ -5,9 +5,11 @@
 ```
 Plugin layer (Copilot CLI)              Runtime layer (Python CLI)
   plugin.json                             ~/.agent-worktrees/
-  hooks.json  -- sessionStart hook          versions/<v>/    Python venv slots (immutable)
-  skills/     -- skills loaded                current-version  marker -> active slot
-                 into every session           bin/             launch-session, bootstrap-check
+  hooks.json  -- preToolUse/sessionStart/     versions/<v>/    Python venv slots (immutable)
+                 sessionEnd hooks             current-version  marker -> active slot
+  skills/     -- skills loaded                payload-dir       installed payload pointer
+                 into every session           bin/             launchers, hook shims, guards
+  extensions/ -- live-pulse sidecar
                                               projects.yaml    registry of adopted repos
                                               repos.yaml       repos registry + source roots
 
@@ -20,10 +22,11 @@ Plugin layer (Copilot CLI)              Runtime layer (Python CLI)
                                               agent-worktrees  CLI tool
 ```
 
-The **plugin** installs via `copilot plugin install` and provides skills
-and hooks to every Copilot CLI session. The **runtime** installs via
-init scripts (`init.ps1`/`init.sh`) and provides the `agent-worktrees`
-CLI, session launchers, and per-project binstubs.
+The **plugin** installs via `copilot plugin install` and provides skills, hooks,
+and the live-pulse extension to Copilot CLI sessions. The **runtime** installs
+via init/install scripts (`init.ps1`/`init.sh` → `install.{ps1,sh}`), or via the
+global binstub's first-use `provision` fallback, and provides the
+`agent-worktrees` CLI, session launchers, and per-project binstubs.
 
 ## Installed Layout
 
@@ -36,8 +39,11 @@ After full installation and project registration:
   bin/                              #   Shell wrappers
     launch-session.{ps1,cmd,sh}     #     Session launcher
     bootstrap-check.{ps1,sh}        #     Session-start health check
+    provision-check.{ps1,sh}        #     Repo-enabled plugin runtime provision
+    *guard.py                       #     preToolUse guard scripts
   projects.yaml                     #   Registry of adopted projects
   repos.yaml                        #   Repos catalog + source roots
+  pivots/                           #   Cross-plugin picker pivot manifests
   deploy-manifest.json              #   Provenance (commit, timestamp)
 
 ~/.{project}/                       # Per-project config + state
@@ -48,7 +54,6 @@ After full installation and project registration:
 ~/.local/bin/                       # Binstubs on PATH
   agent-worktrees{.cmd}             #   CLI tool
   {project}{.cmd}                   #   Project launcher (one per registered repo)
-  cleanup-worktrees{.cmd}           #   Bulk worktree cleanup
 ```
 
 ### Registry paths -- home-relative resolution (invariant)
@@ -151,7 +156,7 @@ Copilot CLI session                # your work happens here
   v
 Post-exit checks                   # detect completion markers
   |
-  +-- status: pushed  --> finalize (validate content on master, cleanup)
+  +-- status: pushed  --> finalize (validate content on default branch, cleanup)
   +-- status: active  --> preserve worktree for later resume
 ```
 
@@ -348,7 +353,7 @@ containers, bridge sessions) so finalizing never orphans unfinished work. (Effor
 
 ```bash
 my-project -Recovery    # Windows
-my-project recovery     # Linux/WSL
+my-project --recovery   # Linux/WSL (also accepted on Windows)
 ```
 
 Skips vault credential loading for debugging broken bootstrap
@@ -423,13 +428,22 @@ agent-worktrees update                                     # full, comprehensive
 
 `agent-worktrees update` is the authoritative, comprehensive update. It:
 
+When the standalone Worktree Manager is installed and passes its `--version`
+health check, `agent-worktrees update` hands off to `worktree-manager update`;
+the manager re-enters the in-plugin flow with `--no-manager`. If the manager is
+absent or unhealthy, the in-plugin flow runs directly, so update never
+dead-ends.
+
+The in-plugin flow:
+
 1. Pulls the agent-worktrees marketplace payload.
 2. Refreshes **every** registered plugin payload (incl. payload-only plugins).
 3. Deploys the agent-worktrees runtime installer.
-4. Updates sibling modules (agent-bridge, ...).
-5. Fast-forwards the managed repo anchor(s).
+4. Updates sibling modules listed in `modules.json` (`agent-bridge` today).
+5. Reconciles registered runtime plugins not covered by the module/self steps.
+6. Fast-forwards the managed repo anchor(s).
 
-**Quick skip (version-gated).** Steps 3 and 4 skip a runtime whose **deployed
+**Quick skip (version-gated).** Runtime deploy steps skip a runtime whose **deployed
 version already equals its (freshly-pulled) payload version** -- the `devN`
 version tracks commit content, so an equal version means the runtime is already
 current, and the (slow) re-deploy is skipped. The skip is conservative: an
@@ -447,7 +461,7 @@ All three version sources must agree:
 | `pyproject.toml` | Runtime `--version` output |
 | `.github/plugin/marketplace.json` | GitHub-hosted marketplace catalog |
 
-See [CONTRIBUTING.md](../../CONTRIBUTING.md) for versioning details.
+See [CONTRIBUTING.md](../../../CONTRIBUTING.md) for versioning details.
 
 ## Picker Pivot Registry (Cross-Plugin)
 
@@ -1439,5 +1453,3 @@ test became `test_native_list_default_with_opt_out`, and `on_option_list_option_
 now ignores highlight events fired while the list isn't focused (so a modal close can't
 clobber a programmatic `sel`). The text-line body remains as the opt-out until it is
 retired.
-
-

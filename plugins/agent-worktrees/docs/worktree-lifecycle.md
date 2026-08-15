@@ -81,8 +81,9 @@ parts:
   raises it, `--resolved` clears it, `--summary "…"` sets the line
   (`agent-dispatch focus "…"` writes the same field).
 - **Live pulse** (derived, never asserted): `live_intent` / `live_pulse` /
-  `live_rest` — a dim, self-refreshing line from the session's intent stream. It
-  is presentation only and **never** sets `follow_up`.
+  `live_rest` — a dim, self-refreshing line from the session's intent/rest
+  stream (or a bounded event-tail fallback for coarse busy/idle). It is
+  presentation only and **never** sets `follow_up`.
 
 The crucial rule: **`follow_up` is orthogonal to state, and it gates cleanup.** A
 worktree can be `finalized`/`completed` (git says "done, prune me") yet still
@@ -159,9 +160,13 @@ branch. Three profiles decide which verbs apply:
 - **`pr-human-merge`** — PR-gated, a human approves + merges. Use `create-pr`,
   `pr-watch`, `pr-status`, `pr-complete`. `pr-merge` **does not apply** (no
   consent label bound).
-- **`pr-agent-merge`** — an auto-merge consent label is bound: after approval the
-  author runs `pr-merge` to signal consent and the review gate merges. The full
-  family applies.
+- **`pr-agent-merge`** — an auto-merge consent label/native auto-complete marker
+  is bound: after approval the author runs `pr-merge` to signal consent and the
+  review gate merges. The full family applies.
+- **`pr-self-merge`** — the submitter is authorized to merge directly. Bare
+  `pr-merge` refuses; use `pr-merge <pr> --now`, which prefers native
+  CI-gated auto-merge when the provider supports it and otherwise performs the
+  configured merge.
 
 The verbs are self-describing — `pr-status` prints the active `flow:` and
 `pr-merge` refuses (naming the reason + next step) where it doesn't apply.
@@ -247,7 +252,9 @@ When in doubt, just `create` a fresh worktree and continue there.
 "Can this worktree be removed?" is **not** the same question as its tracking
 state. The authoritative answer is the **maintenance disposition** — a bucket
 each worktree falls into, graded SAFE / REVIEW / UNSAFE (neutral buckets carry no
-chip). `list --json --classify` and the picker's Maintenance view emit it.
+chip). `list --json --classify` emits it, and the picker uses the same
+disposition in its Cleanup/Sync dialogs on the Worktrees row (the old standalone
+Maintenance view has been folded into those actions).
 
 | Disposition | Buckets | Cleanup behavior |
 |-------------|---------|------------------|

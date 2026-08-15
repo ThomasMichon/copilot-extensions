@@ -107,7 +107,7 @@ worktree), and leaves stale branches.
 
 This is an absolute prohibition, not a preference:
 
-- **Never** run `git rebase`, `git merge`, `git checkout master`, or
+- **Never** run `git rebase`, `git merge`, `git checkout <default-branch>`, or
   `git push` as part of a finalization sequence
 - **Never** run `git worktree remove` on the current working directory
 - **Never** improvise a finalization workflow if the CLI tool errors --
@@ -131,7 +131,7 @@ agent-worktrees push-changes --title "Fix auth regression"
 
 This command:
 1. Squashes all worktree commits into one
-2. Rebases onto origin/master
+2. Rebases onto the configured upstream default branch
 3. Validates core files
 4. Merges to local default branch and pushes to origin
 5. Sets tracking status to `pushed`
@@ -152,22 +152,22 @@ agent-worktrees finalize
 
 This command:
 1. **Validates** (non-mutating) that the branch's content is on
-   origin/master -- using ancestor checks, patch-id comparison, and
-   blob comparison. The worktree's commit must be in origin/master's
-   history (or be equal to origin/master) to be considered safe to prune.
-2. If content IS on master -- the worktree is **finalized**: permissions
+   the upstream default branch -- using ancestor checks, patch-id comparison, and
+   blob comparison. The worktree's commit must be in the default branch's
+   history (or be equal to it) to be considered safe to prune.
+2. If content IS on the default branch -- the worktree is **finalized**: permissions
    are merged and tracking is marked `finalized`. The git branch and the
    worktree folder are removed **only when the worktree is idle** (no live
    Copilot session and your shell is not inside it). When you run
    `finalize` from inside the session (the >90% case), the branch and
    folder are **intentionally left in place** and cleaned up later -- this
    is the normal, expected outcome, not a failure.
-3. If content is NOT on master -- **fails with an error** telling you
+3. If content is NOT on the default branch -- **fails with an error** telling you
    to run `push-changes` first
 
 **`finalize` does not delete the worktree out from under a running
 session, and it never force-removes the folder or the git branch.** Its
-only job is to guarantee the branch's work is merged to master. Deleting
+only job is to guarantee the branch's work is merged to the default branch. Deleting
 the git worktree and folder is a separate, deferred concern handled by
 `cleanup` once the worktree is idle. `finalize` never squashes, rebases,
 or pushes, and is always safe to call -- the worst it can do is say "not
@@ -261,11 +261,11 @@ After running `push-changes`, **read the output carefully**:
 - If it succeeds, proceed to `agent-worktrees finalize`.
 
 After running `finalize`, **read the output as success unless it errors.**
-If it reports that content is on master, finalize succeeded -- even when it
+If it reports that content is on the default branch, finalize succeeded -- even when it
 also says the branch/folder were left in place because a session is still
 live. That deferral is the normal outcome of finalizing from inside the
 session; **do not present it as a bug or as cleanup having failed.** Only if
-it says content is *not* on master did something go wrong -- in that case the
+it says content is *not* on the default branch did something go wrong -- in that case the
 push did not succeed or was not run, so retry `push-changes` first.
 
 
@@ -276,9 +276,9 @@ finalization (config `pr.enabled: true`). **Check the target repo's flow
 before signing off -- it is not the same everywhere:**
 
 ```
-agent-worktrees get pr-profile      # direct | pr-human-merge | pr-agent-merge
+agent-worktrees get pr-profile      # direct | pr-human-merge | pr-agent-merge | pr-self-merge
 agent-worktrees get pr-enabled      # "true" or "false"
-agent-worktrees get pr-required     # "true" -> direct-to-master is blocked
+agent-worktrees get pr-required     # "true" -> direct-to-default-branch is blocked
 agent-worktrees get pr-provider     # gitea | github | azure-devops
 ```
 
@@ -291,6 +291,10 @@ The **profile** tells you how the repo lands work and which `pr-*` verbs apply:
 - **`pr-agent-merge`** -- PR-gated with an auto-merge consent label bound: after
   approval the author runs `pr-merge` to signal consent and the review gate
   merges. The full `pr-*` family applies.
+- **`pr-self-merge`** -- PR-gated and the submitter is authorized to merge
+  directly: use `create-pr` / `pr-watch` / `pr-status`, then
+  `pr-merge <pr> --now` when the PR is ready. Bare `pr-merge` deliberately
+  refuses in this profile.
 
 The verbs are **self-describing**: `pr-status` prints the `flow:` profile, and
 `pr-merge` refuses (naming the reason + the right next step) on a repo where it
@@ -298,8 +302,9 @@ does not apply. Believe them -- never hand-merge or escalate past a verb that
 says it does not apply.
 
 In **direct mode**, use the two-phase `push-changes` + `finalize` flow above.
-In **PR mode**, sign-off becomes `create-pr` -> review -> merge -> `finalize`,
-and `push-changes` targets the *feature* branch, never master.
+In **PR mode**, sign-off becomes `create-pr` -> review -> merge ->
+`pr-complete`/`finalize`, and `push-changes` targets the *feature* branch, never
+the default branch.
 **An opened PR is final by default** -- land everything before `create-pr` (or
 open it as a draft with `--draft`, then `pr-ready` when ready for review), since
 a late push races the merge.
@@ -387,13 +392,13 @@ worktrees from anywhere without env-var contamination.
 
 | Action | Command |
 |--------|---------|
-| **Push changes to master** (normal sign-off step 1) | `agent-worktrees push-changes --title "desc"` |
+| **Push changes to the default branch** (normal sign-off step 1) | `agent-worktrees push-changes --title "desc"` |
 | **Finalize** (validate + clean up, step 2) | `agent-worktrees finalize` |
 | **PR mode: create + push a feature branch** | `agent-worktrees create-pr --title "desc"` |
 | **PR mode: record PR metadata** (after sub-agent opens it) | `agent-worktrees set-pr --url URL --number N` |
 | **PR mode: show tracked PR state** (reconciles vs. provider; flags pull-forward when merged) | `agent-worktrees pr-status` |
-| **Check the target repo's PR flow** (direct / human-merge / agent-merge) | `agent-worktrees get pr-profile` |
-| **Check if PRs are required** (direct-to-master blocked) | `agent-worktrees get pr-required` |
+| **Check the target repo's PR flow** (direct / human-merge / agent-merge / self-merge) | `agent-worktrees get pr-profile` |
+| **Check if PRs are required** (direct-to-default-branch blocked) | `agent-worktrees get pr-required` |
 | Set/update title only | `agent-worktrees push-changes --title "desc" --title-only` |
 | Show worktree git status | `agent-worktrees status` |
 | List worktrees for cleanup | `agent-worktrees cleanup` |
@@ -434,7 +439,7 @@ with no commits yet.
 | `wip` | Has uncommitted or unmerged work, no live session |
 | `dirty` | Uncommitted changes in working tree |
 | `unused` | No commits on branch, no live session |
-| `pushed` | Changes pushed to origin/master, awaiting finalization |
+| `pushed` | Changes pushed to the upstream default branch, awaiting finalization |
 | `completed` | All content merged to default branch, safe to clean |
 | `gone` | Worktree directory missing |
 | `orphan` | No merge base with upstream |
@@ -485,7 +490,7 @@ session means:
 - **Finalization defers destruction** — validation, permission merge, and
   tracking update proceed normally, but the worktree directory and branch
   are intentionally preserved. This is expected, not a failure: `finalize`
-  guarantees the work is on master; it does not delete an active worktree
+  guarantees the work is on the default branch; it does not delete an active worktree
   in git or remove its folder. Cleanup handles that once the worktree is
   idle.
 - **Status shows `active`** — never `completed`, `unused`, or `wip` while
@@ -493,9 +498,11 @@ session means:
 
 ## Session Detection
 
-The picker shows 🟢 on worktrees with live Copilot CLI sessions. This
-is detected by scanning `~/.copilot/session-state/` — no hooks or
-external state needed. Dead PIDs are filtered automatically.
+The picker shows 🟢 on worktrees with live Copilot CLI sessions. Liveness is a
+union of signals: tracked session locks under `~/.copilot/session-state/`, live
+`wt-<id>` tmux/psmux sessions, cached `mux_live` / `bound_live` hints, and
+bridge-owned session locks. Dead PIDs are filtered automatically, and stale
+locks can be reclaimed with the `reclaim` flow above.
 
 ## Resource Leases (atomic, cross-machine, same-harness)
 

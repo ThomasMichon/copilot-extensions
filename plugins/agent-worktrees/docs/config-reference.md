@@ -2,14 +2,15 @@
 
 Every configuration option for a repo adopted by agent-worktrees.
 
-## Three config sources (layered)
+## Config sources (layered)
 
-agent-worktrees merges configuration from three layers at load time. **Highest
-precedence wins**, per key (deep merge):
+agent-worktrees merges configuration from the layers below at load time.
+**Highest precedence wins**, per key (deep merge):
 
 | Precedence | Source | Path | Scope | Committed? |
 |------------|--------|------|-------|-----------|
 | **Highest** | **Machine-local** | `~/.{project}/config.yaml` | Per-machine overrides + machine paths (anchor, custom worktree_root). The **adapter** that makes a *foreign* repo compatible. | No |
+| *(conditional)* | **Knowledge overlay** | bound knowledge repo's config | For a **stateless harness** bound to a knowledge repo, portable operator-preference keys only (`copilot_profiles`, `headless`, `auto_fast_forward`, `new_picker`). Machine-specifics and the binding never graft. | Yes |
 | **Middle** | **In-repo** | `<anchor>/.agent-worktrees/config.yaml` | The repo's **own** committed settings — the base, shared by every machine. | Yes |
 | **Lowest** | **Global** | `~/.agent-worktrees/config.yaml` | Machine-wide defaults: `srcroot`, `machine`, `platform`, `copilot_profiles`. | No |
 
@@ -21,12 +22,13 @@ specific machine, or to adopt a *foreign* repo (work product, external GitHub)
 that carries no in-repo config.
 
 - **Top-level fields** (`srcroot`/`machine`/`platform`/`copilot_profiles`/
-  `headless`/`auto_fast_forward`) resolve **machine-local > global > detected**.
+  `headless`/`auto_fast_forward`/`new_picker`) resolve **machine-local >
+  knowledge overlay (portable prefs only) > global > detected/default**.
 - **Per-repo settings** merge **in-repo flat settings < machine-local
   `repos.<name>` block**. The global tier carries *only* machine-wide top-level
   settings — never per-repo settings.
 - No file holds the "full stack": the complete merged config for a target repo
-  is **computed on-demand** by the loader from these three sources. `agent-worktrees
+  is **computed on-demand** by the loader from these layers. `agent-worktrees
   get …` reads through that on-demand merge.
 - A missing or malformed file at any tier is skipped safely — config loading
   never breaks the CLI on a bad file.
@@ -100,6 +102,7 @@ repos:
 | `repo_name` | string | `""` | Which `repos.<name>` is the default repo. Optional when exactly one repo is defined. |
 | `headless` | bool | `false` | CLI-only project: the bare binstub lists worktrees instead of launching an interactive Copilot session. |
 | `auto_fast_forward` | bool | `true` | On resume, fast-forward a clean worktree that is strictly behind upstream. Only ever a FF — never touches dirty / ahead / diverged worktrees. |
+| `new_picker` | bool | `true` | Use the Textual picker. `picker disable` writes `false` to opt the machine out to the legacy picker. |
 | `copilot_profiles` | list | `[]` | Selectable Copilot backend profiles (Tab-cycle in the picker). |
 | `repos` | map | `{}` | Per-repo configuration, keyed by repo name. |
 
@@ -370,4 +373,3 @@ related:
 Reads degrade safely (a missing/malformed file yields an empty index); a bare
 `name:` is a valid minimal link. Writes emit only non-empty fields, keeping the
 committed file minimal.
-
