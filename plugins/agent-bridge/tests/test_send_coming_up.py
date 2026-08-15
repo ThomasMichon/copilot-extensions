@@ -47,6 +47,17 @@ def test_created_then_running_settles_to_running(monkeypatch) -> None:
     assert s["status"] == "running"
 
 
+def test_starting_then_terminal_settles_to_terminal(monkeypatch) -> None:
+    # A coming-up session whose boot fails settles to a terminal status; the
+    # caller routes it away from reuse (start fresh) rather than submitting to a
+    # dead session.
+    monkeypatch.setattr(m, "_COMING_UP_POLL_INTERVAL", 0.001)
+    c = _FakeClient(["starting", "failed"])
+    s = m._await_coming_up_settled(c, {"session_id": "s1", "status": "starting"})
+    assert s["status"] == "failed"
+    assert s["status"] not in m._REUSABLE_SESSION_STATES
+
+
 def test_timeout_returns_last_seen(monkeypatch) -> None:
     monkeypatch.setattr(m, "_COMING_UP_POLL_INTERVAL", 0.001)
     monkeypatch.setattr(m, "_COMING_UP_SETTLE_TIMEOUT", 0.02)

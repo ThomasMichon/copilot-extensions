@@ -2378,18 +2378,21 @@ def _await_coming_up_settled(client, session: dict) -> dict:
         f"[>] Session {sid} ({name}) is coming up; waiting for it to be ready...",
     )
     deadline = _time.monotonic() + _COMING_UP_SETTLE_TIMEOUT
-    while _time.monotonic() < deadline:
-        _time.sleep(_COMING_UP_POLL_INTERVAL)
+    while True:
+        # Refresh first (the session may already have settled between lookup and
+        # now), then sleep only between subsequent polls -- so an already-idle
+        # session costs no extra latency.
         try:
             refreshed = client.get_session(sid)
         except Exception:
-            continue
-        if not refreshed:
+            refreshed = None
+        if refreshed:
+            session = refreshed
+            if session.get("status", "") not in _COMING_UP_STATES:
+                return session
+        if _time.monotonic() >= deadline:
             return session
-        session = refreshed
-        if session.get("status", "") not in _COMING_UP_STATES:
-            return session
-    return session
+        _time.sleep(_COMING_UP_POLL_INTERVAL)
 
 
 def _find_caller_session(client, agent_name: str, caller_id: str | None) -> dict | None:
@@ -2447,12 +2450,18 @@ def _start_agent_session(
             # / host resume). Wait for it to settle before routing so a prompt
             # doesn't race the bring-up into a 409 "starting, not idle" (ce#606).
             existing = _await_coming_up_settled(client, existing)
+            settled = existing.get("status", "")
+            if settled not in _REUSABLE_SESSION_STATES:
+                # The coming-up session ended in a terminal state (e.g. the boot
+                # or spawn failed) -- don't hand a dead session to submit; fall
+                # through and start a fresh one below (ce#606).
+                pass
             # Concurrent-dispatch guard (#21): never pile a second prompt onto a
             # session that is mid-turn -- the bridge would reject it (or, worse,
             # the caller would block on an idle-wait timeout). Fail fast with an
             # actionable wait-vs-take-over message, or honor --force by ending
             # the in-flight turn and starting fresh.
-            if existing.get("status", "") == "running":
+            elif settled == "running":
                 sid = existing.get("session_id", "")
                 if not force:
                     print(
@@ -2499,6 +2508,19 @@ def _start_agent_session(
             # it settle before the running-guard so we don't race to a 409
             # "starting, not idle" (ce#606).
             session = _await_coming_up_settled(client, session)
+            # If the adopted session came up in a terminal state (failed/ended),
+            # don't reuse a dead session -- clear it and start fresh. Ending an
+            # already-terminal session is harmless and clears the conflict, so
+            # the retry below is bounded (ce#606).
+            if session.get("status", "") not in _REUSABLE_SESSION_STATES:
+                try:
+                    client.end_session(existing_sid)
+                except Exception:
+                    pass
+                return _start_agent_session(
+                    client, agent_name, force_new=force_new,
+                    refuse_on_conflict=refuse_on_conflict, force=False,
+                )
             # Same #21 guard for a session held by *another* caller: if it is
             # mid-turn, don't silently adopt-and-block -- fail fast (or take
             # over with --force).
