@@ -98,14 +98,27 @@ and no install**:
 ```yaml
 auth:
   kind: command
-  command: [ python, "${config_dir}/mint.py", --resource, https://... ]
+  command: [ "${python}", "${config_dir}/mint.py", --resource, https://... ]
   parse: raw
 ```
 
-Invoke the sibling through an interpreter on `PATH` (`python`/`node`/`pwsh`) rather
-than as `argv[0]` directly (a bare `.ps1`/`.py` is not itself executable). The token
-is only expanded when the config is loaded from a file (its directory is known); a
-`--config <path>` or plugin-discovered bridge both qualify.
+Invoke the sibling through an interpreter (`${python}`/`node`/`pwsh`) rather than
+as `argv[0]` directly (a bare `.ps1`/`.py` is not itself executable). `${python}`
+resolves to a full interpreter path (an absolute `sys.executable` when neither
+`python`/`python3` is on `PATH`); `node`/`pwsh` are looked up on `PATH`. The
+`${config_dir}` token is only expanded when the config is loaded from a file (its
+directory is known); a `--config <path>` or plugin-discovered bridge both qualify.
+
+#### Portable interpreter (`${python}`)
+
+Prefer the `${python}` token over a bare `python` in the command: it expands at
+load time to a **working Python 3 interpreter for the current platform** — probing
+`python3` then `python` on POSIX (many Linux/CodeSpaces installs ship only
+`python3`), and `python` then `python3` on Windows, falling back to the interpreter
+running agent-mcp itself (`sys.executable`) if neither is on `PATH`. This keeps a
+plugin's bridge YAML portable across Windows and POSIX without a per-OS launcher.
+`${python}` is path-independent, so it resolves even for a bare-dict config (where
+`${config_dir}` is left intact).
 
 ## Config location — in-repo vs. user-global
 

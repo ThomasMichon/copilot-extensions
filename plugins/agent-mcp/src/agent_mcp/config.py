@@ -19,6 +19,8 @@ import json
 import math
 import os
 import re
+import shutil
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -389,20 +391,57 @@ def _as_command(value: Any) -> list[str]:
     raise ConfigError("server.command must be a string or a list")
 
 
-def _expand_config_dir(argv: list[str], base_dir: str) -> list[str]:
-    """Expand ``${config_dir}`` in each command arg to the bridge config's dir.
+def _resolve_python() -> str:
+    """Resolve the ``${python}`` command token to a working Python 3 interpreter.
 
-    Lets a **plugin-shipped bridge run a plugin-shipped command** -- a sibling
-    script next to the ``.mcp.yaml`` (e.g. an auth minter or a stdio server
-    launcher) -- without deploying anything to ``PATH``. Only applies when the
-    config was loaded from a file (its directory is known); ``parse_config`` on a
-    bare dict leaves the token intact. Invoke the sibling via an interpreter on
-    ``PATH`` (``python``/``node``/``pwsh``), e.g.
-    ``command: [python, "${config_dir}/mint.py", ...]``.
+    A stateless, plugin-shipped command (run in-place via ``${config_dir}``) needs
+    an interpreter on ``PATH``, but the bare name differs by platform: many POSIX
+    installs ship only ``python3`` (no ``python`` at all), while Windows ships
+    ``python``. Probe the platform-appropriate names in order; if none is on
+    ``PATH``, fall back to the interpreter running agent-mcp itself
+    (``sys.executable``), which always exists and can run any stdlib-only sibling
+    script. This keeps a plugin's bridge YAML portable without a per-OS launcher.
+    """
+    names = ("python", "python3") if os.name == "nt" else ("python3", "python")
+    for name in names:
+        found = shutil.which(name)
+        if found:
+            return found
+    return sys.executable
+
+
+def _expand_command_vars(argv: list[str], base_dir: str | None) -> list[str]:
+    """Expand the supported ``${...}`` tokens in a command argv.
+
+    Two tokens are recognized in each ``server.command`` / ``auth.command`` arg:
+
+    * ``${config_dir}`` -> the **directory of the bridge config file**, so a
+      plugin-shipped bridge can run a plugin-shipped sibling script (an auth minter
+      or a stdio launcher) with no PATH deploy and no install. Only expanded when
+      the config was loaded from a file (``base_dir`` known); a bare-dict parse
+      leaves it intact.
+    * ``${python}`` -> a working Python 3 interpreter for **this** platform (see
+      :func:`_resolve_python`), so the same YAML runs on Windows (``python``) and
+      POSIX (``python3``) without a per-OS launcher. Path-independent, so it is
+      expanded regardless of ``base_dir``.
+
+    Invoke a sibling via such an interpreter (``${python}``/``node``/``pwsh``)
+    rather than as ``argv[0]`` directly (a bare ``.py``/``.ps1`` is not itself
+    executable).
     """
     if not argv:
         return argv
-    return [a.replace("${config_dir}", base_dir) for a in argv]
+    py: str | None = None
+    out: list[str] = []
+    for a in argv:
+        if base_dir is not None:
+            a = a.replace("${config_dir}", base_dir)
+        if "${python}" in a:
+            if py is None:
+                py = _resolve_python()
+            a = a.replace("${python}", py)
+        out.append(a)
+    return out
 
 
 # Secret placeholders in a ``server.url`` -- ``${name}`` tokens resolved at spawn
@@ -561,15 +600,15 @@ def parse_config(data: dict[str, Any], *, name: str | None = None,
     auth = auth_specs[0]
     extra_auths = auth_specs[1:]
 
-    # Expand ${config_dir} in every command argv against the bridge config's own
-    # directory, so a plugin-shipped bridge can run a plugin-shipped sibling
-    # command without a PATH deploy. Only when loaded from a file (source_path
-    # known); a bare-dict parse leaves the token intact.
-    if source_path is not None:
-        base_dir = str(source_path.parent)
-        server.command = _expand_config_dir(server.command, base_dir)
-        for spec in (*auth_specs, *url_secrets.values()):
-            spec.command = _expand_config_dir(spec.command, base_dir)
+    # Expand ${config_dir} and ${python} in every command argv. ${config_dir} is
+    # the bridge config's own directory (so a plugin-shipped bridge can run a
+    # plugin-shipped sibling command with no PATH deploy) -- only when loaded from
+    # a file (source_path known). ${python} resolves a per-OS interpreter and is
+    # path-independent, so it expands even for a bare-dict parse.
+    base_dir = str(source_path.parent) if source_path is not None else None
+    server.command = _expand_command_vars(server.command, base_dir)
+    for spec in (*auth_specs, *url_secrets.values()):
+        spec.command = _expand_command_vars(spec.command, base_dir)
 
     raw_tools = data.get("tools") or {}
     tools = ToolFilter(
