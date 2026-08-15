@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agent-zdd"
 version = "0.1.0-dev1"
-description = "Zero-downtime active/passive cutover primitives (routing table + orchestrator) for Copilot CLI plugins and facility services"
+description = "Zero-downtime active/passive cutover primitives (routing table + orchestrator) for Copilot CLI plugins and multi-machine services"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
