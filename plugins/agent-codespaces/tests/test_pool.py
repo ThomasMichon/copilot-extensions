@@ -263,12 +263,12 @@ def test_build_pool_l2_overlay_defaults_to_live_read(monkeypatch):
     from agent_codespaces import coordination
     monkeypatch.setattr(
         coordination, "list_leases",
-        lambda *a, **k: {"a": _l2("a", holder="tmichon-book2/odsp-web/wt-z#s")},
+        lambda *a, **k: {"a": _l2("a", holder="aerial-companion/odsp-web/wt-z#s")},
     )
     members, _ = build_pool(codespaces=[_cs("a")], leases=[], markers={})
     (m,) = members
     assert m.disposition == IN_USE
-    assert m.l2_holder == "tmichon-book2/odsp-web/wt-z#s"
+    assert m.l2_holder == "aerial-companion/odsp-web/wt-z#s"
 
 
 def test_build_pool_l2_read_failure_is_degrade_safe(monkeypatch):

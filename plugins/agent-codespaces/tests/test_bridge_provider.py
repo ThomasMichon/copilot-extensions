@@ -283,7 +283,7 @@ class TestBridgeProviderCLI:
                 "ttl": 300,
                 "age": 42,
                 "expired": False,
-                "conflicts": ["lambda-core"],
+                "conflicts": ["anomalous-potato"],
             }
             rc = main(["bridge", "status"])
             assert rc == 0

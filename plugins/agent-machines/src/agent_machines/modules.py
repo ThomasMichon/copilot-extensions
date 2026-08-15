@@ -5,7 +5,7 @@ the sensitive, OS-mutating work -- install a package manager, bootstrap WSL,
 configure SSH, change power settings -- must never live in this public plugin.
 Instead a requirement package declares **modules**: repo-local commands the
 engine invokes on the machines they gate to. The engine is a generic module
-*runner*; the actual mutation logic stays in the harness repo (e.g. a facility's
+*runner*; the actual mutation logic stays in the harness repo (e.g. a multi-machine system's
 ``tools/restore`` sections), so "engine public, modules repo-local" holds.
 
 A module is declared per package::

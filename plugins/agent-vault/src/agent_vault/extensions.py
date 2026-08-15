@@ -29,7 +29,7 @@ Four generic hook categories are exposed, each a plain callable:
   subparsers action and calls ``subparsers.add_parser(...)`` then
   ``set_defaults(func=handler)``, where ``handler(args) -> int | None`` runs the
   command. Consulted *after* the built-in verbs are registered, so an extension
-  adds facility-only verbs instead of forking ``cli.py``.
+  adds multi-machine system-only verbs instead of forking ``cli.py``.
 - **startup hook** ``hook(service, ctx) -> None`` -- run once, in priority order,
   when the daemon begins serving (after its listeners are bound and its endpoint
   is advertised). Lets an extension start a long-lived background task tied to the

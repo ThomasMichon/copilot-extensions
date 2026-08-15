@@ -65,7 +65,7 @@ def cli_bridge(tmp_path):
     cfg.write_text(json.dumps({
         "server": {"type": "cli",
                    "tools_from": ["search.md", "secret.md"],
-                   "scopes": ["shared", "lambda-core"]},
+                   "scopes": ["shared", "anomalous-potato"]},
     }), encoding="utf-8")
     return cfg
 
