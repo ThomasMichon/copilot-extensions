@@ -527,6 +527,63 @@ function Remove-ConsoleTrampolines {
         ForEach-Object { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
 }
 
+function Get-SignedBasePython {
+    <# Return the path to an Authenticode-signed base Python (>=3.10), or $null.
+       A `uv venv` builds the slot python.exe as a uv *trampoline* that resolves
+       its base interpreter lazily; over a NON-interactive SSH logon that
+       resolution fails with "uv trampoline failed to spawn Python child
+       process (entity not found)". The agent-index CLI SSH transport runs
+       `agent-index <sub>` (i.e. this slot python) on the indexer host over SSH,
+       so the slot python MUST be spawnable there. Building the venv from a
+       signed base with `python -m venv --copies` embeds a *real copied*
+       python.exe (no trampoline; Authenticode survives the copy), which is BOTH
+       SSH-invocable AND Smart-App-Control-allowed.
+
+       Candidates are gathered from several sources because none is reliable on
+       its own: the `py` launcher (absent on some Cloud PCs), the well-known
+       all-users / per-user install roots, and any `python`/`python3` on PATH --
+       skipping the WindowsApps App-Execution-Alias 0-byte reparse stub. Each
+       candidate is verified to be a real interpreter >=3.10 (the plugin's
+       requires-python floor) before its signature is checked. #>
+    $cands = @()
+
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        foreach ($v in '3.13', '3.12', '3.11', '3.10') {
+            $p = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null | Out-String).Trim()
+            if ($LASTEXITCODE -eq 0 -and $p) { $cands += $p }
+        }
+    }
+
+    $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)})
+    if ($env:LOCALAPPDATA) { $roots += (Join-Path $env:LOCALAPPDATA 'Programs\Python') }
+    foreach ($root in $roots) {
+        if (-not $root) { continue }
+        Get-ChildItem -Path $root -Filter 'Python3*' -Directory -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending |
+            ForEach-Object {
+                $exe = Join-Path $_.FullName 'python.exe'
+                if (Test-Path $exe) { $cands += $exe }
+            }
+    }
+
+    foreach ($name in 'python', 'python3') {
+        Get-Command $name -All -ErrorAction SilentlyContinue |
+            Where-Object { $_.Path -and $_.Path -notmatch '\\WindowsApps\\' } |
+            ForEach-Object { $cands += $_.Path }
+    }
+
+    foreach ($c in ($cands | Select-Object -Unique)) {
+        if (-not (Test-Path $c)) { continue }
+        $ver = (& $c -c "import sys;print('%d.%d' % sys.version_info[:2])" 2>$null | Out-String).Trim()
+        if (-not ($ver -match '^(\d+)\.(\d+)$')) { continue }
+        if ([int]$Matches[1] -lt 3 -or ([int]$Matches[1] -eq 3 -and [int]$Matches[2] -lt 10)) { continue }
+        try {
+            if ((Get-AuthenticodeSignature $c).Status -eq 'Valid') { return $c }
+        } catch {}
+    }
+    return $null
+}
+
 function Deploy-SelfProvisioningBinstub {
     <# Deploy the agent-index CLI binstubs into ~/.local/bin, SELF-PROVISIONING
        (#1393): fast-path the built versioned slot's python; if no slot is built
@@ -638,14 +695,54 @@ function Install-Runtime {
     }
     Write-Ok "Directories: $InstallDir"
 
+    # Rebuild an existing slot venv whose python.exe is a uv trampoline /
+    # unsigned (not spawnable over a non-interactive SSH logon, and Smart App
+    # Control-blocked) when a signed base Python is available to rebuild from.
+    # A re-deploy of the same version otherwise leaves the old trampoline in
+    # place, defeating the CLI SSH transport.
+    if (Test-Path $VenvPython) {
+        $sigStatus = try { (Get-AuthenticodeSignature $VenvPython).Status } catch { 'Unknown' }
+        if ($sigStatus -ne 'Valid' -and (Get-SignedBasePython)) {
+            Write-Warn 'Existing slot python is a uv trampoline / unsigned (not SSH-invocable) -- rebuilding from signed Python'
+            try { Invoke-Stop | Out-Null } catch {}
+            try { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop }
+            catch { Write-Fail "Could not remove the unsigned slot venv (in use?): $_ -- refusing to leave a non-SSH-invocable runtime in place"; exit 1 }
+        }
+    }
+
     if (-not (Test-Path $VenvPython)) {
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         Invoke-VersionedSlotClean
-        if (Get-Command uv -ErrorAction SilentlyContinue) {
-            & uv venv $VenvDir --allow-existing 2>&1 | Out-Null
-        } else {
-            & $pythonCmd -m venv $VenvDir 2>&1 | Out-Null
+        # Prefer a signed base Python via `python -m venv --copies`: the signed
+        # python.exe is *copied* into the slot (no uv trampoline), so it is BOTH
+        # spawnable over a non-interactive SSH logon AND SAC-allowed -- the
+        # invariant the agent-index CLI SSH transport depends on. Fall back to
+        # uv (unsigned trampoline) only when no signed base is present.
+        $signedBase = Get-SignedBasePython
+        $created = $false
+        if ($signedBase) {
+            # --clear so a leftover non-empty slot dir (partial prior build)
+            # doesn't fail `venv` and force the uv (trampoline) fallback.
+            & $signedBase -m venv --copies --clear $VenvDir 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0 -and (Test-Path $VenvPython)) {
+                $created = $true
+                Write-Ok "Venv created from signed Python ($signedBase)"
+            } else {
+                Write-Warn 'Signed-Python venv creation failed -- falling back to uv'
+            }
+        }
+        if (-not $created) {
+            if (Get-Command uv -ErrorAction SilentlyContinue) {
+                # Run uv from a trusted CWD (SystemDrive root), never the profile
+                # mount -- launching the WinGet uv.exe reparse shim with the
+                # profile as CWD is blocked on SAC/profile-mount Cloud PCs.
+                $prevLoc = Get-Location
+                Set-Location "$env:SystemDrive\"
+                try { & uv venv $VenvDir --allow-existing 2>&1 | Out-Null } finally { Set-Location $prevLoc }
+            } else {
+                & $pythonCmd -m venv $VenvDir 2>&1 | Out-Null
+            }
         }
         $ErrorActionPreference = $prevEAP
         if (-not (Test-Path $VenvPython)) { Write-Fail "Venv creation failed -- $VenvPython not found"; exit 1 }
