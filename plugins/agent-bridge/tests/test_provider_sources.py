@@ -65,6 +65,8 @@ def test_parse_manifest_valid():
         {"namespace": "cs", "command": [""]},  # empty element
         {"namespace": "cs", "command": [1]},  # non-string element
         {"namespace": "cs", "command": ["x"], "description": 5},  # bad desc
+        {"namespace": "cs", "command": ["x"], "restricted": "false"},  # str, not bool
+        {"namespace": "cs", "command": ["x"], "restricted": 1},  # int, not bool
     ],
 )
 def test_parse_manifest_rejects_bad(data):

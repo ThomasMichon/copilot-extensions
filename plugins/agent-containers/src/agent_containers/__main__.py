@@ -10,7 +10,6 @@ Subcommands:
   release <target>      Release a lease (by container or effort name)
   leases                Show active leases
   exec <name>           Run the ACP launch command in a container (testing)
-  bridge register|...   Push/remove provider registrations on agent-bridge
   version               Show version
 """
 
@@ -80,21 +79,6 @@ def main(argv: list[str] | None = None) -> int:
         help="Attach stdio (ACP transport) instead of a one-shot probe",
     )
 
-    bridge_p = sub.add_parser("bridge", help="agent-bridge provider integration")
-    bridge_sub = bridge_p.add_subparsers(dest="bridge_command")
-    for _bc, _help in (
-        ("register", "Register container agents"),
-        ("unregister", "Remove container agents"),
-        ("status", "Show registration status"),
-    ):
-        _bp = bridge_sub.add_parser(_bc, help=_help)
-        _bp.add_argument(
-            "--bridge-url",
-            default=None,
-            help="Override the agent-bridge daemon URL "
-            "(default: resolve from ~/.agent-bridge/active.json)",
-        )
-
     sub.add_parser("version", help="Show version")
 
     sub.add_parser(
@@ -162,8 +146,6 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_leases()
         if args.command == "exec":
             return _cmd_exec(args)
-        if args.command == "bridge":
-            return _cmd_bridge(args)
         if args.command == "version":
             print(f"agent-containers {__version__}")
             return 0
@@ -485,30 +467,6 @@ def _exec_stdio(spawn_cmd: list[str], env: dict[str, str]) -> int:
     for t in threads[1:]:
         t.join(timeout=2)
     return rc
-
-
-def _cmd_bridge(args: argparse.Namespace) -> int:
-    from . import bridge_provider
-
-    cmd = getattr(args, "bridge_command", None)
-    bridge_url = getattr(args, "bridge_url", None)
-    if cmd == "register":
-        result = bridge_provider.register_with_bridge(bridge_url)
-        print(json.dumps(result, indent=2))
-        return 0
-    if cmd == "unregister":
-        result = bridge_provider.unregister_from_bridge(bridge_url)
-        print(json.dumps(result, indent=2))
-        return 0
-    if cmd == "status":
-        status = bridge_provider.get_bridge_status(bridge_url)
-        if status is None:
-            print("containers provider not registered (or bridge unreachable)")
-            return 1
-        print(json.dumps(status, indent=2))
-        return 0
-    print("Usage: agent-containers bridge {register|unregister|status}", file=sys.stderr)
-    return 1
 
 
 if __name__ == "__main__":

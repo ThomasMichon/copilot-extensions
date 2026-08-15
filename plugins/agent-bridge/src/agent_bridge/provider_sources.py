@@ -104,10 +104,14 @@ def parse_manifest(data: object, *, source_path: str = "") -> ProviderManifest:
     if not isinstance(desc, str):
         raise ManifestError("`description` must be a string when present")
 
+    restricted = data.get("restricted", False)
+    if not isinstance(restricted, bool):
+        raise ManifestError("`restricted` must be a JSON boolean when present")
+
     return ProviderManifest(
         namespace=ns,
         command=tuple(cmd),
-        restricted=bool(data.get("restricted", False)),
+        restricted=restricted,
         description=desc,
         source_path=source_path,
     )
