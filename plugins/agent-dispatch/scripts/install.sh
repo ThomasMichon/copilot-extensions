@@ -787,12 +787,47 @@ WantedBy=default.target
 EOF
     systemctl --user daemon-reload 2>/dev/null || true
     systemctl --user enable "$SYSTEMD_UNIT" 2>/dev/null || true
+    # --no-restart: refresh the unit (for next boot) but do NOT restart now -- used
+    # after a graceful cutover already stood the new coordinator up beside the old
+    # (Thread B). A `systemctl restart` here would spawn a SECOND coordinator.
+    if [[ "${1:-}" == "--no-restart" ]]; then
+        _ok "Coordinator unit refreshed ($SYSTEMD_UNIT); not restarted -- the graceful cutover already brought the new coordinator up"
+        return 0
+    fi
     systemctl --user restart "$SYSTEMD_UNIT" 2>/dev/null || true
     if systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null; then
         _ok "Coordinator service installed + started ($SYSTEMD_UNIT)"
     else
         _warn "Coordinator service installed but not active -- check: systemctl --user status agent-dispatch"
     fi
+}
+
+# Thread B graceful cutover (parity with install.ps1 Invoke-CoordinatorCutover):
+# if a LIVE Thread-B coordinator (one that published the zdd routing table + has a
+# /drain seam) is serving, stand the new slot up beside it and flip routing via the
+# OS-agnostic `_cutover` seam -- so NO in-flight claim is dropped -- instead of a
+# systemctl restart. Returns 0 when the cutover brought the new coordinator up (so
+# the caller refreshes the unit with --no-restart); 1 to fall back to the SIGTERM-
+# graceful `systemctl restart` (which uvicorn drains, so the invariant still holds).
+# A pre-Thread-B coordinator has no routing entry -> returns 1 (fall back). The
+# supervisor is a SEPARATE unit -- deliberately left running so it outlives the
+# coordinator swap and re-adopts via the durable queue DB + routing table.
+_coordinator_cutover() {
+    [[ "$NO_SERVICE" -eq 1 ]] && return 1
+    command -v systemctl >/dev/null 2>&1 || return 1
+    local py="$VENV_PYTHON"
+    [[ -x "$py" ]] || py="$LINK_PYTHON"
+    [[ -x "$py" ]] || return 1
+    # Only cut over a coordinator that has published the routing table (Thread-B,
+    # /drain-capable). read_active_endpoint verifies a live listener too.
+    "$py" -c 'import sys; from zdd.routing import read_active_endpoint; from agent_dispatch.config import routing_dir; sys.exit(0 if read_active_endpoint(routing_dir()) else 1)' 2>/dev/null || return 1
+    _step 'Graceful cutover: standing the new coordinator up beside the old, then flipping routing...'
+    if "$py" -m agent_dispatch _cutover >/dev/null 2>&1; then
+        _ok 'Coordinator cut over to the new build (no in-flight claim dropped; supervisor/workers re-adopt via the queue DB + routing table)'
+        return 0
+    fi
+    _warn 'Graceful cutover did not complete -- falling back to a SIGTERM-graceful systemctl restart'
+    return 1
 }
 
 # -- Embody supervisor service (systemd user unit; label-gated) --------------
@@ -1161,7 +1196,19 @@ do_update() {
     echo ''; echo '=== agent-dispatch update ==='; echo ''
     _downgrade_guard
     _ensure_runtime
-    _install_service
+    # Thread B (parity with install.ps1): a version update must never kill an
+    # in-flight claim. _ensure_runtime built + activated the new slot WITHOUT
+    # stopping the daemon; now, if a live Thread-B coordinator is serving, cut it
+    # over gracefully (new slot beside old -> flip routing -> drain between claims
+    # -> retire) and refresh the unit WITHOUT restarting. Otherwise fall back to
+    # _install_service's SIGTERM-graceful `systemctl restart` (uvicorn drains
+    # in-flight requests, so the invariant holds either way). The supervisor is a
+    # SEPARATE unit -- never stopped here; it outlives the swap + re-adopts.
+    if _coordinator_cutover; then
+        _install_service --no-restart
+    else
+        _install_service
+    fi
     _install_supervisor_service
     echo ''; echo '=== agent-dispatch update complete ==='
 }
