@@ -52,7 +52,7 @@ def test_windows_pipe_without_tcp_has_no_alt():
 
 
 def test_posix_ignores_pipe_and_uses_unix():
-    # POSIX is unchanged: no TCP alt (WSL->Linux is not a facility path).
+    # POSIX is unchanged: no TCP alt (WSL->Linux is not a multi-machine system path).
     assert advertised_endpoint(
         is_windows=False,
         unix_bound=True,

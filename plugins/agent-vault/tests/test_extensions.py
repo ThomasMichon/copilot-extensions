@@ -300,7 +300,7 @@ def test_registered_cli_command_adds_verb(registry, monkeypatch):
     ran = {}
 
     def build(subparsers):
-        p = subparsers.add_parser("probe", help="facility probe")
+        p = subparsers.add_parser("probe", help="multi-machine system probe")
         p.add_argument("target")
 
         def handler(args):

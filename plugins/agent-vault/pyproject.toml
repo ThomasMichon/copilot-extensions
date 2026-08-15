@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-vault"
-version = "0.1.0-dev46"
+version = "0.1.0-dev47"
 description = "Local KeePassXC-backed secret store for Copilot CLI agents."
 readme = "README.md"
 license = "MIT"
@@ -16,7 +16,7 @@ dependencies = []
 
 [project.optional-dependencies]
 # The persistent on-disk credential cache (opt-in) encrypts entries with Fernet,
-# and the seal/unseal envelope-KEK facility encrypts with AES-256-GCM -- both need
+# and the seal/unseal envelope-KEK multi-machine system encrypts with AES-256-GCM -- both need
 # `cryptography`. Install with `pip install agent-vault[cache]` / `[kek]` (or
 # provide cryptography another way); without it the cache degrades to a safe no-op
 # and seal/unseal raise a clear error.

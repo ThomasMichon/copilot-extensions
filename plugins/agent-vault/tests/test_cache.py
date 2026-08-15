@@ -37,8 +37,8 @@ def test_machine_hint_is_passed():
     seen = {}
     reg = ExtensionRegistry()
     reg.register_cache_source(lambda machine: seen.update(m=machine) or ["A/x"])
-    reg.collect_cache_entries("wheatley")
-    assert seen["m"] == "wheatley"
+    reg.collect_cache_entries("mantis-counter")
+    assert seen["m"] == "mantis-counter"
 
 
 def test_raising_source_is_skipped():

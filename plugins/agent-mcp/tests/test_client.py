@@ -126,9 +126,9 @@ def test_call_verb_success(tmp_path, capsys):
 
 def test_call_verb_arguments_flag(tmp_path, capsys):
     cfg = _write_cfg(tmp_path)
-    rc = main(["call", str(cfg), "greet", "--arguments", '{"name": "Wheatley"}'])
+    rc = main(["call", str(cfg), "greet", "--arguments", '{"name": "Mantis-Counter"}'])
     assert rc == 0
-    assert capsys.readouterr().out.strip() == "hello Wheatley"
+    assert capsys.readouterr().out.strip() == "hello Mantis-Counter"
 
 
 def test_call_verb_request_file(tmp_path, capsys):

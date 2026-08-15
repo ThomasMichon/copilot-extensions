@@ -93,13 +93,13 @@ def test_build_argv_value_is_single_token_no_shell_split():
 
 def test_scope_gating():
     shared = parse_sidecar(_sidecar(scope="shared"))
-    scoped = parse_sidecar(_sidecar(scope="lambda-core"))
+    scoped = parse_sidecar(_sidecar(scope="anomalous-potato"))
     untagged = parse_sidecar(_sidecar(scope=None))
     # No configured scopes -> everything allowed.
     assert tool_in_scope(scoped, [])
     # Configured host scopes gate by tag; untagged always allowed.
-    assert tool_in_scope(shared, ["shared", "lambda-core"])
-    assert tool_in_scope(scoped, ["shared", "lambda-core"])
+    assert tool_in_scope(shared, ["shared", "anomalous-potato"])
+    assert tool_in_scope(scoped, ["shared", "anomalous-potato"])
     assert not tool_in_scope(scoped, ["shared"])
     assert tool_in_scope(untagged, ["shared"])
 
@@ -128,10 +128,10 @@ def test_config_cli_type_requires_tools_from():
 def test_config_cli_type_parses_tools_from_and_scopes():
     cfg = parse_config({
         "server": {"type": "cli", "tools_from": ["tools/vei-search.md"],
-                   "scopes": ["shared", "lambda-core"]},
+                   "scopes": ["shared", "anomalous-potato"]},
         "tools": {"allow": ["vei_*"]},
     }, name="vei")
     assert cfg.server.type == "cli"
     assert cfg.server.tools_from == ["tools/vei-search.md"]
-    assert cfg.server.scopes == ["shared", "lambda-core"]
+    assert cfg.server.scopes == ["shared", "anomalous-potato"]
     assert cfg.server.launch_desc == "cli:1 sidecar(s)"

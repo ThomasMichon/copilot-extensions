@@ -125,7 +125,7 @@ class ServerSpec:
     # cli (CLI->MCP responder): a set of tool sidecar files to expose as MCP
     # tools, and an optional list of execution scopes this host is allowed to
     # run. A sidecar whose ``mcp.scope`` is set and not in ``scopes`` is neither
-    # advertised nor runnable (the generic form of the facility execution
+    # advertised nor runnable (the generic form of the multi-machine system execution
     # policy). ``scopes`` empty => no scope gating.
     tools_from: list[str] = field(default_factory=list)
     scopes: list[str] = field(default_factory=list)

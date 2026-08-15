@@ -67,7 +67,7 @@ class RequirementPackage:
 
         The gate match is **case-insensitive**: ``current_machine()`` returns
         ``platform.node()``, whose casing is the OS hostname's (e.g.
-        ``Lambda-Core``/``Borealis`` on Windows), while manifests conventionally
+        ``Anomalous-Potato``/``Emancipation-Cube`` on Windows), while manifests conventionally
         list gates in lowercase. Hostnames are case-insensitive, so comparing
         case-sensitively would silently exclude a machine from its own package.
         """
