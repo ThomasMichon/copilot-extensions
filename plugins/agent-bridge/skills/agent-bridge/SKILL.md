@@ -47,8 +47,8 @@ use `agent-bridge send <agent-name> "prompt"`**. Never use the Task
 tool for cross-machine communication -- it cannot reach other machines.
 
 Run `agent-bridge agents` to see which agent names are available. If
-your deployment includes a facility-specific adapter skill (e.g.
-`facility-agent-bridge`), it will list the concrete machine and agent
+your deployment includes a deployment-specific adapter skill (e.g.
+`multi-machine system-agent-bridge`), it will list the concrete machine and agent
 names for your environment.
 
 ### Which coordination system? (sub-agent vs agent-bridge vs agent-dispatch)
@@ -450,7 +450,7 @@ agent-bridge create <agent> "<same idempotent prompt>"
 > so a fresh turn is measured from its own start. If you are on **dev206 or
 > later**, a resend after a long idle gap just runs; the "send again" dance below
 > is only for the genuine mid-turn reattach-drain case above.
-> (aperture-labs #4122 / #2817.)
+> (test-chamber #4122 / #2817.)
 
 > A **distinct** cause of the same `Operation cancelled by user` string is a
 > permission/`ask_user` request the headless client can't get answered: the

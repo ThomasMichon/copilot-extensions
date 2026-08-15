@@ -11,7 +11,7 @@ A delivered message looks like this (a marker in the same family as the runtime'
 `<system_reminder>` / `<system_notification>`):
 
 ```
-<agent-message from="cjohnson@orchestrator" reply-to="lambda-core-wsl-20260710-200009-ffc8" msg-id="2">
+<agent-message from="cjohnson@orchestrator" reply-to="anomalous-potato-wsl-20260710-200009-ffc8" msg-id="2">
 …the actual message body…
 </agent-message>
 ```

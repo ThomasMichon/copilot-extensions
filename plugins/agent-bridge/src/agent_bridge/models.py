@@ -569,7 +569,7 @@ class TopologyProfile(BaseModel):
 
     machines_yaml: str | None = None
     agents_config: str | None = None
-    # Facility-wide spawn defaults applied to every **derived** agent in this
+    # System-wide spawn defaults applied to every **derived** agent in this
     # profile (the topology roster synthesized from machines.yaml). Derived agents
     # otherwise carry no copilot args, so the model target lived, redundantly, on
     # each hand-authored acp-agents.json entry. Setting it once here lets the
@@ -586,7 +586,7 @@ class RepoBridgeConfig(BaseModel):
     A repo that a topology profile derives its roster from can carry its own
     agent-bridge settings *in the repo*, so they travel with the code to every
     machine that syncs it -- rather than being pinned in each machine's local
-    ``~/.agent-bridge/config.yaml``. Currently the facility spawn defaults
+    ``~/.agent-bridge/config.yaml``. Currently the multi-machine system spawn defaults
     (``default_copilot_args`` / ``default_env``): the repo declares the model
     target once, and every machine's derived roster inherits it on sync. Extra
     keys are ignored so the file can grow without breaking older daemons.

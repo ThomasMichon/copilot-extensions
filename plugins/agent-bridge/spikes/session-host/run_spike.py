@@ -1,7 +1,7 @@
 """Phase-0 go/no-go orchestrator for the Session-Host survive-and-reattach spike.
 
 Runs the whole control test on the current OS and prints a PASS/FAIL table for
-the three assertions from aperture-labs #1761:
+the three assertions from test-chamber #1761:
 
   (1) the child survives the front's mid-turn crash (PID unchanged, running);
   (2) the mid-turn turn keeps streaming to completion while no front is

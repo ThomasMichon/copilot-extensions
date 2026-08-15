@@ -1,6 +1,6 @@
 """Length-prefixed control/data wire protocol for the Session-Host spike.
 
-Throwaway spike code (Phase 0, aperture-labs #1761). Not part of the shipped
+Throwaway spike code (Phase 0, test-chamber #1761). Not part of the shipped
 ``agent_bridge`` package -- it lives under ``spikes/`` and is never imported by
 the plugin. It exists only to prove the survive-and-reattach primitive.
 

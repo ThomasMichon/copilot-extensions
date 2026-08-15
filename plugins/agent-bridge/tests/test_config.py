@@ -285,7 +285,7 @@ class TestValidateConfig:
 
 
 class TestInRepoBridgeConfig:
-    """<repo>/.agent-bridge/config.yaml -- repo-portable facility spawn defaults."""
+    """<repo>/.agent-bridge/config.yaml -- repo-portable multi-machine system spawn defaults."""
 
     def test_missing_file_returns_none(self, tmp_path: Path):
         assert load_repo_bridge_config(tmp_path) is None

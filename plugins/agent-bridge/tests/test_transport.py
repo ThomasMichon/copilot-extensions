@@ -149,12 +149,12 @@ class TestBuildRemoteCmd:
         target = SpawnTarget(
             type="ssh", host="server-a", user="deploy",
             project="my-project",
-            worktree_id="lambda-core-wsl-20250101-120000-abc1",
+            worktree_id="anomalous-potato-wsl-20250101-120000-abc1",
         )
         cmd = _build_remote_cmd(target)
         assert "my-project" in cmd
         assert "--worktree-id" in cmd
-        assert "lambda-core-wsl-20250101-120000-abc1" in cmd
+        assert "anomalous-potato-wsl-20250101-120000-abc1" in cmd
         assert "--no-resume" in cmd
         assert "--new" not in cmd
         assert "--acp" in cmd
@@ -175,8 +175,8 @@ class TestBuildRemoteCmd:
         import base64
 
         target = SpawnTarget(
-            type="ssh", host="lambda-core", user="example-user",
-            project="aperture-labs", ssh_shell="pwsh",
+            type="ssh", host="anomalous-potato", user="example-user",
+            project="test-chamber", ssh_shell="pwsh",
             copilot_args=["--allow-all"],
         )
         cmd = _build_remote_cmd(target, session_id="s")
@@ -186,7 +186,7 @@ class TestBuildRemoteCmd:
         # The encoded payload is the real launch script; decode + assert on it.
         encoded = cmd.rsplit(" ", 1)[-1]
         script = base64.b64decode(encoded).decode("utf-16-le")
-        assert script.startswith("aperture-labs")
+        assert script.startswith("test-chamber")
         assert "'--'" in script and "--acp" in script
 
     def test_project_posix_keeps_breadcrumb(self):
@@ -354,7 +354,7 @@ class TestSpawnSsh:
         only surfaces later as a misleading LAUNCH_ACP: Connection closed).
         """
         target = SpawnTarget(
-            type="ssh", host="cloud1", user="deploy", project="aperture-labs",
+            type="ssh", host="cloud1", user="deploy", project="test-chamber",
             ssh_shell="pwsh",
         )
         notfound = MagicMock()
@@ -362,7 +362,7 @@ class TestSpawnSsh:
         notfound.exit_code = 1
         notfound.stdout = ""
         notfound.stderr = (
-            "aperture-labs: The term 'aperture-labs' is not recognized as a "
+            "test-chamber: The term 'test-chamber' is not recognized as a "
             "name of a cmdlet, function, script file, or operable program."
         )
         mock_manager.exec_command = AsyncMock(return_value=notfound)
@@ -374,7 +374,7 @@ class TestSpawnSsh:
         err = ei.value
         assert err.stage == ConnectStage.WORKTREE
         assert err.retryable is False
-        assert "aperture-labs" in err.detail
+        assert "test-chamber" in err.detail
         assert "cloud1" in err.detail
         assert "not provisioned" in err.detail
         # Crucially: NO degrade -- the direct launch was never attempted.
@@ -384,14 +384,14 @@ class TestSpawnSsh:
     async def test_ssh_unprovisioned_project_posix_exit_127(self, mock_manager):
         """POSIX command-not-found (exit 127) is also treated as unprovisioned."""
         target = SpawnTarget(
-            type="ssh", host="dev6", user="deploy", project="aperture-labs",
+            type="ssh", host="dev6", user="deploy", project="test-chamber",
             ssh_shell="bash",
         )
         notfound = MagicMock()
         notfound.timed_out = False
         notfound.exit_code = 127
         notfound.stdout = ""
-        notfound.stderr = "bash: aperture-labs: command not found"
+        notfound.stderr = "bash: test-chamber: command not found"
         mock_manager.exec_command = AsyncMock(return_value=notfound)
 
         with patch("agent_bridge.transport.get_default_manager", return_value=mock_manager):
@@ -503,27 +503,27 @@ class TestLooksUnprovisionedProject:
 
     def test_powershell_not_recognized(self):
         assert _looks_unprovisioned_project(
-            "aperture-labs",
-            "The term 'aperture-labs' is not recognized as a name of a cmdlet, "
+            "test-chamber",
+            "The term 'test-chamber' is not recognized as a name of a cmdlet, "
             "function, script file, or operable program.",
             1,
         )
 
     def test_cmd_not_recognized(self):
         assert _looks_unprovisioned_project(
-            "aperture-labs",
-            "'aperture-labs' is not recognized as an internal or external command",
+            "test-chamber",
+            "'test-chamber' is not recognized as an internal or external command",
             1,
         )
 
     def test_posix_command_not_found(self):
         assert _looks_unprovisioned_project(
-            "aperture-labs", "bash: aperture-labs: command not found", 127,
+            "test-chamber", "bash: test-chamber: command not found", 127,
         )
 
     def test_posix_exit_127_without_name(self):
         # POSIX 127 is unambiguous command-not-found even if stderr is empty.
-        assert _looks_unprovisioned_project("aperture-labs", "", 127)
+        assert _looks_unprovisioned_project("test-chamber", "", 127)
 
     def test_exit_127_naming_a_different_command_is_not_unprovisioned(self):
         # A bare 127 whose stderr clearly implicates a *different* missing
@@ -542,7 +542,7 @@ class TestLooksUnprovisionedProject:
     def test_exit_127_bare_not_found_project(self):
         # The project binstub itself reported bare "not found" is unprovisioned.
         assert _looks_unprovisioned_project(
-            "aperture-labs", "aperture-labs: not found", 127,
+            "test-chamber", "test-chamber: not found", 127,
         )
 
     def test_generic_failure_is_not_unprovisioned(self):
@@ -1332,7 +1332,7 @@ class TestLocalResolvePassesProject:
     @pytest.mark.asyncio
     async def test_project_flag_precedes_resolve(self):
         plan = {"launch": {"worktree_id": "wt-1", "work_dir": "/d"}}
-        target = SpawnTarget(type="local", cwd="/c", project="aperture-labs")
+        target = SpawnTarget(type="local", cwd="/c", project="test-chamber")
         calls = []
 
         async def fake_exec(*argv, **kw):
@@ -1345,7 +1345,7 @@ class TestLocalResolvePassesProject:
 
         argv = calls[0]
         assert "--project" in argv
-        assert argv[argv.index("--project") + 1] == "aperture-labs"
+        assert argv[argv.index("--project") + 1] == "test-chamber"
         # global flag comes before the subcommand
         assert argv.index("--project") < argv.index("resolve")
 

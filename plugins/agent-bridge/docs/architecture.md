@@ -228,8 +228,8 @@ port. Three cooperating pieces make this work; all are **OS-agnostic and
 app-level** (the effort's deliberate conclusion: systemd and Windows Scheduled
 Tasks share almost no lifecycle surface, so the drain/handoff logic must not
 live in the service manager). Design and validation are tracked in the
-aperture-labs effort `agent-bridge-zero-downtime-deploy` (umbrella issue
-[aperture-labs #1236](https://home.thomasmichon.com/gitea/example-user/aperture-labs/issues/1236)).
+test-chamber effort `agent-bridge-zero-downtime-deploy` (umbrella issue
+[test-chamber #1236](https://home.thomasmichon.com/gitea/example-user/test-chamber/issues/1236)).
 
 ### 1. Routing table (`<config_dir>/active.json`)
 
@@ -271,7 +271,7 @@ releases the gate (used by cutover rollback).
 permitted while draining -- teardown is exactly the operation the drain waits
 for, so gating it would self-deadlock a redeploy (the operator could not clear
 the very sessions blocking the drain). The gate blocks only *new* work
-(create/turn). (aperture-labs #1755.)
+(create/turn). (test-chamber #1755.)
 
 **Drain observability + bounded lifetime.** Opening and releasing the gate are
 logged with a `source`/`reason`, and `/health` exposes a `drain` block (`since`,
@@ -281,7 +281,7 @@ a stuck drain is visible to monitoring without grepping logs. A drain has a
 **auto-releases** it after `SessionManager.DRAIN_AUTO_RELEASE_S` (default 900s)
 if no cutover ever retires the daemon -- so an aborted cutover (or a diagnosis
 session that is itself 503'd by the gate it is investigating) self-heals instead
-of returning 503 forever. (aperture-labs #1757.)
+of returning 503 forever. (test-chamber #1757.)
 
 ### 3. Active/passive cutover (`agent-bridge deploy`)
 
@@ -316,7 +316,7 @@ to the cutover that drained it. `agent-bridge deploy` heals such a stale
 breadcrumb on its next run (undraining the stranded survivor); `agent-bridge
 deploy --recover` runs *only* that heal and exits. Combined with the drain
 watchdog (#1757), a stranded survivor self-heals even if no deploy is re-run.
-(aperture-labs #1756.)
+(test-chamber #1756.)
 
 ### Installer wiring (both platforms)
 
@@ -380,7 +380,7 @@ stable **per-session supervisor** that owns the child over an **AF_UNIX socket**
 and a **restartable frontend** that adopts supervisors on restart (and a rework
 of the Windows kill-on-job-close so supervisors survive frontend exit). That
 supervisor/broker split is **not implemented** and remains tracked in effort
-[#1236](https://home.thomasmichon.com/gitea/example-user/aperture-labs/issues/1236).
+[#1236](https://home.thomasmichon.com/gitea/example-user/test-chamber/issues/1236).
 
 ## Persistence
 

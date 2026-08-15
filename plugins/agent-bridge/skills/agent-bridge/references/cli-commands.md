@@ -61,7 +61,7 @@ Get-Content ./dispatch.md | agent-bridge send <agent-name> --prompt-file -
 # answerable -- routes to the message queue, not an ACP turn. The receiver
 # replies with `agent-bridge send <reply-to> "..."`.
 agent-bridge send <live-session-id> "message body"
-agent-bridge send <live-session-id> "msg" --from "reviewer@lambda-core" --reply-to <my-session-id>
+agent-bridge send <live-session-id> "msg" --from "reviewer@anomalous-potato" --reply-to <my-session-id>
 ```
 
 `send` auto-detects whether the target is an agent name, a bridge-owned session
@@ -243,7 +243,7 @@ turns up to `AGENT_BRIDGE_DRAIN_TIMEOUT`). Full zero-downtime cutover is opt-in
 while service-manager reconciliation is validated:
 
 ```bash
-AGENT_BRIDGE_ZERO_DOWNTIME=1 aperture-labs services agent-bridge update
+AGENT_BRIDGE_ZERO_DOWNTIME=1 test-chamber services agent-bridge update
 ```
 
 > A passive instance (`agent-bridge start --passive`) does not self-publish the
@@ -322,7 +322,7 @@ agent-bridge config show
 agent-bridge config show --json
 
 # Add/update a topology profile for a repo
-agent-bridge config adopt --repo /path/to/repo --profile facility
+agent-bridge config adopt --repo /path/to/repo --profile multi-machine system
 
 # Remove a topology profile
 agent-bridge config remove my-profile

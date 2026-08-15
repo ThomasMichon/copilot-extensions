@@ -22,10 +22,10 @@ class TestLiveSessionCRUD:
         now = time.time()
         tmp_db.register_live_session(
             "cli-1",
-            machine="lambda-core",
+            machine="anomalous-potato",
             cwd="/home/x/wt",
             worktree_id="wt-abc",
-            repo="aperture-labs",
+            repo="test-chamber",
             branch="worktree/x",
             pid=4242,
             role=None,
@@ -34,7 +34,7 @@ class TestLiveSessionCRUD:
         row = tmp_db.get_live_session("cli-1")
         assert row is not None
         assert row["session_id"] == "cli-1"
-        assert row["machine"] == "lambda-core"
+        assert row["machine"] == "anomalous-potato"
         assert row["worktree_id"] == "wt-abc"
         assert row["pid"] == 4242
         assert row["status"] == "live"
@@ -230,7 +230,7 @@ def client(tmp_db: Database) -> TestClient:
 def test_route_register_list_get_deregister(client: TestClient) -> None:
     r = client.post(
         "/api/v1/live-sessions",
-        json={"session_id": "cli-1", "machine": "lambda-core", "worktree_id": "wt-1"},
+        json={"session_id": "cli-1", "machine": "anomalous-potato", "worktree_id": "wt-1"},
     )
     assert r.status_code == 200, r.text
     body = r.json()

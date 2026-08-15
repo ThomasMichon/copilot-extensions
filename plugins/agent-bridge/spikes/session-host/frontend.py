@@ -1,4 +1,4 @@
-"""Stub frontend for the Phase-0 spike (aperture-labs #1761).
+"""Stub frontend for the Phase-0 spike (test-chamber #1761).
 
 Two roles:
 
