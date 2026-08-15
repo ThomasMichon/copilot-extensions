@@ -21,7 +21,7 @@ continuously archived to a target of your choice:
 
 ```
 # Windows
-pwsh -File plugins/agent-logger/scripts/install.ps1 install
+pwsh -File plugins\agent-logger\scripts\install.ps1 install
 # Linux / WSL
 bash plugins/agent-logger/scripts/install.sh install
 ```
@@ -31,24 +31,29 @@ log on demand with `process-backlog` against the archive, or against
 `~/.copilot` directly.
 
 Configure the target with the `session-sync-setup` skill, or edit
-`~/.agent-logger/config.yaml`. Use `sync.repo_allowlist` to scope a sync to
-specific repos — so one machine can run several syncs for different repo
-sets (e.g. one to a NAS, one to OneDrive).
+`~/.agent-logger/config.yaml`. The same engine also supports `ssh`,
+`ssh-tunnel`, and `ingest` targets. Use `sync.repo_allowlist`,
+`sync.repo_denylist`, and `sync.repo_allowlist_fail_closed` when a machine
+should archive only particular repos (or everything except particular repos).
 
 ## 3. Fleet hub (many machines, one shared folder)
 
-Every machine runs **session-sync** pointed at a **shared folder** that
-mirrors a common layout (`<root>/<machine>/session-state/<id>/`):
+Every machine runs **session-sync** pointed at a **shared folder** or service
+that mirrors a common layout (`<root>/<machine>/session-state/<id>/`):
 
 - An `onedrive` subfolder (a NAS-free aggregation point — many machines write
   to the same OneDrive folder), or
 - an `ssh` / `ingest` target to a server you control.
 
-Because the layout is uniform, a single machine with access to that folder
-can process the whole fleet's sessions into logs. Today that processing is
-done by running the `process-backlog` skill against the shared root; the
-automated **orchestrator daemon** that does it on a schedule is *Coming
-Soon* (see [architecture.md](architecture.md)).
+Because the layout is uniform, a single machine with access to that folder can
+process the whole fleet's sessions into logs. Today there are two ground-truth
+paths:
+
+- run `process-backlog` against the shared root for local/batch logging; or
+- configure the optional chronicle core and run `agent-logger chronicle tick`
+  from an external scheduler/runner. The built-in tick writes daily digest
+  manifests by default; the runner is responsible for spawning the
+  `session-log-writer` agent and landing produced logs.
 
 ### Example: OneDrive hub
 

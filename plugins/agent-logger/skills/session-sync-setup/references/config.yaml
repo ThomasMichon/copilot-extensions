@@ -10,7 +10,16 @@
 
 sync:
   target: local                 # local | onedrive | ssh | ssh-tunnel | ingest
+  source: null                  # null => ~/.copilot
   retention_days: 90            # or "infinite" to keep everything
+  repo_allowlist: []            # include matching repos only; [] => all
+  repo_allowlist_fail_closed: false
+  repo_denylist: []             # exclude matching repos
+  harness_repos: []             # origin.json derivation for downstream routing
+  notify:
+    url: null                   # optional post-push HTTP POST; {machine} expands
+    bearer_token_file: null
+    timeout: 5
 
   targets:
     # Local (default) -- explicit path.

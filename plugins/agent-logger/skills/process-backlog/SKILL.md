@@ -13,8 +13,15 @@ description: >
 
 # Process Backlog (local, no service)
 
+> **Before you start — readiness (self-provisioning, no agent-worktrees required).**
+> Ensure `agent-logger` is on PATH and run `agent-logger version` once. If it is
+> missing, stamp this plugin's own binstub (`install.ps1 stamp` on Windows or
+> `install.sh stamp` on Linux/WSL from the installed plugin payload), then retry;
+> the first call self-provisions the runtime and deploys `collate-session`,
+> `read-session-digest`, and `prepare-session-log`.
+
 Turn a backlog of unlogged Copilot sessions into Markdown logs on this
-machine -- the no-service alternative to the orchestrator daemon. Logs are
+machine -- the no-service alternative to a chronicle runner. Logs are
 plain unless repository organization config supplies optional voice seams.
 
 ## When to use
@@ -23,7 +30,8 @@ plain unless repository organization config supplies optional voice seams.
 - No processing service is running; you just want to clear the backlog.
 
 For a single current session, prefer the `log-session` skill. For automated,
-scheduled fleet processing, that is the orchestrator daemon (separate).
+scheduled fleet processing, use a host-owned chronicle runner around
+`agent-logger chronicle tick`.
 
 ## Procedure
 
@@ -89,8 +97,9 @@ worth) so the agent's context isn't overwhelmed; repeat for more.
 
 ### 5. Delegate
 
-Spawn the **session-log-writer** agent (`agent_type: "session-log-writer"`,
-`mode: "sync"`) with the manifest path. In batch mode it triages each
+Spawn the **session-log-writer** agent (`agent_type:
+"agent-logger:session-log-writer"`) synchronously with the manifest path. In
+batch mode it triages each
 session (standalone / digest / skip), writes logs, and reports.
 
 ### 6. Report
