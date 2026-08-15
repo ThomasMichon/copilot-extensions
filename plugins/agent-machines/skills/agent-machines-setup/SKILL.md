@@ -2,9 +2,9 @@
 name: agent-machines-setup
 description: >
   Install, update, and author for the agent-machines runtime -- the portable
-  restore-machinestate engine. Use this skill to deploy the agent-machines
-  binstub/venv after a payload update, or to author requirement packages in a
-  repo's .github/machine-state/ directory.
+  restore-machinestate engine. Use this skill to enable or repair the
+  self-provisioning binstub/venv, inspect runtime readiness, or author
+  requirement packages in a repo's .github/machine-state/ directory.
   Trigger phrases include:
   - 'install agent-machines'
   - 'update agent-machines'
@@ -17,24 +17,37 @@ description: >
 # agent-machines setup
 
 > **Before you start — readiness (self-provisioning, no agent-worktrees required).**
-> agent-machines provisions its own runtime on first use and works standalone in
-> any host (CLI, Copilot app, cloud agent). If `command -v agent-machines` fails,
-> deploy its binstub first (it then self-provisions on first call):
-> `bash "$(ls ~/.copilot/installed-plugins/*/agent-machines/scripts/init.sh | head -1)" stamp`
-> The first call may take ~30–120s to provision (watch for `::agent-provisioning::`);
-> let it finish. If it reports a provisioning failure (e.g. missing uv / network),
-> surface the exact message — don't improvise a toolchain install.
+> The runtime can run standalone. Discovery uses agent-worktrees registries when
+> they exist, but missing registries just mean "no packages discovered." If the
+> binstub is missing, stamp it from the installed payload; the first command then
+> builds the venv on demand.
+>
+> Windows:
+> ```powershell
+> $s = Get-ChildItem "$env:USERPROFILE\.copilot\installed-plugins\*\agent-machines\scripts\init.ps1" | Select-Object -First 1
+> & $s.FullName stamp
+> ```
+>
+> POSIX:
+> ```bash
+> bash "$(ls ~/.copilot/installed-plugins/*/agent-machines/scripts/init.sh | head -1)" stamp
+> ```
+>
+> The first call may take ~30–120s. POSIX emits `::agent-provisioning::`; Windows
+> prints a provisioning message. If provisioning fails, surface the exact message.
 
 ## Install / update the runtime
 
 `agent-machines` is a runtime CLI (a venv plus a `~/.local/bin/agent-machines`
-binstub). On its gated machines it is reconciled automatically at session launch.
-To (re)deploy the runtime from the source folder after a payload update:
+binstub; on Windows the executable shim is `agent-machines.cmd`). The
+session-start hook reconciles the runtime only; it never runs machine-state
+`restore`. To (re)deploy the runtime from the source folder after a payload
+update:
 
 ```
 # from the plugin's source dir (marketplace install path or a local checkout)
+scripts\init.ps1         # Windows
 scripts/init.sh          # Linux / WSL / macOS
-scripts/init.ps1         # Windows
 ```
 
 Verify:
@@ -73,8 +86,9 @@ exclude:                           # capture must never serialize these
 
 **Value-shape guidance:** scalar singletons (`model`, `effortLevel`) are
 `enforce`; maps/lists (`enabledPlugins`, `permissions`) are `ensure-present` so
-several repos compose by union. The plugin's `enabledPlugins` union must retain
-the stack-critical set (`agent-worktrees`, `agent-machines`) or the validator
-errors.
+several repos compose by union. Do not explicitly disable bootstrap-critical
+plugins (`agent-worktrees`, `agent-machines`); if a package manages
+`extraKnownMarketplaces`, include the bootstrap-critical `copilot-extensions`
+marketplace or the validator errors.
 
 Run `agent-machines validate` after authoring to catch conflicts.
