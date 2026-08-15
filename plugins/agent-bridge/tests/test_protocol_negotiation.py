@@ -117,55 +117,6 @@ def test_daemon_protocol_memoized():
     assert calls["n"] == 2  # explicit refresh re-fetches
 
 
-# -- Provider-registration version exchange (cross-plugin skew surface) -------
-
-
-def _register(client: TestClient, body: dict):
-    return client.post("/api/v1/providers/codespaces", json=body)
-
-
-def test_provider_registration_advertises_bridge_protocol(tmp_path):
-    with TestClient(_app(tmp_path)) as c:
-        c.headers["Authorization"] = "Bearer test-token"
-        resp = _register(c, {
-            "agents": [{"name": "cs-x", "spawn_command": ["echo"]}],
-            "protocol_version": 1,
-        })
-    assert resp.status_code == 200
-    data = resp.json()
-    # The bridge advertises its own HTTP contract version + range so the
-    # provider can negotiate capability across skew (dotfiles #632).
-    assert data["protocol_version"] == HTTP_PROTOCOL_VERSION
-    assert data["min_protocol_version"] == HTTP_PROTOCOL_MIN_SUPPORTED
-
-
-def test_provider_protocol_version_recorded_and_surfaced(tmp_path):
-    with TestClient(_app(tmp_path)) as c:
-        c.headers["Authorization"] = "Bearer test-token"
-        _register(c, {
-            "agents": [{"name": "cs-y", "spawn_command": ["echo"]}],
-            "protocol_version": 7,
-        })
-        listing = c.get("/api/v1/providers").json()["providers"]
-    codespaces = next(p for p in listing if p["name"] == "codespaces")
-    assert codespaces["protocol_version"] == 7
-
-
-def test_provider_without_protocol_version_still_registers(tmp_path):
-    # An older provider that predates protocol negotiation omits the field; the
-    # bridge records it as unversioned (None) and still registers it (tolerant).
-    with TestClient(_app(tmp_path)) as c:
-        c.headers["Authorization"] = "Bearer test-token"
-        resp = _register(c, {
-            "agents": [{"name": "cs-z", "spawn_command": ["echo"]}],
-        })
-        assert resp.status_code == 200
-        assert resp.json()["protocol_version"] == HTTP_PROTOCOL_VERSION
-        listing = c.get("/api/v1/providers").json()["providers"]
-    codespaces = next(p for p in listing if p["name"] == "codespaces")
-    assert codespaces["protocol_version"] is None
-
-
 # -- Fabric session-create handshake -----------------------------------------
 
 

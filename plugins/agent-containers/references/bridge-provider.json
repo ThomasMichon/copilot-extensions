@@ -1,0 +1,5 @@
+{
+  "namespace": "container",
+  "restricted": true,
+  "description": "Local Docker dev containers (agent-containers)"
+}
