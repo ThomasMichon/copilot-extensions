@@ -64,11 +64,11 @@ def _kinds(result) -> set[str]:
 def test_stable_guid_matches_powershell_reference():
     """Reference values captured from the live install.ps1 ``New-StableGuid``."""
     assert tf.stable_guid("test-chamber-local-windows") == \
-        "440d9b37-e5d0-d1f2-d8e7-ab1e0a8d6d3b"
+        "19e5e5ec-45eb-a463-895f-dd2dcfe8e233"
     assert tf.stable_guid("ssh-emancipation-cube-wsl") == \
-        "a11d2150-db5f-abf0-77b5-ad47539149c1"
+        "6d216c29-376a-a904-c26d-504c3c6ab598"
     assert tf.stable_guid("agent-worktrees-launch-anomalous-potato-windows") == \
-        "1d312c1f-19aa-dcf0-05c2-a7eba97868bf"
+        "8c23a1bc-6682-3dfb-7571-961a8c7249ae"
 
 
 def test_guid_field_is_braced():

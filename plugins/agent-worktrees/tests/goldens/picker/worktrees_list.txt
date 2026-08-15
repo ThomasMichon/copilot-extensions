@@ -37,4 +37,4 @@
 
 
 ───────────────────────────────────────────────────────── ▼ ──────────────────────────────────────────────────────────
- Enter: new worktree on anomalous-potato Win · Tab region · ^◀▶ machine                                            · ready
+ Enter: new worktree on anomalous-potato Win · Tab region · ^◀▶ machine                                       · ready
