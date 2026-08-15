@@ -201,7 +201,7 @@ for wedged dispatches, resume issues, relay/auth failures, and repair drills.
 |-------|-------------|
 | `agent-bridge` | CLI control plane -- send/create/read/wait, sessions, live sessions, service/config |
 | `agent-bridge-troubleshooting` | Diagnose and recover stuck dispatches, resume hangs, relay/auth failures, and split-brain |
-| `copilot-extensions-setup` | Marketplace/runtime setup when a host needs guided installation |
+| `agent-worktrees:copilot-extensions-setup` | Marketplace/runtime setup when a host needs guided installation |
 
 ## Platforms
 

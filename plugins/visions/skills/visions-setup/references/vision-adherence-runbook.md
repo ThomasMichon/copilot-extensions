@@ -116,4 +116,4 @@ protocol. While guide-only, adherence is **not** a review axis at all.
 
 - `envisioning` (create/revise a vision, derive the delta, the generativity
   check) · `visions-setup` (adopt visions) · the efforts plugin's
-  `planning-efforts` / `efforts-setup` (adopt + author efforts).
+  `efforts:planning-efforts` / `efforts:efforts-setup` (adopt + author efforts).

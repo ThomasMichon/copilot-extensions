@@ -117,7 +117,7 @@ flow exists to prevent.
    the invariant nonconformances are the **build-out backlog**. Dedup against
    existing trackers first (`envisioning` § *Extend before you regenerate*), then
    file issues that **cite the vision item**, and group them into an effort via
-   [`planning-efforts`](../../../efforts/skills/planning-efforts/SKILL.md). The vision
+   [`efforts:planning-efforts`](../../../efforts/skills/planning-efforts/SKILL.md). The vision
    itself is never edited to record this cycle.
 
 ## The design/service-invariant audit
@@ -194,5 +194,5 @@ is a review artifact + issues/effort, exactly like any other derived delta.
   — wiring the "reconcile every change to the vision" habit, incl. binding
   invariants as design contracts down the guidance chain.
 - The efforts plugin's
-  [`planning-efforts`](../../../efforts/skills/planning-efforts/SKILL.md) /
+  [`efforts:planning-efforts`](../../../efforts/skills/planning-efforts/SKILL.md) /
   `efforts-setup` — carve the additive deltas into an effort.

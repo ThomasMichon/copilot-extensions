@@ -406,7 +406,7 @@ when none are live.
 > - **Handoffs are in-place.** A context handoff continues in the **same
 >   worktree** via a **new session** -- the handoff prompt must **never** tell
 >   the next session to "create/build on a fresh worktree." (See the
->   **`context-handoff`** skill.)
+>   **`context-handoff:context-handoff`** skill.)
 > - **Cross-machine `agent-bridge` delegation is the exception that proves the
 >   rule:** dispatching genuinely *parallel* work to another machine implicitly
 >   provisions a remote worktree *bound to the host worktree* -- that is expected

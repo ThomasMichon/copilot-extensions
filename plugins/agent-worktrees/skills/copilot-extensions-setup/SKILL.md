@@ -521,6 +521,6 @@ Two WSL-specific facts:
   stub auto-installs the Linux binary on first run, and agent-worktrees
   *resolves* it from known locations even when it isn't on `PATH` — so
   `<repo> update` and session-start provisioning just work. See the **`wsl-setup`**
-  plugin's `setting-up-wsl` skill (§ "Copilot CLI in WSL") for the details, and
-  its `setting-up-wsl` / `troubleshooting-wsl-networking` skills for the distro,
+  plugin's `wsl-setup:setting-up-wsl` skill (§ "Copilot CLI in WSL") for the details, and
+  its `wsl-setup:setting-up-wsl` / `wsl-setup:troubleshooting-wsl-networking` skills for the distro,
   networking, and keepalive setup that this bootstrap assumes is already done.

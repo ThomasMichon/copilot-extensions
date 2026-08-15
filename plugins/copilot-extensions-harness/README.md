@@ -69,7 +69,7 @@ adoption status. Prefer the plugin for the substance; keep the narrative thin.
 ### Authoring your own
 
 To ship a `<repo>-harness` plugin for a different repo, use the
-**`authoring-harness-plugins`** skill in the `customizing-copilot` plugin — it
+**`customizing-copilot:authoring-harness-plugins`** skill — it
 walks the structure (this plugin as the template), the naming rule, what the
 contributing/diagnosing skills should contain, and how consumers adopt it.
 

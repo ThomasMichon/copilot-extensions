@@ -277,7 +277,7 @@ agent-dispatch create "Add narration track" \
 The **lane** (`--repo`) defaults to the calling repo -- omit it inside your
 worktree. `--target-repo` is different: it's metadata naming the *code* a
 cross-repo task touches; the task still lives in **your** lane and a same-lane
-agent does the cross-repo work via `working-cross-repo`.
+agent does the cross-repo work via `agent-worktrees:working-cross-repo`.
 
 **Selectors — include (`--require`) and exclude (`--exclude`).** Both take
 tokens over an open namespace; at claim time a worker's identity is folded into

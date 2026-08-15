@@ -242,7 +242,7 @@ plugin deploys the *payload* (skills); writing its standing rule into `AGENTS.md
 deploys the *always-on guidance*. A plugin whose value depends on a persistent
 rule is only half-installed until both are done.
 
-**The seam (generalized from `efforts-setup` / `visions-setup`):** when a
+**The seam (generalized from `efforts:efforts-setup` / `visions:visions-setup`):** when a
 plugin's setup ships a standing rule, its setup skill should **add a short,
 declarative entry to the repo's always-on instructions** that:
 
