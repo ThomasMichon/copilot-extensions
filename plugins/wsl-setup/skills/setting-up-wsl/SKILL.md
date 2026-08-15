@@ -20,13 +20,16 @@ description: >
 # Setting up WSL2 (dev + service host)
 
 Provision WSL2 so it can run a reachable, persistent service — not just an
-interactive shell. This is the **environment** setup. To clone a *repo* into WSL
-and wire Windows Terminal profiles, use `agent-worktrees`'
-`agent-worktrees-wsl-provision` skill (they compose). To reach a WSL-hosted sshd
-as its **own SSH target** from other machines, the preferred path is the
+interactive shell. This is the **environment** setup and works standalone: enable
+the payload-only plugin and run this skill; no repo needs to be registered as an
+agent-worktrees harness. To clone a *repo* into WSL and wire Windows Terminal
+profiles, use `agent-worktrees`' `agent-worktrees-wsl-provision` skill (they
+compose). To reach a WSL-hosted sshd as its **own SSH target** from other
+machines, keep the boundary-crossing transport on the Windows host: either
+forward the Windows `localhost:<port>` hop through your tunnel, or use the
 **`agent-ssh`** plugin's `setting-up-ssh-host` skill (§ "Reaching WSL … as its own
-SSH target") — a ProxyJump through the host's existing dtssh host, which needs no
-extra tunnel and no dtssh/devtunnel inside WSL.
+SSH target") for a ProxyJump through the host's existing dtssh host. WSL itself
+does not need to run devtunnel/dtssh.
 
 ## 1. Install WSL + a distro
 
@@ -48,12 +51,13 @@ applies only after `wsl --shutdown`.
 
 | Mode | Reach a WSL service from Windows | Corp VPN DNS | When to use |
 |------|----------------------------------|--------------|-------------|
-| **`nat`** (default) + `localhostForwarding=true` | `Windows localhost:PORT -> WSL:PORT` via the host relay (robust) | needs `dnsTunneling` | **Hosting a service** that Windows / a tunnel must reach. |
-| **`mirrored`** + `dnsTunneling=true` | Shares the host IP; **host↔WSL loopback frequently breaks** behind corp host-vNIC filters | best VPN behavior | Outbound-heavy dev on VPN where you don't need inbound to WSL. |
+| **`nat`** (default) + `localhostForwarding=true` | `Windows localhost:PORT -> WSL:PORT` via the host relay (robust) | use `dnsTunneling=true` for VPN DNS | **Hosting a service** that Windows / a tunnel must reach. |
+| **`mirrored`** + `dnsTunneling=true` | Officially supports localhost, but the relay can time out or hit the host side on locked-down corp host-vNIC/filter stacks; `localhostForwarding` is ignored in mirrored mode | best VPN behavior | Outbound-heavy dev on VPN where you do not need a Windows/tunnel hop into WSL. |
 
 **If you need a reachable WSL-hosted service, use NAT + localhostForwarding.**
-`mirrored` redirects WSL's `127.0.0.1` through a loopback relay that corporate
-network filters silently drop — see `troubleshooting-wsl-networking`.
+Mirrored is excellent for some VPN/DNS scenarios, but NAT is the predictable
+service-hosting mode when Windows or a host-side tunnel must reach a WSL listener
+by `localhost:<port>` — see `troubleshooting-wsl-networking`.
 
 ```ini
 # %USERPROFILE%\.wslconfig  -- reachable-service config
@@ -68,9 +72,12 @@ wsl --shutdown             # required for .wslconfig to take effect
 # NOTE: this stops ALL distros incl. Docker Desktop's backend (it auto-recovers).
 ```
 
-Verify after reboot: `wsl -d <distro> -- bash -c "ip -4 -o addr show eth0 | grep -oP 'inet \K[0-9.]+'"`
-shows a NAT IP (172.x); `Test-NetConnection localhost -Port <PORT>` from Windows
-succeeds once the service is listening.
+Verify after reboot:
+
+```powershell
+wsl -d <distro> hostname -I             # NAT normally shows a 172.x address
+Test-NetConnection localhost -Port <PORT> # succeeds once the service is listening
+```
 
 ## 3. Enable systemd (for real services)
 
@@ -125,8 +132,8 @@ With NAT + `localhostForwarding`, a service listening on `0.0.0.0:PORT` inside
 WSL is reachable at `Windows localhost:PORT`. Confirm end-to-end (example: sshd):
 
 ```powershell
-Test-NetConnection localhost -Port 22        # TcpTestSucceeded = True
-# then the app-level handshake, e.g. ssh -p 22 <user>@localhost 'id -un'
+Test-NetConnection localhost -Port 2200        # TcpTestSucceeded = True
+# then the app-level handshake, e.g. ssh -p 2200 <user>@localhost 'id -un'
 ```
 
 You do **not** need a Windows firewall / Hyper-V inbound rule for the
@@ -143,24 +150,30 @@ unnecessary — front it with a tunnel instead).
 ## 6. Keep the distro alive (critical for hosted services)
 
 An **idle WSL distro terminates**, killing your service (and any tunnel's local
-hop). This plugin ships a **`wsl-keepalive` helper**
-(`references/wsl-keepalive.ps1`) that pins the distro up (and optionally
-`systemctl start`s a service) via a **windowless** VBS launcher on a
-logon-triggered Scheduled Task — run it from an **elevated** shell:
+hop). This plugin ships a **WSL keepalive helper** (`references/wsl-keepalive.ps1`)
+with `install`, `status`, and `uninstall` actions. It pins the distro up via a
+**windowless** VBS launcher on a logon-triggered Scheduled Task. With `-Service`,
+the launcher runs `systemctl start <svc>` once before `exec sleep infinity`; it
+does not monitor or restart the service after that. Use `systemctl enable <svc>`
+and the unit's own restart policy for ongoing service supervision.
+
+Run `install` and `uninstall` from an **elevated** shell (Scheduled Task
+registration/removal needs elevation); `status` can run unelevated:
 
 ```powershell
 # Scheduled Task registration needs elevation. Path is relative to the copilot-extensions repo root.
 $ka = 'plugins\wsl-setup\skills\setting-up-wsl\references\wsl-keepalive.ps1'
 pwsh -File $ka install -Distro <distro> -Service <svc> -TaskName WSL-Keepalive-<svc>
 pwsh -File $ka status  -TaskName WSL-Keepalive-<svc> -Distro <distro> -Service <svc>
+pwsh -File $ka uninstall -TaskName WSL-Keepalive-<svc>
 ```
 
 **Why not run `wsl.exe` from the task directly?** A Scheduled Task that executes
 `wsl.exe` pops a **visible console window** on every fire (the task's `-Hidden`
 flag hides the task, not the child console). The installer routes through a VBS
 launcher (`WScript.Shell.Run ..., 0`) so it is truly windowless. The `sleep
-infinity` process holds the distro up; systemd keeps `<svc>` running; the logon
-trigger re-establishes it after each reboot.
+infinity` process holds the distro up; the logon trigger re-establishes it after
+each reboot.
 
 > Doing it by hand (no plugin checkout): deploy a one-line VBS —
 > `CreateObject("WScript.Shell").Run "wsl.exe -d <distro> -u root --exec /bin/sh -c ""systemctl start <svc>; exec sleep infinity""", 0, False`
@@ -171,14 +184,13 @@ trigger re-establishes it after each reboot.
 
 Once WSL runs sshd on a dedicated port (step 5) and stays up (step 6), reach it
 as its **own** SSH alias (`ssh <host>-wsl`, landing as the Linux user) by
-**ProxyJump through the host's existing dtssh host** to `localhost:<port>`. This
-is the preferred manner — it adds **no new Dev Tunnel** (it rides the machine's
-existing one), needs **no WSL egress and no devtunnel login inside WSL**, and so
-works even where WSL has no outbound egress. The full wiring (and why running
-dtssh *inside* WSL is the wrong path — no WSL keyring to persist the token) lives
-in the **`agent-ssh`** plugin's `setting-up-ssh-host` skill, § "Reaching WSL …
-as its own SSH target". This plugin owns *provisioning* WSL; `agent-ssh` owns the
-SSH-target wiring.
+forwarding the Windows `localhost:<port>` hop through the host's authenticated
+transport. The preferred managed wiring lives in the **`agent-ssh`** plugin's
+`setting-up-ssh-host` skill, § "Reaching WSL … as its own SSH target": ProxyJump
+through the host's existing dtssh host to `localhost:<port>`. A host-side Dev
+Tunnel/SSH forward can use the same hop. Do not run dtssh/devtunnel inside WSL:
+WSL does not need egress for this, and the tunnel credential/keyring belongs on
+Windows.
 
 ## Edge cases
 

@@ -9,14 +9,14 @@ description: >
   Trigger phrases include:
   - 'start an effort'
   - 'new effort'
-  - 'plan this out'
+  - 'plan this as an effort'
   - 'resume the effort'
   - 'continue the effort'
   - 'archive the effort'
   - 'efforts'
   - 'plan a stretch of work'
   - 'turn this into an effort'
-  - 'kick off work on'
+  - 'kick off an effort for'
 ---
 
 # Planning Efforts
@@ -33,12 +33,33 @@ extra sections). The full reference is
 [`references/efforts.md`](references/efforts.md); the README template is
 [`assets/TEMPLATE.md`](assets/TEMPLATE.md).
 
-## First: read the repo's addendum
+## First: resolve the effort home, then read its addendum
 
-Before acting, find the adopting repo's **efforts addendum** — it overrides the
-defaults below for this repo. Look in `efforts/README.md` (a `## Local
-conventions` section) or a linked binding doc (e.g. `docs/efforts.md`). The
-addendum sets:
+Efforts are standalone. If no external state-root binding is in play, the
+effort home is simply the current repo root; the repo does **not** need to be
+registered as an agent-worktrees harness. If `agent-worktrees` is installed,
+ask it whether this repo redirects personal state to a bound knowledge repo:
+
+```
+agent-worktrees state-root        # optional; prints the effort home when available
+```
+
+- **Command unavailable** → use the current repo root as the effort home.
+- **Exit 0** → use the printed state root. In the default case this is the
+  current repo; for a stateless harness / `requires_external_state_root: true`,
+  it is the bound knowledge repo.
+- **Non-zero exit** → if the repo requires an external state root, stop and bind
+  the knowledge repo first; otherwise use the current repo root.
+
+`agent-worktrees state-root --json` gives the full resolution (`source`, `repo`,
+`stateless`, `requires_external`, `bound`) when you need to explain where the
+effort landed. All `efforts/` paths below are relative to the resolved effort
+home.
+
+Before acting, find the effort home's **efforts addendum** — it overrides the
+defaults below for this repo. Look in `<effort-home>/efforts/README.md` (a
+`## Local conventions` section) or a linked binding doc (e.g.
+`docs/efforts.md`). The addendum sets:
 
 - **Grouping** — flat (`efforts/active/<slug>/`) or by-repo
   (`efforts/active/<repo>/<slug>/`).
@@ -48,14 +69,14 @@ addendum sets:
 - **Section deltas** — any renames/additions to the README schema.
 - **Repo rules** — which tracker holds issues; where new efforts are sourced.
 
-If no addendum exists, the repo hasn't adopted efforts yet — use the
-`efforts-setup` skill first.
+If no addendum exists, the effort home has not adopted efforts yet — use the
+`efforts-setup` skill there first.
 
 ## When to use efforts vs. other constructs
 
 | Use… | When the thing is… |
 |------|--------------------|
-| an **effort** (`efforts/`) | a stretch of work to plan and drive — *what should be* |
+| an **effort** (`efforts/`) | a stretch of work to plan and drive — plan + progress |
 | a **doc** | truth about how something works — *what is* |
 | an **issue** (tracker) | a discrete tracked item — *to do* |
 
@@ -63,43 +84,16 @@ Efforts and issues go hand in hand: an effort opens an umbrella issue and
 breaks into sub-issues. **Only issues in *this* repo may directly link effort
 files in this repo.**
 
-## First: resolve where efforts live (the state root)
-
-Do **not** assume efforts live in the launch repo. Whether they do is governed
-by a repo-level setting, **`requires_external_state_root`** (default **false**),
-in the launch repo's `.agent-worktrees/config.yaml` (a stateless harness sets it
-implicitly). Before creating or resuming an effort, resolve the **state root** —
-the checkout where personal state (efforts/logs/visions) belongs on this machine:
-
-```
-agent-worktrees state-root        # prints the state-root path (exit 0)
-```
-
-- **Repo does NOT require an external state root** (the default) → the launch
-  repo *is* the effort home; `state-root` returns the current repo and efforts
-  live here, exactly as before.
-- **Repo requires an external state root** (`requires_external_state_root: true`,
-  or a stateless harness) → `state-root` returns the bound **knowledge repo**;
-  the `efforts/` tree lives **there**, never in the launch repo.
-- **Non-zero exit (unbound)** → the repo requires an external state root but none
-  is bound. **Stop** — do not write the effort into the launch repo. Bind a
-  knowledge repo first (set `knowledge_repo:` in the machine-local config / run
-  the harness setup), then retry.
-
-`agent-worktrees state-root --json` gives the full resolution (`source`, `repo`,
-`stateless`, `requires_external`, `bound`) if you need to explain where it
-landed. All `efforts/` paths in the steps below are **relative to the resolved
-state root**, not the launch repo. (When agent-worktrees is not installed, no
-repo requires an external state root — fall back to the launch repo as before.)
-
 ## Start an effort
 
 1. **Find the seed.** An effort starts pointing at something that already
    exists — an issue, a plan/roadmap doc, or a stated idea. Identify and cite
    it.
 2. **Derive a kebab-case slug** and confirm it with the operator.
-3. **Create the folder** at the grouped path (per the addendum): copy
-   `assets/TEMPLATE.md` to `efforts/active/<slug>/README.md`.
+3. **Create the folder** at the grouped path (per the addendum): copy the
+   effort home's `efforts/TEMPLATE.md` to the new effort's `README.md`. If the
+   repo template is missing, run `efforts-setup`; that template is scaffolded
+   from this skill's `assets/TEMPLATE.md`.
 4. **Fill the header + Guiding Intent + Request** — capture the operator's ask
    **verbatim**; don't paraphrase the premise away.
 5. **Catalog participants.** If the work spans machines/CodeSpaces/containers,
@@ -117,7 +111,7 @@ repo requires an external state root — fall back to the launch repo as before.
   whole every time an agent resumes the effort, so keep it a navigable map. When a
   phase or slice grows a big self-contained body — a detailed sub-plan, deep design
   notes, its own validation matrix — extract it to a sibling sub-doc
-  (`efforts/active/<slug>/<phase>.md`) and leave the Plan a checklist item with a
+  (`<effort-folder>/<phase>.md`) and leave the Plan a checklist item with a
   one-line summary and a link. The agent reads the sub-doc **only when working that
   phase**, cutting upfront context (the trade is an extra read on demand). Link out
   *and* back; no orphan sub-docs. This is the same *decompose-liberally* bias docs
@@ -125,7 +119,7 @@ repo requires an external state root — fall back to the launch repo as before.
 - **Split a large journal by date.** The Journal is append-only — the one section
   that grows without bound. When it (inline or an extracted `journal.md`) nears the
   ~800-line soft cap, break it into dated files
-  `efforts/active/<slug>/journal/<YYYY>/MM.DD <title>.md` (one per day / notable
+  `<effort-folder>/journal/<YYYY>/MM.DD <title>.md` (one per day / notable
   entry, mirroring the archive's date scheme) and keep `journal.md` (or the README
   Journal section) as a **thin chronological index** linking them newest-first. Link
   out *and* back; no orphan entries.
@@ -154,8 +148,9 @@ gate before executing:
 2. **Await approval + merge** — the automated reviewer (and/or the operator)
    approves; auto-merge merges it.
 3. **Sync forward** — pull the worktree onto the merged (squashed) default branch
-   so execution builds *on top of* the reviewed plan: `agent-worktrees git sync`
-   (see the `git-collaboration` skill). Then begin executing the Plan.
+   so execution builds *on top of* the reviewed plan. In an agent-worktrees repo,
+   use `agent-worktrees git sync` (see the `git-collaboration` skill); otherwise
+   use the repo's normal pull-forward command. Then begin executing the Plan.
 
 **The operator may waive their *own* review — but the agent's review-gate is
 non-optional when automated review is available.** Always route the plan through
@@ -243,7 +238,7 @@ change that realizes it.
 
 1. Confirm the effort is done (or abandoned) and the Journal reflects the
    outcome.
-2. **Move** `efforts/active/<slug>/` to the dated archive path (per the
+2. **Move** the active effort folder to the dated archive path (per the
    addendum), using the completion date. Preserve git history with `git mv`.
 3. Set the header **Status** and write a closing Journal entry.
 4. Update the active index in `efforts/README.md`.
@@ -277,5 +272,5 @@ change that realizes it.
 - ❌ Thrashing the effort with a PR per checkbox — batch edits to direction
   changes, phase boundaries, or commits that need pushing anyway.
 - ❌ Letting the README balloon with every phase's full detail inline — extract
-  large phases/slices to linked sibling sub-docs (`<slug>/<phase>.md`) and keep the
+  large phases/slices to linked sibling sub-docs (`<effort-folder>/<phase>.md`) and keep the
   Plan a map, so a resuming agent loads only the phase it is working.

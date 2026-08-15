@@ -2,9 +2,9 @@
 name: contributing-to-copilot-extensions
 description: >
   How to make a change to a copilot-extensions plugin and land it correctly --
-  repo layout, the worktree contribution flow, the MANDATORY version bump (the
+  repo layout, the PR-required worktree flow, the MANDATORY version bump (the
   single most common mistake), the test + install-contract gates, deploy after
-  push, and the source-of-truth rules. Also covers the design-guidance layers a
+  merge, and the source-of-truth rules. Also covers the design-guidance layers a
   change reconciles to: the repo's visions (intent) and architecture patterns
   (how we build). Use when editing, fixing, or extending any plugin in the
   copilot-extensions suite (agent-worktrees, agent-bridge, agent-mcp,
@@ -77,10 +77,10 @@ installer. Know which kind you are changing.
    binding **invariants**. A below-altitude fix (lint, typo, dependency bump)
    skips this with a word; a design change owes the reconcile. This is a guide,
    not a gate.
-1. **Isolate.** This is a worktree-class repo — never edit the anchor checkout.
-   Create a worktree, edit and commit there. (Owners push directly to `main`, no
-   PR. Without push access, use a fork + PR — the target repo's policy, not
-   your control repo's.)
+1. **Isolate.** This is a worktree-class, **PR-required** repo — never edit the
+   anchor checkout and never push directly to `main`. Create a worktree with
+   `copilot-extensions create`, edit and commit there, then land through the
+   repo's `pr-self-merge` flow.
 2. **Edit in the repo, never the deployed copy.** The repo is the source of
    truth. Do **not** edit `~/.copilot/installed-plugins/...` (overwritten on
    update) or a runtime dir (`~/.agent-*/lib`, service venvs).
@@ -103,8 +103,9 @@ installer. Know which kind you are changing.
    violations**.
 5. **BUMP THE VERSION — mandatory, same commit.** This is the mistake that
    silently swallows changes: the marketplace detects updates by comparing
-   versions, so a push without a bump makes every machine report "already at
-   latest" and skip your change. For the plugin you touched, bump **together**:
+   versions, so an unbumped plugin change makes every machine report "already at
+   latest" and skip your change after merge. For the plugin you touched, bump
+   **together**:
    - `plugins/<plugin>/plugin.json` → `version`
    - `plugins/<plugin>/pyproject.toml` → `[project].version` (runtime plugins)
    - `.github/plugin/marketplace.json` → that plugin's `plugins[N].version`
@@ -115,8 +116,17 @@ installer. Know which kind you are changing.
    Default bump is **patch with a `-devN` suffix** (e.g. `1.3.1` → `1.3.2-dev1`);
    never bump minor/major unless the maintainer asks. The exact per-plugin file
    table is in `CONTRIBUTING.md` — follow it; entries drift, so trust the repo.
-6. **Push** to `main` (owner) / open the PR (fork).
-7. **Deploy with `<repo> update` — one unified command.** Pushing only *primes*
+6. **Open/update the PR.** Use `copilot-extensions create-pr` to squash the
+   worktree, push `pr/<slug>`, and open the GitHub PR (the repo config has
+   `auto_open: true`). If review feedback requires more commits in the same
+   worktree, use `copilot-extensions push-changes` to update the PR head — never
+   push a worktree branch or `main` by hand.
+7. **Self-merge and finalize.** This repo's effective profile is
+   **`pr-self-merge`**: the GitHub ruleset blocks direct pushes and requests a
+   non-blocking Copilot review, but the submitter is authorized to merge. After
+   the PR is ready, run `copilot-extensions pr-merge <PR> --now` (or the same
+   verb through `agent-worktrees`) and then `copilot-extensions finalize`.
+8. **Deploy with `<repo> update` — one unified command.** Merging only *primes*
    the change; deploy it on each target machine (over SSH for remotes) with the
    repo's update binstub: **`<repo> update`** (e.g. `agent-worktrees update`, or
    any repo binstub such as `dotfiles update`). This single flow does
@@ -149,8 +159,8 @@ bridge). When you arrive here from such a finding:
    **not** inspect or edit `~/.copilot/installed-plugins/…` (overwritten on
    update).
 3. **Fix it through the normal flow above** — worktree, edit, **bump the
-   version**, gates, push, deploy. A trigger collision is usually resolved by
-   sharpening or de-duplicating the phrase in the owning skill's
+   version**, gates, PR/self-merge, deploy. A trigger collision is usually
+   resolved by sharpening or de-duplicating the phrase in the owning skill's
    `description` / `Trigger phrases include:` list.
 4. **Can't/shouldn't fix it now?** File a GitHub issue on
    `ThomasMichon/copilot-extensions` describing the collision (both skills, the
@@ -164,9 +174,10 @@ upstream half — landing the real fix in the plugin.
 
 ## What NOT to do
 
-- **Don't push without a version bump.** (See step 5. This is the one.)
+- **Don't open/update a PR without the required version bump.** (See step 5.
+  This is the one.)
 - **Don't edit installed/deployed copies** to "fix fast" — fix the repo source,
-  bump, push, deploy.
+  bump, PR/self-merge, deploy.
 - **Don't hand-run `copilot plugin update` or a per-plugin `scripts/install.*` /
   `scripts/init.*`** — always deploy with the unified **`<repo> update`**
   (`agent-worktrees update`). One flow updates every plugin's payload AND
@@ -180,8 +191,9 @@ upstream half — landing the real fix in the plugin.
 
 `copilot-extensions` is **public** and may be driven from **more than one
 private control repo at once** (for example a personal control repo and a work
-control repo). Both push to the same `main`. Two disciplines keep them from
-colliding — and keep private context off the public face.
+control repo). Everyone lands through the same PR-required `main`. Two
+disciplines keep them from colliding — and keep private context off the public
+face.
 
 ### Claim work with a public GitHub issue
 
@@ -197,17 +209,18 @@ racing the same files.
 - Link the issue from your *private* effort/plan — the public issue coordinates,
   the private effort carries the "why".
 
-### Serial, single-writer pushes
+### Serial, single-writer merges
 
-Owners push directly to `main`, so treat `main` as a single-writer lane:
+Treat `main` as a single-writer lane:
 
-- Land one coherent change, then the next — avoid parallel in-flight pushes from
+- Land one coherent change, then the next — avoid parallel in-flight PR merges from
   different worktrees or drivers.
-- **Rebase before push and re-check the version bump.** A concurrent push may
-  have already consumed your `-devN`; if the marketplace version moved under you,
-  bump again on top of theirs (never reuse a version another push took).
-- If you pull and find the other driver touched the same plugin, reconcile
-  before pushing rather than force-landing.
+- **Rebase/update before PR publication or merge and re-check the version bump.**
+  A concurrent merge may have already consumed your `-devN`; if the marketplace
+  version moved under you, bump again on top of theirs (never reuse a version
+  another merge took).
+- If you pull and find another driver touched the same plugin, reconcile before
+  updating/merging your PR rather than force-landing.
 
 ### Sanitization — keep private context off the public face
 

@@ -1,60 +1,48 @@
 # harness-knowledge
 
-Binds a **stateless** Copilot CLI control harness to its private **knowledge**
-repo, **harness-first**, so the shareable harness tree stays generic and
-name-free while each machine points at its own knowledge repo.
+Payload-only binding plugin for a **stateless** Copilot CLI control harness and
+its private **knowledge** repo. It ships a setup skill plus small configurator
+scripts; there is no runtime, venv, binstub, or installer. Enable the plugin,
+then run the **`binding-knowledge`** skill once for the machine.
 
-A stateless harness (see the `stateless-harness` vision) holds the *intelligence*
-— instructions, config, skills, sub-agents — but **no personal state**. Personal
-state (efforts, logs, visions, notes, artifacts, personal issues) lives in a
-separate knowledge repo, bound **per machine** via machine-local config. This
-plugin performs that binding after you've cloned the harness.
+A stateless harness holds the shareable *intelligence* (instructions, config,
+skills, sub-agents) but no personal state. Personal state (efforts, logs,
+visions, notes, artifacts, personal issues) lives in a separate knowledge repo,
+bound per machine so the committed harness tree stays generic and name-free.
+This matches the payload-only shape described in `docs/patterns/README.md`.
 
-## What it does
+## Usage
 
-The **`binding-knowledge`** skill drives the setup:
+The front door is the **`binding-knowledge`** skill:
 
-1. Confirms the launch repo requires an external state root
-   (`agent-worktrees state-root`).
-2. Asks for the knowledge repo — use an existing local checkout, clone a remote,
-   or **create** a new (private) one.
-3. Registers both repos with agent-worktrees so the state-root resolver can find
-   them by name.
-4. Runs the idempotent configurator
-   (`skills/binding-knowledge/scripts/bind_knowledge.py`), which writes **only
-   machine-local** state:
-   - `~/.<harness>/config.yaml` → the top-level `knowledge_repo:` pointer the
-     state-root resolver reads.
-   - `~/.<harness>/knowledge-binding.md` → a managed data fragment **emitted at
-     session start by the harness-knowledge `sessionStart` hook** (dotfiles#1057)
-     that labels the concrete harness/knowledge/product paths **for this
-     machine**. (Previously written into `.github/instructions/` and auto-loaded
-     via `COPILOT_CUSTOM_INSTRUCTIONS_DIRS`; now hook-emitted, so it loads under
-     any launch path with no file in the auto-load dir.)
-5. Verifies the binding resolves.
+1. Confirm the launch repo requires an external state root with
+   `agent-worktrees state-root --json`.
+2. Choose the knowledge repo: use an existing local checkout, clone a remote, or
+   create a new private repo. The flow should fail before configuration if the
+   chosen checkout is missing or is not a git repo; the configurator assumes the
+   path it is given.
+3. Register the harness and knowledge repos with `agent-worktrees repos add` so
+   the state-root resolver can find them by name.
+4. Run the idempotent configurator:
+   `skills/binding-knowledge/scripts/bind_knowledge.py`.
+5. Verify `agent-worktrees state-root --json` resolves the knowledge checkout.
 
-## Why machine-local only
+See `skills/binding-knowledge/SKILL.md` for the exact commands, repo-creation
+flow, and re-pointing steps.
 
-The committed harness tree must **never** name a knowledge or product repo (a
-fork or a different operator changes only their machine-local config). So the
-plugin writes the pointer + the instructions fragment into `~/.<harness>/`, and
-**never** uses `agent-worktrees related add` (which would write a repo name into
-the harness's committed `related.yaml` and break statelessness).
+## Machine-local artifacts
 
-This is E1d of the `citadel-harness-split` effort (dotfiles#879).
+`bind_knowledge.py` writes or refreshes these local artifacts:
 
-## Bigger picture: the knowledge repo as a config-overlay (state-root grafting)
+| Artifact | What it contains |
+|----------|------------------|
+| `~/.<harness>/config.yaml` | Top-level `knowledge_repo: <knowledge-name>` pointer read by the state-root resolver. Existing config content is preserved. |
+| `~/.<harness>/knowledge-binding.md` | Managed instructions data labeling this machine's harness, knowledge, and optional product repo paths. The harness-knowledge `sessionStart` hook emits this file as additional context only when the current project resolves to that harness. |
+| `<harness>/.github/copilot/settings.local.json` | Optional personal-plugin overlay, written when both `--harness-path` and `--knowledge-path` are supplied. It mirrors only the knowledge repo's local (`directory`/`local`) marketplaces with absolute paths and preserves unmanaged local settings. Keep this file gitignored. |
 
-Binding is the **seam**, not the whole story. The knowledge repo is intended to
-**extend the harness's base `.agent-*` config** as much as practical — it may
-carry its own **`related.yaml` + narratives** (more coordinated repos than the
-name-free harness can list), a **`machines.yaml`**, a
-**`.agent-codespaces/config.yaml`**, and
-other multi-machine topology that is inherently operator-specific. Realizing that
-requires every plugin service/tool that reads harness config to become
-**state-root-aware** and **graft** the knowledge (state-root) repo's config on top
-of the harness base. The **state-root repo is a config source in its own right**,
-kept distinct from the harness↔knowledge *binding relationship* modeled here. That
-config-graft layer is tracked as its own phase of the effort; this plugin
-establishes the binding it builds on.
+The plugin never writes a knowledge or product repo name into committed harness
+config and does not use `agent-worktrees related add` for the binding.
 
+Re-running is safe: the pointer is replaced in place, the binding fragment is
+regenerated, and managed local-plugin overlay entries are refreshed while
+unmanaged entries are preserved.

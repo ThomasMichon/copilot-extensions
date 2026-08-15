@@ -16,8 +16,9 @@ outlives any single one.
 
 ## What this plugin ships
 
-This is a **pure skill plugin** — no runtime, no service, no installer. It
-delivers two skills via the Copilot CLI plugin marketplace:
+This is a **payload-only skill plugin** — no runtime, virtualenv, service,
+installer, or binstub. Enabling the plugin is the whole install. It delivers two
+skills via the Copilot CLI plugin marketplace:
 
 | Skill | Role |
 |-------|------|
@@ -28,13 +29,13 @@ delivers two skills via the Copilot CLI plugin marketplace:
 
 The `planning-efforts` skill is the **single source of truth** for the effort
 pattern. An adopting repo does not redefine it — it writes a short **addendum**
-that specializes only three bindings:
+that specializes only the local bindings:
 
 | Binding | What the addendum sets | Examples |
 |---------|------------------------|----------|
 | **Grouping** | flat vs. by-repo folder layout | `efforts/active/<slug>/` (flat) · `efforts/active/<repo>/<slug>/` (by-repo) |
 | **Participants seam** | what executes the work, and how it's reached | machines (SSH/agent-bridge) · CodeSpaces · containers · branches |
-| **Sections** | any additions/renames to the README schema | add a `Validation Plan`, rename `Participants` → `Machines` |
+| **Sections** | any additions/renames to the README schema | rename `Participants` → `Machines`, add repo-specific sections |
 
 The addendum lives in the adopting repo (its `efforts/README.md` or a binding
 doc such as `docs/efforts.md`), keeping repo- and environment-specific details out of the
@@ -42,28 +43,25 @@ portable core.
 
 ## How executor plugins build on efforts
 
-The README's **participants seam** is where executor plugins plug in. An effort
-catalogs *who or what* does its dispatched work, and different repos bind that
-seam to different providers:
+The README's **participants seam** is where executor plugins can plug in. The
+efforts plugin is standalone: a repo can use the README contract with no
+agent-worktrees registration and no executor plugin at all. When executor
+plugins are present, the adopting repo's addendum binds the seam to a provider:
 
 - [`agent-codespaces`](../agent-codespaces) → GitHub **CodeSpaces**
 - [`agent-containers`](../agent-containers) → local **containers**
 - SSH/[`agent-bridge`](../agent-bridge) → **machines** in a fleet
 
-The efforts plugin owns the planning document and lifecycle; the executor
-plugins register participants into an effort and run the work. Keep the schema
-and lifecycle executor-neutral — anything provider-specific belongs in the
-participants binding, not the core.
+The efforts plugin owns the planning document and lifecycle; executor plugins
+own only their provider-specific borrow/dispatch/claim mechanics. Keep the
+schema and lifecycle executor-neutral — anything provider-specific belongs in
+the participants binding, not the core.
 
-## Install
+## Enable
 
-A pure skill plugin needs no runtime install. Add the marketplace and the
-plugin:
-
-```bash
-copilot plugin marketplace add ThomasMichon/copilot-extensions
-copilot plugin install efforts@copilot-extensions
-```
+There is no plugin-local setup command. Enable `efforts@copilot-extensions` in
+the normal Copilot CLI plugin configuration/marketplace flow for your harness;
+because this is payload-only, that simply makes the skills available.
 
 Then run the **efforts-setup** skill in a repo to adopt the system.
 

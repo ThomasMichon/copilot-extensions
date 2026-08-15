@@ -6,8 +6,10 @@ description: >
   (or forking one) when it has no knowledge repo bound yet -- it asks for (or
   creates) the knowledge repo, registers both repos, writes the machine-local
   knowledge_repo pointer, and assembles a machine-local instructions fragment
-  labeling the concrete harness/knowledge/product paths. Also use to re-point the
-  harness at a different knowledge repo or repair a broken binding.
+  labeling the concrete harness/knowledge/product paths. When given both repo
+  paths, it also renders the harness's machine-local personal-plugin overlay from
+  the knowledge repo's local marketplaces. Also use to re-point the harness at a
+  different knowledge repo or repair a broken binding.
   Trigger phrases include:
   - 'bind the knowledge repo'
   - 'set up this harness'
@@ -52,6 +54,11 @@ If `requires_external` is `true` and `bound` is `false` (or `state_root` is
 null), it needs binding -- proceed. If it already resolves to a knowledge path,
 it's bound; only continue to **re-point** it.
 
+Fail loud on the chosen knowledge checkout before invoking the configurator:
+verify the path exists and is a git repo (or clone/create it first). The
+configurator writes the pointer and fragments for the names/paths it is given; it
+does not prove that a missing checkout is valid.
+
 ## 1. Decide the knowledge repo (ask, don't assume)
 
 Ask the operator (use the ask-user affordance) for the knowledge repo, offering
@@ -92,8 +99,10 @@ register it too.)
 ## 3. Write the machine-local binding
 
 Run the configurator (idempotent -- safe to re-run). It writes the
-`knowledge_repo:` pointer into `~/.<harness>/config.yaml` and assembles the
-machine-local instructions fragment labeling the concrete paths:
+`knowledge_repo:` pointer into `~/.<harness>/config.yaml`, assembles the
+machine-local instructions fragment labeling the concrete paths, and (when both
+repo paths are supplied) renders the personal-plugin overlay described in step
+3b:
 
 ```
 python skills/binding-knowledge/scripts/bind_knowledge.py \
@@ -107,16 +116,15 @@ python skills/binding-knowledge/scripts/bind_knowledge.py \
 `--product` (repeatable) labels any coordinated product repos so the assembled
 fragment names them for this machine. The fragment is **machine-local**
 (`~/.<harness>/knowledge-binding.md`, **emitted at session start by the
-harness-knowledge `sessionStart` hook** -- dotfiles#1057) -- it is **never**
-committed into the harness, and it does **not** use `agent-worktrees related add`
-(that would write a repo name into the harness's committed `related.yaml` and
-break statelessness).
+harness-knowledge `sessionStart` hook**) -- it is **never** committed into the
+harness, and it does **not** use `agent-worktrees related add` (that would write
+a repo name into the harness's committed `related.yaml` and break statelessness).
 
 When both `--harness-path` and `--knowledge-path` are given, the bind **also
 assembles the personal-plugin overlay** (see step 3b) -- so the operator's
 personal skills/agents load in the harness in one step.
 
-## 3b. Personal-plugin overlay (skills/agents axis, #955)
+## 3b. Personal-plugin overlay
 
 Copilot loads plugins (skills, agents) from the **launch repo's** settings, but
 the operator's personal skills/agents live as **`.ai` local-marketplace plugins
@@ -145,10 +153,10 @@ refreshes the managed local marketplaces to exactly mirror the knowledge repo.
 > and names the concrete knowledge checkout; add
 > `.github/copilot/settings.local.json` to the harness `.gitignore`.
 
-> **Paired-worktree re-assembly (#1017).** The bind writes an overlay pointing at
-> the knowledge **anchor**'s `.ai`. In a paired `-harness`/`-knowledge` worktree
-> (the #957 lifecycle), the operator's personal-plugin state lives in the paired
-> knowledge **worktree**. Re-render the overlay against the pair with:
+> **Paired-worktree re-assembly.** The bind writes an overlay pointing at the
+> knowledge **anchor**'s `.ai`. In a paired `-harness`/`-knowledge` worktree, the
+> operator's personal-plugin state lives in the paired knowledge **worktree**.
+> Re-render the overlay against the pair with:
 >
 > ```
 > python skills/binding-knowledge/scripts/assemble_plugins.py --from-pair
@@ -176,6 +184,8 @@ should land the effort in the **knowledge** repo, with the harness tree clean.
 ## Idempotence & re-pointing
 
 Re-running is safe: the configurator replaces the `knowledge_repo:` line in place
-(preserving the rest of the config) and rewrites the fragment. To re-point at a
-different knowledge repo, register the new one (step 2) and re-run step 3 with the
-new `--knowledge`/`--knowledge-path`.
+(preserving the rest of the config), rewrites the binding fragment, retires any
+managed legacy auto-loaded fragment, and refreshes the managed local-plugin
+overlay entries while preserving unmanaged local settings. To re-point at a
+different knowledge repo, register the new one (step 2) and re-run step 3 with
+the new `--knowledge`/`--knowledge-path`.

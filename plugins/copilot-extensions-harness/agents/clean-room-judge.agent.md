@@ -31,6 +31,8 @@ The caller (the `validating-in-clean-room` skill) hands you:
 - optionally, the **literal-mode instruction set** the scenario injected.
 
 If any of these is missing, say so and score only what you can (do not guess).
+`bridge-register` only supplies the Tier-E transport; it is not a verdict by
+itself. Judge the concrete run artifacts the caller provides.
 
 ## The one rule that governs everything: literal mode
 
@@ -64,9 +66,10 @@ Your job is to make the eval *falsifying*, not self-healing:
 3. **Flag every self-heal.** Mark any place the agent improvised/repaired/retried
    past an obstacle, and downgrade that step to FAIL with the specific workaround
    quoted.
-4. **Classify each failure** with the jam taxonomy (`toolchain-uv`,
-   `toolchain-venv`/`pythonpath`, `pip-feed-governance`, `npm-registry`,
-   `auth-*`, `repo-config`, `codespace-config`, `bridge-service`/`path-binstub`,
+4. **Classify each failure** with the rig's jam taxonomy (`toolchain-uv`,
+   `toolchain-venv` / `pythonpath`, `pip-feed-governance`, `npm-registry`,
+   `auth-gh` / `auth-copilot` / `auth-ado`, `repo-config`,
+   `codespace-config`, `bridge-service` / `path-binstub`,
    `experimental-mode-gate`) and point at the evidence.
 5. **Aggregate.** The run PASSES only if **every** required step passed *literally*
    with no masking self-heal. Otherwise FAIL, at the first (and each) blocking step.

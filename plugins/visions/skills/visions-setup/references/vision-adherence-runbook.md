@@ -44,7 +44,7 @@ into every node the repo actually has:
 |-------|----------------------------------------------|----------------------------|
 | **Always-on** | the repo's agent-instructions file (`AGENTS.md` / `.github/copilot-instructions.md`) | The three-way reconcile + the hard rule + the proportionality escape hatch. This is the root — the only always-loaded node. |
 | **Planning** | the efforts binding (`docs/efforts.md` / addendum) + the effort skill | An effort **traces to a vision delta** it closes, or **carries an explicit vision extension**. |
-| **Architecture** | the visions binding (`docs/visions.md` / addendum) + the arch guide | The intent/spec boundary; architectural change reconciles to stated vision intent (bind the "must-hold" rules as design contracts). |
+| **Patterns / Architecture** | the visions binding (`docs/visions.md` / addendum), the repo's prescriptive pattern docs (if any), and the arch guide | The intent/spec boundary; patterns are referenced as the reusable **how**, while architectural change reconciles to stated vision intent (bind the "must-hold" rules as design contracts). |
 | **Implementation** | the language/impl standards | Implementation *realizes* stated intent; it must not smuggle in new architectural intent without a vision extension. |
 | **Quality** | the review flow / protocol + reviewer agents | Review confirms the change **traces to a vision** (closing / extending / below-altitude). |
 | **Entry points** | the "carve an effort from the vision delta" flow | Exists and files issues that **cite vision items**. |

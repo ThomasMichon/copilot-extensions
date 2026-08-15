@@ -1,9 +1,10 @@
 <!--
-  EFFORT TEMPLATE — copy this file to efforts/active/<slug>/README.md and fill it in.
-  Delete the guidance comments (like this one) as you go. Keep the section
-  headings stable; agents and humans navigate by them. Your repo's addendum
-  may rename or add sections (e.g. Participants -> Machines, + Validation Plan)
-  — follow the addendum where it differs from this default.
+  EFFORT TEMPLATE — copy this file to the active effort folder (for example,
+  efforts/active/<slug>/README.md, or the grouped path from your repo's addendum)
+  and fill it in. Delete the guidance comments (like this one) as you go. Keep
+  the section headings stable; agents and humans navigate by them. Your repo's
+  addendum may rename or add sections (e.g. Participants -> Machines, + Rollout
+  Notes) — follow the addendum where it differs from this default.
 
   An effort README is a SHARED CONTRACT: the host agent, any dispatched agents,
   and you all read and write THIS file. Keep it current — it is the source of
@@ -41,9 +42,9 @@
      than one agent collaborates on this effort, record the branch topology and
      who owns what, so a fresh agent (or a recovering host) can pick up the
      coordination from the file alone. This is the "branches" participant binding
-     — its mechanics live in the agent-worktrees `git-collaboration` skill (the
-     turn-key `git sync` / `feature-branch` / `merge-to-feature` helpers); keep
-     only the plan here.
+     — in an agent-worktrees repo, its mechanics live in the `git-collaboration`
+     skill (the turn-key `git sync` / `feature-branch` / `merge-to-feature`
+     helpers); keep only the plan here.
 
      Two topologies:
        - Shared feature branch: delegates ff-push slices to one branch; the HOST
@@ -55,8 +56,9 @@
 - **Topology:** <shared feature branch `feature/<name>` | independent per-slice PRs>
 - **Host (owns PRs):** <agent/machine>
 - **Delegates:** <agent/machine — assigned section(s)>
-- **Handoff:** delegates ff-merge to the shared branch (`git merge-to-feature`);
-  host syncs forward (`git feature-branch <name> --sync`). Only the host opens PRs.
+- **Handoff:** delegates ff-merge to the shared branch (`agent-worktrees git
+  merge-to-feature <name>`); host syncs forward (`agent-worktrees git
+  feature-branch <name> --sync`). Only the host opens PRs.
 
 ## Context
 
@@ -77,7 +79,7 @@
      DECOMPOSE LIBERALLY: this README is loaded whole every time the effort is
      resumed, so keep it a map. When a phase or slice grows a big self-contained
      body (a detailed sub-plan, deep design notes, its own validation matrix),
-     extract it to a sibling sub-doc (efforts/active/<slug>/<phase>.md) and leave
+     extract it to a sibling sub-doc (<effort-folder>/<phase>.md) and leave
      a checklist item here with a one-line summary and a link. Link back from the
      sub-doc; no orphans. The agent then reads a phase's detail only when working
      it, keeping upfront context small.
@@ -114,10 +116,9 @@ _Pending._
 
      WHEN THIS GROWS: the Journal is append-only, so it is the section most
      likely to bloat the README. When it (here, or an extracted journal.md)
-     nears ~800 lines, split it into dated files
-     efforts/active/<slug>/journal/<YYYY>/MM.DD <title>.md (one per day/entry)
-     and leave this section (or journal.md) as a thin index linking them
-     newest-first. -->
+     nears ~800 lines, split it into dated files under
+     <effort-folder>/journal/<YYYY>/MM.DD <title>.md (one per day/entry) and
+     leave this section (or journal.md) as a thin index linking them newest-first. -->
 
 ### <YYYY-MM-DD> — Kickoff
 - Effort created, premise captured.
