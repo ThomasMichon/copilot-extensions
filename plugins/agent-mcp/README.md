@@ -44,7 +44,7 @@ reads the host's **Git Credential Manager** (`git credential fill`); `command`
 runs **any other** secret printer — a vault CLI, 1Password's `op`, a custom
 binstub. There is **no built-in `vault` (or other vendor) auth kind by design**:
 vault access is simply a `command` that runs your own `vault` CLI, so no
-facility- or vendor-specific secret tool is hard-coded into agent-mcp.
+multi-machine system- or vendor-specific secret tool is hard-coded into agent-mcp.
 
 Set `source_env` on a `command` auth to make it **env-first**: if that host
 variable is already set (e.g. a no-vault/push machine's static `.env`), it is
@@ -705,7 +705,7 @@ server:
   tools_from:                   # sidecar paths (relative to this config file)
     - tools/vei-search.md
     - tools/vei-status.md
-  scopes: [shared, lambda-core] # optional; gate tools by their mcp.scope tag
+  scopes: [shared, anomalous-potato] # optional; gate tools by their mcp.scope tag
 tools: { allow: ["vei_*"] }     # the usual allow/deny filter still applies
 ```
 

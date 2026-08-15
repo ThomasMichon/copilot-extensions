@@ -367,7 +367,7 @@ rules, and scope gating.
 server:
   type: cli
   tools_from: [tools/vei-search.md, tools/vei-status.md]
-  scopes: [shared, lambda-core]
+  scopes: [shared, anomalous-potato]
 tools: { allow: ["vei_*"] }
 ```
 
