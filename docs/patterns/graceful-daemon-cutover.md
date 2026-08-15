@@ -192,6 +192,40 @@ agent-bridge needs.
    harness itself runs under).
    (agent-bridge is the launcher the harness itself runs under).
 
+## Cross-platform parity (Windows `install.ps1` ↔ POSIX `install.sh`)
+
+The cutover **mechanism** is the OS-agnostic `zdd` library + the daemon's own
+Python seam (`_cutover` / `deploy`), so the *hard part is shared*. What
+legitimately differs is the **service-manager integration**, and the two
+platforms reach the **same behavioral guarantee** (an update never hard-kills
+in-flight, non-resumable work) by different, OS-appropriate routes:
+
+| | Windows (`install.ps1`) | POSIX (`install.sh`) |
+|---|---|---|
+| Service manager | Scheduled Task, but `conhost --headless` **detaches** the daemon — the task never tracks the live process | systemd `--user` unit **tracks** the daemon (its `ExecStart` PID) |
+| A plain "stop" is… | a **hard kill** (no clean SIGTERM-drain path) — so the zdd cutover is **required** to avoid dropping in-flight work | a **SIGTERM**: `Type=simple` + `Restart=on-failure`, and the daemons drain on SIGTERM (uvicorn for the coordinator/index service; a signal handler for agent-vault). So `systemctl restart` is already **graceful** (drains in-flight work, exits 0 → no resurrect), just with a brief API-unavailable blip |
+| Default update path | in-process zdd cutover (no opt-in) | **zdd cutover when a live routed daemon is serving** (agent-bridge, agent-dispatch), **falling back** to the SIGTERM-graceful `systemctl restart` when a cutover can't run or fails |
+| Post-cutover reconcile | re-register the boot task **without starting** it (`-NoStart`); the detached daemon serves; next boot starts the new slot | refresh the unit **without restarting** (`_install_service --no-restart`); the old (unit-tracked) daemon exits cleanly so `Restart=on-failure` never resurrects it; the detached survivor serves; next boot starts the new slot |
+
+Consequences of this equivalence:
+
+- **The binding invariant holds on both platforms.** POSIX meets it *natively*
+  via SIGTERM-graceful drain even without the zdd cutover; the cutover on POSIX
+  is the **zero-downtime enhancement** (removes the brief blip), gated on a live
+  *routed* (Thread-B) daemon with the `systemctl restart` as the always-safe
+  fallback.
+- **The `AGENT_BRIDGE_ZERO_DOWNTIME` / `-ZeroDowntime` opt-in is retired on both
+  lanes** — the cutover is the default whenever a live daemon is running.
+- **agent-vault needs no `.sh` cutover:** its fixed-endpoint service drains on
+  SIGTERM (`systemctl restart`) and reconnects via the OS-agnostic persistent
+  encrypted cache — the POSIX twin of the `.ps1` cooperative `--stop` drain +
+  reconnect.
+- **Validation:** the OS-agnostic Python cutover is exercised by the clean-room
+  `agent-dispatch-cutover` scenario (Linux); the systemd `--user` integration of
+  the `.sh` path is operator-gated (like the live-daemon activation), and the
+  `.sh` change always **falls back** to the already-proven SIGTERM-graceful
+  `systemctl restart`, so the worst case is today's behavior.
+
 ## Rollout sequencing
 
 1. **agent-dispatch** — highest value, currently kill-and-restart. Vendor `zdd`,
