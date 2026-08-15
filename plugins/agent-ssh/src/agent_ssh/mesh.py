@@ -99,13 +99,28 @@ def find_machines_file(start: Path | None = None) -> Path | None:
 
 
 def _load(path: Path) -> dict[str, Any]:
-    text = path.read_text(encoding="utf-8")
+    """Load a machines.yaml document, fail-safe.
+
+    A malformed/unreadable config must not crash a session-context feature, so
+    any read/parse error yields an empty document (mesh-status then reports no
+    machines) rather than raising.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
     try:
         import yaml
 
-        return yaml.safe_load(text) or {}
+        doc = yaml.safe_load(text)
     except ModuleNotFoundError:
-        return json.loads(text) or {}
+        try:
+            doc = json.loads(text)
+        except (ValueError, TypeError):
+            return {}
+    except Exception:  # a malformed machines.yaml is non-fatal here
+        return {}
+    return doc or {}
 
 
 def load_mesh(path: Path) -> Mesh:

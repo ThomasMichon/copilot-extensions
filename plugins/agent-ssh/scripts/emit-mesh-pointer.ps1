@@ -26,7 +26,8 @@ $md = @'
 This repo declares an SSH machine mesh in ``machines.yaml``. For the per-host
 **role + reachability + aliases**, run **``agent-ssh mesh-status``**
 (``--summary`` for one line, ``--json`` for structured). Reach a host
-interactively with ``ssh <alias>`` (canonical ``tmichon-<host>`` aliases).
+interactively with ``ssh <alias>`` (the aliases are listed by ``agent-ssh
+mesh-status``).
 Reachability is **dtssh** -- live only while the target is powered on and logged
 in; ``ssh.ready`` is the operator's declared state, so ``agent-ssh verify
 <alias>`` probes a host live.
