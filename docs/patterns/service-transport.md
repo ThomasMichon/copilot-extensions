@@ -35,7 +35,7 @@ when a rung is genuinely unavailable, and say why.
 
 If a caller can reach the capability as a **library import** or a **child process
 over stdio**, there is no endpoint to bind, discover, or secure. This is how MCP
-servers are wrapped and how the resolver-import shape composes
+servers are wrapped and how the provider-manifest shape composes
 ([a-la-carte-independence](a-la-carte-independence.md)). Zero ports, zero
 rendezvous, nothing to collide. Prefer it for CLI→capability calls and for
 sibling composition that doesn't need a long-lived socket.
@@ -149,7 +149,7 @@ registry, not the destination — the destination is that no such table is neede
 
 - Discovery seam (the rendezvous / port-mapping file):
   [local-endpoint-discovery](local-endpoint-discovery.md)
-- Composition (stdio / resolver-import):
+- Composition (stdio / provider-manifest):
   [a-la-carte-independence](a-la-carte-independence.md)
 - Intent: [`visions/plugin-services/`](../../visions/plugin-services/README.md)
   (§Behaviors `minimal-network-exposure`, `collision-free-endpoints`,

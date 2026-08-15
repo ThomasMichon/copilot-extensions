@@ -93,7 +93,7 @@ flowchart TB
     end
     subgraph RT["Local runtimes — ~/.* + ~/.local/bin"]
       RW["~/.agent-worktrees<br/>agent-worktrees"]
-      RB["~/.agent-bridge<br/>service :9280 Win / :9281 WSL"]
+      RB["~/.agent-bridge<br/>service (OS-assigned port)"]
       RC["~/.agent-codespaces<br/>agent-codespaces"]
       RN["~/.agent-containers<br/>agent-containers"]
       RM["~/.agent-mcp<br/>agent-mcp"]
@@ -115,8 +115,8 @@ flowchart TB
     AM -->|init.ps1 / init.sh| RM
     AS -->|install.ps1 / install.sh| RS
     AL -->|install.ps1 / install.sh| RL
-    AC -.->|codespace resolver + relay| RB
-    AN -.->|container resolver| RB
+    AC -.->|codespace: provider via providers.d/ manifest| RB
+    AN -.->|container: provider via providers.d/ manifest| RB
 ```
 
 Each runtime plugin is itself a **Python package** (its `src/` plus vendored
@@ -135,7 +135,7 @@ flowchart LR
       CLI["Copilot CLI session"]
       WT["agent-worktrees<br/>per-session worktree"]
       BR["agent-bridge<br/>service"]
-      CS["agent-codespaces<br/>+ credential relay :9857"]
+      CS["agent-codespaces<br/>+ credential relay"]
       CN["agent-containers<br/>local dev-container fleet"]
       MCP["agent-mcp<br/>MCP bridge (host creds)"]
       CLI --> WT
@@ -168,9 +168,11 @@ flowchart LR
 
 ### 1. Install the plugins
 
-Install agent-worktrees first; add the others as you need them. The bridge
-installer imports agent-codespaces and agent-containers for their `codespace:` /
-`container:` resolvers, so install those **before** agent-bridge.
+Install agent-worktrees first; add the others as you need them. agent-codespaces
+and agent-containers **self-register** their `codespace:` / `container:`
+namespaces with agent-bridge by dropping a `~/.agent-bridge/providers.d/`
+manifest on session start — there is **no install-order requirement** and no
+package import, so a provider installed at any time is discovered on demand.
 
 ```bash
 copilot plugin marketplace add ThomasMichon/copilot-extensions
@@ -284,9 +286,9 @@ sequenceDiagram
     participant Space as CodeSpace
     You->>Bridge: agent-bridge send "codespace:my-space" "..."
     Bridge->>CS: resolve codespace:my-space
-    CS->>Space: gh codespace start (if Shutdown) + SSH (-R 9857)
+    CS->>Space: gh codespace start (if Shutdown) + SSH (-R to the relay port)
     Bridge->>Space: spawn copilot --acp over SSH
-    Space-->>CS: git / gh credential request to :9857
+    Space-->>CS: git / gh credential request to the local relay
     CS-->>Space: token (from GCM / gh auth)
     Space-->>Bridge: streamed response
     Bridge-->>You: response
