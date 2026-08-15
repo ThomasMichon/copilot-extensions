@@ -80,16 +80,20 @@ back to the paste reply.
 
 **Where the handoff is stored** — `save_handoff_prompt` decides:
 
-- **agent-dispatch present →** a **`proposed`, `handoff`-labeled task** pinned to
-  this worktree (payload = the full markdown; **no** session file). It returns a
-  baton paste-seed *and* a **deferred cutover seed** on the `HANDOFF_SEED:` line.
-- **agent-dispatch absent →** a **file** in the session state folder; the reply
-  is `Continue: <topic>. Read the handoff at <path> and continue.`
+- **agent-dispatch present and worktree resolved →** a **`proposed`,
+  `handoff`-labeled task** pinned to this worktree (payload = the full
+  markdown; **no** session file). It returns a baton paste-seed *and* a
+  **deferred cutover seed** on the `HANDOFF_SEED:` line.
+- **agent-dispatch absent or worktree unresolved →** a **file** in the session
+  state folder; the reply is `Continue: <topic>. Read the handoff at <path> and
+  continue.`
 
 You don't choose the storage — the tool does; it sits *on top of* agent-dispatch
 when it exists and falls back to the file otherwise. **Prefer the task flow:** if
-a coordinator is reachable, the handoff is a task, not a file — do not hand-write
-a `*-prompt.md` file when `agent-dispatch health` answers.
+a coordinator is reachable and this worktree can be resolved, the handoff is a
+task, not a file — do not hand-write a `*-prompt.md` file in that case. If the
+worktree cannot be resolved, the tool falls back to the file flow rather than
+creating an unpinned, anyone-can-claim task.
 
 ### Steps (default = live cutover)
 
@@ -117,10 +121,11 @@ anything.
    over; this session retires itself on the next idle. **End your turn** — do not
    reply with a paste prompt.
 
-5. **Fallback only if cutover can't run:** if `continue_handoff` reports it is
-   **not under a mux session** (graceful, non-destructive), *then* reply with
-   ONLY the short paste prompt (the user pastes it into `/clear`/`/new`, or runs
-   `/resume-handoff`). Never paste the handoff contents.
+5. **Fallback only if cutover can't run:** if `continue_handoff` reports no
+   resolvable worktree, no live mux session, or another cutover failure
+   (graceful, non-destructive), *then* reply with ONLY the short paste prompt
+   (the user pastes it into `/clear`/`/new`, or runs `/resume-handoff`). Never
+   paste the handoff contents.
 
 > **Two completion models.** The **cutover** successor is a dispatched autopilot
 > CLI: its seed uses `agent-dispatch consume <id> --defer-complete` and it
@@ -130,10 +135,16 @@ anything.
 > (baton — completed on pickup; the *work* is tracked by its effort/issue).
 
 If `generate_handoff_prompt` / `save_handoff_prompt` are unavailable (extension
-not loaded), compose the handoff manually: if `agent-dispatch health` answers,
-create the task yourself (see "Where the handoff is stored" below); otherwise
-write the file with the `create` tool to
+not loaded), compose the handoff manually: if `agent-dispatch health` answers
+and you can resolve this worktree, create the task yourself (see "Where the
+handoff is stored" below); otherwise write the file with the `create` tool to
 `~/.copilot/session-state/<sessionId>/files/<sessionId>-prompt.md`.
+
+This workflow is standalone-friendly: without agent-dispatch, agent-worktrees,
+or a mux session, the extension still generates the structured facts and stores
+a file-backed handoff. `/resume-handoff` can fall back to that matching session
+file; task-backed storage and live cutover are additive when the surrounding
+agent-dispatch / agent-worktrees stack is present.
 
 **Do not** commit the handoff, write a file anywhere outside the session folder,
 hide the reply prompt inside a tool call, or tell the user the handoff will be
@@ -147,10 +158,10 @@ itself up; a fallback paste reply is resumed by the user (paste, or
 to the file** — so you normally just call it and reply with what it returns.
 The mechanics, for when you must do it by hand (extension not loaded):
 
-- **A coordinator answers (`agent-dispatch health` exits 0):** store the handoff
-  as a **`proposed`, `handoff`-labeled task** pinned to this worktree, payload =
-  the full markdown. This is the **whole** handoff — there is **no** session
-  file in this mode.
+- **A coordinator answers (`agent-dispatch health` exits 0) and the worktree can
+  be resolved:** store the handoff as a **`proposed`, `handoff`-labeled task**
+  pinned to this worktree, payload = the full markdown. This is the **whole**
+  handoff — there is **no** session file in this mode.
 
   ```bash
   # write the markdown to a temp file, then:
@@ -176,7 +187,7 @@ The mechanics, for when you must do it by hand (extension not loaded):
   - **`--dedup-key handoff-<sessionId>`** makes re-running `/handoff` in the same
     session idempotent.
 
-- **No coordinator:** write the file to
+- **No coordinator, or no resolvable worktree:** write the file to
   `~/.copilot/session-state/<sessionId>/files/<sessionId>-prompt.md` and reply
   with `Continue: <topic>. Read the handoff at <path> and continue.`
 

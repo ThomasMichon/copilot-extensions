@@ -16,6 +16,13 @@ description: >
 
 # Session Ramp-Up
 
+> **Before you start — readiness (self-provisioning, no agent-worktrees required).**
+> Ensure `agent-logger` is on PATH and run `agent-logger version` once. If it is
+> missing, stamp this plugin's own binstub (`install.ps1 stamp` on Windows or
+> `install.sh stamp` on Linux/WSL from the installed plugin payload), then retry;
+> the first call self-provisions the runtime and deploys `ramp-up-session` and
+> `read-session-digest`.
+
 Resume the *work* of a session that can no longer be resumed the normal way.
 Every Copilot session records its raw event stream at
 `~/.copilot/session-state/<id>/events.jsonl`; this skill turns that stream into
@@ -52,9 +59,9 @@ Optionally note a **focus** (what the operator wants to resume).
 
 ### 2. Spawn the `session-rampup` agent (sync)
 
-Delegate with the `task` tool, `agent_type: "session-rampup"`, `mode: "sync"`.
-Put the worktree suffix (and optional machine / session id / focus) in the
-prompt, e.g.:
+Delegate with the `task` tool, `agent_type: "agent-logger:session-rampup"`,
+synchronously. Put the worktree suffix (and optional machine / session id /
+focus) in the prompt, e.g.:
 
 ```
 Ramp into the dormant session for worktree <SUFFIX> [on machine <NAME>].
@@ -140,7 +147,7 @@ Read the whole brief. It is your situational handoff.
 ### 4. Go deeper if needed
 
 The full transcript was collated ephemerally. Read more with the existing
-digest reader (no multi-machine system paths, temp-store aware):
+digest reader (no deployment-specific paths, temp-store aware):
 
 ```
 read-session-digest <id> context

@@ -1,103 +1,208 @@
 ---
 name: agent-vault-setup
 description: >
-  One-time install and update of the agent-vault runtime -- the local vault
-  service, the `~/.local/bin/agent-vault` binstub, and (on Linux/WSL) the
-  `vault-askpass` SUDO_ASKPASS helper. Use this skill for first-time setup,
-  refreshing the runtime after a plugin payload update, or uninstalling. For
-  day-to-day use (get/add/search/SSH keys), see the `agent-vault` skill.
+  Install, stamp, self-provision, update, inspect, troubleshoot, or uninstall
+  the standalone agent-vault runtime -- the Python venv under `~/.agent-vault`,
+  self-provisioning `~/.local/bin/agent-vault` binstub(s), optional background
+  vault service, and Linux/WSL `vault-askpass` SUDO_ASKPASS helper. Use this
+  skill for first-time setup, runtime refresh after a payload update, checking
+  status in lieu of a doctor command, client-only installs, or cleanup. For
+  day-to-day secret reads/writes, use the `agent-vault` skill.
   Trigger phrases include:
   - 'install agent-vault'
   - 'set up agent-vault'
   - 'update the vault runtime'
   - 'deploy agent-vault'
   - 'agent-vault setup'
+  - 'agent-vault status'
+  - 'agent-vault doctor'
+  - 'troubleshoot agent-vault'
   - 'uninstall agent-vault'
 ---
 
 # agent-vault Setup
 
-`agent-vault` ships a **runtime** (a Python venv at `~/.agent-vault`, a
-`~/.local/bin/agent-vault` binstub, and a background vault service). A
-`copilot plugin update agent-vault` only refreshes the plugin **payload** --
-it does **not** move the runtime. Deploying is always two steps: refresh the
-payload, then run the plugin's installer from the source folder.
+`agent-vault` is a runtime plugin: a Python package/venv, binstub(s), and an
+optional always-on local daemon. It is also **standalone**: setup does not depend
+on registering the current repo with `agent-worktrees`.
+
+Runtime defaults:
+
+| Host | Runtime | Binstub(s) | Service |
+|------|---------|------------|---------|
+| Windows | `%USERPROFILE%\.agent-vault` | `%USERPROFILE%\.local\bin\agent-vault.ps1` + `.cmd` | Scheduled Task `AgentVault` |
+| Linux / WSL | `~/.agent-vault` | `~/.local/bin/agent-vault` + `vault-askpass` | systemd user unit `agent-vault.service` when systemd is available |
 
 ## Prerequisites
 
-- **Python 3.10+**.
-- **KeePassXC** with `keepassxc-cli` on PATH (Linux/WSL) or installed at the
-  standard Windows path. The runtime installs without it, but cannot unlock a
-  database until it is present.
-- **Windows only -- a code-signed base Python** (python.org or the Microsoft
-  Store build). The installer builds the venv from a signed interpreter via
-  `--copies` so Smart App Control trusts it; without one, the venv is built
-  unsigned and SAC may block it (a loud warning is printed).
+- Python 3.10+.
+- KeePassXC with `keepassxc-cli` on PATH (or `C:\Program Files\KeePassXC\keepassxc-cli.exe` on Windows). The runtime can install without it, but unlocks fail until it is present.
+- Windows: a code-signed base Python is preferred. The installer warns if it must build from an unsigned interpreter, because Smart App Control may block the venv.
+- Ensure `~/.local/bin` (or `%USERPROFILE%\.local\bin`) is on PATH.
 
-## Install
+## Minimal bootstrap (stamp + self-provision)
 
-Run the plugin's installer from its source directory (a local checkout of the
-`copilot-extensions` repo, or the marketplace-vendored plugin dir):
+The plugin's session-start hook runs `scripts/bootstrap-check.*`. When no deploy
+manifest exists, it performs a cheap `stamp`: copy/record the payload and write a
+self-provisioning binstub. The first real `agent-vault ...` command then builds
+the venv and prints `::agent-provisioning::` (~30-120s). Do not kill that first
+run.
+
+Manual stamp from a checkout:
+
+```powershell
+pwsh -File plugins\agent-vault\scripts\install.ps1 -Action stamp
+```
 
 ```bash
-# Linux / WSL
-bash plugins/agent-vault/scripts/install.sh install
+bash plugins/agent-vault/scripts/install.sh stamp
 ```
+
+Disable first-use provisioning only for diagnostics:
+
+```bash
+export AGENT_VAULT_NO_SELFPROVISION=1
+```
+
 ```powershell
-# Windows
+$env:AGENT_VAULT_NO_SELFPROVISION = '1'
+```
+
+## Full install
+
+From a local checkout or installed plugin payload:
+
+```powershell
 pwsh -File plugins\agent-vault\scripts\install.ps1 -Action install
 ```
 
-This creates the venv, installs the `agent_vault` package into it, writes the
-`~/.local/bin/agent-vault` binstub, deploys a background service (systemd
-**--user** unit on Linux; a windowless scheduled task on Windows), and -- on
-Linux/WSL -- installs the `vault-askpass` helper. Add `--no-service`
-(`-NoService` on Windows) for a client-only host that should not run the daemon.
+```bash
+bash plugins/agent-vault/scripts/install.sh install
+```
 
-Ensure `~/.local/bin` is on your PATH.
+This builds the versioned runtime slot, installs the `agent-vault` package,
+writes the binstub(s), writes `deploy-manifest.json`, verifies the module
+imports, warns if KeePassXC is missing, and registers/starts the background
+service unless disabled.
 
-## Update (after a payload refresh)
+Client-only host:
+
+```powershell
+pwsh -File plugins\agent-vault\scripts\install.ps1 -Action install -NoService
+```
 
 ```bash
-copilot plugin update agent-vault           # refresh the payload
+bash plugins/agent-vault/scripts/install.sh install --no-service
+```
+
+Even without a supervised service, the CLI can cold-start the daemon on demand.
+
+## Update after a payload refresh
+
+If the plugin payload version changes, `bootstrap-check.*` detects drift on a
+later session start and runs the installer in the background. To refresh
+immediately, run the installer update action from the fresh payload or a checkout:
+
+```powershell
+pwsh -File plugins\agent-vault\scripts\install.ps1 -Action update
+```
+
+```bash
 bash plugins/agent-vault/scripts/install.sh update
 ```
 
-> **Windows caveat.** When agent-vault is loaded in the running session,
-> `copilot plugin update` can fail with a busy-directory error. Run
-> `install.ps1 -Action update` from a **local checkout** of the repo instead
-> (its `source.kind` becomes `local`).
+The installer is downgrade-guarded. For an intentional rollback, pass `-Force` /
+`--force` or set `AGENT_VAULT_ALLOW_DOWNGRADE=1`.
 
-The installer is downgrade-guarded; force a deliberate rollback with `--force`
-(`-Force`) or `AGENT_VAULT_ALLOW_DOWNGRADE=1`.
+Windows update path: after activating the new version slot, `install.ps1` sends
+a cooperative stop to the old daemon and waits briefly for the endpoint to close
+before starting the scheduled task again. This is not a hard process kill; short
+in-flight requests can finish. The in-memory master password is released, so the
+new daemon reconnects through the optional persistent cache or a single re-unlock
+on first use.
 
-## First-run configuration
+POSIX update path: the installer refreshes the systemd user unit and restarts it
+when systemd is available; without systemd, the next CLI call cold-starts the
+updated daemon.
 
-Point the vault at your database and start it:
+## Start / stop / status
 
-```bash
-export KPDB="$HOME/Secrets/vault.kdbx"
-agent-vault ping        # cold-starts the service; prompts for the master password on first read
+```powershell
+pwsh -File plugins\agent-vault\scripts\install.ps1 -Action status
+pwsh -File plugins\agent-vault\scripts\install.ps1 -Action start
+pwsh -File plugins\agent-vault\scripts\install.ps1 -Action stop
 ```
-
-## SUDO_ASKPASS wiring (Linux / WSL)
-
-```bash
-export SUDO_ASKPASS="$HOME/.local/bin/vault-askpass"
-export VAULT_SUDO_ENTRY="Personal/sudo"     # your KeePass entry holding the sudo password
-sudo -A true                                 # sourced from the vault
-```
-
-Set these from a profile your non-interactive shells read; a `~/.bashrc`
-`sudo()` wrapper only covers interactive shells.
-
-## Status / uninstall
 
 ```bash
 bash plugins/agent-vault/scripts/install.sh status
-bash plugins/agent-vault/scripts/install.sh uninstall            # keep config + DB
-bash plugins/agent-vault/scripts/install.sh uninstall --purge    # also remove the runtime dir
+bash plugins/agent-vault/scripts/install.sh start
+bash plugins/agent-vault/scripts/install.sh stop
 ```
 
-The `.kdbx` database is yours and is never created, moved, or deleted by the
-installer.
+There is no `agent-vault doctor` subcommand today. Use status plus these runtime
+checks:
+
+```bash
+agent-vault which --json      # config resolution and source tiers
+agent-vault ping              # daemon PID, TTL, cache count, lock status, transport
+agent-vault cache-status --json
+```
+
+Common findings:
+
+| Symptom | Check / fix |
+|---------|-------------|
+| `agent-vault` not found | Run `stamp` or `install`; verify `~/.local/bin` is on PATH. |
+| First command appears slow | It is probably self-provisioning; wait for the `::agent-provisioning::` run to finish. |
+| `KeePass database path is not configured` | Set `KPDB`, add a named vault, or create `.agent-vault.json`; inspect with `agent-vault which`. |
+| `keepassxc-cli` missing | Install KeePassXC or add `keepassxc-cli` to PATH. |
+| Locked read fails fast | Run `agent-vault unlock`, `agent-vault unlock --terminal`, or retry `get` with `--prompt`. |
+| Cache commands are disabled | Set `AGENT_VAULT_CACHE=1` or `AGENT_VAULT_CACHE_DIR`; install `cryptography` into the runtime venv. |
+
+## First-run database config
+
+After install/stamp, configure the database before reading entries:
+
+```powershell
+$env:KPDB = "C:\Users\you\Secrets\vault.kdbx"
+agent-vault which
+agent-vault unlock
+```
+
+```bash
+export KPDB="$HOME/Secrets/vault.kdbx"
+agent-vault which
+agent-vault unlock
+```
+
+For multi-vault setup, use `agent-vault vault add`, `vault set-default`, and a
+repo-local `.agent-vault.json`; see the `agent-vault` skill.
+
+## SUDO_ASKPASS wiring (Linux / WSL)
+
+`install.sh install` writes `~/.local/bin/vault-askpass`:
+
+```bash
+export SUDO_ASKPASS="$HOME/.local/bin/vault-askpass"
+export VAULT_SUDO_ENTRY="Personal/sudo"
+sudo -A true
+```
+
+Set these from a profile read by non-interactive shells. A shell function or
+`.bashrc` wrapper only affects interactive shells; scripts must call `sudo -A`.
+
+## Uninstall
+
+```powershell
+pwsh -File plugins\agent-vault\scripts\install.ps1 -Action uninstall
+pwsh -File plugins\agent-vault\scripts\install.ps1 -Action uninstall -Purge
+```
+
+```bash
+bash plugins/agent-vault/scripts/install.sh uninstall
+bash plugins/agent-vault/scripts/install.sh uninstall --purge
+```
+
+Uninstall removes supervision and binstubs. Without purge, runtime state/config
+is kept. The `.kdbx` database is user-owned and is never created, moved, or
+deleted by the installer.

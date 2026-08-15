@@ -6,7 +6,7 @@ This plugin ships two cooperating pieces:
 
 | Piece | Type | Role |
 |-------|------|------|
-| **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; injects `additionalContext` nudges at 55% / 70% utilization; provides `generate_handoff_prompt` + `save_handoff_prompt` tools and the **`/resume-handoff`** slash command. `save_handoff_prompt` sits **on top of agent-dispatch**: when a coordinator is reachable it stores the handoff as a `proposed`/`handoff` **task** (payload = the markdown, pinned to the worktree, no session file); otherwise it falls back to a session-folder file. `/resume-handoff` digs up this worktree's pending handoff (task, else file) and **injects its continuation prompt into the current session** |
+| **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; logs threshold warnings and queues agent-facing `session.send()` nudges at 55% / 70% utilization, delivered on the next idle; provides `generate_handoff_prompt`, `save_handoff_prompt`, and `continue_handoff` tools plus the **`/handoff-continue`** and **`/resume-handoff`** slash commands. `save_handoff_prompt` sits **on top of agent-dispatch**: when a coordinator is reachable **and this worktree can be resolved**, it stores the handoff as a `proposed`/`handoff` **task** (payload = the markdown, pinned to the worktree, no session file); otherwise it falls back to a session-folder file. `/resume-handoff` digs up this worktree's pending handoff (task, else file) and **injects its continuation prompt into the current session** |
 | **context-handoff skill** | Skill | The `/handoff` workflow -- composes the continuation prompt from the extension's structured facts and the agent's live context. (Resume is handled by the extension's `/resume-handoff` command, which injects the handoff; the skill documents both) |
 
 ## Why an extension (and not a pure plugin)
@@ -18,10 +18,10 @@ hook surface a plugin normally uses cannot replicate it:
   limit tokens) is delivered only to the extension SDK via
   `session.on("session.usage_info", ...)`. No `sessionStart` / `postToolUse`
   hook input exposes it.
-- **`postToolUse` hook output is ignored.** The extension's nudge works by
-  returning `additionalContext` from `onPostToolUse`, which the model reads.
-  Command-hook output is discarded (only `preToolUse` can *deny* a tool call,
-  not inject a message).
+- **Command hooks cannot inject a turn.** The extension's nudge works by
+  queueing a `session.send()` message from the `session.usage_info` handler and
+  delivering it on the next `session.idle` boundary. Command-hook output is
+  discarded (only `preToolUse` can *deny* a tool call, not inject a message).
 
 So the capability requires the extension payload.
 
@@ -37,11 +37,10 @@ plugin ships exactly one:
 plugins/context-handoff/extensions/context-handoff/extension.mjs
 ```
 
-There is **no** copy to `~/.copilot/extensions/`, no deploy manifest, and no
-`scripts/install.*`. Installing/updating the plugin via the marketplace
-(`copilot plugin update context-handoff@copilot-extensions`, or repo-level
-`enabledPlugins` auto-install) is the whole deploy. The extension activates on
-the **next** Copilot CLI session (extensions are scanned at startup).
+There is **no** installed runtime, venv, binstub, copy to
+`~/.copilot/extensions/`, deploy manifest, or `scripts/install.*`. Enabling the
+plugin is the whole setup; the extension activates on the **next** Copilot CLI
+session (extensions are scanned at startup).
 
 ## Requirements
 
@@ -53,17 +52,18 @@ this plugin:
    `.github/copilot/settings.json`). A marketplace plugin's `extensions/` dir is
    only scanned when the plugin is enabled.
 2. **`experimental: true`** in `~/.copilot/settings.json` -- the CLI gates *all*
-   extension loading behind it. This is ensured by the **agent-worktrees**
-   installer (`Ensure-CopilotExperimental`, run on `agent-worktrees
-   install`/`update`), the session-lifecycle owner present on every machine.
-   This plugin does not set it.
+   extension loading behind it. Set it directly if your environment has not
+   already done so. This plugin does not set it and does not require registering
+   the repo with agent-worktrees.
 
 ## Verify
 
-A loaded extension logs `[Context Handoff] Session started ...` and exposes the
-`generate_handoff_prompt` / `save_handoff_prompt` tools. `/extensions` lists it
-with source **plugin**. If it does not load, confirm both requirements above and
-start a fresh session (the context-handoff-setup skill walks through this).
+A loaded extension exposes the `generate_handoff_prompt`,
+`save_handoff_prompt`, and `continue_handoff` tools, plus `/handoff-continue`
+and `/resume-handoff`; `/extensions` lists it with source **plugin**. It
+intentionally does **not** emit a user-visible "Session started" breadcrumb. If
+it does not load, confirm both requirements above and start a fresh session (the
+`context-handoff-setup` troubleshooting skill walks through this).
 
 ## Thresholds
 
@@ -73,6 +73,12 @@ start a fresh session (the context-handoff-setup skill walks through this).
 | 70% | Urgent reminder: "generate NOW, compaction at ~80%" |
 
 Reminder state resets after a successful compaction.
+
+In both cases the extension emits a user-visible `session.log` warning and an
+agent-facing `session.send()` nudge. The nudge is queued by
+`session.usage_info` and delivered only at the next `session.idle` boundary, so
+it does not interrupt an in-flight turn. Failures to send the nudge are logged
+as warnings; they do not block the session.
 
 ## Live cutover records the durable session lineage
 
@@ -94,3 +100,25 @@ that state -- context-handoff keeps no rival pointer):
 
 Both writes are best-effort: a failure never undoes the (already successful)
 cutover.
+
+This split follows the repo-wide
+[`primitives below, orchestration above`](../../docs/patterns/README.md)
+invariant: agent-worktrees provides the lower-level session/worktree mechanisms,
+while context-handoff composes the handoff policy above them.
+
+## Standalone and degraded modes
+
+The plugin remains useful in a plain Copilot CLI session with only
+`context-handoff@copilot-extensions` enabled:
+
+- `generate_handoff_prompt` and `save_handoff_prompt` work without
+  agent-worktrees or agent-dispatch.
+- If `agent-dispatch` is absent, unhealthy, or a worktree cannot be resolved,
+  `save_handoff_prompt` writes the session-file fallback under
+  `~/.copilot/session-state/<sessionId>/files/<sessionId>-prompt.md`.
+- `continue_handoff` is best-effort. Without a resolvable worktree + live mux it
+  does nothing destructive and tells the agent to use the saved paste or
+  `/resume-handoff` fallback.
+- `/resume-handoff` first tries a pinned agent-dispatch handoff task when that
+  stack is available; otherwise it falls back to the newest matching session
+  file for the current CWD.

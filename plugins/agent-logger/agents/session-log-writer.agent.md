@@ -3,8 +3,8 @@ name: session-log-writer
 description: |
   Manifest-driven session-log writer. Turns one or more Copilot sessions
   into structured Markdown logs. Invoked by the log-session skill (one
-  session), the process-backlog skill (local batch), or an orchestrator
-  runner (fleet batch) -- always via a manifest, never directly by users.
+  session), the process-backlog skill (local batch), or a chronicle runner
+  (daily digest) -- always via a manifest, never directly by users.
 
   The agent is personality-neutral: it writes plain, structured logs and
   produces a closing remark ONLY when the caller injects instructions for
@@ -63,9 +63,12 @@ The caller passes a **manifest file path** in its prompt. Read it with the
 
 | Field | Meaning |
 |-------|---------|
-| `mode` | `single` (write the one session) or `batch` (triage + write many). |
+| `mode` | `single` (write the one session), `batch` (triage + write many), or `digest` (write one compact daily chronicle log from `digest_template`). |
 | `return` | `result` (return a short summary + optional remark) or `json` (machine-parseable results for a harness). |
 | `sessions[]` | Sessions to process. `session_path` is the collation source (absolute local path or a path the segmenter can reach). |
+| `digest_date` / `sink` | Digest mode only: day and routed sink id for the daily chronicle. |
+| `digest_template` | Digest mode only: compact daily-log template with tokens `{date} {machine} {sink} {session_count} {sessions}`. |
+| `sessions[].segment_ref` | Digest mode only: reserved `<parent_session_id>:<segment_index>` identity. Preserve it in JSON results if present. |
 | `existing_log_path` | If present, a log already exists for this session -- see [Existing logs](#existing-logs). |
 | `output_root` | Root directory for emitted logs. |
 | `log_path_template` | Path template, tokens `{year} {month} {day} {hhmmss} {machine} {title}`. |
@@ -127,6 +130,12 @@ When unsure whether a session is automated, look for: a system-generated
 prompt with no human language, a single turn with no follow-up, empty
 repository context, or a summary that reads like a function call.
 
+In `digest` mode, do **not** re-triage into standalone/digest/skip. The caller
+has already routed and reserved the listed segments. Read each session enough to
+produce a terse daily entry, render exactly one log for `digest_date` and `sink`
+from `digest_template`, and return JSON. If a listed session cannot be collated,
+include a short failure entry rather than inventing details.
+
 ### 3. Read session data
 
 - `read-session-digest <session-id> context` -- metadata, checkpoints,
@@ -177,9 +186,15 @@ If `log_template` is null, every log begins with a `---` YAML frontmatter block.
 Populate `machine`, `session_id`, `previous_session_id` (if available from
 digest context), `start_time`, `end_time`, and `session_notes` (if any).
 
-**Daily digests** (batch mode): group digest-category sessions by date +
-machine into one file; YAML frontmatter lists each session; each gets a
-2-3 sentence subsection.
+**Daily digests**:
+
+- Batch mode: group digest-category sessions by date + machine into one file;
+  YAML frontmatter lists each session; each gets a 2-3 sentence subsection.
+- Digest mode: render one compact chronicle log for the manifest's
+  `digest_date` / `sink` using `digest_template`. Fill `{sessions}` with terse
+  factual bullets or subsections, preserve `segment_ref` in frontmatter/metadata
+  if you include frontmatter, and do not use the per-session
+  Summary/Key-Changes/Commits/Open-Items shape unless the template asks for it.
 
 #### Existing logs
 
@@ -202,8 +217,8 @@ plain log -- no remark, no quip, no persona.
   reactions, or character beats placed **between** thematic passages where they
   genuinely add warmth or wit. Interleave; do **not** batch all voice into a
   single block at the end, and never force a beat where the material doesn't
-  earn one. The instructions (e.g. from a multi-machine system voice skill) are the only
-  source of personality -- the plugin supplies none.
+  earn one. The caller's instructions (for example, from a host-owned voice
+  skill) are the only source of personality -- the plugin supplies none.
 - **`exemplars`** -- if non-null, a list of short reference passages (or a path
   to them) that demonstrate the intended tone and depth. Treat them as
   **few-shot style samples**, not content to copy.

@@ -14,10 +14,15 @@ description: >
 
 > **Before you start — readiness (self-provisioning, no agent-worktrees required).**
 > agent-logger provisions its own runtime on first use and works standalone in any
-> host (CLI, Copilot app, cloud agent). If `command -v agent-logger` fails, deploy
-> its binstub first (it then self-provisions on first call):
-> `bash "$(ls ~/.copilot/installed-plugins/*/agent-logger/scripts/install.sh | head -1)" stamp`
-> then run `agent-logger version` once — the first call provisions the runtime
+> host (CLI, Copilot app, cloud agent). If `agent-logger` is not on PATH, deploy
+> this plugin's own binstub first; it then self-provisions on first call.
+>
+> - Windows:
+>   `pwsh -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.copilot\installed-plugins\copilot-extensions\agent-logger\scripts\install.ps1" stamp`
+> - Linux/WSL:
+>   `bash "$(ls ~/.copilot/installed-plugins/*/agent-logger/scripts/install.sh | head -1)" stamp`
+>
+> Then run `agent-logger version` once. The first call provisions the runtime
 > (~30–120s; watch for `::agent-provisioning::`) and deploys the auxiliary tools
 > (`session-sync`, `collate-session`, `prepare-session-log`, …). If it reports a
 > provisioning failure (e.g. missing uv / network), surface the exact message —
@@ -103,7 +108,7 @@ explicit error. Do not silently fall back when validation fails.
 > harness** (a shareable control plane that holds no personal state), logs must
 > **not** land in the harness checkout. agent-logger already supports a
 > configurable root: set the **user-level** `log.root` (in
-> `~/.<agent-logger>/config.yaml`, which may be absolute) to the bound
+> `~/.agent-logger/config.yaml`, which may be absolute) to the bound
 > **knowledge** repo's logs directory — resolvable on this machine with
 > `agent-worktrees state-root` (append `/logs`). The harness setup flow writes
 > this per machine; the repo-local `.agent-logger.yaml` `root` stays relative
@@ -113,7 +118,7 @@ explicit error. Do not silently fall back when validation fails.
 
 ### 2. Build a one-session manifest
 
-Write a manifest JSON to a temp file using the prep output -- shape (full
+Write a manifest JSON to a scratch file using the prep output -- shape (full
 example: [`references/manifest.json`](references/manifest.json)):
 
 ```json
@@ -141,9 +146,10 @@ deliberately supplies them.
 
 ### 3. Delegate
 
-Spawn the **session-log-writer** agent (`agent_type: "session-log-writer"`,
-`mode: "sync"`) with the manifest file path in the prompt. The agent
-collates, reads the digest, writes the log, and returns a short result.
+Spawn the **session-log-writer** agent (`agent_type:
+"agent-logger:session-log-writer"`) synchronously with the manifest file path in
+the prompt. The agent collates, reads the digest, writes the log, and returns a
+short result.
 
 ### 4. Present
 

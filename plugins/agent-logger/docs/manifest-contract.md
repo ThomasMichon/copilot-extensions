@@ -3,14 +3,16 @@
 The `session-log-writer` agent is driven entirely by a **manifest** -- a JSON
 file whose path the caller passes in the spawn prompt. Three callers produce
 this same manifest: the `log-session` skill (interactive, one session), the
-`process-backlog` skill (local batch), and an orchestrator runner (fleet
-batch). This document is the contract between them and the agent.
+`process-backlog` skill (local batch), and a chronicle runner (fleet/day
+digest). The chronicle CLI's default writer only persists the `mode: digest`
+manifest JSON; a host runner still has to spawn the writer agent to render a
+log.
 
 ## Schema
 
 ```json
 {
-  "mode": "single | batch",
+  "mode": "single | batch | digest",
   "return": "result | json",
   "sessions": [
     {
@@ -79,11 +81,11 @@ instructions to layer a character voice on its own target. `exemplars` and
   "mode": "digest",
   "return": "json",
   "digest_date": "2026-07-28",
-  "sink": "dotfiles",
+  "sink": "project-logs",
   "sessions": [
     {"session_id": "abc-123", "machine": "book2",
      "session_path": "/…/sessions/book2/session-state/abc-123",
-     "repository": "owner/dotfiles", "segment_ref": "abc-123:0"}
+     "repository": "owner/project", "segment_ref": "abc-123:0"}
   ],
   "output_root": "logs",
   "log_path_template": "{year}/{month}/{day} chronicle.md",
@@ -98,8 +100,9 @@ instructions to layer a character voice on its own target. `exemplars` and
   one-line description) and, if a closing remark was produced, that remark
   verbatim. Used by interactive callers.
 - `return: json` -- the agent prints a JSON results object (per-session
-  `category` / `log_path` / `status`, plus counts) to stdout for a harness
-  to parse. Used by batch/service callers.
+  `category` / `log_path` / `status`, plus counts; for `mode: digest`, one
+  daily-log result) to stdout for a harness to parse. Used by batch/service
+  callers.
 
 ## The voice seam (how voice is injected)
 
@@ -228,7 +231,7 @@ sign-off sets `closing_remark`; a host that wants both sets both.
   "sessions": [ /* ...N sessions... */ ],
   "output_root": "logs",
   "narration_style": "Consult your narration voice skill. Weave brief in-character asides between thematic sections where they add warmth or wit -- interleaved, never forced, never all at the end.",
-  "exemplars": "visions/knowledge/permanent-record/reference-entries.md",
+  "exemplars": "docs/log-style-exemplars.md",
   "closing_remark": null
 }
 ```

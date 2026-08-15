@@ -1,12 +1,15 @@
 ---
 name: agent-vault
 description: >
-  Store and fetch secrets from a local KeePassXC-backed vault -- API keys, SSH
-  keys, tokens, and account credentials -- on demand, without hardcoding them,
-  committing them, or exporting them into the environment. Covers the CLI verbs
-  (get/has/search/add/set-password/import-key/export-key/seal/unseal), the on-demand fetch
-  discipline, first-run database configuration, and wiring the vault as a
-  SUDO_ASKPASS provider for `sudo -A` on Linux/WSL.
+  Store, fetch, and minimally manage secrets from a standalone local
+  KeePassXC-backed vault -- API keys, SSH keys, tokens, account credentials,
+  Git HTTPS credentials, persistent-cache entries, and envelope-KEK sealed
+  values -- without hardcoding them, committing them, or exporting them into
+  the environment. Use this skill for day-to-day `agent-vault` CLI usage
+  (`get`/`has`/`search`/`list`/`show`/`add`/`set-password`/`set-username`,
+  `import-key`/`export-key`, `git-credential`, `cache-*`, `seal`/`unseal`,
+  `which`, `vault *`, lock/unlock behavior, and SUDO_ASKPASS wiring). For
+  runtime install/update/status/uninstall, use `agent-vault-setup`.
   Trigger phrases include:
   - 'agent-vault'
   - 'get a secret'
@@ -17,157 +20,209 @@ description: >
   - 'vault get'
   - 'sudo askpass'
   - 'import an ssh key into the vault'
+  - 'seal a secret with agent-vault'
+  - 'agent-vault cache'
 ---
 
 # agent-vault -- Local Secret Store
 
-> **Before you start — readiness (self-provisioning, no agent-worktrees required).**
-> agent-vault provisions its own runtime on first use and works standalone in any
-> host (CLI, Copilot app, cloud agent). If `command -v agent-vault` fails, deploy
-> its binstub first (it then self-provisions on first call):
-> `bash "$(ls ~/.copilot/installed-plugins/*/agent-vault/scripts/install.sh | head -1)" stamp`
-> The first call may take ~30–120s to provision (watch for `::agent-provisioning::`);
-> let it finish. If it reports a provisioning failure (e.g. missing uv / network),
-> surface the exact message — don't improvise a toolchain install.
+`agent-vault` is a **standalone, machine-scoped credential tap**. It uses a
+local KeePassXC `.kdbx` database, a machine-local service that caches the
+KeePass master password for a bounded time, and a CLI that fetches one entry at
+the moment a tool needs it. It does **not** require an `agent-worktrees` repo
+registration, a broker, a tunnel, a container, or a remote core.
 
-`agent-vault` is a **local, machine-scoped credential tap** backed by a
-KeePassXC database. A small background **service** holds the KeePass master
-password in memory for a bounded time (passive lock + just-in-time unlock), and
-the **CLI** fetches a specific named entry exactly when a tool or agent needs
-it. Secrets are never written into the shell environment or committed to a repo.
+## Readiness
 
-The credential store is a **backend/driver**: today the only backend is
-KeePassXC (`KeePassXCBackend`), but the CLI verbs are store-neutral by design so
-other backends can be added later. Speak of "the vault" / "the credential
-store," not "KeePassXC," at the user surface.
+If `agent-vault` is already on PATH, use it directly; the binstub may
+self-provision the runtime on first use and print `::agent-provisioning::`
+(~30-120s). Let that finish.
+
+If the command is missing but the plugin payload is installed, stamp the binstub
+without building the full runtime:
+
+```bash
+bash "$(ls ~/.copilot/installed-plugins/*/agent-vault/scripts/install.sh | head -1)" stamp
+```
+
+```powershell
+$script = Get-ChildItem "$env:USERPROFILE\.copilot\installed-plugins\*\agent-vault\scripts\install.ps1" | Select-Object -First 1
+pwsh -File $script.FullName -Action stamp
+```
+
+For full install/update/status/uninstall, switch to the `agent-vault-setup`
+skill.
 
 ## First-run configuration
 
-Point `agent-vault` at your `.kdbx` file via the `KPDB` environment variable (or
-a JSON config at `$AGENT_VAULT_CONFIG` / the platform config dir):
+Point the vault at a KeePassXC database with either `KPDB`, named vaults, or a
+repo-local `.agent-vault.json`.
+
+Single database:
 
 ```bash
-export KPDB="$HOME/Secrets/vault.kdbx"      # Linux / WSL
+export KPDB="$HOME/Secrets/vault.kdbx"
+export VAULT_GROUP="Personal"      # optional prefix for bare entry names
 ```
+
 ```powershell
-$env:KPDB = "C:\Users\you\Secrets\vault.kdbx"   # Windows
+$env:KPDB = "C:\Users\you\Secrets\vault.kdbx"
+$env:VAULT_GROUP = "Personal"      # optional
 ```
 
-Optional knobs:
-- `VAULT_GROUP` -- prefix bare entry names with a group (e.g. `VAULT_GROUP=Personal`
-  makes `get example` read `Personal/example`; full paths are left as-is). Missing
-  groups are created automatically on `add`.
-- `VAULT_PASSWORD_TTL` -- seconds the master password stays cached (default 3600).
-- `AGENT_VAULT_PORT` -- localhost TCP port (default 19999).
-
-The CLI resolves the effective database/group/port on **each call** and passes
-them to the service — no daemon restart needed to switch vaults.
-
-## Named vaults, per-repo config, global backstop
-
-For a machine with more than one database (personal + work), give each a nickname
-in the global config and let each repo pick one:
+Multiple named vaults:
 
 ```bash
-agent-vault vault add Personal  --kpdb ~/Personal.kdbx  --group Personal
-agent-vault vault add Microsoft --kpdb ~/work/MS.kdbx   --group Work
-agent-vault vault set-default Personal        # the global backstop
+agent-vault vault add Personal  --kpdb ~/Personal.kdbx --group Personal
+agent-vault vault add Work      --kpdb ~/Work.kdbx     --group Work
+agent-vault vault set-default Personal
 agent-vault vault list
 ```
 
-Point a repo at a vault with an `.agent-vault.json` at/above its root (found by
-walking up from the CWD, git-style): `{ "vault": "Microsoft" }` (or inline
-`kpdb`/`group` overrides). **Precedence, per field:** env var › per-repo
-`.agent-vault.json` › global named vault › defaults. Inspect resolution with
-`agent-vault which`. One service caches master passwords **per database**, so
-personal and work vaults are both usable at once (each prompts once, the prompt
-names the vault). Back-compatible: just `KPDB` set = a single default vault.
+Repo-local selector (`.agent-vault.json` at or above the repo root):
 
-Prerequisite: **KeePassXC** with `keepassxc-cli` on PATH (or the standard
-Windows install path).
+```json
+{ "vault": "Work" }
+```
+
+Precedence per call: env vars (`AGENT_VAULT`, `KPDB`, `VAULT_GROUP`,
+`AGENT_VAULT_PORT`) > repo config > extension config > global named vault >
+defaults. Check the resolved values with:
+
+```bash
+agent-vault which
+agent-vault which --json
+```
+
+Prerequisite: KeePassXC with `keepassxc-cli` on PATH, or the standard Windows
+install path (`C:\Program Files\KeePassXC\keepassxc-cli.exe`).
 
 ## Fetch-on-demand discipline
 
-The whole point is **least exposure**. When a tool needs a secret, resolve it
-in place at the moment of use -- do not stage it in the environment:
+Fetch secrets in place at the point of use. Do **not** export them into a long-
+lived shell environment.
 
 ```bash
-# Good: fetch on demand, use in place
-curl -H "Authorization: Bearer $(agent-vault get 'API/OpenAI' password)" ...
+# Good: command substitution limits lifetime to this command.
+curl -H "Authorization: Bearer $(agent-vault get 'API/OpenAI')" https://example.invalid/
 
-# Avoid: exporting the secret into the session environment
-export OPENAI_KEY="$(agent-vault get 'API/OpenAI' password)"   # lingers, leaks
+# Avoid: exported values linger and leak to children.
+export OPENAI_KEY="$(agent-vault get 'API/OpenAI')"
 ```
 
-## CLI verbs
+## Common CLI verbs
 
 ```bash
-agent-vault ping                       # service status
-agent-vault add "API/OpenAI" -u alice  # create an entry (prompts/generates pw)
-agent-vault set-password "API/OpenAI"  # update an entry's password
-agent-vault get "API/OpenAI" [field]   # read a field (default: password)
-agent-vault has "API/OpenAI"           # existence check
-agent-vault search "OpenAI"            # find entries
-agent-vault lock                       # drop the cached master password now
-agent-vault unlock                     # pre-warm the cache
-agent-vault start | stop               # service lifecycle (auto-starts on demand)
+agent-vault ping
+agent-vault unlock                  # provider-first, then prompts if possible
+agent-vault unlock --terminal       # force prompt on this terminal
+agent-vault get "API/OpenAI"        # default field: password
+agent-vault get "API/OpenAI" username
+agent-vault has "API/OpenAI"
+agent-vault search OpenAI
+agent-vault list Personal -R -f
+agent-vault show "API/OpenAI" -s
+agent-vault add "API/OpenAI" --username alice
+agent-vault set-password "API/OpenAI"
+agent-vault set-username "API/OpenAI" alice
+agent-vault remove "API/OpenAI" -f
+agent-vault move "API/OpenAI" Archive -f
+agent-vault lock
 ```
 
 ### SSH keys
 
 ```bash
-agent-vault import-key "SSH/deploy" ~/.ssh/id_ed25519   # stores key + .pub as attachments
-agent-vault export-key "SSH/deploy" ~/.ssh key_name     # restores the pair to a directory
+agent-vault import-key "SSH/deploy" ~/.ssh/id_ed25519
+agent-vault export-key "SSH/deploy" ~/.ssh id_ed25519
 ```
 
-### Sealing secrets at rest (envelope KEK)
+`import-key` requires the public key beside the private key (`.pub`).
+`export-key` writes the private/public pair and sets POSIX file modes when not on
+Windows.
 
-For a consumer that keeps its **own** on-disk cache (e.g. a short-lived token) and
-just needs to encrypt it at rest without hardcoding a key, the vault provides an
-**envelope key-encryption-key (KEK)**. `seal`/`unseal` run inside the service, so the
-raw KEK never leaves it -- only ciphertext/plaintext cross the wire. The KEK is
-generated once per name and wrapped at rest: **DPAPI** (per-OS-user) on Windows, a
-`0600` file on POSIX. Because it's independent of the KeePass master password,
-seal/unseal work on a **locked** vault (no unlock needed).
+### Git HTTPS credentials
+
+`agent-vault git-credential get|store|erase` is a git credential-helper surface.
+Only `get` resolves a credential; `store` and `erase` intentionally no-op. The
+daemon delegates allowlisted hosts to local Git Credential Manager (`VAULT_GCM_HOSTS`,
+default GitHub + Azure DevOps hosts). This path is independent of KeePassXC and
+does not unlock the vault.
 
 ```bash
-# Seal a token (stdin) under a named KEK (auto-created on first use) -> base64
-printf '%s' "$TOKEN" | agent-vault seal spark > token.sealed
-
-# Unseal it back to stdout later (any process, same OS user)
-agent-vault unseal spark --in token.sealed        # -> the original token
-
-agent-vault kek-list                              # list KEK names
+git config --global credential.helper '!agent-vault git-credential'
 ```
 
-Tamper/wrong-key detection is built in (AES-256-GCM); `unseal` fails cleanly if the
-KEK is missing or the blob was altered. The KEK name is bound as authenticated data,
-so a blob sealed under one name won't unseal under another.
+### Persistent cache
 
-> **Requires `cryptography`** (the AES-256-GCM backend) -- the same optional dep as
-> the persistent cache. Install it via the `kek` (or `cache`) extra, e.g.
-> `uv pip install cryptography`; without it `seal`/`unseal` return a clear error.
-> The KEK *wrapping* (DPAPI on Windows) needs no extra dependency.
+The encrypted persistent cache is off by default. Enable it only when an
+unattended job needs previously fetched values while the vault is locked.
+
+```bash
+export AGENT_VAULT_CACHE=1
+agent-vault cache-populate --entry API/OpenAI --prompt
+agent-vault cache-status
+agent-vault cache-verify --entry API/OpenAI
+agent-vault get API/OpenAI --cache-only
+agent-vault cache-clear
+```
+
+`cache-verify` exits `2` if any requested entry is missing. The cache requires
+`cryptography`; without it, cache operations are a safe no-op.
+
+### Envelope KEK (`seal` / `unseal`)
+
+Use this when a consumer owns its own on-disk cache and needs a local encryption
+key without hardcoding one. KEKs are stored beside the agent-vault config (DPAPI
+per user on Windows; `0600` file on POSIX) and are independent of the KeePass
+master password, so `seal`/`unseal` work while locked.
+
+```bash
+printf '%s' "$TOKEN" | agent-vault seal spark > token.sealed
+agent-vault unseal spark --in token.sealed
+agent-vault kek-list
+```
+
+Requires `cryptography`; otherwise the command returns a clear error.
+
+## Locking and prompting
+
+- Master passwords are cached **per database** by the daemon.
+- `VAULT_PASSWORD_TTL` controls password lifetime (default `3600` seconds).
+- `agent-vault lock` clears cached master passwords and in-memory credential
+  values.
+- Locked `get`/`has`/`search`/`list`/`show` reads fail fast by default after
+  unlock-source providers miss. Use `agent-vault unlock`, `unlock --terminal`, or
+  `get --prompt` when a prompt is appropriate.
+- Non-interactive SSH sessions fail fast instead of popping a GUI the operator
+  cannot see.
 
 ## SUDO_ASKPASS (Linux / WSL)
 
-Wire the vault as sudo's askpass provider so `sudo -A` sources the password from
-KeePassXC instead of prompting inline. The installer ships `vault-askpass` to
-`~/.local/bin`:
+The POSIX installer writes `~/.local/bin/vault-askpass`:
 
 ```bash
 export SUDO_ASKPASS="$HOME/.local/bin/vault-askpass"
-export VAULT_SUDO_ENTRY="Personal/sudo"    # the KeePass entry holding your sudo password
-sudo -A apt update                          # sourced from the vault
+export VAULT_SUDO_ENTRY="Personal/sudo"
+sudo -A true
 ```
 
-There is **no** default entry -- set `VAULT_SUDO_ENTRY` to your own entry path.
-Note: a `~/.bashrc` `sudo()` wrapper only applies in interactive shells; scripts
-and non-interactive sessions must call `sudo -A` explicitly (or export
-`SUDO_ASKPASS` from a profile that non-interactive shells read).
+There is no default sudo entry. Set `VAULT_SUDO_ENTRY` to the KeePass entry that
+holds your sudo password.
 
-## Installing / updating the runtime
+## Troubleshooting quick checks
 
-See the **`agent-vault-setup`** skill -- the plugin ships a runtime (venv +
-`~/.local/bin` binstub + a background service), so a `copilot plugin update`
-alone does not refresh it.
+There is no `agent-vault doctor` command today. Use:
+
+```bash
+agent-vault which --json
+agent-vault ping
+agent-vault cache-status --json
+bash plugins/agent-vault/scripts/install.sh status
+```
+
+```powershell
+pwsh -File plugins\agent-vault\scripts\install.ps1 -Action status
+```
+
+For architecture details, see `plugins/agent-vault/docs/architecture.md`.
