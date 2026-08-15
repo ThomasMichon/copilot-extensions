@@ -19,33 +19,33 @@ from agent_worktrees.terminal_fragment import (
 
 
 # ---------------------------------------------------------------------------
-# Shared roster: Lambda-Core (self) + Borealis + Wheatley, all SSH-ready.
+# Shared roster: Anomalous-Potato (self) + Emancipation-Cube + Mantis-Counter, all SSH-ready.
 # ---------------------------------------------------------------------------
 
 def _roster() -> tuple[RosterMachine, ...]:
     return (
         RosterMachine(
-            key="lambda-core", display_name="Lambda-Core", ssh_ready=True,
+            key="anomalous-potato", display_name="Anomalous-Potato", ssh_ready=True,
             environments=(
-                SshEnvironment("windows", "lambda-core", "pwsh"),
-                SshEnvironment("wsl", "lambda-core-wsl", "bash"),
+                SshEnvironment("windows", "anomalous-potato", "pwsh"),
+                SshEnvironment("wsl", "anomalous-potato-wsl", "bash"),
             ),
         ),
         RosterMachine(
-            key="borealis", display_name="Borealis", ssh_ready=True,
+            key="emancipation-cube", display_name="Emancipation-Cube", ssh_ready=True,
             environments=(
-                SshEnvironment("windows", "borealis", "pwsh"),
-                SshEnvironment("wsl", "borealis-wsl", "bash"),
+                SshEnvironment("windows", "emancipation-cube", "pwsh"),
+                SshEnvironment("wsl", "emancipation-cube-wsl", "bash"),
             ),
         ),
         RosterMachine(
-            key="wheatley", display_name="Wheatley", ssh_ready=True,
-            environments=(SshEnvironment("linux", "wheatley", "bash"),),
+            key="mantis-counter", display_name="Mantis-Counter", ssh_ready=True,
+            environments=(SshEnvironment("linux", "mantis-counter", "bash"),),
         ),
     )
 
 
-def _build(project: ProjectInput, self_machine="lambda-core", computer="lambda-core"):
+def _build(project: ProjectInput, self_machine="anomalous-potato", computer="anomalous-potato"):
     return tf.build_fragment([project], self_machine, computer_name=computer)
 
 
@@ -63,12 +63,12 @@ def _kinds(result) -> set[str]:
 
 def test_stable_guid_matches_powershell_reference():
     """Reference values captured from the live install.ps1 ``New-StableGuid``."""
-    assert tf.stable_guid("aperture-labs-local-windows") == \
-        "440d9b37-e5d0-d1f2-d8e7-ab1e0a8d6d3b"
-    assert tf.stable_guid("ssh-borealis-wsl") == \
-        "a11d2150-db5f-abf0-77b5-ad47539149c1"
-    assert tf.stable_guid("agent-worktrees-launch-lambda-core-windows") == \
-        "1d312c1f-19aa-dcf0-05c2-a7eba97868bf"
+    assert tf.stable_guid("test-chamber-local-windows") == \
+        "19e5e5ec-45eb-a463-895f-dd2dcfe8e233"
+    assert tf.stable_guid("ssh-emancipation-cube-wsl") == \
+        "6d216c29-376a-a904-c26d-504c3c6ab598"
+    assert tf.stable_guid("agent-worktrees-launch-anomalous-potato-windows") == \
+        "8c23a1bc-6682-3dfb-7571-961a8c7249ae"
 
 
 def test_guid_field_is_braced():
@@ -80,25 +80,25 @@ def test_guid_field_is_braced():
 # ---------------------------------------------------------------------------
 
 def test_unmanaged_emits_default_column():
-    proj = ProjectInput(name="aperture-labs", display="Aperture Labs",
+    proj = ProjectInput(name="test-chamber", display="Test Chamber",
                         selection=None, roster=_roster())
     result = _build(proj)
     names = _names(result)
 
     # Local self.agent launcher present, named after the project.
-    assert "Aperture Labs" in names
+    assert "Test Chamber" in names
     # A bare shell for every OTHER ready machine x env.
-    assert "Borealis" in names
-    assert "Borealis (WSL)" in names
-    assert "Wheatley" in names
+    assert "Emancipation-Cube" in names
+    assert "Emancipation-Cube (WSL)" in names
+    assert "Mantis-Counter" in names
     # No remote agent-launch combos, no local shells in the default column.
     assert _kinds(result) == {"local-agent", "ssh-shell"}
     # Self is never an SSH target.
-    assert not any(p.commandline == "ssh lambda-core" for p in result.profiles)
+    assert not any(p.commandline == "ssh anomalous-potato" for p in result.profiles)
 
 
 def test_unmanaged_default_reports_in_plan():
-    proj = ProjectInput(name="aperture-labs", display="Aperture Labs",
+    proj = ProjectInput(name="test-chamber", display="Test Chamber",
                         selection=None, roster=_roster())
     plan = _build(proj).plans[0]
     assert plan.unmanaged_default is True
@@ -113,10 +113,10 @@ def test_managed_empty_but_agent_exposed_keeps_local_launcher():
     """An explicit ``terminal_profiles: []`` on an *agent-exposed* project still
     emits the local launcher (the diagonal is locked) -- so the project never
     vanishes from the Terminal dropdown just because its selection is empty."""
-    proj = ProjectInput(name="aperture-labs", display="Aperture Labs",
+    proj = ProjectInput(name="test-chamber", display="Test Chamber",
                         agent_exposed=True, selection=frozenset(), roster=_roster())
     result = _build(proj)
-    assert _names(result) == ["Aperture Labs"]
+    assert _names(result) == ["Test Chamber"]
     assert result.profiles[0].kind == "local-agent"
 
 
@@ -130,12 +130,12 @@ def test_managed_empty_and_no_agent_emits_nothing():
 
 
 def test_local_launcher_shape_matches_powershell():
-    proj = ProjectInput(name="aperture-labs", display="Aperture Labs",
+    proj = ProjectInput(name="test-chamber", display="Test Chamber",
                         agent_exposed=True, selection=frozenset(), roster=_roster())
     p = _build(proj).profiles[0]
-    assert p.guid == "{" + tf.stable_guid("aperture-labs-local-windows") + "}"
-    assert p.name == "Aperture Labs"
-    assert p.commandline == r'cmd /c "%USERPROFILE%\.local\bin\aperture-labs.cmd"'
+    assert p.guid == "{" + tf.stable_guid("test-chamber-local-windows") + "}"
+    assert p.name == "Test Chamber"
+    assert p.commandline == r'cmd /c "%USERPROFILE%\.local\bin\test-chamber.cmd"'
     wt = p.to_wt()
     assert wt["startingDirectory"] == "%USERPROFILE%"
     assert wt["colorScheme"] == "Aperture Science"
@@ -148,42 +148,42 @@ def test_local_launcher_shape_matches_powershell():
 
 def test_managed_selection_emits_ssh_shell_and_launch_agent():
     sel = frozenset({
-        "Lambda-Core|Win|agent",     # self (locked anyway)
-        "Borealis|Win|shell",        # plain ssh shell to Borealis
-        "Borealis|Win|agent",        # launch aperture-labs on Borealis
+        "Anomalous-Potato|Win|agent",     # self (locked anyway)
+        "Emancipation-Cube|Win|shell",        # plain ssh shell to Emancipation-Cube
+        "Emancipation-Cube|Win|agent",        # launch test-chamber on Emancipation-Cube
     })
-    proj = ProjectInput(name="aperture-labs", display="Aperture Labs",
+    proj = ProjectInput(name="test-chamber", display="Test Chamber",
                         selection=sel, roster=_roster())
     result = _build(proj)
     by_name = {p.name: p for p in result.profiles}
 
-    assert by_name["Borealis"].commandline == "ssh borealis"
-    assert by_name["Borealis"].kind == "ssh-shell"
+    assert by_name["Emancipation-Cube"].commandline == "ssh emancipation-cube"
+    assert by_name["Emancipation-Cube"].kind == "ssh-shell"
     # Launch profile: "<project display> (<machine>)", pwsh env -> .cmd binstub.
-    assert "Aperture Labs (Borealis)" in by_name
-    launch = by_name["Aperture Labs (Borealis)"]
-    assert launch.commandline == "ssh -t borealis aperture-labs.cmd"
+    assert "Test Chamber (Emancipation-Cube)" in by_name
+    launch = by_name["Test Chamber (Emancipation-Cube)"]
+    assert launch.commandline == "ssh -t emancipation-cube test-chamber.cmd"
     assert launch.kind == "launch-agent"
 
 
 def test_launch_agent_uses_bare_binstub_for_bash_env():
-    sel = frozenset({"Wheatley|Linux|agent"})
-    proj = ProjectInput(name="aperture-labs", display="Aperture Labs",
+    sel = frozenset({"Mantis-Counter|Linux|agent"})
+    proj = ProjectInput(name="test-chamber", display="Test Chamber",
                         agent_exposed=False, selection=sel, roster=_roster())
     launch = next(p for p in _build(proj).profiles if p.kind == "launch-agent")
     # bash shell -> no ``.cmd`` suffix.
-    assert launch.commandline == "ssh -t wheatley aperture-labs"
-    assert launch.name == "Aperture Labs (Wheatley)"
+    assert launch.commandline == "ssh -t mantis-counter test-chamber"
+    assert launch.name == "Test Chamber (Mantis-Counter)"
 
 
 def test_wsl_ssh_shell_labelled_and_iconed():
-    sel = frozenset({"Borealis|WSL|shell"})
-    proj = ProjectInput(name="aperture-labs", display="Aperture Labs",
+    sel = frozenset({"Emancipation-Cube|WSL|shell"})
+    proj = ProjectInput(name="test-chamber", display="Test Chamber",
                         agent_exposed=False, selection=sel, roster=_roster(),
                         icon="ICON.ico", wsl_icon="WSL.ico")
     p = next(x for x in _build(proj).profiles if x.kind == "ssh-shell")
-    assert p.name == "Borealis (WSL)"
-    assert p.commandline == "ssh borealis-wsl"
+    assert p.name == "Emancipation-Cube (WSL)"
+    assert p.commandline == "ssh emancipation-cube-wsl"
     assert p.icon == "WSL.ico"
 
 
@@ -194,12 +194,12 @@ def test_wsl_ssh_shell_labelled_and_iconed():
 def test_self_machine_never_becomes_ssh_target():
     # Even if the selection names the self machine as a shell target, no ssh
     # profile to self is emitted (the SSH loop skips self).
-    sel = frozenset({"Lambda-Core|Win|shell", "Lambda-Core|WSL|shell"})
-    proj = ProjectInput(name="aperture-labs", display="Aperture Labs",
+    sel = frozenset({"Anomalous-Potato|Win|shell", "Anomalous-Potato|WSL|shell"})
+    proj = ProjectInput(name="test-chamber", display="Test Chamber",
                         selection=sel, roster=_roster())
     result = _build(proj)
-    assert not any(p.commandline.startswith("ssh lambda-core") for p in result.profiles)
-    # The Lambda-Core|Win|shell selection still produces a LOCAL shell (pwsh),
+    assert not any(p.commandline.startswith("ssh anomalous-potato") for p in result.profiles)
+    # The Anomalous-Potato|Win|shell selection still produces a LOCAL shell (pwsh),
     # not an SSH-to-self.
     local_shells = [p for p in result.profiles if p.kind == "local-shell"]
     assert len(local_shells) == 1
@@ -208,12 +208,12 @@ def test_self_machine_never_becomes_ssh_target():
 
 def test_not_ready_machine_excluded():
     roster = (
-        RosterMachine(key="lambda-core", display_name="Lambda-Core", ssh_ready=True,
-                      environments=(SshEnvironment("windows", "lambda-core", "pwsh"),)),
+        RosterMachine(key="anomalous-potato", display_name="Anomalous-Potato", ssh_ready=True,
+                      environments=(SshEnvironment("windows", "anomalous-potato", "pwsh"),)),
         RosterMachine(key="book2", display_name="Book2", ssh_ready=False,
                       environments=(SshEnvironment("windows", "book2", "pwsh"),)),
     )
-    proj = ProjectInput(name="aperture-labs", display="Aperture Labs",
+    proj = ProjectInput(name="test-chamber", display="Test Chamber",
                         selection=None, roster=roster)
     result = _build(proj)
     # Book2 is not ready -> no bare shell for it in the default column.
@@ -222,15 +222,15 @@ def test_not_ready_machine_excluded():
 
 def test_shell_profiles_deduped_across_projects():
     """Local + remote *shell* GUIDs are project-independent: two projects both
-    selecting the Borealis shell emit ONE Borealis profile."""
-    sel = frozenset({"Borealis|Win|shell"})
-    p1 = ProjectInput(name="aperture-labs", display="Aperture Labs",
+    selecting the Emancipation-Cube shell emit ONE Emancipation-Cube profile."""
+    sel = frozenset({"Emancipation-Cube|Win|shell"})
+    p1 = ProjectInput(name="test-chamber", display="Test Chamber",
                     selection=sel, roster=_roster())
     p2 = ProjectInput(name="agent-worktrees", display="Agent Worktrees",
                     selection=sel, roster=_roster())
-    result = tf.build_fragment([p1, p2], "lambda-core", computer_name="lambda-core")
-    borealis = [p for p in result.profiles if p.name == "Borealis"]
-    assert len(borealis) == 1
+    result = tf.build_fragment([p1, p2], "anomalous-potato", computer_name="anomalous-potato")
+    emancipation_cube = [p for p in result.profiles if p.name == "Emancipation-Cube"]
+    assert len(emancipation_cube) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -238,28 +238,28 @@ def test_shell_profiles_deduped_across_projects():
 # ---------------------------------------------------------------------------
 
 def test_local_wsl_agent_requires_recorded_distro():
-    sel = frozenset({"Lambda-Core|WSL|agent"})
+    sel = frozenset({"Anomalous-Potato|WSL|agent"})
     # No distro/state recorded -> no local WSL agent profile.
-    without = ProjectInput(name="aperture-labs", display="Aperture Labs",
+    without = ProjectInput(name="test-chamber", display="Test Chamber",
                         agent_exposed=False, selection=sel, roster=_roster())
     assert not any(p.kind == "local-wsl-agent" for p in _build(without).profiles)
 
     # Distro + state recorded -> the WSL launcher appears.
-    with_wsl = ProjectInput(name="aperture-labs", display="Aperture Labs",
+    with_wsl = ProjectInput(name="test-chamber", display="Test Chamber",
                         agent_exposed=False, selection=sel, roster=_roster(),
                         wsl_distro="Ubuntu", wsl_state="ready")
     p = next(x for x in _build(with_wsl).profiles if x.kind == "local-wsl-agent")
-    assert p.name == "Aperture Labs (WSL)"
-    assert p.commandline == "wsl.exe -d Ubuntu -- bash -lc aperture-labs"
+    assert p.name == "Test Chamber (WSL)"
+    assert p.commandline == "wsl.exe -d Ubuntu -- bash -lc test-chamber"
 
 
 def test_local_wsl_shell_honored_without_distro():
-    sel = frozenset({"Lambda-Core|WSL|shell"})
-    proj = ProjectInput(name="aperture-labs", display="Aperture Labs",
+    sel = frozenset({"Anomalous-Potato|WSL|shell"})
+    proj = ProjectInput(name="test-chamber", display="Test Chamber",
                         agent_exposed=False, selection=sel, roster=_roster())
     p = next(x for x in _build(proj).profiles if x.kind == "local-wsl-shell")
     assert p.commandline == "wsl.exe"
-    assert p.name == "Lambda-Core (WSL)"
+    assert p.name == "Anomalous-Potato (WSL)"
 
 
 # ---------------------------------------------------------------------------
@@ -267,7 +267,7 @@ def test_local_wsl_shell_honored_without_distro():
 # ---------------------------------------------------------------------------
 
 def test_fragment_carries_profiles_and_scheme():
-    proj = ProjectInput(name="aperture-labs", display="Aperture Labs",
+    proj = ProjectInput(name="test-chamber", display="Test Chamber",
                         selection=None, roster=_roster())
     frag = _build(proj).fragment()
     assert "profiles" in frag and "schemes" in frag
@@ -279,11 +279,11 @@ def test_fragment_carries_profiles_and_scheme():
 
 
 def test_multi_project_no_guid_collisions():
-    p1 = ProjectInput(name="aperture-labs", display="Aperture Labs",
+    p1 = ProjectInput(name="test-chamber", display="Test Chamber",
                     selection=None, roster=_roster())
     p2 = ProjectInput(name="agent-worktrees", display="Agent Worktrees",
                     selection=None, roster=_roster())
-    result = tf.build_fragment([p1, p2], "lambda-core", computer_name="lambda-core")
+    result = tf.build_fragment([p1, p2], "anomalous-potato", computer_name="anomalous-potato")
     guids = [p.guid for p in result.profiles]
     assert len(guids) == len(set(guids))
 
@@ -312,30 +312,30 @@ def test_collect_local_projects_reads_managed_empty(tmp_path, monkeypatch):
     from agent_worktrees import repos as _repos
 
     # Two projects: one with an empty managed selection, one unmanaged.
-    managed_dir = tmp_path / ".aperture-labs"
+    managed_dir = tmp_path / ".test-chamber"
     managed_dir.mkdir()
     (managed_dir / "config.yaml").write_text("terminal_profiles: []\n", encoding="utf-8")
     unmanaged_dir = tmp_path / ".other-proj"
     unmanaged_dir.mkdir()
-    (unmanaged_dir / "config.yaml").write_text("machine: lambda-core\n", encoding="utf-8")
+    (unmanaged_dir / "config.yaml").write_text("machine: anomalous-potato\n", encoding="utf-8")
 
     monkeypatch.setattr(_cfg, "project_dir",
                         lambda name=None: tmp_path / f".{name}")
     monkeypatch.setattr(
         _inst, "read_projects_registry",
-        lambda: {"projects": {"aperture-labs": {"display_name": "Aperture Labs"},
+        lambda: {"projects": {"test-chamber": {"display_name": "Test Chamber"},
                               "other-proj": {}}})
     monkeypatch.setattr(_repos, "read_registry",
                         lambda: _repos.ReposRegistry(repos={}))
 
-    projects = tf.collect_local_projects(current_project="aperture-labs")
+    projects = tf.collect_local_projects(current_project="test-chamber")
     by_name = {p.name: p for p in projects}
 
     # Current project is placed first.
-    assert projects[0].name == "aperture-labs"
+    assert projects[0].name == "test-chamber"
     # Managed empty -> empty frozenset (NOT None).
-    assert by_name["aperture-labs"].selection == frozenset()
-    assert by_name["aperture-labs"].display == "Aperture Labs"
+    assert by_name["test-chamber"].selection == frozenset()
+    assert by_name["test-chamber"].display == "Test Chamber"
     # Absent key -> None (unmanaged, default column at build time).
     assert by_name["other-proj"].selection is None
     # Title-cased slug fallback for the display name.
@@ -374,7 +374,7 @@ def test_collect_skips_reserved_runtime_name(tmp_path, monkeypatch):
 def test_reconcile_heals_hidden_fragment_profile():
     """A live fragment GUID missing from settings.json (WT is hiding it) is
     pruned from generatedProfiles so WT re-discovers it. This is the exact
-    Aperture Labs failure the delta-based sync could never heal."""
+    Test Chamber failure the delta-based sync could never heal."""
     frag = ["{aaaa}", "{bbbb}"]
     settings = ["{aaaa}"]                 # bbbb materialized nowhere -> hidden
     generated = ["{aaaa}", "{bbbb}"]

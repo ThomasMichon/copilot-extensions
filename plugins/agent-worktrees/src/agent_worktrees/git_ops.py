@@ -767,7 +767,7 @@ def slug_from_url(url: str | None) -> str | None:
     components (dropping a trailing ``.git``), so it works for both https and
     ssh forms and for self-hosted hosts with a path prefix, e.g.:
 
-        https://host/gitea/example-user/aperture-labs.git -> example-user/aperture-labs
+        https://host/gitea/example-user/test-chamber.git -> example-user/test-chamber
         git@github.com:owner/repo.git                -> owner/repo
         https://{org}.visualstudio.com/{proj}/_git/{repo} -> {proj}/{repo}
 

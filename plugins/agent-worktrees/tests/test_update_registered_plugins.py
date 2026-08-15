@@ -1,6 +1,6 @@
 """Tests for the ``update`` registered-plugin payload refresh.
 
-``_update_registered_plugins`` closes the "phantom deploy" gap (aperture-labs
+``_update_registered_plugins`` closes the "phantom deploy" gap (test-chamber
 #2554): ``update`` must ``copilot plugin update`` (or install) EVERY
 copilot-extensions plugin registered for the managed repo -- including
 payload-only plugins (``runtimeScope: none``) like ``context-handoff`` -- and

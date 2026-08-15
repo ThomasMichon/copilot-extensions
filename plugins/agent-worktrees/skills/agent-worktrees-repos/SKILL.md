@@ -32,7 +32,7 @@ one with `agent-worktrees repos migrate`.
 
 ## Repo Classes — How a Checkout Is Edited
 
-Every repo has a management **class** that says how the facility
+Every repo has a management **class** that says how the multi-machine system
 interacts with its local checkout. This is the single most important
 field: it determines whether (and how) you may edit the repo.
 
@@ -203,7 +203,7 @@ If the repo has no local path but has a remote, suggest cloning it.
 
 ```bash
 agent-worktrees repos status                 # branch, dirty, ahead/behind
-agent-worktrees repos sync --tag facility    # fetch + ff-merge (skips dirty)
+agent-worktrees repos sync --tag multi-machine system    # fetch + ff-merge (skips dirty)
 ```
 
 `sync` only fast-forwards the default branch and **skips** any repo whose
@@ -240,7 +240,7 @@ repos:
 | `remote` | Git remote URL |
 | `account` | Preferred GitHub identity (a `gh` account login) this repo's git/gh ops run under. Optional — absent, it's resolved via `account_map` then the `github.com` remote owner; a non-GitHub/underivable remote means no account (ambient auth). See *Repo-scoped identity* below. |
 | `default_branch` | Branch `status`/`sync` track (default: current) |
-| `tags` | Filter tags for batch ops (`facility`, `work`, …) |
+| `tags` | Filter tags for batch ops (`multi-machine system`, `work`, …) |
 | `contributing` | Path to CONTRIBUTING.md — read before editing |
 | `windows`/`wsl`/`linux` | Per-platform checkout paths |
 

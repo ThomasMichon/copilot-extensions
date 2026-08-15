@@ -79,7 +79,7 @@ anchor repo (base-repo mode).
 command.** Never call `python -m worktree_manager`, `python -m
 agent_worktrees`, or any other Python invocation directly. Never attempt
 to replicate finalization with raw git commands. The `agent-worktrees`
-binstub is installed on every facility machine and is always available
+binstub is installed on every multi-machine system machine and is always available
 inside a worktree session.
 
 ```

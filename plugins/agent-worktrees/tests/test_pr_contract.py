@@ -656,7 +656,7 @@ class TestPRReminder:
         # reviewer is a manual, org/platform-specific step.
         flow = pc.classify_pr_flow(enabled=True, required=True, provider="gitea",
                                    automerge_label="auto-merge",
-                                   reviewer="agent:wheatley")
+                                   reviewer="agent:mantis-counter")
         r = pc.pr_reminder(flow, "create-pr")
         assert any("manual" in c and "reviewer" in c for c in r.cautions)
 

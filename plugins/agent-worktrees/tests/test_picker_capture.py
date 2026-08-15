@@ -33,19 +33,19 @@ GOLDEN_DIR = os.path.join(os.path.dirname(__file__), "goldens", "picker")
 def _fixture_source():
     """A hermetic two-worktree fleet (frozen clock; no git/SSH/subprocess)."""
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
-    local = ("lambda-core", "Win")
+    local = ("anomalous-potato", "Win")
     raws = [
-        {"id": "lambda-core-win-20260627-aaaa", "title": "Fix the thing",
+        {"id": "anomalous-potato-win-20260627-aaaa", "title": "Fix the thing",
          "status": "active", "started_at": "2026-06-27T17:00:00",
          "turn_count": 4, "state": "wip", "ahead": 2, "behind": 1},
-        {"id": "lambda-core-win-20260620-bbbb", "title": "Old idle wt",
+        {"id": "anomalous-potato-win-20260620-bbbb", "title": "Old idle wt",
          "status": "active", "started_at": "2026-06-20T10:00:00",
          "turn_count": 0, "state": "unused"},
     ]
     src = types.SimpleNamespace()
     src.LOCAL = local
-    src.LOCAL_LABEL = "lambda-core · win"
-    src.machines = lambda: [("lambda-core Win", "lambda-core", "Win", True)]
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
     src.for_machine = derive.for_machine
     src.load = lambda: [derive.norm(w, *local) for w in raws]
@@ -166,9 +166,9 @@ def _awaiting_source():
     WIP/state false positive.
     """
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
-    local = ("lambda-core", "Win")
+    local = ("anomalous-potato", "Win")
     raws = [
-        {"id": "lambda-core-win-20260627-cccc", "title": "Needs a decision",
+        {"id": "anomalous-potato-win-20260627-cccc", "title": "Needs a decision",
          "status": "active", "started_at": "2026-06-27T17:00:00",
          "turn_count": 4, "state": "active",
          "live_intent": "picking a rendering option",
@@ -177,8 +177,8 @@ def _awaiting_source():
     ]
     src = types.SimpleNamespace()
     src.LOCAL = local
-    src.LOCAL_LABEL = "lambda-core · win"
-    src.machines = lambda: [("lambda-core Win", "lambda-core", "Win", True)]
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
     src.for_machine = derive.for_machine
     src.load = lambda: [derive.norm(w, *local) for w in raws]

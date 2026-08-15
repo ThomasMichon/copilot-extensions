@@ -125,7 +125,7 @@ agent-worktrees pr-ready
 ```
 
 `create-pr --draft` opens the PR in the provider's native draft state (a `WIP:`
-title on the facility's Gitea). The AI reviewer **skips draft / WIP /
+title on the multi-machine system's Gitea). The AI reviewer **skips draft / WIP /
 `wip`-labelled PRs**, so it does not review while you iterate. `pr-ready` moves
 the PR **out of draft** (draft → ready-for-review), which fires the
 `ready_for_review` event the reviewer reviews on. `pr-ready` grants **no merge

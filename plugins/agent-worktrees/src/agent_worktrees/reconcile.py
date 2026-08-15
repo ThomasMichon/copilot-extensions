@@ -99,7 +99,7 @@ def resolve_copilot() -> str | None:
 # machine set from a control-harness manifest. The manifest filename(s) and an
 # optional anchor repo (searched via the repos registry when the current repo
 # lacks the manifest) are overridable so any control harness can supply its own
-# gate; the defaults match this repo's reference (facility) convention.
+# gate; the defaults match this repo's reference (multi-machine system) convention.
 #
 # The preferred name is ``services.yaml`` -- a coherently-named plugin/service
 # runtime-placement registry -- with ``external-repos.yaml`` kept as a legacy
@@ -113,7 +113,7 @@ GATE_MANIFESTS = (
 )
 # Back-compat alias (the preferred name); external callers referenced this.
 GATE_MANIFEST = GATE_MANIFESTS[0]
-GATE_ANCHOR = os.environ.get("WORKTREE_GATE_ANCHOR", "aperture-labs")
+GATE_ANCHOR = os.environ.get("WORKTREE_GATE_ANCHOR", "test-chamber")
 
 # Throttle (hours) for the network payload refresh (`copilot plugin update`).
 # Runtime reconciliation is version-keyed and not throttled.

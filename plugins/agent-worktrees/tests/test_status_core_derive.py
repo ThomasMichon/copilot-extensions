@@ -11,7 +11,7 @@ from agent_worktrees.picker_tui import derive
 
 
 def _raw(**kw):
-    base = dict(id="lambda-core-win-20260715-0000-abcd", machine="lambda-core",
+    base = dict(id="anomalous-potato-win-20260715-0000-abcd", machine="anomalous-potato",
                 title="Feeder cam", status="finalized", state="completed")
     base.update(kw)
     return base
@@ -20,25 +20,25 @@ def _raw(**kw):
 class TestDispositionGlyph:
     def test_flagged_gets_glyph_and_summary(self):
         n = derive.norm(_raw(follow_up=True, summary="Phases C/D left; PR open"),
-                        "lambda-core", "win")
+                        "anomalous-potato", "win")
         assert n["title"].startswith("\u271a ")          # ✚ prefix
         assert "Phases C/D left; PR open" in n["title"]   # summary appended
         assert n["follow_up"] is True
         assert n["summary"] == "Phases C/D left; PR open"
 
     def test_unflagged_has_no_glyph(self):
-        n = derive.norm(_raw(title="Done"), "lambda-core", "win")
+        n = derive.norm(_raw(title="Done"), "anomalous-potato", "win")
         assert not n["title"].startswith("\u271a")
         assert n["follow_up"] is False
 
     def test_summary_without_title_uses_summary(self):
         n = derive.norm(_raw(title="", follow_up=True, summary="just this"),
-                        "lambda-core", "win")
+                        "anomalous-potato", "win")
         assert n["title"] == "\u271a just this"
 
     def test_state_stays_pure_for_bucketing(self):
         # The glyph never leaks into ``state`` (bucket()/prune key off it).
-        n = derive.norm(_raw(follow_up=True, summary="x"), "lambda-core", "win")
+        n = derive.norm(_raw(follow_up=True, summary="x"), "anomalous-potato", "win")
         assert n["state"] == "FINAL"
 
 
@@ -50,7 +50,7 @@ class TestPairMarker:
         n = derive.norm(
             _raw(title="Harness work", pair_id="20260806-ab",
                  pair_role="harness", pair_kind="worktree"),
-            "lambda-core", "win",
+            "anomalous-potato", "win",
         )
         assert n["title"].startswith("\u26ad ")   # ⚭ pair marker
         assert n["is_paired"] is True
@@ -59,7 +59,7 @@ class TestPairMarker:
         assert n["pair_kind"] == "worktree"
 
     def test_unpaired_has_no_marker_or_fields(self):
-        n = derive.norm(_raw(title="Solo"), "lambda-core", "win")
+        n = derive.norm(_raw(title="Solo"), "anomalous-potato", "win")
         assert not n["title"].startswith("\u26ad")
         assert n["is_paired"] is False
         assert n["pair_id"] is None
@@ -77,7 +77,7 @@ class TestPairMarker:
 
     def test_pair_marker_does_not_leak_into_state(self):
         n = derive.norm(
-            _raw(pair_id="p", pair_role="harness"), "lambda-core", "win"
+            _raw(pair_id="p", pair_role="harness"), "anomalous-potato", "win"
         )
         assert n["state"] == "FINAL"
 
@@ -156,8 +156,8 @@ class TestFastPassActive:
     (from the batched mux read) and ``session_lock_live`` (from the lock scan)."""
 
     def _raw_active(self, **kw):
-        base = dict(id="lambda-core-win-20260803-0000-abcd",
-                    machine="lambda-core", title="Live", status="active")
+        base = dict(id="anomalous-potato-win-20260803-0000-abcd",
+                    machine="anomalous-potato", title="Live", status="active")
         base.update(kw)
         return base
 
@@ -220,7 +220,7 @@ class TestFollowUpBucket:
 
     def test_authoritative_bucket_passthrough(self):
         n = derive.norm(_raw(follow_up=True, cleanup_bucket="follow-up"),
-                        "lambda-core", "win")
+                        "anomalous-potato", "win")
         assert n["cleanup_bucket"] == "follow-up"
 
     def test_fallback_flagged_finalized_is_follow_up(self):

@@ -20,14 +20,14 @@ class TestClaimFromRunOutput:
 
     def test_create_envelope(self):
         out = json.dumps({
-            "worktree": {"id": "wt-B", "machine": "lambda-core",
+            "worktree": {"id": "wt-B", "machine": "anomalous-potato",
                          "repo": "copilot-extensions", "path": "/x"},
             "launch": {"action": "exec"},
         })
         claim = m._claim_from_run_output(out)
         assert claim is not None
         assert claim.kind == "worktree"
-        assert claim.ref == "lambda-core/copilot-extensions/wt-B"
+        assert claim.ref == "anomalous-potato/copilot-extensions/wt-B"
         assert claim.state == "active" and claim.created_at
 
     def test_bare_worktree_dict(self):
@@ -96,25 +96,25 @@ class TestJournalRunClaim:
         monkeypatch.setattr("agent_worktrees.config.tracking_dir",
                             lambda: tmp_path)
         return tracking.create_new_record(
-            "wt-A", "worktree/wt-A", str(tmp_path / "wt-A"), "aperture-labs",
-            "lambda-core", "wsl", tmp_path,
+            "wt-A", "worktree/wt-A", str(tmp_path / "wt-A"), "test-chamber",
+            "anomalous-potato", "wsl", tmp_path,
         )
 
     def test_journals_forward_claim(self, tmp_path: Path, monkeypatch):
         self._make_caller(tmp_path, monkeypatch)
-        owner_ref = "lambda-core/aperture-labs/wt-A#s1"
-        out = json.dumps({"worktree": {"id": "wt-B", "machine": "lambda-core",
+        owner_ref = "anomalous-potato/test-chamber/wt-A#s1"
+        out = json.dumps({"worktree": {"id": "wt-B", "machine": "anomalous-potato",
                                        "repo": "copilot-extensions"}})
         claim = m._journal_run_claim(owner_ref, out)
         assert claim is not None
         reloaded = tracking.load_record(tmp_path / "wt-A.yaml")
         assert [c.ref for c in reloaded.resources] == \
-            ["lambda-core/copilot-extensions/wt-B"]
+            ["anomalous-potato/copilot-extensions/wt-B"]
 
     def test_idempotent(self, tmp_path: Path, monkeypatch):
         self._make_caller(tmp_path, monkeypatch)
-        owner_ref = "lambda-core/aperture-labs/wt-A#s1"
-        out = json.dumps({"worktree": {"id": "wt-B", "machine": "lambda-core",
+        owner_ref = "anomalous-potato/test-chamber/wt-A#s1"
+        out = json.dumps({"worktree": {"id": "wt-B", "machine": "anomalous-potato",
                                        "repo": "copilot-extensions"}})
         m._journal_run_claim(owner_ref, out)
         m._journal_run_claim(owner_ref, out)
@@ -123,7 +123,7 @@ class TestJournalRunClaim:
 
     def test_journals_pr_claim(self, tmp_path: Path, monkeypatch):
         self._make_caller(tmp_path, monkeypatch)
-        owner_ref = "lambda-core/aperture-labs/wt-A#s1"
+        owner_ref = "anomalous-potato/test-chamber/wt-A#s1"
         out = json.dumps({"success": True, "pr_opened": True,
                           "pr": {"ref": "https://github.com/o/r/pull/42"}})
         claim = m._journal_run_claim(owner_ref, out)
@@ -138,9 +138,9 @@ class TestJournalRunClaim:
         out = json.dumps({"worktree": {"id": "wt-B", "machine": "m",
                                        "repo": "p"}})
         # No wt-A.yaml exists.
-        assert m._journal_run_claim("m/aperture-labs/wt-A", out) is None
+        assert m._journal_run_claim("m/test-chamber/wt-A", out) is None
         self._make_caller(tmp_path, monkeypatch)
-        assert m._journal_run_claim("lambda-core/aperture-labs/wt-A", "junk") is None
+        assert m._journal_run_claim("anomalous-potato/test-chamber/wt-A", "junk") is None
         reloaded = tracking.load_record(tmp_path / "wt-A.yaml")
         assert reloaded.resources == []
 
@@ -152,7 +152,7 @@ class TestJournalRunClaim:
                             lambda: tmp_path)
         monkeypatch.setattr("agent_worktrees.config.load_config",
                             lambda *a, **k: types.SimpleNamespace(
-                                machine="lambda-core", platform="wsl",
+                                machine="anomalous-potato", platform="wsl",
                                 repo_name="spo-core"))
         adir = tmp_path / "anchors" / "spo-core"
         adir.mkdir(parents=True)
@@ -160,7 +160,7 @@ class TestJournalRunClaim:
             "agent_worktrees.repos.find_repo",
             lambda name: types.SimpleNamespace(
                 repo_class="singleton", local_path=lambda plat=None: str(adir)))
-        owner_ref = "lambda-core/spo-core/@anchor"
+        owner_ref = "anomalous-potato/spo-core/@anchor"
         out = json.dumps({"success": True, "pr_opened": True,
                           "pr": {"ref": "https://github.com/o/r/pull/7"}})
         assert not (tmp_path / "@anchor.yaml").exists()
@@ -184,7 +184,7 @@ class TestResolveAnchorOwnerRef:
         adir.mkdir(parents=True)
         monkeypatch.setattr("agent_worktrees.config.load_config",
                             lambda *a, **k: types.SimpleNamespace(
-                                machine="lambda-core", platform="wsl",
+                                machine="anomalous-potato", platform="wsl",
                                 repo_name="spo-core"))
         monkeypatch.setattr("agent_worktrees.config.project_name",
                             lambda: "spo-core")
@@ -200,7 +200,7 @@ class TestResolveAnchorOwnerRef:
 
     def test_singleton_anchor_resolves_to_anchor_ref(self, tmp_path, monkeypatch):
         self._wire(tmp_path, monkeypatch, "singleton")
-        assert m._resolve_owner_ref() == "lambda-core/spo-core/@anchor"
+        assert m._resolve_owner_ref() == "anomalous-potato/spo-core/@anchor"
 
     def test_worktree_class_anchor_is_no_owner(self, tmp_path, monkeypatch):
         # The class == singleton gate is the worktree-class mis-fire guard.
@@ -216,7 +216,7 @@ class TestLocalClaimantAlive:
     """_local_claimant_alive resolves same-machine owners and biases to sparing:
     only a positively-resolved gone owner returns False; cross-machine is None."""
 
-    def _wire(self, tmp_path, monkeypatch, machine="lambda-core"):
+    def _wire(self, tmp_path, monkeypatch, machine="anomalous-potato"):
         import types
         monkeypatch.setattr("agent_worktrees.config.load_config",
                             lambda *a, **k: types.SimpleNamespace(machine=machine))
@@ -232,28 +232,28 @@ class TestLocalClaimantAlive:
         tdir.mkdir(parents=True, exist_ok=True)
         tracking.create_new_record(
             wt_id, f"worktree/{wt_id}", str(wdir), project,
-            "lambda-core", "wsl", tdir,
+            "anomalous-potato", "wsl", tdir,
         )
 
     def test_cross_machine_is_unconfirmed(self, tmp_path, monkeypatch):
-        self._wire(tmp_path, monkeypatch, machine="lambda-core")
-        ref = "borealis/aperture-labs/wt-A#s1"
+        self._wire(tmp_path, monkeypatch, machine="anomalous-potato")
+        ref = "emancipation-cube/test-chamber/wt-A#s1"
         assert m._local_claimant_alive(ref) is None
 
     def test_present_owner_is_alive(self, tmp_path, monkeypatch):
         self._wire(tmp_path, monkeypatch)
-        self._make_owner(tmp_path, "aperture-labs", "wt-A", exists=True)
-        assert m._local_claimant_alive("lambda-core/aperture-labs/wt-A#s1") is True
+        self._make_owner(tmp_path, "test-chamber", "wt-A", exists=True)
+        assert m._local_claimant_alive("anomalous-potato/test-chamber/wt-A#s1") is True
 
     def test_missing_record_is_gone(self, tmp_path, monkeypatch):
         self._wire(tmp_path, monkeypatch)
         # no owner record created
-        assert m._local_claimant_alive("lambda-core/aperture-labs/wt-A") is False
+        assert m._local_claimant_alive("anomalous-potato/test-chamber/wt-A") is False
 
     def test_missing_dir_is_gone(self, tmp_path, monkeypatch):
         self._wire(tmp_path, monkeypatch)
-        self._make_owner(tmp_path, "aperture-labs", "wt-A", exists=False)
-        assert m._local_claimant_alive("lambda-core/aperture-labs/wt-A") is False
+        self._make_owner(tmp_path, "test-chamber", "wt-A", exists=False)
+        assert m._local_claimant_alive("anomalous-potato/test-chamber/wt-A") is False
 
     def test_empty_ref_is_none(self, tmp_path, monkeypatch):
         self._wire(tmp_path, monkeypatch)

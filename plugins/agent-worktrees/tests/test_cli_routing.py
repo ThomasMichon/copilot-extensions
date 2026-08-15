@@ -460,12 +460,12 @@ def test_profiles_get_emits_self_diagonal(monkeypatch, capfd, tmp_path):
 
     cfg_path = tmp_path / "config.yaml"
     monkeypatch.setattr(cfg, "default_config_path", lambda: cfg_path)
-    monkeypatch.setattr(m, "_profiles_host", lambda: ("Lambda-Core", "Win"))
+    monkeypatch.setattr(m, "_profiles_host", lambda: ("Anomalous-Potato", "Win"))
 
     rc = m.cmd_profiles(argparse.Namespace(profiles_action="get", json=True))
     assert rc == 0
     out = capfd.readouterr().out
-    assert '"machine": "Lambda-Core"' in out
+    assert '"machine": "Anomalous-Potato"' in out
     assert '"kind": "agent"' in out
 
 
@@ -479,17 +479,17 @@ def test_profiles_apply_writes_and_normalizes(monkeypatch, capfd, tmp_path):
 
     cfg_path = tmp_path / "config.yaml"
     monkeypatch.setattr(cfg, "default_config_path", lambda: cfg_path)
-    monkeypatch.setattr(m, "_profiles_host", lambda: ("Lambda-Core", "Win"))
+    monkeypatch.setattr(m, "_profiles_host", lambda: ("Anomalous-Potato", "Win"))
 
     rc = m.cmd_profiles(argparse.Namespace(
         profiles_action="apply", json=True, no_mirror=True,
-        set=_json.dumps([{"machine": "Borealis", "env": "Win", "kind": "shell"}]),
+        set=_json.dumps([{"machine": "Emancipation-Cube", "env": "Win", "kind": "shell"}]),
     ))
     assert rc == 0
     capfd.readouterr()
     loaded = profiles_mod.load_selection(cfg_path)
-    assert profiles_mod.TargetSel("Lambda-Core", "Win", "agent") in loaded
-    assert profiles_mod.TargetSel("Borealis", "Win", "shell") in loaded
+    assert profiles_mod.TargetSel("Anomalous-Potato", "Win", "agent") in loaded
+    assert profiles_mod.TargetSel("Emancipation-Cube", "Win", "shell") in loaded
 
 
 def test_profiles_apply_rejects_bad_json(monkeypatch, tmp_path):
@@ -499,7 +499,7 @@ def test_profiles_apply_rejects_bad_json(monkeypatch, tmp_path):
 
     cfg_path = tmp_path / "config.yaml"
     monkeypatch.setattr(cfg, "default_config_path", lambda: cfg_path)
-    monkeypatch.setattr(m, "_profiles_host", lambda: ("Lambda-Core", "Win"))
+    monkeypatch.setattr(m, "_profiles_host", lambda: ("Anomalous-Potato", "Win"))
 
     rc = m.cmd_profiles(argparse.Namespace(
         profiles_action="apply", json=True, no_mirror=True, set="{not json"))
@@ -516,13 +516,13 @@ def test_picker_enable_disable_persists(monkeypatch, tmp_path):
     from agent_worktrees import config as cfg
 
     gpath = tmp_path / "global.yaml"
-    gpath.write_text("machine: lambda-core\nplatform: windows\n", encoding="utf-8")
+    gpath.write_text("machine: anomalous-potato\nplatform: windows\n", encoding="utf-8")
     monkeypatch.setattr(cfg, "global_config_path", lambda: gpath)
 
     assert m.cmd_picker(argparse.Namespace(picker_action="enable", json=False)) == 0
     data = yaml.safe_load(gpath.read_text(encoding="utf-8"))
     assert data["new_picker"] is True
-    assert data["machine"] == "lambda-core"   # other keys preserved
+    assert data["machine"] == "anomalous-potato"   # other keys preserved
 
     assert m.cmd_picker(argparse.Namespace(picker_action="disable", json=False)) == 0
     assert yaml.safe_load(gpath.read_text(encoding="utf-8"))["new_picker"] is False
@@ -641,7 +641,7 @@ def test_bare_reap_sessions_without_project_balks_not_crashes(monkeypatch, capsy
 
 def test_reap_sessions_resolves_project_from_flag(monkeypatch):
     """A project binstub injects ``--project <name>``; reap-sessions then
-    resolves it and runs (the aperture-labs reap-sessions path)."""
+    resolves it and runs (the test-chamber reap-sessions path)."""
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
     monkeypatch.setattr(m, "_anchor_for_project", lambda name: None)
     seen = {}
@@ -1134,9 +1134,9 @@ def test_run_registered_in_command_map():
 
 def test_claimant_liveness_parser_and_registration():
     args = m.build_parser().parse_args(
-        ["claimant-liveness", "lambda-core/aperture-labs/wt-A#s1", "--json"])
+        ["claimant-liveness", "anomalous-potato/test-chamber/wt-A#s1", "--json"])
     assert args.command == "claimant-liveness"
-    assert args.owner_ref == "lambda-core/aperture-labs/wt-A#s1"
+    assert args.owner_ref == "anomalous-potato/test-chamber/wt-A#s1"
     assert args.json is True
     assert m.COMMAND_MAP["claimant-liveness"] is m.cmd_claimant_liveness
     assert m._WORKTREE_VERBS.get("claimant-liveness") == "claimant-liveness"
@@ -1148,12 +1148,12 @@ def test_claimant_liveness_json_output(monkeypatch, capfd):
     monkeypatch.setattr(m.claimant_mod, "local_claimant_alive",
                         lambda ref: False)
     rc = m.cmd_claimant_liveness(argparse.Namespace(
-        owner_ref="borealis/aperture-labs/wt-A", json=True))
+        owner_ref="emancipation-cube/test-chamber/wt-A", json=True))
     assert rc == 0
     import json as _json
     out = _json.loads(capfd.readouterr().out)
     assert out["alive"] is False
-    assert out["owner_ref"] == "borealis/aperture-labs/wt-A"
+    assert out["owner_ref"] == "emancipation-cube/test-chamber/wt-A"
 
 
 def test_pr_research_dispatch_json(monkeypatch, capsys):

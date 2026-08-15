@@ -130,7 +130,7 @@ class TestPrComplete:
 
     def test_reconcile_preserves_post_merge_divergence_net_zero(self, pr_repo):
         """A post-merge commit that diverges from upstream but nets to the
-        merge-base MUST survive the reconcile (aperture-labs #2854).
+        merge-base MUST survive the reconcile (test-chamber #2854).
 
         The regression: ``_branch_fully_merged`` enumerates only the paths in
         ``merge_base..branch``.  A commit that reverts a file back to its

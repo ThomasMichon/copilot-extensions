@@ -52,7 +52,7 @@ def refspec_worktree(tmp_path: Path) -> SimpleNamespace:
       - a clone checked out on ``worktree/<id>`` (never a local ``pr/<slug>``).
       - the remote has NO ``pr/<slug>`` head (auto-deleted on merge).
     """
-    worktree_id = "lambda-core-wsl-test"
+    worktree_id = "anomalous-potato-wsl-test"
     slug = "pr/some-fix-test"
 
     origin = tmp_path / "origin.git"

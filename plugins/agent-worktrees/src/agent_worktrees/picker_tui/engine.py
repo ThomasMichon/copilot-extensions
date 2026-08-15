@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Textual rendering engine for the overhauled Worktree Picker.
 
-Ported from the design prototype (aperture-labs effort
+Ported from the design prototype (test-chamber effort
 ``worktree-picker-tty-overhaul``). The engine is data-source agnostic: a
 ``PickerScreen`` is handed a *source* object exposing the same surface the
 prototype's ``mockdata``/``livedata`` did (``LOCAL``, ``LOCAL_LABEL``,
@@ -111,7 +111,7 @@ C_BTN_LAST = "bold grey85 on grey19"  # group's last-focused button (subtle)
 C_BTN_SEL = "bold black on orange1"  # button focused (the cursor, but "glows")
 C_STATE = {
     # Match the PSMux/TMux status segment (_SEGMENT_STYLE) so the picker and the
-    # status bar use one vocabulary + palette (aperture-labs #1290).
+    # status bar use one vocabulary + palette (test-chamber #1290).
     "DIRTY": "#d70000",    # red (colour160)
     "WIP": "#d7af00",      # amber (colour178)
     "FINAL": "#00af00",    # green (colour034) -- COMPLETED
@@ -335,7 +335,7 @@ MAINT_GROUP_ORDER = ["DIRTY", "WIP", "ACTIVE", "ORPHAN", "CONVO", "UNUSED",
                      "GONE", "CLEAN", "FINAL"]
 # Per-tab button sets — Tab/Shift+Tab rotate within these when focused.
 # Worktrees has a single "New worktree…" entry that opens the options dialog
-# directly (aperture-labs #1346); the old separate "More options…" is gone.
+# directly (test-chamber #1346); the old separate "More options…" is gone.
 # Per-pivot button sets, keyed by pivot *kind* (Tab/Shift+Tab rotate within
 # these when focused). Worktrees and Profiles are handled inline in
 # ``button_set`` (their sets are dynamic); registered pivots have none.
@@ -349,7 +349,7 @@ BUTTON_SETS = {"maintenance": ["K", "SY"]}
 # host_cols()/target_envs()). They are intentionally EMPTY so a missing roster
 # degrades to an empty matrix instead of fabricating a machine list -- the
 # picker ships in a shared marketplace plugin and must never hardcode one
-# facility's roster.
+# multi-machine system's roster.
 _DEFAULT_HOST_COLS: list[tuple[str, str, str]] = []
 _DEFAULT_TARGET_ENVS: list[tuple[str, str]] = []
 
@@ -364,7 +364,7 @@ def target_rows(target_envs):
             })
     return rows
 
-# Clarify each worktree action in the sub-menu (aperture-labs #1343).
+# Clarify each worktree action in the sub-menu (test-chamber #1343).
 ACTION_DESC = {
     "Open": "Attach the worktree's live terminal (PSMux/TMux); launch one if "
             "none. Arrow to the No Mux row below to launch without the wrapper, "
@@ -1339,7 +1339,7 @@ class PickerScreen(Widget):
 
         The registry key is a machine's canonical identity (lowercase; it doubles
         as the SSH-alias base) -- the value ``agent-worktrees get machine`` returns
-        and that other facility tools (agent-dispatch, agent-bridge) match against.
+        and that other multi-machine system tools (agent-dispatch, agent-bridge) match against.
         Tab labels carry the *display* name, so registered-pivot commands need
         this translation. Delegates to :func:`data_ssh.machine_key_map` and caches
         it for the session; any failure degrades to ``{}`` so the caller falls
@@ -1363,8 +1363,8 @@ class PickerScreen(Widget):
 
         A registered pivot's ``{machine}`` names a *machine identity*, not a tab
         label: agent-dispatch resolves the local machine and its SSH aliases by
-        the registry key, so handing it the display name (``Lambda-Core`` vs the
-        identity ``lambda-core``) would make it treat the local machine as a
+        the registry key, so handing it the display name (``Anomalous-Potato`` vs the
+        identity ``anomalous-potato``) would make it treat the local machine as a
         remote peer or miss a peer's lowercase ``Host`` block. Falls back to the
         display name when the roster can't be read (harmless: a downstream that
         casefolds still matches)."""
@@ -2862,7 +2862,7 @@ class PickerScreen(Widget):
         if self.live and self.loader is not None and self._kind() == "worktrees":
             # Only the loading-spinner count is surfaced. A machine-load (SSH)
             # failure is NOT a failed worktree -- the per-machine tab already
-            # shows its ✗ -- so totalling them here only confused (aperture-labs
+            # shows its ✗ -- so totalling them here only confused (test-chamber
             # #1347).
             _ready, loading, _failed = self.loader.counts()
             if loading:

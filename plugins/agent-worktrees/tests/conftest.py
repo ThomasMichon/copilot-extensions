@@ -21,7 +21,7 @@ from agent_worktrees import tracking
 # ``prune_reserved_projects`` -> ``write_projects_registry``) while patching only
 # the *reader* would otherwise clobber the developer's real
 # ``~/.agent-worktrees/projects.yaml`` -- observed live as a projects.yaml
-# reduced to a stray ``realproj`` entry (aperture-labs #4349). Redirect HOME to a
+# reduced to a stray ``realproj`` entry (test-chamber #4349). Redirect HOME to a
 # throwaway per-test dir so NO test can reach real state regardless of what it
 # patches, and running the suite (even concurrently with an install) can never
 # mutate the host. Tests that need finer control still layer their own patches

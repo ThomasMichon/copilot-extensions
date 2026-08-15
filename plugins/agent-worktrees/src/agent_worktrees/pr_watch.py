@@ -1,11 +1,11 @@
 """``pr-watch`` -- block until a pull request moves, then wake the caller.
 
-The provider-generic port of the facility ``tools/pr-watch`` script into the
+The provider-generic port of the multi-machine system ``tools/pr-watch`` script into the
 plugin.  It owns the **network + timing** half of the watcher (poll, retry,
 timeout, baseline); the **pure transition logic** lives in
 :mod:`agent_worktrees.pr_contract` (``compute_events`` / ``Baseline``), and the
 **provider read** (``get_snapshot``) lives in the provider plugins.  The review
-backend -- host, token, and (later) verdict vocabulary -- is a facility
+backend -- host, token, and (later) verdict vocabulary -- is a multi-machine system
 **binding** supplied by ``PRConfig``; nothing here hardcodes Gitea.
 
 An agent that just opened a PR fires ``pr-watch wait`` as a background task; the
@@ -15,7 +15,7 @@ then prints the event JSON and exits 0.  The Copilot CLI surfaces the
 background-task completion as a new turn, waking the otherwise-idle session so it
 can address feedback, re-push, or finalize -- unattended.
 
-Exit codes mirror the facility tool: 0 = a transition fired, 124 = timed out,
+Exit codes mirror the multi-machine system tool: 0 = a transition fired, 124 = timed out,
 3 = provider/auth error, 2 = usage error.
 """
 
@@ -44,14 +44,14 @@ def decorate_events(
 ) -> dict:
     """Wrap the raw transition list into the final result payload.
 
-    The base keys are field-for-field identical to the facility
+    The base keys are field-for-field identical to the multi-machine system
     ``tools/pr-watch`` payload so a thin shim delegating here is a drop-in (same
     keys, same JSON shape). Additively, a **``merge``** block
     (:func:`pr_contract.merge_readiness`) reports what stands between the PR and
     a merge -- crucially ``needs_consent`` / ``consent_action`` -- so a caller
     woken by an ``approved`` transition learns it must still *grant merge
     consent* (add the auto-merge label) rather than assuming the PR will merge on
-    its own. The consent vocabulary is a facility binding passed in by the CLI
+    its own. The consent vocabulary is a multi-machine system binding passed in by the CLI
     (``automerge_label`` etc.); with none configured the block degrades to a
     verdict/merge-state readout with no action.
     """
@@ -102,7 +102,7 @@ def run_wait(
     establishes the reference ("notify me of changes from now on"), except that
     an already-**terminal** state (merged / closed-unmerged) at the first poll
     still fires -- otherwise arming a wait moments after a fast merge baselines
-    ON the terminal state and hangs (aperture-labs #1139).  Transient provider
+    ON the terminal state and hangs (test-chamber #1139).  Transient provider
     errors are tolerated (retried next interval); permanent ones propagate so a
     bad token / wrong repo fails fast instead of hanging the full timeout.
 

@@ -1160,7 +1160,7 @@ class LiveVerdict:
     ``inuse.<pid>.lock`` binding (via :mod:`reclaim`), so it also catches a
     **bare** (un-muxed) bound Copilot that the mux fleet view cannot see -- the
     session-registration reality that the picker's cwd-keyed populate scan misses
-    (aperture-labs #662/#1416).
+    (test-chamber #662/#1416).
     """
 
     active: bool = False

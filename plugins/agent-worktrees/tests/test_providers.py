@@ -189,13 +189,13 @@ class TestScopeFromResult:
         prcfg = cfg.PRConfig(api_base="https://h/gitea", labels=("auto-merge", "source:{machine}"))
         scope = base.scope_from_create_result(
             {"repo": "o/r", "branch": "feature/x", "default_branch": "master"},
-            title="T", body="B", prcfg=prcfg, machine="lambda-core",
+            title="T", body="B", prcfg=prcfg, machine="anomalous-potato",
         )
         assert scope.repo == "o/r"
         assert scope.head == "feature/x"
         assert scope.base == "master"
         assert scope.api_base == "https://h/gitea"
-        assert scope.labels == ("auto-merge", "source:lambda-core")
+        assert scope.labels == ("auto-merge", "source:anomalous-potato")
 
 
 # ---------------------------------------------------------------------------
@@ -205,11 +205,11 @@ class TestScopeFromResult:
 class TestAttribution:
     def test_build_and_parse_round_trip(self):
         marker = attribution.build_marker(
-            "wt-123", machine="lambda-core", session="sess-9", head="abc123",
+            "wt-123", machine="anomalous-potato", session="sess-9", head="abc123",
         )
         fields = attribution.parse_marker(f"Some body\n\n{marker}\n")
         assert fields == {
-            "worktree": "wt-123", "machine": "lambda-core",
+            "worktree": "wt-123", "machine": "anomalous-potato",
             "session": "sess-9", "head": "abc123",
         }
 
@@ -416,10 +416,10 @@ class TestGiteaProvider:
         from agent_worktrees.providers import gitea
 
         page1 = [{"name": f"x{i}", "id": i} for i in range(1, 51)]   # full page
-        page2 = [{"name": "source:wheatley", "id": 228}]            # short -> stop
+        page2 = [{"name": "source:mantis-counter", "id": 228}]            # short -> stop
         label_post: dict = {}
         applied: set = set()
-        id_name = {228: "source:wheatley"}
+        id_name = {228: "source:mantis-counter"}
 
         def fake_run(args, **kw):
             url = next((a for a in args if isinstance(a, str)
@@ -440,7 +440,7 @@ class TestGiteaProvider:
         monkeypatch.setattr(gitea, "run_cli", fake_run)
         scope = PRScope(repo="o/r", head="feature/x", base="master", title="T",
                         body="B", api_base="https://h/gitea",
-                        labels=["source:wheatley"])
+                        labels=["source:mantis-counter"])
         res = gitea.GiteaProvider().create_pull(scope, token="tok")
         assert res.number == 42
         # The page-2 label id was resolved and attached.
@@ -457,10 +457,10 @@ class TestGiteaProvider:
 
         page1 = [{"name": "auto-merge", "id": 189}] + \
             [{"name": f"x{i}", "id": i} for i in range(1, 50)]   # full page (50)
-        page2 = [{"name": "source:wheatley", "id": 228}]
+        page2 = [{"name": "source:mantis-counter", "id": 228}]
         label_post: dict = {}
         applied: set = set()
-        id_name = {189: "auto-merge", 228: "source:wheatley"}
+        id_name = {189: "auto-merge", 228: "source:mantis-counter"}
         page2_attempts = {"n": 0}
 
         def fake_run(args, **kw):
@@ -485,7 +485,7 @@ class TestGiteaProvider:
         monkeypatch.setattr(gitea, "run_cli", fake_run)
         scope = PRScope(repo="o/r", head="feature/x", base="master", title="T",
                         body="B", api_base="https://h/gitea",
-                        labels=["auto-merge", "source:wheatley"])
+                        labels=["auto-merge", "source:mantis-counter"])
         res = gitea.GiteaProvider().create_pull(scope, token="tok")
         assert res.number == 42
         assert page2_attempts["n"] == 2  # retried once
@@ -500,8 +500,8 @@ class TestGiteaProvider:
         from agent_worktrees.providers import gitea
 
         page1 = [{"name": "auto-merge", "id": 189},
-                 {"name": "source:lambda-core", "id": 216}]
-        id_name = {189: "auto-merge", 216: "source:lambda-core"}
+                 {"name": "source:anomalous-potato", "id": 216}]
+        id_name = {189: "auto-merge", 216: "source:anomalous-potato"}
         label_post: dict = {}
         applied: set = set()
         verify_reads = {"n": 0}
@@ -540,7 +540,7 @@ class TestGiteaProvider:
         monkeypatch.setattr(gitea, "run_cli", fake_run)
         scope = PRScope(repo="o/r", head="feature/x", base="master", title="T",
                         body="B", api_base="https://h/gitea",
-                        labels=["auto-merge", "source:lambda-core"])
+                        labels=["auto-merge", "source:anomalous-potato"])
         res = gitea.GiteaProvider().create_pull(scope, token="tok")
         assert res.number == 42
         assert posts["n"] == 2          # re-POSTed after the first didn't stick
@@ -567,7 +567,7 @@ class TestGiteaProvider:
         monkeypatch.setattr(gitea, "run_cli", fake_run)
         scope = PRScope(repo="o/r", head="feature/x", base="master", title="T",
                         body="B", api_base="https://h/gitea",
-                        labels=["auto-merge", "source:wheatley"])
+                        labels=["auto-merge", "source:mantis-counter"])
         res = gitea.GiteaProvider().create_pull(scope, token="tok")
         assert res.number == 42            # PR still created
         assert "label lookup failed" in res.label_error

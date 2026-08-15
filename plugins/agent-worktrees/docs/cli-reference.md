@@ -196,7 +196,7 @@ It renders three fields:
 
 | Field | Style | Source | Example |
 |-------|-------|--------|---------|
-| Machine | Black, bold | Tracking record `machine` (else live host detection) | `lambda-core` |
+| Machine | Black, bold | Tracking record `machine` (else live host detection) | `anomalous-potato` |
 | Environment | Badge: white on an OS-keyed background (win=blue, wsl=purple, linux=orange) | Platform short code, matching the worktree id | `win` |
 | Repo : id4 | Black | Record `repo` + the worktree id's 4-char suffix | `copilot-extensions:8e45` |
 
@@ -213,7 +213,7 @@ on **tmux**, which runs `#()` jobs asynchronously and caches the result between
 `status-interval` ticks. **psmux** (Windows) does not: it runs `#()`
 synchronously **in the render path**, so a ~600 ms binstub spawn (two fresh
 PowerShell processes for the two segments) fired on every repaint. Under
-Copilot's high-framerate TUI that made muxed sessions sluggish on lambda-core
+Copilot's high-framerate TUI that made muxed sessions sluggish on anomalous-potato
 and unusable on slower hosts.
 
 `status-updater` is the **single, cross-platform watcher** that fixes this on
@@ -356,7 +356,7 @@ On an interactive launch, the launcher reconciles the anchor repo's
 `.github/copilot/settings.json` `enabledPlugins`: for each
 `<name>@copilot-extensions` it ensures the **payload** is installed (throttled
 refresh) and the **runtime** matches the installed payload version, per the
-plugin's `runtimeScope` (`none` | `universal` | `machine-gated`) and a facility
+plugin's `runtimeScope` (`none` | `universal` | `machine-gated`) and a multi-machine system
 machine gate (`external-repos.yaml` `deploy_machines`). It is local and
 version-keyed, so an unchanged re-launch does ~no work. Runs only after the
 direct-dispatch boundary (plain subcommands never trigger it); opt out with

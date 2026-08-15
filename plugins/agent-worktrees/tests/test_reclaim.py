@@ -151,12 +151,12 @@ class TestDetachedMuxReclaim:
 # ── _worktree_id_from_path (pure) ──────────────────────────────────────────
 class TestWorktreeIdFromPath:
     def test_dotworktrees_container(self):
-        p = r"C:\Data\Src\.worktrees\aperture-labs\lambda-core-win-20260101-x"
-        assert reclaim._worktree_id_from_path(p) == "lambda-core-win-20260101-x"
+        p = r"C:\Data\Src\.worktrees\test-chamber\anomalous-potato-win-20260101-x"
+        assert reclaim._worktree_id_from_path(p) == "anomalous-potato-win-20260101-x"
 
     def test_suffix_worktrees_container(self):
-        p = r"C:\Data\Src\copilot-extensions.worktrees\lambda-core-win-abc"
-        assert reclaim._worktree_id_from_path(p) == "lambda-core-win-abc"
+        p = r"C:\Data\Src\copilot-extensions.worktrees\anomalous-potato-win-abc"
+        assert reclaim._worktree_id_from_path(p) == "anomalous-potato-win-abc"
 
     def test_non_worktree_path_is_none(self):
         assert reclaim._worktree_id_from_path(r"C:\Users\me\project") is None
