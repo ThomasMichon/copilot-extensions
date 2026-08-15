@@ -59,7 +59,7 @@ _LOCAL_ROOT = _persistent_digest_root()
 def _remote_store_root() -> Path | None:
     """Optional remote/shared digest store root.
 
-    Replaces the facility's hard-coded NAS path. Returns ``None`` unless
+    Replaces the multi-machine system's hard-coded NAS path. Returns ``None`` unless
     ``AGENT_LOGGER_REMOTE_STORE`` is set, so the segmenter works fully
     locally without any remote.
     """

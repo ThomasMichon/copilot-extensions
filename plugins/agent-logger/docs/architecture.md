@@ -42,7 +42,7 @@ chunks. Four console scripts:
   absorbs the large transcript and returns a compact takeover briefing, so the
   dormant session never floods the main session's context).
 
-All machine/path/voice coupling is configuration — there is no facility
+All machine/path/voice coupling is configuration — there is no multi-machine system
 hostname, NAS path, or persona baked in.
 
 ### Session sync (`agent_logger.sync`)
@@ -63,7 +63,7 @@ filtering. Targets implement a small `Target` interface
 best-effort HTTP `POST` (JSON `{"machine": <machine>}`; `{machine}` in the URL
 is also substituted, optional bearer token) after **any** successful push,
 regardless of target — so a downstream consumer can crunch immediately. It is
-facility-neutral: point it at a processing service directly, or at a public
+multi-machine system-neutral: point it at a processing service directly, or at a public
 webhook callback (e.g. a Home Assistant webhook that relays to a private
 service). The `ingest` target's own `notify_url` option remains for back-compat
 and now shares the same best-effort helper (`agent_logger.sync.notify`).

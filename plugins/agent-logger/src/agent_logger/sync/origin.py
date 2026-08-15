@@ -6,7 +6,7 @@ a **machine-only** marker when no harness resolves. The mark is a per-session-di
 sidecar (``origin.json``) that syncs with the session, so any downstream logger
 daemon can route by origin without re-parsing ``workspace.yaml``.
 
-This is the foundation of origin-routed filing (aperture-labs effort
+This is the foundation of origin-routed filing (test-chamber effort
 ``origin-routed-logging``; visions: agent-logger ``origin-routed-filing`` /
 ``derive-the-origin-never-guess`` and permanent-record ``origin-faithful
 routing``). Deriving-not-guessing: the origin comes from the session's own
@@ -58,8 +58,8 @@ def derive_origin(session_dir: Path, machine: str,
 
     ``source_repo`` is the first configured harness repo whose name appears
     (case-insensitive substring) in the session's ``git_root`` / ``repository``
-    / ``cwd`` (worktree-safe: a path like ``.../aperture-labs.worktrees/...``
-    still resolves to ``aperture-labs``). When none matches -- no
+    / ``cwd`` (worktree-safe: a path like ``.../test-chamber.worktrees/...``
+    still resolves to ``test-chamber``). When none matches -- no
     ``workspace.yaml``, no path, or an unrecognized (non-harness) repo -- the
     origin falls back to machine-only (``source_repo=None``,
     ``basis='machine-default'``). It never guesses which machine ran the sync.

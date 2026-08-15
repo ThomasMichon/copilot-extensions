@@ -2,8 +2,8 @@
 
 Publishes the source tree to ``<user@host>:<remote_path>/<machine>/`` using
 ``rsync`` over SSH. The ``ssh-tunnel`` variant routes through a jump host via
-``-o ProxyJump=...`` -- generalized from the facility's Cloudflare-tunnel
-transport, with no facility-specific hostnames baked in.
+``-o ProxyJump=...`` -- generalized from the multi-machine system's Cloudflare-tunnel
+transport, with no deployment-specific hostnames baked in.
 
 rsync is required on both ends. ``doctor`` verifies the local rsync/ssh
 binaries and that the host answers a batch-mode SSH probe.

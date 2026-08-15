@@ -227,7 +227,7 @@ sign-off sets `closing_remark`; a host that wants both sets both.
   "return": "json",
   "sessions": [ /* ...N sessions... */ ],
   "output_root": "logs",
-  "narration_style": "Consult the aperture-voice skill. Weave brief in-character asides between thematic sections where they add warmth or wit -- interleaved, never forced, never all at the end.",
+  "narration_style": "Consult your narration voice skill. Weave brief in-character asides between thematic sections where they add warmth or wit -- interleaved, never forced, never all at the end.",
   "exemplars": "visions/knowledge/permanent-record/reference-entries.md",
   "closing_remark": null
 }

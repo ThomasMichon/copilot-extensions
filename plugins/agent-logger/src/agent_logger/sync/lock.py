@@ -1,6 +1,6 @@
 """Cross-platform advisory file lock for serialized syncs.
 
-Ported from the facility session-sync engine: ``msvcrt`` on Windows,
+Ported from the multi-machine system session-sync engine: ``msvcrt`` on Windows,
 ``fcntl`` on POSIX, with a timeout. This is the same locking the
 orchestrator's merge queue needs -- kept here so the sync engine never
 runs two pushes against the same target concurrently.

@@ -6,7 +6,7 @@ JSON body ``{"machine": <machine>}`` to a configured URL so a downstream
 consumer can crunch immediately. ``{machine}`` in the URL is also substituted
 (back-compat with the ingest target's original notify shape).
 
-Facility-neutral by design: the URL is whatever the operator configures -- a
+Deployment-neutral by design: the URL is whatever the operator configures -- a
 processing service, an rsync-daemon sidecar, or a public webhook callback (e.g.
 a Home Assistant webhook that relays to a private service). All errors are
 swallowed; a notify failure never fails a sync.

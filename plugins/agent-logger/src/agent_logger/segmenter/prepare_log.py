@@ -31,7 +31,7 @@ from agent_logger.segmenter.platform import detect_machine, sanitize_path_compon
 def _parse_machine(raw: str) -> tuple[str, bool]:
     """Split detect_machine() result into (machine, is_wsl).
 
-    If *raw* ends with ``-wsl`` (e.g. ``lambda-core-wsl``), strip the suffix
+    If *raw* ends with ``-wsl`` (e.g. ``anomalous-potato-wsl``), strip the suffix
     and flag the environment as WSL.
     """
     if raw.endswith("-wsl"):

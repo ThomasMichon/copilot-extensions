@@ -5,8 +5,8 @@ its raw sessions to a shared rsync-daemon module (``host::module/path`` or an
 ``rsync://`` URL), and the service is optionally pinged over HTTP after a
 successful push so it can crunch immediately instead of waiting for its poll.
 
-Generalized from the facility engine's rsync-daemon transport and its
-permanent-record notify -- no facility hostnames, modules, or auth specifics
+Generalized from the multi-machine system engine's rsync-daemon transport and its
+permanent-record notify -- no multi-machine system hostnames, modules, or auth specifics
 are baked in.
 """
 

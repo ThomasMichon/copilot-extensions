@@ -202,7 +202,7 @@ plain log -- no remark, no quip, no persona.
   reactions, or character beats placed **between** thematic passages where they
   genuinely add warmth or wit. Interleave; do **not** batch all voice into a
   single block at the end, and never force a beat where the material doesn't
-  earn one. The instructions (e.g. from a facility voice skill) are the only
+  earn one. The instructions (e.g. from a multi-machine system voice skill) are the only
   source of personality -- the plugin supplies none.
 - **`exemplars`** -- if non-null, a list of short reference passages (or a path
   to them) that demonstrate the intended tone and depth. Treat them as

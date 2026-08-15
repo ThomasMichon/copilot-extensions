@@ -7,7 +7,7 @@ Resolution order (lowest precedence first):
 3. Repository-local organization config (``.agent-logger.yaml`` by convention).
 4. Environment-variable overrides (``AGENT_LOGGER_*``).
 
-Everything that couples the reusable code to a particular facility -- the
+Everything that couples the reusable code to a particular multi-machine system -- the
 digest store location, the sync target, the voice pack, the output path
 template, machine naming, and the session-note marker -- lives here as
 configuration with neutral defaults.
@@ -27,7 +27,7 @@ try:
 except ImportError:  # pragma: no cover - pyyaml is a hard dependency
     yaml = None  # type: ignore[assignment]
 
-#: Neutral, personality- and facility-free defaults.
+#: Neutral, personality- and multi-machine system-free defaults.
 DEFAULTS: dict[str, Any] = {
     # Where collated digest chunks are written/read.
     "store_dir": None,  # resolved to <home>/session-digests when None
@@ -50,7 +50,7 @@ DEFAULTS: dict[str, Any] = {
         # whose derived source_repo is in this list is never synced. With an
         # empty repo_allowlist this makes the target a CATCH-ALL for everything
         # not denied -- the "everything else" sink on a dual-use machine (e.g.
-        # book2's work store takes every non-facility session). Empty -> deny
+        # book2's work store takes every non-multi-machine system session). Empty -> deny
         # nothing.
         "repo_denylist": [],
         # Known harness repos on this machine (names; case-insensitive
@@ -66,7 +66,7 @@ DEFAULTS: dict[str, Any] = {
         # engine fires a best-effort HTTP POST to `url` (JSON body
         # {"machine": <machine>}; `{machine}` in the url is also substituted),
         # so a downstream consumer can crunch immediately regardless of which
-        # transport target is used. Empty url -> no notify. Facility-neutral:
+        # transport target is used. Empty url -> no notify. Deployment-neutral:
         # point it at a public webhook callback (e.g. a Home Assistant webhook
         # that relays to a processing service).
         "notify": {
@@ -137,7 +137,7 @@ DEFAULTS: dict[str, Any] = {
         # through to default_sink.
         "routes": [],
         # Convenience: origin repos to SKIP entirely (another harness owns their
-        # chronicle -- e.g. aperture-labs-origin already chronicled facility-side
+        # chronicle -- e.g. test-chamber-origin already chronicled multi-machine system-side
         # by permanent-record). Expanded to leading null-sink routes, so a skip
         # is evaluated before default_sink can catch it.
         "skip_repositories": [],
@@ -552,7 +552,7 @@ class Config:
         regardless of the allowlist. With an **empty** ``repo_allowlist`` this
         turns the target into a **catch-all** for everything *not* denied -- the
         "everything else" sink on a dual-use machine (e.g. book2's work store
-        takes every non-facility session). Empty list means "deny nothing"."""
+        takes every non-multi-machine system session). Empty list means "deny nothing"."""
         raw = self._data.get("sync", {}).get("repo_denylist", [])
         if isinstance(raw, str):
             return [s.strip() for s in raw.split(",") if s.strip()]

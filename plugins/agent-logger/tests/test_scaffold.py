@@ -44,12 +44,12 @@ def test_config_defaults_and_home(tmp_path: Path) -> None:
 
 def test_config_user_override(tmp_path: Path) -> None:
     (tmp_path / "config.yaml").write_text(
-        "sync:\n  target: onedrive\nlog:\n  voice_pack: aperture\n",
+        "sync:\n  target: onedrive\nlog:\n  voice_pack: custom\n",
         encoding="utf-8",
     )
     cfg = load_config(home=tmp_path)
     assert cfg.sync_target == "onedrive"
-    assert cfg.voice_pack == "aperture"
+    assert cfg.voice_pack == "custom"
 
 
 def test_repo_config_overrides_log_layout_only(tmp_path: Path, monkeypatch) -> None:
@@ -249,12 +249,12 @@ def test_origin_backfill_corpus_cli(tmp_path: Path, monkeypatch, capsys) -> None
     sess.mkdir(parents=True)
     (sess / "events.jsonl").write_text("{}\n", encoding="utf-8")
     (sess / "workspace.yaml").write_text(
-        "git_root: /home/u/src/aperture-labs\n", encoding="utf-8"
+        "git_root: /home/u/src/test-chamber\n", encoding="utf-8"
     )
 
     rc = cli_main(
         ["origin", "backfill-corpus", "--root", str(corpus),
-         "--harness-repo", "aperture-labs"]
+         "--harness-repo", "test-chamber"]
     )
     assert rc == 0
     result = json.loads(capsys.readouterr().out)
@@ -262,7 +262,7 @@ def test_origin_backfill_corpus_cli(tmp_path: Path, monkeypatch, capsys) -> None
     assert result["total"] == 1
     assert result["marked"] == 1
     stamped = json.loads((sess / "origin.json").read_text(encoding="utf-8"))
-    assert stamped["source_repo"] == "aperture-labs"
+    assert stamped["source_repo"] == "test-chamber"
     assert stamped["machine"] == "book2"
 
 

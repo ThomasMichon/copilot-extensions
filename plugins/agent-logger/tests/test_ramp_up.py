@@ -133,14 +133,14 @@ def test_default_output_dir_matches_read_digest_temp_fallback(monkeypatch, tmp_p
 
 
 def test_worktree_suffix() -> None:
-    assert ramp_up._worktree_suffix("C:/x/lambda-core-win-20260724-120542-fbc5") == "fbc5"
-    assert ramp_up._worktree_suffix("/home/u/borealis-win-20260101-000000-ABCD") == "abcd"
+    assert ramp_up._worktree_suffix("C:/x/anomalous-potato-win-20260724-120542-fbc5") == "fbc5"
+    assert ramp_up._worktree_suffix("/home/u/emancipation-cube-win-20260101-000000-ABCD") == "abcd"
     assert ramp_up._worktree_suffix("") == ""
 
 
 def test_discover_by_suffix(monkeypatch, tmp_path: Path) -> None:
     state_root = _point_home(monkeypatch, tmp_path / "home")
-    wt = str(tmp_path / "lambda-core-win-20260724-120542-fbc5")
+    wt = str(tmp_path / "anomalous-potato-win-20260724-120542-fbc5")
     _make_session(state_root, "aaaa", wt, updated_at="2026-01-02T00:00:00.000Z")
 
     found = ramp_up.discover_by_suffix("fbc5")
@@ -153,20 +153,20 @@ def test_discover_by_suffix(monkeypatch, tmp_path: Path) -> None:
 
 def test_discover_by_suffix_machine_filter(monkeypatch, tmp_path: Path) -> None:
     state_root = _point_home(monkeypatch, tmp_path / "home")
-    lc = str(tmp_path / "lambda-core-win-20260724-120542-dupe")
-    bl = str(tmp_path / "borealis-win-20260724-120542-dupe")
+    lc = str(tmp_path / "anomalous-potato-win-20260724-120542-dupe")
+    bl = str(tmp_path / "emancipation-cube-win-20260724-120542-dupe")
     _make_session(state_root, "lc01", lc, updated_at="2026-01-02T00:00:00.000Z")
     _make_session(state_root, "bl01", bl, updated_at="2026-01-03T00:00:00.000Z")
 
     # Same suffix on two machines -> both without a filter, one with it.
     assert {s["id"] for s in ramp_up.discover_by_suffix("dupe")} == {"lc01", "bl01"}
-    assert [s["id"] for s in ramp_up.discover_by_suffix("dupe", "lambda-core")] == ["lc01"]
-    assert [s["id"] for s in ramp_up.discover_by_suffix("dupe", "borealis")] == ["bl01"]
+    assert [s["id"] for s in ramp_up.discover_by_suffix("dupe", "anomalous-potato")] == ["lc01"]
+    assert [s["id"] for s in ramp_up.discover_by_suffix("dupe", "emancipation-cube")] == ["bl01"]
 
 
 def test_is_local_machine(monkeypatch) -> None:
-    monkeypatch.setattr(ramp_up, "detect_machine", lambda: "lambda-core")
+    monkeypatch.setattr(ramp_up, "detect_machine", lambda: "anomalous-potato")
     assert ramp_up._is_local_machine(None) is True
-    assert ramp_up._is_local_machine("lambda-core") is True
-    assert ramp_up._is_local_machine("lambda-core-wsl") is True
-    assert ramp_up._is_local_machine("borealis") is False
+    assert ramp_up._is_local_machine("anomalous-potato") is True
+    assert ramp_up._is_local_machine("anomalous-potato-wsl") is True
+    assert ramp_up._is_local_machine("emancipation-cube") is False

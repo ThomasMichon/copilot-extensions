@@ -325,12 +325,12 @@ def test_config_repo_allowlist_fail_closed_flag(tmp_path: Path) -> None:
 
 
 def test_denylist_catchall_is_complement_of_facility(tmp_path: Path) -> None:
-    """book2's work sink: no allowlist + deny facility repos = 'everything else'.
-    A facility session is excluded (goes to the NAS via the other pipeline); a
+    """book2's work sink: no allowlist + deny multi-machine system repos = 'everything else'.
+    A multi-machine system session is excluded (goes to the NAS via the other pipeline); a
     work / unknown / metadata-less session is caught for the work store."""
     src = tmp_path / "copilot"
     for name, ws in (
-        ("fac", "git_root: /home/u/src/aperture-labs\n"),
+        ("fac", "git_root: /home/u/src/test-chamber\n"),
         ("ce", "git_root: /home/u/src/copilot-extensions\n"),
         ("work", "git_root: /home/u/work/dotfiles\n"),
         ("mystery", "git_root: /home/u/work/some-employer-thing\n"),
@@ -342,11 +342,11 @@ def test_denylist_catchall_is_complement_of_facility(tmp_path: Path) -> None:
     bare.mkdir(parents=True)
     (bare / "events.jsonl").write_text("{}\n", encoding="utf-8")
 
-    deny = ["aperture-labs", "copilot-extensions"]
+    deny = ["test-chamber", "copilot-extensions"]
     eff = origin_effective([], ["dotfiles"], deny)
     included = engine._included_sessions(
         src, [], effective=eff, machine="book2", denylist=deny)
-    assert included == {"work", "mystery", "bare"}   # everything NOT facility
+    assert included == {"work", "mystery", "bare"}   # everything NOT multi-machine system
 
 
 def test_no_filter_syncs_everything(tmp_path: Path) -> None:
@@ -442,12 +442,12 @@ def test_notify_helper_posts_json_and_substitutes_machine(monkeypatch, tmp_path)
     tok = tmp_path / "tok"
     tok.write_text("s3cret", encoding="utf-8")
     ok = notify_mod.post_notify(
-        "https://h/api/webhook/x?m={machine}", "lambda-core-wsl",
+        "https://h/api/webhook/x?m={machine}", "anomalous-potato-wsl",
         bearer_token_file=str(tok), timeout=3,
     )
     assert ok is True
-    assert captured["url"] == "https://h/api/webhook/x?m=lambda-core-wsl"
-    assert b'"machine": "lambda-core-wsl"' in captured["data"]
+    assert captured["url"] == "https://h/api/webhook/x?m=anomalous-potato-wsl"
+    assert b'"machine": "anomalous-potato-wsl"' in captured["data"]
     assert captured["auth"] == "Bearer s3cret"
     assert captured["timeout"] == 3
 
