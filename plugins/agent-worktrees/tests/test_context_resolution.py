@@ -266,7 +266,6 @@ def test_worktree_id_ignores_wrong_env(adopted_repo, monkeypatch):
     worktree id resolved from the current directory."""
     _anchor, _wt_root, wt_path, wt_id, conf = adopted_repo
     monkeypatch.setenv("WORKTREE_ID", "some-other-worktree")
-    monkeypatch.setenv("APERTURE_WORKTREE_ID", "some-other-worktree")
     monkeypatch.setenv("WORKTREE_REPO", "/nonexistent/other/repo")
     monkeypatch.chdir(wt_path)
     assert m._infer_worktree_id(None, conf) == wt_id

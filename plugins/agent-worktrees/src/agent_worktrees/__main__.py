@@ -88,18 +88,10 @@ from . import validate as val
 from .picker import ItemKind, MenuItem, pick
 from .update_stage import cmd_stage_update, discover_plugin_dir
 
-# ── Env var migration helpers ───────────────────────────────────────────
-# Phase 2 of copilot-worktrees extraction: APERTURE_* → WORKTREE_* for the
-# operational flags. The APERTURE_* *identity* twins (WORKTREE_ID / WORKTREE_REPO)
-# were retired with the cwd-resolution effort (Phase 3): identity resolves from
-# CWD, never from an ambient env var, so those aliases had zero readers.
-# Read new name first, fall back to old for backward compat.
-
-_ENV_MIGRATION = {
-    "WORKTREE_NO_UPDATE": "APERTURE_NO_UPDATE",
-    "WORKTREE_NO_MUX": "APERTURE_NO_MUX",
-    "WORKTREE_VERBOSE": "APERTURE_PRE_FLIGHT_VERBOSE",
-}
+# ── Env var helpers ─────────────────────────────────────────────────────
+# Operational flags are read from their WORKTREE_* names. The legacy APERTURE_*
+# aliases (a copilot-worktrees extraction transition shim) have been removed --
+# identity resolves from CWD, never from an ambient env var.
 
 _SESSION_BIND_PROJECT = "AGENT_WORKTREES_BIND_PROJECT"
 _SESSION_BIND_WORKTREE = "AGENT_WORKTREES_BIND_WORKTREE_ID"
@@ -107,22 +99,13 @@ _SESSION_BIND_SESSION = "AGENT_WORKTREES_BIND_SESSION_ID"
 
 
 def _env_get(new_name: str) -> str | None:
-    """Read an env var by its new name, falling back to the legacy name."""
-    val = os.environ.get(new_name)
-    if val:
-        return val
-    legacy = _ENV_MIGRATION.get(new_name)
-    if legacy:
-        return os.environ.get(legacy)
-    return None
+    """Read an env var by name (an empty value is treated as unset)."""
+    return os.environ.get(new_name) or None
 
 
 def _env_set(new_name: str, value: str) -> None:
-    """Set both new and legacy env var names (transition period)."""
+    """Set an env var by name."""
     os.environ[new_name] = value
-    legacy = _ENV_MIGRATION.get(new_name)
-    if legacy:
-        os.environ[legacy] = value
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -3514,8 +3497,8 @@ def _infer_worktree_id(
       2. The current working directory under the configured ``worktree_root``
 
     Identity is resolved **purely from the directory**, the way git resolves
-    its repo. Ambient ``$WORKTREE_ID`` / ``$APERTURE_WORKTREE_ID`` are **not**
-    consulted -- they were the source of cross-session/cross-repo contamination.
+    its repo. The ambient ``$WORKTREE_ID`` is **not**
+    consulted -- it was the source of cross-session/cross-repo contamination.
     Git branch is likewise never used: worktrees may switch to feature branches,
     so the branch name is not a reliable indicator of which worktree we are in.
 
@@ -12797,7 +12780,7 @@ def _find_repo_dir() -> Path | None:
       3. Config anchor (last resort -- may be stale)
 
     Resolution is from the directory, not ambient env: the former
-    ``WORKTREE_REPO`` / ``APERTURE_REPO`` env fallback has been removed (it was
+    ``WORKTREE_REPO`` env fallback has been removed (it was
     a cross-session contamination source). All paths are resolved through
     :func:`git_ops.resolve_to_anchor` so that running from inside a git worktree
     returns the main checkout, not the ephemeral worktree path.

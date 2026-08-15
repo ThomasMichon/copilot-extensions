@@ -207,4 +207,4 @@ def test_launchers_fast_reattach_skips_update_on_live_session():
     assert _skip_log in sh
     # The bash probe must key off the tmux session name and honor no-mux.
     assert 'tmux has-session -t "=wt-${_wtid}"' in sh
-    assert 'WORKTREE_NO_MUX' in sh and 'APERTURE_NO_MUX' in sh
+    assert 'WORKTREE_NO_MUX' in sh

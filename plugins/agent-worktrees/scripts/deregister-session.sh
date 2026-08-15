@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-_LOG="${WORKTREE_SETUP_LOG:-${APERTURE_SETUP_LOG:-/dev/null}}"
+_LOG="${WORKTREE_SETUP_LOG:-/dev/null}"
 _log() { printf '[%s] [%s] deregister-session: %s\n' "$(date '+%H:%M:%S')" "$1" "$2" >> "$_LOG" 2>/dev/null || true; }
 
 # Worktree id is resolved from CWD by the Python command (this hook runs in the

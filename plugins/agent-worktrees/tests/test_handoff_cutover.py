@@ -41,9 +41,8 @@ class TestBuildMuxNewWindowArgv:
         # identity strip prefix precedes the command
         assert "env" in argv
         e = argv.index("env")
-        assert argv[e:e + 7] == [
+        assert argv[e:e + 5] == [
             "env", "-u", "WORKTREE_PROJECT", "-u", "WORKTREE_ID",
-            "-u", "APERTURE_WORKTREE_ID",
         ]
         # command tail is verbatim (no -- separator, no wrapper)
         assert argv[-5:] == ["bash", "setup.sh", "--allow-all-tools", "-i", "seed text"]

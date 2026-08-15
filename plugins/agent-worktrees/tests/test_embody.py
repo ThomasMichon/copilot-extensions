@@ -39,9 +39,8 @@ class TestBuildMuxNewSessionArgv:
         assert argv[k + 1] == "COPILOT_FEATURE_FLAGS=x"
         # identity strip prefix precedes the command
         e = argv.index("env")
-        assert argv[e:e + 7] == [
+        assert argv[e:e + 5] == [
             "env", "-u", "WORKTREE_PROJECT", "-u", "WORKTREE_ID",
-            "-u", "APERTURE_WORKTREE_ID",
         ]
         assert argv[-3:] == ["bash", "setup.sh", "--allow-all-tools"]
         assert "--" not in argv

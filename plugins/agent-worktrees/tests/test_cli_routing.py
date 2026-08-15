@@ -577,7 +577,6 @@ def test_project_flag_sets_active_project_and_ignores_worktree_id(monkeypatch):
     import os
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
     monkeypatch.setenv("WORKTREE_ID", "caller-session-wt")
-    monkeypatch.setenv("APERTURE_WORKTREE_ID", "caller-session-wt")
     monkeypatch.setitem(m.COMMAND_MAP, "status", lambda args: 0)
 
     rc = m.main(["--project", "demo", "status"])
@@ -590,7 +589,6 @@ def test_project_flag_sets_active_project_and_ignores_worktree_id(monkeypatch):
     # WORKTREE_ID is no longer scrubbed -- present but irrelevant to CWD-based
     # resolution.
     assert os.environ.get("WORKTREE_ID") == "caller-session-wt"
-    assert os.environ.get("APERTURE_WORKTREE_ID") == "caller-session-wt"
 
 
 def test_bare_invocation_ignores_inherited_worktree_id(monkeypatch):
