@@ -155,6 +155,31 @@ def test_project_requiring_command_no_project_routes_to_help(monkeypatch, capsys
     assert "Could not resolve a project for 'list'" in err
 
 
+@pytest.mark.parametrize(
+    ("argv", "command"),
+    [
+        (["reconcile-binstubs"], "reconcile-binstubs"),
+        (["register-project-entry", "demo"], "register-project-entry"),
+    ],
+)
+def test_installer_registry_commands_run_without_project(
+    monkeypatch, tmp_path, argv, command,
+):
+    m.cfg.set_active_project(None)
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        m,
+        "_git_toplevel",
+        lambda _path: pytest.fail("installer command tried to resolve project context"),
+    )
+    called = []
+    monkeypatch.setitem(m.COMMAND_MAP, command, lambda args: called.append(args) or 0)
+
+    assert m.main(argv) == 0
+    assert len(called) == 1
+
+
 def test_project_flag_bypasses_help(monkeypatch):
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
     called = {}
