@@ -195,3 +195,53 @@ def test_explicit_indexer_flag_still_uses_singular_flow(_iso):
                     repo=str(repo)))
     data = config._load_yaml(config.repo_config_path(repo))
     assert data["indexer"]["machine"] == "boxB"
+
+
+# -- hardening (review follow-ups) -------------------------------------------
+
+
+def test_setup_multi_host_clears_stale_client_endpoints(_iso):
+    # A box that was a client (has endpoints) and is re-adopted as a host must not
+    # keep stale client routing that could shadow its live local service.
+    config.set_machine_config({"role": "client",
+                               "endpoints": ["http://old:8420"], "endpoint": "http://old:8420"})
+    repo = _iso / "repo"; repo.mkdir()
+    _author_indexers(repo, [{"machine": "boxA", "endpoint": "http://a:8420"}])
+    cmd_setup(_args(repo=str(repo)))  # boxA (this machine) -> host
+    assert config.resolve_role() == "host"
+    data = config._load_yaml(config.config_path())
+    assert "endpoints" not in data and "endpoint" not in data
+
+
+def test_read_indexer_machineless_block_is_none(_iso):
+    repo = _iso / "repo"; repo.mkdir()
+    p = config.repo_config_path(repo)
+    p.parent.mkdir(parents=True)
+    p.write_text("indexer:\n  ssh: no-machine\n", encoding="utf-8")
+    # A malformed indexer: block (no machine) resolves to None, per the contract.
+    assert config.read_indexer(repo) is None
+
+
+def test_set_machine_config_remove(_iso):
+    config.set_machine_config({"role": "client", "endpoint": "http://x:8420"})
+    config.set_machine_config({"role": "host"}, remove=["endpoint"])
+    data = config._load_yaml(config.config_path())
+    assert data["role"] == "host" and "endpoint" not in data
+
+
+def test_route_probe_timeout_default_and_guard(_iso, monkeypatch):
+    monkeypatch.delenv("AGENT_INDEX_ROUTE_PROBE_TIMEOUT_S", raising=False)
+    assert config._route_probe_timeout() == 1.5
+    monkeypatch.setenv("AGENT_INDEX_ROUTE_PROBE_TIMEOUT_S", "0.4")
+    assert config._route_probe_timeout() == 0.4
+    for bad in ("banana", "-1", "0", ""):
+        monkeypatch.setenv("AGENT_INDEX_ROUTE_PROBE_TIMEOUT_S", bad)
+        assert config._route_probe_timeout() == 1.5  # malformed/non-positive -> default
+
+
+def test_client_url_malformed_timeout_does_not_crash(_iso, monkeypatch):
+    config.set_machine_config({"role": "client",
+                               "endpoints": ["http://p:8420", "http://s:8421"]})
+    monkeypatch.setenv("AGENT_INDEX_ROUTE_PROBE_TIMEOUT_S", "not-a-number")
+    monkeypatch.setattr(config, "_endpoint_healthy", lambda url, t: url == "http://s:8421")
+    assert config.client_url() == "http://s:8421"  # guarded parse, failover still works

@@ -142,7 +142,11 @@ def _setup_multi(cfg, args, this: str, root, indexers: list[dict]) -> int:
             # Ordered failover list (primary first) + singular back-compat mirror.
             machine_updates["endpoints"] = endpoints
             machine_updates["endpoint"] = endpoints[0]
-    role_path = cfg.set_machine_config(machine_updates)
+        role_path = cfg.set_machine_config(machine_updates)
+    else:
+        # This box is a host: clear any stale client routing a prior client
+        # adoption may have left, so it never shadows the live local service.
+        role_path = cfg.set_machine_config(machine_updates, remove=["endpoint", "endpoints"])
 
     result = {
         "machine": this,

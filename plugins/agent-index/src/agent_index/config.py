@@ -147,7 +147,7 @@ def read_indexer(root: Path | None) -> dict | None:
     if isinstance(ind, dict) and ind.get("machine"):
         return ind
     plural = read_indexers(root)
-    return plural[0] if plural else (ind if isinstance(ind, dict) else None)
+    return plural[0] if plural else None
 
 
 def read_indexers(root: Path | None) -> list[dict]:
@@ -306,10 +306,14 @@ def write_machine_role(role: str) -> Path:
     return set_machine_config({"role": role})
 
 
-def set_machine_config(updates: dict) -> Path:
-    """Merge *updates* into the machine-local config file. Returns its path."""
+def set_machine_config(updates: dict, remove: list[str] | None = None) -> Path:
+    """Merge *updates* into the machine-local config file, optionally removing the
+    keys in *remove* (e.g. clearing stale client routing when a box becomes a host).
+    Returns its path."""
     path = config_path()
     data = _load_yaml(path)
+    for key in remove or ():
+        data.pop(key, None)
     data.update(updates)
     _dump_yaml(path, data)
     return path
@@ -460,6 +464,22 @@ def configured_endpoints() -> list[str]:
     return [single] if single else []
 
 
+def _route_probe_timeout() -> float:
+    """Per-endpoint failover probe timeout (seconds), from
+    ``AGENT_INDEX_ROUTE_PROBE_TIMEOUT_S``. Defensively falls back to 1.5s on a
+    missing/malformed/non-positive value so a stray env setting never crashes
+    routing."""
+    default = 1.5
+    raw = os.environ.get("AGENT_INDEX_ROUTE_PROBE_TIMEOUT_S")
+    if not raw:
+        return default
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return default
+    return val if val > 0 else default
+
+
 def _endpoint_healthy(base_url: str, timeout: float) -> bool:
     """Best-effort reachability probe of a service endpoint's ``GET /health``.
 
@@ -497,7 +517,7 @@ def client_url() -> str | None:
             # transparently falls back to a secondary (SSH-mesh robustness;
             # vision §adoption-designates-ordered-indexers). When none answer, return
             # the primary deterministically so the caller surfaces its connect error.
-            timeout = float(os.environ.get("AGENT_INDEX_ROUTE_PROBE_TIMEOUT_S", "1.5"))
+            timeout = _route_probe_timeout()
             for ep in endpoints:
                 if _endpoint_healthy(ep, timeout):
                     return ep
