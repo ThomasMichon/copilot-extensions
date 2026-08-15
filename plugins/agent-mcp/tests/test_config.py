@@ -429,3 +429,57 @@ def test_config_dir_left_intact_without_source_path():
     }
     cfg = parse_config(doc)
     assert cfg.auth.command == ["python", "${config_dir}/m.py"]
+
+
+# --- ${python} interpreter expansion ---------------------------------------
+
+def test_python_token_expands_to_resolved_interpreter(tmp_path, monkeypatch):
+    import agent_mcp.config as cfgmod
+
+    monkeypatch.setattr(cfgmod, "_resolve_python", lambda: "/opt/py/python3")
+    doc = {
+        "server": {"type": "http", "url": "https://mcp.example/o"},
+        "auth": {"kind": "command",
+                 "command": ["${python}", "${config_dir}/mint.py"],
+                 "parse": "raw"},
+    }
+    cfg = load_config(str(_write_cfg_file(tmp_path / "b.mcp.yaml", doc)))
+    assert cfg.auth.command == ["/opt/py/python3", f"{tmp_path}/mint.py"]
+
+
+def test_python_token_expands_without_source_path(monkeypatch):
+    # ${python} is path-independent, so it resolves even for a bare-dict parse
+    # (where ${config_dir} is intentionally left intact).
+    import agent_mcp.config as cfgmod
+
+    monkeypatch.setattr(cfgmod, "_resolve_python", lambda: "/opt/py/python3")
+    doc = {
+        "server": {"type": "stdio",
+                   "command": ["${python}", "${config_dir}/server.py"]},
+        "auth": {"kind": "none"},
+    }
+    cfg = parse_config(doc)
+    assert cfg.server.command == ["/opt/py/python3", "${config_dir}/server.py"]
+
+
+def test_resolve_python_prefers_platform_names(monkeypatch):
+    import agent_mcp.config as cfgmod
+
+    monkeypatch.setattr(cfgmod.os, "name", "posix")
+    seen: list[str] = []
+
+    def fake_which(name):
+        seen.append(name)
+        return "/usr/bin/python3" if name == "python3" else None
+
+    monkeypatch.setattr(cfgmod.shutil, "which", fake_which)
+    assert cfgmod._resolve_python() == "/usr/bin/python3"
+    assert seen[0] == "python3"  # POSIX probes python3 first
+
+
+def test_resolve_python_falls_back_to_sys_executable(monkeypatch):
+    import agent_mcp.config as cfgmod
+
+    monkeypatch.setattr(cfgmod.shutil, "which", lambda name: None)
+    monkeypatch.setattr(cfgmod.sys, "executable", "/venv/bin/python")
+    assert cfgmod._resolve_python() == "/venv/bin/python"
