@@ -45,7 +45,7 @@ takeover briefing** (target ≤ ~6k tokens). It is the context firewall.
 ### 1. Identify the dormant worktree
 
 You just need the worktree's short **suffix** — the last segment of its name
-(e.g. `fbc5` from `lambda-core-win-20260724-120542-fbc5`). A full path or `.`
+(e.g. `fbc5` from `anomalous-potato-win-20260724-120542-fbc5`). A full path or `.`
 (current directory) also work. If the worktree lives on **another machine**,
 note that machine's name. If the operator hasn't said which worktree, ask.
 Optionally note a **focus** (what the operator wants to resume).
@@ -140,7 +140,7 @@ Read the whole brief. It is your situational handoff.
 ### 4. Go deeper if needed
 
 The full transcript was collated ephemerally. Read more with the existing
-digest reader (no facility paths, temp-store aware):
+digest reader (no multi-machine system paths, temp-store aware):
 
 ```
 read-session-digest <id> context

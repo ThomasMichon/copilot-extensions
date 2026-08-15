@@ -2,7 +2,7 @@
 
 Each push drops a ``sync-meta.json`` at the machine root so a consumer can
 see which machine last wrote, when, and via which transport. Ported from the
-facility engine's ``write_sync_meta`` (local variant).
+multi-machine system engine's ``write_sync_meta`` (local variant).
 """
 
 from __future__ import annotations

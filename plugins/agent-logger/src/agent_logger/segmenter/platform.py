@@ -1,8 +1,8 @@
 """Platform + filesystem helpers for the segmenter.
 
-A de-facility-ized subset of what the aperture-labs ``facility_lib`` module
+A de-multi-machine system-ized subset of what the test-chamber ``facility_lib`` module
 provided: platform detection, machine-name detection, and NTFS-safe
-filename sanitization. No NAS paths, no facility hostnames -- machine
+filename sanitization. No NAS paths, no multi-machine system hostnames -- machine
 naming is overridable via configuration.
 """
 
