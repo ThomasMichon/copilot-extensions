@@ -68,7 +68,7 @@ The cycle:
    is not a delta (see *Positive and negative intent* below).
 3. Each misalignment becomes an **issue** that *cites the vision item*.
 4. Related issues are grouped into an **effort** that plans, implements, and
-   validates the work (see the `planning-efforts` skill).
+   validates the work (see the `efforts:planning-efforts` skill).
 5. When the work lands and the reality docs are updated, the delta for those
    items disappears — reality has caught up to the vision.
 

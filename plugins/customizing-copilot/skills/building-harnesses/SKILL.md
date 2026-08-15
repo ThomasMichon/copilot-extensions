@@ -69,16 +69,16 @@ opinionated one, apply the opinion and move on.
    `installing-plugins`), restart, deploy runtimes (skill:
    `copilot-extensions-setup`).
 3. Adopt the harness + register/link related target repos (skills:
-   `agent-worktrees-repos`, `agent-worktrees-related`, `working-cross-repo`).
+   `agent-worktrees:agent-worktrees-repos`, `agent-worktrees:agent-worktrees-related`, `agent-worktrees:working-cross-repo`).
 4. `AGENTS.md` + connective-tissue skills (skills: `authoring-skills`,
    `defining-subagents`). **Standing/ambient rules** (persona, style, safety,
    cross-repo sequencing) are materialized into the always-on `AGENTS.md` and the
    skill load+enforces them — never embedded as a decaying one-shot copy (the
    ambient-guidance principle; the "install a persistent rule into `AGENTS.md`"
    seam lives in `installing-plugins`).
-5. SSH mesh + agent-bridge topology (skills: `agent-ssh`, `agent-bridge`).
+5. SSH mesh + agent-bridge topology (skills: `agent-ssh:agent-ssh`, `agent-bridge:agent-bridge`).
 6. Validate end-to-end through the **Picker**.
-7. Enable efforts + visions (skills: `efforts-setup`, `visions-setup`).
+7. Enable efforts + visions (skills: `efforts:efforts-setup`, `visions:visions-setup`).
 8. Review skills + agents (skill: **`reviewing-customizations`**).
 9. agent-mcp + delegate MCP handling to sub-agents (skills: `agent-mcp`,
    `defining-subagents`).

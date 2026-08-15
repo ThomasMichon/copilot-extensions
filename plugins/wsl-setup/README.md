@@ -43,13 +43,13 @@ install/networking choices, so the next agent doesn't re-derive them.
 This plugin covers **environment setup** and is usable standalone: no repo needs
 to be registered as an agent-worktrees harness. If you also want to clone a
 **repo** into WSL and wire Windows Terminal profiles, compose it with
-`agent-worktrees`' `agent-worktrees-wsl-provision` skill: provision the repo with
+`agent-worktrees:agent-worktrees-wsl-provision` skill: provision the repo with
 agent-worktrees, ready the environment with wsl-setup.
 
 To reach a WSL-hosted sshd as its **own SSH target**, first make sshd listen on a
 dedicated WSL port and keep the distro alive. Then either forward the Windows
 `localhost:<port>` hop through your tunnel, or use the **`agent-ssh`** plugin's
-`setting-up-ssh-host` skill (§ "Reaching WSL … as its own SSH target") to wire
+`agent-ssh:setting-up-ssh-host` skill (§ "Reaching WSL … as its own SSH target") to wire
 `ssh <host>-wsl` as a ProxyJump through the host's existing dtssh host. WSL does
 not need to run devtunnel/dtssh itself; the boundary-crossing transport lives on
 the Windows host, consistent with the repo's `service-transport` pattern.

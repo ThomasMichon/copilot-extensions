@@ -50,7 +50,7 @@ Start a Copilot CLI session and say:
 
 > *"set up agent-bridge"*
 
-This invokes the `copilot-extensions-setup` skill, which runs the
+This invokes the `agent-worktrees:copilot-extensions-setup` skill, which runs the
 platform-specific installer.
 
 ### Manual install (alternative)

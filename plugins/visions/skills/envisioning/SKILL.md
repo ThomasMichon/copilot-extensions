@@ -226,7 +226,7 @@ This is how a vision *does work*: it is diffed against reality.
    A capability that is *merely unmentioned* is **not** a delta — absence is
    latitude, not a removal order.
 3. **Carve efforts.** Group related deltas into an **effort** (see the
-   `planning-efforts` skill) — additive and subtractive deltas carve additive and
+   `efforts:planning-efforts` skill) — additive and subtractive deltas carve additive and
    removal efforts respectively. The effort plans and validates the work; the
    issues track it; the vision stays untouched (it already says what should be).
 4. **Close the loop.** When the work lands and the reality docs are updated to

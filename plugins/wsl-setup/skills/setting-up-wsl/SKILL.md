@@ -23,11 +23,11 @@ Provision WSL2 so it can run a reachable, persistent service — not just an
 interactive shell. This is the **environment** setup and works standalone: enable
 the payload-only plugin and run this skill; no repo needs to be registered as an
 agent-worktrees harness. To clone a *repo* into WSL and wire Windows Terminal
-profiles, use `agent-worktrees`' `agent-worktrees-wsl-provision` skill (they
+profiles, use `agent-worktrees:agent-worktrees-wsl-provision` skill (they
 compose). To reach a WSL-hosted sshd as its **own SSH target** from other
 machines, keep the boundary-crossing transport on the Windows host: either
 forward the Windows `localhost:<port>` hop through your tunnel, or use the
-**`agent-ssh`** plugin's `setting-up-ssh-host` skill (§ "Reaching WSL … as its own
+**`agent-ssh`** plugin's `agent-ssh:setting-up-ssh-host` skill (§ "Reaching WSL … as its own
 SSH target") for a ProxyJump through the host's existing dtssh host. WSL itself
 does not need to run devtunnel/dtssh.
 
@@ -186,7 +186,7 @@ Once WSL runs sshd on a dedicated port (step 5) and stays up (step 6), reach it
 as its **own** SSH alias (`ssh <host>-wsl`, landing as the Linux user) by
 forwarding the Windows `localhost:<port>` hop through the host's authenticated
 transport. The preferred managed wiring lives in the **`agent-ssh`** plugin's
-`setting-up-ssh-host` skill, § "Reaching WSL … as its own SSH target": ProxyJump
+`agent-ssh:setting-up-ssh-host` skill, § "Reaching WSL … as its own SSH target": ProxyJump
 through the host's existing dtssh host to `localhost:<port>`. A host-side Dev
 Tunnel/SSH forward can use the same hop. Do not run dtssh/devtunnel inside WSL:
 WSL does not need egress for this, and the tunnel credential/keyring belongs on
