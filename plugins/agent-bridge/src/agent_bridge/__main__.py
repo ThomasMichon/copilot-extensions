@@ -3561,8 +3561,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     deploy_p = sub.add_parser(
         "deploy",
-        help="Zero-downtime active/passive cutover: stand up the new daemon on "
-             "a fresh port, flip the routing table, drain + retire the old one",
+        # Demoted to an INSTALLER-INTERNAL seam (Thread B, correct-install-flows):
+        # the installer's `update`/activation drives the ZDD cutover automatically
+        # whenever a live daemon is running, so an operator never runs this. Kept
+        # (functional) for the installer to invoke and for cutover self-recovery
+        # (invariant #1: no operator deploy verb).
+        help="(internal) installer-driven ZDD cutover seam -- activation runs it "
+             "automatically on update; operators do not invoke it directly",
     )
     deploy_p.add_argument(
         "--health-timeout", type=float, default=60.0, metavar="SECONDS",
