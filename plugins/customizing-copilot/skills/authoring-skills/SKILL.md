@@ -179,6 +179,18 @@ When creating or modifying a skill, validate against Anthropic's best practices:
   are available outside an interactive session as `copilot skill list`,
   `copilot skill add <FILE|URL|DIRECTORY>`, and `copilot skill remove ...`.
 
+### Referencing skills or agents from another plugin
+
+When a skill (or its docs/references) refers to a skill or sub-agent **shipped by
+a different plugin**, name it in the **namespaced `plugin:name` form** — e.g. the
+`agent-bridge` skill in the agent-bridge plugin is `agent-bridge:agent-bridge`,
+agent-worktrees' worktree skill is `agent-worktrees:worktree`, and the
+agent-logger writer agent is `agent-logger:session-log-writer`. This disambiguates
+same-named skills across plugins and tells the reader (and the agent) exactly
+which plugin owns it. **Within the same plugin, keep the bare name** — only
+*cross-plugin* references are namespaced. The same rule applies to a sub-agent's
+`agent_type` (see the defining-subagents skill).
+
 ### Skills vs custom instructions
 
 Use **custom instructions** for simple, always-on guidance (coding standards,
@@ -248,7 +260,7 @@ on demand instead of loading them into every session.
 
 **Build `AGENTS.md` as a waypoint, not a dumping ground.** The root `AGENTS.md`
 is the first thing an agent reads on entering a repo -- including one arriving
-from *another* repo (see the **`working-cross-repo`** skill) -- so it should read
+from *another* repo (see the **`agent-worktrees:working-cross-repo`** skill) -- so it should read
 as a **map**: orient the reader and link out (backtick faux-links) to the
 detailed homes (`docs/`, `visions/`, `CONTRIBUTING.md`, the connective-tissue
 skills) rather than inlining reference detail that has a home elsewhere.

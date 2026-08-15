@@ -149,7 +149,7 @@ gate before executing:
    approves; auto-merge merges it.
 3. **Sync forward** — pull the worktree onto the merged (squashed) default branch
    so execution builds *on top of* the reviewed plan. In an agent-worktrees repo,
-   use `agent-worktrees git sync` (see the `git-collaboration` skill); otherwise
+   use `agent-worktrees git sync` (see the `agent-worktrees:git-collaboration` skill); otherwise
    use the repo's normal pull-forward command. Then begin executing the Plan.
 
 **The operator may waive their *own* review — but the agent's review-gate is

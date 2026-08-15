@@ -169,7 +169,7 @@ bridge). When you arrive here from such a finding:
 
 The consumer repo's own options (an in-repo authority-override skill that
 reclaims the phrase, or disabling the plugin there) live on the *consumer* side
-and are documented by `reviewing-customizations`; **this** skill covers the
+and are documented by `customizing-copilot:reviewing-customizations`; **this** skill covers the
 upstream half — landing the real fix in the plugin.
 
 ## What NOT to do
@@ -247,4 +247,4 @@ contributor — because to a reader, you are.
 contract), `docs/architecture.md` (payload/runtime split, ports), `docs/patterns/`
 (how we build — shapes, principles, invariants, focused patterns), `visions/` (the
 standing what-should-be). To work the repo as a good citizen from another control
-repo, pair this with the `working-cross-repo` skill.
+repo, pair this with the `agent-worktrees:working-cross-repo` skill.

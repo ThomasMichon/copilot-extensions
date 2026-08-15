@@ -180,7 +180,7 @@ account dotfiles repo, you're done -- `dotfiles_repo` just names it. If they
 **differ**, make the relationship explicit so cross-repo flows can find and
 update the account dotfiles repo:
 
-1. Link it as a related repo (see the `agent-worktrees-related` skill):
+1. Link it as a related repo (see the `agent-worktrees:agent-worktrees-related` skill):
    ```bash
    agent-worktrees related add <your-user>/dotfiles --role tooling \
      --summary "Account dotfiles repo cloned into every CodeSpace; hosts install.sh." \

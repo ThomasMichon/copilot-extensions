@@ -42,7 +42,7 @@
      than one agent collaborates on this effort, record the branch topology and
      who owns what, so a fresh agent (or a recovering host) can pick up the
      coordination from the file alone. This is the "branches" participant binding
-     — in an agent-worktrees repo, its mechanics live in the `git-collaboration`
+     — in an agent-worktrees repo, its mechanics live in the `agent-worktrees:git-collaboration`
      skill (the turn-key `git sync` / `feature-branch` / `merge-to-feature`
      helpers); keep only the plan here.
 

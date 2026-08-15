@@ -534,7 +534,7 @@ agent-worktrees lease list [--kind <kind>]                           # fabric-wi
   `AGENT_WORKTREES_LEASE_ORIGIN` to the control-plane (dotfiles) remote so agents
   in *every* project coordinate through one store.
 - **Two-tier consumers.** `agent-codespaces` uses this as the cross-machine **L2**
-  authority behind its host-local **L1** claim (see `borrowing-codespaces`); a
+  authority behind its host-local **L1** claim (see `agent-codespaces:borrowing-codespaces`); a
   live claim on another machine raises a `ClaimConflict` naming the remote holder.
 - **Degrade-safe.** Only a definitive lease conflict (exit 3) blocks; a missing
   origin / binstub / token degrades to best-effort, never a hard failure.

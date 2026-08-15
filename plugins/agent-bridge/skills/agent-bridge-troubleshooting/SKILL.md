@@ -55,7 +55,7 @@ All of these together mean it's the race, **not** a broken CodeSpace or bad plug
   hangs. It is intermittent (a generation race).
 
 If SSH itself fails, or a *fresh create* also hangs, it is **not** this -- treat
-it as a CodeSpace/transport problem (see the `codespaces-lifecycle` skill).
+it as a CodeSpace/transport problem (see the `agent-codespaces:codespaces-lifecycle` skill).
 
 ## Immediate workaround -- end + create
 
@@ -253,5 +253,5 @@ reliable recovery.
 ## Related skills
 
 - `agent-bridge` -- the CLI/service reference (same plugin).
-- `codespaces-lifecycle` (agent-codespaces) -- CodeSpace ssh/list/stop/delete +
+- `agent-codespaces:codespaces-lifecycle` -- CodeSpace ssh/list/stop/delete +
   rescue when the CodeSpace itself is broken (not the resume-race/relay-flap).

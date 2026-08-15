@@ -79,7 +79,7 @@ over); **agent-dispatch = fire-and-forget queued/claimed work you don't own** â€
 you may poll its status or send steering messages, but it is *not* a controlled
 sub-agent. Both agent-bridge and agent-dispatch cross machines; the axis is
 **ownership, not location**. For the queue side (claim, dedup, the six-state
-lifecycle) see the **`agent-dispatch`** skill; for dedup-safe open-ended
+lifecycle) see the **`agent-dispatch:agent-dispatch`** skill; for dedup-safe open-ended
 self-dispatch see **`pick-and-claim`**.
 
 ### Relay Chain Pattern
@@ -142,7 +142,7 @@ The full command reference -- `send` (sync/async, sessions, timeouts), agent
 and machine listing, session management, config adopt/show, and service
 control -- is in [references/cli-commands.md](references/cli-commands.md).
 
-For first-time setup, see the `copilot-extensions-setup` skill; for topology
+For first-time setup, see the `agent-worktrees:copilot-extensions-setup` skill; for topology
 configuration, see `plugins/agent-bridge/docs/machine-config.md`.
 
 ## Common Patterns
@@ -476,10 +476,10 @@ session continues from the remote with minimal rework.
 
 ## Delegating an Effort Slice (multi-agent coordination)
 
-When an **effort** (see the `planning-efforts` skill) is worked by more than one
+When an **effort** (see the `efforts:planning-efforts` skill) is worked by more than one
 agent, agent-bridge is the dispatch layer and the **effort README's
 `## Coordination` section** is the shared contract. The git mechanics are turn-key
-helpers in the `agent-worktrees` **`git-collaboration`** skill -- this section is
+helpers in the **`agent-worktrees:git-collaboration`** skill -- this section is
 only the *choreography*; it adds no new mechanics.
 
 > **A delegate is a real agent-bridge session, not a Copilot sub-agent.** Each
@@ -519,7 +519,7 @@ this only when the pieces are truly independent; otherwise use topology A.
 
 - Keep the effort README **ahead of the conversation** -- dispatches, landings,
   and blockers are journaled there so a fresh host (or a recovering one) resumes
-  from the file. Batch effort edits (each costs a PR) per the `planning-efforts`
+  from the file. Batch effort edits (each costs a PR) per the `efforts:planning-efforts`
   in-flight discipline.
 - Clean up dispatched worktrees afterward (see *Remote Worktree Lifecycle* below).
 
@@ -708,7 +708,7 @@ meant to outlive its caller, prefer a **CLI-backed autopilot session** (via
 NF-viewable, and completes its task explicitly. Ephemeral, caller-bounded helpers
 still use headless bridge agents (`send`/`create`). A **handoff** is the in-place
 variant: a live cutover replaces the current CLI in its mux with a successor that
-takes the work over (see the `context-handoff` and `agent-dispatch` skills).
+takes the work over (see the `context-handoff:context-handoff` and `agent-dispatch:agent-dispatch` skills).
 
 ## Troubleshooting
 

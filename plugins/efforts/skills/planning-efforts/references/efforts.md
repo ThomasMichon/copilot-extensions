@@ -149,14 +149,14 @@ repo binds it to its own executor provider:
 | machine fleet | a workstation / server | SSH alias, agent-bridge |
 | CodeSpaces | a GitHub CodeSpace | `agent-codespaces` |
 | containers | a local dev container | `agent-containers` |
-| branches | a shared feature branch several agents build on | git; in an agent-worktrees repo, the **`git-collaboration`** skill provides turn-key `git sync` / `feature-branch` / `merge-to-feature` helpers; delegates may be dispatched via **agent-bridge** |
+| branches | a shared feature branch several agents build on | git; in an agent-worktrees repo, the **`agent-worktrees:git-collaboration`** skill provides turn-key `git sync` / `feature-branch` / `merge-to-feature` helpers; delegates may be dispatched via **agent-bridge** |
 
 When the binding is **branches**, the effort README's `## Coordination` section
 holds the topology: a **shared feature branch** (delegates ff-push slices; the
 **host** owns PRs) for interdependent work, or **independent worktrees with
 per-slice PRs** when each PR leaves the default branch green on its own. In an
 agent-worktrees repo, the mechanics are turn-key helpers in the
-`git-collaboration` skill -- the effort records only the plan and who owns what.
+`agent-worktrees:git-collaboration` skill -- the effort records only the plan and who owns what.
 
 The effort README is where multi-participant coordination is planned and
 journaled, so a fresh agent can pick up the effort from the file alone. Keep
@@ -178,7 +178,7 @@ separation is what lets one plugin serve many repos and many executor plugins.
    review**, submit the effort as a PR (with auto-merge), let it be approved +
    merged, then **pull the worktree forward onto the merged plan** (the
    repo's normal pull-forward command; in an agent-worktrees repo this is the
-   `git-collaboration` skill's `git sync` helper) and execute on top. The operator
+   `agent-worktrees:git-collaboration` skill's `git sync` helper) and execute on top. The operator
    may waive their own review; the agent's gate is non-optional when automated
    review exists. It guarantees a reviewed plan, makes the effort visible to other
    agents (dedupe / co-work), and leaves a crash-recovery point. Where no

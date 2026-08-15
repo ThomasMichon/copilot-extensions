@@ -190,7 +190,7 @@ agent-bridge service status     # running state + bound port + PID
 > interactively signed in. For an always-on machine reached over SSH/RDP with no
 > persistent session, (re)install with `install.ps1 install -NonInteractive`
 > (or `AGENT_BRIDGE_NONINTERACTIVE=1`) to register a **boot-triggered S4U** task
-> instead -- opt-in, preserved across updates. See the `copilot-extensions-setup`
+> instead -- opt-in, preserved across updates. See the `agent-worktrees:copilot-extensions-setup`
 > skill.
 
 `agent-bridge start` (no `service`) runs the server in the **foreground** -- it
@@ -331,5 +331,5 @@ agent-bridge config remove my-profile
 agent-bridge config validate
 ```
 
-For first-time setup, see the `copilot-extensions-setup` skill. For
+For first-time setup, see the `agent-worktrees:copilot-extensions-setup` skill. For
 detailed topology configuration, see `plugins/agent-bridge/docs/machine-config.md`.

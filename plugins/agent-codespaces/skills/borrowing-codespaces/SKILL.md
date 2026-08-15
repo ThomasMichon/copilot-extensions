@@ -36,7 +36,7 @@ is owned by the control-plane delegation skill (e.g. `dispatching-work` /
 > `codespaces-setup` § *Readiness*.
 
 > **CodeSpace vs container:** a CodeSpace is the default for cloud feature work;
-> borrow a **local container** (`borrowing-containers` / `containers-fleet`) for
+> borrow a **local container** (`borrowing-containers` / `agent-containers:containers-fleet`) for
 > fast local iteration. The lease model is the same shape in both plugins.
 
 ---

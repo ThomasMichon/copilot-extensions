@@ -103,6 +103,13 @@ tools with `'server-name/*'` or `'server-name/tool-name'` in the tools list.
 - **By inference:** prompt matches the agent description, Copilot auto-delegates
 - **Programmatic:** `copilot --agent agent-name --prompt "..."`
 
+> **Namespacing across plugins.** When you refer to (or delegate to) a sub-agent
+> **shipped by another plugin**, use the **`plugin:name`** form — e.g.
+> `agent-logger:session-log-writer` or `copilot-extensions-harness:clean-room-judge`
+> — including as the `task` tool's `agent_type`. A bare name is reserved for an
+> agent defined in the *same* plugin. The identical convention covers cross-plugin
+> **skill** references (see the authoring-skills skill).
+
 ## Per-agent MCP ownership
 
 Sub-agents that depend on MCP tools should **define those servers in their own

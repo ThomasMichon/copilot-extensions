@@ -56,7 +56,7 @@ agent-codespaces config show
 ```
 
 For a convention-matching repo, skip the above entirely — see the
-`codespaces-setup` skill for when supplementary config is warranted and its
+`agent-codespaces:codespaces-setup` skill for when supplementary config is warranted and its
 format. A legacy repo-root `codespaces.yaml` is still read (relocate it with
 `agent-codespaces config migrate`).
 
@@ -77,7 +77,7 @@ WARNED about a missing sibling, re-run the agent-bridge installer **after** the
 agent-codespaces plugin is installed (section 0) so the service venv picks up
 the `agent_codespaces` package. (`agent-codespaces bridge register` exists but
 only POSTs a static `cs-*` snapshot with a TTL — it is optional and superseded
-by the resolver; see the `codespaces-lifecycle` skill.)
+by the resolver; see the `agent-codespaces:codespaces-lifecycle` skill.)
 
 ---
 
@@ -162,5 +162,5 @@ agent-mcp status            # prerequisites + available bridges
 ```
 
 Define a bridge under `~/.agent-mcp/bridges/<name>.yaml` (or pass `--config`),
-then validate it with `agent-mcp validate <name>`. See the `agent-mcp` skill for
+then validate it with `agent-mcp validate <name>`. See the `agent-mcp:agent-mcp` skill for
 the config format and how to wire it into an agent's `mcp-servers`.

@@ -448,7 +448,7 @@ The schema is identical -- both read the same `machines:` structure with
 differences are strictness (agent-worktrees errors on missing `machines:`
 key; agent-bridge tolerates it) and one optional field (`ssh.ip`).
 
-The `copilot-extensions-setup` skill can handle both when you want an
+The `agent-worktrees:copilot-extensions-setup` skill can handle both when you want an
 agent-worktrees-backed harness, but agent-bridge does not require that flow.
 
 ---
