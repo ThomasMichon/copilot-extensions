@@ -773,10 +773,17 @@ function Install-Runtime {
         exit 1
     }
     Remove-ConsoleTrampolines -VenvDir $VenvDir
+    # A client delegates read commands to the indexer host over SSH and runs NO
+    # local store/engine, so it installs only the light base package (CLI +
+    # transport + service shell). The host adds the [store] extra
+    # (lancedb/pyarrow/tree-sitter/numpy) it needs to read/write the index --
+    # those have no Windows-ARM64 wheels and are unneeded (and unbuildable) on a
+    # client, so gating keeps an ARM64 client provisionable.
+    $pkgSpec = if ((Get-InstallRole) -eq 'client') { "$PluginDir" } else { "$PluginDir[store]" }
     if (Get-Command uv -ErrorAction SilentlyContinue) {
-        $out = & uv pip install --python $VenvPython $PluginDir 2>&1 | Out-String
+        $out = & uv pip install --python $VenvPython $pkgSpec 2>&1 | Out-String
     } else {
-        $out = & $VenvPython -m pip install $PluginDir 2>&1 | Out-String
+        $out = & $VenvPython -m pip install $pkgSpec 2>&1 | Out-String
     }
     if ($LASTEXITCODE -ne 0) {
         Write-Fail 'Failed to install agent-index package into venv'
@@ -990,7 +997,7 @@ function Install-Engine {
     #      blocked host.
     $torchIdx = $env:AGENT_INDEX_TORCH_INDEX
     if (Get-Command uv -ErrorAction SilentlyContinue) {
-        $pipArgs = @('pip', 'install', '--python', $EngineVenvPython, "$PluginDir[engine]")
+        $pipArgs = @('pip', 'install', '--python', $EngineVenvPython, "$PluginDir[store,engine]")
         if ($Upgrade) { $pipArgs += '--upgrade' }
         $engOut = & uv @pipArgs 2>&1
         $engRc = $LASTEXITCODE
@@ -1001,7 +1008,7 @@ function Install-Engine {
             $engOut = @($engOut) + @($torchOut)
         }
     } else {
-        $pipArgs = @('-m', 'pip', 'install', "$PluginDir[engine]")
+        $pipArgs = @('-m', 'pip', 'install', "$PluginDir[store,engine]")
         if ($Upgrade) { $pipArgs += '--upgrade' }
         $engOut = & $EngineVenvPython @pipArgs 2>&1
         $engRc = $LASTEXITCODE

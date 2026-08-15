@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-index"
-version = "0.1.0-dev55"
+version = "0.1.0-dev56"
 description = "Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem."
 readme = "README.md"
 license = "MIT"
@@ -13,29 +13,20 @@ authors = [
     { name = "Thomas Michon" }
 ]
 dependencies = [
+    # Light, ARM64-friendly base: the CLI entry point, the project-aware
+    # transport (a client delegates read commands to the indexer host over SSH),
+    # the FastAPI service shell, and adoption config. A CLIENT installs ONLY this
+    # -- it runs no local store/engine. The indexing + vector-store stack is the
+    # [store] extra (host); the embedding stack is [engine] (host). These base
+    # deps all ship Windows-ARM64 wheels, so a client provisions on ARM64 laptops.
     "fastapi>=0.110",
     "uvicorn>=0.29",
     "httpx>=0.27",
     "pydantic>=2.0",
-    "numpy>=2.2.6",
-    "pyarrow>=15.0",
     "mcp>=2.0,<3.0",
     "agent-zdd",
-    # Store + chunking belong to the light, torch-free SERVICE runtime: it
-    # reads/writes the LanceDB store and chunks source with tree-sitter (falling
-    # back to line-based chunking when a grammar is absent). The heavy embedding
-    # stack (torch + ...) is the separate ``engine`` extra, provisioned only on
-    # the engine host so a routine service update never rebuilds it (effort
-    # agent-index-engine-daemon).
-    "lancedb",
-    "tree-sitter>=0.23,<1.0",
-    "tree-sitter-python>=0.23,<1.0",
-    "tree-sitter-javascript>=0.25.0,<1.0",
-    "tree-sitter-typescript>=0.23,<1.0",
-    "tree-sitter-bash>=0.23,<1.0",
     # Structured adoption config (.agent-index/config.yaml: role, indexer
-    # designation, routing). Small, pure-Python, torch-free -- fine for the light
-    # service (effort agent-index-engine-daemon, Phase 6 adoption).
+    # designation, routing). Small, pure-Python.
     "pyyaml>=6.0",
 ]
 
@@ -45,10 +36,31 @@ dependencies = [
 agent-zdd = { path = "libs/zdd" }
 
 [project.optional-dependencies]
+store = [
+    # The indexing + vector-store stack: reads/writes the LanceDB store and chunks
+    # source with tree-sitter (falling back to line-based chunking when a grammar
+    # is absent). Provisioned on a HOST only (the light, torch-free SERVICE
+    # runtime) -- a client delegates over SSH and never touches the local store,
+    # and these have no Windows-ARM64 wheels (an ARM64 client that pulled them
+    # backtracked to pylance==0.0.2/pyarrow==8.0.0 and failed to build). The
+    # search/indexing modules import them LAZILY, so the light base loads fine
+    # without them. The heavy embedding stack is the separate [engine] extra.
+    "numpy>=2.2.6",
+    "pyarrow>=15.0",
+    "lancedb",
+    "tree-sitter>=0.23,<1.0",
+    "tree-sitter-python>=0.23,<1.0",
+    "tree-sitter-javascript>=0.25.0,<1.0",
+    "tree-sitter-typescript>=0.23,<1.0",
+    "tree-sitter-bash>=0.23,<1.0",
+]
 dev = [
     "pytest",
     "httpx",
     "fastapi",
+    # The test suite exercises the store/indexing/search modules, so dev pulls
+    # the [store] extra (self-reference) even though a client runtime does not.
+    "agent-index[store]",
 ]
 engine = [
     # The heavy embedding stack -- the durable, persistent ENGINE runtime only,

@@ -604,10 +604,16 @@ _ensure_runtime() {
     fi
 
     _pip_install() {
+        # A client delegates over SSH and runs NO local store/engine, so it
+        # installs only the light base package; the host adds the [store] extra
+        # (lancedb/pyarrow/tree-sitter/numpy) it needs to read/write the index.
+        # Those have no Windows-ARM64 wheels and are unneeded on a client.
+        local pkg="$PLUGIN_DIR"
+        [[ "$(_install_role)" != "client" ]] && pkg="$PLUGIN_DIR[store]"
         if [[ "$have_uv" -eq 1 ]]; then
-            uv pip install --python "$VENV_PYTHON" "$PLUGIN_DIR"
+            uv pip install --python "$VENV_PYTHON" "$pkg"
         else
-            "$VENV_PYTHON" -m pip install "$PLUGIN_DIR"
+            "$VENV_PYTHON" -m pip install "$pkg"
         fi
     }
     if ! pkg_out="$(_pip_install 2>&1)"; then
@@ -791,7 +797,7 @@ _install_engine() {
     local rc=0
     local torch_idx="${AGENT_INDEX_TORCH_INDEX:-}"
     if [[ "$have_uv" -eq 1 ]]; then
-        local uv_args=(pip install --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR[engine]")
+        local uv_args=(pip install --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR[store,engine]")
         [[ "$upgrade" -eq 1 ]] && uv_args+=(--upgrade)
         uv "${uv_args[@]}" || rc=$?
         if [[ "$rc" -eq 0 && -n "$torch_idx" ]]; then
@@ -799,7 +805,7 @@ _install_engine() {
             uv pip install --python "$ENGINE_VENV_PYTHON" --index-url "$torch_idx" --no-deps --reinstall-package torch torch || rc=$?
         fi
     else
-        local pip_args=(-m pip install "$PLUGIN_DIR[engine]")
+        local pip_args=(-m pip install "$PLUGIN_DIR[store,engine]")
         [[ "$upgrade" -eq 1 ]] && pip_args+=(--upgrade)
         "$ENGINE_VENV_PYTHON" "${pip_args[@]}" || rc=$?
         if [[ "$rc" -eq 0 && -n "$torch_idx" ]]; then
