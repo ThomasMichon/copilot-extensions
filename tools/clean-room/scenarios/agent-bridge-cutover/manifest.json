@@ -1,0 +1,27 @@
+{
+  "name": "agent-bridge-cutover",
+  "description": "Tier-P F1 cutover-resilience scenario: install + provision agent-bridge on a fresh box, then drive the installer's real `agent-bridge deploy` seam (the OS-agnostic zdd active/passive graceful cutover) through a battery of THORNY situations and assert the binding invariant of the correct-install-flows effort (dotfiles#1393) -- a version cutover must NEVER kill in-flight, non-resumable work. agent-bridge stands a new daemon up beside the old (start --passive on a fresh port), health-gates it, flips the routing table (active.json), drains the old at the TURN boundary, and retires it. Checks: (routing-flip-retire) deploy stands a new daemon up beside the old, flips the routing table, and retires the old, and clients resolve the new daemon (beside-not-in-place; nothing hard-killed); (drain-gate) `drain` opens the gate (/health -> draining -- the turn boundary at which new work is refused and in-flight work is waited on) and `undrain` releases it; (breadcrumb-recover) an aborted cutover that strands a DRAINED survivor is healed by recovery (deploy --recover undrains it). FIDELITY: a fully live 'turn survives the flip' assertion needs a real model/ACP child and is a Tier-E concern; this Tier-P probe proves the cutover MECHANISM the turn-survival guarantee is built on (routing flip + retirement, the drain gate/turn boundary, cooperative recovery). The probe is portable stdlib-only, so it is verifiable off-Docker too. Name-free / public.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": [] },
+  "auth": { "copilot": "required", "gh": "optional", "ado": "none" },
+  "validates": "graceful-daemon-cutover",
+  "config": {
+    "CR_MARKETPLACE_REPO": "ThomasMichon/copilot-extensions",
+    "CR_MARKETPLACE_NAME": "copilot-extensions",
+    "CR_UV_INDEX": "(opt-in uv-index fixture)",
+    "CR_CUTOVER_CHECKS": "comma-separated subset of: routing-flip-retire,drain-gate,breadcrumb-recover"
+  },
+  "expected_artifacts": [
+    "~/.copilot/installed-plugins/<marketplace>/agent-bridge",
+    "~/.agent-bridge/versions/<ver>/bin/python (built slot with zdd)",
+    "~/.local/bin/agent-bridge (self-provisioning binstub)"
+  ],
+  "stages": [
+    { "n": 0, "title": "environment (fresh machine)" },
+    { "n": 1, "title": "install agent-bridge" },
+    { "n": 2, "title": "runtime provisions on first session" },
+    { "n": 3, "title": "cutover resilience battery (thorny situations)" }
+  ]
+}
