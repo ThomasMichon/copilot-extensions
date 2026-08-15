@@ -16,6 +16,16 @@ from agent_index import transport
 def _patch(monkeypatch, *, root, indexer, machine, role="client"):
     monkeypatch.setattr(transport.config, "repo_root", lambda explicit=None: root)
     monkeypatch.setattr(transport.config, "read_indexer", lambda r: indexer)
+    monkeypatch.setattr(transport.config, "read_indexers", lambda r: [indexer] if indexer else [])
+    monkeypatch.setattr(transport.config, "machine_id", lambda: machine)
+    monkeypatch.setattr(transport.config, "resolve_role", lambda: role)
+
+
+def _patch_multi(monkeypatch, *, root, indexers, machine, role="client"):
+    """Patch config for an ordered multi-indexer designation."""
+    monkeypatch.setattr(transport.config, "repo_root", lambda explicit=None: root)
+    monkeypatch.setattr(transport.config, "read_indexer", lambda r: indexers[0] if indexers else None)
+    monkeypatch.setattr(transport.config, "read_indexers", lambda r: list(indexers))
     monkeypatch.setattr(transport.config, "machine_id", lambda: machine)
     monkeypatch.setattr(transport.config, "resolve_role", lambda: role)
 
@@ -112,10 +122,14 @@ def test_maybe_delegate_client_delegates_over_ssh(monkeypatch):
     assert rc == 0
     argv = captured["argv"]
     assert argv[0] == "ssh"
-    assert argv[1] == "indexer-host"
-    # pwsh EncodedCommand carries the inner, forcing --json for search.
-    assert argv[2].startswith("pwsh -NoProfile -WindowStyle Hidden -EncodedCommand ")
-    enc = argv[2].rsplit(" ", 1)[1]
+    assert "indexer-host" in argv
+    # Non-interactive, bounded-connect options are present.
+    assert "BatchMode=yes" in argv
+    assert any(a.startswith("ConnectTimeout=") for a in argv)
+    # The remote command is the last argv element.
+    cmd = argv[-1]
+    assert cmd.startswith("pwsh -NoProfile -WindowStyle Hidden -EncodedCommand ")
+    enc = cmd.rsplit(" ", 1)[1]
     inner = base64.b64decode(enc).decode("utf-16-le")
     assert "agent-index.ps1" in inner
     assert "'hello world'" in inner
@@ -132,6 +146,134 @@ def test_maybe_delegate_client_ssh_failure_reports_error(monkeypatch, capsys):
     rc = transport.maybe_delegate("status", ["status"])
     assert rc == 1
     assert "SSH transport" in capsys.readouterr().out
+
+
+# -- maybe_delegate: ordered SSH failover --------------------------------------
+
+def _runner(results):
+    """Build a fake ``subprocess.run`` that yields queued results per call.
+
+    Each entry is either an int (returncode) or an ``OSError`` to raise. Records
+    the ssh alias reached on each call in ``calls``."""
+    calls: list[str] = []
+    seq = list(results)
+
+    def _run(argv, check=False):
+        # alias is the element just before the remote command (the last arg).
+        calls.append(argv[-2])
+        outcome = seq.pop(0)
+        if isinstance(outcome, OSError):
+            raise outcome
+
+        class _P:
+            returncode = outcome
+
+        return _P()
+
+    return _run, calls
+
+
+def test_failover_primary_down_falls_back_to_secondary(monkeypatch):
+    _patch_multi(
+        monkeypatch, root="/repo",
+        indexers=[{"machine": "primary", "ssh": "primary"},
+                  {"machine": "secondary", "ssh": "secondary"}],
+        machine="client-host",
+    )
+    run, calls = _runner([transport.SSH_TRANSPORT_RC, 0])
+    monkeypatch.setattr(transport.subprocess, "run", run)
+    rc = transport.maybe_delegate("search", ["search", "q"])
+    assert rc == 0
+    assert calls == ["primary", "secondary"]
+
+
+def test_failover_primary_oserror_falls_back(monkeypatch):
+    _patch_multi(
+        monkeypatch, root="/repo",
+        indexers=[{"machine": "primary", "ssh": "primary"},
+                  {"machine": "secondary", "ssh": "secondary"}],
+        machine="client-host",
+    )
+    run, calls = _runner([OSError("ssh: connect"), 0])
+    monkeypatch.setattr(transport.subprocess, "run", run)
+    rc = transport.maybe_delegate("status", ["status"])
+    assert rc == 0
+    assert calls == ["primary", "secondary"]
+
+
+def test_failover_all_down_reports_aggregated_error(monkeypatch, capsys):
+    _patch_multi(
+        monkeypatch, root="/repo",
+        indexers=[{"machine": "primary", "ssh": "primary"},
+                  {"machine": "secondary", "ssh": "secondary"}],
+        machine="client-host",
+    )
+    run, calls = _runner([transport.SSH_TRANSPORT_RC, transport.SSH_TRANSPORT_RC])
+    monkeypatch.setattr(transport.subprocess, "run", run)
+    rc = transport.maybe_delegate("status", ["status"])
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "every designated indexer" in out
+    assert "primary" in out and "secondary" in out
+    assert calls == ["primary", "secondary"]
+
+
+def test_failover_genuine_remote_error_is_authoritative(monkeypatch):
+    # A non-255 remote exit is the real result: do NOT retry on a secondary.
+    _patch_multi(
+        monkeypatch, root="/repo",
+        indexers=[{"machine": "primary", "ssh": "primary"},
+                  {"machine": "secondary", "ssh": "secondary"}],
+        machine="client-host",
+    )
+    run, calls = _runner([2, 0])
+    monkeypatch.setattr(transport.subprocess, "run", run)
+    rc = transport.maybe_delegate("search", ["search", "q"])
+    assert rc == 2
+    assert calls == ["primary"]
+
+
+def test_single_indexer_255_is_returned_verbatim(monkeypatch):
+    # With no fallback, a lone indexer's 255 is its authoritative result
+    # (single-indexer back-compat), not an aggregated transport error.
+    _patch(monkeypatch, root="/repo", indexer={"machine": "only", "ssh": "only"}, machine="client-host")
+    run, calls = _runner([transport.SSH_TRANSPORT_RC])
+    monkeypatch.setattr(transport.subprocess, "run", run)
+    rc = transport.maybe_delegate("status", ["status"])
+    assert rc == transport.SSH_TRANSPORT_RC
+    assert calls == ["only"]
+
+
+def test_secondary_indexer_machine_runs_local(monkeypatch):
+    # This machine is the *secondary* designated indexer -> serve from its own
+    # store (run local), never delegate to the primary.
+    _patch_multi(
+        monkeypatch, root="/repo",
+        indexers=[{"machine": "primary", "ssh": "primary"},
+                  {"machine": "secondary", "ssh": "secondary"}],
+        machine="secondary",
+    )
+    called = {"n": 0}
+    monkeypatch.setattr(transport.subprocess, "run",
+                        lambda *a, **k: called.__setitem__("n", called["n"] + 1))
+    assert transport.maybe_delegate("search", ["search", "q"]) is None
+    assert called["n"] == 0
+
+
+def test_failover_skips_indexers_without_ssh(monkeypatch):
+    # A designated indexer lacking an ssh alias is not SSH-reachable; it is
+    # skipped and the reachable secondary is used.
+    _patch_multi(
+        monkeypatch, root="/repo",
+        indexers=[{"machine": "primary"},
+                  {"machine": "secondary", "ssh": "secondary"}],
+        machine="client-host",
+    )
+    run, calls = _runner([0])
+    monkeypatch.setattr(transport.subprocess, "run", run)
+    rc = transport.maybe_delegate("status", ["status"])
+    assert rc == 0
+    assert calls == ["secondary"]
 
 
 # -- inner command / argv builders --------------------------------------------
@@ -153,14 +295,33 @@ def test_build_inner_bash_uses_home_binstub_and_shlex():
 def test_build_ssh_argv_bash_wraps_in_login_shell():
     argv = transport.build_ssh_argv({"ssh": "linbox", "shell": "bash"}, ["status"])
     assert argv[0] == "ssh"
-    assert argv[1] == "linbox"
-    assert argv[2].startswith("bash -lc '")
-    assert argv[2].endswith("'")
+    assert "linbox" in argv
+    assert argv[-1].startswith("bash -lc '")
+    assert argv[-1].endswith("'")
 
 
 def test_build_ssh_argv_defaults_to_pwsh():
     argv = transport.build_ssh_argv({"ssh": "winbox"}, ["status"])
-    assert "EncodedCommand" in argv[2]
+    assert "EncodedCommand" in argv[-1]
+
+
+def test_build_ssh_argv_carries_connect_options(monkeypatch):
+    monkeypatch.delenv("AGENT_INDEX_SSH_CONNECT_TIMEOUT_S", raising=False)
+    argv = transport.build_ssh_argv({"ssh": "winbox"}, ["status"])
+    assert "BatchMode=yes" in argv
+    assert f"ConnectTimeout={transport.DEFAULT_SSH_CONNECT_TIMEOUT_S}" in argv
+
+
+def test_build_ssh_argv_connect_timeout_env_override(monkeypatch):
+    monkeypatch.setenv("AGENT_INDEX_SSH_CONNECT_TIMEOUT_S", "3")
+    argv = transport.build_ssh_argv({"ssh": "winbox"}, ["status"])
+    assert "ConnectTimeout=3" in argv
+
+
+@pytest.mark.parametrize("bad", ["", "0", "-5", "nope"])
+def test_ssh_connect_timeout_falls_back_on_bad_value(monkeypatch, bad):
+    monkeypatch.setenv("AGENT_INDEX_SSH_CONNECT_TIMEOUT_S", bad)
+    assert transport._ssh_connect_timeout() == transport.DEFAULT_SSH_CONNECT_TIMEOUT_S
 
 
 @pytest.mark.parametrize("sub,expect_json", [("search", True), ("status", False),

@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -42,6 +43,34 @@ DELEGABLE = ("search", "similar", "clusters", "status")
 # Default remote shell when a project's ``indexer.shell`` is unset. A Windows
 # indexer uses pwsh; a Linux indexer must declare ``shell: bash``.
 DEFAULT_SHELL = "pwsh"
+
+# ``ssh`` exit code for a connection-level failure (host down, DNS/route error,
+# auth refused) -- distinct from any exit code the remote command itself
+# returns. The SSH failover across ordered indexers treats *only* this code (and
+# an ``OSError`` launching ssh) as "try the next indexer"; a genuine remote
+# command failure is authoritative and is returned as-is (mirrors the HTTP
+# failover, which only falls over on an unreachable ``/health`` probe).
+SSH_TRANSPORT_RC = 255
+
+# Default per-hop TCP connect timeout (seconds) applied to every delegated ssh
+# invocation. Bounds how long an unreachable indexer stalls before failover
+# moves to the next; overridable via ``AGENT_INDEX_SSH_CONNECT_TIMEOUT_S``.
+DEFAULT_SSH_CONNECT_TIMEOUT_S = 8
+
+
+def _ssh_connect_timeout() -> int:
+    """Per-hop ssh ``ConnectTimeout`` (seconds), from
+    ``AGENT_INDEX_SSH_CONNECT_TIMEOUT_S``. Defensively falls back to the default
+    on a missing/malformed/non-positive value so a stray env setting never
+    breaks routing."""
+    raw = os.environ.get("AGENT_INDEX_SSH_CONNECT_TIMEOUT_S")
+    if not raw:
+        return DEFAULT_SSH_CONNECT_TIMEOUT_S
+    try:
+        val = int(float(raw))
+    except (TypeError, ValueError):
+        return DEFAULT_SSH_CONNECT_TIMEOUT_S
+    return val if val > 0 else DEFAULT_SSH_CONNECT_TIMEOUT_S
 
 
 def plan_route() -> tuple[str, dict | None]:
@@ -93,14 +122,21 @@ def _build_inner(shell: str, argv: list[str]) -> str:
 
 
 def build_ssh_argv(indexer: dict, argv: list[str]) -> list[str]:
-    """Build the local ``ssh`` argv that runs ``agent-index <argv>`` on the host."""
+    """Build the local ``ssh`` argv that runs ``agent-index <argv>`` on the host.
+
+    Every hop carries ``BatchMode=yes`` (never block on an interactive auth
+    prompt -- delegation runs unattended over key/agent auth) and a bounded
+    ``ConnectTimeout`` so an unreachable indexer fails fast (exit 255) and the
+    ordered failover moves on to the next indexer instead of stalling.
+    """
     alias = str(indexer["ssh"]).strip()
     shell = str(indexer.get("shell") or DEFAULT_SHELL).strip().lower()
     inner = _build_inner(shell, argv)
+    opts = ["-o", "BatchMode=yes", "-o", f"ConnectTimeout={_ssh_connect_timeout()}"]
     if shell == "bash":
         escaped = inner.replace("'", "'\\''")
-        return ["ssh", alias, f"bash -lc '{escaped}'"]
-    return ["ssh", alias, _pwsh_remote(inner)]
+        return ["ssh", *opts, alias, f"bash -lc '{escaped}'"]
+    return ["ssh", *opts, alias, _pwsh_remote(inner)]
 
 
 def _forward_argv(sub: str, raw_argv: list[str]) -> list[str]:
@@ -121,46 +157,40 @@ def maybe_delegate(sub: str, raw_argv: list[str]) -> int | None:
     """Route a read subcommand.
 
     Returns ``None`` when the command should run **locally**; otherwise delegates
-    over SSH to the project's indexer and returns the remote exit code.
+    over SSH to the project's designated indexer(s) and returns the remote exit
+    code.
 
     Decision:
 
-    * A positively-resolved indexer designation for the current project routes:
-      this machine is the ``host`` (``machine_id() == indexer.machine``) → run
-      local (``None``); otherwise → delegate ``agent-index <argv>`` to
-      ``indexer.ssh``.
+    * A positively-resolved indexer designation for the current project routes.
+      This machine runs **locally** (``None``) when it is *any* of the designated
+      indexers (``machine_id() == indexers[i].machine``) -- a primary or a
+      secondary host serves from its own store, and this also terminates the SSH
+      recursion at the host. Otherwise this is a **client**: delegate
+      ``agent-index <argv>`` across the ordered ``indexers`` (primary first),
+      trying the next only when a hop fails at the **SSH connection level**
+      (exit 255 or an ``OSError`` launching ssh). A genuine remote command exit
+      is authoritative and returned as-is -- a bad query must not silently retry
+      on another indexer.
     * No usable indexer for the current directory: **refuse** only when truly
-      bare — not inside any repo — on a ``client``-role machine (there is no
+      bare -- not inside any repo -- on a ``client``-role machine (there is no
       project to pick a transport target, and a client has no local store).
       Everywhere else (inside a project without a designation, or a
-      host/standalone box) run locally, preserving direct local dispatch. This
-      also terminates the SSH recursion: the delegated command runs in the host's
-      home dir (no project), where the host resolves to local.
+      host/standalone box) run locally, preserving direct local dispatch.
     """
     if sub not in DELEGABLE:
         return None
     root = config.repo_root()
-    indexer = config.read_indexer(root) if root is not None else None
+    indexers = config.read_indexers(root) if root is not None else []
 
-    if indexer and indexer.get("ssh"):
-        designated = str(indexer.get("machine", "")).strip().lower()
-        if config.machine_id().strip().lower() == designated:
-            return None  # this machine is the host for this project -> run local
-        # client -> run the same command on the indexer host over SSH
-        argv = build_ssh_argv(indexer, _forward_argv(sub, raw_argv))
-        try:
-            proc = subprocess.run(argv, check=False)  # noqa: S603 - argv built from config
-        except OSError as exc:
-            return _emit_error(
-                {
-                    "error": (
-                        f"agent-index: SSH transport to indexer '{indexer.get('ssh')}' "
-                        f"failed: {exc}"
-                    ),
-                    "hits": [],
-                }
-            )
-        return proc.returncode
+    if indexers:
+        me = config.machine_id().strip().lower()
+        if any(str(ix.get("machine", "")).strip().lower() == me for ix in indexers):
+            return None  # this machine is a designated indexer -> run local
+        candidates = [ix for ix in indexers if ix.get("ssh")]
+        if candidates:
+            return _delegate_over_ssh(sub, raw_argv, candidates)
+        # designation without any ssh alias -> fall through to bare handling
 
     if root is None and config.resolve_role() == "client":
         return _emit_error(
@@ -175,3 +205,39 @@ def maybe_delegate(sub: str, raw_argv: list[str]) -> int | None:
             }
         )
     return None
+
+
+def _delegate_over_ssh(sub: str, raw_argv: list[str], candidates: list[dict]) -> int:
+    """Run the read subcommand on the first reachable indexer in *candidates*.
+
+    Iterates the ordered indexers (primary first); a hop that fails at the SSH
+    connection level (exit 255, or an ``OSError`` launching ssh) is recorded and
+    skipped so a down primary or broken SSH hop transparently falls back to a
+    secondary. The 255-as-transport-failure signal applies only when a fallback
+    remains: with a single candidate its exit code is returned verbatim (a lone
+    indexer's 255 is its authoritative result, preserving single-indexer
+    back-compat). When every candidate fails to connect, one aggregated error is
+    emitted."""
+    fwd = _forward_argv(sub, raw_argv)
+    multi = len(candidates) > 1
+    failures: list[str] = []
+    for ix in candidates:
+        argv = build_ssh_argv(ix, fwd)
+        try:
+            proc = subprocess.run(argv, check=False)  # noqa: S603 - argv built from config
+        except OSError as exc:
+            failures.append(f"{ix.get('ssh')}: {exc}")
+            continue
+        if proc.returncode == SSH_TRANSPORT_RC and multi:
+            failures.append(f"{ix.get('ssh')}: ssh connection failed (exit 255)")
+            continue
+        return proc.returncode
+    return _emit_error(
+        {
+            "error": (
+                "agent-index: SSH transport failed for every designated indexer "
+                f"({'; '.join(failures)})."
+            ),
+            "hits": [],
+        }
+    )
