@@ -6,9 +6,8 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 _SETUP_LOG_DIR="${TMPDIR:-/tmp}/worktree-setup-logs"
 mkdir -p "$_SETUP_LOG_DIR" 2>/dev/null || true
-SETUP_LOG="${WORKTREE_SETUP_LOG:-${APERTURE_SETUP_LOG:-$_SETUP_LOG_DIR/setup-$$.log}}"
+SETUP_LOG="${WORKTREE_SETUP_LOG:-$_SETUP_LOG_DIR/setup-$$.log}"
 export WORKTREE_SETUP_LOG="$SETUP_LOG"
-export APERTURE_SETUP_LOG="$SETUP_LOG"  # backward compat
 
 # ---------------------------------------------------------------------------
 # Launch-flow correlation id -- minted once per launcher run and threaded
@@ -126,7 +125,6 @@ for arg in "$@"; do
         _SEEN_SEPARATOR=1
     elif [[ "$arg" == "--recovery" || "$arg" == "recovery" ]]; then
         export WORKTREE_RECOVERY=1
-        export APERTURE_RECOVERY=1  # backward compat
         setup_log INFO 'Recovery mode requested via CLI arg'
     else
         FILTERED_ARGS+=("$arg")
@@ -138,7 +136,7 @@ if [[ ${#COPILOT_PASSTHROUGH[@]} -gt 0 ]]; then
 fi
 
 # Recovery escape hatch (broken venv)
-if [[ "${WORKTREE_RECOVERY:-${APERTURE_RECOVERY:-}}" == "1" ]] && [[ ! -x "$PYTHON" ]]; then
+if [[ "${WORKTREE_RECOVERY:-}" == "1" ]] && [[ ! -x "$PYTHON" ]]; then
     PROJECT="${WORKTREE_PROJECT:-}"
     if [[ -z "$PROJECT" ]]; then
         echo "ERROR: WORKTREE_PROJECT is not set. Set it or run from inside the anchor repo." >&2
@@ -166,7 +164,7 @@ fi
 # Guard: WORKTREE_NO_UPDATE=1 skips this block entirely (set by --no-update
 # and by the re-exec below to prevent infinite loops).
 
-_NO_UPDATE="${WORKTREE_NO_UPDATE:-${APERTURE_NO_UPDATE:-}}"
+_NO_UPDATE="${WORKTREE_NO_UPDATE:-}"
 _STAGE_PID=""
 _UPDATE_APPLIED=""
 
@@ -441,7 +439,7 @@ fi
 # start and never blocks this re-attach.
 aw_joining_live_session() {
     # No-mux launches always (re)start Copilot directly -- the update is relevant.
-    local _nomux_env="${WORKTREE_NO_MUX:-${APERTURE_NO_MUX:-}}"
+    local _nomux_env="${WORKTREE_NO_MUX:-}"
     local _nomux_plan
     _nomux_plan=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print('1' if d.get('no_mux') else '0')" 2>/dev/null) || _nomux_plan=0
     if [[ "$_nomux_env" == "1" || "$_nomux_plan" == "1" ]]; then
@@ -479,7 +477,7 @@ if [[ "$ACTION" == "exec" ]]; then
     NO_MUX=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print('1' if d.get('no_mux') else '0')")
 
     # Env var override takes precedence
-    _NO_MUX="${WORKTREE_NO_MUX:-${APERTURE_NO_MUX:-}}"
+    _NO_MUX="${WORKTREE_NO_MUX:-}"
     if [[ "$_NO_MUX" == "1" ]]; then
         NO_MUX="1"
     fi
@@ -527,7 +525,7 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
     # resolve context from CWD (git-like). `env -u` runs inside the pane, so it
     # is robust to tmux-server-env inheritance. The launcher's own logic keeps
     # its local WORKTREE_ID / WORKTREE_PROJECT shell vars.
-    CLEAN_ENV=(env -u WORKTREE_PROJECT -u WORKTREE_ID -u APERTURE_WORKTREE_ID)
+    CLEAN_ENV=(env -u WORKTREE_PROJECT -u WORKTREE_ID)
 
     if [[ -n "$WORK_DIR" ]]; then
         cd "$WORK_DIR"
@@ -624,7 +622,6 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
         TMUX_ENV_FLAGS=()
         if [[ -n "${SETUP_LOG:-}" ]]; then
             TMUX_ENV_FLAGS+=(-e "WORKTREE_SETUP_LOG=$SETUP_LOG")
-            TMUX_ENV_FLAGS+=(-e "APERTURE_SETUP_LOG=$SETUP_LOG")
         fi
         if [[ -n "${LAUNCH_ID:-}" ]]; then
             TMUX_ENV_FLAGS+=(-e "WORKTREE_LAUNCH_ID=$LAUNCH_ID")
