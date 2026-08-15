@@ -956,20 +956,46 @@ function Install-Engine {
     }
 
     # agent-index[engine] -- the heavy embedding stack into the DURABLE venv only.
-    # Default PyPI torch is the CPU wheel; set AGENT_INDEX_TORCH_INDEX to a CUDA
-    # wheel index (e.g. https://download.pytorch.org/whl/cu121) for a GPU host.
+    #
+    # Torch install is TWO STEPS so a GPU host works even behind a managed/CFS
+    # package feed:
+    #   1. Install agent-index[engine] from the DEFAULT feed (governed mirror or
+    #      public PyPI). This pulls the CPU torch wheel plus ALL of torch's
+    #      pure-python deps (sympy, networkx, jinja2, ...) and the rest of the
+    #      engine stack (transformers, sentence-transformers, numpy).
+    #   2. If AGENT_INDEX_TORCH_INDEX is set (a CUDA wheel index, e.g.
+    #      https://download.pytorch.org/whl/cu124), SWAP the torch wheel ONLY from
+    #      that index with --no-deps. This is essential on a CFS box: the CUDA index
+    #      links torch's pure-python deps to files.pythonhosted.org, which is often
+    #      network-blocked -- so we take deps from the reachable default feed (step 1)
+    #      and only the (reachable) CUDA torch wheel from the CUDA index here. The
+    #      CUDA build's exact dep pins (e.g. sympy==1.13.1) are satisfied at runtime
+    #      by the step-1 versions; --no-deps skips re-resolving them through the
+    #      blocked host.
+    $torchIdx = $env:AGENT_INDEX_TORCH_INDEX
     if (Get-Command uv -ErrorAction SilentlyContinue) {
         $pipArgs = @('pip', 'install', '--python', $EngineVenvPython, "$PluginDir[engine]")
         if ($Upgrade) { $pipArgs += '--upgrade' }
-        if ($env:AGENT_INDEX_TORCH_INDEX) { $pipArgs += @('--extra-index-url', $env:AGENT_INDEX_TORCH_INDEX) }
         $engOut = & uv @pipArgs 2>&1
+        $engRc = $LASTEXITCODE
+        if ($engRc -eq 0 -and $torchIdx) {
+            Write-Host "  ...    Swapping in CUDA torch from $torchIdx (wheel only, --no-deps)" -ForegroundColor DarkGray
+            $torchOut = & uv pip install --python $EngineVenvPython --index-url $torchIdx --no-deps --reinstall-package torch torch 2>&1
+            $engRc = $LASTEXITCODE
+            $engOut = @($engOut) + @($torchOut)
+        }
     } else {
         $pipArgs = @('-m', 'pip', 'install', "$PluginDir[engine]")
         if ($Upgrade) { $pipArgs += '--upgrade' }
-        if ($env:AGENT_INDEX_TORCH_INDEX) { $pipArgs += @('--extra-index-url', $env:AGENT_INDEX_TORCH_INDEX) }
         $engOut = & $EngineVenvPython @pipArgs 2>&1
+        $engRc = $LASTEXITCODE
+        if ($engRc -eq 0 -and $torchIdx) {
+            Write-Host "  ...    Swapping in CUDA torch from $torchIdx (wheel only, --no-deps)" -ForegroundColor DarkGray
+            $torchOut = & $EngineVenvPython -m pip install --index-url $torchIdx --no-deps --force-reinstall torch 2>&1
+            $engRc = $LASTEXITCODE
+            $engOut = @($engOut) + @($torchOut)
+        }
     }
-    $engRc = $LASTEXITCODE
     $ErrorActionPreference = $prevEAP
     if ($engRc -ne 0) {
         Write-Warn 'Engine runtime install failed (torch stack) -- light service unaffected; provision later with the "engine" action'
