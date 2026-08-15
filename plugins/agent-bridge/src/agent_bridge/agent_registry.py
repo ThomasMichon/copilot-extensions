@@ -1141,7 +1141,7 @@ def derive_topology_agents(
                     ),
                 )
 
-    # Apply the profile's facility-wide spawn defaults to every derived agent.
+    # Apply the profile's multi-machine system-wide spawn defaults to every derived agent.
     # Derived agents otherwise carry no copilot args/env, so the model target had
     # to be repeated on each hand-authored acp-agents.json entry. Applying it here
     # lets the derived roster be the single source of the machine lanes. A derived
@@ -1243,7 +1243,7 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
         repo_root = Path(profile.machines_yaml).expanduser().resolve().parent
         related = _load_related_entries(repo_root)
         local_machine, local_platform = _detect_local_machine(machines)
-        # In-repo config (<repo>/.agent-bridge/config.yaml) carries the facility
+        # In-repo config (<repo>/.agent-bridge/config.yaml) carries the multi-machine system
         # spawn defaults *in the repo* so they ride to every machine on sync. The
         # machine-local topology profile still wins when it sets a default (an
         # explicit local override); otherwise the repo-declared default is used.

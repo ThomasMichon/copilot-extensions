@@ -714,7 +714,7 @@ class BridgeClient:
 
         If this process is a descendant of a Copilot session (its
         ``AGENT_BRIDGE_SESSION_ID`` env is set -- e.g. an agent running an
-        in-session ``aperture-labs services agent-bridge update``), that session
+        in-session ``test-chamber services agent-bridge update``), that session
         is passed as ``exclude_session_id`` so the redeploy's graceful-cancel
         does not cancel the very turn driving the update (#1790).
         """

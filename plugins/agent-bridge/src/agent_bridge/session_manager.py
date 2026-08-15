@@ -1278,7 +1278,7 @@ class SessionManager:
 
         with tracker.stage(ConnectStage.LAUNCH_ACP):
             # Tag the child's environment with its own bridge session id so a
-            # command the agent runs (e.g. an in-session `aperture-labs services
+            # command the agent runs (e.g. an in-session `test-chamber services
             # agent-bridge update`) can tell the drain to spare THIS session --
             # cancelling the turn running the update would abort the update
             # (#1790). Any descendant process inherits it.

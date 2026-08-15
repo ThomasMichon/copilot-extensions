@@ -531,8 +531,8 @@ class TestDiscoverLocalAgents:
         projects_yaml = tmp_path / "projects.yaml"
         projects_yaml.write_text(
             "projects:\n"
-            "  facility:\n"
-            '    anchor: "/home/user/src/facility"\n'
+            "  multi-machine system:\n"
+            '    anchor: "/home/user/src/multi-machine system"\n'
             "    expose_agent: true\n"
             "  plugin-src:\n"
             '    anchor: "/home/user/src/plugin-src"\n'
@@ -542,7 +542,7 @@ class TestDiscoverLocalAgents:
         )
         monkeypatch.setenv("AGENT_WORKTREES_PROJECTS_YAML", str(projects_yaml))
         agents = discover_local_agents()
-        assert set(agents) == {"facility", "legacy"}
+        assert set(agents) == {"multi-machine system", "legacy"}
         assert "plugin-src" not in agents
 
     def test_missing_projects_yaml(self, tmp_path: Path, monkeypatch):

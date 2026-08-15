@@ -747,7 +747,7 @@ def _build_remote_cmd(target: SpawnTarget, session_id: str = "") -> str:
         if target.copilot_args:
             binstub_args.extend(target.copilot_args)
         # PowerShell -- the default OpenSSH shell on native Windows targets
-        # (lambda-core, borealis) -- treats a *bare* ``--`` as its
+        # (anomalous-potato, emancipation-cube) -- treats a *bare* ``--`` as its
         # end-of-parameters sigil and drops it, stripping the ACP passthrough
         # separator before the project binstub sees it (the binstub then
         # forwards ``--acp --stdio ...`` to argparse, which rejects them, #985).

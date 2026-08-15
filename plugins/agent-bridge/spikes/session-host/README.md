@@ -1,8 +1,8 @@
 # Session-Host survive-and-reattach spike (Phase 0)
 
 Throwaway spike for the **agent-bridge Session-Host decoupling** effort
-(aperture-labs [#1759](https://gitea.michon.ski/example-user/aperture-labs/issues/1759) /
-Phase-0 go/no-go [#1761](https://gitea.michon.ski/example-user/aperture-labs/issues/1761)).
+(test-chamber [#1759](https://gitea.example.com/example-user/test-chamber/issues/1759) /
+Phase-0 go/no-go [#1761](https://gitea.example.com/example-user/test-chamber/issues/1761)).
 
 It proves the load-bearing primitive **before** any real code is built: a
 Copilot `--acp` child can be owned by a **Session Host** that outlives the
@@ -69,7 +69,7 @@ python run_spike.py --child real --front-job --front-breakaway-ok --host-breakaw
 Exit code is `0` on PASS, `1` on FAIL. `--keep` retains the temp state dir
 (`summary.json`, per-front result JSON).
 
-## Results (2026-07-03, lambda-core)
+## Results (2026-07-03, anomalous-potato)
 
 | Scenario | OS | Verdict |
 |----------|----|---------|
