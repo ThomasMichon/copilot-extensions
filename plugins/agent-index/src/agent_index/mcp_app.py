@@ -168,13 +168,15 @@ async def agent_index_clusters(
 @mcp.tool()
 async def agent_index_status() -> str:
     """Show index health — plugin/version, chunk counts, sources, indexing state."""
-    data = await _get("/status", {})
+    data = await _get("/status", {"sources": 1})
     index = data.get("index", {}) or {}
+    available = index.get("available")
+    chunks = index.get("chunks")
     lines = [
         f"Plugin: {data.get('plugin', 'agent-index')} {data.get('version', '')}",
         f"Draining: {data.get('draining', False)}",
-        f"Index available: {index.get('available', False)}",
-        f"Total chunks: {index.get('chunks', 0)}",
+        f"Index available: {available if available is not None else 'unknown'}",
+        f"Total chunks: {chunks if chunks is not None else 'unknown'}",
     ]
     sources = index.get("sources") or {}
     if sources:
