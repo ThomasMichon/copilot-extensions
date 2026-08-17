@@ -35,6 +35,7 @@ NPM_REGISTRY="${CR_NPM_REGISTRY:-}"
 UV_INDEX="${CR_UV_INDEX:-}"
 TOKEN_ACCOUNT=""
 NO_TOKEN=0
+PASS_ENV=()
 MODE=run
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -46,9 +47,10 @@ while [ $# -gt 0 ]; do
         --npm-registry) NPM_REGISTRY="$2"; shift 2 ;;
         --uv-index) UV_INDEX="$2"; shift 2 ;;
         --token-account) TOKEN_ACCOUNT="$2"; shift 2 ;;
+        --pass-env) PASS_ENV+=("$2"); shift 2 ;;
         --no-token) NO_TOKEN=1; shift ;;
         build|auth|run|shell|down|bridge-register|bridge-unregister|all) MODE="$1"; shift ;;
-        *) echo "usage: $0 [--image base|pristine] [--name-suffix SUFFIX] [--scenario NAME|DIR] [--until N|all] [--then shell|down] [--npm-registry URL] [--uv-index URL] [--token-account USER] [--no-token] {build|auth|run|shell|down|bridge-register|bridge-unregister|all}" >&2; exit 2 ;;
+        *) echo "usage: $0 [--image base|pristine] [--name-suffix SUFFIX] [--scenario NAME|DIR] [--until N|all] [--then shell|down] [--npm-registry URL] [--uv-index URL] [--token-account USER] [--pass-env NAME]... [--no-token] {build|auth|run|shell|down|bridge-register|bridge-unregister|all}" >&2; exit 2 ;;
     esac
 done
 
@@ -134,6 +136,19 @@ start_container() {
     fi
     docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
     mkdir -p "$RESULTS"
+    # Generic host->container value relay: forward each --pass-env NAME by name
+    # (value from the runner's env, not on the docker CLI args). Only names set on
+    # the host are forwarded; a missing one warns rather than silently dropping.
+    local pass_args=()
+    local _n
+    for _n in "${PASS_ENV[@]}"; do
+        [ -z "$_n" ] && continue
+        if [ -z "${!_n:-}" ]; then
+            echo "warn: --pass-env '$_n' is not set on the host -- not forwarding" >&2
+            continue
+        fi
+        pass_args+=(-e "$_n")
+    done
     docker run -d --name "$CONTAINER" \
         -v "$SCENARIO_DIR:/home/operator/scenario:ro" \
         -v "$LIB_DIR:/home/operator/lib:ro" \
@@ -148,6 +163,7 @@ start_container() {
         -e "CR_LOGDIR=/home/operator/cr-logs" \
         -e "CR_REPORT=/home/operator/out/cr-report.json" \
         "${token_args[@]}" \
+        "${pass_args[@]}" \
         --entrypoint sleep "$img" infinity >/dev/null
     [ -n "$token" ] && unset COPILOT_GITHUB_TOKEN
     echo "container $CONTAINER up (results -> $RESULTS)"

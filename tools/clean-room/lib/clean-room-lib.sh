@@ -25,6 +25,15 @@
 #                                   (exit 0 iff no FAILs); usually called for you
 #                                   by the --until gate or at scenario end
 #
+# Live-scenario auth shims (Tier-E scenarios that create/connect a real
+# CodeSpace -- the rig injects only COPILOT_GITHUB_TOKEN and runs no inner login
+# flow, so these provide the generic, product-agnostic shim):
+#   cr_ensure_gh                 -- install the gh CLI if the base image lacks it
+#   cr_ensure_ssh_client         -- install an ssh client if absent (connect needs one)
+#   cr_seed_gh_codespace_auth    -- seed gh KEYRING auth from the token AND keep
+#                                   GH_TOKEN exported (both are needed; see below),
+#                                   asserting the codespace scope
+#
 # Environment consumed:
 #   CR_REPORT        path for the JSON report            (default $HOME/cr-report.json)
 #   CR_LOGDIR        per-label command logs              (default $HOME/cr-logs)
@@ -161,6 +170,75 @@ jam() {  # <category> <evidence-ref> [<unjam-hint>]
         "$( [ -n "$hint" ] && printf ' -- hint: %s' "$hint" )"
     CR_RESULTS+=("{\"kind\":\"FAIL\",\"phase\":$CR_CUR_PHASE,\"msg\":\"jam[$(_cr_esc "$cat")]: $(_cr_esc "$ev")\"}")
     CR_JAMS+=("{\"category\":\"$(_cr_esc "$cat")\",\"phase\":$CR_CUR_PHASE,\"evidence\":\"$(_cr_esc "$ev")\",\"hint\":\"$(_cr_esc "$hint")\"}")
+}
+
+# ---- live-scenario auth shims (Tier-E CodeSpace scenarios) ----------------
+# The rig injects a single COPILOT_GITHUB_TOKEN and deliberately runs no inner
+# login flow. A live scenario that actually creates/connects a CodeSpace needs
+# more than that raw token, so these helpers provide the generic,
+# product-agnostic shim. (Product/tenant-specific credential relaying -- e.g. an
+# ADO/az inner-loop token -- layers ON TOP of these in the consuming harness,
+# which can hold the fuller credential stack; it does not belong in this public
+# substrate.)
+
+# Install the GitHub CLI if the base image lacks it (from the GitHub releases
+# tarball). Idempotent; puts gh on PATH. Honors CR_GH_VERSION (default 2.62.0).
+cr_ensure_gh() {
+    command -v gh >/dev/null 2>&1 && return 0
+    if [ -x "$HOME/.local/bin/gh" ]; then export PATH="$HOME/.local/bin:$PATH"; return 0; fi
+    local ver="${CR_GH_VERSION:-2.62.0}"
+    ( cd /tmp && curl -fsSL -o gh.tgz "https://github.com/cli/cli/releases/download/v${ver}/gh_${ver}_linux_amd64.tar.gz" \
+        && tar xzf gh.tgz && mkdir -p "$HOME/.local/bin" && cp "gh_${ver}_linux_amd64/bin/gh" "$HOME/.local/bin/gh" ) >/dev/null 2>&1
+    export PATH="$HOME/.local/bin:$PATH"
+    command -v gh >/dev/null 2>&1
+}
+
+# Install an ssh client if absent (agent-codespaces connect needs one). Records a
+# PASS/JAM. Returns non-zero if it could not be provided.
+cr_ensure_ssh_client() {
+    if command -v ssh >/dev/null 2>&1; then pass "openssh-client present ($(ssh -V 2>&1))"; return 0; fi
+    if command -v sudo >/dev/null 2>&1; then
+        sudo apt-get update -qq && sudo apt-get install -y -qq openssh-client
+    else
+        apt-get update -qq && apt-get install -y -qq openssh-client
+    fi >/dev/null 2>&1
+    if command -v ssh >/dev/null 2>&1; then
+        pass "openssh-client installed ($(ssh -V 2>&1))"; return 0
+    fi
+    jam "codespace-config" "no ssh client and could not install openssh-client" "agent-codespaces connect needs an ssh client"
+    return 1
+}
+
+# Seed gh auth for a live CodeSpace scenario from the injected token. Records a
+# PASS/JAM and returns non-zero on failure. Call once in a live scenario's setup.
+#
+# Two facts drive this shim, and BOTH bite silently without it:
+#  (1) agent-codespaces' create scope-check reads the gh KEYRING / `gh auth
+#      status`, NOT a raw GH_TOKEN env var -- so the token must be logged in via
+#      `gh auth login --with-token`, or `create` refuses ("gh is not
+#      authenticated"). This mirrors the real golden path's `gh auth login`.
+#  (2) the agent-bridge daemon PROPAGATES GH_TOKEN to the in-CodeSpace copilot at
+#      ACP launch (connect stage 7). If GH_TOKEN is unset, `agent-bridge send`
+#      fails with "LAUNCH_ACP: Authentication required" -- the missing "inner"
+#      auth leg (the CodeSpace-side copilot has no login flow, so the injected
+#      token must flow through). So GH_TOKEN must ALSO stay exported.
+# The keyring and GH_TOKEN coexist (they resolve the same account); this seeds
+# both and asserts the codespace scope.
+cr_seed_gh_codespace_auth() {
+    if ! cr_ensure_gh; then
+        jam "auth-gh" "gh CLI not installed (base image omits it)" "provide gh, or use the golden path's setup.sh prereq phase"
+        return 1
+    fi
+    if [ -n "${COPILOT_GITHUB_TOKEN:-}" ]; then
+        printf '%s' "$COPILOT_GITHUB_TOKEN" | gh auth login --hostname github.com --with-token >/dev/null 2>&1 || true
+        export GH_TOKEN="$COPILOT_GITHUB_TOKEN"
+    fi
+    if gh auth status 2>&1 | grep -q "codespace"; then
+        pass "gh authenticated with the codespace scope (keyring + GH_TOKEN)"
+        return 0
+    fi
+    jam "auth-gh" "gh not authenticated with the codespace scope" "inject a codespace-scoped COPILOT_GITHUB_TOKEN (run.ps1 -TokenAccount <acct>)"
+    return 1
 }
 
 _cr_join() {  # print array elements joined by ",\n    " with a leading indent

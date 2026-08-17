@@ -102,6 +102,19 @@ scenarios/<name>/
 report shape (`cr-report.json`) keeps its historical top-level keys and adds an
 `env{}` snapshot and a classified `jams[]` array.
 
+For **Tier-E live** scenarios (that actually create/connect a real CodeSpace) the
+lib also carries the generic **auth shim** — the rig injects only
+`COPILOT_GITHUB_TOKEN` and runs no inner login flow, so a live scenario calls:
+`cr_ensure_gh` (install gh if the base image lacks it) · `cr_ensure_ssh_client`
+(install an ssh client — connect needs one) · `cr_seed_gh_codespace_auth` (seed
+the gh **keyring** from the token **and** keep `GH_TOKEN` exported — the first is
+what agent-codespaces' create scope-check reads, the second is what the
+agent-bridge daemon propagates to the in-CodeSpace copilot at ACP launch; both
+are needed or `create`/`dispatch` fail with confusing auth errors). These stay
+**product-agnostic**; a tenant-specific inner-loop credential (e.g. an ADO/`az`
+bearer) is relayed **on top** by the consuming harness via `--pass-env` (below),
+not baked into this substrate.
+
 **`generic-single-plugin`** is the reference scenario — today's Layer-0 install
 check — proving the substrate generalises without an internal dependency.
 
@@ -171,6 +184,27 @@ have Copilot entitlement. Options:
 - `-NoToken` (`--no-token`) falls back to the one-time device-code login
   committed to a cached `:authed` image (`-Mode auth`); re-run `auth` when it
   expires.
+
+**Relaying an extra host credential into the box (`-PassEnv` / `--pass-env`).**
+`COPILOT_GITHUB_TOKEN` is what the rig itself needs. A **Tier-E live** scenario
+may need one more host-provided credential for its inner loop — e.g. a
+host-minted ADO/`az` bearer so the credential relay can proxy it into the
+CodeSpace (closing the ADO manual gate). Rather than bake any tenant specifics
+into this public runner, `-PassEnv <NAME>` (repeatable; `--pass-env NAME` on
+`run.sh`) forwards a **named host env var** into the container by name (value from
+the runner's env, never on the docker CLI args). A downstream harness mints the
+credential on the host and passes it through:
+
+```powershell
+$env:ADO_BEARER_TOKEN = (az account get-access-token --scope 499b84ac-…/.default --query accessToken -o tsv)
+./run.ps1 -Scenario <downstream-live-scenario> -PassEnv ADO_BEARER_TOKEN …
+```
+
+A `-PassEnv` name that is not set on the host is skipped with a warning (so a
+downstream scenario fails loud rather than silently unauthenticated). The
+tenant-specific wiring (which scope to mint, how the in-container relay consumes
+it) lives with the **consuming harness**, which can hold the fuller credential
+stack — not in this substrate.
 
 > **Credential hygiene:** the token is passed via the runner's environment (not
 > on the docker CLI args) and lives only in the disposable container. The
