@@ -99,6 +99,21 @@ def test_ok_when_asyncio_timeout_named(tmp_path: Path) -> None:
     assert _run(tmp_path).returncode == 0
 
 
+def test_ok_when_concurrent_futures_timeout_named(tmp_path: Path) -> None:
+    # concurrent.futures.TimeoutError is a valid safe catch on 3.10 (asyncio's
+    # wait_for timeout derives from it); the dotted name must be recognized, not
+    # truncated to '?.TimeoutError' (regression for the PR #642 review note).
+    _write(tmp_path, """
+        import concurrent.futures
+        async def f(proc):
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=5.0)
+            except (TimeoutError, concurrent.futures.TimeoutError):
+                pass
+    """)
+    assert _run(tmp_path).returncode == 0
+
+
 def test_ok_when_broad_exception(tmp_path: Path) -> None:
     _write(tmp_path, """
         async def f(proc):

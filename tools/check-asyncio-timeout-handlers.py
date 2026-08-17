@@ -104,12 +104,23 @@ def _exc_names(expr: ast.expr | None) -> set[str]:
         return names
     targets = expr.elts if isinstance(expr, ast.Tuple) else [expr]
     for t in targets:
-        if isinstance(t, ast.Name):
-            names.add(t.id)
-        elif isinstance(t, ast.Attribute):
-            base = t.value.id if isinstance(t.value, ast.Name) else "?"
-            names.add(f"{base}.{t.attr}")
+        dotted = _dotted_name(t)
+        if dotted is not None:
+            names.add(dotted)
     return names
+
+
+def _dotted_name(node: ast.expr) -> str | None:
+    """Full dotted name for a ``Name``/``Attribute`` chain (e.g.
+    ``concurrent.futures.TimeoutError``), or ``None`` for anything else. Recurses
+    so a multi-level attribute is not truncated to ``?.attr`` (which would let a
+    safe ``concurrent.futures.TimeoutError`` handler read as unsafe)."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        base = _dotted_name(node.value)
+        return f"{base}.{node.attr}" if base is not None else None
+    return None
 
 
 def _suppress_names(node: ast.With) -> set[str]:
