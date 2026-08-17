@@ -1,0 +1,33 @@
+{
+  "name": "agent-machines-solo",
+  "description": "Tier-P F1 solo scenario: install ONLY agent-machines on a fresh box and assert the standalone machine-state reconciler CLI stands up without sibling plugins or requirement packages -- payload installs, runtime self-provisions from the session/login-shell stamp or installer provision fallback, the binstub reports a real version, and read-only/preview verbs handle an absent registry cleanly without tracebacks. Name-free / public.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": [] },
+  "auth": { "copilot": "required", "gh": "none", "ado": "none" },
+  "base": "standalone-without-agent-worktrees-or-requirement-packages",
+  "validates": [
+    "agent-machines payload installs by itself from the configured marketplace",
+    "runtime self-provisions on a fresh machine through the session/login-shell binstub path or installer provision fallback",
+    "the login-shell binstub is on PATH and --version prints a non-empty real version",
+    "discover/plan/validate/help and restore's default dry-run preview handle absent machine-state config without tracebacks"
+  ],
+  "config": {
+    "CR_MARKETPLACE_REPO": "ThomasMichon/copilot-extensions",
+    "CR_MARKETPLACE_NAME": "copilot-extensions",
+    "CR_UV_INDEX": "(opt-in uv-index fixture)"
+  },
+  "expected_artifacts": [
+    "~/.copilot/installed-plugins/<marketplace>/agent-machines",
+    "~/.agent-machines/versions/<ver> or ~/.agent-machines/.venv (runtime)",
+    "~/.local/bin/agent-machines (binstub)"
+  ],
+  "stages": [
+    { "n": 0, "title": "environment (fresh machine)" },
+    { "n": 1, "title": "install ONLY agent-machines" },
+    { "n": 2, "title": "runtime self-provisions (session stamp + binstub/provision fallback)" },
+    { "n": 3, "title": "binstub on PATH + reports a REAL version" },
+    { "n": 4, "title": "standalone read/preview verbs handle absent config" }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "name": "agent-vault-cutover",
+  "description": "Tier-P F1 cutover-resilience witness for agent-vault. agent-vault's daemon caches the KeePassXC master password with a TTL and serves credential fetches over a discoverable local endpoint; the graceful-daemon-cutover pattern names it a FUTURE connection-owner adopter (a version cutover should not drop an in-flight fetch / the unlocked TTL cache). VERIFIED IN CODE: agent-vault has the CLIENT-SIDE half -- the rendezvous cutover fallback ladder (agent_vault.rendezvous.resolve: override -> live rendezvous file -> legacy constant) -- but has NOT yet adopted the DAEMON-SIDE active/passive zdd cutover (no vendored zdd, no CutoverOrchestrator/--passive/routing flip). So this scenario proves the rendezvous fallback ladder deterministically (a portable stdlib-only probe run off the built slot python) and reports the daemon-side zdd cutover as a classified, forward-looking gap (INFO, not a probe failure) so it stays green today and its phase-3 battery lights up the moment vault vendors zdd. Tracks issue #609. Name-free / public.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": [] },
+  "auth": { "copilot": "required", "gh": "optional", "ado": "none" },
+  "validates": "graceful-daemon-cutover (client-side rendezvous fallback ladder today; daemon-side zdd active/passive not yet adopted -- #609)",
+  "config": {
+    "CR_MARKETPLACE_REPO": "ThomasMichon/copilot-extensions",
+    "CR_MARKETPLACE_NAME": "copilot-extensions",
+    "CR_UV_INDEX": "(opt-in uv-index fixture)",
+    "CR_LADDER_CHECKS": "comma-separated subset of: ladder-override,ladder-file,ladder-legacy,ladder-precedence,ladder-empty-raises"
+  },
+  "expected_artifacts": [
+    "~/.copilot/installed-plugins/<marketplace>/agent-vault",
+    "~/.agent-vault/versions/<ver>/bin/python (built slot with agent_vault.rendezvous)",
+    "~/.local/bin/agent-vault (self-provisioning binstub)"
+  ],
+  "stages": [
+    { "n": 0, "title": "environment (fresh machine)" },
+    { "n": 1, "title": "install agent-vault" },
+    { "n": 2, "title": "runtime provisions on first session (built slot + agent_vault importable)" },
+    { "n": 3, "title": "cutover fallback ladder (client-side resilience) + daemon-side gap" }
+  ]
+}
