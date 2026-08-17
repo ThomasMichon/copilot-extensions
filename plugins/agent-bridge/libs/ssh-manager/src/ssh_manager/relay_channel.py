@@ -323,7 +323,12 @@ class SupervisedRelayForward:
             return ""
         try:
             raw = await asyncio.wait_for(proc.stderr.read(4096), timeout=timeout)
-        except (TimeoutError, OSError):
+        # On Python <=3.10 ``asyncio.wait_for`` raises ``asyncio.TimeoutError``
+        # (a ``concurrent.futures.TimeoutError``), which is NOT the builtin
+        # ``TimeoutError`` -- so it must be caught explicitly or a routine
+        # "no stderr yet" poll escapes and fails relay establish (dotfiles
+        # #1549). ``forward.py`` already does this; keep the two in lockstep.
+        except (asyncio.TimeoutError, TimeoutError, OSError):
             return ""
         return raw.decode(errors="replace")
 
@@ -339,7 +344,7 @@ class SupervisedRelayForward:
             return ""
         try:
             raw = await asyncio.wait_for(proc.stderr.read(4096), timeout=2.0)
-        except (TimeoutError, OSError):
+        except (asyncio.TimeoutError, TimeoutError, OSError):
             return ""
         return raw.decode(errors="replace").strip()
 
@@ -353,7 +358,7 @@ class SupervisedRelayForward:
             return
         try:
             await asyncio.wait_for(proc.wait(), timeout=5.0)
-        except (TimeoutError, ProcessLookupError):
+        except (asyncio.TimeoutError, TimeoutError, ProcessLookupError):
             pass
 
     async def _sleep(self, delay: float) -> None:
