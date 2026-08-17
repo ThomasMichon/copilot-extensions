@@ -168,19 +168,35 @@ def _ado_scope(resource: str = ADO_REST_RESOURCE) -> str:
 async def host_can_mint_ado_token(
     resource: str = ADO_REST_RESOURCE, *, timeout: float = 30.0,
 ) -> bool:
-    """Whether the *host* az identity can mint an ADO REST bearer for ``resource``.
+    """Whether the *host* can mint an ADO REST bearer for ``resource``.
 
-    Exercises the exact same path the relay uses (``AzLoginSource`` +
-    ``get-azure-token`` with scope normalization), so a True result here means a
-    dispatched agent's ``ado-auth-helper get-access-token`` will succeed. Never
-    raises; a probe failure returns False.
+    Exercises the same routing the relay uses: an injected test bearer
+    (``InjectedTokenSource``) is honored first when present, then the host az
+    identity (``AzLoginSource`` + ``get-azure-token`` with scope normalization).
+    A True result means a dispatched agent's ``ado-auth-helper get-access-token``
+    will succeed over the relay. Never raises; a probe failure returns False.
     """
+    scope = _ado_scope(resource)
+    # Mirror the relay's source order: a pre-minted injected bearer (a hermetic
+    # test venue that cannot run `az login`) satisfies the gate exactly as it
+    # serves the runtime request. Inert when its env var is unset (returns None).
+    try:
+        from credential_relay.sources.injected_token import InjectedTokenSource
+
+        inj = InjectedTokenSource(allowed_resources=["*"])
+        resp = await inj.resolve(
+            "get-azure-token", {"scope": scope}, timeout=timeout,
+        )
+        if resp and "token=" in resp:
+            return True
+    except Exception:
+        log.debug("injected ADO REST token probe raised", exc_info=True)
     try:
         from credential_relay.sources.az_login import AzLoginSource
 
         src = AzLoginSource(allowed_resources=["*"], cache_ttl_override=0)
         resp = await src.resolve(
-            "get-azure-token", {"scope": _ado_scope(resource)}, timeout=timeout,
+            "get-azure-token", {"scope": scope}, timeout=timeout,
         )
     except Exception:
         log.debug("ADO REST token probe raised", exc_info=True)

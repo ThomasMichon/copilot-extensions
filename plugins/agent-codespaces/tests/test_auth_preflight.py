@@ -257,3 +257,44 @@ class TestAdoRestPreflight:
             import credential_relay.sources.az_login as azmod
             mp.setattr(azmod, "AzLoginSource", _FakeAz)
             assert await ap.host_can_mint_ado_token() is False
+
+    @pytest.mark.asyncio
+    async def test_host_can_mint_true_via_injected_token(self):
+        """An injected bearer satisfies the gate even when az cannot mint --
+        mirrors the relay routing (injected source tried before az-login)."""
+        import agent_codespaces.auth_preflight as ap
+        from credential_relay.sources.injected_token import DEFAULT_ENV_VAR
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv(DEFAULT_ENV_VAR, "injected-bearer")
+
+            class _NoAz:
+                def __init__(self, *a, **k):
+                    pass
+
+                async def resolve(self, action, fields, *, timeout=30.0):
+                    return None  # az cannot mint (no host login)
+
+            import credential_relay.sources.az_login as azmod
+            mp.setattr(azmod, "AzLoginSource", _NoAz)
+            assert await ap.host_can_mint_ado_token() is True
+
+    @pytest.mark.asyncio
+    async def test_injected_absent_falls_through_to_az(self):
+        """With no injected token, the gate falls through to the az identity."""
+        import agent_codespaces.auth_preflight as ap
+        from credential_relay.sources.injected_token import DEFAULT_ENV_VAR
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.delenv(DEFAULT_ENV_VAR, raising=False)
+
+            class _FakeAz:
+                def __init__(self, *a, **k):
+                    pass
+
+                async def resolve(self, action, fields, *, timeout=30.0):
+                    return "protocol=https\ntoken=abc123\n\n"
+
+            import credential_relay.sources.az_login as azmod
+            mp.setattr(azmod, "AzLoginSource", _FakeAz)
+            assert await ap.host_can_mint_ado_token() is True
