@@ -153,13 +153,13 @@ def build_app() -> FastAPI:
         return {"status": "draining" if gate.draining else "ok"}
 
     @app.get("/status")
-    def status(request: Request) -> dict[str, Any]:
+    def status(request: Request, sources: bool = False) -> dict[str, Any]:
         gate: DrainGate = request.app.state.drain_gate
         payload: dict[str, Any] = {
             "plugin": "agent-index",
             "version": __version__,
             "draining": gate.draining,
-            "index": _index_status(),
+            "index": _index_status(include_sources=sources),
         }
         runner = getattr(request.app.state, "task_runner", None)
         if runner is not None:
@@ -337,39 +337,72 @@ def _missing_indexing_dependencies() -> str | None:
     return None
 
 
-def _index_status() -> dict[str, Any]:
-    """Return real index counts when the optional store is available."""
+def _index_status(include_sources: bool = False) -> dict[str, Any]:
+    """Return real index counts when the optional store is available.
+
+    A ``chunks`` value of ``0`` always means "measured empty"; when the store
+    cannot be read at all, ``chunks``/``available`` are ``None`` ("unknown"),
+    never a fabricated ``0`` (see dotfiles issue #1531 — a slow/unreachable
+    service must not masquerade as a wiped index).
+
+    The per-source histogram is O(n) over the content table, so it is computed
+    only when ``include_sources`` is set — keeping ``/status`` fast on a large
+    index — and is decoupled from the count so a histogram failure can never
+    zero a valid ``count_rows()``.
+    """
     try:
         import lancedb
 
         from .index_config import IndexConfig
+    except Exception:
+        log.debug("Index store library unavailable", exc_info=True)
+        return {"chunks": None, "available": None, "tables": {}, "sources": {}}
 
+    try:
         cfg = IndexConfig(data_dir=data_dir())
         lance_dir = cfg.lance_dir
         if not lance_dir.exists():
             return {"chunks": 0, "available": False, "tables": {}, "sources": {}}
         db = lancedb.connect(str(lance_dir))
         table_names = sorted(db.table_names())
-        tables: dict[str, int] = {}
-        sources: dict[str, int] = {}
-        for table_name in table_names:
-            try:
-                table = db.open_table(table_name)
-                tables[table_name] = int(table.count_rows())
-                if table_name == cfg.content_table and tables[table_name] > 0:
-                    rows = table.search().select(["source"]).limit(tables[table_name]).to_list()
-                    for row in rows:
-                        source = row.get("source")
-                        if source:
-                            sources[source] = sources.get(source, 0) + 1
-            except Exception:
-                log.debug("Failed to read index table %s", table_name, exc_info=True)
-                tables[table_name] = 0
-        chunks = tables.get(cfg.content_table, 0)
-        return {"chunks": chunks, "available": chunks > 0, "tables": tables, "sources": sources}
     except Exception:
         log.debug("Index status unavailable", exc_info=True)
-        return {"chunks": 0, "available": False, "tables": {}, "sources": {}}
+        return {"chunks": None, "available": None, "tables": {}, "sources": {}}
+
+    tables: dict[str, int | None] = {}
+    for table_name in table_names:
+        try:
+            table = db.open_table(table_name)
+            tables[table_name] = int(table.count_rows())
+        except Exception:
+            # A count failure is "unknown," never a fabricated 0.
+            log.debug("Failed to count index table %s", table_name, exc_info=True)
+            tables[table_name] = None
+
+    # The store was read successfully, so an absent content table means a
+    # measurably-empty index (0), NOT "unknown". Only a failed count_rows()
+    # (recorded as None above) is genuinely unknown.
+    if cfg.content_table in tables:
+        chunks = tables[cfg.content_table]
+    else:
+        chunks = 0
+    available = chunks > 0 if isinstance(chunks, int) else None
+
+    sources: dict[str, int] = {}
+    if include_sources and isinstance(chunks, int) and chunks > 0:
+        # O(n) histogram, kept separate from the count above so a failure here
+        # leaves the valid chunk count intact.
+        try:
+            table = db.open_table(cfg.content_table)
+            rows = table.search().select(["source"]).limit(chunks).to_list()
+            for row in rows:
+                source = row.get("source")
+                if source:
+                    sources[source] = sources.get(source, 0) + 1
+        except Exception:
+            log.debug("Failed to build source histogram", exc_info=True)
+
+    return {"chunks": chunks, "available": available, "tables": tables, "sources": sources}
 
 
 def _publish_routing(cfg: Config, bound_port: int, *, passive: bool = False) -> None:

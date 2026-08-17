@@ -15,5 +15,6 @@ def test_status_degrades_without_index(monkeypatch, tmp_path) -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["index"]["chunks"] == 0
-    assert payload["index"]["available"] is False
+    # Store library unavailable => "unknown", NOT a fabricated empty index.
+    assert payload["index"]["chunks"] is None
+    assert payload["index"]["available"] is None

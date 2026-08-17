@@ -43,22 +43,24 @@ def _status_payload() -> dict[str, Any]:
             "running": False,
             "plugin": "agent-index",
             "version": __version__,
-            "index": {"chunks": 0},
+            "index": {"chunks": None, "available": None, "unreachable": True},
         }
     try:
-        with httpx.Client(timeout=2.0) as client:
+        with httpx.Client(timeout=10.0) as client:
             payload = client.get(f"{url}/status").json()
         payload["running"] = True
         payload["endpoint"] = url
         return payload
     except (httpx.HTTPError, ValueError) as exc:
+        # Failing to reach the service is "unknown," not an empty index:
+        # never fabricate chunks:0 here (dotfiles issue #1531).
         return {
             "running": False,
             "plugin": "agent-index",
             "version": __version__,
             "error": str(exc),
             "endpoint": url,
-            "index": {"chunks": 0},
+            "index": {"chunks": None, "available": None, "unreachable": True},
         }
 
 
