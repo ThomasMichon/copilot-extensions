@@ -64,6 +64,12 @@ else
 fi
 [ -f "$SCENARIO_DIR/scenario.sh" ] || { echo "scenario '$SCENARIO_NAME' has no scenario.sh" >&2; exit 2; }
 LIB_DIR="$HERE/lib"
+# Optional per-suite shared helpers: if the selected scenario's parent dir holds
+# a `_lib/`, it is mounted read-only at /home/operator/scenario-lib and exposed
+# as $CR_SCENARIO_LIB, so sibling scenarios in a suite can source shared phase
+# helpers instead of each duplicating them. Opt-in: absent -> unchanged.
+SCENARIO_SHARED_LIB="$(dirname "$SCENARIO_DIR")/_lib"
+[ -d "$SCENARIO_SHARED_LIB" ] || SCENARIO_SHARED_LIB=""
 
 # $NAME_SUFFIX makes the CONTAINER + agent names unique (concurrent clean-rooms
 # of the same image); the image/tag are shared (name-collision is only on the
@@ -149,10 +155,17 @@ start_container() {
         fi
         pass_args+=(-e "$_n")
     done
+    # Optional per-suite shared-lib mount (see scenario resolution above).
+    local scen_lib_args=()
+    if [ -n "$SCENARIO_SHARED_LIB" ]; then
+        scen_lib_args=(-v "$SCENARIO_SHARED_LIB:/home/operator/scenario-lib:ro" \
+                       -e "CR_SCENARIO_LIB=/home/operator/scenario-lib")
+    fi
     docker run -d --name "$CONTAINER" \
         -v "$SCENARIO_DIR:/home/operator/scenario:ro" \
         -v "$LIB_DIR:/home/operator/lib:ro" \
         -v "$RESULTS:/home/operator/out" \
+        "${scen_lib_args[@]}" \
         -e "CR_LIB=/home/operator/lib/clean-room-lib.sh" \
         -e "CR_SCENARIO_NAME=$SCENARIO_NAME" \
         -e "CR_MARKETPLACE_REPO=${CR_MARKETPLACE_REPO:-ThomasMichon/copilot-extensions}" \

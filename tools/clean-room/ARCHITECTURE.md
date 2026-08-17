@@ -173,6 +173,16 @@ The `-Scenario <dir>` seam is what keeps this split clean: the runner mounts a
 self-contained scenario dir (plus the shared `lib/`) read-only into the box, so an
 internal scenario carries all its specifics and needs no substrate change.
 
+**Per-suite shared helpers.** A downstream harness that ships *several* related
+scenarios can factor their common phases into a `_lib/` directory placed **beside**
+the scenario dirs (i.e. `<suite>/_lib/`, a sibling of `<suite>/<scenario>/`). When
+the selected scenario has such a sibling `_lib/`, the runner mounts it read-only at
+`/home/operator/scenario-lib` and exposes it as **`$CR_SCENARIO_LIB`**, so each
+scenario can `source "$CR_SCENARIO_LIB"/<file>.sh` instead of duplicating the phase
+logic. This is opt-in and generic (the rig names nothing): absent a sibling `_lib/`,
+behavior is unchanged. It complements the substrate `lib/` (`$CR_LIB`), which stays
+the rig-owned assertion/reporting harness.
+
 ## 7. Execution model
 
 - **Persistent named box + staged handoff.** The runner drives a persistent
