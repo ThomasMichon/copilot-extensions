@@ -99,6 +99,17 @@ realized in `main`; unchecked items are the remaining delta.
       (`bootstrap.{ps1,sh}`); user-level source override (`config.toml`,
       `worktree-manager source`). Closes installer §`out-of-plugin-delivery`,
       §`one-line-bootstrap`, §`self-updating` (bootstrap/self-install slice).
+- [x] **Bootstrap prerequisite auto-provisioning (git-optional).** The one-liner
+      no longer hard-fails on a bare machine: `uv` is auto-installed user-local
+      (no admin) when missing (session `PATH` amended; restart prompted when it
+      can't), and `git` is installed best-effort where a package manager exists,
+      else the payload is fetched as a **GitHub codeload tarball** so the bootstrap
+      never dead-ends without `git`. The same git-optional fallback is mirrored in
+      `self_update` (`manager_tarball_url` + `_fetch_via_tarball`), so updates work
+      git-lessly too. Closes installer §`prerequisite-provisioning`,
+      §`restart-aware`, §`legible-and-consent-driven`, and completes
+      §`one-line-bootstrap` (bare machine, no pre-installed harness tooling).
+      Shipped in worktree-manager `0.1.0-dev13`.
 
 ### Phase 1 — Plugin-knowledge model (Done)
 - [x] Dependency-free catalog of the harness plugins (what exists, what a repo can
@@ -192,3 +203,11 @@ its issues; the public artifacts stay self-contained and general-purpose.
   Phase 3 (extracted Picker over the engine boundary) and Phase 4 (plugin seam)
   substantially in place; Phase 6 (retire the bundled Picker → install-trigger
   end-state) still pending parity.
+- **2026-08-17** — Bootstrap prerequisite auto-provisioning (git-optional).
+  Reworked `bootstrap.{ps1,sh}` to provision `uv` (user-local, restart-aware) and
+  best-effort `git`, with a GitHub-tarball fallback when `git` is absent; mirrored
+  the tarball fallback into `self_update` (`manager_tarball_url` +
+  `_fetch_via_tarball`). Added derivation + fallback tests (132 green). Closes the
+  §one-line-bootstrap × §prerequisite-provisioning × §restart-aware delta at the
+  bootstrap entry — the app-level provisioning (#355) was already done; this
+  closes the bootstrap-entry tail. worktree-manager `0.1.0-dev13`.

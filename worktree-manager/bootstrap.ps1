@@ -10,12 +10,13 @@
 # ~/.local/bin/worktree-manager binstub — then launches it. Re-running is
 # version-gated (a no-op when already current).
 #
-# Phase 0 assumes git + uv are already present; automatic prerequisite
-# provisioning lands in Phase 2 (issue #355). The git source (repo + ref) is
-# taken from the user-level source config ($Root/config.toml [source]) when
-# present — set it with `worktree-manager source set` to track a fork / canary
-# branch — otherwise the canonical defaults below. Relocate the install root
-# with $env:WORKTREE_MANAGER_ROOT.
+# Prerequisites are auto-provisioned: uv is installed user-local (no admin) when
+# missing; git is installed best-effort where a package manager exists, otherwise
+# the payload is fetched as a GitHub tarball so a bare machine still bootstraps.
+# The git source (repo + ref) is taken from the user-level source config
+# ($Root/config.toml [source]) when present -- set it with `worktree-manager
+# source set` to track a fork / canary branch -- otherwise the canonical defaults
+# below. Relocate the install root with $env:WORKTREE_MANAGER_ROOT.
 
 $ErrorActionPreference = 'Stop'
 
@@ -41,21 +42,73 @@ if (Test-Path $Config) {
 
 Write-Host 'copilot-extensions Worktree Manager - bootstrap'
 
-foreach ($tool in 'git', 'uv') {
-    if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
-        throw "$tool is required for the Phase 0 bootstrap (automatic prerequisite install lands in Phase 2 / issue #355). Install $tool and re-run."
+# -- Prerequisites (auto-provision; restart-aware; user-local first) ----------
+# The one-liner must take a *bare* machine into the Manager (vision installer
+# one-line-bootstrap). uv is auto-installed (user-local, no admin). git is
+# installed best-effort where a package manager exists, else we fetch the payload
+# as a GitHub tarball so the bootstrap never dead-ends without git.
+
+$LocalBin = Join-Path $env:USERPROFILE '.local\bin'
+
+if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+    Write-Host '  uv not found - installing (user-local, no admin)...'
+    try { Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression }
+    catch { throw "uv install failed: $_" }
+    # uv installs into ~\.local\bin; amend THIS session's PATH so we can continue
+    # without a restart (the installer persists PATH for future shells).
+    if (Test-Path (Join-Path $LocalBin 'uv.exe')) { $env:PATH = "$LocalBin;$env:PATH" }
+    if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+        Write-Warning "uv was installed but is not on PATH yet. Restart your shell and re-run the bootstrap."
+        exit 1
     }
 }
 
-New-Item -ItemType Directory -Force -Path $Staging | Out-Null
-if (Test-Path (Join-Path $Staging '.git')) {
-    git -C $Staging fetch --depth 1 $Repo $Ref | Out-Null
-    git -C $Staging checkout -q FETCH_HEAD
-} else {
-    git clone --depth 1 --branch $Ref $Repo $Staging | Out-Null
+$HaveGit = [bool](Get-Command git -ErrorAction SilentlyContinue)
+if (-not $HaveGit) {
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        Write-Host '  git not found - attempting winget install (may prompt for elevation)...'
+        try {
+            winget install --id Git.Git -e --source winget `
+                --accept-source-agreements --accept-package-agreements | Out-Null
+        } catch { }
+        $gitCmd = Join-Path $env:ProgramFiles 'Git\cmd'
+        if (Test-Path (Join-Path $gitCmd 'git.exe')) { $env:PATH = "$gitCmd;$env:PATH" }
+        $HaveGit = [bool](Get-Command git -ErrorAction SilentlyContinue)
+    }
+    if (-not $HaveGit) { Write-Host '  git unavailable - will fetch the payload as a tarball (no git).' }
 }
 
-Push-Location (Join-Path $Staging 'worktree-manager')
+# -- Fetch the payload (git clone/fetch when available, else GitHub tarball) ---
+if ($HaveGit) {
+    New-Item -ItemType Directory -Force -Path $Staging | Out-Null
+    if (Test-Path (Join-Path $Staging '.git')) {
+        git -C $Staging fetch --depth 1 $Repo $Ref | Out-Null
+        git -C $Staging checkout -q FETCH_HEAD
+    } else {
+        if (Test-Path $Staging) { Remove-Item -Recurse -Force $Staging }
+        git clone --depth 1 --branch $Ref $Repo $Staging | Out-Null
+    }
+    $PayloadParent = $Staging
+} else {
+    # Derive the codeload tarball URL from the (GitHub) source; a non-GitHub
+    # source genuinely needs git.
+    $TarUrl = $null
+    $m = [regex]::Match($Repo, 'github\.com[/:]+([^/]+)/([^/]+?)(?:\.git)?/?$')
+    if ($m.Success) { $TarUrl = "https://codeload.github.com/$($m.Groups[1].Value)/$($m.Groups[2].Value)/tar.gz/$Ref" }
+    if (-not $TarUrl) { throw "git is required for a non-GitHub source ($Repo). Install git and re-run." }
+    Write-Host '  fetching payload tarball (no git)...'
+    New-Item -ItemType Directory -Force -Path $Staging | Out-Null
+    $Tar = Join-Path $Staging 'payload.tar.gz'
+    Invoke-WebRequest -Uri $TarUrl -OutFile $Tar -UseBasicParsing
+    $Extract = Join-Path $Staging 'extract'
+    if (Test-Path $Extract) { Remove-Item -Recurse -Force $Extract }
+    New-Item -ItemType Directory -Force -Path $Extract | Out-Null
+    tar -xzf $Tar -C $Extract   # bsdtar ships with Windows 10 1803+
+    $PayloadParent = (Get-ChildItem $Extract -Directory | Select-Object -First 1).FullName
+    Remove-Item $Tar -Force
+}
+
+Push-Location (Join-Path $PayloadParent 'worktree-manager')
 try {
     # Version-install the fetched payload (idempotent, version-gated): publishes
     # the versions/<ver> slot + current-version marker + ~/.local/bin binstub.
@@ -64,4 +117,8 @@ try {
     uv run --quiet python -m worktree_manager @args
 } finally {
     Pop-Location
+}
+
+if (($env:PATH -split ';') -notcontains $LocalBin) {
+    Write-Warning "Add '$LocalBin' to your PATH (uv and the worktree-manager binstub live there), then restart your shell."
 }

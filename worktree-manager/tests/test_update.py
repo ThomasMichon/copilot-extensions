@@ -120,11 +120,57 @@ def test_passthrough_absent_engine_hints_install(monkeypatch):
 
 # ── self_update (best-effort, git-fetch + version-install) ────────────────────
 
-def test_self_update_skips_without_git(monkeypatch):
+def test_self_update_without_git_non_github_skips(monkeypatch, tmp_path):
+    """Without git AND a non-GitHub source, there is no tarball endpoint — skip."""
+    from worktree_manager import source_config as sc
     monkeypatch.setattr(self_install.shutil, "which", lambda name: None)
-    res = self_install.self_update(dry_run=True)
+    sc.set_source(repo=str(tmp_path / "local-remote"), root=tmp_path)  # non-GitHub
+    res = self_install.self_update(root=tmp_path, dry_run=True)
     assert res.action == "skipped"
     assert "git" in (res.reason or "")
+
+
+def test_self_update_without_git_falls_back_to_tarball(monkeypatch, tmp_path):
+    """Without git but a GitHub source, self_update fetches the codeload tarball."""
+    from worktree_manager import source_config as sc
+    monkeypatch.setattr(self_install.shutil, "which", lambda name: None)
+    monkeypatch.setattr(self_install, "local_bin", lambda: tmp_path / "localbin")
+    sc.set_source(repo="https://github.com/acme/widgets.git", ref="main", root=tmp_path)
+    seen = {}
+
+    def fake_fetch(staging, url, **kw):
+        seen["url"] = url
+        pkg = staging / "worktree-manager" / "src" / "worktree_manager"
+        pkg.mkdir(parents=True, exist_ok=True)
+        (pkg / "__init__.py").write_text('__version__ = "9.9.9"\n')
+        (staging / "worktree-manager" / "pyproject.toml").write_text(
+            "[project]\nname='x'\nversion='9.9.9'\n")
+
+    monkeypatch.setattr(self_install, "_fetch_via_tarball", fake_fetch)
+    res = self_install.self_update(root=tmp_path, dry_run=False)
+    assert seen["url"] == "https://codeload.github.com/acme/widgets/tar.gz/main"
+    assert res.action == "updated"
+    assert res.version == "9.9.9"
+
+
+@pytest.mark.parametrize("repo,ref,expected", [
+    ("https://github.com/ThomasMichon/copilot-extensions.git", "main",
+     "https://codeload.github.com/ThomasMichon/copilot-extensions/tar.gz/main"),
+    ("https://github.com/acme/widgets", "canary",
+     "https://codeload.github.com/acme/widgets/tar.gz/canary"),
+    ("git@github.com:acme/widgets.git", "main",
+     "https://codeload.github.com/acme/widgets/tar.gz/main"),
+])
+def test_manager_tarball_url_github(tmp_path, repo, ref, expected):
+    from worktree_manager import source_config as sc
+    sc.set_source(repo=repo, ref=ref, root=tmp_path)
+    assert self_install.manager_tarball_url(tmp_path) == expected
+
+
+def test_manager_tarball_url_non_github_is_none(tmp_path):
+    from worktree_manager import source_config as sc
+    sc.set_source(repo=str(tmp_path / "local"), root=tmp_path)
+    assert self_install.manager_tarball_url(tmp_path) is None
 
 
 def test_self_update_reports_updated(monkeypatch, tmp_path):

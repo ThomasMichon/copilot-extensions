@@ -54,6 +54,27 @@ def manager_ref(root: Path | None = None) -> str:
     return resolved_ref(root)
 
 
+# Owner/name from a GitHub https or ssh remote (``.git`` + trailing slash optional).
+_GITHUB_REPO_RE = re.compile(r"github\.com[/:]+(?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)?/?$")
+
+
+def manager_tarball_url(root: Path | None = None, ref: str | None = None) -> str | None:
+    """The GitHub codeload tarball URL for the configured source, or ``None``.
+
+    Derives ``https://codeload.github.com/<owner>/<name>/tar.gz/<ref>`` from the
+    resolved source repo (:func:`manager_repo`) when it is a GitHub remote. Returns
+    ``None`` for a non-GitHub source (a local path or an enterprise remote), where
+    no codeload endpoint exists and git is genuinely required. This is what lets
+    the bootstrap and :func:`self_update` fetch the payload **without git** on a
+    bare machine — the git-optional path.
+    """
+    m = _GITHUB_REPO_RE.search(manager_repo(root).strip())
+    if not m:
+        return None
+    ref = ref or manager_ref(root)
+    return f"https://codeload.github.com/{m.group('owner')}/{m.group('name')}/tar.gz/{ref}"
+
+
 def default_root() -> Path:
     """Install root, mirroring ``~/.agent-worktrees`` for the core installer."""
     env = os.environ.get("WORKTREE_MANAGER_ROOT")
@@ -264,6 +285,65 @@ class SelfUpdateResult:
     reason: str | None = None
 
 
+def _clear_dir(d: Path) -> None:
+    """Empty a directory in place (keep the directory itself)."""
+    if not d.exists():
+        return
+    for child in d.iterdir():
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child, ignore_errors=True)
+        else:
+            try:
+                child.unlink()
+            except OSError:
+                pass
+
+
+def _safe_extract(tf, dest: Path) -> None:
+    """Extract a tar, rejecting members that would escape ``dest`` (zip-slip)."""
+    dest = dest.resolve()
+    for member in tf.getmembers():
+        target = (dest / member.name).resolve()
+        if dest not in target.parents and target != dest:
+            raise OSError(f"unsafe path in tarball: {member.name}")
+    tf.extractall(dest)  # noqa: S202 - members validated above
+
+
+def _fetch_via_tarball(staging: Path, url: str, *, timeout: int = 180) -> None:
+    """Fetch + extract the worktree-manager payload from a GitHub tarball (no git).
+
+    Replaces ``staging`` contents with the extracted ``worktree-manager/`` payload
+    so ``staging/worktree-manager/pyproject.toml`` exists — the same layout the git
+    clone produces, so the caller's payload resolution is uniform. Raises ``OSError``
+    on any failure so the caller can degrade to an ``error`` result.
+    """
+    import tarfile
+    import tempfile
+    import urllib.request
+
+    staging.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as td:
+        tdp = Path(td)
+        archive = tdp / "payload.tar.gz"
+        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 - https codeload
+            archive.write_bytes(resp.read())
+        extract = tdp / "x"
+        extract.mkdir()
+        with tarfile.open(archive, "r:gz") as tf:
+            _safe_extract(tf, extract)
+        # codeload extracts to a single <name>-<ref>/ top dir; find the payload.
+        payload = None
+        for rdir in (p for p in extract.iterdir() if p.is_dir()):
+            cand = rdir / "worktree-manager"
+            if (cand / "pyproject.toml").is_file():
+                payload = cand
+                break
+        if payload is None:
+            raise OSError(f"worktree-manager payload not found in tarball from {url}")
+        _clear_dir(staging)
+        shutil.copytree(payload, staging / "worktree-manager")
+
+
 def self_update(
     *,
     ref: str | None = None,
@@ -272,11 +352,18 @@ def self_update(
 ) -> SelfUpdateResult:
     """Fetch the latest Worktree Manager payload and version-install it.
 
-    This is the "updater updates itself" step: it git-fetches the out-of-band
-    ``worktree-manager`` payload (the same source as the bootstrap one-liners),
-    then :func:`self_install`\\s it -- publishing a new ``versions/<ver>`` slot +
+    This is the "updater updates itself" step: it fetches the out-of-band
+    ``worktree-manager`` payload (the same source as the bootstrap one-liners) and
+    :func:`self_install`\\s it -- publishing a new ``versions/<ver>`` slot +
     ``current-version`` marker when the fetched payload is newer, a no-op when
     already current (version-gated).
+
+    Fetch is **git-optional**: with git on PATH it ``git clone``/``fetch``es (which
+    also enables a lightweight in-place refetch next run); **without git** it falls
+    back to a GitHub codeload **tarball** download (:func:`manager_tarball_url` /
+    :func:`_fetch_via_tarball`), so a machine that never installed git can still
+    update. The tarball fallback needs a GitHub source; a non-GitHub remote (local
+    path / enterprise) still requires git and returns ``skipped``.
 
     Deliberately **best-effort and non-fatal**: git/uv missing, offline, or a
     fetch error return an ``error``/``skipped`` result rather than raising, so a
@@ -290,24 +377,33 @@ def self_update(
     repo = manager_repo(r)
     previous = current_version(r)
 
-    if not shutil.which("git"):
-        return SelfUpdateResult(action="skipped", previous=previous,
-                                reason="git not found on PATH")
-
     staging = r / STAGING_DIR
+    use_git = shutil.which("git") is not None
     try:
         staging.mkdir(parents=True, exist_ok=True)
-        if (staging / ".git").is_dir():
-            subprocess.run(["git", "-C", str(staging), "fetch", "--depth", "1",
-                            repo, ref], check=True, capture_output=True,
-                           text=True, timeout=180)
-            subprocess.run(["git", "-C", str(staging), "checkout", "-q",
-                            "FETCH_HEAD"], check=True, capture_output=True,
-                           text=True, timeout=60)
+        if use_git:
+            if (staging / ".git").is_dir():
+                subprocess.run(["git", "-C", str(staging), "fetch", "--depth", "1",
+                                repo, ref], check=True, capture_output=True,
+                               text=True, timeout=180)
+                subprocess.run(["git", "-C", str(staging), "checkout", "-q",
+                                "FETCH_HEAD"], check=True, capture_output=True,
+                               text=True, timeout=60)
+            else:
+                # staging may hold a prior tarball payload (no .git); clear so the
+                # clone lands in an empty dir.
+                _clear_dir(staging)
+                subprocess.run(["git", "clone", "--depth", "1", "--branch", ref,
+                                repo, str(staging)], check=True,
+                               capture_output=True, text=True, timeout=300)
         else:
-            subprocess.run(["git", "clone", "--depth", "1", "--branch", ref,
-                            repo, str(staging)], check=True,
-                           capture_output=True, text=True, timeout=300)
+            url = manager_tarball_url(r, ref)
+            if url is None:
+                return SelfUpdateResult(
+                    action="skipped", previous=previous,
+                    reason="git not found and source is not a GitHub repo "
+                           "(cannot fetch a tarball) -- install git to update")
+            _fetch_via_tarball(staging, url)
     except (OSError, subprocess.SubprocessError) as e:
         return SelfUpdateResult(action="error", previous=previous,
                                 reason=f"fetch failed: {e}")

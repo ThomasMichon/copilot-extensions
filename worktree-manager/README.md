@@ -52,10 +52,12 @@ under the same convention as the harness's other installers — an immutable
 `~/.worktree-manager/current-version` marker, and a `~/.local/bin/worktree-manager`
 binstub (`.cmd`/`.ps1` on Windows) — then launches it. Re-running the one-liner is
 **version-gated** (a no-op when already current). After the first run, invoke
-`worktree-manager …` directly (ensure `~/.local/bin` is on `PATH`). Phase 0 assumes
-`git` and `uv` are already present; automatic prerequisite provisioning (and
-restart prompts) lands in Phase 2
-([#355](https://github.com/ThomasMichon/copilot-extensions/issues/355)). Set
+`worktree-manager …` directly (ensure `~/.local/bin` is on `PATH`). The bootstrap
+**auto-provisions its prerequisites**: `uv` is installed user-local (no admin) when
+missing, and `git` is installed best-effort where a package manager exists —
+otherwise the payload is fetched as a GitHub tarball, so a bare machine bootstraps
+even without `git`. It amends the current session's `PATH` and prompts for a
+restart when it can't. Set
 `WORKTREE_MANAGER_ROOT` to relocate the install root. Inspect/repair the versioned
 install with `worktree-manager self-install` (dry-run) / `--apply`, and see it in
 `worktree-manager doctor`.
