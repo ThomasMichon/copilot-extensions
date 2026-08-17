@@ -81,6 +81,11 @@ Resolve the target disk by its **serial number**, not its disk number. This
 matters most when two disks are the *same model* — the serial is the only safe
 discriminator.
 
+> The samples `TrimEnd('.')` on **both** sides only because Windows `Get-Disk`
+> reports serials with a trailing `.` artifact; it is applied symmetrically, so
+> it never weakens the full-serial match (real serials don't differ by only a
+> trailing dot). Keep matching the **full** serial otherwise.
+
 ```powershell
 Get-Disk | Select-Object Number, FriendlyName, SerialNumber, PartitionStyle, OperationalStatus
 # Note the SerialNumber of the intended data disk. Everything below resolves the
