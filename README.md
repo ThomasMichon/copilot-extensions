@@ -23,7 +23,17 @@ Plugins, one marketplace. Install what you need; they compose.
 Bootstrap a machine into a working harness with the standalone **Configurator**
 — an out-of-plugin app that installs the prerequisites and the core, then adopts
 your first repo (it must run *before* the plugins do, so it is delivered
-**outside** the plugin pipe):
+**outside** the plugin pipe).
+
+> **Status — not yet available.** The Configurator is being built under
+> [#352](https://github.com/ThomasMichon/copilot-extensions/issues/352) (a Phase 0
+> skeleton today; prerequisite + core install land next). **Until it ships**, set
+> up **today** by installing the plugins from the marketplace — start with
+> **agent-worktrees** (see the table below and its
+> [Getting Started](plugins/agent-worktrees/docs/getting-started.md)), then add the
+> others as you need them.
+
+When it ships, one line will bootstrap a machine:
 
 **Windows (PowerShell):**
 
@@ -36,10 +46,6 @@ iex (irm https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/configurator/bootstrap.sh | bash
 ```
-
-See [`configurator/`](configurator/). *(Building out under
-[#352](https://github.com/ThomasMichon/copilot-extensions/issues/352) — a Phase 0
-skeleton today; prerequisite install + core install land next.)*
 
 | Plugin | Type | What it gives you |
 |--------|------|-------------------|

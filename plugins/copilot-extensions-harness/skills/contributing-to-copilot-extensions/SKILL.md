@@ -32,13 +32,13 @@ operator's map: what to touch, in what order, and the gotchas that bite.
 **Two guidance layers a change reconciles to** (design work, not just the
 mechanical flow):
 
-- **Visions** ([`visions/`](visions/README.md)) — the *intent*, the standing
+- **Visions** ([`visions/`](../../../../visions/README.md)) — the *intent*, the standing
   what-should-be. Before an architectural/behavioral change, reconcile it (the
   three kinds): it **closes** a stated vision item (cite it), **extends** the
   vision (revise the vision first), or is **below-altitude** (say so, proceed).
   Never silently contradict or bypass a vision. This binds **every** contributor —
   including an agent driving from a downstream control repo.
-- **Patterns** ([`docs/patterns/`](docs/patterns/README.md)) — *how we build it
+- **Patterns** ([`docs/patterns/`](../../../../docs/patterns/README.md)) — *how we build it
   here*: plugin shapes, design principles, binding invariants, and focused pattern
   docs (endpoint discovery, service supervision, à-la-carte independence,
   cross-platform parity). Honor them; extend the library when you establish a new
