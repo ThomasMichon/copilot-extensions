@@ -28,6 +28,7 @@ See ``visions/plugins/agent-dispatch`` -- Concept *the supervisor*, Feature
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import subprocess
@@ -46,6 +47,28 @@ log = logging.getLogger("agent-dispatch.supervisor-daemon")
 
 class UnsupportedKind(RuntimeError):
     """A registration whose kind the daemon cannot yet run in a subprocess."""
+
+
+def _is_connection_error(exc: BaseException) -> bool:
+    """True if ``exc`` is a network-level failure reaching the coordinator.
+
+    Distinguishes "couldn't connect" (a moved/dead ephemeral port -- rebuild the
+    client and re-resolve the rendezvous file) from a *live* coordinator returning
+    an HTTP error (a :class:`~agent_dispatch.client.DispatchError`, which is a
+    plain ``RuntimeError`` and must NOT trigger a reconnect). Covers builtin
+    socket errors and, when installed, ``httpx`` transport errors
+    (``ConnectError``/``ConnectTimeout``/``ReadError`` all subclass
+    ``httpx.TransportError``).
+    """
+    if isinstance(exc, OSError):
+        # ConnectionError and TimeoutError are OSError subclasses -- a refused,
+        # reset, or timed-out socket to a moved/dead coordinator port.
+        return True
+    try:
+        import httpx
+    except Exception:  # pragma: no cover -- httpx is a hard dep in practice
+        return False
+    return isinstance(exc, httpx.TransportError)
 
 
 def supervisor_lease_scope(machine: str | None, env: str) -> str:
@@ -263,8 +286,17 @@ class SupervisorDaemon:
         max_restarts: int | None = None,
         lock: Any | None = None,
         declared_source: Callable[[], Iterable[Any]] | None = None,
+        client_factory: Callable[[], Any] | None = None,
     ):
         self.client = client
+        #: Rebuilds the coordinator client by **re-resolving** its endpoint (the
+        #: rendezvous ``endpoint.json``). The coordinator binds an OS-assigned
+        #: ephemeral port, so a coordinator restart moves the port; a daemon that
+        #: cached the old port at startup would wedge -- every reconcile failing to
+        #: reach a dead port. On a connection-level failure the serve loop calls
+        #: this to re-resolve and reconnect, mirroring the rendezvous cutover
+        #: ladder. ``None`` disables reconnect (tests inject a fixed fake client).
+        self._client_factory = client_factory
         self.machine = machine
         self.env = env or "default"
         self.launcher = launcher or SubprocessLauncher()
@@ -503,6 +535,33 @@ class SupervisorDaemon:
         for rid in list(self._units):
             self._stop(rid)
 
+    def _reconnect(self) -> bool:
+        """Rebuild the coordinator client by re-resolving its endpoint.
+
+        Called when a reconcile cycle fails at the connection level -- the classic
+        cause being a coordinator restart that moved its OS-assigned ephemeral
+        port, leaving this daemon pointed at a dead one. Re-resolving reads the
+        fresh rendezvous ``endpoint.json`` so the next tick reaches the live
+        coordinator. Best-effort: a factory that itself raises leaves the old
+        client in place and the loop simply retries next tick. Returns True when
+        the client was rebuilt.
+        """
+        if self._client_factory is None:
+            return False
+        try:
+            new_client = self._client_factory()
+        except Exception:  # pragma: no cover -- re-resolve is environment-dependent
+            log.exception("failed to re-resolve coordinator endpoint; will retry")
+            return False
+        old = self.client
+        self.client = new_client
+        close = getattr(old, "close", None)
+        if callable(close):
+            with contextlib.suppress(Exception):
+                close()
+        log.info("re-resolved coordinator endpoint after a connection failure")
+        return True
+
     def serve(
         self,
         *,
@@ -531,8 +590,13 @@ class SupervisorDaemon:
                         on_cycle(summary)
                 except KeyboardInterrupt:
                     break
-                except Exception:  # pragma: no cover -- never die on a blip
+                except Exception as exc:  # pragma: no cover -- never die on a blip
                     log.exception("supervisor reconcile cycle failed")
+                    # A connection-level failure most likely means the coordinator
+                    # restarted onto a new ephemeral port; re-resolve its endpoint
+                    # so the next tick reconnects instead of wedging forever.
+                    if _is_connection_error(exc):
+                        self._reconnect()
                 if once:
                     break
                 try:
@@ -541,6 +605,11 @@ class SupervisorDaemon:
                     break
         finally:
             self.shutdown()
+            if self._client_factory is not None:
+                close = getattr(self.client, "close", None)
+                if callable(close):
+                    with contextlib.suppress(Exception):
+                        close()
             if single_instance:
                 self.release_singleton()
         return 0

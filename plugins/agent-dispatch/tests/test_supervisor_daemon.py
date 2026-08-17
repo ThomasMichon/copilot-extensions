@@ -387,3 +387,69 @@ def test_serve_unguarded_skips_election():
     rc = d.serve(once=True, single_instance=False)
     assert rc == 0
     assert launcher.proc_for("a")  # ran despite a held lock
+
+
+# -- reconnect (coordinator restart / moved port, #3825) ---------------------
+
+
+class ConnResetClient:
+    """A client whose reads fail with a connection error until swapped out."""
+
+    def __init__(self):
+        self.calls = 0
+        self.closed = False
+
+    def list_registrations(self, **_kw):
+        self.calls += 1
+        raise ConnectionRefusedError("connection refused")
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_is_connection_error_classifies_transport_vs_http():
+    from agent_dispatch.client import DispatchError
+    from agent_dispatch.supervisor_daemon import _is_connection_error
+
+    assert _is_connection_error(ConnectionRefusedError("refused")) is True
+    assert _is_connection_error(TimeoutError("timed out")) is True
+    assert _is_connection_error(OSError("winsock")) is True
+    # A live coordinator returning an HTTP error must NOT trigger a reconnect.
+    assert _is_connection_error(DispatchError(503, "unavailable")) is False
+    assert _is_connection_error(ValueError("bad json")) is False
+
+
+def test_serve_reconnects_on_connection_failure():
+    """A connection failure rebuilds the client via the factory, and the next
+    reconcile reaches the (moved) coordinator -- the daemon does not wedge."""
+    dead = ConnResetClient()
+    healthy = FakeClient([_reg("a")])
+    rebuilt: list[object] = []
+
+    def factory():
+        rebuilt.append(healthy)
+        return healthy
+
+    launcher = FakeLauncher()
+    d = _daemon(dead, launcher, lock=FakeLock(granted=True), client_factory=factory)
+    # One cycle: reconcile_once() fails at the connection level -> _reconnect()
+    # swaps in the healthy client.
+    d.serve(once=True)
+    assert rebuilt == [healthy]  # factory was called
+    assert d.client is healthy  # client was swapped
+    assert dead.closed is True  # old client closed on reconnect
+
+    # The next reconcile now succeeds against the re-resolved coordinator.
+    summary = d.reconcile_once()
+    assert summary.started == ["a"]
+
+
+def test_serve_does_not_reconnect_without_factory():
+    """Back-compat: with no factory the daemon keeps its client (tests inject a
+    fixed fake) and simply retries next tick."""
+    dead = ConnResetClient()
+    launcher = FakeLauncher()
+    d = _daemon(dead, launcher, lock=FakeLock(granted=True))
+    d.serve(once=True)
+    assert d.client is dead  # unchanged
+    assert dead.closed is False
