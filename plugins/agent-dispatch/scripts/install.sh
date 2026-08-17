@@ -467,11 +467,17 @@ PY
 # uv does not read pip.conf, so derive index-url from pip config / the pip.conf
 # files and export it. No-op where pip has no index (e.g. pristine -- the index
 # then arrives via env / the clean-room fixture).
+#
+# `pip config get <key>` exits NON-ZERO when the key is unset (the common case on
+# a host with no governed feed). Under this script's `set -euo pipefail`, an
+# unguarded `idx="$(pip config get ... | tr ...)"` therefore aborts the whole
+# install right after the Python check -- a benign probe turned fatal (it blocked
+# every Linux upgrade on such a host). The `|| true` keeps the probe advisory.
 _ensure_uv_index() {
     [[ -n "${UV_INDEX_URL:-}${UV_DEFAULT_INDEX:-}" ]] && return 0
     local idx=""
-    if command -v pip >/dev/null 2>&1; then idx="$(pip config get global.index-url 2>/dev/null | tr -d '[:space:]')"; fi
-    if [[ -z "$idx" ]] && command -v pip3 >/dev/null 2>&1; then idx="$(pip3 config get global.index-url 2>/dev/null | tr -d '[:space:]')"; fi
+    if command -v pip >/dev/null 2>&1; then idx="$(pip config get global.index-url 2>/dev/null | tr -d '[:space:]' || true)"; fi
+    if [[ -z "$idx" ]] && command -v pip3 >/dev/null 2>&1; then idx="$(pip3 config get global.index-url 2>/dev/null | tr -d '[:space:]' || true)"; fi
     if [[ -z "$idx" ]]; then
         local f
         for f in "${PIP_CONFIG_FILE:-}" "$HOME/.config/pip/pip.conf" "$HOME/.pip/pip.conf" /etc/pip.conf /etc/xdg/pip/pip.conf; do
