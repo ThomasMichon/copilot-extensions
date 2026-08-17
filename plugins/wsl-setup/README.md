@@ -36,6 +36,7 @@ install/networking choices, so the next agent doesn't re-derive them.
 | Skill | Use when |
 |-------|----------|
 | **setting-up-wsl** | Install WSL + a distro, pick the networking mode, install base tooling, and make a WSL-hosted service reachable + persistent. |
+| **splitting-wsl-storage** | The rootfs VHD is huge or I/O-heavy: keep a small rootfs on NTFS and move the bulk data (`/home`, `/opt`, heavy `/var/lib/*`) onto a native ext4 disk, bare-attached + bind-mounted back. |
 | **troubleshooting-wsl-networking** | Egress blocked, `apt` "No route to host", host→WSL `localhost:PORT` times out/refused, or a WSL service disappears when idle. |
 
 ## Composition
