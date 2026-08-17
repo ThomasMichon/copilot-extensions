@@ -447,6 +447,31 @@ def refresh_one(worktree_id: str, machine: str | None = None,
     except Exception:
         bridge_live_wts = set()
     mux_map = sessions.mux_status_many([rec.worktree_id])
+    # Explicit Refresh is authoritative for LIVENESS, not just the session-render
+    # cache: resolve the live bound/mux truth NOW and write it onto the record
+    # (in-memory + persisted) BEFORE the active-path / classify / row build below
+    # read it. Those all key off ``rec.bound_live`` / ``rec.mux_live`` via the
+    # fresh-hint helpers, which trust a cached ``bound_live=True`` for its full
+    # 10-min TTL -- so without this, a Refresh within that window keeps
+    # re-painting a stale-ACTIVE row (the operator's "Refresh/Reclaim didn't
+    # update status" bug). Correcting the record here makes every derived field
+    # (state, session_bound_live, Sess column, Reclaim gating) truthful on this
+    # same paint, and persists it so the next populate agrees. Best-effort.
+    try:
+        _live_bound = bool(
+            reclaim.resolve_bound_copilots(worktree_id=rec.worktree_id)
+        ) or (rec.worktree_id in bridge_live_wts)
+        _mi = mux_map.get(rec.worktree_id)
+        _live_mux = bool(_mi and _mi.exists)
+        _now_iso = _dt.datetime.now().isoformat(timespec="seconds")
+        rec.bound_live = _live_bound
+        rec.bound_live_at = _now_iso
+        rec.mux_live = _live_mux
+        rec.mux_live_at = _now_iso
+        tracking.stamp_bound_live(rec.worktree_id, _live_bound)
+        tracking.stamp_mux_live(rec.worktree_id, _live_mux, sync=True)
+    except Exception:
+        pass
     config = cfg.load_config()
     active_paths = _build_active_paths([rec], session_ctx)
     info = _classify_one_record(
