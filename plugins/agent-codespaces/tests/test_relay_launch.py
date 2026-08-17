@@ -43,9 +43,9 @@ def test_build_relay_env_no_relay_still_scrubs():
 def test_build_feed_token_exports_emits_helper_backed_export():
     # dotfiles#1221: env-token feed auth (npm/nuget/rush) is bridged from the
     # relay-minted ADO bearer via the ado-auth-helper.
-    snippet = build_feed_token_exports(["ODSP_NPM_AUTH_TOKEN"])
+    snippet = build_feed_token_exports(["EXAMPLE_NPM_AUTH_TOKEN"])
     assert (
-        'export ODSP_NPM_AUTH_TOKEN="$($HOME/.local/bin/ado-auth-helper '
+        'export EXAMPLE_NPM_AUTH_TOKEN="$($HOME/.local/bin/ado-auth-helper '
         'get-access-token 2>/dev/null || true)"; ' == snippet
     )
 
@@ -64,20 +64,20 @@ def test_build_relay_env_exports_feed_token_after_relay():
         "tok123",
         use_relay=True,
         ado_host="example.visualstudio.com",
-        feed_token_env=["ODSP_NPM_AUTH_TOKEN"],
+        feed_token_env=["EXAMPLE_NPM_AUTH_TOKEN"],
     )
-    assert "export ODSP_NPM_AUTH_TOKEN=" in env
+    assert "export EXAMPLE_NPM_AUTH_TOKEN=" in env
     assert "ado-auth-helper get-access-token" in env
     # The feed-token export MUST come after LC_GIT_CREDENTIAL_RELAY (the helper
     # needs it to reach the relay).
     assert env.index("LC_GIT_CREDENTIAL_RELAY=") < env.index(
-        "export ODSP_NPM_AUTH_TOKEN="
+        "export EXAMPLE_NPM_AUTH_TOKEN="
     )
 
 
 def test_build_relay_env_no_feed_token_by_default():
     env = build_relay_env(9857, "tok123", use_relay=True)
-    assert "ODSP_NPM_AUTH_TOKEN" not in env
+    assert "EXAMPLE_NPM_AUTH_TOKEN" not in env
     assert "ado-auth-helper" not in env
 
 
@@ -85,9 +85,9 @@ def test_build_relay_env_no_relay_omits_feed_token():
     # Without the relay there is no LC_GIT_CREDENTIAL_RELAY for the helper, so
     # the feed-token export is not emitted either.
     env = build_relay_env(
-        9857, "tok", use_relay=False, feed_token_env=["ODSP_NPM_AUTH_TOKEN"]
+        9857, "tok", use_relay=False, feed_token_env=["EXAMPLE_NPM_AUTH_TOKEN"]
     )
-    assert "ODSP_NPM_AUTH_TOKEN" not in env
+    assert "EXAMPLE_NPM_AUTH_TOKEN" not in env
 
 
 def test_build_relay_launch_env(monkeypatch, tmp_path):

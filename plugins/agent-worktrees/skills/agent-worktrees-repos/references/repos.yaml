@@ -9,12 +9,12 @@ srcroot:
 
 # Decoupled GitHub owner/org -> gh account login. Applies to any repo hosted
 # under the owner -- including *orgs* that are not themselves gh accounts
-# (github, odsp-microsoft) -- so their repos resolve to the right login instead
+# (github, example-org) -- so their repos resolve to the right login instead
 # of the org name. Manage with `repos account set/list/unset`. The identities
 # below are catalogued in ~/.agent-worktrees/accounts.yaml.
 account_map:
   github: ThomasMichon
-  odsp-microsoft: tmichon_microsoft
+  example-org: example-operator
 
 repos:
   copilot-extensions:

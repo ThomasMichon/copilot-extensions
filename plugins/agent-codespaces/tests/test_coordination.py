@@ -168,8 +168,8 @@ def test_release_without_token_is_unavailable():
 
 
 def test_owner_ref_from_binstub(monkeypatch):
-    monkeypatch.setattr(coord, "_run", lambda *a, **k: _proc(0, "tmichon-dev6/odsp-web/wt-123\n"))
-    assert coord.owner_ref() == "tmichon-dev6/odsp-web/wt-123"
+    monkeypatch.setattr(coord, "_run", lambda *a, **k: _proc(0, "example-dev6/example-web/wt-123\n"))
+    assert coord.owner_ref() == "example-dev6/example-web/wt-123"
 
 
 def test_owner_ref_explicit_wins(monkeypatch):

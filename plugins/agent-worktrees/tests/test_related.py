@@ -42,10 +42,10 @@ def test_doc_abs_path_honors_origin_anchor(tmp_path: Path):
     # resolve against THAT anchor, not the base passed to doc_abs_path.
     base = tmp_path / "harness"
     knowledge = tmp_path / "knowledge"
-    e = RelatedEntry(name="odsp-web", doc="related/odsp-web.md",
+    e = RelatedEntry(name="example-web", doc="related/example-web.md",
                      origin_anchor=str(knowledge))
     assert related.doc_abs_path(base, e) == (
-        knowledge / ".agent-worktrees" / "related" / "odsp-web.md"
+        knowledge / ".agent-worktrees" / "related" / "example-web.md"
     )
 
 
@@ -68,24 +68,24 @@ def test_grafted_union_overlays_knowledge_on_harness(tmp_path: Path):
                                               role="docs")},
     ))
     _write_related(knowledge, RelatedConfig(
-        primary="odsp-web",
+        primary="example-web",
         related={"shared": RelatedEntry(name="shared", role="product",
                                         summary="from knowledge"),
-                 "odsp-web": RelatedEntry(name="odsp-web", role="product")},
+                 "example-web": RelatedEntry(name="example-web", role="product")},
     ))
 
     merged = related.read_related_grafted([base, knowledge])
     # later (knowledge) primary wins
-    assert merged.primary == "odsp-web"
+    assert merged.primary == "example-web"
     # union of both anchors' entries
-    assert set(merged.related) == {"shared", "harness-only", "odsp-web"}
+    assert set(merged.related) == {"shared", "harness-only", "example-web"}
     # knowledge overlays the harness entry wholesale on a name collision
     assert merged.related["shared"].role == "product"
     assert merged.related["shared"].summary == "from knowledge"
     # origin_anchor tracks the source per entry
     assert merged.related["shared"].origin_anchor == str(knowledge)
     assert merged.related["harness-only"].origin_anchor == str(base)
-    assert merged.related["odsp-web"].origin_anchor == str(knowledge)
+    assert merged.related["example-web"].origin_anchor == str(knowledge)
 
 
 def test_grafted_single_anchor_matches_ungrafted(tmp_path: Path):
@@ -106,7 +106,7 @@ def test_grafted_primary_falls_through_when_overlay_unset(tmp_path: Path):
     _write_related(base, RelatedConfig(primary="base-primary"))
     # knowledge has entries but no primary of its own
     _write_related(knowledge, RelatedConfig(
-        related={"odsp-web": RelatedEntry(name="odsp-web", role="product")},
+        related={"example-web": RelatedEntry(name="example-web", role="product")},
     ))
     merged = related.read_related_grafted([base, knowledge])
     assert merged.primary == "base-primary"  # base primary retained
@@ -150,9 +150,9 @@ def test_installed_plugin_related_anchors_discovers_and_filters(
     root = tmp_path / "installed-plugins"
     # (a) nested layout with plugin.json manifest
     p1 = _make_installed_plugin(
-        root, "dev-tmichon", "odsp-web-harness",
-        RelatedConfig(related={"odsp-web": RelatedEntry(
-            name="odsp-web", role="product", delegate="agent-codespaces")}))
+        root, "example-marketplace", "example-web-harness",
+        RelatedConfig(related={"example-web": RelatedEntry(
+            name="example-web", role="product", delegate="agent-codespaces")}))
     # (b) nested layout with .claude-plugin manifest
     p2 = _make_installed_plugin(
         root, "acme", "other-harness",
@@ -181,11 +181,11 @@ def test_grafted_plugin_is_lowest_precedence_and_primary_ignored(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
     root = tmp_path / "installed-plugins"
-    # plugin contributes odsp-web AND (wrongly) a primary -- primary must be ignored
+    # plugin contributes example-web AND (wrongly) a primary -- primary must be ignored
     plugin = _make_installed_plugin(
-        root, "dev-tmichon", "odsp-web-harness",
-        RelatedConfig(primary="odsp-web", related={
-            "odsp-web": RelatedEntry(name="odsp-web", role="product",
+        root, "example-marketplace", "example-web-harness",
+        RelatedConfig(primary="example-web", related={
+            "example-web": RelatedEntry(name="example-web", role="product",
                                      summary="from plugin",
                                      delegate="agent-codespaces"),
             "vessel": RelatedEntry(name="vessel", role="tooling")}))
@@ -194,18 +194,18 @@ def test_grafted_plugin_is_lowest_precedence_and_primary_ignored(
     base = tmp_path / "harness"
     knowledge = tmp_path / "knowledge"
     _write_related(base, RelatedConfig(primary="base-primary"))
-    # user/knowledge overrides the plugin's odsp-web entry wholesale
+    # user/knowledge overrides the plugin's example-web entry wholesale
     _write_related(knowledge, RelatedConfig(related={
-        "odsp-web": RelatedEntry(name="odsp-web", role="product",
+        "example-web": RelatedEntry(name="example-web", role="product",
                                  summary="from knowledge")}))
 
     # anchor order as _related_config_source_anchors builds it: plugin, base, knowledge
     merged = related.read_related_grafted([str(plugin), base, knowledge])
 
     # union: plugin-only entry survives; collision resolves to knowledge
-    assert set(merged.related) == {"odsp-web", "vessel"}
-    assert merged.related["odsp-web"].summary == "from knowledge"   # user overrides plugin
-    assert merged.related["odsp-web"].origin_anchor == str(knowledge)
+    assert set(merged.related) == {"example-web", "vessel"}
+    assert merged.related["example-web"].summary == "from knowledge"   # user overrides plugin
+    assert merged.related["example-web"].origin_anchor == str(knowledge)
     # plugin-only entry is contributed purely by being installed
     assert merged.related["vessel"].origin_anchor == str(plugin)
     # a plugin's primary is NEVER adopted; the base primary stands
@@ -217,14 +217,14 @@ def test_grafted_plugin_only_entry_resolves_when_no_user_config(
 ):
     root = tmp_path / "installed-plugins"
     plugin = _make_installed_plugin(
-        root, "dev-tmichon", "odsp-web-harness",
-        RelatedConfig(related={"odsp-web": RelatedEntry(
-            name="odsp-web", role="product", delegate="agent-codespaces")}))
+        root, "example-marketplace", "example-web-harness",
+        RelatedConfig(related={"example-web": RelatedEntry(
+            name="example-web", role="product", delegate="agent-codespaces")}))
     monkeypatch.setenv(related.INSTALLED_PLUGINS_ENV, str(root))
     base = tmp_path / "harness"
     _write_related(base, RelatedConfig(primary="base-primary"))
-    # merely installing the plugin makes odsp-web resolvable
-    e = related.get_related_grafted([str(plugin), base], "odsp-web")
+    # merely installing the plugin makes example-web resolvable
+    e = related.get_related_grafted([str(plugin), base], "example-web")
     assert e is not None and e.delegate == "agent-codespaces"
 
 

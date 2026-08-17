@@ -31,7 +31,7 @@ _ONE_WT = {
     "version": 1,
     "worktrees": [
         {
-            "id": "tmichon-cloud1-win-20260813-1200-ab12",
+            "id": "example-cloud1-win-20260813-1200-ab12",
             "repo": "dotfiles",
             "machine": "cloud1",
             "branch": "worktree/x",

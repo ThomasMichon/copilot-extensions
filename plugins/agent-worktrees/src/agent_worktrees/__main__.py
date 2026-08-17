@@ -11834,7 +11834,7 @@ def _related_config_source_anchors(base_anchor: str) -> list[str]:
     # Installed-plugin config-graft: plugins that ship
     # ``.agent-worktrees/related.yaml`` are the LOWEST-precedence layer, so they
     # go ahead of the base/knowledge anchors (later anchors overlay earlier ones).
-    # Merely installing e.g. ``odsp-web-harness`` then contributes the odsp-web
+    # Merely installing e.g. ``example-web-harness`` then contributes the example-web
     # CodeSpace locus, which any base/knowledge/user entry can still override.
     try:
         from . import related as _related_mod

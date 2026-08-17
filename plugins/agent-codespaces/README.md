@@ -189,7 +189,7 @@ Host-side `gh` operations (`gh codespace list/create/delete/stop/ssh`, `gh api`,
 and the `gh codespace ssh --config` fetch) run under the `gh` account that can
 access the **target repo's org** — not whatever account is active in the `gh`
 keyring. With two accounts backing different orgs (e.g. `ThomasMichon` for
-`github/*` and `tmichon_microsoft` for `odsp-microsoft/*`), the active-account
+`github/*` and `example-operator` for `example-org/*`), the active-account
 default would hide or `403`/`404` the other org's CodeSpaces entirely.
 
 - The owner→login mapping is owned by **agent-worktrees** (its `repos.yaml`

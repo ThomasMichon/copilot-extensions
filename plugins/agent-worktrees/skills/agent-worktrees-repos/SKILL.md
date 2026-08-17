@@ -221,7 +221,7 @@ srcroot:
   wsl: ~/src
 account_map:                       # decoupled GitHub owner/org -> gh login
   github: ThomasMichon             #   org-owned repos resolve to the right
-  odsp-microsoft: tmichon_microsoft #   login (not the org name)
+  example-org: example-operator #   login (not the org name)
 repos:
   copilot-extensions:
     class: worktree                # reference | singleton | worktree
@@ -246,7 +246,7 @@ repos:
 
 Top-level `account_map` (GitHub **owner/org → gh login**) is the decoupled
 identity layer: it maps an owner that is **not** itself a `gh` account — an org
-like `github` or `odsp-microsoft` — to the login that can access it. Manage it
+like `github` or `example-org` — to the login that can access it. Manage it
 with `repos account set/list/unset`; the identities it points at (host, scopes,
 login flow) are catalogued separately in `~/.agent-worktrees/accounts.yaml`
 (`accounts …`).
@@ -261,7 +261,7 @@ inline, so agents never hand-switch:
 - **Resolution** (`resolve_account` / `account_for_github_owner`): explicit
   `account:` → top-level `account_map[owner]` → the remote owner itself →
   none. None = today's ambient-`gh` behavior (additive, safe). The `account_map`
-  step is what makes an **org-owned** repo (`github/…`, `odsp-microsoft/…`)
+  step is what makes an **org-owned** repo (`github/…`, `example-org/…`)
   resolve to the correct login instead of the org name. GitHub-only in v1;
   ADO/gitea remotes resolve no account.
 - **Query primitive**: `repos account-for <owner|owner/name>` prints the
@@ -284,7 +284,7 @@ different login.
 **Clarified at registration.** When `repos add`, `repos clone`, or `register`
 (adopt) would leave a repo's account resolving *only* by falling back to a
 github **owner that isn't an authenticated `gh` account** (i.e. an org like
-`github`/`odsp-microsoft`), the flow clarifies it then and there — interactively
+`github`/`example-org`), the flow clarifies it then and there — interactively
 it lists the authenticated `gh` logins and persists your pick as an
 `account_map` entry; headless it warns with the exact remedy
 (`repos account set <owner> <login>`). A repo whose owner **is** a `gh` account

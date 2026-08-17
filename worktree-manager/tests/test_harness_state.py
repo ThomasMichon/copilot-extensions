@@ -46,11 +46,11 @@ def _make_home(tmp: Path) -> Path:
     win = str(checkout).replace("\\", "\\\\")
     (awt / "repos.yaml").write_text(
         "schema_version: 1\n"
-        "account_map:\n  tmichon_microsoft: tmichon_microsoft\n"
+        "account_map:\n  example-operator: example-operator\n"
         "repos:\n"
         "  dotfiles:\n"
         "    class: worktree\n"
-        "    remote: \"https://github.com/tmichon_microsoft/dotfiles.git\"\n"
+        "    remote: \"https://github.com/example-operator/dotfiles.git\"\n"
         f"    windows: \"{win}\"\n"
         "    linux: \"" + str(checkout).replace("\\", "/") + "\"\n"
         "    tags: [control-plane]\n"

@@ -220,7 +220,7 @@ def _add_args(kind, ref, *, note="", json_=True):
 
 def test_claims_add_journals_active_claim(monkeypatch, tmp_path, capfd):
     _seed(tmp_path, monkeypatch)
-    rc = m.cmd_claims(_add_args("codespace", "cs-blue", note="odsp-web"))
+    rc = m.cmd_claims(_add_args("codespace", "cs-blue", note="example-web"))
     assert rc == 0
     out = json.loads(capfd.readouterr().out)
     assert out["kind"] == "codespace" and out["ref"] == "cs-blue"
@@ -228,7 +228,7 @@ def test_claims_add_journals_active_claim(monkeypatch, tmp_path, capfd):
     rec = tracking.load_record(tmp_path / "worktrees" / "wt-A.yaml")
     assert len(rec.resources) == 1
     c = rec.resources[0]
-    assert c.kind == "codespace" and c.ref == "cs-blue" and c.note == "odsp-web"
+    assert c.kind == "codespace" and c.ref == "cs-blue" and c.note == "example-web"
     assert c.is_unsettled and c.created_at  # active + timestamped
 
 
@@ -266,14 +266,14 @@ def _seed_ownerref(tmp_path, monkeypatch, *, machine="anomalous-potato"):
     """Seed a borrowing-worktree record in ITS OWN project dir, and point the
     'current' cwd at a DIFFERENT project (the daemon-cwd gotcha)."""
     import types
-    # The borrowing worktree lives in project 'odsp-web'.
-    owner_proj_dir = tmp_path / ".odsp-web"
+    # The borrowing worktree lives in project 'example-web'.
+    owner_proj_dir = tmp_path / ".example-web"
     owner_wt_dir = owner_proj_dir / "worktrees"
     owner_wt_dir.mkdir(parents=True, exist_ok=True)
     wdir = tmp_path / "borrower"
     wdir.mkdir(exist_ok=True)
     tracking.create_new_record(
-        "wt-borrower", "worktree/wt-borrower", str(wdir), "odsp-web",
+        "wt-borrower", "worktree/wt-borrower", str(wdir), "example-web",
         machine, "wsl", owner_wt_dir,
     )
     # The 'current' project (daemon cwd) is a different one entirely.
@@ -293,7 +293,7 @@ def _seed_ownerref(tmp_path, monkeypatch, *, machine="anomalous-potato"):
 def test_claims_add_owner_ref_lands_on_cross_project_record(monkeypatch, tmp_path, capfd):
     owner_wt_dir = _seed_ownerref(tmp_path, monkeypatch)
     rc = m.cmd_claims(_add_ownerref_args(
-        "codespace", "cs-xyz", "anomalous-potato/odsp-web/wt-borrower", note="borrow"))
+        "codespace", "cs-xyz", "anomalous-potato/example-web/wt-borrower", note="borrow"))
     assert rc == 0
     out = json.loads(capfd.readouterr().out)
     assert out["worktree_id"] == "wt-borrower" and out["ref"] == "cs-xyz"
@@ -308,14 +308,14 @@ def test_claims_add_owner_ref_lands_on_cross_project_record(monkeypatch, tmp_pat
 def test_claims_add_owner_ref_cross_machine_defers(monkeypatch, tmp_path, capfd):
     _seed_ownerref(tmp_path, monkeypatch)
     rc = m.cmd_claims(_add_ownerref_args(
-        "codespace", "cs-remote", "other-box/odsp-web/wt-borrower"))
+        "codespace", "cs-remote", "other-box/example-web/wt-borrower"))
     assert rc == 0
     out = json.loads(capfd.readouterr().out)
     assert out.get("deferred") is True and out["reason"] == "cross-machine-owner"
     # No local ledger write anywhere.
-    assert not list((tmp_path / ".odsp-web" / "worktrees").glob("*.yaml")) or \
+    assert not list((tmp_path / ".example-web" / "worktrees").glob("*.yaml")) or \
         all(not tracking.load_record(p).resources
-            for p in (tmp_path / ".odsp-web" / "worktrees").glob("*.yaml"))
+            for p in (tmp_path / ".example-web" / "worktrees").glob("*.yaml"))
 
 
 def test_claims_add_owner_ref_rejects_unqualified(monkeypatch, tmp_path):
@@ -327,7 +327,7 @@ def test_claims_add_owner_ref_rejects_unqualified(monkeypatch, tmp_path):
 def test_claims_add_owner_ref_missing_record(monkeypatch, tmp_path):
     _seed_ownerref(tmp_path, monkeypatch)
     rc = m.cmd_claims(_add_ownerref_args(
-        "codespace", "cs-x", "anomalous-potato/odsp-web/no-such-wt"))
+        "codespace", "cs-x", "anomalous-potato/example-web/no-such-wt"))
     assert rc == 1  # resolved to a same-machine path that doesn't exist
 
 
@@ -377,11 +377,11 @@ def test_claims_settle_owner_ref_lands_on_cross_project_record(monkeypatch, tmp_
     owner_wt_dir = _seed_ownerref(tmp_path, monkeypatch)
     # First journal an active claim onto the borrowing record via owner-ref.
     m.cmd_claims(_add_ownerref_args(
-        "codespace", "cs-xyz", "anomalous-potato/odsp-web/wt-borrower"))
+        "codespace", "cs-xyz", "anomalous-potato/example-web/wt-borrower"))
     capfd.readouterr()
     # Now settle it via owner-ref (disconnect-hook path).
     rc = m.cmd_claims(_settle_ownerref_args(
-        "cs-xyz", "anomalous-potato/odsp-web/wt-borrower"))
+        "cs-xyz", "anomalous-potato/example-web/wt-borrower"))
     assert rc == 0
     out = json.loads(capfd.readouterr().out)
     assert out["disposition"] == "at-rest" and out["worktree_id"] == "wt-borrower"
@@ -392,7 +392,7 @@ def test_claims_settle_owner_ref_lands_on_cross_project_record(monkeypatch, tmp_
 def test_claims_settle_owner_ref_cross_machine_defers(monkeypatch, tmp_path, capfd):
     _seed_ownerref(tmp_path, monkeypatch)
     rc = m.cmd_claims(_settle_ownerref_args(
-        "cs-remote", "other-box/odsp-web/wt-borrower"))
+        "cs-remote", "other-box/example-web/wt-borrower"))
     assert rc == 0
     out = json.loads(capfd.readouterr().out)
     assert out.get("deferred") is True and out["reason"] == "cross-machine-owner"

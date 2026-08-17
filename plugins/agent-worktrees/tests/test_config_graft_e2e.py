@@ -34,12 +34,12 @@ _HARNESS_RELATED = (
     "# name-free harness base\nprimary: null\nrelated: {}\n"
 )
 _KNOWLEDGE_RELATED = """\
-primary: odsp-web
+primary: example-web
 related:
-  odsp-web:
+  example-web:
     role: product
     summary: "Primary product monorepo."
-    doc: related/odsp-web.md
+    doc: related/example-web.md
     locus: { preferred: codespace }
     delegate: { via: agent-codespaces }
   copilot-extensions:
@@ -51,7 +51,7 @@ related:
 """
 _KNOWLEDGE_MACHINES = (
     "control_plane:\n  project: harness\n"
-    "machines:\n  tmichon-cloud1:\n    display_name: cloud1\n    role: cloud-dev\n"
+    "machines:\n  example-cloud1:\n    display_name: cloud1\n    role: cloud-dev\n"
 )
 
 
@@ -76,8 +76,8 @@ def split(tmp_path: Path, monkeypatch):
     kdir = knowledge / ".agent-worktrees"
     (kdir / "related").mkdir(parents=True)
     (kdir / "related.yaml").write_text(_KNOWLEDGE_RELATED, encoding="utf-8")
-    (kdir / "related" / "odsp-web.md").write_text(
-        "# odsp-web narrative\n", encoding="utf-8")
+    (kdir / "related" / "example-web.md").write_text(
+        "# example-web narrative\n", encoding="utf-8")
     (kdir / "related" / "copilot-extensions.md").write_text(
         "# copilot-extensions narrative\n", encoding="utf-8")
     (kdir / "machines.yaml").write_text(_KNOWLEDGE_MACHINES, encoding="utf-8")
@@ -111,15 +111,15 @@ def test_related_list_surfaces_knowledge_entries(split, capfd):
     harness, _ = split
     assert run(["list", "--repo", str(harness), "--json"]) == 0
     out = json.loads(capfd.readouterr().out)
-    assert out["primary"] == "odsp-web"
+    assert out["primary"] == "example-web"
     names = {e["name"] for e in out["related"]}
-    assert names == {"odsp-web", "copilot-extensions"}
+    assert names == {"example-web", "copilot-extensions"}
 
 
 def test_related_show_doc_resolves_in_knowledge(split, capfd):
     from agent_worktrees.__main__ import cmd_related_dispatch as run
     harness, knowledge = split
-    assert run(["show", "odsp-web", "--repo", str(harness)]) == 0
+    assert run(["show", "example-web", "--repo", str(harness)]) == 0
     out = capfd.readouterr().out
     # the narrative doc path points INTO the knowledge repo, not the harness
     assert str(knowledge) in out
@@ -139,9 +139,9 @@ def test_related_doc_scaffold_target_is_knowledge(split, capfd):
 def test_related_resolve_grafted_entry(split, capfd):
     from agent_worktrees.__main__ import cmd_related_dispatch as run
     harness, _ = split
-    assert run(["resolve", "odsp-web", "--repo", str(harness), "--json"]) == 0
+    assert run(["resolve", "example-web", "--repo", str(harness), "--json"]) == 0
     out = json.loads(capfd.readouterr().out)
-    assert out["name"] == "odsp-web"
+    assert out["name"] == "example-web"
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +153,7 @@ def test_machines_redirect_to_knowledge(split):
     assert cfg.machines_yaml_path(harness) == (
         knowledge / ".agent-worktrees" / "machines.yaml"
     )
-    assert "tmichon-cloud1" in cfg.load_machines_yaml(harness)
+    assert "example-cloud1" in cfg.load_machines_yaml(harness)
 
 
 # ---------------------------------------------------------------------------
@@ -164,8 +164,8 @@ def test_harness_tree_stays_name_free(split, capfd):
     from agent_worktrees.__main__ import cmd_related_dispatch as run
     harness, _ = split
     for argv in (["list", "--repo", str(harness), "--json"],
-                 ["show", "odsp-web", "--repo", str(harness)],
-                 ["resolve", "odsp-web", "--repo", str(harness), "--json"]):
+                 ["show", "example-web", "--repo", str(harness)],
+                 ["resolve", "example-web", "--repo", str(harness), "--json"]):
         run(argv)
         capfd.readouterr()
     base = related.read_related(harness)

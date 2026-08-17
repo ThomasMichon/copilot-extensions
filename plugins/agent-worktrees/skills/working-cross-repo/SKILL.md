@@ -129,7 +129,7 @@ Always read the repo's `CONTRIBUTING.md` / `AGENTS.md` and its narrative
 > Your control-plane's own dispatch skill owns the concrete host↔venue interop.
 
 > **A cross-repo PR you open is an obligation on your worktree — journal it.**
-> When you open a PR in *another* repo (e.g. an **odsp-web ADO PR** created with
+> When you open a PR in *another* repo (e.g. an **example-web ADO PR** created with
 > the AZ CLI / ADO REST / `gh`, on a CodeSpace or locally) it is **not**
 > auto-journaled — only `agent-worktrees create-pr` in *this* repo is. So your
 > worktree's `finalize` won't know that cross-repo work is still open. Record it
@@ -140,7 +140,7 @@ Always read the repo's `CONTRIBUTING.md` / `AGENTS.md` and its narrative
 > agent-worktrees claims settle <pr-url>     # (sweep spares pr-kind — manual)
 > ```
 > See the `worktree` skill's finalize-gate section for the full model
-> (tmichon_microsoft/dotfiles#1351 tracks auto-journaling these).
+> (example-operator/dotfiles#1351 tracks auto-journaling these).
 
 ### 3. Prefer DELEGATION over reaching across machines
 

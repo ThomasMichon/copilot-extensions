@@ -4,8 +4,8 @@ The multi-account seam.  agent-codespaces' host-side ``gh`` calls (``gh
 codespace list/create/delete/stop/ssh``, ``gh api``) must run under the ``gh``
 account that can access the *target repo's* GitHub org -- not whatever account
 happens to be active in the ``gh`` keyring.  With two accounts backing
-different orgs (e.g. ``ThomasMichon`` for ``github/*`` and ``tmichon_microsoft``
-for ``odsp-microsoft/*``), running under the wrong one hides/《403》s the other
+different orgs (e.g. ``ThomasMichon`` for ``github/*`` and ``example-operator``
+for ``example-org/*``), running under the wrong one hides/《403》s the other
 org's CodeSpaces entirely (#195, #190).
 
 The owner->login mapping is owned by **agent-worktrees** (its ``repos.yaml``

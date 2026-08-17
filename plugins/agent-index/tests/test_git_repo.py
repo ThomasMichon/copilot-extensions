@@ -133,7 +133,7 @@ def test_source_name_from_url_parsing() -> None:
     """Repo-name extraction handles https, scp-like, trailing slash and .git."""
     f = GitRepoConnector._repo_name_from_url
     assert f("https://github.com/example-org/dotfiles.git") == "dotfiles"
-    assert f("https://github.com/tmichon_microsoft/dotfiles") == "dotfiles"
+    assert f("https://github.com/example-operator/dotfiles") == "dotfiles"
     assert f("git@github.com:owner/dotfiles.git") == "dotfiles"
     assert f("https://host/owner/repo/") == "repo"
     assert f(r"C:\repos\owner\dotfiles.git") == "dotfiles"

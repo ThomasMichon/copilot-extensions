@@ -40,9 +40,9 @@ def test_tar_pkg_b64_roundtrips_with_package_arcname():
 
 
 def test_build_resolve_command_quotes_and_embeds_repo():
-    cmd = aps.build_resolve_command("QkFTRTY0", "/workspaces/odsp-web")
+    cmd = aps.build_resolve_command("QkFTRTY0", "/workspaces/example-web")
     assert "base64 -d" in cmd and "tar -xzf" in cmd
-    assert "/workspaces/odsp-web" in cmd
+    assert "/workspaces/example-web" in cmd
     assert "python3" in cmd and "command -v python" in cmd
     assert aps.RESULT_MARKER in cmd
 
@@ -71,18 +71,18 @@ def _make_ai_repo(root: Path) -> None:
     (root / ".claude").mkdir(parents=True)
     (root / ".claude" / "settings.json").write_text(json.dumps({
         "extraKnownMarketplaces": {
-            "odsp-web-plugins": {"source": {"source": "directory", "path": "./.ai"}},
+            "example-web-plugins": {"source": {"source": "directory", "path": "./.ai"}},
             "remote": {"source": {"source": "github", "repo": "org/x"}},
         },
         "enabledPlugins": {
-            "atomic@odsp-web-plugins": True,
+            "atomic@example-web-plugins": True,
             "flt@remote": True,
         },
     }))
     ai = root / ".ai"
     (ai / ".claude-plugin").mkdir(parents=True)
     (ai / ".claude-plugin" / "marketplace.json").write_text(json.dumps({
-        "name": "odsp-web-plugins",
+        "name": "example-web-plugins",
         "plugins": [{"name": "atomic", "source": "./atomic-dir"}],
     }))
     plug = ai / "atomic-dir" / ".claude-plugin"

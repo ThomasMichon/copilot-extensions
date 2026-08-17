@@ -218,15 +218,15 @@ def test_build_pool_l2_hold_marks_in_use_without_local_lease():
     now = time.time()
     members, _ = build_pool(
         now=now, codespaces=[_cs("a")], leases=[], markers={},
-        l2_leases={"a": _l2("a", holder="tmichon-cloud1/odsp-web/wt-abc#s1")},
+        l2_leases={"a": _l2("a", holder="example-cloud1/example-web/wt-abc#s1")},
     )
     (m,) = members
     assert m.disposition == IN_USE
     assert m.l2_live is True
-    assert m.l2_holder == "tmichon-cloud1/odsp-web/wt-abc#s1"
+    assert m.l2_holder == "example-cloud1/example-web/wt-abc#s1"
     d = m.to_dict()
     assert d["l2"] == {
-        "holder": "tmichon-cloud1/odsp-web/wt-abc#s1",
+        "holder": "example-cloud1/example-web/wt-abc#s1",
         "live": True,
         "expires_at": "2026-08-07T18:00:00Z",
     }
@@ -263,12 +263,12 @@ def test_build_pool_l2_overlay_defaults_to_live_read(monkeypatch):
     from agent_codespaces import coordination
     monkeypatch.setattr(
         coordination, "list_leases",
-        lambda *a, **k: {"a": _l2("a", holder="aerial-companion/odsp-web/wt-z#s")},
+        lambda *a, **k: {"a": _l2("a", holder="aerial-companion/example-web/wt-z#s")},
     )
     members, _ = build_pool(codespaces=[_cs("a")], leases=[], markers={})
     (m,) = members
     assert m.disposition == IN_USE
-    assert m.l2_holder == "aerial-companion/odsp-web/wt-z#s"
+    assert m.l2_holder == "aerial-companion/example-web/wt-z#s"
 
 
 def test_build_pool_l2_read_failure_is_degrade_safe(monkeypatch):
@@ -293,7 +293,7 @@ def test_build_pool_local_lease_takes_precedence_over_l2_owner():
                   acquired_at=now, heartbeat_at=now)
     members, _ = build_pool(
         now=now, codespaces=[_cs("a")], leases=[lease], markers={},
-        l2_leases={"a": _l2("a", holder="tmichon-dev6/odsp-web/wt-a#s")},
+        l2_leases={"a": _l2("a", holder="example-dev6/example-web/wt-a#s")},
     )
     (m,) = members
     assert m.disposition == IN_USE
@@ -306,12 +306,12 @@ def test_picker_payload_l2_holder_rendered_when_no_local_lease():
     now = time.time()
     members, budget = build_pool(
         now=now, codespaces=[_cs("a", repo="o/web-cs")], leases=[], markers={},
-        l2_leases={"a": _l2("a", holder="tmichon-cloud1/odsp-web/wt-abc#s1")},
+        l2_leases={"a": _l2("a", holder="example-cloud1/example-web/wt-abc#s1")},
     )
     e = picker_payload(members, budget)["entries"][0]
     assert e["use"] == "in-use"
-    assert e["holder"] == "wt-abc@tmichon-cloud1"
-    assert "held cross-machine by wt-abc@tmichon-cloud1" in e["subtitle"]
+    assert e["holder"] == "wt-abc@example-cloud1"
+    assert "held cross-machine by wt-abc@example-cloud1" in e["subtitle"]
 
 
 def _iso(epoch: float) -> str:
@@ -416,7 +416,7 @@ def test_orphaned_claim_flagged_when_worktree_path_gone(tmp_path):
     ``worktree`` column surfaces the claim's worktree dir id."""
     from agent_codespaces.pool import picker_payload
     now = time.time()
-    gone = str(tmp_path / "worktrees" / "tmichon-cloud1-win-DEAD-9f3a")  # never created
+    gone = str(tmp_path / "worktrees" / "example-cloud1-win-DEAD-9f3a")  # never created
     claim = Lease(codespace="held", effort="", pid=1, host="dev6",
                   acquired_at=now, heartbeat_at=now, worktree=gone)
     members, budget = build_pool(
@@ -430,7 +430,7 @@ def test_orphaned_claim_flagged_when_worktree_path_gone(tmp_path):
     assert e["orphaned"] is True
     assert e["occupancy"] == "orphan"    # -> the magenta ORPHAN palette cell
     assert e["disposition"] == IN_USE    # unchanged: Release verb still gates on
-    assert e["worktree"] == "tmichon-cloud1-win-DEAD-9f3a"  # which lock is stale
+    assert e["worktree"] == "example-cloud1-win-DEAD-9f3a"  # which lock is stale
 
 
 def test_live_claim_not_flagged_orphaned(tmp_path):
@@ -438,7 +438,7 @@ def test_live_claim_not_flagged_orphaned(tmp_path):
     ``occupancy`` mirrors the disposition and the worktree dir id surfaces."""
     from agent_codespaces.pool import picker_payload
     now = time.time()
-    live = tmp_path / "worktrees" / "tmichon-cloud1-win-LIVE-1a2b"
+    live = tmp_path / "worktrees" / "example-cloud1-win-LIVE-1a2b"
     live.mkdir(parents=True)
     claim = Lease(codespace="held", effort="", pid=1, host="dev6",
                   acquired_at=now, heartbeat_at=now, worktree=str(live))
@@ -450,7 +450,7 @@ def test_live_claim_not_flagged_orphaned(tmp_path):
     e = picker_payload(members, budget)["entries"][0]
     assert e["orphaned"] is False
     assert e["occupancy"] == IN_USE      # mirrors disposition when not orphaned
-    assert e["worktree"] == "tmichon-cloud1-win-LIVE-1a2b"
+    assert e["worktree"] == "example-cloud1-win-LIVE-1a2b"
 
 
 def test_advisory_borrow_never_orphaned():
@@ -504,12 +504,12 @@ def test_picker_payload_group_status_worktree():
     lease = Lease(codespace="held", effort="3bac", pid=1, host="dev6",
                   acquired_at=now, heartbeat_at=now)
     held = CodespaceInfo(name="held", display_name="my-feature",
-                         repository="odsp-microsoft/odsp-web-codespaces", branch="main",
+                         repository="example-org/example-web-codespaces", branch="main",
                          state="Available", machine="premiumLinux", account="acct1",
                          last_used_at="")
     members, budget = build_pool(now=now, codespaces=[held], leases=[lease], markers={})
     e = picker_payload(members, budget)["entries"][0]
-    assert e["group"] == "odsp-web-codespaces @ acct1"
+    assert e["group"] == "example-web-codespaces @ acct1"
     assert e["status"] == "RUNNING"          # running box
     assert e["worktree"] == "3bac"           # claiming worktree short id (effort)
 

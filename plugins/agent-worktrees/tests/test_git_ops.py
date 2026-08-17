@@ -290,7 +290,7 @@ class TestCrossAccountAuth:
             "  \u2713 Logged in to github.com account ThomasMichon (keyring)\n"
             "  - Active account: true\n"
             "  - Token scopes: 'repo'\n"
-            "  \u2713 Logged in to github.com account tmichon_microsoft (keyring)\n"
+            "  \u2713 Logged in to github.com account example-operator (keyring)\n"
             "  - Active account: false\n"
         )
         monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
@@ -299,7 +299,7 @@ class TestCrossAccountAuth:
             lambda *a, **k: types.SimpleNamespace(returncode=0, stdout=out, stderr=""),
         )
         # EMU logins with underscores must survive.
-        assert go.list_gh_accounts() == ["ThomasMichon", "tmichon_microsoft"]
+        assert go.list_gh_accounts() == ["ThomasMichon", "example-operator"]
 
     def test_list_gh_accounts_empty_without_gh(self, monkeypatch):
         monkeypatch.setattr(go.shutil, "which", lambda _: None)

@@ -65,7 +65,7 @@ class TestClaimFromRunOutput:
         assert claim.state == "active" and claim.created_at
 
     def test_create_pr_envelope_ado(self):
-        url = "https://onedrive.visualstudio.com/P/_git/r/pullrequest/2285417"
+        url = "https://my-org.visualstudio.com/P/_git/r/pullrequest/2285417"
         out = json.dumps({"success": True, "pr_opened": True, "pr": {"ref": url}})
         claim = m._claim_from_run_output(out)
         assert claim is not None and claim.kind == "pr" and claim.ref == url
