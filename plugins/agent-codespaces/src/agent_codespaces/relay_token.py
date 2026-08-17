@@ -18,6 +18,7 @@ import json
 import logging
 import secrets
 import threading
+from typing import Any
 
 from .config import RUNTIME_DIR
 
@@ -30,43 +31,95 @@ _TOKENS_FILE = RUNTIME_DIR / "relay-tokens.json"
 _lock = threading.Lock()
 
 
-def _read_tokens() -> dict[str, str]:
+def _read_tokens() -> dict[str, Any]:
     try:
         return json.loads(_TOKENS_FILE.read_text(encoding="utf-8")) or {}
     except (OSError, json.JSONDecodeError):
         return {}
 
 
-def _write_tokens(data: dict[str, str]) -> None:
+def _write_tokens(data: dict[str, Any]) -> None:
     _TOKENS_FILE.parent.mkdir(parents=True, exist_ok=True)
     tmp = _TOKENS_FILE.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(data), encoding="utf-8")
     tmp.replace(_TOKENS_FILE)
 
 
+def _token_value(entry: Any) -> str:
+    """Read the secret from a structured entry or a legacy ``codespace: token``."""
+    if isinstance(entry, str):
+        return entry
+    if isinstance(entry, dict):
+        return str(entry.get("token", ""))
+    return ""
+
+
 def validate(token: str) -> bool:
     """Relay token validator: is ``token`` a known per-codespace secret?"""
     if not token:
         return False
-    values = _read_tokens().values()
-    return any(secrets.compare_digest(token, t) for t in values)
+    return any(
+        secrets.compare_digest(token, _token_value(entry))
+        for entry in _read_tokens().values()
+    )
 
 
-def token_for(codespace: str) -> str:
+def authorize_azure(token: str, action: str, fields: dict[str, str]) -> bool:
+    """Authorize a ``get-azure-token`` request against the token's scope policy.
+
+    The request-scoped :meth:`RelayBuilder.authorize_token` gate calls this with
+    the presented ``token``, the ``action``, and the request ``fields``. The
+    token is authorized only if it is a known per-codespace secret AND the
+    requested scope/resource is in the ``allowed_resources`` recorded for that
+    codespace when the token was minted (see :func:`token_for`). Legacy
+    string-only entries carry no allowlist and are therefore denied for scoped
+    minting -- they must be re-minted (structured) to gain Azure-token access.
+    """
+    if action != "get-azure-token" or not token:
+        return False
+    requested = fields.get("scope") or fields.get("resource") or ""
+    normalized = requested.removesuffix("/.default").rstrip("/")
+    for entry in _read_tokens().values():
+        if not secrets.compare_digest(token, _token_value(entry)):
+            continue
+        if not isinstance(entry, dict):
+            return False
+        allowed = {
+            str(value).removesuffix("/.default").rstrip("/")
+            for value in entry.get("allowed_resources", [])
+        }
+        return "*" in allowed or normalized in allowed
+    return False
+
+
+def token_for(
+    codespace: str, *, repository: str | None = None,
+    allowed_resources: list[str] | None = None,
+) -> str:
     """Return the per-codespace relay secret, minting + persisting on first use.
 
     One stable token per codespace (reused across connections), persisted to
     :data:`_TOKENS_FILE` so both the relay validator and the SSH transport see
-    it.
+    it. ``repository`` and ``allowed_resources`` record the per-token scope
+    policy :func:`authorize_azure` enforces; they are refreshed on each call so
+    a re-mint with updated config re-scopes an existing token.
     """
     with _lock:
         tokens = _read_tokens()
-        tok = tokens.get(codespace)
-        if tok is None:
+        raw_entry = tokens.get(codespace)
+        entry = raw_entry if isinstance(raw_entry, dict) else {}
+        tok = _token_value(raw_entry)
+        if not tok:
             tok = secrets.token_hex(32)
-            tokens[codespace] = tok
-            _write_tokens(tokens)
             log.info("Minted relay token for codespace '%s'", codespace)
+        tokens[codespace] = {
+            "token": tok,
+            "repository": repository or entry.get("repository"),
+            "allowed_resources": list(
+                allowed_resources or entry.get("allowed_resources", [])
+            ),
+        }
+        _write_tokens(tokens)
         return tok
 
 

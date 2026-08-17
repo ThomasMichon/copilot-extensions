@@ -1368,10 +1368,15 @@ class FileTokenValidator:
         if not isinstance(data, dict):
             return False
         for v in data.values():
-            if not isinstance(v, str):
+            secret = v if isinstance(v, str) else (
+                v.get("token") if isinstance(v, dict) else None
+            )
+            if not isinstance(secret, str) or not secret:
+                # Structured entries store the secret under ``token``; anything
+                # else (or a legacy non-string value) can never match.
                 continue
             try:
-                if secrets.compare_digest(token, v):
+                if secrets.compare_digest(token, secret):
                     return True
             except TypeError:
                 # compare_digest rejects non-ASCII str -- a non-ASCII token can
@@ -1379,6 +1384,66 @@ class FileTokenValidator:
                 # no-match. The providers' validators would *raise* here; both
                 # net to "rejected", so this is a hardening, never a weakening.
                 return False
+        return False
+
+
+class FileTokenAuthorizer:
+    """A file-backed, request-scoped relay-token authorizer.
+
+    The scoped counterpart to :class:`FileTokenValidator`: reads the same JSON
+    token store, but each entry may be a structured ``{"token", "repository",
+    "allowed_resources"}`` record. For a gated ``get-azure-token`` request it
+    accepts the presented ``token`` iff it matches a stored secret AND the
+    requested ``scope``/``resource`` is in that entry's ``allowed_resources``.
+    Mirrors ``agent_codespaces.relay_token.authorize_azure`` over the process
+    boundary, so agent-bridge enforces a *per-token* Azure scope from the
+    provider's own token file with no in-process import. Legacy string-only
+    entries carry no allowlist and fall back to the profile's static
+    ``azure_resources`` allowlist (the pre-scoping behavior) -- never a
+    regression for tokens that already worked.
+    """
+
+    __slots__ = ("_path", "_static")
+
+    def __init__(
+        self, path: str | Path, static_resources: list[str] | None = None,
+    ) -> None:
+        self._path = Path(path)
+        self._static = {
+            str(r).removesuffix("/.default").rstrip("/")
+            for r in (static_resources or [])
+        }
+
+    def __call__(self, token: str, action: str, fields: dict[str, str]) -> bool:
+        if action != "get-azure-token" or not token:
+            return False
+        try:
+            data = json.loads(self._path.read_text(encoding="utf-8")) or {}
+        except (OSError, json.JSONDecodeError):
+            return False
+        if not isinstance(data, dict):
+            return False
+        requested = fields.get("scope") or fields.get("resource") or ""
+        normalized = requested.removesuffix("/.default").rstrip("/")
+        for entry in data.values():
+            secret = entry if isinstance(entry, str) else (
+                entry.get("token") if isinstance(entry, dict) else None
+            )
+            if not isinstance(secret, str) or not secret:
+                continue
+            try:
+                if not secrets.compare_digest(token, secret):
+                    continue
+            except TypeError:
+                return False
+            if isinstance(entry, dict) and "allowed_resources" in entry:
+                allowed = {
+                    str(v).removesuffix("/.default").rstrip("/")
+                    for v in entry.get("allowed_resources", [])
+                }
+            else:
+                allowed = self._static
+            return "*" in allowed or normalized in allowed
         return False
 
 
@@ -1420,7 +1485,16 @@ def _apply_relay_profile(builder, profile: dict) -> None:
     gated = profile.get("gated_actions") or []
     store = profile.get("token_store")
     if gated and store:
-        builder.require_token(list(gated), FileTokenValidator(store))
+        if profile.get("scoped_azure"):
+            # Per-token scope enforcement: the provider's token store records an
+            # ``allowed_resources`` allowlist per token, so gate get-azure-token
+            # with the request-scoped authorizer instead of a bare validator.
+            builder.authorize_token(
+                list(gated),
+                FileTokenAuthorizer(store, profile.get("azure_resources")),
+            )
+        else:
+            builder.require_token(list(gated), FileTokenValidator(store))
 
 
 def _relay_profile_via_cli(binstub: str) -> dict | None:

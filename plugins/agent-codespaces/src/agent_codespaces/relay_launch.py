@@ -195,6 +195,7 @@ def build_relay_launch_env(
     ``credentials.relay_port``.
     """
     from .config import load_merged_config
+    from .relay_provider import DEFAULT_AZURE_RESOURCES
     from .relay_token import token_for
 
     cfg = load_merged_config(include_cwd=False)
@@ -206,7 +207,15 @@ def build_relay_launch_env(
             port = published
         else:
             port = int(cfg.credentials.relay_port)
-    token = token_for(codespace_name)
+    # Record the per-token Azure scope the relay authorizer enforces: the default
+    # ADO REST + Storage resources, plus any the adopting repo's ``az-login``
+    # source config adds. No product-specific values here -- they come from the
+    # merged config a harness plugin supplies by convention.
+    resources = list(DEFAULT_AZURE_RESOURCES)
+    az_cfg = getattr(cfg.credentials, "sources", {}).get("az-login")
+    if az_cfg and az_cfg.enabled:
+        resources.extend(az_cfg.allowed_resources)
+    token = token_for(codespace_name, allowed_resources=resources)
     warn_if_relay_unavailable(
         port, codespace_name, context="Session Host dispatch",
     )

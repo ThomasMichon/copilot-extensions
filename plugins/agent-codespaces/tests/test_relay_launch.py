@@ -105,7 +105,7 @@ def test_build_relay_launch_env(monkeypatch, tmp_path):
     monkeypatch.setattr("agent_codespaces.config.load_merged_config",
                         lambda *a, **k: _Cfg())
     monkeypatch.setattr("agent_codespaces.relay_token.token_for",
-                        lambda name: "minted-tok")
+                        lambda name, **kw: "minted-tok")
     env, port = rl.build_relay_launch_env("cs-foo")
     assert port == 9999
     assert "export LC_GIT_CREDENTIAL_RELAY=9999;" in env
@@ -126,7 +126,7 @@ def test_build_relay_launch_env_live_port_override(monkeypatch):
     monkeypatch.setattr("agent_codespaces.config.load_merged_config",
                         lambda *a, **k: _Cfg())
     monkeypatch.setattr("agent_codespaces.relay_token.token_for",
-                        lambda name: "minted-tok")
+                        lambda name, **kw: "minted-tok")
     env, port = rl.build_relay_launch_env("cs-foo", relay_port=51234)
     assert port == 51234
     assert "export LC_GIT_CREDENTIAL_RELAY=51234;" in env
@@ -150,7 +150,7 @@ def test_build_relay_launch_env_preflights_dispatch_relay(monkeypatch):
     monkeypatch.setattr("agent_codespaces.config.load_merged_config",
                         lambda *a, **k: _Cfg())
     monkeypatch.setattr("agent_codespaces.relay_token.token_for",
-                        lambda name: "minted-tok")
+                        lambda name, **kw: "minted-tok")
     monkeypatch.setattr(
         rl,
         "warn_if_relay_unavailable",
@@ -198,7 +198,7 @@ def test_build_relay_launch_env_none_falls_back_to_config(monkeypatch, tmp_path)
     monkeypatch.setattr("agent_codespaces.config.load_merged_config",
                         lambda *a, **k: _Cfg())
     monkeypatch.setattr("agent_codespaces.relay_token.token_for",
-                        lambda name: "minted-tok")
+                        lambda name, **kw: "minted-tok")
     env, port = rl.build_relay_launch_env("cs-foo", relay_port=None)
     assert port == 9999
     assert "export LC_GIT_CREDENTIAL_RELAY=9999;" in env
@@ -222,7 +222,7 @@ def test_build_relay_launch_env_none_uses_published_live_port(monkeypatch, tmp_p
     monkeypatch.setattr("agent_codespaces.config.load_merged_config",
                         lambda *a, **k: _Cfg())
     monkeypatch.setattr("agent_codespaces.relay_token.token_for",
-                        lambda name: "minted-tok")
+                        lambda name, **kw: "minted-tok")
     env, port = rl.build_relay_launch_env("cs-foo", relay_port=None)
     assert port == 52001
     assert "export LC_GIT_CREDENTIAL_RELAY=52001;" in env

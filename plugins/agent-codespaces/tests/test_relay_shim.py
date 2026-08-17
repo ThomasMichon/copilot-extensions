@@ -49,45 +49,74 @@ class TestRelayToken:
 
 class TestRegisterRelay:
     def test_enables_ado_rest_azure_gated_by_codespace_token(self, isolated_tokens):
-        from agent_codespaces.relay_provider import register_relay
+        from agent_codespaces.relay_provider import (
+            DEFAULT_AZURE_RESOURCES,
+            register_relay,
+        )
         from credential_relay import RelayBuilder
 
         b = RelayBuilder()
         register_relay(b)
         srv = b.build()
 
-        # An az-login source is present, but the default allowlist is just the
-        # public ADO REST + Azure Storage resources -- not a wildcard broker.
+        # With a request-scoped authorizer the az-login source is built
+        # wide-open; per-token scope is enforced by the authorizer instead of a
+        # static source allowlist, so the source itself allows any scope.
         az = [s for s in srv.sources if s.name == "az-login"]
         assert len(az) == 1
-        assert az[0]._is_allowed("499b84ac-1321-427f-aa17-267ca6975798") is True
-        assert (
-            az[0]._is_allowed("499b84ac-1321-427f-aa17-267ca6975798/.default")
-            is True
-        )
-        assert az[0]._is_allowed("https://storage.azure.com/.default") is True
-        assert az[0]._is_allowed("https://graph.microsoft.com/.default") is False
+        assert az[0]._is_allowed("https://graph.microsoft.com/.default") is True
 
-        # get-azure-token is gated, and a minted per-codespace token passes.
+        # get-azure-token is gated by the request-scoped authorizer, and a token
+        # minted with the default ADO REST + Storage scope authorizes exactly
+        # those resources -- not an arbitrary one, and not an unknown token.
         assert "get-azure-token" in srv.token_required_actions
-        tok = relay_token.token_for("cs-x")
-        assert srv.token_validator(tok) is True
-        assert srv.token_validator("wrong") is False
+        assert srv.token_authorizer is not None
+        ado = "499b84ac-1321-427f-aa17-267ca6975798"
+        tok = relay_token.token_for(
+            "cs-x", allowed_resources=list(DEFAULT_AZURE_RESOURCES)
+        )
+        assert srv.token_authorizer(tok, "get-azure-token", {"scope": ado}) is True
+        assert srv.token_authorizer(
+            tok, "get-azure-token",
+            {"scope": "https://storage.azure.com/.default"},
+        ) is True
+        assert srv.token_authorizer(
+            tok, "get-azure-token",
+            {"scope": "https://graph.microsoft.com/.default"},
+        ) is False
+        assert srv.token_authorizer(
+            "wrong", "get-azure-token", {"scope": ado},
+        ) is False
 
     def test_coexists_with_container_token_validator(self, isolated_tokens):
         """Both providers gate get-azure-token; either provider's token works."""
-        from agent_codespaces.relay_provider import register_relay
+        from agent_codespaces.relay_provider import (
+            DEFAULT_AZURE_RESOURCES,
+            register_relay,
+        )
         from credential_relay import RelayBuilder
 
         b = RelayBuilder()
-        # Simulate the containers provider gating with its own token store.
+        # Simulate the containers provider gating with its own boolean validator.
         b.require_token(["get-azure-token"], lambda t: t == "container-secret")
         register_relay(b)
         srv = b.build()
 
-        assert srv.token_validator("container-secret") is True       # container
-        assert srv.token_validator(relay_token.token_for("cs-y")) is True  # codespace
-        assert srv.token_validator("neither") is False
+        assert srv.token_authorizer is not None
+        ado = "499b84ac-1321-427f-aa17-267ca6975798"
+        # Container token: authorized via the validator fallback + static scope.
+        assert srv.token_authorizer(
+            "container-secret", "get-azure-token", {"scope": ado},
+        ) is True
+        # Codespace token minted with the default scope: authorized via the
+        # request-scoped authorizer.
+        cs = relay_token.token_for(
+            "cs-y", allowed_resources=list(DEFAULT_AZURE_RESOURCES)
+        )
+        assert srv.token_authorizer(cs, "get-azure-token", {"scope": ado}) is True
+        assert srv.token_authorizer(
+            "neither", "get-azure-token", {"scope": ado},
+        ) is False
 
     def test_sets_ado_host_from_config(self, isolated_tokens, monkeypatch):
         """A configured ado_host is plumbed to the relay so host-less

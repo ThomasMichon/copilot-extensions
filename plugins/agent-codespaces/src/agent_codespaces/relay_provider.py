@@ -63,6 +63,12 @@ def relay_profile() -> dict:
         "azure_resources": sorted(azure_resources),
         "gated_actions": ["get-azure-token"],
         "token_store": str(_TOKENS_FILE),
+        # Signal the scoped-authorizer contract: the token store records a
+        # per-token ``allowed_resources`` allowlist, so agent-bridge gates
+        # get-azure-token with a request-scoped FileTokenAuthorizer rather than a
+        # bare FileTokenValidator. A bridge that predates the flag ignores it and
+        # keeps the validator path (back-compatible).
+        "scoped_azure": True,
     }
 
 
@@ -70,24 +76,26 @@ def register_relay(builder) -> None:
     """Inject the codespace credential-relay profile into ``builder``.
 
     ``builder`` is a :class:`credential_relay.registry.RelayBuilder`. Applies the
-    same profile :func:`relay_profile` emits, but with the **in-process** token
-    validator -- this is the degrade-safe fallback agent-bridge uses when the
-    ``agent-codespaces relay-profile`` CLI seam is unavailable (#892 Inc 2).
-    ``set_port(None)`` / ``set_ado_host(None)`` are internally no-ops, so a
-    config-unavailable profile behaves exactly as before.
+    same profile :func:`relay_profile` emits, but with the **in-process**
+    request-scoped token authorizer -- this is the degrade-safe fallback
+    agent-bridge uses when the ``agent-codespaces relay-profile`` CLI seam is
+    unavailable (#892 Inc 2). ``set_port(None)`` / ``set_ado_host(None)`` are
+    internally no-ops, so a config-unavailable profile behaves exactly as before.
     """
     from credential_relay.sources.git_credential import GitCredentialSource
 
-    from .relay_token import validate as _validate_codespace_token
+    from .relay_token import authorize_azure
 
     prof = relay_profile()
     builder.add_source(GitCredentialSource())
     builder.set_port(prof["port"])
     builder.set_ado_host(prof["ado_host"])
-    # Raw Azure/Entra bearer minting stays policy-gated: by default the
-    # CodeSpace can ask only for the public ADO REST resource, plus any resources
-    # explicitly configured by the adopting repo. The shared relay also serves
-    # network-reachable targets, so get-azure-token must stay behind a
-    # per-codespace token even though CodeSpaces reach it through an SSH tunnel.
+    # Raw Azure/Entra bearer minting stays policy-gated: a CodeSpace token may
+    # mint only the Azure resources recorded in its per-token allowlist (the ADO
+    # REST resource by default, plus any resources the adopting repo's config
+    # adds). The shared relay also serves network-reachable targets, so
+    # get-azure-token stays behind a per-codespace token even though CodeSpaces
+    # reach it through an SSH tunnel. ``allow_azure_resources`` enables the
+    # Azure source; the authorizer -- not the static allowlist -- enforces scope.
     builder.allow_azure_resources(prof["azure_resources"])
-    builder.require_token(prof["gated_actions"], _validate_codespace_token)
+    builder.authorize_token(prof["gated_actions"], authorize_azure)
