@@ -229,14 +229,25 @@ class LocalForward:
             )
             self._proc = proc
             self.local_port = port
-            if await self._wait_ready(proc, port):
-                log.info("Local forward up: 127.0.0.1:%d -> %s:%d",
-                         port, self._remote_host, self._remote_port)
-                return port
-            # Failed -- collect stderr, tear down, maybe retry a fresh port.
-            last_err = await self._drain_stderr(proc)
+            try:
+                ready = await self._wait_ready(proc, port)
+                if ready:
+                    log.info("Local forward up: 127.0.0.1:%d -> %s:%d",
+                             port, self._remote_host, self._remote_port)
+                    return port
+                # Failed -- collect stderr, tear down, maybe retry a fresh port.
+                last_err = await self._drain_stderr(proc)
+            except BaseException:
+                # Cancellation (or any error) while waiting must not leak the
+                # ssh child; shield the kill so it survives the cancel, and only
+                # clear our handle if it still points at this proc.
+                await asyncio.shield(self._kill(proc))
+                if self._proc is proc:
+                    self._proc = None
+                raise
             await self._kill(proc)
-            self._proc = None
+            if self._proc is proc:
+                self._proc = None
         raise ConnectionError(
             f"local forward to {self._config.ssh_target} "
             f"({self._remote_host}:{self._remote_port}) did not come up: "

@@ -17,6 +17,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from agent_bridge.agent_registry import (
+    FileTokenAuthorizer,
     FileTokenValidator,
     _apply_relay_profile,
     _register_provider_relay,
@@ -113,6 +114,7 @@ class _FakeBuilder:
         self.azure = None
         self.gated = None
         self.validator = None
+        self.authorizer = None
 
     def add_source(self, s):
         self.sources.append(getattr(s, "name", type(s).__name__))
@@ -131,6 +133,10 @@ class _FakeBuilder:
     def require_token(self, actions, validator):
         self.gated = list(actions)
         self.validator = validator
+
+    def authorize_token(self, actions, authorizer):
+        self.gated = list(actions)
+        self.authorizer = authorizer
 
 
 def test_apply_relay_profile_codespace_shape(tmp_path):
@@ -174,6 +180,79 @@ def test_apply_relay_profile_skips_unknown_source():
     b = _FakeBuilder()
     _apply_relay_profile(b, {"sources": ["bogus"], "azure_resources": []})
     assert b.sources == []
+
+
+def test_file_token_validator_tolerates_structured_entries(tmp_path):
+    # A store written by the scoped token_for carries structured entries; the
+    # validator must read the ``token`` field (not skip the dict, which would
+    # silently deny every request -- the version-skew hazard).
+    store = tmp_path / "relay-tokens.json"
+    _write_store(store, {
+        "cs-a": {"token": "TOKA", "repository": "o/r", "allowed_resources": []},
+        "cs-legacy": "TOKB",
+    })
+    fv = FileTokenValidator(store)
+    assert fv("TOKA") is True   # structured entry's secret
+    assert fv("TOKB") is True   # legacy string entry
+    assert fv("nope") is False
+
+
+def test_apply_relay_profile_scoped_azure_uses_authorizer(tmp_path):
+    ado = "499b84ac-1321-427f-aa17-267ca6975798"
+    store = tmp_path / "relay-tokens.json"
+    _write_store(store, {
+        "cs": {"token": "TOK", "repository": "o/r", "allowed_resources": [ado]},
+    })
+    b = _FakeBuilder()
+    _apply_relay_profile(b, {
+        "sources": ["git-credential"],
+        "port": 50123,
+        "ado_host": None,
+        "azure_resources": [ado, "https://storage.azure.com/"],
+        "gated_actions": ["get-azure-token"],
+        "token_store": str(store),
+        "scoped_azure": True,
+    })
+    # The scoped profile applies the request-scoped authorizer, not a validator.
+    assert b.validator is None
+    assert isinstance(b.authorizer, FileTokenAuthorizer)
+    assert b.authorizer("TOK", "get-azure-token", {"scope": ado}) is True
+    # A resource outside the token's allowlist is denied even for a valid token.
+    assert b.authorizer(
+        "TOK", "get-azure-token", {"scope": "https://graph.microsoft.com/"},
+    ) is False
+    assert b.authorizer("nope", "get-azure-token", {"scope": ado}) is False
+
+
+def test_file_token_authorizer_enforces_per_token_scope(tmp_path):
+    ado = "499b84ac-1321-427f-aa17-267ca6975798"
+    store = tmp_path / "relay-tokens.json"
+    _write_store(store, {
+        "cs": {"token": "TOK", "repository": "o/r",
+               "allowed_resources": [ado, "https://storage.azure.com/"]},
+    })
+    fa = FileTokenAuthorizer(store)
+    # In-allowlist resources authorize, with /.default normalization; others don't.
+    assert fa("TOK", "get-azure-token", {"scope": ado + "/.default"}) is True
+    assert fa("TOK", "get-azure-token",
+              {"resource": "https://storage.azure.com/"}) is True
+    assert fa("TOK", "get-azure-token",
+              {"scope": "https://graph.microsoft.com/.default"}) is False
+    # Non-Azure actions and unknown tokens are never authorized here.
+    assert fa("TOK", "get-github-token", {}) is False
+    assert fa("wrong", "get-azure-token", {"scope": ado}) is False
+
+
+def test_file_token_authorizer_legacy_entry_falls_back_to_static(tmp_path):
+    ado = "499b84ac-1321-427f-aa17-267ca6975798"
+    store = tmp_path / "relay-tokens.json"
+    # A legacy string entry carries no per-token allowlist; the authorizer falls
+    # back to the profile's static allowlist so a pre-scoping token still works.
+    _write_store(store, {"cs-legacy": "LTOK"})
+    fa = FileTokenAuthorizer(store, [ado])
+    assert fa("LTOK", "get-azure-token", {"scope": ado}) is True
+    assert fa("LTOK", "get-azure-token",
+              {"scope": "https://graph.microsoft.com/"}) is False
 
 
 # --- _relay_profile_via_cli + _register_provider_relay -----------------------

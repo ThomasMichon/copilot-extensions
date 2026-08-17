@@ -13,6 +13,7 @@ class _FakeBuilder:
     def __init__(self):
         self.sources, self.port, self.ado_host = [], None, None
         self.azure, self.gated, self.validator = None, None, None
+        self.authorizer = None
 
     def add_source(self, s):
         self.sources.append(getattr(s, "name", type(s).__name__))
@@ -31,6 +32,9 @@ class _FakeBuilder:
     def require_token(self, actions, validator):
         self.gated, self.validator = list(actions), validator
 
+    def authorize_token(self, actions, authorizer):
+        self.gated, self.authorizer = list(actions), authorizer
+
 
 def test_relay_profile_shape():
     prof = relay_profile()
@@ -47,7 +51,8 @@ def test_register_relay_applies_profile_data():
     assert "git-credential" in b.sources
     assert b.azure == prof["azure_resources"]
     assert b.gated == ["get-azure-token"]
-    assert callable(b.validator)  # the in-process fallback validator
+    assert callable(b.authorizer)  # the in-process request-scoped authorizer
+    assert b.validator is None
 
 
 def test_relay_profile_cli_emits_json(capsys):
