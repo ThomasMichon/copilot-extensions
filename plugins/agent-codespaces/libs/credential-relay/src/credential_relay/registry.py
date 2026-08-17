@@ -168,13 +168,19 @@ class RelayBuilder:
         sources = list(self.sources)
         if self._azure_enabled and not any(s.name == "az-login" for s in sources):
             from .sources.az_login import AzLoginSource
+            from .sources.injected_token import InjectedTokenSource
 
-            sources.append(
-                AzLoginSource(
-                    allowed_resources=["*"] if self._token_authorizers
-                    else sorted(self.azure_resources)
-                )
+            azure_allowed = (
+                ["*"] if self._token_authorizers else sorted(self.azure_resources)
             )
+            # A pre-minted-bearer shim tried BEFORE az-login: inert (its resolve
+            # returns None -> routing falls through to az-login) unless its env
+            # var is set, so production is unchanged; when set -- a hermetic test
+            # venue that cannot run `az login` (e.g. the clean-room container) --
+            # it serves a host-minted bearer instead of shelling az. Same
+            # allowlist + server token gate as az-login.
+            sources.append(InjectedTokenSource(allowed_resources=azure_allowed))
+            sources.append(AzLoginSource(allowed_resources=azure_allowed))
         policy = RelayPolicy(allowed_hosts=list(self.allowed_hosts))
         kwargs: dict = {"sources": sources, "policy": policy}
         if self.port is not None:
