@@ -51,10 +51,16 @@ def declaration_to_spec(decl: ProfileDeclaration) -> dict:
         spec["repo"] = decl.repos
     if decl.label_max_attempts:
         spec["label_max_attempts"] = dict(decl.label_max_attempts)
-    headless = decl.effective_headless_labels()
-    if headless:
-        spec["headless_labels"] = list(headless)
-    if decl.body.type == "headless" or headless:
+    # Headless is the default embody backend. An embody (CLI-default) profile pins
+    # the backend and lists any headless subset; a headless profile lists any CLI
+    # opt-out subset (cli_labels) and leaves the backend at its default.
+    if decl.body.type == "embody":
+        spec["embody_backend"] = "cli"
+        if decl.body.headless_labels:
+            spec["headless_labels"] = list(decl.body.headless_labels)
+    elif decl.body.cli_labels:
+        spec["cli_labels"] = list(decl.body.cli_labels)
+    if decl.body.type == "headless" or decl.body.headless_labels:
         spec["headless_agent"] = decl.body.agent
     if decl.verify_timeout:
         spec["verify_timeout"] = decl.verify_timeout

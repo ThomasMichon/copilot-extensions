@@ -1658,10 +1658,14 @@ AGENT_DISPATCH_SUPERVISE_MAX_ATTEMPTS=3
 # e.g. "code-review=3 nightly-scan=1" so raising one
 # label's bound never revives another label's stale tasks (N=0 = retry forever):
 AGENT_DISPATCH_SUPERVISE_LABEL_MAX_ATTEMPTS=
-# Labels whose tasks embody as a HEADLESS agent-bridge ACP session (no mux, no
-# CLI-start-prompt) instead of a CLI autopilot -- comma- or space-separated. For
-# self-contained, bounded sweeps that need no human attach; unlisted labels stay
-# CLI-first. Each listed label must also appear in SUPERVISE_LABELS to be watched.
+# Default embody backend: 'headless' (default) embodies each claimed task as a
+# headless agent-bridge ACP session (no mux, no CLI-start-prompt); 'cli' makes the
+# lane a CLI-backed autopilot worktree session. Leave blank for the headless default.
+AGENT_DISPATCH_SUPERVISE_EMBODY_BACKEND=
+# Per-label overrides (comma/space list; each must also be in SUPERVISE_LABELS):
+#   CLI_LABELS      -- force these labels to a CLI autopilot (opt-out on a headless lane)
+#   HEADLESS_LABELS -- force these labels headless (opt-in when EMBODY_BACKEND=cli)
+AGENT_DISPATCH_SUPERVISE_CLI_LABELS=
 AGENT_DISPATCH_SUPERVISE_HEADLESS_LABELS=
 # agent-bridge agent name used for headless embody bodies (default: task-worker):
 AGENT_DISPATCH_SUPERVISE_HEADLESS_AGENT=
@@ -1698,6 +1702,8 @@ Set-Location -LiteralPath `$PSScriptRoot
 `$maxConcurrent = '1'
 `$maxAttempts = '3'
 `$labelMaxAttempts = ''
+`$embodyBackend = ''
+`$cliLabels = ''
 `$headlessLabels = ''
 `$headlessAgent = ''
 `$extra = ''
@@ -1714,6 +1720,8 @@ if (Test-Path `$envFile) {
             'AGENT_DISPATCH_SUPERVISE_MAX_CONCURRENT' { if (`$v) { `$maxConcurrent = `$v } }
             'AGENT_DISPATCH_SUPERVISE_MAX_ATTEMPTS'   { if (`$v) { `$maxAttempts = `$v } }
             'AGENT_DISPATCH_SUPERVISE_LABEL_MAX_ATTEMPTS' { `$labelMaxAttempts = `$v }
+            'AGENT_DISPATCH_SUPERVISE_EMBODY_BACKEND'  { `$embodyBackend = `$v }
+            'AGENT_DISPATCH_SUPERVISE_CLI_LABELS'      { `$cliLabels = `$v }
             'AGENT_DISPATCH_SUPERVISE_HEADLESS_LABELS' { `$headlessLabels = `$v }
             'AGENT_DISPATCH_SUPERVISE_HEADLESS_AGENT'  { `$headlessAgent = `$v }
             'AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS'     { `$extra = `$v }
@@ -1732,6 +1740,10 @@ if (-not `$haveLabel) {
 }
 foreach (`$lm in (`$labelMaxAttempts -split '[\s,]+')) {
     if (`$lm) { `$argsList += @('--label-max-attempts', `$lm) }
+}
+if (`$embodyBackend) { `$argsList += @('--embody-backend', `$embodyBackend) }
+foreach (`$cl in (`$cliLabels -split '[\s,]+')) {
+    if (`$cl) { `$argsList += @('--cli-label', `$cl) }
 }
 foreach (`$hl in (`$headlessLabels -split '[\s,]+')) {
     if (`$hl) { `$argsList += @('--headless-label', `$hl) }
