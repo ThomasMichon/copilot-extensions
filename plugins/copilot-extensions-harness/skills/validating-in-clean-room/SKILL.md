@@ -177,11 +177,21 @@ Under `tools/clean-room/scenarios/` today:
 | `agent-worktrees-solo` | P/F1 | Worktree base stands up solo and round-trips `register` → `create` → `finalize`. |
 | `agent-bridge-solo` | P/F1 | agent-bridge provisions and read verbs answer without an agent-worktrees base. |
 | `agent-codespaces-solo` | P/F1 | agent-codespaces read verbs degrade safely without an agent-worktrees base. |
+| `agent-containers-solo` | P/F1 | agent-containers provisions solo; its knowledge-overlay `state-root` shell-out falls open and read verbs answer without the base. |
+| `agent-ssh-solo` | P/F1 | agent-ssh (standalone profile emitter/verifier) installs with no sibling and its transport-contract read verbs answer. |
+| `agent-machines-solo` | P/F1 | agent-machines (standalone reconciler) provisions; `restore` (default dry-run) refuses cleanly on validator errors instead of crashing on absent config. |
+| `agent-logger-solo` | P/F1 | agent-logger (standalone) provisions; read verbs answer and `session-sync run --dry-run` reports would-push only. |
+| `agent-mcp-solo` | P/F1 | agent-mcp (the standalone MCP-wrapper exemplar, no bridge) provisions; `validate` schema-checks a stdio bridge and cleanly rejects a missing one. *(Docker smoke-run green.)* |
+| `agent-dispatch-solo` | P/F1 | agent-dispatch (standalone) provisions; `--version` matches package+manifest (not the fallback) and read verbs answer on an empty queue. |
+| `agent-index-solo` | P/F1 | agent-index (standalone) provisions the **service** without the heavy engine; status/role read verbs and the direct/bridge MCP surfaces answer. |
+| `agent-vault-solo` | P/F1 | agent-vault (standalone secret store) provisions binstub + `vault-askpass`; read verbs report cleanly with no `.kdbx` (no KeePassXC hard-dep). |
 | `agent-bridge-cutover` | P/F1 | agent-bridge zdd cutover mechanism: routing flip, drain gate, recovery. |
 | `agent-dispatch-cutover` | P/F1 | agent-dispatch cutover preserves queued/held work and heals aborted/wedged cases. |
 | `agent-index-cutover` | P/F1 | agent-index service cutover preserves durable queue state and heals drain/recovery cases. |
+| `agent-vault-cutover` | P/F1 | Forward-ready witness: proves agent-vault's client-side rendezvous fallback ladder; flags the daemon-side zdd cutover as not-yet-adopted (INFO, #609). |
 
-**The matrix to build toward** (per the vision): each plugin **solo** → **reasonable
+**The matrix to build toward** (per the vision): each plugin **solo** *(now
+complete — every runtime plugin has a solo scenario)* → **reasonable
 combinations** → the **full assembled harness**, each **with and without** the
 worktree base (does an enhanced feature degrade safely when its base is absent?),
 culminating in the turn-key assembly acceptance (a fresh harness + empty knowledge
