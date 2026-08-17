@@ -184,7 +184,7 @@ honorer; declare it as a dependency, and use its two convention-discovered seams
    friends — scoped with `forWorkspaceRepo`. `agent-codespaces` reads this custom
    field and installs them into the CodeSpace's user settings.
 
-The full mechanism, the worked `odsp-web-harness` example, and the anti-patterns
+The full mechanism, the worked `example-web-harness` example, and the anti-patterns
 are in the copilot-extensions pattern
 [**docs/patterns/codespace-repo-provenance.md**](../../../../docs/patterns/codespace-repo-provenance.md).
 (A heavier `setup-venue` that scaffolds config + tools into a control-plane repo,

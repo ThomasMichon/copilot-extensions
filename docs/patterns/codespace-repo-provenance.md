@@ -3,7 +3,7 @@
 **Serves:** *Vision agent-codespaces* §Features/`config-by-adoption`,
 `headless-agent-hosting`; §Provenance — the venue side of the fabric's
 "dispatch a repo you have no local checkout of" golden path.
-**Exemplars:** `odsp-web-harness` (dev-tmichon) → `agent-codespaces` (the honorer);
+**Exemplars:** `example-web-harness` (example-marketplace) → `agent-codespaces` (the honorer);
 composes with `agent-bridge` for `codespace:<name>` dispatch.
 **Related:** [`a-la-carte-independence`](a-la-carte-independence.md) (the
 provider-manifest seam agent-codespaces uses to reach agent-bridge);
@@ -73,10 +73,10 @@ The provenance itself lives under `repos.<vessel>`:
 # can't derive. Machine/location defaults, /workspaces/<basename>, and the
 # github.com + ADO credential relay are all handled automatically.
 credentials:
-  ado_host: onedrive.visualstudio.com          # bare get-access-token host for the org
+  ado_host: my-org.visualstudio.com          # bare get-access-token host for the org
 repos:
-  odsp-microsoft/odsp-web-codespaces:          # the VESSEL repo (the CodeSpace's own repository)
-    workspace_repo: odsp-web                    # -> agent lands in /workspaces/odsp-web (the PRODUCT)
+  example-org/example-web-codespaces:          # the VESSEL repo (the CodeSpace's own repository)
+    workspace_repo: example-web                    # -> agent lands in /workspaces/example-web (the PRODUCT)
     machine_type: largePremiumLinux256gb
     devcontainer_path: .devcontainer/devcontainer.json   # pin when the vessel ships >1
     provision:                                  # per-venue setup deployed on SSH connect
@@ -85,7 +85,7 @@ repos:
 ```
 
 `workspace_repo` is the crux of provenance: it is what makes
-`effective_acp_command_for(<vessel>)` emit `cd /workspaces/odsp-web && copilot
+`effective_acp_command_for(<vessel>)` emit `cd /workspaces/example-web && copilot
 --acp --stdio --allow-all-tools`, and what `resolved_workspace_folder_for` publishes
 to agent-bridge as the ACP `session/new` cwd — so a dispatched agent's tools are
 rooted in the product checkout.
@@ -107,11 +107,11 @@ ignores; `agent-codespaces` is its sole consumer):
 
 ```jsonc
 {
-  "name": "odsp-web-harness",
+  "name": "example-web-harness",
   "dependencies": [ { "name": "agent-codespaces", "marketplace": "copilot-extensions" } ],
   "codespacePlugins": [
-    { "source": "odsp-web-agent@dev-tmichon", "enable": true,
-      "forWorkspaceRepo": "odsp-microsoft/odsp-web*" }
+    { "source": "example-web-agent@example-marketplace", "enable": true,
+      "forWorkspaceRepo": "example-org/example-web*" }
   ]
 }
 ```

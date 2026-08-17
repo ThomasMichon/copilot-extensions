@@ -83,7 +83,7 @@ credentials:
 
 A repo's venue policy does **not** have to live in an adopted control-plane repo.
 A **`<repo>-harness`** plugin can ship the venue's **repo provenance** with itself
-and make it discoverable with **no control-plane repo** — the odsp-web-style
+and make it discoverable with **no control-plane repo** — the example-web-style
 golden path. Two convention-discovered seams, both honored here:
 
 - **Config-provider drop-in (`config.d`).** A harness plugin ships a supplementary
@@ -106,7 +106,7 @@ golden path. Two convention-discovered seams, both honored here:
 Authoring a `<repo>-harness` plugin that uses these seams is the
 `authoring-harness-plugins` skill (`customizing-copilot`) and the pattern
 [`docs/patterns/codespace-repo-provenance.md`](../../docs/patterns/codespace-repo-provenance.md).
-The reference implementation is `odsp-web-harness` (dev-tmichon).
+The reference implementation is `example-web-harness` (example-marketplace).
 
 ## CLI
 
