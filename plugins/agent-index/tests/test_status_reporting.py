@@ -115,6 +115,17 @@ def test_missing_lance_dir_is_measured_empty(monkeypatch, tmp_path) -> None:
     assert result["available"] is False
 
 
+def test_absent_content_table_is_measured_empty(monkeypatch, tmp_path) -> None:
+    # Store reads fine but the content table simply isn't there yet.
+    tables = {"other": _FakeTable(5)}
+    _install_fake_lancedb(monkeypatch, tmp_path, tables)
+
+    result = server._index_status()
+
+    assert result["chunks"] == 0  # readable store, empty => 0, not "unknown"
+    assert result["available"] is False
+
+
 def test_status_payload_unreachable_reports_unknown(monkeypatch) -> None:
     monkeypatch.setattr(cli, "client_url", lambda: "http://127.0.0.1:9")
 

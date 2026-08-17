@@ -379,7 +379,13 @@ def _index_status(include_sources: bool = False) -> dict[str, Any]:
             log.debug("Failed to count index table %s", table_name, exc_info=True)
             tables[table_name] = None
 
-    chunks = tables.get(cfg.content_table)
+    # The store was read successfully, so an absent content table means a
+    # measurably-empty index (0), NOT "unknown". Only a failed count_rows()
+    # (recorded as None above) is genuinely unknown.
+    if cfg.content_table in tables:
+        chunks = tables[cfg.content_table]
+    else:
+        chunks = 0
     available = chunks > 0 if isinstance(chunks, int) else None
 
     sources: dict[str, int] = {}
