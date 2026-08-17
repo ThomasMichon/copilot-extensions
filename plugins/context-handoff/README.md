@@ -6,7 +6,7 @@ This plugin ships two cooperating pieces:
 
 | Piece | Type | Role |
 |-------|------|------|
-| **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; logs threshold warnings and queues agent-facing `session.send()` nudges at 55% / 70% utilization, delivered on the next idle; provides `generate_handoff_prompt`, `save_handoff_prompt`, and `continue_handoff` tools plus the **`/handoff-continue`** and **`/resume-handoff`** slash commands. `save_handoff_prompt` sits **on top of agent-dispatch**: when a coordinator is reachable **and this worktree can be resolved**, it stores the handoff as a `proposed`/`handoff` **task** (payload = the markdown, pinned to the worktree, no session file); otherwise it falls back to a session-folder file. `/resume-handoff` digs up this worktree's pending handoff (task, else file) and **injects its continuation prompt into the current session** |
+| **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; logs threshold warnings and queues agent-facing `session.send()` nudges at 55% / 70% utilization, delivered on the next idle; provides `generate_handoff_prompt`, `save_handoff_prompt`, `consume_handoff`, and `continue_handoff` tools plus the **`/handoff-continue`** and **`/resume-handoff`** slash commands. `save_handoff_prompt` sits **on top of agent-dispatch**: when a coordinator is reachable **and this worktree can be resolved**, it stores the handoff as a `proposed`/`handoff` **task** (payload = metadata plus markdown, pinned to the worktree, no file handoff); otherwise it falls back to a one-time worktree-state file outside the repo checkout. `/resume-handoff` digs up this worktree's pending handoff (task, else file), consumes it once, and **injects its continuation prompt into the current session** |
 | **context-handoff skill** | Skill | The `/handoff` workflow -- composes the continuation prompt from the extension's structured facts and the agent's live context. (Resume is handled by the extension's `/resume-handoff` command, which injects the handoff; the skill documents both) |
 
 ## Why an extension (and not a pure plugin)
@@ -59,8 +59,8 @@ this plugin:
 ## Verify
 
 A loaded extension exposes the `generate_handoff_prompt`,
-`save_handoff_prompt`, and `continue_handoff` tools, plus `/handoff-continue`
-and `/resume-handoff`; `/extensions` lists it with source **plugin**. It
+`save_handoff_prompt`, `consume_handoff`, and `continue_handoff` tools, plus
+`/handoff-continue` and `/resume-handoff`; `/extensions` lists it with source **plugin**. It
 intentionally does **not** emit a user-visible "Session started" breadcrumb. If
 it does not load, confirm both requirements above and start a fresh session (the
 `context-handoff-setup` troubleshooting skill walks through this).
@@ -80,26 +80,19 @@ agent-facing `session.send()` nudge. The nudge is queued by
 it does not interrupt an in-flight turn. Failures to send the nudge are logged
 as warnings; they do not block the session.
 
-## Live cutover records the durable session lineage
+## Live cutover is successor-consume-driven
 
 A live cutover (`continue_handoff`) spawns a seeded successor Copilot in a new
-mux window, cuts the operator over, and retires this session's pane on the next
-`session.idle`. Beyond the mux choreography, the cutover now writes the
-worktree's **session lineage** into the agent-worktrees ground layer (which owns
-that state -- context-handoff keeps no rival pointer):
+mux window and cuts the operator over. It does **not** retire the predecessor on
+the predecessor's next idle. The stored handoff carries the predecessor pane id
+and session id; the successor's seeded first action is to call `consume_handoff`.
+That consume step loads the brief, marks file-backed handoffs spent, records the
+outgoing session as **`handed-off`** via `agent-worktrees conclude-session`, and
+retires the predecessor pane through `agent-worktrees handoff-cutover
+--retire-pane`.
 
-- At cutover the outgoing session is durably concluded **`handed-off`** via
-  `agent-worktrees conclude-session`, not merely a killed pane. That advances the
-  worktree head off it, so a stale replay of the same handoff -- or agent-bridge's
-  create guard -- no longer treats the worktree as still holding the retired
-  session (the spent-baton replay).
-- The successor completes the **two-way `predecessor`/`successor` link** when it
-  registers: `agent-worktrees register_session` auto-adopts the pending handoff,
-  the first moment the successor's fresh session id exists. The lineage of
-  sessions in a worktree is then traversable in both directions.
-
-Both writes are best-effort: a failure never undoes the (already successful)
-cutover.
+This keeps recovery safe: if the successor never comes up or never consumes the
+handoff, the predecessor pane remains available and the terminal is not closed.
 
 This split follows the repo-wide
 [`primitives below, orchestration above`](../../docs/patterns/README.md)
@@ -112,13 +105,13 @@ The plugin remains useful in a plain Copilot CLI session with only
 `context-handoff@copilot-extensions` enabled:
 
 - `generate_handoff_prompt` and `save_handoff_prompt` work without
-  agent-worktrees or agent-dispatch.
+  agent-dispatch when agent-worktrees can resolve a worktree state directory.
 - If `agent-dispatch` is absent, unhealthy, or a worktree cannot be resolved,
-  `save_handoff_prompt` writes the session-file fallback under
-  `~/.copilot/session-state/<sessionId>/files/<sessionId>-prompt.md`.
+  `save_handoff_prompt` writes a one-time file under the worktree state
+  directory outside the repo checkout.
 - `continue_handoff` is best-effort. Without a resolvable worktree + live mux it
   does nothing destructive and tells the agent to use the saved paste or
   `/resume-handoff` fallback.
 - `/resume-handoff` first tries a pinned agent-dispatch handoff task when that
-  stack is available; otherwise it falls back to the newest matching session
-  file for the current CWD.
+  stack is available; otherwise it falls back to the newest unconsumed
+  worktree-state handoff file for the current CWD.
