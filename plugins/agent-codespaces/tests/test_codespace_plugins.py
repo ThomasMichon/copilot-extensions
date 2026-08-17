@@ -10,7 +10,10 @@ from agent_codespaces.codespace_plugins import (
     CodespacePluginSpec,
     enabled_plugin_names,
     is_harness_plugin,
+    is_local_marketplace_source,
     iter_installed_manifests,
+    marketplace_of,
+    partition_local_specs,
     plugin_names_from_enabled,
     repo_matches,
     resolve_codespace_plugins,
@@ -28,8 +31,14 @@ def _install_plugin(
     *,
     codespace_plugins: list[dict] | None = None,
     extra: dict | None = None,
+    claude_layout: bool = False,
 ) -> None:
-    """Write a fake installed plugin payload under <home>/installed-plugins."""
+    """Write a fake installed plugin payload under <home>/installed-plugins.
+
+    ``claude_layout`` writes the manifest at ``.claude-plugin/plugin.json``
+    (the ``.ai`` local-marketplace convention) instead of the native
+    ``plugin.json`` at the plugin root.
+    """
     pdir = copilot_home / "installed-plugins" / marketplace / name
     pdir.mkdir(parents=True, exist_ok=True)
     manifest: dict = {"name": name, "version": "0.1.0"}
@@ -37,7 +46,12 @@ def _install_plugin(
         manifest["codespacePlugins"] = codespace_plugins
     if extra:
         manifest.update(extra)
-    (pdir / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
+    if claude_layout:
+        mdir = pdir / ".claude-plugin"
+        mdir.mkdir(parents=True, exist_ok=True)
+        (mdir / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
+    else:
+        (pdir / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
 def _set_enabled(copilot_home: Path, *specs: str) -> None:
@@ -87,8 +101,22 @@ def test_enabled_plugin_names_strips_marketplace(tmp_path):
 def test_iter_installed_manifests(tmp_path):
     _install_plugin(tmp_path, "example-marketplace", "repo-example-web")
     _install_plugin(tmp_path, "copilot-extensions", "agent-bridge")
+    # A local ``.ai`` marketplace plugin using the Claude manifest layout.
+    _install_plugin(tmp_path, "dotfiles-plugins", "figma", claude_layout=True)
     names = {n for n, _d, _m in iter_installed_manifests(tmp_path)}
-    assert names == {"repo-example-web", "agent-bridge"}
+    assert names == {"repo-example-web", "agent-bridge", "figma"}
+
+
+def test_iter_installed_manifests_claude_layout_carries_codespace_plugins(tmp_path):
+    # A Claude-layout harness plugin declaring codespacePlugins is swept too.
+    _install_plugin(
+        tmp_path, "dotfiles-plugins", "example-web-harness",
+        codespace_plugins=[{"source": "example-web-agent@dotfiles-plugins"}],
+        claude_layout=True,
+    )
+    _set_enabled(tmp_path, "example-web-harness@dotfiles-plugins")
+    specs = resolve_codespace_plugins(None, copilot_home=tmp_path)
+    assert [s.source for s in specs] == ["example-web-agent@dotfiles-plugins"]
 
 
 # --------------------------------------------------------------------------
@@ -364,3 +392,61 @@ def test_enabled_names_override_supersedes_user_settings(tmp_path):
         enabled_names={"documenting-packages"},
     )
     assert [s.source for s in specs] == ["example-web-agent@example-marketplace"]
+
+
+# --------------------------------------------------------------------------
+# Local-marketplace classification (stage-from-host vs register+install)
+# --------------------------------------------------------------------------
+
+_DIR_MKT = {"source": {"source": "directory", "path": "./.ai"}}
+_LOCAL_MKT = {"source": {"source": "local", "path": "/abs/mkt"}}
+_GH_MKT = {"source": {"source": "github", "repo": "owner/repo"}}
+
+
+def test_marketplace_of():
+    assert marketplace_of("figma@dotfiles-plugins") == "dotfiles-plugins"
+    assert marketplace_of("  figma@dotfiles-plugins  ") == "dotfiles-plugins"
+    assert marketplace_of("noat") == ""
+    assert marketplace_of("") == ""
+
+
+def test_is_local_marketplace_source_directory():
+    mk = {"dotfiles-plugins": _DIR_MKT}
+    assert is_local_marketplace_source("figma@dotfiles-plugins", mk) is True
+
+
+def test_is_local_marketplace_source_local_kind():
+    mk = {"m": _LOCAL_MKT}
+    assert is_local_marketplace_source("p@m", mk) is True
+
+
+def test_is_local_marketplace_source_remote_is_false():
+    mk = {"copilot-extensions": _GH_MKT}
+    assert is_local_marketplace_source("agent-bridge@copilot-extensions", mk) is False
+
+
+def test_is_local_marketplace_source_unknown_or_bad():
+    mk = {"dotfiles-plugins": _DIR_MKT}
+    assert is_local_marketplace_source("p@unknown", mk) is False  # not in map
+    assert is_local_marketplace_source("noat", mk) is False       # no marketplace
+    assert is_local_marketplace_source("p@m", None) is False      # no map
+    assert is_local_marketplace_source("p@m", {"m": {}}) is False  # no source
+
+
+def test_partition_local_specs_splits_by_kind():
+    marketplaces = {"dotfiles-plugins": _DIR_MKT, "copilot-extensions": _GH_MKT}
+    specs = [
+        CodespacePluginSpec(source="figma@dotfiles-plugins"),
+        CodespacePluginSpec(source="agent-bridge@copilot-extensions"),
+        CodespacePluginSpec(source="mail@dotfiles-plugins"),
+    ]
+    local, remote = partition_local_specs(specs, marketplaces)
+    assert [s.source for s in local] == ["figma@dotfiles-plugins", "mail@dotfiles-plugins"]
+    assert [s.source for s in remote] == ["agent-bridge@copilot-extensions"]
+
+
+def test_partition_local_specs_empty_marketplaces_all_remote():
+    specs = [CodespacePluginSpec(source="figma@dotfiles-plugins")]
+    local, remote = partition_local_specs(specs, {})
+    assert local == []
+    assert [s.source for s in remote] == ["figma@dotfiles-plugins"]
