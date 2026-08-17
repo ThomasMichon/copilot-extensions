@@ -107,6 +107,70 @@ def test_parser_requires_subcommand():
         build_parser().parse_args([])
 
 
+def test_cmd_serve_reroots_cwd_to_runtime_dir(monkeypatch, tmp_path):
+    import argparse
+    from pathlib import Path
+
+    from agent_dispatch import __main__, runtime_version, server
+
+    start = tmp_path / "payload"
+    runtime = tmp_path / "runtime"
+    start.mkdir()
+    monkeypatch.chdir(start)
+    monkeypatch.setattr(runtime_version, "install_dir", lambda: runtime)
+
+    seen = {}
+
+    def fake_serve(cfg, *, passive=False):
+        seen["cwd"] = Path.cwd()
+        seen["cfg"] = cfg
+        seen["passive"] = passive
+
+    monkeypatch.setattr(server, "serve", fake_serve)
+    args = argparse.Namespace(
+        host="127.0.0.1", port=None, db=None, token=None, passive=False
+    )
+
+    assert __main__._cmd_serve(args) == 0
+    assert seen["cwd"] == runtime
+    assert seen["cwd"] != start
+    assert runtime.is_dir()
+
+
+def test_cmd_serve_runtime_dir_resolution_failure_is_nonfatal(
+    monkeypatch, tmp_path, capsys
+):
+    import argparse
+    from pathlib import Path
+
+    from agent_dispatch import __main__, runtime_version, server
+
+    start = tmp_path / "payload"
+    fallback = tmp_path / "home"
+    start.mkdir()
+    monkeypatch.chdir(start)
+    monkeypatch.setattr(
+        runtime_version,
+        "install_dir",
+        lambda: (_ for _ in ()).throw(OSError("boom")),
+    )
+    monkeypatch.setattr(__main__.Path, "home", staticmethod(lambda: fallback))
+
+    seen = {}
+
+    def fake_serve(cfg, *, passive=False):
+        seen["cwd"] = Path.cwd()
+
+    monkeypatch.setattr(server, "serve", fake_serve)
+    args = argparse.Namespace(
+        host="127.0.0.1", port=None, db=None, token=None, passive=False
+    )
+
+    assert __main__._cmd_serve(args) == 0
+    assert seen["cwd"] == fallback
+    assert "could not resolve runtime cwd" in capsys.readouterr().err
+
+
 def test_parser_dashdash_tail_captured_for_drive_and_run():
     """`recipes drive` (leading positional) and `run` capture a verbatim
     `-- <command>` tail via `_dashdash_tail`, robustly across CPython versions
