@@ -442,6 +442,40 @@ def spawn_fleet_headless_worker(
     )
 
 
+def remote_registered_agent_names(host: str, *, timeout: float = 15.0) -> set[str] | None:
+    """Best-effort set of agent names registered with agent-bridge on remote ``host``.
+
+    A fleet/pool headless body spawns on the pool *host*, so its agent must be
+    registered **there**, not on the supervisor's host. Runs
+    ``agent-bridge --json agents`` on ``host`` (its SSH alias, never a raw IP) over
+    the mesh with ``BatchMode`` so a missing key fails fast. Returns ``None``
+    (indeterminate) whenever ssh is absent, the probe errors/times out, or the
+    output is unparseable -- never raises, never blocks. Used by
+    :func:`agent_dispatch.bridge.preflight_headless_agent` to warn before a fleet
+    lane silently dead-letters against an unregistered pool-host agent.
+    """
+    exe = shutil.which("ssh")
+    if exe is None:
+        return None
+    remote_argv = ["agent-bridge", "--json", "agents"]
+    remote_cmd = " ".join(shlex.quote(a) for a in remote_argv)
+    # `host` is the SSH alias (never a raw IP). BatchMode so a missing key fails
+    # fast instead of hanging on a password prompt.
+    cmd = [exe, "-o", "BatchMode=yes", host.strip().lower(), remote_cmd]
+    try:
+        proc = subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
+            cmd, check=False, capture_output=True, text=True, timeout=timeout,
+            **no_window_kwargs(),
+        )
+    except (subprocess.SubprocessError, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+    from .bridge import parse_agent_names
+
+    return parse_agent_names(proc.stdout)
+
+
 def parse_fleet_body_session(result: subprocess.CompletedProcess) -> str | None:
     """Extract the agent-bridge **session id** from ``create --no-wait --json``.
 
