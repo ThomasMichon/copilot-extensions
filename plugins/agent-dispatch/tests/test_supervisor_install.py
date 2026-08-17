@@ -96,18 +96,42 @@ def test_launcher_refuses_label_less_run():
 
 def test_service_enabled_only_when_labels_configured():
     """`_install_supervisor_unit` must gate `enable`/`restart` behind
-    `_supervisor_labels_configured <env-file>`, and disable/stop otherwise."""
+    `_supervisor_labels_configured <env-file>` (or MODE=serve, which self-gates),
+    and disable/stop otherwise."""
     text = _text()
     assert "_supervisor_labels_configured" in text
     idx = text.index("_install_supervisor_unit()")
     body = text[idx:]
-    guard = body.index('if _supervisor_labels_configured "$env_file"; then')
+    # The enable/restart is gated by the label check (MODE=serve short-circuits it,
+    # since the master daemon self-gates -- only labeled units run). Match the label
+    # guard substring (present in both the legacy and serve-aware conditions).
+    guard = body.index('_supervisor_labels_configured "$env_file"; then')
     enable = body.index('systemctl --user enable "$unit"')
     disable = body.index('systemctl --user disable "$unit"')
     assert guard < enable < disable, (
         "enable must be gated by _supervisor_labels_configured for that env "
         "file, with disable/stop in the inert (no-label) branch"
     )
+    # The label gate must still be present for the LEGACY (non-serve) path -- the
+    # only thing standing between the direct supervisor and embodying everything.
+    assert '_supervisor_labels_configured "$env_file"' in body
+
+
+def test_serve_mode_runs_master_daemon_and_self_gates():
+    """MODE=serve switches the launcher to the master daemon and enables the unit
+    unconditionally (the daemon self-gates: only labeled declarations/profiles run)."""
+    text = _text()
+    # The launcher execs the master daemon in serve mode.
+    assert "supervise serve --legacy-env" in text
+    assert 'mode="\\${AGENT_DISPATCH_SUPERVISE_MODE:-}"' in text
+    # _install_supervisor_unit enables unconditionally when MODE=serve.
+    idx = text.index("_install_supervisor_unit()")
+    body = text[idx:]
+    assert '[[ "$mode" == "serve" ]] || _supervisor_labels_configured' in body, (
+        "serve mode must bypass the label gate (the daemon self-gates)"
+    )
+    # In serve mode the installer retires per-profile units instead of creating them.
+    assert "_retire_supervisor_profile_units" in text
 
 
 def test_shipped_env_defaults_to_no_labels():
