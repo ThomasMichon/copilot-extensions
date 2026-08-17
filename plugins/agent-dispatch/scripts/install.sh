@@ -857,6 +857,22 @@ _supervisor_labels_configured() {
     [[ -n "$v" ]]
 }
 
+# The supervisor MODE: 'serve' runs the single master registrar daemon
+# (`supervise serve --legacy-env`, which reconciles declared pools + legacy env
+# profiles, each in its own subprocess); anything else (blank/'legacy') runs the
+# classic direct `supervise --label...` embody loop. Echoes the resolved mode.
+_supervisor_mode() {
+    local env_file="${1:-$SUPERVISOR_ENV_FILE}"
+    local v=""
+    if [[ -f "$env_file" ]]; then
+        v="$(sed -n 's/^[[:space:]]*AGENT_DISPATCH_SUPERVISE_MODE[[:space:]]*=//p' \
+            "$env_file" | tail -n1)"
+        v="${v//\"/}"; v="${v//\'/}"
+        v="$(printf '%s' "$v" | tr -d '[:space:]')"
+    fi
+    [[ "$v" == "serve" ]] && printf 'serve' || printf 'legacy'
+}
+
 _supervisor_profile_name_valid() {
     [[ "$1" =~ ^[A-Za-z0-9_-]+$ ]]
 }
@@ -923,6 +939,17 @@ AGENT_DISPATCH_SUPERVISE_HEADLESS_AGENT=
 # Extra raw flags appended to the invocation (advanced; e.g. fleet mode:
 #   --pool host-a,host-b --origin mantis-counter):
 AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=
+# Supervisor MODE (migration opt-in; default: the classic direct embody loop):
+#   serve -- run the single MASTER registrar daemon (`supervise serve
+#            --legacy-env`) instead of the direct loop. The daemon reconciles
+#            declared pools (registrar pointers) PLUS this host's legacy profiles
+#            (this supervisor.env + supervisors/*.env, read via --legacy-env),
+#            each in its own subprocess, and hot-reconciles on change. It is
+#            self-gating (only labeled units run), so it needs no label opt-in.
+#            In this mode the installer stops creating per-profile units (the
+#            daemon runs them) and retires any it previously created.
+# Leave blank for the classic per-host direct supervisor.
+AGENT_DISPATCH_SUPERVISE_MODE=
 ENVEOF
         _ok "Supervisor env: $SUPERVISOR_ENV_FILE (no labels -> service stays inert; add a label to enable)"
     else
@@ -956,6 +983,20 @@ cli_labels="\${AGENT_DISPATCH_SUPERVISE_CLI_LABELS:-}"
 headless_labels="\${AGENT_DISPATCH_SUPERVISE_HEADLESS_LABELS:-}"
 headless_agent="\${AGENT_DISPATCH_SUPERVISE_HEADLESS_AGENT:-}"
 extra="\${AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS:-}"
+
+# MODE=serve (opt-in): run the single MASTER registrar daemon instead of the
+# classic direct embody loop. The daemon reconciles declared pools (discovered
+# pointers) + this host's legacy env profiles (--legacy-env: supervisor.env +
+# supervisors/*.env), each in its own subprocess. It is self-gating -- only
+# labeled declarations/profiles run -- so, unlike the direct loop below, it needs
+# no label opt-in to be safe.
+mode="\${AGENT_DISPATCH_SUPERVISE_MODE:-}"
+if [[ "\$mode" == "serve" ]]; then
+    serve_args=(supervise serve --legacy-env)
+    # shellcheck disable=SC2206
+    [[ -n "\$extra" ]] && serve_args+=(\$extra)
+    exec "$LINK_PYTHON" -m agent_dispatch "\${serve_args[@]}"
+fi
 
 args=(supervise --all-repos --interval "\$interval" \\
       --max-concurrent "\$max_concurrent" --max-attempts "\$max_attempts")
@@ -1059,11 +1100,16 @@ WantedBy=default.target
 EOF
     systemctl --user daemon-reload 2>/dev/null || true
 
-    if _supervisor_labels_configured "$env_file"; then
+    local mode; mode="$(_supervisor_mode "$env_file")"
+    if [[ "$mode" == "serve" ]] || _supervisor_labels_configured "$env_file"; then
         systemctl --user enable "$unit" 2>/dev/null || true
         systemctl --user restart "$unit" 2>/dev/null || true
         if systemctl --user is-active "$unit" &>/dev/null; then
-            _ok "$label installed + started ($unit)"
+            if [[ "$mode" == "serve" ]]; then
+                _ok "$label installed + started ($unit -- MODE=serve: master registrar daemon)"
+            else
+                _ok "$label installed + started ($unit)"
+            fi
         else
             _warn "$label installed but not active -- check: systemctl --user status $unit"
         fi
@@ -1101,6 +1147,22 @@ _reconcile_supervisor_profiles() {
             _remove_supervisor_unit "$unit"
             _ok "Removed orphan supervisor profile unit: $unit"
         fi
+    done
+}
+
+# MODE=serve: the master daemon runs each legacy profile itself (--legacy-env), so
+# every per-profile unit (agent-dispatch-supervisor-<name>.service) is redundant.
+# Retire them all; their .env files stay in place for the daemon to read. The glob
+# requires a char after the dash, so the primary unit (agent-dispatch-supervisor
+# .service) is never matched.
+_retire_supervisor_profile_units() {
+    local unit_path unit
+    [[ -d "$UNIT_DIR" ]] || return 0
+    for unit_path in "$UNIT_DIR"/agent-dispatch-supervisor-*.service; do
+        [[ -e "$unit_path" ]] || continue
+        unit="${unit_path##*/}"
+        _remove_supervisor_unit "$unit"
+        _ok "Retired per-profile unit (MODE=serve; the daemon runs it): $unit"
     done
 }
 
@@ -1192,8 +1254,15 @@ _install_supervisor_service() {
     _write_supervisor_default_env
     _write_supervisor_launcher
     _install_supervisor_unit "$SUPERVISOR_UNIT" "$SUPERVISOR_ENV_FILE" "Embody supervisor"
-    _install_supervisor_profiles
-    _reconcile_supervisor_profiles
+    if [[ "$(_supervisor_mode "$SUPERVISOR_ENV_FILE")" == "serve" ]]; then
+        # MODE=serve: the master daemon runs the legacy profiles itself (via
+        # --legacy-env), so the per-profile units are redundant and would
+        # double-run -- retire them (their .env files stay; the daemon reads them).
+        _retire_supervisor_profile_units
+    else
+        _install_supervisor_profiles
+        _reconcile_supervisor_profiles
+    fi
 }
 
 # -- Actions ----------------------------------------------------------------
