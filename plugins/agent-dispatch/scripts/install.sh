@@ -899,10 +899,18 @@ AGENT_DISPATCH_SUPERVISE_MAX_ATTEMPTS=3
 # e.g. "code-review=3 nightly-scan=1" so raising one
 # label's bound never revives another label's stale tasks (N=0 = retry forever):
 AGENT_DISPATCH_SUPERVISE_LABEL_MAX_ATTEMPTS=
-# Labels whose tasks embody as a HEADLESS agent-bridge ACP session (no mux, no
-# CLI-start-prompt) instead of a CLI autopilot -- comma- or space-separated. For
-# self-contained, bounded sweeps that need no human attach; unlisted labels stay
-# CLI-first. Each listed label must also appear in SUPERVISE_LABELS to be watched.
+# Default embody backend for this supervisor: 'headless' (default) embodies each
+# claimed task as a headless agent-bridge ACP session -- the right body for a
+# self-contained, autonomous dispatched task (no mux, no CLI-start-prompt); 'cli'
+# makes the lane a CLI-backed autopilot worktree session (attachable). Leave blank
+# for the headless default.
+AGENT_DISPATCH_SUPERVISE_EMBODY_BACKEND=
+# Per-label overrides of the default backend (comma- or space-separated; each must
+# also appear in SUPERVISE_LABELS):
+#   CLI_LABELS      -- force these labels to a CLI autopilot (the opt-out on a
+#                      headless-by-default lane).
+#   HEADLESS_LABELS -- force these labels headless (the opt-in when EMBODY_BACKEND=cli).
+AGENT_DISPATCH_SUPERVISE_CLI_LABELS=
 AGENT_DISPATCH_SUPERVISE_HEADLESS_LABELS=
 # agent-bridge agent name used for headless embody bodies (default: task-worker):
 AGENT_DISPATCH_SUPERVISE_HEADLESS_AGENT=
@@ -937,6 +945,8 @@ interval="\${AGENT_DISPATCH_SUPERVISE_INTERVAL:-30}"
 max_concurrent="\${AGENT_DISPATCH_SUPERVISE_MAX_CONCURRENT:-1}"
 max_attempts="\${AGENT_DISPATCH_SUPERVISE_MAX_ATTEMPTS:-3}"
 label_max_attempts="\${AGENT_DISPATCH_SUPERVISE_LABEL_MAX_ATTEMPTS:-}"
+embody_backend="\${AGENT_DISPATCH_SUPERVISE_EMBODY_BACKEND:-}"
+cli_labels="\${AGENT_DISPATCH_SUPERVISE_CLI_LABELS:-}"
 headless_labels="\${AGENT_DISPATCH_SUPERVISE_HEADLESS_LABELS:-}"
 headless_agent="\${AGENT_DISPATCH_SUPERVISE_HEADLESS_AGENT:-}"
 extra="\${AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS:-}"
@@ -965,8 +975,17 @@ for lm in \$label_max_attempts; do
     args+=(--label-max-attempts "\$lm")
 done
 
-# Headless-ACP embody labels: tasks with one of these embody as a headless
-# agent-bridge worker instead of a CLI/mux autopilot (self-contained sweeps).
+# Default embody backend: headless (the default) unless EMBODY_BACKEND=cli.
+[[ -n "\$embody_backend" ]] && args+=(--embody-backend "\$embody_backend")
+
+# Per-label backend overrides. --cli-label opts a label OUT to a CLI autopilot on a
+# headless-by-default lane; --headless-label forces a label headless (for a
+# --embody-backend cli lane). Each must also be watched (in SUPERVISE_LABELS).
+cli_labels="\${cli_labels//,/ }"
+for cl in \$cli_labels; do
+    [[ -n "\$cl" ]] || continue
+    args+=(--cli-label "\$cl")
+done
 headless_labels="\${headless_labels//,/ }"
 for hl in \$headless_labels; do
     [[ -n "\$hl" ]] || continue

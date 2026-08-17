@@ -1643,11 +1643,19 @@ def _build_registration_spec(args: argparse.Namespace) -> dict:
     lma = _parse_label_max_attempts(getattr(args, "label_max_attempts", None))
     if lma:
         spec["label_max_attempts"] = lma
+    # Embody backend default is headless; record it (+ any per-label overrides) so
+    # the daemon rebuilds the same lane. Omit the default to keep older specs stable.
+    backend = getattr(args, "embody_backend", None) or "headless"
+    if backend != "headless":
+        spec["embody_backend"] = backend
     headless = [
         label for label in (getattr(args, "headless_label", None) or []) if label
     ]
     if headless:
         spec["headless_labels"] = headless
+    cli = [label for label in (getattr(args, "cli_label", None) or []) if label]
+    if cli:
+        spec["cli_labels"] = cli
     if getattr(args, "headless_agent", None):
         spec["headless_agent"] = args.headless_agent
     if getattr(args, "evaluator", None):
@@ -1871,8 +1879,18 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
     repo = None if getattr(args, "all_repos", False) else _scope_repo(args)
     coordinator_url = _resolve_client_target(args)[0]
     pool = [h for h in (getattr(args, "pool", "") or "").split(",") if h.strip()]
+    # Embody backend default is HEADLESS: a dispatched/supervised task is a
+    # self-contained, autonomous body that needs no human attach, and headless
+    # sidesteps the CLI-start-prompt path entirely. `--embody-backend cli` opts the
+    # whole lane back to CLI/mux (attachable); per-label overrides fine-tune either
+    # way (`--cli-label` forces CLI when the default is headless; `--headless-label`
+    # forces headless when the default is cli).
+    backend = getattr(args, "embody_backend", None) or "headless"
     headless_labels = [
         label for label in (getattr(args, "headless_label", None) or []) if label
+    ]
+    cli_labels = [
+        label for label in (getattr(args, "cli_label", None) or []) if label
     ]
     capacity_gate = None
     if pool:
@@ -1887,7 +1905,9 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 2
-        fleet_headless = bool(getattr(args, "headless", False))
+        # Fleet bodies are headless by default too (the `--headless` flag remains an
+        # explicit force); only `--embody-backend cli` makes fleet bodies CLI.
+        fleet_headless = bool(getattr(args, "headless", False)) or backend != "cli"
         fleet = FleetSpawner(
             pool,
             origin=origin,
@@ -1897,10 +1917,12 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
         )
         spawn_fn = fleet
         capacity_gate = fleet.can_spawn
-        if headless_labels:
+        if headless_labels or cli_labels:
             print(
-                "agent-dispatch supervise: --headless-label is ignored in fleet "
-                "(--pool) mode; use --headless to make all fleet bodies headless.",
+                "agent-dispatch supervise: per-label --headless-label/--cli-label "
+                "are ignored in fleet (--pool) mode; the whole pool is "
+                f"{'headless' if fleet_headless else 'CLI'} "
+                "(set --embody-backend to change).",
                 file=sys.stderr,
             )
         body = "headless agent-bridge ACP" if fleet_headless else "CLI-embodied"
@@ -1910,22 +1932,36 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
     else:
-        spawn_fn = make_embody_spawn(
+        headless_spawn = make_headless_spawn(
+            coordinator_url,
+            agent=getattr(args, "headless_agent", None) or "task-worker",
+        )
+        embody_spawn = make_embody_spawn(
             coordinator_url, verify_timeout=getattr(args, "verify_timeout", 0) or 0
         )
-        if headless_labels:
-            headless_spawn = make_headless_spawn(
-                coordinator_url,
-                agent=getattr(args, "headless_agent", None) or "task-worker",
+        if backend == "cli":
+            # CLI-default lane: headless is the per-label opt-in.
+            default_spawn, overrides = embody_spawn, {
+                label: headless_spawn for label in headless_labels
+            }
+            routed_note = (
+                f"CLI embody; headless-ACP for label(s): {', '.join(headless_labels)}"
+                if headless_labels else "CLI embody (all watched labels)"
             )
-            spawn_fn = make_label_routed_spawn(
-                spawn_fn, overrides={label: headless_spawn for label in headless_labels}
+        else:
+            # Headless-default lane (the default): CLI is the per-label opt-out.
+            default_spawn, overrides = headless_spawn, {
+                label: embody_spawn for label in cli_labels
+            }
+            routed_note = (
+                f"headless-ACP embody; CLI for label(s): {', '.join(cli_labels)}"
+                if cli_labels else "headless-ACP embody (all watched labels)"
             )
-            print(
-                "agent-dispatch supervise: headless-ACP embody for label(s): "
-                f"{', '.join(headless_labels)}",
-                file=sys.stderr,
-            )
+        spawn_fn = (
+            make_label_routed_spawn(default_spawn, overrides=overrides)
+            if overrides else default_spawn
+        )
+        print(f"agent-dispatch supervise: {routed_note}", file=sys.stderr)
     with _client(args, ensure=False) as c:
         evaluator = None
         spec_path = getattr(args, "evaluator", None)
@@ -3128,11 +3164,26 @@ def build_parser() -> argparse.ArgumentParser:
              "lease doesn't expire)",
     )
     p.add_argument(
+        "--embody-backend", choices=["headless", "cli"], default="headless",
+        help="how the supervisor embodies a claimed task by default: 'headless' "
+             "(default) -- a headless agent-bridge ACP session (no mux, no "
+             "CLI-start-prompt), the right body for self-contained autonomous "
+             "sweeps; 'cli' -- a CLI-backed autopilot worktree session (mux, "
+             "attachable). Per-label overrides: --cli-label (force CLI when the "
+             "default is headless) / --headless-label (force headless when the "
+             "default is cli).",
+    )
+    p.add_argument(
         "--headless-label", action="append", metavar="LABEL",
-        help="embody queued tasks carrying this label as a HEADLESS agent-bridge "
-             "ACP session (no mux, no CLI-start-prompt) instead of a CLI "
-             "autopilot (repeatable). For self-contained, bounded sweeps that "
-             "need no human attach; unmarked labels stay CLI-first. Local "
+        help="force queued tasks carrying this label to a HEADLESS agent-bridge "
+             "ACP session (repeatable). Only meaningful with --embody-backend cli "
+             "(headless is already the default); local (non-pool) mode only.",
+    )
+    p.add_argument(
+        "--cli-label", action="append", metavar="LABEL",
+        help="force queued tasks carrying this label to a CLI-backed autopilot "
+             "(mux, attachable) instead of the default headless body (repeatable). "
+             "The opt-out for a lane that is headless-by-default; local "
              "(non-pool) mode only.",
     )
     p.add_argument(
@@ -3232,9 +3283,15 @@ def build_parser() -> argparse.ArgumentParser:
                          "(default: 3; 0 = retry forever)")
     rp.add_argument("--label-max-attempts", action="append", metavar="LABEL=N",
                     help="per-label override of --max-attempts (repeatable)")
+    rp.add_argument("--embody-backend", choices=["headless", "cli"], default="headless",
+                    help="default embody body for the lane: 'headless' (default) "
+                         "agent-bridge ACP, or 'cli' autopilot worktree session")
     rp.add_argument("--headless-label", action="append", metavar="LABEL",
-                    help="embody tasks carrying this label as a headless "
-                         "agent-bridge ACP session (repeatable)")
+                    help="force tasks carrying this label to a headless agent-bridge "
+                         "ACP session (repeatable; use when --embody-backend cli)")
+    rp.add_argument("--cli-label", action="append", metavar="LABEL",
+                    help="force tasks carrying this label to a CLI autopilot instead "
+                         "of the default headless body (repeatable)")
     rp.add_argument("--headless-agent", metavar="AGENT",
                     help="agent-bridge agent name for headless embody bodies")
     rp.add_argument("--evaluator", metavar="SPEC",

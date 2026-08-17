@@ -50,7 +50,7 @@ _KNOWN_KEYS = frozenset(
         "description",
     }
 )
-_KNOWN_BODY_KEYS = frozenset({"type", "agent", "headless_labels"})
+_KNOWN_BODY_KEYS = frozenset({"type", "agent", "headless_labels", "cli_labels"})
 _KNOWN_FLEET_KEYS = frozenset({"pool", "origin", "headless"})
 _KNOWN_FILTER_KEYS = frozenset({"permit", "reject"})
 
@@ -76,16 +76,19 @@ def _canon_dim(key: object) -> str:
 class Body:
     """How a claimed task is embodied for this profile.
 
-    ``type=embody`` (default) is a CLI-backed autopilot worktree session;
-    ``type=headless`` routes the profile's labels to a headless agent-bridge ACP
-    session named by ``agent``. ``headless_labels`` narrows *which* labels go
-    headless (local mode); when omitted for a headless body it defaults to the
-    profile's full label set.
+    ``type=headless`` (default) routes the profile's labels to a headless
+    agent-bridge ACP session named by ``agent`` -- the right body for a
+    self-contained, autonomous dispatched task (no mux, no CLI-start-prompt).
+    ``type=embody`` is a CLI-backed autopilot worktree session (mux, attachable).
+    Per-label overrides refine either default: ``cli_labels`` forces specific
+    labels to a CLI body when the profile is headless-by-default; ``headless_labels``
+    forces specific labels headless when the profile is ``embody`` (a mixed profile).
     """
 
-    type: str = "embody"
+    type: str = "headless"
     agent: str = "task-worker"
     headless_labels: tuple[str, ...] = ()
+    cli_labels: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -206,13 +209,21 @@ class ProfileDeclaration:
             args += ["--pool", ",".join(self.fleet.pool)]
             if self.fleet.origin:
                 args += ["--origin", self.fleet.origin]
-            if self.fleet.headless:
+            # Headless is the default body; a fleet pins CLI explicitly.
+            if self.body.type == "embody" and not self.fleet.headless:
+                args += ["--embody-backend", "cli"]
+            elif self.fleet.headless:
                 args.append("--headless")
-        else:
-            # Local mode: --headless-label routes specific labels to a headless body.
-            for label in self._effective_headless_labels():
+        elif self.body.type == "embody":
+            # CLI-default lane: --headless-label opts a subset into a headless body.
+            args += ["--embody-backend", "cli"]
+            for label in self.body.headless_labels:
                 args += ["--headless-label", label]
-        if self.body.type == "headless" or self.fleet.headless:
+        else:
+            # Headless-default lane (the default): --cli-label opts a subset out to CLI.
+            for label in self.body.cli_labels:
+                args += ["--cli-label", label]
+        if self.body.type == "headless" or self.body.headless_labels or self.fleet.headless:
             args += ["--headless-agent", self.body.agent]
         if self.evaluator:
             args += ["--evaluator", self.evaluator]
@@ -221,15 +232,14 @@ class ProfileDeclaration:
     def _effective_headless_labels(self) -> tuple[str, ...]:
         """Which labels this (local) profile routes to a headless body.
 
-        A ``headless`` body with no explicit ``headless_labels`` means *the whole
-        profile is headless* -> route every watched label. An ``embody`` body routes
-        none unless labels were explicitly listed (a mixed profile).
+        A ``headless`` body (the default) routes *every* watched label headless
+        (minus any ``cli_labels`` opt-outs). An ``embody`` body routes only its
+        explicit ``headless_labels`` (a mixed profile), none by default.
         """
-        if self.body.headless_labels:
-            return self.body.headless_labels
         if self.body.type == "headless":
-            return self.labels
-        return ()
+            cli = set(self.body.cli_labels)
+            return tuple(label for label in self.labels if label not in cli)
+        return self.body.headless_labels
 
     def effective_headless_labels(self) -> tuple[str, ...]:
         """Public accessor for the labels this (local) profile routes headless.
@@ -324,7 +334,7 @@ def _load_body(data: object) -> Body:
     if not isinstance(data, Mapping):
         raise RegistrarError(f"body: expected a mapping, got {type(data).__name__}")
     _reject_unknown(data, _KNOWN_BODY_KEYS, where="body")
-    btype = data.get("type", "embody")
+    btype = data.get("type", "headless")
     if btype not in _VALID_BODY_TYPES:
         raise RegistrarError(
             f"body.type: must be one of {sorted(_VALID_BODY_TYPES)}, got {btype!r}"
@@ -336,6 +346,7 @@ def _load_body(data: object) -> Body:
         type=btype,
         agent=agent,
         headless_labels=_as_str_tuple(data.get("headless_labels"), key="body.headless_labels"),
+        cli_labels=_as_str_tuple(data.get("cli_labels"), key="body.cli_labels"),
     )
 
 
@@ -486,6 +497,15 @@ def load_declaration(data: Mapping) -> ProfileDeclaration:
                 f"body.headless_labels {sorted(stray)} are not in labels "
                 f"{sorted(decl.labels)} -- a headless label must also be watched"
             )
+    # Symmetric guard for the headless-default opt-out: a cli_labels entry that is
+    # not watched forces nothing to CLI -- catch the typo.
+    if decl.body.cli_labels and not decl.fleet.enabled:
+        stray = set(decl.body.cli_labels) - set(decl.labels)
+        if stray:
+            raise RegistrarError(
+                f"body.cli_labels {sorted(stray)} are not in labels "
+                f"{sorted(decl.labels)} -- a cli label must also be watched"
+            )
     return decl
 
 
@@ -531,7 +551,13 @@ def declaration_from_env(name: str, env: Mapping[str, str]) -> ProfileDeclaratio
 
     labels = _as_str_tuple(g("LABELS"), key="LABELS")
     headless_labels = _as_str_tuple(g("HEADLESS_LABELS"), key="HEADLESS_LABELS")
+    cli_labels = _as_str_tuple(g("CLI_LABELS"), key="CLI_LABELS")
     headless_agent = g("HEADLESS_AGENT")
+    backend = g("EMBODY_BACKEND")
+    if backend is not None and backend not in ("headless", "cli"):
+        raise RegistrarError(
+            f"EMBODY_BACKEND: must be 'headless' or 'cli', got {backend!r}"
+        )
 
     label_max: dict[str, int] = {}
     if (raw := g("LABEL_MAX_ATTEMPTS")) is not None:
@@ -547,7 +573,19 @@ def declaration_from_env(name: str, env: Mapping[str, str]) -> ProfileDeclaratio
     extra = _parse_extra_args((g("EXTRA_ARGS") or "").split())
     # The dedicated HEADLESS_AGENT var wins; an EXTRA_ARGS --headless-agent is a fallback.
     agent = headless_agent or extra["headless_agent"]
-    body_type = "headless" if (headless_labels or extra["headless"]) else "embody"
+    # Embody backend defaults to HEADLESS. Only an explicit EMBODY_BACKEND=cli makes
+    # the lane CLI-default; HEADLESS_LABELS alone no longer forces CLI (it is the
+    # headless subset for a cli lane, redundant on a headless one). So a plain file
+    # is headless, and an existing HEADLESS_LABELS=<all watched> file stays headless.
+    body_type = "embody" if backend == "cli" else "headless"
+
+    body: dict[str, object] = {"type": body_type}
+    if agent:
+        body["agent"] = agent
+    if body_type == "embody" and headless_labels:
+        body["headless_labels"] = list(headless_labels)
+    if body_type == "headless" and cli_labels:
+        body["cli_labels"] = list(cli_labels)
 
     data: dict[str, object] = {
         "name": name,
@@ -559,11 +597,7 @@ def declaration_from_env(name: str, env: Mapping[str, str]) -> ProfileDeclaratio
         "label_max_attempts": label_max,
         "heartbeat": not extra["no_heartbeat"],
         "reactive": not extra["no_reactive"],
-        "body": {
-            "type": body_type,
-            **({"agent": agent} if agent else {}),
-            **({"headless_labels": list(headless_labels)} if headless_labels else {}),
-        },
+        "body": body,
     }
     if extra["pool"]:
         data["fleet"] = {

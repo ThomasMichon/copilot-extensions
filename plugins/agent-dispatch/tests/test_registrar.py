@@ -117,14 +117,18 @@ def test_supervise_args_general_pool_headless():
     assert args[args.index("--label") + 1] == "general"
     assert _flag_val(args, "--max-concurrent") == "2"
     assert _flag_val(args, "--interval") == "30"  # no trailing .0
-    # a headless local body routes its labels headless + names the agent
-    assert _flag_val(args, "--headless-label") == "general"
+    # a headless local body is headless by DEFAULT -- no per-label --headless-label,
+    # just the agent name (and no --embody-backend, since headless is the default)
+    assert "--headless-label" not in args
+    assert "--embody-backend" not in args
     assert _flag_val(args, "--headless-agent") == "general-loop-worker"
 
 
 def test_supervise_args_embody_body_has_no_headless_label():
-    d = load_declaration({"name": "sweeps", "labels": ["review"], "repos": "all"})
+    d = load_declaration({"name": "sweeps", "labels": ["review"], "body": {"type": "embody"}, "repos": "all"})
     args = d.to_supervise_args()
+    # an explicit CLI (embody) lane pins the backend and emits no headless flags
+    assert _flag_val(args, "--embody-backend") == "cli"
     assert "--headless-label" not in args
     assert "--headless-agent" not in args
 
@@ -170,7 +174,9 @@ def test_env_migration_matches_dib_profile():
     assert d.body.type == "headless"
     assert d.body.agent == "document-intake-processor"
     args = d.to_supervise_args()
-    assert _flag_val(args, "--headless-label") == "document-intake-processing"
+    # headless is the default -> the whole lane is headless with no per-label flag
+    assert "--headless-label" not in args
+    assert "--embody-backend" not in args
     assert _flag_val(args, "--headless-agent") == "document-intake-processor"
 
 
@@ -198,7 +204,8 @@ def test_env_migration_general_pool_roundtrips_to_expected_args():
     d = declaration_from_env("general", env)
     args = d.to_supervise_args()
     assert _flag_val(args, "--max-concurrent") == "2"
-    assert _flag_val(args, "--headless-label") == "general"
+    # headless-by-default: the redundant HEADLESS_LABELS is not re-emitted per-label
+    assert "--headless-label" not in args
     assert _flag_val(args, "--headless-agent") == "general-loop-worker"
 
 

@@ -81,8 +81,14 @@ def _lane_flags(spec: dict) -> list[str]:
     argv += ["--max-attempts", str(spec.get("max_attempts", 3))]
     for k, v in (spec.get("label_max_attempts") or {}).items():
         argv += ["--label-max-attempts", f"{k}={v}"]
+    # Embody backend + per-label overrides (headless is the default; emit the flag
+    # only when a spec pins 'cli' so older store-backed specs stay byte-stable).
+    if spec.get("embody_backend"):
+        argv += ["--embody-backend", str(spec["embody_backend"])]
     for label in spec.get("headless_labels", []) or []:
         argv += ["--headless-label", str(label)]
+    for label in spec.get("cli_labels", []) or []:
+        argv += ["--cli-label", str(label)]
     if spec.get("headless_agent"):
         argv += ["--headless-agent", str(spec["headless_agent"])]
     argv += ["--interval", str(spec.get("interval", 30.0))]

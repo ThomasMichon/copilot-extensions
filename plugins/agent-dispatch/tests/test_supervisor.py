@@ -340,6 +340,7 @@ def test_cli_supervise_once(monkeypatch, q, client):
         all_repos=False, repo=None, url=None, token=None, label=None,
         max_concurrent=5, verify_timeout=0, once=True, interval=30.0,
         no_heartbeat=False, max_attempts=3,
+        embody_backend="cli", cli_label=None, headless_label=None,
     )
     assert m._cmd_supervise(args) == 0
     assert spawn.calls == [t.id]
@@ -468,9 +469,90 @@ def test_make_label_routed_spawn_no_overrides_returns_default_unwrapped():
     assert make_label_routed_spawn(default, overrides={}) is default
 
 
+def test_cli_supervise_headless_is_default(monkeypatch, q, client):
+    """Headless is the DEFAULT embody backend: with no per-label flags, every
+    watched task embodies headless (no CLI/mux)."""
+    import types
+
+    from agent_dispatch import __main__ as m
+    from agent_dispatch import supervisor as sup_mod
+
+    a = q.create("sweep a")
+    b = q.create("sweep b")
+
+    embody_calls: list[str] = []
+    headless_calls: list[str] = []
+
+    def embody_spawn(task):
+        embody_calls.append(task["id"])
+        return True, {"session": "cli", "worktree": "wt"}
+
+    def headless_spawn(task):
+        headless_calls.append(task["id"])
+        return True, {"session": "headless", "worktree": None}
+
+    monkeypatch.setattr(m, "_client", lambda _args, **_kw: client)
+    monkeypatch.setattr(m, "client_url", lambda: "http://coord")
+    monkeypatch.setattr(m, "_scope_repo", lambda _args: TEST_REPO)
+    monkeypatch.setattr(sup_mod, "make_embody_spawn", lambda _url, **_kw: embody_spawn)
+    monkeypatch.setattr(sup_mod, "make_headless_spawn", lambda _url, **_kw: headless_spawn)
+
+    args = types.SimpleNamespace(
+        all_repos=False, repo=None, url=None, token=None, label=None,
+        max_concurrent=5, verify_timeout=0, once=True, interval=30.0,
+        no_heartbeat=False, max_attempts=3,
+        embody_backend=None, headless_label=None, cli_label=None,
+        headless_agent="task-worker",
+    )
+    assert m._cmd_supervise(args) == 0
+    assert set(headless_calls) == {a.id, b.id}  # both headless by default
+    assert embody_calls == []
+
+
+def test_cli_supervise_cli_label_opts_out(monkeypatch, q, client):
+    """--cli-label routes a marked task back to CLI/mux while everything else
+    stays headless (the opt-out on a headless-by-default lane)."""
+    import types
+
+    from agent_dispatch import __main__ as m
+    from agent_dispatch import supervisor as sup_mod
+
+    interactive = q.create("interactive work", labels=["needs-attach"])
+    sweep = q.create("sweep work")
+
+    embody_calls: list[str] = []
+    headless_calls: list[str] = []
+
+    def embody_spawn(task):
+        embody_calls.append(task["id"])
+        return True, {"session": "cli", "worktree": "wt"}
+
+    def headless_spawn(task):
+        headless_calls.append(task["id"])
+        return True, {"session": "headless", "worktree": None}
+
+    monkeypatch.setattr(m, "_client", lambda _args, **_kw: client)
+    monkeypatch.setattr(m, "client_url", lambda: "http://coord")
+    monkeypatch.setattr(m, "_scope_repo", lambda _args: TEST_REPO)
+    monkeypatch.setattr(sup_mod, "make_embody_spawn", lambda _url, **_kw: embody_spawn)
+    monkeypatch.setattr(sup_mod, "make_headless_spawn", lambda _url, **_kw: headless_spawn)
+
+    args = types.SimpleNamespace(
+        all_repos=False, repo=None, url=None, token=None, label=None,
+        max_concurrent=5, verify_timeout=0, once=True, interval=30.0,
+        no_heartbeat=False, max_attempts=3,
+        embody_backend=None, headless_label=None, cli_label=["needs-attach"],
+        headless_agent="task-worker",
+    )
+    assert m._cmd_supervise(args) == 0
+    assert embody_calls == [interactive.id]  # opted out to CLI
+    assert sweep.id in headless_calls
+    assert interactive.id not in headless_calls
+
+
 def test_cli_supervise_headless_label_routes(monkeypatch, q, client):
-    """--headless-label routes a marked task to the headless backend while an
-    unmarked task stays CLI-first in the same supervisor (per-label body)."""
+    """--headless-label forces a label headless on an explicit --embody-backend cli
+    lane (the opt-in when the default has been set back to CLI)."""
     import types
 
     from agent_dispatch import __main__ as m
@@ -500,7 +582,8 @@ def test_cli_supervise_headless_label_routes(monkeypatch, q, client):
         all_repos=False, repo=None, url=None, token=None, label=None,
         max_concurrent=5, verify_timeout=0, once=True, interval=30.0,
         no_heartbeat=False, max_attempts=3,
-        headless_label=["nightly-scan"], headless_agent="task-worker",
+        embody_backend="cli", headless_label=["nightly-scan"], cli_label=None,
+        headless_agent="task-worker",
     )
     assert m._cmd_supervise(args) == 0
     assert headless_calls == [marked.id]
