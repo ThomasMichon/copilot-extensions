@@ -127,12 +127,19 @@ Three placement models — pick per the subject; none is mandatory (see
 [`references/visions.md`](references/visions.md) § Cross-repo placement for the
 fuller rationale).
 
+**Default to the target repo when the subject mostly lives there and it has the
+structure.** If a vision is predominantly *about one target repo* and that repo
+has adopted `visions/`, author the vision **there** (as a good citizen of its
+flow) rather than reflexively keeping it local — the north star then lives with
+the subject it governs, where its contributors and reviewers see it. Keep it
+local only when the subject is owned here or the target hasn't adopted `visions/`.
+
 - **Local (default).** The vision lives in *this* repo. Use when the subject is
   owned here, or the target repo hasn't adopted `visions/`.
 - **Author directly in the target repo.** If the **target repo has adopted
   `visions/`** and the subject is genuinely *its own* — a tool, service, or
-  product that lives there — you may author the vision **there**, through *that
-  repo's* flow and addendum. A vision about a tool can belong with the tool. Work
+  product that lives there — **prefer to author** the vision **there**, through
+  *that repo's* flow and addendum. A vision about a tool can belong with the tool. Work
   it as a **good citizen** of the target repo: its conventions win over this
   repo's.
 - **Hybrid (split public/private).** Keep a **generalized** vision in a
