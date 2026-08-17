@@ -1454,9 +1454,8 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
       ready. The seed is typed, not passed as a launch arg -- psmux (Windows)
       cannot carry a spaces-containing pane arg. Deliberately omits ``--resume``:
       a handoff wants a FRESH context window seeded by the prompt, not the old
-      transcript replayed. Returns the OLD (pre-cutover) pane id so the caller can
-      retire it once the old session
-      reaches agent-stop.
+      transcript replayed. Returns the OLD (pre-cutover) pane id so the
+      successor-side handoff consumer can retire it after pickup.
     * **retire** (``--retire-pane <id>``): double-Ctrl-C that specific pane
       (Copilot's native clean quit), hard-killing it only if it will not exit.
 
@@ -1466,7 +1465,20 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
     # ── Retire mode ──────────────────────────────────────────────────────
     retire_pane = getattr(args, "retire_pane", None)
     if retire_pane:
+        raw_id = getattr(args, "worktree_id", None)
+        wt_id = _resolve_worktree_id(raw_id) if raw_id else None
         result = sessions.mux_retire_pane(retire_pane)
+        activity.log_event(
+            "handoff_predecessor_retire",
+            worktree_id=wt_id,
+            session_id=getattr(args, "session_id", None),
+            source="python",
+            old_pane=retire_pane,
+            successor_verified=bool(getattr(args, "successor_verified", False)),
+            reason=getattr(args, "retire_reason", None),
+            method=result.get("method"),
+            outcome="gone" if result.get("gone") else "left-running",
+        )
         _json_output(result)
         return 0 if result.get("ok") else 1
 
@@ -1557,6 +1569,17 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
     new_pane = result.get("new_pane")
     # Inject the seed as the successor's first interactive turn.
     seed_result = sessions.mux_seed_pane(new_pane, seed) if new_pane else {}
+    activity.log_event(
+        "handoff_cutover_spawn",
+        worktree_id=wt_id,
+        session_id=session_id,
+        source="python",
+        old_pane=old_pane,
+        new_pane=new_pane,
+        seeded=bool(seed_result.get("sent")),
+        seed_ready=bool(seed_result.get("ready")),
+        method="mux_new_window",
+    )
 
     _json_output({
         "ok": True,
@@ -10306,6 +10329,7 @@ def cmd_machine_context(args: argparse.Namespace) -> int:
 _GET_KEYS: dict[str, str] = {
     "repo-dir":      "Anchor repo directory",
     "worktree-dir":  "Current worktree root (the worktree you are in; empty if not inside one)",
+    "worktree-state-dir": "Per-worktree state directory outside the repo checkout",
     "worktrees-root": "Parent directory that holds all worktrees (formerly 'worktree-dir')",
     "src-dir":       "Source root (parent of repos)",
     "config-dir":    "Per-project config directory (~/.{project})",
@@ -10473,6 +10497,7 @@ def cmd_get(args: argparse.Namespace) -> int:
     values = {
         "repo-dir":     repo.anchor,
         "worktree-dir": current_worktree,
+        "worktree-state-dir": str(cfg.project_dir() / "worktrees" / wt_id) if wt_id else "",
         "worktrees-root": repo.worktree_root,
         "src-dir":      config.srcroot,
         "config-dir":   str(cfg.project_dir()),
@@ -13244,6 +13269,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--retire-pane", dest="retire_pane", default=None,
                    help="Retire mode: double-Ctrl-C this pane id (Copilot's "
                         "clean quit) and report whether it exited")
+    p.add_argument("--successor-verified", action="store_true",
+                   help="Retire mode: record that the successor invoked the "
+                        "handoff consumer before retiring the old pane")
+    p.add_argument("--retire-reason", default=None,
+                   help="Retire mode: high-level reason for activity logging")
     p.add_argument("--dry-run", action="store_true",
                    help="Print the resolved plan without opening a window")
     p.add_argument("--json", action="store_true",

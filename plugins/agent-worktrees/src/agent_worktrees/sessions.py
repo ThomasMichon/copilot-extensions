@@ -1885,6 +1885,50 @@ def _mux_pane_alive(pane_id: str, mux_bin: str) -> bool:
         return False
 
 
+def _mux_pane_session_name(pane_id: str, mux_bin: str) -> str | None:
+    """Return the mux session name containing ``pane_id``."""
+    import subprocess
+
+    try:
+        r = subprocess.run(
+            [mux_bin, "display-message", "-p", "-t", pane_id, "#{session_name}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode != 0:
+            return None
+        return getattr(r, "stdout", "").strip() or None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def _mux_session_window_count(session_name: str, mux_bin: str) -> int | None:
+    """Return the number of windows in ``session_name`` when the mux reports it."""
+    import subprocess
+
+    target = session_name if mux_bin == "psmux" else f"={session_name}"
+    try:
+        r = subprocess.run(
+            [mux_bin, "list-windows", "-t", target, "-F", "#{window_id}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode != 0:
+            return None
+        return len([line for line in getattr(r, "stdout", "").splitlines() if line.strip()])
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def _mux_last_window_guard(pane_id: str, mux_bin: str) -> dict | None:
+    """Return guard context when retiring ``pane_id`` would close a wt session."""
+    session_name = _mux_pane_session_name(pane_id, mux_bin)
+    if not session_name or not session_name.startswith("wt-"):
+        return None
+    window_count = _mux_session_window_count(session_name, mux_bin)
+    if window_count == 1:
+        return {"session": session_name, "window_count": window_count}
+    return None
+
+
 def mux_retire_pane(
     pane_id: str,
     *,
@@ -1939,6 +1983,29 @@ def mux_retire_pane(
 
     if not _mux_pane_alive(pane_id, mux_bin):
         return {"ok": True, "pane": pane_id, "gone": True, "method": "already-gone"}
+
+    guard = _mux_last_window_guard(pane_id, mux_bin)
+    if guard:
+        try:
+            from . import activity
+
+            activity.log_event(
+                "handoff_retire_guard",
+                source="python",
+                old_pane=pane_id,
+                reason="last-window-skip",
+                method="guard",
+                outcome="left-running",
+                mux_session=guard.get("session"),
+                window_count=guard.get("window_count"),
+            )
+        except Exception:
+            pass
+        return {
+            "ok": True, "pane": pane_id, "gone": False,
+            "method": "last-window-skip",
+            "session": guard.get("session"),
+        }
 
     _send("C-c")
     time.sleep(ctrl_c_gap)
