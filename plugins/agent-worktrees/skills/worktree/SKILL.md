@@ -226,7 +226,7 @@ worktree vanish while that work is still open. Journal it as a claim on **this**
 worktree, and settle it when it's done:
 
 ```
-# You opened a cross-repo / ADO PR out-of-band (e.g. an odsp-web PR created with
+# You opened a cross-repo / ADO PR out-of-band (e.g. an example-web PR created with
 # the AZ CLI / ADO REST / gh, NOT `agent-worktrees create-pr`):
 agent-worktrees claims add pr <pr-url-or-id> --owner-ref "$(agent-worktrees get owner-ref)"
 # ...later, when that PR merges or closes:
@@ -239,7 +239,7 @@ about unfinished cross-repo work. But the reclaim **sweep spares `pr`-kind
 claims** (it can't prove an arbitrary PR safe), so a `pr` claim is **manual to
 settle** — there is no auto-reclaim. Kinds: `worktree|codespace|container|ssh|
 workdir|pr`. *(Auto-journaling `pr` claims + settle-on-merge is tracked in
-tmichon_microsoft/dotfiles#1351.)*
+example-operator/dotfiles#1351.)*
 
 ### When the user says "finalize", "wrap up", "sign off", or "done with this"
 

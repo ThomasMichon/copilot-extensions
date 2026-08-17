@@ -20,7 +20,7 @@ def _fake_config(*, knowledge_repo: str, platform: str = "windows") -> cfg.Confi
     )
     return cfg.Config(
         srcroot="/anchors",
-        machine="tmichon-dev6",
+        machine="example-dev6",
         platform=platform,
         repo_name="self",
         repos={"self": repo},
@@ -65,12 +65,12 @@ def test_knowledge_repo_redirects_before_current_project(
         # Only the knowledge checkout should be consulted -- not the self anchor.
         assert str(cwd) == "/anchors/dotfiles"
         assert remote == "origin"
-        return "https://github.com/tmichon_microsoft/dotfiles.git"
+        return "https://github.com/example-operator/dotfiles.git"
 
     monkeypatch.setattr(git_ops, "_remote_url", fake_remote_url)
 
     url, remote, anchor = _resolve_store_target()
-    assert url == "https://github.com/tmichon_microsoft/dotfiles.git"
+    assert url == "https://github.com/example-operator/dotfiles.git"
     assert remote == "origin"
     assert anchor == "/anchors/dotfiles"
 

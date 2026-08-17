@@ -120,7 +120,7 @@ def _resolve_codespace_ai_plugin_dirs(
     session brain; agent-codespaces is the transport).
 
     ``repo_dir`` is the target's **concrete** ``workspace_folder`` (e.g.
-    ``/workspaces/odsp-web``); the codespace spawn command frequently carries
+    ``/workspaces/example-web``); the codespace spawn command frequently carries
     **no** ``--repo`` but ``workspace_folder`` is always known (parsed from the
     launch ``cd``), so the resolve keys off ``repo_dir``. ``repo`` is accepted
     for call-site compatibility.

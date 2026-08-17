@@ -202,14 +202,14 @@ class TestCwdAutoDiscovery:
         cfg_dir.mkdir(parents=True)
         (cfg_dir / "config.yaml").write_text(
             yaml.safe_dump(
-                {"credentials": {"feed_token_env": ["ODSP_NPM_AUTH_TOKEN"]}}
+                {"credentials": {"feed_token_env": ["EXAMPLE_NPM_AUTH_TOKEN"]}}
             )
         )
         monkeypatch.setattr(
             "agent_codespaces.config.cwd_repo_root", lambda: repo
         )
         cfg = load_merged_config()
-        assert cfg.credentials.feed_token_env == ["ODSP_NPM_AUTH_TOKEN"]
+        assert cfg.credentials.feed_token_env == ["EXAMPLE_NPM_AUTH_TOKEN"]
 
     def test_credentials_feed_token_env_default_empty(self, config_dir, monkeypatch):
         monkeypatch.setattr(
@@ -628,8 +628,8 @@ class TestPerRepoWorkspaceFolder:
         config = CodespacesConfig()
         # -codespaces host repo -> product checkout, case preserved, owner stripped.
         assert config.resolved_workspace_folder_for(
-            "odsp-microsoft/odsp-web-codespaces"
-        ) == "/workspaces/odsp-web"
+            "example-org/example-web-codespaces"
+        ) == "/workspaces/example-web"
         # A plain (non-split) repo -> /workspaces/<basename>.
         assert config.resolved_workspace_folder_for("org/Some-Repo") == (
             "/workspaces/Some-Repo"

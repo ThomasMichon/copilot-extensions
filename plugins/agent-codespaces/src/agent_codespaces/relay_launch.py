@@ -105,7 +105,7 @@ def build_feed_token_exports(var_names) -> str:
 
     The credential relay only wires **git** auth. A tool that authenticates to an
     Azure Artifacts feed via a static env token -- e.g. a Rush ``.npmrc`` line
-    ``//<feed>/:_authToken=${ODSP_NPM_AUTH_TOKEN}`` -- otherwise stays anonymous
+    ``//<feed>/:_authToken=${EXAMPLE_NPM_AUTH_TOKEN}`` -- otherwise stays anonymous
     (E401), because nothing populates that var. For every name in *var_names*
     emit ``export <NAME>="$(<helper> get-access-token 2>/dev/null || true)";`` so
     it resolves to a fresh, relay-minted ADO bearer at launch, bridging the

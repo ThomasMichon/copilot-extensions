@@ -396,7 +396,7 @@ def account_for_github_owner(owner: str | None) -> str | None:
        for EMU accounts spanning orgs);
     2. the decoupled ``account_map`` (owner->login) in repos.yaml -- the org
        identity layer, which resolves org-owned repos (``github/...``,
-       ``odsp-microsoft/...``) to the correct login even when no gh account is
+       ``example-org/...``) to the correct login even when no gh account is
        named after the org and no repo under it is registered;
     3. the owner itself (correct when owner == login, e.g. a personal/EMU
        user's own repos).

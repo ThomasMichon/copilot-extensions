@@ -54,7 +54,7 @@ probe (the pure predicate logic was already correct). The current probe:
    a trusted, code-supplied value, never user input.
 2. **Scans every repo under the glob** (aggregating: any dirty/unpushed ⇒ not
    at-rest), not just the first. A borrowed CodeSpace holds both the scaffold
-   repo (e.g. `odsp-web-codespaces`) and the actual work repo (e.g. `odsp-web`);
+   repo (e.g. `example-web-codespaces`) and the actual work repo (e.g. `example-web`);
    stopping at the first would hide unpushed work in the other.
 3. **Detects unpushed work with `git rev-list --count HEAD --not --remotes`**
    (commits reachable from HEAD that exist on **no remote**), plus per-branch
