@@ -294,3 +294,109 @@ def discover_repo(repo_root: str | Path, *, owner: str | None = None) -> list[Pr
     """
     pointer = repo_pointer(repo_root, owner=owner)
     return discover([pointer])
+
+
+# -- Legacy env-profile back-compat bridge (Phase 4 migration) ----------------
+#
+# The migration off the unit-per-profile model is gradual: a host may still carry
+# its old ``supervisor.env`` (primary) + ``supervisors/*.env`` profiles while the
+# single ``supervise serve`` daemon takes over. This bridge lets the daemon run
+# those legacy profiles *as declarations* (via
+# :func:`agent_dispatch.registrar.declaration_from_env`) so switching the unit to
+# ``supervise serve`` reproduces existing supervision losslessly -- no behavior
+# change until an operator migrates each profile to a first-class declaration.
+
+#: The install dir that holds the legacy supervisor env files (``~/.agent-dispatch``),
+#: overridable for tests/alternate deployments.
+INSTALL_DIR_ENV = "AGENT_DISPATCH_INSTALL_DIR"
+
+
+def install_dir() -> Path:
+    """The agent-dispatch install dir (holds ``supervisor.env`` + ``supervisors/``)."""
+    override = os.environ.get(INSTALL_DIR_ENV)
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".agent-dispatch"
+
+
+def _parse_env_file(path: Path) -> dict[str, str]:
+    """Parse a simple ``KEY=VALUE`` env file (``#`` comments + blanks skipped)."""
+    out: dict[str, str] = {}
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return out
+    for line in text.splitlines():
+        s = line.strip()
+        if not s or s.startswith("#") or "=" not in s:
+            continue
+        key, value = s.split("=", 1)
+        out[key.strip()] = value.strip()
+    return out
+
+
+def read_legacy_env_profiles(
+    *,
+    env_file: str | Path | None = None,
+    profile_dir: str | Path | None = None,
+) -> list[ProfileDeclaration]:
+    """Read legacy ``AGENT_DISPATCH_SUPERVISE_*`` env profiles as declarations.
+
+    Reads the primary ``env_file`` (default ``<install>/supervisor.env``) and every
+    ``profile_dir/*.env`` (default ``<install>/supervisors/``), translating each into
+    a :class:`ProfileDeclaration` via
+    :func:`agent_dispatch.registrar.declaration_from_env`. The profile *name* is the
+    file stem; provenance is stamped ``legacy-env:<name>`` when the profile does not
+    carry its own owner.
+
+    A profile with **no opt-in ``LABELS``** is skipped -- it is inert under the
+    label-gated installer (a label-less supervisor would embody everything), so an
+    empty default ``supervisor.env`` contributes nothing. A duplicate name (two env
+    files sharing a stem) keeps the first read; the primary ``supervisor.env`` is read
+    before the profile directory.
+    """
+    from .registrar import declaration_from_env
+
+    base = install_dir()
+    primary = Path(env_file) if env_file is not None else base / "supervisor.env"
+    profiles = Path(profile_dir) if profile_dir is not None else base / "supervisors"
+
+    sources: list[tuple[str, Path]] = []
+    if primary.is_file():
+        sources.append((primary.stem, primary))
+    if profiles.is_dir():
+        sources.extend((f.stem, f) for f in sorted(profiles.glob("*.env")))
+
+    out: list[ProfileDeclaration] = []
+    seen: set[str] = set()
+    for name, path in sources:
+        if name in seen:
+            continue
+        env = _parse_env_file(path)
+        if not env.get("AGENT_DISPATCH_SUPERVISE_LABELS", "").strip():
+            continue  # label-less -> inert; skip (matches the installer's gate)
+        seen.add(name)
+        decl = declaration_from_env(name, env)
+        out.append(decl if decl.owner else decl.with_owner(f"legacy-env:{name}"))
+    return out
+
+
+def discover_with_legacy(
+    *,
+    base: Path | None = None,
+    env_file: str | Path | None = None,
+    profile_dir: str | Path | None = None,
+) -> list[ProfileDeclaration]:
+    """Pointer-discovered declarations plus the legacy env profiles, deduped by name.
+
+    A first-class **declaration wins** over a legacy env profile of the same name, so
+    migrating a profile to a declaration (and leaving the old ``*.env`` in place during
+    transition) does not double-run it. Used by ``supervise serve --legacy-env``.
+    """
+    declared = discover(base=base)
+    names = {d.name for d in declared}
+    legacy = [
+        d for d in read_legacy_env_profiles(env_file=env_file, profile_dir=profile_dir)
+        if d.name not in names
+    ]
+    return [*declared, *legacy]
