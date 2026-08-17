@@ -1257,7 +1257,7 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
             if overall_timeout is not None and overall_timeout > 0:
                 return await asyncio.wait_for(_run(), timeout=overall_timeout)
             return await _run()
-        except TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
             print(
                 f"[FAIL] SSH operation for CodeSpace '{args.name}' exceeded "
                 f"{overall_timeout:g}s; disconnected and cleaned up.",
