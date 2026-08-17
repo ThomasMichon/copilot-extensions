@@ -324,6 +324,41 @@ class TestCmdHandoffCutover:
         assert out["cmd"] == ["bash", "setup.sh", "--allow-all-tools"]
         assert out["seed_len"] == len("continue the work")
 
+    def test_spawn_dry_run_prefers_recorded_copilot_pane(
+        self, monkeypatch, capfd, tmp_path
+    ):
+        monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: "wtY")
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: True)
+        monkeypatch.setattr(
+            sessions, "mux_copilot_pane", lambda w, session_id=None: "%bound"
+        )
+        monkeypatch.setattr(
+            sessions, "mux_active_pane", lambda w: pytest.fail("active fallback used")
+        )
+        (tmp_path / "wtY.yaml").write_text("x")
+
+        class _Cfg:
+            pass
+
+        monkeypatch.setattr(m.cfg, "load_config", lambda: _Cfg())
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+
+        class _Rec:
+            worktree_path = str(tmp_path / "w")
+
+        monkeypatch.setattr(m.tracking, "load_record", lambda p: _Rec())
+        monkeypatch.setattr(m, "_build_launch_cmd", lambda cfg_, args, wd: ["copilot"])
+        monkeypatch.setattr(m, "_build_env", lambda p, s, work_dir=None: {})
+        monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
+
+        rc = m.cmd_handoff_cutover(
+            _ns(seed="continue", dry_run=True, session_id="sess-head")
+        )
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["old_pane"] == "%bound"
+
     def test_spawn_success_opens_window(self, monkeypatch, capfd, tmp_path):
         monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: "wtZ")
         monkeypatch.setattr(sessions, "has_mux_session", lambda w: True)

@@ -1816,6 +1816,46 @@ def mux_seed_pane(
     }
 
 
+def mux_copilot_pane(
+    worktree_id: str,
+    session_id: str | None = None,
+    *,
+    mux: str | None = None,
+) -> str | None:
+    """Return the registry-bound Copilot pane for a worktree/session.
+
+    The session registry is the portable authority for pane identity (tmux and
+    psmux both expose the pane id in the Copilot pane's environment, while
+    custom pane options are not portable).  A recorded pane is returned only
+    while it still exists; otherwise this degrades to the historical active-pane
+    heuristic.  Best-effort by design: callers must never fail because the mux
+    or registry is unavailable.
+    """
+    try:
+        from . import tracking
+
+        record = tracking.load_record_by_id(worktree_id)
+        if record is not None:
+            target_session = session_id or getattr(record, "resolved_head_session", None)
+            entry = record.session_entry(target_session) if target_session else None
+            pane = getattr(entry, "pane_id", None) if entry is not None else None
+            if isinstance(pane, str):
+                pane = pane.strip()
+            if pane:
+                mux_bin = _mux_bin(mux)
+                if _mux_pane_alive(pane, mux_bin):
+                    return pane
+    except Exception:
+        pass
+
+    try:
+        if mux is None:
+            return mux_active_pane(worktree_id)
+        return mux_active_pane(worktree_id, mux=mux)
+    except Exception:
+        return None
+
+
 def mux_active_pane(worktree_id: str, *, mux: str | None = None) -> str | None:
     """Return the active pane id (e.g. ``%3``) of ``wt-<id>``'s current window.
 

@@ -98,6 +98,7 @@ class SessionEntry:
     state: SessionState = "active"
     successor: str | None = None
     predecessor: str | None = None
+    pane_id: str | None = None
 
 
 @dataclass
@@ -844,6 +845,7 @@ def load_record(path: Path) -> WorktreeRecord:
                         else "active")
                     succ = entry.get("successor")
                     pred = entry.get("predecessor")
+                    pane = entry.get("pane_id")
                     sessions_list.append(SessionEntry(
                         session_id=str(entry["session_id"]),
                         started_at=str(sa),
@@ -852,6 +854,7 @@ def load_record(path: Path) -> WorktreeRecord:
                         state=st_val,
                         successor=str(succ) if succ else None,
                         predecessor=str(pred) if pred else None,
+                        pane_id=str(pane) if pane else None,
                     ))
 
     # Parse PR records -- the multi-PR ``prs:`` list (preferred) or a legacy
@@ -1138,6 +1141,7 @@ def save_record(record: WorktreeRecord, path: Path | None = None) -> None:
                 **({"state": s.state} if s.state != "active" else {}),
                 **({"successor": s.successor} if s.successor else {}),
                 **({"predecessor": s.predecessor} if s.predecessor else {}),
+                **({"pane_id": s.pane_id} if s.pane_id else {}),
             }
             for s in record.sessions
         ]
@@ -2343,6 +2347,7 @@ def register_session(
     worktree_id: str,
     session_id: str,
     pid: int | None = None,
+    pane_id: str | None = None,
 ) -> None:
     """Register a Copilot session against a worktree (called from sessionStart hook)."""
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
@@ -2359,6 +2364,8 @@ def register_session(
             if entry.session_id == session_id:
                 entry.started_at = _now_iso()
                 entry.pid = pid
+                if pane_id:
+                    entry.pane_id = pane_id
                 entry.ended_at = None
                 save_record(record)
                 return
@@ -2372,6 +2379,7 @@ def register_session(
             session_id=session_id,
             started_at=_now_iso(),
             pid=pid,
+            pane_id=pane_id,
         )
         record.sessions.append(new_entry)
         # session-lifecycle: complete a pending handoff's two-way link. When the

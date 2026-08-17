@@ -36,7 +36,9 @@ def _save_record(tracking_dir: Path, wt_id: str, wt_path: str) -> None:
 
 
 def _args(**kw) -> argparse.Namespace:
-    base = dict(worktree_id=None, session_id=None, cwd=None, stdin=False, pid=None)
+    base = dict(
+        worktree_id=None, session_id=None, cwd=None, stdin=False, pid=None, pane=None
+    )
     base.update(kw)
     return argparse.Namespace(**base)
 
@@ -66,6 +68,57 @@ class TestRegisterSessionStdin:
         assert rc == 0
         rec = load_record(tmp_tracking_dir / "wt-y.yaml")
         assert [s.session_id for s in rec.sessions] == ["sess-2"]
+
+    def test_records_pane_from_explicit_arg(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        _save_record(tmp_tracking_dir, "wt-pane", "/tmp/src/wt-pane")
+        monkeypatch.setattr(m.sys, "stdin", io.StringIO(""))
+
+        rc = m.cmd_register_session(
+            _args(worktree_id="wt-pane", session_id="sess-pane", pane="%12")
+        )
+
+        assert rc == 0
+        rec = load_record(tmp_tracking_dir / "wt-pane.yaml")
+        assert rec.sessions is not None
+        assert rec.sessions[0].pane_id == "%12"
+
+    def test_records_pane_from_mux_env(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        _save_record(tmp_tracking_dir, "wt-env", "/tmp/src/wt-env")
+        monkeypatch.setenv("TMUX_PANE", "%13")
+        monkeypatch.delenv("PSMUX_PANE", raising=False)
+        monkeypatch.setattr(m.sys, "stdin", io.StringIO(""))
+
+        rc = m.cmd_register_session(
+            _args(worktree_id="wt-env", session_id="sess-env")
+        )
+
+        assert rc == 0
+        rec = load_record(tmp_tracking_dir / "wt-env.yaml")
+        assert rec.sessions is not None
+        assert rec.sessions[0].pane_id == "%13"
+
+    def test_reregistration_updates_existing_pane(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        _save_record(tmp_tracking_dir, "wt-update", "/tmp/src/wt-update")
+        monkeypatch.setattr(m.sys, "stdin", io.StringIO(""))
+        m.cmd_register_session(
+            _args(worktree_id="wt-update", session_id="sess-update", pane="%1")
+        )
+
+        rc = m.cmd_register_session(
+            _args(worktree_id="wt-update", session_id="sess-update", pane="%2")
+        )
+
+        assert rc == 0
+        rec = load_record(tmp_tracking_dir / "wt-update.yaml")
+        assert rec.sessions is not None
+        assert len(rec.sessions) == 1
+        assert rec.sessions[0].pane_id == "%2"
 
     def test_unknown_cwd_is_silent_noop(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
