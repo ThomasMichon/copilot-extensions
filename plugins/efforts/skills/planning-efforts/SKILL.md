@@ -193,13 +193,21 @@ per the work; none is mandatory, and the choice is the operator's/agent's to mak
 (see [`references/efforts.md`](references/efforts.md) § Cross-repo placement for
 the fuller rationale).
 
+**Default to the target repo when the work mostly lands there and it has the
+structure.** If a stretch is predominantly *about one target repo* and that repo
+has adopted `efforts/`, author the effort **there** (as a good citizen of its
+flow) rather than reflexively tracking it locally — the plan then lives where the
+work and its reviewers are, so every party tracks it in one place. Fall back to
+local/tracking-only only when the work spans several targets or the target hasn't
+adopted `efforts/`.
+
 - **Local / tracking-only (default).** The effort folder lives in *this*
   (control) repo and coordinates work that lands elsewhere — the folder tracks,
   the real changes happen in the target. Use when the work spans several targets,
   or the target repo hasn't adopted `efforts/`.
 - **Build directly in the target repo.** If the **target repo has adopted
-  `efforts/`** and the stretch is genuinely *about that repo*, you may author the
-  effort **there**, through *that repo's* flow — its grouping, tracker, review
+  `efforts/`** and the stretch is genuinely *about that repo*, **prefer to author**
+  the effort **there**, through *that repo's* flow — its grouping, tracker, review
   gate, and addendum — instead of here. An effort about a tool can live with the
   tool. Work it as a **good citizen** of the target repo: follow its conventions
   over this repo's.
