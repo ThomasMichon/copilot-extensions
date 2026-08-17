@@ -159,7 +159,37 @@ Rules for a plugin-shipped `related.yaml`:
 - **Provisioning is separate.** This brings *discovery/resolution* (locus +
   delegate); a venue's own provisioning config (e.g. a CodeSpace's
   `.agent-codespaces/` vessel block) is a separate concern owned by that venue's
-  plugin.
+  plugin — see the next section.
+
+### Provision a CodeSpace venue by-install (repo provenance + in-venue plugins)
+
+When your repo's venue is a **GitHub CodeSpace** (no local checkout — the harness
+dispatches into a `<product>-codespaces` vessel), the harness plugin can also carry
+the venue's **provisioning** so a consumer gets a working `codespace:<name>`
+dispatch by *just enabling three plugins* — `agent-bridge` + `agent-codespaces` +
+your `<repo>-harness` — with **no control-plane repo**. `agent-codespaces` is the
+honorer; declare it as a dependency, and use its two convention-discovered seams:
+
+1. **Repo provenance via the `config.d` config-provider drop-in.** Ship a
+   supplementary `.agent-codespaces/config.yaml` fragment under your
+   `references/agent-codespaces/`, and add a `sessionStart` hook
+   (`register-config-provider.{sh,ps1}`) that drops a **pointer** to it into
+   `~/.agent-codespaces/config.d/`. The crux is
+   `repos.<vessel>.workspace_repo: <product>` — it makes the dispatched agent land
+   in `/workspaces/<product>` (not the vessel folder) and sets its ACP cwd. The
+   drop-in merges at **lowest precedence** (a consumer's adopted config still wins)
+   and writes into no repo.
+2. **In-venue plugins via `codespacePlugins`.** In `plugin.json`, declare the
+   plugins to inject **into** the CodeSpace on connect — your `<product>-agent` and
+   friends — scoped with `forWorkspaceRepo`. `agent-codespaces` reads this custom
+   field and installs them into the CodeSpace's user settings.
+
+The full mechanism, the worked `example-web-harness` example, and the anti-patterns
+are in the copilot-extensions pattern
+[**docs/patterns/codespace-repo-provenance.md**](../../../../docs/patterns/codespace-repo-provenance.md).
+(A heavier `setup-venue` that scaffolds config + tools into a control-plane repo,
+for a full build-capable venue, is an optional add-on — **not** required for the
+golden path.)
 
 ### What the two skills should contain
 

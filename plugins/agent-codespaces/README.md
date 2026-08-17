@@ -79,6 +79,35 @@ credentials:
 > The service reads config live from the repo -- no generated intermediate
 > config. All org/account/URL values live in **your** repo, never in the plugin.
 
+### Repo provenance & the config-provider seam (harness plugins)
+
+A repo's venue policy does **not** have to live in an adopted control-plane repo.
+A **`<repo>-harness`** plugin can ship the venue's **repo provenance** with itself
+and make it discoverable with **no control-plane repo** — the example-web-style
+golden path. Two convention-discovered seams, both honored here:
+
+- **Config-provider drop-in (`config.d`).** A harness plugin ships a supplementary
+  `.agent-codespaces/config.yaml` under its own `references/` and, from a
+  `sessionStart` hook, drops a one-line **pointer** to it into
+  `~/.agent-codespaces/config.d/<name>.conf`. `discover_dropin_configs()` reads each
+  pointer and `load_merged_config` merges the referenced config at the **lowest
+  precedence** — a provider default any adopted-repo/cwd config still overrides,
+  with no copy to drift and no writeback into any repo.
+- **Repo provenance (`workspace_repo`).** The provider config's
+  `repos.<vessel>.workspace_repo: <product>` is what makes
+  `effective_acp_command_for(<vessel>)` launch the agent in `/workspaces/<product>`
+  (the product checkout) rather than the vessel folder, and what
+  `resolved_workspace_folder_for` publishes as the dispatched agent's ACP
+  `session/new` cwd (dotfiles#1274).
+- **In-venue plugins (`codespacePlugins`).** The harness plugin's `plugin.json`
+  also declares which plugins to inject **into** the CodeSpace on connect (the
+  `<product>-agent`), scoped by `forWorkspaceRepo` (see `codespace_plugins.py`).
+
+Authoring a `<repo>-harness` plugin that uses these seams is the
+`authoring-harness-plugins` skill (`customizing-copilot`) and the pattern
+[`docs/patterns/codespace-repo-provenance.md`](../../docs/patterns/codespace-repo-provenance.md).
+The reference implementation is `example-web-harness` (example-marketplace).
+
 ## CLI
 
 agent-codespaces is a standalone CLI/binstub. Listing, creating, deleting,
