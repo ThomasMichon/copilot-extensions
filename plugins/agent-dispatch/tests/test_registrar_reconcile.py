@@ -28,7 +28,10 @@ def test_spec_general_pool_headless():
     assert spec["all_repos"] is True
     assert spec["labels"] == ["general"]
     assert spec["max_concurrent"] == 2
-    assert spec["headless_labels"] == ["general"]
+    # headless is the default backend -> no per-label headless_labels, no
+    # embody_backend pin; just the agent name.
+    assert "headless_labels" not in spec
+    assert "embody_backend" not in spec
     assert spec["headless_agent"] == "general-loop-worker"
     assert spec["heartbeat"] is True
     assert spec["reactive"] is True
@@ -95,7 +98,9 @@ def test_build_command_runs_a_converted_declaration():
     cmd = build_command(reg)
     assert "supervise" in cmd
     assert cmd[cmd.index("--max-concurrent") + 1] == "2"
-    assert "--headless-label" in cmd
+    # headless-by-default lane: no --headless-label / --embody-backend, just the agent
+    assert "--headless-label" not in cmd
+    assert "--embody-backend" not in cmd
     assert cmd[cmd.index("--headless-agent") + 1] == "general-loop-worker"
     # the extended lane flags a declaration can now carry:
     assert "--no-heartbeat" in cmd

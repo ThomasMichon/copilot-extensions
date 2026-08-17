@@ -130,6 +130,7 @@ CLI:
 agent-dispatch supervise [--repo R | --all-repos] [--label L ...] \
     [--max-concurrent N] [--max-attempts N] [--no-heartbeat] \
     [--no-reactive] [--reactive-interval S] \
+    [--embody-backend headless|cli] [--cli-label L ...] \
     [--headless-label L ...] [--headless-agent AGENT] [--interval S] [--once]
 agent-dispatch reservations list [--task ID] [--state S]
 agent-dispatch reservations fail|settle <key> [--detail ...]
@@ -220,32 +221,39 @@ set against the registry on every tick.
 > subsuming the foreground `supervise --evaluator` flag into an evaluator
 > registration. The bare `supervise` foreground loop remains available.
 
-### Per-label embody body: CLI-first, headless-ACP opt-in
+### Embody body: headless by default, CLI opt-out
 
-The supervisor embodies each spawned task as a **mux-wrapped CLI autopilot**
-(`agent-worktrees embody`) by default — the right body for standalone/durable
-work a human may later attach to. But a **self-contained, bounded** task — a
-scheduled or reactive sweep that claims a task, runs it to a deliberate
-completion, and is torn down — needs no human attach, and a seeded CLI session
-can *race the input-prompt caret and never deliver its seed* (deadlocking at 0%).
-For those, `--headless-label LABEL` (repeatable) routes tasks carrying that label
-to a **headless agent-bridge ACP** body instead, sidestepping the
-CLI-start-prompt path entirely. `--headless-agent AGENT` names the agent-bridge
-agent used (default `task-worker`).
+The supervisor embodies each spawned task as a **headless agent-bridge ACP**
+session **by default** (`--embody-backend headless`) — the right body for a
+dispatched/supervised task, which is a self-contained, autonomous unit that needs
+no human attach. Headless also sidesteps the **CLI-start-prompt** path entirely (a
+seeded CLI/mux session can *race the input-prompt caret and never deliver its
+seed*, deadlocking at 0%). `--headless-agent AGENT` names the agent-bridge agent
+used (default `task-worker`).
 
-The routing is **per label within one supervisor**: unmarked labels stay
-CLI-first (unchanged), only listed labels go headless — so a single service can
-embody interactive worktree work as a CLI session while embodying self-contained
-sweeps headless. The headless body reuses the **same autopilot seed** as the CLI
-backend (claim-under-identity, contract-net evaluation, deferred completion), so
-a headless-embodied task is *driven* identically; only its body differs. A
-headless body is not a worktree, so the worktree-keyed lease heartbeat does not
-apply to it (bounded sweeps drive their own lifecycle to completion);
-reconciliation still settles its reservation on the task's terminal state.
-`--headless-label` is **per-label** and applies to **local** (non-pool) spawn.
-In fleet (`--pool`) mode the body choice is **fleet-wide** instead: `--headless`
-makes *every* fleet body a headless agent-bridge ACP session on the pool host
-(see *Fleet dispatch* below), and `--headless-label` is ignored.
+When a task *does* want an attachable **mux-wrapped CLI autopilot**
+(`agent-worktrees embody`) — standalone/durable work a human may take over — opt
+out:
+
+- `--embody-backend cli` makes the **whole lane** CLI-embodied; then
+  `--headless-label LABEL` (repeatable) forces specific labels back to headless (a
+  mixed lane).
+- `--cli-label LABEL` (repeatable) forces specific labels to CLI while the lane
+  stays headless-by-default (the common opt-out).
+
+The routing is **per label within one supervisor**, so a single service can
+embody self-contained sweeps headless (the default) while opting a "kick a
+session" interactive label out to CLI. The headless body reuses the **same
+autopilot seed** as the CLI backend (claim-under-identity, contract-net
+evaluation, deferred completion), so a headless-embodied task is *driven*
+identically; only its body differs. A headless body is not a worktree, so the
+worktree-keyed lease heartbeat does not apply to it (bounded sweeps drive their
+own lifecycle to completion); reconciliation still settles its reservation on the
+task's terminal state. `--embody-backend`/`--cli-label`/`--headless-label` apply
+to **local** (non-pool) spawn. In fleet (`--pool`) mode the body choice is
+**fleet-wide** instead: fleet bodies are headless by default too (only
+`--embody-backend cli` makes them CLI on the pool host; the legacy `--headless`
+flag remains an explicit force), and the per-label flags are ignored.
 
 ### Lease heartbeat (built) — the live-worker safety net
 

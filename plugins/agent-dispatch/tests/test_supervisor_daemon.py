@@ -164,7 +164,30 @@ def test_build_command_supervised_lane():
     assert "--evaluator" not in cmd
 
 
-def test_build_command_all_repos():
+def test_build_command_threads_embody_backend_and_cli_labels():
+    """A spec pinning the CLI backend + a cli-label opt-out round-trips into the
+    supervise argv (headless is the default, so it is emitted only when pinned)."""
+    reg = _reg("b", spec={
+        "all_repos": True, "labels": ["x", "y"], "max_concurrent": 1,
+        "embody_backend": "cli", "cli_labels": ["x"], "headless_agent": "task-worker",
+        "interval": 30.0,
+    })
+    cmd = build_command(reg, python="PY")
+    assert cmd[cmd.index("--embody-backend") + 1] == "cli"
+    assert cmd[cmd.index("--cli-label") + 1] == "x"
+
+
+def test_build_command_headless_default_emits_no_backend_flag():
+    """A default (headless) lane spec carries no embody_backend/cli_labels, so the
+    argv omits those flags -- headless is the default the command already assumes."""
+    reg = _reg("c", spec={
+        "all_repos": True, "labels": ["x"], "max_concurrent": 1,
+        "headless_agent": "task-worker", "interval": 30.0,
+    })
+    cmd = build_command(reg, python="PY")
+    assert "--embody-backend" not in cmd
+    assert "--cli-label" not in cmd
+    assert "--headless-label" not in cmd
     cmd = build_command(_reg("a", spec={"all_repos": True}), python="PY")
     assert "--all-repos" in cmd
     assert "--repo" not in cmd
