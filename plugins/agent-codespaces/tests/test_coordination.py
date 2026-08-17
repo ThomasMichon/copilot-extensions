@@ -168,6 +168,7 @@ def test_release_without_token_is_unavailable():
 
 
 def test_owner_ref_from_binstub(monkeypatch):
+    monkeypatch.delenv("AGENT_WORKTREES_OWNER_REF", raising=False)
     monkeypatch.setattr(coord, "_run", lambda *a, **k: _proc(0, "example-dev6/example-web/wt-123\n"))
     assert coord.owner_ref() == "example-dev6/example-web/wt-123"
 
@@ -178,6 +179,7 @@ def test_owner_ref_explicit_wins(monkeypatch):
 
 
 def test_owner_ref_unresolvable_is_none(monkeypatch):
+    monkeypatch.delenv("AGENT_WORKTREES_OWNER_REF", raising=False)
     monkeypatch.setattr(coord, "_run", lambda *a, **k: _proc(0, "\n"))
     assert coord.owner_ref() is None
 
