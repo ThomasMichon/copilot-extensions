@@ -297,6 +297,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     from .config import load_config
     from .server import serve
 
+    _reroot_serve_cwd()
     base = load_config()
     cfg = Config(
         host=_resolve_serve_host(args, base),
@@ -306,6 +307,29 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     )
     serve(cfg, passive=bool(getattr(args, "passive", False)))
     return 0
+
+
+def _reroot_serve_cwd() -> None:
+    # The coordinator must not keep the plugin payload as cwd (#621); on Windows
+    # the process cwd locks that directory and blocks payload replacement.
+    try:
+        from .runtime_version import install_dir
+
+        target = install_dir()
+    except Exception as exc:
+        print(
+            f"agent-dispatch: warning: could not resolve runtime cwd; using home: {exc}",
+            file=sys.stderr,
+        )
+        target = Path.home()
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        os.chdir(target)
+    except Exception as exc:
+        print(
+            f"agent-dispatch: warning: could not switch runtime cwd to {target}: {exc}",
+            file=sys.stderr,
+        )
 
 
 def _cmd_cutover(args: argparse.Namespace) -> int:

@@ -1299,6 +1299,7 @@ function Install-CoordinatorTask {
 # Task runs headless (conhost --headless), so console output is otherwise lost.
 `$ErrorActionPreference = 'Stop'
 `$env:PYTHONUTF8 = '1'
+Set-Location -LiteralPath `$PSScriptRoot
 `$envFile = Join-Path `$PSScriptRoot 'service.env'
 if (Test-Path `$envFile) {
     foreach (`$line in Get-Content `$envFile) {
@@ -1395,10 +1396,11 @@ try {
     # -- and because the launcher runs the long-lived `-m agent_dispatch serve`
     # in-process, that window persists for the life of the coordinator.
     $action = New-ScheduledTaskAction -Execute 'conhost.exe' `
-        -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$launcher`""
+        -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$launcher`"" `
+        -WorkingDirectory $InstallDir
     # Two triggers: -AtStartup makes the coordinator a true always-on service that
     # comes up at boot with NO interactive login (essential for a headless box
-    # like Emancipation-Cube, accessed only over SSH); -AtLogOn additionally (re)starts it
+    # accessed only over SSH); -AtLogOn additionally (re)starts it
     # when the operator logs in (covers a manually-stopped task on a
     # console-driven box). The dev58 bounded bind-host retry
     # (_resolve_bind_host_resilient) rides out the boot-before-WSL race on NAT,
@@ -1416,8 +1418,8 @@ try {
     # password): the coordinator must run headless. The prior Interactive logon
     # type only ran while the user had an interactive console session, so on a
     # headless SSH-only box the task registered but never fired (observed on
-    # Emancipation-Cube: State=Ready, LastRunTime=never). S4U runs it in a non-interactive
-    # session at boot; validated binding the vEthernet(WSL) IP on Emancipation-Cube NAT and
+    # a headless SSH-only host: State=Ready, LastRunTime=never). S4U runs it in a non-interactive
+    # session at boot; validated binding the vEthernet(WSL) IP on a NAT-mode WSL host and
     # loopback on mirrored hosts. Set-ScheduledTask/Register with S4U succeeds
     # non-elevated (unlike a password-backed Password logon). NOTE: the supervisor
     # task below deliberately stays Interactive -- it spawns embody CLI sessions
@@ -1689,6 +1691,7 @@ param([string]`$EnvFile = (Join-Path `$PSScriptRoot 'supervisor.env'))
 # Do not edit; edit supervisor.env or supervisors/<name>.env instead.
 `$ErrorActionPreference = 'Stop'
 `$env:PYTHONUTF8 = '1'
+Set-Location -LiteralPath `$PSScriptRoot
 `$envFile = `$EnvFile
 `$labels = ''
 `$interval = '30'
@@ -1807,7 +1810,8 @@ function Install-SupervisorTaskInstance {
     }
 
     $action = New-ScheduledTaskAction -Execute 'conhost.exe' `
-        -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Launcher`" -EnvFile `"$EnvFile`""
+        -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Launcher`" -EnvFile `"$EnvFile`"" `
+        -WorkingDirectory $InstallDir
     $trigger = New-ScheduledTaskTrigger -AtLogOn
     $settings = New-ScheduledTaskSettingsSet `
         -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
