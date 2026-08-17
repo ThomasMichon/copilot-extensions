@@ -13,6 +13,7 @@ from agent_worktrees.sessions import (
     backfill_sessions,
     find_latest_session_id_fast,
     list_worktree_sessions,
+    mux_copilot_pane,
     mux_seed_pane,
     recent_worktree_messages,
     scan_sessions_fast,
@@ -21,7 +22,109 @@ from agent_worktrees.sessions import (
 from agent_worktrees.tracking import (
     SessionEntry,
     WorktreeRecord,
+    save_record,
 )
+
+def _make_mux_record(wt_id: str, wt_path: str, sessions=None) -> WorktreeRecord:
+    return WorktreeRecord(
+        worktree_id=wt_id,
+        branch=f"worktree/{wt_id}",
+        worktree_path=wt_path,
+        repo="test",
+        machine="test",
+        platform="wsl",
+        started_at="2026-06-01T10:00:00",
+        last_resumed_at="2026-06-01T10:00:00",
+        resume_count=0,
+        title=None,
+        status="active",
+        completed_at=None,
+        sessions=sessions,
+    )
+
+
+class TestMuxCopilotPane:
+    def test_returns_recorded_live_head_pane(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        rec = _make_mux_record(
+            "wt-pane",
+            "/tmp/src/wt-pane",
+            sessions=[SessionEntry("sess-head", "2026-06-01T10:00:00", pane_id="%42")],
+        )
+        rec.head_session = "sess-head"
+        save_record(rec, tmp_tracking_dir / "wt-pane.yaml")
+        monkeypatch.setattr(
+            "agent_worktrees.sessions._mux_pane_alive",
+            lambda pane, mux_bin: pane == "%42",
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.sessions.mux_active_pane",
+            lambda wt, mux=None: "%active",
+        )
+
+        assert mux_copilot_pane("wt-pane", mux="tmux") == "%42"
+
+    def test_returns_recorded_live_requested_session_pane(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        rec = _make_mux_record(
+            "wt-pane",
+            "/tmp/src/wt-pane",
+            sessions=[
+                SessionEntry("sess-head", "2026-06-01T10:00:00", pane_id="%1"),
+                SessionEntry("sess-other", "2026-06-01T10:01:00", pane_id="%2"),
+            ],
+        )
+        rec.head_session = "sess-head"
+        save_record(rec, tmp_tracking_dir / "wt-pane.yaml")
+        monkeypatch.setattr(
+            "agent_worktrees.sessions._mux_pane_alive",
+            lambda pane, mux_bin: pane == "%2",
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.sessions.mux_active_pane",
+            lambda wt, mux=None: "%active",
+        )
+
+        assert mux_copilot_pane("wt-pane", session_id="sess-other", mux="tmux") == "%2"
+
+    def test_falls_back_to_active_when_recorded_pane_dead(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        rec = _make_mux_record(
+            "wt-dead",
+            "/tmp/src/wt-dead",
+            sessions=[SessionEntry("sess-dead", "2026-06-01T10:00:00", pane_id="%9")],
+        )
+        save_record(rec, tmp_tracking_dir / "wt-dead.yaml")
+        monkeypatch.setattr(
+            "agent_worktrees.sessions._mux_pane_alive",
+            lambda pane, mux_bin: False,
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.sessions.mux_active_pane",
+            lambda wt, mux=None: "%active",
+        )
+
+        assert mux_copilot_pane("wt-dead", mux="tmux") == "%active"
+
+    def test_falls_back_to_active_when_pane_unset(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        rec = _make_mux_record(
+            "wt-unset",
+            "/tmp/src/wt-unset",
+            sessions=[SessionEntry("sess-unset", "2026-06-01T10:00:00")],
+        )
+        save_record(rec, tmp_tracking_dir / "wt-unset.yaml")
+        monkeypatch.setattr(
+            "agent_worktrees.sessions.mux_active_pane",
+            lambda wt, mux=None: "%active",
+        )
+
+        assert mux_copilot_pane("wt-unset", mux="tmux") == "%active"
+
 
 # ---------------------------------------------------------------------------
 # Path normalization

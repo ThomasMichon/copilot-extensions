@@ -1547,7 +1547,11 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
     # Capture the pane to retire (the operator's current Copilot) BEFORE opening
     # the new window, which becomes the active pane. ``--old-pane`` lets the
     # extension pin its own $TMUX_PANE explicitly.
-    old_pane = getattr(args, "old_pane", None) or sessions.mux_active_pane(wt_id)
+    old_pane = (
+        getattr(args, "old_pane", None)
+        or sessions.mux_copilot_pane(wt_id, session_id)
+        or sessions.mux_active_pane(wt_id)
+    )
 
     if getattr(args, "dry_run", False):
         _json_output({
@@ -1666,7 +1670,10 @@ def cmd_embody(args: argparse.Namespace) -> int:
         _json_output({
             "ok": True, "worktree_id": wt_id, "session": f"wt-{wt_id}",
             "work_dir": work_dir, "created": False, "resumed": True,
-            "new_pane": sessions.mux_active_pane(wt_id),
+            "new_pane": (
+                sessions.mux_copilot_pane(wt_id)
+                or sessions.mux_active_pane(wt_id)
+            ),
             "note": "a live mux session already embodies this worktree",
         })
         return 0
@@ -13923,6 +13930,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Read the Copilot sessionStart JSON payload from stdin")
     sp.add_argument("--pid", type=int, default=None,
                     help="PID of the Copilot process (diagnostic only)")
+    sp.add_argument("--pane", default=None,
+                    help="Mux pane id (defaults to TMUX_PANE/PSMUX_PANE)")
     sp.add_argument("--launch-id", dest="launch_id", default=None,
                     help="Launch-flow correlation id (from WORKTREE_LAUNCH_ID)")
 
@@ -14154,6 +14163,14 @@ def cmd_register_session(args: argparse.Namespace) -> int:
     session_id = getattr(args, "session_id", None)
     cwd = getattr(args, "cwd", None)
     pid = getattr(args, "pid", None)
+    pane_id = (
+        getattr(args, "pane", None)
+        or os.environ.get("TMUX_PANE")
+        or os.environ.get("PSMUX_PANE")
+        or None
+    )
+    if isinstance(pane_id, str):
+        pane_id = pane_id.strip() or None
 
     if getattr(args, "stdin", False):
         payload = _read_hook_stdin()
@@ -14187,7 +14204,7 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         return 0  # cwd isn't a tracked worktree (base repo / unrelated dir)
 
     try:
-        tracking.register_session(wt_id, session_id, pid=pid)
+        tracking.register_session(wt_id, session_id, pid=pid, pane_id=pane_id)
     except Exception as e:
         output.err(f"Failed to register session: {e}")
         return 1

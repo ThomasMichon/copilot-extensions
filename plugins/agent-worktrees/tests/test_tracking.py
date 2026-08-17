@@ -33,6 +33,31 @@ from agent_worktrees.tracking import (
 )
 
 
+def test_session_entry_round_trips_pane_id(tmp_path: Path) -> None:
+    rec = WorktreeRecord(
+        worktree_id="wt-pane",
+        branch="worktree/wt-pane",
+        worktree_path=str(tmp_path / "wt-pane"),
+        repo="test-repo",
+        machine="test-machine",
+        platform="wsl",
+        started_at="2026-06-01T10:00:00",
+        last_resumed_at="2026-06-01T10:00:00",
+        resume_count=0,
+        title=None,
+        status="active",
+        completed_at=None,
+        sessions=[SessionEntry("sess-pane", "2026-06-01T10:00:00", pane_id="%42")],
+    )
+    path = tmp_path / "wt-pane.yaml"
+
+    save_record(rec, path)
+    loaded = load_record(path)
+
+    assert loaded.sessions is not None
+    assert loaded.sessions[0].pane_id == "%42"
+
+
 def _lock_increment_worker(yaml_path_str: str, iterations: int, hold: float) -> None:
     """Cross-process worker for the ``_RecordLock`` lost-update test.
 
