@@ -351,6 +351,55 @@ async def test_live_process_with_remote_forward_failure_is_not_ready(
 
 
 @pytest.mark.asyncio
+async def test_read_stderr_available_swallows_asyncio_timeout(monkeypatch) -> None:
+    """A timed-out stderr poll must be swallowed, not raised (dotfiles #1549).
+
+    On Python <=3.10 ``asyncio.wait_for`` raises ``asyncio.TimeoutError`` -- a
+    ``concurrent.futures.TimeoutError``, NOT the builtin ``TimeoutError`` -- so
+    the handler must name it explicitly. A bare ``except (TimeoutError, OSError)``
+    let a routine "no stderr yet" poll escape and degraded relay establish to
+    auth-light on 3.10 venues (the mesh runs 3.11 so it hid there).
+    """
+    async def _raise_asyncio_timeout(coro=None, *_args, **_kwargs):
+        if coro is not None and hasattr(coro, "close"):
+            coro.close()  # avoid 'coroutine never awaited' warning
+        raise asyncio.TimeoutError
+
+    monkeypatch.setattr(
+        "ssh_manager.relay_channel.asyncio.wait_for", _raise_asyncio_timeout
+    )
+    proc = _FakeProcess()
+
+    out = await SupervisedRelayForward._read_stderr_available(proc, timeout=0.01)
+
+    assert out == ""
+
+
+@pytest.mark.asyncio
+async def test_wait_settled_ready_when_stderr_poll_times_out(monkeypatch) -> None:
+    """``_wait_settled`` must settle ready when every stderr poll times out.
+
+    Regression for dotfiles #1549: an uncaught ``asyncio.TimeoutError`` from the
+    stderr poll used to escape ``establish`` and fail the reverse-forward.
+    """
+    async def _raise_asyncio_timeout(coro=None, *_args, **_kwargs):
+        if coro is not None and hasattr(coro, "close"):
+            coro.close()  # avoid 'coroutine never awaited' warning
+        raise asyncio.TimeoutError
+
+    monkeypatch.setattr(
+        "ssh_manager.relay_channel.asyncio.wait_for", _raise_asyncio_timeout
+    )
+    proc = _FakeProcess()
+    relay = SupervisedRelayForward(_config(), 51234, ready_timeout=0.01)
+
+    settled = await relay._wait_settled(proc)
+
+    assert settled.ready is True
+    assert settled.remote_forward_failed is False
+
+
+@pytest.mark.asyncio
 async def test_asymmetric_host_port_from_resolver(monkeypatch) -> None:
     """A host_port_resolver re-targets the -R host side while the CodeSpace
     listen port stays stable (dotfiles #855)."""
