@@ -93,8 +93,9 @@ Take the disk offline to Windows so WSL can own it (whole-disk case):
 ```powershell
 # Elevated. Confirm you have the RIGHT disk (by serial) before running this.
 $serial = '<DATA_DISK_SERIAL>'
-$disk   = Get-Disk | Where-Object { $_.SerialNumber.Trim().TrimEnd('.') -eq $serial }
-Set-Disk -Number $disk.Number -IsOffline $true
+$disk   = @(Get-Disk | Where-Object { $_.SerialNumber -and $_.SerialNumber.Trim().TrimEnd('.') -eq $serial })
+if ($disk.Count -ne 1) { throw "expected exactly 1 disk with serial $serial, found $($disk.Count)" }
+Set-Disk -Number $disk[0].Number -IsOffline $true
 ```
 
 ## 3. Bare-attach the disk into WSL and format it ext4
@@ -105,8 +106,9 @@ does it. Resolve the path from the serial each time:
 ```powershell
 # Elevated. --bare attaches the raw block device to the WSL2 VM (no auto-mount).
 $serial = '<DATA_DISK_SERIAL>'
-$n      = (Get-Disk | Where-Object { $_.SerialNumber.Trim().TrimEnd('.') -eq $serial }).Number
-wsl.exe --mount "\\.\PHYSICALDRIVE$n" --bare
+$disk   = @(Get-Disk | Where-Object { $_.SerialNumber -and $_.SerialNumber.Trim().TrimEnd('.') -eq $serial })
+if ($disk.Count -ne 1) { throw "expected exactly 1 disk with serial $serial, found $($disk.Count)" }
+wsl.exe --mount "\\.\PHYSICALDRIVE$($disk[0].Number)" --bare
 ```
 
 Inside WSL the disk appears as a `/dev/sdX` block device. **Format it once**
@@ -198,18 +200,21 @@ distro only ever boots with its data present. A minimal PowerShell shape:
 
 ```powershell
 # Runs at startup, before login. Resolve by serial, attach, THEN keepalive.
-$serial = '<DATA_DISK_SERIAL>'
-for ($i = 0; $i -lt 10; $i++) {
-  $n = (Get-Disk | Where-Object { $_.SerialNumber.Trim().TrimEnd('.') -eq $serial }).Number
-  if ($null -ne $n) {
-    $out = & wsl.exe --mount "\\.\PHYSICALDRIVE$n" --bare 2>&1
+# Fail CLOSED: track an explicit $attached flag so a disk that never enumerates
+# (wsl.exe never invoked) can't be mistaken for success via a stale $LASTEXITCODE.
+$serial   = '<DATA_DISK_SERIAL>'
+$attached = $false
+for ($i = 0; $i -lt 10 -and -not $attached; $i++) {
+  $disk = @(Get-Disk | Where-Object { $_.SerialNumber -and $_.SerialNumber.Trim().TrimEnd('.') -eq $serial })
+  if ($disk.Count -eq 1) {
+    $out = & wsl.exe --mount "\\.\PHYSICALDRIVE$($disk[0].Number)" --bare 2>&1
     # wsl.exe emits UTF-16LE; strip NULs before matching its text.
     $txt = (($out | Out-String) -replace "`0", "")
-    if ($LASTEXITCODE -eq 0 -or $txt -match 'already') { break }
+    if ($LASTEXITCODE -eq 0 -or $txt -match 'already') { $attached = $true }
   }
-  Start-Sleep -Seconds 3
+  if (-not $attached) { Start-Sleep -Seconds 3 }
 }
-if ($LASTEXITCODE -ne 0 -and $txt -notmatch 'already') {
+if (-not $attached) {
   Write-Error "data disk not attached; refusing to boot WSL diskless"; exit 1
 }
 & wsl.exe -d <distro> sleep infinity
