@@ -529,7 +529,7 @@ async def run_owner_daemon(
                 log.warning("Connection Owner reconcile cycle failed: %s", exc)
             try:
                 await asyncio.wait_for(stop.wait(), timeout=interval)
-            except TimeoutError:
+            except (TimeoutError, asyncio.TimeoutError):
                 pass
     finally:
         await owner.shutdown()

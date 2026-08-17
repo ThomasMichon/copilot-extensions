@@ -91,7 +91,7 @@ async def _terminate_process_tree(
     try:
         await asyncio.wait_for(proc.wait(), timeout=grace)
         return
-    except TimeoutError:
+    except (TimeoutError, asyncio.TimeoutError):
         pass
     if sys.platform != "win32":
         try:
@@ -102,7 +102,7 @@ async def _terminate_process_tree(
         proc.kill()
     try:
         await asyncio.wait_for(proc.wait(), timeout=2.0)
-    except TimeoutError:
+    except (TimeoutError, asyncio.TimeoutError):
         log.warning("Process tree rooted at pid %s did not exit", proc.pid)
 
 
@@ -310,7 +310,7 @@ class ConnectionManager:
         except asyncio.CancelledError:
             await _terminate_process_tree(proc)
             raise
-        except TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
             stderr = ""
             if proc.stderr:
                 try:
@@ -420,7 +420,7 @@ class ConnectionManager:
             finally:
                 if proc in info.child_processes and proc.returncode is not None:
                     info.child_processes.remove(proc)
-        except TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
             await _terminate_process_tree(proc)
             stdout_bytes, stderr_bytes = await proc.communicate()
             timed_out = True
@@ -512,7 +512,7 @@ class ConnectionManager:
                     **_subprocess_kwargs(),
                 )
                 await asyncio.wait_for(proc.wait(), timeout=5.0)
-            except (TimeoutError, OSError) as e:
+            except (TimeoutError, asyncio.TimeoutError, OSError) as e:
                 log.warning("Graceful disconnect failed for %s: %s", host, e)
 
         # Kill master process if still running

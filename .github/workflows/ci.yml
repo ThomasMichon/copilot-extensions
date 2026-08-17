@@ -63,6 +63,13 @@ jobs:
         run: python tools/check-docs-consistency.py
       - name: Runbook references
         run: python tools/check-runbook-references.py
+      - name: Asyncio timeout handlers (Python 3.10 daemon)
+        # The agent-bridge daemon venv is pinned to Python 3.10 (uv venv
+        # --python 3.10), where asyncio.wait_for raises asyncio.TimeoutError --
+        # NOT the builtin TimeoutError. Flag any wait_for whose handler names the
+        # builtin TimeoutError without asyncio.TimeoutError, so the class of bug
+        # behind dotfiles#1549 cannot recur unseen (dev-box/CI are 3.11/3.12).
+        run: python tools/check-asyncio-timeout-handlers.py
       - name: Internal-identifier guard (PR diff only)
         # Public repo: the denylist is never committed. When the FORBIDDEN_IDS
         # secret is configured this enforces that a PR introduces no forbidden

@@ -379,7 +379,7 @@ class TaskRunner:
                 self._wake.clear()
                 try:
                     await asyncio.wait_for(self._wake.wait(), timeout=5.0)
-                except TimeoutError:
+                except (TimeoutError, asyncio.TimeoutError):
                     pass
                 continue
 
@@ -388,7 +388,7 @@ class TaskRunner:
                 self._wake.clear()
                 try:
                     await asyncio.wait_for(self._wake.wait(), timeout=10.0)
-                except TimeoutError:
+                except (TimeoutError, asyncio.TimeoutError):
                     pass
                 continue
 

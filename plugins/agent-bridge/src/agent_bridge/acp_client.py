@@ -186,7 +186,7 @@ async def _terminate_process_tree(proc: asyncio.subprocess.Process) -> None:
                 stderr=asyncio.subprocess.DEVNULL,
             )
             await asyncio.wait_for(killer.wait(), timeout=5.0)
-        except (TimeoutError, OSError, ProcessLookupError):
+        except (TimeoutError, asyncio.TimeoutError, OSError, ProcessLookupError):
             pass
     else:
         # POSIX: agent spawns use start_new_session, so the child leads its
@@ -197,7 +197,7 @@ async def _terminate_process_tree(proc: asyncio.subprocess.Process) -> None:
         if not safe_killpg(pid, signal.SIGTERM):
             with contextlib.suppress(ProcessLookupError):
                 proc.terminate()
-    with contextlib.suppress(TimeoutError, ProcessLookupError):
+    with contextlib.suppress(TimeoutError, asyncio.TimeoutError, ProcessLookupError):
         await asyncio.wait_for(proc.wait(), timeout=5.0)
         return
     # Last resort if still alive.

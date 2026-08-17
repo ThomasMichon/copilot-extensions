@@ -89,7 +89,7 @@ async def check_health(manager: ConnectionManager, host: str) -> HealthStatus:
             return HealthStatus(ok=True, reason="ok")
         return HealthStatus(ok=False, reason="check_failed", stderr=stderr)
 
-    except TimeoutError:
+    except (TimeoutError, asyncio.TimeoutError):
         return HealthStatus(
             ok=False, reason="check_failed", stderr="ssh -O check timed out"
         )
