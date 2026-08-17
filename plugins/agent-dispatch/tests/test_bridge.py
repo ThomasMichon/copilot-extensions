@@ -150,3 +150,112 @@ def test_spawn_worker_wait_omits_no_wait(monkeypatch):
     )
     result = bridge.spawn_worker("t", coordinator_url="http://c", worker_id="w", wait=True)
     assert result.returncode == 0
+
+
+# -- registered-agent preflight ----------------------------------------------
+
+_AGENTS_JSON = (
+    '[{"name": "general-loop-worker"}, {"name": "sweep-worker"}, '
+    '{"name": "document-intake-processor"}]'
+)
+
+
+def test_parse_agent_names_extracts_names():
+    names = bridge.parse_agent_names(_AGENTS_JSON)
+    assert names == {"general-loop-worker", "sweep-worker", "document-intake-processor"}
+
+
+def test_parse_agent_names_skips_human_preamble():
+    out = "Loading agents...\n" + _AGENTS_JSON
+    assert bridge.parse_agent_names(out) == {
+        "general-loop-worker", "sweep-worker", "document-intake-processor"
+    }
+
+
+def test_parse_agent_names_indeterminate_on_junk():
+    # Empty / unparseable / wrong-shape all mean "couldn't tell" (None), never {}.
+    assert bridge.parse_agent_names("") is None
+    assert bridge.parse_agent_names(None) is None
+    assert bridge.parse_agent_names("not json at all") is None
+    assert bridge.parse_agent_names('{"name": "x"}') is None  # object, not a list
+
+
+def test_registered_agent_names_none_when_no_bridge(monkeypatch):
+    monkeypatch.setattr(bridge, "_agent_bridge_launch_prefix", lambda: None)
+    assert bridge.registered_agent_names() is None
+
+
+def test_registered_agent_names_none_on_nonzero_exit(monkeypatch):
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
+    monkeypatch.setattr(
+        bridge.subprocess, "run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, "", "boom"),
+    )
+    assert bridge.registered_agent_names() is None
+
+
+def test_registered_agent_names_parses_list(monkeypatch):
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, _AGENTS_JSON, "")
+
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
+    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    assert bridge.registered_agent_names() == {
+        "general-loop-worker", "sweep-worker", "document-intake-processor"
+    }
+    # --json is a global flag before the `agents` subcommand.
+    assert seen["cmd"] == ["/usr/bin/agent-bridge", "--json", "agents"]
+
+
+def test_preflight_local_warns_when_agent_absent(monkeypatch):
+    monkeypatch.setattr(
+        bridge, "registered_agent_names", lambda **_kw: {"general-loop-worker"}
+    )
+    warnings = bridge.preflight_headless_agent("task-worker")
+    assert len(warnings) == 1
+    w = warnings[0]
+    assert "task-worker" in w and "not registered" in w and "this host" in w
+
+
+def test_preflight_local_silent_when_agent_present(monkeypatch):
+    monkeypatch.setattr(
+        bridge, "registered_agent_names", lambda **_kw: {"sweep-worker"}
+    )
+    assert bridge.preflight_headless_agent("sweep-worker") == []
+
+
+def test_preflight_local_silent_when_indeterminate(monkeypatch):
+    # None registry (couldn't check) must never produce a false warning.
+    monkeypatch.setattr(bridge, "registered_agent_names", lambda **_kw: None)
+    assert bridge.preflight_headless_agent("task-worker") == []
+
+
+def test_preflight_fleet_probes_each_pool_host(monkeypatch):
+    from agent_dispatch import embody
+
+    probed = []
+
+    def fake_remote(host, **_kw):
+        probed.append(host)
+        # present on the first host, absent on the second, indeterminate on third
+        return {
+            "pool-a": {"sweep-worker"},
+            "pool-b": {"other"},
+            "pool-c": None,
+        }[host]
+
+    monkeypatch.setattr(embody, "remote_registered_agent_names", fake_remote)
+    warnings = bridge.preflight_headless_agent(
+        "sweep-worker", pool=["pool-a", "pool-b", "pool-c"]
+    )
+    assert probed == ["pool-a", "pool-b", "pool-c"]
+    # Only pool-b (present-but-absent-agent) warns; pool-a present, pool-c unknown.
+    assert len(warnings) == 1
+    assert "pool-b" in warnings[0]

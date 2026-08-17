@@ -231,6 +231,17 @@ seeded CLI/mux session can *race the input-prompt caret and never deliver its
 seed*, deadlocking at 0%). `--headless-agent AGENT` names the agent-bridge agent
 used (default `task-worker`).
 
+> **Preflight (fail-loud, best-effort).** At loop startup a headless lane checks
+> that its `--headless-agent` is actually registered with agent-bridge on the host
+> where the body will spawn — the local registry, or each `--pool` host over SSH
+> for a fleet lane — and prints a one-line **WARNING** for any host where the agent
+> is provably absent (the classic trap being the bogus `task-worker` default naming
+> an agent nobody registered, which otherwise fails as `'task-worker' is not a
+> known agent name`, retries, and dead-letters *silently*). The check never blocks
+> the lane and stays silent when the registry can't be read (bridge absent,
+> unreachable, timeout) — it only warns on a confirmed miss. It is skipped for
+> `--once` so hot one-shot/cron polls stay cheap.
+
 When a task *does* want an attachable **mux-wrapped CLI autopilot**
 (`agent-worktrees embody`) — standalone/durable work a human may take over — opt
 out:

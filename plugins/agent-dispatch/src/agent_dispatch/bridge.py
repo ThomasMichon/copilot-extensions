@@ -9,9 +9,11 @@ remains a standalone plugin usable where no bridge exists.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 
 from .procutil import no_window_kwargs
@@ -153,3 +155,116 @@ def send_nudge(
     except (subprocess.SubprocessError, OSError):
         return False
     return proc.returncode == 0
+
+
+def parse_agent_names(out: str | None) -> set[str] | None:
+    """Extract agent ``name`` values from ``agent-bridge --json agents`` stdout.
+
+    ``agent-bridge`` may print a human preamble line before the JSON array, so we
+    locate the first ``[`` and ``raw_decode`` from there. Returns the set of names,
+    or ``None`` -- meaning *indeterminate*, not *empty* -- when the payload is
+    missing or unparseable, so a caller can distinguish "provably absent" (a real
+    set that omits a name) from "couldn't tell".
+    """
+    text = (out or "").strip()
+    if not text:
+        return None
+    try:
+        data = json.loads(text)
+    except (ValueError, TypeError):
+        # Tolerate a stray human preamble line before the JSON array: decode from
+        # the first '[' (best-effort; a preamble that itself contains '[' simply
+        # reads as indeterminate rather than crashing).
+        start = text.find("[")
+        if start == -1:
+            return None
+        try:
+            data, _end = json.JSONDecoder().raw_decode(text[start:])
+        except (ValueError, TypeError):
+            return None
+    if not isinstance(data, list):
+        return None
+    names: set[str] = set()
+    for entry in data:
+        if isinstance(entry, dict):
+            name = entry.get("name")
+            if isinstance(name, str) and name:
+                names.add(name)
+    return names
+
+
+def registered_agent_names(*, timeout: float = 8.0) -> set[str] | None:
+    """Best-effort set of agent names registered with the **local** agent-bridge.
+
+    Runs ``agent-bridge --json agents`` and collects each entry's ``name``.
+    Returns ``None`` (indeterminate) whenever the registry can't be read -- the
+    bridge CLI is absent, the command exits non-zero, times out, or emits
+    unparseable output -- so a caller never mistakes "couldn't check" for "no such
+    agent". Never raises.
+    """
+    exe = _agent_bridge_launch_prefix()
+    if exe is None:
+        return None
+    try:
+        proc = subprocess.run(  # noqa: S603 -- fixed argv, exe resolved above
+            [*exe, "--json", "agents"],
+            check=False, capture_output=True, text=True, timeout=timeout,
+            **no_window_kwargs(),
+        )
+    except (subprocess.SubprocessError, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return parse_agent_names(proc.stdout)
+
+
+def preflight_headless_agent(
+    agent: str,
+    *,
+    pool: Sequence[str] | None = None,
+    local_timeout: float = 8.0,
+    remote_timeout: float = 15.0,
+) -> list[str]:
+    """Best-effort check that ``agent`` is a registered agent-bridge agent on the
+    host(s) where a headless embody body will actually spawn.
+
+    A headless supervise lane hands ``agent`` to ``agent-bridge create <agent>``;
+    if no such agent is registered the spawn fails ("'<agent>' is not a known
+    agent name"), retries, and dead-letters -- silently, from the operator's seat.
+    This preflight turns that latent misconfiguration (classically the bogus
+    ``task-worker`` code default naming an agent nobody registered) into a loud,
+    diagnosable startup WARNING, returning one human-readable line per host where
+    ``agent`` is *provably* absent.
+
+    It is deliberately **advisory and best-effort** (``degrade-gracefully`` +
+    ``fail-loud-on-endpoint-error``): it warns only when the registry is readable
+    AND the agent is confirmed missing. If the registry can't be read (bridge
+    absent, host unreachable, timeout, unparseable) that host is INDETERMINATE and
+    yields no warning -- the preflight never blocks a lane and never cries wolf on
+    ignorance. For a fleet lane (``pool`` set) the body spawns on each remote pool
+    host, so each is probed over SSH; otherwise the local registry is probed.
+    """
+    checks: list[tuple[str, set[str] | None]] = []
+    if pool:
+        from . import embody
+
+        for host in pool:
+            h = host.strip()
+            if not h:
+                continue
+            checks.append(
+                (h, embody.remote_registered_agent_names(h, timeout=remote_timeout))
+            )
+    else:
+        checks.append(("this host", registered_agent_names(timeout=local_timeout)))
+    warnings: list[str] = []
+    for where, names in checks:
+        if names is not None and agent not in names:
+            warnings.append(
+                f"agent-dispatch supervise: WARNING -- headless embody agent "
+                f"{agent!r} is not registered with agent-bridge on {where}; "
+                f"headless spawns for this lane will fail ({agent!r} is not a known "
+                f"agent name) and dead-letter. Register it (e.g. add a body to "
+                f"acp-agents.json) or set --headless-agent to a registered agent."
+            )
+    return warnings

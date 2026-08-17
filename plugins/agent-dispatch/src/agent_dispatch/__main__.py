@@ -1948,6 +1948,13 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
             f"origin={origin} body={body}",
             file=sys.stderr,
         )
+        # Preflight only a headless fleet lane: a CLI-embodied fleet body is a
+        # worktree autopilot, not an agent-bridge agent.
+        _preflight_agent = (
+            (getattr(args, "headless_agent", None) or "task-worker")
+            if fleet_headless else None
+        )
+        _preflight_pool = list(fleet.pool)
     else:
         headless_spawn = make_headless_spawn(
             coordinator_url,
@@ -1979,6 +1986,26 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
             if overrides else default_spawn
         )
         print(f"agent-dispatch supervise: {routed_note}", file=sys.stderr)
+        # A local lane is headless when the default backend is headless, or when a
+        # CLI-default lane routes a subset of labels to a headless body.
+        _headless_active = backend != "cli" or bool(headless_labels)
+        _preflight_agent = (
+            (getattr(args, "headless_agent", None) or "task-worker")
+            if _headless_active else None
+        )
+        _preflight_pool = None
+    # Best-effort, fail-loud preflight: warn (never block) when the headless
+    # embody agent isn't registered with agent-bridge on the host(s) where a body
+    # will actually spawn -- turning a silent dead-letter (the classic bogus
+    # `task-worker` default) into a diagnosable startup warning. Skipped for
+    # `--once` so hot one-shot/cron polls stay cheap and side-effect-free.
+    if not args.once and _preflight_agent:
+        from . import bridge
+
+        for _warning in bridge.preflight_headless_agent(
+            _preflight_agent, pool=_preflight_pool
+        ):
+            print(_warning, file=sys.stderr)
     with _client(args, ensure=False) as c:
         evaluator = None
         spec_path = getattr(args, "evaluator", None)
