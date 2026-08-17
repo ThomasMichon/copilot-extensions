@@ -11,7 +11,7 @@ _STATUS = """github.com
   - Active account: true
   - Token scopes: 'codespace', 'gist', 'read:org', 'repo', 'workflow'
 
-  x Logged in to github.com account tmichon_microsoft (keyring)
+  x Logged in to github.com account example-operator (keyring)
   - Active account: false
   - Token scopes: 'gist', 'read:org', 'repo', 'workflow'
 """
@@ -20,17 +20,17 @@ _STATUS = """github.com
 def test_parse_gh_account_scopes():
     parsed = m._parse_gh_account_scopes(_STATUS)
     assert "codespace" in parsed["ThomasMichon"]
-    assert "codespace" not in parsed["tmichon_microsoft"]
+    assert "codespace" not in parsed["example-operator"]
 
 
 def test_preflight_flags_mapped_account_missing_codespace_scope():
     with patch("subprocess.run") as run, \
          patch("agent_codespaces.gh_account.mapped_accounts",
-               return_value=("ThomasMichon", "tmichon_microsoft")):
+               return_value=("ThomasMichon", "example-operator")):
         run.return_value = MagicMock(returncode=0, stdout=_STATUS, stderr="")
         msgs = m._gh_auth_preflight()
     joined = "\n".join(msgs)
-    assert "tmichon_microsoft" in joined and "codespace" in joined
+    assert "example-operator" in joined and "codespace" in joined
     # The account that HAS the scope must not be flagged.
     assert "ThomasMichon" not in joined
 
@@ -53,7 +53,7 @@ def test_preflight_clean_when_all_scoped():
     )
     with patch("subprocess.run") as run, \
          patch("agent_codespaces.gh_account.mapped_accounts",
-               return_value=("ThomasMichon", "tmichon_microsoft")):
+               return_value=("ThomasMichon", "example-operator")):
         run.return_value = MagicMock(returncode=0, stdout=status, stderr="")
         msgs = m._gh_auth_preflight()
     assert msgs == []

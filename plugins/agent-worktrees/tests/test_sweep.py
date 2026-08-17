@@ -157,7 +157,7 @@ def test_github_pr_view_args_recognizes_forms():
     # ADO url, bare number, junk -> None (the GitHub recognizer; ADO is matched
     # separately by _ado_pr_view_args).
     assert sweep._github_pr_view_args(
-        "https://onedrive.visualstudio.com/ODSP-Web/_git/odsp-web/pullrequest/9") is None
+        "https://my-org.visualstudio.com/Example-Web/_git/example-web/pullrequest/9") is None
     assert sweep._github_pr_view_args("123") is None
     assert sweep._github_pr_view_args("") is None
 
@@ -196,12 +196,12 @@ def test_pr_merged_degrades_to_none(monkeypatch):
 def test_ado_pr_view_args_recognizes_forms():
     # classic <org>.visualstudio.com -> org = https://<host>/
     assert sweep._ado_pr_view_args(
-        "https://onedrive.visualstudio.com/ODSP-Web/_git/odsp-web/pullrequest/2285417"
-    ) == ["--id", "2285417", "--org", "https://onedrive.visualstudio.com/"]
+        "https://my-org.visualstudio.com/Example-Web/_git/example-web/pullrequest/2285417"
+    ) == ["--id", "2285417", "--org", "https://my-org.visualstudio.com/"]
     # modern dev.azure.com/<org> -> org = https://dev.azure.com/<org>/
     assert sweep._ado_pr_view_args(
-        "https://dev.azure.com/onedrive/ODSP-Web/_git/odsp-web/pullrequest/2285417"
-    ) == ["--id", "2285417", "--org", "https://dev.azure.com/onedrive/"]
+        "https://dev.azure.com/my-org/Example-Web/_git/example-web/pullrequest/2285417"
+    ) == ["--id", "2285417", "--org", "https://dev.azure.com/my-org/"]
     # GitHub refs, bare number, junk -> None
     assert sweep._ado_pr_view_args("https://github.com/o/r/pull/12") is None
     assert sweep._ado_pr_view_args("o/r#34") is None
@@ -210,7 +210,7 @@ def test_ado_pr_view_args_recognizes_forms():
 
 
 def test_ado_pr_merged_true_only_on_completed(monkeypatch):
-    ado = "https://onedrive.visualstudio.com/P/_git/r/pullrequest/9"
+    ado = "https://my-org.visualstudio.com/P/_git/r/pullrequest/9"
     monkeypatch.setattr(sweep.shutil, "which", lambda _: "az")
     monkeypatch.setattr(sweep.subprocess, "run",
                         lambda *a, **k: _proc(0, "completed\n"))
@@ -250,7 +250,7 @@ def test_pr_merged_dispatches_github_vs_ado(monkeypatch):
                         lambda ref: calls.append(("ado", ref)) or True)
     assert sweep.pr_merged("o/r#7") is True
     assert sweep.pr_merged(
-        "https://onedrive.visualstudio.com/P/_git/r/pullrequest/8") is True
+        "https://my-org.visualstudio.com/P/_git/r/pullrequest/8") is True
     assert sweep.pr_merged("123") is None  # unrecognized -> neither backend
     assert [c[0] for c in calls] == ["gh", "ado"]
 

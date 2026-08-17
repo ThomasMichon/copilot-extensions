@@ -141,14 +141,14 @@ def test_stateless_bound_but_unregistered(fake_checkouts):
 # ---------------------------------------------------------------------------
 
 def test_explicit_override_targets_named_repo(fake_checkouts):
-    fake_checkouts["odsp-web"] = "/repos/odsp-web"
+    fake_checkouts["example-web"] = "/repos/example-web"
     res = sr.resolve_state_root(
         _config("citadel-harness", stateless=True, knowledge_repo="citadel-knowledge"),
-        repo_override="odsp-web",
+        repo_override="example-web",
     )
-    assert res.path == "/repos/odsp-web"
+    assert res.path == "/repos/example-web"
     assert res.source == "explicit"
-    assert res.repo == "odsp-web"
+    assert res.repo == "example-web"
 
 
 def test_explicit_override_unregistered(fake_checkouts):

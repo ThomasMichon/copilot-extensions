@@ -265,9 +265,9 @@ class CredentialsConfig:
     # ``ado-auth-helper get-access-token`` (a relay-minted ADO bearer), so
     # tooling that authenticates to an Azure Artifacts feed via a static env
     # token works over the relay. The relay itself only wires *git* auth; a Rush
-    # ``.npmrc`` line like ``//<feed>/:_authToken=${ODSP_NPM_AUTH_TOKEN}`` reads
+    # ``.npmrc`` line like ``//<feed>/:_authToken=${EXAMPLE_NPM_AUTH_TOKEN}`` reads
     # such a var and, when it is undefined, Rush drops the line -> anonymous ->
-    # E401. Set this to your feed's token var(s), e.g. ``[ODSP_NPM_AUTH_TOKEN]``.
+    # E401. Set this to your feed's token var(s), e.g. ``[EXAMPLE_NPM_AUTH_TOKEN]``.
     # Left empty (default), nothing is exported and behavior is unchanged.
     # dotfiles#1221.
     feed_token_env: list[str] = field(default_factory=list)

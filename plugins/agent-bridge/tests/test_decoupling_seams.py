@@ -126,8 +126,8 @@ def test_ai_plugin_dirs_uses_in_bridge_remote_resolve():
         seen["session"] = session
         seen["repo_dir"] = repo_dir
         return (
-            ["/workspaces/odsp-web/.ai/atomic", "/workspaces/odsp-web/.ai/od-web"],
-            ["odsp-ai-hub-ecs@agency-playground"],
+            ["/workspaces/example-web/.ai/atomic", "/workspaces/example-web/.ai/od-web"],
+            ["example-ai-hub-ecs@agency-playground"],
         )
 
     with patch(
@@ -135,14 +135,14 @@ def test_ai_plugin_dirs_uses_in_bridge_remote_resolve():
         side_effect=_resolve,
     ):
         dirs = session_manager._resolve_codespace_ai_plugin_dirs(
-            "my-cs", "odsp-microsoft/odsp-web", repo_dir="/workspaces/odsp-web",
+            "my-cs", "example-org/example-web", repo_dir="/workspaces/example-web",
         )
     assert dirs == [
-        "/workspaces/odsp-web/.ai/atomic", "/workspaces/odsp-web/.ai/od-web",
+        "/workspaces/example-web/.ai/atomic", "/workspaces/example-web/.ai/od-web",
     ]
     # target identified as a codespace by agent_name; repo_dir threaded through.
     assert seen["session"] == {"agent_name": "codespace:my-cs"}
-    assert seen["repo_dir"] == "/workspaces/odsp-web"
+    assert seen["repo_dir"] == "/workspaces/example-web"
 
 
 def test_ai_plugin_dirs_empty_when_no_repo_dir():
@@ -170,5 +170,5 @@ def test_ai_plugin_dirs_empty_on_best_effort_failure():
         return_value=([], []),
     ):
         assert session_manager._resolve_codespace_ai_plugin_dirs(
-            "cs", None, repo_dir="/workspaces/odsp-web",
+            "cs", None, repo_dir="/workspaces/example-web",
         ) == []

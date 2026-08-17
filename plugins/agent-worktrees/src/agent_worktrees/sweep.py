@@ -48,13 +48,13 @@ _GH_PR_URL = re.compile(
 _GH_PR_SHORT = re.compile(r"^([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#(\d+)$")
 
 #: A classic ADO PR URL on the ``<org>.visualstudio.com`` host, e.g.
-#: ``https://onedrive.visualstudio.com/ODSP-Web/_git/odsp-web/pullrequest/2285417``
+#: ``https://my-org.visualstudio.com/Example-Web/_git/example-web/pullrequest/2285417``
 #: (group 1 = ``<org>.visualstudio.com`` host, group 2 = PR id).
 _ADO_PR_VSTS = re.compile(
     r"^https?://([A-Za-z0-9._-]+\.visualstudio\.com)/.+/pullrequest/(\d+)/?$",
     re.IGNORECASE)
 #: The modern ADO PR URL on ``dev.azure.com/<org>``, e.g.
-#: ``https://dev.azure.com/onedrive/ODSP-Web/_git/odsp-web/pullrequest/2285417``
+#: ``https://dev.azure.com/my-org/Example-Web/_git/example-web/pullrequest/2285417``
 #: (group 1 = ``<org>`` slug, group 2 = PR id).
 _ADO_PR_DEVAZURE = re.compile(
     r"^https?://dev\.azure\.com/([A-Za-z0-9._-]+)/.+/pullrequest/(\d+)/?$",
@@ -301,7 +301,7 @@ def _ado_pr_view_args(ref: str) -> list[str] | None:
 
     Recognizes the classic ``https://<org>.visualstudio.com/.../pullrequest/N``
     and modern ``https://dev.azure.com/<org>/.../pullrequest/N`` URL shapes (the
-    odsp-web case). Returns ``["--id", N, "--org", <org-url>]`` -- the org URL
+    example-web case). Returns ``["--id", N, "--org", <org-url>]`` -- the org URL
     ``az`` needs to resolve the org-wide-unique PR id (the repo/project in the
     URL is not required by ``az repos pr show``). A GitHub ref, a bare number, or
     any other shape yields ``None`` (spare).
@@ -366,7 +366,7 @@ def pr_merged(ref: str) -> bool | None:
     ``None`` (spare). Never raises. This is the ``pr``-kind analog of the
     worktree branch-merged check: a merged PR is provably safe AND its obligation
     discharged, so a stale (manually-journaled, never-settled) cross-repo PR
-    claim -- GitHub or the real-world **odsp-web ADO** case -- auto-reclaims once
+    claim -- GitHub or the real-world **example-web ADO** case -- auto-reclaims once
     the PR lands.
     """
     if _github_pr_view_args(ref) is not None:

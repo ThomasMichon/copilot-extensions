@@ -277,11 +277,11 @@ def test_resolve_account_none_for_missing_entry():
 
 def test_account_map_round_trips(home: Path):
     repos.set_account_map("github", "ThomasMichon")
-    repos.set_account_map("odsp-microsoft", "tmichon_microsoft")
+    repos.set_account_map("example-org", "example-operator")
     reg = repos.read_registry()
     assert reg.account_map == {
         "github": "ThomasMichon",
-        "odsp-microsoft": "tmichon_microsoft",
+        "example-org": "example-operator",
     }
 
 
@@ -294,14 +294,14 @@ def test_account_map_resolves_org_owned_repo(home: Path):
 
 
 def test_account_map_case_insensitive(home: Path):
-    repos.set_account_map("ODSP-Microsoft", "tmichon_microsoft")
-    assert repos.account_for_github_owner("odsp-microsoft") == "tmichon_microsoft"
-    assert repos.account_from_map("odsp-microsoft") == "tmichon_microsoft"
+    repos.set_account_map("Example-Org", "example-operator")
+    assert repos.account_for_github_owner("example-org") == "example-operator"
+    assert repos.account_from_map("example-org") == "example-operator"
 
 
 def test_owner_fallback_when_unmapped(home: Path):
     """Unmapped owner falls back to itself (owner == login for personal repos)."""
-    assert repos.account_for_github_slug("tmichon_microsoft/dotfiles") == "tmichon_microsoft"
+    assert repos.account_for_github_slug("example-operator/dotfiles") == "example-operator"
 
 
 def test_explicit_repo_account_beats_map(home: Path):
@@ -340,7 +340,7 @@ def test_unset_account_map(home: Path):
 
 # --- resolve_registration_account (#537) ------------------------------------
 
-_AUTHED = ("ThomasMichon", "tmichon_microsoft")
+_AUTHED = ("ThomasMichon", "example-operator")
 
 
 def _fake_token(login):
@@ -361,8 +361,8 @@ def test_registration_personal_owner_is_clean(home: Path):
     with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
          patch("agent_worktrees.repos.shutil.which", return_value="gh"):
         r = repos.resolve_registration_account(
-            "https://github.com/tmichon_microsoft/dotfiles.git")
-    assert r.login == "tmichon_microsoft"
+            "https://github.com/example-operator/dotfiles.git")
+    assert r.login == "example-operator"
     assert r.needs_clarify is False
 
 
@@ -403,7 +403,7 @@ def test_registration_sibling_explicit_resolves(home: Path):
 
 def test_registration_non_github_is_none(home: Path):
     r = repos.resolve_registration_account(
-        "https://onedrive.visualstudio.com/x/_git/y")
+        "https://my-org.visualstudio.com/x/_git/y")
     assert r.source == "none"
     assert r.needs_clarify is False
 

@@ -5327,7 +5327,7 @@ def test_registered_pivot_account_scope_and_subtitle(tmp_path, monkeypatch):
             plain = pcap.screen_to_text(scr)
             # Account-scoped header counts items, not "on <machine>".
             assert "2 codespaces" in plain
-            assert "on tmichon" not in plain.lower()
+            assert "on example-operator" not in plain.lower()
             # Friendly names + the subtitle second line for the held row.
             assert "my-feature" in plain
             assert "claimed by eff-a on dev6" in plain

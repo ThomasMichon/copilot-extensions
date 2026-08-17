@@ -45,11 +45,11 @@ def test_replace_preserves_comments():
 
 def test_render_labels_paths_and_marker():
     md = bk.render_instructions("citadel-harness", "C:/h", "citadel-knowledge", "C:/k",
-                                [("odsp-web", "C:/o")])
+                                [("example-web", "C:/o")])
     assert bk.MANAGED_MARKER in md
     assert "citadel-harness" in md and "C:/h" in md
     assert "citadel-knowledge" in md and "C:/k" in md
-    assert "odsp-web" in md and "C:/o" in md
+    assert "example-web" in md and "C:/o" in md
     assert "state-root" in md  # routing pointer present
 
 

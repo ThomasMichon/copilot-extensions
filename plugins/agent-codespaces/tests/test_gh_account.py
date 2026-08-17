@@ -29,8 +29,8 @@ def _clear_caches(monkeypatch):
 def test_account_for_repo_returns_login():
     with patch.object(gh_account, "_agent_worktrees_bin", return_value="aw"), \
          patch.object(gh_account.subprocess, "run") as run:
-        run.return_value = MagicMock(returncode=0, stdout="tmichon_microsoft\n")
-        assert gh_account.account_for_repo("odsp-microsoft/x") == "tmichon_microsoft"
+        run.return_value = MagicMock(returncode=0, stdout="example-operator\n")
+        assert gh_account.account_for_repo("example-org/x") == "example-operator"
         args = run.call_args[0][0]
         assert args[:3] == ["aw", "repos", "account-for"]
 
@@ -73,11 +73,11 @@ def test_env_for_account_none_login():
 
 
 def test_mapped_accounts_parses_json():
-    payload = '{"account_map": {"github": "ThomasMichon", "odsp-microsoft": "tmichon_microsoft"}}'
+    payload = '{"account_map": {"github": "ThomasMichon", "example-org": "example-operator"}}'
     with patch.object(gh_account, "_agent_worktrees_bin", return_value="aw"), \
          patch.object(gh_account.subprocess, "run") as run:
         run.return_value = MagicMock(returncode=0, stdout=payload)
-        assert gh_account.mapped_accounts() == ("ThomasMichon", "tmichon_microsoft")
+        assert gh_account.mapped_accounts() == ("ThomasMichon", "example-operator")
 
 
 def test_mapped_accounts_empty_without_map():
@@ -101,15 +101,15 @@ def test_list_codespaces_merges_across_accounts():
     def fake_under(login):
         if login == "ThomasMichon":
             return [_cs("cs-a", "ThomasMichon")]
-        if login == "tmichon_microsoft":
-            return [_cs("cs-b", "tmichon_microsoft")]
+        if login == "example-operator":
+            return [_cs("cs-b", "example-operator")]
         return []  # ambient (None)
 
     with patch.object(lifecycle, "_list_codespaces_under", side_effect=fake_under), \
          patch("agent_codespaces.gh_account.mapped_accounts",
-               return_value=("ThomasMichon", "tmichon_microsoft")):
+               return_value=("ThomasMichon", "example-operator")):
         names = {c.name: c.account for c in lifecycle.list_codespaces()}
-    assert names == {"cs-a": "ThomasMichon", "cs-b": "tmichon_microsoft"}
+    assert names == {"cs-a": "ThomasMichon", "cs-b": "example-operator"}
 
 
 def test_list_codespaces_ambient_only_without_map():

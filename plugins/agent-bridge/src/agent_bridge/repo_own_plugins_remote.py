@@ -2,7 +2,7 @@
 
 The **remote** counterpart of :func:`repo_own_plugins.repo_plugin_dir_args`
 (local). agent-bridge owns transport-agnostic session logic; the venue repo
-checked out on the target (e.g. ``/workspaces/odsp-web``) declares its own
+checked out on the target (e.g. ``/workspaces/example-web``) declares its own
 plugins in ``.github/copilot/settings.json`` / ``.claude/settings.json`` and
 ships them in a local (``directory``) marketplace such as ``.ai``. Since
 ``copilot --acp`` ignores ``enabledPlugins`` and only surfaces plugin skills via
