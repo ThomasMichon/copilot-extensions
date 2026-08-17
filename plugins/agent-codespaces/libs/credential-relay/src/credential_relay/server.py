@@ -229,6 +229,7 @@ class CredentialRelayServer:
         policy: RelayPolicy | None = None,
         ado_host: str | None = None,
         token_validator: Callable[[str], bool] | None = None,
+        token_authorizer: Callable[[str, str, dict[str, str]], bool] | None = None,
         token_required_actions: frozenset[str] | None = None,
     ) -> None:
         self.port = port
@@ -244,6 +245,11 @@ class CredentialRelayServer:
         # reachable. Open actions (git get/fill, get-github-token) are never
         # gated, so the codespace relay behavior is unchanged.
         self.token_validator = token_validator
+        # Optional request-scoped gate: ``token_authorizer(token, action,
+        # fields) -> bool`` supersedes ``token_validator`` when set, so a gate
+        # can enforce a per-token scope (e.g. the Azure resources a given token
+        # may mint) rather than a bare token check.
+        self.token_authorizer = token_authorizer
         self.token_required_actions = token_required_actions or frozenset()
         # Default ADO host for bare `get-access-token` requests that carry no
         # host (e.g. npm/nuget via ado-auth-helper). Resolved from the explicit
@@ -371,7 +377,12 @@ class CredentialRelayServer:
             # it can't leak into a source response or confuse a source.
             token = fields.pop("auth", "")
             if action in self.token_required_actions:
-                if not self.token_validator or not self.token_validator(token):
+                authorized = (
+                    self.token_authorizer(token, action, dict(fields))
+                    if self.token_authorizer else
+                    bool(self.token_validator and self.token_validator(token))
+                )
+                if not authorized:
                     log.warning(
                         "[%s] Token gate denied action=%s (missing/invalid token)",
                         addr, action,

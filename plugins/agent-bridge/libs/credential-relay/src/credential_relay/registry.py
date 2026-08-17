@@ -73,6 +73,9 @@ class RelayBuilder:
     port: int | None = None
     ado_host: str | None = None
     _token_validators: list[Callable[[str], bool]] = field(default_factory=list)
+    _token_authorizers: list[Callable[[str, str, dict[str, str]], bool]] = field(
+        default_factory=list
+    )
     token_required_actions: set[str] = field(default_factory=set)
     # Merged Azure-token allowlist across providers. A single AzLoginSource is
     # built from the union so two providers (codespaces + containers) can each
@@ -136,6 +139,26 @@ class RelayBuilder:
         self._token_validators.append(validator)
         self.token_required_actions.update(actions)
 
+    def authorize_token(
+        self, actions: list[str],
+        authorizer: Callable[[str, str, dict[str, str]], bool],
+    ) -> None:
+        """Gate ``actions`` with a token-aware, request-scoped policy.
+
+        Unlike :meth:`require_token`'s boolean ``validator(token)``, an
+        ``authorizer(token, action, fields) -> bool`` also sees the action and
+        the request fields, so it can enforce a *per-token* scope -- e.g. the
+        set of Azure resources a given per-target token is allowed to mint,
+        read from that provider's (file-backed) token store. When any authorizer
+        is registered, per-request scope enforcement moves off the static
+        ``azure_resources`` allowlist onto the authorizer, so the underlying
+        source is built wide-open (``"*"``) and the authorizer is the sole gate.
+        Authorizers are checked with **any-match**, then fall back to the
+        accumulated :meth:`require_token` validators, so the two seams compose.
+        """
+        self._token_authorizers.append(authorizer)
+        self.token_required_actions.update(actions)
+
     @property
     def empty(self) -> bool:
         return not self.sources and not self._azure_enabled
@@ -147,7 +170,10 @@ class RelayBuilder:
             from .sources.az_login import AzLoginSource
 
             sources.append(
-                AzLoginSource(allowed_resources=sorted(self.azure_resources))
+                AzLoginSource(
+                    allowed_resources=["*"] if self._token_authorizers
+                    else sorted(self.azure_resources)
+                )
             )
         policy = RelayPolicy(allowed_hosts=list(self.allowed_hosts))
         kwargs: dict = {"sources": sources, "policy": policy}
@@ -157,6 +183,32 @@ class RelayBuilder:
             kwargs["ado_host"] = self.ado_host
         if self.token_required_actions:
             validators = list(self._token_validators)
-            kwargs["token_validator"] = lambda tok: any(v(tok) for v in validators)
+            authorizers = list(self._token_authorizers)
+            if authorizers:
+                static_resources = set(self.azure_resources)
+
+                def _authorize(tok: str, action: str, fields: dict[str, str]) -> bool:
+                    # Any provider's request-scoped authorizer accepting wins.
+                    if any(a(tok, action, fields) for a in authorizers):
+                        return True
+                    # Otherwise fall back to the boolean validators; a valid
+                    # token is still scope-checked against the static allowlist
+                    # for get-azure-token so the validator-only (containers) path
+                    # keeps its existing source-level scope guarantee.
+                    if not any(v(tok) for v in validators):
+                        return False
+                    if action != "get-azure-token":
+                        return True
+                    requested = fields.get("scope") or fields.get("resource") or ""
+                    normalized = requested.removesuffix("/.default").rstrip("/")
+                    allowed = {
+                        value.removesuffix("/.default").rstrip("/")
+                        for value in static_resources
+                    }
+                    return "*" in static_resources or normalized in allowed
+
+                kwargs["token_authorizer"] = _authorize
+            else:
+                kwargs["token_validator"] = lambda tok: any(v(tok) for v in validators)
             kwargs["token_required_actions"] = frozenset(self.token_required_actions)
         return CredentialRelayServer(**kwargs)
