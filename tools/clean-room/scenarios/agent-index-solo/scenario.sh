@@ -92,7 +92,7 @@ else
 fi
 if [ -f "$INSTALLED_ROOT/$PLUGIN/mcp/agent-index.yaml" ] \
    && [ "$(find "$INSTALLED_ROOT/$PLUGIN/mcp/tools" -maxdepth 1 -name 'agent_index_*.md' 2>/dev/null | wc -l | tr -d ' ')" -ge 4 ] \
-   && ! grep -q 'agent_index_reindex' "$INSTALLED_ROOT/$PLUGIN/mcp/agent-index.yaml" 2>/dev/null; then
+   && ! sed 's/#.*//' "$INSTALLED_ROOT/$PLUGIN/mcp/agent-index.yaml" 2>/dev/null | grep -q 'agent_index_reindex'; then
     pass "read-only agent-mcp bridge config present (four read tools; no reindex tool)"
 else
     jam "index-config" "read-only agent-mcp bridge config missing or exposes reindex" "payload should include mcp/agent-index.yaml with search/similar/clusters/status only"
