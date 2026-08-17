@@ -1790,7 +1790,20 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
     if not getattr(args, "no_declared", False):
         from . import registrar_discovery
 
-        declared_source = registrar_discovery.discover
+        if getattr(args, "legacy_env", False):
+            # Back-compat bridge: pointer-discovered declarations PLUS the host's
+            # legacy supervisor.env / supervisors/*.env profiles, deduped by name
+            # (a first-class declaration wins). Lets a host switch its supervisor
+            # unit to `serve` without dropping its existing profiles mid-migration.
+            declared_source = registrar_discovery.discover_with_legacy
+        else:
+            declared_source = registrar_discovery.discover
+    elif getattr(args, "legacy_env", False):
+        # --no-declared drops pointer discovery but --legacy-env still bridges the
+        # legacy env profiles.
+        from . import registrar_discovery
+
+        declared_source = registrar_discovery.read_legacy_env_profiles
 
     with _client(args) as c:
         daemon = SupervisorDaemon(
@@ -3340,6 +3353,13 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--no-declared", action="store_true",
                     help="do not supervise the registrar's DECLARED profile set "
                          "(discovered pointers); run only store-backed registrations")
+    rp.add_argument("--legacy-env", action="store_true",
+                    help="ALSO supervise legacy AGENT_DISPATCH_SUPERVISE_* env "
+                         "profiles (supervisor.env + supervisors/*.env) as declarations "
+                         "-- the Phase 4 migration back-compat bridge, so switching a "
+                         "host's supervisor unit to `serve` keeps its existing profiles "
+                         "running until each is migrated to a first-class declaration. A "
+                         "declaration of the same name wins over a legacy profile.")
     rp.set_defaults(func=_cmd_supervise)
     rp = sup_sub.add_parser(
         "daemon-status",

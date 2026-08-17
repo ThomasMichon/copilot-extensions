@@ -13,8 +13,10 @@ from agent_dispatch.registrar_discovery import (
     add_pointer,
     discover,
     discover_repo,
+    discover_with_legacy,
     load_pointers,
     read_declaration_file,
+    read_legacy_env_profiles,
     read_location,
     remove_pointer,
     repo_pointer,
@@ -213,3 +215,78 @@ def test_discover_repo_reads_inrepo_dir(tmp_path):
     decls = discover_repo(tmp_path)
     assert [d.name for d in decls] == ["general"]
     assert decls[0].owner == f"repo:{tmp_path.name}"
+
+
+# -- Legacy env-profile back-compat bridge (Phase 4) -------------------------
+
+
+def _write_env(path, **vars) -> None:
+    path.write_text(
+        "\n".join(f"AGENT_DISPATCH_SUPERVISE_{k}={v}" for k, v in vars.items()) + "\n",
+        encoding="utf-8",
+    )
+
+
+def test_read_legacy_env_profiles_primary_and_dir(tmp_path):
+    base = tmp_path
+    _write_env(base / "supervisor.env", LABELS="general", MAX_CONCURRENT="2")
+    profiles = base / "supervisors"
+    profiles.mkdir()
+    _write_env(profiles / "review.env", LABELS="code-review", HEADLESS_AGENT="reviewer")
+    decls = read_legacy_env_profiles(
+        env_file=base / "supervisor.env", profile_dir=profiles
+    )
+    by_name = {d.name: d for d in decls}
+    assert set(by_name) == {"supervisor", "review"}
+    assert by_name["supervisor"].labels == ("general",)
+    assert by_name["supervisor"].concurrency == 2
+    assert by_name["supervisor"].owner == "legacy-env:supervisor"
+    assert by_name["review"].labels == ("code-review",)
+    assert by_name["review"].body.agent == "reviewer"
+
+
+def test_read_legacy_env_profiles_skips_labelless(tmp_path):
+    # An empty/label-less primary is inert (label-gated installer) -> skipped.
+    (tmp_path / "supervisor.env").write_text(
+        "AGENT_DISPATCH_SUPERVISE_LABELS=\nAGENT_DISPATCH_SUPERVISE_INTERVAL=30\n",
+        encoding="utf-8",
+    )
+    assert read_legacy_env_profiles(
+        env_file=tmp_path / "supervisor.env", profile_dir=tmp_path / "none"
+    ) == []
+
+
+def test_read_legacy_env_profiles_missing_paths(tmp_path):
+    assert read_legacy_env_profiles(
+        env_file=tmp_path / "nope.env", profile_dir=tmp_path / "gone"
+    ) == []
+
+
+def test_discover_with_legacy_declaration_wins(tmp_path, monkeypatch):
+    # A pointer declares 'general'; a legacy env profile of the SAME name (stem)
+    # 'general' plus a distinct 'review' legacy profile. The declaration wins for
+    # 'general'; the distinct legacy 'review' is included.
+    decls_dir = tmp_path / "decls"
+    decls_dir.mkdir()
+    (decls_dir / "general.yaml").write_text(
+        "name: general\nlabels: [general]\nconcurrency: 5\n", encoding="utf-8"
+    )
+    reg_base = tmp_path / "reg"
+    add_pointer("ops", str(decls_dir), owner="ops", base=reg_base)
+
+    legacy = tmp_path / "install"
+    (legacy / "supervisors").mkdir(parents=True)
+    # stem 'general' collides with the declaration; stem 'review' is distinct.
+    _write_env(legacy / "supervisors" / "general.env", LABELS="general", MAX_CONCURRENT="1")
+    _write_env(legacy / "supervisors" / "review.env", LABELS="code-review")
+
+    out = discover_with_legacy(
+        base=reg_base,
+        env_file=legacy / "none.env",
+        profile_dir=legacy / "supervisors",
+    )
+    by_name = {d.name: d for d in out}
+    assert set(by_name) == {"general", "review"}
+    # declaration (concurrency 5) wins over the legacy env 'general' (concurrency 1)
+    assert by_name["general"].concurrency == 5
+    assert by_name["review"].labels == ("code-review",)
