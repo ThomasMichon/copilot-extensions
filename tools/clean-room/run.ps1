@@ -132,6 +132,12 @@ if (-not (Test-Path (Join-Path $ScenarioDir 'scenario.sh'))) {
     throw "scenario '$ScenarioName' has no scenario.sh"
 }
 $LibDir = Join-Path $Here 'lib'
+# Optional per-suite shared helpers: if the selected scenario's parent dir holds
+# a `_lib/`, mount it read-only at /home/operator/scenario-lib and expose it as
+# $CR_SCENARIO_LIB, so sibling scenarios in a suite can source shared phase
+# helpers instead of each duplicating them. Opt-in: absent -> unchanged.
+$ScenarioSharedLib = Join-Path (Split-Path -Parent $ScenarioDir) '_lib'
+if (-not (Test-Path -PathType Container $ScenarioSharedLib)) { $ScenarioSharedLib = $null }
 
 # --- image/tag/container naming (base keeps the legacy :authed tag) -----------
 # $NameSuffix makes the CONTAINER + agent names unique (concurrent clean-rooms of
@@ -225,6 +231,15 @@ function Start-Container {
     $scenDir = ($ScenarioDir) -replace '\\','/'
     $libDir  = ($LibDir)      -replace '\\','/'
     $res     = ($Results)     -replace '\\','/'
+    # Optional per-suite shared-lib mount (see scenario resolution above).
+    $scenLibArgs = @()
+    if ($ScenarioSharedLib) {
+        $slib = ($ScenarioSharedLib) -replace '\\','/'
+        $scenLibArgs = @(
+            '-v', "${slib}:/home/operator/scenario-lib:ro",
+            '-e', 'CR_SCENARIO_LIB=/home/operator/scenario-lib'
+        )
+    }
     # Generic host->container value relay: forward each requested host env var by
     # NAME (value stays in the runner's env, not on the docker CLI args). Only
     # names actually set on the host are forwarded; a missing one is skipped with
@@ -244,6 +259,7 @@ function Start-Container {
         -v "${scenDir}:/home/operator/scenario:ro" `
         -v "${libDir}:/home/operator/lib:ro" `
         -v "${res}:/home/operator/out" `
+        @scenLibArgs `
         -e "CR_LIB=/home/operator/lib/clean-room-lib.sh" `
         -e "CR_SCENARIO_NAME=$ScenarioName" `
         -e "CR_MARKETPLACE_REPO=$MarketplaceRepo" `
