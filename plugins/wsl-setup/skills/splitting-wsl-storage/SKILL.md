@@ -92,7 +92,7 @@ Take the disk offline to Windows so WSL can own it (whole-disk case):
 
 ```powershell
 # Elevated. Confirm you have the RIGHT disk (by serial) before running this.
-$serial = '<DATA_DISK_SERIAL>'
+$serial = '<DATA_DISK_SERIAL>'.Trim().TrimEnd('.')   # normalize both sides
 $disk   = @(Get-Disk | Where-Object { $_.SerialNumber -and $_.SerialNumber.Trim().TrimEnd('.') -eq $serial })
 if ($disk.Count -ne 1) { throw "expected exactly 1 disk with serial $serial, found $($disk.Count)" }
 Set-Disk -Number $disk[0].Number -IsOffline $true
@@ -105,7 +105,7 @@ does it. Resolve the path from the serial each time:
 
 ```powershell
 # Elevated. --bare attaches the raw block device to the WSL2 VM (no auto-mount).
-$serial = '<DATA_DISK_SERIAL>'
+$serial = '<DATA_DISK_SERIAL>'.Trim().TrimEnd('.')   # normalize both sides
 $disk   = @(Get-Disk | Where-Object { $_.SerialNumber -and $_.SerialNumber.Trim().TrimEnd('.') -eq $serial })
 if ($disk.Count -ne 1) { throw "expected exactly 1 disk with serial $serial, found $($disk.Count)" }
 wsl.exe --mount "\\.\PHYSICALDRIVE$($disk[0].Number)" --bare
@@ -141,7 +141,7 @@ path-mirrored subdirectory, so the bind-mounts in step 5 are a clean 1:1 map:
 ```bash
 # In WSL, as root
 mkdir -p /mnt/wsl-data
-mount /dev/sdX /mnt/wsl-data
+mount UUID=<UUID> /mnt/wsl-data             # mount by UUID (not /dev/sdX — it renumbers)
 
 # Quiesce writers first (stop docker/containerd and app services that write these
 # paths) so the copy is consistent, THEN copy. Example set — adjust to your data:
@@ -202,7 +202,7 @@ distro only ever boots with its data present. A minimal PowerShell shape:
 # Runs at startup, before login. Resolve by serial, attach, THEN keepalive.
 # Fail CLOSED: track an explicit $attached flag so a disk that never enumerates
 # (wsl.exe never invoked) can't be mistaken for success via a stale $LASTEXITCODE.
-$serial   = '<DATA_DISK_SERIAL>'
+$serial   = '<DATA_DISK_SERIAL>'.Trim().TrimEnd('.')   # normalize both sides
 $attached = $false
 for ($i = 0; $i -lt 10 -and -not $attached; $i++) {
   $disk = @(Get-Disk | Where-Object { $_.SerialNumber -and $_.SerialNumber.Trim().TrimEnd('.') -eq $serial })
