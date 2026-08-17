@@ -51,7 +51,8 @@ _crashy_message() {
 }
 
 _run_read_verb() {
-    local label="$1" display="$2" cmd="$3" log="$CR_LOGDIR/$label.log"
+    local label="$1" display="$2" cmd="$3"
+    local log="$CR_LOGDIR/$label.log"
     if capture "$label" -- bash -lc "VAULT_NONINTERACTIVE=1 $cmd"; then
         pass "$display exits 0 without a configured .kdbx"
         return 0
