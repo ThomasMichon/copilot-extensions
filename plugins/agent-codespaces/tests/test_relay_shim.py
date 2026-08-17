@@ -159,6 +159,22 @@ class TestRegisterRelay:
         assert az._is_allowed("https://storage.azure.com/.default") is True
         assert az._is_allowed("https://graph.microsoft.com/.default") is True
 
+    def test_injected_token_source_wired_before_az_login(self, isolated_tokens):
+        """The build wires the injected-token shim AHEAD of az-login so, when its
+        env var is set, a host-minted bearer is served instead of shelling az;
+        inert (passthrough) otherwise. It must precede az-login in routing."""
+        from agent_codespaces.relay_provider import register_relay
+        from credential_relay import RelayBuilder
+
+        b = RelayBuilder()
+        register_relay(b)
+        srv = b.build()
+
+        names = [s.name for s in srv.sources]
+        assert "injected-azure-token" in names
+        assert "az-login" in names
+        assert names.index("injected-azure-token") < names.index("az-login")
+
     def test_no_ado_host_when_unconfigured(self, isolated_tokens, monkeypatch):
         """Unset ado_host leaves the relay default (None) -- never hardcoded."""
         from agent_codespaces import config as cfg
