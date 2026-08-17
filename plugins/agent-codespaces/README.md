@@ -102,6 +102,12 @@ golden path. Two convention-discovered seams, both honored here:
 - **In-venue plugins (`codespacePlugins`).** The harness plugin's `plugin.json`
   also declares which plugins to inject **into** the CodeSpace on connect (the
   `<product>-agent`), scoped by `forWorkspaceRepo` (see `codespace_plugins.py`).
+  A source backed by a **remote** marketplace is registered + pre-installed into
+  the CodeSpace's user settings; a source backed by the harness repo's own
+  **local** (`.ai`/`directory`) marketplace can't be installed on an
+  egress-restricted CodeSpace (its repo-relative `path` doesn't exist there), so
+  its host payload is **staged** (tar+base64 copy) and folded into the `--acp`
+  launch as `--plugin-dir` -- the same lane the related-repo plugins use.
 
 Authoring a `<repo>-harness` plugin that uses these seams is the
 `authoring-harness-plugins` skill (`customizing-copilot`) and the pattern

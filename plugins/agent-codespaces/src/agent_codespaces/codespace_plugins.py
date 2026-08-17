@@ -99,14 +99,28 @@ class CodespacePluginSpec:
 # Installed-plugin discovery
 # --------------------------------------------------------------------------
 
+def _read_plugin_manifest(plugin_dir: Path) -> dict[str, Any] | None:
+    """Read a plugin's manifest across the native + Claude layouts.
+
+    A plugin declares its manifest at the native ``plugin.json`` (plugin root)
+    OR the Claude ``.claude-plugin/plugin.json`` -- the ``.ai`` local
+    marketplaces this harness ships use the latter. Native is preferred; returns
+    ``None`` when neither is present/valid.
+    """
+    return _read_json(plugin_dir / "plugin.json") or _read_json(
+        plugin_dir / ".claude-plugin" / "plugin.json"
+    )
+
+
 def iter_installed_manifests(
     copilot_home: Path | None = None,
 ) -> Iterator[tuple[str, Path, dict[str, Any]]]:
     """Yield ``(plugin_name, payload_dir, manifest)`` for every installed plugin.
 
-    Walks ``<copilot_home>/installed-plugins/<marketplace>/<plugin>/plugin.json``
-    and the ``_direct`` layout. ``plugin_name`` is the manifest ``name`` when
-    present, else the directory name.
+    Walks ``<copilot_home>/installed-plugins/<marketplace>/<plugin>/`` and reads
+    each plugin's manifest across the native (``plugin.json``) and Claude
+    (``.claude-plugin/plugin.json``) layouts. ``plugin_name`` is the manifest
+    ``name`` when present, else the directory name.
     """
     root = (copilot_home or default_copilot_home()) / "installed-plugins"
     if not root.is_dir():
@@ -117,7 +131,7 @@ def iter_installed_manifests(
         for plugin_dir in sorted(marketplace_dir.iterdir()):
             if not plugin_dir.is_dir():
                 continue
-            manifest = _read_json(plugin_dir / "plugin.json")
+            manifest = _read_plugin_manifest(plugin_dir)
             if manifest is None:
                 continue
             name = str(manifest.get("name") or plugin_dir.name)
@@ -208,6 +222,58 @@ def is_harness_plugin(source: str) -> bool:
     """
     name = plugin_name(source)
     return name.endswith("-harness") or "-harness-" in name
+
+
+def marketplace_of(source: str) -> str:
+    """The ``@marketplace`` suffix of a ``name@marketplace`` source (else ``""``)."""
+    return (source or "").strip().partition("@")[2].strip()
+
+
+def is_local_marketplace_source(
+    source: str, marketplaces: dict[str, Any] | None
+) -> bool:
+    """True when ``source``'s marketplace is a **local** (on-disk) marketplace.
+
+    ``marketplaces`` is an ``extraKnownMarketplaces`` map (e.g. the merged repo
+    settings). A *local* marketplace is one whose ``source.source`` is
+    ``directory`` or ``local`` -- a repo-relative on-disk marketplace (the ``.ai``
+    standard). Such a marketplace cannot be ``copilot plugin install``-ed on an
+    egress-restricted CodeSpace (its repo-relative ``path`` does not exist there),
+    so its payload must be **staged from the host** instead of registered. A
+    remote (github/git/npm) or unknown marketplace yields ``False``. Fail-safe ->
+    ``False``.
+    """
+    try:
+        from plugin_resolve.conventions import LOCAL_MARKETPLACE_SOURCE_KINDS
+    except Exception:
+        LOCAL_MARKETPLACE_SOURCE_KINDS = frozenset({"directory", "local"})
+    mkt = marketplace_of(source)
+    if not mkt or not isinstance(marketplaces, dict):
+        return False
+    entry = marketplaces.get(mkt)
+    src = entry.get("source") if isinstance(entry, dict) else None
+    return isinstance(src, dict) and src.get("source") in LOCAL_MARKETPLACE_SOURCE_KINDS
+
+
+def partition_local_specs(
+    specs: Iterable[CodespacePluginSpec], marketplaces: dict[str, Any] | None
+) -> tuple[list[CodespacePluginSpec], list[CodespacePluginSpec]]:
+    """Split resolved specs into ``(local, remote)`` by marketplace kind.
+
+    ``local`` specs reference a local (``directory``/``local``) marketplace and
+    must be delivered by **staging the host payload** into a ``--plugin-dir``
+    (:func:`plugin_staging.build_stage_command`); ``remote`` specs go through the
+    normal register + ``copilot plugin install`` lane. See
+    :func:`is_local_marketplace_source`.
+    """
+    local: list[CodespacePluginSpec] = []
+    remote: list[CodespacePluginSpec] = []
+    for spec in specs:
+        if is_local_marketplace_source(spec.source, marketplaces):
+            local.append(spec)
+        else:
+            remote.append(spec)
+    return local, remote
 
 
 def parse_codespace_plugins(

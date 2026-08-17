@@ -29,6 +29,26 @@ log = logging.getLogger("agent-codespaces")
 STAGE_ROOT = "$HOME/.acp-staged-plugins"
 
 
+def _has_plugin_manifest(plugin_dir: Path) -> bool:
+    """True when ``plugin_dir`` holds a plugin manifest (native or Claude layout).
+
+    A payload may carry its manifest at the native ``plugin.json`` (repo root of
+    the plugin) OR the Claude ``.claude-plugin/plugin.json`` -- the ``.ai`` local
+    marketplaces this harness stages use the latter. Delegates to the shared
+    ``plugin_resolve`` convention when available, with a self-contained fallback
+    so staging never hard-depends on the import succeeding.
+    """
+    try:
+        from plugin_resolve.conventions import has_plugin_manifest
+
+        return has_plugin_manifest(plugin_dir)
+    except Exception:
+        return (
+            (plugin_dir / "plugin.json").is_file()
+            or (plugin_dir / ".claude-plugin" / "plugin.json").is_file()
+        )
+
+
 def _installed_root(copilot_home: Path | None = None) -> Path:
     return (copilot_home or (Path.home() / ".copilot")) / "installed-plugins"
 
@@ -63,7 +83,7 @@ def host_payload_dir(source: str, copilot_home: Path | None = None) -> Path | No
     if parsed:
         name, mkt = parsed
         cand = root / mkt / name
-        if (cand / "plugin.json").is_file():
+        if _has_plugin_manifest(cand):
             return cand
     target = parsed[0] if parsed else (source or "").strip()
     if target and root.is_dir():
@@ -71,7 +91,7 @@ def host_payload_dir(source: str, copilot_home: Path | None = None) -> Path | No
             if not mkt_dir.is_dir():
                 continue
             cand = mkt_dir / target
-            if (cand / "plugin.json").is_file():
+            if _has_plugin_manifest(cand):
                 return cand
     return None
 

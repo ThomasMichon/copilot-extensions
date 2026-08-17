@@ -1599,11 +1599,21 @@ async def _register_codespace_plugins(
       payload dirs (the ones the register step just installed) for the caller to
       fold into the acp launch as ``--plugin-dir`` args.
 
+    A ``codespacePlugins`` source backed by a **local** (``.ai``/``directory``)
+    marketplace -- the harness repo's own onboard marketplace -- can't be
+    ``copilot plugin install``-ed on an egress-restricted CodeSpace (its
+    repo-relative ``path`` doesn't exist there). Those specs are split out
+    (:func:`codespace_plugins.partition_local_specs`) and delivered by **staging
+    the host payload** into a ``--plugin-dir`` (the same tar+base64 copy the
+    related-repo lane uses); only the remote-marketplace specs go through the
+    register + pre-install lane.
+
     Best-effort and idempotent: logs a warning on failure but never raises, and
     returns ``[]`` when there is nothing to register.
     """
     from .codespace_plugins import (
         parse_operator_plugins,
+        partition_local_specs,
         plugin_names_from_enabled,
         resolve_codespace_plugins,
     )
@@ -1625,6 +1635,7 @@ async def _register_codespace_plugins(
         # step carry whichever marketplaces the selected plugins reference.
         repo_settings = repo_copilot_settings(getattr(config, "source_paths", []) or [])
         enabled_names = plugin_names_from_enabled(repo_settings.get("enabledPlugins"))
+        marketplaces = repo_settings.get("extraKnownMarketplaces") or {}
 
         # Merge the operator-declared globals (.agent-codespaces/config.yaml
         # `codespace_plugins`)
@@ -1635,28 +1646,54 @@ async def _register_codespace_plugins(
         specs = resolve_codespace_plugins(
             repo, extra_specs=operator_specs, enabled_names=enabled_names
         )
-        command = build_register_command(
-            specs, marketplaces=repo_settings.get("extraKnownMarketplaces") or {}
-        )
-        if not command:
-            return []
 
-        wrapped = f"bash -l -c {shlex.quote(command)}"
-        # Settings merge is quick; the pre-install (`copilot plugin install`)
-        # clones the marketplace over the relay, so allow a generous window.
-        result = await manager.exec_command(name, wrapped, timeout=240.0)
-        if result.exit_code == 0:
-            log.info(
-                "Registered %d CodeSpace-scoped plugin(s) on %s: %s",
-                len(specs), name, ", ".join(s.source for s in specs),
+        # Split by marketplace kind. A local (`.ai`/`directory`) marketplace is
+        # repo-relative on the *host* and cannot be `copilot plugin install`-ed on
+        # an egress-restricted CodeSpace -- so its payload is STAGED from the host
+        # (tar+base64 copy -> --plugin-dir), exactly like the related-repo lane.
+        # Remote-marketplace specs keep the register + enable + pre-install lane
+        # (which also serves the interactive / `copilot -p` launches via user
+        # settings). Both contribute --plugin-dir paths for the --acp dispatch.
+        local_specs, remote_specs = partition_local_specs(specs, marketplaces)
+
+        dirs: list[str] = []
+
+        command = build_register_command(remote_specs, marketplaces=marketplaces)
+        if command:
+            wrapped = f"bash -l -c {shlex.quote(command)}"
+            # Settings merge is quick; the pre-install (`copilot plugin install`)
+            # clones the marketplace over the relay, so allow a generous window.
+            result = await manager.exec_command(name, wrapped, timeout=240.0)
+            if result.exit_code == 0:
+                log.info(
+                    "Registered %d CodeSpace-scoped plugin(s) on %s: %s",
+                    len(remote_specs), name,
+                    ", ".join(s.source for s in remote_specs),
+                )
+                # Fold the just-installed payloads into the --acp launch: the
+                # dispatch ignores enabledPlugins, so --plugin-dir is required.
+                dirs += codespace_plugin_dirs(remote_specs)
+            else:
+                log.warning(
+                    "CodeSpace plugin registration on %s exited %s: %s",
+                    name, result.exit_code, result.stderr.strip(),
+                )
+
+        # Stage local-marketplace codespacePlugins from the host payload and fold
+        # their dirs into the launch. Best-effort per source (see _stage_plugins).
+        if local_specs:
+            staged = await _stage_plugins(
+                manager, name, [s.source for s in local_specs]
             )
-            # Fold the just-installed payloads into the --acp launch: the
-            # dispatch ignores enabledPlugins, so --plugin-dir is required.
-            return codespace_plugin_dirs(specs)
-        log.warning(
-            "CodeSpace plugin registration on %s exited %s: %s",
-            name, result.exit_code, result.stderr.strip(),
-        )
+            if staged:
+                log.info(
+                    "Staged %d local-marketplace CodeSpace plugin(s) on %s: %s",
+                    len(staged), name,
+                    ", ".join(s.source for s in local_specs),
+                )
+            dirs += staged
+
+        return dirs
     except Exception as exc:
         log.warning("CodeSpace plugin registration on %s failed: %s", name, exc)
     return []
