@@ -7502,6 +7502,36 @@ def reclaim_one(worktree_id: str, *, bare_only: bool = True) -> dict:
         reclaim.teardown_detached_mux(killed_targets, table=table)
         if killed_targets else []
     )
+    # Update the worktree's cached liveness authoritatively so the automatic
+    # post-action refresh renders the TRUE post-reclaim state instead of
+    # re-reading the pre-reclaim cache (the "Reclaim ran but the row stayed
+    # ACTIVE" bug). Reclaim's own reload path only ever *reads* the bound_live/
+    # mux_live hints, so unless the executor writes them here they stay stale
+    # until the off-hot-path reconcile or the freshness TTL. Race-safe: a pid we
+    # just terminated may not be OS-reaped yet, so re-resolve the remaining
+    # binding EXCLUDING ``killed_pids`` (mirrors ``clear_lock_residue``). A
+    # preserved live, Stop-able mux-homed sibling still counts as bound, so
+    # ``bound_live`` only clears when nothing bound remains. Reuses the already-
+    # built process ``table`` (resolve does LIVE pid checks for liveness
+    # regardless of table age, and the ``killed_pids`` exclusion is what guards
+    # the just-killed race -- a fresh table would add cost without changing the
+    # outcome). Best-effort.
+    try:
+        remaining_bound = [
+            b for b in reclaim.resolve_bound_copilots(
+                worktree_id=worktree_id, table=table)
+            if b["pid"] not in killed_pids
+        ]
+        remaining_bound += [
+            b for b in reclaim.resolve_bridge_bound(worktree_id, table=table)
+            if b["pid"] not in killed_pids
+        ]
+        tracking.stamp_bound_live(worktree_id, bool(remaining_bound))
+        tracking.stamp_mux_live(
+            worktree_id, sessions.has_mux_session(worktree_id), sync=True,
+        )
+    except Exception:
+        pass
     return {
         "ok": ok, "worktree_id": worktree_id,
         "targets": len(targets), "reaped": reaped,

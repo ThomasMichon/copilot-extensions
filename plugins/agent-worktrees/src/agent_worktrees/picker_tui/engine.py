@@ -3598,6 +3598,21 @@ class PickerScreen(Widget):
             # list index (clamped) so it never lands on a phantom stop.
             self._reconcile_wt_sel()
             self._rehome_l_focus()
+        # Reconcile the local machine's bound/mux liveness cache as part of the
+        # automatic post-action refresh (dotfiles: "Reclaim ran but the row
+        # stayed ACTIVE"). The reload above only READS the cached bound_live/
+        # mux_live hints, so an action that killed a process or mux
+        # (Reclaim/Stop/Repair) would re-render from the pre-action cache until
+        # the periodic reconcile or the freshness TTL. Kicking the authoritative
+        # tri-state sweep here makes every completed action re-render the TRUE
+        # liveness. Local-only (it resolves local processes); best-effort,
+        # off-thread, reloads only on a real change (an already-correct cache --
+        # e.g. one the executor self-stamped -- is a silent no-op).
+        local = getattr(self.src, "LOCAL", None)
+        if (not self.live) or (local is not None and local in targets):
+            blr_fn = getattr(self.src, "reconcile_bound_live", None)
+            if callable(blr_fn):
+                self._start_bound_live_reconcile(blr_fn)
 
     def _confirm_new_worktree(self, dlg):
         """Confirmed New-worktree options -> the launch decision (#88 F4)."""
