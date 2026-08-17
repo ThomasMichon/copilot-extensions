@@ -1492,6 +1492,22 @@ function Test-SupervisorProfileName {
     return ($Name -match '^[A-Za-z0-9_-]+$')
 }
 
+# The supervisor MODE: 'serve' runs the single master registrar daemon
+# (`supervise serve --legacy-env`, reconciling declared pools + legacy env
+# profiles, each in its own subprocess); anything else (blank/'legacy') runs the
+# classic direct `supervise --label...` embody loop.
+function Get-SupervisorMode {
+    param([string]$EnvFile = (Join-Path $InstallDir 'supervisor.env'))
+    if (Test-Path $EnvFile) {
+        foreach ($line in Get-Content $EnvFile) {
+            if ($line -match '^\s*AGENT_DISPATCH_SUPERVISE_MODE\s*=\s*(.+?)\s*$') {
+                if ($Matches[1].Trim().Trim('"').Trim("'") -eq 'serve') { return 'serve' }
+            }
+        }
+    }
+    return 'legacy'
+}
+
 function Get-SupervisorTaskName {
     param([string]$ProfileName)
     if ([string]::IsNullOrEmpty($ProfileName)) { return $SupervisorTaskName }
@@ -1607,6 +1623,36 @@ function Remove-OrphanSupervisorProfiles {
     } catch { }
 }
 
+function Remove-ProfileSupervisorTasks {
+    # MODE=serve: the master daemon runs each legacy profile itself (--legacy-env),
+    # so every per-profile task (agent-dispatch-supervisor-<name>) is redundant.
+    # Retire them all; their .env files stay for the daemon to read. The "-*" glob
+    # requires a char after the dash, so the primary task is never matched.
+    if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
+        $tasks = @(Get-ScheduledTask -TaskName "$SupervisorTaskName-*" -ErrorAction SilentlyContinue)
+        foreach ($task in $tasks) {
+            $name = $task.TaskName
+            switch (Remove-SupervisorTask -Name $name) {
+                'removed' { Write-Ok "Retired per-profile task (MODE=serve; the daemon runs it): $name" }
+                'blocked' { Write-Skip "Per-profile task '$name' present but not removable without elevation" }
+                default   { }
+            }
+        }
+    }
+    $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    try {
+        $props = Get-ItemProperty -Path $runKey -ErrorAction SilentlyContinue
+        if ($props) {
+            foreach ($p in $props.PSObject.Properties) {
+                if ($p.Name -like "$SupervisorTaskName-*") {
+                    Remove-ItemProperty -Path $runKey -Name $p.Name -ErrorAction SilentlyContinue
+                    Write-Ok "Retired per-profile logon auto-start (MODE=serve): $($p.Name)"
+                }
+            }
+        }
+    } catch { }
+}
+
 function Install-SupervisorLogonAutostart {
     # Interactive-mode supervisor: start it now (detached) and register an HKCU
     # Run key so it (re)starts at each interactive logon. An interactive logon
@@ -1672,6 +1718,15 @@ AGENT_DISPATCH_SUPERVISE_HEADLESS_AGENT=
 # Extra raw flags appended to the invocation (advanced; e.g. fleet mode:
 #   --pool host-a,host-b --origin anomalous-potato):
 AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=
+# Supervisor MODE (migration opt-in; default: the classic direct embody loop):
+#   serve -- run the single MASTER registrar daemon (supervise serve --legacy-env)
+#            instead of the direct loop. It reconciles declared pools (registrar
+#            pointers) PLUS this host's legacy profiles (supervisor.env +
+#            supervisors/*.env, via --legacy-env), each in its own subprocess, and
+#            is self-gating (only labeled units run). In this mode the installer
+#            stops creating per-profile tasks and retires any it created.
+# Leave blank for the classic per-host direct supervisor.
+AGENT_DISPATCH_SUPERVISE_MODE=
 "@
         [System.IO.File]::WriteAllText($envFile, $envDefault, $utf8NoBom)
         Write-Ok "Supervisor env: $envFile (no labels -> task stays inert; add a label to enable)"
@@ -1707,6 +1762,7 @@ Set-Location -LiteralPath `$PSScriptRoot
 `$headlessLabels = ''
 `$headlessAgent = ''
 `$extra = ''
+`$mode = ''
 if (Test-Path `$envFile) {
     foreach (`$line in Get-Content `$envFile) {
         `$t = `$line.Trim()
@@ -1725,9 +1781,19 @@ if (Test-Path `$envFile) {
             'AGENT_DISPATCH_SUPERVISE_HEADLESS_LABELS' { `$headlessLabels = `$v }
             'AGENT_DISPATCH_SUPERVISE_HEADLESS_AGENT'  { `$headlessAgent = `$v }
             'AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS'     { `$extra = `$v }
+            'AGENT_DISPATCH_SUPERVISE_MODE'           { `$mode = `$v }
         }
     }
 }
+if (`$mode -eq 'serve') {
+    # MODE=serve (opt-in): run the single MASTER registrar daemon instead of the
+    # classic direct embody loop. The daemon reconciles declared pools (discovered
+    # pointers) + this host's legacy env profiles (--legacy-env: supervisor.env +
+    # supervisors/*.env), each in its own subprocess. It is self-gating (only
+    # labeled declarations/profiles run), so it needs no label opt-in here.
+    `$argsList = @('supervise', 'serve', '--legacy-env')
+    if (`$extra) { `$argsList += (`$extra -split '\s+') }
+} else {
 `$argsList = @('supervise', '--all-repos', '--interval', `$interval,
     '--max-concurrent', `$maxConcurrent, '--max-attempts', `$maxAttempts)
 `$haveLabel = `$false
@@ -1750,6 +1816,7 @@ foreach (`$hl in (`$headlessLabels -split '[\s,]+')) {
 }
 if (`$headlessAgent) { `$argsList += @('--headless-agent', `$headlessAgent) }
 if (`$extra) { `$argsList += (`$extra -split '\s+') }
+}
 # Resolve the .venv junction's target and launch the slot python DIRECTLY (never
 # traverse the junction; reading its target is allowed) -- RedirectionGuard #637.
 # Resolved up front so the version (`$_slot leaf) is available for the log fallback.
@@ -1803,6 +1870,10 @@ function Install-SupervisorTaskInstance {
         [Parameter(Mandatory)][string]$DisplayName
     )
 
+    # MODE=serve runs the self-gating master daemon, so it is enabled
+    # unconditionally (no label opt-in); the direct loop stays label-gated.
+    $mode = Get-SupervisorMode -EnvFile $EnvFile
+
     # Interactive-required host: use the non-elevated logon auto-start (HKCU Run)
     # instead of a Scheduled Task -- registration is admin-gated here, and an
     # interactive station is the right fit for the supervisor anyway. Only when a
@@ -1812,7 +1883,7 @@ function Install-SupervisorTaskInstance {
             'removed' { Write-Step "Removed prior supervisor Scheduled Task '$Name' (interactive mode)" }
             default   { }
         }
-        if (Test-SupervisorLabelsConfigured -EnvFile $EnvFile) {
+        if ($mode -eq 'serve' -or (Test-SupervisorLabelsConfigured -EnvFile $EnvFile)) {
             Install-SupervisorLogonAutostart -Name $Name -Launcher $Launcher -EnvFile $EnvFile
         } else {
             if (Remove-SupervisorAutostart -Name $Name) { Write-Step "Removed supervisor logon auto-start '$Name' (no opt-in label)" }
@@ -1849,11 +1920,15 @@ function Install-SupervisorTaskInstance {
         return
     }
 
-    if (Test-SupervisorLabelsConfigured -EnvFile $EnvFile) {
+    if ($mode -eq 'serve' -or (Test-SupervisorLabelsConfigured -EnvFile $EnvFile)) {
         Enable-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue | Out-Null
         Start-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
         $ErrorActionPreference = $prevEAP
-        Write-Ok "$DisplayName installed + started (Scheduled Task '$Name')"
+        if ($mode -eq 'serve') {
+            Write-Ok "$DisplayName installed + started (Scheduled Task '$Name' -- MODE=serve: master registrar daemon)"
+        } else {
+            Write-Ok "$DisplayName installed + started (Scheduled Task '$Name')"
+        }
     } else {
         # No opt-in label -> leave the task registered but DISABLED (inert), the
         # Windows analogue of an installed-but-not-enabled systemd unit.
@@ -1890,12 +1965,19 @@ function Install-SupervisorTask {
     Install-SupervisorTaskInstance -Name $SupervisorTaskName -EnvFile $envFile `
         -Launcher $launcher -DisplayName 'Embody supervisor'
 
-    foreach ($profile in @(Get-SupervisorProfileFiles)) {
-        $name = Get-SupervisorTaskName -ProfileName $profile.BaseName
-        Install-SupervisorTaskInstance -Name $name -EnvFile $profile.FullName `
-            -Launcher $launcher -DisplayName "Embody supervisor profile '$($profile.BaseName)'"
+    if ((Get-SupervisorMode -EnvFile $envFile) -eq 'serve') {
+        # MODE=serve: the master daemon runs the legacy profiles itself
+        # (--legacy-env), so the per-profile tasks are redundant and would
+        # double-run -- retire them (their .env files stay; the daemon reads them).
+        Remove-ProfileSupervisorTasks
+    } else {
+        foreach ($profile in @(Get-SupervisorProfileFiles)) {
+            $name = Get-SupervisorTaskName -ProfileName $profile.BaseName
+            Install-SupervisorTaskInstance -Name $name -EnvFile $profile.FullName `
+                -Launcher $launcher -DisplayName "Embody supervisor profile '$($profile.BaseName)'"
+        }
+        Remove-OrphanSupervisorProfiles
     }
-    Remove-OrphanSupervisorProfiles
 }
 
 function Invoke-SupervisorStart {

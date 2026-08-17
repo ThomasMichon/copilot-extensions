@@ -235,7 +235,9 @@ class TestWindowsSupervisorInstall:
         text = _ps1_text()
         idx = text.index("function Install-SupervisorTaskInstance")
         body = text[idx:]
-        gate = body.index("if (Test-SupervisorLabelsConfigured -EnvFile $EnvFile)")
+        # MODE=serve short-circuits the gate (the master daemon self-gates); match
+        # the label-guard substring present in both the legacy and serve conditions.
+        gate = body.index("(Test-SupervisorLabelsConfigured -EnvFile $EnvFile)")
         start = body.index("Start-ScheduledTask -TaskName $Name")
         disable = body.index("Disable-ScheduledTask -TaskName $Name")
         # enable/start in the positive branch (after the gate); disable in the
@@ -244,6 +246,20 @@ class TestWindowsSupervisorInstall:
             "enable/start must be gated by Test-SupervisorLabelsConfigured for "
             "that env file, with Disable-ScheduledTask in the inert branch"
         )
+
+    def test_serve_mode_runs_master_daemon_and_self_gates(self):
+        """MODE=serve switches the Windows launcher to the master daemon, enables
+        the task unconditionally (the daemon self-gates), and retires per-profile
+        tasks -- cross-platform parity with the systemd path."""
+        text = _ps1_text()
+        assert "'supervise', 'serve', '--legacy-env'" in text
+        assert "function Get-SupervisorMode" in text
+        idx = text.index("function Install-SupervisorTaskInstance")
+        body = text[idx:]
+        assert "$mode -eq 'serve' -or (Test-SupervisorLabelsConfigured -EnvFile $EnvFile)" in body, (
+            "serve mode must bypass the label gate (the daemon self-gates)"
+        )
+        assert "Remove-ProfileSupervisorTasks" in text
 
     def test_shipped_env_defaults_to_no_labels(self):
         text = _ps1_text()
@@ -284,7 +300,7 @@ class TestWindowsSupervisorInstall:
         text = _ps1_text()
         idx = text.index("function Install-SupervisorTaskInstance")
         body = text[idx:]
-        assert "if (Test-SupervisorLabelsConfigured -EnvFile $EnvFile)" in body
+        assert "(Test-SupervisorLabelsConfigured -EnvFile $EnvFile)" in body
         assert "Enable-ScheduledTask -TaskName $Name" in body
         assert "Disable-ScheduledTask -TaskName $Name" in body
 
