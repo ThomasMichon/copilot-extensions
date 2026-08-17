@@ -245,7 +245,7 @@ stage N). The scenario name + stage list live in `manifest.json`.
 |------|------|
 | `Dockerfile` | Credential-free `base` "fresh machine": git, python, node, uv, Copilot CLI — nothing from copilot-extensions. |
 | `Dockerfile.pristine` | The `pristine` variant: Copilot + git only (no venv/pip/uv/feed-governance) — forces the harness to self-provision. |
-| `lib/clean-room-lib.sh` | Shared scenario helper API (`phase`/`pass`/`fail`/`info`/`capture`/`envdump`/`jam`/`cr_meta`/`cr_finalize`) + uniform `cr-report.json` writer. Mounted read-only at `$CR_LIB`. |
+| `lib/clean-room-lib.sh` | Shared scenario helper API (`phase`/`pass`/`fail`/`info`/`capture`/`envdump`/`jam`/`cr_meta`/`cr_finalize`) + uniform `cr-report.json` writer. Bind-mounted read-only at `/home/operator/lib`; scenarios source it via `$CR_LIB`. |
 | `<suite>/_lib/` (downstream) | Optional per-suite shared phase helpers beside a harness's scenario dirs. When the selected scenario has a sibling `_lib/`, the runner mounts it read-only at `/home/operator/scenario-lib` and exposes it as `$CR_SCENARIO_LIB` (opt-in; absent → unchanged). |
 | `scenarios/<name>/manifest.json` | Scenario descriptor: image variant, prereqs, auth, expected artifacts, ordered stages. |
 | `scenarios/<name>/scenario.sh` | In-container driver + assertions for one scenario (bind-mounted at run, so edits need no rebuild). Sources the lib; honors `CR_UNTIL`. |
