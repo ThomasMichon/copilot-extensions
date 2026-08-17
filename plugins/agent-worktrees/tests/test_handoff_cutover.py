@@ -13,6 +13,7 @@ import json
 import pytest
 
 from agent_worktrees import __main__ as m
+from agent_worktrees import activity
 from agent_worktrees import sessions
 
 
@@ -151,6 +152,24 @@ class TestMuxRetirePane:
         assert out["gone"] is False
         assert out["method"] == "failed"
 
+    def test_last_window_guard_skips_retire(self, monkeypatch):
+        calls: list[list[str]] = []
+        monkeypatch.setattr(sessions, "_mux_pane_alive", lambda p, b: True)
+        monkeypatch.setattr(sessions, "_mux_last_window_guard",
+                            lambda p, b: {"session": "wt-demo", "window_count": 1})
+        monkeypatch.setattr(activity, "log_event", lambda *a, **k: None)
+        import subprocess
+
+        def _fake_run(*a, **k):
+            calls.append(list(a[0]))
+            return type("R", (), {"returncode": 0})()
+
+        monkeypatch.setattr(subprocess, "run", _fake_run)
+        out = sessions.mux_retire_pane("%3", mux="tmux")
+        assert out["gone"] is False
+        assert out["method"] == "last-window-skip"
+        assert not any(c[1] in ("send-keys", "kill-pane") for c in calls)
+
     def test_third_ctrl_c_when_two_dont_land(self, monkeypatch):
         # Alive through the double-interrupt escalate window, gone only after
         # the conditional third Ctrl-C -- verifies three C-c are sent (#3946).
@@ -191,6 +210,7 @@ class TestCmdHandoffCutover:
         monkeypatch.setattr(sessions, "mux_retire_pane",
                             lambda p, **k: {"ok": True, "pane": p, "gone": True,
                                             "method": "graceful"})
+        monkeypatch.setattr(activity, "log_event", lambda *a, **k: None)
         rc = m.cmd_handoff_cutover(_ns(retire_pane="%9"))
         assert rc == 0
         out = json.loads(capfd.readouterr().out)

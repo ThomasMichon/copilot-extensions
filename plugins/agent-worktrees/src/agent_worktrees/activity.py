@@ -31,6 +31,10 @@ Events are intentionally high-level:
   finalize_skipped_removal  finalize left the worktree/branch/session in place
                             (running inside it, or a live session was detected)
   worktree_reaped           cleanup removed a worktree's dir/branch/session
+  handoff_cutover_spawn     live handoff spawned a successor pane
+  handoff_predecessor_retire
+                            a consumed handoff retired the predecessor pane
+  handoff_retire_guard      a retire request was left in place by a safety guard
 
 Every record carries ``worktree_id`` and (where known) ``session_id`` and
 ``launch_id``. ``launch_id`` is a short correlation token minted once at
@@ -253,7 +257,10 @@ def _fmt_local(ts_iso: str) -> str:
 
 
 # Context fields worth surfacing in the human-readable table, in order.
-_EXTRA_KEYS = ("reason", "branch", "exit_code", "resume_count", "state", "mux", "launch_id")
+_EXTRA_KEYS = (
+    "reason", "branch", "exit_code", "resume_count", "state", "mux", "launch_id",
+    "old_pane", "new_pane", "successor_verified", "method", "outcome",
+)
 
 
 def render_events(events: list[dict]) -> str:
