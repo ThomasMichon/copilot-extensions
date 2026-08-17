@@ -1796,6 +1796,10 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
         daemon = SupervisorDaemon(
             c, machine, env, poll_interval=getattr(args, "interval", 5.0),
             declared_source=declared_source,
+            # Rebuild the client by re-resolving the coordinator endpoint after a
+            # connection failure -- the coordinator's ephemeral port moves on
+            # restart, so a cached one would wedge the daemon (#3825).
+            client_factory=lambda: _client(args, ensure=False),
         )
 
         def _on_cycle(summary) -> None:
