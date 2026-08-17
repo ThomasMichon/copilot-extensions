@@ -1,0 +1,55 @@
+{
+  "name": "agent-containers-solo",
+  "description": "Tier-P F1 solo scenario: install ONLY agent-containers on a fresh box and assert its solo DEGRADE-SAFE contract. agent-containers can consult agent-worktrees only through an optional knowledge-overlay config lookup, and that shell-out must fail open when the base is absent; installed alone it must still provision, expose a binstub with a real version, and answer read/idempotent no-venue verbs (leases/relay-profile/namespace-target-repo) rather than hard-fail on a missing agent-worktrees base. Name-free / public.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": {
+    "present": [
+      "git",
+      "python3",
+      "node",
+      "uv"
+    ],
+    "provisioned_by_flow": []
+  },
+  "auth": {
+    "copilot": "required",
+    "gh": "optional",
+    "ado": "none"
+  },
+  "base": "without-agent-worktrees",
+  "validates": "agent-containers-solo-degrade-safe-without-agent-worktrees",
+  "config": {
+    "CR_MARKETPLACE_REPO": "ThomasMichon/copilot-extensions",
+    "CR_MARKETPLACE_NAME": "copilot-extensions",
+    "CR_UV_INDEX": "(opt-in uv-index fixture)"
+  },
+  "expected_artifacts": [
+    "~/.copilot/installed-plugins/<marketplace>/agent-containers",
+    "~/.agent-containers/versions/<ver>/bin/python or ~/.agent-containers/.venv/bin/python (built runtime)",
+    "~/.local/bin/agent-containers (binstub)"
+  ],
+  "stages": [
+    {
+      "n": 0,
+      "title": "environment (fresh machine)"
+    },
+    {
+      "n": 1,
+      "title": "install ONLY agent-containers"
+    },
+    {
+      "n": 2,
+      "title": "runtime provisions on first session"
+    },
+    {
+      "n": 3,
+      "title": "binstub on PATH + reports a REAL version"
+    },
+    {
+      "n": 4,
+      "title": "DEGRADE-SAFE: read verbs fall open without an agent-worktrees base"
+    }
+  ]
+}

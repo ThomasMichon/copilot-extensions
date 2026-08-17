@@ -1,0 +1,27 @@
+{
+  "name": "agent-logger-solo",
+  "description": "Tier-P F1 solo scenario: install ONLY agent-logger on a fresh box and assert its standalone session-logging contract -- the payload installs alone, the session-start bootstrap stamps a login-shell binstub, first CLI use self-provisions the runtime, --version reports a real build, and idempotent read/dry-run verbs (config, organization, chronicle status, session-sync status/run --dry-run, origin backfill --dry-run) exit 0 without sibling plugins. Chronicle is validated as a manifest-producing scheduled tick surface, not as an installed daemon/lease. Name-free / public.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": [] },
+  "auth": { "copilot": "required", "gh": "none", "ado": "none" },
+  "base": "standalone-agent-logger",
+  "config": {
+    "CR_MARKETPLACE_REPO": "ThomasMichon/copilot-extensions",
+    "CR_MARKETPLACE_NAME": "copilot-extensions",
+    "CR_UV_INDEX": "(opt-in uv-index fixture)"
+  },
+  "expected_artifacts": [
+    "~/.copilot/installed-plugins/<marketplace>/agent-logger",
+    "~/.local/bin/agent-logger (self-provisioning binstub)",
+    "~/.agent-logger/versions/<version> or ~/.agent-logger/.venv"
+  ],
+  "stages": [
+    { "n": 0, "title": "environment (fresh machine)" },
+    { "n": 1, "title": "install ONLY agent-logger" },
+    { "n": 2, "title": "runtime self-provisions on first use" },
+    { "n": 3, "title": "binstub on PATH + reports a REAL version" },
+    { "n": 4, "title": "STANDALONE: read/dry-run verbs answer without sibling plugins" }
+  ]
+}
