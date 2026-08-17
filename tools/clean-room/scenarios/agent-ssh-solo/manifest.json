@@ -1,0 +1,33 @@
+{
+  "name": "agent-ssh-solo",
+  "description": "Tier-P F1 solo scenario: install ONLY agent-ssh on a fresh box and assert its STANDALONE transport-provider contract. agent-ssh owns SSH profile emission, reachability/read helpers, and the pluggable transport module contract; it must not require agent-worktrees, agent-bridge, agent-codespaces, or any other sibling plugin to provision, expose a binstub with a real version, or answer idempotent read verbs. Name-free / public.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": [] },
+  "auth": { "copilot": "required", "gh": "none", "ado": "none" },
+  "base": "standalone-without-siblings",
+  "validates": [
+    "Installing agent-ssh alone writes its marketplace payload and does not pull sibling plugins.",
+    "The runtime provisions from a fresh session / login-shell binstub trigger, with installer provision as the continuation fallback.",
+    "~/.local/bin/agent-ssh is on a stock login-shell PATH and prints a real non-empty version.",
+    "Standalone read verbs for the SSH transport-provider contract exit 0 without any live SSH target or sibling plugin."
+  ],
+  "config": {
+    "CR_MARKETPLACE_REPO": "ThomasMichon/copilot-extensions",
+    "CR_MARKETPLACE_NAME": "copilot-extensions",
+    "CR_UV_INDEX": "(opt-in uv-index fixture)"
+  },
+  "expected_artifacts": [
+    "~/.copilot/installed-plugins/<marketplace>/agent-ssh",
+    "~/.agent-ssh/versions/<version> or ~/.agent-ssh/.venv",
+    "~/.local/bin/agent-ssh (binstub)"
+  ],
+  "stages": [
+    { "n": 0, "title": "environment (fresh machine)" },
+    { "n": 1, "title": "install ONLY agent-ssh" },
+    { "n": 2, "title": "runtime provisions on first session / first use" },
+    { "n": 3, "title": "binstub on PATH + reports a REAL version" },
+    { "n": 4, "title": "STANDALONE: read verbs answer with no sibling plugin" }
+  ]
+}

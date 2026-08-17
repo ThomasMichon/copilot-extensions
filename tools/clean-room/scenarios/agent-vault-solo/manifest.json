@@ -1,0 +1,28 @@
+{
+  "name": "agent-vault-solo",
+  "description": "Tier-P F1 solo scenario: install ONLY agent-vault and assert its standalone local KeePassXC-backed secret-store contract on a fresh machine. The scenario proves the plugin payload installs, the session hook plus first-use binstub provision the runtime, the agent-vault binstub exposes a real non-empty --version, the POSIX vault-askpass SUDO_ASKPASS helper is deployed, and read/idempotent verbs (vault list, which, cache-status, ping, list) either exit 0 or report a clean no-vault-configured/locked condition without tracebacks. It records keepassxc-cli presence as information only and never requires a real unlocked .kdbx. Name-free / public.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": [] },
+  "auth": { "copilot": "required", "gh": "none", "ado": "none" },
+  "base": "standalone",
+  "config": {
+    "CR_MARKETPLACE_REPO": "ThomasMichon/copilot-extensions",
+    "CR_MARKETPLACE_NAME": "copilot-extensions",
+    "CR_UV_INDEX": "(opt-in uv-index fixture)"
+  },
+  "expected_artifacts": [
+    "~/.copilot/installed-plugins/<marketplace>/agent-vault",
+    "~/.agent-vault/versions or ~/.agent-vault/.venv",
+    "~/.local/bin/agent-vault (binstub)",
+    "~/.local/bin/vault-askpass (SUDO_ASKPASS helper)"
+  ],
+  "stages": [
+    { "n": 0, "title": "environment (fresh machine)" },
+    { "n": 1, "title": "install ONLY agent-vault" },
+    { "n": 2, "title": "runtime self-provisions through session hook + first-use binstub" },
+    { "n": 3, "title": "binstub on PATH + real --version + vault-askpass" },
+    { "n": 4, "title": "STANDALONE read verbs degrade cleanly without a configured .kdbx" }
+  ]
+}

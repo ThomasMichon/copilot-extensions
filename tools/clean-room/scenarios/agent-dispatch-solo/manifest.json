@@ -1,0 +1,27 @@
+{
+  "name": "agent-dispatch-solo",
+  "description": "Tier-P F1 solo scenario: install ONLY agent-dispatch on a fresh machine and assert its standalone install/behave contract -- payload present, runtime self-provisions via the session-start/login-shell binstub (or installer provision), the PATH binstub reports the real installed package version (not the 0.0.0 fallback), and read-only/idempotent entry points (installer status, --version, inbox against an empty queue, coordinator health) exit cleanly without any companion plugin. Distinct from agent-dispatch-cutover, which validates graceful version cutover. Name-free / public.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": [] },
+  "auth": { "copilot": "required", "gh": "none", "ado": "none" },
+  "base": "fresh-standalone",
+  "config": {
+    "CR_MARKETPLACE_REPO": "ThomasMichon/copilot-extensions",
+    "CR_MARKETPLACE_NAME": "copilot-extensions",
+    "CR_UV_INDEX": "(opt-in uv-index fixture)"
+  },
+  "expected_artifacts": [
+    "~/.copilot/installed-plugins/<marketplace>/agent-dispatch",
+    "~/.agent-dispatch/versions/<version> or ~/.agent-dispatch/.venv",
+    "~/.local/bin/agent-dispatch (binstub)"
+  ],
+  "stages": [
+    { "n": 0, "title": "environment (fresh machine)" },
+    { "n": 1, "title": "install ONLY agent-dispatch" },
+    { "n": 2, "title": "runtime self-provisions" },
+    { "n": 3, "title": "binstub on PATH + reports the real installed version" },
+    { "n": 4, "title": "standalone read verbs exit 0 solo" }
+  ]
+}

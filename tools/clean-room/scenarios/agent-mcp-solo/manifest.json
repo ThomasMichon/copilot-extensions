@@ -1,0 +1,31 @@
+{
+  "name": "agent-mcp-solo",
+  "description": "Tier-P F1 solo scenario: install ONLY agent-mcp and assert its standalone MCP-wrapper contract -- no agent-bridge sibling plugin, no resolver, no resident daemon required. A fresh machine must install the payload, self-provision the local runtime/binstub, report a real version, validate a simple bridge config, and fail a missing bridge name with a clear non-traceback error. Name-free / public.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "validates": [
+    "standalone-reachability",
+    "a-la-carte independence"
+  ],
+  "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": [] },
+  "auth": { "copilot": "required", "gh": "none", "ado": "none" },
+  "base": "without-agent-bridge",
+  "config": {
+    "CR_MARKETPLACE_REPO": "ThomasMichon/copilot-extensions",
+    "CR_MARKETPLACE_NAME": "copilot-extensions",
+    "CR_UV_INDEX": "(opt-in uv-index fixture)"
+  },
+  "expected_artifacts": [
+    "~/.copilot/installed-plugins/<marketplace>/agent-mcp",
+    "~/.agent-mcp/versions or ~/.agent-mcp/.venv",
+    "~/.local/bin/agent-mcp (binstub)"
+  ],
+  "stages": [
+    { "n": 0, "title": "environment (fresh machine)" },
+    { "n": 1, "title": "install ONLY agent-mcp" },
+    { "n": 2, "title": "runtime self-provisions" },
+    { "n": 3, "title": "binstub on PATH + reports a REAL version" },
+    { "n": 4, "title": "STANDALONE: help/status/validate without sibling plugin or bridge" }
+  ]
+}

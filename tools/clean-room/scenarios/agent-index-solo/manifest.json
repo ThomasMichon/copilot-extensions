@@ -1,0 +1,28 @@
+{
+  "name": "agent-index-solo",
+  "description": "Tier-P F1 solo scenario: install ONLY agent-index on a fresh box and assert its standalone install/behave contract. agent-index is a local retrieval service with a CLI, HTTP service shell, direct `agent-index mcp` toolset, and read-only `agent-mcp` bridge; this scenario validates the solo install payload, self-provisioning service runtime, login-shell binstub with a real version, and idempotent read/status/health surfaces without requiring a durable embedding engine or model build. Distinct from agent-index-cutover, which validates graceful version cutover. Name-free / public.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": [] },
+  "auth": { "copilot": "required", "gh": "optional", "ado": "none" },
+  "validates": "agent-index standalone solo install + read behavior",
+  "config": {
+    "CR_MARKETPLACE_REPO": "ThomasMichon/copilot-extensions",
+    "CR_MARKETPLACE_NAME": "copilot-extensions",
+    "CR_UV_INDEX": "(opt-in uv-index fixture)"
+  },
+  "expected_artifacts": [
+    "~/.copilot/installed-plugins/<marketplace>/agent-index",
+    "~/.local/bin/agent-index (self-provisioning binstub)",
+    "~/.agent-index/versions/<ver>/bin/python or ~/.agent-index/.venv (service runtime)",
+    "~/.copilot/installed-plugins/<marketplace>/agent-index/mcp/agent-index.yaml (read-only agent-mcp bridge config)"
+  ],
+  "stages": [
+    { "n": 0, "title": "environment (fresh machine)" },
+    { "n": 1, "title": "install ONLY agent-index" },
+    { "n": 2, "title": "runtime provisions the service runtime" },
+    { "n": 3, "title": "binstub on PATH + reports a REAL version" },
+    { "n": 4, "title": "standalone read/status/health verbs degrade cleanly with no built index" }
+  ]
+}
