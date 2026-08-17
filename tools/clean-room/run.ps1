@@ -101,7 +101,14 @@ param(
     # Where run artifacts (report + logs) land. Defaults to a MACHINE-LOCAL dir
     # OUTSIDE any repo checkout -- run artifacts are per-run state and must never
     # be written into the (possibly anchor) repo tree.
-    [string]$ResultsDir = ''
+    [string]$ResultsDir = '',
+    # Generic host->container value relay: names of HOST environment variables to
+    # forward into the container (in addition to COPILOT_GITHUB_TOKEN). This is
+    # the substrate seam a downstream harness uses to relay a host-minted testing
+    # credential (e.g. an ADO/az bearer its own wrapper mints) into a live
+    # scenario, without baking any product/tenant specifics into this public
+    # runner. Only names that are actually set on the host are forwarded.
+    [string[]]$PassEnv = @()
 )
 $ErrorActionPreference = 'Stop'
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -218,6 +225,21 @@ function Start-Container {
     $scenDir = ($ScenarioDir) -replace '\\','/'
     $libDir  = ($LibDir)      -replace '\\','/'
     $res     = ($Results)     -replace '\\','/'
+    # Generic host->container value relay: forward each requested host env var by
+    # NAME (value stays in the runner's env, not on the docker CLI args). Only
+    # names actually set on the host are forwarded; a missing one is skipped with
+    # a warning so a downstream harness fails loud rather than silently unauthed.
+    $passArgs = @()
+    foreach ($name in $PassEnv) {
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $val = [Environment]::GetEnvironmentVariable($name)
+        if ([string]::IsNullOrEmpty($val)) {
+            Write-Host "warn: -PassEnv '$name' is not set on the host -- not forwarding" -ForegroundColor Yellow
+            continue
+        }
+        Set-Item -Path "Env:\$name" -Value $val
+        $passArgs += @('-e', $name)
+    }
     docker run -d --name $Container `
         -v "${scenDir}:/home/operator/scenario:ro" `
         -v "${libDir}:/home/operator/lib:ro" `
@@ -232,6 +254,7 @@ function Start-Container {
         -e "CR_LOGDIR=/home/operator/cr-logs" `
         -e "CR_REPORT=/home/operator/out/cr-report.json" `
         @tokenArgs `
+        @passArgs `
         --entrypoint sleep $img infinity | Out-Null
     if ($token) { Remove-Item Env:\COPILOT_GITHUB_TOKEN -ErrorAction SilentlyContinue }
     Write-Host "container $Container up (results -> $Results)" -ForegroundColor DarkGray
