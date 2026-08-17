@@ -11,10 +11,16 @@ from pathlib import Path
 from agent_codespaces import plugin_staging as ps
 
 
-def _make_payload(root: Path, mkt: str, name: str) -> Path:
+def _make_payload(root: Path, mkt: str, name: str, *, claude_layout: bool = False) -> Path:
     d = root / "installed-plugins" / mkt / name
     (d / "skills" / "demo").mkdir(parents=True)
-    (d / "plugin.json").write_text('{"name": "%s"}' % name, encoding="utf-8")
+    if claude_layout:
+        (d / ".claude-plugin").mkdir(parents=True)
+        (d / ".claude-plugin" / "plugin.json").write_text(
+            '{"name": "%s"}' % name, encoding="utf-8"
+        )
+    else:
+        (d / "plugin.json").write_text('{"name": "%s"}' % name, encoding="utf-8")
     (d / "skills" / "demo" / "SKILL.md").write_text("hi", encoding="utf-8")
     return d
 
@@ -50,6 +56,20 @@ def test_host_payload_dir_scan_fallback(tmp_path: Path):
 
 def test_host_payload_dir_missing(tmp_path: Path):
     assert ps.host_payload_dir("nope@mkt", copilot_home=tmp_path) is None
+
+
+def test_host_payload_dir_claude_layout(tmp_path: Path):
+    # A local ``.ai`` marketplace plugin carries its manifest at
+    # ``.claude-plugin/plugin.json``; host_payload_dir must still find it.
+    _make_payload(tmp_path, "dotfiles-plugins", "figma", claude_layout=True)
+    got = ps.host_payload_dir("figma@dotfiles-plugins", copilot_home=tmp_path)
+    assert got == tmp_path / "installed-plugins" / "dotfiles-plugins" / "figma"
+
+
+def test_host_payload_dir_claude_layout_scan_fallback(tmp_path: Path):
+    _make_payload(tmp_path, "actual-mkt", "figma", claude_layout=True)
+    got = ps.host_payload_dir("figma@some-alias", copilot_home=tmp_path)
+    assert got == tmp_path / "installed-plugins" / "actual-mkt" / "figma"
 
 
 def test_build_stage_command_roundtrips(tmp_path: Path):
