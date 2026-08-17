@@ -278,3 +278,38 @@ def test_spawn_worker_for_embody_degrades_to_bridge(monkeypatch):
     )
     m._do_spawn(args, {"id": "T8"})
     assert bridge_calls["task_id"] == "T8"
+
+
+# -- remote registered-agent probe (fleet preflight) -------------------------
+
+
+def test_remote_registered_agent_names_none_when_no_ssh(monkeypatch):
+    monkeypatch.setattr(embody.shutil, "which", lambda _n: None)
+    assert embody.remote_registered_agent_names("pool-a") is None
+
+
+def test_remote_registered_agent_names_none_on_nonzero_exit(monkeypatch):
+    monkeypatch.setattr(embody.shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(
+        embody.subprocess, "run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 255, "", "unreachable"),
+    )
+    assert embody.remote_registered_agent_names("pool-a") is None
+
+
+def test_remote_registered_agent_names_parses_over_ssh(monkeypatch):
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen["cmd"] = cmd
+        return subprocess.CompletedProcess(
+            cmd, 0, '[{"name": "sweep-worker"}]', ""
+        )
+
+    monkeypatch.setattr(embody.shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(embody.subprocess, "run", fake_run)
+    assert embody.remote_registered_agent_names("Pool-A") == {"sweep-worker"}
+    # SSH to the lower-cased alias, running the JSON agents listing.
+    assert seen["cmd"][0] == "/usr/bin/ssh"
+    assert "pool-a" in seen["cmd"]
+    assert seen["cmd"][-1] == "agent-bridge --json agents"
