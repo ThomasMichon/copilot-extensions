@@ -13,7 +13,6 @@ import importlib.util
 import os
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 _VR_PATH = Path(__file__).resolve().parents[1] / "scripts" / "versioned_runtime.py"
@@ -94,18 +93,17 @@ def test_terminate_tree_kills_real_process():
     try:
         assert vr._pid_alive(proc.pid)
         assert vr._terminate_tree(proc.pid) is True
-        deadline = time.time() + 15
-        while time.time() < deadline and vr._pid_alive(proc.pid):
-            time.sleep(0.1)
-        assert not vr._pid_alive(proc.pid), "process should be terminated"
+        # proc.wait() reaps the child: on POSIX a killed-but-unwaited child lingers
+        # as a zombie that os.kill(pid, 0) still reports alive, so assert via
+        # wait() (a non-None return code == it exited) rather than _pid_alive.
+        assert proc.wait(timeout=15) is not None
     finally:
         if proc.poll() is None:
             proc.kill()
-        proc.wait(timeout=10)
+            proc.wait(timeout=10)
 
 
 def test_terminate_tree_noop_on_dead_pid():
     proc = subprocess.Popen([sys.executable, "-c", "pass"])
-    proc.wait(timeout=10)
-    # Already exited -> nothing to terminate.
+    proc.wait(timeout=10)  # reap it so the pid is fully gone (not a zombie)
     assert vr._terminate_tree(proc.pid) is False
