@@ -363,9 +363,15 @@ Per ARCHITECTURE §6, the split is unchanged and matters more for Tier E:
    Tier-P precondition** (`<plugin> --version`, `-SkipTierPGate` to force) refuses
    an eval on a broken CLI. **Advisory-only:** `runs.max_credits` (the
    `agent-bridge create` transport doesn't expose per-turn credits to the runner).
-6. **☐ The extreme F1-E.** Author `harness-from-bare` (downstream, name-ful):
-   bare box → "set this up" → judge suite self-assembly, escalating toward the
-   vision's turn-key F3-E acceptance.
+6. **◐ The extreme F1-E.** The **public** suite-self-assembly eval is **built**:
+   `scenarios/suite-assembly-eval/` installs the harness core (agent-worktrees base
+   + agent-bridge) on a bare box and drives "get the suite working per its docs,
+   then register a repo and create a worktree" — validated end-to-end to a PASS via
+   the documented `setup → register → create` flow (and it surfaced #691:
+   agent-worktrees doesn't self-provision). **Still future:** the fully name-ful
+   **turn-key F3-E** — a *specific* assembled harness bound to an **empty** knowledge
+   repo completing a real end-to-end task with zero manual setup — which homes
+   **downstream** (with the consuming harness), not the public rig.
 
 > **Also still to do:** **`run.sh` parity** — `-Mode eval` is implemented in
 > `run.ps1` only; the Linux/WSL/macOS `run.sh` does not yet carry it (it errors on

@@ -203,6 +203,7 @@ Under `tools/clean-room/scenarios/` today:
 | `agent-index-cutover` | P/F1 | agent-index service cutover preserves durable queue state and heals drain/recovery cases. |
 | `agent-vault-cutover` | P/F1 | Forward-ready witness: proves agent-vault's client-side rendezvous fallback ladder; flags the daemon-side zdd cutover as not-yet-adopted (INFO, #609). |
 | `agent-vault-eval` | **E**/F2 | **The reference agent-driven doc-audit:** install agent-vault solo, then drive Copilot under literal mode with "set it up and list my vault, per its docs" — judged (via `clean-room-judge`) on whether the docs carry a fresh agent to an affirmative ready state **or** an honest STOP at the documented `.kdbx`/`KPDB` prerequisite, with no self-heal. |
+| `suite-assembly-eval` | **E**/F1 | **Suite self-assembly from bare (the public "extreme"):** install the harness core (agent-worktrees base + agent-bridge), then drive "get the suite working per its docs, then register this repo and create a worktree" — judged on whether the suite's own docs carry a fresh agent through the real `setup → register → create` assembly via documented commands (no hand-edited `projects.yaml` / raw `git worktree`). Surfaced #691 (agent-worktrees doesn't self-provision). |
 
 **The matrix to build toward** (per the vision): each plugin **solo** *(now
 complete — every runtime plugin has a solo scenario)* → **reasonable
