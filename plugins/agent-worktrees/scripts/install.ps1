@@ -249,6 +249,16 @@ if (-not $ProjectName) {
 }
 # Don't auto-adopt the CWD repo -- project association is explicit.
 # Runtime installs fine without a project name.
+# Reserved-name guard: `agent-worktrees` is the runtime's own global command
+# (the project-agnostic shim from bin/agent-worktrees.{ps1,cmd}, deployed by
+# Deploy-GlobalBinstub), never a per-project launcher. If inference or an
+# explicit -ProjectName resolves to it (e.g. the installer run from a dir
+# literally named `agent-worktrees`), a project deploy would overwrite the
+# global shims with self-`--project` binstubs. Never treat it as a project.
+if ($ProjectName -eq 'agent-worktrees') {
+    Write-ServiceWarn "Ignoring reserved runtime name 'agent-worktrees' as a project (global command is owned by the tool binstub)"
+    $ProjectName = $null
+}
 $HasProject = [bool]$ProjectName
 
 if ($HasProject) {
@@ -1158,6 +1168,15 @@ function Deploy-Binstub {
        Routes through the Python CLI for subcommand dispatch.
        Falls back to launch-session.cmd if the venv is missing. #>
     Ensure-InstallDir $LocalBin
+
+    # Reserved-name guard (belt-and-suspenders with the ProjectName resolution
+    # above): a project stub for `agent-worktrees` writes agent-worktrees.{cmd,
+    # ps1} -- the SAME paths as the global shims -- clobbering them with a
+    # self-`--project` binstub. Never overwrite the global command.
+    if ($ProjectName -eq 'agent-worktrees') {
+        Write-ServiceWarn "Refusing to deploy project binstub for reserved runtime name 'agent-worktrees' (global command owned by Deploy-GlobalBinstub)"
+        return
+    }
 
     $content = @"
 @echo off

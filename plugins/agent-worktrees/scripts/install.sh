@@ -205,6 +205,19 @@ else
         PROJECT_NAME="$_cwd_name"
     fi
 fi
+# Reserved-name guard: `agent-worktrees` is the runtime's own global command
+# (the project-agnostic shim from bin/agent-worktrees, deployed by
+# deploy_tool_binstub), never a per-project launcher. If inference or an
+# explicit flag resolves the name to it (e.g. the installer run from a dir
+# literally named `agent-worktrees`, whose ~/.agent-worktrees/config.yaml always
+# exists), a project deploy would overwrite the global shim with a
+# self-`--project` binstub -- historically the seed of a fork-storm. Never treat
+# the reserved runtime name as a project. (echo, not warn(): the output helpers
+# are not defined until later in the script.)
+if [[ "$PROJECT_NAME" == "agent-worktrees" ]]; then
+    echo "  ! Ignoring reserved runtime name 'agent-worktrees' as a project (global command is owned by the tool binstub)" >&2
+    PROJECT_NAME=""
+fi
 # Don't auto-adopt CWD repo -- runtime installs fine without a project.
 HAS_PROJECT=false
 if [[ -n "$PROJECT_NAME" ]]; then
@@ -787,6 +800,14 @@ reconcile_binstubs() {
 
 deploy_binstub() {
     mkdir -p "$LOCAL_BIN"
+    # Reserved-name guard (belt-and-suspenders with the PROJECT_NAME resolution
+    # above): the project-form is written to $LOCAL_BIN/$PROJECT_NAME, which for
+    # the reserved runtime name IS the global shim path. Never overwrite the
+    # global `agent-worktrees` command with a self-`--project` project binstub.
+    if [[ "$PROJECT_NAME" == "agent-worktrees" ]]; then
+        warn "Refusing to deploy project binstub for reserved runtime name 'agent-worktrees' (global command owned by deploy_tool_binstub)"
+        return 0
+    fi
     # Generate project-specific binstub that routes through the Python CLI.
     # The CLI dispatches: no args → launch session, known subcommand → handler.
     # Falls back to launch-session.sh if venv is missing (recovery path).
