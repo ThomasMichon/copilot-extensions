@@ -166,6 +166,9 @@ that set; the fallback when agent-worktrees is absent is on-disk existence of
 the worktree dir, reliable for the same reason). Because the picker only renders
 tracked worktrees and compaction only archives non-tracked ones, an archived
 session is never one the picker needs -- no picker archive-awareness required.
+Compaction also honors the **sync repo scope** (`repo_allowlist`/`repo_denylist`):
+only sessions sync itself would publish are archived, so the archive store (which
+Pair B pushes to the hub wholesale) never leaks a repo the allowlist excludes.
 Archives keep uncompressed `workspace.yaml`/`origin.json` sidecars beside the
 bundle so listing/selection never decompresses; readers (`ramp-up-session`,
 `collate-session`) resolve and read archived sessions transparently.
