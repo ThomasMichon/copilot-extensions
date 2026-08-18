@@ -1,7 +1,7 @@
 {
   "label": "Tasks",
   "after": "Worktrees",
-  "list": ["agent-dispatch", "inbox", "--machine", "{machine}"],
+  "list": ["agent-dispatch", "inbox", "--machine", "{machine}", "--status", "proposed,held"],
   "entry": {
     "id": "id",
     "title": "title",
@@ -9,8 +9,30 @@
     "subtitle": "repo_name",
     "badges": ["labels"]
   },
-  "empty_hint": "No proposed tasks for this machine.",
+  "empty_hint": "No proposed or awaiting-steer tasks for this machine.",
   "actions": [
+    {
+      "key": "card",
+      "label": "View card",
+      "kind": "card",
+      "when": {"awaiting_steer": true},
+      "description": "Read the full card a blocked worker posted (title/status/link/body). Read-only."
+    },
+    {
+      "key": "steer",
+      "label": "Steer — answer the card",
+      "kind": "form",
+      "fields_from": "card.request_input",
+      "title_from": "card.title",
+      "body_from": "card.status",
+      "run": [
+        "agent-dispatch", "steer", "submit", "{task_id}",
+        "--field", "feedback={field.feedback}",
+        "--field", "decision={field.decision}"
+      ],
+      "when": {"awaiting_steer": true},
+      "description": "Answer the worker's card (feedback + decision) and wake it. Never a verdict — the operator's steer, not an ADO vote."
+    },
     {
       "key": "open-cli",
       "label": "Open into a CLI session",

@@ -428,7 +428,21 @@ class RegisteredPivotRuntime:
         """Run one action's argv template against ``ctx``. Returns
         ``(ok, message)`` -- never raises, so the caller can surface the result
         in the status line."""
-        argv = _resolve_argv(action.run, ctx)
+        return self.run_resolved(format_template(action.run, ctx))
+
+    def run_resolved(self, argv: Sequence[str]) -> tuple[bool, str]:
+        """Run an **already-substituted** argv (A5 form path + the shared sync
+        run path). Resolves ``argv[0]`` on ``PATH`` and executes, returning
+        ``(ok, message)`` and never raising. No placeholder substitution happens
+        here -- the caller has already resolved every token (a form's
+        ``{field.<name>}`` + entry tokens in one safe pass via
+        :func:`format_form_template`, or a plain template via
+        :func:`format_template`)."""
+        argv = list(argv)
+        if argv:
+            resolved = shutil.which(argv[0])
+            if resolved:
+                argv = [resolved, *argv[1:]]
         if not argv:
             return (False, "empty action command")
         try:

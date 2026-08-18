@@ -594,3 +594,127 @@ def test_bad_action_progress_sinks_only_its_manifest(tmp_path):
     _write(tmp_path, "bad", {"label": "Bad", "list": ["agent-x", "y"],
         "actions": [{"label": "X", "run": ["do"], "progress": "yes"}]})
     assert {p.name for p in pivots.discover_pivots(tmp_path)} == {"ok"}
+
+
+# ---- A5: steering-seam form/card action kinds -------------------------------
+
+
+def test_form_action_parses(tmp_path):
+    _write(tmp_path, "m", {"label": "M", "list": ["agent-x", "y"], "actions": [
+        {"key": "steer", "label": "Steer", "kind": "form",
+         "fields_from": "card.request_input",
+         "title_from": "card.title", "body_from": "card.status",
+         "run": ["agent-dispatch", "steer", "submit", "{task_id}",
+                 "--field", "decision={field.decision}"],
+         "when": {"awaiting_steer": True}},
+    ]})
+    [p] = pivots.discover_pivots(tmp_path)
+    a = p.actions[0]
+    assert a.form == {
+        "fields_from": "card.request_input",
+        "title_from": "card.title",
+        "body_from": "card.status",
+    }
+    assert a.card is None and a.internal is None
+    assert a.when == {"awaiting_steer": True}
+    assert a.run[:4] == ("agent-dispatch", "steer", "submit", "{task_id}")
+
+
+def test_form_action_requires_fields_from(tmp_path):
+    _write(tmp_path, "ok", {"label": "Ok", "list": ["agent-x", "y"]})
+    _write(tmp_path, "bad", {"label": "Bad", "list": ["agent-x", "y"], "actions": [
+        {"label": "Steer", "kind": "form", "run": ["x"]},
+    ]})
+    # The missing fields_from sinks only the bad manifest.
+    assert {p.name for p in pivots.discover_pivots(tmp_path)} == {"ok"}
+
+
+def test_form_action_requires_run(tmp_path):
+    with pytest.raises(pivots.ManifestError):
+        pivots.parse_manifest(
+            {"label": "M", "list": ["x"], "actions": [
+                {"label": "Steer", "kind": "form", "fields_from": "card.request_input"}]},
+            name="m", source_path="x")
+
+
+def test_card_action_parses_with_defaults(tmp_path):
+    _write(tmp_path, "m", {"label": "M", "list": ["agent-x", "y"], "actions": [
+        {"key": "card", "label": "View card", "kind": "card",
+         "when": {"awaiting_steer": True}},
+    ]})
+    [p] = pivots.discover_pivots(tmp_path)
+    a = p.actions[0]
+    assert a.card == {
+        "title_from": "card.title",
+        "status_from": "card.status",
+        "link_from": "card.link",
+        "body_from": "card.body",
+    }
+    assert a.form is None and a.internal is None
+    assert a.run == ()
+
+
+def test_card_action_custom_paths(tmp_path):
+    [p] = [pivots.parse_manifest(
+        {"label": "M", "list": ["x"], "actions": [
+            {"label": "C", "kind": "card", "body_from": "detail.text",
+             "title_from": "detail.head"}]},
+        name="m", source_path="x")]
+    a = p.actions[0]
+    assert a.card["body_from"] == "detail.text"
+    assert a.card["title_from"] == "detail.head"
+    # Unspecified paths still default.
+    assert a.card["status_from"] == "card.status"
+
+
+def test_bad_from_path_type_is_manifest_error():
+    with pytest.raises(pivots.ManifestError):
+        pivots.parse_manifest(
+            {"label": "M", "list": ["x"], "actions": [
+                {"label": "C", "kind": "card", "body_from": 123}]},
+            name="m", source_path="x")
+
+
+def test_resolve_path():
+    rec = {"task_id": "abc", "card": {"body": "B",
+           "request_input": [{"name": "feedback", "type": "textarea"}]}}
+    assert pivots.resolve_path(rec, "task_id") == "abc"
+    assert pivots.resolve_path(rec, "card.body") == "B"
+    assert pivots.resolve_path(rec, "card.request_input") == [
+        {"name": "feedback", "type": "textarea"}]
+    # Missing key or non-mapping mid-walk => None, never raises.
+    assert pivots.resolve_path(rec, "card.nope") is None
+    assert pivots.resolve_path(rec, "task_id.deeper") is None
+    assert pivots.resolve_path(rec, None) is None
+    assert pivots.resolve_path(None, "card.body") is None
+
+
+def test_format_form_template_substitutes_fields_and_ctx():
+    template = ["agent-dispatch", "steer", "submit", "{task_id}",
+                "--field", "feedback={field.feedback}",
+                "--field", "decision={field.decision}"]
+    out = pivots.format_form_template(
+        template,
+        {"task_id": "T123"},
+        {"feedback": "looks good", "decision": "post-approved"},
+    )
+    assert out == ["agent-dispatch", "steer", "submit", "T123",
+                   "--field", "feedback=looks good",
+                   "--field", "decision=post-approved"]
+
+
+def test_format_form_template_missing_field_is_empty():
+    out = pivots.format_form_template(
+        ["--field", "decision={field.decision}"], {}, {})
+    assert out == ["--field", "decision="]
+
+
+def test_format_form_template_field_value_is_literal_no_injection():
+    # A field value that itself contains a brace token is inserted literally --
+    # it must NOT be re-scanned/substituted (no token injection).
+    out = pivots.format_form_template(
+        ["--field", "feedback={field.feedback}"],
+        {"task_id": "SECRET"},
+        {"feedback": "use {task_id} carefully"},
+    )
+    assert out == ["--field", "feedback=use {task_id} carefully"]
