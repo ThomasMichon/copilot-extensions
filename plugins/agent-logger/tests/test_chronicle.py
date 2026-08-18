@@ -215,6 +215,98 @@ def test_scan_reads_recorded_origin_sidecar(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------
+# Archived (compacted) session discovery
+# --------------------------------------------------------------------------
+
+
+def _write_archived_session(
+    corpus_root: Path,
+    machine: str,
+    session_id: str,
+    *,
+    repository: str = "owner/repo",
+    created_at: str = "2026-07-28T10:00:00Z",
+    source_repo: str = "__unset__",
+) -> Path:
+    """Build a ``<machine>/archived/<id>.tar.gz`` + sidecars via the real
+    write path (a cold session compacted by session-sync)."""
+    import shutil
+
+    from agent_logger import sessions as _s
+
+    staging = corpus_root.parent / ".staging" / session_id
+    staging.mkdir(parents=True)
+    (staging / "events.jsonl").write_text('{"ts": 1}\n', encoding="utf-8")
+    (staging / "workspace.yaml").write_text(
+        f"id: {session_id}\nrepository: {repository}\nbranch: main\n"
+        f"created_at: {created_at}\nupdated_at: {created_at}\n",
+        encoding="utf-8",
+    )
+    if source_repo != "__unset__":
+        import json
+
+        (staging / "origin.json").write_text(
+            json.dumps({
+                "schema_version": 1, "machine": machine,
+                "source_repo": source_repo,
+                "basis": "machine-default" if source_repo is None else "cwd",
+            }),
+            encoding="utf-8",
+        )
+    store = corpus_root / machine / "archived"
+    ref = _s.archive_session(staging, store)
+    shutil.rmtree(staging)
+    return ref.path
+
+
+def test_scan_discovers_archived_sessions(tmp_path: Path) -> None:
+    corpus = tmp_path / "sessions"
+    _write_archived_session(
+        corpus, "book2", "cold1", repository="org/chamber", source_repo="org/chamber"
+    )
+    src = SyncedSessionSource(corpus, ReservationStore(tmp_path / "c.db"))
+    by_id = {s.session_id: s for s in src.scan()}
+    assert "cold1" in by_id
+    s = by_id["cold1"]
+    assert s.archived is True
+    assert s.repository == "org/chamber"
+    assert s.source_repo == "org/chamber"
+    assert s.origin_recorded is True
+    assert s.session_path.name == "cold1.tar.gz"
+    assert s.day == "2026-07-28"
+
+
+def test_scan_archived_is_always_settled(tmp_path: Path) -> None:
+    # The archive file was just written (fresh mtime) but archives are cold and
+    # immutable -- the settle gate must not hide them.
+    corpus = tmp_path / "sessions"
+    _write_archived_session(corpus, "book2", "cold1")
+    src = SyncedSessionSource(corpus, ReservationStore(tmp_path / "c.db"))
+    assert {s.session_id for s in src.scan()} == {"cold1"}
+
+
+def test_scan_live_shadows_archived_same_id(tmp_path: Path) -> None:
+    corpus = tmp_path / "sessions"
+    _write_session(corpus, "book2", "dup")
+    _write_archived_session(corpus, "book2", "dup")
+    src = SyncedSessionSource(corpus, ReservationStore(tmp_path / "c.db"))
+    dup = [s for s in src.scan() if s.session_id == "dup"]
+    assert len(dup) == 1
+    assert dup[0].archived is False  # live wins
+
+
+def test_scan_skips_journaled_archived(tmp_path: Path) -> None:
+    corpus = tmp_path / "sessions"
+    _write_archived_session(corpus, "book2", "cold1")
+    reservations = ReservationStore(tmp_path / "c.db")
+    src = SyncedSessionSource(corpus, reservations)
+    assert {s.session_id for s in src.scan()} == {"cold1"}
+    # Journaled while it was live stays journaled after archiving (same ref).
+    reservations.mark_journaled(SegmentRef("cold1", 0))
+    assert src.scan() == []
+
+
+# --------------------------------------------------------------------------
 # Log-sink: router origin keying + machine-default fallback
 # --------------------------------------------------------------------------
 
