@@ -34,8 +34,16 @@ def test_project_binstub_uses_project_flag(monkeypatch, tmp_path: Path):
         assert '"%_PY%" -m agent_worktrees --project demoproj' in content
         assert 'set "WORKTREE_PROJECT=demoproj"' in content  # recovery only
     else:
-        assert 'exec "$_AW" --project demoproj' in content
+        assert "-m agent_worktrees --project demoproj" in content
         assert 'export WORKTREE_PROJECT="demoproj"' in content  # recovery only
+        # Regression guard (process-storm): the POSIX binstub must resolve the
+        # versioned runtime directly (current-version -> versions/<ver>/bin/
+        # python), NEVER exec ~/.local/bin/agent-worktrees -- delegating to
+        # itself (or the global stub, which delegates to itself) recurses into
+        # an unbounded fork/exec storm.
+        assert ".local/bin/agent-worktrees" not in content
+        assert "current-version" in content
+        assert "versions/" in content
 
 
 def test_global_stub_does_not_clear_worktree_id(monkeypatch, tmp_path: Path):
@@ -49,6 +57,36 @@ def test_global_stub_does_not_clear_worktree_id(monkeypatch, tmp_path: Path):
     name = "agent-worktrees.cmd" if platform.system() == "Windows" else "agent-worktrees"
     global_stub = (lb / name).read_text()
     assert "WORKTREE_ID" not in global_stub
+
+
+def test_posix_stubs_never_self_reference(monkeypatch, tmp_path: Path):
+    """Regression guard for the fork/exec storm: NO POSIX binstub -- neither the
+    global ``agent-worktrees`` stub nor a per-project stub -- may exec
+    ``~/.local/bin/agent-worktrees``. The global stub doing so exec'd *itself*
+    unboundedly; a per-project stub doing so delegated to the (self-exec'ing)
+    global stub. Both must instead resolve the versioned runtime directly and
+    run ``-m agent_worktrees``."""
+    if platform.system() == "Windows":
+        import pytest
+        pytest.skip("POSIX-only binstub content")
+    lb = tmp_path / "bin"
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+
+    assert inst.deploy_binstubs(repo_dir=tmp_path, project="demoproj") is True
+
+    # Global stub (project-agnostic, marker-based resolver): no --project, but
+    # must resolve the versioned runtime and never exec itself.
+    gcontent = (lb / "agent-worktrees").read_text()
+    assert ".local/bin/agent-worktrees" not in gcontent, "global stub self-references"
+    assert "-m agent_worktrees" in gcontent
+    assert "current-version" in gcontent and "versions/" in gcontent
+
+    # Per-project stub: resolves the versioned runtime with its OWN --project,
+    # never delegating to (and thus recursing through) the global stub.
+    pcontent = (lb / "demoproj").read_text()
+    assert ".local/bin/agent-worktrees" not in pcontent, "project stub self-references"
+    assert "-m agent_worktrees --project demoproj" in pcontent
+    assert "current-version" in pcontent and "versions/" in pcontent
 
 
 def test_windows_binstubs_avoid_unsigned_trampoline(monkeypatch, tmp_path: Path):
