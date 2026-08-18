@@ -402,6 +402,21 @@ class CliNamespaceResolver(NamespaceResolver):
                     "namespace-list output unparseable (%s) -- falling back",
                     self._binstub, exc_info=True,
                 )
+        if self._fallback is None:
+            # A missing/unreachable provider binstub with no in-process fallback
+            # means "this provider contributes no dynamic agents here" -- a
+            # benign, expected state, NOT an error. The elevated sub-daemon, for
+            # example, cannot see the ``agent-codespaces`` binstub on its PATH,
+            # so a strict raise here produced a scary RuntimeError traceback on
+            # every agent-list. Degrade to empty so enumeration stays clean.
+            # (resolve/ensure_ready still raise -- you cannot spawn what you
+            # cannot resolve.)
+            log.debug(
+                "namespace '%s:': provider '%s' unavailable and no in-process "
+                "fallback -- contributing no dynamic agents",
+                self._prefix, self._binstub,
+            )
+            return []
         return await self._fallback_or_raise("list")
 
     async def resolve(

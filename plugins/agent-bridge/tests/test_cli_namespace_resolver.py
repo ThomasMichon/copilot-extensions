@@ -164,11 +164,28 @@ async def test_target_repo_cli_and_fallback():
 
 
 @pytest.mark.asyncio
-async def test_no_fallback_raises_when_cli_absent():
+async def test_no_fallback_list_degrades_to_empty_when_cli_absent():
+    # A missing provider binstub with no in-process fallback (e.g. the
+    # ``codespace:`` namespace inside the elevated sub-daemon, which cannot see
+    # the agent-codespaces binstub) must NOT raise from list() -- it means "no
+    # dynamic agents from this provider". Degrade to empty so agent enumeration
+    # stays clean (previously this produced a scary RuntimeError traceback on
+    # every list).
+    r = CliNamespaceResolver("codespace", "agent-codespaces", fallback=None)
+    with patch("shutil.which", return_value=None):
+        assert await r.list() == []
+
+
+@pytest.mark.asyncio
+async def test_no_fallback_resolve_still_raises_when_cli_absent():
+    # resolve/ensure_ready stay strict: you cannot spawn what you cannot
+    # resolve, so the degraded-list path must not soften these.
     r = CliNamespaceResolver("codespace", "agent-codespaces", fallback=None)
     with patch("shutil.which", return_value=None):
         with pytest.raises(RuntimeError):
-            await r.list()
+            await r.resolve("cs-a")
+        with pytest.raises(RuntimeError):
+            await r.ensure_ready("cs-a")
 
 
 # --- restricted (container) variant + signature-aware fallback (#892 Inc 3b) ---

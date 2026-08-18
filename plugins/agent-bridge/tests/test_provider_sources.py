@@ -129,13 +129,19 @@ async def test_cli_resolver_uses_explicit_command(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_cli_resolver_missing_command_no_fallback_raises():
+async def test_cli_resolver_missing_command_no_fallback_list_empty():
+    # list() degrades to [] when the provider command is unavailable and there
+    # is no in-process fallback -- a missing provider contributes no dynamic
+    # agents (the codespace: case inside the elevated sub-daemon). It must NOT
+    # raise, so agent enumeration stays clean.
     resolver = CliNamespaceResolver(
         "codespace", "agent-codespaces",
         command=[str("this-binary-does-not-exist-xyz")],
     )
+    assert await resolver.list() == []
+    # resolve stays strict -- you cannot spawn what you cannot resolve.
     with pytest.raises(RuntimeError):
-        await resolver.list()
+        await resolver.resolve("cs-1")
 
 
 # -- AgentResolver.refresh_provider_resolvers ----------------------------------
