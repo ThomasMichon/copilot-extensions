@@ -296,6 +296,70 @@ def test_reconcile_stops_paused_registration():
     assert summary.running == []
 
 
+# -- operator overrides (kill-switch) ----------------------------------------
+
+
+def test_reconcile_winds_down_overridden_unit():
+    """Disabling a running unit via an override winds it down on the next reconcile
+    -- the reconcile's stop-not-desired path, driven by the override subtraction."""
+    client = FakeClient([_reg("a"), _reg("b")])
+    launcher = FakeLauncher()
+    override_map: dict[str, dict] = {}
+    d = _daemon(client, launcher, overrides_source=lambda: override_map)
+    d.reconcile_once()  # both start
+    override_map["b"] = {"disabled": True, "reason": "misbehaving"}
+    summary = d.reconcile_once()
+    assert summary.stopped == ["b"]
+    assert launcher.proc_for("b").terminated is True
+    # a is untouched
+    assert "a" in d._units and "b" not in d._units
+
+
+def test_override_outranks_declaration_and_survives_resync():
+    """An override wins over the desired set every reconcile: a still-registered
+    (or re-declared) unit stays wound down until the override is cleared -- a repo
+    re-sync cannot quietly revive it."""
+    client = FakeClient([_reg("a")])
+    launcher = FakeLauncher()
+    override_map = {"a": {"disabled": True, "reason": "stop"}}
+    d = _daemon(client, launcher, overrides_source=lambda: override_map)
+    summary = d.reconcile_once()
+    assert summary.running == []  # never started -- overridden off from the start
+    assert "a" not in d._units
+    # a "re-sync" (still registered) does not revive it while the override stands.
+    d.reconcile_once()
+    assert "a" not in d._units
+    # clearing the override returns it to its registered state.
+    override_map.clear()
+    summary = d.reconcile_once()
+    assert summary.running == ["a"]
+    assert "a" in d._units
+
+
+def test_override_disabled_false_is_inert():
+    """A record left disabled=false is the same as no override -- the unit runs."""
+    client = FakeClient([_reg("a")])
+    launcher = FakeLauncher()
+    d = _daemon(client, launcher, overrides_source=lambda: {"a": {"disabled": False}})
+    summary = d.reconcile_once()
+    assert summary.running == ["a"]
+    assert "a" in d._units
+
+
+def test_override_source_error_fails_safe_to_none():
+    """A raising overrides_source is treated as 'no overrides' -- a bad read must
+    never wind down declared/registered units."""
+    def boom():
+        raise RuntimeError("cannot read overrides")
+
+    client = FakeClient([_reg("a")])
+    launcher = FakeLauncher()
+    d = _daemon(client, launcher, overrides_source=boom)
+    summary = d.reconcile_once()
+    assert summary.running == ["a"]
+    assert "a" in d._units
+
+
 def test_reconcile_restarts_on_spec_change():
     client = FakeClient([_reg("a")])
     launcher = FakeLauncher()
