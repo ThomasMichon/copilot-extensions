@@ -623,6 +623,23 @@ if ($VersionedRuntime) {
         exit 1
     }
     Write-Ok "Runtime version $SrcVersion active (.venv -> versions/$SrcVersion)"
+
+    # Reap processes still running from a now-stale (non-current) slot -- leaked/
+    # orphaned bridge trees or a warmth daemon from the prior version -- so an
+    # upgrade never leaves "two runtime versions resident". Best-effort; opt out
+    # with AGENT_MCP_NO_VERSION_REAP. Runs via the new slot's own python, so it is
+    # attributed to the current version and never reaps itself.
+    if (-not $env:AGENT_MCP_NO_VERSION_REAP) {
+        try {
+            $reapOut = & $VenvPython $VrScript --root $InstallDir --link-name '.venv' --json reap 2>$null | Out-String
+            $reapObj = if ($reapOut.Trim()) { $reapOut | ConvertFrom-Json } else { $null }
+            $reaped = if ($reapObj) { @($reapObj.reaped) } else { @() }
+            if ($reaped.Count -gt 0) {
+                $stale = ($reaped | ForEach-Object { $_.version } | Sort-Object -Unique) -join ', '
+                Write-Ok "Reaped $($reaped.Count) stale-version process(es) from: $stale"
+            }
+        } catch { Write-Skip "Version-reap skipped ($($_.Exception.Message))" }
+    }
 }
 # === end install-contract:v3 versioned-venv activate ===
 

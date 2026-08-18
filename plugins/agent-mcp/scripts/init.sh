@@ -446,6 +446,20 @@ if [[ "$VERSIONED_RUNTIME" -eq 1 ]]; then
         exit 1
     fi
     _ok "Runtime version $SRC_VERSION active (.venv -> versions/$SRC_VERSION)"
+
+    # Reap processes still running from a now-stale (non-current) slot -- leaked/
+    # orphaned bridge trees or a warmth daemon from the prior version -- so an
+    # upgrade never leaves "two runtime versions resident". Best-effort; opt out
+    # with AGENT_MCP_NO_VERSION_REAP. Runs via the new slot's own python, so it is
+    # attributed to the current version and never reaps itself.
+    if [[ -z "${AGENT_MCP_NO_VERSION_REAP:-}" ]]; then
+        _reaped="$("$VENV_PYTHON" "$VR_SCRIPT" --root "$INSTALL_DIR" \
+            --link-name '.venv' reap 2>/dev/null || true)"
+        if [[ -n "$_reaped" ]]; then
+            _n="$(printf '%s\n' "$_reaped" | grep -c . || true)"
+            _ok "Reaped $_n stale-version process(es)"
+        fi
+    fi
 fi
 # === end install-contract:v3 versioned-venv activate ===
 
