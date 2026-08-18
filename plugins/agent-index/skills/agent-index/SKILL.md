@@ -65,7 +65,7 @@ default; `--full` is explicit.
 repo's `.agent-index/config.yaml` `corpus.sources` when present.
 - For a plain repo with no corpus config, `agent-index index` defaults to the
 current git checkout (`git`) and its commits.
-- Use direct `rg`/`glob` for exact strings, files outside indexed scopes, or when
+- Use direct `grep`/`glob` for exact strings, files outside indexed scopes, or when
 `agent-index status` shows the index is unavailable.
 - Query-time trust-domain enforcement is not implemented; when a request is
 clearly scoped, pass `source` or `repo` rather than doing an unscoped search.
