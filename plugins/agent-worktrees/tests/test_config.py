@@ -457,14 +457,14 @@ class TestControlPlaneRelatedPRTier:
                 "enabled": True,
                 "required": True,
                 "provider": "azure-devops",
-                "api_base": "https://onedrive.visualstudio.com",
+                "api_base": "https://your-org.visualstudio.com",
             },
         })
         pr = cfg.load_config(cfgfile).repos["ext"].pr
         assert pr.enabled is True
         assert pr.required is True
         assert pr.provider == "azure-devops"
-        assert pr.api_base == "https://onedrive.visualstudio.com"
+        assert pr.api_base == "https://your-org.visualstudio.com"
 
     def test_cp_related_pr_overrides_inrepo_per_key(self, tmp_path, monkeypatch):
         anchor = tmp_path / "ext"
@@ -541,7 +541,7 @@ class TestControlPlaneRelatedPRTier:
                 "enabled": True,
                 "required": True,
                 "provider": "azure-devops",
-                "api_base": "https://onedrive.visualstudio.com",
+                "api_base": "https://your-org.visualstudio.com",
             }),
             "no-pr-repo": _related.RelatedEntry(name="no-pr-repo", role="docs"),
         }))
@@ -561,7 +561,7 @@ class TestControlPlaneRelatedPRTier:
                 "enabled": True,
                 "required": True,
                 "provider": "azure-devops",
-                "api_base": "https://onedrive.visualstudio.com",
+                "api_base": "https://your-org.visualstudio.com",
             },
         }  # entries without a pr block are omitted
 

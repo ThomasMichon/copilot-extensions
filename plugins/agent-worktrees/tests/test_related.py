@@ -911,7 +911,7 @@ def test_pr_roundtrip(tmp_path: Path):
                 "enabled": True,
                 "required": True,
                 "provider": "azure-devops",
-                "api_base": "https://onedrive.visualstudio.com",
+                "api_base": "https://your-org.visualstudio.com",
                 "approval_required": True,
                 "squash": True,
                 "delete_source_branch": True,
@@ -924,7 +924,7 @@ def test_pr_roundtrip(tmp_path: Path):
         "enabled": True,
         "required": True,
         "provider": "azure-devops",
-        "api_base": "https://onedrive.visualstudio.com",
+        "api_base": "https://your-org.visualstudio.com",
         "approval_required": True,
         "squash": True,
         "delete_source_branch": True,
@@ -951,7 +951,7 @@ def test_pr_emitted_yaml_is_valid_with_native_bools(tmp_path: Path):
         "x": RelatedEntry(name="x", pr={
             "enabled": True,
             "provider": "azure-devops",
-            "api_base": "https://onedrive.visualstudio.com",
+            "api_base": "https://your-org.visualstudio.com",
             "approval_required": False,
         }),
     })
@@ -960,7 +960,7 @@ def test_pr_emitted_yaml_is_valid_with_native_bools(tmp_path: Path):
     assert data["related"]["x"]["pr"] == {
         "enabled": True,                      # a real bool, not the string "True"
         "provider": "azure-devops",
-        "api_base": "https://onedrive.visualstudio.com",
+        "api_base": "https://your-org.visualstudio.com",
         "approval_required": False,
     }
 
