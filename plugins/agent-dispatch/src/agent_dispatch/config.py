@@ -358,8 +358,52 @@ def shared_token() -> str | None:
     Independent of the local ``AGENT_DISPATCH_TOKEN`` (``AGENT_DISPATCH_SHARED_TOKEN``):
     the two coordinators authenticate separately -- the shared one is exposed only
     through the secured mesh atop its own per-client bearer.
+
+    Resolved from ``AGENT_DISPATCH_SHARED_TOKEN`` when set; otherwise, if
+    ``AGENT_DISPATCH_SHARED_TOKEN_COMMAND`` is set, by running that command and
+    using its stdout. The command indirection lets a deployment fetch the secret
+    **on demand** from an external store (e.g. a credential/vault CLI) so it is
+    never persisted in the environment -- fetch, use, let go. Returns ``None``
+    when neither is set, or when the command fails or yields nothing.
     """
-    return os.environ.get("AGENT_DISPATCH_SHARED_TOKEN") or None
+    direct = os.environ.get("AGENT_DISPATCH_SHARED_TOKEN")
+    if direct:
+        return direct
+    command = os.environ.get("AGENT_DISPATCH_SHARED_TOKEN_COMMAND")
+    if command:
+        return _run_token_command(command)
+    return None
+
+
+def _run_token_command(command: str) -> str | None:
+    """Run a token-fetch command and return its stdout (stripped), or ``None``.
+
+    ``command`` is parsed with :func:`shlex.split` and run **without a shell**
+    (fixed argv), so it handles quoted arguments (e.g. a vault entry name with
+    spaces) without exposing shell metacharacters. Any failure -- unparseable
+    command, non-zero exit, timeout, empty output -- degrades to ``None`` so a
+    missing/broken fetcher never crashes the CLI; the request then proceeds
+    tokenless and fails loudly at the coordinator if a token was required.
+    """
+    import shlex
+    import subprocess
+
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return None
+    if not argv:
+        return None
+    try:
+        proc = subprocess.run(  # noqa: S603 -- fixed argv (shlex.split), no shell
+            argv, check=False, capture_output=True, text=True, timeout=30
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    token = (proc.stdout or "").strip()
+    return token or None
 
 
 # -- federation (relay-rendezvous directory + fenced-epoch lease) -------------

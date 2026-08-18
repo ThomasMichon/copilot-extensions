@@ -6,7 +6,7 @@ import pytest
 
 from agent_dispatch import config as config_mod
 from agent_dispatch import rendezvous
-from agent_dispatch.config import DEFAULT_SWEEP_INTERVAL, client_url, load_config
+from agent_dispatch.config import DEFAULT_SWEEP_INTERVAL, client_url, load_config, shared_token
 
 
 @pytest.fixture(autouse=True)
@@ -33,6 +33,9 @@ def _isolate_discovery(monkeypatch, tmp_path):
     # A WSL guest resolves its OWN coordinator by default; clear the Windows-client
     # opt-in so the default-path tests are deterministic even on a box that sets it.
     monkeypatch.delenv("AGENT_DISPATCH_WSL_WINDOWS_CLIENT", raising=False)
+    # Shared-coordinator token resolution: clear both inputs so tests are hermetic.
+    monkeypatch.delenv("AGENT_DISPATCH_SHARED_TOKEN", raising=False)
+    monkeypatch.delenv("AGENT_DISPATCH_SHARED_TOKEN_COMMAND", raising=False)
 
 
 def test_sweep_interval_default(monkeypatch):
@@ -105,6 +108,46 @@ def test_client_url_degrades_on_resolution_error(monkeypatch):
     monkeypatch.setattr("agent_dispatch.netinfo.resolve_wsl_client_url", _boom)
     # A detection/probe failure must never break the CLI.
     assert client_url() == load_config().url
+
+
+# -- shared coordinator token resolution ------------------------------------
+
+
+def test_shared_token_direct_env_wins(monkeypatch):
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_TOKEN", "direct-tok")
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_TOKEN_COMMAND", "printf should-not-run")
+    assert shared_token() == "direct-tok"
+
+
+def test_shared_token_from_command(monkeypatch):
+    monkeypatch.delenv("AGENT_DISPATCH_SHARED_TOKEN", raising=False)
+    # shlex-split, no shell; quoted args (e.g. a vault entry name with spaces) work.
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_TOKEN_COMMAND", "printf '%s' fetched-tok")
+    assert shared_token() == "fetched-tok"
+
+
+def test_shared_token_command_strips_whitespace(monkeypatch):
+    monkeypatch.delenv("AGENT_DISPATCH_SHARED_TOKEN", raising=False)
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_TOKEN_COMMAND", "printf '  tok-nl\\n'")
+    assert shared_token() == "tok-nl"
+
+
+def test_shared_token_none_when_unset(monkeypatch):
+    monkeypatch.delenv("AGENT_DISPATCH_SHARED_TOKEN", raising=False)
+    monkeypatch.delenv("AGENT_DISPATCH_SHARED_TOKEN_COMMAND", raising=False)
+    assert shared_token() is None
+
+
+def test_shared_token_command_failure_returns_none(monkeypatch):
+    monkeypatch.delenv("AGENT_DISPATCH_SHARED_TOKEN", raising=False)
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_TOKEN_COMMAND", "false")
+    assert shared_token() is None
+
+
+def test_shared_token_command_empty_output_returns_none(monkeypatch):
+    monkeypatch.delenv("AGENT_DISPATCH_SHARED_TOKEN", raising=False)
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_TOKEN_COMMAND", "true")
+    assert shared_token() is None
 
 
 def test_config_module_importable():
