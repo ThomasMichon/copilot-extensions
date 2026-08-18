@@ -278,8 +278,7 @@ def compact_session(
         sessions.remove_archive(archived)
         raise RuntimeError(f"archive verification failed for {ref.id}")
     if reclaim:
-        shutil.rmtree(ref.path, ignore_errors=True)
-        return size
+        return size if sessions.force_rmtree(ref.path) else 0
     return 0
 
 

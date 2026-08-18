@@ -34,6 +34,7 @@ import io
 import json
 import os
 import shutil
+import stat
 import tarfile
 import tempfile
 from abc import ABC, abstractmethod
@@ -415,6 +416,31 @@ def _cleanup_materialized_temps() -> None:
 # ---------------------------------------------------------------------------
 # Write path (used by the compaction flows)
 # ---------------------------------------------------------------------------
+
+def force_rmtree(path: Path) -> bool:
+    """Remove a directory tree robustly; return ``True`` if it is gone after.
+
+    A plain ``shutil.rmtree`` fails on Windows read-only files, and
+    ``ignore_errors=True`` then silently *leaves the tree in place* -- which on a
+    OneDrive hub (session dirs synced ``ReadOnly`` + as online-only reparse-point
+    placeholders) makes reconciliation a no-op that mis-reports success. This
+    clears the read-only attribute on every entry first, then removes, and
+    verifies the tree is actually gone so callers count only real removals.
+    """
+    if not path.exists():
+        return True
+    for p in path.rglob("*"):
+        try:
+            os.chmod(p, stat.S_IWRITE)
+        except OSError:
+            pass
+    try:
+        os.chmod(path, stat.S_IWRITE)
+    except OSError:
+        pass
+    shutil.rmtree(path, ignore_errors=True)
+    return not path.exists()
+
 
 def is_archived(session_id: str, store: Path, codec: str = "targz") -> bool:
     """Whether ``session_id`` already has an archive in ``store``."""

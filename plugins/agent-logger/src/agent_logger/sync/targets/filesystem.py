@@ -277,9 +277,12 @@ class FilesystemTarget(Target):
             ref = SessionRef(id=sid, kind="archive", path=arc, store=archived)
             if not sessions.verify_archive(ref):
                 continue
-            if not dry_run:
-                shutil.rmtree(live, ignore_errors=True)
-            removed += 1
+            if dry_run:
+                removed += 1
+            elif sessions.force_rmtree(live):
+                # Count only sessions actually removed -- OneDrive hub dirs are
+                # ReadOnly online-only placeholders that defeat a plain rmtree.
+                removed += 1
         return removed
 
     def compact_backlog(
