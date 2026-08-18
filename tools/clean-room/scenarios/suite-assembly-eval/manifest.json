@@ -1,0 +1,30 @@
+{
+  "name": "suite-assembly-eval",
+  "description": "Tier-E (agent-driven) F1 suite-assembly doc-audit: install the copilot-extensions HARNESS CORE (the agent-worktrees base + agent-bridge) on a fresh box, seed a throwaway git repo, then drive the in-container Copilot under LITERAL MODE with 'get the suite working per its docs, then register this repo as a harness project and create a worktree for it'. Judges whether the SUITE self-assembles (binstubs on PATH, base runtime self-provisioned) AND the suite's own docs carry a fresh agent through the real multi-step assembly (register -> create) -- OR the agent stops at a documented gap -- WITHOUT hand-hacking projects.yaml or fabricating state. Name-free / public: names only copilot-extensions plugins + a throwaway repo. This is the public F1-E form of the 'set up the harness from bare' extreme; the fully name-ful turn-key F3-E (a specific operator harness + empty knowledge repo) homes downstream.",
+  "tier": "E",
+  "family": "F1",
+  "image": "base",
+  "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": [] },
+  "auth": { "copilot": "required", "gh": "none", "ado": "none" },
+  "starting_state": {
+    "setup": "setup.sh",
+    "installed_plugins": ["agent-worktrees", "agent-bridge"],
+    "notes": "The harness core PAYLOADS installed on a base box; a session was started so agent-bridge self-provisions its binstub. agent-worktrees does NOT self-provision on first session (it guides an explicit 'set up agent-worktrees' instead -- see issue #691), so its binstub is deliberately NOT yet on PATH; a throwaway git repo is seeded at /home/operator/demo-repo; NOTHING registered. The agent must do the assembly from the docs: get agent-worktrees working (its documented setup), then register + create."
+  },
+  "tier_p_precondition": "test -d $HOME/.copilot/installed-plugins/copilot-extensions/agent-worktrees && test -d $HOME/.copilot/installed-plugins/copilot-extensions/agent-bridge",
+  "prompt": "This machine has the copilot-extensions agent suite installed (the agent-worktrees base and agent-bridge). Following ONLY the suite's own documentation, get it working, then register the git repository at /home/operator/demo-repo as a harness project and create a git worktree for it.",
+  "expected_outcome": {
+    "steps": [
+      "Discover the suite's own documentation (the agent-worktrees `worktree` / setup skill / README, and agent-bridge's).",
+      "Get agent-worktrees working the DOCUMENTED way: it does not self-provision on first session, so the agent follows its setup docs (e.g. the agent-worktrees setup skill / `install.sh`) until its binstub reports a real version.",
+      "Register /home/operator/demo-repo as a harness project the documented way (e.g. `agent-worktrees register` from the repo), reaching an affirmative recognized state (projects.yaml).",
+      "Create a git worktree for the registered repo the documented way and confirm it exists.",
+      "OR: STOP and report the first documented step that could not be completed, verbatim."
+    ],
+    "affirmative_ready": "agent-worktrees is working (binstub reports a real version after its documented setup) and agent-bridge answers; the repo is registered (projects.yaml names demo-repo); a worktree was created and confirmed by a read verb (agent-worktrees list) -- OR the agent names the exact documented step that blocked it and stops.",
+    "pass_if": "the agent got agent-worktrees working via its DOCUMENTED setup and completed the documented register -> create round-trip (ground-truth confirmed by post_check), OR it stopped and reported a genuine documented gap verbatim without improvising.",
+    "false_pass_if": "the agent hand-edited ~/.agent-worktrees/projects.yaml, ran a raw `git worktree add` instead of the documented agent-worktrees flow, hand-built a venv or copied files into ~/.agent-worktrees OUTSIDE the documented installer, or otherwise fabricated assembled state the suite's docs/installer were supposed to provide. (Running agent-worktrees' OWN documented setup/installer is the expected assembly step, NOT a self-heal.)"
+  },
+  "runs": { "count": 1, "aggregate": "unanimous", "per_turn_timeout_s": 1200, "max_credits": 8 },
+  "post_check": "post_check.sh"
+}
