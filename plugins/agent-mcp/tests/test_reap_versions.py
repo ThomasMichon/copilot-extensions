@@ -91,6 +91,21 @@ def test_reap_matches_current_across_version_normalization(tmp_path, monkeypatch
     assert reaped == []
 
 
+def test_reap_noops_without_current_marker(tmp_path, monkeypatch):
+    # A missing/broken current-version marker must NOT reap every slot (which
+    # would include the live runtime) -- reap nothing when we can't tell.
+    killed: list[int] = []
+    monkeypatch.setattr(rv, "current_version", lambda *a, **k: None)
+    monkeypatch.setattr(rv, "_pids_by_slot",
+                        lambda root: {"0.2.0-dev44": {111}, "0.2.0-dev49": {222}})
+    monkeypatch.setattr(rv, "_terminate_tree",
+                        lambda pid: (killed.append(pid), True)[1])
+
+    reaped = rv.reap_stale(tmp_path)
+    assert killed == [], "no marker -> reap nothing (never risk the live runtime)"
+    assert reaped == []
+
+
 # --- real terminate -------------------------------------------------------
 
 def test_terminate_tree_kills_real_process():

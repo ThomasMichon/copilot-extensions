@@ -77,12 +77,12 @@ def _terminate_tree(pid: int) -> bool:
         return False
     if os.name == "nt":
         try:
-            subprocess.run(
+            proc = subprocess.run(
                 ["taskkill", "/PID", str(pid), "/T", "/F"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 timeout=15, check=False,
             )
-            return True
+            return proc.returncode == 0
         except Exception:
             return False
     import signal
@@ -121,14 +121,20 @@ def reap_stale(root: Path, *, link_name: str = CURRENT_LINK,
 
     The now-current slot, this process, and any ``exclude_pids`` are never
     touched. Returns a list of ``{"version", "pid", "terminated"}`` records.
+
+    If there is no authoritative ``current-version`` marker (``current_version``
+    returns ``None``) we cannot tell which slot is active, so we reap **nothing**
+    rather than risk terminating the live runtime.
     """
     cur = current_version(root, link_name)
-    cur_norm = _norm_version(cur) if cur else None
+    if cur is None:
+        return []
+    cur_norm = _norm_version(cur)
     exclude = set(exclude_pids or ())
     exclude.add(os.getpid())
     reaped: list[dict] = []
     for version, pids in _pids_by_slot(root).items():
-        if cur_norm is not None and _norm_version(version) == cur_norm:
+        if _norm_version(version) == cur_norm:
             continue
         for pid in sorted(pids):
             if pid in exclude:
