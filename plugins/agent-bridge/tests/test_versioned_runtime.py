@@ -237,6 +237,38 @@ def test_versions_with_live_process_maps_exe_to_slot(tmp_path, monkeypatch):
     assert vr._versions_with_live_process(tmp_path) == {"2.0.0"}
 
 
+def test_versions_with_live_process_via_recorded_version(tmp_path, monkeypatch):
+    # Symlink-proof signal: running-version.json records {version, pid}. The
+    # recorded PEP 440 string (1.0.0.dev5) matches the dir name (1.0.0-dev5) via
+    # separator normalization -- no reliance on the interpreter's image path.
+    import json
+    _install(tmp_path, "1.0.0-dev5")
+    _install(tmp_path, "2.0.0-dev5")
+    vr.activate(tmp_path, "2.0.0-dev5")
+    (tmp_path / vr.RUNNING_VERSION_FILE).write_text(
+        json.dumps({"version": "1.0.0.dev5", "pid": os.getpid()}), encoding="utf-8")
+    monkeypatch.setattr(vr, "_iter_all_pids", lambda: [])
+    monkeypatch.setattr(vr, "_pid_image_path", lambda pid: None)
+    monkeypatch.setattr(vr, "_pid_cmdline_argv0", lambda pid: None)
+    assert vr._versions_with_live_process(tmp_path) == {"1.0.0-dev5"}
+
+
+def test_versions_with_live_process_via_argv0_when_exe_symlinked(tmp_path, monkeypatch):
+    # A symlinked venv interpreter: /proc/<pid>/exe resolves to the base
+    # interpreter OUTSIDE the slot, but argv[0] preserves the in-slot launch path
+    # versions/<v>/bin/python. argv[0] must still attribute the slot as in-use.
+    for v in ("1.0.0", "2.0.0"):
+        _install(tmp_path, v)
+    argv0 = str(vr.version_dir(tmp_path, "2.0.0") / "bin" / "python")
+    monkeypatch.setattr(vr, "_iter_all_pids", lambda: [555])
+    monkeypatch.setattr(vr, "_running_pids", lambda root: set())
+    monkeypatch.setattr(vr, "_pid_image_path",
+                        lambda pid: "/usr/bin/python3.12")   # resolves outside
+    monkeypatch.setattr(vr, "_pid_cmdline_argv0",
+                        lambda pid: argv0 if pid == 555 else None)
+    assert vr._versions_with_live_process(tmp_path) == {"2.0.0"}
+
+
 def test_gc_reaps_iff_no_live_process(tmp_path, monkeypatch):
     # The invariant: reap a non-current version iff no active process runs from
     # it -- irrespective of slot age (no time floor by default).

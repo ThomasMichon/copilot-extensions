@@ -426,35 +426,105 @@ def _iter_all_pids() -> list[int]:
         return []
 
 
-def _versions_with_live_process(root: Path) -> set[str]:
-    """Version names a **live process is currently running from** -- i.e. whose
-    executable image resolves under ``<root>/versions/<v>/``.
+def _pid_cmdline_argv0(pid: int) -> str | None:
+    """POSIX argv[0] of a process -- the path it was *launched* by, BEFORE any
+    symlink resolution (e.g. ``versions/<v>/bin/python`` even when that file
+    symlinks a shared base interpreter). ``None`` on Windows / unavailable.
 
-    This is the precise form of "in use": a versioned-venv process's image path
-    is ``versions/<v>/{Scripts,bin}/python(.exe)``, so the version dir is read
-    straight off the image path -- exact and portable, needing no version-string
-    normalization (the recorded version ``0.4.0.dev287`` would otherwise not
-    match the dir ``0.4.0-dev287``). Candidate pids are the machine's live
-    processes plus any pids recorded in ``running-version.json`` (belt-and-
-    suspenders if enumeration is blocked). Best-effort: unresolvable pids are
-    skipped.
+    This is the symlink-robust complement to :func:`_pid_image_path`: a
+    ``python -m venv`` / ``uv venv`` interpreter is often a symlink, so
+    ``/proc/<pid>/exe`` resolves to the base interpreter *outside* the slot,
+    while argv[0] preserves the in-slot launch path.
     """
+    if os.name == "nt":
+        return None
     try:
-        versions_root = (root / VERSIONS_DIR).resolve()
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
     except OSError:
-        versions_root = root / VERSIONS_DIR
-    pids = set(_iter_all_pids()) | _running_pids(root)
-    in_use: set[str] = set()
-    for pid in pids:
-        exe = _pid_image_path(pid)
-        if not exe:
-            continue
-        try:
-            rel = Path(exe).resolve().relative_to(versions_root)
-        except (ValueError, OSError):
-            continue
-        if rel.parts:
-            in_use.add(rel.parts[0])
+        return None
+    if not raw:
+        return None
+    argv0 = raw.split(b"\x00", 1)[0].decode("utf-8", "replace")
+    return argv0 or None
+
+
+def _norm_version(v: str) -> str:
+    """Normalize a version string for matching (the recorded PEP 440 form
+    ``0.4.0.dev287`` vs the dir name ``0.4.0-dev287``)."""
+    return v.replace("-", ".").replace("_", ".")
+
+
+def _slot_of_path(path: str | None, versions_abs: str, versions: set[str]) -> str | None:
+    """The version dir name a path lies under (``<versions>/<v>/...``), or None.
+
+    Compares WITHOUT resolving symlinks (``os.path.abspath``, not
+    ``Path.resolve``) so a symlinked venv interpreter launched by its in-slot
+    path still attributes to its slot.
+    """
+    if not path:
+        return None
+    try:
+        p = os.path.normcase(os.path.abspath(path))
+    except (OSError, ValueError):
+        return None
+    base = os.path.normcase(versions_abs)
+    if not base.endswith(os.sep):
+        base += os.sep
+    if not p.startswith(base):
+        return None
+    first = p[len(base):].split(os.sep, 1)[0]
+    return first if first in versions else None
+
+
+def _recorded_live_versions(root: Path, versions: set[str]) -> set[str]:
+    """Versions explicitly recorded live in ``running-version.json`` -- the
+    symlink-proof signal a daemon writes about itself (``{version, pid}``). The
+    recorded PEP 440 string is matched to the actual dir name via
+    :func:`_norm_version`."""
+    path = root / RUNNING_VERSION_FILE
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return set()
+    by_norm = {_norm_version(v): v for v in versions}
+    entries = data if isinstance(data, list) else [data]
+    out: set[str] = set()
+    for e in entries:
+        if isinstance(e, dict) and isinstance(e.get("pid"), int) and _pid_alive(e["pid"]):
+            rec = e.get("version")
+            if isinstance(rec, str):
+                dirname = by_norm.get(_norm_version(rec))
+                if dirname:
+                    out.add(dirname)
+    return out
+
+
+def _versions_with_live_process(root: Path) -> set[str]:
+    """Version names a **live process is currently running from** -- the precise
+    "in use" set that GC must never reap.
+
+    Three complementary, best-effort signals (a version is in use if ANY fires):
+
+    1. ``running-version.json`` -- the version a daemon explicitly recorded for
+       its live pid (symlink-proof; matched dir<-record via :func:`_norm_version`).
+    2. argv[0] (``/proc/<pid>/cmdline``) resolving under ``versions/<v>/`` -- the
+       un-resolved launch path, correct even when the venv interpreter SYMLINKS a
+       shared base interpreter (``python -m venv`` / ``uv venv`` on Linux), where
+       signal 3 would resolve outside the slot.
+    3. the process image path (``QueryFullProcessImageNameW`` / ``/proc/<pid>/exe``)
+       under ``versions/<v>/`` -- a COPIED venv python (Windows; ``uv --copies``)
+       lands here directly.
+
+    Candidate pids are the machine's live processes plus any recorded pids.
+    """
+    versions_abs = os.path.abspath(str(root / VERSIONS_DIR))
+    versions = set(list_versions(root))
+    in_use: set[str] = _recorded_live_versions(root, versions)
+    for pid in set(_iter_all_pids()) | _running_pids(root):
+        for cand in (_pid_cmdline_argv0(pid), _pid_image_path(pid)):
+            v = _slot_of_path(cand, versions_abs, versions)
+            if v:
+                in_use.add(v)
     return in_use
 
 
