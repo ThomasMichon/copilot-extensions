@@ -41,9 +41,34 @@ host that should run it; a client-only host opts out (`--no-service` /
   *current identity* (`[WindowsIdentity]::GetCurrent().Name`), **not**
   `%USERDOMAIN%\%USERNAME%` — on a non-domain (workgroup) machine `USERDOMAIN` is
   `WORKGROUP`, which is not a resolvable security principal and fails registration.
-- **Re-registration vs. update.** Overwriting an existing task's registration can
-  fail "Access is denied"; the task already references the venv, so a package
-  update alone re-points it. Prefer update over force-re-register.
+- **Register once; refresh in place on update — never re-register.** First-time
+  registration needs elevation; *changing* an existing task's registration can also
+  fail "Access is denied". So register the task **once** with an action that points
+  at a **stable launcher path** which resolves the active slot at run time (via the
+  `current-version` marker — see
+  [`durable-vs-versioned-runtime`](durable-vs-versioned-runtime.md)). The task
+  *definition* then never changes across updates, so an update never needs to
+  re-register. To pick up the new build, an update **restarts the existing task**
+  non-elevated — kill the (possibly detached, see below) daemon, then `Start` the
+  task — or hands off via [`graceful-daemon-cutover`](graceful-daemon-cutover.md)
+  for a daemon holding in-flight work. `Set-ScheduledTask` (an in-place edit of an
+  existing task you own) is non-elevated and fine for a trigger/action tweak; a
+  forced `Register -Force` is only for a principal change (interactive ⇄ S4U).
+- **Guard a legacy-migration stop on the real link path, not the built slot.** If
+  the installer stops the daemon to release a *legacy* runtime dir before the first
+  versioned migration, gate that stop on the **actual link path** (e.g. `.venv`),
+  which is normally absent under the junction-free marker model. Do **not** gate it
+  on the variable that a versioned refactor may have repointed at the
+  freshly-built `versions/<v>` slot — that dir is *always* a real, non-link
+  directory, so such a guard fires on **every** update and force-stops the daemon
+  each time, defeating a non-elevated in-place refresh (agent-dispatch regression,
+  fixed by restoring the real-path guard).
+- **Kill the detached child, not just the task.** On Windows the launcher is run
+  under `conhost.exe --headless`, which **detaches** the pwsh+python from the task's
+  tracked process tree — so `Stop-ScheduledTask` alone does not kill the live
+  daemon. A restart-on-update must terminate the detached `python -m <pkg> …`
+  process by command line before `Start-ScheduledTask`, or the old build survives
+  and the new one stands down on the single-instance lease.
 - **Supervision ≠ binding.** The supervisor keeps the process *alive*; it does not
   make a contended endpoint bind. Endpoint contention is the endpoint pattern's
   job — a service that flaps "up then exits" is usually an endpoint problem, not a
