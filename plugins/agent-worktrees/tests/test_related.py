@@ -898,6 +898,80 @@ def test_no_plugins_emits_nothing(tmp_path: Path):
     assert "plugins" not in text
 
 
+# ---------------------------------------------------------------------------
+# Per-entry ``pr:`` block (control-plane-driven foreign-repo PR workflow)
+# ---------------------------------------------------------------------------
+
+def test_pr_roundtrip(tmp_path: Path):
+    cfg = RelatedConfig(related={
+        "spark-transpile": RelatedEntry(
+            name="spark-transpile",
+            role="tooling",
+            pr={
+                "enabled": True,
+                "required": True,
+                "provider": "azure-devops",
+                "api_base": "https://your-org.visualstudio.com",
+                "approval_required": True,
+                "squash": True,
+                "delete_source_branch": True,
+            },
+        ),
+    })
+    related.write_related(tmp_path, cfg)
+    got = related.read_related(tmp_path).related["spark-transpile"]
+    assert got.pr == {
+        "enabled": True,
+        "required": True,
+        "provider": "azure-devops",
+        "api_base": "https://your-org.visualstudio.com",
+        "approval_required": True,
+        "squash": True,
+        "delete_source_branch": True,
+    }
+
+
+def test_pr_parse_nonmapping_is_empty(tmp_path: Path):
+    (tmp_path / ".agent-worktrees").mkdir()
+    related.related_path(tmp_path).write_text(
+        "related:\n"
+        "  x:\n"
+        "    pr: not-a-mapping\n"
+        "  y:\n"
+        "    role: tooling\n",           # no pr at all
+        encoding="utf-8",
+    )
+    rc = related.read_related(tmp_path)
+    assert rc.related["x"].pr == {}
+    assert rc.related["y"].pr == {}
+
+
+def test_pr_emitted_yaml_is_valid_with_native_bools(tmp_path: Path):
+    cfg = RelatedConfig(related={
+        "x": RelatedEntry(name="x", pr={
+            "enabled": True,
+            "provider": "azure-devops",
+            "api_base": "https://your-org.visualstudio.com",
+            "approval_required": False,
+        }),
+    })
+    related.write_related(tmp_path, cfg)
+    data = yaml.safe_load(related.related_path(tmp_path).read_text(encoding="utf-8"))
+    assert data["related"]["x"]["pr"] == {
+        "enabled": True,                      # a real bool, not the string "True"
+        "provider": "azure-devops",
+        "api_base": "https://your-org.visualstudio.com",
+        "approval_required": False,
+    }
+
+
+def test_no_pr_emits_nothing(tmp_path: Path):
+    cfg = RelatedConfig(related={"x": RelatedEntry(name="x", role="tooling")})
+    related.write_related(tmp_path, cfg)
+    data = yaml.safe_load(related.related_path(tmp_path).read_text(encoding="utf-8"))
+    assert "pr" not in data["related"]["x"]
+
+
 # ── control-plane fallback (resolve/show/doc from a non-control-plane cwd) ────
 
 def _cp_paths(p):
