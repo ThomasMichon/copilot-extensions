@@ -1832,17 +1832,23 @@ if (`$extra) { `$argsList += (`$extra -split '\s+') }
 }
 # Resolve the .venv junction's target and launch the slot python DIRECTLY (never
 # traverse the junction; reading its target is allowed) -- RedirectionGuard #637.
-# Resolved up front so the version (`$_slot leaf) is available for the log fallback.
 `$_venv = '$($LinkDir -replace "'","''")'
-`$_py = '$($LinkPython -replace "'","''")'
-`$_slot = ''
 `$_root = Split-Path `$_venv
 if ((Split-Path -Leaf `$_root) -eq 'versions') { `$_root = Split-Path `$_root }
-`$_ver = ''
-try { `$_ver = ([IO.File]::ReadAllText((Join-Path `$_root 'current-version'))).Trim() } catch {}
-`$_slot = if (`$_ver) { Join-Path `$_root ('versions\' + `$_ver) } else { '' }
-`$_py = if (`$_slot) { Join-Path `$_slot 'Scripts\python.exe' } else { '' }
-if (-not (`$_py -and (Test-Path -LiteralPath `$_py))) { `$_py = Get-ChildItem (Join-Path `$_root 'versions') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Join-Path `$_.FullName 'Scripts\python.exe' } | Where-Object { Test-Path -LiteralPath `$_ } | Select-Object -Last 1; `$_slot = if (`$_py) { Split-Path (Split-Path `$_py) } else { '' } }
+function Resolve-SlotPython([string]`$root) {
+    # Re-read the current-version marker on EACH call so a live .venv slot swap
+    # (a non-elevated update) is picked up on the next restart-loop iteration.
+    # #637: read the marker text, never traverse the junction. Falls back to the
+    # newest built slot when the marker is missing/stale.
+    `$ver = ''
+    try { `$ver = ([IO.File]::ReadAllText((Join-Path `$root 'current-version'))).Trim() } catch {}
+    `$slot = if (`$ver) { Join-Path `$root ('versions\' + `$ver) } else { '' }
+    `$py = if (`$slot) { Join-Path `$slot 'Scripts\python.exe' } else { '' }
+    if (-not (`$py -and (Test-Path -LiteralPath `$py))) {
+        `$py = Get-ChildItem (Join-Path `$root 'versions') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Join-Path `$_.FullName 'Scripts\python.exe' } | Where-Object { Test-Path -LiteralPath `$_ } | Select-Object -Last 1
+    }
+    return `$py
+}
 # A busy/locked log must NEVER block the supervisor launch -- prefer the canonical
 # supervise-service.log, else a VERSION- and pid-aware fallback (see serve-service).
 function Resolve-WritableLog([string]`$primary, [string]`$slot) {
@@ -1853,23 +1859,54 @@ function Resolve-WritableLog([string]`$primary, [string]`$slot) {
     }
     return `$alt
 }
-`$logFile = Resolve-WritableLog (Join-Path `$PSScriptRoot 'supervise-service.log') `$_slot
-try {
-    if ((Test-Path `$logFile) -and ((Get-Item `$logFile).Length -gt 1MB)) {
-        Move-Item -Force `$logFile "`$logFile.1"
-    }
-} catch { }
-try {
-    "[`$(Get-Date -Format o)] agent-dispatch supervisor launch (env=`$envFile labels=`$labels interval=`$interval log=`$logFile)" |
-        Out-File -FilePath `$logFile -Append -Encoding utf8
-} catch { }
+# Restart-loop (live-update): run the daemon through the CURRENT slot. On the
+# distinguished reload exit code (75 = RELOAD_EXIT_CODE) the daemon noticed its
+# slot was swapped by a non-elevated update and asked to be restarted onto the
+# new build -- re-resolve the slot python and re-run, in place, no re-register, no
+# elevation, no reboot. Any other exit (clean stop, single-instance stand-down,
+# crash) breaks the loop so the scheduled task's own restart policy governs. This
+# pwsh (the conhost-launched task action) owns the python child DIRECTLY -- no
+# detached grandchild (#3602) -- so the task keeps tracking the live process
+# across a reload.
 `$ErrorActionPreference = 'Continue'
-try {
-    & `$_py -m agent_dispatch @argsList 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
-} catch {
-    # Teeing to the log failed -- keep the supervisor alive without the tee.
-    & `$_py -m agent_dispatch @argsList *> `$null
+`$_reloadCode = 75
+`$_rc = 0
+while (`$true) {
+    `$_py = Resolve-SlotPython `$_root
+    `$_slot = if (`$_py) { Split-Path (Split-Path `$_py) } else { '' }
+    `$logFile = Resolve-WritableLog (Join-Path `$PSScriptRoot 'supervise-service.log') `$_slot
+    try {
+        if ((Test-Path `$logFile) -and ((Get-Item `$logFile).Length -gt 1MB)) {
+            Move-Item -Force `$logFile "`$logFile.1"
+        }
+    } catch { }
+    try {
+        "[`$(Get-Date -Format o)] agent-dispatch supervisor launch (env=`$envFile labels=`$labels interval=`$interval py=`$_py log=`$logFile)" |
+            Out-File -FilePath `$logFile -Append -Encoding utf8
+    } catch { }
+    if (-not (`$_py -and (Test-Path -LiteralPath `$_py))) {
+        # No runnable slot yet (mid-swap) -- pause briefly and retry rather than
+        # exiting the launcher (which would surrender to the task restart timer).
+        Start-Sleep -Seconds 2
+        continue
+    }
+    try {
+        & `$_py -m agent_dispatch @argsList 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
+    } catch {
+        # Teeing to the log failed -- keep the supervisor alive without the tee.
+        & `$_py -m agent_dispatch @argsList *> `$null
+    }
+    `$_rc = `$LASTEXITCODE
+    if (`$_rc -eq `$_reloadCode) {
+        try {
+            "[`$(Get-Date -Format o)] supervisor reload-exit (code `$_rc) -- restarting on the newly-activated slot" |
+                Out-File -FilePath `$logFile -Append -Encoding utf8
+        } catch { }
+        continue
+    }
+    break
 }
+exit `$_rc
 "@
     [System.IO.File]::WriteAllText($launcher, $launcherBody, $utf8NoBom)
     return $launcher

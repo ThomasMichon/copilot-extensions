@@ -1822,6 +1822,8 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
         declared_source = registrar_discovery.read_legacy_env_profiles
 
     with _client(args) as c:
+        from .runtime_version import read_active_version
+
         daemon = SupervisorDaemon(
             c, machine, env, poll_interval=getattr(args, "interval", 5.0),
             declared_source=declared_source,
@@ -1829,6 +1831,11 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
             # connection failure -- the coordinator's ephemeral port moves on
             # restart, so a cached one would wedge the daemon (#3825).
             client_factory=lambda: _client(args, ensure=False),
+            # Live-update watch: a non-elevated `update` swaps the active slot
+            # (rewrites current-version) without re-registering this scheduled
+            # task. On divergence the daemon reload-exits (RELOAD_EXIT_CODE) and
+            # its launcher restarts it on the new build -- no elevation, no reboot.
+            active_version_source=read_active_version,
         )
 
         def _on_cycle(summary) -> None:
