@@ -29,6 +29,7 @@ lone dev box or against a designated coordinator host on a shared network:
 from __future__ import annotations
 
 import os
+import socket
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -212,18 +213,48 @@ def _discover_local_endpoint():
         return None
 
 
+def _url_listening(base_url: str, *, timeout: float = 0.25) -> bool:
+    """True if a TCP listener accepts a connection at ``base_url``'s host:port.
+
+    The zdd routing table deliberately returns a **mid-startup** coordinator's
+    endpoint (``read_active_endpoint`` keeps a live-pid/no-listener-yet entry so a
+    racing client addresses the NEW generation, not the old). That is correct for
+    *addressing* (``client_url``) but not for *liveness*: a client that treats the
+    routed endpoint as reachable would connect before the socket is accepting and
+    get ``Connection refused``. So liveness must probe the actual socket.
+    """
+    from urllib.parse import urlparse
+
+    try:
+        parsed = urlparse(base_url)
+        host, port = parsed.hostname, parsed.port
+    except (ValueError, TypeError):
+        return False
+    if not host or not port:
+        return False
+    try:
+        with socket.create_connection((host, port), timeout):
+            return True
+    except OSError:
+        return False
+
+
 def has_live_local_coordinator() -> bool:
     """True if a local coordinator is discoverable **and** answering its probe.
 
     Consults the zdd routing table first (authoritative on the host; it self-heals
-    a dead ``active`` to ``previous`` and verifies a live listener), then the
-    legacy discovery ladder (``AGENT_DISPATCH_ENDPOINT`` -> the rendezvous file,
-    probed for a live listener). The CLI's lazy-start uses this to decide whether
-    it must spawn a local coordinator before a client command runs -- so honoring
-    the routing table here prevents a spurious second coordinator during/after a
-    graceful cutover (when the rendezvous file may momentarily lag the flip).
+    a dead ``active`` to ``previous``), then the legacy discovery ladder
+    (``AGENT_DISPATCH_ENDPOINT`` -> the rendezvous file, probed for a live
+    listener). The CLI's lazy-start uses this to decide whether a coordinator is
+    up before a client command runs, so it must mean **actually reachable**: the
+    routing table alone returns a mid-startup (live-pid, not-yet-listening)
+    endpoint, so the routed URL is additionally socket-probed here -- otherwise
+    lazy-start would stop waiting the instant a just-spawned coordinator wrote its
+    routing entry and the very next client call would race the bind and get
+    ``Connection refused``.
     """
-    if _routing_url() is not None:
+    routed = _routing_url()
+    if routed is not None and _url_listening(routed):
         return True
     return _discover_local_endpoint() is not None
 

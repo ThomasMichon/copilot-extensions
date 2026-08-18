@@ -116,6 +116,23 @@ def test_client_url_no_file_falls_back_to_fixed(monkeypatch):
     assert client_url() == load_config().url
 
 
+def test_has_live_false_when_routed_endpoint_not_listening(monkeypatch):
+    # The zdd routing table returns a mid-startup coordinator's URL (live pid, not
+    # yet accepting connections). has_live must NOT report live off the routing
+    # table alone -- otherwise lazy-start stops waiting and the next client call
+    # races the socket bind and gets Connection refused.
+    monkeypatch.setattr(config_mod, "_routing_url", lambda: "http://127.0.0.1:59999")
+    monkeypatch.setattr(config_mod, "_url_listening", lambda url, **k: False)
+    monkeypatch.setattr(config_mod, "_discover_local_endpoint", lambda: None)
+    assert config_mod.has_live_local_coordinator() is False
+
+
+def test_has_live_true_when_routed_endpoint_listening(monkeypatch):
+    monkeypatch.setattr(config_mod, "_routing_url", lambda: "http://127.0.0.1:59999")
+    monkeypatch.setattr(config_mod, "_url_listening", lambda url, **k: True)
+    assert config_mod.has_live_local_coordinator() is True
+
+
 def test_client_url_wsl_uses_discovered_port(monkeypatch):
     monkeypatch.delenv("AGENT_DISPATCH_URL", raising=False)
     monkeypatch.setattr("agent_dispatch.netinfo.is_wsl", lambda: True)
