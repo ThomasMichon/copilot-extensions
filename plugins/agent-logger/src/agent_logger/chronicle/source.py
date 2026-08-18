@@ -41,6 +41,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 
+from agent_logger import sessions
 from agent_logger.segmenter.collate import read_workspace
 from agent_logger.sync.origin import read_origin_sidecar
 
@@ -107,6 +108,12 @@ class DiscoveredSession:
     #: ``repository`` during the pre-backfill transition) from "recorded
     #: machine-only origin" (authoritatively route by the machine default).
     origin_recorded: bool = False
+    #: ``True`` when this session was discovered as a compressed archive
+    #: (``<machine>/archived/<id>.tar.gz``) rather than a live
+    #: ``session-state/<id>/`` directory. ``session_path`` then points at the
+    #: archive; a content consumer (the writer) must materialize it. Metadata
+    #: here was read from the uncompressed selector sidecars, no decompress.
+    archived: bool = False
     #: The continuation-segment identity this unit will log. Single-segment
     #: sessions use index 0; a source that splits continuation sessions sets
     #: one DiscoveredSession per reserved segment.
@@ -365,15 +372,58 @@ class SyncedSessionSource(SessionSource):
         out: list[DiscoveredSession] = []
         for machine_dir in sorted(self.corpus_root.iterdir()):
             ss = machine_dir / "session-state"
-            if not ss.is_dir():
-                continue
-            for session_dir in sorted(ss.iterdir()):
-                if not session_dir.is_dir():
-                    continue
-                discovered = self._discover(machine_dir.name, session_dir, now=now)
-                if discovered is not None:
-                    out.append(discovered)
+            if ss.is_dir():
+                for session_dir in sorted(ss.iterdir()):
+                    if not session_dir.is_dir():
+                        continue
+                    discovered = self._discover(machine_dir.name, session_dir, now=now)
+                    if discovered is not None:
+                        out.append(discovered)
+            # Cold sessions compacted into the sibling ``archived/`` tree. A live
+            # dir of the same id shadows an archive (a compaction/reconcile
+            # race), so ``iter_session_refs`` yields only the un-shadowed
+            # archives here.
+            archived_store = machine_dir / "archived"
+            if archived_store.is_dir():
+                for ref in sessions.iter_session_refs(ss, archived_store):
+                    if ref.kind != "archive":
+                        continue
+                    discovered = self._discover_archived(
+                        machine_dir.name, ref, now=now
+                    )
+                    if discovered is not None:
+                        out.append(discovered)
         return out
+
+    def _discover_archived(
+        self, machine: str, ref: sessions.SessionRef, *, now: datetime | None
+    ) -> DiscoveredSession | None:
+        seg = SegmentRef(ref.id, 0)
+        # I4: never re-file a journaled unit -- keyed on the same SegmentRef the
+        # session had while live, so archiving never re-chronicles it.
+        if self.is_journaled(seg):
+            return None
+        # An archive is immutable and cold (>= the compaction age threshold), so
+        # the file-mtime settle gate -- which exists to skip a mid-sync *live*
+        # dir -- does not apply. Archives are inherently settled.
+        ws = sessions.read_workspace(ref)
+        has_origin = sessions.member_exists(ref, "origin.json")
+        origin = sessions.read_origin(ref) if has_origin else {}
+        source_repo = origin.get("source_repo") if origin else None
+        return DiscoveredSession(
+            session_id=ref.id,
+            machine=machine,
+            session_path=ref.path,  # the <id>.tar.gz; the writer materializes it
+            repository=(ws.get("repository") or None),
+            branch=(ws.get("branch") or None),
+            summary=(ws.get("summary") or None),
+            created_at=(ws.get("created_at") or None),
+            updated_at=(ws.get("updated_at") or None),
+            source_repo=(source_repo or None),
+            origin_recorded=has_origin,
+            archived=True,
+            ref=seg,
+        )
 
     def _discover(
         self, machine: str, session_dir: Path, *, now: datetime | None
