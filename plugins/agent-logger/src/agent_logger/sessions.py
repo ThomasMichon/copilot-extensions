@@ -395,7 +395,13 @@ def materialize_path(ref: SessionRef) -> Path:
     if ref.kind == "live":
         return ref.path
     tmp = Path(tempfile.mkdtemp(prefix=f"agentlog-{ref.id}-"))
-    _codec_for_archive(ref.path).extract_all(ref.path, tmp)
+    try:
+        _codec_for_archive(ref.path).extract_all(ref.path, tmp)
+    except Exception:
+        # Never leak the temp dir if extraction fails (corrupt archive, unknown
+        # codec, path-traversal guard) -- it was created before this point.
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
     _MATERIALIZED_TEMPS.append(str(tmp))
     return tmp
 

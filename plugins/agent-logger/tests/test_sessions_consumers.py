@@ -38,6 +38,32 @@ def test_materialize_path_archive_extracts(tmp_path: Path) -> None:
     assert str(d) in sessions._MATERIALIZED_TEMPS
 
 
+def test_materialize_path_cleans_temp_on_extraction_failure(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # An archive whose filename matches no codec raises after mkdtemp -- the
+    # temp dir must not leak, and nothing is registered for cleanup.
+    bogus = tmp_path / "s1.bogus"
+    bogus.write_bytes(b"x")
+    ref = SessionRef(id="s1", kind="archive", path=bogus, store=tmp_path)
+
+    created: list[str] = []
+    real_mkdtemp = sessions.tempfile.mkdtemp
+
+    def _spy(*a, **k):
+        d = real_mkdtemp(*a, **k)
+        created.append(d)
+        return d
+
+    monkeypatch.setattr(sessions.tempfile, "mkdtemp", _spy)
+    before = list(sessions._MATERIALIZED_TEMPS)
+    with pytest.raises(ValueError, match="no codec for archive"):
+        materialize_path(ref)
+    assert created, "mkdtemp should have been called"
+    assert not Path(created[0]).exists()  # cleaned up, no leak
+    assert sessions._MATERIALIZED_TEMPS == before
+
+
 def test_collate_resolve_session_dir_finds_archive(tmp_path: Path, monkeypatch) -> None:
     from agent_logger.segmenter import collate
 

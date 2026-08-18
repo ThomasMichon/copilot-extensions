@@ -104,6 +104,21 @@ def test_unclassified_when_no_cwd_and_require_inactive(tmp_path: Path, monkeypat
     assert result.skipped_unclassified == 1
 
 
+def test_no_timestamp_counted_unclassified_not_recent(tmp_path: Path, monkeypatch) -> None:
+    src = tmp_path / "copilot"
+    d = src / "session-state" / "no_ts"
+    d.mkdir(parents=True)
+    (d / "events.jsonl").write_text("{}\n", encoding="utf-8")
+    # workspace.yaml with a cwd but no updated_at/created_at -> age unknown
+    (d / "workspace.yaml").write_text("id: no_ts\ncwd: C:/repo/gone\n", encoding="utf-8")
+    monkeypatch.setattr(compact_mod, "tracked_worktree_paths", lambda: None)
+
+    selected, result = select_compactable(_cfg(tmp_path), now=NOW)
+    assert selected == []
+    assert result.skipped_unclassified == 1
+    assert result.skipped_recent == 0
+
+
 # --- full run -------------------------------------------------------------
 
 def test_run_compact_archives_and_reclaims(tmp_path: Path, monkeypatch) -> None:

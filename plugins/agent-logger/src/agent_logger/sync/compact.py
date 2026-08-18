@@ -192,7 +192,11 @@ def select_compactable(
         ws = sessions.read_workspace(ref)
 
         age = session_age_days(ref, ws, now)
-        if age is None or age < min_age:
+        if age is None:
+            # No usable workspace.yaml timestamp -> cannot classify age.
+            result.skipped_unclassified += 1
+            continue
+        if age < min_age:
             result.skipped_recent += 1
             continue
 
