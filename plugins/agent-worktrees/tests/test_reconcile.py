@@ -156,6 +156,34 @@ def test_no_settings_returns_empty(env):
 
 
 # ---------------------------------------------------------------------------
+# read_user_enabled_plugins (#653)
+# ---------------------------------------------------------------------------
+
+def test_read_user_enabled_filters_and_local_override(tmp_path, monkeypatch):
+    home = tmp_path / "copilot-home"
+    home.mkdir()
+    monkeypatch.setattr(reconcile, "_copilot_home", lambda: home)
+    (home / "settings.json").write_text(json.dumps({"enabledPlugins": {
+        f"efforts@{MKT}": True,
+        f"visions@{MKT}": True,
+        f"agent-worktrees@{MKT}": True,      # self -> excluded
+        f"context-handoff@{MKT}": False,     # disabled -> excluded
+        "other@some-marketplace": True,      # foreign marketplace -> excluded
+        "bare-name": True,                   # no marketplace -> excluded
+    }}), encoding="utf-8")
+    # settings.local.json overrides base within the convention (disables visions).
+    (home / "settings.local.json").write_text(json.dumps({"enabledPlugins": {
+        f"visions@{MKT}": False,
+    }}), encoding="utf-8")
+    assert reconcile.read_user_enabled_plugins() == ["efforts"]
+
+
+def test_read_user_enabled_no_file_returns_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr(reconcile, "_copilot_home", lambda: tmp_path / "absent")
+    assert reconcile.read_user_enabled_plugins() == []
+
+
+# ---------------------------------------------------------------------------
 # Payload presence
 # ---------------------------------------------------------------------------
 

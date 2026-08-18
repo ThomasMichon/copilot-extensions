@@ -199,6 +199,23 @@ def _version_lt(a: str | None, b: str | None) -> bool:
 # Repo settings -> enabled copilot-extensions plugins
 # --------------------------------------------------------------------------
 
+def _ce_plugin_names(enabled: dict[str, bool]) -> set[str]:
+    """copilot-extensions plugin names from an ``enabledPlugins`` map.
+
+    Keeps truthy ``"<name>@<marketplace>"`` specs whose marketplace is this
+    one, excluding ``agent-worktrees`` itself (managed by the self-update path).
+    """
+    names: set[str] = set()
+    for spec, val in enabled.items():
+        if not val or "@" not in spec:
+            continue
+        name, _, mkt = spec.partition("@")
+        if mkt != MARKETPLACE or name == SELF_PLUGIN:
+            continue
+        names.add(name)
+    return names
+
+
 def read_enabled_plugins(repo_dir: Path) -> list[str]:
     """Return copilot-extensions plugin names enabled in repo settings.
 
@@ -211,17 +228,39 @@ def read_enabled_plugins(repo_dir: Path) -> list[str]:
     """
     from plugin_resolve import read_repo_settings
 
-    enabled = read_repo_settings(repo_dir).enabled
+    return sorted(_ce_plugin_names(read_repo_settings(repo_dir).enabled))
 
-    names: set[str] = set()
-    for spec, val in enabled.items():
-        if not val or "@" not in spec:
+
+def read_user_enabled_plugins() -> list[str]:
+    """Return copilot-extensions plugin names enabled in the USER-GLOBAL settings.
+
+    The user-global enabled set -- ``<copilot-home>/settings.json`` (+ a
+    ``settings.local.json`` override) ``enabledPlugins`` -- is the set that
+    ``copilot plugin list`` reflects. It is **not** covered by
+    :func:`read_enabled_plugins` (which reads a *repo's*
+    ``.github/copilot/settings.json``), so a plugin enabled **only** user-global
+    would otherwise never be refreshed by ``update`` and would silently go stale
+    (#653). Same marketplace filter + ``agent-worktrees`` self-exclusion.
+    Fail-safe -> ``[]``.
+    """
+    home = _copilot_home()
+    enabled: dict[str, bool] = {}
+    for fname in ("settings.json", "settings.local.json"):  # local overrides base
+        p = home / fname
+        try:
+            if not p.is_file():
+                continue
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
             continue
-        name, _, mkt = spec.partition("@")
-        if mkt != MARKETPLACE or name == SELF_PLUGIN:
+        if not isinstance(data, dict):
             continue
-        names.add(name)
-    return sorted(names)
+        en = data.get("enabledPlugins")
+        if isinstance(en, dict):
+            for k, v in en.items():
+                if isinstance(k, str):
+                    enabled[k] = bool(v)
+    return sorted(_ce_plugin_names(enabled))
 
 
 # --------------------------------------------------------------------------
