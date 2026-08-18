@@ -26,11 +26,13 @@ from pathlib import Path
 
 from agent_logger import sessions
 from agent_logger.config import Config
+from agent_logger.segmenter.platform import detect_machine
 from agent_logger.sessions import SessionRef
 
 # Reuse the sync-lock so compaction never races the scheduled push (both touch
 # ``~/.copilot/session-state``).
 from agent_logger.sync.lock import sync_lock
+from agent_logger.sync.origin import classify_for_sync, effective_harness
 
 # On Windows, shelling out from a windowless parent (pythonw under a Scheduled
 # Task) flashes a console; suppress it. No-op on POSIX.
@@ -50,6 +52,7 @@ class CompactResult:
     reclaimed_bytes: int = 0
     skipped_recent: int = 0
     skipped_tracked: int = 0
+    skipped_out_of_scope: int = 0
     skipped_unclassified: int = 0
     failed: list[str] = field(default_factory=list)
 
@@ -171,9 +174,17 @@ def select_compactable(
     ``require_untracked_worktree``) not belonging to a tracked worktree -- i.e.
     a worktree the picker renders. Since the picker only renders tracked
     worktrees and we only archive non-tracked ones, the two sets never overlap,
-    so an archived session is never one the picker needs. Sessions that cannot
-    be classified (no timestamp, or an undecidable worktree state under
-    fail-closed) are skipped, never compacted.
+    so an archived session is never one the picker needs.
+
+    The selection also honors the **sync repo scope** (``repo_allowlist`` /
+    ``repo_denylist``): only sessions that sync itself would publish are
+    compacted. This is a hard requirement, not a nicety -- the archive store is
+    pushed to the hub wholesale by ``push_archives`` (Pair B), so compacting an
+    out-of-scope session would leak it to the hub past the allowlist that
+    excludes it from the uncompressed push.
+
+    Sessions that cannot be classified (no timestamp, or an undecidable worktree
+    state under fail-closed) are skipped, never compacted.
     """
     now = now or datetime.now(timezone.utc)
     opts = cfg.sync_compact
@@ -183,12 +194,22 @@ def select_compactable(
 
     tracked_paths = tracked_worktree_paths() if require_untracked else None
 
+    # Same repo-scope gate as run_sync: None => no filter (sync everything).
+    allowlist = cfg.sync_repo_allowlist
+    denylist = cfg.sync_repo_denylist
+    in_scope = _in_scope_ids(cfg, state_root, allowlist, denylist)
+
     result = CompactResult()
     selected: list[SessionRef] = []
     for ref in sessions.iter_session_refs(state_root):
         if ref.kind != "live":
             continue
         result.scanned += 1
+
+        if in_scope is not None and ref.id not in in_scope:
+            result.skipped_out_of_scope += 1
+            continue
+
         ws = sessions.read_workspace(ref)
 
         age = session_age_days(ref, ws, now)
@@ -211,6 +232,34 @@ def select_compactable(
 
         selected.append(ref)
     return selected, result
+
+
+def _in_scope_ids(
+    cfg: Config, state_root: Path, allowlist: list[str], denylist: list[str]
+) -> set[str] | None:
+    """Session ids the sync repo policy would publish, or ``None`` for "all".
+
+    Mirrors ``engine._included_sessions`` so compaction never archives a session
+    that sync would not publish (which Pair B would then leak to the hub).
+    """
+    if not allowlist and not denylist:
+        return None
+    if not state_root.is_dir():
+        return set()
+    machine = cfg.machine_name or detect_machine()
+    effective = effective_harness(allowlist, cfg.sync_harness_repos, denylist)
+    fail_closed = cfg.sync_repo_allowlist_fail_closed
+    included: set[str] = set()
+    for d in state_root.iterdir():
+        if not d.is_dir():
+            continue
+        include, _ = classify_for_sync(
+            d, machine, allowlist, effective, fail_closed=fail_closed,
+            denylist=denylist,
+        )
+        if include:
+            included.add(d.name)
+    return included
 
 
 def compact_session(
@@ -253,6 +302,7 @@ def run_compact(
         print(
             f"compact: {len(selected)} eligible; skipped "
             f"{result.skipped_recent} recent, {result.skipped_tracked} tracked, "
+            f"{result.skipped_out_of_scope} out-of-scope, "
             f"{result.skipped_unclassified} unclassified"
         )
 

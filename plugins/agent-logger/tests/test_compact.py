@@ -31,15 +31,16 @@ def _cfg(tmp_path: Path, **compact_opts) -> Config:
 
 
 def _session(
-    src: Path, sid: str, *, updated: datetime, cwd: str = "C:/repo/wt"
+    src: Path, sid: str, *, updated: datetime, cwd: str = "C:/repo/wt",
+    repository: str | None = None,
 ) -> Path:
     d = src / "session-state" / sid
     d.mkdir(parents=True)
     (d / "events.jsonl").write_text('{"type":"session.start"}\n' * 50, encoding="utf-8")
-    (d / "workspace.yaml").write_text(
-        f"id: {sid}\ncwd: {cwd}\nupdated_at: {updated.isoformat()}\n",
-        encoding="utf-8",
-    )
+    ws = f"id: {sid}\ncwd: {cwd}\nupdated_at: {updated.isoformat()}\n"
+    if repository is not None:
+        ws += f"repository: {repository}\n"
+    (d / "workspace.yaml").write_text(ws, encoding="utf-8")
     (d / "origin.json").write_text(json.dumps({"machine": "box"}), encoding="utf-8")
     return d
 
@@ -117,6 +118,29 @@ def test_no_timestamp_counted_unclassified_not_recent(tmp_path: Path, monkeypatc
     assert selected == []
     assert result.skipped_unclassified == 1
     assert result.skipped_recent == 0
+
+
+def test_respects_repo_allowlist(tmp_path: Path, monkeypatch) -> None:
+    # With an allowlist, an out-of-scope session must not be compacted -- Pair B
+    # pushes the archive store wholesale, so this is a hard leak guard.
+    src = tmp_path / "copilot"
+    _session(src, "in", updated=NOW - timedelta(days=40), cwd="C:/repo/gone",
+             repository="tmichon_microsoft/dotfiles")
+    _session(src, "out", updated=NOW - timedelta(days=40), cwd="C:/repo/gone",
+             repository="github/copilot-agent-runtime")
+    monkeypatch.setattr(compact_mod, "tracked_worktree_paths", lambda: None)
+
+    home = tmp_path / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    cfg = Config({"sync": {
+        "source": str(src),
+        "repo_allowlist": ["dotfiles"],
+        "compact": {"enabled": True},
+    }}, home)
+
+    selected, result = select_compactable(cfg, now=NOW)
+    assert {r.id for r in selected} == {"in"}
+    assert result.skipped_out_of_scope == 1
 
 
 # --- full run -------------------------------------------------------------
