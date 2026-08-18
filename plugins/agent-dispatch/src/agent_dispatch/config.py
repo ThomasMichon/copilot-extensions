@@ -45,6 +45,28 @@ DEFAULT_SWEEP_INTERVAL = 60.0
 RUN_DIR_ENV = "AGENT_DISPATCH_RUN_DIR"
 ENDPOINT_ENV = "AGENT_DISPATCH_ENDPOINT"
 OVERRIDES_ENV = "AGENT_DISPATCH_OVERRIDES"
+# Opt-in: keep a WSL guest a *client* of the Windows host's coordinator (the
+# pre-per-environment behavior). Default (unset) means a WSL guest runs and
+# resolves its OWN coordinator, coexisting with the Windows one via dynamic ports.
+WSL_WINDOWS_CLIENT_ENV = "AGENT_DISPATCH_WSL_WINDOWS_CLIENT"
+
+
+def wsl_windows_client() -> bool:
+    """True when a WSL guest is explicitly opted in to remain a *client* of the
+    Windows host's coordinator (via ``AGENT_DISPATCH_WSL_WINDOWS_CLIENT``).
+
+    Per-execution-environment ownership makes each environment run its own
+    coordinator: a WSL guest, by default, owns and resolves its **own**
+    coordinator (on an OS-assigned dynamic port), coexisting with the Windows
+    host's. A box that deliberately wants the old cross-mount client behavior
+    sets this opt-in.
+    """
+    return os.environ.get(WSL_WINDOWS_CLIENT_ENV, "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def run_dir() -> Path:
@@ -265,14 +287,16 @@ def client_url() -> str:
     Resolution order:
 
     1. ``AGENT_DISPATCH_URL`` -- explicit operator override.
-    2. On a **WSL guest**, resolve the Windows-owned coordinator dynamically
-       (probe ``127.0.0.1`` for mirrored, then the default gateway for NAT;
-       cached best-effort), taking the **port from the rendezvous file** (the
-       Windows-side ``endpoint.json``) when present, else the fixed default. A WSL
-       guest depends on the Windows host, which owns the coordinator.
-    3. Otherwise (standalone Linux, or the Windows host itself), the **discovered**
-       local endpoint (``AGENT_DISPATCH_ENDPOINT`` -> rendezvous file), falling
-       back to the fixed ``http://127.0.0.1:9847``.
+    2. On a **WSL guest opted in** to Windows-client mode
+       (``AGENT_DISPATCH_WSL_WINDOWS_CLIENT``), resolve the Windows-owned
+       coordinator dynamically (probe ``127.0.0.1`` for mirrored, then the
+       default gateway for NAT; cached best-effort), taking the **port from the
+       rendezvous file** (the Windows-side ``endpoint.json``) when present, else
+       the fixed default.
+    3. Otherwise -- standalone Linux, the Windows host, **or (by default) a WSL
+       guest**, each owning its own per-environment coordinator -- the
+       **discovered** local endpoint (zdd routing table -> ``AGENT_DISPATCH_ENDPOINT``
+       -> rendezvous file), falling back to the fixed ``http://127.0.0.1:9847``.
     """
     override = os.environ.get("AGENT_DISPATCH_URL")
     if override:
@@ -281,12 +305,17 @@ def client_url() -> str:
     try:
         from .netinfo import is_wsl, resolve_wsl_client_url
 
-        if is_wsl():
+        if is_wsl() and wsl_windows_client():
+            # Opt-in only: this WSL guest is a client of the Windows-owned
+            # coordinator (legacy cross-mount discovery). By default a WSL guest
+            # falls through and resolves its OWN local coordinator, exactly like a
+            # standalone Linux host or the Windows host itself.
             return resolve_wsl_client_url(_discovered_wsl_port(cfg.port))
-        # On the coordinator host, the zdd routing table is the authority: a
-        # graceful cutover flips it to the new coordinator generation, so clients
-        # follow the live port without a restart. Fall back to the rendezvous file
-        # (legacy discovery) when no routing table is published yet.
+        # Standalone Linux, the Windows host, AND (by default) a WSL guest: the
+        # zdd routing table is the authority -- a graceful cutover flips it to the
+        # new coordinator generation, so clients follow the live port without a
+        # restart. Fall back to the rendezvous file (legacy discovery) when no
+        # routing table is published yet.
         routed = _routing_url()
         if routed:
             return routed

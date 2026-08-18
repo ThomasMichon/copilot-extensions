@@ -160,17 +160,21 @@ def test_shipped_env_defaults_to_no_labels():
     )
 
 
-def test_supervisor_gated_off_on_wsl_and_client_hosts():
-    """The supervisor must not install on a WSL guest / client-only host."""
+def test_supervisor_gated_off_on_windows_client_and_no_service_hosts():
+    """The supervisor installs on a default WSL guest (it owns its own
+    coordinator), and is skipped only on a true client-only host (--no-service)
+    or a WSL guest opted into Windows-client mode."""
     text = _text()
     idx = text.index("_install_supervisor_service()")
     body = text[idx : text.index("\n}\n", idx)]
-    assert "_is_wsl" in body and 'NO_SERVICE' in body, (
-        "the supervisor install must skip WSL / client-only hosts"
+    assert "_is_wsl" in body and "_wsl_windows_client" in body and "NO_SERVICE" in body, (
+        "the supervisor install must skip --no-service and Windows-client WSL hosts, "
+        "but NOT a default WSL guest"
     )
     assert "NO_SUPERVISOR" in body, "must honor --no-supervisor"
     assert "_remove_all_supervisor_units" in body, (
-        "client-only / WSL / --no-supervisor must remove primary and profile supervisors"
+        "client-only / Windows-client WSL / --no-supervisor must remove primary and "
+        "profile supervisors"
     )
 
 

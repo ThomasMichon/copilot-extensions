@@ -29,6 +29,9 @@ def _isolate_discovery(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENT_DISPATCH_WINDOWS_RUN_DIR", str(tmp_path / "winrun"))
     monkeypatch.setenv("AGENT_DISPATCH_WINDOWS_MOUNT", str(tmp_path / "winmount"))
     monkeypatch.delenv("AGENT_DISPATCH_ENDPOINT", raising=False)
+    # A WSL guest resolves its OWN coordinator by default; clear the Windows-client
+    # opt-in so the default-path tests are deterministic even on a box that sets it.
+    monkeypatch.delenv("AGENT_DISPATCH_WSL_WINDOWS_CLIENT", raising=False)
 
 
 def test_sweep_interval_default(monkeypatch):
@@ -56,14 +59,32 @@ def test_client_url_env_override_wins(monkeypatch):
     assert client_url() == "http://coord.example:9847"
 
 
-def test_client_url_wsl_guest_resolves_windows(monkeypatch):
+def test_client_url_wsl_guest_resolves_windows_when_opted_in(monkeypatch):
     monkeypatch.delenv("AGENT_DISPATCH_URL", raising=False)
+    monkeypatch.setenv("AGENT_DISPATCH_WSL_WINDOWS_CLIENT", "1")
     monkeypatch.setattr("agent_dispatch.netinfo.is_wsl", lambda: True)
     monkeypatch.setattr(
         "agent_dispatch.netinfo.resolve_wsl_client_url",
         lambda port: f"http://172.19.240.1:{port}",
     )
     assert client_url() == "http://172.19.240.1:9847"
+
+
+def test_client_url_wsl_resolves_local_by_default(monkeypatch, tmp_path):
+    # Per-environment ownership: a WSL guest with NO Windows-client opt-in resolves
+    # its OWN local coordinator (like a standalone Linux host), NOT the Windows one.
+    monkeypatch.delenv("AGENT_DISPATCH_URL", raising=False)
+    monkeypatch.setattr("agent_dispatch.netinfo.is_wsl", lambda: True)
+
+    def _should_not_be_called(_port):
+        raise AssertionError("WSL default must not resolve the Windows coordinator")
+
+    monkeypatch.setattr("agent_dispatch.netinfo.resolve_wsl_client_url", _should_not_be_called)
+    monkeypatch.setattr(rendezvous, "connect_probe", lambda ep, **k: True)
+    run = tmp_path / "run"
+    monkeypatch.setenv("AGENT_DISPATCH_RUN_DIR", str(run))
+    rendezvous.write_endpoint(run, "tcp", "127.0.0.1:44100")
+    assert client_url() == "http://127.0.0.1:44100"
 
 
 def test_client_url_standalone_uses_local_default(monkeypatch):
@@ -74,6 +95,7 @@ def test_client_url_standalone_uses_local_default(monkeypatch):
 
 def test_client_url_degrades_on_resolution_error(monkeypatch):
     monkeypatch.delenv("AGENT_DISPATCH_URL", raising=False)
+    monkeypatch.setenv("AGENT_DISPATCH_WSL_WINDOWS_CLIENT", "1")
     monkeypatch.setattr("agent_dispatch.netinfo.is_wsl", lambda: True)
 
     def _boom(_port):
@@ -133,8 +155,9 @@ def test_has_live_true_when_routed_endpoint_listening(monkeypatch):
     assert config_mod.has_live_local_coordinator() is True
 
 
-def test_client_url_wsl_uses_discovered_port(monkeypatch):
+def test_client_url_wsl_uses_discovered_port_when_opted_in(monkeypatch):
     monkeypatch.delenv("AGENT_DISPATCH_URL", raising=False)
+    monkeypatch.setenv("AGENT_DISPATCH_WSL_WINDOWS_CLIENT", "1")
     monkeypatch.setattr("agent_dispatch.netinfo.is_wsl", lambda: True)
     monkeypatch.setattr(
         "agent_dispatch.netinfo.resolve_wsl_client_url",

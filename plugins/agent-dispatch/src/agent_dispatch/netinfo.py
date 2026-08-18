@@ -74,9 +74,12 @@ def _in_container() -> bool:
 def is_wsl() -> bool:
     """True on a WSL guest (a Linux env hosted by a Windows box).
 
-    A WSL guest installs **client-only** and resolves the Windows coordinator; a
-    standalone Linux host (e.g. Mantis-Counter) installs the **full** coordinator.
-    Detected via ``WSL_DISTRO_NAME`` or ``microsoft`` in the kernel osrelease /
+    By default a WSL guest runs and resolves its **own** per-environment
+    coordinator (coexisting with the Windows host's via dynamic ports); it can be
+    opted back into being a *client* of the Windows coordinator via
+    ``AGENT_DISPATCH_WSL_WINDOWS_CLIENT``. A standalone Linux host (e.g.
+    Mantis-Counter) is not WSL and always installs the full coordinator. Detected
+    via ``WSL_DISTRO_NAME`` or ``microsoft`` in the kernel osrelease /
     ``/proc/version`` (case-insensitive). Only meaningful on Linux -- Windows and
     macOS return False.
 
