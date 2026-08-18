@@ -738,6 +738,32 @@ agent-mcp --log-level debug call .github/agents/ado.mcp.yaml some_tool '{"x":1}'
   `::agent-provisioning::`, let the first-use provision complete and preserve the
   exact failure text if it cannot build the runtime.
 
+### Bridge lifecycle — clean teardown (no leaked processes)
+
+A `bridge` normally shuts down when its **stdin closes** (the runtime's terminal
+signal). That signal is defeated when an intermediate launcher interposes — most
+notably the Windows `agent-mcp.cmd` shim, where the tree is
+`runtime → cmd.exe → python -m agent_mcp bridge`: the runtime terminates only the
+`cmd.exe` it spawned, leaving the grandchild `python` with an inherited stdin that
+never sees EOF, so it (and its helpers) leak. Two guards close this gap:
+
+- **Parent-death watchdog** — a daemon thread polls the launch-time parent's
+  liveness and, when it goes away, drives the *same* graceful teardown as stdin
+  EOF, with a hard-exit backstop if teardown wedges.
+- **Descendant reaping** — on Windows the bridge assigns itself to a
+  kill-on-close **Job Object**, so the upstream stdio child and any `az`/`gh`/`git`
+  mint helpers die when the bridge exits. On POSIX the graceful path already
+  closes the upstream child.
+
+Tunables (all optional):
+
+| env var | default | effect |
+|---------|---------|--------|
+| `AGENT_MCP_PARENT_WATCHDOG` | on | `0`/`false`/`off` disables the watchdog |
+| `AGENT_MCP_PARENT_WATCHDOG_INTERVAL` | `5` | parent-liveness poll interval, seconds (`<=0` disables) |
+| `AGENT_MCP_PARENT_WATCHDOG_GRACE` | `10` | hard-exit backstop after signalling, seconds (`0` = graceful-only) |
+| `AGENT_MCP_REAP_DESCENDANTS` | on | `0`/`false`/`off` disables the Windows kill-on-close job |
+
 ## CLI → MCP: the `cli` server type
 
 The `http`/`stdio` bridges proxy an upstream MCP. The **`cli`** server type is
