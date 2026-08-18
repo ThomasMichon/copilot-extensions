@@ -46,6 +46,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from agent_logger import sessions
 from agent_logger.segmenter.collate import (
     DEFAULT_MAX_TOOL_OUTPUT,
     DEFAULT_SEGMENT_SIZE,
@@ -63,6 +64,7 @@ from agent_logger.segmenter.collate import (
     read_checkpoints,
     read_rewind_index,
     read_workspace,
+    session_archive_stores,
     write_segments,
 )
 from agent_logger.segmenter.platform import detect_machine
@@ -176,9 +178,21 @@ def discover_by_suffix(suffix: str, machine: str | None = None) -> list[dict[str
 
 
 def _session_dir_by_id(session_id: str) -> Path | None:
-    """Resolve a session directory by bare UUID, if it exists."""
+    """Resolve a session directory by bare UUID.
+
+    A live ``session-state/<id>/`` directory when present; otherwise an
+    on-device archive, transparently materialized to a temp directory (cleaned
+    at exit) so the rest of ramp-up keeps working on a real directory path.
+    """
     candidate = _session_state_root() / session_id
-    return candidate if candidate.is_dir() else None
+    if candidate.is_dir():
+        return candidate
+    ref = sessions.resolve_ref(
+        session_id, _session_state_root(), *session_archive_stores()
+    )
+    if ref is not None and ref.is_archive:
+        return sessions.materialize_path(ref)
+    return None
 
 
 def _default_output_dir(session_id: str) -> Path:

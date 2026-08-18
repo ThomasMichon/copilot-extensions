@@ -129,6 +129,18 @@ def run_sync(
             if removed:
                 print(f"session-sync: pruned {removed} old session(s)")
 
+        # Two-pair sync: publish the compressed archive store to
+        # {machine}/archived/ and reconcile away hub duplicates.
+        if cfg.sync_compact["enabled"]:
+            arc = target.push_archives(cfg.compact_archive_root, machine)
+            if arc.ok and arc.file_count:
+                print(f"session-sync: pushed {arc.file_count} archive file(s)")
+            elif not arc.ok:
+                print(f"session-sync: archive push failed: {arc.detail}", file=sys.stderr)
+            reclaimed = target.reconcile_hub(machine)
+            if reclaimed:
+                print(f"session-sync: reconciled {reclaimed} hub session(s)")
+
         notify = cfg.sync_notify
         if notify["url"]:
             sent = post_notify(
@@ -211,6 +223,44 @@ def do_doctor(cfg: Config) -> int:
     return 0 if result.ok else 1
 
 
+def do_compact_hub(cfg: Config, *, dry_run: bool, verbose: bool) -> int:
+    """Backlog pass: compact cold hub-only sessions and reconcile duplicates."""
+    machine = _machine(cfg)
+    opts = cfg.sync_compact
+    if not opts["enabled"]:
+        print("session-sync compact-hub: disabled (sync.compact.enabled=false)")
+        return 0
+    target = build_target(cfg.sync_target, cfg.target_options(cfg.sync_target))
+    lock_file = cfg.home / "session-sync.lock"
+    # Protect hub copies of sessions whose worktree is still tracked (the
+    # running machine authoritatively knows its own namespace).
+    from agent_logger.sync.compact import tracked_worktree_paths
+
+    tracked = tracked_worktree_paths() if opts["require_untracked_worktree"] else None
+    with sync_lock(lock_file, timeout=cfg.sync_lock_timeout) as acquired:
+        if not acquired:
+            print(
+                "session-sync compact-hub: another sync holds the lock; skipping",
+                file=sys.stderr,
+            )
+            return 0
+        compacted = target.compact_backlog(
+            machine,
+            opts["min_age_days"],
+            opts["codec"],
+            tracked_paths=tracked,
+            dry_run=dry_run,
+        )
+        reclaimed = target.reconcile_hub(machine, dry_run=dry_run)
+    verb = "would compact" if dry_run else "compacted"
+    verb2 = "would reconcile" if dry_run else "reconciled"
+    print(
+        f"session-sync compact-hub: {verb} {compacted} hub session(s); "
+        f"{verb2} {reclaimed} duplicate(s)"
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="session-sync", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -244,6 +294,24 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("status", help="show resolved sync configuration")
     sub.add_parser("doctor", help="check the target is reachable/usable")
+
+    p_compact = sub.add_parser(
+        "compact",
+        help="archive cold on-device sessions into the compressed store",
+    )
+    p_compact.add_argument(
+        "--dry-run", action="store_true", help="list what would be archived"
+    )
+    p_compact.add_argument("--verbose", action="store_true", help="verbose output")
+
+    p_hub = sub.add_parser(
+        "compact-hub",
+        help="compact cold hub-only sessions in place and reconcile duplicates",
+    )
+    p_hub.add_argument(
+        "--dry-run", action="store_true", help="count what would be compacted"
+    )
+    p_hub.add_argument("--verbose", action="store_true", help="verbose output")
     return parser
 
 
@@ -268,6 +336,28 @@ def main(argv: list[str] | None = None) -> int:
             return do_status(cfg)
         if args.command == "doctor":
             return do_doctor(cfg)
+        if args.command == "compact":
+            from agent_logger.sync.compact import run_compact
+
+            result = run_compact(cfg, dry_run=args.dry_run, verbose=args.verbose)
+            if not args.dry_run:
+                mb = result.reclaimed_bytes / (1024 * 1024)
+                print(
+                    f"session-sync compact: archived {result.compacted} "
+                    f"session(s), reclaimed {mb:.1f} MB"
+                )
+                if result.failed:
+                    print(
+                        f"session-sync compact: {len(result.failed)} failed: "
+                        f"{'; '.join(result.failed)}",
+                        file=sys.stderr,
+                    )
+                    return 1
+            return 0
+        if args.command == "compact-hub":
+            return do_compact_hub(
+                cfg, dry_run=args.dry_run, verbose=args.verbose
+            )
         return 2
     finally:
         # A staged child (launched via `run --detach`) removes its throwaway

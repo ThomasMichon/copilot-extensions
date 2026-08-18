@@ -39,6 +39,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from agent_logger import sessions
 from agent_logger.config import load_config
 from agent_logger.segmenter.platform import detect_machine
 
@@ -150,11 +151,29 @@ def resolve_session_dir(spec: str) -> Path:
         candidates.sort(reverse=True)
         return candidates[0][1]
 
-    # Treat as UUID
+    # Treat as UUID -- a live directory, else an on-device archive we
+    # transparently materialize so downstream path-based reads are unchanged.
     candidate = state_root / spec
     if candidate.is_dir():
         return candidate
+    ref = sessions.resolve_ref(spec, state_root, *session_archive_stores())
+    if ref is not None and ref.is_archive:
+        return sessions.materialize_path(ref)
     raise FileNotFoundError(f"Session directory not found: {candidate}")
+
+
+def session_archive_stores() -> list[Path]:
+    """On-device archive store(s) holding compacted sessions (config-aware).
+
+    Falls back to the ``<home>/archived-sessions`` default if config cannot be
+    loaded, so by-id resolution still finds archives on a minimal host.
+    """
+    try:
+        return [load_config(include_repo=False).compact_archive_root]
+    except Exception:
+        from agent_logger.config import home_dir
+
+        return [home_dir() / "archived-sessions"]
 
 
 def redact(text: str) -> str:
