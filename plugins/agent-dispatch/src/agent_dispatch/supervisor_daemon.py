@@ -71,6 +71,32 @@ def _is_connection_error(exc: BaseException) -> bool:
     return isinstance(exc, httpx.TransportError)
 
 
+#: Exit code the daemon returns when it notices its runtime slot was swapped and
+#: it must be restarted onto the new version. Distinguished (EX_TEMPFAIL, "retry
+#: me") so the per-OS launcher can tell a *reload* from a real failure or a clean
+#: exit: the Windows ``supervise-service.ps1`` loop re-invokes the daemon through
+#: the freshly-swapped ``.venv`` slot on this code, and the systemd unit lists it
+#: under ``RestartForceExitStatus``. A non-elevated ``update`` thus cycles the
+#: running supervisor onto the new build within its scheduled task's lifetime --
+#: no re-register, no elevation, no reboot.
+RELOAD_EXIT_CODE = 75
+
+
+def _is_dev_sentinel(version: str | None) -> bool:
+    """True for a bare-source / unstamped version that must never self-reload.
+
+    A deployed slot stamps ``__version__`` (via ``_build_info.py``) to the same
+    string the ``current-version`` marker holds, so the two compare cleanly. A raw
+    source checkout resolves a sentinel (``0.0.0+dev``, ``0.0.0``, or empty) that
+    could spuriously differ from an on-disk marker; arming the version-watch on it
+    would make a foreground ``supervise serve`` exit itself. Treat those as "not a
+    deployed runtime" and leave the watch disarmed.
+    """
+    if not version:
+        return True
+    return version.startswith("0.0.0") or version == "dev"
+
+
 def supervisor_lease_scope(machine: str | None, env: str) -> str:
     """The single-instance election scope for a host's supervisor daemon."""
     return f"supervisor:{machine or 'local'}:{env or 'default'}"
@@ -288,6 +314,8 @@ class SupervisorDaemon:
         declared_source: Callable[[], Iterable[Any]] | None = None,
         overrides_source: Callable[[], Mapping[str, dict]] | None = None,
         client_factory: Callable[[], Any] | None = None,
+        running_version: str | None = None,
+        active_version_source: Callable[[], str | None] | None = None,
     ):
         self.client = client
         #: Rebuilds the coordinator client by **re-resolving** its endpoint (the
@@ -331,6 +359,22 @@ class SupervisorDaemon:
         #: unit does). Empty until the first successful read.
         self._last_declared: list[dict] = []
         self._units: dict[str, ManagedUnit] = {}
+        #: The version this daemon is *executing* (the launcher launched the slot
+        #: named by ``current-version`` at start, so the running code == that slot).
+        #: Defaults to the imported ``__version__``; injectable for tests.
+        if running_version is None:
+            from . import __version__ as _running
+            running_version = _running
+        self._running_version = running_version
+        #: Reads the active on-disk runtime version (the ``current-version`` marker)
+        #: each tick. When it diverges from the version captured at :meth:`serve`
+        #: start, a non-elevated ``update`` swapped the slot and the daemon
+        #: reload-exits so its launcher restarts it on the new build. ``None``
+        #: disables the watch (a run with no versioned runtime, e.g. bare source).
+        self.active_version_source = active_version_source
+        #: The active version observed when the serve loop started (the reload
+        #: baseline). ``None`` leaves the watch disarmed.
+        self._version_baseline: str | None = None
 
     # -- registry view -------------------------------------------------------
 
@@ -602,6 +646,44 @@ class SupervisorDaemon:
         log.info("re-resolved coordinator endpoint after a connection failure")
         return True
 
+    def _arm_version_watch(self) -> None:
+        """Capture the reload baseline at serve start (best-effort).
+
+        The baseline is the active on-disk version when this daemon began serving,
+        which -- because the launcher launches the slot named by ``current-version``
+        -- is the version this process is executing. Left ``None`` (watch disarmed)
+        when no version source is wired or the running version is a bare-source
+        sentinel, so a foreground/dev ``supervise serve`` never self-exits.
+        """
+        self._version_baseline = None
+        if self.active_version_source is None:
+            return
+        if _is_dev_sentinel(self._running_version):
+            return
+        try:
+            self._version_baseline = self.active_version_source()
+        except Exception:  # pragma: no cover -- marker read is environment-dependent
+            self._version_baseline = None
+
+    def _reload_target(self) -> str | None:
+        """The new active version to reload into, or ``None`` if none is warranted.
+
+        Compares the current ``current-version`` marker against the baseline
+        captured at :meth:`serve` start. Returns the new version once a
+        (non-elevated) ``update`` has swapped the active slot, else ``None``.
+        Best-effort: a marker read failure is treated as "no change" so a transient
+        blip never triggers a spurious reload.
+        """
+        if self.active_version_source is None or self._version_baseline is None:
+            return None
+        try:
+            active = self.active_version_source()
+        except Exception:  # pragma: no cover -- marker read is environment-dependent
+            return None
+        if active and active != self._version_baseline:
+            return active
+        return None
+
     def serve(
         self,
         *,
@@ -611,8 +693,10 @@ class SupervisorDaemon:
     ) -> int:
         """Run the daemon: reconcile each tick until interrupted.
 
-        Returns ``0`` normally, or ``3`` if it stood down because another daemon
-        already holds this scope's singleton lease. With ``once`` it runs a single
+        Returns ``0`` normally, ``3`` if it stood down because another daemon
+        already holds this scope's singleton lease, or :data:`RELOAD_EXIT_CODE`
+        when it noticed its runtime slot was swapped and reload-exited for the
+        launcher to restart it on the new version. With ``once`` it runs a single
         reconcile and returns (still lease-guarded). ``single_instance=False``
         skips the election (for tests / a deliberately unguarded run).
         """
@@ -622,6 +706,8 @@ class SupervisorDaemon:
                 supervisor_lease_scope(self.machine, self.env),
             )
             return 3
+        self._arm_version_watch()
+        reload_exit = False
         try:
             while True:
                 try:
@@ -637,6 +723,20 @@ class SupervisorDaemon:
                     # so the next tick reconnects instead of wedging forever.
                     if _is_connection_error(exc):
                         self._reconnect()
+                # Version-watch: a non-elevated `update` swapped the active slot
+                # (built the new versions/<v> + rewrote current-version) WITHOUT
+                # re-registering this scheduled task. Drain (via the finally
+                # shutdown) and reload-exit so the launcher re-invokes this daemon
+                # through the swapped `.venv` link -> the new build, in place.
+                target = self._reload_target()
+                if target is not None:
+                    log.info(
+                        "active runtime version changed (%s -> %s); reload-exiting "
+                        "(code %d) so the launcher restarts on the new build",
+                        self._version_baseline, target, RELOAD_EXIT_CODE,
+                    )
+                    reload_exit = True
+                    break
                 if once:
                     break
                 try:
@@ -652,4 +752,4 @@ class SupervisorDaemon:
                         close()
             if single_instance:
                 self.release_singleton()
-        return 0
+        return RELOAD_EXIT_CODE if reload_exit else 0

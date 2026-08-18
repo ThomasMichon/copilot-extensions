@@ -27,10 +27,35 @@ from . import __version__
 
 RUNNING_VERSION_FILE = "running-version.json"
 
+#: The versioned-runtime ``current-version`` marker (a plain text file naming the
+#: active ``versions/<name>`` slot). Written by the installer's activation step;
+#: read here so a long-running daemon can notice its slot was swapped and reload.
+CURRENT_VERSION_FILE = "current-version"
+
 
 def install_dir() -> Path:
     """Runtime root for the coordinator (``~/.agent-dispatch``)."""
     return Path.home() / ".agent-dispatch"
+
+
+def read_active_version(directory: Path | None = None) -> str | None:
+    """The active on-disk runtime version, or ``None`` when absent/unreadable.
+
+    Reads the versioned-runtime ``current-version`` marker (a plain text file, so
+    it is never blocked by RedirectionGuard/WinError 448 the way *traversing* the
+    ``.venv`` junction is) under the runtime root. A non-elevated ``update`` builds
+    the new slot and atomically rewrites this marker; a daemon comparing it against
+    the version it is running detects the swap and reload-exits so its launcher can
+    restart it on the new slot -- the live-update path for a scheduled-task daemon
+    that cannot re-register itself without elevation. Best-effort: a read failure
+    returns ``None`` (treated as "no change"), never raising into the serve loop.
+    """
+    d = directory or install_dir()
+    try:
+        txt = (d / CURRENT_VERSION_FILE).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return txt or None
 
 
 def write_running_version(directory: Path | None = None) -> None:
