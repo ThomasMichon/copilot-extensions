@@ -17,6 +17,34 @@ from __future__ import annotations
 
 import os
 import subprocess
+from pathlib import Path
+
+
+def runtime_root() -> Path:
+    """The agent-dispatch runtime root (``~/.agent-dispatch``) -- a stable dir that
+    is **never** under the Copilot plugin payload. Safe as a daemon's working
+    directory and as a spawn ``cwd``."""
+    return Path.home() / ".agent-dispatch"
+
+
+def relocate_off_payload() -> None:
+    """Move the current process's working directory to :func:`runtime_root`.
+
+    A long-lived daemon (the coordinator / supervisor) is lazy-started from a
+    session-start hook and inherits that session's CWD -- which is often the
+    **plugin payload dir** (``~/.copilot/installed-plugins/.../agent-dispatch``).
+    On Windows a live process's CWD **locks that directory tree**, so a payload
+    CWD makes ``copilot plugin update`` fail with ``os error 32`` (the runtime
+    can never be updated while the daemon it installed is running). Relocating to
+    the runtime root at daemon startup guarantees no daemon ever holds the payload
+    -- independent of how it was launched. Best-effort; never fatal.
+    """
+    try:
+        root = runtime_root()
+        root.mkdir(parents=True, exist_ok=True)
+        os.chdir(root)
+    except OSError:
+        pass
 
 
 def no_window_kwargs() -> dict:

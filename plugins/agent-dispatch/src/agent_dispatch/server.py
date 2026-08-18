@@ -128,6 +128,13 @@ def serve(cfg: Config | None = None, *, passive: bool = False) -> None:
     """
     import uvicorn
 
+    # A long-lived daemon must never hold the Copilot plugin payload dir as its
+    # CWD (on Windows that locks it against `copilot plugin update`, os error 32).
+    # It is lazy-started from a session-start hook and inherits that session's CWD,
+    # so relocate to the runtime root before we block. See procutil.relocate_off_payload.
+    from . import procutil
+    procutil.relocate_off_payload()
+
     cfg = cfg or load_config()
     try:
         check_bind_safety(cfg)
