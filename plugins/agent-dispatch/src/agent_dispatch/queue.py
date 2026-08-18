@@ -249,6 +249,14 @@ class Task:
     #: (``live``/``gone``/``unknown``), so the buildup metric can classify held
     #: tasks without re-probing the bridge on every ``/health`` call.
     last_liveness: str | None = None
+    #: Steering (the card + steer seam). ``card`` is the latest-only card object
+    #: a worker posts when it needs operator input -- parsed from JSON to a dict
+    #: (``{title, status, link, body, request_input, ts}``), or ``None``.
+    #: ``awaiting_steer`` is ``True`` while the task is blocked on an operator
+    #: answer (a card with a ``request_input`` form was posted and not yet
+    #: answered). The submitted answers live in the ``task_steer`` table.
+    card: dict | None = None
+    awaiting_steer: bool = False
 
     @classmethod
     def _from_row(cls, row: sqlite3.Row) -> Task:
@@ -287,6 +295,8 @@ class Task:
             generation=row["generation"],
             last_seen_at=row["last_seen_at"],
             last_liveness=row["last_liveness"],
+            card=json.loads(row["card"]) if row["card"] else None,
+            awaiting_steer=bool(row["awaiting_steer"]),
         )
 
 
@@ -424,6 +434,14 @@ _COLUMNS: dict[str, str] = {
     "generation": "INTEGER NOT NULL DEFAULT 0",
     "last_seen_at": "REAL",
     "last_liveness": "TEXT",
+    # Steering (the card + steer seam): ``card`` is a latest-only JSON object the
+    # worker posts to describe what it needs from the operator (title/status/link/
+    # body/request_input); ``awaiting_steer`` is 1 while the task is blocked on an
+    # operator answer (set when a card carrying a ``request_input`` form is posted,
+    # cleared when the operator submits a steer). The submitted answers accumulate
+    # in the append-only ``task_steer`` table.
+    "card": "TEXT",
+    "awaiting_steer": "INTEGER NOT NULL DEFAULT 0",
 }
 
 
@@ -531,6 +549,25 @@ class TaskQueue:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_task_progress_task "
                 "ON task_progress(task_id)"
+            )
+            # Append-only steer inbox -- the operator's answers to a task's card
+            # (the human-in-the-loop counterpart of ``task_progress``). Each
+            # ``submit_steer`` appends one row; ``take_steer`` marks the oldest
+            # untaken row consumed and hands it to the resumed worker.
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS task_steer ("
+                "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "  task_id TEXT NOT NULL,"
+                "  ts REAL NOT NULL,"
+                "  fields TEXT NOT NULL DEFAULT '{}',"
+                "  sender TEXT,"
+                "  taken INTEGER NOT NULL DEFAULT 0,"
+                "  taken_at REAL"
+                ")"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_task_steer_task "
+                "ON task_steer(task_id)"
             )
             # Spawn reservations -- the atomic "exactly one embody spawn per
             # (task, attempt)" record that closes the gap between the queue's
@@ -1205,6 +1242,204 @@ class TaskQueue:
             result = self._fetch(conn, task_id)
             conn.execute("COMMIT")
         return result  # type: ignore[return-value]
+
+    # -- steering: card + steer inbox ----------------------------------------
+
+    def set_card(
+        self,
+        task_id: str,
+        worker_id: str,
+        *,
+        card: dict,
+        now: float | None = None,
+    ) -> Task:
+        """Attach a **card** to a held task the worker owns, describing what it
+        needs from the operator.
+
+        Stores the latest-only ``card`` object (title/status/link/body/
+        request_input). When the card carries a non-empty ``request_input`` form
+        the task is marked **awaiting_steer** -- blocked on an operator answer --
+        so a surface can surface it as "needs you". Posting a card without a
+        ``request_input`` (a pure status/notification card) leaves
+        ``awaiting_steer`` unset. Refreshes the lease (the worker is alive) and
+        audits the post. The task stays in its held state throughout -- a card is
+        **never** a verdict or a terminal transition.
+        """
+        ts = self._now(now)
+        payload = json.dumps(card, separators=(",", ":"))
+        awaiting = 1 if card.get("request_input") else 0
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            task = self._fetch(conn, task_id)
+            if task is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such task {task_id!r}")
+            if task.status not in Status.HELD:
+                conn.execute("COMMIT")
+                raise TaskError(f"cannot set a card on a {task.status!r} task")
+            if task.owner != worker_id:
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}"
+                )
+            conn.execute(
+                "UPDATE tasks SET card = ?, awaiting_steer = ?, lease_expires_at = ?,"
+                " last_seen_at = ?, updated_at = ? WHERE id = ?",
+                (payload, awaiting, ts + self.lease_seconds, ts, ts, task_id),
+            )
+            note = "card posted (awaiting steer)" if awaiting else "card posted"
+            self._audit(
+                conn,
+                task_id,
+                ts=ts,
+                from_status=task.status,
+                to_status=task.status,
+                worker=worker_id,
+                note=note,
+            )
+            result = self._fetch(conn, task_id)
+            conn.execute("COMMIT")
+        return result  # type: ignore[return-value]
+
+    def submit_steer(
+        self,
+        task_id: str,
+        *,
+        fields: dict,
+        sender: str | None = None,
+        now: float | None = None,
+    ) -> Task:
+        """Submit an operator's answer (a **steer**) to a task's card.
+
+        Appends the answer to the append-only ``task_steer`` inbox and clears
+        ``awaiting_steer`` (the operator has responded; the task is no longer
+        blocked on a human). Deliberately **not** owner-gated -- the operator (or
+        a surface acting for them), not the worker, submits a steer. Allowed on
+        any non-terminal task. The worker consumes the answer with
+        :meth:`take_steer` when it resumes. A steer is **never** a verdict -- it
+        carries operator *guidance*, and the coordinator has no path to set an
+        Approve/Reject outcome from it.
+        """
+        ts = self._now(now)
+        payload = json.dumps(fields, separators=(",", ":"))
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            task = self._fetch(conn, task_id)
+            if task is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such task {task_id!r}")
+            if task.status in Status.TERMINAL:
+                conn.execute("COMMIT")
+                raise TaskError(f"cannot steer a {task.status!r} task")
+            conn.execute(
+                "INSERT INTO task_steer (task_id, ts, fields, sender) VALUES (?, ?, ?, ?)",
+                (task_id, ts, payload, sender),
+            )
+            conn.execute(
+                "UPDATE tasks SET awaiting_steer = 0, updated_at = ? WHERE id = ?",
+                (ts, task_id),
+            )
+            self._audit(
+                conn,
+                task_id,
+                ts=ts,
+                from_status=task.status,
+                to_status=task.status,
+                worker=sender,
+                note=f"steer submitted{f' by {sender}' if sender else ''}",
+            )
+            result = self._fetch(conn, task_id)
+            conn.execute("COMMIT")
+        return result  # type: ignore[return-value]
+
+    def take_steer(
+        self,
+        task_id: str,
+        worker_id: str,
+        *,
+        now: float | None = None,
+    ) -> dict | None:
+        """Consume the oldest un-taken steer for a held task the worker owns.
+
+        Returns the steer payload ``{id, ts, fields, sender}`` and marks it taken,
+        or ``None`` when the inbox has nothing pending. Owner-gated (only the
+        worker driving the task reads its steers) and lease-refreshing. This is
+        the wake-side read: a resumed worker calls it to learn what the operator
+        answered, then continues toward its goal.
+        """
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            task = self._fetch(conn, task_id)
+            if task is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such task {task_id!r}")
+            if task.status not in Status.HELD:
+                conn.execute("COMMIT")
+                raise TaskError(f"cannot take a steer on a {task.status!r} task")
+            if task.owner != worker_id:
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}"
+                )
+            row = conn.execute(
+                "SELECT id, ts, fields, sender FROM task_steer "
+                "WHERE task_id = ? AND taken = 0 ORDER BY id ASC LIMIT 1",
+                (task_id,),
+            ).fetchone()
+            if row is None:
+                conn.execute(
+                    "UPDATE tasks SET lease_expires_at = ?, last_seen_at = ?,"
+                    " updated_at = ? WHERE id = ?",
+                    (ts + self.lease_seconds, ts, ts, task_id),
+                )
+                conn.execute("COMMIT")
+                return None
+            conn.execute(
+                "UPDATE task_steer SET taken = 1, taken_at = ? WHERE id = ?",
+                (ts, row["id"]),
+            )
+            conn.execute(
+                "UPDATE tasks SET lease_expires_at = ?, last_seen_at = ?,"
+                " updated_at = ? WHERE id = ?",
+                (ts + self.lease_seconds, ts, ts, task_id),
+            )
+            self._audit(
+                conn,
+                task_id,
+                ts=ts,
+                from_status=task.status,
+                to_status=task.status,
+                worker=worker_id,
+                note="steer taken",
+            )
+            conn.execute("COMMIT")
+        return {
+            "id": row["id"],
+            "ts": row["ts"],
+            "fields": json.loads(row["fields"] or "{}"),
+            "sender": row["sender"],
+        }
+
+    def steer_log(self, task_id: str) -> list[dict]:
+        """The full steer inbox for a task (oldest first), for inspection."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, ts, fields, sender, taken, taken_at FROM task_steer "
+                "WHERE task_id = ? ORDER BY id ASC",
+                (task_id,),
+            ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "ts": r["ts"],
+                "fields": json.loads(r["fields"] or "{}"),
+                "sender": r["sender"],
+                "taken": bool(r["taken"]),
+                "taken_at": r["taken_at"],
+            }
+            for r in rows
+        ]
 
     def recover_expired_leases(self, *, now: float | None = None) -> int:
         """Deprecated compatibility shim -- now runs a **liveness** GC pass.

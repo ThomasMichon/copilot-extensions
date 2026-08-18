@@ -456,6 +456,49 @@ recovery, not the nudge. See
 [`visions/plugins/agent-dispatch`](../../visions/plugins/agent-dispatch/README.md)
 (§Features/*hibernate-the-wait*).
 
+## Steer a blocked worker (`agent-dispatch card` / `steer`)
+
+*Hibernate-the-wait* handles a wait on a **machine** condition; **steering**
+handles a wait on a **human** decision. When a goal-loop worker needs operator
+input it can't make itself (screen a draft before it posts, choose between
+options, confirm a risky step), it **posts a card** describing what it needs and
+suspends; the operator answers later through any surface, and the coordinator
+**wakes the worker** with the answer.
+
+```bash
+# The worker posts a card describing what it needs and suspends. A --request-input
+# form marks the task "awaiting-steer" (blocked on the operator):
+agent-dispatch card set <id> \
+  --title "Recommend Approve" --status "4 comments (2 nits)" \
+  --link "<url to the rich artifact>" --body @card.md \
+  --request-input "feedback:textarea,decision:choice[revise,post-approved,hold-all]"
+
+# Anyone can see what's blocked on them and read a card + its steer inbox:
+agent-dispatch list --status started        # awaiting_steer=true rows are "needs you"
+agent-dispatch card show <id>
+
+# The operator answers; --wake nudges the owning worktree to resume (default on):
+agent-dispatch steer submit <id> --field feedback="post the nits" --field decision=post-approved
+
+# The resumed worker consumes the answer and continues toward its goal:
+agent-dispatch steer take <id>              # -> {"steer": {"fields": {...}, "sender": ...}}
+```
+
+- **`card`** is a latest-only object on the task (`title`/`status`/`link`/`body`/
+  `request_input`); the rich artifact lives elsewhere (a doc/PR the `link` points
+  at) -- the card is only the glanceable brief + the form. `--request-input` is a
+  compact field spec (`name[:text|textarea|choice[a,b,...]]`, comma-separated).
+- **`steer submit`** appends the operator's answer to the task's append-only steer
+  inbox and clears `awaiting_steer`; it is **not** worker-owned (the operator, or a
+  surface acting for them, answers). `steer take` is the owner-gated wake-side read
+  that hands the next answer to the resumed worker.
+- **General, not domain-specific.** The coordinator stores card/steer objects
+  opaquely, so any dispatched agent that must block on operator input uses this --
+  the same transport a picker "form" surface or an `ask_user` skill writes through.
+- **Never a verdict.** Steering carries operator *guidance*; there is no task
+  state/verb/`result_ref` that sets an outcome from it. A card is posted on a
+  **held** task and leaves it held (never a terminal transition).
+
 ## Development
 
 ```bash
