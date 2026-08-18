@@ -1255,6 +1255,7 @@ class SessionManager:
             spawner = LocalSpawner(
                 unexpected_reap_seconds=self._session_host_unexpected_reap_seconds,
                 active_reap_seconds=self._session_host_active_reap_seconds,
+                ready_timeout=self._timeouts.session_host_ready,
             )
 
         if remote_child_argv is not None:

@@ -80,7 +80,7 @@ def launch_session_host(
     cwd: str | None = None,
     env: dict[str, str] | None = None,
     state_dir: str | os.PathLike[str] | None = None,
-    ready_timeout: float = 30.0,
+    ready_timeout: float = 90.0,
     nonce: str = "",
     unexpected_reap_seconds: float = 60.0,
     active_reap_seconds: float = 0.0,
