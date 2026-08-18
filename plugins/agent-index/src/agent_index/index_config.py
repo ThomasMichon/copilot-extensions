@@ -141,6 +141,21 @@ def _default_device() -> str:
     return "cuda"
 
 
+def _default_indexer_nice() -> int:
+    """POSIX nice increment for the background index worker (host good citizen).
+
+    ``AGENT_INDEX_INDEXER_NICE`` (default 10) is the amount by which the dedicated
+    ``index-worker`` subprocess lowers its own scheduling priority so background/
+    webhook-driven reindexing yields to foreground work under contention. 0 (or a
+    negative value) disables the throttle for an explicit full-priority run. Read
+    per ``IndexConfig()`` so a fresh worker subprocess picks up the current env.
+    """
+    try:
+        return int(os.environ.get("AGENT_INDEX_INDEXER_NICE", "10"))
+    except ValueError:
+        return 10
+
+
 def _default_stream_batch_size() -> int:
     """Chunks per embed+store batch, capability-aware (#115).
 
@@ -238,6 +253,18 @@ class IndexConfig:
     )
     cluster_thresholds: dict[str, float] = field(default_factory=_default_cluster_thresholds)
     cluster_min_size: int = int(os.environ.get("AGENT_INDEX_CLUSTER_MIN_SIZE", "2"))
+
+    # Background-indexer host politeness (host-resource good citizen). The index
+    # worker runs as a dedicated subprocess, so it lowers its OWN CPU/IO priority
+    # at startup: background/webhook-driven reindexing yields to foreground work
+    # instead of driving the host to critical CPU load, while still running at
+    # full speed on an idle box (nice only bites under contention). The value is
+    # the POSIX nice INCREMENT applied to the worker (and, best-effort, a lowest
+    # best-effort IO priority / a below-normal Windows priority class); 0 (or a
+    # negative value) disables the throttle for a run that wants full priority.
+    # default_factory so AGENT_INDEX_INDEXER_NICE is read per IndexConfig() (the
+    # fresh worker subprocess), not bound once at import.
+    indexer_nice: int = field(default_factory=_default_indexer_nice)
 
     # Engine subprocess defaults.
     host: str = os.environ.get("AGENT_INDEX_HOST", "127.0.0.1")

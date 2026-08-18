@@ -145,6 +145,17 @@ delta-driven by default, event/webhook-driven where the source offers it,
 rate-limit-aware with polite backoff, and small-footprint per upstream. Not
 getting throttled or blocked is treated as correctness, not a nicety.
 
+### host-good-citizen-indexing
+Just as ingestion stays welcome on its *upstreams*, background indexing stays
+welcome on the *machine it runs on*: it **never drives the host to critical CPU
+or thermal load**. Reindex work runs at lowered priority so it **yields to
+foreground and interactive work** under contention while still using idle
+capacity fully — search stays answerable and the host stays responsive whether or
+not a reindex is in flight. Crucially, the **built-in indexer carries this
+discipline itself** rather than depending on an external wrapper, so the same
+politeness holds wherever it runs — a hosted, resource-capped container **or** the
+standalone user-mode CPU fallback on someone's laptop.
+
 ### pluggable-source-connectors
 Sources join through a **uniform connector interface** — the built-in repo
 files/commits/issues/PRs, plus an optional **hosted work-tracking + pull-request

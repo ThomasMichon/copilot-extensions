@@ -140,6 +140,16 @@ def run_worker(task_id: str) -> int:
     if task.status in {TaskStatus.COMPLETE.value, TaskStatus.CANCELLED.value}:
         return 0  # already terminal — idempotent no-op
 
+    # Host-resource good citizen: this worker is a dedicated indexing subprocess,
+    # so lower its OWN CPU/IO priority up front (before run_reindex spawns any
+    # embedding/FTS threads or children, which then inherit it). Background
+    # reindexing yields to foreground work instead of driving the host to
+    # critical CPU load; idle-box throughput is unaffected. Best-effort no-op on
+    # unsupported platforms. Disable with AGENT_INDEX_INDEXER_NICE=0.
+    from agent_index.indexing.priority import lower_current_process_priority
+
+    lower_current_process_priority(IndexConfig().indexer_nice)
+
     try:
         host = _config.machine_id()
     except Exception:  # fall back to the node name
