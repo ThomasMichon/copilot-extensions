@@ -9705,35 +9705,42 @@ def _update_one_plugin_payload(name: str, marketplace: str) -> str:
 
 
 def _update_registered_plugins() -> None:
-    """Update every copilot-extensions plugin registered for the managed repo(s).
+    """Update every enabled copilot-extensions plugin's payload.
 
-    ``update`` must refresh EVERY registered plugin's payload -- including
+    ``update`` must refresh EVERY enabled plugin's payload -- including
     payload-only plugins (``runtimeScope: none``) such as ``context-handoff``,
-    which the module/runtime steps never touch. This enumerates the plugins
-    enabled in each managed repo's settings
-    (``reconcile.read_enabled_plugins``, the authoritative registered list,
-    which already excludes ``agent-worktrees`` itself), refreshes the
-    marketplace catalog once, then runs ``copilot plugin update`` (or
-    ``install`` when missing) for each. Payloads only -- runtimes are handled
-    afterward by ``_update_modules`` and the anchor reconcile.
+    which the module/runtime steps never touch. The enabled set is the **union**
+    of two sources:
 
-    Best-effort and idempotent: a single plugin's failure warns and continues;
-    an already-current plugin is a no-op. No resolvable project config (e.g. a
-    generic install) is a silent no-op.
+    * **repo-scoped** -- the plugins enabled in each managed repo's
+      ``.github/copilot/settings.json`` (``reconcile.read_enabled_plugins``); and
+    * **user-global** -- the plugins enabled in ``<copilot-home>/settings.json``
+      (``reconcile.read_user_enabled_plugins``), the set ``copilot plugin list``
+      reflects.
+
+    Both are needed: a plugin enabled **only** user-global (not present in any
+    managed repo's settings) was previously skipped and left stale (#653). The
+    user-global read is independent of any project config, so a generic install
+    with no managed repo still refreshes its user-global plugins.
+
+    Refreshes the marketplace catalog once, then runs ``copilot plugin update``
+    (or ``install`` when missing) for each. Payloads only -- runtimes are handled
+    afterward by ``_update_modules`` and the anchor reconcile. Best-effort and
+    idempotent: a single plugin's failure warns and continues; an already-current
+    plugin is a no-op; nothing enabled is a silent no-op.
     """
     from . import reconcile
 
+    names: set[str] = set()
+
+    # 1. Repo-scoped enabled plugins (each managed repo's settings).
     try:
         config = cfg.load_config()
+        repos = config.repos or {}
     except Exception:
-        # No resolvable project config -- nothing to enumerate.
-        return
+        # No resolvable project config -- fall through to the user-global set.
+        repos = {}
 
-    repos = config.repos or {}
-    if not repos:
-        return
-
-    names: set[str] = set()
     seen_anchors: set[str] = set()
     for repo in repos.values():
         anchor = repo.anchor
@@ -9744,6 +9751,13 @@ def _update_registered_plugins() -> None:
             names.update(reconcile.read_enabled_plugins(Path(anchor)))
         except Exception as exc:
             output.warn(f"Could not read enabled plugins from {anchor}: {exc}")
+
+    # 2. User-global enabled plugins (#653) -- enabled but absent from any managed
+    #    repo's settings would otherwise be silently skipped and left stale.
+    try:
+        names.update(reconcile.read_user_enabled_plugins())
+    except Exception as exc:
+        output.warn(f"Could not read user-global enabled plugins: {exc}")
 
     if not names:
         return

@@ -29,6 +29,14 @@ def _pin_copilot(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(m, "_resolve_copilot", lambda: "copilot")
 
 
+@pytest.fixture(autouse=True)
+def _no_user_global(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default the USER-GLOBAL enabled set to empty so per-test repo mocks stay
+    deterministic (the real reader would pick up this machine's
+    ``~/.copilot/settings.json``). The dedicated user-global tests override it."""
+    monkeypatch.setattr(reconcile, "read_user_enabled_plugins", lambda: [])
+
+
 def _install_config(monkeypatch: pytest.MonkeyPatch, anchor: str) -> None:
     repo = cfg.RepoConfig(
         anchor=anchor,
@@ -259,4 +267,83 @@ def test_ordering_plugins_before_services(monkeypatch):
     assert order.index("registered-plugins") < order.index("modules")
     # And the agent-worktrees payload update precedes the registered loop.
     assert order.index("aw-plugin-update") < order.index("registered-plugins")
+
+
+# ── user-global enabled plugins (#653) ────────────────────────────────────────
+
+def test_user_global_enabled_are_refreshed(monkeypatch):
+    """A plugin enabled ONLY user-global (not in any repo settings) is updated."""
+    _install_config(monkeypatch, "/repo/anchor")
+    monkeypatch.setattr(reconcile, "read_enabled_plugins", lambda repo_dir: [])
+    monkeypatch.setattr(
+        reconcile, "read_user_enabled_plugins", lambda: ["efforts", "visions"]
+    )
+    monkeypatch.setattr(
+        reconcile, "installed_payload_dir", lambda name: Path(f"/inst/{name}")
+    )
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        subprocess, "run", lambda argv, **kw: (calls.append(list(argv)) or _ok())
+    )
+
+    m._update_registered_plugins()
+
+    for name in ("efforts", "visions"):
+        assert [
+            "copilot", "plugin", "update", f"{name}@{reconcile.MARKETPLACE}"
+        ] in calls
+
+
+def test_union_of_repo_and_user_global(monkeypatch):
+    """The refreshed set is the UNION of repo-scoped and user-global (deduped)."""
+    _install_config(monkeypatch, "/repo/anchor")
+    monkeypatch.setattr(
+        reconcile, "read_enabled_plugins",
+        lambda repo_dir: ["agent-bridge", "efforts"],
+    )
+    monkeypatch.setattr(
+        reconcile, "read_user_enabled_plugins", lambda: ["efforts", "visions"]
+    )
+    monkeypatch.setattr(
+        reconcile, "installed_payload_dir", lambda name: Path(f"/inst/{name}")
+    )
+    updated: list[str] = []
+
+    def fake_run(argv, **kw):
+        if argv[:3] == ["copilot", "plugin", "marketplace"]:
+            return _ok()
+        updated.append(argv[3].split("@")[0])
+        return _ok()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    m._update_registered_plugins()
+
+    # efforts appears once (deduped); all three covered.
+    assert sorted(updated) == ["agent-bridge", "efforts", "visions"]
+
+
+def test_user_global_updates_without_project_config(monkeypatch):
+    """No resolvable project config still refreshes USER-GLOBAL plugins (#653).
+
+    The old behavior returned early when no config resolved, skipping even
+    user-global-enabled plugins. The user-global read is now independent."""
+    def _boom(*a, **k):
+        raise RuntimeError("no config")
+
+    monkeypatch.setattr(cfg, "load_config", _boom)
+    monkeypatch.setattr(reconcile, "read_user_enabled_plugins", lambda: ["visions"])
+    monkeypatch.setattr(
+        reconcile, "installed_payload_dir", lambda name: Path(f"/inst/{name}")
+    )
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        subprocess, "run", lambda argv, **kw: (calls.append(list(argv)) or _ok())
+    )
+
+    m._update_registered_plugins()  # must not raise despite no config
+
+    assert [
+        "copilot", "plugin", "update", f"visions@{reconcile.MARKETPLACE}"
+    ] in calls
 
