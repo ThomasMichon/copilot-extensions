@@ -134,17 +134,17 @@ def assess(
 
     # Claimed-resource safety (agent-fabric `claimed-resource-not-reclaimed`),
     # NARROWED so a finished resource is collectable: this worktree is another
-    # worktree's outbound
-    # resource. Compute the content verdict first, then spare it while its
-    # claimant is alive / not-confirmed-gone -- UNLESS the owner has demonstrably
-    # moved on, i.e. the resource is already FINISHED (its own status is
-    # ``finalized``, or its content is proven on the default branch via a merged
-    # PR / git-COMPLETED). A finished resource is collectable garbage even under a
-    # live claimant, so a host session kept open for days never pins its merged
-    # children forever. IN-FLIGHT owned resources (dirty / wip / orphan / open-pr
-    # / closed-unmerged / empty / conversation-only) are still spared: the owner
-    # may resume, is mid-review, or (empty) is a just-created scaffold. A claimant
-    # *confirmed gone* (probe returns ``False``) lets even those fall through.
+    # worktree's outbound resource. Compute the content verdict first, then spare
+    # it while its claimant is alive / not-confirmed-gone -- UNLESS the owner has
+    # demonstrably moved on, i.e. the resource is already FINISHED (its own status
+    # is ``finalized``, or its content is proven on the default branch via a
+    # merged PR / git-COMPLETED). A finished resource is collectable garbage even
+    # under a live claimant, so a host session kept open for days never pins its
+    # merged children forever. IN-FLIGHT owned resources (dirty / wip / orphan /
+    # open-pr / closed-unmerged / empty / conversation-only) are still spared: the
+    # owner may resume, is mid-review, or (empty) is a just-created scaffold. A
+    # claimant *confirmed gone* (probe returns ``False``) lets even those fall
+    # through.
     verdict = _content_verdict(rec, info, turn_count)
     owner_moved_on = (verdict.category in _OWNER_MOVED_ON
                       or rec.status == "finalized")

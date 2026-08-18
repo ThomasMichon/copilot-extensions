@@ -454,6 +454,14 @@ class TestAssessClaimedResource:
         v = prune.assess(rec, _info(S.COMPLETED), claimant_alive=lambda ref: True)
         assert v.safe is True and v.category == "merged"
 
+    def test_finished_claimed_collectable_when_unconfirmed(self):
+        # The owner-moved-on short-circuit fires BEFORE the probe, so a finished
+        # resource is collectable regardless of claimant liveness -- including
+        # the unconfirmed (None) path, not just alive == True.
+        rec = _rec_owned(self.OWNER, status="active")
+        v = prune.assess(rec, _info(S.COMPLETED), claimant_alive=lambda ref: None)
+        assert v.safe is True and v.category == "completed-local"
+
     def test_inflight_dirty_claimed_spared_when_alive(self):
         # A dirty owned resource (unpushed work) is still protected under a live
         # claimant -- narrowing collects only FINISHED resources.
