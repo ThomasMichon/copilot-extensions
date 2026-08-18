@@ -27,12 +27,30 @@ def _args(copilot_args: list[str]) -> argparse.Namespace:
 
 def test_plain_launch_appends_allow_all():
     cmd = m._build_launch_cmd(_config(), _args([]), "/w/wt")
-    assert cmd[-1] == "--allow-all"
+    # --no-sandbox is appended alongside --allow-all (see below), so --allow-all
+    # is the second-to-last token now.
+    assert cmd[-2:] == ["--allow-all", "--no-sandbox"]
+
+
+def test_plain_launch_appends_no_sandbox():
+    # Newer Copilot builds force a sandbox mode that breaks worktree sessions;
+    # the launcher opts back out with --no-sandbox on every non-ACP launch.
+    cmd = m._build_launch_cmd(_config(), _args([]), "/w/wt")
+    assert "--no-sandbox" in cmd
+
+
+def test_no_sandbox_not_duplicated():
+    # A caller that already passed --no-sandbox must not get a second copy.
+    cmd = m._build_launch_cmd(_config(), _args(["--no-sandbox"]), "/w/wt")
+    assert cmd.count("--no-sandbox") == 1
 
 
 def test_acp_launch_skips_allow_all():
     cmd = m._build_launch_cmd(_config(), _args(["--acp", "--stdio"]), "/w/wt")
     assert "--allow-all" not in cmd
+    # ACP sessions get their sandbox/permissions managed by agent-bridge over
+    # the protocol, so the launcher adds neither --allow-all nor --no-sandbox.
+    assert "--no-sandbox" not in cmd
 
 
 def test_existing_all_perm_flag_not_duplicated():
@@ -94,7 +112,7 @@ def test_setup_hook_builds_normalized_launch(monkeypatch):
     assert hook_arg.endswith("session-setup.sh")
     # relative hook path is resolved against the anchor
     assert "tools" in hook_arg and "setup" in hook_arg
-    assert cmd[-1] == "--allow-all"
+    assert cmd[-2:] == ["--allow-all", "--no-sandbox"]
 
 
 def test_setup_hook_absolute_path_preserved(monkeypatch):
