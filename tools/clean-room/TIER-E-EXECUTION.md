@@ -278,9 +278,17 @@ policy that keeps it honest and affordable:
   requires `count ≥ 3` + `unanimous`** — a single green agent run is evidence, not
   proof. A **split** result is itself a finding (the docs are ambiguous enough that
   the agent sometimes self-heals) and is reported, not hidden.
-- **Budgets & timeouts.** `runs.max_credits` (hard ceiling per run; abort + record
-  `INCONCLUSIVE` if exceeded) and `per_turn_timeout_s` (a hung agent is a FAIL with
-  a `bridge-service`/timeout note, not an infinite wait).
+- **Budgets & timeouts.** `per_turn_timeout_s` is **enforced** host-side (the drive
+  runs in a bounded job; a turn that overruns is stopped and recorded
+  `timed_out: true` — a hung agent is a FAIL, not an infinite wait).
+  `runs.max_credits` is **advisory only**: the `agent-bridge create` transport does
+  not surface per-turn credits to the runner, so it is recorded as intent but
+  cannot be hard-enforced (a future transport that exposes usage would close this).
+- **Tier-P precondition (enforced, cheap).** Before spending the drive, the runner
+  runs a cheap in-box smoke of the plugin CLI — `manifest.tier_p_precondition`, else
+  `<first installed plugin> --version` — and **refuses the eval** if it fails (a
+  broken CLI surface would red the eval for the wrong reason). On by default;
+  `-SkipTierPGate` forces past it.
 - **Determinism caveats, stated not hidden.** Model version, temperature, and doc
   drift all move the result; `cr-eval.json` records the `copilot_version` and a
   hash of the injected prompt + the plugin docs the agent could see, so a verdict
@@ -289,13 +297,15 @@ policy that keeps it honest and affordable:
   cost: a literal agent **stops at the first obstacle** instead of burning credits
   hammering — so a broken scenario fails cheap.
 
-## 9. Runner surface (proposed)
+## 9. Runner surface
 
-Additive to today's `run.ps1`/`run.sh`; no change to Tier-P behavior.
+Additive to today's `run.ps1` (`-Mode eval` is implemented in `run.ps1`; `run.sh`
+parity is a follow-up); no change to Tier-P behavior.
 
 ```powershell
-./run.ps1 -Scenario agent-vault-eval -Mode eval            # run one eval end-to-end (build→setup→drive→judge)
+./run.ps1 -Scenario agent-vault-eval -Mode eval            # run one eval end-to-end (setup→gate→drive→capture)
 ./run.ps1 -Scenario agent-vault-eval -Mode eval -Runs 3    # N-run for a gating claim
+./run.ps1 -Scenario agent-vault-eval -Mode eval -SkipTierPGate   # force past the in-box Tier-P precondition
 ./run.ps1 -Scenario harness-from-bare -Mode eval -Image base
 ```
 
@@ -346,10 +356,13 @@ Per ARCHITECTURE §6, the split is unchanged and matters more for Tier E:
    written to `eval/cr-eval.json`. Validated end-to-end: `agent-vault-eval` yields
    a literal-mode PASS (agent stopped at the documented `.kdbx`/`KPDB` prerequisite;
    no self-heal, corroborated by `post_check.sh` ground-truth).
-5. **◐ Flake/cost controls.** `-Runs N` + `runs.count`/`aggregate` are wired and
-   `copilot_version` is recorded; **still to do:** enforce `max_credits`/
-   `per_turn_timeout_s`, the prompt+docs hash, and the automatic Tier-P precondition
-   gate.
+5. **◐ Flake/cost controls.** `-Runs N` + `runs.count`/`aggregate` are wired;
+   `per_turn_timeout_s` is **enforced** (host-side bounded job → `timed_out`);
+   the **prompt + docs hash** and `copilot_version` are recorded in
+   `eval/eval-run.json` for reproducible-in-context verdicts; and a cheap **in-box
+   Tier-P precondition** (`<plugin> --version`, `-SkipTierPGate` to force) refuses
+   an eval on a broken CLI. **Advisory-only:** `runs.max_credits` (the
+   `agent-bridge create` transport doesn't expose per-turn credits to the runner).
 6. **☐ The extreme F1-E.** Author `harness-from-bare` (downstream, name-ful):
    bare box → "set this up" → judge suite self-assembly, escalating toward the
    vision's turn-key F3-E acceptance.
