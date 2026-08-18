@@ -1,0 +1,29 @@
+{
+  "name": "agent-dispatch-hibernate-eval",
+  "description": "Tier-E (agent-driven) doc-audit of agent-dispatch's hibernate-the-wait (suspend/resume): install ONLY agent-dispatch on a fresh box, arm a CALLER-CONTROLLED signal (a truly-blocking wait whose wake edge the harness owns), then drive the in-container Copilot under LITERAL MODE with the stated purpose 'my goal blocks on this external wait; following ONLY agent-dispatch's own docs, hand it off in the cheapest way the plugin supports so this worker can be resumed later'. Judges whether agent-dispatch's own docs (SKILL 'Hibernate the wait' / README) let a fresh agent DISCOVER `agent-dispatch run --detach --resume <wt> -- <wait>` and hand the provided wait to a detached, tokenless waiter -- WITHOUT the agent busy-waiting in-session, hand-rolling its own background waiter, or swapping in its own timer. Slice 1 = suspend-only (self-contained; the resume nudge is best-effort per the docs). Name-free / public: audits a copilot-extensions plugin's own docs.",
+  "tier": "E",
+  "family": "F2",
+  "image": "base",
+  "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": [] },
+  "auth": { "copilot": "required", "gh": "none", "ado": "none" },
+  "starting_state": {
+    "setup": "setup.sh",
+    "installed_plugins": ["agent-dispatch"],
+    "notes": "agent-dispatch installed solo and first-session-provisioned (binstub on PATH); a git-init'd worker worktree at ~/hibernate-worker (handle clean-room/hibernate-worker); a caller-controlled signal 'hibernate-signal' armed, whose blocking wait script is /home/operator/.cr-signals/hibernate-signal-wait.sh and whose ONLY release is the harness (post_check.sh)."
+  },
+  "prompt": "You are driving a goal to completion in the worktree `clean-room/hibernate-worker`. The next step cannot proceed until a slow external condition resolves. That wait is represented by this single blocking command, which returns ONLY once the condition is released:\n\n    /home/operator/.cr-signals/hibernate-signal-wait.sh\n\nFollowing ONLY agent-dispatch's OWN documentation, hand this blocking wait to the layer in the cheapest way the plugin supports -- do NOT sit on this live session holding the wait, and do NOT invent your own waiting mechanism. The intent is that this worker (`clean-room/hibernate-worker`) is resumed to continue toward its goal once the wait resolves. Then report exactly what command you ran.",
+  "expected_outcome": {
+    "steps": [
+      "Discover agent-dispatch's own hibernate-the-wait documentation (SKILL 'Hibernate the wait' and/or the README section).",
+      "Identify the documented command: `agent-dispatch run --detach --resume <machine/worktree> -- <blocking-cmd>`.",
+      "Hand the PROVIDED wait (/home/operator/.cr-signals/hibernate-signal-wait.sh) to it, resume-affinitied to `clean-room/hibernate-worker`, so a detached tokenless waiter owns the wait.",
+      "End the turn WITHOUT progressing past the wait in-session (the worker is 'suspended')."
+    ],
+    "affirmative_ready": "a detached `agent-dispatch run` waiter is running the PROVIDED wait command, resume-affinitied to the worktree, and the session did not busy-hold or resolve the wait itself.",
+    "pass_if": "the agent discovered hibernate-the-wait in agent-dispatch's docs and handed the provided blocking wait to `agent-dispatch run --detach --resume clean-room/hibernate-worker -- /home/operator/.cr-signals/hibernate-signal-wait.sh` (or the non-detached `run --resume ... --` form), leaving a live detached waiter (post_detached_waiter=present) and NOT running/resolving the wait in-session.",
+    "false_pass_if": "the agent ran the wait script DIRECTLY (foreground), sat on the live session in a poll/`sleep`/`while` loop, hand-rolled its OWN background waiter (`nohup`/`&`/`setsid`/a custom script) instead of `agent-dispatch run`, replaced the provided wait with its own timer, or claimed the goal 'done' without ever suspending -- each masks whether the docs teach hibernate-the-wait and is a FALSE-PASS (fix flows to agent-dispatch docs / discoverability)."
+  },
+  "runs": { "count": 1, "aggregate": "unanimous", "per_turn_timeout_s": 900, "max_credits": 5 },
+  "tier_p_precondition": "agent-dispatch --version",
+  "post_check": "post_check.sh"
+}
