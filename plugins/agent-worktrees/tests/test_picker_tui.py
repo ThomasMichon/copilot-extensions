@@ -5578,10 +5578,9 @@ def test_steering_card_and_form_actions_gate_and_drive(tmp_path, monkeypatch):
     appear only on an awaiting-steer row; activating them opens the native card
     detail / elicitation modals; submitting the form runs the substituted steer
     argv via the runtime (no verdict path)."""
-    import json
     from agent_worktrees.picker_tui import pivots as pivots_mod
     from agent_worktrees.picker_tui.engine import PivotCardScreen, PivotFormScreen
-    from textual.widgets import Input, TextArea
+    from textual.widgets import TextArea
 
     d = tmp_path / "pivots"
     d.mkdir()
