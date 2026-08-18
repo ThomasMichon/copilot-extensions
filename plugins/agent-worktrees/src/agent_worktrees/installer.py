@@ -553,8 +553,17 @@ def _project_binstub_specs(project: str) -> list[tuple[Path, str]]:
 
 
 def _deploy_project_binstub(project: str) -> int:
-    """Write a single project's binstub file(s). Returns the count written."""
-    if not project:
+    """Write a single project's binstub file(s). Returns the count written.
+
+    Reserved-name guard: ``agent-worktrees`` is the runtime's own global command
+    (the project-agnostic shim deployed from ``bin/agent-worktrees``), never a
+    per-project launcher. A project stub for that name writes to the SAME
+    ~/.local/bin path as the global shim -- clobbering it with a
+    self-``--project`` binstub. Historically that project-form was the seed of a
+    fork-storm, so refuse it here at the single chokepoint for project-form
+    content, regardless of caller or deploy ordering.
+    """
+    if not project or project in _RESERVED_BINSTUB_NAMES:
         return 0
     is_windows = platform.system() == "Windows"
     written = 0

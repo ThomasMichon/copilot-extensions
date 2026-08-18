@@ -245,3 +245,36 @@ def test_reconcile_never_touches_reserved_global_name(monkeypatch, tmp_path: Pat
         assert p.exists()
     for p, _ in inst._project_binstub_specs("agent-worktrees"):
         assert not p.exists()
+
+
+def test_deploy_binstubs_reserved_project_keeps_global_shim(monkeypatch, tmp_path: Path):
+    """Direct-deploy regression (the fork-storm artifact): when ``deploy_binstubs``
+    is called with ``project='agent-worktrees'`` -- e.g. the installer inferring
+    the project from a dir literally named ``agent-worktrees`` -- the global
+    ``agent-worktrees`` stub must remain the project-agnostic marker resolver,
+    NOT the self-``--project`` project form. The project-form is what mis-scoped
+    the bare global command (and, pre-#708, exec'd itself into a storm)."""
+    lb = tmp_path / "bin"
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+
+    assert inst.deploy_binstubs(repo_dir=tmp_path, project="agent-worktrees") is True
+
+    name = "agent-worktrees.cmd" if platform.system() == "Windows" else "agent-worktrees"
+    global_stub = (lb / name).read_text()
+    # The global shim never names a project -- that is the whole point of the
+    # reserved name. A `--project agent-worktrees` here is the clobber bug.
+    assert "--project agent-worktrees" not in global_stub
+    # And it resolves the versioned runtime via the marker (static shim identity).
+    assert "current-version" in global_stub
+
+
+def test_deploy_project_binstub_refuses_reserved_name(monkeypatch, tmp_path: Path):
+    """The single chokepoint for project-form content refuses the reserved
+    runtime name outright, so no caller or deploy ordering can write it."""
+    lb = tmp_path / "bin"
+    lb.mkdir()
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+
+    assert inst._deploy_project_binstub("agent-worktrees") == 0
+    for p, _ in inst._project_binstub_specs("agent-worktrees"):
+        assert not p.exists()
