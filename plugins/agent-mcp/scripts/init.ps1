@@ -635,11 +635,13 @@ if ($VersionedRuntime) {
 if ($VersionedRuntime -and -not $env:AGENT_MCP_NO_VERSION_REAP) {
     $ReapScript = Join-Path $PSScriptRoot 'reap_versions.py'
     try {
-        $reapOut = & $VenvPython $ReapScript --root $InstallDir --link-name '.venv' --json 2>$null | Out-String
-        $reapObj = if ($reapOut.Trim()) { $reapOut | ConvertFrom-Json } else { $null }
-        $reaped = if ($reapObj) { @($reapObj.reaped) } else { @() }
+        # Use the plain (one 'version:pid' per line) output, not --json: under this
+        # script's Set-StrictMode 2.0, an empty ConvertFrom-Json array collapses so
+        # a later .Count throws. @(...) of the lines is always a countable array.
+        $reapLines = & $VenvPython $ReapScript --root $InstallDir --link-name '.venv' 2>$null
+        $reaped = @($reapLines | Where-Object { $_ -and $_.ToString().Trim() })
         if ($reaped.Count -gt 0) {
-            $stale = ($reaped | ForEach-Object { $_.version } | Sort-Object -Unique) -join ', '
+            $stale = ($reaped | ForEach-Object { ($_ -split ':', 2)[0] } | Sort-Object -Unique) -join ', '
             Write-Ok "Reaped $($reaped.Count) stale-version process(es) from: $stale"
         }
     } catch { Write-Skip "Version-reap skipped ($($_.Exception.Message))" }
