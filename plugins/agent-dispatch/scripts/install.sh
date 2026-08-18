@@ -19,8 +19,11 @@
 # ~/.local/bin/agent-dispatch. A STANDALONE Linux host (e.g. Mantis-Counter) runs the
 # full coordinator as a systemd **user** service (loopback 127.0.0.1, an
 # OS-assigned dynamic port advertised via the rendezvous file -- Stage C). A
-# WSL guest installs CLIENT-ONLY (no service): the always-on Windows host owns
-# the coordinator (Phase 2, issue #2818), reversing the #2777 WSL-owned model.
+# WSL guest, by default, does the SAME -- it runs its OWN per-environment
+# coordinator on a dynamic port, coexisting with the Windows host's coordinator
+# (the fixed-shared-port collision behind #2777/#2818 is gone under dynamic
+# ports). A WSL guest can opt back into being a client of the Windows coordinator
+# with AGENT_DISPATCH_WSL_WINDOWS_CLIENT=1.
 #
 # Usage:
 #   bash scripts/install.sh install        # venv + binstub + service + pivot
@@ -709,12 +712,15 @@ _register_pivot() {
 
 # -- Coordinator service (systemd user unit; default-on on deploy machines) --
 
-# True (0) on a WSL guest -- a Linux env hosted by a Windows box. A WSL guest
-# installs CLIENT-ONLY (venv + binstub, no coordinator service): the always-on
-# Windows host owns the coordinator now (Phase 2, issue #2818), reversing the
-# #2777 model. A standalone Linux host (e.g. Mantis-Counter) is NOT WSL and installs
-# the full coordinator. Detect via WSL_DISTRO_NAME or `microsoft` in the kernel
-# osrelease / /proc/version (case-insensitive) -- mirrors netinfo.is_wsl().
+# True (0) on a WSL guest -- a Linux env hosted by a Windows box. By default a
+# WSL guest now installs its OWN coordinator (per-environment ownership) on an
+# OS-assigned dynamic port, coexisting with the Windows host's coordinator; the
+# fixed-shared-port collision that made #2777/#2818 gate it off is gone under
+# dynamic ports. A box that deliberately wants to stay a *client* of the Windows
+# coordinator opts in with AGENT_DISPATCH_WSL_WINDOWS_CLIENT=1. A standalone Linux
+# host (e.g. Mantis-Counter) is NOT WSL and installs the full coordinator. Detect
+# via WSL_DISTRO_NAME or `microsoft` in the kernel osrelease / /proc/version
+# (case-insensitive) -- mirrors netinfo.is_wsl().
 _is_wsl() {
     [[ -n "${WSL_DISTRO_NAME:-}" ]] && return 0
     local f
@@ -727,26 +733,38 @@ _is_wsl() {
     return 1
 }
 
+# True (0) when a WSL guest is opted in to remain a *client* of the Windows
+# host's coordinator (legacy behavior) instead of running its own. Mirrors
+# config.wsl_windows_client().
+_wsl_windows_client() {
+    case "${AGENT_DISPATCH_WSL_WINDOWS_CLIENT:-0}" in
+        1 | true | yes | on | TRUE | YES | ON) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 _install_service() {
     if [[ "$NO_SERVICE" -eq 1 ]]; then
         _skip "Coordinator service skipped (--no-service): this host is a client only"
         return 0
     fi
-    if _is_wsl; then
-        # A WSL guest is a client of the Windows-owned coordinator. Never install
-        # a systemd unit here; remove a stale one left from the #2777 (WSL-owned)
-        # model so the two don't split-brain.
+    if _is_wsl && _wsl_windows_client; then
+        # Opt-in only: this WSL guest stays a client of the Windows-owned
+        # coordinator. Never install a systemd unit here; remove a stale one so
+        # the two don't split-brain.
         if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$SYSTEMD_UNIT" ]]; then
             systemctl --user stop "$SYSTEMD_UNIT" 2>/dev/null || true
             systemctl --user disable "$SYSTEMD_UNIT" 2>/dev/null || true
             rm -f "$UNIT_DIR/$SYSTEMD_UNIT"
             systemctl --user daemon-reload 2>/dev/null || true
-            _ok "WSL guest: removed stale coordinator unit -- the Windows host owns the coordinator (client-only; issue #2818)"
+            _ok "WSL guest (Windows-client opt-in): removed stale coordinator unit -- the Windows host owns the coordinator"
         else
-            _skip "WSL guest: client-only -- the Windows host owns the coordinator (issue #2818)"
+            _skip "WSL guest (Windows-client opt-in): client-only -- the Windows host owns the coordinator"
         fi
         return 0
     fi
+    # A WSL guest without the opt-in installs its OWN coordinator, exactly like a
+    # standalone Linux host (dynamic port; coexists with the Windows one).
     if ! command -v systemctl >/dev/null 2>&1; then
         _skip "systemd not available -- run 'agent-dispatch serve' manually if this host hosts a coordinator"
         return 0
@@ -1248,13 +1266,14 @@ _install_supervisor_service() {
         _skip "Embody supervisor skipped (--no-supervisor)"
         return 0
     fi
-    # The supervisor spawns embody autopilots on THIS host. Install it only where
-    # we install the full coordinator (a standalone Linux deploy host); a WSL
-    # guest / client-only host does not host the supervisor by default. Remove a
-    # stale unit if this host became client-only.
-    if [[ "$NO_SERVICE" -eq 1 ]] || _is_wsl; then
+    # The supervisor spawns embody autopilots on THIS host. Install it wherever we
+    # install the full coordinator -- a standalone Linux host AND (by default) a
+    # WSL guest, which now owns its own per-environment coordinator. Skip only a
+    # true client-only host (--no-service) or a WSL guest opted into Windows-client
+    # mode. Remove a stale unit if this host became client-only.
+    if [[ "$NO_SERVICE" -eq 1 ]] || { _is_wsl && _wsl_windows_client; }; then
         _remove_all_supervisor_units
-        _skip "Embody supervisor skipped (client-only / WSL host)"
+        _skip "Embody supervisor skipped (client-only / Windows-client WSL host)"
         return 0
     fi
     if ! command -v systemctl >/dev/null 2>&1; then
