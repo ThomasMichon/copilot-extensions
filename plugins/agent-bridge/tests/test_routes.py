@@ -1435,3 +1435,75 @@ class TestPendingQueue:
         assert client.get("/api/v1/sessions/nope/queue").status_code == 404
         assert client.delete("/api/v1/sessions/nope/queue").status_code == 404
         assert client.delete("/api/v1/sessions/nope/queue/1").status_code == 404
+
+
+def test_worktree_discovery_crawl_is_single_flight() -> None:
+    """Two overlapping ``crawl()`` calls spawn only ONE crawl's worth of work.
+
+    Single-owner-slot / debounce guard (process-slot-ownership effort): a slow or
+    stuck ``agent-worktrees list`` must never be answered by kicking a second,
+    parallel crawl -- the exact repeat-spawn this fixes. The second concurrent
+    crawl must coalesce onto the in-flight one, not re-run the per-agent work.
+    """
+    import asyncio
+
+    from agent_bridge.routes.worktrees import WorktreeDiscoveryCache
+
+    cache = WorktreeDiscoveryCache(interval=0)
+
+    agent_cfg = MagicMock()
+    agent_cfg.project = "aw"
+    agent_cfg.worktree_discovery = True
+    agent_cfg.host = None
+    resolver = MagicMock()
+    resolver.agents = {"local": agent_cfg}
+    cache._resolver = resolver
+
+    calls = {"n": 0}
+
+    async def _slow_crawl_agent(name, config, res):
+        calls["n"] += 1
+        await asyncio.sleep(0.2)  # simulate a slow / stuck `list`
+        return []
+
+    async def _run() -> None:
+        with patch.object(cache, "_crawl_agent", side_effect=_slow_crawl_agent):
+            # Fire two crawls concurrently; the second finds the lock held and
+            # coalesces onto the first instead of starting a duplicate crawl.
+            await asyncio.gather(cache.crawl(resolver), cache.crawl(resolver))
+
+    asyncio.run(_run())
+
+    assert calls["n"] == 1, f"expected single-flight crawl, got {calls['n']} crawls"
+    assert cache.get_all() == {"local": []}
+
+
+def test_worktree_discovery_crawl_if_empty_no_reentrant_deadlock() -> None:
+    """``crawl_if_empty`` must populate the cache without deadlocking.
+
+    It holds ``_crawl_lock`` and calls the unlocked ``_do_crawl`` body (not the
+    re-locking ``crawl``); a regression that pointed it back at ``crawl`` would
+    deadlock on the non-reentrant asyncio lock.
+    """
+    import asyncio
+
+    from agent_bridge.routes.worktrees import WorktreeDiscoveryCache
+
+    cache = WorktreeDiscoveryCache(interval=0)
+    agent_cfg = MagicMock()
+    agent_cfg.project = "aw"
+    agent_cfg.worktree_discovery = True
+    agent_cfg.host = None
+    resolver = MagicMock()
+    resolver.agents = {"local": agent_cfg}
+    cache._resolver = resolver
+
+    async def _crawl_agent(name, config, res):
+        return []
+
+    async def _run() -> None:
+        with patch.object(cache, "_crawl_agent", side_effect=_crawl_agent):
+            await asyncio.wait_for(cache.crawl_if_empty(), timeout=5)
+
+    asyncio.run(_run())
+    assert cache.get_all() == {"local": []}
