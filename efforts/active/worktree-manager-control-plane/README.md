@@ -211,3 +211,10 @@ its issues; the public artifacts stay self-contained and general-purpose.
   §one-line-bootstrap × §prerequisite-provisioning × §restart-aware delta at the
   bootstrap entry — the app-level provisioning (#355) was already done; this
   closes the bootstrap-entry tail. worktree-manager `0.1.0-dev13`.
+- **2026-08-17** — Clean-room validated the bootstrap on a fresh box. Added the
+  `worktree-manager-bootstrap` Tier-P scenario (`tools/clean-room/`): on the
+  **pristine** image (no uv) the published one-liner self-provisions uv (0.12.5),
+  publishes `current-version` + slot, deploys the `~/.local/bin/worktree-manager`
+  binstub, and the binstub runs on a stock login PATH — **7 passed, 0 failed**.
+  Turns the unit-tested behavior into a hard fresh-box PASS. The git-absent
+  tarball fallback stays unit-tested; a no-git image variant is a noted follow-up.

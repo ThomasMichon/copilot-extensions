@@ -1,0 +1,25 @@
+{
+  "name": "worktree-manager-bootstrap",
+  "description": "Tier-P F1 scenario: on a PRISTINE box (Copilot + git + a system python3, but NO uv / pip / venv / ~/.local/bin) the out-of-plugin Worktree Manager bootstrap one-liner must SELF-PROVISION uv (user-local), fetch the payload, and publish the versioned slot + current-version marker + the ~/.local/bin/worktree-manager binstub -- then the binstub runs a read-only verb from a stock login shell. Falsifies 'the bootstrap dead-ends without a pre-installed toolchain'. Asserts on filesystem/CLI outcomes, not exact syntax. Name-free / public.",
+  "tier": "P",
+  "family": "F1",
+  "image": "pristine",
+  "prereqs": { "present": ["git", "curl", "python3"], "provisioned_by_flow": ["uv"] },
+  "auth": { "copilot": "none", "gh": "none", "ado": "none" },
+  "config": {
+    "CR_MANAGER_REPO": "ThomasMichon/copilot-extensions",
+    "CR_MANAGER_REF": "main"
+  },
+  "expected_artifacts": [
+    "~/.worktree-manager/versions/<ver> + ~/.worktree-manager/current-version",
+    "~/.local/bin/worktree-manager (binstub)",
+    "uv provisioned into ~/.local/bin (was absent on the pristine image)"
+  ],
+  "stages": [
+    { "n": 0, "title": "environment (pristine: no uv, no binstub, no ~/.worktree-manager)" },
+    { "n": 1, "title": "run the bootstrap one-liner (self-provisions uv + installs)" },
+    { "n": 2, "title": "uv self-provisioned + versioned install published" },
+    { "n": 3, "title": "binstub on PATH + runs a verb" },
+    { "n": 4, "title": "git-optional note (tarball fallback) + read-only doctor" }
+  ]
+}
