@@ -69,9 +69,34 @@ def test_runs_on_machine_respects_permit_filter():
     )
     assert runs_on_machine(pinned, "host-a") is True
     assert runs_on_machine(pinned, "host-b") is False
-    assert runs_on_machine(pinned, None) is True  # a machineless daemon runs anything
+    # Fail closed: an unidentified host (machine=None) must NOT run a machine-pinned
+    # declaration it cannot confirm membership of (aperture-labs #5001).
+    assert runs_on_machine(pinned, None) is False
     unpinned = load_declaration({"name": "g"})
     assert runs_on_machine(unpinned, "host-b") is True
+    # A machine-agnostic declaration still runs on an unidentified host.
+    assert runs_on_machine(unpinned, None) is True
+
+
+def test_runs_on_machine_fail_closed_on_reject_too():
+    # A reject.machine constraint also makes the declaration machine-scoped, so an
+    # unidentified host cannot evaluate it -> excluded.
+    rejecting = load_declaration(
+        {"name": "g", "filters": {"reject": {"machine": ["host-x"]}}}
+    )
+    assert runs_on_machine(rejecting, None) is False
+    assert runs_on_machine(rejecting, "host-a") is True
+    assert runs_on_machine(rejecting, "host-x") is False
+
+
+def test_declared_registrations_excludes_machine_pinned_when_unidentified():
+    decls = [
+        load_declaration({"name": "pinned", "filters": {"permit": {"machine": ["host-a"]}}}),
+        load_declaration({"name": "anywhere"}),
+    ]
+    regs = declared_registrations(decls, machine=None)
+    # Only the machine-agnostic declaration survives an unidentified host.
+    assert [r["id"] for r in regs] == ["declared:local:anywhere"]
 
 
 def test_declared_registrations_filters_by_machine():

@@ -134,6 +134,23 @@ def test_serve_mode_runs_master_daemon_and_self_gates():
     assert "_retire_supervisor_profile_units" in text
 
 
+def test_serve_mode_supports_explicit_machine_scope():
+    """Both installers' serve launcher must thread an explicit machine scope
+    (AGENT_DISPATCH_SUPERVISE_MACHINE -> `--machine`) so a service-context daemon
+    can identify itself and correctly scope machine-pinned declarations
+    (aperture-labs #5001)."""
+    sh = _text()
+    assert 'smachine="\\${AGENT_DISPATCH_SUPERVISE_MACHINE:-}"' in sh
+    assert '--machine "\\$smachine"' in sh
+    # documented in the shipped supervisor.env template
+    assert "AGENT_DISPATCH_SUPERVISE_MACHINE=" in sh
+
+    ps1 = _ps1_text()
+    assert "'AGENT_DISPATCH_SUPERVISE_MACHINE'" in ps1  # parsed from the env file
+    assert "@('--machine', `$sMachine)" in ps1
+    assert "AGENT_DISPATCH_SUPERVISE_MACHINE=" in ps1
+
+
 def test_shipped_env_defaults_to_no_labels():
     """The generated supervisor.env must ship an EMPTY label list so a fresh
     install is inert (embodies nothing) until an operator opts in."""

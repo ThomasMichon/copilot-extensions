@@ -1727,6 +1727,12 @@ AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=
 #            stops creating per-profile tasks and retires any it created.
 # Leave blank for the classic per-host direct supervisor.
 AGENT_DISPATCH_SUPERVISE_MODE=
+# MODE=serve only: explicit machine scope for this host's daemon. Recommended in a
+# service context -- CWD-based identity resolution can fail there, and without a
+# machine the daemon SKIPS every machine-pinned declaration (aperture-labs #5001).
+# Leave blank to fall back to the host node name at runtime; set to this host's
+# alias to pin it explicitly.
+AGENT_DISPATCH_SUPERVISE_MACHINE=
 "@
         [System.IO.File]::WriteAllText($envFile, $envDefault, $utf8NoBom)
         Write-Ok "Supervisor env: $envFile (no labels -> task stays inert; add a label to enable)"
@@ -1763,6 +1769,7 @@ Set-Location -LiteralPath `$PSScriptRoot
 `$headlessAgent = ''
 `$extra = ''
 `$mode = ''
+`$sMachine = ''
 if (Test-Path `$envFile) {
     foreach (`$line in Get-Content `$envFile) {
         `$t = `$line.Trim()
@@ -1782,6 +1789,7 @@ if (Test-Path `$envFile) {
             'AGENT_DISPATCH_SUPERVISE_HEADLESS_AGENT'  { `$headlessAgent = `$v }
             'AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS'     { `$extra = `$v }
             'AGENT_DISPATCH_SUPERVISE_MODE'           { `$mode = `$v }
+            'AGENT_DISPATCH_SUPERVISE_MACHINE'        { `$sMachine = `$v }
         }
     }
 }
@@ -1792,6 +1800,11 @@ if (`$mode -eq 'serve') {
     # supervisors/*.env), each in its own subprocess. It is self-gating (only
     # labeled declarations/profiles run), so it needs no label opt-in here.
     `$argsList = @('supervise', 'serve', '--legacy-env')
+    # Explicit machine scope (recommended for a service context, where CWD-based
+    # identity resolution can fail and leave the daemon unable to scope
+    # machine-pinned declarations -- aperture-labs #5001). Falls back to the host
+    # node name at runtime when unset.
+    if (`$sMachine) { `$argsList += @('--machine', `$sMachine) }
     if (`$extra) { `$argsList += (`$extra -split '\s+') }
 } else {
 `$argsList = @('supervise', '--all-repos', '--interval', `$interval,

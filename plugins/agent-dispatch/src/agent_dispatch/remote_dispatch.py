@@ -32,10 +32,27 @@ class RemoteDispatchUnavailable(RuntimeError):
 
 
 def local_machine() -> str | None:
-    """This machine's name (its SSH alias), or None if unresolvable."""
+    """This machine's name (its SSH alias), or None if unresolvable.
+
+    Primary source is agent-worktrees' CWD-resolved identity. That resolution
+    fails in a bare **service / scheduled-task context** (no repo CWD, minimal
+    env), which would leave the supervisor daemon unable to identify itself and so
+    unable to scope machine-pinned declarations -- it would then either fail closed
+    (run nothing pinned) or, before the fix, run *everything* (aperture-labs #5001).
+    As a CWD-independent fallback, use the host's own **node name**
+    (``platform.node()``), normalized to the lowercase convention machine aliases
+    follow: a machine's node name is its natural identity and, by convention, is
+    its alias. Returns None only when neither source yields a name.
+    """
     from .identity import resolve_identity
 
-    return resolve_identity()[0]
+    machine = resolve_identity()[0]
+    if machine:
+        return machine
+    import platform
+
+    node = (platform.node() or "").strip().casefold()
+    return node or None
 
 
 def ssh_available() -> bool:
