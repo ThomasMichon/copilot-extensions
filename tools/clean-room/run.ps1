@@ -111,7 +111,11 @@ param(
     [string[]]$PassEnv = @(),
     # Tier-E only: override the manifest's runs.count (how many times the driven
     # agent is run for flake aggregation). 0/empty = use the manifest (default 1).
-    [int]$Runs = 0
+    [int]$Runs = 0,
+    # Tier-E only: skip the cheap in-box Tier-P precondition (a `<plugin> --version`
+    # smoke check that a broken CLI surface doesn't waste an eval's credits). The
+    # gate is ON by default because it is nearly free; pass this to force an eval.
+    [switch]$SkipTierPGate
 )
 $ErrorActionPreference = 'Stop'
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -336,6 +340,42 @@ function Invoke-BridgeUnregister {
     & $py.Source (Join-Path $Here 'bridge_register.py') unregister --name $AgentName
 }
 
+# Short SHA-256 of a string (first 16 hex chars). Used to fingerprint the exact
+# injected prompt so a Tier-E verdict is reproducible-in-context (the same prompt
+# + same docs hash + same copilot_version should reproduce a verdict).
+function Get-Sha256Short([string]$Text) {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes(($Text ?? ''))
+        return -join ($sha.ComputeHash($bytes)[0..7] | ForEach-Object { $_.ToString('x2') })
+    } finally { $sha.Dispose() }
+}
+
+# Drive one agent turn with a wall-clock timeout. `agent-bridge create` has no
+# --reply-timeout, so bound it host-side via a job: on timeout, stop the job and
+# report the partial transcript so a hung agent is a FAIL, not an infinite wait.
+# Returns @{ transcript; duration_s; timed_out }.
+function Invoke-DriveWithTimeout([string]$Agent, [string]$PromptFile, [int]$TimeoutSec) {
+    $t0 = Get-Date
+    $job = Start-Job -ScriptBlock {
+        param($a, $pf)
+        & agent-bridge create $a --prompt-file $pf --expand all --no-color 2>&1 | Out-String
+    } -ArgumentList $Agent, $PromptFile
+    $timedOut = $false
+    if ($TimeoutSec -gt 0) {
+        if (-not (Wait-Job $job -Timeout $TimeoutSec)) { $timedOut = $true }
+    } else {
+        Wait-Job $job | Out-Null
+    }
+    $out = (Receive-Job $job 2>&1 | Out-String)
+    if ($timedOut) {
+        Stop-Job $job -ErrorAction SilentlyContinue
+        $out += "`n[clean-room] TIMED OUT after ${TimeoutSec}s -- driven agent did not complete its turn.`n"
+    }
+    Remove-Job $job -Force -ErrorAction SilentlyContinue
+    return @{ transcript = $out; duration_s = [int]((Get-Date) - $t0).TotalSeconds; timed_out = $timedOut }
+}
+
 # Tier-E (agent-driven eval): establish the scenario's starting state, drive the
 # in-container Copilot over agent-bridge with a literal-mode + stated-purpose
 # prompt, and capture the transcript(s) as judge evidence. The runner produces
@@ -360,8 +400,17 @@ function Invoke-Eval {
         $prompt = Get-Content $promptFile -Raw
     }
     $runCount = if ($Runs -gt 0) { $Runs } elseif ($manifest.runs -and $manifest.runs.count) { [int]$manifest.runs.count } else { 1 }
+    $perTurnTimeout = if ($manifest.runs -and $manifest.runs.per_turn_timeout_s) { [int]$manifest.runs.per_turn_timeout_s } else { 0 }
     $postCheck = $manifest.post_check
     if (-not $postCheck -and (Test-Path (Join-Path $ScenarioDir 'post_check.sh'))) { $postCheck = 'post_check.sh' }
+    # Tier-P precondition: an in-box command that must exit 0 before we spend the
+    # drive (a broken CLI surface would fail the eval for the wrong reason).
+    # Explicit manifest.tier_p_precondition wins; else `<first installed plugin>
+    # --version` (every runtime plugin exposes it).
+    $installedPlugins = @()
+    if ($manifest.starting_state -and $manifest.starting_state.installed_plugins) { $installedPlugins = @($manifest.starting_state.installed_plugins) }
+    $tierPCmd = $manifest.tier_p_precondition
+    if (-not $tierPCmd -and $installedPlugins.Count -gt 0) { $tierPCmd = "$($installedPlugins[0]) --version" }
 
     # --- literal-mode fixture (substrate-owned; injected, never in a plugin) --
     $litPath = Join-Path $LibDir 'literal-mode.md'
@@ -378,6 +427,19 @@ function Invoke-Eval {
         Write-Host "warn: setup driver exited $LASTEXITCODE -- the starting state may be incomplete (see cr-report.json)." -ForegroundColor Yellow
     }
 
+    # --- Tier-P precondition: cheap in-box smoke of the plugin CLI -----------
+    # Don't spend an eval's credits on a broken CLI surface -- if `<plugin>
+    # --version` (or the manifest's explicit command) fails, the eval would red
+    # for the wrong reason. On by default; -SkipTierPGate forces past it.
+    if (-not $SkipTierPGate -and $tierPCmd) {
+        Write-Host "== eval: Tier-P precondition ($tierPCmd) ==" -ForegroundColor Cyan
+        docker exec $Container /bin/bash -lc "$tierPCmd" | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "eval: Tier-P precondition '$tierPCmd' failed (exit $LASTEXITCODE) -- refusing to spend an eval on a broken CLI surface. Fix the plugin's *-solo Tier-P scenario first, or pass -SkipTierPGate to force."
+        }
+        Write-Host "   precondition OK" -ForegroundColor DarkGray
+    }
+
     # --- 3) register the box as a bridge agent -------------------------------
     Invoke-BridgeRegister
 
@@ -388,23 +450,40 @@ function Invoke-Eval {
     $promptTxt = Join-Path $evalDir 'prompt.txt'
     Set-Content -Path $promptTxt -Value $fullPrompt -Encoding utf8
 
+    # --- reproducibility fingerprints ---------------------------------------
+    # A Tier-E verdict is only meaningful against the exact prompt + the docs the
+    # agent could see. Fingerprint both so a verdict is reproducible-in-context
+    # and a doc change that flips it is visible.
+    $promptHash = Get-Sha256Short $fullPrompt
+    $docsHash = (docker exec $Container /bin/bash -lc `
+        'find $HOME/.copilot/installed-plugins -type f \( -name "*.md" -o -name "*.json" -o -name "*.sh" \) 2>/dev/null | sort | xargs sha256sum 2>/dev/null | sha256sum | cut -c1-16' `
+        2>$null | Select-Object -First 1)
+
     # --- 4/5) drive N times + capture transcripts ----------------------------
     # Always CREATE a fresh session per run (never `send <agent>`, which resumes a
     # prior session -- a stale one whose recreated box gives HTTP 500). Pass the
     # prompt via --prompt-file (multi-line safe; no PowerShell argv mangling) and
     # --expand all so thoughts + tool calls land in the transcript for the judge.
+    # Each turn is wall-clock bounded (runs.per_turn_timeout_s) so a hung agent is
+    # a FAIL, not an infinite wait.
     Write-Host "== eval: driving '$AgentName' x$runCount (fresh session; literal-mode + stated purpose) ==" -ForegroundColor Cyan
+    if ($perTurnTimeout -gt 0) { Write-Host "   per-turn timeout: ${perTurnTimeout}s" -ForegroundColor DarkGray }
     $runRecords = @()
     for ($n = 1; $n -le $runCount; $n++) {
         $runDir = if ($runCount -eq 1) { $evalDir } else { $d = Join-Path $evalDir "run-$n"; New-Item -ItemType Directory -Force -Path $d | Out-Null; $d }
         $transcriptPath = Join-Path $runDir 'transcript.txt'
         Write-Host "   -- run $n/$runCount --" -ForegroundColor DarkGray
-        $t0 = Get-Date
-        $transcript = & agent-bridge create $AgentName --prompt-file $promptTxt --expand all --no-color 2>&1 | Out-String
-        $dur = [int]((Get-Date) - $t0).TotalSeconds
-        Set-Content -Path $transcriptPath -Value $transcript -Encoding utf8
-        $runRecords += [pscustomobject]@{ n = $n; transcript = ($transcriptPath -replace [regex]::Escape($Results + '\'), '') -replace '\\','/'; duration_s = $dur }
-        Write-Host "      transcript -> $transcriptPath  (${dur}s)" -ForegroundColor DarkGray
+        $drv = Invoke-DriveWithTimeout $AgentName $promptTxt $perTurnTimeout
+        Set-Content -Path $transcriptPath -Value $drv.transcript -Encoding utf8
+        $runRecords += [pscustomobject]@{
+            n          = $n
+            transcript = ($transcriptPath -replace [regex]::Escape($Results + '\'), '') -replace '\\','/'
+            duration_s = $drv.duration_s
+            timed_out  = $drv.timed_out
+        }
+        $tag = if ($drv.timed_out) { " -- TIMED OUT" } else { '' }
+        $col = if ($drv.timed_out) { 'Yellow' } else { 'DarkGray' }
+        Write-Host "      transcript -> $transcriptPath  ($($drv.duration_s)s)$tag" -ForegroundColor $col
     }
 
     # --- 6) optional programmatic post-check (ground-truth evidence) ---------
@@ -430,6 +509,11 @@ function Invoke-Eval {
         run_count    = $runCount
         aggregate_policy = if ($manifest.runs -and $manifest.runs.aggregate) { $manifest.runs.aggregate } else { 'unanimous' }
         copilot_version  = $copilotVer
+        prompt_hash      = $promptHash
+        docs_hash        = $docsHash
+        per_turn_timeout_s = $perTurnTimeout
+        tier_p_precondition = if ($SkipTierPGate) { "$tierPCmd (SKIPPED)" } else { $tierPCmd }
+        max_credits_note = "runs.max_credits is advisory: the agent-bridge `create` transport does not expose per-turn credits, so it cannot be hard-enforced from the runner (see TIER-E-EXECUTION.md)."
         report       = 'cr-report.json'
         cr_logs      = 'cr-logs/'
         judged       = $false
