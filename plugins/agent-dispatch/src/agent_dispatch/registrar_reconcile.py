@@ -86,16 +86,37 @@ def declaration_to_registration(
     }
 
 
+def _constrains_machine(decl: ProfileDeclaration) -> bool:
+    """True if this declaration restricts *which machine* may run it.
+
+    A declaration constrains the machine dimension when its filters name it on
+    either side -- a ``permit.machine`` (only these hosts) or a ``reject.machine``
+    (never these hosts). A declaration that names neither is **machine-agnostic**
+    and runs on any host.
+    """
+    return "machine" in decl.filters.permit or "machine" in decl.filters.reject
+
+
 def runs_on_machine(decl: ProfileDeclaration, machine: str | None) -> bool:
     """Does this declaration's pool filter permit running on ``machine``?
 
     Reuses the Phase-2 pool filter: a declaration with a ``permit.machine`` that
-    excludes this host is not desired here; one with no machine restriction (or a
-    daemon with no machine identity) runs anywhere. Only the ``machine`` dimension is
-    consulted -- every other dimension is left unconstrained (a wildcard).
+    excludes this host is not desired here; one with no machine restriction runs
+    anywhere.
+
+    **Fail closed when the host cannot identify itself.** If ``machine`` is
+    ``None`` (the daemon could not resolve its own machine -- e.g. a bare
+    service/scheduled-task context where CWD-based identity resolution fails), a
+    declaration that **restricts to specific machines** is *excluded*: an
+    unidentified host must not run a machine-pinned pool it cannot confirm it is a
+    permitted member of. (The prior behavior ran *everything* on an unidentified
+    host, so a host with a registrar pointer would run cross-machine declarations
+    it should skip -- see aperture-labs #5001.) A **machine-agnostic** declaration
+    (no ``machine`` permit/reject) still runs anywhere, including on an
+    unidentified host.
     """
     if machine is None:
-        return True
+        return not _constrains_machine(decl)
     return decl.permits({"machine": machine})
 
 
