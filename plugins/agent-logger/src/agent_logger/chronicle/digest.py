@@ -93,6 +93,7 @@ def build_digest_manifest(
                 "session_id": s.session_id,
                 "machine": s.machine,
                 "session_path": str(s.session_path),
+                "archived": s.archived,
                 "repository": s.repository,
                 "branch": s.branch,
                 "summary": s.summary,
