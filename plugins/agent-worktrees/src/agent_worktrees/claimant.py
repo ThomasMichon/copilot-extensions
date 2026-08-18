@@ -43,6 +43,87 @@ _NO_REMOTE_ENV = "AGENT_WORKTREES_NO_REMOTE_CLAIMANT"
 #: a sweep -- it degrades to ``None`` (spare) instead.
 _REMOTE_TIMEOUT = 8.0
 
+#: How stale a same-machine owner's last-known activity must be before, in the
+#: ABSENCE of any live process/hint, the owner is judged dead so its in-flight
+#: claims are released. Deliberately generous (24h default)
+#: so a merely-idle-but-alive session -- which would anyway present a live
+#: process or a fresh cached-live hint -- is never mistaken for dead; only a
+#: session with no process, no fresh liveness hint, AND days-stale activity is
+#: reclaimed. Override via ``AGENT_WORKTREES_CLAIMANT_DEAD_AFTER_SECS``.
+_DEAD_AFTER_SECS = 86_400.0
+_DEAD_AFTER_ENV = "AGENT_WORKTREES_CLAIMANT_DEAD_AFTER_SECS"
+
+
+def _dead_after_secs() -> float:
+    """Resolve the dead-after staleness threshold (env override, else default)."""
+    raw = os.environ.get(_DEAD_AFTER_ENV)
+    if raw:
+        try:
+            val = float(raw)
+            if val > 0:
+                return val
+        except (TypeError, ValueError):
+            pass
+    return _DEAD_AFTER_SECS
+
+
+def _parseable_iso(stamp: str | None) -> bool:
+    """Whether ``stamp`` is a parseable ISO timestamp (empty/None -> False)."""
+    if not stamp:
+        return False
+    from datetime import datetime
+    try:
+        datetime.fromisoformat(str(stamp))
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def _owner_looks_dead(owner_rec, *, dead_after_secs: float | None = None) -> bool:
+    """Positively conclude a same-machine owner worktree's session is DEAD.
+
+    Used only for the "owner record present, non-terminal status, dir still on
+    disk" branch of :func:`local_claimant_alive`: the dir existing is not proof
+    the owning *session* is alive (a crashed/rebooted/abandoned session leaves
+    its worktree dir behind). This confirms death conservatively -- returning
+    ``True`` only when EVERY liveness signal is absent -- so a live-but-idle
+    owner is never mistaken for gone (the safe direction: a false "dead" merely
+    drops the claimed-resource shield, and the in-flight resource still keeps its
+    OWN git/PR/session prune-safety):
+
+      1. A live bound/mux Copilot process for the owner's registered sessions
+         (:func:`sessions.worktree_has_live_session`) -> NOT dead.
+      2. A fresh cached-live hint (``mux_live``/``bound_live`` True with a
+         within-threshold ``*_at`` stamp -- covers a bare-resumed session that
+         is invisible to the registered-session scan) -> NOT dead.
+      3. Otherwise dead ONLY when every parseable activity timestamp
+         (``started_at`` / ``last_resumed_at`` / a live ``*_live_at``) is older
+         than ``dead_after_secs``. No parseable timeline at all -> spare.
+
+    Best-effort: any error resolving liveness biases to NOT dead (spare).
+    """
+    if dead_after_secs is None:
+        dead_after_secs = _dead_after_secs()
+    try:
+        from . import sessions
+        if sessions.worktree_has_live_session(owner_rec):
+            return False  # a live bound Copilot -> definitely alive
+    except Exception:
+        return False  # cannot resolve -> do not declare dead (spare)
+    # Activity timeline: creation + last resume are always present; a cached
+    # liveness *_at counts only when its paired *_live is True (a fresh
+    # ``bound_live=False`` stamp means "confirmed NOT live", not a heartbeat).
+    candidates = [getattr(owner_rec, "started_at", ""),
+                  getattr(owner_rec, "last_resumed_at", "")]
+    if getattr(owner_rec, "mux_live", None) is True:
+        candidates.append(getattr(owner_rec, "mux_live_at", "") or "")
+    if getattr(owner_rec, "bound_live", None) is True:
+        candidates.append(getattr(owner_rec, "bound_live_at", "") or "")
+    parseable = [c for c in candidates if _parseable_iso(c)]
+    if not parseable:
+        return False  # no timeline to judge staleness by -> spare
+    return all(tracking._stamp_older_than(c, dead_after_secs) for c in parseable)
+
 
 def local_claimant_alive(owner_ref: str) -> bool | None:
     """Same-machine claimant-liveness probe (resource-claims).
@@ -58,6 +139,10 @@ def local_claimant_alive(owner_ref: str) -> bool | None:
         resolution is done by :func:`resolve_claimant_alive`.
 
     Only a *positively resolved, gone* same-machine owner returns ``False``.
+    "Gone" here means either the owner's tracking record is missing, its
+    recorded worktree dir was removed, its status is terminal, **or** its dir is
+    still on disk but the owning session is confirmed dead -- no live process, no
+    fresh liveness hint, and days-stale activity (see :func:`_owner_looks_dead`).
 
     **Anchor owners** (``<machine>/<project>/@anchor``) are permanent, so they
     invert the worktree rule: a *missing* anchor ledger is ``None`` (spare, never
@@ -117,6 +202,14 @@ def local_claimant_alive(owner_ref: str) -> bool | None:
         return False
     if owner_rec.worktree_path and not Path(owner_rec.worktree_path).exists():
         return False  # owner's worktree dir removed -> gone
+    # Dead-session detection: a still-on-disk worktree dir is
+    # NOT proof the owning *session* is alive -- a crashed/rebooted/abandoned
+    # session leaves its dir behind and would otherwise pin its in-flight claims
+    # forever. Release the claim only when the session is CONFIRMED gone (no live
+    # process, no fresh liveness hint, and days-stale activity); the freed
+    # resources still keep their own git/PR/session prune-safety.
+    if _owner_looks_dead(owner_rec):
+        return False
     return True  # owner still present -> spare
 
 

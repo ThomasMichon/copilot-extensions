@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 import types
+from datetime import datetime, timedelta
 
 from agent_worktrees import claimant, tracking
+
+
+def _iso_ago(**delta) -> str:
+    """A naive ISO stamp ``delta`` in the past, matching ``tracking._now_iso``."""
+    return (datetime.now() - timedelta(**delta)).strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def _cfg(machine="anomalous-potato"):
@@ -79,6 +85,84 @@ class TestLocalClaimantAlive:
 
     def test_empty_ref_none(self):
         assert claimant.local_claimant_alive("") is None
+
+    # --- dead-session detection ---------------------------------------------
+    # A same-machine owner whose worktree DIR still exists but whose session is
+    # confirmed dead (no live process, no fresh liveness hint, days-stale
+    # activity) reports gone, so its in-flight claims are released.
+
+    def _age_owner(self, tmp_path, project, wt_id, **fields):
+        """Load the seeded owner record, patch fields, save. Returns the path."""
+        tdir = tmp_path / f".{project}" / "worktrees"
+        path = tdir / f"{wt_id}.yaml"
+        rec = tracking.load_record(path)
+        for k, v in fields.items():
+            setattr(rec, k, v)
+        tracking.save_record(rec, path)
+        return path
+
+    def test_dead_session_stale_activity_gone(self, tmp_path, monkeypatch):
+        # Dir present, but no live session and all activity days-stale -> gone.
+        _seed_owner(tmp_path, monkeypatch, "test-chamber", "wt-A")
+        self._age_owner(tmp_path, "test-chamber", "wt-A",
+                        started_at=_iso_ago(days=30),
+                        last_resumed_at=_iso_ago(days=18))
+        assert claimant.local_claimant_alive(
+            "anomalous-potato/test-chamber/wt-A") is False
+
+    def test_recent_activity_spares_dead_check(self, tmp_path, monkeypatch):
+        # Old creation but a recent resume -> still alive (spare).
+        _seed_owner(tmp_path, monkeypatch, "test-chamber", "wt-A")
+        self._age_owner(tmp_path, "test-chamber", "wt-A",
+                        started_at=_iso_ago(days=30),
+                        last_resumed_at=_iso_ago(minutes=5))
+        assert claimant.local_claimant_alive(
+            "anomalous-potato/test-chamber/wt-A") is True
+
+    def test_fresh_bound_live_hint_spares(self, tmp_path, monkeypatch):
+        # A bare-resumed owner (invisible to the session scan) with a fresh
+        # bound_live=True hint is spared even when created long ago.
+        _seed_owner(tmp_path, monkeypatch, "test-chamber", "wt-A")
+        self._age_owner(tmp_path, "test-chamber", "wt-A",
+                        started_at=_iso_ago(days=30),
+                        last_resumed_at=_iso_ago(days=18),
+                        bound_live=True, bound_live_at=_iso_ago(minutes=2))
+        assert claimant.local_claimant_alive(
+            "anomalous-potato/test-chamber/wt-A") is True
+
+    def test_stale_live_hint_not_spared(self, tmp_path, monkeypatch):
+        # A stale mux_live=True hint (its *_at days old) is not a heartbeat.
+        _seed_owner(tmp_path, monkeypatch, "test-chamber", "wt-A")
+        self._age_owner(tmp_path, "test-chamber", "wt-A",
+                        started_at=_iso_ago(days=30),
+                        last_resumed_at=_iso_ago(days=18),
+                        mux_live=True, mux_live_at=_iso_ago(days=10))
+        assert claimant.local_claimant_alive(
+            "anomalous-potato/test-chamber/wt-A") is False
+
+    def test_confirmed_not_live_stamp_is_not_a_heartbeat(self, tmp_path, monkeypatch):
+        # A FRESH bound_live=False stamp means "confirmed NOT live" -- it must
+        # not spare a session whose real activity is days-stale.
+        _seed_owner(tmp_path, monkeypatch, "test-chamber", "wt-A")
+        self._age_owner(tmp_path, "test-chamber", "wt-A",
+                        started_at=_iso_ago(days=30),
+                        last_resumed_at=_iso_ago(days=18),
+                        bound_live=False, bound_live_at=_iso_ago(minutes=1))
+        assert claimant.local_claimant_alive(
+            "anomalous-potato/test-chamber/wt-A") is False
+
+    def test_dead_after_env_override(self, tmp_path, monkeypatch):
+        # Under the default 24h threshold a 2-min-idle owner is alive; a tight
+        # env override reclassifies it as dead.
+        _seed_owner(tmp_path, monkeypatch, "test-chamber", "wt-A")
+        self._age_owner(tmp_path, "test-chamber", "wt-A",
+                        started_at=_iso_ago(minutes=2),
+                        last_resumed_at=_iso_ago(minutes=2))
+        assert claimant.local_claimant_alive(
+            "anomalous-potato/test-chamber/wt-A") is True
+        monkeypatch.setenv(claimant._DEAD_AFTER_ENV, "60")
+        assert claimant.local_claimant_alive(
+            "anomalous-potato/test-chamber/wt-A") is False
 
     # --- anchor owners (permanent; invert the "missing record => gone" rule) ---
 
