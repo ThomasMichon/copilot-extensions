@@ -174,18 +174,20 @@ bundle so listing/selection never decompresses; readers (`ramp-up-session`,
 `collate-session`) resolve and read archived sessions transparently.
 
 Two-pair model -- the compressed store syncs to the hub alongside the
-uncompressed tree:
+uncompressed tree. **When `compact.enabled`, the scheduled `session-sync run`
+performs the whole lifecycle itself** (no separate command needed):
 
 ```
-session-sync compact       # on-device: archive cold sessions into the store
-                           #   (<home>/archived-sessions) + reclaim the live
-                           #   session-state/<id>/ dir (keeps the .tar.gz)
-session-sync run           # with compact.enabled: also pushes the archive store
-                           #   to {machine}/archived/ and reconciles away the
-                           #   uncompressed hub duplicates
-session-sync compact-hub   # hub backlog: compact hub-only historical sessions
-                           #   in place + reconcile (--dry-run aware)
+session-sync run           # scheduled service: on-device compact + reclaim,
+                           #   push (Pair A), push archive store to
+                           #   {machine}/archived/ (Pair B), compact the hub-only
+                           #   backlog, and reconcile away uncompressed duplicates
+session-sync compact       # (manual) on-device compaction only
+session-sync compact-hub   # (manual) hub backlog compaction + reconcile only
 ```
+
+Both `compact`/`compact-hub` remain for manual/`--dry-run` use, but the deployed
+4-hourly `session-sync run --prune` already drives everything from config.
 
 Both `compact` and `compact-hub` are idempotent and take the sync lock, so they
 never race the scheduled push. Add `--dry-run` to preview.

@@ -321,17 +321,54 @@ def run_compact(
                 file=sys.stderr,
             )
             return result
-        for ref in selected:
-            try:
-                reclaimed = compact_session(
-                    ref, archive_root, codec=codec, reclaim=True
-                )
-            except (OSError, RuntimeError, ValueError) as exc:
-                result.failed.append(f"{ref.id}: {exc}")
-                continue
-            result.compacted += 1
-            result.reclaimed_bytes += reclaimed
-            if verbose:
-                mb = reclaimed / (1024 * 1024)
-                print(f"compact: archived {ref.id} (reclaimed {mb:.1f} MB)")
+        _compact_selected(cfg, selected, result, codec=codec,
+                          archive_root=archive_root, verbose=verbose)
     return result
+
+
+def _compact_selected(
+    cfg: Config,
+    selected: list[SessionRef],
+    result: CompactResult,
+    *,
+    codec: str,
+    archive_root: Path,
+    verbose: bool = False,
+) -> CompactResult:
+    """Archive each selected session (lock-free core; caller holds the lock)."""
+    for ref in selected:
+        try:
+            reclaimed = compact_session(ref, archive_root, codec=codec, reclaim=True)
+        except (OSError, RuntimeError, ValueError) as exc:
+            result.failed.append(f"{ref.id}: {exc}")
+            continue
+        result.compacted += 1
+        result.reclaimed_bytes += reclaimed
+        if verbose:
+            mb = reclaimed / (1024 * 1024)
+            print(f"compact: archived {ref.id} (reclaimed {mb:.1f} MB)")
+    return result
+
+
+def compact_local(cfg: Config, *, verbose: bool = False) -> CompactResult:
+    """On-device compaction core for callers that already hold the sync lock.
+
+    Selects cold in-scope untracked sessions and archives them (reclaiming the
+    live dirs). Used by ``run_sync`` to fold compaction into the scheduled
+    ``session-sync run`` when ``sync.compact.enabled``. Returns the result;
+    ``enabled`` is the caller's gate.
+    """
+    codec = cfg.sync_compact["codec"]
+    archive_root = cfg.compact_archive_root
+    selected, result = select_compactable(cfg)
+    if verbose:
+        print(
+            f"compact: {len(selected)} eligible of {result.scanned}; skipped "
+            f"{result.skipped_recent} recent, {result.skipped_tracked} tracked, "
+            f"{result.skipped_out_of_scope} out-of-scope, "
+            f"{result.skipped_unclassified} unclassified"
+        )
+    if not selected:
+        return result
+    return _compact_selected(cfg, selected, result, codec=codec,
+                            archive_root=archive_root, verbose=verbose)

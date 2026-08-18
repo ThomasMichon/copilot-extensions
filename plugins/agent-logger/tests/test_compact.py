@@ -193,6 +193,37 @@ def test_dry_run_does_not_reclaim(tmp_path: Path, monkeypatch) -> None:
 
 # --- config ---------------------------------------------------------------
 
+def test_run_sync_folds_in_compaction(tmp_path: Path, monkeypatch) -> None:
+    # session-sync run itself performs the whole compaction lifecycle when
+    # compact.enabled: on-device archive+reclaim, then Pair B push to the hub.
+    from agent_logger.sync import engine
+
+    src = tmp_path / "copilot"
+    live = _session(src, "old1", updated=NOW - timedelta(days=40), cwd="C:/repo/gone")
+    home = tmp_path / "home"
+    home.mkdir()
+    hub = tmp_path / "hub"
+    cfg = Config({
+        "machine": {"name": "testbox"},
+        "sync": {
+            "source": str(src),
+            "target": "local",
+            "targets": {"local": {"path": str(hub)}},
+            "compact": {"enabled": True},
+        },
+    }, home)
+    monkeypatch.setattr(compact_mod, "tracked_worktree_paths", lambda: None)
+
+    rc = engine.run_sync(cfg, verbose=True)
+    assert rc == 0
+    # on-device: live dir reclaimed, archive kept in the local store
+    assert not live.exists()
+    assert (home / "archived-sessions" / "old1.tar.gz").is_file()
+    # Pair B: archive published to the hub under {machine}/archived/
+    assert (hub / "testbox" / "archived" / "old1.tar.gz").is_file()
+    assert (hub / "testbox" / "archived" / "old1.workspace.yaml").is_file()
+
+
 def test_archive_root_defaults_under_home(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
     assert cfg.compact_archive_root == cfg.home / "archived-sessions"
