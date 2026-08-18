@@ -299,8 +299,8 @@ policy that keeps it honest and affordable:
 
 ## 9. Runner surface
 
-Additive to today's `run.ps1` (`-Mode eval` is implemented in `run.ps1`; `run.sh`
-parity is a follow-up); no change to Tier-P behavior.
+Additive to today's `run.ps1`/`run.sh` (`-Mode eval` is implemented in **both**);
+no change to Tier-P behavior.
 
 ```powershell
 ./run.ps1 -Scenario agent-vault-eval -Mode eval            # run one eval end-to-end (setup→gate→drive→capture)
@@ -391,9 +391,14 @@ Per ARCHITECTURE §6, the split is unchanged and matters more for Tier E:
    (**full round-trip**) — the detached waiter's agent-bridge resume nudge landing
    back in the *same* driven worktree/session — gated on a live bridge.
 
-> **Also still to do:** **`run.sh` parity** — `-Mode eval` is implemented in
-> `run.ps1` only; the Linux/WSL/macOS `run.sh` does not yet carry it (it errors on
-> an unknown mode). Track as a follow-up.
+> **✅ `run.sh` parity (done).** `eval` mode is now implemented in the
+> Linux/WSL/macOS `run.sh` too, mirroring `run.ps1`'s `Invoke-Eval`: manifest parse
+> + full-prompt assembly + prompt hash (delegated to `python3`, no `jq` dep), the
+> `setup.sh` starting-state + Tier-P precondition (`--skip-tier-p-gate`), the
+> `agent-bridge create` drive with a `timeout(1)`-bounded per-turn wall clock,
+> `--runs N`, `post_check.sh`, and the `eval/eval-run.json` judge-packet index. The
+> prompt-hash and eval-run.json shape are byte-identical to `run.ps1`'s (verified by
+> cross-checking a `run.ps1`-produced fingerprint).
 
 Each phase is independently useful: even Phase 3 (drive + capture, human-judged)
 already delivers the operator's core ask — *point a fresh Copilot at our docs and
