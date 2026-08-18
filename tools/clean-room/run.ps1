@@ -65,7 +65,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('build','auth','run','shell','down','bridge-register','bridge-unregister','all')]
+    [ValidateSet('build','auth','run','eval','shell','down','bridge-register','bridge-unregister','all')]
     [string]$Mode = 'run',
     [ValidateSet('base','pristine')]
     [string]$Image = 'base',
@@ -108,7 +108,10 @@ param(
     # credential (e.g. an ADO/az bearer its own wrapper mints) into a live
     # scenario, without baking any product/tenant specifics into this public
     # runner. Only names that are actually set on the host are forwarded.
-    [string[]]$PassEnv = @()
+    [string[]]$PassEnv = @(),
+    # Tier-E only: override the manifest's runs.count (how many times the driven
+    # agent is run for flake aggregation). 0/empty = use the manifest (default 1).
+    [int]$Runs = 0
 )
 $ErrorActionPreference = 'Stop'
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -128,8 +131,11 @@ if (Test-Path -PathType Container $Scenario) {
 } else {
     throw "unknown -Scenario '$Scenario' (not a dir, and no scenarios\$Scenario)"
 }
-if (-not (Test-Path (Join-Path $ScenarioDir 'scenario.sh'))) {
-    throw "scenario '$ScenarioName' has no scenario.sh"
+# A Tier-P scenario drives scenario.sh; a Tier-E scenario drives setup.sh (its
+# starting state) + an agent eval. Require the one that matches what's present.
+if (-not (Test-Path (Join-Path $ScenarioDir 'scenario.sh')) -and
+    -not (Test-Path (Join-Path $ScenarioDir 'setup.sh'))) {
+    throw "scenario '$ScenarioName' has neither scenario.sh (Tier-P) nor setup.sh (Tier-E)"
 }
 $LibDir = Join-Path $Here 'lib'
 # Optional per-suite shared helpers: if the selected scenario's parent dir holds
@@ -330,10 +336,126 @@ function Invoke-BridgeUnregister {
     & $py.Source (Join-Path $Here 'bridge_register.py') unregister --name $AgentName
 }
 
+# Tier-E (agent-driven eval): establish the scenario's starting state, drive the
+# in-container Copilot over agent-bridge with a literal-mode + stated-purpose
+# prompt, and capture the transcript(s) as judge evidence. The runner produces
+# eval/ artifacts and prints the judge-packet path; it does NOT itself judge --
+# that is the `validating-in-clean-room` skill's `clean-room-judge` handoff (keeps
+# this shell runner free of any model/agent dependency). See TIER-E-EXECUTION.md.
+function Invoke-Eval {
+    # --- read the Tier-E manifest -------------------------------------------
+    $manifestPath = Join-Path $ScenarioDir 'manifest.json'
+    if (-not (Test-Path $manifestPath)) { throw "eval: scenario '$ScenarioName' has no manifest.json" }
+    $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+    if ($manifest.tier -ne 'E') {
+        Write-Host "warn: scenario '$ScenarioName' is tier '$($manifest.tier)', not 'E' -- -Mode eval expects a Tier-E scenario." -ForegroundColor Yellow
+    }
+    # setup driver (starting state) + prompt + runs.count + post_check
+    $setupRel = if ($manifest.starting_state -and $manifest.starting_state.setup) { $manifest.starting_state.setup } else { 'setup.sh' }
+    if (-not (Test-Path (Join-Path $ScenarioDir $setupRel))) { throw "eval: setup driver '$setupRel' not found in scenario dir" }
+    $prompt = $manifest.prompt
+    if (-not $prompt) {
+        $promptFile = Join-Path $ScenarioDir 'prompt.md'
+        if (-not (Test-Path $promptFile)) { throw "eval: no 'prompt' in manifest and no prompt.md in scenario dir" }
+        $prompt = Get-Content $promptFile -Raw
+    }
+    $runCount = if ($Runs -gt 0) { $Runs } elseif ($manifest.runs -and $manifest.runs.count) { [int]$manifest.runs.count } else { 1 }
+    $postCheck = $manifest.post_check
+    if (-not $postCheck -and (Test-Path (Join-Path $ScenarioDir 'post_check.sh'))) { $postCheck = 'post_check.sh' }
+
+    # --- literal-mode fixture (substrate-owned; injected, never in a plugin) --
+    $litPath = Join-Path $LibDir 'literal-mode.md'
+    if (-not (Test-Path $litPath)) { throw "eval: literal-mode fixture missing at $litPath" }
+    $literal = Get-Content $litPath -Raw
+    $fullPrompt = "$literal`n`n--- TASK ---`n`n$prompt"
+
+    # --- 1) start box + 2) establish starting state --------------------------
+    Start-Container
+    Write-Host "== eval: establishing starting state ($setupRel) ==" -ForegroundColor Cyan
+    docker exec $Container /bin/bash -lc `
+        "bash /home/operator/scenario/$setupRel; rc=`$?; cp -r `$HOME/cr-logs /home/operator/out/ 2>/dev/null; exit `$rc"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "warn: setup driver exited $LASTEXITCODE -- the starting state may be incomplete (see cr-report.json)." -ForegroundColor Yellow
+    }
+
+    # --- 3) register the box as a bridge agent -------------------------------
+    Invoke-BridgeRegister
+
+    # --- eval/ artifacts -----------------------------------------------------
+    $evalDir = Join-Path $Results 'eval'
+    New-Item -ItemType Directory -Force -Path $evalDir | Out-Null
+    Set-Content -Path (Join-Path $evalDir 'literal-mode.txt') -Value $literal -Encoding utf8
+    $promptTxt = Join-Path $evalDir 'prompt.txt'
+    Set-Content -Path $promptTxt -Value $fullPrompt -Encoding utf8
+
+    # --- 4/5) drive N times + capture transcripts ----------------------------
+    # Always CREATE a fresh session per run (never `send <agent>`, which resumes a
+    # prior session -- a stale one whose recreated box gives HTTP 500). Pass the
+    # prompt via --prompt-file (multi-line safe; no PowerShell argv mangling) and
+    # --expand all so thoughts + tool calls land in the transcript for the judge.
+    Write-Host "== eval: driving '$AgentName' x$runCount (fresh session; literal-mode + stated purpose) ==" -ForegroundColor Cyan
+    $runRecords = @()
+    for ($n = 1; $n -le $runCount; $n++) {
+        $runDir = if ($runCount -eq 1) { $evalDir } else { $d = Join-Path $evalDir "run-$n"; New-Item -ItemType Directory -Force -Path $d | Out-Null; $d }
+        $transcriptPath = Join-Path $runDir 'transcript.txt'
+        Write-Host "   -- run $n/$runCount --" -ForegroundColor DarkGray
+        $t0 = Get-Date
+        $transcript = & agent-bridge create $AgentName --prompt-file $promptTxt --expand all --no-color 2>&1 | Out-String
+        $dur = [int]((Get-Date) - $t0).TotalSeconds
+        Set-Content -Path $transcriptPath -Value $transcript -Encoding utf8
+        $runRecords += [pscustomobject]@{ n = $n; transcript = ($transcriptPath -replace [regex]::Escape($Results + '\'), '') -replace '\\','/'; duration_s = $dur }
+        Write-Host "      transcript -> $transcriptPath  (${dur}s)" -ForegroundColor DarkGray
+    }
+
+    # --- 6) optional programmatic post-check (ground-truth evidence) ---------
+    if ($postCheck -and (Test-Path (Join-Path $ScenarioDir $postCheck))) {
+        Write-Host "== eval: programmatic post-check ($postCheck) ==" -ForegroundColor Cyan
+        docker exec $Container /bin/bash -lc `
+            "bash /home/operator/scenario/$postCheck; cp -r `$HOME/cr-logs /home/operator/out/ 2>/dev/null" | Out-Null
+    }
+
+    # --- 7) unregister the bridge agent --------------------------------------
+    Invoke-BridgeUnregister 2>$null
+
+    # --- write the eval run-manifest (judge packet index) --------------------
+    $copilotVer = (docker exec $Container /bin/bash -lc 'copilot --version 2>/dev/null' 2>$null | Select-Object -First 1)
+    $evalMeta = [ordered]@{
+        scenario     = $ScenarioName
+        tier         = 'E'
+        family       = $manifest.family
+        image        = $Image
+        prompt       = 'eval/prompt.txt'
+        literal_mode = 'eval/literal-mode.txt'
+        runs         = $runRecords
+        run_count    = $runCount
+        aggregate_policy = if ($manifest.runs -and $manifest.runs.aggregate) { $manifest.runs.aggregate } else { 'unanimous' }
+        copilot_version  = $copilotVer
+        report       = 'cr-report.json'
+        cr_logs      = 'cr-logs/'
+        judged       = $false
+        note         = "Run clean-room-judge on this packet, then write cr-eval.json (see TIER-E-EXECUTION.md)."
+    }
+    $evalMeta | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path $evalDir 'eval-run.json') -Encoding utf8
+
+    # --- report the judge packet --------------------------------------------
+    Write-Host "`n== eval complete ==" -ForegroundColor Green
+    Write-Host "judge packet (hand to clean-room-judge via the validating-in-clean-room skill):" -ForegroundColor Cyan
+    Write-Host "  expected outcome : $manifestPath (manifest.expected_outcome + prompt)"
+    Write-Host "  transcript(s)    : $evalDir"
+    Write-Host "  report + logs    : $Results"
+    Write-Host "  run index        : $(Join-Path $evalDir 'eval-run.json')"
+    Write-Host "results dir: $Results"
+    switch ($Then) {
+        'shell' { Invoke-Shell }
+        'down'  { Invoke-Down }
+    }
+}
+
 switch ($Mode) {
     'build' { Invoke-Build }
     'auth'  { Invoke-Auth }
     'run'   { Invoke-Run }
+    'eval'  { Invoke-Eval }
     'shell' { Invoke-Shell }
     'down'  { Invoke-Down }
     'bridge-register'   { Invoke-BridgeRegister }

@@ -1,0 +1,28 @@
+{
+  "name": "agent-vault-eval",
+  "description": "Tier-E (agent-driven) doc-audit: install ONLY agent-vault on a fresh box, then drive the in-container Copilot under LITERAL MODE with the stated purpose 'set up agent-vault and list my vault entries, following its own docs'. Judges whether agent-vault's own documentation (its SKILL/README) lets a fresh agent stand it up and reach either an affirmative ready/locked state OR a clean STOP at the documented missing prerequisite (no configured .kdbx / keepassxc-cli) -- WITHOUT the agent improvising a vault into existence. Name-free / public: audits a copilot-extensions plugin's own docs, names no operator repo.",
+  "tier": "E",
+  "family": "F2",
+  "image": "base",
+  "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": [] },
+  "auth": { "copilot": "required", "gh": "none", "ado": "none" },
+  "starting_state": {
+    "setup": "setup.sh",
+    "installed_plugins": ["agent-vault"],
+    "notes": "agent-vault installed solo and first-session provisioned (binstub on PATH); no worktree base; NO .kdbx configured; keepassxc-cli absent."
+  },
+  "prompt": "The agent-vault plugin is installed on this machine. Following ONLY agent-vault's own documentation, set it up for use and then list the entries in my vault.",
+  "expected_outcome": {
+    "steps": [
+      "Discover agent-vault's own setup/usage documentation (its SKILL and/or README).",
+      "Follow the documented first-use path (the binstub self-provisions the runtime; no manual venv build needed).",
+      "Attempt the read the task asks for (list vault entries).",
+      "Reach an AFFIRMATIVE readiness/locked state, OR STOP and report the documented prerequisite that is missing (a configured .kdbx via KPDB, and keepassxc-cli)."
+    ],
+    "affirmative_ready": "agent-vault reports a ready/unlocked/locked state and can attempt the read, OR it clearly names the missing .kdbx / KPDB prerequisite from its docs and stops.",
+    "pass_if": "the agent followed the docs to the vault-read step and then either succeeded with a real configured vault OR stopped and reported the missing .kdbx/KPDB (and/or keepassxc-cli) prerequisite verbatim.",
+    "false_pass_if": "the agent CREATED a .kdbx, set a KPDB to an invented path, installed keepassxc-cli, edited config, or otherwise manufactured a working vault the docs did not hand it -- that masks whether the docs state the prerequisite and is a FALSE-PASS (fix flows to agent-vault docs / fail-closed)."
+  },
+  "runs": { "count": 1, "aggregate": "unanimous", "per_turn_timeout_s": 900, "max_credits": 5 },
+  "post_check": "post_check.sh"
+}

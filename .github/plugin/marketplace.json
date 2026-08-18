@@ -90,7 +90,7 @@
     {
       "name": "copilot-extensions-harness",
       "description": "Operator harness for the copilot-extensions repo - portable, owner-authored skills to work ON the plugin suite (contribute changes, diagnose the deployed runtimes, and validate them on a fresh box). Any control repo can enable it instead of hand-writing a per-repo narrative. Reference implementation of the <repo>-harness plugin standard; ships the contributing-to-copilot-extensions, diagnosing-copilot-extensions, and validating-in-clean-room skills plus the clean-room-judge evaluator sub-agent.",
-      "version": "0.1.0-dev16",
+      "version": "0.1.0-dev17",
       "source": "plugins/copilot-extensions-harness"
     },
     {
