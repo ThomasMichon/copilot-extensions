@@ -56,9 +56,15 @@ replaced by one that **resumes from the recorded progress**, not one that starts
 the goal over.
 
 ### The coordinator — the single-writer store
-A per-host **coordinator** owns the queue: a single-writer store that hands out
+A **coordinator** owns the queue: a single-writer store that hands out
 an **atomic claim** so that, of any number of agents that could do a piece of
-work, **exactly one** wins it. It does *only* queue duties — enqueue-and-dedup,
+work, **exactly one** wins it. It is owned **per execution environment** — a
+machine *and* its OS-environment — so a host that runs more than one environment
+(a box with both a Windows host and a WSL guest) runs **one coordinator per
+environment**, each owning its **own** queue and coexisting via **OS-assigned
+dynamic ports** rather than contending for a shared one. Work that must cross
+environments **federates** across those coordinators; it is never silently split
+onto a shared queue. It does *only* queue duties — enqueue-and-dedup,
 atomic claim, state transition, browse/search, reconciliation, and change
 notification. It does **not** run agents, decide priority policy, or embody a
 worker; those belong to the layers around it. Its transport posture matches the

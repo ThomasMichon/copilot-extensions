@@ -270,7 +270,8 @@ def _ensure_local_coordinator(args: argparse.Namespace) -> None:
     command runs, lazily starting one if not.
 
     No-op for an explicit ``--url``/``--shared`` target (remote/operator choice),
-    on a WSL guest (the Windows host owns the coordinator), or when opted out via
+    for a **WSL guest opted in** to Windows-client mode (``AGENT_DISPATCH_WSL_WINDOWS_CLIENT``;
+    the Windows host owns that coordinator), or when opted out via
     ``AGENT_DISPATCH_NO_AUTOSTART``. Every failure is swallowed -- the command then
     fails loudly on its own if the coordinator really is unreachable, so autostart
     never converts a hard error into a silent hang.
@@ -280,9 +281,10 @@ def _ensure_local_coordinator(args: argparse.Namespace) -> None:
     if os.environ.get(_AUTOSTART_ENV_OPT_OUT):
         return
     try:
+        from .config import wsl_windows_client
         from .netinfo import is_wsl
 
-        if is_wsl():
+        if is_wsl() and wsl_windows_client():
             return
     except Exception:
         pass
