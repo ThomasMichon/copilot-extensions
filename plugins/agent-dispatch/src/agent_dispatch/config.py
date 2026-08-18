@@ -43,11 +43,28 @@ DEFAULT_SWEEP_INTERVAL = 60.0
 # its own namespace. See docs/patterns/local-endpoint-discovery.md.
 RUN_DIR_ENV = "AGENT_DISPATCH_RUN_DIR"
 ENDPOINT_ENV = "AGENT_DISPATCH_ENDPOINT"
+OVERRIDES_ENV = "AGENT_DISPATCH_OVERRIDES"
 
 
 def run_dir() -> Path:
     """The runtime dir that holds the rendezvous (endpoint) file."""
     return Path(os.environ.get(RUN_DIR_ENV) or (Path.home() / ".agent-dispatch" / "run"))
+
+
+def overrides_path() -> Path:
+    """The local, out-of-band operator-override store for supervised units.
+
+    A machine-local JSON file (``~/.agent-dispatch/overrides.json``) mapping a
+    supervised unit's **registration id** to an override record. It is deliberately
+    *not* under any repo, so a repo re-sync can never quietly undo an override; the
+    single supervisor daemon subtracts overridden-off ids from its desired set each
+    reconcile, and the ``supervise override`` CLI reads/writes it. Honors
+    ``AGENT_DISPATCH_OVERRIDES`` for side-by-side / test deployments (kept beside the
+    run dir so a branded namespace carries its overrides too)."""
+    return Path(
+        os.environ.get(OVERRIDES_ENV)
+        or (Path.home() / ".agent-dispatch" / "overrides.json")
+    )
 
 
 def routing_dir() -> Path:
