@@ -34,11 +34,36 @@
 #                                   GH_TOKEN exported (both are needed; see below),
 #                                   asserting the codespace scope
 #
+# Caller-controlled signal (the async construct for suspend/resume evals):
+#   cr_signal_arm  <name>        -- arm a signal the HARNESS controls the wake edge
+#                                   of; writes a truly-blocking wait script (a FIFO
+#                                   read -- no CPU spin) whose only release is
+#                                   cr_signal_fire. Survives across the
+#                                   setup->agent-turn->post_check process boundary
+#                                   (state lives under $CR_SIGNAL_DIR on disk).
+#   cr_signal_wait_cmd <name>    -- print the blocking wait command (a single
+#                                   argv-safe path) to hand to the agent-under-test
+#                                   (e.g. `agent-dispatch run --detach --resume <wt>
+#                                   -- <this>`); it BLOCKS until the harness fires.
+#   cr_signal_fire <name>        -- release the signal (bounded; never hangs). The
+#                                   caller owns WHEN this happens, so a resume that
+#                                   lands before it is proof of a poll/self-wake.
+#   cr_signal_waiter_present <name>
+#                                -- 0 iff a live waiter for <name> is running (the
+#                                   objective "did it genuinely suspend" evidence).
+#   cr_signal_fired <name>       -- 0 iff the signal was fired (breadcrumb).
+# Why it exists: an internally-timed wait (a plain `sleep`) can be faked and masks
+# whether the agent truly hibernated. A wake edge the TEST CALLER owns makes
+# suspend/resume objectively observable -- the flagship consumer is the
+# agent-dispatch hibernate-the-wait eval; heavier agentic evals reuse it to test
+# externally-timed orchestration rather than self-paced sleeps.
+#
 # Environment consumed:
 #   CR_REPORT        path for the JSON report            (default $HOME/cr-report.json)
 #   CR_LOGDIR        per-label command logs              (default $HOME/cr-logs)
 #   CR_UNTIL         stop after this phase number        (default 999 = all)
 #   CR_SCENARIO_NAME scenario name recorded in the report (default "unnamed")
+#   CR_SIGNAL_DIR    caller-controlled signal state dir  (default $HOME/.cr-signals)
 #
 # Contract notes:
 # - The report keeps the historical shape: top-level copilot_version,
@@ -52,6 +77,7 @@ CR_REPORT="${CR_REPORT:-$HOME/cr-report.json}"
 CR_LOGDIR="${CR_LOGDIR:-$HOME/cr-logs}"
 CR_UNTIL="${CR_UNTIL:-999}"
 CR_SCENARIO_NAME="${CR_SCENARIO_NAME:-unnamed}"
+CR_SIGNAL_DIR="${CR_SIGNAL_DIR:-$HOME/.cr-signals}"
 
 # ---- accounting ----------------------------------------------------------
 CR_PASS=0
@@ -239,6 +265,80 @@ cr_seed_gh_codespace_auth() {
     fi
     jam "auth-gh" "gh not authenticated with the codespace scope" "inject a codespace-scoped COPILOT_GITHUB_TOKEN (run.ps1 -TokenAccount <acct>)"
     return 1
+}
+
+# ---- caller-controlled signal (async construct for suspend/resume evals) --
+# A "signal" whose wake edge the TEST CALLER owns. The wait it produces is a real
+# block (a FIFO read -- no CPU spin), so a worker that hands it to a hibernation
+# layer genuinely costs nothing while suspended; the ONLY thing that releases it is
+# cr_signal_fire, called by the harness at a moment of its choosing. Any forward
+# progress observed before that fire is proof the agent polled / self-woke instead
+# of truly hibernating. State lives on disk under $CR_SIGNAL_DIR so it survives the
+# setup -> agent-turn -> post_check process boundary.
+
+# Arm a signal: create its FIFO + a blocking wait script. Falls back to a
+# sentinel-file poll only if mkfifo is unavailable (still caller-released).
+cr_signal_arm() {  # <name>
+    local name="$1"
+    mkdir -p "$CR_SIGNAL_DIR"
+    local fifo="$CR_SIGNAL_DIR/$name.fifo"
+    local fired="$CR_SIGNAL_DIR/$name.fired"
+    local waitsh="$CR_SIGNAL_DIR/$name-wait.sh"
+    rm -f "$fifo" "$fired"
+    if mkfifo "$fifo" 2>/dev/null; then
+        cat > "$waitsh" <<EOF
+#!/usr/bin/env bash
+# Caller-controlled signal '$name': block with NO CPU spin until the harness
+# fires it (cr_signal_fire). A FIFO read blocks at open until a writer appears.
+read -r _ < "$fifo"
+EOF
+    else
+        cat > "$waitsh" <<EOF
+#!/usr/bin/env bash
+# Caller-controlled signal '$name' (poll fallback -- no mkfifo): block until the
+# harness drops the fired breadcrumb (cr_signal_fire).
+while [ ! -e "$fired" ]; do sleep 1; done
+EOF
+    fi
+    chmod +x "$waitsh"
+    info "signal '$name' armed (wait: $waitsh)"
+}
+
+# Print the blocking wait command -- a single argv-safe path -- to hand to the
+# agent-under-test (e.g. `agent-dispatch run --detach --resume <wt> -- <this>`).
+cr_signal_wait_cmd() {  # <name>
+    printf '%s' "$CR_SIGNAL_DIR/$1-wait.sh"
+}
+
+# Release the signal (bounded -- never hangs even if no reader is present).
+cr_signal_fire() {  # <name>
+    local name="$1"
+    local fifo="$CR_SIGNAL_DIR/$name.fifo"
+    touch "$CR_SIGNAL_DIR/$name.fired"
+    if [ -p "$fifo" ]; then
+        if command -v timeout >/dev/null 2>&1; then
+            timeout 10 bash -c "printf 'go\n' > '$fifo'" 2>/dev/null || true
+        else
+            ( printf 'go\n' > "$fifo" ) 2>/dev/null &
+            sleep 2; kill %1 2>/dev/null || true
+        fi
+    fi
+    info "signal '$name' fired"
+}
+
+# 0 iff a live waiter for <name> is running (objective "did it suspend" evidence).
+cr_signal_waiter_present() {  # <name>
+    local waitsh="$CR_SIGNAL_DIR/$1-wait.sh"
+    if command -v pgrep >/dev/null 2>&1; then
+        pgrep -f "$waitsh" >/dev/null 2>&1
+    else
+        ps -ef 2>/dev/null | grep -F "$waitsh" | grep -qv grep
+    fi
+}
+
+# 0 iff the signal was fired (breadcrumb).
+cr_signal_fired() {  # <name>
+    [ -e "$CR_SIGNAL_DIR/$1.fired" ]
 }
 
 _cr_join() {  # print array elements joined by ",\n    " with a leading indent

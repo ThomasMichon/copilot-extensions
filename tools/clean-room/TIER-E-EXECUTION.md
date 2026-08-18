@@ -372,6 +372,24 @@ Per ARCHITECTURE §6, the split is unchanged and matters more for Tier E:
    **turn-key F3-E** — a *specific* assembled harness bound to an **empty** knowledge
    repo completing a real end-to-end task with zero manual setup — which homes
    **downstream** (with the consuming harness), not the public rig.
+7. **◐ agent-dispatch suspend/resume (hibernate-the-wait) eval.** Slice 1
+   (**suspend-only**) is **built + validated**: `scenarios/agent-dispatch-hibernate-eval/`
+   installs agent-dispatch solo, arms a **caller-controlled signal** — a new
+   substrate primitive `cr_signal_arm` / `cr_signal_wait_cmd` / `cr_signal_fire`
+   (+ `cr_signal_waiter_present` / `cr_signal_fired`) in `lib/clean-room-lib.sh`: a
+   truly-blocking wait (a FIFO read, no CPU spin) whose **wake edge the harness
+   owns** — and drives "hand this blocking wait off per your docs." A literal PASS
+   requires the agent to discover *hibernate-the-wait* and run
+   `agent-dispatch run --detach --resume <wt> -- <signal-wait>`, leaving a **detached,
+   tokenless** waiter (`post_check.sh` proves it: `post_detached_waiter=present`,
+   `post_waiter_detached=yes` ppid→init, `post_agent_dispatch_run=yes`, then fires
+   the signal and confirms `post_waiter_released_on_fire=yes`). Busy-waiting,
+   hand-rolling a `nohup/&/setsid` waiter, or swapping in an own timer is a
+   FALSE-PASS. Because the caller owns the wake edge, hibernation is **objectively
+   observable** — the primitive is reusable infra for heavier agentic evals
+   (externally-timed orchestration, not self-paced sleeps). **Still future:** Slice 2
+   (**full round-trip**) — the detached waiter's agent-bridge resume nudge landing
+   back in the *same* driven worktree/session — gated on a live bridge.
 
 > **Also still to do:** **`run.sh` parity** — `-Mode eval` is implemented in
 > `run.ps1` only; the Linux/WSL/macOS `run.sh` does not yet carry it (it errors on
