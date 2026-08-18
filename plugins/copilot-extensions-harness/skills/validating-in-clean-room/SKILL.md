@@ -51,9 +51,11 @@ ARCHITECTURE.md).
 
 The **rig is name-free and public**; scenarios that name specific repos live with
 the consuming harness and are mounted in via `-Scenario <dir>`. The checked-in
-public scenarios are currently Tier-P/F1 (plus the configurable
-`generic-single-plugin` reference); Tier-E is supported by the bridge transport
-and the judge, but eval scenarios may live downstream.
+public scenarios are mostly Tier-P/F1 (plus the configurable
+`generic-single-plugin` reference); **Tier-E is now runnable end-to-end** via
+`-Mode eval` (drive + capture) plus the `clean-room-judge` verdict, with
+`agent-vault-eval` as the public reference eval. Name-ful eval scenarios (e.g. a
+whole-harness "set this up" from bare) still live downstream.
 
 ## 1. Run
 
@@ -71,6 +73,8 @@ From `tools/clean-room/` (`run.ps1` on Windows, `run.sh` on Linux/WSL/macOS):
 ./run.ps1 -TokenAccount <user>               # choose the host gh account for token injection
 ./run.ps1 -NoToken -Mode auth                # fallback device-code cached :authed image path
 ./run.ps1 -Mode bridge-register              # expose the box as an agent-bridge agent (Tier-E transport)
+./run.ps1 -Scenario agent-vault-eval -Mode eval   # Tier-E: setup -> drive Copilot (literal-mode) -> capture transcript + judge packet
+./run.ps1 -Scenario agent-vault-eval -Mode eval -Runs 3   # N-run for a gating claim (see flake policy)
 ./run.ps1 -Image pristine -Mode down         # remove the container
 ```
 
@@ -121,13 +125,22 @@ per-phase logs under `cr-logs/`.
   failure) means uv's index is unconfigured, not that uv is missing — the hint
   derives the internal index from pip's config. Confirmed fixes flow back to the
   **owning plugin/effort**; the clean room proves, it does not house the repair.
-- **Tier-E judging — delegate to `clean-room-judge`.** For an eval run (a driven
-  Copilot transcript against a scenario's stated outcome), hand the scenario's
-  expected outcome + the run's report/transcript to the **`clean-room-judge`**
-  sub-agent. It renders PASS/FAIL + evidence **under literal-mode rules**: it
-  credits only the literal task and treats a "pass" that depended on the agent
-  improvising around a broken setup as a **false pass** (a scenario defect). Do
-  not eyeball an eval as passing because the agent "eventually got there."
+- **Tier-E judging — delegate to `clean-room-judge`.** A Tier-E eval is a
+  two-step flow: **(1) drive + capture** with `-Mode eval` — it establishes the
+  scenario's starting state (`setup.sh`), registers the box as a bridge agent,
+  drives the in-container Copilot with the **literal-mode fixture + the scenario's
+  stated-purpose prompt** (a *fresh* session per run), and captures the
+  transcript(s) to `<results>/eval/` alongside an optional programmatic
+  `post_check.sh` (ground-truth self-heal tripwires). It prints the **judge
+  packet** path and does **not** itself judge. **(2) judge** — hand that packet
+  (the scenario's `manifest.json` `expected_outcome` + `prompt`/`expected.md`, the
+  `eval/transcript.txt`, `cr-report.json`, `cr-logs/`, and `eval/literal-mode.txt`)
+  to the **`clean-room-judge`** sub-agent; write its verdict to `eval/cr-eval.json`.
+  It renders PASS/FAIL + evidence **under literal-mode rules**: it credits only the
+  literal task and treats a "pass" that depended on the agent improvising around a
+  broken setup as a **FALSE-PASS → FAIL** (a scenario/plugin defect). Do not eyeball
+  an eval as passing because the agent "eventually got there." Full execution design
+  (manifest fields, artifacts, flake/cost policy): [`TIER-E-EXECUTION.md`](../../../../tools/clean-room/TIER-E-EXECUTION.md).
 
 ### Literal mode (non-negotiable for Tier E)
 
@@ -189,6 +202,7 @@ Under `tools/clean-room/scenarios/` today:
 | `agent-dispatch-cutover` | P/F1 | agent-dispatch cutover preserves queued/held work and heals aborted/wedged cases. |
 | `agent-index-cutover` | P/F1 | agent-index service cutover preserves durable queue state and heals drain/recovery cases. |
 | `agent-vault-cutover` | P/F1 | Forward-ready witness: proves agent-vault's client-side rendezvous fallback ladder; flags the daemon-side zdd cutover as not-yet-adopted (INFO, #609). |
+| `agent-vault-eval` | **E**/F2 | **The reference agent-driven doc-audit:** install agent-vault solo, then drive Copilot under literal mode with "set it up and list my vault, per its docs" — judged (via `clean-room-judge`) on whether the docs carry a fresh agent to an affirmative ready state **or** an honest STOP at the documented `.kdbx`/`KPDB` prerequisite, with no self-heal. |
 
 **The matrix to build toward** (per the vision): each plugin **solo** *(now
 complete — every runtime plugin has a solo scenario)* → **reasonable

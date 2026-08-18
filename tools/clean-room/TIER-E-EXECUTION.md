@@ -6,12 +6,16 @@
 > the gap between the Tier-E *concept* (already defined in
 > [`ARCHITECTURE.md`](./ARCHITECTURE.md) §1, the [vision](../../visions/clean-room-validation/README.md),
 > and the [`clean-room-judge`](../../plugins/copilot-extensions-harness/agents/clean-room-judge.agent.md)
-> agent) and a working implementation. **Status: design (pre-build).**
+> agent) and a working implementation. **Status: beachhead BUILT** — the runner
+> `-Mode eval` path, the `lib/literal-mode.md` fixture, and the reference
+> `agent-vault-eval` scenario are implemented and validated end-to-end (drive →
+> capture → `clean-room-judge` verdict). The **extreme** whole-harness F1-E/F3-E
+> variant remains future work (Phase 6). See the phased plan in §11.
 >
-> Tier P (programmatic) already runs today (17 scenarios). Tier E has all its
-> *pieces* — the `bridge-register` transport, the judge agent, the literal-mode
-> principle — but **no execution path and no eval scenarios**. This document
-> specifies both, and a phased build plan.
+> Tier P (programmatic) runs today (17 scenarios). Tier E's pieces — the
+> `bridge-register` transport, the judge agent, the literal-mode principle — are
+> now wired together by an execution path (`-Mode eval`) with one public reference
+> eval scenario. This document is the design of record for that layer.
 
 ## 1. What Tier-E execution must serve
 
@@ -327,24 +331,32 @@ Per ARCHITECTURE §6, the split is unchanged and matters more for Tier E:
 
 ## 11. Phased build plan
 
-1. **Fixture + schema (docs → substrate).** Add `lib/literal-mode.md`; extend the
-   scenario contract in ARCHITECTURE.md §4 with the Tier-E fields; document the
-   `cr-eval.json` shape. *No runner behavior yet.*
-2. **Reference eval scenario.** Author `scenarios/agent-vault-eval/`
-   (`manifest.json` + `setup.sh` + `expected.md` + optional `post_check.sh`) — the
+1. **✅ Fixture + schema (docs → substrate).** `lib/literal-mode.md` shipped; the
+   Tier-E scenario contract + `cr-eval.json` shape are specified here (§4, §7).
+2. **✅ Reference eval scenario.** `scenarios/agent-vault-eval/` shipped
+   (`manifest.json` + `setup.sh` + `expected.md` + `post_check.sh`) — the
    falsifying beachhead of §5.
-3. **Runner `-Mode eval` (seed + capture).** Implement steps 3–5: register the
-   bridge agent, seed the literal-mode+purpose turn, capture the transcript to
-   `eval/`. Prints the judge-packet path. This is the first end-to-end
-   *drive-and-capture* (no judge yet — human reads the transcript).
-4. **Judge wiring + `cr-eval.json`.** Wire the `validating-in-clean-room` skill to
-   assemble the packet and invoke `clean-room-judge`, writing `cr-eval.json`.
-   `agent-vault-eval` now yields an automated literal-mode verdict.
-5. **Flake/cost controls.** `-Runs N`, aggregation, `max_credits`, timeouts,
-   version/doc hashing into `cr-eval.json`.
-6. **The extreme F1-E.** Author `harness-from-bare` (downstream, name-ful):
+3. **✅ Runner `-Mode eval` (seed + capture).** Implemented in `run.ps1`: establish
+   the starting state (`setup.sh`), register the bridge agent, drive a **fresh
+   session per run** (`agent-bridge create --prompt-file --expand all`; never
+   `send`, which resumes a stale session), capture the transcript to `eval/`, run
+   `post_check.sh`, and print the judge-packet path.
+4. **✅ Judge wiring + `cr-eval.json`.** The `validating-in-clean-room` skill
+   documents assembling the packet and invoking `clean-room-judge`; the verdict is
+   written to `eval/cr-eval.json`. Validated end-to-end: `agent-vault-eval` yields
+   a literal-mode PASS (agent stopped at the documented `.kdbx`/`KPDB` prerequisite;
+   no self-heal, corroborated by `post_check.sh` ground-truth).
+5. **◐ Flake/cost controls.** `-Runs N` + `runs.count`/`aggregate` are wired and
+   `copilot_version` is recorded; **still to do:** enforce `max_credits`/
+   `per_turn_timeout_s`, the prompt+docs hash, and the automatic Tier-P precondition
+   gate.
+6. **☐ The extreme F1-E.** Author `harness-from-bare` (downstream, name-ful):
    bare box → "set this up" → judge suite self-assembly, escalating toward the
    vision's turn-key F3-E acceptance.
+
+> **Also still to do:** **`run.sh` parity** — `-Mode eval` is implemented in
+> `run.ps1` only; the Linux/WSL/macOS `run.sh` does not yet carry it (it errors on
+> an unknown mode). Track as a follow-up.
 
 Each phase is independently useful: even Phase 3 (drive + capture, human-judged)
 already delivers the operator's core ask — *point a fresh Copilot at our docs and
