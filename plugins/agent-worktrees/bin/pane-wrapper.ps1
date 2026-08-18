@@ -20,6 +20,76 @@ try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new() } catch {}
 $minRuntime = if ($env:WORKTREE_PANE_MIN_RUNTIME) { [int]$env:WORKTREE_PANE_MIN_RUNTIME } else { 3 }
 $waitTimeout = if ($env:WORKTREE_PANE_WAIT_TIMEOUT) { [int]$env:WORKTREE_PANE_WAIT_TIMEOUT } else { 60 }
 
+# --- Owner-tether: reap the whole pane subtree when this pane exits (#1433) ----
+# This wrapper is the pane's root process; the Copilot session (and its node /
+# conhost descendants) run beneath it. When a psmux pane is closed or reaped,
+# Windows terminates only this root process -- its descendants are orphaned,
+# reparent to a non-interactive svchost, and accumulate for days (#1433, #713).
+#
+# Placing this process in a Job Object with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+# makes the OS terminate every process in the job the instant the last handle to
+# the job closes -- which happens when THIS process exits by any means (the user
+# quitting Copilot, psmux kill-session during a reap/finalize, or a force-close).
+# Children spawned after assignment inherit the job, so the whole Copilot subtree
+# is covered. This is the kernel-level, event-driven form of the fabric's
+# owner-liveness tether (the pane's logical owner IS this wrapper's lifetime), so
+# no descendant can outlive the pane. Detaching a psmux client does NOT exit this
+# wrapper (the session persists), so reattach-never-kill is preserved -- only an
+# actual pane exit/reap fires the kill.
+#
+# Fully guarded and fail-open: any failure (old OS, P/Invoke error, already in a
+# non-nestable job) leaves behavior exactly as before. The job handle is kept in
+# a script-scoped variable for this process's lifetime on purpose -- closing it
+# early would fire the kill immediately. Escape hatch: WORKTREE_NO_PANE_JOB=1.
+#
+# This mirrors agent-bridge's proven `winjob.setup_kill_on_close_job()` (the
+# daemon orphan-prevention job, #90) -- the same CreateJobObject +
+# KILL_ON_JOB_CLOSE + AssignProcessToJobObject(self) pattern, in PowerShell for
+# the launcher hot path. (Pure orphan-prevention: no BREAKAWAY_OK -- children
+# inherit and die with the pane; the breakaway flag is only for a survivor that
+# must escape its owner's job, which a pane never does.)
+function Set-AwPaneKillOnCloseJob {
+    if ($env:WORKTREE_NO_PANE_JOB -eq '1') { return }
+    if (-not $IsWindows) { return }
+    try {
+        if (-not ('AwProcessOwnership.PaneJob' -as [type])) {
+            Add-Type -Namespace 'AwProcessOwnership' -Name 'PaneJob' -MemberDefinition @'
+[StructLayout(LayoutKind.Sequential)]
+public struct IO_COUNTERS { public ulong ReadOperationCount; public ulong WriteOperationCount; public ulong OtherOperationCount; public ulong ReadTransferCount; public ulong WriteTransferCount; public ulong OtherTransferCount; }
+[StructLayout(LayoutKind.Sequential)]
+public struct JOBOBJECT_BASIC_LIMIT_INFORMATION { public long PerProcessUserTimeLimit; public long PerJobUserTimeLimit; public uint LimitFlags; public UIntPtr MinimumWorkingSetSize; public UIntPtr MaximumWorkingSetSize; public uint ActiveProcessLimit; public UIntPtr Affinity; public uint PriorityClass; public uint SchedulingClass; }
+[StructLayout(LayoutKind.Sequential)]
+public struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION { public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation; public IO_COUNTERS IoInfo; public UIntPtr ProcessMemoryLimit; public UIntPtr JobMemoryLimit; public UIntPtr PeakProcessMemoryUsed; public UIntPtr PeakJobMemoryUsed; }
+[DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] public static extern IntPtr CreateJobObject(IntPtr lpJobAttributes, string lpName);
+[DllImport("kernel32.dll", SetLastError=true)] public static extern bool SetInformationJobObject(IntPtr hJob, int JobObjectInfoClass, IntPtr lpJobObjectInfo, uint cbJobObjectInfoLength);
+[DllImport("kernel32.dll", SetLastError=true)] public static extern bool AssignProcessToJobObject(IntPtr hJob, IntPtr hProcess);
+[DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr GetCurrentProcess();
+public const int JobObjectExtendedLimitInformation = 9;
+public const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000;
+'@ -ErrorAction Stop
+        }
+        $t = [AwProcessOwnership.PaneJob]
+        $h = $t::CreateJobObject([IntPtr]::Zero, $null)
+        if ($h -eq [IntPtr]::Zero) { return }
+        $info = New-Object 'AwProcessOwnership.PaneJob+JOBOBJECT_EXTENDED_LIMIT_INFORMATION'
+        $info.BasicLimitInformation.LimitFlags = $t::JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        $len = [Runtime.InteropServices.Marshal]::SizeOf($info)
+        $ptr = [Runtime.InteropServices.Marshal]::AllocHGlobal($len)
+        try {
+            [Runtime.InteropServices.Marshal]::StructureToPtr($info, $ptr, $false)
+            if (-not $t::SetInformationJobObject($h, $t::JobObjectExtendedLimitInformation, $ptr, [uint32]$len)) { return }
+            $null = $t::AssignProcessToJobObject($h, $t::GetCurrentProcess())
+        } finally {
+            [Runtime.InteropServices.Marshal]::FreeHGlobal($ptr)
+        }
+        # Keep the handle alive for this process's lifetime (do NOT close it):
+        # the kill fires when the last handle closes -- which we want to be OUR
+        # exit, not now. The OS releases it when this process terminates.
+        $script:AwPaneJobHandle = $h
+    } catch {}
+}
+Set-AwPaneKillOnCloseJob
+
 $rest = @($args)
 $awWt = ''
 if ($rest.Count -ge 2 -and $rest[0] -eq '-AwWt') {
@@ -56,10 +126,19 @@ try {
                     '--field', "exit_code=$exitCode", '--field', "runtime=$runtime")
         if ($awWt) { $awArgs += @('--worktree-id', $awWt) }
         if ($env:WORKTREE_LAUNCH_ID) { $awArgs += @('--launch-id', $env:WORKTREE_LAUNCH_ID) }
-        Start-Process -FilePath $awPy -ArgumentList $awArgs `
-            -WindowStyle Hidden -ErrorAction Stop | Out-Null
+        $script:AwActivityProc = Start-Process -FilePath $awPy -ArgumentList $awArgs `
+            -WindowStyle Hidden -PassThru -ErrorAction Stop
     }
 } catch {}
+
+# The pane_exited writer above is a member of this pane's kill-on-close job, so
+# it would be terminated the instant this wrapper exits. It is a sub-second local
+# write; wait briefly for it to finish so the durable mark lands before the job
+# reaps the subtree. Bounded + fail-silent -- never let a stuck write trap the
+# pane.
+if ($script:AwActivityProc) {
+    try { $null = $script:AwActivityProc.WaitForExit(5000) } catch {}
+}
 
 # Intentional interrupt -- exit silently so post-exit finalization runs.
 if ($exitCode -eq 130) { exit 0 }
