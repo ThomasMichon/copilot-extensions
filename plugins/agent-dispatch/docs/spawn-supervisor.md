@@ -221,6 +221,35 @@ set against the registry on every tick.
 > subsuming the foreground `supervise --evaluator` flag into an evaluator
 > registration. The bare `supervise` foreground loop remains available.
 
+### Operator overrides (built) — the kill-switch
+
+The running set is the declared/registered set **reconciled with operator
+overrides**, and an override **wins**. `supervise override` is a fast, local,
+reversible **enable/disable** veto on one supervised unit (addressed by its
+registration id — the same id `daemon-status` / `list` show):
+
+```
+agent-dispatch supervise override disable <id> [--reason "..."]
+agent-dispatch supervise override enable  <id>
+agent-dispatch supervise override list
+```
+
+- **Precedence.** The daemon subtracts overridden-off ids from its desired set
+  **after** it merges the declared + store-backed sets, so an override outranks
+  both a unit's declaration and the discovery layer. A disabled unit is **wound
+  down** on the next reconcile (the stop-not-desired path) and **stays down** —
+  a later repo re-sync that re-declares it does **not** quietly revive it.
+- **Out of band + local.** The override lives in a machine-local JSON store
+  (`~/.agent-dispatch/overrides.json`, honoring `AGENT_DISPATCH_OVERRIDES`), *not*
+  a repo commit + sync cycle — so a misbehaving unit is stopped **right now**
+  without editing, or racing a repo-sync against, its declaration.
+- **Reversible + legible.** `enable` clears the override and the unit returns to
+  whatever its declaration/registration says; `override list` and `daemon-status`
+  surface the overridden-off set (and each unit's reason) beside what is declared.
+- **Fail-safe.** A missing or unreadable override store means "no overrides in
+  effect" — a bad read never winds a unit down. This is the emergency stop that
+  *discover-and-live-reconcile* needs to be safe.
+
 ### Embody body: headless by default, CLI opt-out
 
 The supervisor embodies each spawned task as a **headless agent-bridge ACP**

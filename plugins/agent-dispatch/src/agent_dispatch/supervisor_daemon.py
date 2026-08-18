@@ -34,7 +34,7 @@ import logging
 import subprocess
 import sys
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Protocol
@@ -286,6 +286,7 @@ class SupervisorDaemon:
         max_restarts: int | None = None,
         lock: Any | None = None,
         declared_source: Callable[[], Iterable[Any]] | None = None,
+        overrides_source: Callable[[], Mapping[str, dict]] | None = None,
         client_factory: Callable[[], Any] | None = None,
     ):
         self.client = client
@@ -316,6 +317,14 @@ class SupervisorDaemon:
         #: the *declarations-are-the-source-of-truth* path. Returns ProfileDeclaration
         #: objects; None disables declared supervision (store-only, legacy behavior).
         self.declared_source = declared_source
+        #: Optional provider of the operator **override** map ({registration id ->
+        #: record}). Called every reconcile and its overridden-off ids are subtracted
+        #: from the desired set *after* the declared + store-backed sets are merged --
+        #: so an override is a higher-precedence veto that discovery cannot undo (a
+        #: re-declared unit stays wound down). None defaults to reading the local
+        #: ``overrides.json`` store; a callable that raises is treated as "no
+        #: overrides" (best-effort, never fatal).
+        self.overrides_source = overrides_source
         #: The declared set most recently read successfully -- returned when a later
         #: discovery read *errors*, so a transient filesystem/env blip never winds
         #: down live declared units (only a successful read that no longer lists a
@@ -346,20 +355,51 @@ class SupervisorDaemon:
         self._last_declared = declared_registrations(decls, machine=self.machine, env=self.env)
         return self._last_declared
 
-    def _desired(self) -> dict[str, dict]:
-        """Active registrations scoped to this daemon's (machine, env).
+    def _overridden_off(self) -> set[str]:
+        """Registration ids an operator has disabled via the override store.
 
-        Two sources, one desired set: the coordinator's store-backed registrations
-        plus the registrar's **declared** profile set. Declared ids are namespaced
-        (``declared:...``) to avoid colliding with *derived* store ids; if a
-        caller-supplied store id ever collides, the **declared** entry wins (the
-        declaration is the source of truth)."""
+        Best-effort: read via the injected ``overrides_source`` or, by default, the
+        local ``overrides.json``. Any failure yields an empty set (no override in
+        effect) rather than tearing down units on a bad read -- the override is a
+        *stop* signal, so its absence must fail safe toward "keep running what is
+        declared".
+        """
+        from . import overrides as ov
+
+        try:
+            if self.overrides_source is not None:
+                data = self.overrides_source()
+            else:
+                from .config import overrides_path
+
+                data = ov.load_overrides(overrides_path())
+        except Exception:  # pragma: no cover - override read is environment-dependent
+            log.exception("failed to read operator overrides; treating as none")
+            return set()
+        return ov.overridden_off_ids(data)
+
+    def _desired(self) -> dict[str, dict]:
+        """Active registrations scoped to this daemon's (machine, env), minus
+        operator overrides.
+
+        Three inputs, one desired set: the coordinator's store-backed registrations,
+        the registrar's **declared** profile set, then the operator **override** veto.
+        Declared ids are namespaced (``declared:...``) to avoid colliding with
+        *derived* store ids; if a caller-supplied store id ever collides, the
+        **declared** entry wins (the declaration is the source of truth). Finally,
+        any id an operator has **overridden off** is dropped from the desired set --
+        applied *last*, so the override outranks both the declaration and the
+        discovery layer and a later re-sync cannot quietly revive the unit (vision
+        Behavior *overrides-take-precedence*). A dropped id is then wound down by the
+        reconcile's stop-not-desired step."""
         regs = self.client.list_registrations(
             machine=self.machine, env=self.env, include_paused=False
         )
         desired = {r["id"]: r for r in regs}
         for reg in self._declared():
             desired[reg["id"]] = reg
+        for rid in self._overridden_off():
+            desired.pop(rid, None)
         return desired
 
     # -- unit lifecycle ------------------------------------------------------

@@ -55,6 +55,47 @@ def test_resolve_target_local_default(monkeypatch):
     assert url == "http://127.0.0.1:9847"
 
 
+# -- supervise override (operator kill-switch) -------------------------------
+
+
+def test_override_parser_shapes_namespace():
+    args = _args(["supervise", "override", "disable", "declared:general:general",
+                  "--reason", "runaway"])
+    assert args.supervise_command == "override"
+    assert args.override_command == "disable"
+    assert args.id == "declared:general:general"
+    assert args.reason == "runaway"
+
+
+def test_override_disable_enable_roundtrip_via_cli(monkeypatch, tmp_path, capsys):
+    import json
+
+    from agent_dispatch import overrides as ov
+
+    ovpath = tmp_path / "overrides.json"
+    monkeypatch.setenv("AGENT_DISPATCH_OVERRIDES", str(ovpath))
+
+    # disable
+    args = _args(["supervise", "override", "disable", "u1", "--reason", "boom"])
+    assert args.func(args) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["id"] == "u1" and out["overridden_off"] is True and out["reason"] == "boom"
+    assert ov.overridden_off_ids(ov.load_overrides(ovpath)) == {"u1"}
+
+    # list shows it
+    args = _args(["supervise", "override", "list"])
+    assert args.func(args) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["overridden_off"] == ["u1"]
+
+    # enable clears it
+    args = _args(["supervise", "override", "enable", "u1"])
+    assert args.func(args) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["overridden_off"] is False and out["cleared"] is True
+    assert ov.load_overrides(ovpath) == {}
+
+
 def test_parser_create_flags():
     args = build_parser().parse_args(
         ["create", "do it", "--require", "logger", "--affinity", "agent=w1", "--proposed"]

@@ -1839,7 +1839,8 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
 def _cmd_supervise_daemon_status(args: argparse.Namespace) -> int:
     """``supervise daemon-status`` -- is a daemon running here, and what would it
     run."""
-    from .config import run_dir
+    from .config import overrides_path, run_dir
+    from .overrides import load_overrides, overridden_off_ids
     from .single_instance import is_locked, lock_path_for
     from .supervisor_daemon import supervisor_lease_scope
 
@@ -1848,6 +1849,16 @@ def _cmd_supervise_daemon_status(args: argparse.Namespace) -> int:
     running = is_locked(lock_path_for(run_dir(), scope))
     with _client(args) as c:
         regs = c.list_registrations(machine=machine, env=env, include_paused=True)
+    overrides = load_overrides(overrides_path())
+    off = overridden_off_ids(overrides)
+    # Annotate each registration with its override state so the overridden-off set
+    # is legible right beside what is declared/registered (vision: legibility).
+    for reg in regs:
+        rid = reg.get("id")
+        if rid in off:
+            reg["overridden_off"] = True
+            rec = overrides.get(rid) or {}
+            reg["override_reason"] = rec.get("reason")
     return _emit(
         {
             "scope": scope,
@@ -1855,6 +1866,46 @@ def _cmd_supervise_daemon_status(args: argparse.Namespace) -> int:
             "env": env,
             "running": running,
             "registrations": regs,
+            "overrides": overrides,
+        }
+    )
+
+
+def _cmd_supervise_override(args: argparse.Namespace) -> int:
+    """``supervise override {disable,enable,list}`` -- the operator kill-switch.
+
+    A fast, local, reversible enable/disable veto on a supervised unit (addressed
+    by its registration id), applied out of band via the local override store. The
+    daemon subtracts overridden-off ids from its desired set on the next reconcile,
+    so a disabled unit winds down and stays down until re-enabled -- even across a
+    repo re-sync of its declaration.
+    """
+    from .config import overrides_path
+    from .overrides import (
+        clear_override,
+        load_overrides,
+        overridden_off_ids,
+        set_override,
+    )
+
+    action = getattr(args, "override_command", None)
+    path = overrides_path()
+    if action == "disable":
+        record = set_override(
+            path, args.id, disabled=True, reason=getattr(args, "reason", None)
+        )
+        return _emit({"id": args.id, "overridden_off": True, **record})
+    if action == "enable":
+        cleared = clear_override(path, args.id)
+        return _emit({"id": args.id, "overridden_off": False, "cleared": cleared})
+    # list (default)
+    overrides = load_overrides(path)
+    off = sorted(overridden_off_ids(overrides))
+    return _emit(
+        {
+            "path": str(path),
+            "overridden_off": off,
+            "overrides": overrides,
         }
     )
 
@@ -1885,6 +1936,8 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
         return _cmd_supervise_serve(args)
     if sub == "daemon-status":
         return _cmd_supervise_daemon_status(args)
+    if sub == "override":
+        return _cmd_supervise_override(args)
 
     from .supervisor import (
         Supervisor,
@@ -3397,6 +3450,31 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--env", help="scope: this environment "
                     "(default: $AGENT_DISPATCH_ENV or 'default')")
     rp.set_defaults(func=_cmd_supervise)
+    op = sup_sub.add_parser(
+        "override",
+        help="operator kill-switch: locally disable/enable one supervised unit "
+             "(by registration id), out of band and taking precedence over its "
+             "declaration + the discovery layer (a re-sync does not undo it)",
+    )
+    op_sub = op.add_subparsers(dest="override_command")
+    od = op_sub.add_parser(
+        "disable",
+        help="disable a supervised unit now: the daemon winds it down on the next "
+             "reconcile and keeps it down until re-enabled",
+    )
+    od.add_argument("id", help="registration id of the unit to disable "
+                              "(see `supervise daemon-status` / `list`)")
+    od.add_argument("--reason", help="why it is disabled (recorded for legibility)")
+    od.set_defaults(func=_cmd_supervise)
+    oe = op_sub.add_parser(
+        "enable",
+        help="clear a unit's override, returning it to its declared/registered state",
+    )
+    oe.add_argument("id", help="registration id of the unit to re-enable")
+    oe.set_defaults(func=_cmd_supervise)
+    ol = op_sub.add_parser("list", help="list the current operator overrides")
+    ol.set_defaults(func=_cmd_supervise)
+    op.set_defaults(func=_cmd_supervise)
     p = sub.add_parser(
         "reservations", help="inspect / manually control spawn reservations"
     )

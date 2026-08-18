@@ -1,0 +1,62 @@
+"""Tests for the operator override store (the supervised-unit kill-switch)."""
+
+from __future__ import annotations
+
+from agent_dispatch import overrides as ov
+
+
+def test_load_missing_returns_empty(tmp_path):
+    assert ov.load_overrides(tmp_path / "nope.json") == {}
+
+
+def test_set_load_clear_roundtrip(tmp_path):
+    p = tmp_path / "overrides.json"
+    rec = ov.set_override(p, "declared:x:y", reason="misbehaving", now=123.0)
+    assert rec == {"disabled": True, "reason": "misbehaving", "at": 123.0}
+    loaded = ov.load_overrides(p)
+    assert loaded == {"declared:x:y": {"disabled": True, "reason": "misbehaving", "at": 123.0}}
+    assert ov.overridden_off_ids(loaded) == {"declared:x:y"}
+    assert ov.clear_override(p, "declared:x:y") is True
+    assert ov.load_overrides(p) == {}
+    # clearing a missing id is a no-op False (not an error)
+    assert ov.clear_override(p, "declared:x:y") is False
+
+
+def test_set_creates_parent_dir(tmp_path):
+    p = tmp_path / "nested" / "dir" / "overrides.json"
+    ov.set_override(p, "a")
+    assert p.is_file()
+    assert ov.overridden_off_ids(ov.load_overrides(p)) == {"a"}
+
+
+def test_disabled_false_is_not_off():
+    overrides = {"a": {"disabled": False}, "b": {"disabled": True}, "c": {}}
+    assert ov.overridden_off_ids(overrides) == {"b"}
+
+
+def test_load_tolerates_malformed(tmp_path):
+    p = tmp_path / "overrides.json"
+    p.write_text("not json at all", encoding="utf-8")
+    assert ov.load_overrides(p) == {}
+    # a JSON non-object is indeterminate -> empty
+    p.write_text("[1, 2, 3]", encoding="utf-8")
+    assert ov.load_overrides(p) == {}
+    # a well-formed object with a non-dict entry drops that entry
+    p.write_text('{"a": {"disabled": true}, "b": "nope"}', encoding="utf-8")
+    assert ov.load_overrides(p) == {"a": {"disabled": True}}
+
+
+def test_set_override_replaces_existing(tmp_path):
+    p = tmp_path / "overrides.json"
+    ov.set_override(p, "a", reason="first", now=1.0)
+    rec = ov.set_override(p, "a", reason="second", now=2.0)
+    assert rec["reason"] == "second" and rec["at"] == 2.0
+    assert ov.load_overrides(p) == {"a": {"disabled": True, "reason": "second", "at": 2.0}}
+
+
+def test_save_is_atomic_leaves_no_temp(tmp_path):
+    p = tmp_path / "overrides.json"
+    ov.set_override(p, "a")
+    # the temp file used for the atomic replace is cleaned up
+    leftovers = [q.name for q in tmp_path.iterdir() if q.name.startswith(".overrides-")]
+    assert leftovers == []
