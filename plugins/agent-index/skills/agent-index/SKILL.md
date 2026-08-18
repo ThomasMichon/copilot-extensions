@@ -2,16 +2,16 @@
 name: agent-index
 description: >
   Operate or use the agent-index runtime: semantic + lexical retrieval over a
-  repo/corpus, index health/status, host/client setup, indexing refresh, and the
-  @agent-index MCP read toolset. Trigger phrases include 'agent-index',
+  repo/corpus, index health/status, host/client setup, indexing refresh, and its
+  read CLI (search/similar/clusters/status). Trigger phrases include 'agent-index',
   'semantic search index', 'index service status', 'portable repo search',
-  'agent_index_search', 'agent_index_status', and 'find similar indexed content'.
+  'agent-index search', 'agent-index status', and 'find similar indexed content'.
 ---
 
 # agent-index
 
 Use this skill when the task is about the **agent-index** plugin, its runtime
-service, or retrieval through its MCP tools.
+service, or retrieval through its read CLI.
 
 ## Readiness
 
@@ -28,21 +28,24 @@ state.
 
 ## Retrieval path
 
-Prefer the **`@agent-index` sub-agent** for semantic retrieval within configured
-scopes. Its `agent-mcp bridge agent-index` surface exposes four read-only tools:
+agent-index is a uniform retrieval capability **every agent calls directly via
+the `agent-index` CLI** — there is no sub-agent and no MCP-tool wrapper. The
+sessionStart scope-binding hook injects how-to-search guidance (covered scopes +
+the commands below) into each session's context. The read subcommands:
 
-- `agent_index_search(query, limit?, source?, language?, repo?)` — meaning +
-lexical hybrid search. Use for conceptual/code/doc searches when exact tokens are
-unknown.
-- `agent_index_find_similar(chunk_id, limit?, source?)` — pivot from a returned
-hit (`id` / `chunk_id`) into related material.
-- `agent_index_clusters(source?, bucket?, model?, exact_dupes_only?, limit?)` —
-list near-duplicate clusters.
-- `agent_index_status()` — health and coverage map; probe this before relying on
-results.
+- `agent-index search "<query>" [--source S] [--language L] [--repo R] [--limit N] --json`
+  — meaning + lexical hybrid search. Use for conceptual/code/doc searches when
+  exact tokens are unknown. Each hit has `chunk_id`, `source`, `file_path`,
+  `line_start`/`line_end`, `content`.
+- `agent-index similar <chunk_id> [--source S] [--limit N]` — pivot from a
+  returned hit into related material.
+- `agent-index clusters [--source S] [--bucket B] [--exact-dupes-only] [--limit N]`
+  — list near-duplicate clusters.
+- `agent-index status` — health and coverage map; probe this before relying on
+  results.
 
-The read agent intentionally does **not** expose `agent_index_reindex`. Reindexing
-is an operator/runtime action, not a retrieval side effect.
+Reindexing is **not** a retrieval action: `agent-index index` is an
+operator/runtime step, never an agent side effect.
 
 ## CLI/operator path
 
@@ -54,8 +57,6 @@ Use the CLI directly when operating the runtime:
   `agent-index deploy --recover`.
 - Index refresh: `agent-index index [--source S] [--full]`. Incremental is the
 default; `--full` is explicit.
-- Search without the sub-agent: `agent-index search "<query>" --json`,
-  `agent-index similar <chunk_id>`, `agent-index clusters`.
 - Engine daemon: `agent-index engine status|start|stop|run`.
 
 ## Scope and fallback
@@ -64,8 +65,8 @@ default; `--full` is explicit.
 repo's `.agent-index/config.yaml` `corpus.sources` when present.
 - For a plain repo with no corpus config, `agent-index index` defaults to the
 current git checkout (`git`) and its commits.
-- Use direct `rg`/`glob` for exact strings, files outside indexed scopes, or when
-`agent_index_status` shows the index is unavailable.
+- Use direct `grep`/`glob` for exact strings, files outside indexed scopes, or when
+`agent-index status` shows the index is unavailable.
 - Query-time trust-domain enforcement is not implemented; when a request is
 clearly scoped, pass `source` or `repo` rather than doing an unscoped search.
 

@@ -4,7 +4,8 @@
 lexical index for a repo and its configured corpus. The shipped plugin is no
 longer just a service shell: it includes the service, CLI, indexing pipeline,
 source connectors, LanceDB-backed stores, a warm embedding-engine split, query
-surfaces, and the `@agent-index` read-only retrieval agent.
+surfaces, and a read-only retrieval surface that every agent calls directly
+through the `agent-index` CLI.
 
 ## What ships today
 
@@ -16,8 +17,11 @@ logs live under `~/.agent-index/data/`, outside the versioned service runtime.
 - **Indexing pipeline**: incremental-by-default crawl/chunk/embed/store/reconcile
 for local git files + commits, GitHub issues/PRs, and Azure DevOps work
 items/PRs. `--full` is explicit.
-- **Search surfaces**: CLI, HTTP, direct `agent-index mcp`, and a read-only
-`agent-mcp bridge agent-index` used by the `@agent-index` sub-agent.
+- **Search surfaces**: the `agent-index` **CLI** (the primary, agent-facing
+surface — every agent calls it directly), HTTP, and the direct `agent-index mcp`
+server. agent-index is a uniform retrieval capability every agent may use, so it
+is deliberately **not** wrapped in a sub-agent or an MCP tool; agents learn how
+to search from the sessionStart scope-binding hook's `additionalContext`.
 - **Engine split**: the light service runtime is torch-free by default; embedding
 runs through a durable engine daemon at `127.0.0.1:8421` unless an operator opts
 into another engine mode.
@@ -45,18 +49,19 @@ runs the local service and, when provisioned, the durable engine daemon.
 
 | Need | Use |
 |------|-----|
-| Search by meaning within indexed scopes | Delegate to `@agent-index` and call `agent_index_search` |
-| Pivot from one result | `agent_index_find_similar` |
-| Find near-duplicate clusters | `agent_index_clusters` |
-| Check coverage/health | `agent_index_status` or `agent-index status` |
+| Search by meaning within indexed scopes | `agent-index search "<query>" [--source S] [--limit N] --json` |
+| Pivot from one result | `agent-index similar <chunk_id> [--source S] [--limit N]` |
+| Find near-duplicate clusters | `agent-index clusters [--source S] [--exact-dupes-only]` |
+| Check coverage/health | `agent-index status` |
 | Refresh the index | `agent-index index [--source S] [--full]` or `POST /reindex` |
 | Manage runtime | `agent-index start`, `stop`, `status`, `deploy --recover` |
 | Manage the engine daemon | `agent-index engine status|start|stop|run` |
 | Adopt host/client routing | `agent-index setup`, `role`, `capability --json` |
 
-The `@agent-index` agent intentionally exposes only the four read tools. The
-lower-level `agent-index mcp` server also has `agent_index_reindex`, but the
-retrieval agent does not expose it; reindexing is an operator/runtime action.
+The `agent-index` read subcommands (`search`, `similar`, `clusters`, `status`)
+are the read-only, agent-facing surface. The lower-level `agent-index mcp` server
+and the CLI also have an `index` path (`agent_index_reindex` over MCP), but
+reindexing is an operator/runtime action, not something agents trigger.
 
 ## Corpus configuration
 
@@ -71,7 +76,7 @@ locally adopted projects plus any machine-local supplement in
 `~/.agent-index/config.yaml`.
 - The session-start scope-binding hook reads the current repo's
 `.agent-index/config.yaml` directly and tells agents which configured scopes are
-safe to prefer `@agent-index` for.
+safe to prefer `agent-index search` for (and how to invoke it).
 
 ## Troubleshooting quick checks
 

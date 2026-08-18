@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # emit-scope-binding -- agent-index sessionStart hook (POSIX parity).
 #
-# Emits a succinct "what agent-index covers + prefer @agent-index for retrieval
-# within these scopes" guidance fragment as {"additionalContext": "..."}, so
-# every agent learns the configured index scopes at session start without the MCP
-# tool schemas entering the main context (the tools live in the @agent-index
-# sub-agent). Generic emitter (ships in the plugin); it reads the LOCAL scope
-# config -- <repo>/.agent-index/config.yaml corpus.sources -- so the operator's
-# scope values stay in the repo, not baked into the plugin.
+# Emits a succinct "what agent-index covers + how to search it" guidance fragment
+# as {"additionalContext": "..."}, so EVERY agent learns, at session start, that a
+# semantic index is available and how to query it -- by calling the `agent-index`
+# CLI DIRECTLY. agent-index is a uniform retrieval capability every agent may use,
+# so it is deliberately NOT wrapped in a sub-agent or an MCP tool; the
+# how-to-search instructions ride in this hook's additionalContext instead.
+# Generic emitter (ships in the plugin); it reads the LOCAL scope config --
+# <repo>/.agent-index/config.yaml corpus.sources -- so the operator's scope values
+# stay in the repo, not baked into the plugin.
 #
 # cwd-gated: emits {} outside a repo that declares corpus.sources. The config
 # parse + JSON encode is delegated to python3 (present wherever agent-index runs);
@@ -75,17 +77,27 @@ rows = "\n".join(
 )
 
 md = (
-    "## agent-index retrieval is available for these scopes\n\n"
-    "The **agent-index** semantic + lexical index covers the following configured\n"
-    "scopes (delegate retrieval to the **`@agent-index`** sub-agent):\n\n"
+    "## agent-index retrieval \u2014 call the `agent-index` CLI directly\n\n"
+    "A semantic + lexical index of this harness is available to **every agent**.\n"
+    "Run the **`agent-index`** CLI directly (no sub-agent, no MCP tool). It covers:\n\n"
     + rows + "\n\n"
-    "**Prefer `@agent-index`** (`agent_index_search` / `agent_index_find_similar`)\n"
-    "over a broad `grep`/`glob` sweep when searching **within these scopes** by\n"
-    "meaning/behavior, when you want the most-relevant few results across a large\n"
-    "corpus, or to pivot 'more like this' from a hit. Pass the `source`/`repo`\n"
-    "filter to scope to one corpus (and to respect trust-domain boundaries, which\n"
-    "are not yet enforced at query time). Fall back to direct `grep`/`glob` for\n"
-    "exact-string hunts, files outside these scopes, or if the index is unavailable."
+    "**How to search:**\n"
+    "- `agent-index search \"<natural-language or code query>\" [--source <name>] "
+    "[--language <lang>] [--repo <repo>] [--limit N] --json` \u2014 ranked hits; each has "
+    "`chunk_id`, `source`, `file_path`, `line_start`/`line_end`, `content`.\n"
+    "- `agent-index similar <chunk_id> [--source <name>] [--limit N]` \u2014 pivot "
+    "'more like this' from a hit.\n"
+    "- `agent-index clusters [--source <name>] [--exact-dupes-only] [--limit N]` \u2014 "
+    "near-duplicate groups.\n"
+    "- `agent-index status` \u2014 index health + per-source coverage; probe once if "
+    "results look sparse.\n\n"
+    "**Prefer `agent-index search`** over a broad `grep`/`glob` sweep when searching\n"
+    "**within these scopes** by meaning/behavior, for the most-relevant few results\n"
+    "across a large corpus, or to pivot from a hit. Pass `--source` to scope to one\n"
+    "corpus (and to respect trust-domain boundaries, not yet enforced at query time).\n"
+    "Fall back to `grep`/`glob` for exact-string hunts, files outside these scopes,\n"
+    "or if the index is unavailable. Read-only: never reindex from an agent \u2014 that\n"
+    "is the operator flow (`agent-index index`)."
 )
 
 print(json.dumps({"additionalContext": md}))

@@ -18,7 +18,7 @@ items/PRs;
 - chunkers for code, Markdown, YAML, and fallback text;
 - LanceDB content/vector stores, path state, task queue, GC/repair, and
 similarity-cluster artifacts;
-- CLI, HTTP, direct MCP, and `agent-mcp` bridge query surfaces;
+- CLI (the agent-facing surface), HTTP, and direct MCP query surfaces;
 - host/client role routing for read commands over SSH.
 
 That means the old "Phase 1 service shell only" description is stale. Future
@@ -28,8 +28,7 @@ work still exists, but indexing and retrieval are present in the shipped code.
 
 ```mermaid
 flowchart LR
-  Agent[Copilot / @agent-index] --> Bridge[agent-mcp bridge agent-index]
-  Bridge --> CLI[agent-index read CLI]
+  Agent[Any Copilot agent] --> CLI[agent-index read CLI]
   CLI -->|host: local| Service[agent-index service]
   CLI -->|client: SSH command| HostCLI[agent-index on indexer host]
   HostCLI --> Service
@@ -174,20 +173,23 @@ Operators can opt into `subprocess`, `systemd`, or `auto` engine modes, or
 in-process CPU query embedding, but those are configuration choices rather than
 the shipped default.
 
-## MCP surfaces
+## Retrieval + MCP surfaces
 
-There are two MCP-related surfaces and they are deliberately different:
+Retrieval is agent-facing through the **`agent-index` read CLI**, and there is a
+separate lower-level MCP surface:
 
-1. **`@agent-index` sub-agent bridge** — `mcp/agent-index.yaml` is an
-`agent-mcp` CLI bridge exposing four read tools:
-   `agent_index_search`, `agent_index_find_similar`, `agent_index_clusters`, and
-   `agent_index_status`. Each invokes an `agent-index` read subcommand, so the
-   CLI transport handles host/client SSH routing. This is the recommended agent
-   retrieval path.
-2. **Direct `agent-index mcp`** — `src/agent_index/mcp_app.py` exposes the HTTP
-client FastMCP tools above plus `agent_index_reindex`. It resolves
-`AGENT_INDEX_ENDPOINT` first, then local endpoint discovery. This is lower-level
-and not what the read-only `@agent-index` agent exposes.
+1. **`agent-index` read CLI (the agent path)** — every agent calls
+   `agent-index search` / `similar` / `clusters` / `status` **directly**;
+   there is no sub-agent and no MCP-tool wrapper. agent-index is a uniform
+   retrieval capability every agent may use, so how-to-search guidance is
+   delivered by the sessionStart scope-binding hook's `additionalContext` rather
+   than by wrapping the tools. The CLI transport handles host/client SSH routing,
+   so the same commands work on a host (local) or a client (over SSH).
+2. **Direct `agent-index mcp`** — `src/agent_index/mcp_app.py` exposes HTTP-client
+   FastMCP tools (`agent_index_search`/`find_similar`/`clusters`/`status`) plus
+   `agent_index_reindex`. It resolves `AGENT_INDEX_ENDPOINT` first, then local
+   endpoint discovery. This is a lower-level surface for embedding/automation, not
+   the agent retrieval path.
 
 ## Robustness and fail-loud behavior
 
@@ -212,7 +214,7 @@ queries with `source`/`repo` when crossing trust domains.
 - Cross-process source locks during a service cutover are not implemented; store
 locking is relied on for the narrow overlap window.
 - The plugin does not expose a public network listener, gateway, or relay.
-- The read-only `@agent-index` agent does not expose reindexing.
+- The read-only agent-facing CLI surface does not expose reindexing.
 - There is no plugin-local clean-room scenario under `plugins/agent-index`; fresh
 install/runtime changes should use the repo-level clean-room framework when
 practical.

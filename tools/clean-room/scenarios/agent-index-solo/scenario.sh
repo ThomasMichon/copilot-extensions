@@ -90,12 +90,13 @@ if [ -d "$INSTALLED_ROOT/$PLUGIN" ]; then
 else
     jam "npm-registry" "$PLUGIN payload NOT installed (see cr-logs/install.log)" "check marketplace source + node/npm feed"
 fi
-if [ -f "$INSTALLED_ROOT/$PLUGIN/mcp/agent-index.yaml" ] \
-   && [ "$(find "$INSTALLED_ROOT/$PLUGIN/mcp/tools" -maxdepth 1 -name 'agent_index_*.md' 2>/dev/null | wc -l | tr -d ' ')" -ge 4 ] \
-   && ! sed 's/#.*//' "$INSTALLED_ROOT/$PLUGIN/mcp/agent-index.yaml" 2>/dev/null | grep -q 'agent_index_reindex'; then
-    pass "read-only agent-mcp bridge config present (four read tools; no reindex tool)"
+if [ ! -e "$INSTALLED_ROOT/$PLUGIN/mcp/agent-index.yaml" ] \
+   && [ ! -e "$INSTALLED_ROOT/$PLUGIN/agents/agent-index.agent.md" ] \
+   && [ -f "$INSTALLED_ROOT/$PLUGIN/scripts/emit-scope-binding.sh" ] \
+   && [ -f "$INSTALLED_ROOT/$PLUGIN/scripts/emit-scope-binding.ps1" ]; then
+    pass "CLI-direct model: no @agent-index sub-agent/bridge; emit-scope-binding hook present"
 else
-    jam "index-config" "read-only agent-mcp bridge config missing or exposes reindex" "payload should include mcp/agent-index.yaml with search/similar/clusters/status only"
+    jam "index-config" "agent-index should ship NO sub-agent/bridge and MUST ship the emit-scope-binding hook" "payload should omit mcp/agent-index.yaml + agents/agent-index.agent.md and include scripts/emit-scope-binding.{sh,ps1}"
 fi
 
 # =========================================================================

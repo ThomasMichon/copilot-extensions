@@ -1,6 +1,6 @@
 {
   "name": "agent-index-solo",
-  "description": "Tier-P F1 solo scenario: install ONLY agent-index on a fresh box and assert its standalone install/behave contract. agent-index is a local retrieval service with a CLI, HTTP service shell, direct `agent-index mcp` toolset, and read-only `agent-mcp` bridge; this scenario validates the solo install payload, self-provisioning service runtime, login-shell binstub with a real version, and idempotent read/status/health surfaces without requiring a durable embedding engine or model build. Distinct from agent-index-cutover, which validates graceful version cutover. Name-free / public.",
+  "description": "Tier-P F1 solo scenario: install ONLY agent-index on a fresh box and assert its standalone install/behave contract. agent-index is a local retrieval service with a CLI, HTTP service shell, direct `agent-index mcp` toolset, and a sessionStart scope-binding hook (agents call the `agent-index` CLI directly — no sub-agent/bridge); this scenario validates the solo install payload, self-provisioning service runtime, login-shell binstub with a real version, and idempotent read/status/health surfaces without requiring a durable embedding engine or model build. Distinct from agent-index-cutover, which validates graceful version cutover. Name-free / public.",
   "tier": "P",
   "family": "F1",
   "image": "base",
@@ -16,7 +16,7 @@
     "~/.copilot/installed-plugins/<marketplace>/agent-index",
     "~/.local/bin/agent-index (self-provisioning binstub)",
     "~/.agent-index/versions/<ver>/bin/python or ~/.agent-index/.venv (service runtime)",
-    "~/.copilot/installed-plugins/<marketplace>/agent-index/mcp/agent-index.yaml (read-only agent-mcp bridge config)"
+    "~/.copilot/installed-plugins/<marketplace>/agent-index/scripts/emit-scope-binding.sh (+ .ps1) (sessionStart how-to-search hook)"
   ],
   "stages": [
     { "n": 0, "title": "environment (fresh machine)" },
