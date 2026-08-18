@@ -828,6 +828,11 @@ def load_config(path: Path | None = None) -> Config:
     if not isinstance(machine_repos, dict):
         machine_repos = {}
 
+    # Control-plane related.yaml (+ ``<repo>-harness`` plugin) ``pr:`` overlays,
+    # computed once: a checked-in control-plane view of how to land PRs in a
+    # FOREIGN repo, layered per-repo below. Fail-safe -> ``{}``.
+    cp_related_pr = _control_plane_related_pr_map()
+
     # Build the set of repos to resolve: those named in the machine-local file,
     # plus the active project (so a convention-adopted repo with no
     # machine-local block still loads, with its anchor from the registry).
@@ -856,10 +861,21 @@ def load_config(path: Path | None = None) -> Config:
         # Tier 2: the repo's own in-repo flat settings (base for repo settings).
         inrepo_settings = _load_inrepo_config(anchor)
 
-        # Merge per-repo settings: in-repo base < machine-local override.
-        # (The global tier carries only machine-wide top-level defaults --
-        # srcroot/machine/platform/profiles -- never per-repo settings.)
-        merged = _deep_merge(inrepo_settings, machine_repo)
+        # NEW tier (between in-repo and machine-local): a control-plane-supplied
+        # ``pr:`` overlay for this FOREIGN repo (from the control plane's
+        # ``related.yaml`` or a ``<repo>-harness`` plugin). Lets the checked-in
+        # control-plane view drive the repo's PR workflow without committing
+        # harness config into it. A machine-local ``repos.<name>.pr`` still wins.
+        base_settings = inrepo_settings
+        cp_pr = cp_related_pr.get(name)
+        if cp_pr:
+            base_settings = _deep_merge(base_settings, {"pr": cp_pr})
+
+        # Merge per-repo settings: in-repo base < control-plane related pr <
+        # machine-local override. (The global tier carries only machine-wide
+        # top-level defaults -- srcroot/machine/platform/profiles -- never
+        # per-repo settings.)
+        merged = _deep_merge(base_settings, machine_repo)
 
         # Fall back to the registries for adoption facts that _build_repo_config
         # would otherwise read ONLY from the overlay/in-repo (default_branch,
@@ -1208,6 +1224,43 @@ def _load_inrepo_config(anchor: str) -> dict[str, Any]:
     if dir_form:
         return dir_form
     return _load_yaml_safe(Path(anchor) / INREPO_CONFIG_FILENAME)
+
+
+def _control_plane_related_pr_map() -> dict[str, dict[str, Any]]:
+    """Map ``repo-name -> raw pr: block`` from the control plane's related index.
+
+    A checked-in control-plane source may drive a FOREIGN repo's PR workflow --
+    without committing harness config into that (often shared) repo -- by
+    carrying a ``pr:`` block on the repo's entry in the control plane's
+    ``related.yaml``, or via a ``<repo>-harness`` plugin that *contributes* a
+    related entry. Both flow through the grafted related index, so this reads it
+    once (installed-plugin contributions + the control-plane ``related.yaml``)
+    and returns only the entries that carry a ``pr`` block.
+
+    Config-free and fail-safe: it uses ``find_control_plane_anchor`` /
+    ``installed_plugin_related_anchors`` (registry + file reads only, never
+    ``load_config``), and degrades to ``{}`` on any error so the hot config path
+    can never be broken by control-plane discovery. ``load_config`` layers each
+    block ABOVE the foreign repo's own in-repo ``pr`` and BELOW a machine-local
+    ``repos.<name>.pr`` override.
+    """
+    try:
+        from . import related
+
+        anchors: list[str] = list(related.installed_plugin_related_anchors())
+        cp = related.find_control_plane_anchor()
+        if cp:
+            anchors.append(cp)
+        if not anchors:
+            return {}
+        rc = related.read_related_grafted(anchors)
+        return {
+            name: entry.pr
+            for name, entry in rc.related.items()
+            if getattr(entry, "pr", None)
+        }
+    except Exception:
+        return {}
 
 
 def _parse_pr(raw: Any) -> PRConfig:
