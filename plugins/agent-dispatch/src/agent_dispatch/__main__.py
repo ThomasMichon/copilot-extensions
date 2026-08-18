@@ -25,7 +25,14 @@ import httpx
 from . import __version__
 from . import config as _config
 from .client import DispatchClient, DispatchError
-from .config import Config, client_token, client_url, shared_token, shared_url
+from .config import (
+    Config,
+    client_token,
+    client_url,
+    has_live_local_coordinator,
+    shared_token,
+    shared_url,
+)
 from .registrations import RegistrationKind
 
 if TYPE_CHECKING:
@@ -104,7 +111,13 @@ def _resolve_client_target(args: argparse.Namespace) -> tuple[str, str | None]:
        shared coordinator is configured, error loudly rather than silently using
        the local queue (which would strand a cross-machine task on one host).
     3. Otherwise the **local** loopback coordinator -- same-machine work, the
-       single-machine default that needs no shared service.
+       single-machine default that needs no shared service. **Failover:** if a
+       shared coordinator is configured (``AGENT_DISPATCH_SHARED_URL``) *and* the
+       local coordinator is not live (this environment's coordinator is down),
+       transparently fall back to the shared/hosted coordinator so work is
+       dispatched onto it (e.g. the standby) rather than stranded on a dead local
+       queue. This is opt-in by construction: with no shared URL configured,
+       nothing is probed and the local default is unchanged.
     """
     url = getattr(args, "url", None)
     token = getattr(args, "token", None)
@@ -119,6 +132,12 @@ def _resolve_client_target(args: argparse.Namespace) -> tuple[str, str | None]:
                 file=sys.stderr,
             )
             raise SystemExit(2)
+        return surl, (token or shared_token())
+    # Default local path, with opt-in failover to the shared coordinator: only
+    # probe (and only fall back) when a shared URL is configured, so the common
+    # single-machine case pays nothing and behaves exactly as before.
+    surl = shared_url()
+    if surl and not has_live_local_coordinator():
         return surl, (token or shared_token())
     return client_url(), (token or client_token())
 
