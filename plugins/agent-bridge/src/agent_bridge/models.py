@@ -522,6 +522,20 @@ class PhasedTimeouts(BaseModel):
         default=1800.0,
         description="Max seconds to wait for a single turn/command to complete.",
     )
+    session_host_ready: float = Field(
+        default=90.0,
+        description="Max seconds to wait for a freshly launched LOCAL Session "
+        "Host process to bind its loopback port and write its state file "
+        "(port + child_pid). Distinct from session_start/session_new (which "
+        "bound the ACP handshake AFTER the host is up): this bounds the host "
+        "process's own cold start -- python interpreter spin-up + agent_bridge "
+        "import + child spawn. A heavy or elevated launch (e.g. a base_repo "
+        "singleton whose enlistment launch cmd is slow, or an elevated "
+        "sub-daemon host cold-started under AV real-time scanning) can exceed a "
+        "tight 30s budget, which previously surfaced as a spurious "
+        "LAUNCH_ACP/new_session internal error. Raise this in config.yaml if a "
+        "local host still times out on a very slow box.",
+    )
 
 
 class RetentionConfig(BaseModel):

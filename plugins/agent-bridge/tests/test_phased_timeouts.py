@@ -48,3 +48,45 @@ class TestPhasedTimeouts:
         assert t.codespace_boot == PhasedTimeouts().codespace_boot
         # session_new keeps its default when not overridden (#2107).
         assert t.session_new == PhasedTimeouts().session_new
+
+    def test_session_host_ready_default_and_parse(self, tmp_path, monkeypatch) -> None:
+        # Local Session Host cold-start budget: present, positive, and larger
+        # than the retired hard-coded 30s (which spuriously failed heavy /
+        # elevated singleton launches).
+        assert PhasedTimeouts().session_host_ready >= 60.0
+        (tmp_path / "config.yaml").write_text(
+            yaml.dump({"timeouts": {"session_host_ready": 150}})
+        )
+        monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))
+        from agent_bridge.config import load_config
+
+        assert load_config().timeouts.session_host_ready == 150
+
+
+class TestLocalSpawnerReadyTimeout:
+    """The session_host_ready budget must reach launch_session_host."""
+
+    def test_local_spawner_forwards_ready_timeout(self, monkeypatch) -> None:
+        import asyncio
+        from types import SimpleNamespace
+
+        from agent_bridge.session_host import spawner as sp
+
+        seen: dict = {}
+
+        def _fake_launch(child_argv, **kwargs):
+            seen.update(kwargs)
+            return SimpleNamespace(
+                host_pid=1, child_pid=2, port=3, protocol_version=1,
+                state_file="x", proc=None,
+            )
+
+        monkeypatch.setattr(sp, "launch_session_host", _fake_launch)
+        s = sp.LocalSpawner(ready_timeout=123.0)
+        asyncio.run(s.spawn(["copilot", "--acp", "--stdio"], cwd="/w"))
+        assert seen["ready_timeout"] == 123.0
+
+    def test_local_spawner_default_ready_timeout_is_generous(self) -> None:
+        from agent_bridge.session_host.spawner import LocalSpawner
+
+        assert LocalSpawner()._ready_timeout >= 60.0
