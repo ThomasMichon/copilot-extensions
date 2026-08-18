@@ -211,6 +211,29 @@ class ProgressBody(BaseModel):
     pr: str | None = None
 
 
+class CardBody(BaseModel):
+    """A card a worker posts to describe what it needs from the operator. The
+    ``card`` object is built client-side (see ``steering.build_card``) and stored
+    opaquely, keeping the coordinator a general steering substrate."""
+
+    worker_id: str
+    card: dict
+
+
+class SteerBody(BaseModel):
+    """An operator's answer to a task's card. Not worker-owned -- the operator
+    (or a surface acting for them) submits it."""
+
+    fields: dict = Field(default_factory=dict)
+    sender: str | None = None
+
+
+class SteerTakeBody(BaseModel):
+    """A worker consuming the next pending steer for a task it owns."""
+
+    worker_id: str
+
+
 class AbandonBody(BaseModel):
     worker_id: str | None = None
     permitted: bool = False
@@ -715,6 +738,42 @@ def create_app(
     @app.post("/tasks/{task_id}/detach")
     def detach(task_id: str) -> dict:
         return _guard(lambda: queue.detach(task_id), "task.detached")
+
+    @app.post("/tasks/{task_id}/card")
+    def set_card(task_id: str, body: CardBody) -> dict:
+        """Attach a card to a held task (marks it awaiting-steer when the card
+        carries a ``request_input`` form)."""
+        return _guard(
+            lambda: queue.set_card(task_id, body.worker_id, card=body.card),
+            "task.card",
+        )
+
+    @app.post("/tasks/{task_id}/steer")
+    def steer(task_id: str, body: SteerBody) -> dict:
+        """Submit an operator's answer to a task's card (clears awaiting-steer)."""
+        return _guard(
+            lambda: queue.submit_steer(
+                task_id, fields=body.fields, sender=body.sender
+            ),
+            "task.steer",
+        )
+
+    @app.post("/tasks/{task_id}/steer/take")
+    def steer_take(task_id: str, body: SteerTakeBody) -> dict:
+        """Consume the next pending steer for a task the worker owns (or null)."""
+        try:
+            steer = queue.take_steer(task_id, body.worker_id)
+        except TaskError as exc:
+            msg = str(exc)
+            status = 404 if msg.startswith("no such task") else 409
+            raise HTTPException(status_code=status, detail=msg) from exc
+        return {"task_id": task_id, "steer": steer}
+
+    @app.get("/tasks/{task_id}/steer-log")
+    def get_steer_log(task_id: str) -> list[dict]:
+        """The full steer inbox for a task (oldest first)."""
+        _require(queue.get(task_id))
+        return queue.steer_log(task_id)
 
     @app.post("/recover")
     def recover() -> dict:

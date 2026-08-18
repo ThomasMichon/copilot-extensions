@@ -1068,6 +1068,92 @@ def _cmd_progress(args: argparse.Namespace) -> int:
         )
 
 
+def _cmd_card_set(args: argparse.Namespace) -> int:
+    """Attach a card to a task the worker owns (the human-in-the-loop 'I need
+    input' post). Parses the ``--request-input`` form spec, builds the card, and
+    posts it; a card with a form marks the task awaiting-steer."""
+    from . import steering
+
+    worker_id = _resolve_owner(args, verb="card set")
+    if worker_id is None:
+        return 2
+    try:
+        fields = steering.parse_request_input(getattr(args, "request_input", None))
+    except steering.SteeringError as exc:
+        print(f"agent-dispatch: {exc}", file=sys.stderr)
+        return 2
+    body = args.body
+    if body and body.startswith("@"):
+        body = Path(body[1:]).expanduser().read_text(encoding="utf-8")
+    card = steering.build_card(
+        title=args.title,
+        status=args.status,
+        link=args.link,
+        body=body,
+        request_input=fields,
+    )
+    with _client(args) as c:
+        return _emit(c.set_card(args.task_id, worker_id, card=card))
+
+
+def _cmd_card_show(args: argparse.Namespace) -> int:
+    """Show a task's current card (plus its steer inbox)."""
+    with _client(args) as c:
+        task = c.get(args.task_id)
+        steers = c.steer_log(args.task_id)
+    return _emit(
+        {
+            "task_id": args.task_id,
+            "card": task.get("card"),
+            "awaiting_steer": task.get("awaiting_steer"),
+            "steers": steers,
+        }
+    )
+
+
+def _cmd_steer(args: argparse.Namespace) -> int:
+    """Submit an operator's answer to a task's card, then (unless --no-wake)
+    wake the owning worktree so a suspended reviewer resumes and consumes it."""
+    fields: dict[str, str] = {}
+    for item in args.field or []:
+        key, sep, value = item.partition("=")
+        if not sep:
+            print(
+                f"agent-dispatch: --field must be key=value (got {item!r})",
+                file=sys.stderr,
+            )
+            return 2
+        fields[key.strip()] = value
+    sender = args.sender or _owner_from_identity(args)
+    with _client(args) as c:
+        result = c.steer(args.task_id, fields=fields, sender=sender)
+        woken: bool | None = None
+        owner = result.get("owner")
+        if args.wake and owner:
+            from . import bridge
+
+            message = args.message or (
+                f"The operator answered your card on task {args.task_id}. Resume, "
+                f"run `agent-dispatch steer take {args.task_id}` to read the answer, "
+                f"and continue toward your goal."
+            )
+            try:
+                woken = bool(bridge.send_nudge(owner, message))
+            except Exception:
+                woken = False
+    return _emit({"task": result, "woken": woken})
+
+
+def _cmd_steer_take(args: argparse.Namespace) -> int:
+    """Consume the next pending steer for a task the worker owns (the wake-side
+    read a resumed reviewer runs to learn what the operator answered)."""
+    worker_id = _resolve_owner(args, verb="steer take")
+    if worker_id is None:
+        return 2
+    with _client(args) as c:
+        return _emit(c.steer_take(args.task_id, worker_id))
+
+
 def _cmd_focus(args: argparse.Namespace) -> int:
     # worktree-status-core convergence: a worktree's "focus" IS its status-core
     # summary on the worktree record (the single owning layer). There is no
@@ -3011,6 +3097,78 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("detach", help="demote a hard worktree pin to a soft affinity")
     p.add_argument("task_id")
     p.set_defaults(func=_simple("detach", "task_id"))
+
+    # -- Steering: card + steer (human-in-the-loop) --------------------------
+    cp = sub.add_parser(
+        "card",
+        help="attach/show a task's card -- the glanceable brief a worker posts "
+             "when it needs operator input",
+    )
+    csub = cp.add_subparsers(dest="card_cmd", required=True)
+    cs = csub.add_parser(
+        "set",
+        help="attach a card to a held task you own (a form via --request-input "
+             "marks it awaiting-steer); identity auto-resolved from CWD",
+    )
+    cs.add_argument("task_id")
+    cs.add_argument(
+        "worker_id", nargs="?",
+        help="owner id (default: composed from machine/worktree)",
+    )
+    cs.add_argument("--title", help="short card title")
+    cs.add_argument("--status", help="one-line status overview")
+    cs.add_argument("--link", help="a link to the rich artifact (OneDrive draft / PR)")
+    cs.add_argument(
+        "--body",
+        help="the scrollable card body (markdown); '@path' reads a file",
+    )
+    cs.add_argument(
+        "--request-input", dest="request_input",
+        help="form spec the operator should fill, e.g. "
+             "'feedback:textarea,decision:choice[revise,post-approved,hold-all]'",
+    )
+    cs.add_argument("--machine", help="override the resolved machine")
+    cs.add_argument("--worktree", help="override the resolved worktree id")
+    cs.set_defaults(func=_cmd_card_set)
+    ch = csub.add_parser("show", help="show a task's current card + its steer inbox")
+    ch.add_argument("task_id")
+    ch.set_defaults(func=_cmd_card_show)
+
+    sp = sub.add_parser(
+        "steer",
+        help="submit an operator's answer to a task's card, or (steer take) "
+             "consume the next answer as the worker",
+    )
+    ssub = sp.add_subparsers(dest="steer_cmd", required=True)
+    ssm = ssub.add_parser(
+        "submit",
+        help="submit an operator answer (--field k=v ...) and wake the worker",
+    )
+    ssm.add_argument("task_id")
+    ssm.add_argument(
+        "--field", action="append", metavar="KEY=VALUE",
+        help="one answer field (repeatable), e.g. --field decision=post-approved",
+    )
+    ssm.add_argument("--sender", help="who is answering (default: resolved identity)")
+    ssm.add_argument("--message", help="override the wake nudge text")
+    ssm.add_argument(
+        "--no-wake", dest="wake", action="store_false",
+        help="do not send an agent-bridge wake nudge to the owning worktree",
+    )
+    ssm.set_defaults(func=_cmd_steer, wake=True)
+    stk = ssub.add_parser(
+        "take",
+        help="consume the next pending steer for a task you own (the wake-side "
+             "read); identity auto-resolved from CWD",
+    )
+    stk.add_argument("task_id")
+    stk.add_argument(
+        "worker_id", nargs="?",
+        help="owner id (default: composed from machine/worktree)",
+    )
+    stk.add_argument("--machine", help="override the resolved machine")
+    stk.add_argument("--worktree", help="override the resolved worktree id")
+    stk.set_defaults(func=_cmd_steer_take)
 
     p = sub.add_parser("list", help="list tasks (scoped to the calling repo by default)")
     p.add_argument("--repo", help="lane to list (local name or remote URL); default: calling repo")

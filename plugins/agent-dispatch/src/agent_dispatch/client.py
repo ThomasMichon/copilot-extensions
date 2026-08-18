@@ -203,6 +203,42 @@ class DispatchClient:
     def detach(self, task_id: str) -> dict:
         return self._unwrap(self._http.post(f"/tasks/{task_id}/detach"))
 
+    # -- steering: card + steer inbox ----------------------------------------
+
+    def set_card(self, task_id: str, worker_id: str, *, card: dict) -> dict:
+        """Attach a card to a held task (awaiting-steer if it carries a form)."""
+        return self._unwrap(
+            self._http.post(
+                f"/tasks/{task_id}/card",
+                json={"worker_id": worker_id, "card": card},
+            )
+        )
+
+    def steer(
+        self, task_id: str, *, fields: dict, sender: str | None = None
+    ) -> dict:
+        """Submit an operator's answer to a task's card (clears awaiting-steer)."""
+        return self._unwrap(
+            self._http.post(
+                f"/tasks/{task_id}/steer",
+                json={"fields": fields, "sender": sender},
+            )
+        )
+
+    def steer_take(self, task_id: str, worker_id: str) -> dict:
+        """Consume the next pending steer (returns ``{task_id, steer}``; steer is
+        the payload dict or ``None`` when the inbox is empty)."""
+        return self._unwrap(
+            self._http.post(
+                f"/tasks/{task_id}/steer/take",
+                json={"worker_id": worker_id},
+            )
+        )
+
+    def steer_log(self, task_id: str) -> list[dict]:
+        """The full steer inbox for a task (oldest first)."""
+        return self._unwrap(self._http.get(f"/tasks/{task_id}/steer-log"))
+
     def recover(self) -> dict:
         return self._unwrap(self._http.post("/recover"))
 
