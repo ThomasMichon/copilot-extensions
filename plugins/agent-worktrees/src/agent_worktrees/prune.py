@@ -32,10 +32,14 @@ from . import git_ops, tracking
 
 # A claimant-liveness probe: given a resource's qualified ``owner_ref``, report
 # whether the owning worktree is still alive. Tri-state on purpose:
-#   * True  -- claimant confirmed alive           -> spare the resource
-#   * None  -- claimant liveness UNCONFIRMED       -> spare the resource
+#   * True  -- claimant confirmed alive           -> spare an IN-FLIGHT resource
+#   * None  -- claimant liveness UNCONFIRMED       -> spare an IN-FLIGHT resource
 #              (absence of a *local* owner is NOT proof of no owner)
 #   * False -- claimant confirmed GONE             -> fall through to git/PR state
+# A FINISHED resource (its status ``finalized``, or content on the default
+# branch via a merged PR / git-COMPLETED) is collectable even when this probe
+# reports alive/unconfirmed; the gate only protects a live
+# owner's still-in-flight resources.
 # Injected (not called inline) so the pure assessment stays unit-testable and a
 # caller wires the concrete same-machine / cross-fabric resolver.
 ClaimantAliveProbe = Callable[[str], Optional[bool]]
@@ -69,9 +73,12 @@ PairedSiblingFinalProbe = Callable[[tracking.WorktreeRecord], bool | None]
 #                          content is not confirmed on the default branch
 #   "gone"              -- worktree directory is missing (caller verifies the
 #                          branch is merged before deleting)
-#   "claimed"           -- owned as an outbound resource by another worktree
+#   "claimed"           -- an IN-FLIGHT outbound resource of another worktree
 #                          whose claimant is alive or not-confirmed-gone
-#                          (agent-fabric `claimed-resource-not-reclaimed`)
+#                          (agent-fabric `claimed-resource-not-reclaimed`). A
+#                          FINISHED resource is NOT "claimed" -- it stays
+#                          merged/completed-local and is collectable even under a
+#                          live claimant.
 
 CATEGORY_SAFE = {"merged", "completed-local", "empty"}
 
@@ -102,11 +109,14 @@ def assess(
 
     When ``claimant_alive`` is injected and this worktree carries an
     ``owner_ref`` (it was created as another worktree's outbound resource), the
-    claimant-safety rule applies **before** any git/PR verdict: a resource with
-    a live -- or not-confirmed-gone -- claimant is never prunable, so a
-    machine-local sweep can't mistake an actively-owned cross-repo resource for
-    an orphan. Only a claimant *confirmed gone* (probe returns ``False``) lets
-    assessment fall through to the git/PR state below.
+    claimant-safety rule spares it while a live -- or not-confirmed-gone --
+    claimant may still be using it, so a machine-local sweep can't mistake an
+    actively-owned cross-repo resource for an orphan. NARROWED so that the
+    spare applies only while the resource is still
+    IN-FLIGHT; a FINISHED resource (its own status ``finalized``, or content on
+    the default branch via a merged PR / git-COMPLETED) is collectable even
+    under a live claimant, because a finished child of a long-open host is
+    garbage, not in-use. A claimant *confirmed gone* frees even an in-flight one.
     """
     state = info.state
     S = git_ops.WorktreeState
@@ -122,18 +132,53 @@ def assess(
         return PruneVerdict(False, "gone", "worktree directory missing",
                             turn_count)
 
-    # Claimed-resource safety (agent-fabric `claimed-resource-not-reclaimed`):
-    # this worktree is another worktree's outbound resource. Spare it unless the
-    # claimant is confirmed gone -- absence of a local owner is not proof of no
-    # owner. Sits above the git/PR verdict so a "looks empty/merged" resource a
-    # remote agent still owns is not reclaimed.
-    if rec.owner_ref and claimant_alive is not None:
+    # Claimed-resource safety (agent-fabric `claimed-resource-not-reclaimed`),
+    # NARROWED so a finished resource is collectable: this worktree is another
+    # worktree's outbound resource. Compute the content verdict first, then spare
+    # it while its claimant is alive / not-confirmed-gone -- UNLESS the owner has
+    # demonstrably moved on, i.e. the resource is already FINISHED (its own status
+    # is ``finalized``, or its content is proven on the default branch via a
+    # merged PR / git-COMPLETED). A finished resource is collectable garbage even
+    # under a live claimant, so a host session kept open for days never pins its
+    # merged children forever. IN-FLIGHT owned resources (dirty / wip / orphan /
+    # open-pr / closed-unmerged / empty / conversation-only) are still spared: the
+    # owner may resume, is mid-review, or (empty) is a just-created scaffold. A
+    # claimant *confirmed gone* (probe returns ``False``) lets even those fall
+    # through.
+    verdict = _content_verdict(rec, info, turn_count)
+    owner_moved_on = (verdict.category in _OWNER_MOVED_ON
+                      or rec.status == "finalized")
+    if rec.owner_ref and claimant_alive is not None and not owner_moved_on:
         alive = claimant_alive(rec.owner_ref)
         if alive is not False:
             why = "claimant alive" if alive else "claimant liveness unconfirmed"
             return PruneVerdict(False, "claimed",
                                 f"owned as a resource by {rec.owner_ref} "
                                 f"({why})", turn_count)
+    return verdict
+
+
+# Content-verdict categories that prove the owner has FINISHED with a resource,
+# so it is collectable even while its claimant is alive. NOT
+# "empty" (a live owner's just-created scaffold) nor "open-pr"/"unmerged"
+# (in-flight); those keep the claimed-resource protection.
+_OWNER_MOVED_ON = frozenset({"merged", "completed-local"})
+
+
+def _content_verdict(
+    rec: tracking.WorktreeRecord,
+    info: git_ops.WorktreeStateInfo,
+    turn_count: int,
+) -> PruneVerdict:
+    """The prune verdict from git/PR/session content alone (ownership-agnostic).
+
+    Split out of :func:`assess` so the claimed-resource gate can decide, from the
+    resulting category, whether an owned resource is still in-flight (spare) or
+    finished (collectable even under a live claimant). Assumes the caller already
+    handled ACTIVE / GONE.
+    """
+    state = info.state
+    S = git_ops.WorktreeState
 
     # Uncommitted changes in the working tree -- unsafe to remove.
     if state == S.DIRTY:
@@ -226,10 +271,13 @@ def cleanup_disposition(
     long-standing default and avoids over-preserving on a *stale* local PR
     state (use ``--reconcile-prs`` / live reconcile to refine those).
 
-    The **one exception** is a claimed resource (agent-fabric
+    The **one exception** is an IN-FLIGHT claimed resource (agent-fabric
     `claimed-resource-not-reclaimed`): when ``claimant_alive`` is injected and
-    the claimant is alive / not-confirmed-gone, the worktree is spared even if
-    it is finalized or git-COMPLETED, because its owner may still be using it.
+    the claimant is alive / not-confirmed-gone, a still-in-flight resource is
+    spared because its owner may still be using it. A FINISHED claimed resource
+    (finalized / merged / git-COMPLETED) is NOT spared -- it is collectable even
+    under a live claimant, so a host kept open for days does not
+    pin its merged children.
     """
     v = assess(rec, info, turn_count=turn_count, claimant_alive=claimant_alive)
     S = git_ops.WorktreeState
@@ -237,10 +285,11 @@ def cleanup_disposition(
     if info.state == S.ACTIVE:
         return CleanupDisposition(False, "active", v.reason)
 
-    # Claimed-resource safety overrides even the finalized/COMPLETED clean path
-    # below -- a live claimant means the resource is still owned. (Only fires
-    # when the probe is injected; a confirmed-gone claimant yields a non-claimed
-    # verdict and flows through normally.)
+    # Claimed-resource safety spares an IN-FLIGHT owned resource while its
+    # claimant is alive/unconfirmed. A FINISHED resource never reaches here as
+    # "claimed" (assess returns merged/completed-local, or its status is
+    # finalized), so it flows to the finalized/COMPLETED clean path below and is
+    # collected even under a live claimant.
     if v.category == "claimed":
         return CleanupDisposition(False, "claimed", v.reason)
 
