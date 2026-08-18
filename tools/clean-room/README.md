@@ -11,6 +11,10 @@ clean room. It isolates *everything* under test (no `~/.agent-*`, no
 `~/.local/bin`, no marketplace, a stock login-shell PATH) while reusing your
 Copilot **login** (auth is not what we're validating).
 
+> **First time on this machine? → [`SETUP.md`](SETUP.md)** walks you from "no
+> Docker" to a green smoke-test (install Docker per OS → verify → build → auth →
+> run). This README is the reference for everything after that.
+
 ## Image variants
 
 | Image | Toolchain present | Use |
@@ -43,6 +47,11 @@ robust across `copilot` versions and records the CLI surface + full logs it saw.
 - Docker (Linux containers). `docker --version` should work.
 - A `gh` login (or a `COPILOT_GITHUB_TOKEN`/PAT) for a **Copilot-entitled**
   account — injected automatically so no in-container login is needed.
+
+> **Setting this up on a new machine?** Follow **[`SETUP.md`](SETUP.md)** — a
+> step-by-step to install Docker (per OS), verify it, build the image, wire auth,
+> and smoke-test the rig end-to-end. The notes below are the quick reference;
+> `SETUP.md` is the from-zero walkthrough.
 
 > **Governed machines / internal npm feed.** On a corp-governed box the public
 > `registry.npmjs.org` is TLS-blocked, so the in-image `npm install -g
@@ -245,6 +254,7 @@ stage N). The scenario name + stage list live in `manifest.json`.
 
 | File | Role |
 |------|------|
+| [`SETUP.md`](SETUP.md) | From-zero machine setup: install Docker (per OS), verify it, build the image, wire auth, smoke-test, and troubleshoot. |
 | `Dockerfile` | Credential-free `base` "fresh machine": git, python, node, uv, Copilot CLI — nothing from copilot-extensions. |
 | `Dockerfile.pristine` | The `pristine` variant: Copilot + git only (no venv/pip/uv/feed-governance) — forces the harness to self-provision. |
 | `lib/clean-room-lib.sh` | Shared scenario helper API (`phase`/`pass`/`fail`/`info`/`capture`/`envdump`/`jam`/`cr_meta`/`cr_finalize`) + uniform `cr-report.json` writer. Bind-mounted read-only at `/home/operator/lib`; scenarios source it via `$CR_LIB`. |
