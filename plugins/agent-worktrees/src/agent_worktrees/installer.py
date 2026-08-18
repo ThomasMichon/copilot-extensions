@@ -532,9 +532,18 @@ def _project_binstub_specs(project: str) -> list[tuple[Path, str]]:
         "export PYTHONUTF8=1\n"
         "# Context resolves from CWD / --project (git-like); the binstub\n"
         "# names its project via --project, not an ambient env var.\n"
-        '_AW="$HOME/.local/bin/agent-worktrees"\n'
-        'if [[ -x "$_AW" ]]; then\n'
-        f'    exec "$_AW" --project {project} "$@"\n'
+        "# Resolve the active versioned runtime directly (the .venv junction is\n"
+        "# retired -- #637/#1085/#1106); NEVER exec this binstub itself, which\n"
+        "# would recurse into an unbounded process storm.\n"
+        '_root="$HOME/.agent-worktrees"\n'
+        '_ver="$(cat "$_root/current-version" 2>/dev/null)"\n'
+        '_py="$_root/versions/$_ver/bin/python"\n'
+        'if [[ ! -x "$_py" ]]; then\n'
+        '    _py="$(ls -1d "$_root"/versions/*/bin/python 2>/dev/null'
+        " | sort | tail -n1)\"\n"
+        'fi\n'
+        'if [[ -n "$_py" && -x "$_py" ]]; then\n'
+        f'    exec "$_py" -m agent_worktrees --project {project} "$@"\n'
         'fi\n'
         '# Recovery (venv missing): launch-session reads WORKTREE_PROJECT\n'
         f'export WORKTREE_PROJECT="{project}"\n'

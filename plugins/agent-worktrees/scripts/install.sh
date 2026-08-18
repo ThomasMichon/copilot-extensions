@@ -799,9 +799,17 @@ BINSTUB_HEAD
 export PYTHONUTF8=1
 # Context resolves from CWD / --project (git-like); the binstub names its
 # project via --project, not an ambient env var.
-_AW="\$HOME/.local/bin/agent-worktrees"
-if [[ -x "\$_AW" ]]; then
-    exec "\$_AW" --project "$PROJECT_NAME" "\$@"
+# Resolve the active versioned runtime directly (the .venv junction is retired
+# -- #637/#1085/#1106); NEVER exec this binstub itself, which would recurse
+# into an unbounded process storm.
+_root="\$HOME/.agent-worktrees"
+_ver="\$(cat "\$_root/current-version" 2>/dev/null)"
+_py="\$_root/versions/\$_ver/bin/python"
+if [[ ! -x "\$_py" ]]; then
+    _py="\$(ls -1d "\$_root"/versions/*/bin/python 2>/dev/null | sort | tail -n1)"
+fi
+if [[ -n "\$_py" && -x "\$_py" ]]; then
+    exec "\$_py" -m agent_worktrees --project "$PROJECT_NAME" "\$@"
 fi
 # Recovery (venv missing): launch-session reads WORKTREE_PROJECT
 export WORKTREE_PROJECT="$PROJECT_NAME"
