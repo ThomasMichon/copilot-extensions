@@ -76,6 +76,23 @@ class PivotAction:
     #: Default off => the original synchronous run (result in the status line).
     #: Ignored for an ``internal`` action.
     progress: bool = False
+    #: A5 (steering seam) -- a ``kind:"form"`` action. When set, activating the
+    #: verb opens a **native elicitation modal** that reads a ``request-input``
+    #: field spec out of the selected entry (``fields_from`` -- a dotted path such
+    #: as ``card.request_input``), lays out a widget per field (text/textarea/
+    #: choice), and on submit substitutes ``{field.<name>}`` tokens in ``run`` and
+    #: executes it (the general steer transport, e.g. ``agent-dispatch steer
+    #: submit``). ``None`` => not a form action. Shape:
+    #: ``{"fields_from": str, "title_from": str|None, "body_from": str|None}``.
+    #: Mutually exclusive with ``internal``/``card``.
+    form: Mapping[str, object] | None = None
+    #: A5 (steering seam) -- a ``kind:"card"`` action. When set, activating the
+    #: verb opens a **read-only scrollable card-detail modal** rendering the
+    #: entry's card (title/status/link/body pulled from dotted paths). No
+    #: subprocess is run. ``None`` => not a card action. Shape:
+    #: ``{"title_from", "status_from", "link_from", "body_from"}`` (each a dotted
+    #: path string). Mutually exclusive with ``internal``/``form``.
+    card: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -217,6 +234,37 @@ def _as_argv(value: object, *, where: str) -> tuple[str, ...]:
     return argv
 
 
+def _opt_path(value: object, *, where: str) -> str | None:
+    """Validate an optional dotted-path field (A5 form/card ``*_from``).
+
+    ``None`` / absent => ``None``; a non-empty string is returned stripped; any
+    other type raises :class:`ManifestError` so a malformed manifest is skipped.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ManifestError(f"{where} must be a non-empty string when present")
+    return value.strip()
+
+
+def resolve_path(rec: Mapping[str, object] | None, dotted: str | None) -> object:
+    """Resolve a dotted path (e.g. ``card.request_input``) against an entry rec.
+
+    Walks nested mappings key-by-key; a missing key or a non-mapping mid-walk
+    yields ``None`` rather than raising, so a form/card action degrades to an
+    empty field spec / blank card body instead of breaking the picker. A path
+    with no dot is a plain top-level lookup.
+    """
+    if not dotted or rec is None:
+        return None
+    cur: object = rec
+    for part in dotted.split("."):
+        if not isinstance(cur, Mapping):
+            return None
+        cur = cur.get(part)
+    return cur
+
+
 def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -> RegisteredPivot:
     """Build a :class:`RegisteredPivot` from a parsed manifest mapping.
 
@@ -278,11 +326,19 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
             raise ManifestError(f"`actions[{i}].label` is required")
         a_key = a.get("key")
         key = str(a_key) if isinstance(a_key, str) and a_key else f"action{i}"
-        # Two action shapes: an EXTERNAL CLI (`run` argv template, the default)
-        # or an INTERNAL picker-navigation verb (`{"kind":"internal","verb":…}`).
-        # An internal action's optional `args` become the ``run`` template the
-        # picker's handler substitutes; no subprocess is ever spawned for it.
-        if a.get("kind") == "internal":
+        # Action shapes, by ``kind``:
+        #   * default / EXTERNAL CLI -- a `run` argv template (a subprocess);
+        #   * `internal` -- a picker-navigation verb (`{"kind":"internal","verb":…}`)
+        #     whose optional `args` become the ``run`` template the picker's handler
+        #     substitutes; no subprocess is ever spawned for it;
+        #   * `form` -- a native elicitation modal (A5): reads a request-input field
+        #     spec from `fields_from` (a dotted entry path) and, on submit,
+        #     substitutes `{field.<name>}` into `run` and runs it;
+        #   * `card` -- a read-only scrollable card-detail modal (A5); no `run`.
+        kind = a.get("kind")
+        form: Mapping[str, object] | None = None
+        card: Mapping[str, object] | None = None
+        if kind == "internal":
             verb = a.get("verb")
             if not isinstance(verb, str) or not verb.strip():
                 raise ManifestError(
@@ -294,6 +350,28 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
             else:
                 run = ()
             internal: str | None = verb.strip()
+        elif kind == "form":
+            fields_from = a.get("fields_from")
+            if not isinstance(fields_from, str) or not fields_from.strip():
+                raise ManifestError(
+                    f"`actions[{i}].fields_from` is required for a form action"
+                )
+            run = _as_argv(a.get("run"), where=f"`actions[{i}].run`")
+            internal = None
+            form = {
+                "fields_from": fields_from.strip(),
+                "title_from": _opt_path(a.get("title_from"), where=f"`actions[{i}].title_from`"),
+                "body_from": _opt_path(a.get("body_from"), where=f"`actions[{i}].body_from`"),
+            }
+        elif kind == "card":
+            run = ()
+            internal = None
+            card = {
+                "title_from": _opt_path(a.get("title_from"), where=f"`actions[{i}].title_from`") or "card.title",
+                "status_from": _opt_path(a.get("status_from"), where=f"`actions[{i}].status_from`") or "card.status",
+                "link_from": _opt_path(a.get("link_from"), where=f"`actions[{i}].link_from`") or "card.link",
+                "body_from": _opt_path(a.get("body_from"), where=f"`actions[{i}].body_from`") or "card.body",
+            }
         else:
             run = _as_argv(a.get("run"), where=f"`actions[{i}].run`")
             internal = None
@@ -313,6 +391,8 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
                 internal=internal,
                 when=dict(a_when) if isinstance(a_when, Mapping) else None,
                 progress=a_progress,
+                form=form,
+                card=card,
             )
         )
 
@@ -745,6 +825,51 @@ def format_template(template: Sequence[str], ctx: Mapping[str, object]) -> list[
     return out
 
 
+def format_form_template(
+    template: Sequence[str],
+    ctx: Mapping[str, object],
+    fields: Mapping[str, object],
+) -> list[str]:
+    """Substitute a form action's argv template in a single safe pass (A5).
+
+    Two token namespaces resolve here:
+
+    * ``{field.<name>}`` -> the operator's submitted value for ``<name>`` (from
+      ``fields``), inserted **literally** -- it is never re-scanned, so a value
+      that itself contains braces (``use {task_id} here``) is inert and can't
+      inject another token;
+    * ``{<token>}`` -> the entry/context value (same source as
+      :func:`format_template`), e.g. ``{task_id}``.
+
+    Done in one pass with a custom :class:`string.Formatter` whose ``get_field``
+    treats the whole brace token as a single key (no attribute/index walking),
+    so ``field.<name>`` is a key lookup rather than attribute access. Unknown
+    tokens degrade to empty; a per-arg formatting error leaves that arg
+    unchanged, mirroring :func:`format_template`'s defensive contract.
+    """
+    import string
+
+    field_prefix = "field."
+
+    class _FormFormatter(string.Formatter):
+        def get_field(self, field_name, args, kwargs):  # type: ignore[override]
+            if field_name.startswith(field_prefix):
+                return (fields.get(field_name[len(field_prefix):], ""), field_name)
+            return (ctx.get(field_name, ""), field_name)
+
+        def format_field(self, value, format_spec):  # type: ignore[override]
+            return "" if value is None else str(value)
+
+    fmt = _FormFormatter()
+    out: list[str] = []
+    for arg in template:
+        try:
+            out.append(fmt.vformat(arg, (), {}))
+        except (KeyError, IndexError, ValueError):
+            out.append(arg)
+    return out
+
+
 # Kept for symmetry with maintenance.py's module layout; the engine imports the
 # functions above directly.
 __all__ = [
@@ -759,6 +884,7 @@ __all__ = [
     "discover_worktree_actions",
     "ensure_pivots",
     "entry_matches",
+    "format_form_template",
     "format_template",
     "installed_plugins_dir",
     "order_pivots",
@@ -767,5 +893,6 @@ __all__ = [
     "parse_manifest",
     "parse_worktree_actions",
     "pivots_dir",
+    "resolve_path",
     "worktree_action_matches",
 ]

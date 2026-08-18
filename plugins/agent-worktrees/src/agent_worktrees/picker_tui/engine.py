@@ -22,11 +22,20 @@ from rich.panel import Panel
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
+from textual.containers import Vertical, VerticalScroll
 from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widget import Widget
-from textual.widgets import OptionList, SelectionList, Static
+from textual.widgets import (
+    Button,
+    Input,
+    OptionList,
+    RadioButton,
+    RadioSet,
+    SelectionList,
+    Static,
+    TextArea,
+)
 from textual.widgets.option_list import Option
 
 from .. import profiles as profiles_mod
@@ -4683,6 +4692,17 @@ class PickerScreen(Widget):
             if not ok:
                 self.debug = f"{action.label} failed · {msg or 'see logs'}"
             return
+        if getattr(action, "card", None) is not None:
+            # A5: read-only scrollable card-detail modal; no subprocess, no cache
+            # invalidation (nothing mutated).
+            self._open_pivot_card(reg, action, rec)
+            return
+        if getattr(action, "form", None) is not None:
+            # A5: native elicitation modal -> on submit, {field.<name>} tokens in
+            # the action's `run` are substituted and the command is run (the steer
+            # transport). Cache invalidation happens after the submitted run.
+            self._open_pivot_form(reg, action, rec, ctx, title)
+            return
         if getattr(action, "progress", False):
             self._run_task_action_progress(reg, action, ctx, title)
             return
@@ -4747,6 +4767,68 @@ class PickerScreen(Widget):
 
         _threading.Thread(target=_worker, daemon=True).start()
         self._open_progress()
+
+    # ---- A5: steering-seam card + form modals (DISPATCH pivot) --------------
+    def _open_pivot_card(self, reg, action, rec):
+        """Open a read-only scrollable card-detail modal for the focused task
+        (A5). The card's title/status/link/body are pulled from the action's
+        declared dotted paths (defaults ``card.*``); nothing is mutated, so no
+        subprocess runs and the list cache is untouched."""
+        from . import pivots as _pivots
+
+        spec = action.card or {}
+        card = {
+            "title": _pivots.resolve_path(rec, spec.get("title_from")),
+            "status": _pivots.resolve_path(rec, spec.get("status_from")),
+            "link": _pivots.resolve_path(rec, spec.get("link_from")),
+            "body": _pivots.resolve_path(rec, spec.get("body_from")),
+        }
+        row_title = rec.get(reg.title_field) or rec.get(reg.id_field) or ""
+        self.app.push_screen(PivotCardScreen(str(row_title), card))
+
+    def _open_pivot_form(self, reg, action, rec, ctx, title):
+        """Open the native elicitation modal for a ``kind:"form"`` action (A5).
+
+        Reads the request-input field spec from the action's ``fields_from``
+        dotted path (e.g. ``card.request_input``), lays out a widget per field,
+        and -- on submit -- substitutes ``{field.<name>}`` (+ entry tokens like
+        ``{task_id}``) into ``run`` and executes it via the pivot runtime, then
+        invalidates the cache and reports. Cancel is a no-op."""
+        from . import pivots as _pivots
+
+        spec = action.form or {}
+        raw_fields = _pivots.resolve_path(rec, spec.get("fields_from"))
+        fields = _normalize_form_fields(raw_fields)
+        head_title = _pivots.resolve_path(rec, spec.get("title_from")) or title
+        body = _pivots.resolve_path(rec, spec.get("body_from"))
+
+        def _after(values):
+            if values is None:
+                self.debug = f"{action.label} · cancelled"
+                return
+            self._run_pivot_form_submit(reg, action, ctx, title, values)
+
+        self.app.push_screen(
+            PivotFormScreen(str(head_title), body, fields, action.label), _after
+        )
+
+    def _run_pivot_form_submit(self, reg, action, ctx, title, values):
+        """Run a submitted form action (A5): resolve ``{field.<name>}`` + entry
+        tokens in one safe pass, run the command via the pivot runtime, then
+        invalidate the cached list so the row reflects the new state."""
+        from . import pivots as _pivots
+
+        rt = self._pivot_runtime(reg)
+        argv = _pivots.format_form_template(action.run, ctx, values)
+        ok, msg = rt.run_resolved(argv)
+        rt.invalidate()
+        if self.sel not in self.stops():
+            self.sel = self.default_sel()
+        short = (msg or "").splitlines()[0][:80] if msg else ""
+        if ok:
+            self.debug = f"{action.label} · {title}" + (f" — {short}" if short else "")
+        else:
+            self.debug = f"{action.label} failed · {short or 'see command output'}"
 
     def _scope_label(self):
         return "All machines" if self.is_all() else \
@@ -6040,6 +6122,225 @@ class MsgViewScreen(ModalScreen[None]):
             self.dismiss(None)
         else:
             self._refresh()
+
+
+def _normalize_form_fields(raw: object) -> list[dict]:
+    """Normalize a request-input spec (A5) into a clean field list for the form.
+
+    Accepts the ``[{name, type, options?}]`` shape ``steering.parse_request_input``
+    produces (surfaced on a task's ``card.request_input``). Drops non-dict / un-
+    named entries, defaults an unknown/absent type to ``text``, and keeps only a
+    non-empty ``options`` list for a ``choice``. Never raises -- a malformed spec
+    degrades to a shorter (or empty) form, so the modal always renders."""
+    if not isinstance(raw, list):
+        return []
+    valid_types = {"text", "textarea", "choice"}
+    out: list[dict] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        ftype = item.get("type")
+        ftype = ftype if isinstance(ftype, str) and ftype in valid_types else "text"
+        field: dict = {"name": name.strip(), "type": ftype}
+        if ftype == "choice":
+            opts = item.get("options")
+            options = [str(o) for o in opts if str(o).strip()] if isinstance(opts, list) else []
+            if not options:
+                # A choice with no options can't be answered -- treat as text.
+                field["type"] = "text"
+            else:
+                field["options"] = options
+        out.append(field)
+    return out
+
+
+class PivotCardScreen(ModalScreen[None]):
+    """Read-only scrollable card-detail modal (A5 -- the DISPATCH pivot 'card').
+
+    Renders the card a blocked worker posted -- its title, one-line status, an
+    optional link to the rich artifact, and a scrollable body -- so the operator
+    can read the full brief before steering. Purely informational: no field
+    entry, no subprocess. Esc/q/Enter close; ↑/↓/PgUp/PgDn scroll the body (the
+    native ``VerticalScroll`` owns scrolling once focused)."""
+
+    CSS = """
+    PivotCardScreen { align: center middle; background: $background 55%; }
+    PivotCardScreen > #card-frame {
+        width: 92; height: auto; max-height: 90%;
+        border: round #ffaf00; background: $surface; padding: 0 1;
+    }
+    PivotCardScreen #card-scroll { height: auto; max-height: 24; }
+    PivotCardScreen #card-foot { color: grey; height: auto; padding: 1 0 0 0; }
+    """
+    BINDINGS = [
+        Binding("escape", "close", show=False),
+        Binding("q", "close", show=False),
+        Binding("enter", "close", show=False),
+    ]
+
+    def __init__(self, row_title: str, card: dict) -> None:
+        super().__init__()
+        self._row_title = row_title
+        self._card = card or {}
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="card-frame"):
+            with VerticalScroll(id="card-scroll"):
+                yield Static(self._body(), id="card-body")
+            yield Static("↑/↓ scroll · Esc close", id="card-foot")
+
+    def on_mount(self) -> None:
+        self.query_one("#card-frame", Vertical).border_title = "Card"
+        self.query_one("#card-scroll", VerticalScroll).focus()
+
+    def _body(self) -> Text:
+        card = self._card
+        t = Text()
+        title = card.get("title") or self._row_title
+        if title:
+            t.append(f"{title}\n", style=C_HEADER)
+        status = card.get("status")
+        if status:
+            t.append(f"{status}\n", style="white")
+        link = card.get("link")
+        if link:
+            t.append(f"{link}\n", style="#4aa3ff underline")
+        body = card.get("body")
+        if title or status or link:
+            t.append("\n")
+        if body:
+            t.append(str(body), style="white")
+        elif not (title or status or link):
+            t.append("(empty card)", style=C_FAINT)
+        return t
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class PivotFormScreen(ModalScreen[dict]):
+    """Native elicitation modal (A5 -- the DISPATCH pivot 'form').
+
+    The net-new steering surface: lays out a widget per declared request-input
+    field (``text`` -> ``Input``, ``textarea`` -> ``TextArea``, ``choice`` ->
+    ``RadioSet``) beneath the card's title/context, and on **Submit** returns the
+    collected ``{name: value}`` answer via ``dismiss(dict)`` (``dismiss(None)``
+    on cancel). The caller substitutes those values into the action's ``run``
+    template (the steer transport) -- this screen never runs a command itself and
+    never carries a verdict; it only gathers the operator's answer.
+
+    Tab moves between fields and the Submit/Cancel buttons (native focus); Esc
+    cancels; Ctrl+S submits from anywhere."""
+
+    CSS = """
+    PivotFormScreen { align: center middle; background: $background 55%; }
+    PivotFormScreen > #form-frame {
+        width: 84; height: auto; max-height: 90%;
+        border: round #ffaf00; background: $surface; padding: 0 1;
+    }
+    PivotFormScreen #form-head { height: auto; padding: 0 0 1 0; }
+    PivotFormScreen #form-scroll { height: auto; max-height: 20; }
+    PivotFormScreen .form-label { color: #ffaf00; height: auto; padding: 1 0 0 0; }
+    PivotFormScreen Input, PivotFormScreen TextArea {
+        border: round grey; background: $surface;
+    }
+    PivotFormScreen TextArea { height: 5; }
+    PivotFormScreen RadioSet { border: none; background: $surface; height: auto; }
+    PivotFormScreen #form-buttons { height: auto; padding: 1 0 0 0; }
+    PivotFormScreen #form-buttons Button { margin: 0 1 0 0; }
+    PivotFormScreen #form-foot { color: grey; height: auto; padding: 1 0 0 0; }
+    """
+    BINDINGS = [
+        Binding("escape", "cancel", show=False),
+        Binding("ctrl+s", "submit", show=False),
+    ]
+
+    def __init__(self, title: str, body: object, fields: list[dict], submit_label: str) -> None:
+        super().__init__()
+        self._title = title or "Steer"
+        self._body = str(body) if body else ""
+        self._fields = fields or []
+        self._submit_label = submit_label or "Submit"
+        # name -> (type, widget, options) resolved at submit time.
+        self._widgets: list[tuple[str, str, Widget, list[str]]] = []
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="form-frame"):
+            yield Static(self._header(), id="form-head")
+            with VerticalScroll(id="form-scroll"):
+                if not self._fields:
+                    yield Static("(this card requests no input)", classes="form-label")
+                for i, f in enumerate(self._fields):
+                    name, ftype = f["name"], f["type"]
+                    yield Static(self._field_label(name, ftype), classes="form-label")
+                    wid = f"ff-{i}"
+                    if ftype == "textarea":
+                        w: Widget = TextArea(id=wid)
+                        self._widgets.append((name, ftype, w, []))
+                        yield w
+                    elif ftype == "choice":
+                        options = f.get("options", [])
+                        rs = RadioSet(
+                            *[RadioButton(o, value=(j == 0)) for j, o in enumerate(options)],
+                            id=wid,
+                        )
+                        self._widgets.append((name, ftype, rs, list(options)))
+                        yield rs
+                    else:
+                        inp = Input(id=wid)
+                        self._widgets.append((name, ftype, inp, []))
+                        yield inp
+            with Vertical(id="form-buttons"):
+                yield Button(self._submit_label, variant="primary", id="form-submit")
+                yield Button("Cancel", id="form-cancel")
+            yield Static("Tab move · Ctrl+S submit · Esc cancel", id="form-foot")
+
+    def _header(self) -> Text:
+        t = Text()
+        t.append(str(self._title), style=C_HEADER)
+        if self._body:
+            t.append("\n" + self._body, style=C_DIM)
+        return t
+
+    @staticmethod
+    def _field_label(name: str, ftype: str) -> str:
+        hint = {"textarea": " (multi-line)", "choice": " (choose one)"}.get(ftype, "")
+        return f"{name}{hint}:"
+
+    def on_mount(self) -> None:
+        self.query_one("#form-frame", Vertical).border_title = "Steer"
+        if self._widgets:
+            try:
+                self._widgets[0][2].focus()
+            except Exception:
+                pass
+
+    def _collect(self) -> dict:
+        values: dict[str, str] = {}
+        for name, ftype, widget, options in self._widgets:
+            if ftype == "textarea":
+                values[name] = widget.text
+            elif ftype == "choice":
+                idx = getattr(widget, "pressed_index", -1)
+                values[name] = options[idx] if 0 <= idx < len(options) else ""
+            else:
+                values[name] = widget.value
+        return values
+
+    def on_button_pressed(self, event: "Button.Pressed") -> None:
+        if event.button.id == "form-submit":
+            self.action_submit()
+        else:
+            self.action_cancel()
+
+    def action_submit(self) -> None:
+        self.dismiss(self._collect())
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class MaintenanceView:
