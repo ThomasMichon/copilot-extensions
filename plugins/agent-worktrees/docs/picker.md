@@ -158,6 +158,25 @@ bridge's "Send message", a dispatcher's "Dispatch task here") via a
 adopt, the more a worktree row can do. See
 [architecture.md § Picker Pivot Registry](architecture.md#picker-pivot-registry-cross-plugin).
 
+### Steering a blocked task — card + form (the DISPATCH pivot)
+A registered pivot's action can declare a native **card** or **form** kind so an
+operator can answer a worker that blocked on input (the agent-dispatch
+card/steer seam). On the **Tasks** pivot, a task that is **awaiting steer** gains
+two verbs (gated `when: {awaiting_steer: true}`):
+
+- **View card** (`kind: "card"`) — a read-only, scrollable detail overlay of the
+  brief the worker posted (title · status · link · body). Purely informational.
+- **Steer** (`kind: "form"`) — a native elicitation modal that lays out a widget
+  per requested field (`text`→ line, `textarea`→ multi-line, `choice`→ radio),
+  read from the card's `request_input`. On **Submit** it fills `{field.<name>}`
+  in the action's `run` and calls `agent-dispatch steer submit …`, which wakes
+  the worker with the answer. `Tab` moves between fields, `Ctrl+S` submits, `Esc`
+  cancels.
+
+This is a **general** steering surface (any blocked dispatched agent can use it),
+and it is **never a verdict path** — it only carries the operator's answer back
+to the worker.
+
 **Messages** (read-only) peeks the last few conversation turns of the worktree's
 latest session in an overlay, so you can tell what a worktree was doing — and
 whether it still needs follow-up — without opening it. This is the read-side

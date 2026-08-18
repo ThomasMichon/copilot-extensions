@@ -4954,6 +4954,11 @@ class _FakeRuntime:
         self.actions.append((action.key, dict(ctx)))
         return (True, "done")
 
+    def run_resolved(self, argv):
+        # A5 form path: record the already-substituted argv the engine builds.
+        self.resolved = list(argv)
+        return (True, "done")
+
 
 def _seed_fake_tasks(scr, rows):
     reg = scr.registered_pivots[0]
@@ -5539,6 +5544,116 @@ def test_registered_pivot_conditional_actions_filter_by_when(tmp_path, monkeypat
             menu = _task_menu(scr)
             assert menu is not None
             assert [a.label for a in menu._actions] == ["Details", "Recycle"]
+
+    asyncio.run(run())
+
+
+def _write_steering_manifest(directory):
+    """A Tasks manifest with the A5 steering card + form actions, gated to
+    awaiting-steer rows (mirrors the shipped agent-dispatch pivot)."""
+    import json
+    manifest = {
+        "label": "Tasks",
+        "after": "Worktrees",
+        "list": ["true"],
+        "entry": {"id": "id", "title": "title"},
+        "actions": [
+            {"key": "card", "label": "View card", "kind": "card",
+             "when": {"awaiting_steer": True}},
+            {"key": "steer", "label": "Steer", "kind": "form",
+             "fields_from": "card.request_input",
+             "title_from": "card.title", "body_from": "card.status",
+             "run": ["agent-dispatch", "steer", "submit", "{task_id}",
+                     "--field", "feedback={field.feedback}",
+                     "--field", "decision={field.decision}"],
+             "when": {"awaiting_steer": True}},
+            {"key": "abandon", "label": "Abandon", "run": ["echo", "{task_id}"]},
+        ],
+    }
+    (directory / "agent-dispatch.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+
+def test_steering_card_and_form_actions_gate_and_drive(tmp_path, monkeypatch):
+    """A5 end-to-end wiring through the real PickerScreen: the card + form verbs
+    appear only on an awaiting-steer row; activating them opens the native card
+    detail / elicitation modals; submitting the form runs the substituted steer
+    argv via the runtime (no verdict path)."""
+    import json
+    from agent_worktrees.picker_tui import pivots as pivots_mod
+    from agent_worktrees.picker_tui.engine import PivotCardScreen, PivotFormScreen
+    from textual.widgets import Input, TextArea
+
+    d = tmp_path / "pivots"
+    d.mkdir()
+    _write_steering_manifest(d)
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+
+    rows = [
+        {"id": "t1", "title": "PR 123", "task_id": "t1", "awaiting_steer": True,
+         "card": {"title": "Review PR 123", "status": "recommend post-approved",
+                  "body": "The full review.",
+                  "request_input": [
+                      {"name": "feedback", "type": "textarea"},
+                      {"name": "decision", "type": "choice",
+                       "options": ["revise", "post-approved"]}]}},
+        {"id": "t2", "title": "PR 999", "task_id": "t2", "awaiting_steer": False},
+    ]
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            rt = _seed_fake_tasks(scr, rows)
+            scr.htab = scr.htabs.index("Tasks")
+            reg = scr._reg_pivot()
+
+            # Awaiting-steer row: Card + Steer are shown (plus Abandon).
+            scr.sel = ("T", 0)
+            await pilot.pause()
+            scr._open_task_menu()
+            await pilot.pause()
+            menu = _task_menu(scr)
+            assert [a.label for a in menu._actions] == ["View card", "Steer", "Abandon"]
+            await pilot.press("escape")
+            await pilot.pause()
+
+            # Non-awaiting row: only Abandon (card/steer gated out).
+            scr.sel = ("T", 1)
+            await pilot.pause()
+            scr._open_task_menu()
+            await pilot.pause()
+            menu = _task_menu(scr)
+            assert [a.label for a in menu._actions] == ["Abandon"]
+            await pilot.press("escape")
+            await pilot.pause()
+
+            actions = {a.key: a for a in reg.actions}
+
+            # View card -> opens the read-only card modal.
+            scr._run_task_action(reg, actions["card"], rows[0])
+            await pilot.pause()
+            assert isinstance(app.screen, PivotCardScreen)
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not isinstance(app.screen, PivotCardScreen)
+
+            # Steer -> opens the form; fill + submit runs the substituted argv.
+            scr._run_task_action(reg, actions["steer"], rows[0])
+            await pilot.pause()
+            assert isinstance(app.screen, PivotFormScreen)
+            form = app.screen
+            form.query_one("#ff-0", TextArea).text = "ship it"
+            await pilot.pause()
+            form.action_submit()
+            await pilot.pause()
+
+            assert rt.resolved == [
+                "agent-dispatch", "steer", "submit", "t1",
+                "--field", "feedback=ship it",
+                "--field", "decision=revise",
+            ]
 
     asyncio.run(run())
 
