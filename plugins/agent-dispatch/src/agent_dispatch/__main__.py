@@ -187,6 +187,11 @@ def _spawn_coordinator_process() -> None:
 
     kwargs: dict[str, Any] = dict(
         stdin=subprocess.DEVNULL, stdout=log, stderr=log, close_fds=True, env=env,
+        # Launch the detached coordinator from the runtime root, never the CWD we
+        # inherited (a session-start hook's CWD is often the plugin payload dir,
+        # which on Windows would lock it against `copilot plugin update`). The
+        # daemon also relocates itself (procutil.relocate_off_payload) as a belt.
+        cwd=str(install_dir),
     )
     if os.name == "nt":
         kwargs["creationflags"] = 0x00000008  # DETACHED_PROCESS
@@ -1873,7 +1878,7 @@ def _spawn_supervisor_daemon_detached(machine: str | None, env: str) -> bool:
     single-instance election stands it down cleanly (pin-not-failover), so a double
     launch is self-correcting. Returns whether the spawn was issued.
     """
-    from .procutil import detached_kwargs
+    from .procutil import detached_kwargs, runtime_root
 
     argv = [sys.executable, "-m", "agent_dispatch", "supervise", "serve"]
     if machine:
@@ -1886,6 +1891,8 @@ def _spawn_supervisor_daemon_detached(machine: str | None, env: str) -> bool:
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            # Launch from the runtime root, never an inherited (possibly payload) CWD.
+            cwd=str(runtime_root()),
             **detached_kwargs(),
         )
         return True
@@ -1923,6 +1930,12 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
     Single-instance-guarded -- a second daemon for the same scope stands down.
     """
     from .supervisor_daemon import SupervisorDaemon
+
+    # Never hold the Copilot plugin payload dir as CWD (Windows locks it against
+    # `copilot plugin update`); this daemon is lazy-started and inherits the
+    # launching session's CWD. Relocate before the long-lived loop.
+    from . import procutil
+    procutil.relocate_off_payload()
 
     machine, env = _registration_scope(args)
 
