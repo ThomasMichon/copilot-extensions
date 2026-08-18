@@ -160,6 +160,22 @@ def test_shipped_env_defaults_to_no_labels():
     )
 
 
+def test_supervisor_unit_force_restarts_on_reload_code():
+    """Live-update (Linux): the supervisor systemd unit must force a restart on the
+    daemon's reload exit code (75) and treat it as success -- so a non-elevated
+    update that swaps the .venv slot cycles the running daemon onto the new build
+    via the unit's Restart, no re-register (agent-daemon-live-update Phase 1)."""
+    text = _text()
+    idx = text.index("_install_supervisor_unit()")
+    body = text[idx:]
+    assert "RestartForceExitStatus=75" in body, (
+        "the supervisor unit must force a restart on the reload exit code (75)"
+    )
+    assert "SuccessExitStatus=75" in body, (
+        "the reload exit code must count as success, not a unit failure"
+    )
+
+
 def test_supervisor_gated_off_on_wsl_and_client_hosts():
     """The supervisor must not install on a WSL guest / client-only host."""
     text = _text()
@@ -365,3 +381,21 @@ class TestWindowsSupervisorInstall:
             "\"[`$(Get-Date -Format o)] agent-dispatch coordinator launch "
             "(host=`$pinned port=`$portShown)\" |\n    Out-File" not in text
         ), "the coordinator banner write must be wrapped, not a bare fatal Out-File"
+
+    def test_supervisor_launcher_restart_loops_on_reload_code(self):
+        """Live-update (Windows): the supervisor launcher must run the daemon in a
+        restart-loop that re-resolves the .venv slot and re-invokes on the reload
+        exit code (75), so a non-elevated update cycles the running supervisor onto
+        the new build in place -- no re-register, no elevation, no reboot
+        (agent-daemon-live-update Phase 1). The loop owns the python child directly
+        (no detached grandchild) so the scheduled task keeps tracking it (#3602)."""
+        text = _ps1_text()
+        # A re-resolvable slot resolver (re-reads current-version each iteration).
+        assert "function Resolve-SlotPython" in text
+        # The distinguished reload code, matched against the child's exit code.
+        assert "`$_reloadCode = 75" in text
+        assert "if (`$_rc -eq `$_reloadCode)" in text
+        # The loop re-invokes on reload and surfaces the real exit code otherwise.
+        assert "while (`$true) {" in text
+        assert "`$_rc = `$LASTEXITCODE" in text
+        assert "exit `$_rc" in text
