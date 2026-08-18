@@ -1105,13 +1105,6 @@ Environment=PYTHONUTF8=1
 ExecStart=$SUPERVISOR_LAUNCHER
 Restart=on-failure
 RestartSec=10
-# Live-update: the supervise-serve daemon exits 75 (RELOAD_EXIT_CODE) when a
-# non-elevated update swapped the active .venv slot. SuccessExitStatus keeps that
-# from counting as a failure; RestartForceExitStatus forces a restart on it -- the
-# unit re-execs \$LINK_PYTHON (the symlink) onto the new slot, in place, no
-# re-register. (The POSIX symlink swap is safe while the old process runs.)
-SuccessExitStatus=75
-RestartForceExitStatus=75
 WorkingDirectory=$INSTALL_DIR
 
 [Install]
