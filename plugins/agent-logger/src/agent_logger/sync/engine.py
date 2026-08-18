@@ -118,6 +118,28 @@ def run_sync(
         if not acquired:
             print("session-sync: another sync holds the lock; skipping", file=sys.stderr)
             return 0
+
+        # On-device compaction (before the push): archive cold, in-scope,
+        # untracked local sessions into the compressed store and reclaim their
+        # live dirs, so the scheduled service performs the whole compaction
+        # lifecycle from config -- no separate `compact` invocation needed.
+        if cfg.sync_compact["enabled"]:
+            from agent_logger.sync.compact import compact_local
+
+            cres = compact_local(cfg, verbose=verbose)
+            if cres.compacted:
+                mb = cres.reclaimed_bytes / (1024 * 1024)
+                print(
+                    f"session-sync: compacted {cres.compacted} local session(s), "
+                    f"reclaimed {mb:.1f} MB"
+                )
+            if cres.failed:
+                print(
+                    f"session-sync: {len(cres.failed)} compaction failure(s): "
+                    f"{'; '.join(cres.failed)}",
+                    file=sys.stderr,
+                )
+
         result = target.push(source, machine, include)
         if not result.ok:
             print(f"session-sync: push failed: {result.detail}", file=sys.stderr)
@@ -130,13 +152,30 @@ def run_sync(
                 print(f"session-sync: pruned {removed} old session(s)")
 
         # Two-pair sync: publish the compressed archive store to
-        # {machine}/archived/ and reconcile away hub duplicates.
+        # {machine}/archived/, compact the hub-only backlog, and reconcile away
+        # the uncompressed hub duplicates.
         if cfg.sync_compact["enabled"]:
             arc = target.push_archives(cfg.compact_archive_root, machine)
             if arc.ok and arc.file_count:
                 print(f"session-sync: pushed {arc.file_count} archive file(s)")
             elif not arc.ok:
                 print(f"session-sync: archive push failed: {arc.detail}", file=sys.stderr)
+
+            opts = cfg.sync_compact
+            from agent_logger.sync.compact import tracked_worktree_paths
+
+            tracked = (
+                tracked_worktree_paths()
+                if opts["require_untracked_worktree"]
+                else None
+            )
+            backlog = target.compact_backlog(
+                machine, opts["min_age_days"], opts["codec"],
+                tracked_paths=tracked,
+            )
+            if backlog:
+                print(f"session-sync: compacted {backlog} hub-only session(s)")
+
             reclaimed = target.reconcile_hub(machine)
             if reclaimed:
                 print(f"session-sync: reconciled {reclaimed} hub session(s)")
