@@ -334,6 +334,56 @@ def _reroot_serve_cwd() -> None:
         )
 
 
+def _reap_superseded_coordinators(result: Any) -> None:
+    """After a successful cutover, retire every *other* live coordinator.
+
+    The cutover itself only shuts down the single predecessor it replaced; this
+    reconciles the full set so stale coordinators from earlier cutovers/restarts
+    do not leak (see :mod:`agent_dispatch.reap`). Best-effort: records a step and
+    never raises.
+
+    Anchored on the cutover's own ``new_port``: the only coordinator kept is the
+    routing table's ``active`` entry **when its port matches the port this
+    cutover just promoted** (plus this process). If that cannot be confirmed the
+    reap is skipped rather than risk terminating the freshly promoted daemon.
+    """
+    try:
+        from zdd.routing import read_table
+
+        from .config import routing_dir
+        from .reap import reap_superseded_coordinators
+
+        new_port = getattr(result, "new_port", None)
+        table = read_table(routing_dir()) or {}
+        active = table.get("active") if isinstance(table, dict) else None
+        keep = {os.getpid()}
+        if (
+            isinstance(active, dict)
+            and new_port
+            and active.get("port") == new_port
+            and active.get("pid")
+        ):
+            keep.add(int(active["pid"]))
+        else:
+            result.steps.append(
+                "reap skipped: could not confirm the promoted coordinator "
+                "against the routing table"
+            )
+            return
+        reap = reap_superseded_coordinators(keep_pids=keep)
+        if reap.reaped:
+            result.steps.append(
+                f"reaped {len(reap.reaped)} superseded coordinator(s): {reap.reaped}"
+            )
+        for err in reap.errors:
+            result.steps.append(f"reap: {err}")
+    except Exception as exc:  # best-effort: reap must never fail a cutover
+        try:
+            result.steps.append(f"reap skipped: {exc}")
+        except Exception:  # noqa: S110 -- nothing actionable if even that fails
+            pass
+
+
 def _cmd_cutover(args: argparse.Namespace) -> int:
     """Internal graceful-cutover seam -- driven by the installer, not operators.
 
@@ -446,6 +496,8 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
         drain_timeout=args.drain_timeout,
         force=args.force,
     )
+    if result.ok:
+        _reap_superseded_coordinators(result)
     if getattr(args, "json", False):
         _emit(result.to_dict())
     else:

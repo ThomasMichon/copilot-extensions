@@ -115,6 +115,19 @@ A consumer owns three things `zdd` cannot know:
    resources the active one still owns (a shared credential-relay port, a pinned
    socket, a named single-instance lock) until *after* the flip. Bind a fresh
    port; acquire shared singletons only on promotion.
+4. **Single-active reconciliation** — `RETIRE` shuts down only the *one*
+   predecessor a cutover replaces (`old_client.shutdown()`). That is not enough
+   to guarantee **one daemon per host** across *repeated* cutovers and plain
+   restarts: a passive promoted by cutover *N* that is later displaced by a
+   process which is not its direct successor (e.g. a plain `serve` restart that
+   re-published the routing table over the top) is never anyone's "old" and
+   leaks — a live process holding a port + RSS, indefinitely. After a successful
+   cutover, **reconcile the full set**: enumerate the daemon's own processes and
+   retire every one that is not the routing table's `active` (anchored on the
+   port this cutover just promoted, so the freshly-promoted daemon is never
+   reaped) and not self. Keep it best-effort and fail-soft — a stray that cannot
+   be reaped must never fail the cutover. (agent-dispatch: `agent_dispatch.reap`,
+   invoked from `_cmd_cutover` after commit.)
 
 ### Wiring it to the runtime layout — the installer drives cutover, automatically
 
