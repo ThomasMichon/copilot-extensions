@@ -17,7 +17,21 @@
 InstallDir="$HOME/.agent-ssh"
 Manifest="$InstallDir/deploy-manifest.json"
 
-[ -f "$Manifest" ] || exit 0
+# FIRST install (no deploy manifest yet): do the cheap 'stamp' so the binstub is
+# on PATH THIS session and self-provisions the runtime on first use. Without this
+# a fresh box never provisions, because the reconcile logic below is manifest-gated
+# -- the stamp writes no manifest, so it (idempotently) re-runs until first use
+# builds the runtime. Mirrors agent-logger's bootstrap-check. Self-locate the
+# installer from this script (the sessionStart hook runs the plugin-shipped copy)
+# and only fire when the installer actually declares a 'stamp' action.
+if [ ! -f "$Manifest" ]; then
+  _bc_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  _bc_installer="$_bc_dir/install.sh"
+  if [ -f "$_bc_installer" ] && grep -qE '(\||[[:space:]])stamp[|)]' "$_bc_installer" 2>/dev/null; then
+    bash "$_bc_installer" stamp >/dev/null 2>&1 || true
+  fi
+  exit 0
+fi
 
 py="$(command -v python3 || command -v python || true)"
 [ -n "$py" ] || exit 0
