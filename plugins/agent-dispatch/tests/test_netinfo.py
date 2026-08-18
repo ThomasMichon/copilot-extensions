@@ -27,15 +27,29 @@ def test_is_wsl_true_via_env(monkeypatch):
 def test_is_wsl_true_via_proc(monkeypatch, tmp_path):
     monkeypatch.setattr(netinfo.sys, "platform", "linux")
     monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
+    monkeypatch.setattr(netinfo, "_in_container", lambda: False)
     osrelease = tmp_path / "osrelease"
     osrelease.write_text("5.15.153.1-microsoft-standard-WSL2\n")
     monkeypatch.setattr(netinfo, "_WSL_PROBE_FILES", (str(osrelease),))
     assert netinfo.is_wsl() is True
 
 
+def test_is_wsl_false_in_container_on_wsl2_kernel(monkeypatch, tmp_path):
+    # A container on Docker Desktop's WSL2 backend matches the "microsoft"
+    # kernel string but is NOT a WSL guest -- it must run its own coordinator.
+    monkeypatch.setattr(netinfo.sys, "platform", "linux")
+    monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
+    monkeypatch.setattr(netinfo, "_in_container", lambda: True)
+    osrelease = tmp_path / "osrelease"
+    osrelease.write_text("5.15.167.4-microsoft-standard-WSL2\n")
+    monkeypatch.setattr(netinfo, "_WSL_PROBE_FILES", (str(osrelease),))
+    assert netinfo.is_wsl() is False
+
+
 def test_is_wsl_false_standalone_linux(monkeypatch, tmp_path):
     monkeypatch.setattr(netinfo.sys, "platform", "linux")
     monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
+    monkeypatch.setattr(netinfo, "_in_container", lambda: False)
     osrelease = tmp_path / "osrelease"
     osrelease.write_text("6.1.0-18-amd64\n")  # plain Debian (Mantis-Counter)
     monkeypatch.setattr(netinfo, "_WSL_PROBE_FILES", (str(osrelease),))

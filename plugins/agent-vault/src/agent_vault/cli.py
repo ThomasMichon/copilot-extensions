@@ -1414,9 +1414,16 @@ def cmd_vault_remove(args):
 def main():
     import argparse
 
+    from . import __version__
+
     parser = argparse.ArgumentParser(
         prog="agent-vault",
         description="Local KeePassXC-backed credential CLI",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"agent-vault {__version__}",
     )
     sub = parser.add_subparsers(dest="command")
 

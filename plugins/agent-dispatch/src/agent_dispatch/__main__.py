@@ -20,6 +20,8 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import httpx
+
 from . import __version__
 from . import config as _config
 from .client import DispatchClient, DispatchError
@@ -3723,6 +3725,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"agent-dispatch: {exc}", file=sys.stderr)
         return 1
     except (ConnectionError, OSError) as exc:
+        print(f"agent-dispatch: cannot reach coordinator: {exc}", file=sys.stderr)
+        return 1
+    except httpx.TransportError as exc:
         print(f"agent-dispatch: cannot reach coordinator: {exc}", file=sys.stderr)
         return 1
 
