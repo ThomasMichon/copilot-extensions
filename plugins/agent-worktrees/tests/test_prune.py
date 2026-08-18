@@ -434,12 +434,32 @@ class TestAssessClaimedResource:
         assert v.safe is False and v.category == "claimed"
         assert self.OWNER in v.reason and "alive" in v.reason
 
-    def test_claimed_unknown_spares(self):
-        # None (unconfirmed) -> spare; absence of a local owner is not proof.
-        rec = _rec_owned(self.OWNER)
-        v = prune.assess(rec, _info(S.COMPLETED), claimant_alive=lambda ref: None)
+    def test_claimed_unknown_spares_inflight(self):
+        # None (unconfirmed) -> spare an IN-FLIGHT resource; absence of a local
+        # owner is not proof. (A FINISHED resource is collectable regardless.)
+        rec = _rec_owned(self.OWNER, status="active")
+        v = prune.assess(rec, _info(S.WIP), claimant_alive=lambda ref: None)
         assert v.safe is False and v.category == "claimed"
         assert "unconfirmed" in v.reason
+
+    def test_finished_completed_claimed_collectable_when_alive(self):
+        # A git-COMPLETED owned resource is collectable even when
+        # its claimant is alive -- the owner has demonstrably moved on.
+        rec = _rec_owned(self.OWNER, status="active")
+        v = prune.assess(rec, _info(S.COMPLETED), claimant_alive=lambda ref: True)
+        assert v.safe is True and v.category == "completed-local"
+
+    def test_finished_merged_pr_claimed_collectable_when_alive(self):
+        rec = _rec_owned(self.OWNER, status="active", prs=[_pr(7, "merged")])
+        v = prune.assess(rec, _info(S.COMPLETED), claimant_alive=lambda ref: True)
+        assert v.safe is True and v.category == "merged"
+
+    def test_inflight_dirty_claimed_spared_when_alive(self):
+        # A dirty owned resource (unpushed work) is still protected under a live
+        # claimant -- narrowing collects only FINISHED resources.
+        rec = _rec_owned(self.OWNER, status="active")
+        v = prune.assess(rec, _info(S.DIRTY, dirty=2), claimant_alive=lambda ref: True)
+        assert v.safe is False and v.category == "claimed"
 
     def test_claimed_gone_falls_through(self):
         # False (confirmed gone) -> normal git verdict applies (empty is safe).
@@ -470,12 +490,31 @@ class TestAssessClaimedResource:
 class TestCleanupDispositionClaimed:
     OWNER = "anomalous-potato/test-chamber/wt-A#s1"
 
-    def test_claimed_overrides_finalized_clean(self):
-        # Even a finalized resource is spared while its claimant is alive.
+    def test_finalized_claimed_is_collectable_when_alive(self):
+        # The core flip: a finalized/COMPLETED resource is
+        # collectable even while its claimant is alive -- a host kept open for
+        # days must not pin its merged children forever.
         rec = _rec_owned(self.OWNER, status="finalized")
         d = prune.cleanup_disposition(rec, _info(S.COMPLETED),
                                       claimant_alive=lambda ref: True)
+        assert d.cleanable is True and d.bucket == "clean"
+
+    def test_inflight_claimed_spared_when_alive(self):
+        # A still-in-flight (dirty) owned resource is spared under a live claimant.
+        rec = _rec_owned(self.OWNER, status="active")
+        d = prune.cleanup_disposition(rec, _info(S.DIRTY, dirty=1),
+                                      claimant_alive=lambda ref: True)
         assert d.cleanable is False and d.bucket == "claimed"
+
+    def test_finalized_claimed_followup_still_preserved(self):
+        # A finalized+claimed resource the agent flagged with pending follow-ups
+        # is still preserved (the follow-up gate wins over the clean path), just
+        # as it does for a non-claimed finalized worktree.
+        rec = _rec_owned(self.OWNER, status="finalized")
+        rec.follow_up = True
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED),
+                                      claimant_alive=lambda ref: True)
+        assert d.cleanable is False and d.bucket == "follow-up"
 
     def test_claimed_gone_is_cleanable(self):
         rec = _rec_owned(self.OWNER, status="finalized")
