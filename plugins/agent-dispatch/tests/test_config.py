@@ -26,6 +26,7 @@ def _isolate_discovery(monkeypatch, tmp_path):
     finds nothing and falls back to the fixed default port.
     """
     monkeypatch.setenv("AGENT_DISPATCH_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(tmp_path / "routing"))
     monkeypatch.setenv("AGENT_DISPATCH_WINDOWS_RUN_DIR", str(tmp_path / "winrun"))
     monkeypatch.setenv("AGENT_DISPATCH_WINDOWS_MOUNT", str(tmp_path / "winmount"))
     monkeypatch.delenv("AGENT_DISPATCH_ENDPOINT", raising=False)

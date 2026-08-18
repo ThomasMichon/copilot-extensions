@@ -2,12 +2,23 @@
 
 from __future__ import annotations
 
+import pytest
+
 from agent_dispatch.__main__ import (
     _parse_affinity,
     _resolve_bind_host_resilient,
     _resolve_client_target,
     build_parser,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_discovery(monkeypatch, tmp_path):
+    """Point endpoint + routing discovery at empty tmp dirs so target resolution is
+    deterministic and never reads a live coordinator's rendezvous / routing table."""
+    monkeypatch.setenv("AGENT_DISPATCH_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(tmp_path / "routing"))
+    monkeypatch.delenv("AGENT_DISPATCH_ENDPOINT", raising=False)
 
 
 def test_parse_affinity():
@@ -49,7 +60,33 @@ def test_resolve_target_shared_unconfigured_errors_loudly(monkeypatch):
 
 def test_resolve_target_local_default(monkeypatch):
     monkeypatch.delenv("AGENT_DISPATCH_URL", raising=False)
+    monkeypatch.delenv("AGENT_DISPATCH_SHARED_URL", raising=False)
     monkeypatch.setattr("agent_dispatch.netinfo.is_wsl", lambda: False)
+    args = _args(["list"])
+    url, _ = _resolve_client_target(args)
+    assert url == "http://127.0.0.1:9847"
+
+
+def test_resolve_target_falls_back_to_shared_when_local_down(monkeypatch):
+    # Failover: local coordinator not live + a shared coordinator configured ->
+    # dispatch transparently onto the shared/hosted (standby) coordinator.
+    monkeypatch.delenv("AGENT_DISPATCH_URL", raising=False)
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_URL", "https://coordinator.example/dispatch")
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_TOKEN", "shared-secret")
+    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda: False)
+    args = _args(["list"])
+    url, token = _resolve_client_target(args)
+    assert url == "https://coordinator.example/dispatch"
+    assert token == "shared-secret"
+
+
+def test_resolve_target_prefers_local_when_live(monkeypatch):
+    # A shared coordinator is configured, but the local one is live -> local wins
+    # (no unnecessary cross-machine hop).
+    monkeypatch.delenv("AGENT_DISPATCH_URL", raising=False)
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_URL", "https://coordinator.example/dispatch")
+    monkeypatch.setattr("agent_dispatch.netinfo.is_wsl", lambda: False)
+    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda: True)
     args = _args(["list"])
     url, _ = _resolve_client_target(args)
     assert url == "http://127.0.0.1:9847"

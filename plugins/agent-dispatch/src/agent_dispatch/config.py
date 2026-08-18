@@ -43,6 +43,7 @@ DEFAULT_SWEEP_INTERVAL = 60.0
 # legacy fixed port). Honors overrides so a branded/side-by-side deployment keeps
 # its own namespace. See docs/patterns/local-endpoint-discovery.md.
 RUN_DIR_ENV = "AGENT_DISPATCH_RUN_DIR"
+ROUTING_DIR_ENV = "AGENT_DISPATCH_ROUTING_DIR"
 ENDPOINT_ENV = "AGENT_DISPATCH_ENDPOINT"
 OVERRIDES_ENV = "AGENT_DISPATCH_OVERRIDES"
 # Opt-in: keep a WSL guest a *client* of the Windows host's coordinator (the
@@ -97,8 +98,13 @@ def routing_dir() -> Path:
     file-based routing table (``active.json``) here so a version update stands the
     new coordinator up beside the old and moves clients over without a restart.
     It lives at the install root (never a version slot) so it survives every swap.
+    Honors ``AGENT_DISPATCH_ROUTING_DIR`` for side-by-side / test deployments
+    (mirrors ``run_dir`` / ``overrides_path``), so an isolated or branded namespace
+    does not read the real install's routing table.
     """
-    return Path.home() / ".agent-dispatch"
+    return Path(
+        os.environ.get(ROUTING_DIR_ENV) or (Path.home() / ".agent-dispatch")
+    )
 
 #: Wildcard bind addresses that expose the coordinator on **every** interface
 #: (including the LAN). Binding one of these without a bearer token would put the
