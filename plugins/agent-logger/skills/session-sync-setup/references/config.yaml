@@ -16,6 +16,17 @@ sync:
   repo_allowlist_fail_closed: false
   repo_denylist: []             # exclude matching repos
   harness_repos: []             # origin.json derivation for downstream routing
+  # Cold-session compaction (opt-in). Archive very old, inactive sessions into
+  # a compressed store to reclaim space. Run by `session-sync compact` (local)
+  # and `session-sync compact-hub` (the OneDrive/local hub backlog); with
+  # `enabled: true`, `session-sync run` also pushes the archive store to the
+  # hub and reconciles away the uncompressed duplicates.
+  compact:
+    enabled: false              # opt-in
+    codec: targz                # tar.gz (stdlib); pluggable (zstd later)
+    min_age_days: 30            # only sessions at least this old
+    require_untracked_worktree: true  # skip sessions of picker-tracked worktrees
+    archive_root: null          # null => <home>/archived-sessions (out of ~/.copilot)
   notify:
     url: null                   # optional post-push HTTP POST; {machine} expands
     bearer_token_file: null

@@ -15,8 +15,11 @@ import os
 import shutil
 import stat
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
+from agent_logger import sessions
+from agent_logger.sessions import SessionRef
 from agent_logger.sync.meta import write_sync_meta
 from agent_logger.sync.targets.base import DoctorResult, PushResult, Target
 
@@ -69,6 +72,57 @@ def _needs_copy(src: Path, dst: Path) -> bool:
         return True
     s = src.stat()
     return s.st_size != d.st_size or s.st_mtime > d.st_mtime + 1e-6
+
+
+def _parse_iso(ts: str) -> datetime | None:
+    """Parse an ISO-8601 timestamp (tolerating a trailing ``Z``)."""
+    raw = (ts or "").strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _hub_session_age_days(session_dir: Path, now: datetime) -> float | None:
+    """Age in days from a hub session's ``workspace.yaml`` timestamps.
+
+    Uses ``updated_at`` then ``created_at`` -- never filesystem mtime, which is
+    unreliable on OneDrive online-only placeholders. ``None`` if no timestamp.
+    """
+    ws_file = session_dir / "workspace.yaml"
+    if not ws_file.is_file():
+        return None
+    try:
+        ws = sessions.parse_workspace_text(
+            ws_file.read_text(encoding="utf-8", errors="replace")
+        )
+    except OSError:
+        return None
+    for key in ("updated_at", "created_at"):
+        dt = _parse_iso(ws.get(key, ""))
+        if dt is not None:
+            return (now - dt).total_seconds() / 86400.0
+    return None
+
+
+def _hub_session_cwd(session_dir: Path) -> str:
+    """Normalized cwd/git_root from a hub session's ``workspace.yaml`` ("" if none)."""
+    ws_file = session_dir / "workspace.yaml"
+    if not ws_file.is_file():
+        return ""
+    try:
+        ws = sessions.parse_workspace_text(
+            ws_file.read_text(encoding="utf-8", errors="replace")
+        )
+    except OSError:
+        return ""
+    raw = (ws.get("cwd") or ws.get("git_root") or "").strip()
+    return os.path.normcase(os.path.normpath(raw)) if raw else ""
 
 
 def _count_sessions(dest: Path) -> int:
@@ -179,6 +233,99 @@ class FilesystemTarget(Target):
                 shutil.rmtree(d, ignore_errors=True)
                 removed += 1
         return removed
+
+    def push_archives(self, archive_root: Path, machine: str) -> PushResult:
+        if not archive_root.is_dir():
+            return PushResult(ok=True, detail="no local archive store", file_count=0)
+        dest = self._root() / machine / "archived"
+        try:
+            dest.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            return PushResult(ok=False, detail=f"cannot create {dest}: {exc}")
+        copied = 0
+        nbytes = 0
+        for src_file in archive_root.iterdir():
+            if not src_file.is_file():
+                continue
+            dst_file = dest / src_file.name
+            if _needs_copy(src_file, dst_file):
+                try:
+                    _copy_replace(src_file, dst_file)
+                except OSError as exc:
+                    return PushResult(ok=False, detail=f"copy failed: {exc}")
+                copied += 1
+                nbytes += src_file.stat().st_size
+        return PushResult(ok=True, detail=f"-> {dest}", file_count=copied, byte_count=nbytes)
+
+    def reconcile_hub(self, machine: str, *, dry_run: bool = False) -> int:
+        """Remove uncompressed hub sessions whose verified archive has landed."""
+        base = self._root() / machine
+        archived = base / "archived"
+        state = base / "session-state"
+        if not archived.is_dir() or not state.is_dir():
+            return 0
+        removed = 0
+        for arc in archived.iterdir():
+            if not arc.is_file() or not any(
+                arc.name.endswith(s) for s in sessions._ARCHIVE_SUFFIXES
+            ):
+                continue
+            sid = sessions._archive_stem(arc)
+            live = state / sid
+            if not live.is_dir():
+                continue
+            ref = SessionRef(id=sid, kind="archive", path=arc, store=archived)
+            if not sessions.verify_archive(ref):
+                continue
+            if not dry_run:
+                shutil.rmtree(live, ignore_errors=True)
+            removed += 1
+        return removed
+
+    def compact_backlog(
+        self,
+        machine: str,
+        min_age_days: int,
+        codec: str,
+        *,
+        tracked_paths: set[str] | None = None,
+        dry_run: bool = False,
+    ) -> int:
+        """Compact cold hub-only sessions in place under ``{machine}/archived/``.
+
+        ``tracked_paths`` (when provided, for the running machine's own
+        namespace) protects any hub session whose worktree is still tracked --
+        so a hub copy of a live, picker-visible session is never archived even
+        if it is old.
+        """
+        base = self._root() / machine
+        state = base / "session-state"
+        archived = base / "archived"
+        if not state.is_dir():
+            return 0
+        now = datetime.now(timezone.utc)
+        compacted = 0
+        for d in state.iterdir():
+            if not d.is_dir() or not (d / sessions.EVENTS_MEMBER).exists():
+                continue
+            if sessions.is_archived(d.name, archived, codec):
+                continue
+            if tracked_paths is not None:
+                cwd = _hub_session_cwd(d)
+                if cwd and cwd in tracked_paths:
+                    continue
+            age = _hub_session_age_days(d, now)
+            if age is None or age < min_age_days:
+                continue
+            if dry_run:
+                compacted += 1
+                continue
+            ref = sessions.archive_session(d, archived, codec=codec)
+            if sessions.verify_archive(ref):
+                compacted += 1
+            else:
+                sessions.remove_archive(ref)
+        return compacted
 
     def doctor(self) -> DoctorResult:
         result = DoctorResult(ok=True)

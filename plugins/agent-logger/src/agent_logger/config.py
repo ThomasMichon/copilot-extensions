@@ -594,6 +594,41 @@ class Config:
         return opts
 
     @property
+    def sync_compact(self) -> dict[str, Any]:
+        """Resolved cold-session compaction settings (``sync.compact``).
+
+        Compaction is **opt-in** (``enabled: false`` by default). ``codec`` is a
+        registered :mod:`agent_logger.sessions` codec (default ``targz``, stdlib
+        only). A cold session is one at least ``min_age_days`` old that (when
+        ``require_untracked_worktree``) does not belong to a tracked worktree --
+        one the picker renders. Since the picker only renders tracked worktrees,
+        an archived session is never one the picker needs.
+        """
+        raw = dict(self._data.get("sync", {}).get("compact", {}) or {})
+        return {
+            "enabled": bool(raw.get("enabled", False)),
+            "codec": str(raw.get("codec") or "targz"),
+            "min_age_days": int(raw.get("min_age_days") or 30),
+            "require_untracked_worktree": bool(
+                raw.get("require_untracked_worktree", True)
+            ),
+            "archive_root": raw.get("archive_root"),
+        }
+
+    @property
+    def compact_archive_root(self) -> Path:
+        """Local archive store for compacted sessions.
+
+        Deliberately **outside** ``~/.copilot`` (the Copilot CLI owns and
+        rotates that tree) — defaults to ``<home>/archived-sessions``, a stable
+        agent-logger-owned, non-cloud-synced location.
+        """
+        raw = self.sync_compact.get("archive_root")
+        if raw:
+            return Path(raw).expanduser()
+        return self.home / "archived-sessions"
+
+    @property
     def log_path_template(self) -> str:
         return self._data.get("log", {}).get("path_template", DEFAULTS["log"]["path_template"])
 

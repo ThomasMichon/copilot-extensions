@@ -130,6 +130,45 @@ class Target(ABC):
         """
         return 0
 
+    def push_archives(self, archive_root: Path, machine: str) -> PushResult:
+        """Publish the compressed archive store under ``{machine}/archived/``.
+
+        The second pair of the two-pair sync model: the on-device archive store
+        (compacted ``<id>.tar.gz`` bundles + uncompressed sidecars) is copied to
+        a sibling of the uncompressed ``session-state`` tree. Targets that
+        cannot do this return an ok no-op.
+        """
+        return PushResult(ok=True, detail="archive sync unsupported by target")
+
+    def reconcile_hub(self, machine: str, *, dry_run: bool = False) -> int:
+        """Drop uncompressed hub sessions whose archive has landed.
+
+        For each ``{machine}/archived/<id>`` archive present (and verified),
+        remove the redundant uncompressed ``{machine}/session-state/<id>/``
+        directory. Returns the number reclaimed (or, with ``dry_run``, the
+        number that would be). No-op for non-hub targets.
+        """
+        return 0
+
+    def compact_backlog(
+        self,
+        machine: str,
+        min_age_days: int,
+        codec: str,
+        *,
+        tracked_paths: set[str] | None = None,
+        dry_run: bool = False,
+    ) -> int:
+        """Compact cold hub-only sessions in place under ``{machine}/archived/``.
+
+        For historical sessions that only ever lived on the hub (already rotated
+        off every device, so no local archive is pushed to cover them). Returns
+        the number archived (or, with ``dry_run``, the number eligible).
+        ``tracked_paths`` protects hub sessions whose worktree is still tracked.
+        No-op for non-hub targets.
+        """
+        return 0
+
     @abstractmethod
     def describe(self) -> str:
         """Return a short human-readable description of the destination."""

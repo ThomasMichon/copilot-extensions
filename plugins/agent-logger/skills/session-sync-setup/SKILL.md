@@ -141,6 +141,52 @@ session-sync run --prune
 on "OneDrive root resolved" means no `OneDrive*` environment variable and no
 `~/OneDrive` -- set `sync.targets.onedrive.root` explicitly.
 
+## Compaction (cold-session archival)
+
+Very old, inactive sessions are compressed into per-session `<id>.tar.gz`
+bundles to reclaim space (`events.jsonl` is ~95% of the bytes and compresses
+~5x). Opt in under `sync.compact` (see [`references/config.yaml`](references/config.yaml)):
+
+```yaml
+sync:
+  compact:
+    enabled: true
+    codec: targz            # stdlib tar.gz; pluggable (zstd later)
+    min_age_days: 30
+    require_untracked_worktree: true
+    archive_root: null      # null => <home>/archived-sessions
+```
+
+A session is *cold* when it is at least `min_age_days` old (from
+`workspace.yaml` timestamps, never filesystem mtime) and -- when
+`require_untracked_worktree` -- it does **not** belong to a *tracked* worktree:
+one that `agent-worktrees list` still renders in the picker (pruning a worktree
+deletes its directory and `.<repo>` registry entry together, dropping it from
+that set; the fallback when agent-worktrees is absent is on-disk existence of
+the worktree dir, reliable for the same reason). Because the picker only renders
+tracked worktrees and compaction only archives non-tracked ones, an archived
+session is never one the picker needs -- no picker archive-awareness required.
+Archives keep uncompressed `workspace.yaml`/`origin.json` sidecars beside the
+bundle so listing/selection never decompresses; readers (`ramp-up-session`,
+`collate-session`) resolve and read archived sessions transparently.
+
+Two-pair model -- the compressed store syncs to the hub alongside the
+uncompressed tree:
+
+```
+session-sync compact       # on-device: archive cold sessions into the store
+                           #   (<home>/archived-sessions) + reclaim the live
+                           #   session-state/<id>/ dir (keeps the .tar.gz)
+session-sync run           # with compact.enabled: also pushes the archive store
+                           #   to {machine}/archived/ and reconciles away the
+                           #   uncompressed hub duplicates
+session-sync compact-hub   # hub backlog: compact hub-only historical sessions
+                           #   in place + reconcile (--dry-run aware)
+```
+
+Both `compact` and `compact-hub` are idempotent and take the sync lock, so they
+never race the scheduled push. Add `--dry-run` to preview.
+
 ## Troubleshoot
 
 - **Runtime not ready:** run `agent-logger version` and keep the exact
