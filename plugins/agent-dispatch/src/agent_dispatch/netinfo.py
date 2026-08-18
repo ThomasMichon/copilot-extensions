@@ -46,6 +46,31 @@ _COORD_URL_CACHE = Path.home() / ".agent-dispatch" / "coordinator-url"
 _WSL_PROBE_FILES = ("/proc/sys/kernel/osrelease", "/proc/version")
 
 
+def _in_container() -> bool:
+    """True inside an OS container (Docker / Podman / containerd / LXC / k8s).
+
+    A container that happens to run on the **WSL2 host kernel** (e.g. Docker
+    Desktop's WSL2 backend) still reports ``microsoft`` in ``/proc/version``, but
+    it is **not** a WSL guest: it has its own network namespace and no
+    Windows-host coordinator to defer to, so it must run its own coordinator.
+    Genuine WSL guests carry interop markers (``WSL_DISTRO_NAME``, ``/run/WSL``,
+    the ``WSLInterop`` binfmt) that a container lacks; conversely a container
+    carries the markers probed here. Excluding containers keeps :func:`is_wsl`
+    from misclassifying them via the weak kernel-string heuristic.
+    """
+    for marker in ("/.dockerenv", "/run/.containerenv"):
+        try:
+            if Path(marker).exists():
+                return True
+        except OSError:
+            pass
+    try:
+        cgroup = Path("/proc/1/cgroup").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        cgroup = ""
+    return any(tag in cgroup for tag in ("/docker", "/kubepods", "containerd", "/lxc", "libpod"))
+
+
 def is_wsl() -> bool:
     """True on a WSL guest (a Linux env hosted by a Windows box).
 
@@ -54,11 +79,18 @@ def is_wsl() -> bool:
     Detected via ``WSL_DISTRO_NAME`` or ``microsoft`` in the kernel osrelease /
     ``/proc/version`` (case-insensitive). Only meaningful on Linux -- Windows and
     macOS return False.
+
+    An OS **container** on the WSL2 host kernel (Docker Desktop's WSL2 backend)
+    also matches the ``microsoft`` kernel string but is **not** a WSL guest -- it
+    has no Windows-host coordinator to defer to -- so it is excluded (via
+    :func:`_in_container`) and treated as standalone Linux.
     """
     if not sys.platform.startswith("linux"):
         return False
     if os.environ.get("WSL_DISTRO_NAME"):
         return True
+    if _in_container():
+        return False
     for probe in _WSL_PROBE_FILES:
         try:
             text = Path(probe).read_text(encoding="utf-8", errors="replace")
