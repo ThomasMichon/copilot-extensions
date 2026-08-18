@@ -198,11 +198,16 @@ the rig-owned assertion/reporting harness.
   results dir outside any repo tree**, never into an anchor checkout.
 - **Bridge-drive.** The box can be registered as an agent-bridge `command` agent
   (via the runtime provider API) so an orchestrator drives the in-container
-  Copilot programmatically — the transport for Tier-E evals.
+  Copilot programmatically — the transport for Tier-E evals. The concrete
+  **Tier-E execution design** (the seed-prompt → drive → capture → judge loop, the
+  Tier-E scenario contract, the literal-mode fixture, and the flake/cost policy)
+  is specified in [`TIER-E-EXECUTION.md`](./TIER-E-EXECUTION.md).
 
 ## See Also
 
 - Operator guide: [`README.md`](./README.md)
+- Tier-E execution design: [`TIER-E-EXECUTION.md`](./TIER-E-EXECUTION.md) (how an
+  agent-driven eval run executes end-to-end — pre-build design)
 - Vision: [`visions/clean-room-validation/README.md`](../../visions/clean-room-validation/README.md)
 - Skill: **`validating-in-clean-room`** (run / evaluate / author more) — `copilot-extensions-harness` plugin
 - Judge: **`clean-room-judge`** sub-agent — `copilot-extensions-harness` plugin
