@@ -177,7 +177,7 @@ class WorktreeDiscoveryCache:
     async def crawl_if_empty(self) -> None:
         """Trigger a crawl only if the cache has no data yet.
 
-        Uses a lock to prevent concurrent callers from stampeding
+        Uses the crawl lock to prevent concurrent callers from stampeding
         multiple crawls simultaneously.
         """
         if self._cache or not self._resolver:
@@ -185,10 +185,38 @@ class WorktreeDiscoveryCache:
         async with self._crawl_lock:
             if self._cache:
                 return
-            await self.crawl(self._resolver)
+            await self._do_crawl(self._resolver)
 
     async def crawl(self, resolver: AgentResolver) -> None:
-        """Crawl all eligible agents concurrently."""
+        """Crawl all eligible agents -- **single-flight**.
+
+        Only one crawl runs at a time. If a crawl is already in flight -- a slow
+        periodic tick overlapping the next, or an on-demand request racing the
+        loop -- this **coalesces** onto it (waits for the running crawl and
+        reuses its freshly-updated cache) instead of spawning a second, duplicate
+        set of ``agent-worktrees list`` subprocesses.
+
+        This is the single-owner-slot guard for the discovery crawl: a slow or
+        stuck ``list`` must never be answered by kicking *more* ``list``
+        processes (the owner-tethered spawn discipline -- see the
+        ``process-slot-ownership`` effort). Each individual ``list`` is still
+        bounded by ``_CMD_TIMEOUT``; this bounds their **concurrency** to one.
+        """
+        if self._crawl_lock.locked():
+            # A crawl is in flight -- wait for it and reuse its result rather than
+            # starting an overlapping one. (Acquiring then immediately releasing
+            # serializes behind the running crawl without doing a second one.)
+            async with self._crawl_lock:
+                return
+        async with self._crawl_lock:
+            await self._do_crawl(resolver)
+
+    async def _do_crawl(self, resolver: AgentResolver) -> None:
+        """Crawl all eligible agents concurrently (the actual work).
+
+        Callers hold ``_crawl_lock`` around this, so at most one crawl's worth of
+        ``list`` subprocesses is ever in flight.
+        """
         eligible = [
             (name, cfg) for name, cfg in resolver.agents.items()
             if cfg.project and cfg.worktree_discovery
