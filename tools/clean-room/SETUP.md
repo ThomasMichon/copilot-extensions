@@ -162,10 +162,35 @@ Prove the whole path (Docker + image + auth) works with the reference scenario:
 
 Expected: the runner starts `cr-base`, runs the scenario's stages, prints a
 `== report ==` block, and writes `cr-report.json` (with `passed` / `failed`
-counts) plus per-phase logs to a machine-local results dir it prints
-(`%LOCALAPPDATA%\copilot-cleanroom\runs\<ts>\` on Windows,
-`${XDG_STATE_HOME:-~/.local/state}/copilot-cleanroom/runs/<ts>/` elsewhere). A run
-with `failed: 0` means your clean room is correctly set up.
+counts + an `env{}` snapshot) plus per-phase logs to a machine-local results dir
+it prints (`%LOCALAPPDATA%\copilot-cleanroom\runs\<ts>\` on Windows,
+`${XDG_STATE_HOME:-~/.local/state}/copilot-cleanroom/runs/<ts>/` elsewhere).
+
+**What "working" looks like — read this carefully:** the signal that your *clean
+room* is set up correctly is that the scenario **ran to completion and produced a
+`cr-report.json`** with a captured `env{}` (copilot ran in the container, the
+stages executed). It is **not** `failed: 0`. The `generic-single-plugin`
+reference scenario deliberately asserts hard PASS/FAIL lines about the
+**install/bootstrap flow under test**, and on the current product it is *expected*
+to surface some `FAIL`s (e.g. installing one plugin not pulling its siblings, or
+the first-session bootstrap not deploying a runtime venv on a truly fresh box).
+Those are **findings about the product**, not problems with your Docker setup —
+the rig doing its job. A setup problem looks different: the run doesn't start
+(Docker errors), or every phase-0 line is missing (auth/image failure). If phase 0
+captured the environment and the stages ran, your clean room is good.
+
+> **Governed / corp box (internal uv index).** Just as the *build* needs an
+> internal npm feed (§3), the reference scenario's provision stage installs a
+> runtime venv with **uv** — on a box where the public PyPI is TLS-blocked, add
+> the internal uv index so that stage doesn't jam:
+> ```powershell
+> ./run.ps1 -UvIndex https://<internal-pypi-index>/ -TokenAccount <copilot-acct>
+> ```
+> ```bash
+> ./run.sh --uv-index https://<internal-pypi-index>/ --token-account <copilot-acct> run
+> ```
+> (`-UvIndex`/`--uv-index` is the run-time analog of `-NpmRegistry`; see
+> [`README.md`](README.md) for the full feed-governance notes.)
 
 Tear the container down when done:
 
@@ -207,6 +232,8 @@ handoff. Plain Tier-P scenarios (§5) do **not** need `agent-bridge`.
 | `docker` not found **inside WSL** | Enable WSL integration in Docker Desktop for the distro, or install Docker Engine inside the distro (§1). |
 | Build fails at `npm install -g @github/copilot` with a **TLS / handshake / could-not-connect** error | Governed box: public npm is blocked. Pass `-NpmRegistry` / `--npm-registry <internal-feed>` at build time (§3). |
 | Build fails **pulling `ubuntu:24.04`**, or fetching `deb.nodesource.com` / `astral.sh` | No outbound network to those hosts. Build on a box with access, or point Docker/apt/npm at internal mirrors. |
+| A scenario phase **jams on a `uv` / `pip` install** (TLS / handshake / could-not-resolve) at the provision stage | Governed box: public PyPI is blocked. Add the internal uv index at run time: `-UvIndex` / `--uv-index <internal-pypi-index>` (§5). |
+| The reference scenario reports some `FAIL`s (e.g. dependency-not-pulled, bootstrap venv not deployed) | Usually **not** a setup problem — those are findings about the install flow under test (§5). Your clean room is fine if the run completed and wrote a `cr-report.json` with an `env{}` snapshot. |
 | **Linux:** `permission denied` on `/var/run/docker.sock` | Add your user to the `docker` group and re-login (`sudo usermod -aG docker $USER`), or prefix commands with `sudo`. |
 | The runner errors on `docker rm` / `docker exec` while Desktop is up | Ensure Docker is in **Linux containers** mode (Windows Docker Desktop can be switched to Windows containers — switch back). |
 | A run hangs at the first turn or the plugin install for a long time | First-ever image build + first Copilot session are slow (image pull + venv provision). Give it a few minutes; check the printed results dir's `cr-logs/` for progress. |
@@ -226,6 +253,10 @@ gh auth status            # 4. Copilot-entitled login  (auth is auto-injected)
 ./run.sh                  # 5. smoke-test              (Windows: ./run.ps1)
 ./run.sh down             # tear down
 ```
+
+> On a **governed box**, steps 3 and 5 take the internal feeds:
+> `./run.sh --npm-registry https://<internal-npm-feed>/ build` and
+> `./run.sh --uv-index https://<internal-pypi-index>/ --token-account <acct> run`.
 
 That's a working clean room. From here, [`README.md`](README.md) covers the full
 scenario catalog, the `pristine` image, driving the box over agent-bridge, and
