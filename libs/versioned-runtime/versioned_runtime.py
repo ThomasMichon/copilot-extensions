@@ -42,8 +42,6 @@ Commands (all take ``--root <dir>``; ``--json`` for machine output)::
                                     live process running from the slot, and -- if
                                     a positive N is passed -- not younger than N
                                     days (an optional backstop; default off)
-    reap [--exclude-pid P ...]      terminate processes running from a NON-current
-                                    slot (leaked/orphaned bridges, stale daemons)
 
 Exit code is 0 on success, non-zero on error; errors print to stderr.
 """
@@ -55,7 +53,6 @@ import errno
 import json
 import os
 import shutil
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -531,112 +528,6 @@ def _versions_with_live_process(root: Path) -> set[str]:
     return in_use
 
 
-# --------------------------------------------------------------------------
-# Version reaping: terminate processes still running from a STALE slot
-# --------------------------------------------------------------------------
-# GC (above) only removes stale version *directories*, and it deliberately
-# *protects* any slot a live process runs from -- so a leaked/orphaned bridge
-# from a prior version keeps its whole ``versions/<old>`` tree resident across an
-# upgrade ("two runtime versions resident"). Reaping closes that gap: once a new
-# version is activated, terminate the stale-slot processes themselves, after
-# which GC can remove their now-idle dirs on the next pass.
-
-def _pids_by_slot(root: Path) -> dict[str, set[int]]:
-    """Map each version-dir name -> the set of live pids running from that slot.
-
-    Same argv[0]/image-path attribution as :func:`_versions_with_live_process`,
-    but keeps the pids so a caller can act on them (reap) rather than only
-    learning *which* versions are in use.
-    """
-    versions_abs = os.path.abspath(str(root / VERSIONS_DIR))
-    versions = set(list_versions(root))
-    out: dict[str, set[int]] = {}
-    for pid in set(_iter_all_pids()) | _running_pids(root):
-        for cand in (_pid_cmdline_argv0(pid), _pid_image_path(pid)):
-            v = _slot_of_path(cand, versions_abs, versions)
-            if v:
-                out.setdefault(v, set()).add(pid)
-                break
-    return out
-
-
-def _terminate_tree(pid: int) -> bool:
-    """Best-effort terminate a process AND its descendants.
-
-    A leaked bridge is a tree (the wrapped stdio upstream child, mint helpers),
-    so we kill the whole tree, not just the root pid. Returns True if a terminate
-    was issued (not a liveness guarantee).
-    """
-    if not _pid_alive(pid):
-        return False
-    if os.name == "nt":
-        try:
-            subprocess.run(
-                ["taskkill", "/PID", str(pid), "/T", "/F"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                timeout=15, check=False,
-            )
-            return True
-        except Exception:
-            return False
-    import signal
-
-    # Prefer the process group (reaps the upstream stdio child too), but NEVER
-    # signal our own group. SIGTERM first, SIGKILL as the backstop.
-    try:
-        pgid = os.getpgid(pid)
-    except OSError:
-        pgid = None
-    try:
-        my_pgid = os.getpgid(0)
-    except OSError:
-        my_pgid = None
-    issued = False
-    for sig in (signal.SIGTERM, signal.SIGKILL):
-        try:
-            if pgid is not None and pgid != my_pgid:
-                os.killpg(pgid, sig)
-            else:
-                os.kill(pid, sig)
-            issued = True
-        except ProcessLookupError:
-            break
-        except OSError:
-            pass
-        if not _pid_alive(pid):
-            break
-        time.sleep(0.2)
-    return issued
-
-
-def reap_stale(root: Path, *, link_name: str = CURRENT_LINK,
-               exclude_pids: set[int] | None = None) -> list[dict]:
-    """Terminate every process running from a NON-current version slot.
-
-    The durable answer to leaked bridge trees surviving a version upgrade: once a
-    new version is activated, any process still executing from an older
-    ``versions/<v>`` slot is stale -- a leaked/orphaned bridge, or a warmth daemon
-    that must restart on the new version -- so reap it (and its tree). The
-    now-current slot, this process, and any ``exclude_pids`` are never touched.
-
-    Returns a list of ``{"version", "pid", "terminated"}`` records.
-    """
-    cur = current_version(root, link_name)
-    cur_norm = _norm_version(cur) if cur else None
-    exclude = set(exclude_pids or ())
-    exclude.add(os.getpid())
-    reaped: list[dict] = []
-    for version, pids in _pids_by_slot(root).items():
-        if cur_norm is not None and _norm_version(version) == cur_norm:
-            continue
-        for pid in sorted(pids):
-            if pid in exclude:
-                continue
-            terminated = _terminate_tree(pid)
-            reaped.append({"version": version, "pid": pid, "terminated": terminated})
-    return reaped
-
-
 _AV_RETRY_ATTEMPTS = 4
 _AV_RETRY_BACKOFF = 0.5  # seconds; grows linearly per attempt
 
@@ -940,12 +831,6 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("toss-incomplete",
                    help="remove non-current slots lacking a completion marker")
 
-    rpp = sub.add_parser(
-        "reap", help="terminate processes still running from a non-current "
-                     "version slot (leaked/orphaned bridges, stale daemons)")
-    rpp.add_argument("--exclude-pid", action="append", type=int, default=[],
-                     help="pid(s) to spare in addition to self (repeatable)")
-
     args = p.parse_args(argv)
     root: Path = args.root
     link_name: str = args.link_name
@@ -1001,11 +886,6 @@ def main(argv: list[str] | None = None) -> int:
         elif args.cmd == "toss-incomplete":
             tossed = toss_incomplete(root, link_name)
             _emit({"tossed": tossed} if args.json else tossed, args.json)
-        elif args.cmd == "reap":
-            reaped = reap_stale(root, link_name=link_name,
-                                exclude_pids=set(args.exclude_pid))
-            _emit({"reaped": reaped} if args.json
-                  else [f"{r['version']}:{r['pid']}" for r in reaped], args.json)
         else:  # pragma: no cover
             p.error(f"unknown command {args.cmd}")
     except Exception as exc:

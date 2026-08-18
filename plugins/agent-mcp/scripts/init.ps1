@@ -633,8 +633,9 @@ if ($VersionedRuntime) {
 # AGENT_MCP_NO_VERSION_REAP. Runs via the new slot's own python, so it is
 # attributed to the current version and never reaps itself.
 if ($VersionedRuntime -and -not $env:AGENT_MCP_NO_VERSION_REAP) {
+    $ReapScript = Join-Path $PSScriptRoot 'reap_versions.py'
     try {
-        $reapOut = & $VenvPython $VrScript --root $InstallDir --link-name '.venv' --json reap 2>$null | Out-String
+        $reapOut = & $VenvPython $ReapScript --root $InstallDir --link-name '.venv' --json 2>$null | Out-String
         $reapObj = if ($reapOut.Trim()) { $reapOut | ConvertFrom-Json } else { $null }
         $reaped = if ($reapObj) { @($reapObj.reaped) } else { @() }
         if ($reaped.Count -gt 0) {

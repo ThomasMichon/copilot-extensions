@@ -781,9 +781,10 @@ above the bridge) is the one the runtime kills.
 from a *previous* runtime version would otherwise keep its whole `~/.agent-mcp/versions/<old>`
 tree resident across an upgrade (garbage collection deliberately *protects* any slot
 with a live process). So when the installer activates a new version it also **reaps
-processes still running from any non-current slot** (`versioned_runtime.py reap`,
-which attributes each live pid to a slot by its image/argv[0] path and terminates the
-stale trees). The now-current slot and the installer itself are never touched. Set
+processes still running from any non-current slot** (`scripts/reap_versions.py`, an
+agent-mcp-local companion that reuses the shared versioned-runtime primitive's
+slot-attribution helpers to map each live pid to a slot and terminate the stale
+trees). The now-current slot and the installer itself are never touched. Set
 `AGENT_MCP_NO_VERSION_REAP` to opt out.
 
 ## CLI → MCP: the `cli` server type

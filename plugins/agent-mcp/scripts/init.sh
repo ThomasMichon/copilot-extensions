@@ -456,8 +456,9 @@ fi
 # AGENT_MCP_NO_VERSION_REAP. Runs via the new slot's own python, so it is
 # attributed to the current version and never reaps itself.
 if [[ "$VERSIONED_RUNTIME" -eq 1 && -z "${AGENT_MCP_NO_VERSION_REAP:-}" ]]; then
-    _reaped="$("$VENV_PYTHON" "$VR_SCRIPT" --root "$INSTALL_DIR" \
-        --link-name '.venv' reap 2>/dev/null || true)"
+    _reap_script="$SCRIPT_DIR/reap_versions.py"
+    _reaped="$("$VENV_PYTHON" "$_reap_script" --root "$INSTALL_DIR" \
+        --link-name '.venv' 2>/dev/null || true)"
     if [[ -n "$_reaped" ]]; then
         _n="$(printf '%s\n' "$_reaped" | grep -c . || true)"
         _ok "Reaped $_n stale-version process(es)"
