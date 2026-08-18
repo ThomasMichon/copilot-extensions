@@ -160,22 +160,6 @@ def test_shipped_env_defaults_to_no_labels():
     )
 
 
-def test_supervisor_unit_force_restarts_on_reload_code():
-    """Live-update (Linux): the supervisor systemd unit must force a restart on the
-    daemon's reload exit code (75) and treat it as success -- so a non-elevated
-    update that swaps the .venv slot cycles the running daemon onto the new build
-    via the unit's Restart, no re-register (agent-daemon-live-update Phase 1)."""
-    text = _text()
-    idx = text.index("_install_supervisor_unit()")
-    body = text[idx:]
-    assert "RestartForceExitStatus=75" in body, (
-        "the supervisor unit must force a restart on the reload exit code (75)"
-    )
-    assert "SuccessExitStatus=75" in body, (
-        "the reload exit code must count as success, not a unit failure"
-    )
-
-
 def test_supervisor_gated_off_on_wsl_and_client_hosts():
     """The supervisor must not install on a WSL guest / client-only host."""
     text = _text()
@@ -382,20 +366,43 @@ class TestWindowsSupervisorInstall:
             "(host=`$pinned port=`$portShown)\" |\n    Out-File" not in text
         ), "the coordinator banner write must be wrapped, not a bare fatal Out-File"
 
-    def test_supervisor_launcher_restart_loops_on_reload_code(self):
-        """Live-update (Windows): the supervisor launcher must run the daemon in a
-        restart-loop that re-resolves the .venv slot and re-invokes on the reload
-        exit code (75), so a non-elevated update cycles the running supervisor onto
-        the new build in place -- no re-register, no elevation, no reboot
-        (agent-daemon-live-update Phase 1). The loop owns the python child directly
-        (no detached grandchild) so the scheduled task keeps tracking it (#3602)."""
+    def test_versioned_activate_gates_migration_stop_on_real_venv_path(self):
+        """#689: the legacy-migration force-stop in Invoke-VersionedActivate must
+        gate on the ACTUAL `.venv` path, NOT $LinkDir. The versioned refactor
+        repointed $LinkDir at the freshly-built versions/<v> slot (always a real,
+        non-link dir), so a $LinkDir guard force-stopped the coordinator + supervisor
+        on EVERY update, defeating a non-elevated in-place refresh."""
         text = _ps1_text()
-        # A re-resolvable slot resolver (re-reads current-version each iteration).
-        assert "function Resolve-SlotPython" in text
-        # The distinguished reload code, matched against the child's exit code.
-        assert "`$_reloadCode = 75" in text
-        assert "if (`$_rc -eq `$_reloadCode)" in text
-        # The loop re-invokes on reload and surfaces the real exit code otherwise.
-        assert "while (`$true) {" in text
-        assert "`$_rc = `$LASTEXITCODE" in text
-        assert "exit `$_rc" in text
+        idx = text.index("function Invoke-VersionedActivate")
+        body = text[idx : text.index("\n}\n", idx)]
+        assert "$legacyVenv = Join-Path $InstallDir '.venv'" in body, (
+            "the migration stop must resolve the real .venv path explicitly"
+        )
+        assert "(Test-Path $legacyVenv) -and -not (Test-VenvIsLink $legacyVenv)" in body, (
+            "the migration stop must gate on the real .venv path, not $LinkDir"
+        )
+        assert "-not (Test-VenvIsLink $LinkDir)" not in body, (
+            "the migration stop must NOT test $LinkDir (the always-real slot dir)"
+        )
+
+    def test_supervisor_task_refreshed_in_place_without_reregister(self):
+        """Register-once model (#689): a non-elevated update must refresh an
+        already-registered supervisor task IN PLACE -- no re-register (elevation) --
+        by killing the detached daemon and restarting the task onto the new slot."""
+        text = _ps1_text()
+        assert "function Restart-SupervisorTaskInPlace" in text
+        # The in-place refresh cycles the daemon: kill the conhost-detached process
+        # (#3602), then restart the existing task.
+        idx = text.index("function Restart-SupervisorTaskInPlace")
+        body = text[idx : text.index("\nfunction ", idx + 1)]
+        assert "Stop-DispatchProcess -Subcommand supervise" in body
+        assert "Start-ScheduledTask -TaskName $Name" in body
+        # Install-SupervisorTaskInstance short-circuits to the in-place restart when
+        # non-elevated and the task already exists (never re-registering on update).
+        inst = text.index("function Install-SupervisorTaskInstance")
+        instbody = text[inst:]
+        assert "(-not (Test-Elevated)) -and (Get-ScheduledTask -TaskName $Name" in instbody, (
+            "a non-elevated update with an existing task must restart in place, "
+            "not attempt a re-registration that needs elevation"
+        )
+        assert "Restart-SupervisorTaskInPlace -Name $Name" in instbody

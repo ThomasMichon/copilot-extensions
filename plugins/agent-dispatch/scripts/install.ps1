@@ -303,15 +303,28 @@ function Test-VenvIsLink {
 }
 
 function Invoke-VersionedActivate {
-    <# Swap the stable `.venv` link to this version's freshly-built slot. No-op in
-       legacy mode. First migration: the `.venv` path is still a REAL dir the
-       running coordinator + supervisor hold open -- Windows can't rename it aside
-       while a loaded python.exe locks it, so stop BOTH daemons first (the task
-       re-register below restarts them on the new slot). A later version-bump swaps
-       only the link (the daemons run from their own immutable slot until Invoke-
-       Update cycles them). #>
+    <# Activate this version's freshly-built slot as the runtime (write the
+       current-version marker; junction-free on Windows). No-op in legacy mode.
+
+       First migration only: a genuine LEGACY real `.venv` dir -- a pre-versioned
+       install whose coordinator + supervisor still execute from
+       `.venv\Scripts\python.exe` -- must be released before the slot can take
+       over, because Windows can't remove a dir a loaded python.exe locks; so stop
+       BOTH daemons first. A normal version-bump swaps only the marker (the daemons
+       run from their own immutable versions/<v> slot until Invoke-Update cycles
+       them), so NO stop is needed.
+
+       #689: gate on the ACTUAL `.venv` path, NOT $LinkDir. The versioned refactor
+       repointed $LinkDir at the freshly-built versions/<v> slot -- ALWAYS a real,
+       non-link dir -- so the old $LinkDir-based guard was true on EVERY update,
+       force-stopping the coordinator + supervisor each time and defeating a
+       non-elevated in-place refresh. In the junction-free marker model `.venv` is
+       normally absent (the binstub, task launchers, and deploy-manifest all
+       resolve the slot through the marker), so this guard is correctly false on a
+       normal update. #>
     if (-not $VersionedRuntime) { return $true }
-    if ((Test-Path $LinkDir) -and -not (Test-VenvIsLink $LinkDir)) {
+    $legacyVenv = Join-Path $InstallDir '.venv'
+    if ((Test-Path $legacyVenv) -and -not (Test-VenvIsLink $legacyVenv)) {
         Write-Step 'Releasing legacy .venv for versioned migration (stopping coordinator + supervisor)...'
         try { Stop-DispatchProcess -Subcommand serve | Out-Null } catch {}
         try { Stop-DispatchProcess -Subcommand supervise | Out-Null } catch {}
@@ -1664,6 +1677,13 @@ function Install-SupervisorLogonAutostart {
         [Parameter(Mandatory)][string]$EnvFile
     )
     $taskArgs = "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Launcher`" -EnvFile `"$EnvFile`""
+    # Register-once + restart-on-update also applies here (#689): on an update a
+    # supervisor is already running from the old slot, so terminate it first --
+    # else Start-Process spawns a second launcher and the new daemon stands down on
+    # the single-instance lease (leaving the OLD build live). Killing by command
+    # line handles the conhost --headless detachment (#3602).
+    $stopped = Stop-DispatchProcess -Subcommand supervise
+    if ($stopped -gt 0) { Write-Step "Stopped $stopped old supervisor process(es) before restart" }
     try {
         Start-Process -FilePath 'conhost.exe' -ArgumentList $taskArgs -WindowStyle Hidden | Out-Null
     } catch {
@@ -1832,23 +1852,17 @@ if (`$extra) { `$argsList += (`$extra -split '\s+') }
 }
 # Resolve the .venv junction's target and launch the slot python DIRECTLY (never
 # traverse the junction; reading its target is allowed) -- RedirectionGuard #637.
+# Resolved up front so the version (`$_slot leaf) is available for the log fallback.
 `$_venv = '$($LinkDir -replace "'","''")'
+`$_py = '$($LinkPython -replace "'","''")'
+`$_slot = ''
 `$_root = Split-Path `$_venv
 if ((Split-Path -Leaf `$_root) -eq 'versions') { `$_root = Split-Path `$_root }
-function Resolve-SlotPython([string]`$root) {
-    # Re-read the current-version marker on EACH call so a live .venv slot swap
-    # (a non-elevated update) is picked up on the next restart-loop iteration.
-    # #637: read the marker text, never traverse the junction. Falls back to the
-    # newest built slot when the marker is missing/stale.
-    `$ver = ''
-    try { `$ver = ([IO.File]::ReadAllText((Join-Path `$root 'current-version'))).Trim() } catch {}
-    `$slot = if (`$ver) { Join-Path `$root ('versions\' + `$ver) } else { '' }
-    `$py = if (`$slot) { Join-Path `$slot 'Scripts\python.exe' } else { '' }
-    if (-not (`$py -and (Test-Path -LiteralPath `$py))) {
-        `$py = Get-ChildItem (Join-Path `$root 'versions') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Join-Path `$_.FullName 'Scripts\python.exe' } | Where-Object { Test-Path -LiteralPath `$_ } | Select-Object -Last 1
-    }
-    return `$py
-}
+`$_ver = ''
+try { `$_ver = ([IO.File]::ReadAllText((Join-Path `$_root 'current-version'))).Trim() } catch {}
+`$_slot = if (`$_ver) { Join-Path `$_root ('versions\' + `$_ver) } else { '' }
+`$_py = if (`$_slot) { Join-Path `$_slot 'Scripts\python.exe' } else { '' }
+if (-not (`$_py -and (Test-Path -LiteralPath `$_py))) { `$_py = Get-ChildItem (Join-Path `$_root 'versions') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Join-Path `$_.FullName 'Scripts\python.exe' } | Where-Object { Test-Path -LiteralPath `$_ } | Select-Object -Last 1; `$_slot = if (`$_py) { Split-Path (Split-Path `$_py) } else { '' } }
 # A busy/locked log must NEVER block the supervisor launch -- prefer the canonical
 # supervise-service.log, else a VERSION- and pid-aware fallback (see serve-service).
 function Resolve-WritableLog([string]`$primary, [string]`$slot) {
@@ -1859,57 +1873,55 @@ function Resolve-WritableLog([string]`$primary, [string]`$slot) {
     }
     return `$alt
 }
-# Restart-loop (live-update): run the daemon through the CURRENT slot. On the
-# distinguished reload exit code (75 = RELOAD_EXIT_CODE) the daemon noticed its
-# slot was swapped by a non-elevated update and asked to be restarted onto the
-# new build -- re-resolve the slot python and re-run, in place, no re-register, no
-# elevation, no reboot. Any other exit (clean stop, single-instance stand-down,
-# crash) breaks the loop so the scheduled task's own restart policy governs. This
-# pwsh (the conhost-launched task action) owns the python child DIRECTLY -- no
-# detached grandchild (#3602) -- so the task keeps tracking the live process
-# across a reload.
+`$logFile = Resolve-WritableLog (Join-Path `$PSScriptRoot 'supervise-service.log') `$_slot
+try {
+    if ((Test-Path `$logFile) -and ((Get-Item `$logFile).Length -gt 1MB)) {
+        Move-Item -Force `$logFile "`$logFile.1"
+    }
+} catch { }
+try {
+    "[`$(Get-Date -Format o)] agent-dispatch supervisor launch (env=`$envFile labels=`$labels interval=`$interval log=`$logFile)" |
+        Out-File -FilePath `$logFile -Append -Encoding utf8
+} catch { }
 `$ErrorActionPreference = 'Continue'
-`$_reloadCode = 75
-`$_rc = 0
-while (`$true) {
-    `$_py = Resolve-SlotPython `$_root
-    `$_slot = if (`$_py) { Split-Path (Split-Path `$_py) } else { '' }
-    `$logFile = Resolve-WritableLog (Join-Path `$PSScriptRoot 'supervise-service.log') `$_slot
-    try {
-        if ((Test-Path `$logFile) -and ((Get-Item `$logFile).Length -gt 1MB)) {
-            Move-Item -Force `$logFile "`$logFile.1"
-        }
-    } catch { }
-    try {
-        "[`$(Get-Date -Format o)] agent-dispatch supervisor launch (env=`$envFile labels=`$labels interval=`$interval py=`$_py log=`$logFile)" |
-            Out-File -FilePath `$logFile -Append -Encoding utf8
-    } catch { }
-    if (-not (`$_py -and (Test-Path -LiteralPath `$_py))) {
-        # No runnable slot yet (mid-swap) -- pause briefly and retry rather than
-        # exiting the launcher (which would surrender to the task restart timer).
-        Start-Sleep -Seconds 2
-        continue
-    }
-    try {
-        & `$_py -m agent_dispatch @argsList 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
-    } catch {
-        # Teeing to the log failed -- keep the supervisor alive without the tee.
-        & `$_py -m agent_dispatch @argsList *> `$null
-    }
-    `$_rc = `$LASTEXITCODE
-    if (`$_rc -eq `$_reloadCode) {
-        try {
-            "[`$(Get-Date -Format o)] supervisor reload-exit (code `$_rc) -- restarting on the newly-activated slot" |
-                Out-File -FilePath `$logFile -Append -Encoding utf8
-        } catch { }
-        continue
-    }
-    break
+try {
+    & `$_py -m agent_dispatch @argsList 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
+} catch {
+    # Teeing to the log failed -- keep the supervisor alive without the tee.
+    & `$_py -m agent_dispatch @argsList *> `$null
 }
-exit `$_rc
 "@
     [System.IO.File]::WriteAllText($launcher, $launcherBody, $utf8NoBom)
     return $launcher
+}
+
+function Restart-SupervisorTaskInPlace {
+    <# Cycle an ALREADY-REGISTERED supervisor Scheduled Task onto the freshly-
+       activated slot, NON-ELEVATED. The task's action points at a STABLE launcher
+       path that resolves the active slot via the current-version marker, so the
+       task DEFINITION never changes across updates -- only the launcher content +
+       the active slot do. Re-registering would need elevation; restarting does
+       not. The conhost --headless launcher detaches the daemon from the task's
+       tracked tree (#3602), so Stop-ScheduledTask alone won't kill it: terminate
+       the detached `-m agent_dispatch supervise` processes by command line, reset
+       the task, then Start it so the launcher re-runs on the new slot. #>
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$EnvFile,
+        [Parameter(Mandatory)][string]$Mode,
+        [Parameter(Mandatory)][string]$DisplayName
+    )
+    if ($Mode -eq 'serve' -or (Test-SupervisorLabelsConfigured -EnvFile $EnvFile)) {
+        Enable-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue | Out-Null
+        $stopped = Stop-DispatchProcess -Subcommand supervise
+        Stop-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
+        Start-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
+        Write-Ok "$DisplayName refreshed in place (Scheduled Task '$Name'; stopped $stopped old process(es), restarted onto the new build -- no re-register, no elevation)"
+    } else {
+        Stop-DispatchProcess -Subcommand supervise | Out-Null
+        Disable-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue | Out-Null
+        Write-Ok "$DisplayName INERT (no opt-in label; task disabled)"
+    }
 }
 
 function Install-SupervisorTaskInstance {
@@ -1942,6 +1954,18 @@ function Install-SupervisorTaskInstance {
         return
     }
 
+    # Register-ONCE model (#689 / non-elevated live-update): if the task already
+    # exists AND we are non-elevated, it was registered once (one-time elevated
+    # install) and its action points at the STABLE launcher path, so we must NOT
+    # re-register on update (that needs elevation and is why the supervisor used to
+    # go stale). Just restart it in place to cycle onto the freshly-activated slot.
+    # When elevated we fall through and re-register so a task DEFINITION change is
+    # still applied (Register -Force cycles it too).
+    if ((-not (Test-Elevated)) -and (Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue)) {
+        Restart-SupervisorTaskInPlace -Name $Name -EnvFile $EnvFile -Mode $mode -DisplayName $DisplayName
+        return
+    }
+
     $action = New-ScheduledTaskAction -Execute 'conhost.exe' `
         -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Launcher`" -EnvFile `"$EnvFile`"" `
         -WorkingDirectory $InstallDir
@@ -1966,7 +1990,7 @@ function Install-SupervisorTaskInstance {
     }
     if (-not $regOk) {
         $ErrorActionPreference = $prevEAP
-        Write-Warn "$DisplayName not registered (needs elevation) -- coordinator is installed; run elevated to add it"
+        Write-Warn "$DisplayName not registered (first-time task registration needs elevation) -- run elevated ONCE to install the task; subsequent updates refresh it in place, no elevation"
         return
     }
 
