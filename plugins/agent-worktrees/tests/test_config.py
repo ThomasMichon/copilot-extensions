@@ -427,6 +427,145 @@ class TestInRepoPRPolicy:
         assert pr.enabled is True
 
 
+class TestControlPlaneRelatedPRTier:
+    """A control-plane ``related.yaml`` (or ``<repo>-harness`` plugin) may carry a
+    foreign repo's ``pr:`` block. It layers ABOVE the foreign repo's own in-repo
+    ``pr`` and BELOW a machine-local ``repos.<name>.pr`` override."""
+
+    def _write_machine(self, path: Path, anchor: Path, pr_block: str = "") -> None:
+        path.write_text(
+            "repo_name: ext\n"
+            "srcroot: /tmp/src\n"
+            "machine: anomalous-potato\n"
+            "platform: wsl\n"
+            "repos:\n"
+            "  ext:\n"
+            f"    anchor: {anchor}\n"
+            "    worktree_root: /tmp/src/.worktrees/ext\n"
+            "    default_branch: main\n"
+            "    remote: origin\n"
+            f"{pr_block}"
+        )
+
+    def test_cp_related_pr_applies_when_no_inrepo_or_machine(self, tmp_path, monkeypatch):
+        anchor = tmp_path / "ext"
+        anchor.mkdir()  # no in-repo config
+        cfgfile = tmp_path / "config.yaml"
+        self._write_machine(cfgfile, anchor)  # no machine-local pr
+        monkeypatch.setattr(cfg, "_control_plane_related_pr_map", lambda: {
+            "ext": {
+                "enabled": True,
+                "required": True,
+                "provider": "azure-devops",
+                "api_base": "https://onedrive.visualstudio.com",
+            },
+        })
+        pr = cfg.load_config(cfgfile).repos["ext"].pr
+        assert pr.enabled is True
+        assert pr.required is True
+        assert pr.provider == "azure-devops"
+        assert pr.api_base == "https://onedrive.visualstudio.com"
+
+    def test_cp_related_pr_overrides_inrepo_per_key(self, tmp_path, monkeypatch):
+        anchor = tmp_path / "ext"
+        anchor.mkdir()
+        (anchor / cfg.INREPO_CONFIG_FILENAME).write_text(
+            "pr:\n  enabled: false\n  provider: gitea\n  branch_prefix: feature\n"
+        )
+        cfgfile = tmp_path / "config.yaml"
+        self._write_machine(cfgfile, anchor)  # no machine-local pr
+        # Control plane drives the workflow: overrides provider + enabled, but the
+        # in-repo key it does not set (branch_prefix) is preserved.
+        monkeypatch.setattr(cfg, "_control_plane_related_pr_map", lambda: {
+            "ext": {"enabled": True, "provider": "azure-devops"},
+        })
+        pr = cfg.load_config(cfgfile).repos["ext"].pr
+        assert pr.enabled is True                 # cp over in-repo
+        assert pr.provider == "azure-devops"      # cp over in-repo
+        assert pr.branch_prefix == "feature"      # in-repo base preserved
+
+    def test_machine_local_overrides_cp_related_per_key(self, tmp_path, monkeypatch):
+        anchor = tmp_path / "ext"
+        anchor.mkdir()  # no in-repo config
+        cfgfile = tmp_path / "config.yaml"
+        # Machine-local overrides provider only; cp's other keys survive.
+        self._write_machine(
+            cfgfile, anchor,
+            "    pr:\n      provider: github\n",
+        )
+        monkeypatch.setattr(cfg, "_control_plane_related_pr_map", lambda: {
+            "ext": {
+                "enabled": True,
+                "required": True,
+                "provider": "azure-devops",
+            },
+        })
+        pr = cfg.load_config(cfgfile).repos["ext"].pr
+        assert pr.provider == "github"    # machine-local override wins
+        assert pr.enabled is True         # cp preserved
+        assert pr.required is True        # cp preserved
+
+    def test_cp_related_pr_absent_is_noop(self, tmp_path, monkeypatch):
+        anchor = tmp_path / "ext"
+        anchor.mkdir()
+        cfgfile = tmp_path / "config.yaml"
+        self._write_machine(cfgfile, anchor)
+        # No cp entry for this repo -> unchanged (disabled default).
+        monkeypatch.setattr(cfg, "_control_plane_related_pr_map", lambda: {})
+        pr = cfg.load_config(cfgfile).repos["ext"].pr
+        assert pr.enabled is False
+
+    def test_cp_related_pr_map_is_failsafe(self, monkeypatch):
+        # Any error in control-plane discovery degrades to {} (never breaks a load).
+        from agent_worktrees import related as _related
+
+        def _boom(*a, **k):
+            raise RuntimeError("registry blew up")
+
+        monkeypatch.setattr(_related, "installed_plugin_related_anchors", _boom)
+        monkeypatch.setattr(_related, "find_control_plane_anchor", _boom)
+        assert cfg._control_plane_related_pr_map() == {}
+
+    def test_cp_related_pr_map_discovers_from_registry_e2e(self, tmp_path, monkeypatch):
+        # End-to-end wiring: a registered control-plane repo whose related.yaml
+        # carries a foreign repo's pr: block is discovered and surfaced.
+        from agent_worktrees import related as _related
+        from agent_worktrees import repos
+
+        cp = tmp_path / "dotfiles"
+        cp.mkdir()
+        (cp / "machines.yaml").write_text(
+            "control_plane:\n  project: dotfiles\nmachines: {}\n", encoding="utf-8")
+        _related.write_related(cp, _related.RelatedConfig(related={
+            "ext": _related.RelatedEntry(name="ext", role="tooling", pr={
+                "enabled": True,
+                "required": True,
+                "provider": "azure-devops",
+                "api_base": "https://onedrive.visualstudio.com",
+            }),
+            "no-pr-repo": _related.RelatedEntry(name="no-pr-repo", role="docs"),
+        }))
+
+        def _paths(p):
+            s = str(p)
+            return {"windows": s, "linux": s, "wsl": s}
+
+        monkeypatch.setattr(repos, "list_repos", lambda class_filter=None: [
+            repos.RepoEntry(name="dotfiles", repo_class="worktree", paths=_paths(cp)),
+        ])
+        monkeypatch.setattr(_related, "installed_plugin_related_anchors", lambda *a, **k: [])
+
+        got = cfg._control_plane_related_pr_map()
+        assert got == {
+            "ext": {
+                "enabled": True,
+                "required": True,
+                "provider": "azure-devops",
+                "api_base": "https://onedrive.visualstudio.com",
+            },
+        }  # entries without a pr block are omitted
+
+
 class TestLayeredConfig:
     """Three-tier merge: global < in-repo < machine-local; optional machine file."""
 

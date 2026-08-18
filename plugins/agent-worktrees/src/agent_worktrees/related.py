@@ -163,6 +163,16 @@ class RelatedEntry:
     # source. Consumed by agent-bridge, which injects them into the dispatched
     # agent's launch (``--plugin-dir`` / user-settings), never by agent-worktrees.
     plugins: list[dict[str, Any]] = field(default_factory=list)
+    # PR-workflow config for THIS related repo, supplied by the control plane
+    # (this repo's checked-in ``related.yaml``) or by a ``<repo>-harness`` plugin
+    # that contributes a related entry. Same schema as a repo's own in-repo /
+    # machine-local ``pr:`` block (parsed by ``config._parse_pr``). It lets a
+    # control plane drive a FOREIGN repo's PR workflow -- e.g. a shared team repo
+    # we must not commit our harness config into -- in a versioned, checked-in
+    # way. Consumed by ``config.load_config`` (layered above the foreign repo's
+    # own in-repo ``pr`` and below a machine-local ``repos.<name>.pr`` override);
+    # a raw mapping here, never a parsed object. Empty ``{}`` for most entries.
+    pr: dict[str, Any] = field(default_factory=dict)
     # The checkout anchor this entry was **read from**, set by the state-root
     # config-graft (:func:`read_related_grafted`) so a knowledge-repo overlay
     # entry's narrative ``doc`` -- which is relative to ITS source repo's
@@ -335,6 +345,19 @@ def _parse_plugins(raw: Any) -> list[dict[str, Any]]:
     return list(out.values())
 
 
+def _parse_related_pr(raw: Any) -> dict[str, Any]:
+    """Normalise an entry's ``pr:`` block to a raw mapping (or ``{}``).
+
+    The value is passed through verbatim (a shallow copy) rather than parsed
+    into a ``PRConfig`` here -- ``config.load_config`` merges it with the
+    foreign repo's own in-repo / machine-local ``pr`` and hands the union to
+    ``config._parse_pr``, so the schema (``enabled`` / ``required`` /
+    ``provider`` / ``api_base`` / ``approval_required`` / ``squash`` / ...) stays
+    defined in one place. Non-mapping values yield ``{}``. Never raises.
+    """
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
 def read_related(anchor: str | Path) -> RelatedConfig:
     """Load ``<anchor>/.agent-worktrees/related.yaml``.
 
@@ -373,6 +396,7 @@ def read_related(anchor: str | Path) -> RelatedConfig:
                 ownership=normalize_ownership(entry.get("ownership")),
                 owner=str(entry.get("owner", "")).strip(),
                 plugins=_parse_plugins(entry.get("plugins")),
+                pr=_parse_related_pr(entry.get("pr")),
             )
 
     return RelatedConfig(primary=primary, related=related)
@@ -416,6 +440,26 @@ def _emit_locus(lines: list[str], locus: Locus, indent: str) -> None:
         lines.append(f"{inner}{_emit_venue('codespace', locus.codespace)}")
     if locus.container:
         lines.append(f"{inner}{_emit_venue('container', locus.container)}")
+
+
+def _emit_pr(lines: list[str], pr: dict[str, Any], indent: str) -> None:
+    """Render a related entry's ``pr:`` block as nested YAML.
+
+    Flat scalar values only (the PR-config schema is flat): bools as
+    ``true``/``false``, everything else quoted-as-needed. Insertion order is
+    preserved for a stable round-trip; a non-scalar value is skipped defensively
+    (the schema has none, and dropping one is safer than emitting broken YAML).
+    """
+    if not pr:
+        return
+    lines.append(f"{indent}pr:")
+    inner = indent + "  "
+    for k, v in pr.items():
+        if isinstance(v, bool):
+            lines.append(f"{inner}{k}: {'true' if v else 'false'}")
+        elif isinstance(v, (str, int, float)):
+            lines.append(f"{inner}{k}: {_quote(str(v))}")
+        # else: skip non-scalar defensively
 
 
 def write_related(anchor: str | Path, cfg: RelatedConfig) -> None:
@@ -465,6 +509,8 @@ def write_related(anchor: str | Path, cfg: RelatedConfig) -> None:
                         lines.append(f"      - {{ source: {src} }}")
                     else:
                         lines.append(f"      - {{ source: {src}, enable: false }}")
+            if entry.pr:
+                _emit_pr(lines, entry.pr, "    ")
             lines.append("")
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
