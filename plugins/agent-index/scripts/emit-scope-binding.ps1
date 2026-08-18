@@ -1,12 +1,14 @@
 # emit-scope-binding -- agent-index sessionStart hook.
 #
-# Emits a succinct "what agent-index covers + prefer @agent-index for retrieval
-# within these scopes" guidance fragment as {"additionalContext": "..."}, so
-# every agent learns the configured index scopes at session start without the MCP
-# tool schemas entering the main context (harness MCP policy: the tools live in
-# the @agent-index sub-agent). Generic emitter (ships in the plugin); it reads the
-# LOCAL scope config -- `<repo>/.agent-index/config.yaml` `corpus.sources` -- so
-# the operator's scope values stay in the repo, not baked into the plugin.
+# Emits a succinct "what agent-index covers + how to search it" guidance fragment
+# as {"additionalContext": "..."}, so EVERY agent learns, at session start, that a
+# semantic index is available and how to query it -- by calling the `agent-index`
+# CLI DIRECTLY. agent-index is a uniform retrieval capability every agent may use
+# (like built-in search), so it is deliberately NOT wrapped in a sub-agent or an
+# MCP tool; the how-to-search instructions ride in this hook's additionalContext
+# instead. Generic emitter (ships in the plugin); it reads the LOCAL scope config
+# -- `<repo>/.agent-index/config.yaml` `corpus.sources` -- so the operator's scope
+# values stay in the repo, not baked into the plugin.
 #
 # cwd-gated: fires only when the current git repo has an .agent-index/config.yaml
 # with corpus.sources; otherwise emits {} so nothing leaks into unrelated repos.
@@ -59,20 +61,26 @@ $rows = ($sources | ForEach-Object {
     }) -join "`n"
 
 $md = @"
-## agent-index retrieval is available for these scopes
+## agent-index retrieval — call the ``agent-index`` CLI directly
 
-The **agent-index** semantic + lexical index covers the following configured
-scopes (delegate retrieval to the **``@agent-index``** sub-agent):
+A semantic + lexical index of this harness is available to **every agent**. Run
+the **``agent-index``** CLI directly (no sub-agent, no MCP tool). It covers:
 
 $rows
 
-**Prefer ``@agent-index``** (``agent_index_search`` / ``agent_index_find_similar``)
-over a broad ``grep``/``glob`` sweep when searching **within these scopes** by
-meaning/behavior, when you want the most-relevant few results across a large
-corpus, or to pivot 'more like this' from a hit. Pass the ``source``/``repo``
-filter to scope to one corpus (and to respect trust-domain boundaries, which are
-not yet enforced at query time). Fall back to direct ``grep``/``glob`` for
-exact-string hunts, files outside these scopes, or if the index is unavailable.
+**How to search:**
+- ``agent-index search "<natural-language or code query>" [--source <name>] [--language <lang>] [--repo <repo>] [--limit N] --json`` — ranked hits; each has ``chunk_id``, ``source``, ``file_path``, ``line_start``/``line_end``, ``content``.
+- ``agent-index similar <chunk_id> [--source <name>] [--limit N]`` — pivot 'more like this' from a hit.
+- ``agent-index clusters [--source <name>] [--exact-dupes-only] [--limit N]`` — near-duplicate groups.
+- ``agent-index status`` — index health + per-source coverage; probe once if results look sparse.
+
+**Prefer ``agent-index search``** over a broad ``grep``/``glob`` sweep when
+searching **within these scopes** by meaning/behavior, for the most-relevant few
+results across a large corpus, or to pivot from a hit. Pass ``--source`` to scope
+to one corpus (and to respect trust-domain boundaries, not yet enforced at query
+time). Fall back to ``grep``/``glob`` for exact-string hunts, files outside these
+scopes, or if the index is unavailable. Read-only: never reindex from an agent --
+that is the operator flow (``agent-index index``).
 "@
 
 Write-Output (@{ additionalContext = $md } | ConvertTo-Json -Compress -Depth 3)
