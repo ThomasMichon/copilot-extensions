@@ -111,14 +111,20 @@ class Bridge:
         # Guard against the leaked-tree failure mode where an interposed launcher
         # (e.g. the Windows cmd shim) is terminated but this process's inherited
         # stdin never sees EOF: reap descendants on exit and shut down when the
-        # launch parent goes away. See agent_mcp.watchdog (dotfiles#1562).
+        # launch parent goes away. See agent_mcp.watchdog.
         reap_descendants_on_exit()
         install_parent_death_watchdog(_signal_shutdown)
 
         def _reader() -> None:
-            for line in sys.stdin:
-                loop.call_soon_threadsafe(queue.put_nowait, line)
-            loop.call_soon_threadsafe(queue.put_nowait, None)
+            # The watchdog can end run() (and close the loop) while this daemon
+            # thread is still blocked on stdin; guard the wakeups so a late read
+            # doesn't raise "Event loop is closed" during interpreter shutdown.
+            try:
+                for line in sys.stdin:
+                    loop.call_soon_threadsafe(queue.put_nowait, line)
+                loop.call_soon_threadsafe(queue.put_nowait, None)
+            except RuntimeError:
+                pass  # loop already closed -- shutdown is already under way
 
         threading.Thread(target=_reader, name="agent-mcp-stdin", daemon=True).start()
         log.info("bridge '%s' started (%s -> %s); %d decorator(s)", self.cfg.name,

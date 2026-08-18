@@ -7,7 +7,8 @@ shim, which the runtime spawns as ``cmd.exe`` with ``python -m agent_mcp bridge`
 a *grandchild*. When the sub-agent ends the runtime terminates only the ``cmd.exe``
 it directly spawned; the grandchild Python is not in a kill-on-close Job Object and
 its inherited stdin never sees EOF, so the reader thread blocks forever and the
-whole tree leaks (dotfiles#1562: 68 orphaned bridge processes observed on cloud1).
+whole tree leaks (observed in the wild: dozens of orphaned multi-day bridge
+process trees accumulating across a machine).
 
 Two mechanisms close that gap:
 
@@ -82,8 +83,8 @@ if _IS_WINDOWS:  # pragma: no cover - platform-specific
     # Windows the runtime kills the top shim (cmd.exe) it spawned, but an
     # interposed trampoline (a uv/venv ``python.exe`` launcher, or the cmd shim
     # itself) can sit between that shim and this process and keep *its* handle
-    # alive, hiding the shim's death from an immediate-parent-only check
-    # (dotfiles#1562). Walking the chain fires as soon as any recorded ancestor
+    # alive, hiding the shim's death from an immediate-parent-only check.
+    # Walking the chain fires as soon as any recorded ancestor
     # dies. We stop early at the first ancestor we cannot open (a different
     # session / a system process), which self-bounds the walk to our own chain.
     _MAX_ANCESTORS = 5
