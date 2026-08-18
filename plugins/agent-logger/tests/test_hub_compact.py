@@ -76,6 +76,22 @@ def test_reconcile_dry_run_keeps_dir(tmp_path: Path) -> None:
     assert live.is_dir()
 
 
+def test_reconcile_removes_readonly_hub_dir(tmp_path: Path) -> None:
+    # Simulate a OneDrive-synced hub dir: read-only files that defeat a plain
+    # rmtree. reconcile must still remove it and count it as removed.
+    import os
+    import stat
+
+    hub = tmp_path / "hub"
+    live = _hub_session(hub, "box", "s1", updated=NOW - timedelta(days=40))
+    archive_session(live, hub / "box" / "archived")
+    for p in live.rglob("*"):
+        os.chmod(p, stat.S_IREAD)
+    removed = _target(hub).reconcile_hub("box")
+    assert removed == 1
+    assert not live.exists()
+
+
 def test_reconcile_keeps_dir_without_archive(tmp_path: Path) -> None:
     hub = tmp_path / "hub"
     live = _hub_session(hub, "box", "s1", updated=NOW - timedelta(days=40))

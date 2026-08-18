@@ -12,6 +12,7 @@ from agent_logger.sessions import (
     CODECS,
     SessionRef,
     archive_session,
+    force_rmtree,
     get_codec,
     is_archived,
     iter_session_refs,
@@ -217,3 +218,22 @@ def test_no_such_codec_for_archive(tmp_path: Path) -> None:
     ref = SessionRef(id="s1", kind="archive", path=bogus, store=tmp_path)
     with pytest.raises(ValueError, match="no codec for archive"):
         read_member(ref, "events.jsonl")
+
+
+# --- force_rmtree ---------------------------------------------------------
+
+def test_force_rmtree_removes_readonly_tree(tmp_path: Path) -> None:
+    import os
+    import stat
+
+    d = tmp_path / "ro"
+    (d / "sub").mkdir(parents=True)
+    f = d / "sub" / "file.txt"
+    f.write_text("x", encoding="utf-8")
+    os.chmod(f, stat.S_IREAD)  # read-only file defeats a plain rmtree on Windows
+    assert force_rmtree(d) is True
+    assert not d.exists()
+
+
+def test_force_rmtree_missing_returns_true(tmp_path: Path) -> None:
+    assert force_rmtree(tmp_path / "nope") is True
