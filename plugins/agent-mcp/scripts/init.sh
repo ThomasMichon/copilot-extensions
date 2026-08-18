@@ -449,6 +449,22 @@ if [[ "$VERSIONED_RUNTIME" -eq 1 ]]; then
 fi
 # === end install-contract:v3 versioned-venv activate ===
 
+# agent-mcp-specific (NOT part of the byte-identical activate block above): reap
+# processes still running from a now-stale (non-current) slot -- leaked/orphaned
+# bridge trees or a warmth daemon from the prior version -- so an upgrade never
+# leaves "two runtime versions resident". Best-effort; opt out with
+# AGENT_MCP_NO_VERSION_REAP. Runs via the new slot's own python, so it is
+# attributed to the current version and never reaps itself.
+if [[ "$VERSIONED_RUNTIME" -eq 1 && -z "${AGENT_MCP_NO_VERSION_REAP:-}" ]]; then
+    _reap_script="$SCRIPT_DIR/reap_versions.py"
+    _reaped="$("$VENV_PYTHON" "$_reap_script" --root "$INSTALL_DIR" \
+        --link-name '.venv' 2>/dev/null || true)"
+    if [[ -n "$_reaped" ]]; then
+        _n="$(printf '%s\n' "$_reaped" | grep -c . || true)"
+        _ok "Reaped $_n stale-version process(es)"
+    fi
+fi
+
 # -- 4. Binstub --------------------------------------------------------
 deploy_binstub
 

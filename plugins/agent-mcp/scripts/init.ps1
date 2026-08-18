@@ -626,6 +626,25 @@ if ($VersionedRuntime) {
 }
 # === end install-contract:v3 versioned-venv activate ===
 
+# agent-mcp-specific (NOT part of the byte-identical activate block above): reap
+# processes still running from a now-stale (non-current) slot -- leaked/orphaned
+# bridge trees or a warmth daemon from the prior version -- so an upgrade never
+# leaves "two runtime versions resident". Best-effort; opt out with
+# AGENT_MCP_NO_VERSION_REAP. Runs via the new slot's own python, so it is
+# attributed to the current version and never reaps itself.
+if ($VersionedRuntime -and -not $env:AGENT_MCP_NO_VERSION_REAP) {
+    $ReapScript = Join-Path $PSScriptRoot 'reap_versions.py'
+    try {
+        $reapOut = & $VenvPython $ReapScript --root $InstallDir --link-name '.venv' --json 2>$null | Out-String
+        $reapObj = if ($reapOut.Trim()) { $reapOut | ConvertFrom-Json } else { $null }
+        $reaped = if ($reapObj) { @($reapObj.reaped) } else { @() }
+        if ($reaped.Count -gt 0) {
+            $stale = ($reaped | ForEach-Object { $_.version } | Sort-Object -Unique) -join ', '
+            Write-Ok "Reaped $($reaped.Count) stale-version process(es) from: $stale"
+        }
+    } catch { Write-Skip "Version-reap skipped ($($_.Exception.Message))" }
+}
+
 # -- 4. Deploy binstub -------------------------------------------------
 
 Deploy-SelfProvisioningBinstub

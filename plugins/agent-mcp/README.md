@@ -763,6 +763,29 @@ Tunables (all optional):
 | `AGENT_MCP_PARENT_WATCHDOG_INTERVAL` | `5` | parent-liveness poll interval, seconds (`<=0` disables) |
 | `AGENT_MCP_PARENT_WATCHDOG_GRACE` | `10` | hard-exit backstop after signalling, seconds (`0` = graceful-only) |
 | `AGENT_MCP_REAP_DESCENDANTS` | on | `0`/`false`/`off` disables the Windows kill-on-close job |
+| `AGENT_MCP_NO_VERSION_REAP` | unset | set to skip the on-upgrade reap of stale-version bridges (see below) |
+
+**Why the watchdog and not a direct launch?** The obvious "just don't interpose
+`cmd.exe`" fixes — a native `agent-mcp.exe` console-script launcher, or launching
+the versioned `python.exe` directly — are not viable here: unsigned console-script
+`.exe` trampolines are **stripped at install** because Smart App Control blocks them
+(CodeIntegrity 3077) on managed devices, and the versioned interpreter path is only
+known after the binstub resolves `current-version` at spawn time (so a static
+`.agent.md` can't name it). A PowerShell shim was rejected for cold-start latency
+and unreliable stdin streaming. The single self-provisioning `.cmd` is therefore
+deliberate, and the **parent-death watchdog is the portable teardown mechanism** —
+it fires no matter which launcher (the `cmd` shim, or a `uv`/venv `python` trampoline
+above the bridge) is the one the runtime kills.
+
+**Version-reap on upgrade.** A leaked/orphaned bridge — or a `serve` warmth daemon —
+from a *previous* runtime version would otherwise keep its whole `~/.agent-mcp/versions/<old>`
+tree resident across an upgrade (garbage collection deliberately *protects* any slot
+with a live process). So when the installer activates a new version it also **reaps
+processes still running from any non-current slot** (`scripts/reap_versions.py`, an
+agent-mcp-local companion that reuses the shared versioned-runtime primitive's
+slot-attribution helpers to map each live pid to a slot and terminate the stale
+trees). The now-current slot and the installer itself are never touched. Set
+`AGENT_MCP_NO_VERSION_REAP` to opt out.
 
 ## CLI → MCP: the `cli` server type
 
