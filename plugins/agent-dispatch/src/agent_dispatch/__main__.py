@@ -1788,6 +1788,20 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
 
     machine, env = _registration_scope(args)
 
+    if machine is None and not getattr(args, "no_declared", False):
+        # Fail-loud companion to the fail-closed reconcile: an unidentified host
+        # will SKIP every machine-pinned declaration (it cannot confirm membership),
+        # so a discovered machine-scoped pool would silently never run. Surface it
+        # so the operator can pass --machine (or fix host identity) -- aperture-labs
+        # #5001.
+        print(
+            "agent-dispatch supervise serve: WARNING -- could not resolve this "
+            "host's machine name; machine-scoped declarations will be SKIPPED "
+            "(machine-agnostic ones still run). Pass --machine <alias> to scope "
+            "this daemon.",
+            file=sys.stderr,
+        )
+
     declared_source = None
     if not getattr(args, "no_declared", False):
         from . import registrar_discovery

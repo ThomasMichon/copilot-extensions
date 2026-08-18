@@ -288,3 +288,28 @@ def test_diagnose_remote_failure_no_stderr():
     msg = remote_dispatch.diagnose_remote_failure("emancipation-cube", 2, "")
     assert "emancipation-cube" in msg
     assert "exit 2" in msg
+
+
+# -- local_machine resolution (identity primary, host node-name fallback) --------
+
+
+def test_local_machine_prefers_identity(monkeypatch):
+    monkeypatch.setattr(
+        "agent_dispatch.identity.resolve_identity", lambda: ("anomalous-potato", "wt-1")
+    )
+    assert remote_dispatch.local_machine() == "anomalous-potato"
+
+
+def test_local_machine_falls_back_to_host_node_name(monkeypatch):
+    # A bare service/scheduled-task context: CWD-based identity resolution yields
+    # nothing, so local_machine() falls back to the host node name, normalized to
+    # the lowercase alias convention (aperture-labs #5001).
+    monkeypatch.setattr("agent_dispatch.identity.resolve_identity", lambda: (None, None))
+    monkeypatch.setattr("platform.node", lambda: "Anomalous-Potato")
+    assert remote_dispatch.local_machine() == "anomalous-potato"
+
+
+def test_local_machine_none_when_nothing_resolves(monkeypatch):
+    monkeypatch.setattr("agent_dispatch.identity.resolve_identity", lambda: (None, None))
+    monkeypatch.setattr("platform.node", lambda: "")
+    assert remote_dispatch.local_machine() is None
