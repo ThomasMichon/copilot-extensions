@@ -206,20 +206,66 @@ def test_gc_dead_pid_not_protected(tmp_path):
     assert removed == ["1.0.0"]     # dead pid -> no protection
 
 
-def test_gc_min_age_floor_protects_recent_slot(tmp_path):
-    # A just-superseded slot can still be referenced by another runtime's
-    # path-pinned launch command, which --protect-pids can't see. The recency
-    # floor keeps it until it ages out (the dev14-prune incident).
+def test_gc_min_age_floor_is_optional_backstop(tmp_path):
+    # The recency floor is now an OPT-IN backstop (default off): active-process
+    # usage is the primary gate. A young, just-superseded slot is reaped by
+    # default, but a caller may pass min_age_days to hold it -- e.g. for a stored
+    # (not-running) path-pinned launch reference to age out (the dev14 concern).
     _install(tmp_path, "1.0.0", age_days=0)   # young, just superseded
     _install(tmp_path, "2.0.0")               # current (old)
     vr.activate(tmp_path, "2.0.0")
-    # Default floor protects the young non-current slot...
-    assert vr.gc(tmp_path) == []
+    # An explicit floor protects the young non-current slot...
+    assert vr.gc(tmp_path, min_age_days=7) == []
     assert vr.version_dir(tmp_path, "1.0.0").is_dir()
-    # ...and an explicit min_age_days=0 disables the floor and reaps it.
-    removed = vr.gc(tmp_path, min_age_days=0)
+    # ...but the default (floor off) reaps it.
+    removed = vr.gc(tmp_path)
     assert removed == ["1.0.0"]
     assert not vr.version_dir(tmp_path, "1.0.0").exists()
+
+
+def test_versions_with_live_process_maps_exe_to_slot(tmp_path, monkeypatch):
+    # A live process whose executable resolves under versions/<v>/ marks that
+    # version in-use -- the precise "no active process" gate. The dir is read
+    # straight off the image path, so no version-string normalization is needed.
+    for v in ("1.0.0", "2.0.0"):
+        _install(tmp_path, v)
+    live_exe = str(vr.version_dir(tmp_path, "2.0.0") / "Scripts" / "python.exe")
+    monkeypatch.setattr(vr, "_iter_all_pids", lambda: [4321])
+    monkeypatch.setattr(vr, "_pid_image_path",
+                        lambda pid: live_exe if pid == 4321 else None)
+    monkeypatch.setattr(vr, "_running_pids", lambda root: set())
+    assert vr._versions_with_live_process(tmp_path) == {"2.0.0"}
+
+
+def test_gc_reaps_iff_no_live_process(tmp_path, monkeypatch):
+    # The invariant: reap a non-current version iff no active process runs from
+    # it -- irrespective of slot age (no time floor by default).
+    for v in ("1.0.0", "2.0.0", "3.0.0"):
+        _install(tmp_path, v, age_days=0)          # all fresh/young
+    vr.activate(tmp_path, "3.0.0")                 # current
+    monkeypatch.setattr(vr, "_versions_with_live_process",
+                        lambda root: {"2.0.0"})
+    removed = vr.gc(tmp_path, protect_pids=True)
+    assert removed == ["1.0.0"]                    # young but unused -> reaped
+    assert vr.version_dir(tmp_path, "2.0.0").is_dir()   # in use -> kept
+    assert vr.version_dir(tmp_path, "3.0.0").is_dir()   # current -> kept
+
+
+def test_gc_protect_pids_fallback_when_enumeration_blocked(tmp_path, monkeypatch):
+    # If precise scanning yields nothing but a live pid IS recorded (a platform
+    # where enumeration/image-path lookup is blocked), fall back to the older
+    # conservative rule -- keep the newest non-current slot -- so GC is never
+    # LESS safe than before.
+    import json
+    for v in ("1.0.0", "2.0.0", "3.0.0"):
+        _install(tmp_path, v)
+    vr.activate(tmp_path, "3.0.0")
+    monkeypatch.setattr(vr, "_versions_with_live_process", lambda root: set())
+    (tmp_path / vr.RUNNING_VERSION_FILE).write_text(
+        json.dumps({"version": "2.0.0", "pid": os.getpid()}), encoding="utf-8")
+    removed = vr.gc(tmp_path, protect_pids=True)
+    assert removed == ["1.0.0"]
+    assert vr.version_dir(tmp_path, "2.0.0").is_dir()
 
 
 # ---------------------------------------------------------------------------

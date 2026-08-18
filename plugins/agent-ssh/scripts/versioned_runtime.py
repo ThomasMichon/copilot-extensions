@@ -38,9 +38,10 @@ Commands (all take ``--root <dir>``; ``--json`` for machine output)::
     list                            list installed versions (+ which is current)
     gc [--keep V ...] [--protect-pids] [--min-age-days N]
                                     remove version dirs that are not current,
-                                    not kept, not younger than N days, and (with
-                                    --protect-pids) not held by a live pid
-                                    recorded in running-version.json
+                                    not kept, not (with --protect-pids) held by a
+                                    live process running from the slot, and -- if
+                                    a positive N is passed -- not younger than N
+                                    days (an optional backstop; default off)
 
 Exit code is 0 on success, non-zero on error; errors print to stderr.
 """
@@ -354,6 +355,109 @@ def _pid_alive(pid: int) -> bool:
         return False
 
 
+def _pid_image_path(pid: int) -> str | None:
+    """Absolute path to the executable image backing ``pid``, or None.
+
+    Windows: ``QueryFullProcessImageNameW`` on a limited-query handle. POSIX:
+    ``/proc/<pid>/exe``. Best-effort -- any failure (process gone, access
+    denied, unsupported platform) returns None, and callers treat an
+    unresolvable pid conservatively (they simply cannot attribute it to a slot).
+    """
+    if not isinstance(pid, int) or pid <= 0:
+        return None
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            k32 = ctypes.windll.kernel32
+            k32.OpenProcess.restype = wintypes.HANDLE
+            k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            h = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            if not h:
+                return None
+            try:
+                k32.QueryFullProcessImageNameW.argtypes = [
+                    wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
+                    ctypes.POINTER(wintypes.DWORD)]
+                k32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+                buf = ctypes.create_unicode_buffer(32768)
+                size = wintypes.DWORD(len(buf))
+                if k32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
+                    return buf.value
+                return None
+            finally:
+                k32.CloseHandle(h)
+        except Exception:
+            return None
+    try:
+        return os.readlink(f"/proc/{pid}/exe")
+    except OSError:
+        return None
+
+
+def _iter_all_pids() -> list[int]:
+    """Best-effort list of live process ids on this machine (``[]`` if we cannot
+    enumerate). Windows: psapi ``EnumProcesses``. POSIX: numeric ``/proc`` dirs.
+    """
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            psapi = ctypes.windll.psapi
+            n = 4096
+            while True:
+                arr = (wintypes.DWORD * n)()
+                needed = wintypes.DWORD()
+                if not psapi.EnumProcesses(ctypes.byref(arr), ctypes.sizeof(arr),
+                                           ctypes.byref(needed)):
+                    return []
+                got = needed.value // ctypes.sizeof(wintypes.DWORD)
+                if got < n:
+                    return [int(arr[i]) for i in range(got)]
+                n *= 2  # buffer was full -- grow and re-enumerate
+        except Exception:
+            return []
+    try:
+        return [int(e) for e in os.listdir("/proc") if e.isdigit()]
+    except OSError:
+        return []
+
+
+def _versions_with_live_process(root: Path) -> set[str]:
+    """Version names a **live process is currently running from** -- i.e. whose
+    executable image resolves under ``<root>/versions/<v>/``.
+
+    This is the precise form of "in use": a versioned-venv process's image path
+    is ``versions/<v>/{Scripts,bin}/python(.exe)``, so the version dir is read
+    straight off the image path -- exact and portable, needing no version-string
+    normalization (the recorded version ``0.4.0.dev287`` would otherwise not
+    match the dir ``0.4.0-dev287``). Candidate pids are the machine's live
+    processes plus any pids recorded in ``running-version.json`` (belt-and-
+    suspenders if enumeration is blocked). Best-effort: unresolvable pids are
+    skipped.
+    """
+    try:
+        versions_root = (root / VERSIONS_DIR).resolve()
+    except OSError:
+        versions_root = root / VERSIONS_DIR
+    pids = set(_iter_all_pids()) | _running_pids(root)
+    in_use: set[str] = set()
+    for pid in pids:
+        exe = _pid_image_path(pid)
+        if not exe:
+            continue
+        try:
+            rel = Path(exe).resolve().relative_to(versions_root)
+        except (ValueError, OSError):
+            continue
+        if rel.parts:
+            in_use.add(rel.parts[0])
+    return in_use
+
+
 _AV_RETRY_ATTEMPTS = 4
 _AV_RETRY_BACKOFF = 0.5  # seconds; grows linearly per attempt
 
@@ -406,17 +510,18 @@ def _rmtree_deferrable(d: Path, *, label: str) -> bool:
     return False
 
 
-# Default minimum age (days) before a non-current, unprotected version slot is
-# eligible for GC. A recently-superseded slot can still be referenced by ANOTHER
-# runtime that baked its absolute versioned path into a stored launch command
-# (e.g. an agent-bridge codespace session/agent pinned to
-# ``versions/<v>/Scripts/python.exe``) -- a cross-runtime reference that
-# ``--protect-pids`` (which only sees THIS runtime's recorded pids) cannot know
-# about. Pruning such a slot orphans that reference and crash-loops the other
-# runtime (the dev14-prune incident, dotfiles#1221 follow-up). An age floor keeps
-# a just-superseded slot around long enough for those references to age out,
-# without unbounded growth (current + the previous-good are always kept anyway).
-DEFAULT_GC_MIN_AGE_DAYS = 7.0
+# Optional recency backstop (days) for GC. The PRIMARY GC gate is now precise
+# live-process usage: ``gc(protect_pids=True)`` keeps exactly the versions a live
+# process is running from (see :func:`_versions_with_live_process`) and reaps the
+# rest -- the invariant "reap a version iff no active process runs from it." The
+# age floor is therefore OFF by default (0.0). A caller may still pass a positive
+# ``min_age_days`` to *additionally* hold a just-superseded slot long enough for a
+# STORED (not-currently-running) path-pinned launch reference to age out -- the
+# historical dev14-prune concern (dotfiles#1221) on runtimes that keep such
+# references (e.g. an agent-bridge codespace session whose launch command bakes
+# ``versions/<v>/Scripts/python.exe`` but is not running at GC time). current and
+# any ``--keep`` are always preserved regardless.
+DEFAULT_GC_MIN_AGE_DAYS = 0.0
 
 
 def _slot_age_days(root: Path, version: str) -> float:
@@ -438,33 +543,43 @@ def gc(root: Path, keep: list[str] | None = None,
     """Remove version dirs that are not protected. Returns the removed names.
 
     Never removes: the ``current`` version, any name in ``keep`` (e.g. the
-    previous-good for rollback), any version whose slot is younger than
-    ``min_age_days`` (recency protection -- see :data:`DEFAULT_GC_MIN_AGE_DAYS`),
-    and -- when ``protect_pids`` -- any version whose directory a still-live
-    recorded pid may be running from. Live-pid protection is coarse (we cannot
-    map a pid to its version dir portably), so if *any* live pid is recorded we
-    conservatively keep ``current`` (already kept) and skip GC of the most recent
-    non-current version too, leaving a safe rollback target. Pass
-    ``min_age_days=0`` to disable the age floor.
+    previous-good for rollback), any version a live process is running from (when
+    ``protect_pids``), and -- if a positive ``min_age_days`` is passed -- any slot
+    younger than that (an optional backstop; see
+    :data:`DEFAULT_GC_MIN_AGE_DAYS`).
+
+    ``protect_pids`` is now **precise**: it protects exactly the versions whose
+    directory a live process's executable resolves under (see
+    :func:`_versions_with_live_process`) -- the real "reap iff no active process
+    runs from it" invariant. If that scan finds nothing but pids ARE recorded
+    live (a platform where process enumeration/image-path lookup is blocked), it
+    falls back to the older conservative rule -- keep the newest non-current slot
+    too -- so GC is never *less* safe than before.
     """
     keep_set = set(keep or [])
     cur = current_version(root, link_name)
     if cur:
         keep_set.add(cur)
 
-    if protect_pids and _running_pids(root):
-        # A live daemon may still be serving from a non-current version mid-cutover;
-        # keep the newest non-current version as its likely home.
-        non_current = [v for v in list_versions(root) if v != cur]
-        if non_current:
-            keep_set.add(non_current[-1])
+    if protect_pids:
+        in_use = _versions_with_live_process(root)
+        if in_use:
+            keep_set |= in_use
+        elif _running_pids(root):
+            # Enumeration yielded nothing yet a live pid is recorded -> we cannot
+            # attribute it to a slot on this platform; keep the newest non-current
+            # version as its likely home (the pre-precision conservative rule).
+            non_current = [v for v in list_versions(root) if v != cur]
+            if non_current:
+                keep_set.add(non_current[-1])
 
     removed: list[str] = []
     for v in list_versions(root):
         if v in keep_set:
             continue
-        # Recency floor: never reap a slot younger than min_age_days -- another
-        # runtime may still hold a path-pinned reference to it (see the constant).
+        # Optional recency backstop (default off): active-process usage is the
+        # primary gate, but a caller may pass a floor to hold just-superseded
+        # slots for a stored (not-running) pinned reference to age out.
         if min_age_days > 0 and _slot_age_days(root, v) < min_age_days:
             continue
         d = version_dir(root, v)
@@ -623,10 +738,12 @@ def main(argv: list[str] | None = None) -> int:
                     help="also protect versions a live recorded pid may run from")
     gp.add_argument("--min-age-days", type=float,
                     default=DEFAULT_GC_MIN_AGE_DAYS,
-                    help="minimum slot age (days) before an unprotected version "
-                         "is eligible for removal; a recently-superseded slot may "
-                         "still be referenced by another runtime's pinned launch "
-                         "path (default: %(default)s; 0 disables)")
+                    help="optional recency backstop: minimum slot age (days) "
+                         "before an unprotected version is eligible for removal. "
+                         "The primary gate is live-process usage (--protect-pids); "
+                         "this only additionally holds a just-superseded slot for a "
+                         "STORED (not-running) pinned launch reference to age out "
+                         "(default: %(default)s = off)")
     gp.add_argument("--toss-incomplete", action="store_true",
                     help="also remove non-current slots lacking a completion "
                          "marker (failed/partial builds; dotfiles #935)")
