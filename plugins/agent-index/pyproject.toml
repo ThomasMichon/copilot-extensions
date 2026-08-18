@@ -26,7 +26,7 @@ dependencies = [
     "agent-zdd",
     # Structured adoption config (.agent-index/config.yaml: role, indexer
     # designation, routing). Small, pure-Python.
-    "pyyaml>=6.0",
+    "pyyaml>=6.0.3",
 ]
 
 [tool.uv.sources]
