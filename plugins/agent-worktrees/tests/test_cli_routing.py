@@ -647,6 +647,34 @@ def test_reap_sessions_is_project_scoped_not_no_project():
     assert "reap-sessions" not in m._NO_PROJECT_COMMANDS
 
 
+def test_terminal_fragment_is_no_project_command():
+    """terminal-fragment is machine-global: it reads EVERY registered project's
+    config and takes ``--machine``, so it must dispatch WITHOUT a resolvable
+    project. The installer's Deploy-Shortcuts invokes it as
+    ``terminal-fragment --machine <key>`` from a context with no project, so a
+    missing entry here makes fragment generation fail (regression: PR #771)."""
+    assert "terminal-fragment" in m._NO_PROJECT_COMMANDS
+
+
+def test_bare_terminal_fragment_without_project_dispatches(monkeypatch, capsys):
+    """`agent-worktrees terminal-fragment --machine <key>` runs even when no
+    project resolves from cwd/env -- it must NOT balk with the project-resolution
+    error the installer's Deploy-Shortcuts would surface as a fragment failure."""
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m, "_git_toplevel", lambda p: None)
+    monkeypatch.setattr(m.inst, "read_projects_registry", lambda: {"projects": {}})
+    # No project context -> cmd_terminal_fragment falls back to current=None and
+    # builds an (empty) fragment from zero collected projects.
+    from agent_worktrees import terminal_fragment as tf
+    monkeypatch.setattr(tf, "collect_local_projects", lambda current_project=None: [])
+
+    rc = m.main(["terminal-fragment", "--machine", "tmichon-book2"])
+    out = capsys.readouterr()
+    assert rc == 0
+    assert "Could not resolve a project" not in out.err
+    assert '"profiles"' in out.out          # emitted the fragment JSON
+
+
 def test_bare_reap_sessions_without_project_balks_not_crashes(monkeypatch, capsys):
     """`agent-worktrees reap-sessions` from a non-repo dir balks helpfully
     instead of raising RuntimeError deep in project_name() (#102)."""
