@@ -4,12 +4,14 @@ from __future__ import annotations
 import os
 import sqlite3
 import time
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import yaml
 
 from agent_worktrees import health
+from agent_worktrees.tracking import SessionEntry, WorktreeRecord
 
 # --------------------------------------------------------------------------- #
 # YAML integrity
@@ -202,3 +204,101 @@ class TestHelpers:
     def test_default_store_db(self, tmp_path: Path):
         ss = tmp_path / "session-state"
         assert health.default_store_db(ss) == tmp_path / "session-store.db"
+
+
+# --------------------------------------------------------------------------- #
+# Orphaned handoffs (head lost to a failed cutover)
+# --------------------------------------------------------------------------- #
+_NOW = 1_800_000_000.0
+_STALE = datetime.fromtimestamp(_NOW - 7200).isoformat()   # 2h ago
+_FRESH = datetime.fromtimestamp(_NOW - 60).isoformat()     # 1m ago
+
+
+def _session(sid="s1", state="handed-off", successor=None):
+    return SimpleNamespace(session_id=sid, state=state, successor=successor,
+                           started_at=None, ended_at=None)
+
+
+def _oh_rec(**over):
+    base = dict(
+        worktree_id="wt", status="active",
+        mux_live=None, bound_live=None,
+        last_resumed_at=_STALE, started_at=None, session_state_at=None,
+        mux_live_at=None, bound_live_at=None,
+        sessions=[_session()],
+    )
+    base.update(over)
+    return SimpleNamespace(**base)
+
+
+class TestOrphanedHandoffs:
+    def test_detects_dark_stale_unlinked_handoff(self):
+        # The 453f scenario: lone handed-off tail, no successor, active, dark, stale.
+        found = health.find_orphaned_handoffs([_oh_rec()], now=_NOW)
+        assert len(found) == 1
+        assert found[0].worktree_id == "wt" and found[0].session_id == "s1"
+        assert round(found[0].age_h) == 2
+
+    def test_skips_fresh_cutover(self):
+        # A successor may still be registering -- must NOT be touched.
+        rec = _oh_rec(last_resumed_at=_FRESH)
+        assert health.find_orphaned_handoffs([rec], now=_NOW) == []
+
+    def test_skips_when_mux_live(self):
+        rec = _oh_rec(mux_live=True)
+        assert health.find_orphaned_handoffs([rec], now=_NOW) == []
+
+    def test_skips_when_bound_live(self):
+        rec = _oh_rec(bound_live=True)
+        assert health.find_orphaned_handoffs([rec], now=_NOW) == []
+
+    def test_skips_deliberate_concluded_tail(self):
+        rec = _oh_rec(sessions=[_session(state="concluded")])
+        assert health.find_orphaned_handoffs([rec], now=_NOW) == []
+
+    def test_skips_completed_succession(self):
+        # Predecessor handed-off + a live successor => head resolves, not orphaned.
+        rec = _oh_rec(sessions=[
+            _session("old", "handed-off", successor="new"),
+            _session("new", "active"),
+        ])
+        assert health.find_orphaned_handoffs([rec], now=_NOW) == []
+
+    def test_skips_when_tail_has_linked_successor(self):
+        rec = _oh_rec(sessions=[_session("old", "handed-off", successor="new")])
+        assert health.find_orphaned_handoffs([rec], now=_NOW) == []
+
+    def test_skips_terminal_status(self):
+        for st in ("finalized", "complete", "pushed", "orphaned"):
+            rec = _oh_rec(status=st)
+            assert health.find_orphaned_handoffs([rec], now=_NOW) == []
+
+    def test_skips_no_sessions(self):
+        assert health.find_orphaned_handoffs([_oh_rec(sessions=[])], now=_NOW) == []
+
+    def test_unprovable_staleness_is_skipped(self):
+        # No parseable timestamp anywhere -> cannot prove staleness -> skip.
+        rec = _oh_rec(last_resumed_at=None)
+        assert health.find_orphaned_handoffs([rec], now=_NOW) == []
+
+    def test_reactivation_makes_head_resolvable(self):
+        # End-to-end semantic (mirrors the orchestrator's inline --fix): a real
+        # record whose head is orphaned re-derives to the re-activated session.
+        entry = SessionEntry(session_id="s1", started_at="2026-01-01T00:00:00",
+                             state="handed-off")
+        rec = WorktreeRecord(
+            worktree_id="wt-1", branch="worktree/wt-1", worktree_path="/tmp/wt-1",
+            repo="test-repo", machine="test", platform="wsl",
+            started_at="2026-01-01T00:00:00", last_resumed_at="2026-01-01T00:00:00",
+            resume_count=0, title=None, status="active", completed_at=None,
+            sessions=[entry],
+        )
+        assert rec.resolved_head_session is None  # orphaned
+        orphans = health.find_orphaned_handoffs([rec])
+        assert len(orphans) == 1 and orphans[0].session_id == "s1"
+        # Apply the orchestrator's mutate.
+        o = orphans[0]
+        e = o.record.session_entry(o.session_id)
+        e.state = "active"
+        o.record.head_session = o.session_id
+        assert rec.resolved_head_session == "s1"  # resumable again

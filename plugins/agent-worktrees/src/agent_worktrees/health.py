@@ -18,6 +18,11 @@ Passes:
   4. Alignment audit (report-only) -- worktrees with no own session but a
      ``parent_session`` whose cwd differs from their own path (the class of
      drift that used to make a tab open in another worktree's directory).
+  5. Orphaned handoff -- a worktree whose head was lost to a handoff-cutover
+     whose successor never registered (e.g. it died on the CLI resume-hang), so
+     the derived head is None and the worktree is un-resumable. Detected only
+     when dark + stale (never a healthy in-flight cutover); with ``apply`` the
+     orchestrator re-activates the handed-off tail so the head derives again.
 
 Registry/title backfill is delegated to ``sessions.backfill_sessions`` by the
 orchestrator; it is not duplicated here.
@@ -29,6 +34,7 @@ import shutil
 import sqlite3
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 import yaml
@@ -273,6 +279,123 @@ def audit_alignment(records, session_state_dir: Path) -> list[dict]:
                 "parent_session": r.parent_session,
                 "parent_cwd": pcwd,
             })
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# Pass 5: orphaned handoff (head lost to a failed cutover)
+# --------------------------------------------------------------------------- #
+# Mirrors ``tracking._CONCLUDED_SESSION_STATES`` (kept local so health stays
+# self-contained and unit-testable without importing tracking).
+_CONCLUDED_STATES = ("handed-off", "concluded")
+_HANDED_OFF = "handed-off"
+
+
+@dataclass
+class OrphanedHandoff:
+    """A worktree whose head was orphaned by a handoff that never completed.
+
+    Carries the ``record`` so the orchestrator can apply the fix inline (as it
+    does for stale status); ``session_id`` is the handed-off tail to re-activate.
+    """
+    record: object
+    session_id: str
+    age_h: float
+    reactivated: bool = False
+
+    @property
+    def worktree_id(self) -> str:
+        return getattr(self.record, "worktree_id", "?")
+
+
+def _parse_iso_epoch(value) -> float | None:
+    """Parse an ISO-8601 stamp (naive-local or tz-aware) to an epoch, or None."""
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value).timestamp()
+    except (ValueError, OSError):
+        return None
+
+
+def _record_last_activity(record) -> float | None:
+    """Newest known activity epoch across a record's timestamp fields and its
+    tail session entry. ``None`` when nothing parseable is present (so staleness
+    cannot be proven -- the detector then conservatively skips the record)."""
+    stamps = [
+        getattr(record, "last_resumed_at", None),
+        getattr(record, "started_at", None),
+        getattr(record, "session_state_at", None),
+        getattr(record, "mux_live_at", None),
+        getattr(record, "bound_live_at", None),
+    ]
+    sessions = getattr(record, "sessions", None) or []
+    if sessions:
+        tail = sessions[-1]
+        stamps.append(getattr(tail, "ended_at", None))
+        stamps.append(getattr(tail, "started_at", None))
+    epochs = [e for e in (_parse_iso_epoch(s) for s in stamps) if e is not None]
+    return max(epochs) if epochs else None
+
+
+def find_orphaned_handoffs(
+    records,
+    *,
+    now: float | None = None,
+    min_age_h: float = 0.5,
+) -> list[OrphanedHandoff]:
+    """Worktrees whose head was orphaned by a handoff whose successor never came.
+
+    A handoff-cutover concludes the predecessor ``handed-off`` *before* the
+    successor registers, so a transient headless window is **normal and correct**
+    (``resolved_head_session`` is intentionally None then). This detects the
+    *permanent* case -- the successor never materialized (e.g. it died on the CLI
+    resume-hang before ``register-session``/``link-succession`` landed) -- with
+    conservative guards so a healthy in-flight cutover is **never** touched:
+
+      * the worktree is non-terminal (``status == "active"``);
+      * it has sessions, and **none** is non-concluded (so the derived head is
+        None -- there is no current session);
+      * the **tail** session is ``handed-off`` with **no linked successor** (the
+        cutover began but no successor was ever recorded);
+      * the worktree is **dark** -- ``mux_live`` and ``bound_live`` both falsy
+        (nothing live that could be a successor starting up); and
+      * its last activity is **stale** past ``min_age_h`` (a successor would have
+        registered long ago -- unprovable staleness conservatively skips).
+
+    Report-only. The orchestrator re-activates the tail (``handed-off`` ->
+    ``active``) under ``--fix`` so ``resolved_head_session`` derives it again and
+    the worktree becomes resumable -- the mechanical form of the manual repair.
+    """
+    now = time.time() if now is None else now
+    out: list[OrphanedHandoff] = []
+    for r in records:
+        if getattr(r, "status", None) != "active":
+            continue
+        sessions = getattr(r, "sessions", None) or []
+        if not sessions:
+            continue
+        # Any non-concluded session => the head resolves to it => not orphaned.
+        if any(getattr(s, "state", "active") not in _CONCLUDED_STATES
+               for s in sessions):
+            continue
+        tail = sessions[-1]
+        if getattr(tail, "state", None) != _HANDED_OFF:
+            continue
+        # A linked successor is a different (completed/handled) shape; only an
+        # unlinked handed-off tail is the "successor never came" case.
+        if getattr(tail, "successor", None):
+            continue
+        if getattr(r, "mux_live", None) or getattr(r, "bound_live", None):
+            continue
+        last = _record_last_activity(r)
+        if last is None or (now - last) < min_age_h * 3600:
+            continue
+        out.append(OrphanedHandoff(
+            record=r,
+            session_id=getattr(tail, "session_id", ""),
+            age_h=(now - last) / 3600,
+        ))
     return out
 
 
