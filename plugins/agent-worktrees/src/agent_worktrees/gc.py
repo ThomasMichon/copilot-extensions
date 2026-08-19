@@ -154,6 +154,13 @@ _FINAL_STATUSES = frozenset({"finalized", "complete", "completed"})
 # that just created one (creation races the sweep) is never yanked out from under.
 MANAGED_GC_GRACE_SECS = 3600  # 1 hour
 
+# A FINISHED session worktree (finalized / merged / git-COMPLETED) must be idle
+# this long before the no-daemon cadence (picker launch + session end) auto-
+# collects it, so a just-finished worktree the operator may still glance at is
+# never yanked immediately. Deliberately generous -- the operator keeps sessions
+# open for days -- and overridable via ``AGENT_WORKTREES_AUTO_CLEAN_GRACE_SECS``.
+SESSION_GC_GRACE_SECS = 48 * 3600  # 48 hours
+
 
 @dataclass
 class ManagedVerdict:
@@ -280,6 +287,7 @@ __all__ = [
     "CACHE_DIRNAMES",
     "MANAGED_GC_GRACE_SECS",
     "MANAGED_KINDS",
+    "SESSION_GC_GRACE_SECS",
     "ManagedVerdict",
     "OrphanVerdict",
     "candidate_roots",

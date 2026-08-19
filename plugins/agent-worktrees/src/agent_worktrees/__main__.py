@@ -3172,6 +3172,9 @@ def _run_new_picker(config: cfg.Config, args: argparse.Namespace) -> int:
         _sweep_managed_on_exit()
         # ...and for orphaned launcher shells (copilot-extensions #102).
         _sweep_launcher_shells_on_exit()
+        # ...and for FINISHED session worktrees (prune-on-next-start), so
+        # finished user worktrees don't accumulate without a daemon.
+        _sweep_finished_sessions_on_cadence()
     threading.Thread(target=_reap_bg, name="reap-orphans", daemon=True).start()
 
     # Avoid a confusing double hop: when this picker is itself running over SSH,
@@ -3747,6 +3750,34 @@ def _sweep_orphans_on_exit() -> None:
         pass
     _sweep_managed_on_exit()
     _sweep_launcher_shells_on_exit()
+    _sweep_finished_sessions_on_cadence()
+
+
+def _sweep_finished_sessions_on_cadence() -> None:
+    """Best-effort auto-clean of FINISHED session worktrees at a lifecycle
+    boundary (the no-daemon prune-on-next-start cadence).
+
+    Extends the same picker-launch + session-end cadence as the mux/managed/
+    launcher sweeps to the ordinary (non-managed) worktrees the manual
+    ``cleanup`` would remove -- ``finalized`` / merged / git-COMPLETED ones idle
+    past the grace window -- so finished user worktrees self-heal without a
+    background service (the ~hundreds-of-stale-worktrees accumulation). Reuses
+    :func:`sweep_finished_session_worktrees`, which mirrors the manual cleanup's
+    conservative safety exactly. Gated by the :func:`auto_clean_enabled`
+    kill-switch and wrapped best-effort; never raises.
+    """
+    if not auto_clean_enabled():
+        return
+    try:
+        report = sweep_finished_session_worktrees()
+        removed = report.get("removed") or []
+        if removed:
+            output.ok(
+                f"Auto-cleaned {len(removed)} finished worktree(s): "
+                + ", ".join(x["id"] for x in removed)
+            )
+    except Exception:
+        pass
 
 
 def _sweep_managed_on_exit() -> None:
@@ -7204,6 +7235,177 @@ def sweep_managed_worktrees(*, dry_run: bool = False,
         reason = verdict.reason + (f"; {'; '.join(warns)}" if warns else "")
         result["removed"].append({"id": rec.worktree_id, "reason": reason})
 
+    return result
+
+
+#: Kill-switch: any non-empty value disables the finished-session auto-clean pass
+#: on the no-daemon cadence, so the sweep only ever runs via explicit ``cleanup``.
+_NO_AUTO_CLEAN_ENV = "AGENT_WORKTREES_NO_AUTO_CLEAN"
+#: Override for :data:`gc.SESSION_GC_GRACE_SECS` (seconds a finished worktree must
+#: be idle before the cadence auto-collects it).
+_AUTO_CLEAN_GRACE_ENV = "AGENT_WORKTREES_AUTO_CLEAN_GRACE_SECS"
+
+
+def auto_clean_enabled() -> bool:
+    """Whether the finished-session auto-clean pass may run (kill-switch off)."""
+    return not os.environ.get(_NO_AUTO_CLEAN_ENV)
+
+
+def _auto_clean_grace_secs() -> float:
+    """Resolve the finished-session idle-grace threshold (env override else default)."""
+    from . import gc as gc_mod
+    raw = os.environ.get(_AUTO_CLEAN_GRACE_ENV)
+    if raw:
+        try:
+            val = float(raw)
+            if val >= 0:
+                return val
+        except (TypeError, ValueError):
+            pass
+    return float(gc_mod.SESSION_GC_GRACE_SECS)
+
+
+def sweep_finished_session_worktrees(*, dry_run: bool = False,
+                                     min_idle_secs: float | None = None,
+                                     now: float | None = None) -> dict:
+    """GC provably-safe **finished session** worktrees on the no-daemon cadence.
+
+    The companion to :func:`sweep_managed_worktrees`: where that reaps leaked
+    ``system``/``bridge`` worktrees, this reaps ordinary (non-managed) worktrees
+    whose work is already landed -- the ``finalized`` / merged / git-COMPLETED
+    ones the manual ``cleanup`` would remove -- so they stop accumulating without
+    a background service or a manual sweep. Run at the same two lifecycle
+    boundaries (picker launch + session end).
+
+    Safety reuses the EXACT manual-cleanup decision so the cadence can never be
+    more aggressive than an explicit ``cleanup``: :func:`prune.cleanup_disposition`
+    with the conservative flags (``include_unused=False``,
+    ``include_conversations=False``) collects ONLY the strictly-SAFE buckets
+    (finalized / merged / completed-local); an ``empty``/``conversation-only``
+    worktree, an in-flight claimed resource (via ``resolve_claimant_alive`` --
+    which now also releases a provably-dead owner's claims), a follow-up-flagged
+    or paired-pending worktree, and anything dirty/wip/unmerged are all spared.
+    On top of that, a worktree is collected only once it has been **idle past the
+    grace window** (default :data:`gc.SESSION_GC_GRACE_SECS`, 48h) and has no live
+    bound session or live/attached mux. No network fetch is done (the cadence
+    must be fast and offline-safe), so a merge not yet locally provable simply
+    waits for a later pass -- the sweep never collects on unproven state.
+
+    Returns ``{removed: [{id, reason}], skipped: [{id, reason}]}``. Never raises
+    for control-flow; the caller wraps it best-effort. The kill-switch
+    (:func:`auto_clean_enabled`) is checked by the cadence callers, not here, so
+    this stays directly testable.
+    """
+    result: dict = {"removed": [], "skipped": []}
+    now = time.time() if now is None else now
+    grace = _auto_clean_grace_secs() if min_idle_secs is None else min_idle_secs
+
+    config = cfg.load_config()
+    repo = config.default_repo
+    tracking_path = cfg.tracking_dir()
+    records = [r for r in tracking.list_records(tracking_path)
+               if r.kind not in tracking.MANAGED_KINDS]
+    if not records:
+        return result
+
+    session_ctx = sessions.scan_sessions_fast(records)
+    active_paths = _build_active_paths(records, session_ctx)
+    activity_by_name = sessions._mux_session_activity()
+    mux = sessions._list_mux_sessions() or {}
+    upstream = f"{repo.remote}/{repo.default_branch}"
+
+    # Pass 1 (read-only): resolve the collectable set without mutating anything,
+    # so the finalization lock is taken only when there is real work.
+    candidates: list[tuple[tracking.WorktreeRecord, git_ops.WorktreeStateInfo, str]] = []
+    for rec in records:
+        name = f"wt-{rec.worktree_id}"
+        norm = _normalize_path(rec.worktree_path) if rec.worktree_path else ""
+        # Live guards: a bound session, or a live/attached mux, is never touched.
+        if norm and norm in session_ctx.active_sessions:
+            result["skipped"].append({"id": rec.worktree_id, "reason": "live session"})
+            continue
+        if name in mux:
+            result["skipped"].append({"id": rec.worktree_id, "reason": "live mux session"})
+            continue
+
+        if rec.worktree_path and Path(rec.worktree_path).exists():
+            info = git_ops.classify_worktree(
+                rec.worktree_path, rec.branch, fetch=False,
+                remote=repo.remote, default_branch=repo.default_branch,
+                active_paths=active_paths,
+            )
+            info = _apply_tracking_override(rec, info)
+        elif rec.status == "finalized":
+            info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
+        else:
+            info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.GONE)
+
+        # Idle-grace gate: the worktree must have been quiet past the window. Use
+        # the freshest of the mux activity, last resume, completion, or creation.
+        last_active = activity_by_name.get(name)
+        if last_active is None:
+            last_active = (_iso_epoch(rec.last_resumed_at)
+                           or _iso_epoch(rec.completed_at)
+                           or _iso_epoch(rec.started_at))
+        if last_active is not None and (now - last_active) < grace:
+            result["skipped"].append(
+                {"id": rec.worktree_id, "reason": "idle grace not elapsed"})
+            continue
+
+        # Collectability reuses the exact manual-cleanup safety (conservative).
+        if info.state == git_ops.WorktreeState.GONE:
+            # Dir already gone: only collect once the branch content is on master
+            # (the check manual cleanup owns for GONE).
+            if rec.branch and not git_ops.is_branch_merged(
+                    rec.branch, upstream, cwd=repo.anchor):
+                result["skipped"].append(
+                    {"id": rec.worktree_id,
+                     "reason": "branch unmerged (worktree dir missing)"})
+                continue
+            candidates.append((rec, info, "gone; branch merged"))
+            continue
+
+        turns = session_ctx.turn_count.get(norm, 0)
+        disp = prune.cleanup_disposition(
+            rec, info, turn_count=turns,
+            include_unused=False, include_conversations=False,
+            claimant_alive=claimant_mod.resolve_claimant_alive,
+            paired_sibling_final=prune.default_paired_sibling_final,
+        )
+        if not disp.cleanable:
+            result["skipped"].append({"id": rec.worktree_id, "reason": disp.bucket})
+            continue
+        candidates.append((rec, info, disp.reason))
+
+    if not candidates:
+        return result
+    if dry_run:
+        for rec, info, reason in candidates:
+            result["removed"].append(
+                {"id": rec.worktree_id, "reason": f"would remove ({reason})"})
+        return result
+
+    # Pass 2: reap under the shared finalization lock. A short, non-blocking-ish
+    # timeout keeps the cadence from wedging behind a concurrent finalize -- skip
+    # this pass and let the next boundary retry rather than delay startup/exit.
+    lock = fin.FinalizeLock(Path(repo.worktree_root) / ".finalize.lock", timeout=3)
+    try:
+        lock.acquire()
+    except TimeoutError:
+        return result
+    try:
+        for rec, info, reason in candidates:
+            f, warns = _reap_worktree(rec, info, repo, tracking_path)
+            try:
+                activity.log_event("session_worktree_autoclean",
+                                   worktree_id=rec.worktree_id, reason=reason)
+            except Exception:
+                pass
+            full = reason + (f"; {'; '.join(warns)}" if warns else "")
+            result["removed"].append({"id": rec.worktree_id, "reason": full})
+        git_ops.prune_worktrees(cwd=repo.anchor)
+    finally:
+        lock.release()
     return result
 
 
