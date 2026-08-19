@@ -29,6 +29,7 @@ from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widget import Widget
 from textual.widgets import (
+    Input,
     OptionList,
     RadioButton,
     RadioSet,
@@ -6327,7 +6328,20 @@ class SteerButtonRow(Widget):
     def on_click(self, event) -> None:
         event.stop()
         self.focus()
-        self._on_press(self._buttons[self._idx][0])
+        # Hit-test the click against each button's rendered span so a mouse
+        # press acts on the button under the cursor (not merely the focused one).
+        x = int(getattr(event, "x", 0))
+        pos = 0
+        for i, (_key, label) in enumerate(self._buttons):
+            if i:
+                pos += 2  # the "  " separator between buttons
+            width = len(label) + 2  # the " label " span
+            if pos <= x < pos + width:
+                self._idx = i
+                self.refresh()
+                self._on_press(self._buttons[i][0])
+                return
+            pos += width
 
 
 class PivotFormScreen(ModalScreen[dict]):
@@ -6442,10 +6456,13 @@ class PivotFormScreen(ModalScreen[dict]):
                 other.display = False
                 rec["other"] = other
                 yield other
-        else:  # text / textarea -> free-form auto-expanding box
-            ta = _AutoExpandTextArea(id=f"q-{i}")
-            rec["primary"] = ta
-            yield ta
+        else:  # text -> single-line Input; textarea -> free-form auto-expand box
+            if ftype == "text":
+                w: Widget = Input(id=f"q-{i}")
+            else:
+                w = _AutoExpandTextArea(id=f"q-{i}")
+            rec["primary"] = w
+            yield w
         self._q.append(rec)
 
     # ---- rendering helpers --------------------------------------------------
@@ -6533,7 +6550,9 @@ class PivotFormScreen(ModalScreen[dict]):
             name, ftype = rec["name"], rec["type"]
             options, allow_other = rec["options"], rec["allow_other"]
             prim, other = rec["primary"], rec["other"]
-            if ftype in ("text", "textarea"):
+            if ftype == "text":
+                values[name] = prim.value
+            elif ftype == "textarea":
                 values[name] = prim.text
             elif ftype == "choice":
                 idx = getattr(prim, "pressed_index", -1)
@@ -6560,7 +6579,9 @@ class PivotFormScreen(ModalScreen[dict]):
             if name not in values:
                 continue
             v = values[name]
-            if ftype in ("text", "textarea"):
+            if ftype == "text":
+                prim.value = str(v)
+            elif ftype == "textarea":
                 prim.text = str(v)
                 prim.autosize()
             elif ftype == "choice":

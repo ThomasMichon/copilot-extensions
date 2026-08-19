@@ -10,7 +10,6 @@ Save drafts. The screen only gathers the operator's answer (returned via
 from __future__ import annotations
 
 import asyncio
-import tempfile
 
 import pytest
 
@@ -42,9 +41,9 @@ class _Host(App):
         self.result = r
 
 
-def _drafts(monkeypatch):
-    d = tempfile.mkdtemp()
-    monkeypatch.setenv("AGENT_WORKTREES_STEER_DRAFTS", d)
+def _drafts(monkeypatch, tmp_path):
+    d = tmp_path / "steer-drafts"
+    monkeypatch.setenv("AGENT_WORKTREES_STEER_DRAFTS", str(d))
     return d
 
 
@@ -68,6 +67,25 @@ def _fields():
 # ---- PivotCardScreen (read-only) --------------------------------------------
 
 
+def test_form_text_field_is_single_line_input(monkeypatch, tmp_path):
+    _drafts(monkeypatch, tmp_path)
+    from textual.widgets import Input
+    scr = PivotFormScreen(_card(), [{"name": "ref", "type": "text"}],
+                          "Steer", task_id="t-text")
+    app = _Host(scr)
+
+    async def run():
+        async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+            inp = scr.query_one("#q-0", Input)   # text -> single-line Input
+            inp.value = "PR 42"
+            scr._confirm()
+            await pilot.pause()
+
+    asyncio.run(run())
+    assert app.result == {"ref": "PR 42"}
+
+
 def test_card_renders_parts_and_closes():
     scr = PivotCardScreen("Row Title", _card())
     app = _Host(scr)
@@ -89,8 +107,8 @@ def test_card_renders_parts_and_closes():
 # ---- PivotFormScreen: layout + collection -----------------------------------
 
 
-def test_form_shows_card_prose_and_tabs(monkeypatch):
-    _drafts(monkeypatch)
+def test_form_shows_card_prose_and_tabs(monkeypatch, tmp_path):
+    _drafts(monkeypatch, tmp_path)
     scr = PivotFormScreen(_card(), _fields(), "Steer", task_id="t-layout")
     app = _Host(scr)
 
@@ -105,8 +123,8 @@ def test_form_shows_card_prose_and_tabs(monkeypatch):
     asyncio.run(run())
 
 
-def test_form_single_question_has_no_tabs(monkeypatch):
-    _drafts(monkeypatch)
+def test_form_single_question_has_no_tabs(monkeypatch, tmp_path):
+    _drafts(monkeypatch, tmp_path)
     scr = PivotFormScreen(_card(), [{"name": "feedback", "type": "textarea"}],
                           "Steer", task_id="t-single")
     app = _Host(scr)
@@ -121,8 +139,8 @@ def test_form_single_question_has_no_tabs(monkeypatch):
     asyncio.run(run())
 
 
-def test_form_collect_all_types_on_confirm(monkeypatch):
-    _drafts(monkeypatch)
+def test_form_collect_all_types_on_confirm(monkeypatch, tmp_path):
+    _drafts(monkeypatch, tmp_path)
     scr = PivotFormScreen(_card(), _fields(), "Steer", task_id="t-collect")
     app = _Host(scr)
 
@@ -152,8 +170,8 @@ def test_form_collect_all_types_on_confirm(monkeypatch):
     }
 
 
-def test_form_multichoice_other_free_member(monkeypatch):
-    _drafts(monkeypatch)
+def test_form_multichoice_other_free_member(monkeypatch, tmp_path):
+    _drafts(monkeypatch, tmp_path)
     fields = [{"name": "tags", "type": "multichoice", "options": ["perf", "api"],
                "allow_other": True}]
     scr = PivotFormScreen(_card(), fields, "Steer", task_id="t-multi-other")
@@ -178,8 +196,8 @@ def test_form_multichoice_other_free_member(monkeypatch):
 # ---- Save / restore / cancel / escape ---------------------------------------
 
 
-def test_form_save_writes_draft_and_restores(monkeypatch):
-    _drafts(monkeypatch)
+def test_form_save_writes_draft_and_restores(monkeypatch, tmp_path):
+    _drafts(monkeypatch, tmp_path)
     scr = PivotFormScreen(_card(), _fields(), "Steer", task_id="t-draft")
     app = _Host(scr)
 
@@ -208,8 +226,8 @@ def test_form_save_writes_draft_and_restores(monkeypatch):
     asyncio.run(run2())
 
 
-def test_form_confirm_clears_draft(monkeypatch):
-    _drafts(monkeypatch)
+def test_form_confirm_clears_draft(monkeypatch, tmp_path):
+    _drafts(monkeypatch, tmp_path)
     scr = PivotFormScreen(_card(), [{"name": "feedback", "type": "textarea"}],
                           "Steer", task_id="t-clear")
     app = _Host(scr)
@@ -228,8 +246,8 @@ def test_form_confirm_clears_draft(monkeypatch):
     assert not _steer_draft_path("t-clear").exists()
 
 
-def test_form_cancel_discards_draft(monkeypatch):
-    _drafts(monkeypatch)
+def test_form_cancel_discards_draft(monkeypatch, tmp_path):
+    _drafts(monkeypatch, tmp_path)
     scr = PivotFormScreen(_card(), [{"name": "feedback", "type": "textarea"}],
                           "Steer", task_id="t-cancel")
     app = _Host(scr)
@@ -248,8 +266,8 @@ def test_form_cancel_discards_draft(monkeypatch):
     assert not _steer_draft_path("t-cancel").exists()
 
 
-def test_form_escape_preserves_draft(monkeypatch):
-    _drafts(monkeypatch)
+def test_form_escape_preserves_draft(monkeypatch, tmp_path):
+    _drafts(monkeypatch, tmp_path)
     scr = PivotFormScreen(_card(), [{"name": "feedback", "type": "textarea"}],
                           "Steer", task_id="t-esc")
     app = _Host(scr)
@@ -273,8 +291,8 @@ def test_form_escape_preserves_draft(monkeypatch):
 # ---- button row + auto-expand -----------------------------------------------
 
 
-def test_button_row_confirm_via_row(monkeypatch):
-    _drafts(monkeypatch)
+def test_button_row_confirm_via_row(monkeypatch, tmp_path):
+    _drafts(monkeypatch, tmp_path)
     from agent_worktrees.picker_tui.engine import SteerButtonRow
     scr = PivotFormScreen(_card(), [{"name": "feedback", "type": "textarea"}],
                           "Steer", task_id="t-btn")
@@ -291,8 +309,8 @@ def test_button_row_confirm_via_row(monkeypatch):
     assert app.result == {"feedback": "x"}
 
 
-def test_auto_expand_grows_with_lines(monkeypatch):
-    _drafts(monkeypatch)
+def test_auto_expand_grows_with_lines(monkeypatch, tmp_path):
+    _drafts(monkeypatch, tmp_path)
     scr = PivotFormScreen(_card(), [{"name": "notes", "type": "textarea"}],
                           "Steer", task_id="t-grow")
     app = _Host(scr)
