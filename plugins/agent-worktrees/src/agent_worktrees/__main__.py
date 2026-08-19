@@ -5260,11 +5260,12 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
     path = args.path or os.getcwd()
     interval = args.interval if args.interval and args.interval >= 2 else 15
 
-    # Coalescing tier (work-coalescing-singleton): when opted in, one resident
-    # status-monitor serves EVERY session instead of a loop per session. Register
-    # this session's path (the monitor's refcount), ensure the monitor is up, and
-    # hand off. If registration or the spawn fails, fall through to this
-    # per-session loop so the session is never left without a status bar.
+    # Coalescing tier (work-coalescing-singleton): default-on (opt-out via
+    # AGENT_WORKTREES_STATUS_MONITOR=0). One resident status-monitor serves EVERY
+    # session instead of a loop per session. Register this session's path (the
+    # monitor's refcount), ensure the monitor is up, and hand off. If registration
+    # or the spawn fails, fall through to this per-session loop so the session is
+    # never left without a status bar.
     if _status_monitor_enabled() and _register_session_for_monitor(sess, path):
         if _ensure_status_monitor():
             return 0
@@ -5418,18 +5419,25 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
 # work-coalescing-singleton service tier: a single resident process refreshes
 # every ``wt-*`` session's bar in one coalesced sweep, lives only while at least
 # one session is registered, and idle-exits when the last one goes.  It is
-# strictly **opt-in** via ``AGENT_WORKTREES_STATUS_MONITOR`` -- unset, the
-# per-session updater is unchanged (a-la-carte: the inline path stays correct
-# with no daemon).  Single-active on the host via a liveness lock; a superseded
-# runtime self-retires (mirrors the updater's #911 behaviour).
+# **default-on (opt-out** via ``AGENT_WORKTREES_STATUS_MONITOR=0``) -- when
+# disabled, each session runs its own per-session updater (a-la-carte: the inline
+# path stays correct with no daemon).  Single-active on the host via a liveness
+# lock; a superseded runtime self-retires (mirrors the updater's #911 behaviour).
 
 _STATUS_MONITOR_ENV = "AGENT_WORKTREES_STATUS_MONITOR"
 
 
 def _status_monitor_enabled() -> bool:
     """Whether the resident coalescing monitor is opted into via env."""
-    return os.environ.get(_STATUS_MONITOR_ENV, "").strip().lower() in (
-        "1", "true", "yes", "on")
+    """Whether the resident coalescing monitor is active (default-ON / opt-out).
+
+    Enabled unless ``AGENT_WORKTREES_STATUS_MONITOR`` is explicitly falsy
+    (``0``/``false``/``no``/``off``), in which case each session runs its own
+    per-session ``status-updater`` (the a-la-carte inline fallback). Mirrors the
+    self-retire opt-out convention.
+    """
+    return os.environ.get(_STATUS_MONITOR_ENV, "").strip().lower() not in (
+        "0", "false", "no", "off")
 
 
 def _aw_runtime_home() -> Path:
@@ -13860,8 +13868,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "status-monitor",
         help="Resident, coalescing status tracker for every wt-* session "
-             "(one process instead of one per session; opt-in via "
-             "AGENT_WORKTREES_STATUS_MONITOR)",
+             "(one process instead of one per session; default-on, opt out via "
+             "AGENT_WORKTREES_STATUS_MONITOR=0)",
     )
     p.add_argument("--interval", type=int, default=15,
                    help="Sweep cadence in seconds (min 2)")
