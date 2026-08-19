@@ -61,6 +61,19 @@ def test_charter_points_at_the_concrete_hibernate_and_resolve_verbs():
         assert "agent-dispatch resolve" in r.charter_template
 
 
+def test_conflict_resolution_charter_names_producer_origin_and_force_push():
+    # The conflict-resolution recipe IS the "PR reconciler": an automated
+    # producer opens a PR, it conflicts, an agent is dispatched to solve it by
+    # rebasing and force-pushing the resolution back over the SAME PR (never a
+    # second PR). Lock that intent into the charter so it can't quietly drift.
+    r = recipes.get_recipe("conflict-resolution")
+    charter = r.charter_template.lower()
+    assert "automated producer" in charter
+    assert "force-push" in charter
+    assert "same pr" in charter
+    assert "never open a second pr" in charter
+
+
 def test_render_missing_required_param_raises_listing_them():
     with pytest.raises(recipes.RecipeError) as exc:
         recipes.render_recipe("reviewer", {"repo": "o/n"})
