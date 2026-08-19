@@ -895,7 +895,7 @@ do_install() {
     # single-instance-lease (one active daemon per host: lease + self-retire + reaper).
     local sil_dir
     if sil_dir="$(_resolve_single_instance_lease)"; then
-        if ! uv pip install --python "$VENV_DIR/bin/python" "$sil_dir" --quiet; then
+        if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-single-instance-lease --refresh-package agent-single-instance-lease "$sil_dir" --quiet; then
             _fail "single-instance-lease install failed"
             exit 1
         fi
@@ -1338,7 +1338,7 @@ _update_core() {
     # single-instance-lease: force-reinstall so a local code change propagates.
     local sil_dir
     if sil_dir="$(_resolve_single_instance_lease)"; then
-        if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-single-instance-lease \
+        if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-single-instance-lease --refresh-package agent-single-instance-lease \
                 "$sil_dir" --quiet; then
             _fail "single-instance-lease update failed"
             return 1
