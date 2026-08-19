@@ -174,8 +174,11 @@ write deploy-manifest.json  (schema_version 3, source block, atomic temp+move)
 > [`patterns/README.md`](patterns/README.md)). **On Windows there is no junction at
 > all** — a reparse point was blocked by RedirectionGuard (WinError 448) on managed
 > devices, so the marker + pinned binstubs replace it; **on POSIX** the marker is
-> authoritative and a `venv`/`.venv` **symlink** (not a reparse point) still
-> publishes the active slot as the stable runtime-facing path. This is the
+> equally authoritative — the runtime is resolved **directly from it** via the
+> canonical resolver (`versioned_runtime.resolve_python` /
+> `libs/versioned-runtime/resolve-runtime.sh`), with **no `venv`/`.venv` link in
+> the resolution path** (the retired stable-link; uniform marker-only resolution,
+> effort `uniform-runtime-resolution`). This is the
 > **only** layout for every Python runtime plugin, on both OSes: the installers
 > are **always versioned** and the `AGENT_<NAME>_VERSIONED` /
 > `COPILOT_EXT_NO_VERSIONED` opt-out (and the legacy in-place-venv fork it
@@ -196,12 +199,16 @@ write deploy-manifest.json  (schema_version 3, source block, atomic temp+move)
 2. **No `PYTHONPATH` to a `lib/` dir.** A binstub that points `PYTHONPATH` at a
    loose `…/lib` dir and runs `python -m <pkg>` is forbidden — the package must
    be `uv pip install`ed into the venv's site-packages (rule 1), not imported
-   off a sidecar path. How the binstub launches differs by OS (both resolve the
-   active slot from the `current-version` marker — Windows directly, POSIX through
-   the `venv`/`.venv` symlink that publishes it):
-   - **Linux/WSL:** `exec` the active slot's console script
-     (`…/versions/<v>/bin/<name>`, reachable via the `.venv` symlink) — a shebang
-     script, no Smart App Control concern.
+   off a sidecar path. The binstub launches identically on both OSes — it
+   resolves the active slot **directly from the `current-version` marker** via the
+   canonical resolver (marker → `last-known-good` → newest complete slot;
+   junction-free, **never** a `venv`/`.venv` link, **never** a PATH python), the
+   one uniform method for every binstub, hook, service unit, and agent
+   (`versioned_runtime.resolve_python` for Python callers,
+   `libs/versioned-runtime/resolve-runtime.sh`/`.ps1` for shell):
+   - **Linux/WSL:** `exec` the marker-resolved slot interpreter
+     `…/versions/<v>/bin/python -m <pkg>` — a shebang interpreter, no Smart App
+     Control concern.
    - **Windows:** launch `…\versions\<v>\Scripts\python.exe -m <pkg>` (resolved via
      the `current-version` marker — there is no `.venv` junction), **never** the
      generated `…\Scripts\<name>.exe` console-script trampoline. That trampoline

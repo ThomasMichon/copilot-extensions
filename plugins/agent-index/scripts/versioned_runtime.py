@@ -66,6 +66,17 @@ RUNNING_VERSION_FILE = "running-version.json"
 # way traversing a junction is, and the runtime is selected by version-pinned
 # binstubs the installer rewrites on cutover -- so no junction is needed at all.
 CURRENT_VERSION_FILE = "current-version"
+# The last version `activate()` published, stamped atomically alongside the
+# marker. It is the fallback resolution target: if the `current-version` marker
+# is ever missing/unreadable (a torn or deleted marker), a resolver prefers the
+# last-known-good version -- whose slot, having been the active one, still exists
+# -- over guessing the newest installed slot. See `resolve_python`.
+LAST_KNOWN_GOOD_FILE = "last-known-good"
+
+# The interpreter sub-paths inside a version slot, POSIX then Windows layout.
+# The single place the "where is the slot's python" answer lives, so every
+# resolver (this module, the shell resolvers, the binstubs) agrees.
+SLOT_PYTHON_SUBPATHS = ("bin/python", "Scripts/python.exe")
 
 
 # --------------------------------------------------------------------------
@@ -187,6 +198,89 @@ def _read_current_marker(root: Path) -> str | None:
     return txt or None
 
 
+def read_last_known_good(root: Path) -> str | None:
+    """The last version ``activate()`` published, or ``None`` if never stamped."""
+    try:
+        txt = (root / LAST_KNOWN_GOOD_FILE).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return txt or None
+
+
+def _write_last_known_good(root: Path, version: str) -> None:
+    """Stamp ``last-known-good`` atomically (temp + os.replace), only-when-changed.
+
+    Best-effort: a failure here never undoes the (already-written) marker.
+    """
+    if read_last_known_good(root) == version:
+        return
+    dest = root / LAST_KNOWN_GOOD_FILE
+    tmp = dest.with_name(dest.name + f".tmp-{os.getpid()}")
+    try:
+        tmp.write_text(version + "\n", encoding="utf-8")
+        os.replace(tmp, dest)
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+
+def slot_python(root: Path, version: str) -> Path | None:
+    """The interpreter inside ``versions/<version>``, or ``None`` if not present.
+
+    Checks the POSIX (``bin/python``) then Windows (``Scripts/python.exe``)
+    layout, so it resolves correctly on either OS and under git-bash on Windows.
+    """
+    if not version:
+        return None
+    vdir = version_dir(root, version)
+    for sub in SLOT_PYTHON_SUBPATHS:
+        p = vdir / sub
+        if p.is_file():
+            return p
+    return None
+
+
+def resolve_python(root: Path) -> Path | None:
+    """The single canonical way to resolve a versioned runtime's interpreter.
+
+    Junction-free and uniform across every OS and every caller (this module, the
+    shell resolvers, the binstubs, service launchers). Resolves in three tiers:
+
+    1. the ``current-version`` marker (the source of truth, written atomically);
+    2. ``last-known-good`` -- the last version ``activate()`` published -- when
+       the marker is missing/unreadable or names an unresolvable slot;
+    3. the newest **complete** installed slot (true first-run / torn marker),
+       then any newest slot as a final belt.
+
+    Never resolves through a ``venv``/``.venv`` link (a reparse point on Windows
+    that RedirectionGuard blocks) and **never** falls back to a PATH python -- an
+    unresolved runtime returns ``None`` so the caller degrades deliberately
+    (e.g. self-provisions) rather than silently binding the system interpreter.
+    """
+    # Tier 1: the current-version marker.
+    p = slot_python(root, current_version(root) or "")
+    if p is not None:
+        return p
+    # Tier 2: the last activated version (its slot, having been active, survives).
+    p = slot_python(root, read_last_known_good(root) or "")
+    if p is not None:
+        return p
+    # Tier 3: newest complete slot, then any newest slot.
+    versions = list_versions(root)  # sorted, newest last
+    for ver in reversed(versions):
+        if is_complete(root, ver):
+            p = slot_python(root, ver)
+            if p is not None:
+                return p
+    for ver in reversed(versions):
+        p = slot_python(root, ver)
+        if p is not None:
+            return p
+    return None
+
+
 # --------------------------------------------------------------------------
 # current link: write (atomic-ish swap)
 # --------------------------------------------------------------------------
@@ -252,6 +346,9 @@ def activate(root: Path, version: str, *, link_name: str = CURRENT_LINK,
     tmp = dest.with_name(dest.name + f".tmp-{os.getpid()}")
     tmp.write_text(version + "\n", encoding="utf-8")
     os.replace(tmp, dest)
+    # Stamp last-known-good alongside the marker so a resolver can recover the
+    # last-active version if the marker is ever torn/absent (resolve_python tier 2).
+    _write_last_known_good(root, version)
 
     link = current_link(root, link_name)
 
@@ -800,6 +897,10 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("current", help="print the active version")
     rp = sub.add_parser("resolve", help="print current/<subpath>")
     rp.add_argument("--subpath", default="")
+    sub.add_parser("resolve-python",
+                   help="print the canonical interpreter path (marker -> "
+                        "last-known-good -> newest complete slot; junction-free, "
+                        "no PATH fallback). Exits 1 if no runtime is installed.")
     sub.add_parser("list", help="list installed versions")
     gp = sub.add_parser("gc", help="remove unreferenced version dirs")
     gp.add_argument("--keep", action="append", default=[],
@@ -859,6 +960,12 @@ def main(argv: list[str] | None = None) -> int:
             base = version_dir(root, cur)
             out = base / args.subpath if args.subpath else base
             _emit(str(out), args.json)
+        elif args.cmd == "resolve-python":
+            py = resolve_python(root)
+            if py is None:
+                print("no runtime installed", file=sys.stderr)
+                return 1
+            _emit({"python": str(py)} if args.json else str(py), args.json)
         elif args.cmd == "list":
             vs = list_versions(root)
             cur = current_version(root, link_name)
