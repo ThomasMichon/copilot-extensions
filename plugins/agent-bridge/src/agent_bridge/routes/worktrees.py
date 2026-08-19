@@ -10,7 +10,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import shlex
+import signal
 import time
 from dataclasses import dataclass, replace
 from typing import Any
@@ -369,6 +371,13 @@ async def _exec(cmd: list[str]) -> str | None:
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            # Run the child in its OWN session/process group so a timeout can
+            # reap the WHOLE subtree, not just the direct child. The discovery
+            # command (``<project> list --json --mux-details``) may shell out to
+            # per-worktree mux probes; if it ever spins again (#4439), killing
+            # only the top process would orphan those grandchildren and leave
+            # them pinning cores. POSIX-only; a no-op on Windows.
+            start_new_session=True,
         )
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(), timeout=_CMD_TIMEOUT,
@@ -383,8 +392,8 @@ async def _exec(cmd: list[str]) -> str | None:
         return stdout.decode()
     except TimeoutError:
         log.error("Command timed out after %.0fs: %s", _CMD_TIMEOUT, " ".join(cmd))
+        _kill_process_tree(proc)
         if proc:
-            proc.kill()
             try:
                 await asyncio.wait_for(proc.communicate(), timeout=5)
             except Exception:
@@ -392,7 +401,7 @@ async def _exec(cmd: list[str]) -> str | None:
         return None
     except asyncio.CancelledError:
         if proc and proc.returncode is None:
-            proc.kill()
+            _kill_process_tree(proc)
             try:
                 await proc.communicate()
             except Exception:
@@ -401,6 +410,29 @@ async def _exec(cmd: list[str]) -> str | None:
     except Exception:
         log.exception("Failed to run: %s", " ".join(cmd))
         return None
+
+
+def _kill_process_tree(proc: asyncio.subprocess.Process | None) -> None:
+    """SIGKILL the child *and its process group* so no grandchild (e.g. a
+    per-worktree mux probe) orphans and keeps pinning a core -- the #4439
+    accumulation failure mode. Falls back to killing just the child where
+    process groups aren't available (Windows). Best-effort; never raises.
+    """
+    if proc is None or proc.returncode is not None:
+        return
+    pid = proc.pid
+    if hasattr(os, "killpg") and hasattr(os, "getpgid"):
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
+            return
+        except ProcessLookupError:
+            return
+        except OSError:
+            pass  # group unavailable -- fall through to a direct child kill
+    try:
+        proc.kill()
+    except (ProcessLookupError, OSError):
+        pass
 
 
 def _parse_worktree_list(raw: str, agent_name: str) -> list[_WorktreeEntry]:
