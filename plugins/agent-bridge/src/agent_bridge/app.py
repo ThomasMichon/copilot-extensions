@@ -48,10 +48,11 @@ def _count_active_sessions(mgr) -> int:
     return n
 
 
-# Generation self-retire tuning. Opt-in (default off): the live behavior (a
-# demoted daemon exiting itself) must be validated on a real cutover before it
-# becomes the default, so it is armed only by an explicit env guard. Cadence and
-# the K-confirmation count are env-tunable for that validation.
+# Generation self-retire tuning. Default-ON (opt-out): validated on real cutovers
+# (it arms for cutover-promoted daemons and self-retires a demoted generation
+# without disturbing in-flight work), so it is now the default. Set
+# ``AGENT_BRIDGE_SELF_RETIRE=0`` (or false/no/off) to disable it. Cadence and the
+# K-confirmation count are env-tunable.
 _SELF_RETIRE_DEFAULT_POLL_S = 30.0
 _SELF_RETIRE_DEFAULT_CONFIRMATIONS = 3
 
@@ -59,15 +60,16 @@ _SELF_RETIRE_DEFAULT_CONFIRMATIONS = 3
 def _self_retire_settings() -> tuple[bool, float, int]:
     """``(enabled, poll_seconds, confirmations)`` for generation self-retire.
 
-    ``enabled`` is False unless ``AGENT_BRIDGE_SELF_RETIRE`` is truthy -- when off,
-    the loop is never created, so no self-retire code runs at all. The poll cadence
+    ``enabled`` is True (default-ON / opt-out) unless ``AGENT_BRIDGE_SELF_RETIRE``
+    is explicitly falsy (``0``/``false``/``no``/``off``) -- when disabled, the loop
+    is never created, so no self-retire code runs at all. The poll cadence
     (``AGENT_BRIDGE_SELF_RETIRE_POLL_S``) and confirmation count
-    (``AGENT_BRIDGE_SELF_RETIRE_CONFIRMATIONS``) are overridable for validation.
+    (``AGENT_BRIDGE_SELF_RETIRE_CONFIRMATIONS``) are overridable.
     """
     import os
 
-    enabled = os.environ.get("AGENT_BRIDGE_SELF_RETIRE", "").strip().lower() in (
-        "1", "true", "yes", "on",
+    enabled = os.environ.get("AGENT_BRIDGE_SELF_RETIRE", "").strip().lower() not in (
+        "0", "false", "no", "off",
     )
     try:
         poll = float(
@@ -441,8 +443,8 @@ async def lifespan(app: FastAPI):
     # tracked here is the single active routing generation, with the periodic
     # reapers as a backstop.
     #
-    # OPT-IN (default off): armed whenever ``AGENT_BRIDGE_SELF_RETIRE`` is set; when
-    # off, none of the loop below is created or runs. The loop **self-gates on
+    # DEFAULT-ON (opt-out): armed unless ``AGENT_BRIDGE_SELF_RETIRE`` is explicitly
+    # falsy; when disabled, none of the loop below is created or runs. The loop **self-gates on
     # active-ness**: its startup phase waits until the routing table's ``active``
     # entry is *our own pid* before it captures our generation and begins watching.
     # This is what makes it correct for a **cutover-promoted** daemon -- one spawned

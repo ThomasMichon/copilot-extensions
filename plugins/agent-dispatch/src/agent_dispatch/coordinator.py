@@ -34,10 +34,11 @@ from .satellites import (
 log = logging.getLogger("agent-dispatch.coordinator")
 
 
-# Generation self-retire tuning. Opt-in (default off): the live behavior (a
-# demoted coordinator exiting itself) must be validated on a real cutover before
-# it becomes the default, so it is armed only by an explicit env guard. Cadence
-# and the K-confirmation count are env-tunable for that validation.
+# Generation self-retire tuning. Default-ON (opt-out): validated on real cutovers
+# (it arms for cutover-promoted coordinators and self-retires a demoted generation
+# without dropping an in-flight claim), so it is now the default. Set
+# ``AGENT_DISPATCH_SELF_RETIRE=0`` (or false/no/off) to disable it. Cadence and the
+# K-confirmation count are env-tunable.
 _SELF_RETIRE_DEFAULT_POLL_S = 30.0
 _SELF_RETIRE_DEFAULT_CONFIRMATIONS = 3
 
@@ -45,15 +46,16 @@ _SELF_RETIRE_DEFAULT_CONFIRMATIONS = 3
 def _self_retire_settings() -> tuple[bool, float, int]:
     """``(enabled, poll_seconds, confirmations)`` for generation self-retire.
 
-    ``enabled`` is False unless ``AGENT_DISPATCH_SELF_RETIRE`` is truthy -- when
-    off, the loop is never created, so no self-retire code runs at all. The poll
-    cadence (``AGENT_DISPATCH_SELF_RETIRE_POLL_S``) and confirmation count
-    (``AGENT_DISPATCH_SELF_RETIRE_CONFIRMATIONS``) are overridable for validation.
+    ``enabled`` is True (default-ON / opt-out) unless ``AGENT_DISPATCH_SELF_RETIRE``
+    is explicitly falsy (``0``/``false``/``no``/``off``) -- when disabled, the loop
+    is never created, so no self-retire code runs at all. The poll cadence
+    (``AGENT_DISPATCH_SELF_RETIRE_POLL_S``) and confirmation count
+    (``AGENT_DISPATCH_SELF_RETIRE_CONFIRMATIONS``) are overridable.
     """
     import os
 
-    enabled = os.environ.get("AGENT_DISPATCH_SELF_RETIRE", "").strip().lower() in (
-        "1", "true", "yes", "on",
+    enabled = os.environ.get("AGENT_DISPATCH_SELF_RETIRE", "").strip().lower() not in (
+        "0", "false", "no", "off",
     )
     try:
         poll = float(
@@ -428,8 +430,8 @@ def create_app(
         # over). The "owner" tracked here is the single active routing generation,
         # with the periodic liveness GC as a backstop.
         #
-        # OPT-IN (default off): armed whenever ``AGENT_DISPATCH_SELF_RETIRE`` is set;
-        # when off, the loop is never created. The loop **self-gates on active-ness**:
+        # DEFAULT-ON (opt-out): armed unless ``AGENT_DISPATCH_SELF_RETIRE`` is
+        # explicitly falsy; when disabled, the loop is never created. The loop **self-gates on active-ness**:
         # its startup phase waits until the routing table's ``active`` entry is our
         # own pid before it captures our generation and begins watching. This is what
         # makes it correct for a **cutover-promoted** coordinator -- one spawned
