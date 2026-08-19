@@ -429,15 +429,29 @@ def force_rmtree(path: Path) -> bool:
     """
     if not path.exists():
         return True
-    for p in path.rglob("*"):
+
+    def _make_removable(p: Path) -> None:
+        # OR-in owner write (clears the Windows read-only attribute); for a
+        # directory also ensure read+traverse so ``rmtree`` can descend on POSIX.
+        # SETTING the mode to ``S_IWRITE`` (0o200) alone strips a directory's
+        # ``x`` bit, so on POSIX the recursive delete cannot enter the dir and
+        # silently leaves the tree in place (the failure ``ignore_errors=True``
+        # then hides), making reconciliation a no-op that mis-reports success.
         try:
-            os.chmod(p, stat.S_IWRITE)
+            mode = p.stat().st_mode
+        except OSError:
+            mode = 0
+        add = stat.S_IWUSR | stat.S_IRUSR
+        if p.is_dir():
+            add |= stat.S_IXUSR
+        try:
+            os.chmod(p, mode | add)
         except OSError:
             pass
-    try:
-        os.chmod(path, stat.S_IWRITE)
-    except OSError:
-        pass
+
+    _make_removable(path)  # root first, so a read-only root dir stays traversable
+    for p in path.rglob("*"):
+        _make_removable(p)
     shutil.rmtree(path, ignore_errors=True)
     return not path.exists()
 
