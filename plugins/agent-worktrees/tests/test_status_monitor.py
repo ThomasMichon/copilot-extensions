@@ -44,12 +44,25 @@ def test_enabled_env_unset(monkeypatch):
 
 def test_registry_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: tmp_path / "reg")
-    m._register_session_for_monitor("wt-a", "/w/a")
-    m._register_session_for_monitor("wt-b", "/w/b")
-    m._register_session_for_monitor("", "/w/x")        # ignored (no session)
-    m._register_session_for_monitor("wt-c", None)      # ignored (no path)
+    assert m._register_session_for_monitor("wt-a", "/w/a") is True
+    assert m._register_session_for_monitor("wt-b", "/w/b") is True
+    assert m._register_session_for_monitor("", "/w/x") is False    # no session
+    assert m._register_session_for_monitor("wt-c", None) is False  # no path
     reg = m._read_monitor_registry(tmp_path / "reg")
     assert reg == {"wt-a": "/w/a", "wt-b": "/w/b"}
+
+
+@pytest.mark.parametrize(
+    "bad", ["../evil", "wt-../../x", "/abs/path", "wt-a/b", "wt-a\\b", "notwt"])
+def test_registry_rejects_unsafe_session(tmp_path, monkeypatch, bad):
+    """``--session`` is untrusted: a traversal / absolute / non-wt name must be
+    rejected (never escape the registry dir), so it writes nothing."""
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    assert m._valid_monitor_session(bad) is False
+    assert m._register_session_for_monitor(bad, "/w/a") is False
+    if reg.exists():
+        assert list(reg.iterdir()) == []
 
 
 def _capture_set(monkeypatch):
@@ -151,8 +164,9 @@ def test_status_updater_delegates_when_enabled(monkeypatch):
     ensured: list[bool] = []
     monkeypatch.setattr(
         m, "_register_session_for_monitor",
-        lambda sess, path: registered.append((sess, path)))
-    monkeypatch.setattr(m, "_ensure_status_monitor", lambda: ensured.append(True))
+        lambda sess, path: registered.append((sess, path)) or True)
+    monkeypatch.setattr(
+        m, "_ensure_status_monitor", lambda: ensured.append(True) or True)
     # If it fell through to the real loop it would call _render_status_segment;
     # make that explode so a regression is loud.
     monkeypatch.setattr(m, "_render_status_segment", _boom)
@@ -162,6 +176,25 @@ def test_status_updater_delegates_when_enabled(monkeypatch):
     assert rc == 0
     assert registered == [("wt-a", "/w/a")]
     assert ensured == [True]
+
+
+def test_status_updater_falls_back_when_monitor_cannot_start(monkeypatch):
+    """If the monitor can't be ensured, the per-session updater must still run --
+    a session is never left without a status bar (a-la-carte inline fallback)."""
+    monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "1")
+    monkeypatch.setattr(m, "_register_session_for_monitor", lambda s, p: True)
+    monkeypatch.setattr(m, "_ensure_status_monitor", lambda: False)  # spawn failed
+    monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
+    # Prove we REACHED the per-session loop (did not early-return via the monitor
+    # path) by short-circuiting it at its first self-retire check.
+    reached = []
+    monkeypatch.setattr(
+        m, "_runtime_superseded", lambda *a, **k: bool(reached.append(True)) or True)
+
+    rc = m.cmd_status_updater(
+        argparse.Namespace(session="wt-a", mux="tmux", path="/w/a", interval=5))
+    assert rc == 0
+    assert reached  # fell through into the per-session loop
 
 
 def _boom(*a, **k):  # pragma: no cover - only fires on regression

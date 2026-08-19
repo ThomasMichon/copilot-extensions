@@ -5258,11 +5258,11 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
     # Coalescing tier (work-coalescing-singleton): when opted in, one resident
     # status-monitor serves EVERY session instead of a loop per session. Register
     # this session's path (the monitor's refcount), ensure the monitor is up, and
-    # hand off -- this per-session loop does not run. Unset -> unchanged below.
-    if _status_monitor_enabled():
-        _register_session_for_monitor(sess, path)
-        _ensure_status_monitor()
-        return 0
+    # hand off. If registration or the spawn fails, fall through to this
+    # per-session loop so the session is never left without a status bar.
+    if _status_monitor_enabled() and _register_session_for_monitor(sess, path):
+        if _ensure_status_monitor():
+            return 0
 
     # status-updater is a no-project command, so main() never resolved a
     # project for us -- but the status renderers need one to find the
@@ -5440,15 +5440,30 @@ def _monitor_registry_dir() -> Path:
     return _aw_runtime_home() / "status-monitor.d"
 
 
-def _register_session_for_monitor(sess: str, path: str | None) -> None:
+def _valid_monitor_session(sess: str) -> bool:
+    """A safe ``wt-*`` session name usable as a registry filename.
+
+    ``sess`` originates from the untrusted ``--session`` CLI arg, so it must be a
+    bare ``wt-<id>`` token (alphanumerics + ``-._``) with no path separator,
+    ``..``, or absolute component -- otherwise it could escape the registry dir
+    (path traversal / absolute-path write). Every real session is
+    ``wt-<worktree_id>``, so this allow-list costs nothing.
+    """
+    return bool(sess) and sess.startswith("wt-") and ".." not in sess and all(
+        c.isalnum() or c in "-._" for c in sess)
+
+
+def _register_session_for_monitor(sess: str, path: str | None) -> bool:
     """Record ``sess -> worktree path`` so the resident monitor can serve it.
 
     One file per session (``status-monitor.d/<sess>``), so concurrent session
     starts never contend on a shared document -- the registry doubles as the
-    monitor's refcount.  Best-effort; never raises.
+    monitor's refcount.  Returns whether the entry was persisted; the caller
+    falls back to the per-session updater when it was not, so a session is never
+    left without a status bar.  Never raises.
     """
-    if not sess or not path:
-        return
+    if not path or not _valid_monitor_session(sess):
+        return False
     import tempfile
     try:
         d = _monitor_registry_dir()
@@ -5457,8 +5472,9 @@ def _register_session_for_monitor(sess: str, path: str | None) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(str(path))
         os.replace(tmp, str(d / sess))
+        return True
     except OSError:
-        pass
+        return False
 
 
 def _read_monitor_registry(reg_dir: Path) -> dict[str, str]:
@@ -5466,7 +5482,8 @@ def _read_monitor_registry(reg_dir: Path) -> dict[str, str]:
     out: dict[str, str] = {}
     try:
         for f in reg_dir.iterdir():
-            if f.is_file() and not f.name.endswith(".tmp"):
+            if f.is_file() and not f.name.endswith(".tmp") \
+                    and _valid_monitor_session(f.name):
                 try:
                     out[f.name] = f.read_text(encoding="utf-8").strip()
                 except OSError:
@@ -5513,21 +5530,24 @@ def _spawn_detached(argv: list[str]) -> bool:
         return False
 
 
-def _ensure_status_monitor() -> None:
+def _ensure_status_monitor() -> bool:
     """Start the resident monitor unless one is already live on the CURRENT
-    runtime.  Idempotent + cheap: a live, non-superseded monitor is a no-op; a
-    superseded (older-runtime) one is left to self-retire while a current one is
-    spawned to take over."""
+    runtime.  Returns whether a current monitor is believed running (already
+    live, or freshly spawned) -- the caller falls back to the per-session updater
+    when it is not.  Idempotent + cheap: a live, non-superseded monitor is a
+    no-op; a superseded (older-runtime) one is left to self-retire while a
+    current one is spawned to take over."""
     try:
         from . import locks as _locks
         data = _locks.read_lock(_monitor_lock_path())
         if _locks.lock_is_live(data) and isinstance(data, dict):
             other_prefix = data.get("prefix")
             if not other_prefix or not _runtime_superseded(prefix=other_prefix):
-                return
+                return True
     except Exception:
         pass
-    _spawn_detached([sys.executable, "-m", "agent_worktrees", "status-monitor"])
+    return _spawn_detached(
+        [sys.executable, "-m", "agent_worktrees", "status-monitor"])
 
 
 def _monitor_mux_set(mux_bin: str, sess: str, opt: str, val: str) -> None:
