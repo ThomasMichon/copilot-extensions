@@ -277,27 +277,27 @@ def _build_sources():
             is_local = is_local_machine and ename == local_plat
             if is_local:
                 # Local env: in-process, no SSH profile required.
-                out.append(Source(m.display_name, elabel, None, local=True,
+                out.append(Source(m.key, elabel, None, local=True,
                                   ready=True))
                 local_env_added = True
             elif not alias:
                 # No SSH profile for this env -- never try to connect to it;
                 # surface it as a disabled tab.
-                out.append(Source(m.display_name, elabel, None, ready=False,
+                out.append(Source(m.key, elabel, None, ready=False,
                                   alias="", shell=shell))
             elif m.ssh_ready:
                 argv = _argv_for(shell, alias, project, classify=True)
-                out.append(Source(m.display_name, elabel, argv, ready=True,
+                out.append(Source(m.key, elabel, argv, ready=True,
                                   alias=alias, shell=shell))
             else:
-                out.append(Source(m.display_name, elabel, None, ready=False,
+                out.append(Source(m.key, elabel, None, ready=False,
                                   alias=alias, shell=shell))
         # Bypass: the current machine always gets a local source, even when it
         # has no SSH environment of its own in machines.yaml (or none matched
         # the running platform). The picker runs *here*, so it never needs to
         # SSH to itself.
         if is_local_machine and not local_env_added:
-            out.append(Source(m.display_name, local_elabel, None, local=True,
+            out.append(Source(m.key, local_elabel, None, local=True,
                               ready=True))
 
     # Defensive fail-safe: guarantee a local source even when this machine is
