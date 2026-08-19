@@ -11,17 +11,17 @@
   **closes** [`visions/plugins/agent-worktrees`](../../../visions/plugins/agent-worktrees/README.md)
   §*The warm-cache accelerator — optional, on-demand, refcounted, losable* (the
   resident tracker), which is stated-but-unbuilt.
-- **Umbrella issue:** [#736](https://github.com/ThomasMichon/copilot-extensions/issues/736)
-- **Sub-issues:** [#737](https://github.com/ThomasMichon/copilot-extensions/issues/737)
+- **Umbrella issue:** #736
+- **Sub-issues:** #737
   (lease + reaper primitive · enabler),
-  [#738](https://github.com/ThomasMichon/copilot-extensions/issues/738) (bridge
-  strand/churn), [#739](https://github.com/ThomasMichon/copilot-extensions/issues/739)
+  #738 (bridge
+  strand/churn), #739
   (worktrees resident tracker),
-  [#740](https://github.com/ThomasMichon/copilot-extensions/issues/740) (launcher
-  no-block), [#741](https://github.com/ThomasMichon/copilot-extensions/issues/741)
-  (mcp version GC), [#742](https://github.com/ThomasMichon/copilot-extensions/issues/742)
-  (marker atomicity), [#743](https://github.com/ThomasMichon/copilot-extensions/issues/743)
-  (vault cutover), [#744](https://github.com/ThomasMichon/copilot-extensions/issues/744)
+  #740 (launcher
+  no-block), #741
+  (mcp version GC), #742
+  (marker atomicity), #743
+  (vault cutover), #744
   (coalescing tier + mcp multiplexer).
 - **Related:** #625 (lifecycle pecking order), #438 (bridge cutover-on-update),
   #396 (dispatch hot-reconciled supervision), #229 (worktree state store).
