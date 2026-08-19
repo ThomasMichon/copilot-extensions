@@ -156,3 +156,53 @@ cross-checked against a live host running ~7 concurrent sessions) found:
 - Next: Phase 2 (the shared lease + reaper primitive, #737) as the enabler, aligned
   with the upstream process-spawn-guard work so the guard is shared, not
   per-plugin.
+
+### 2026-08-19 — Phases 3-5 landed; Phase 2 primitive extracted; Phase 6 started
+
+Phase 4 & 5 conformance fixes (merged):
+
+- **#741 — agent-mcp version GC on activation** (PR #750). `versioned_runtime.py gc`
+  now runs on successful activation, pruning non-current, non-live slots.
+- **#739 — agent-worktrees resident status-monitor** (PR #752, then default-on
+  opt-out in PR #758). One warm, idle-exiting monitor coalesces the per-session
+  status sweeps and is refcounted + reaped on last-consumer exit, retiring the
+  per-session status-updater fan-out. Opt-out via
+  `AGENT_WORKTREES_STATUS_MONITOR=0`. Realizes the resident-tracker accelerator.
+- **#740 — agent-worktrees no-block launch** (PR #755). The marketplace install
+  is detached from the launch path (safe because slots are immutable), so a
+  burst of session launches no longer serializes on the install lock. Escape
+  hatch `WORKTREE_BLOCKING_INSTALL=1`.
+- **#738 — bridge stranded-passive leak** — resolved by the generation
+  self-retire loop (now default-on / opt-out): a demoted daemon drains and
+  exits on its own once a live, strictly-newer generation has taken over, so a
+  repeated same-version cutover no longer strands a live passive. The *active*
+  reconcile-set reap (retiring strays from the promoted daemon) is available in
+  the Phase 2 primitive below and remains to be wired into the cutover path.
+
+Phase 2 — shared primitive extracted (merged):
+
+- **#737 — single-instance-lease** (PR #759). New pure-stdlib shared library
+  `libs/single-instance-lease` (vendored like `zdd`) with three pieces:
+  `SingleInstance` (an OS-level, liveness-reconciled lease), `is_superseded`
+  (the pure fail-safe self-retire decision on a routing-table dict), and
+  `reconcile_set_reap` + `superseded_pids_from_table` (the fail-soft reaper;
+  process identity is the caller's responsibility, guarding pid reuse).
+  agent-bridge's `singleton.py` and `self_retire.py` are now thin adapters over
+  it, with the historical lock naming and call shapes unchanged. Realizes the
+  `single-instance-lease` vision behavior. Adoption into agent-vault (#743) and
+  wiring the reaper into the active cutover path (#738) build on this next.
+
+Phase 6 — cross-cutting (partial):
+
+- **#742 — marker atomicity + last-known-good** (PR #760). The `current-version`
+  marker was already written atomically; this landed the read-side preference
+  for the canonical agent-worktrees resolver — a 3-tier resolution
+  (marker -> `last-known-good` -> newest slot), with the installer stamping
+  `last-known-good` on activate. The hot path is unchanged. Rolling the same
+  fallback into the other plugins' inlined binstubs is tracked follow-up on #742.
+
+Remaining: Phase 5's optional agent-mcp **multiplexer** (#744, the dominant RAM
+consumer — one heavy stdio bridge per session per server collapses to a thin
+forwarder + one shared `serve` session-map process); Phase 6's agent-vault
+**drain-safe cutover** (#743, now unblocked by the #737 lease primitive); and the
+per-plugin last-known-good rollout (#742).
