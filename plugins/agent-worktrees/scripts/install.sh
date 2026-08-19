@@ -358,6 +358,13 @@ _versioned_activate() {
         return 1
     fi
     ok "Runtime version $SRC_VERSION active (marker -> versions/$SRC_VERSION)"
+    # #742: record the just-activated version as `last-known-good` so a future
+    # marker-absent resolution (resolve-runtime.sh tier 2) prefers it over a
+    # newest-slot guess. Atomic (temp + rename); best-effort, never fatal.
+    if printf '%s\n' "$SRC_VERSION" > "$INSTALL_DIR/last-known-good.tmp.$$" 2>/dev/null; then
+        mv -f "$INSTALL_DIR/last-known-good.tmp.$$" "$INSTALL_DIR/last-known-good" 2>/dev/null \
+            || rm -f "$INSTALL_DIR/last-known-good.tmp.$$" 2>/dev/null
+    fi
     if [[ -n "$prev" ]]; then
         "$VENV_PYTHON" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids --keep "$prev" 2>&1 | sed 's/^/  → gc: /' || true
     else
