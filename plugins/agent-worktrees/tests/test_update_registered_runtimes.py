@@ -259,6 +259,82 @@ def test_no_config_is_noop(monkeypatch):
     m._reconcile_registered_runtimes(Path("/plugin/dir"), "linux", force=True)
 
 
+def _capture_init_installers(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """Capture runtime invocations for an init-only plugin: only init.sh exists.
+
+    Mirrors ``_capture_installers`` but for the init-only shape (agent-machines,
+    agent-mcp, agent-containers) that ships ``scripts/init.sh`` and NO
+    ``install.sh`` -- the case the update reconcile used to skip with
+    ``installer not found`` for a plugin that ships only an init script.
+    """
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kw):
+        calls.append(list(argv))
+        return _ok()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    real_exists = Path.exists
+
+    def fake_exists(self):
+        s = str(self)
+        if s.endswith("install.sh"):
+            return False
+        if s.endswith("init.sh"):
+            return True
+        return real_exists(self)
+
+    monkeypatch.setattr(Path, "exists", fake_exists)
+    return calls
+
+
+def _init_calls(calls: list[list[str]]) -> list[list[str]]:
+    return [c for c in calls if any(str(t).endswith("init.sh") for t in c)]
+
+
+def test_init_only_plugin_falls_back_to_init_sh(monkeypatch):
+    """An init-only runtime reconciles via init.sh instead of reporting 'installer not found'."""
+    _install_config(monkeypatch)
+    _stub_reconcile(
+        monkeypatch,
+        enabled=["agent-machines"],
+        scopes={"agent-machines": "machine-gated"},
+        deployed={"agent-machines": "0.1.0-dev18"},
+        payload={"agent-machines": "0.1.0-dev24"},
+    )
+    calls = _capture_init_installers(monkeypatch)
+    m._reconcile_registered_runtimes(Path("/plugin/dir"), "linux", force=False)
+    inits = _init_calls(calls)
+    assert len(inits) == 1
+    argv = inits[0]
+    assert argv[0] == "bash"
+    assert argv[-1].endswith("scripts/init.sh")  # bootstrap has no 'update' subcommand
+    assert "update" not in argv
+    assert "--force" not in argv
+
+
+def test_init_only_plugin_forced_passes_force_flag(monkeypatch):
+    """A forced reconcile of an init-only runtime passes --force to the bootstrap."""
+    _install_config(monkeypatch)
+    _stub_reconcile(
+        monkeypatch,
+        enabled=["agent-machines"],
+        scopes={"agent-machines": "machine-gated"},
+        deployed={"agent-machines": "0.1.0-dev24"},  # same version as payload
+        payload={"agent-machines": "0.1.0-dev24"},
+    )
+    calls = _capture_init_installers(monkeypatch)
+    m._reconcile_registered_runtimes(Path("/plugin/dir"), "linux", force=True)
+    inits = _init_calls(calls)
+    assert len(inits) == 1
+    argv = inits[0]
+    assert argv[0] == "bash"
+    assert argv[-1] == "--force"
+    assert argv[-2].endswith("scripts/init.sh")
+    assert "update" not in argv
+
+
 def test_module_names_reads_manifest(tmp_path):
     (tmp_path / "modules.json").write_text(
         json.dumps({"modules": [{"name": "agent-bridge"}, {"name": "x"}]}),
