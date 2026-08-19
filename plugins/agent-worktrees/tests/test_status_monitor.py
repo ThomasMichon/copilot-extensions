@@ -29,8 +29,9 @@ def test_status_monitor_registered():
 
 @pytest.mark.parametrize(
     "val,expected",
-    [("1", True), ("true", True), ("YES", True), ("on", True),
-     ("0", False), ("", False), ("nope", False)],
+    [("1", True), ("true", True), ("YES", True), ("on", True), ("", True),
+     ("nope", True), ("0", False), ("false", False), ("no", False),
+     ("off", False)],
 )
 def test_enabled_env(monkeypatch, val, expected):
     monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR", val)
@@ -38,8 +39,9 @@ def test_enabled_env(monkeypatch, val, expected):
 
 
 def test_enabled_env_unset(monkeypatch):
+    """Default-on: absent the env var, the monitor is enabled (opt-out)."""
     monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
-    assert m._status_monitor_enabled() is False
+    assert m._status_monitor_enabled() is True
 
 
 def test_registry_roundtrip(tmp_path, monkeypatch):
