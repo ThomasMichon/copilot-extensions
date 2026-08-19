@@ -10027,8 +10027,10 @@ def _reconcile_registered_runtimes(
     #1025). This reconciles them here, mirroring the launch-path reconciler:
 
     * **version-keyed** by default -- run the plugin's ``scripts/install.*
-      update`` only when its deployed runtime version differs from its freshly
-      refreshed payload version (or no runtime is deployed yet);
+      update`` (or its ``scripts/init.*`` bootstrap, for init-only plugins --
+      see ``_reconcile_one_runtime``) only when its deployed runtime version
+      differs from its freshly refreshed payload version (or no runtime is
+      deployed yet);
     * **forced** under ``--force`` -- run the installer regardless of version,
       so a same-version content drift (a dev checkout, or a marketplace artifact
       whose stamp lagged) is repaired. The installer force-reinstalls the
@@ -10110,16 +10112,35 @@ def _reconcile_one_runtime(name: str, platform: str, *, force: bool) -> str:
         if pver and dver and reconcile._versions_equal(dver, pver):
             return "SKIPPED (current)"
 
+    # Resolve the runtime installer with the SAME preference the launch-path
+    # reconciler uses (``reconcile.runtime_installer_argv``): prefer
+    # ``install.{sh,ps1} update``, else fall back to the ``init.{sh,ps1}``
+    # idempotent bootstrap for plugins that ship only an init script
+    # (agent-machines, agent-mcp, agent-containers). Without this fallback the
+    # update path reported ``installer not found`` and left those init-only
+    # runtimes pinned to a stale version slot forever, even though the launch
+    # path already advanced them. The bootstrap has no ``update``
+    # subcommand, so a forced reconcile passes the installer's own force flag
+    # (``--force`` / ``-Force``) to repair a same-version content drift.
     if platform == "windows":
-        installer = pdir / "scripts" / "install.ps1"
         shell = shutil.which("pwsh") or shutil.which("powershell")
         if not shell:
             return "powershell not found"
-        argv = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass",
-                "-File", str(installer), "update"]
+        installer = pdir / "scripts" / "install.ps1"
+        if installer.exists():
+            argv = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass",
+                    "-File", str(installer), "update"]
+        else:
+            installer = pdir / "scripts" / "init.ps1"
+            argv = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass",
+                    "-File", str(installer)] + (["-Force"] if force else [])
     else:
         installer = pdir / "scripts" / "install.sh"
-        argv = ["bash", str(installer), "update"]
+        if installer.exists():
+            argv = ["bash", str(installer), "update"]
+        else:
+            installer = pdir / "scripts" / "init.sh"
+            argv = ["bash", str(installer)] + (["--force"] if force else [])
     if not installer.exists():
         return "installer not found"
 
