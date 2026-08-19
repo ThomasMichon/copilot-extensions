@@ -309,7 +309,7 @@ def test_button_row_confirm_via_row(monkeypatch, tmp_path):
     assert app.result == {"feedback": "x"}
 
 
-def test_auto_expand_grows_with_lines(monkeypatch, tmp_path):
+def test_textarea_auto_height(monkeypatch, tmp_path):
     _drafts(monkeypatch, tmp_path)
     scr = PivotFormScreen(_card(), [{"name": "notes", "type": "textarea"}],
                           "Steer", task_id="t-grow")
@@ -320,12 +320,161 @@ def test_auto_expand_grows_with_lines(monkeypatch, tmp_path):
         async with app.run_test(size=(120, 45)) as pilot:
             await pilot.pause()
             ta = scr.query_one("#q-0", _AutoExpandTextArea)
-            heights["min"] = ta.styles.height.value
-            ta.text = "\n".join(f"line {i}" for i in range(20))
-            ta.autosize()
+            # CSS height:auto -> the widget sizes to content, bounded by
+            # min/max-height (no manual line math, no off-by-one).
+            assert str(ta.styles.height) == "auto"
+            heights["one"] = ta.outer_size.height
+            ta.text = "\n".join(f"line {i}" for i in range(30))
             await pilot.pause()
-            heights["max"] = ta.styles.height.value
+            heights["many"] = ta.outer_size.height
 
     asyncio.run(run())
-    assert heights["min"] == 3            # min_lines floor
-    assert heights["max"] == 10           # capped at max_lines
+    assert heights["many"] > heights["one"]     # grew with content
+    assert heights["many"] <= 12                # capped by max-height
+
+
+# ---- keyboard flow (Copilot-CLI mechanics) ----------------------------------
+
+
+def _flow_fields():
+    return [
+        {"name": "decision", "type": "choice", "options": ["revise", "post-approved"]},
+        {"name": "severity", "type": "choice", "options": ["low", "high"],
+         "allow_other": True},
+        {"name": "tags", "type": "multichoice", "options": ["perf", "api"],
+         "allow_other": True},
+    ]
+
+
+def test_enter_advances_shift_enter_newlines(monkeypatch, tmp_path):
+    _drafts(monkeypatch, tmp_path)
+    scr = PivotFormScreen(_card(), [{"name": "feedback", "type": "textarea"},
+                                    {"name": "decision", "type": "choice",
+                                     "options": ["a", "b"]}],
+                          "Steer", task_id="t-flow1")
+    app = _Host(scr)
+
+    async def run():
+        async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+            ta = scr.query_one("#q-0", _AutoExpandTextArea)
+            ta.focus()
+            await pilot.pause()
+            ta.text = "one"
+            await pilot.press("shift+enter")     # inserts a newline (grow)
+            await pilot.pause()
+            assert "\n" in ta.text
+            await pilot.press("enter")           # accept + advance to q-1
+            await pilot.pause()
+            assert app.focused.id == "q-1"
+
+    asyncio.run(run())
+
+
+def test_space_stays_enter_advances_on_radio(monkeypatch, tmp_path):
+    _drafts(monkeypatch, tmp_path)
+    scr = PivotFormScreen(_card(), _flow_fields(), "Steer", task_id="t-flow2")
+    app = _Host(scr)
+
+    async def run():
+        async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+            scr.query_one("#q-0", RadioSet).focus()
+            await pilot.pause()
+            await pilot.press("down")
+            await pilot.press("space")           # toggle without advancing
+            await pilot.pause()
+            assert app.focused.id == "q-0"        # stayed
+            assert scr.query_one("#q-0", RadioSet).pressed_index == 1
+            await pilot.press("enter")            # toggle + advance
+            await pilot.pause()
+            assert app.focused.id == "q-1"
+
+    asyncio.run(run())
+
+
+def test_enter_on_other_focuses_box_then_advances(monkeypatch, tmp_path):
+    _drafts(monkeypatch, tmp_path)
+    scr = PivotFormScreen(_card(), _flow_fields(), "Steer", task_id="t-flow3")
+    app = _Host(scr)
+
+    async def run():
+        async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+            sev = scr.query_one("#q-1", RadioSet)
+            sev.focus()
+            await pilot.pause()
+            # highlight "Other…" (index 2 = after low/high), Enter -> focus the box
+            await pilot.press("down")
+            await pilot.press("down")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert app.focused.id == "other-1"
+            assert scr.query_one("#other-1", _AutoExpandTextArea).display is True
+            # typing + Enter from the Other box advances to the next question
+            await pilot.press("h")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert app.focused.id == "q-2"
+
+    asyncio.run(run())
+
+
+def test_ctrl_arrows_cycle_tabs(monkeypatch, tmp_path):
+    _drafts(monkeypatch, tmp_path)
+    scr = PivotFormScreen(_card(), _flow_fields(), "Steer", task_id="t-tabs")
+    app = _Host(scr)
+    from textual.widgets import TabbedContent
+
+    async def run():
+        async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+            tabs = scr.query_one("#steer-tabs", TabbedContent)
+            assert tabs.active == "tab-0"
+            await pilot.press("ctrl+right")
+            await pilot.pause()
+            assert tabs.active == "tab-1"
+            await pilot.press("ctrl+left")
+            await pilot.press("ctrl+left")       # wrap backwards 0 -> 2
+            await pilot.pause()
+            assert tabs.active == "tab-2"
+
+    asyncio.run(run())
+
+
+def test_last_field_enter_focuses_confirm(monkeypatch, tmp_path):
+    _drafts(monkeypatch, tmp_path)
+    scr = PivotFormScreen(_card(), [{"name": "feedback", "type": "textarea"}],
+                          "Steer", task_id="t-last")
+    app = _Host(scr)
+    from agent_worktrees.picker_tui.engine import SteerButtonRow
+
+    async def run():
+        async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+            scr.query_one("#q-0", _AutoExpandTextArea).focus()
+            await pilot.pause()
+            await pilot.press("enter")            # last field -> button row
+            await pilot.pause()
+            assert isinstance(app.focused, SteerButtonRow)
+
+    asyncio.run(run())
+
+
+def test_card_prose_linkifies_urls(monkeypatch, tmp_path):
+    _drafts(monkeypatch, tmp_path)
+    card = {"title": "T", "body": "See https://ado/pr/2312460 for details."}
+    scr = PivotFormScreen(card, [{"name": "feedback", "type": "textarea"}],
+                          "Steer", task_id="t-link")
+    app = _Host(scr)
+
+    async def run():
+        async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+            rendered = scr.query_one("#steer-card-body").render()
+            # A span carries the URL as an OSC-8 link.
+            links = [sp for sp in rendered.spans
+                     if getattr(sp.style, "link", None) == "https://ado/pr/2312460"]
+            assert links, "URL should render as a clickable link span"
+
+    asyncio.run(run())
