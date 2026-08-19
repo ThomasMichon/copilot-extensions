@@ -5428,7 +5428,6 @@ _STATUS_MONITOR_ENV = "AGENT_WORKTREES_STATUS_MONITOR"
 
 
 def _status_monitor_enabled() -> bool:
-    """Whether the resident coalescing monitor is opted into via env."""
     """Whether the resident coalescing monitor is active (default-ON / opt-out).
 
     Enabled unless ``AGENT_WORKTREES_STATUS_MONITOR`` is explicitly falsy
