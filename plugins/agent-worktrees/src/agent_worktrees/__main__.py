@@ -5052,7 +5052,7 @@ def cmd_status_context(args: argparse.Namespace) -> int:
     return 0
 
 
-def _activate_project_for_path(path: str | None) -> None:
+def _activate_project_for_path(path: str | None, *, force: bool = False) -> None:
     """Resolve + thread the active project in-process from a worktree path.
 
     ``status-updater`` is a ``_NO_PROJECT_COMMANDS`` entry, so ``main()``
@@ -5066,19 +5066,26 @@ def _activate_project_for_path(path: str | None) -> None:
     Resolve the project git-like from the path's anchor (the same reverse
     lookup ``main()`` uses for CWD) and set it in process, so the status
     renderers can find the worktree's record.  A no-op when a project is
-    already active or the path is not inside an adopted repo.
+    already active or the path is not inside an adopted repo -- unless ``force``
+    is set, which is what the resident ``status-monitor`` uses to *switch* the
+    active project per session as it sweeps across worktrees in different repos.
     """
-    if cfg.active_project():
+    if not force and cfg.active_project():
         return
+    name = None
     try:
         anchor = _git_toplevel(Path(path) if path else Path.cwd())
-        if anchor is None:
-            return
-        name = _reverse_lookup_project(anchor)
-        if name:
-            cfg.set_active_project(name)
+        if anchor is not None:
+            name = _reverse_lookup_project(anchor)
     except Exception:
-        pass
+        name = None
+    if name:
+        cfg.set_active_project(name)
+    elif force:
+        # Under ``force`` (the resident monitor sweeping across repos), never
+        # leave a PRIOR session's project active: clear it so an unresolved path
+        # can't render with the previous session's identity/title.
+        cfg.set_active_project(None)
 
 
 def _slot_superseded(active: str, mine: str, versions_root: str) -> bool:
@@ -5253,6 +5260,15 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
     path = args.path or os.getcwd()
     interval = args.interval if args.interval and args.interval >= 2 else 15
 
+    # Coalescing tier (work-coalescing-singleton): when opted in, one resident
+    # status-monitor serves EVERY session instead of a loop per session. Register
+    # this session's path (the monitor's refcount), ensure the monitor is up, and
+    # hand off. If registration or the spawn fails, fall through to this
+    # per-session loop so the session is never left without a status bar.
+    if _status_monitor_enabled() and _register_session_for_monitor(sess, path):
+        if _ensure_status_monitor():
+            return 0
+
     # status-updater is a no-project command, so main() never resolved a
     # project for us -- but the status renderers need one to find the
     # worktree's tracking record (repo:id locus + session title).  Resolve it
@@ -5389,6 +5405,314 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
             seg = ""
         _set("@aw_seg", seg)
         time.sleep(interval)
+    return 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# status-monitor -- one resident, coalescing tracker for ALL sessions
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# The per-session ``status-updater`` pays one resident Python process *per live
+# session*.  With many concurrent worktree sessions that is N interpreters, each
+# polling its own bar.  ``status-monitor`` consolidates them into the
+# work-coalescing-singleton service tier: a single resident process refreshes
+# every ``wt-*`` session's bar in one coalesced sweep, lives only while at least
+# one session is registered, and idle-exits when the last one goes.  It is
+# strictly **opt-in** via ``AGENT_WORKTREES_STATUS_MONITOR`` -- unset, the
+# per-session updater is unchanged (a-la-carte: the inline path stays correct
+# with no daemon).  Single-active on the host via a liveness lock; a superseded
+# runtime self-retires (mirrors the updater's #911 behaviour).
+
+_STATUS_MONITOR_ENV = "AGENT_WORKTREES_STATUS_MONITOR"
+
+
+def _status_monitor_enabled() -> bool:
+    """Whether the resident coalescing monitor is opted into via env."""
+    return os.environ.get(_STATUS_MONITOR_ENV, "").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
+def _aw_runtime_home() -> Path:
+    """The shared runtime root (``~/.agent-worktrees``)."""
+    return Path(os.path.expanduser("~")) / ".agent-worktrees"
+
+
+def _monitor_lock_path() -> Path:
+    return _aw_runtime_home() / "status-monitor.lock"
+
+
+def _monitor_registry_dir() -> Path:
+    return _aw_runtime_home() / "status-monitor.d"
+
+
+def _valid_monitor_session(sess: str) -> bool:
+    """A safe ``wt-*`` session name usable as a registry filename.
+
+    ``sess`` originates from the untrusted ``--session`` CLI arg, so it must be a
+    bare ``wt-<id>`` token (alphanumerics + ``-._``) with no path separator,
+    ``..``, or absolute component -- otherwise it could escape the registry dir
+    (path traversal / absolute-path write). Every real session is
+    ``wt-<worktree_id>``, so this allow-list costs nothing.
+    """
+    return bool(sess) and sess.startswith("wt-") and ".." not in sess and all(
+        c.isalnum() or c in "-._" for c in sess)
+
+
+def _register_session_for_monitor(sess: str, path: str | None) -> bool:
+    """Record ``sess -> worktree path`` so the resident monitor can serve it.
+
+    One file per session (``status-monitor.d/<sess>``), so concurrent session
+    starts never contend on a shared document -- the registry doubles as the
+    monitor's refcount.  Returns whether the entry was persisted; the caller
+    falls back to the per-session updater when it was not, so a session is never
+    left without a status bar.  Never raises.
+    """
+    if not path or not _valid_monitor_session(sess):
+        return False
+    import tempfile
+    try:
+        d = _monitor_registry_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=sess + ".", suffix=".tmp", dir=str(d))
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(str(path))
+        os.replace(tmp, str(d / sess))
+        return True
+    except OSError:
+        return False
+
+
+def _read_monitor_registry(reg_dir: Path) -> dict[str, str]:
+    """Map ``session name -> worktree path`` from the registry dir (best-effort)."""
+    out: dict[str, str] = {}
+    try:
+        for f in reg_dir.iterdir():
+            if f.is_file() and not f.name.endswith(".tmp") \
+                    and _valid_monitor_session(f.name):
+                try:
+                    out[f.name] = f.read_text(encoding="utf-8").strip()
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return out
+
+
+def _remove_monitor_entry(reg_dir: Path, sess: str) -> None:
+    try:
+        (reg_dir / sess).unlink()
+    except OSError:
+        pass
+
+
+def _spawn_detached(argv: list[str]) -> bool:
+    """Detached-spawn a fixed, trusted argv rooted at HOME.
+
+    Rooted at HOME (never the plugin payload dir): a detached child that keeps
+    the payload dir as its cwd holds an open handle that blocks
+    ``copilot plugin update`` on Windows.  Never raises.
+    """
+    kwargs: dict = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "cwd": os.path.expanduser("~"),
+    }
+    if os.name == "nt":
+        DETACHED_PROCESS = 0x00000008
+        CREATE_NEW_PROCESS_GROUP = 0x00000200
+        CREATE_NO_WINDOW = 0x08000000
+        CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+        kwargs["creationflags"] = (
+            DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+            | CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB)
+    else:
+        kwargs["start_new_session"] = True
+    try:
+        subprocess.Popen(argv, **kwargs)  # detached: fixed, trusted argv
+        return True
+    except Exception:
+        return False
+
+
+def _ensure_status_monitor() -> bool:
+    """Start the resident monitor unless one is already live on the CURRENT
+    runtime.  Returns whether a current monitor is believed running (already
+    live, or freshly spawned) -- the caller falls back to the per-session updater
+    when it is not.  Idempotent + cheap: a live, non-superseded monitor is a
+    no-op; a superseded (older-runtime) one is left to self-retire while a
+    current one is spawned to take over."""
+    try:
+        from . import locks as _locks
+        data = _locks.read_lock(_monitor_lock_path())
+        if _locks.lock_is_live(data) and isinstance(data, dict):
+            other_prefix = data.get("prefix")
+            if not other_prefix or not _runtime_superseded(prefix=other_prefix):
+                return True
+    except Exception:
+        pass
+    return _spawn_detached(
+        [sys.executable, "-m", "agent_worktrees", "status-monitor"])
+
+
+def _monitor_mux_set(mux_bin: str, sess: str, opt: str, val: str) -> None:
+    """Push a session-scoped mux option (best-effort, bounded)."""
+    try:
+        subprocess.run([mux_bin, "set-option", "-t", sess, opt, val],
+                       capture_output=True, text=True, timeout=15)
+    except Exception:
+        pass
+
+
+def _monitor_list_sessions(mux_bin: str) -> dict[str, int] | None:
+    """Enumerate mux sessions with the monitor's OWN selected binary.
+
+    ``sessions._list_mux_sessions`` chooses tmux/psmux by *platform*, which can
+    disagree with the binary ``cmd_status_monitor`` actually resolved
+    (psmux-if-present) -- a mismatch would enumerate the wrong multiplexer and
+    return nothing every sweep, so the monitor neither serves nor idle-exits.
+    Query ``mux_bin`` directly instead.  Returns ``{session_name: attached}`` or
+    ``None`` on a transient failure (so the caller neither prunes nor exits).
+    """
+    try:
+        r = subprocess.run(
+            [mux_bin, "list-sessions", "-F",
+             "#{session_name}:#{session_attached}"],
+            capture_output=True, text=True, timeout=15)
+    except Exception:
+        return None
+    if r.returncode != 0:
+        return None
+    out: dict[str, int] = {}
+    for line in (r.stdout or "").strip().splitlines():
+        if ":" not in line:
+            continue
+        name, _, cnt = line.rpartition(":")
+        try:
+            out[name] = int(cnt)
+        except ValueError:
+            out[name] = 0
+    return out
+
+
+def _monitor_sweep(
+    mux_bin: str, token: str, prefix: str, ctx_done: set[str],
+) -> int:
+    """One coalescing pass over all live, registered ``wt-*`` sessions.
+
+    Returns the number of sessions served, or ``-1`` on a *transient* mux
+    enumeration failure (so the caller neither prunes nor idle-exits on a
+    hiccup).  For each served session it wins the ``@aw_updater`` election (so a
+    lingering per-session updater stands down), renders ``@aw_ctx`` once and
+    ``@aw_seg`` every pass -- the same renders the per-session updater did,
+    coalesced into one process.  Registry entries whose session is definitively
+    gone are pruned.
+    """
+    live = _monitor_list_sessions(mux_bin)
+    if live is None:
+        return -1
+    live_wt = {n for n in live if n.startswith("wt-")}
+    reg_dir = _monitor_registry_dir()
+    registry = _read_monitor_registry(reg_dir)
+    for sess in [s for s in registry if s not in live_wt]:
+        _remove_monitor_entry(reg_dir, sess)
+        registry.pop(sess, None)
+        ctx_done.discard(sess)
+    served = [(s, p) for s, p in registry.items() if s in live_wt and p]
+    for sess, path in served:
+        try:
+            _activate_project_for_path(path, force=True)
+        except Exception:
+            pass
+        # Win the single-instance election so any per-session updater retires,
+        # publishing our current-runtime prefix so it defers to us (not to a
+        # superseded owner) -- see cmd_status_updater's debounce.
+        _monitor_mux_set(mux_bin, sess, "@aw_updater", token)
+        _monitor_mux_set(mux_bin, sess, "@aw_updater_prefix", prefix)
+        if sess not in ctx_done:
+            try:
+                _monitor_mux_set(
+                    mux_bin, sess, "@aw_ctx",
+                    _render_status_context(path, plain=False))
+                ctx_done.add(sess)
+            except Exception:
+                pass
+        try:
+            seg = _render_status_segment(
+                path, fetch=False, plain=False, no_title=False,
+                persist_title=True)
+        except Exception:
+            seg = ""
+        _monitor_mux_set(mux_bin, sess, "@aw_seg", seg)
+    return len(served)
+
+
+def cmd_status_monitor(args: argparse.Namespace) -> int:
+    """One resident, coalescing tracker for every ``wt-*`` session's status bar.
+
+    Replaces N per-session ``status-updater`` loops with a single sweep on the
+    interval.  Single-active on the host via a liveness lock; idle-exits after a
+    short run of empty sweeps (the last session left -- a new session start
+    re-spawns it); self-retires when a newer runtime supersedes it.
+    """
+    import shutil
+    import time
+    from . import locks as _locks
+
+    mux = ("psmux" if shutil.which("psmux") else
+           ("tmux" if shutil.which("tmux") else None))
+    if not mux:
+        return 0
+    mux_bin = shutil.which(mux) or mux
+    interval = args.interval if getattr(args, "interval", None) \
+        and args.interval >= 2 else 15
+
+    lock = _monitor_lock_path()
+    my_prefix = os.path.realpath(sys.prefix)
+    token = str(os.getpid())
+
+    def _other_current_monitor() -> bool:
+        """A *different*, live monitor on a non-superseded runtime owns the host."""
+        d = _locks.read_lock(lock)
+        if not (_locks.lock_is_live(d) and isinstance(d, dict)):
+            return False
+        if d.get("pid") == os.getpid():
+            return False
+        op = d.get("prefix")
+        return not (op and _runtime_superseded(prefix=op))
+
+    # Single-active: stand down if a current monitor already owns the host.
+    if _other_current_monitor():
+        return 0
+    _locks.write_lock(lock, extra={"prefix": my_prefix})
+
+    ctx_done: set[str] = set()
+    empty_strikes = 0
+    _MAX_EMPTY_STRIKES = 3
+    try:
+        while True:
+            if _runtime_superseded():
+                break  # a newer runtime took over -> retire; it re-spawns current
+            if _other_current_monitor():
+                return 0  # a current successor claimed the lock -> stand down
+            _locks.write_lock(lock, extra={"prefix": my_prefix})
+
+            served = _monitor_sweep(mux_bin, token, my_prefix, ctx_done)
+            if served < 0:
+                time.sleep(interval)  # transient mux failure: hold, don't exit
+                continue
+            if served == 0:
+                empty_strikes += 1
+                if empty_strikes >= _MAX_EMPTY_STRIKES:
+                    break  # idle-exit: no sessions remain
+            else:
+                empty_strikes = 0
+            time.sleep(interval)
+    finally:
+        # Release the lock only if it is still ours (never clobber a successor).
+        d = _locks.read_lock(lock)
+        if isinstance(d, dict) and d.get("pid") == os.getpid():
+            _locks.remove_lock(lock)
     return 0
 
 
@@ -6816,7 +7140,7 @@ _LAUNCHER_SIGNATURES = ("launch-session", "-m agent_worktrees",
 # present -- services/daemons, ACP/stdio sessions, and the reaper's own verbs.
 _LAUNCHER_REAP_VETOES = (
     "serve-service", "agent_dispatch", "agent-dispatch", "telemetry",
-    "status-updater", "vault", "--acp", "--stdio",
+    "status-updater", "status-monitor", "vault", "--acp", "--stdio",
     "reap-shells", "reap_shells", "reap-sessions",
 )
 # Descendant image names that mark a LIVE session under a launcher shell ->
@@ -10883,6 +11207,7 @@ _WORKTREE_VERBS = {
     "status-segment": "status-segment",
     "status-context": "status-context",
     "status-updater": "status-updater",
+    "status-monitor": "status-monitor",
     "push": "push-changes",
     "push-changes": "push-changes",
     "create-pr": "create-pr",
@@ -13531,6 +13856,15 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Worktree path to classify (default: current directory)")
     p.add_argument("--interval", type=int, default=15,
                    help="Disposition refresh cadence in seconds (min 2)")
+    # status-monitor (one resident coalescing tracker for ALL wt-* sessions)
+    p = sub.add_parser(
+        "status-monitor",
+        help="Resident, coalescing status tracker for every wt-* session "
+             "(one process instead of one per session; opt-in via "
+             "AGENT_WORKTREES_STATUS_MONITOR)",
+    )
+    p.add_argument("--interval", type=int, default=15,
+                   help="Sweep cadence in seconds (min 2)")
     # handoff-cutover (live-cutover handoff: seeded successor window + pane retire)
     p = sub.add_parser(
         "handoff-cutover",
@@ -15385,6 +15719,7 @@ COMMAND_MAP = {
     "status-segment": cmd_status_segment,
     "status-context": cmd_status_context,
     "status-updater": cmd_status_updater,
+    "status-monitor": cmd_status_monitor,
     "handoff-cutover": cmd_handoff_cutover,
     "embody": cmd_embody,
     "list": cmd_list,
@@ -15760,7 +16095,7 @@ def _git_toplevel(path: Path | None) -> Path | None:
 # and balks helpfully when neither is available.
 _NO_PROJECT_COMMANDS = {
     "--version", "-V", "--help", "-h", "repos", "accounts", "related", "install", "register", "hook",
-    "picker", "reap-shells", "status-updater", "restart", "register-session",
+    "picker", "reap-shells", "status-updater", "status-monitor", "restart", "register-session",
     "head-session", "conclude-session", "link-succession", "config-migrate",
     "session-lock", "machine-context", "reconcile-binstubs",
     "register-project-entry",

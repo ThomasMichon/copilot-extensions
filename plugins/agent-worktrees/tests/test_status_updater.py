@@ -15,8 +15,6 @@ import subprocess
 import sys
 import time
 
-import pytest
-
 from agent_worktrees import __main__ as m
 from agent_worktrees import update_stage as us
 
@@ -294,25 +292,14 @@ def test_slot_superseded_no_partial_prefix_match():
     assert m._slot_superseded(f"{root}/dev5", mine, root) is False
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="Requires symlink privilege: the active-slot check resolves via "
-           "realpath, but Windows non-dev-mode falls back to a dir copy.",
-)
 def test_runtime_superseded_true_when_active_slot_differs(tmp_path):
     versions = tmp_path / "versions"
     (versions / "dev4").mkdir(parents=True)
     (versions / "dev5").mkdir(parents=True)
-    # active .venv realpath -> dev5; this process pretends to run from dev4.
-    active = versions / "dev5"
-    venv = tmp_path / ".venv"
-    try:
-        venv.symlink_to(active, target_is_directory=True)
-    except (OSError, NotImplementedError):
-        # No symlink privilege (Windows non-dev-mode): fall back to a real dir
-        # copy so realpath still resolves under versions/.
-        import shutil as _sh
-        _sh.copytree(active, venv)
+    # The current-version marker names the active slot (dev5); this process
+    # pretends to run from dev4 -- an older, superseded slot. Resolution is
+    # marker-based (junction-free, #1106), so no symlink privilege is needed.
+    (tmp_path / "current-version").write_text("dev5", encoding="utf-8")
     assert m._runtime_superseded(
         prefix=str(versions / "dev4"), install_root=tmp_path
     ) is True
