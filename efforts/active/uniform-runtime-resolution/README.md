@@ -1,0 +1,112 @@
+# Uniform Runtime Resolution — one way to spawn the versioned interpreter
+
+- **Slug:** `uniform-runtime-resolution`
+- **Repo:** copilot-extensions (PR-required `main`, self-merge)
+- **Branch(es):** per-phase `pr/<slug>` worktrees → landed to `main`
+- **Created:** 2026-08-19
+- **Status:** Active <!-- Draft | Active | Blocked | Done -->
+- **Intent:** **extends** the deploy contract
+  ([`docs/install-contract.md`](../../../docs/install-contract.md)) — today it
+  states a **dual** resolution model (Windows resolves the active slot directly
+  from the `current-version` marker; POSIX resolves *through* a `venv`/`.venv`
+  **symlink** that the marker publishes). This effort makes resolution
+  **marker-only on every OS** (the model `agent-worktrees` already proved in
+  #1106), and **closes** the genuinely-divergent drift the dual model let creep
+  in (a bare `python3`-on-PATH fallback, a cross-plugin `~/.agent-bridge/venv`
+  reference, and per-plugin resolvers that disagree on the fallback order).
+  Adds a **how-we-build** pattern: `docs/patterns/uniform-runtime-resolution.md`.
+- **Umbrella issue:** #765
+
+## Guiding Intent
+
+There must be **exactly one way** a versioned-runtime plugin's Python interpreter
+is resolved and spawned — reachable identically from a `~/.local/bin` binstub, a
+systemd user unit or scheduled task, a service/daemon launcher, and an agent
+shelling the binstub via a skill. Today there is not: the resolution logic is
+**copy-pasted into every plugin's install script and binstub**, and the copies
+have diverged into at least four methods:
+
+1. **Marker → slot, junction-free, 3-tier** (`current-version` →
+   `last-known-good` → newest complete slot) — `agent-worktrees` only
+   (`resolve-runtime.sh`/`.ps1`; the robust target).
+2. **Hardcoded `~/.<svc>/.venv/bin/python`** — most plugins on POSIX (the retired
+   stable-link; a **junction/reparse point on Windows** that RedirectionGuard
+   blocks with WinError 448, the exact hazard #1106 removed).
+3. **Marker → slot, inlined per-plugin with a *newest-slot* fallback and no
+   last-known-good** — several plugins' Windows launch lines; resolves
+   *differently* from (1) during a version swap, so two callers can bind
+   different slots.
+4. **Bare `python3` on PATH** (`agent-index/ensure-service.sh`) and a cross-plugin
+   `~/.agent-bridge/venv/bin/python` reference (`agent-codespaces`) — a service
+   under the **system** interpreter, or a second link-name variant.
+
+The consequence is exactly the failure the single-instance model exists to
+prevent: the same service launched by its `.venv` binstub and by a
+marker-resolving caller can bind **different slots mid-swap**; on Windows the
+`.venv` path fails outright; and a service can silently come up under the wrong
+interpreter. **Durable runtimes are out of scope** — a heavy engine's own
+`~/.<svc>/engine/.venv` (see `patterns/durable-vs-versioned-runtime`) is a
+separate, intentional runtime and keeps its explicit venv.
+
+## The uniform method
+
+- **`versioned_runtime.resolve_python(root)`** — the one canonical resolution in
+  the shared primitive: `current-version` marker → `last-known-good` → newest
+  **complete** slot, junction-free, **never** a `venv`/`.venv` link, **never** a
+  PATH python. `activate()` stamps `last-known-good` atomically alongside the
+  marker so the fallback always has the last-active version to prefer. A
+  `resolve-python` CLI subcommand exposes it to shell/install callers.
+- **Canonical parameterized shell resolvers** — one `resolve-runtime.sh` /
+  `resolve-runtime.ps1`, service-parameterized (`AGENT_RT_ROOT` + module +
+  console-script), fanned out **byte-identically** to every plugin (like
+  `versioned_runtime.py`) and **embedded** into every self-contained binstub
+  from one template — so a binstub, a hook, and a service launcher all resolve
+  identically with no external dependency.
+- **Python callers** (service/daemon launch, `agent_worktrees.config.venv_python`,
+  the agent-bridge spawn path) call `resolve_python(root)`.
+- **Agents/skills** inherit uniformity for free: skill-directed calls go through
+  the binstubs, which now all resolve identically.
+- **A guard** (`tools/check-runtime-resolution.py`) fails the build on any launch
+  path that resolves through a `venv`/`.venv` link, falls back to a PATH python,
+  or inlines a non-canonical resolver.
+
+## Plan (phased PRs)
+
+### Phase 1 — Intent + foundation *(this PR)*
+- Update `docs/install-contract.md` to the marker-only model; add
+  `docs/patterns/uniform-runtime-resolution.md`; author this effort; file the
+  umbrella issue.
+- Primitive: `resolve_python()` + `slot_python()` + `last-known-good` in
+  `activate()` + a `resolve-python` CLI verb. Re-vendor to all plugins.
+- Canonical parameterized `resolve-runtime.sh`/`.ps1` in `libs/versioned-runtime`
+  + sync plumbing. Guard `check-runtime-resolution.py` (report-only first).
+- Unit tests for the 3-tier resolution.
+
+### Phase 2..N — Migrate plugins (small batches)
+- Each plugin's binstubs + service launchers + Python callers adopt the canonical
+  resolver; delete the `.venv`/`python3`/cross-`venv` fallbacks; pass `--no-link`
+  to `activate`. 2-3 plugins per PR to keep review + version-bump churn tractable.
+
+### Phase final — Retire the link + enforce
+- Stop creating the `venv`/`.venv` symlink in `activate()` once no consumer
+  resolves through it; turn the guard **blocking** in CI.
+
+## Validation Plan
+- Unit tests for `resolve_python` (all tiers, junction-free, no-PATH).
+- The guard reports zero non-canonical launch paths at the end of migration.
+- Field: on a host, every plugin's binstub and service resolves to the same slot
+  the marker names; a mid-swap does not bind a stale slot; Windows launches never
+  touch a junction.
+- `check-install-contract`, `check-vendored-libs-sync`, version guards green.
+
+## Journal
+
+### 2026-08-19 - Kickoff (Phase 1)
+- Audited every Python-spawn site across the 11 runtime plugins; mapped the four
+  divergent methods above. Confirmed the install-contract states a dual model
+  (Windows marker / POSIX `.venv` symlink) that `agent-worktrees` already
+  superseded with marker-only (#1106), and that a few genuinely-bad fallbacks
+  (bare `python3`, cross-plugin `venv`) slipped in under it.
+- Decision (operator): go **full marker-only**, uniform on every OS.
+- Next: land Phase 1 (contract + pattern + `resolve_python` primitive + canonical
+  parameterized resolvers + guard), then migrate plugins in batches.
