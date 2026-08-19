@@ -20,11 +20,13 @@ config dir during a zero-downtime cutover.
 from __future__ import annotations
 
 import logging
-import os
+from typing import TYPE_CHECKING
 
-from single_instance_lease import AlreadyRunningError
+from single_instance_lease import AlreadyRunningError, read_owner_pid
 from single_instance_lease import SingleInstance as _SingleInstance
-from single_instance_lease import read_owner_pid
+
+if TYPE_CHECKING:
+    import os
 
 log = logging.getLogger("agent-bridge")
 
