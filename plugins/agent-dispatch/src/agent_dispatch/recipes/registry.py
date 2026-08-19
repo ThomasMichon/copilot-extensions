@@ -11,8 +11,10 @@ The three first-class archetypes:
 
 * **reviewer** -- drive a change (a pull request) to merged-or-abandoned: review,
   post feedback or approve, suspend on a verdict, resume on update, own the merge.
-* **conflict-resolution** -- take the last mile of a change nobody is driving:
-  check out, rebase, resolve conflicts, answer review/build state, suspend/resume.
+* **conflict-resolution** -- take the last mile of a PR an automated producer
+  opened but nobody is driving: check out its branch, rebase the target in,
+  resolve conflicts, force-push back over the same PR, answer review/build
+  state, suspend/resume until it lands.
 * **goal-driven** -- drive an arbitrary goal against one or more repos through one
   or more pull requests until met or abandoned.
 
@@ -177,7 +179,10 @@ _register(
 _register(
     Recipe(
         name="conflict-resolution",
-        summary="Take the last mile of a stalled change: rebase, resolve, land.",
+        summary=(
+            "Drive a producer-opened PR the last mile: check out, rebase, "
+            "resolve conflicts, force-push back over the same PR, land."
+        ),
         params=(
             RecipeParam("repo", "target repo 'owner/name' (or lane) of the change"),
             RecipeParam("pr", "pull-request number/identifier that is stuck"),
@@ -193,10 +198,14 @@ _register(
             "is merged -- or it is abandoned with the blocker recorded."
         ),
         charter_template=(
-            "Pull request {repo}#{pr} is open but nobody is driving it. Take the last "
-            "mile: check out the branch, rebase onto {base}, resolve any conflicts, and "
-            "answer its review and build state.\n\n" + _SUSPEND_CLAUSE + " Resume on the "
-            "next review/build/update and continue until it lands.\n\n"
+            "Pull request {repo}#{pr} was opened by an automated producer and is now "
+            "stuck: it has merge conflicts against {base} and nobody is driving it. "
+            "Take the last mile to a mergeable state -- check out its branch into a "
+            "local worktree, rebase (or merge) {base} in, resolve the conflicts, and "
+            "**force-push the resolved branch back over the PR head** so the same PR "
+            "updates in place -- never open a second PR. Then answer its review and "
+            "build state.\n\n" + _SUSPEND_CLAUSE + " Resume on the next "
+            "review/build/update and iterate until it lands.\n\n"
             "Stay within the intent of the existing change -- you are unblocking it, not "
             "redesigning it.\n\n" + _RESOLUTION_CLAUSE
         ),
