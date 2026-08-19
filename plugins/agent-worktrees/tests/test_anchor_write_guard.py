@@ -280,6 +280,35 @@ def test_shell_cd_into_anchor_subdir_then_git_write_denies(tmp_path, anchor):
     assert d and d["permissionDecision"] == "deny"
 
 
+def test_shell_cd_into_anchor_forwardslash_subdir_then_git_write_denies(
+    tmp_path, anchor
+):
+    # Forward-slash subdir is the POSIX-native form of the same vector.
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell(f'cd "{gp}/src" && git add -A', tmp_path),
+                     env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_cd_relative_backslash_subdir_from_anchor_then_git_write_denies(
+    tmp_path, anchor
+):
+    # A RELATIVE backslash subpath from the anchor cwd must also normalize so the
+    # effective cwd stays inside the anchor (defense-in-depth on POSIX).
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell(f'cd "{gp}" && cd sub\\deeper && git add -A', tmp_path),
+                     env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_cd_into_non_anchor_backslash_dir_still_allows(tmp_path, anchor):
+    # Separator normalization must not over-fire: a cd into an unrelated dir that
+    # merely shares no ancestry with the anchor is still allowed.
+    d = guard.decide(_shell('cd "/tmp/elsewhere\\src" && git add -A', tmp_path),
+                     env={}, home=tmp_path, anchors=anchor)
+    assert d is None
+
+
 def test_shell_cmd_style_cd_slash_d_into_anchor_denies(tmp_path, anchor):
     # CMD `cd /d <path>` (SHELL_TOOLS includes cmd): the /d flag must be skipped,
     # not captured as the directory target.
