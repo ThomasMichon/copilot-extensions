@@ -5,7 +5,7 @@
   local services on a user's machine.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-08-13
+- **Last revised:** 2026-08-18
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -53,6 +53,18 @@ into a coordination problem.
 - **Lifecycle supervision** — the platform-native mechanism that starts, keeps
   alive, and restarts a service (a per-user OS service), so a service's presence
   does not depend on an interactive session.
+- **Single-instance lease** — the host-local claim that makes "**one active
+  daemon per service per host**" an *asserted, repairable* property rather than a
+  hope: a process becomes the active endpoint only by holding the lease, and a
+  process that cannot acquire it stands down instead of racing. Ownership is
+  liveness-reconciled, so a lease held by a dead process is reclaimable and a
+  live owner is never displaced by accident. It is the seam that makes cutover
+  reaping complete and the coalescing tier safe.
+- **Work-coalescing singleton** — an *optional* service tier that folds many
+  callers' identical, cheap, idempotent work onto a single warm, refcounted
+  daemon (consolidating the warm runtime and shared upstream, never the callers'
+  isolated state), instead of each caller spawning its own worker. A convenience
+  over the always-correct inline path, never a dependency.
 - **Install contract** — the uniform deploy/version/footprint agreement every
   runtime plugin follows, so services deploy, update, and are audited the same
   way. See [`docs/install-contract.md`](../../docs/install-contract.md).
@@ -262,6 +274,37 @@ request, double-runs a scheduled job, or opens a window with no live service.
 *How* the routing record and drain are implemented (a shared cutover primitive) is
 spec-level, not fixed here.
 
+### single-instance-lease
+At most **one live daemon owns a given service on a host at a time**, and that
+ownership is **explicit and reclaimable**. A service acquires a host-local lease
+before it becomes the active endpoint; a process that cannot acquire it **stands
+down** rather than racing an incumbent. Ownership is **liveness-reconciled, not
+timer-guessed**: a lease held by a dead process is reclaimable, and a still-live
+owner is never displaced by accident. This makes "one active per service per
+host" a property the system can **assert and repair** — so a cutover reconciles
+the **full set** against the lease, retiring every predecessor it replaces *and*
+every stray that a plain restart would otherwise strand, and no drained-but-live
+daemon lingers holding a port or memory. The mechanism (a lock file, a named
+mutex, an OS-native single-instance guard) is spec-level; the guarantee is not.
+
+### work-coalescing-singleton
+Where many callers would otherwise each spawn a short-lived worker for the **same
+cheap, idempotent work**, the suite **may** fold that work onto a single warm,
+**refcounted** daemon instead. Identical requests arriving close together
+**coalesce** into one execution rather than fanning out into N redundant
+processes; **distinct side-effecting** work is **queued with bounded concurrency
+and backpressure**, never unbounded-forked. The daemon lives **only while at
+least one consumer needs it** and **idle-exits** when the last releases — it is
+**warmth, not truth**: an accelerator over a durable store whose loss costs only
+warmth. This tier is **always optional**: a lone caller, or any caller that
+cannot reach the daemon, does the work **inline and correct with no daemon at
+all**. It generalizes two capabilities the model already sanctions — an optional
+resident tracker and the optional multiplexer of *graceful-composition* — into
+one shape: **consolidate the warm runtime and shared upstream, never the callers'
+isolated state, and only across callers that share the same identity and
+credentials.** Guarded by the *single-instance-lease*, cut over by
+*zero-downtime-cutover*, discovered by rendezvous.
+
 ## Non-Goals / Boundaries
 
 - **No shared-infrastructure dependency.** The suite does **not** assume — and a
@@ -405,3 +448,24 @@ spec-level, not fixed here.
   heavyweight dependency out of the lightweight plugins while letting muxed sessions
   light up when the Manager is installed. Mined from the operator's Phase-6 DQ9
   decision (mux is Manager-owned; plugins detect-and-fall-back).
+
+- **2026-08-18** — Added the **single-instance-lease** and
+  **work-coalescing-singleton** behaviors. Mined from a process-management audit
+  of the suite under its now-normal operating point: hosts running **many
+  concurrent worktree sessions** (on the order of 5–10) with **frequent mid-flight
+  plugin updates**, where each new session launch may re-run a service's start and
+  trigger a reinstall. The audit found the model already prescribes clean cutover
+  and optional multiplexing, but lacked two things. (a) An explicit **"one active
+  per service per host" lease** to make cutover reaping *complete*: repeated
+  same-version cutovers and plain restarts were observed **stranding drained-but-
+  live passive daemons** that keep holding a port and memory, because a cutover
+  retires only the single predecessor it replaces, not every stray. (b) A **named
+  work-coalescing service tier** unifying the already-stated worktree resident-
+  tracker and the graceful-composition multiplexer, so that many identical cheap
+  sweeps (a status refresh) and per-session, per-server transport bridges
+  **consolidate onto one warm, refcounted, idle-exiting daemon** instead of
+  fanning out one process per caller — the dominant source of process-count and
+  memory growth under concurrency. Both are intent-level: the lease is a shared
+  primitive beside `zdd`/rendezvous, and the coalescing tier stays strictly
+  optional with an always-correct inline fallback. Realized by the
+  *plugin-process-hygiene* effort.
