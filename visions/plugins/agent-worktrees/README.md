@@ -6,7 +6,7 @@
   session is live, and owns the transports that produce that truth.
 - **Scope:** leaf (concrete component; child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-08-07
+- **Last revised:** 2026-08-19
 - **Reality docs:** the agent-worktrees plugin `docs/` (worktree lifecycle +
   tracking) · the Worktree-Picker performance/IO effort (dotfiles#948) as the
   most recent reality on the state store
@@ -43,6 +43,20 @@ consistent** (no torn or half-written state, no lost update when two things touc
 the same record at once), reads are cheap, and the store is the one place the
 truth lives. Consumers never keep a parallel copy; they read this owner and
 **derive** over it.
+
+### The aggregate is derived — single-writer slots, one reducer
+The worktree's **aggregate** status and current-session (head) are **not a shared
+cell** any contributor writes; they are a **pure reduction over independent,
+single-writer slots**. Each signal source owns exactly **one** slot and writes only
+that — git working-tree classification, per-PR lifecycle, claim/lease disposition,
+multiplexer liveness, bound-process liveness (the Copilot lock), and per-session
+lifecycle + succession — each carrying its **own** freshness stamp. A single
+**reducer** owned by agent-worktrees folds the slots into `status` and the resolved
+head, with explicit precedence and per-slot staleness. Because no contributor writes
+the aggregate and the derived view is recomputed rather than being a slot two
+writers race on, parallel contributors cannot clobber one another's determination or
+persist a stale guess into the shared verdict. This is *derive, don't duplicate*
+taken all the way down: **one writer per signal, the aggregate always derived.**
 
 ### The derivation / liveness engine — the extension-free backbone
 Liveness and "what is this agent doing" are produced by agent-worktrees from its
@@ -165,6 +179,17 @@ Each piece of tracking truth has **one owner** (agent-worktrees). Higher layers
 **coordinate over and derive from** it; they do not keep a second copy that can
 drift. agent-bridge's contribution is *events into the owner*, not a rival store.
 
+### aggregate status is derived, never written
+No contributor ever writes the worktree's overall status or head directly; each
+writes **only its own slot**, and the aggregate is **computed** from the accumulated
+slots on read (or by the single owner). A contributor that is wrong, stale, or
+racing another can affect **its** slot only — never the shared verdict — so a
+mis-write is bounded to one signal and corrected by the next reduction, never a lost
+update on the aggregate. Where completeness depends on more than the record — e.g. a
+handoff whose conclusion must observe whether its successor ever came alive — the
+reducer is a **liveness-aware reconciliation**, not merely a static fold; but it
+stays a derivation, never a shared cell each caller overwrites with its own verdict.
+
 ### durable of record, losable when warm
 The **store of record survives** crashes and restarts and can be trusted as the
 truth. The **warm-cache accelerator is expendable** — losing it loses only
@@ -253,3 +278,15 @@ dependency of it.
   Sharpened the derivation engine to *bounded, random-access + cursor/watermark
   incremental* reads and added the matching Behavior + Non-Goal, keeping the
   extension-free backbone consistent with the org-wide efficiency invariant.
+- **2026-08-19** — Sharpened *derive, don't duplicate* from "one owner of the
+  store" down to "**one writer per signal, aggregate derived**": added §Concepts/*the
+  aggregate is derived — single-writer slots, one reducer* and §Behaviors/*aggregate
+  status is derived, never written*. The worktree's status/head is a **pure reduction
+  over independent single-writer slots** (git · pr · claim · mux · copilot-lock ·
+  session/handoff), each with its own freshness stamp; no contributor writes the
+  aggregate, so parallel writers cannot race on one "true state" cell. Mined from an
+  operator design conversation prompted by a failed handoff-cutover that orphaned a
+  worktree's head (successor died on the CLI resume-hang before registering) — which
+  also clarified that succession *completeness* is a **liveness-aware reconciliation**
+  (repair layer), not a static record-local fold. Realized operationally by the
+  `worktree-state-live-db` effort (cells + journal + deterministic derivation).
