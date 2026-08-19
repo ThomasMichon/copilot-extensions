@@ -72,8 +72,11 @@ def test_resolve_repo_path_expands_tilde(tmp_path, monkeypatch):
 
 def test_discover_expands_tilde_path(tmp_path, monkeypatch):
     # End-to-end: a registry entry using ~ still discovers the repo's packages.
+    # Pin the platform so the test is deterministic on any runner (the wsl key
+    # is only consulted when current_platform() == "wsl").
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setattr(discover, "current_platform", lambda: "wsl")
     repo = tmp_path / "src" / "acme"
     write_package(repo, "d.yaml", base_package(gate=["*"]))
     reg = {"repos": {"acme": {"class": "worktree", "wsl": "~/src/acme"}}}
