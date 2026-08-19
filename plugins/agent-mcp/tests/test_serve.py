@@ -250,3 +250,105 @@ async def test_tcp_endpoint_published_and_token_enforced(tmp_path):
     assert serve_socket_if_available(str(sock)) is None
     assert _read_endpoint(sock) is None
 
+
+
+# -- full-session attach (the #744 multiplexer session-host) ------------------
+
+def _write_bridge_config(tmp_path, name="echo.mcp.yaml"):
+    """Write a stdio-echo bridge config file the server can load_config()."""
+    bridge = tmp_path / name
+    bridge.write_text(
+        "server:\n  type: stdio\n  command:\n"
+        f"    - {sys.executable}\n    - '-c'\n    - |\n"
+        + "".join("      " + ln + "\n" for ln in _CHILD.splitlines())
+        + "auth:\n  kind: none\n",
+        encoding="utf-8",
+    )
+    return bridge
+
+
+async def _await_socket(sock):
+    for _ in range(50):
+        if serve_socket_if_available(str(sock)):
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError("serve socket never appeared")
+
+
+async def _rpc(reader, writer, msg):
+    writer.write((json.dumps(msg) + "\n").encode())
+    await writer.drain()
+    line = await asyncio.wait_for(reader.readline(), timeout=10)
+    return json.loads(line)
+
+
+async def test_attach_full_session_roundtrip(tmp_path):
+    from agent_mcp.serve import open_attached_session
+
+    sock = tmp_path / "serve.sock"
+    bridge = _write_bridge_config(tmp_path)
+    server = Server(sock)
+    task = asyncio.create_task(server.serve_forever())
+    try:
+        await _await_socket(sock)
+        reader, writer = await open_attached_session(sock, str(bridge))
+        init = await _rpc(reader, writer,
+                          {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                           "params": {}})
+        assert init["id"] == 1 and "result" in init
+        tl = await _rpc(reader, writer,
+                        {"jsonrpc": "2.0", "id": 2, "method": "tools/list",
+                         "params": {}})
+        assert [t["name"] for t in tl["result"]["tools"]] == ["echo"]
+        call = await _rpc(reader, writer,
+                          {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                           "params": {"name": "echo", "arguments": {"k": "v"}}})
+        assert json.loads(call["result"]["content"][0]["text"]) == {"k": "v"}
+        writer.close()
+    finally:
+        await request_via_socket(sock, {"op": "shutdown"})
+        await asyncio.wait_for(task, timeout=5)
+
+
+async def test_two_attached_sessions_are_independent(tmp_path):
+    # One serve process hosts two concurrent client sessions, each with its own
+    # upstream + pipeline (the multiplexer property: interpreters collapse, but
+    # per-client MCP sessions stay separate).
+    from agent_mcp.serve import open_attached_session
+
+    sock = tmp_path / "serve.sock"
+    bridge = _write_bridge_config(tmp_path)
+    server = Server(sock)
+    task = asyncio.create_task(server.serve_forever())
+    try:
+        await _await_socket(sock)
+        r1, w1 = await open_attached_session(sock, str(bridge))
+        r2, w2 = await open_attached_session(sock, str(bridge))
+        # Interleave calls; each session echoes its own arguments back.
+        a = await _rpc(r1, w1, {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                "params": {"name": "echo", "arguments": {"s": "one"}}})
+        b = await _rpc(r2, w2, {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                "params": {"name": "echo", "arguments": {"s": "two"}}})
+        assert json.loads(a["result"]["content"][0]["text"]) == {"s": "one"}
+        assert json.loads(b["result"]["content"][0]["text"]) == {"s": "two"}
+        assert server.pool.size == 0  # attach sessions bypass the WarmPool
+        w1.close()
+        w2.close()
+    finally:
+        await request_via_socket(sock, {"op": "shutdown"})
+        await asyncio.wait_for(task, timeout=5)
+
+
+async def test_attach_missing_bridge_is_refused(tmp_path):
+    from agent_mcp.serve import open_attached_session
+
+    sock = tmp_path / "serve.sock"
+    server = Server(sock)
+    task = asyncio.create_task(server.serve_forever())
+    try:
+        await _await_socket(sock)
+        with pytest.raises(OSError):
+            await open_attached_session(sock, str(tmp_path / "does-not-exist.yaml"))
+    finally:
+        await request_via_socket(sock, {"op": "shutdown"})
+        await asyncio.wait_for(task, timeout=5)
