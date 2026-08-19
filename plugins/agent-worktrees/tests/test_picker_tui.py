@@ -5660,6 +5660,87 @@ def test_steering_card_and_form_actions_gate_and_drive(tmp_path, monkeypatch):
     asyncio.run(run())
 
 
+def test_steer_submit_is_offloaded_off_the_render_flow(tmp_path, monkeypatch):
+    """The Confirm subprocess (agent-dispatch steer submit) must NOT block the
+    Textual event loop -- it runs on a background worker via _run_bg, so the UI
+    stays live during the coordinator round-trip. Proven deterministically with a
+    runtime whose run_resolved blocks on an Event: right after Confirm the submit
+    has NOT run yet (deferred to the worker) and the status line shows the working
+    marker -- the loop was NOT blocked by the 5s gate. Releasing the gate lets the
+    worker finish and apply on the loop."""
+    import threading
+
+    from agent_worktrees.picker_tui import pivots as pivots_mod
+    from agent_worktrees.picker_tui.engine import (
+        PivotFormScreen,
+        _AutoExpandTextArea,
+    )
+
+    d = tmp_path / "pivots"
+    d.mkdir()
+    _write_steering_manifest(d)
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+    monkeypatch.setenv("AGENT_WORKTREES_STEER_DRAFTS", str(tmp_path / "drafts"))
+    rows = [
+        {"id": "t1", "title": "PR 123", "task_id": "t1", "awaiting_steer": True,
+         "card": {"title": "Review PR 123", "status": "rec", "body": "b",
+                  "request_input": [
+                      {"name": "feedback", "type": "textarea"},
+                      {"name": "decision", "type": "choice",
+                       "options": ["revise", "post-approved"]}]}},
+    ]
+    src = _fixture_source()
+
+    class _GatedRuntime(_FakeRuntime):
+        def __init__(self, rows):
+            super().__init__(rows)
+            self.gate = threading.Event()
+            self.resolved = None
+
+        def run_resolved(self, argv):
+            self.gate.wait(5)          # block as a slow coordinator round-trip would
+            self.resolved = list(argv)
+            return (True, "done")
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            scr.htab = scr.htabs.index("Tasks")
+            await pilot.pause()
+            reg = scr._reg_pivot()
+            rt = _GatedRuntime(rows)
+            scr._pivot_runtimes[reg.name] = rt
+            actions = {a.key: a for a in reg.actions}
+            scr._run_task_action(reg, actions["steer"], rows[0])
+            await pilot.pause()
+            assert isinstance(app.screen, PivotFormScreen)
+            form = app.screen
+            form.query_one("#q-0", _AutoExpandTextArea).text = "ship it"
+            await pilot.pause()
+            form._confirm()
+            await pilot.pause()
+            # Offloaded: the blocking submit has NOT run (gate closed), and the
+            # loop was not frozen by the 5s wait -- the status shows the marker.
+            assert rt.resolved is None, "submit ran inline on the UI thread (froze)"
+            assert str(scr.debug).endswith("working…")
+            # Release the gate; the worker finishes and applies on the loop.
+            rt.gate.set()
+            for _ in range(200):
+                await pilot.pause()
+                await asyncio.sleep(0.02)
+                if rt.resolved is not None:
+                    break
+            assert rt.resolved == [
+                "agent-dispatch", "steer", "submit", "t1",
+                "--field", "feedback=ship it",
+                "--field", "decision=revise",
+            ]
+
+    asyncio.run(run())
+
+
 def test_registered_pivot_switch_pivot_cycles_left_rail(tmp_path, monkeypatch):
     from agent_worktrees.picker_tui import pivots as pivots_mod
 
