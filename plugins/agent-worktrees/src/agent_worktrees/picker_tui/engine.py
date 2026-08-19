@@ -49,7 +49,7 @@ from . import derive
 from .selection import ListSelection
 
 
-def _register_meta_enter_key() -> None:
+def _register_shift_enter_key() -> None:
     """Surface **Shift+Enter** as a distinct ``shift+enter`` key.
 
     Windows Terminal (and most terminals, by the classic meta-key convention)
@@ -87,7 +87,7 @@ def _register_meta_enter_key() -> None:
         pass
 
 
-_register_meta_enter_key()
+_register_shift_enter_key()
 
 
 def _resolve_version() -> str:
@@ -6346,7 +6346,7 @@ class _AutoExpandTextArea(TextArea):
       the last one); **Shift+Enter inserts a newline** (grow the box) -- matching
       the operator's Copilot-CLI muscle memory. Windows Terminal emits ``ESC``+
       ``CR`` for Shift+Enter (not the Kitty ``\\x1b[13;2u`` form), which Textual
-      would otherwise collapse to a plain ``enter``; ``_register_meta_enter_key``
+      would otherwise collapse to a plain ``enter``; ``_register_shift_enter_key``
       (module scope) restores the distinct ``shift+enter`` key. **Alt+Enter** and
       **Ctrl+J** remain wired as newline fallbacks for terminals that report those
       distinctly instead.
