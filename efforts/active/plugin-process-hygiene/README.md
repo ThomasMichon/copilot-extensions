@@ -161,7 +161,7 @@ cross-checked against a live host running ~7 concurrent sessions) found:
 
 Phase 4 & 5 conformance fixes (merged):
 
-- **#741 — agent-mcp version GC on activation** (PR #750). `versioned_runtime gc`
+- **#741 — agent-mcp version GC on activation** (PR #750). `versioned_runtime.py gc`
   now runs on successful activation, pruning non-current, non-live slots.
 - **#739 — agent-worktrees resident status-monitor** (PR #752, then default-on
   opt-out in PR #758). One warm, idle-exiting monitor coalesces the per-session
