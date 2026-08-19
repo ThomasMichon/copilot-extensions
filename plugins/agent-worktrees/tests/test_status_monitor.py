@@ -82,8 +82,8 @@ def test_sweep_serves_live_registered_and_prunes_gone(tmp_path, monkeypatch):
 
     # wt-a + wt-b are live; wt-gone is not; a non-wt session is ignored.
     monkeypatch.setattr(
-        m.sessions, "_list_mux_sessions",
-        lambda: {"wt-a": 1, "wt-b": 0, "other": 1})
+        m, "_monitor_list_sessions",
+        lambda mux_bin: {"wt-a": 1, "wt-b": 0, "other": 1})
     monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
     monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
@@ -108,7 +108,7 @@ def test_sweep_ctx_rendered_once(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
     m._register_session_for_monitor("wt-a", "/w/a")
-    monkeypatch.setattr(m.sessions, "_list_mux_sessions", lambda: {"wt-a": 1})
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
     monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
     monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
@@ -129,7 +129,7 @@ def test_sweep_transient_mux_failure_holds(tmp_path, monkeypatch):
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
     m._register_session_for_monitor("wt-a", "/w/a")
     # None == the mux couldn't be enumerated -> transient; must NOT prune/exit.
-    monkeypatch.setattr(m.sessions, "_list_mux_sessions", lambda: None)
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: None)
     calls = _capture_set(monkeypatch)
 
     assert m._monitor_sweep("tmux", "T", "P", set()) == -1
@@ -195,6 +195,23 @@ def test_status_updater_falls_back_when_monitor_cannot_start(monkeypatch):
         argparse.Namespace(session="wt-a", mux="tmux", path="/w/a", interval=5))
     assert rc == 0
     assert reached  # fell through into the per-session loop
+
+
+def test_activate_force_clears_prior_project_on_unresolved(monkeypatch):
+    """Under force, an unresolved path must NOT leave a prior session's project
+    active (else the monitor renders one session with another's context)."""
+    from agent_worktrees import config as cfg
+    monkeypatch.setattr(m, "_git_toplevel", lambda p: None)  # unresolved
+    try:
+        cfg.set_active_project("prev")
+        m._activate_project_for_path("/no/repo", force=True)
+        assert cfg.active_project() is None                 # cleared under force
+        # without force, an already-active project is left untouched
+        cfg.set_active_project("prev")
+        m._activate_project_for_path("/no/repo", force=False)
+        assert cfg.active_project() == "prev"
+    finally:
+        cfg.set_active_project(None)
 
 
 def _boom(*a, **k):  # pragma: no cover - only fires on regression

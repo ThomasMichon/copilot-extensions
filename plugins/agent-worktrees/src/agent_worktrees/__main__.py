@@ -5072,15 +5072,20 @@ def _activate_project_for_path(path: str | None, *, force: bool = False) -> None
     """
     if not force and cfg.active_project():
         return
+    name = None
     try:
         anchor = _git_toplevel(Path(path) if path else Path.cwd())
-        if anchor is None:
-            return
-        name = _reverse_lookup_project(anchor)
-        if name:
-            cfg.set_active_project(name)
+        if anchor is not None:
+            name = _reverse_lookup_project(anchor)
     except Exception:
-        pass
+        name = None
+    if name:
+        cfg.set_active_project(name)
+    elif force:
+        # Under ``force`` (the resident monitor sweeping across repos), never
+        # leave a PRIOR session's project active: clear it so an unresolved path
+        # can't render with the previous session's identity/title.
+        cfg.set_active_project(None)
 
 
 def _slot_superseded(active: str, mine: str, versions_root: str) -> bool:
@@ -5559,6 +5564,37 @@ def _monitor_mux_set(mux_bin: str, sess: str, opt: str, val: str) -> None:
         pass
 
 
+def _monitor_list_sessions(mux_bin: str) -> dict[str, int] | None:
+    """Enumerate mux sessions with the monitor's OWN selected binary.
+
+    ``sessions._list_mux_sessions`` chooses tmux/psmux by *platform*, which can
+    disagree with the binary ``cmd_status_monitor`` actually resolved
+    (psmux-if-present) -- a mismatch would enumerate the wrong multiplexer and
+    return nothing every sweep, so the monitor neither serves nor idle-exits.
+    Query ``mux_bin`` directly instead.  Returns ``{session_name: attached}`` or
+    ``None`` on a transient failure (so the caller neither prunes nor exits).
+    """
+    try:
+        r = subprocess.run(
+            [mux_bin, "list-sessions", "-F",
+             "#{session_name}:#{session_attached}"],
+            capture_output=True, text=True, timeout=15)
+    except Exception:
+        return None
+    if r.returncode != 0:
+        return None
+    out: dict[str, int] = {}
+    for line in (r.stdout or "").strip().splitlines():
+        if ":" not in line:
+            continue
+        name, _, cnt = line.rpartition(":")
+        try:
+            out[name] = int(cnt)
+        except ValueError:
+            out[name] = 0
+    return out
+
+
 def _monitor_sweep(
     mux_bin: str, token: str, prefix: str, ctx_done: set[str],
 ) -> int:
@@ -5572,7 +5608,7 @@ def _monitor_sweep(
     coalesced into one process.  Registry entries whose session is definitively
     gone are pruned.
     """
-    live = sessions._list_mux_sessions()
+    live = _monitor_list_sessions(mux_bin)
     if live is None:
         return -1
     live_wt = {n for n in live if n.startswith("wt-")}
