@@ -499,6 +499,9 @@ _resolve_ssh_manager() { _resolve_vendored_lib ssh-manager; }
 _resolve_credential_relay() { _resolve_vendored_lib credential-relay; }
 # zero-downtime cutover primitives (module ``zdd``), extracted from this plugin.
 _resolve_zdd() { _resolve_vendored_lib zdd; }
+# single-instance lease + supersession self-retire + reconcile-set reaper
+# (module ``single_instance_lease``), extracted from this plugin.
+_resolve_single_instance_lease() { _resolve_vendored_lib single-instance-lease; }
 # config schema versioning + migration (module ``config_migrate``).
 _resolve_config_migrate() { _resolve_vendored_lib config-migrate; }
 
@@ -519,6 +522,12 @@ _credential_relay_installed() {
 _zdd_installed() {
     [[ -x "$VENV_DIR/bin/python" ]] || return 1
     "$VENV_DIR/bin/python" -c 'from zdd.cutover import CutoverOrchestrator' 2>/dev/null
+}
+
+# Check if the single-instance-lease lib is already importable in the venv.
+_single_instance_lease_installed() {
+    [[ -x "$VENV_DIR/bin/python" ]] || return 1
+    "$VENV_DIR/bin/python" -c 'from single_instance_lease import SingleInstance' 2>/dev/null
 }
 
 # Check if config-migrate is already importable in the venv.
@@ -883,6 +892,19 @@ do_install() {
         _fail "Cannot locate zdd library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer."
         exit 1
     fi
+    # single-instance-lease (one active daemon per host: lease + self-retire + reaper).
+    local sil_dir
+    if sil_dir="$(_resolve_single_instance_lease)"; then
+        if ! uv pip install --python "$VENV_DIR/bin/python" "$sil_dir" --quiet; then
+            _fail "single-instance-lease install failed"
+            exit 1
+        fi
+    elif _single_instance_lease_installed; then
+        _step "single-instance-lease already installed in venv (marketplace layout)"
+    else
+        _fail "Cannot locate single-instance-lease library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer."
+        exit 1
+    fi
     # config-migrate (config schema versioning + migration).
     local cfg_migrate_dir
     if cfg_migrate_dir="$(_resolve_config_migrate)"; then
@@ -1146,7 +1168,7 @@ _runtime_healthy() {
     # install before declaring the update good (#52). uvicorn + credential_relay
     # are the modules that went missing in the observed broken-venv outage.
     [[ -x "$VENV_DIR/bin/python" ]] || return 1
-    "$VENV_DIR/bin/python" -c 'import agent_bridge, uvicorn, credential_relay, zdd' 2>/dev/null
+    "$VENV_DIR/bin/python" -c 'import agent_bridge, uvicorn, credential_relay, zdd, single_instance_lease' 2>/dev/null
 }
 
 # Version of the agent-bridge package currently installed in the runtime venv.
@@ -1311,6 +1333,20 @@ _update_core() {
         _step "zdd already installed in venv (marketplace layout)"
     else
         _fail "Cannot locate zdd library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer."
+        return 1
+    fi
+    # single-instance-lease: force-reinstall so a local code change propagates.
+    local sil_dir
+    if sil_dir="$(_resolve_single_instance_lease)"; then
+        if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-single-instance-lease \
+                "$sil_dir" --quiet; then
+            _fail "single-instance-lease update failed"
+            return 1
+        fi
+    elif _single_instance_lease_installed; then
+        _step "single-instance-lease already installed in venv (marketplace layout)"
+    else
+        _fail "Cannot locate single-instance-lease library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer."
         return 1
     fi
     # config-migrate: force-reinstall so a local code change propagates.
