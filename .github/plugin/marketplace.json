@@ -12,7 +12,7 @@
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.5.3-dev539",
+      "version": "1.5.3-dev540",
       "source": "plugins/agent-worktrees"
     },
     {
@@ -78,7 +78,7 @@
     {
       "name": "agent-dispatch",
       "description": "Portable agent task-queue + per-host coordinator: a single-writer SQLite work queue (seven-state model, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.1.0-dev178",
+      "version": "0.1.0-dev179",
       "source": "plugins/agent-dispatch"
     },
     {

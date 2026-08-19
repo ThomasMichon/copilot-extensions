@@ -718,3 +718,29 @@ def test_format_form_template_field_value_is_literal_no_injection():
         {"feedback": "use {task_id} carefully"},
     )
     assert out == ["--field", "feedback=use {task_id} carefully"]
+
+
+def test_format_form_template_fields_expansion():
+    # `{fields}` as a standalone arg expands to one --field pair per collected
+    # field (the general "submit all my answers" form).
+    out = pivots.format_form_template(
+        ["agent-dispatch", "steer", "submit", "{task_id}", "{fields}"],
+        {"task_id": "T1"},
+        {"feedback": "ok", "decision": "revise"},
+    )
+    assert out == [
+        "agent-dispatch", "steer", "submit", "T1",
+        "--field", "feedback=ok",
+        "--field", "decision=revise",
+    ]
+
+
+def test_format_form_template_multichoice_list_json_encoded():
+    # A list value (multichoice) is JSON-encoded so comma'd members survive.
+    out = pivots.format_form_template(
+        ["{fields}"], {}, {"tags": ["perf", "a, b"]})
+    assert out == ["--field", 'tags=["perf", "a, b"]']
+    # Same encoding via the per-name token.
+    out2 = pivots.format_form_template(
+        ["--field", "tags={field.tags}"], {}, {"tags": ["perf", "api"]})
+    assert out2 == ["--field", 'tags=["perf", "api"]']

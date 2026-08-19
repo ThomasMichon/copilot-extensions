@@ -5562,10 +5562,8 @@ def _write_steering_manifest(directory):
              "when": {"awaiting_steer": True}},
             {"key": "steer", "label": "Steer", "kind": "form",
              "fields_from": "card.request_input",
-             "title_from": "card.title", "body_from": "card.status",
-             "run": ["agent-dispatch", "steer", "submit", "{task_id}",
-                     "--field", "feedback={field.feedback}",
-                     "--field", "decision={field.decision}"],
+             "title_from": "card.title", "body_from": "card.body",
+             "run": ["agent-dispatch", "steer", "submit", "{task_id}", "{fields}"],
              "when": {"awaiting_steer": True}},
             {"key": "abandon", "label": "Abandon", "run": ["echo", "{task_id}"]},
         ],
@@ -5579,13 +5577,17 @@ def test_steering_card_and_form_actions_gate_and_drive(tmp_path, monkeypatch):
     detail / elicitation modals; submitting the form runs the substituted steer
     argv via the runtime (no verdict path)."""
     from agent_worktrees.picker_tui import pivots as pivots_mod
-    from agent_worktrees.picker_tui.engine import PivotCardScreen, PivotFormScreen
-    from textual.widgets import TextArea
+    from agent_worktrees.picker_tui.engine import (
+        PivotCardScreen,
+        PivotFormScreen,
+        _AutoExpandTextArea,
+    )
 
     d = tmp_path / "pivots"
     d.mkdir()
     _write_steering_manifest(d)
     monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+    monkeypatch.setenv("AGENT_WORKTREES_STEER_DRAFTS", str(tmp_path / "drafts"))
 
     rows = [
         {"id": "t1", "title": "PR 123", "task_id": "t1", "awaiting_steer": True,
@@ -5638,14 +5640,15 @@ def test_steering_card_and_form_actions_gate_and_drive(tmp_path, monkeypatch):
             await pilot.pause()
             assert not isinstance(app.screen, PivotCardScreen)
 
-            # Steer -> opens the form; fill + submit runs the substituted argv.
+            # Steer -> opens the redesigned docked form; fill + Confirm runs the
+            # {fields}-expanded steer argv (all questions submitted).
             scr._run_task_action(reg, actions["steer"], rows[0])
             await pilot.pause()
             assert isinstance(app.screen, PivotFormScreen)
             form = app.screen
-            form.query_one("#ff-0", TextArea).text = "ship it"
+            form.query_one("#q-0", _AutoExpandTextArea).text = "ship it"
             await pilot.pause()
-            form.action_submit()
+            form._confirm()
             await pilot.pause()
 
             assert rt.resolved == [
