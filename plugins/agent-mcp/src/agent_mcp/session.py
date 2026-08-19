@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from .auth import build_injector
 from .config import BridgeConfig
@@ -30,7 +30,10 @@ log = logging.getLogger("agent-mcp.session")
 
 # A client-bound sink: called with a fully-formed JSON-RPC message object to
 # deliver to the client (response, decorator push, or upstream notification).
-ClientSink = Callable[[dict], None]
+# May be sync or async -- an async sink (returning an awaitable) is awaited, the
+# same convention BridgeContext.emit_to_client and UpstreamClient already use, so
+# a caller can apply write flow control (e.g. awaiting a socket drain).
+ClientSink = Callable[[dict], Awaitable[None] | None]
 
 
 class BridgeSession:
@@ -73,7 +76,12 @@ class BridgeSession:
             log.error("pipeline error: %s", exc)
             resp = error_response(msg, f"bridge error: {exc}") if is_request(msg) else None
         if resp is not None:
-            self._write(resp)
+            # The sink may be sync or async; await it when async (matching the
+            # emit_to_client / unsolicited convention) so a socket sink can apply
+            # write backpressure via drain().
+            res = self._write(resp)
+            if res is not None:
+                await res
 
     def submit(self, msg: dict) -> None:
         """Dispatch a client->server message concurrently; reply goes to the sink."""

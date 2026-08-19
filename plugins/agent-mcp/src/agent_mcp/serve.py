@@ -322,14 +322,21 @@ class Server:
             await self._send(writer, {"ok": False, "error": f"config: {exc}"})
             return
 
-        # Client-bound sink: write one complete JSON-RPC line per message. A
-        # single write() per message keeps concurrent dispatch tasks' outputs
-        # from interleaving; flow control is handled by the read loop's drain.
-        def sink(msg: dict) -> None:
-            try:
-                writer.write((json.dumps(msg) + "\n").encode())
-            except Exception:  # a closed/broken client just drops the push
-                pass
+        # Client-bound sink: write one complete JSON-RPC line per message and
+        # await the drain so an idle client that stops reading applies real
+        # backpressure (the transport buffer can't grow without bound). A
+        # per-connection lock serializes concurrent dispatch/notification writes
+        # so their lines and drains never interleave.
+        write_lock = asyncio.Lock()
+
+        async def sink(msg: dict) -> None:
+            data = (json.dumps(msg) + "\n").encode()
+            async with write_lock:
+                writer.write(data)
+                try:
+                    await writer.drain()
+                except (ConnectionResetError, BrokenPipeError):
+                    pass  # a closed/broken client just drops the push
 
         session = BridgeSession(cfg, sink)
         try:
@@ -352,9 +359,10 @@ class Server:
                 try:
                     msg = json.loads(text)
                 except (ValueError, TypeError):
+                    log.warning("invalid JSON on attached session %s: %s",
+                                bridge, text[:200])
                     continue
                 session.submit(msg)
-                await writer.drain()
         except (ConnectionResetError, BrokenPipeError):
             pass
         finally:

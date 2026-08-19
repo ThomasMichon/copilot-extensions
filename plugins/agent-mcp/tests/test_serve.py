@@ -352,3 +352,27 @@ async def test_attach_missing_bridge_is_refused(tmp_path):
     finally:
         await request_via_socket(sock, {"op": "shutdown"})
         await asyncio.wait_for(task, timeout=5)
+
+
+async def test_attached_session_survives_invalid_json(tmp_path):
+    # A garbage line after attach is logged and dropped; the session stays live
+    # and still answers the next valid request.
+    from agent_mcp.serve import open_attached_session
+
+    sock = tmp_path / "serve.sock"
+    bridge = _write_bridge_config(tmp_path)
+    server = Server(sock)
+    task = asyncio.create_task(server.serve_forever())
+    try:
+        await _await_socket(sock)
+        reader, writer = await open_attached_session(sock, str(bridge))
+        writer.write(b"not json at all\n")
+        await writer.drain()
+        call = await _rpc(reader, writer,
+                          {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                           "params": {"name": "echo", "arguments": {"ok": 1}}})
+        assert json.loads(call["result"]["content"][0]["text"]) == {"ok": 1}
+        writer.close()
+    finally:
+        await request_via_socket(sock, {"op": "shutdown"})
+        await asyncio.wait_for(task, timeout=5)
