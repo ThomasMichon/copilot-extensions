@@ -48,6 +48,46 @@ def _count_active_sessions(mgr) -> int:
     return n
 
 
+# Generation self-retire tuning. Opt-in (default off): the live behavior (a
+# demoted daemon exiting itself) must be validated on a real cutover before it
+# becomes the default, so it is armed only by an explicit env guard. Cadence and
+# the K-confirmation count are env-tunable for that validation.
+_SELF_RETIRE_DEFAULT_POLL_S = 30.0
+_SELF_RETIRE_DEFAULT_CONFIRMATIONS = 3
+
+
+def _self_retire_settings() -> tuple[bool, float, int]:
+    """``(enabled, poll_seconds, confirmations)`` for generation self-retire.
+
+    ``enabled`` is False unless ``AGENT_BRIDGE_SELF_RETIRE`` is truthy -- when off,
+    the loop is never created, so no self-retire code runs at all. The poll cadence
+    (``AGENT_BRIDGE_SELF_RETIRE_POLL_S``) and confirmation count
+    (``AGENT_BRIDGE_SELF_RETIRE_CONFIRMATIONS``) are overridable for validation.
+    """
+    import os
+
+    enabled = os.environ.get("AGENT_BRIDGE_SELF_RETIRE", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+    try:
+        poll = float(
+            os.environ.get("AGENT_BRIDGE_SELF_RETIRE_POLL_S", "")
+            or _SELF_RETIRE_DEFAULT_POLL_S
+        )
+        poll = max(1.0, poll)
+    except ValueError:
+        poll = _SELF_RETIRE_DEFAULT_POLL_S
+    try:
+        k = int(
+            os.environ.get("AGENT_BRIDGE_SELF_RETIRE_CONFIRMATIONS", "")
+            or _SELF_RETIRE_DEFAULT_CONFIRMATIONS
+        )
+        k = max(1, k)
+    except ValueError:
+        k = _SELF_RETIRE_DEFAULT_CONFIRMATIONS
+    return enabled, poll, k
+
+
 async def _start_credential_relay(app: FastAPI):
     """Build and start the in-process credential relay; return the server or None.
 
@@ -393,6 +433,84 @@ async def lifespan(app: FastAPI):
 
         publish_task = asyncio.create_task(_publish_when_listening())
 
+    # Self-retire on supersession (owner-liveness tether). A daemon that has been
+    # *demoted* -- a newer generation flipped the routing table and now serves
+    # clients -- drains and exits on its own instead of lingering as a stranded
+    # ``serve --passive`` process (the observed leak: a demoted generation
+    # persisting for hours after its successor took over). The "owner" being
+    # tracked here is the single active routing generation, with the periodic
+    # reapers as a backstop.
+    #
+    # OPT-IN (default off): only a daemon that self-published (``publish_on_ready``)
+    # AND has ``AGENT_BRIDGE_SELF_RETIRE`` set arms this; when off, none of the loop
+    # below is created or runs. Fail-safe on two independent axes -- it exits only
+    # once BOTH (a) supersession by a *live, strictly-newer* generation and (b)
+    # local idleness are K-confirmed. So the genuinely-active daemon (which reads
+    # its own pid as active) can never self-retire, and an in-flight turn on a
+    # demoted daemon is never cut mid-flight: it drains as clients follow the
+    # flipped route.
+    self_retire_task = None
+    _sr_enabled, _sr_poll, _sr_confirmations = _self_retire_settings()
+    if getattr(app.state, "publish_on_ready", False) and _sr_enabled:
+        async def _self_retire_loop() -> None:
+            import os as _os
+
+            from zdd import routing
+            from zdd.routing import Endpoint
+
+            from .config import config_dir
+            from .self_retire import is_superseded
+
+            my_pid = _os.getpid()
+            # Observe our own publish landing first, capturing our generation.
+            # Until we are the recorded active we cannot meaningfully be
+            # "superseded"; a passive instance that is never promoted simply
+            # never arms the watch (returns without ever calling is_superseded).
+            my_gen: int | None = None
+            for _ in range(600):  # ~5 min ceiling to see our own publish
+                await asyncio.sleep(0.5)
+                data = await asyncio.to_thread(routing.read_table, config_dir())
+                raw = data.get("active") if isinstance(data, dict) else None
+                ep = Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+                if ep is not None and ep.pid == my_pid:
+                    my_gen = ep.generation
+                    break
+            if my_gen is None:
+                return
+            confirms = 0
+            while True:
+                await asyncio.sleep(_sr_poll)
+                try:
+                    superseded = await asyncio.to_thread(
+                        is_superseded, config_dir(), my_pid, my_gen
+                    )
+                    idle = superseded and (
+                        await asyncio.to_thread(_count_active_sessions, mgr) == 0
+                    )
+                except Exception:
+                    confirms = 0
+                    log.debug("Self-retire supersession check failed", exc_info=True)
+                    continue
+                if not (superseded and idle):
+                    confirms = 0  # any miss resets: only a sustained state acts
+                    continue
+                confirms += 1
+                if confirms >= _sr_confirmations:
+                    log.info(
+                        "Superseded by a live newer generation and idle -- "
+                        "self-retiring (was gen %d, pid %d)", my_gen, my_pid,
+                    )
+                    server = getattr(app.state, "uvicorn_server", None)
+                    if server is not None:
+                        server.should_exit = True
+                    return
+
+        self_retire_task = asyncio.create_task(_self_retire_loop())
+        log.info(
+            "Self-retire-on-supersession armed (K=%d, poll=%.0fs)",
+            _sr_confirmations, _sr_poll,
+        )
+
     yield
 
     # Shutdown: retract our routing-table claim so clients fall back (or follow
@@ -402,6 +520,11 @@ async def lifespan(app: FastAPI):
         publish_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await publish_task
+    # Shutdown: stop the generation self-retire watch (if armed)
+    if self_retire_task is not None:
+        self_retire_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await self_retire_task
     if getattr(app.state, "publish_on_ready", False):
         import os as _os
 
