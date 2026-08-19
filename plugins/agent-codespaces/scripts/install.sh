@@ -450,8 +450,8 @@ _ensure_uv_index() {
     [[ -n "${UV_INDEX_URL:-}${UV_DEFAULT_INDEX:-}" ]] && return 0
     local idx=""
     # Prefer `pip config get` when pip is on PATH.
-    if command -v pip &>/dev/null; then idx="$(pip config get global.index-url 2>/dev/null | tr -d '[:space:]')"; fi
-    if [[ -z "$idx" ]] && command -v pip3 &>/dev/null; then idx="$(pip3 config get global.index-url 2>/dev/null | tr -d '[:space:]')"; fi
+    if command -v pip &>/dev/null; then idx="$(pip config get global.index-url 2>/dev/null | tr -d '[:space:]' || true)"; fi
+    if [[ -z "$idx" ]] && command -v pip3 &>/dev/null; then idx="$(pip3 config get global.index-url 2>/dev/null | tr -d '[:space:]' || true)"; fi
     # Else parse the standard pip.conf files directly -- a governed box carries the
     # conf (index-url policy) but may not have pip on PATH in this context.
     if [[ -z "$idx" ]]; then
