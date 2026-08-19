@@ -51,16 +51,33 @@ def declaration_to_spec(decl: ProfileDeclaration) -> dict:
         spec["repo"] = decl.repos
     if decl.label_max_attempts:
         spec["label_max_attempts"] = dict(decl.label_max_attempts)
+    # Fleet dispatch (pool/origin/headless) is mutually exclusive with the
+    # non-fleet body-backend branches -- mirror ``to_supervise_args`` exactly so the
+    # daemon-built argv matches the lossless-superset render. Without carrying the
+    # fleet block here the serve daemon silently drops pool/origin and every fleet
+    # supervisor runs LOCAL: it spawns a body on the pool host that queries that
+    # host's *own* coordinator (not the origin), so the origin task 404s and the
+    # body stands down without doing the work.
+    if decl.fleet.enabled:
+        spec["fleet"] = {
+            "pool": list(decl.fleet.pool),
+            "origin": decl.fleet.origin,
+            "headless": decl.fleet.headless,
+        }
+        # A fleet embody body pins CLI explicitly; a headless fleet emits --headless
+        # (from spec["fleet"]) in _lane_flags.
+        if decl.body.type == "embody" and not decl.fleet.headless:
+            spec["embody_backend"] = "cli"
     # Headless is the default embody backend. An embody (CLI-default) profile pins
     # the backend and lists any headless subset; a headless profile lists any CLI
     # opt-out subset (cli_labels) and leaves the backend at its default.
-    if decl.body.type == "embody":
+    elif decl.body.type == "embody":
         spec["embody_backend"] = "cli"
         if decl.body.headless_labels:
             spec["headless_labels"] = list(decl.body.headless_labels)
     elif decl.body.cli_labels:
         spec["cli_labels"] = list(decl.body.cli_labels)
-    if decl.body.type == "headless" or decl.body.headless_labels:
+    if decl.body.type == "headless" or decl.body.headless_labels or decl.fleet.headless:
         spec["headless_agent"] = decl.body.agent
     if decl.verify_timeout:
         spec["verify_timeout"] = decl.verify_timeout
