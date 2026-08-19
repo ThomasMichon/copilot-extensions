@@ -39,12 +39,27 @@ if ($_rtRoot) {
     if ($_rtLkg) { $AgentRtPy = _Rt-TrySlot $_rtLkg }
   }
 
-  # Tier 3: true first-run (no marker, no last-known-good) -> newest slot.
+  # Tier 3: true first-run (no marker, no last-known-good) -> newest COMPLETE
+  # slot, matching versioned_runtime.resolve_python. Sorted version-aware (each
+  # numeric run zero-padded so 0.1.0-dev185 > 0.1.0-dev50, not lexicographic),
+  # preferring slots that carry a completion marker; falls back to the newest slot
+  # with a python if none is marked complete.
   if (-not $AgentRtPy) {
-    $AgentRtPy = Get-ChildItem (Join-Path $_rtRoot 'versions') -Directory -ErrorAction SilentlyContinue |
-      Sort-Object Name |
-      ForEach-Object { Join-Path $_.FullName 'Scripts\python.exe' } |
-      Where-Object { Test-Path -LiteralPath $_ } |
-      Select-Object -Last 1
+    $_rtSlots = Get-ChildItem (Join-Path $_rtRoot 'versions') -Directory -ErrorAction SilentlyContinue |
+      Sort-Object { [regex]::Replace($_.Name, '\d+', { param($m) $m.Value.PadLeft(10, '0') }) }
+    $_rtAny = $null
+    foreach ($_rtSlot in $_rtSlots) {
+      $p = $null
+      foreach ($sub in @('Scripts\python.exe', 'bin\python')) {
+        $cand = Join-Path $_rtSlot.FullName $sub
+        if (Test-Path -LiteralPath $cand) { $p = $cand; break }
+      }
+      if (-not $p) { continue }
+      $_rtAny = $p
+      if (Test-Path -LiteralPath (Join-Path $_rtSlot.FullName '.install-complete.json')) {
+        $AgentRtPy = $p
+      }
+    }
+    if (-not $AgentRtPy) { $AgentRtPy = $_rtAny }
   }
 }

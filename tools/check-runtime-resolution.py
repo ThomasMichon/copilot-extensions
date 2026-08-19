@@ -45,7 +45,7 @@ _SCAN_GLOBS = ("scripts/*.sh", "scripts/*.ps1", "bin/*")
 # marker). `engine`/durable venvs are excluded by path; anything else opts out
 # with the inline allow marker.
 _LINK_PY = re.compile(
-    r"""(?<![\w.])\.?venv[\\/](?:bin[\\/]python|Scripts[\\/]python(?:w)?\.exe)""",
+    r"""(?<![\w.])\.?venv[\\/](?:bin[\\/]python(?:3(?:\.\d+)?)?|Scripts[\\/]python(?:w)?\.exe)""",
     re.IGNORECASE,
 )
 # A PATH python bound as a **launch** interpreter (never allowed) -- a launch

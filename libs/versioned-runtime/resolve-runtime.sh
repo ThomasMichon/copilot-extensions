@@ -43,13 +43,27 @@ if [ -n "$_rt_root" ]; then
     _rt_try_slot "$_rt_lkg"
   fi
 
-  # Tier 3: true first-run (no marker, no last-known-good) -> newest slot.
+  # Tier 3: true first-run (no marker, no last-known-good) -> newest COMPLETE
+  # slot, matching versioned_runtime.resolve_python. Version-sorted (so
+  # 0.1.0-dev185 > 0.1.0-dev50, not lexicographic), preferring slots that carry a
+  # completion marker; falls back to the newest slot with a python if none is
+  # marked complete.
   if [ -z "$AGENT_RT_PY" ]; then
-    for _rt_p in "$_rt_root"/versions/*/bin/python "$_rt_root"/versions/*/Scripts/python.exe; do
-      [ -x "$_rt_p" ] && AGENT_RT_PY="$_rt_p"
+    _rt_any=""
+    # shellcheck disable=SC2012,SC2045  # version names never contain whitespace
+    for _rt_v in $(ls -1 "$_rt_root/versions" 2>/dev/null | sort -V); do
+      for _rt_sub in bin/python Scripts/python.exe; do
+        if [ -x "$_rt_root/versions/$_rt_v/$_rt_sub" ]; then
+          _rt_any="$_rt_root/versions/$_rt_v/$_rt_sub"
+          [ -f "$_rt_root/versions/$_rt_v/.install-complete.json" ] && \
+            AGENT_RT_PY="$_rt_root/versions/$_rt_v/$_rt_sub"
+          break
+        fi
+      done
     done
+    [ -n "$AGENT_RT_PY" ] || AGENT_RT_PY="$_rt_any"
   fi
 
-  unset _rt_root _rt_ver _rt_lkg _rt_sub _rt_p 2>/dev/null || true
+  unset _rt_root _rt_ver _rt_lkg _rt_sub _rt_v _rt_any 2>/dev/null || true
   unset -f _rt_try_slot 2>/dev/null || true
 fi
