@@ -472,6 +472,9 @@ function Resolve-SshManager { return (Resolve-VendoredLib -LibName 'ssh-manager'
 function Resolve-CredentialRelay { return (Resolve-VendoredLib -LibName 'credential-relay') }
 # zero-downtime cutover primitives (module ``zdd``), extracted from this plugin.
 function Resolve-Zdd { return (Resolve-VendoredLib -LibName 'zdd') }
+# single-instance lease + supersession self-retire + reconcile-set reaper
+# (module ``single_instance_lease``), extracted from this plugin.
+function Resolve-SingleInstanceLease { return (Resolve-VendoredLib -LibName 'single-instance-lease') }
 # config schema versioning + migration (module ``config_migrate``).
 function Resolve-ConfigMigrate { return (Resolve-VendoredLib -LibName 'config-migrate') }
 
@@ -493,6 +496,13 @@ function Test-CredentialRelayInstalled {
 function Test-ZddInstalled {
     if (-not (Test-Path $VenvPython)) { return $false }
     & $VenvPython -c 'from zdd.cutover import CutoverOrchestrator' 2>$null
+    return $LASTEXITCODE -eq 0
+}
+
+# Check if the single-instance-lease lib is already importable in the venv.
+function Test-SingleInstanceLeaseInstalled {
+    if (-not (Test-Path $VenvPython)) { return $false }
+    & $VenvPython -c 'from single_instance_lease import SingleInstance' 2>$null
     return $LASTEXITCODE -eq 0
 }
 
@@ -1342,6 +1352,21 @@ function Invoke-Install {
     } else {
         throw 'Cannot locate zdd library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
     }
+    # single-instance-lease (one active daemon per host: lease + self-retire + reaper).
+    $SilDir = Resolve-SingleInstanceLease
+    if ($SilDir) {
+        $silOut = & uv pip install --python $VenvPython "$SilDir" --reinstall-package agent-single-instance-lease --refresh-package agent-single-instance-lease --quiet 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            $ErrorActionPreference = $prevEAP
+            Write-Fail "single-instance-lease install failed (exit $LASTEXITCODE)"
+            if ($silOut) { Write-Host ($silOut | Out-String) }
+            throw 'single-instance-lease install failed'
+        }
+    } elseif (Test-SingleInstanceLeaseInstalled) {
+        Write-Step 'single-instance-lease already installed in venv (marketplace layout)'
+    } else {
+        throw 'Cannot locate single-instance-lease library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
+    }
     # config-migrate (config schema versioning + migration).
     $CfgMigrateDir = Resolve-ConfigMigrate
     if ($CfgMigrateDir) {
@@ -1729,7 +1754,7 @@ function Test-RuntimeHealthy {
        missing in the observed broken-venv outage. #>
     param([string]$Python)
     if (-not (Test-Path $Python)) { return $false }
-    & $Python -c 'import agent_bridge, uvicorn, credential_relay, zdd' 2>$null
+    & $Python -c 'import agent_bridge, uvicorn, credential_relay, zdd, single_instance_lease' 2>$null
     return $LASTEXITCODE -eq 0
 }
 
@@ -1915,6 +1940,21 @@ function Invoke-Update {
             Write-Step 'zdd already installed in venv (marketplace layout)'
         } else {
             throw 'Cannot locate zdd library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
+        }
+        # single-instance-lease: force-reinstall so a local code change propagates.
+        $SilDir = Resolve-SingleInstanceLease
+        if ($SilDir) {
+            $silOut = & uv pip install --python $VenvPython --reinstall-package agent-single-instance-lease --refresh-package agent-single-instance-lease `
+                "$SilDir" --quiet 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                $ErrorActionPreference = $prevEAP
+                if ($silOut) { Write-Host ($silOut | Out-String) }
+                throw "single-instance-lease update failed (exit $LASTEXITCODE)"
+            }
+        } elseif (Test-SingleInstanceLeaseInstalled) {
+            Write-Step 'single-instance-lease already installed in venv (marketplace layout)'
+        } else {
+            throw 'Cannot locate single-instance-lease library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
         }
         # config-migrate: force-reinstall so a local code change propagates.
         $CfgMigrateDir = Resolve-ConfigMigrate
