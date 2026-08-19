@@ -645,6 +645,20 @@ if ($VersionedRuntime -and -not $env:AGENT_MCP_NO_VERSION_REAP) {
             Write-Ok "Reaped $($reaped.Count) stale-version process(es) from: $stale"
         }
     } catch { Write-Skip "Version-reap skipped ($($_.Exception.Message))" }
+    # Collect the now-idle stale version *directories* the reap above freed. The
+    # process-reap alone leaves the dirs on disk (the primitive's gc deliberately
+    # protects any slot a live process runs from), so without this step stale
+    # slots accumulate unbounded across upgrades. --protect-pids keeps the current
+    # version + any slot a live process still runs from; --min-age-days is a
+    # recency floor so a concurrent peer install's freshly-built (not-yet-live)
+    # slot is never reaped mid-build. Best-effort; runs via the new slot's python.
+    try {
+        $gcJson = & $VenvPython $VrScript --root $InstallDir --link-name '.venv' `
+            --json gc --protect-pids --min-age-days 0.05 2>$null
+        $gcArg = (($gcJson | Out-String).Trim())
+        $gcN = & $VenvPython -c 'import sys,json; a=sys.argv[1] if len(sys.argv)>1 else ""; print(len(json.loads(a).get("removed",[])) if a.strip()[:1]=="{" else 0)' $gcArg
+        if ([int]$gcN -gt 0) { Write-Ok "Collected $gcN stale version dir(s)" }
+    } catch { Write-Skip "Version-gc skipped ($($_.Exception.Message))" }
 }
 
 # -- 4. Deploy binstub -------------------------------------------------
