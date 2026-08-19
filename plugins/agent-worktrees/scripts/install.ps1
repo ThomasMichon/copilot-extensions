@@ -349,6 +349,16 @@ function Invoke-VersionedActivate {
         return $false
     }
     Write-ServiceOk "Runtime version $SrcVersion active (.venv -> versions/$SrcVersion)"
+    # #742: record the just-activated version as `last-known-good` so a future
+    # marker-absent resolution (resolve-runtime.ps1 tier 2) prefers it over a
+    # newest-slot guess. Atomic (temp + rename); best-effort, never fatal.
+    try {
+        $lkgTmp = Join-Path $InstallDir ("last-known-good.tmp." + $PID)
+        [IO.File]::WriteAllText($lkgTmp, "$SrcVersion`n")
+        Move-Item -LiteralPath $lkgTmp -Destination (Join-Path $InstallDir 'last-known-good') -Force
+    } catch {
+        try { Remove-Item -LiteralPath $lkgTmp -Force -ErrorAction SilentlyContinue } catch {}
+    }
     $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
     $gcArgs = @($vr, '--root', $InstallDir, '--link-name', '.venv', 'gc', '--protect-pids')
     if ($prev) { $gcArgs += @('--keep', $prev) }
