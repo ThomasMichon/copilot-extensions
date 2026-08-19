@@ -149,11 +149,56 @@ check — proving the substrate generalises without an internal dependency.
 | [`agent-dispatch-cutover`](scenarios/agent-dispatch-cutover/) | P | **Graceful daemon cutover — agent-dispatch** (correct-install-flows, dotfiles#1393): a queued task survives; a claimed+started **held task** survives and the worker re-adopts via the durable queue DB; an **aborted cutover** is healed (undrain); a **wedged daemon** is stood-up-beside and retired. Stdlib-only probe. |
 | [`agent-index-cutover`](scenarios/agent-index-cutover/) | P | **Graceful daemon cutover — agent-index** (service + durable engine): the swappable versioned service cuts over without disturbing the durable, warm embedding engine/model on its own lifecycle. Stdlib-only probe. |
 | [`agent-vault-cutover`](scenarios/agent-vault-cutover/) | P | **Cutover witness — agent-vault** (#609): proves the client-side rendezvous **cutover fallback ladder** (override → live file → legacy) deterministically, and reports the **daemon-side** active/passive zdd cutover as a forward-looking gap (INFO — vault has not yet vendored `zdd`). Stays green today; its phase-3 battery lights up once vault adopts the connection-owner contract. |
+| [`partner-harness-setup`](scenarios/partner-harness-setup/) | P | **Downstream partner-harness setup gate:** given a partner harness tree (mounted `CR_PARTNER_PATH` or cloned `CR_PARTNER_REPO`), assert the vendored plugin **drop is structurally coherent** (plugins parse + are marketplace-listed + ship installers; setup entrypoint + golden-path doc present), the partner's **read-only `setup check` runs without crashing**, and the partner's **OWN setup/update test suite passes**. Name-free via `CR_PARTNER_*`. Flagship consumer: the `odsp-web-harness` agent-* re-blit sync gate — *never publish a drop that breaks the partner's setup flow.* |
 
 Downstream/internal scenarios (naming a specific harness's repos — e.g.
 `harness-health`, the citadel north-star) live with the **consuming harness** and
 are mounted verbatim via `-Scenario <dir>`, per the ownership split in
 [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+## Machine verdict for a consuming gate (`verdict.sh`)
+
+A scenario emits a rich `cr-report.json` (phases + jams + env). A **consuming
+gate** — a downstream sync/publish step, a mirror, a CI job — usually just needs a
+single, uniform PASS/FAIL. **`verdict.sh`** is that thin adapter:
+
+```bash
+# after a scenario run wrote $CR_REPORT:
+tools/clean-room/verdict.sh --report <cr-report.json> [--pretty]
+# stdout: {"ok":bool,"scenario":str,"passed":int,"failed":int,"degraded":bool,"jams":[…]}
+# exit:   0 iff ok (failed==0); 1 on validation failure; 2 on usage/parse error
+```
+
+`degraded` is true when the only jams are **environment** gaps (`validator-env`)
+rather than a real product failure — a caller running fail-closed treats
+`degraded` as a hold too. This is the consistent verdict contract every partner
+gate shares.
+
+### The partner-harness setup gate (deterministic, Tier P)
+
+`partner-harness-setup` + `verdict.sh` is the shared, **fail-closed** gate a
+downstream **vendored-plugin sync** runs before publishing a re-blit, so it never
+ships a drop that breaks the partner's setup flow. Point it at the
+to-be-published tree (mount it as `CR_PARTNER_PATH`) and read the verdict:
+
+```bash
+docker run --rm \
+  -v <clean-room-dir>:/cr:ro -v <partner-tree>:/partner \
+  -e CR_LIB=/cr/lib/clean-room-lib.sh -e CR_PARTNER_PATH=/partner \
+  -e CR_REPORT=/out/cr-report.json -e CR_LOGDIR=/out/cr-logs \
+  copilot-cleanroom:base \
+  'bash /cr/scenarios/partner-harness-setup/scenario.sh; bash /cr/verdict.sh --report "$CR_REPORT"'
+```
+
+**Platform split.** This Linux box runs the partner's **unix-native** flow
+(`setup.sh` + `*_sh` tests). The **Windows-native** flow (`setup.ps1` + `*_ps1`
+tests) runs in a **Windows container on cloud2** (see the dotfiles
+`onboard-cloud2-windows-containers` effort) — a partner is validated on the
+platform whose native suite is faithful. The dotfiles `odsp-web-harness` sync also
+ships a lightweight host-side fill (`tools/owh-validate-drop.ps1`) that runs the
+same checks + owh's `*_ps1` tests directly on the sync box; this clean-room
+scenario is the fresh-box, cross-partner canonical gate the sync's
+`-ValidatorScript` seam points at where a container host is available.
 
 ## Driving the box over agent-bridge
 
