@@ -18,4 +18,4 @@ try:
     # so `status` / `--version` never drift from the real version.
     __version__ = _pkg_version("agent-mcp")
 except PackageNotFoundError:  # running from source without an install
-    __version__ = "0.2.0-dev33"
+    __version__ = "0.2.0-dev53"

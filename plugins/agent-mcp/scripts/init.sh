@@ -463,6 +463,21 @@ if [[ "$VERSIONED_RUNTIME" -eq 1 && -z "${AGENT_MCP_NO_VERSION_REAP:-}" ]]; then
         _n="$(printf '%s\n' "$_reaped" | grep -c . || true)"
         _ok "Reaped $_n stale-version process(es)"
     fi
+    # Collect the now-idle stale version *directories* the reap above freed. The
+    # process-reap alone leaves the dirs on disk (the primitive's gc deliberately
+    # protects any slot a live process runs from), so without this step stale
+    # slots accumulate unbounded across upgrades. --protect-pids keeps the current
+    # version + any slot a live process still runs from; --min-age-days is a
+    # recency floor so a *concurrent* peer install's freshly-built (not-yet-live)
+    # slot is never reaped mid-build. Best-effort; runs via the new slot's python.
+    _gc_json="$("$VENV_PYTHON" "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" \
+        --link-name '.venv' --json gc --protect-pids --min-age-days 0.05 2>/dev/null || true)"
+    _gc_n="$("$VENV_PYTHON" -c 'import sys, json
+try:
+    print(len(json.loads(sys.argv[1]).get("removed", [])))
+except Exception:
+    print(0)' "$_gc_json" 2>/dev/null || echo 0)"
+    [[ "${_gc_n:-0}" -gt 0 ]] && _ok "Collected $_gc_n stale version dir(s)"
 fi
 
 # -- 4. Binstub --------------------------------------------------------
