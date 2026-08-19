@@ -56,6 +56,35 @@ def test_discover_uses_explicit_path_key(tmp_path):
     assert found[0].path == repo
 
 
+def test_resolve_repo_path_expands_tilde(tmp_path, monkeypatch):
+    # A ~-shorthand path in repos.yaml must be expanded, else is_dir() is False
+    # in discover() and the repo is silently skipped.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    resolved = discover.resolve_repo_path(
+        "acme", {"wsl": "~/src/acme"}, {}, "wsl")
+    assert resolved == tmp_path / "src" / "acme"
+    # srcroot fallback expands too.
+    resolved_root = discover.resolve_repo_path(
+        "acme", {}, {"wsl": "~/src"}, "wsl")
+    assert resolved_root == tmp_path / "src" / "acme"
+
+
+def test_discover_expands_tilde_path(tmp_path, monkeypatch):
+    # End-to-end: a registry entry using ~ still discovers the repo's packages.
+    # Pin the platform so the test is deterministic on any runner (the wsl key
+    # is only consulted when current_platform() == "wsl").
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setattr(discover, "current_platform", lambda: "wsl")
+    repo = tmp_path / "src" / "acme"
+    write_package(repo, "d.yaml", base_package(gate=["*"]))
+    reg = {"repos": {"acme": {"class": "worktree", "wsl": "~/src/acme"}}}
+    found = discover.discover(machine="box-1", registry=reg, projects=_projects("acme"))
+    assert len(found) == 1
+    assert found[0].path == repo
+
+
 def test_discover_missing_registry_degrades(tmp_path, monkeypatch):
     # No projects.yaml -> empty read -> empty set (a la carte independence).
     monkeypatch.setattr(discover, "read_projects", lambda path=None: {})
