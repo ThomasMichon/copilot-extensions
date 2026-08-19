@@ -16,11 +16,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 from pathlib import Path
 
 from rich.panel import Panel
+from rich.style import Style
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -6258,25 +6260,120 @@ def _steer_draft_path(task_id: str) -> Path | None:
     return _steer_drafts_dir() / f"{tid}.json" if tid else None
 
 
-class _AutoExpandTextArea(TextArea):
-    """A ``TextArea`` that grows with its content up to a line cap (the docked
-    steer input). The widget height tracks the document's line count, clamped to
-    ``[min_lines, max_lines]``; past the cap it scrolls internally."""
+#: Matches an http(s) URL in card prose (stops at whitespace / closing brackets).
+_URL_RE = re.compile(r"https?://[^\s<>\)\]]+")
 
-    def __init__(self, *args, min_lines: int = 3, max_lines: int = 10, **kw) -> None:
+
+def _linkify(text: str, style: str) -> Text:
+    """Render ``text`` as Rich ``Text`` with any http(s) URL turned into a
+    clickable OSC-8 hyperlink (underlined), so the operator can click it -- or
+    hover to reveal the full URL -- instead of reading a bare string. Non-URL
+    spans keep the base ``style``. (Click-through depends on the terminal; over
+    SSH/mux it degrades to a hover/inspectable link, which is why the picker is
+    usually driven locally.)"""
+    base = Style.parse(style) if style else Style()
+    t = Text()
+    pos = 0
+    for m in _URL_RE.finditer(text):
+        if m.start() > pos:
+            t.append(text[pos:m.start()], style=base)
+        url = m.group(0)
+        # Don't swallow trailing sentence punctuation into the link target
+        # (a URL that ends a sentence, e.g. "…see https://x/y." ).
+        trail = ""
+        while url and url[-1] in ".,;:!?)]}'\"":
+            trail = url[-1] + trail
+            url = url[:-1]
+        if url:
+            t.append(url, style=base + Style(link=url, underline=True))
+        if trail:
+            t.append(trail, style=base)
+        pos = m.end()
+    if pos < len(text):
+        t.append(text[pos:], style=base)
+    return t
+
+
+class _AutoExpandTextArea(TextArea):
+    """A docked steer input that grows with its content and follows the
+    Copilot-CLI editing mechanic.
+
+    * Height is CSS ``auto`` (bounded by ``min_height``/``max_height``), so the
+      box grows one row per line of content and caps out (then scrolls) -- no
+      manual line math, no off-by-one.
+    * **Enter accepts + advances** focus to the next field (or the button row on
+      the last one); **Shift+Enter inserts a newline** (grow the box). This
+      matches the operator's Copilot-CLI muscle memory."""
+
+    def __init__(self, *args, min_height: int = 3, max_height: int = 12, **kw) -> None:
         super().__init__(*args, **kw)
-        self._min_lines = min_lines
-        self._max_lines = max_lines
+        self._min_height = min_height
+        self._max_height = max_height
 
     def on_mount(self) -> None:
-        self.autosize()
+        self.styles.height = "auto"
+        self.styles.min_height = self._min_height
+        self.styles.max_height = self._max_height
 
     def autosize(self) -> None:
-        try:
-            n = self.document.line_count
-        except Exception:
-            n = 1
-        self.styles.height = max(self._min_lines, min(self._max_lines, n))
+        # Back-compat no-op: CSS ``height: auto`` now does the growing.
+        return
+
+    def on_key(self, event) -> None:
+        if event.key == "enter":
+            # Accept + advance (Copilot-CLI mechanic) -- do NOT insert a newline.
+            # Using the public on_key handler (not the private _on_key) keeps this
+            # robust across Textual upgrades.
+            event.prevent_default()
+            event.stop()
+            adv = getattr(self.screen, "_advance_focus", None)
+            if callable(adv):
+                adv(self)
+        elif event.key == "shift+enter":
+            event.prevent_default()
+            event.stop()
+            self.insert("\n")
+
+
+class _SteerRadioSet(RadioSet):
+    """A single-select that keeps ``Space`` = toggle-and-stay but makes ``Enter``
+    = toggle-**and-advance** (the steer form's keyboard flow). Enter that lands on
+    "Other…" focuses the revealed free-text box instead of advancing."""
+
+    BINDINGS = [
+        Binding("enter", "toggle_and_advance", show=False),
+        Binding("space", "toggle_button", show=False),
+    ]
+
+    def action_toggle_and_advance(self) -> None:
+        self.action_toggle_button()
+        # The selection settles asynchronously (pressed_index updates after the
+        # button's Changed message), so defer the advance until after refresh.
+        self.call_after_refresh(self._notify_advance)
+
+    def _notify_advance(self) -> None:
+        adv = getattr(self.screen, "_advance_after_choice", None)
+        if callable(adv):
+            adv(self)
+
+
+class _SteerSelectionList(SelectionList):
+    """A multi-select where ``Space`` toggles-and-stays (pick several) and
+    ``Enter`` toggles the highlighted option **and advances**. Enter that toggles
+    "Other…" on focuses the revealed free-text box."""
+
+    BINDINGS = [
+        Binding("enter", "toggle_and_advance", show=False),
+    ]
+
+    def action_toggle_and_advance(self) -> None:
+        self.action_select()
+        self.call_after_refresh(self._notify_advance)
+
+    def _notify_advance(self) -> None:
+        adv = getattr(self.screen, "_advance_after_choice", None)
+        if callable(adv):
+            adv(self)
 
 
 class SteerButtonRow(Widget):
@@ -6377,6 +6474,7 @@ class PivotFormScreen(ModalScreen[dict]):
     PivotFormScreen .steer-qlabel { color: #ffaf00; height: auto; padding: 1 0 0 0; }
     PivotFormScreen .steer-note { color: grey; height: auto; padding: 1 0 0 0; }
     PivotFormScreen TextArea { border: round grey; background: $surface; }
+    PivotFormScreen Input { border: round grey; background: $surface; }
     PivotFormScreen RadioSet, PivotFormScreen SelectionList {
         border: none; background: $surface; height: auto;
     }
@@ -6386,6 +6484,8 @@ class PivotFormScreen(ModalScreen[dict]):
     BINDINGS = [
         Binding("escape", "escape_close", show=False),
         Binding("ctrl+s", "save", show=False),
+        Binding("ctrl+right", "next_tab", show=False),
+        Binding("ctrl+left", "prev_tab", show=False),
     ]
 
     def __init__(self, card: dict, fields: list[dict], submit_label: str,
@@ -6436,7 +6536,7 @@ class PivotFormScreen(ModalScreen[dict]):
             btns = [RadioButton(o, value=(j == 0)) for j, o in enumerate(options)]
             if allow_other:
                 btns.append(RadioButton(_OTHER_LABEL))
-            rs = RadioSet(*btns, id=f"q-{i}")
+            rs = _SteerRadioSet(*btns, id=f"q-{i}")
             rec["primary"] = rs
             yield rs
             if allow_other:
@@ -6448,7 +6548,7 @@ class PivotFormScreen(ModalScreen[dict]):
             sels = [(o, o) for o in options]
             if allow_other:
                 sels.append((_OTHER_LABEL, _OTHER_SENTINEL))
-            sl = SelectionList(*sels, id=f"q-{i}")
+            sl = _SteerSelectionList(*sels, id=f"q-{i}")
             rec["primary"] = sl
             yield sl
             if allow_other:
@@ -6474,18 +6574,27 @@ class PivotFormScreen(ModalScreen[dict]):
             t.append(f"{title}\n", style=C_HEADER)
         status = card.get("status")
         if status:
-            t.append(f"{status}\n", style="white")
+            self._append_linked(t, str(status), "white")
+            t.append("\n")
         link = card.get("link")
         if link:
-            t.append(f"{link}\n", style="#4aa3ff underline")
+            t.append_text(_linkify(str(link), "#4aa3ff underline"))
+            t.append("\n")
         body = card.get("body")
         if title or status or link:
             t.append("\n")
         if body:
-            t.append(str(body), style="white")
+            self._append_linked(t, str(body), "white")
         elif not (title or status or link):
             t.append("(no card detail)", style=C_FAINT)
         return t
+
+    @staticmethod
+    def _append_linked(t: Text, text: str, style: str) -> None:
+        """Append ``text`` to ``t``, rendering any http(s) URLs as clickable
+        Rich hyperlinks (OSC-8) so the operator can click them (or hover to see
+        the full URL) rather than eyeballing a bare string."""
+        t.append_text(_linkify(text, style))
 
     @staticmethod
     def _q_label(f: dict) -> str:
@@ -6497,8 +6606,9 @@ class PivotFormScreen(ModalScreen[dict]):
         return f"{f['name']}" + (f"  ({hint})" if hint else "") + ":"
 
     def _foot(self) -> str:
-        return ("Tab move · ←/→ on buttons · Ctrl+S save · Esc save+close  ·  "
-                "Confirm submits your answer (never a vote)")
+        return ("Enter accept+next · Shift+Enter newline · Space toggle · "
+                "Ctrl+←/→ tabs · Ctrl+S save · Esc save+close  ·  "
+                "Confirm submits (never a vote)")
 
     # ---- lifecycle ----------------------------------------------------------
     def on_mount(self) -> None:
@@ -6514,22 +6624,29 @@ class PivotFormScreen(ModalScreen[dict]):
         except Exception:
             pass
 
-    # ---- dynamic "Other…" reveal + textarea autosize ------------------------
+    # ---- dynamic "Other…" reveal --------------------------------------------
     def _rec_for(self, widget) -> dict | None:
         for rec in self._q:
             if rec["primary"] is widget:
                 return rec
         return None
 
+    def _question_index(self, widget) -> int:
+        """Index of the question a widget belongs to (its primary OR its Other
+        box), or -1."""
+        for i, rec in enumerate(self._q):
+            if rec["primary"] is widget or rec.get("other") is widget:
+                return i
+        return -1
+
     def on_radio_set_changed(self, event) -> None:
+        # Reveal/hide the "Other…" free-text box for this question (display only;
+        # focus is handled on Enter by _advance_after_choice so Space stays put).
         rec = self._rec_for(event.radio_set)
         if not rec or not rec.get("other"):
             return
         other_idx = len(rec["options"])  # "Other…" is appended after the options
-        show = getattr(event, "index", -1) == other_idx
-        rec["other"].display = show
-        if show:
-            rec["other"].focus()
+        rec["other"].display = getattr(event, "index", -1) == other_idx
 
     def on_selection_list_selected_changed(self, event) -> None:
         rec = self._rec_for(event.selection_list)
@@ -6538,10 +6655,75 @@ class PivotFormScreen(ModalScreen[dict]):
         selected = list(getattr(event.selection_list, "selected", []) or [])
         rec["other"].display = _OTHER_SENTINEL in selected
 
-    def on_text_area_changed(self, event) -> None:
-        ta = event.text_area
-        if isinstance(ta, _AutoExpandTextArea):
-            ta.autosize()
+    # ---- keyboard flow: advance + tab cycling -------------------------------
+    def _activate_tab(self, i: int) -> None:
+        try:
+            self.query_one("#steer-tabs", TabbedContent).active = f"tab-{i}"
+        except Exception:
+            pass
+
+    def _advance_to_next_question(self, i: int) -> None:
+        """Focus the next question's input (switching tabs), or the button row
+        (Confirm) when there is none left."""
+        if 0 <= i and i + 1 < len(self._q):
+            self._activate_tab(i + 1)
+            try:
+                self._q[i + 1]["primary"].focus()
+            except Exception:
+                pass
+        else:
+            try:
+                br = self.query_one(SteerButtonRow)
+                br._idx = 0  # highlight Confirm
+                br.focus()
+            except Exception:
+                pass
+
+    def _advance_focus(self, widget) -> None:
+        """Enter from a free-form / Other box: advance to the next question."""
+        self._advance_to_next_question(self._question_index(widget))
+
+    def _advance_after_choice(self, widget) -> None:
+        """Enter from a choice/multichoice: if the toggle activated the "Other…"
+        box, focus it (keep typing); otherwise advance to the next question."""
+        rec = self._rec_for(widget)
+        if rec and rec.get("other") is not None:
+            if rec["type"] == "choice":
+                other_active = getattr(widget, "pressed_index", -1) == len(rec["options"])
+            else:
+                other_active = _OTHER_SENTINEL in (getattr(widget, "selected", []) or [])
+            if other_active:
+                rec["other"].display = True
+                try:
+                    rec["other"].focus()
+                except Exception:
+                    pass
+                return
+        self._advance_to_next_question(self._question_index(widget))
+
+    def _cycle_tab(self, direction: int) -> None:
+        if len(self._q) <= 1:
+            return
+        try:
+            tabs = self.query_one("#steer-tabs", TabbedContent)
+        except Exception:
+            return
+        try:
+            cur = int(str(tabs.active).split("-")[1])
+        except Exception:
+            cur = 0
+        i = (cur + direction) % len(self._q)
+        tabs.active = f"tab-{i}"
+        try:
+            self._q[i]["primary"].focus()
+        except Exception:
+            pass
+
+    def action_next_tab(self) -> None:
+        self._cycle_tab(1)
+
+    def action_prev_tab(self) -> None:
+        self._cycle_tab(-1)
 
     # ---- collect / draft ----------------------------------------------------
     def _collect(self) -> dict:
