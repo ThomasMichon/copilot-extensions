@@ -34,6 +34,46 @@ from .satellites import (
 log = logging.getLogger("agent-dispatch.coordinator")
 
 
+# Generation self-retire tuning. Opt-in (default off): the live behavior (a
+# demoted coordinator exiting itself) must be validated on a real cutover before
+# it becomes the default, so it is armed only by an explicit env guard. Cadence
+# and the K-confirmation count are env-tunable for that validation.
+_SELF_RETIRE_DEFAULT_POLL_S = 30.0
+_SELF_RETIRE_DEFAULT_CONFIRMATIONS = 3
+
+
+def _self_retire_settings() -> tuple[bool, float, int]:
+    """``(enabled, poll_seconds, confirmations)`` for generation self-retire.
+
+    ``enabled`` is False unless ``AGENT_DISPATCH_SELF_RETIRE`` is truthy -- when
+    off, the loop is never created, so no self-retire code runs at all. The poll
+    cadence (``AGENT_DISPATCH_SELF_RETIRE_POLL_S``) and confirmation count
+    (``AGENT_DISPATCH_SELF_RETIRE_CONFIRMATIONS``) are overridable for validation.
+    """
+    import os
+
+    enabled = os.environ.get("AGENT_DISPATCH_SELF_RETIRE", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+    try:
+        poll = float(
+            os.environ.get("AGENT_DISPATCH_SELF_RETIRE_POLL_S", "")
+            or _SELF_RETIRE_DEFAULT_POLL_S
+        )
+        poll = max(1.0, poll)
+    except ValueError:
+        poll = _SELF_RETIRE_DEFAULT_POLL_S
+    try:
+        k = int(
+            os.environ.get("AGENT_DISPATCH_SELF_RETIRE_CONFIRMATIONS", "")
+            or _SELF_RETIRE_DEFAULT_CONFIRMATIONS
+        )
+        k = max(1, k)
+    except ValueError:
+        k = _SELF_RETIRE_DEFAULT_CONFIRMATIONS
+    return enabled, poll, k
+
+
 class DrainGate:
     """Process-wide drain state for the graceful daemon cutover.
 
@@ -380,6 +420,84 @@ def create_app(
             if sweep_interval and sweep_interval > 0
             else None
         )
+        # Self-retire on supersession (owner-liveness tether). A coordinator that
+        # has been *demoted* -- a newer generation flipped the routing table and
+        # now serves clients -- drains to its safe cutover point and exits on its
+        # own instead of lingering as a stranded ``serve --passive`` process (the
+        # observed leak: a demoted generation persisting after its successor took
+        # over). The "owner" tracked here is the single active routing generation,
+        # with the periodic liveness GC as a backstop.
+        #
+        # OPT-IN (default off): armed only when this coordinator self-published its
+        # routing entry (``self_retire_publish`` -- i.e. not a passive instance)
+        # AND ``AGENT_DISPATCH_SELF_RETIRE`` is set. When off, the loop is never
+        # created. Fail-safe on two independent axes -- it exits only once BOTH
+        # (a) supersession by a *live, strictly-newer* generation and (b) the safe
+        # cutover point (``DrainGate`` reports no in-flight claim) are K-confirmed.
+        # So the genuinely-active coordinator (its own pid = active) can never
+        # self-retire, and a claim mid-flight is never dropped.
+        self_retire_task = None
+        _sr_enabled, _sr_poll, _sr_confirmations = _self_retire_settings()
+        if getattr(_app.state, "self_retire_publish", False) and _sr_enabled:
+            async def _self_retire_loop() -> None:
+                import os as _os
+
+                from zdd import routing
+                from zdd.routing import Endpoint
+
+                from .config import routing_dir
+                from .self_retire import is_superseded
+
+                my_pid = _os.getpid()
+                # Observe our own publish landing first, capturing our generation.
+                my_gen: int | None = None
+                for _ in range(600):  # ~5 min ceiling to see our own publish
+                    await asyncio.sleep(0.5)
+                    data = await asyncio.to_thread(routing.read_table, routing_dir())
+                    raw = data.get("active") if isinstance(data, dict) else None
+                    ep = Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+                    if ep is not None and ep.pid == my_pid:
+                        my_gen = ep.generation
+                        break
+                if my_gen is None:
+                    return
+                gate = getattr(_app.state, "drain_gate", None)
+                confirms = 0
+                while True:
+                    await asyncio.sleep(_sr_poll)
+                    try:
+                        superseded = await asyncio.to_thread(
+                            is_superseded, routing_dir(), my_pid, my_gen
+                        )
+                        # Safe cutover point: no claim in flight (a claimed task is
+                        # already durable in the queue). Absent a gate, treat as safe.
+                        at_safe_point = superseded and (
+                            gate is None or gate.claims == 0
+                        )
+                    except Exception:
+                        confirms = 0
+                        log.debug("self-retire supersession check failed", exc_info=True)
+                        continue
+                    if not (superseded and at_safe_point):
+                        confirms = 0
+                        continue
+                    confirms += 1
+                    if confirms >= _sr_confirmations:
+                        log.info(
+                            "superseded by a live newer generation at a safe cutover "
+                            "point -- self-retiring (was gen %d, pid %d)",
+                            my_gen, my_pid,
+                        )
+                        server = getattr(_app.state, "uvicorn_server", None)
+                        if server is not None:
+                            server.should_exit = True
+                        return
+
+            self_retire_task = asyncio.create_task(_self_retire_loop())
+            log.info(
+                "self-retire-on-supersession armed (K=%d, poll=%.0fs)",
+                _sr_confirmations, _sr_poll,
+            )
         async with contextlib.AsyncExitStack() as stack:
             if coordinator_mcp is not None:
                 # mcp 2.0: a mounted sub-app's own lifespan doesn't run, so drive
@@ -388,6 +506,12 @@ def create_app(
             try:
                 yield
             finally:
+                if self_retire_task is not None:
+                    self_retire_task.cancel()
+                    try:
+                        await self_retire_task
+                    except asyncio.CancelledError:
+                        pass
                 if sweeper is not None:
                     sweeper.cancel()
                     try:
