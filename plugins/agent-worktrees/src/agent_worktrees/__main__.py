@@ -15064,9 +15064,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     health for this project.
 
     Read-only by default. ``--fix`` applies non-destructive repairs
-    (YAML integrity, registry/title backfill, stale status). ``--gc-sessions``
-    (with ``--fix``) additionally removes empty session-state shells and purges
-    their orphaned ``session-store.db`` rows. ``--json`` emits the report.
+    (YAML integrity, registry/title backfill, stale status, and re-activating a
+    worktree whose head was orphaned by a handoff whose successor never
+    registered). ``--gc-sessions`` (with ``--fix``) additionally removes empty
+    session-state shells and purges their orphaned ``session-store.db`` rows.
+    ``--json`` emits the report.
     """
     from . import health
 
@@ -15119,6 +15121,23 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     # 5. Alignment audit (report-only)
     misaligned = health.audit_alignment(records, session_dir)
 
+    # 5b. Orphaned handoffs: a handoff-cutover whose successor never registered
+    #     (e.g. it died on the CLI resume-hang) leaves the derived head None and
+    #     the worktree un-resumable. Re-activate the handed-off tail so the head
+    #     derives again -- the mechanical form of the manual repair. Guarded to
+    #     dark + stale worktrees so a healthy in-flight cutover is never touched.
+    orphaned = health.find_orphaned_handoffs(records)
+    orphaned_fixed = 0
+    if apply:
+        for o in orphaned:
+            entry = o.record.session_entry(o.session_id)
+            if entry is not None and entry.state == "handed-off":
+                entry.state = "active"
+                o.record.head_session = o.session_id
+                tracking.save_record(o.record)
+                o.reactivated = True
+                orphaned_fixed += 1
+
     # 6. Bare (un-muxed) Copilot orphans -- machine-wide surfacing (report-only).
     #    Reclaiming stays operator-initiated: a bare session may be a live,
     #    actively-used non-mux terminal with no safe auto-reap signal, so doctor
@@ -15161,6 +15180,15 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                          "ids": [r.worktree_id for r in stale]},
         "empty_sessions": gc_result,
         "misaligned": {"count": len(misaligned), "worktrees": misaligned},
+        "orphaned_handoffs": {
+            "found": len(orphaned),
+            "reactivated": orphaned_fixed,
+            "items": [
+                {"worktree_id": o.worktree_id, "session_id": o.session_id,
+                 "age_h": round(o.age_h, 1), "reactivated": o.reactivated}
+                for o in orphaned
+            ],
+        },
         "bare_orphans": {"count": len(bare_orphans), "items": bare_orphans},
         "runtime_lag": runtime_lag,
     }
@@ -15225,6 +15253,19 @@ def _render_doctor_report(report: dict, *, applied: bool, gc_applied: bool) -> N
               f"(resume handled by Fix; informational)")
     else:
         print("  \u2713 No worktree/path misalignment")
+
+    oh = report.get("orphaned_handoffs", {"found": 0, "items": []})
+    if oh["found"]:
+        verb = "re-activated" if applied else "found"
+        print(f"  {chk if applied else '!'} Orphaned handoffs "
+              f"(head lost to a failed cutover): {oh['found']} {verb}")
+        for o in oh["items"][:8]:
+            mark = "fixed" if o.get("reactivated") else (
+                "re-activate" if applied else "needs --fix")
+            print(f"      - {o['worktree_id']}  <- {o['session_id'][:8]} "
+                  f"(idle {o['age_h']}h) [{mark}]")
+    else:
+        print(f"  {chk} No orphaned handoffs")
 
     bo = report.get("bare_orphans", {"count": 0, "items": []})
     if bo["count"]:
