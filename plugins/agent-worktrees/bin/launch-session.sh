@@ -237,19 +237,37 @@ print('\t'.join([
         # (1) Marketplace installer, iff the download changed the payload.
         #     NO re-exec: a launcher-script change applies on the next launch.
         if [[ "$plugin_changed" == "True" ]]; then
-            setup_status INFO 'A new plugin version was downloaded; installing the updated runtime...'
             local _installer="$plugin_dir/scripts/install.sh"
             if [[ -n "$plugin_dir" && -f "$_installer" ]]; then
                 local _inst_args=(update)
                 if [[ -n "${WORKTREE_PROJECT:-}" ]]; then
                     _inst_args+=(--project-name "$WORKTREE_PROJECT")
                 fi
-                if bash "$_installer" "${_inst_args[@]}" 2>&1 | while IFS= read -r _line; do
-                    setup_log INFO "installer: $_line"
-                done; then
-                    setup_log INFO 'Installer update succeeded (launcher change, if any, applies next launch)'
+                if [[ -n "${WORKTREE_BLOCKING_INSTALL:-}" ]]; then
+                    # Escape hatch (recovery/debug): apply synchronously.
+                    setup_status INFO 'A new plugin version was downloaded; installing the updated runtime...'
+                    if bash "$_installer" "${_inst_args[@]}" 2>&1 | while IFS= read -r _line; do
+                        setup_log INFO "installer: $_line"
+                    done; then
+                        setup_log INFO 'Installer update succeeded (launcher change, if any, applies next launch)'
+                    else
+                        setup_log WARN "Installer update failed -- continuing with existing version"
+                    fi
                 else
-                    setup_log WARN "Installer update failed -- continuing with existing version"
+                    # Default: DETACH the install so the launch never blocks on the
+                    # (slow) venv rebuild. Immutable versioned slots make this safe
+                    # -- the installer builds a NEW versions/<v> slot and flips the
+                    # current-version marker atomically, never touching the slot
+                    # THIS session execs from. So launch on the active slot now; the
+                    # new version applies on the next launch (stage-next), the same
+                    # way the runtime reconcile already runs detached. The installer
+                    # carries its own single-instance lock, so a concurrent launch's
+                    # background install can't collide.
+                    setup_status INFO 'A new plugin version was downloaded; installing it in the background (applies on the next launch)...'
+                    local _ilog="${APERTURE_SETUP_LOG:-${WORKTREE_SETUP_LOG:-/dev/null}}"
+                    setsid bash "$_installer" "${_inst_args[@]}" >>"$_ilog" 2>&1 </dev/null &
+                    disown 2>/dev/null || true
+                    setup_log INFO 'Background install started (new version applies on the next launch)'
                 fi
             else
                 setup_log WARN "Plugin installer not found ($_installer) -- skipping"
