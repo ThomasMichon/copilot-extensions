@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
+import shutil
+
 import pytest
 
 from agent_dispatch import config as config_mod
 from agent_dispatch import rendezvous
 from agent_dispatch.config import DEFAULT_SWEEP_INTERVAL, client_url, load_config, shared_token
+
+# The token-from-command tests below invoke `printf` via a no-shell subprocess
+# (shlex-split, no shell). `printf` is not available as a standalone executable
+# on Windows, so those tests are skipped where it is absent -- the feature itself
+# (shlex-split + subprocess) is platform-agnostic; only these tests' chosen
+# command is POSIX-only.
+_needs_printf = pytest.mark.skipif(
+    shutil.which("printf") is None,
+    reason="`printf` is not available as a standalone command on this platform",
+)
 
 
 @pytest.fixture(autouse=True)
@@ -119,6 +131,7 @@ def test_shared_token_direct_env_wins(monkeypatch):
     assert shared_token() == "direct-tok"
 
 
+@_needs_printf
 def test_shared_token_from_command(monkeypatch):
     monkeypatch.delenv("AGENT_DISPATCH_SHARED_TOKEN", raising=False)
     # shlex-split, no shell; quoted args (e.g. a vault entry name with spaces) work.
@@ -126,6 +139,7 @@ def test_shared_token_from_command(monkeypatch):
     assert shared_token() == "fetched-tok"
 
 
+@_needs_printf
 def test_shared_token_command_strips_whitespace(monkeypatch):
     monkeypatch.delenv("AGENT_DISPATCH_SHARED_TOKEN", raising=False)
     monkeypatch.setenv("AGENT_DISPATCH_SHARED_TOKEN_COMMAND", "printf '  tok-nl\\n'")
