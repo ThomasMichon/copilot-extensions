@@ -173,6 +173,13 @@ def _cd_target(eff_seg: str, base: str) -> str | None:
     raw = m.group(1).strip().strip("\"'").rstrip()
     if not raw or "$" in raw or "%" in raw or raw.startswith("~"):
         return None
+    # Normalize BOTH separators to the native os.sep so a Windows-style backslash
+    # subpath (``cd "<anchor>\src"``) resolves as a real subdir of the anchor on
+    # POSIX too -- mirroring _anchor_token's ``[\\/]`` acceptance. Without this a
+    # cd target with a literal backslash reads as one odd path component on Linux
+    # (its parent is not the anchor), so ``cd <anchor>\sub && git write`` slipped
+    # past the effective-cwd tracking.
+    raw = raw.replace("\\", os.sep).replace("/", os.sep)
     return raw if os.path.isabs(raw) else os.path.join(base, raw)
 
 
