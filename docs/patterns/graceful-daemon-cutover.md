@@ -161,6 +161,69 @@ separate step, no operator action, nothing to remember.
   (breadcrumb) is undrained by the installer on its next run, not by a manual
   recover command.
 
+## Generation self-retire (the demoted daemon cleans up after itself)
+
+Invariant-4 reconciliation above is **successor-driven**: after a *successful*
+cutover the new active daemon enumerates and retires every sibling that is not
+the routing table's `active`. That closes the leak whenever a cutover runs to
+completion — but it has a blind spot. If the **orchestrator itself dies** between
+the flip and the retire (a crashed `update`, an abandoned cutover), *no successor
+ever runs the reconcile*, and the demoted generation lingers indefinitely as a
+stranded `serve --passive` process holding a port + RSS.
+
+**Generation self-retire** is the complementary, **daemon-side** backstop: instead
+of relying on a survivor to reap it, a demoted daemon notices *on its own* that it
+has been superseded and exits. The two mechanisms cover each other — the
+successor-reap handles a live orchestrator's strays promptly; the self-retire
+handles the orphaned-by-a-dead-orchestrator case that the reap never reaches.
+
+### The fail-safe predicate
+
+Each daemon reads the routing table and asks a single question with a deliberately
+narrow "yes":
+
+> Is the `active` entry a **different pid**, at a **strictly higher generation**,
+> that is **actually listening**?
+
+Only then is it a *confirmed live successor* that has superseded us. Every
+ambiguous state — no table, an absent/unparseable `active`, our **own** pid still
+active, a not-higher generation, or a successor that is not (yet) accepting
+connections — returns **False (stay alive)**. The consequence that makes this safe
+to run inside a live daemon: the genuinely-active daemon always reads *its own* pid
+as `active`, so it can **never** self-retire; only a demoted generation with a
+confirmed live successor ever can. (Implemented as a pure, injectable
+`self_retire.is_superseded(config_dir, my_pid, my_generation)` in each consumer.)
+
+### Two more gates before it actually exits
+
+The predicate decides *superseded?*; two additional gates decide *safe to exit
+now?*:
+
+1. **Safe cutover point (never drop in-flight work).** Exit is gated on the same
+   drain boundary the cutover uses (§ consumer contract, point 1): agent-bridge
+   waits for no active session; the agent-dispatch coordinator waits for the
+   `DrainGate` to report no in-flight `/claim` (a claimed task is already durable
+   in the queue DB). A busy demoted daemon keeps serving and only exits once it
+   has drained to that boundary — clients have already followed the flipped route,
+   so it trends to idle on its own.
+2. **K-confirmation (honor "confirm the precondition, don't act on one transient
+   miss").** The (superseded ∧ safe) condition must hold for *K consecutive*
+   polls before the daemon requests its own clean shutdown (`uvicorn should_exit`,
+   which runs the normal drain + `clear_if_owner`-is-a-no-op-since-we're-not-active
+   path). Any miss resets the counter.
+
+### Opt-in until validated on a real cutover
+
+Because a false positive would exit a *live* fabric daemon, the loop is **opt-in
+and default-off** — it is armed only for a self-published (non-passive) daemon that
+also sets an env guard (`AGENT_BRIDGE_SELF_RETIRE` / `AGENT_DISPATCH_SELF_RETIRE`;
+cadence and K are env-tunable via the `_POLL_S` / `_CONFIRMATIONS` suffixes). The
+guard is checked *before any task is created*, so with the default off **no
+self-retire code runs at all**. Promotion to on is gated on a real-cutover
+rehearsal (§ Invariant 7) — arm it on one host, drive a cutover, confirm the
+demoted daemon self-retires once idle and the successor keeps serving, then flip
+the default.
+
 ## Per-plugin adoption
 
 | Plugin | Daemon(s) | State today | Safe cutover point | Work |
