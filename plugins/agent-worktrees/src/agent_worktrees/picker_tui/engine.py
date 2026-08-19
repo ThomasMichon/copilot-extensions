@@ -14,9 +14,11 @@ Keys:
 """
 from __future__ import annotations
 
+import json
 import os
 import threading
 import time
+from pathlib import Path
 
 from rich.panel import Panel
 from rich.text import Text
@@ -27,13 +29,14 @@ from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widget import Widget
 from textual.widgets import (
-    Button,
     Input,
     OptionList,
     RadioButton,
     RadioSet,
     SelectionList,
     Static,
+    TabbedContent,
+    TabPane,
     TextArea,
 )
 from textual.widgets.option_list import Option
@@ -4787,29 +4790,36 @@ class PickerScreen(Widget):
         self.app.push_screen(PivotCardScreen(str(row_title), card))
 
     def _open_pivot_form(self, reg, action, rec, ctx, title):
-        """Open the native elicitation modal for a ``kind:"form"`` action (A5).
-
-        Reads the request-input field spec from the action's ``fields_from``
-        dotted path (e.g. ``card.request_input``), lays out a widget per field,
-        and -- on submit -- substitutes ``{field.<name>}`` (+ entry tokens like
-        ``{task_id}``) into ``run`` and executes it via the pivot runtime, then
-        invalidates the cache and reports. Cancel is a no-op."""
+        """Open the docked card + tabbed-elicitation modal for a ``kind:"form"``
+        action. Reads the request-input field spec from the action's
+        ``fields_from`` dotted path (e.g. ``card.request_input``) and the card
+        prose (title/status/link/body) from the standard ``card.*`` paths (the
+        action's ``title_from`` overrides the header). On Confirm it substitutes
+        ``{field.<name>}`` / ``{fields}`` (+ entry tokens like ``{task_id}``)
+        into ``run`` and executes it via the pivot runtime. Save/Cancel/Escape
+        submit nothing (Save/Esc persist a resumable draft)."""
         from . import pivots as _pivots
 
         spec = action.form or {}
         raw_fields = _pivots.resolve_path(rec, spec.get("fields_from"))
         fields = _normalize_form_fields(raw_fields)
-        head_title = _pivots.resolve_path(rec, spec.get("title_from")) or title
-        body = _pivots.resolve_path(rec, spec.get("body_from"))
+        card = {
+            "title": _pivots.resolve_path(rec, spec.get("title_from")) or title,
+            "status": _pivots.resolve_path(rec, "card.status"),
+            "link": _pivots.resolve_path(rec, "card.link"),
+            "body": (_pivots.resolve_path(rec, spec.get("body_from"))
+                     or _pivots.resolve_path(rec, "card.body")),
+        }
+        task_id = ctx.get("task_id") or rec.get(reg.id_field) or ""
 
         def _after(values):
             if values is None:
-                self.debug = f"{action.label} · cancelled"
+                self.debug = f"{action.label} · saved/cancelled (no submit)"
                 return
             self._run_pivot_form_submit(reg, action, ctx, title, values)
 
         self.app.push_screen(
-            PivotFormScreen(str(head_title), body, fields, action.label), _after
+            PivotFormScreen(card, fields, action.label, task_id=str(task_id)), _after
         )
 
     def _run_pivot_form_submit(self, reg, action, ctx, title, values):
@@ -6125,16 +6135,20 @@ class MsgViewScreen(ModalScreen[None]):
 
 
 def _normalize_form_fields(raw: object) -> list[dict]:
-    """Normalize a request-input spec (A5) into a clean field list for the form.
+    """Normalize a request-input spec into a clean field list for the form.
 
-    Accepts the ``[{name, type, options?}]`` shape ``steering.parse_request_input``
-    produces (surfaced on a task's ``card.request_input``). Drops non-dict / un-
-    named entries, defaults an unknown/absent type to ``text``, and keeps only a
-    non-empty ``options`` list for a ``choice``. Never raises -- a malformed spec
-    degrades to a shorter (or empty) form, so the modal always renders."""
+    Accepts the ``[{name, type, options?, allow_other?}]`` shape
+    ``steering.parse_request_input`` produces (surfaced on a task's
+    ``card.request_input``). Drops non-dict / un-named entries, defaults an
+    unknown/absent type to ``text``, keeps only a non-empty ``options`` list for
+    a choice/multichoice (an empty one degrades to a free-text field), and
+    carries ``allow_other`` (the "Other…" affordance). Never raises -- a
+    malformed spec degrades to a shorter (or empty) form, so the modal always
+    renders."""
     if not isinstance(raw, list):
         return []
-    valid_types = {"text", "textarea", "choice"}
+    valid_types = {"text", "textarea", "choice", "multichoice"}
+    choice_types = {"choice", "multichoice"}
     out: list[dict] = []
     for item in raw:
         if not isinstance(item, dict):
@@ -6145,7 +6159,7 @@ def _normalize_form_fields(raw: object) -> list[dict]:
         ftype = item.get("type")
         ftype = ftype if isinstance(ftype, str) and ftype in valid_types else "text"
         field: dict = {"name": name.strip(), "type": ftype}
-        if ftype == "choice":
+        if ftype in choice_types:
             opts = item.get("options")
             options = [str(o) for o in opts if str(o).strip()] if isinstance(opts, list) else []
             if not options:
@@ -6153,6 +6167,8 @@ def _normalize_form_fields(raw: object) -> list[dict]:
                 field["type"] = "text"
             else:
                 field["options"] = options
+                if item.get("allow_other"):
+                    field["allow_other"] = True
         out.append(field)
     return out
 
@@ -6221,125 +6237,444 @@ class PivotCardScreen(ModalScreen[None]):
         self.dismiss(None)
 
 
+#: Env override for the steer-draft directory (tests / operator escape hatch).
+_STEER_DRAFTS_ENV = "AGENT_WORKTREES_STEER_DRAFTS"
+#: Internal sentinels for the "Other…" affordance (never a real option value).
+_OTHER_SENTINEL = "\x00other"
+_OTHER_LABEL = "Other…"
+
+
+def _steer_drafts_dir() -> Path:
+    """Directory holding saved steer drafts (partial answers). Overridable via
+    ``AGENT_WORKTREES_STEER_DRAFTS``; defaults to ``~/.agent-worktrees/steer-drafts``."""
+    override = os.environ.get(_STEER_DRAFTS_ENV)
+    return Path(override) if override else Path.home() / ".agent-worktrees" / "steer-drafts"
+
+
+def _steer_draft_path(task_id: str) -> Path | None:
+    """Per-task draft file path (``<drafts>/<sanitized-task-id>.json``), or
+    ``None`` when the task id has no filesystem-safe characters."""
+    tid = "".join(c for c in str(task_id) if c.isalnum() or c in "-_")
+    return _steer_drafts_dir() / f"{tid}.json" if tid else None
+
+
+class _AutoExpandTextArea(TextArea):
+    """A ``TextArea`` that grows with its content up to a line cap (the docked
+    steer input). The widget height tracks the document's line count, clamped to
+    ``[min_lines, max_lines]``; past the cap it scrolls internally."""
+
+    def __init__(self, *args, min_lines: int = 3, max_lines: int = 10, **kw) -> None:
+        super().__init__(*args, **kw)
+        self._min_lines = min_lines
+        self._max_lines = max_lines
+
+    def on_mount(self) -> None:
+        self.autosize()
+
+    def autosize(self) -> None:
+        try:
+            n = self.document.line_count
+        except Exception:
+            n = 1
+        self.styles.height = max(self._min_lines, min(self._max_lines, n))
+
+
+class SteerButtonRow(Widget):
+    """A single-line row of Picker-style buttons (Confirm/Save/Cancel), focusable
+    as one region: ←/→ move the cursor, Enter/Space press. Matches the picker's
+    ``C_BTN``/``C_BTN_SEL`` button aesthetic rather than the heavier Textual
+    ``Button`` widget. Calls ``on_press(key)`` when a button is pressed."""
+
+    can_focus = True
+
+    def __init__(self, buttons: list[tuple[str, str]], on_press, **kw) -> None:
+        super().__init__(**kw)
+        self._buttons = list(buttons)  # [(key, label), ...]
+        self._on_press = on_press
+        self._idx = 0
+
+    def render(self):
+        t = Text()
+        for i, (_key, label) in enumerate(self._buttons):
+            if i:
+                t.append("  ")
+            focused = self.has_focus and i == self._idx
+            t.append(f" {label} ", style=C_BTN_SEL if focused else C_BTN)
+        return t
+
+    def on_key(self, event) -> None:
+        if event.key == "left":
+            self._idx = (self._idx - 1) % len(self._buttons)
+            self.refresh()
+            event.stop()
+        elif event.key == "right":
+            self._idx = (self._idx + 1) % len(self._buttons)
+            self.refresh()
+            event.stop()
+        elif event.key in ("enter", "space"):
+            self._on_press(self._buttons[self._idx][0])
+            event.stop()
+
+    def press(self, key: str) -> None:
+        """Programmatic press (used by tests / click)."""
+        self._on_press(key)
+
+    def on_focus(self) -> None:
+        self.refresh()
+
+    def on_blur(self) -> None:
+        self.refresh()
+
+    def on_click(self, event) -> None:
+        event.stop()
+        self.focus()
+        # Hit-test the click against each button's rendered span so a mouse
+        # press acts on the button under the cursor (not merely the focused one).
+        x = int(getattr(event, "x", 0))
+        pos = 0
+        for i, (_key, label) in enumerate(self._buttons):
+            if i:
+                pos += 2  # the "  " separator between buttons
+            width = len(label) + 2  # the " label " span
+            if pos <= x < pos + width:
+                self._idx = i
+                self.refresh()
+                self._on_press(self._buttons[i][0])
+                return
+            pos += width
+
+
 class PivotFormScreen(ModalScreen[dict]):
-    """Native elicitation modal (A5 -- the DISPATCH pivot 'form').
+    """Docked card + tabbed elicitation modal (the DISPATCH-pivot 'Steer' surface).
 
-    The net-new steering surface: lays out a widget per declared request-input
-    field (``text`` -> ``Input``, ``textarea`` -> ``TextArea``, ``choice`` ->
-    ``RadioSet``) beneath the card's title/context, and on **Submit** returns the
-    collected ``{name: value}`` answer via ``dismiss(dict)`` (``dismiss(None)``
-    on cancel). The caller substitutes those values into the action's ``run``
-    template (the steer transport) -- this screen never runs a command itself and
-    never carries a verdict; it only gathers the operator's answer.
+    A Copilot-CLI-style layout: the card's prose fills the top (a scrollable
+    ``#steer-card`` that takes all the height the docked input doesn't need), and
+    a **docked** elicitation section sits at the bottom -- one **tab per question**
+    (``TabbedContent``; a single question skips the tab bar), each a single-select
+    (``RadioSet``), multi-select (``SelectionList``), or free-form
+    auto-expanding text box (up to 10 lines). A choice/multichoice that declares
+    ``allow_other`` gains an **"Other…"** entry that reveals a free-text box.
+    Beneath sits a single-line Picker-style button row: **Confirm** (submit),
+    **Save** (persist a draft and close -- resume later, survives a kill/Escape),
+    **Cancel** (discard).
 
-    Tab moves between fields and the Submit/Cancel buttons (native focus); Esc
-    cancels; Ctrl+S submits from anywhere."""
+    On **Confirm** the collected ``{name: value}`` answer is returned via
+    ``dismiss(dict)`` (a multichoice value is a list); ``dismiss(None)`` on
+    Save/Cancel/Escape. The caller substitutes those values into the action's
+    ``run`` template (the steer transport) -- this screen never runs a command
+    and never carries a verdict; it only gathers the operator's answer.
+
+    Esc saves a draft and closes (nothing is lost); Ctrl+S saves explicitly."""
 
     CSS = """
     PivotFormScreen { align: center middle; background: $background 55%; }
-    PivotFormScreen > #form-frame {
-        width: 84; height: auto; max-height: 90%;
+    PivotFormScreen > #steer-frame {
+        width: 90%; height: 90%;
         border: round #ffaf00; background: $surface; padding: 0 1;
     }
-    PivotFormScreen #form-head { height: auto; padding: 0 0 1 0; }
-    PivotFormScreen #form-scroll { height: auto; max-height: 20; }
-    PivotFormScreen .form-label { color: #ffaf00; height: auto; padding: 1 0 0 0; }
-    PivotFormScreen Input, PivotFormScreen TextArea {
-        border: round grey; background: $surface;
+    PivotFormScreen #steer-card { height: 1fr; }
+    PivotFormScreen #steer-dock { height: auto; max-height: 65%; padding: 0; }
+    PivotFormScreen .steer-qlabel { color: #ffaf00; height: auto; padding: 1 0 0 0; }
+    PivotFormScreen .steer-note { color: grey; height: auto; padding: 1 0 0 0; }
+    PivotFormScreen TextArea { border: round grey; background: $surface; }
+    PivotFormScreen RadioSet, PivotFormScreen SelectionList {
+        border: none; background: $surface; height: auto;
     }
-    PivotFormScreen TextArea { height: 5; }
-    PivotFormScreen RadioSet { border: none; background: $surface; height: auto; }
-    PivotFormScreen #form-buttons { height: auto; padding: 1 0 0 0; }
-    PivotFormScreen #form-buttons Button { margin: 0 1 0 0; }
-    PivotFormScreen #form-foot { color: grey; height: auto; padding: 1 0 0 0; }
+    PivotFormScreen #steer-foot { color: grey; height: auto; padding: 1 0 0 0; }
+    PivotFormScreen #steer-buttons { height: 1; padding: 0; }
     """
     BINDINGS = [
-        Binding("escape", "cancel", show=False),
-        Binding("ctrl+s", "submit", show=False),
+        Binding("escape", "escape_close", show=False),
+        Binding("ctrl+s", "save", show=False),
     ]
 
-    def __init__(self, title: str, body: object, fields: list[dict], submit_label: str) -> None:
+    def __init__(self, card: dict, fields: list[dict], submit_label: str,
+                 task_id: str = "") -> None:
         super().__init__()
-        self._title = title or "Steer"
-        self._body = str(body) if body else ""
+        self._card = card or {}
         self._fields = fields or []
-        self._submit_label = submit_label or "Submit"
-        # name -> (type, widget, options) resolved at submit time.
-        self._widgets: list[tuple[str, str, Widget, list[str]]] = []
+        self._submit_label = submit_label or "Steer"
+        self._task_id = str(task_id or "")
+        # Per-question runtime refs, filled during compose:
+        #   {name, type, options, allow_other, primary, other}
+        self._q: list[dict] = []
 
+    # ---- compose ------------------------------------------------------------
     def compose(self) -> ComposeResult:
-        with Vertical(id="form-frame"):
-            yield Static(self._header(), id="form-head")
-            with VerticalScroll(id="form-scroll"):
-                if not self._fields:
-                    yield Static("(this card requests no input)", classes="form-label")
-                for i, f in enumerate(self._fields):
-                    name, ftype = f["name"], f["type"]
-                    yield Static(self._field_label(name, ftype), classes="form-label")
-                    wid = f"ff-{i}"
-                    if ftype == "textarea":
-                        w: Widget = TextArea(id=wid)
-                        self._widgets.append((name, ftype, w, []))
-                        yield w
-                    elif ftype == "choice":
-                        options = f.get("options", [])
-                        rs = RadioSet(
-                            *[RadioButton(o, value=(j == 0)) for j, o in enumerate(options)],
-                            id=wid,
-                        )
-                        self._widgets.append((name, ftype, rs, list(options)))
-                        yield rs
-                    else:
-                        inp = Input(id=wid)
-                        self._widgets.append((name, ftype, inp, []))
-                        yield inp
-            with Vertical(id="form-buttons"):
-                yield Button(self._submit_label, variant="primary", id="form-submit")
-                yield Button("Cancel", id="form-cancel")
-            yield Static("Tab move · Ctrl+S submit · Esc cancel", id="form-foot")
+        with Vertical(id="steer-frame"):
+            with VerticalScroll(id="steer-card"):
+                yield Static(self._card_prose(), id="steer-card-body")
+            with Vertical(id="steer-dock"):
+                yield from self._compose_questions()
+                yield Static(self._foot(), id="steer-foot")
+                yield SteerButtonRow(
+                    [("confirm", "Confirm"), ("save", "Save"), ("cancel", "Cancel")],
+                    self._on_button, id="steer-buttons",
+                )
 
-    def _header(self) -> Text:
+    def _compose_questions(self):
+        if not self._fields:
+            yield Static("(this card requests no input — Confirm to acknowledge)",
+                         classes="steer-note")
+            return
+        if len(self._fields) == 1:
+            yield from self._compose_one(self._fields[0], 0)
+            return
+        with TabbedContent(id="steer-tabs"):
+            for i, f in enumerate(self._fields):
+                with TabPane(f["name"], id=f"tab-{i}"):
+                    yield from self._compose_one(f, i)
+
+    def _compose_one(self, f: dict, i: int):
+        name, ftype = f["name"], f["type"]
+        options = list(f.get("options", []))
+        allow_other = bool(f.get("allow_other"))
+        rec = {"name": name, "type": ftype, "options": options,
+               "allow_other": allow_other, "primary": None, "other": None}
+        yield Static(self._q_label(f), classes="steer-qlabel")
+        if ftype == "choice":
+            btns = [RadioButton(o, value=(j == 0)) for j, o in enumerate(options)]
+            if allow_other:
+                btns.append(RadioButton(_OTHER_LABEL))
+            rs = RadioSet(*btns, id=f"q-{i}")
+            rec["primary"] = rs
+            yield rs
+            if allow_other:
+                other = _AutoExpandTextArea(id=f"other-{i}")
+                other.display = False
+                rec["other"] = other
+                yield other
+        elif ftype == "multichoice":
+            sels = [(o, o) for o in options]
+            if allow_other:
+                sels.append((_OTHER_LABEL, _OTHER_SENTINEL))
+            sl = SelectionList(*sels, id=f"q-{i}")
+            rec["primary"] = sl
+            yield sl
+            if allow_other:
+                other = _AutoExpandTextArea(id=f"other-{i}")
+                other.display = False
+                rec["other"] = other
+                yield other
+        else:  # text -> single-line Input; textarea -> free-form auto-expand box
+            if ftype == "text":
+                w: Widget = Input(id=f"q-{i}")
+            else:
+                w = _AutoExpandTextArea(id=f"q-{i}")
+            rec["primary"] = w
+            yield w
+        self._q.append(rec)
+
+    # ---- rendering helpers --------------------------------------------------
+    def _card_prose(self) -> Text:
+        card = self._card
         t = Text()
-        t.append(str(self._title), style=C_HEADER)
-        if self._body:
-            t.append("\n" + self._body, style=C_DIM)
+        title = card.get("title")
+        if title:
+            t.append(f"{title}\n", style=C_HEADER)
+        status = card.get("status")
+        if status:
+            t.append(f"{status}\n", style="white")
+        link = card.get("link")
+        if link:
+            t.append(f"{link}\n", style="#4aa3ff underline")
+        body = card.get("body")
+        if title or status or link:
+            t.append("\n")
+        if body:
+            t.append(str(body), style="white")
+        elif not (title or status or link):
+            t.append("(no card detail)", style=C_FAINT)
         return t
 
     @staticmethod
-    def _field_label(name: str, ftype: str) -> str:
-        hint = {"textarea": " (multi-line)", "choice": " (choose one)"}.get(ftype, "")
-        return f"{name}{hint}:"
+    def _q_label(f: dict) -> str:
+        hints = {"textarea": "free text", "text": "free text",
+                 "choice": "choose one", "multichoice": "choose any"}
+        hint = hints.get(f["type"], "")
+        if f.get("allow_other"):
+            hint += " · Other… for free text"
+        return f"{f['name']}" + (f"  ({hint})" if hint else "") + ":"
 
+    def _foot(self) -> str:
+        return ("Tab move · ←/→ on buttons · Ctrl+S save · Esc save+close  ·  "
+                "Confirm submits your answer (never a vote)")
+
+    # ---- lifecycle ----------------------------------------------------------
     def on_mount(self) -> None:
-        self.query_one("#form-frame", Vertical).border_title = "Steer"
-        if self._widgets:
-            try:
-                self._widgets[0][2].focus()
-            except Exception:
-                pass
+        self.query_one("#steer-frame", Vertical).border_title = f"Steer — {self._submit_label}"
+        # Choice defaults: pre-select the first real option (RadioSet index 0).
+        restored = self._load_draft()
+        if restored:
+            self._restore(restored)
+        # Focus the first question's input (or the card scroll when there is none).
+        target = self._q[0]["primary"] if self._q else self.query_one("#steer-card", VerticalScroll)
+        try:
+            target.focus()
+        except Exception:
+            pass
 
+    # ---- dynamic "Other…" reveal + textarea autosize ------------------------
+    def _rec_for(self, widget) -> dict | None:
+        for rec in self._q:
+            if rec["primary"] is widget:
+                return rec
+        return None
+
+    def on_radio_set_changed(self, event) -> None:
+        rec = self._rec_for(event.radio_set)
+        if not rec or not rec.get("other"):
+            return
+        other_idx = len(rec["options"])  # "Other…" is appended after the options
+        show = getattr(event, "index", -1) == other_idx
+        rec["other"].display = show
+        if show:
+            rec["other"].focus()
+
+    def on_selection_list_selected_changed(self, event) -> None:
+        rec = self._rec_for(event.selection_list)
+        if not rec or not rec.get("other"):
+            return
+        selected = list(getattr(event.selection_list, "selected", []) or [])
+        rec["other"].display = _OTHER_SENTINEL in selected
+
+    def on_text_area_changed(self, event) -> None:
+        ta = event.text_area
+        if isinstance(ta, _AutoExpandTextArea):
+            ta.autosize()
+
+    # ---- collect / draft ----------------------------------------------------
     def _collect(self) -> dict:
-        values: dict[str, str] = {}
-        for name, ftype, widget, options in self._widgets:
-            if ftype == "textarea":
-                values[name] = widget.text
+        values: dict = {}
+        for rec in self._q:
+            name, ftype = rec["name"], rec["type"]
+            options, allow_other = rec["options"], rec["allow_other"]
+            prim, other = rec["primary"], rec["other"]
+            if ftype == "text":
+                values[name] = prim.value
+            elif ftype == "textarea":
+                values[name] = prim.text
             elif ftype == "choice":
-                idx = getattr(widget, "pressed_index", -1)
-                values[name] = options[idx] if 0 <= idx < len(options) else ""
-            else:
-                values[name] = widget.value
+                idx = getattr(prim, "pressed_index", -1)
+                if allow_other and idx == len(options):
+                    values[name] = other.text if other else ""
+                elif 0 <= idx < len(options):
+                    values[name] = options[idx]
+                else:
+                    values[name] = ""
+            elif ftype == "multichoice":
+                selected = list(getattr(prim, "selected", []) or [])
+                members = [s for s in selected if s != _OTHER_SENTINEL]
+                if (allow_other and _OTHER_SENTINEL in selected
+                        and other and other.text.strip()):
+                    members.append(other.text.strip())
+                values[name] = members
         return values
 
-    def on_button_pressed(self, event: "Button.Pressed") -> None:
-        if event.button.id == "form-submit":
-            self.action_submit()
+    def _restore(self, values: dict) -> None:
+        for rec in self._q:
+            name, ftype = rec["name"], rec["type"]
+            options, allow_other = rec["options"], rec["allow_other"]
+            prim, other = rec["primary"], rec["other"]
+            if name not in values:
+                continue
+            v = values[name]
+            if ftype == "text":
+                prim.value = str(v)
+            elif ftype == "textarea":
+                prim.text = str(v)
+                prim.autosize()
+            elif ftype == "choice":
+                btns = list(prim.query(RadioButton))
+                if str(v) in options:
+                    target = options.index(str(v))
+                elif allow_other and other is not None:
+                    target = len(options)  # "Other…"
+                    other.text = str(v)
+                    other.display = True
+                    other.autosize()
+                else:
+                    target = -1
+                for j, b in enumerate(btns):
+                    b.value = (j == target)
+            elif ftype == "multichoice":
+                members = v if isinstance(v, list) else [v]
+                extras = []
+                for m in members:
+                    if str(m) in options:
+                        try:
+                            prim.select(prim.get_option_at_index(options.index(str(m))))
+                        except Exception:
+                            pass
+                    else:
+                        extras.append(str(m))
+                if allow_other and other is not None and extras:
+                    other.text = ", ".join(extras)
+                    other.display = True
+                    other.autosize()
+                    try:
+                        prim.select(prim.get_option_at_index(len(options)))
+                    except Exception:
+                        pass
+
+    def _write_draft(self) -> None:
+        path = _steer_draft_path(self._task_id)
+        if not path:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps({"task_id": self._task_id, "values": self._collect()}),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
+
+    def _load_draft(self) -> dict:
+        path = _steer_draft_path(self._task_id)
+        try:
+            if path and path.exists():
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(data, dict) and isinstance(data.get("values"), dict):
+                    return data["values"]
+        except (OSError, ValueError):
+            pass
+        return {}
+
+    def _delete_draft(self) -> None:
+        path = _steer_draft_path(self._task_id)
+        try:
+            if path and path.exists():
+                path.unlink()
+        except OSError:
+            pass
+
+    # ---- actions ------------------------------------------------------------
+    def _on_button(self, key: str) -> None:
+        if key == "confirm":
+            self._confirm()
+        elif key == "save":
+            self.action_save()
         else:
-            self.action_cancel()
+            self._cancel()
 
-    def action_submit(self) -> None:
-        self.dismiss(self._collect())
+    def _confirm(self) -> None:
+        values = self._collect()
+        self._delete_draft()
+        self.dismiss(values)
 
-    def action_cancel(self) -> None:
+    def _cancel(self) -> None:
+        self._delete_draft()
+        self.dismiss(None)
+
+    def action_save(self) -> None:
+        self._write_draft()
+        self.dismiss(None)
+
+    def action_escape_close(self) -> None:
+        # Preserve work: Esc saves a draft (so nothing is lost if you step away)
+        # then closes without submitting.
+        self._write_draft()
         self.dismiss(None)
 
 

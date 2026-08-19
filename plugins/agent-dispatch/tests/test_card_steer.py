@@ -79,6 +79,29 @@ def test_parse_rejects_empty_choice():
         steering.parse_request_input("d:choice[]")
 
 
+def test_parse_multichoice_and_allow_other():
+    fields = steering.parse_request_input(
+        "tags:multichoice[perf,api,ux],severity:choice[low,high,*]"
+    )
+    assert fields == [
+        {"name": "tags", "type": "multichoice", "options": ["perf", "api", "ux"]},
+        {"name": "severity", "type": "choice", "options": ["low", "high"],
+         "allow_other": True},
+    ]
+
+
+def test_parse_multichoice_with_other():
+    [f] = steering.parse_request_input("tags:multichoice[a,b,*]")
+    assert f["type"] == "multichoice"
+    assert f["options"] == ["a", "b"]  # the * sentinel is stripped from options
+    assert f["allow_other"] is True
+
+
+def test_parse_rejects_empty_multichoice():
+    with pytest.raises(steering.SteeringError):
+        steering.parse_request_input("d:multichoice[*]")  # * only -> no real options
+
+
 # -- build_card --------------------------------------------------------------
 
 
@@ -96,6 +119,30 @@ def test_validate_steer_rejects_bad_choice():
     steering.validate_steer_fields({"other": "z"}, form)  # unknown passes
     with pytest.raises(steering.SteeringError):
         steering.validate_steer_fields({"decision": "nope"}, form)
+
+
+def test_validate_steer_allow_other_accepts_free_text():
+    form = steering.parse_request_input("severity:choice[low,high,*]")
+    # A value outside the options is a valid "Other…" answer when allow_other.
+    steering.validate_steer_fields({"severity": "somewhere in between"}, form)
+
+
+def test_validate_steer_multichoice_members():
+    import json as _json
+
+    form = steering.parse_request_input("tags:multichoice[perf,api]")
+    steering.validate_steer_fields({"tags": _json.dumps(["perf", "api"])}, form)  # ok
+    with pytest.raises(steering.SteeringError):
+        steering.validate_steer_fields({"tags": _json.dumps(["perf", "nope"])}, form)
+
+
+def test_validate_steer_multichoice_allow_other_free_member():
+    import json as _json
+
+    form = steering.parse_request_input("tags:multichoice[perf,api,*]")
+    # A free-text member survives (JSON array preserves commas) and is accepted.
+    steering.validate_steer_fields(
+        {"tags": _json.dumps(["perf", "a custom, comma'd tag"])}, form)
 
 
 # -- queue: set_card ---------------------------------------------------------

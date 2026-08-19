@@ -825,27 +825,47 @@ def format_template(template: Sequence[str], ctx: Mapping[str, object]) -> list[
     return out
 
 
+def _encode_field_value(value: object) -> str:
+    """Encode one collected field value for a ``--field name=value`` argument.
+
+    A **multichoice** answer is a list -> a JSON array string (so members that
+    contain commas survive round-trip and the consumer can ``json.loads`` it); a
+    single value -> its string form; ``None`` -> empty.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple)):
+        import json as _json
+        return _json.dumps([("" if v is None else str(v)) for v in value])
+    return str(value)
+
+
 def format_form_template(
     template: Sequence[str],
     ctx: Mapping[str, object],
     fields: Mapping[str, object],
 ) -> list[str]:
-    """Substitute a form action's argv template in a single safe pass (A5).
+    """Substitute a form action's argv template in a single safe pass.
 
-    Two token namespaces resolve here:
+    Token namespaces:
 
     * ``{field.<name>}`` -> the operator's submitted value for ``<name>`` (from
       ``fields``), inserted **literally** -- it is never re-scanned, so a value
       that itself contains braces (``use {task_id} here``) is inert and can't
-      inject another token;
+      inject another token. A list value (multichoice) is JSON-encoded.
+    * ``{fields}`` as a **standalone** argv element -> expands to the full set of
+      ``--field <name>=<value>`` pairs for *every* collected field (the general
+      "submit all my answers" form, so a card can ask arbitrary questions without
+      the manifest naming each). Empty-valued fields are still emitted (so the
+      worker sees the operator left them blank).
     * ``{<token>}`` -> the entry/context value (same source as
       :func:`format_template`), e.g. ``{task_id}``.
 
-    Done in one pass with a custom :class:`string.Formatter` whose ``get_field``
-    treats the whole brace token as a single key (no attribute/index walking),
-    so ``field.<name>`` is a key lookup rather than attribute access. Unknown
-    tokens degrade to empty; a per-arg formatting error leaves that arg
-    unchanged, mirroring :func:`format_template`'s defensive contract.
+    Per-token substitution is one pass with a custom :class:`string.Formatter`
+    whose ``get_field`` treats the whole brace token as a single key (so
+    ``field.<name>`` is a key lookup, not attribute access). Unknown tokens
+    degrade to empty; a per-arg formatting error leaves that arg unchanged,
+    mirroring :func:`format_template`'s defensive contract.
     """
     import string
 
@@ -854,7 +874,10 @@ def format_form_template(
     class _FormFormatter(string.Formatter):
         def get_field(self, field_name, args, kwargs):  # type: ignore[override]
             if field_name.startswith(field_prefix):
-                return (fields.get(field_name[len(field_prefix):], ""), field_name)
+                return (
+                    _encode_field_value(fields.get(field_name[len(field_prefix):], "")),
+                    field_name,
+                )
             return (ctx.get(field_name, ""), field_name)
 
         def format_field(self, value, format_spec):  # type: ignore[override]
@@ -863,6 +886,12 @@ def format_form_template(
     fmt = _FormFormatter()
     out: list[str] = []
     for arg in template:
+        if arg == "{fields}":
+            # Expand to one `--field name=value` pair per collected field.
+            for name, value in fields.items():
+                out.append("--field")
+                out.append(f"{name}={_encode_field_value(value)}")
+            continue
         try:
             out.append(fmt.vformat(arg, (), {}))
         except (KeyError, IndexError, ValueError):

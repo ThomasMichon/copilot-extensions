@@ -24,14 +24,12 @@
       "kind": "form",
       "fields_from": "card.request_input",
       "title_from": "card.title",
-      "body_from": "card.status",
+      "body_from": "card.body",
       "run": [
-        "agent-dispatch", "steer", "submit", "{task_id}",
-        "--field", "feedback={field.feedback}",
-        "--field", "decision={field.decision}"
+        "agent-dispatch", "steer", "submit", "{task_id}", "{fields}"
       ],
       "when": {"awaiting_steer": true},
-      "description": "Answer the worker's card (feedback + decision) and wake it. Never a verdict — the operator's steer, not an ADO vote."
+      "description": "Read the card and answer its questions (any shape), then wake the worker. Never a verdict — the operator's steer, not an ADO vote."
     },
     {
       "key": "open-cli",
