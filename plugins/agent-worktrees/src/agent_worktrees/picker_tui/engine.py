@@ -4761,7 +4761,9 @@ class PickerScreen(Widget):
 
             def _apply():
                 if err is not None:
-                    self.debug = f"{label} failed · {str(err).splitlines()[0][:80]}"
+                    detail = str(err).strip()
+                    detail = detail.splitlines()[0] if detail else type(err).__name__
+                    self.debug = f"{label} failed · {detail[:80]}"
                 elif done is not None:
                     try:
                         done(result)
