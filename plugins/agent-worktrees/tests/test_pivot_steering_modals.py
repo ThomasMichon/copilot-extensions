@@ -461,9 +461,63 @@ def test_last_field_enter_focuses_confirm(monkeypatch, tmp_path):
     asyncio.run(run())
 
 
+def test_multichoice_space_stays_enter_advances(monkeypatch, tmp_path):
+    _drafts(monkeypatch, tmp_path)
+    fields = [
+        {"name": "tags", "type": "multichoice", "options": ["perf", "api"],
+         "allow_other": True},
+        {"name": "note", "type": "textarea"},
+    ]
+    scr = PivotFormScreen(_card(), fields, "Steer", task_id="t-mflow")
+    app = _Host(scr)
+
+    async def run():
+        async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+            sl = scr.query_one("#q-0", SelectionList)
+            sl.focus()
+            await pilot.pause()
+            await pilot.press("space")            # toggle perf, stay
+            await pilot.pause()
+            assert list(sl.selected) == ["perf"]
+            assert app.focused.id == "q-0"
+            await pilot.press("down")
+            await pilot.press("enter")            # toggle api + advance
+            await pilot.pause()
+            assert "api" in list(sl.selected)
+            assert app.focused.id == "q-1"
+
+    asyncio.run(run())
+
+
+def test_multichoice_enter_on_other_focuses_box(monkeypatch, tmp_path):
+    _drafts(monkeypatch, tmp_path)
+    fields = [{"name": "tags", "type": "multichoice", "options": ["perf", "api"],
+               "allow_other": True}]
+    scr = PivotFormScreen(_card(), fields, "Steer", task_id="t-mother")
+    app = _Host(scr)
+
+    async def run():
+        async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+            sl = scr.query_one("#q-0", SelectionList)
+            sl.focus()
+            await pilot.pause()
+            # highlight "Other…" (index 2 = after perf/api), Enter -> focus its box
+            await pilot.press("down")
+            await pilot.press("down")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert app.focused.id == "other-0"
+            assert scr.query_one("#other-0", _AutoExpandTextArea).display is True
+
+    asyncio.run(run())
+
+
 def test_card_prose_linkifies_urls(monkeypatch, tmp_path):
     _drafts(monkeypatch, tmp_path)
-    card = {"title": "T", "body": "See https://ado/pr/2312460 for details."}
+    # URL ends the sentence -> the trailing period must NOT be part of the link.
+    card = {"title": "T", "body": "See https://ado/pr/2312460."}
     scr = PivotFormScreen(card, [{"name": "feedback", "type": "textarea"}],
                           "Steer", task_id="t-link")
     app = _Host(scr)
@@ -472,9 +526,9 @@ def test_card_prose_linkifies_urls(monkeypatch, tmp_path):
         async with app.run_test(size=(120, 45)) as pilot:
             await pilot.pause()
             rendered = scr.query_one("#steer-card-body").render()
-            # A span carries the URL as an OSC-8 link.
-            links = [sp for sp in rendered.spans
-                     if getattr(sp.style, "link", None) == "https://ado/pr/2312460"]
-            assert links, "URL should render as a clickable link span"
+            links = [getattr(sp.style, "link", None) for sp in rendered.spans
+                     if getattr(sp.style, "link", None)]
+            assert "https://ado/pr/2312460" in links       # clean target
+            assert "https://ado/pr/2312460." not in links  # period trimmed
 
     asyncio.run(run())

@@ -6278,7 +6278,16 @@ def _linkify(text: str, style: str) -> Text:
         if m.start() > pos:
             t.append(text[pos:m.start()], style=base)
         url = m.group(0)
-        t.append(url, style=base + Style(link=url, underline=True))
+        # Don't swallow trailing sentence punctuation into the link target
+        # (a URL that ends a sentence, e.g. "…see https://x/y." ).
+        trail = ""
+        while url and url[-1] in ".,;:!?)]}'\"":
+            trail = url[-1] + trail
+            url = url[:-1]
+        if url:
+            t.append(url, style=base + Style(link=url, underline=True))
+        if trail:
+            t.append(trail, style=base)
         pos = m.end()
     if pos < len(text):
         t.append(text[pos:], style=base)
@@ -6310,21 +6319,20 @@ class _AutoExpandTextArea(TextArea):
         # Back-compat no-op: CSS ``height: auto`` now does the growing.
         return
 
-    def _on_key(self, event) -> None:
+    def on_key(self, event) -> None:
         if event.key == "enter":
             # Accept + advance (Copilot-CLI mechanic) -- do NOT insert a newline.
+            # Using the public on_key handler (not the private _on_key) keeps this
+            # robust across Textual upgrades.
             event.prevent_default()
             event.stop()
             adv = getattr(self.screen, "_advance_focus", None)
             if callable(adv):
                 adv(self)
-            return None
-        if event.key == "shift+enter":
+        elif event.key == "shift+enter":
             event.prevent_default()
             event.stop()
             self.insert("\n")
-            return None
-        return super()._on_key(event)
 
 
 class _SteerRadioSet(RadioSet):
