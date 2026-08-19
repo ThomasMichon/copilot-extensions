@@ -1,0 +1,39 @@
+{
+  "name": "partner-harness-setup",
+  "description": "Tier-P (deterministic, agent-free) validation of a DOWNSTREAM partner harness's setup flow against a to-be-published tree. Given a partner harness checkout (a mounted CR_PARTNER_PATH, or a cloned CR_PARTNER_REPO), it asserts the vendored plugin drop is structurally coherent, the partner's read-only `setup check` runs without crashing, and the partner's OWN setup/update test suite passes. Name-free of any specific partner: everything is configurable via CR_PARTNER_* env. A consuming gate is a downstream vendored-plugin sync that runs this before it publishes a re-blit (never ship a drop that breaks the partner's setup flow).",
+  "image": "base",
+  "prereqs": {
+    "present": ["git", "python3", "bash"],
+    "provisioned_by_flow": []
+  },
+  "auth": {
+    "copilot": "none",
+    "gh": "optional",
+    "ado": "none"
+  },
+  "inputs": {
+    "CR_PARTNER_NAME": "partner harness name (report meta). default: partner-harness",
+    "CR_PARTNER_PATH": "path to a MOUNTED partner tree inside the box (preferred: validates the exact to-be-published bytes). Takes precedence over CR_PARTNER_REPO.",
+    "CR_PARTNER_REPO": "git URL to clone when no CR_PARTNER_PATH is mounted (needs gh/git auth for an internal repo).",
+    "CR_PARTNER_PLUGINS": "space-separated vendored plugins to structurally check. default: 'agent-bridge agent-codespaces'",
+    "CR_PARTNER_MARKETPLACE": "partner marketplace manifest path. default: .github/plugin/marketplace.json",
+    "CR_PARTNER_GOLDEN_DOC": "golden-path doc that must exist. default: docs/golden-path/setup.md",
+    "CR_PARTNER_SETUP_ENTRY": "read-only setup entrypoint to exercise. default: setup.sh",
+    "CR_PARTNER_CHECK_ARGS": "args for the read-only check. default: 'check --non-interactive'",
+    "CR_PARTNER_CHECK_OK_CODES": "space-separated exit codes that mean the check RAN + reported a coherent diagnostic (a fresh box legitimately reports missing prereqs). default: '0 1 2'. An interpreter crash (syntax/CRLF/unbound) is caught separately, regardless of code.",
+    "CR_PARTNER_SETUP_TESTS": "the partner's OWN setup/update test modules (stdlib unittest). default: 'tests.test_setup_sh tests.test_update_sh'"
+  },
+  "expected_artifacts": [
+    "$HOME/cr-report.json (phases + jams; ok iff failed==0)"
+  ],
+  "stages": [
+    { "n": 0, "title": "environment + partner tree present" },
+    { "n": 1, "title": "drop structure (plugins parse, marketplace-listed, installers + golden-path present)" },
+    { "n": 2, "title": "read-only `setup check` runs without crashing" },
+    { "n": 3, "title": "partner's OWN setup/update test suite passes" }
+  ],
+  "notes": [
+    "Platform split: this scenario runs the partner's NATIVE-unix setup flow (setup.sh + *_sh tests) in a Linux container. The Windows-native counterpart (setup.ps1 + *_ps1 tests) runs on a Windows container host. A partner is validated on the platform whose native suite is faithful.",
+    "This is a Tier-P gate (no agent, no credits). The agent-driven golden-path (Tier E) eval layers on top later via the same consuming seam."
+  ]
+}
