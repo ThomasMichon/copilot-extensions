@@ -356,13 +356,12 @@ def _resolve_relay_port(default: int) -> int:
     """
     try:
         from agent_bridge.relay_state import get_live_relay_port
+    except ImportError:  # agent-bridge not importable from this wrapper process
+        log.debug("agent-bridge unavailable; using configured relay port %s", default)
+        return default
 
-        live = get_live_relay_port()
-        if live:
-            return int(live)
-    except Exception:  # pragma: no cover - agent-bridge optional / import guard
-        log.debug("live relay port unavailable; using configured port %s", default)
-    return default
+    live = get_live_relay_port()
+    return int(live) if live else default
 
 
 def _cmd_exec(args: argparse.Namespace) -> int:
