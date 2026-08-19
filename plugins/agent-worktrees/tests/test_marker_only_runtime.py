@@ -124,6 +124,9 @@ def _resolve(home: Path) -> str:
         capture_output=True, text=True,
         env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
     )
+    assert out.returncode == 0, (
+        f"resolver exited {out.returncode}: {out.stderr.strip()}"
+    )
     return out.stdout.strip()
 
 

@@ -345,10 +345,10 @@ function Invoke-VersionedActivate {
     & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
         ForEach-Object { Write-ServiceChanged $_ }
     if ($LASTEXITCODE -ne 0) {
-        Write-ServiceErr "Failed to activate versioned venv (.venv -> versions/$SrcVersion)"
+        Write-ServiceErr "Failed to activate runtime version (marker -> versions/$SrcVersion)"
         return $false
     }
-    Write-ServiceOk "Runtime version $SrcVersion active (.venv -> versions/$SrcVersion)"
+    Write-ServiceOk "Runtime version $SrcVersion active (marker -> versions/$SrcVersion)"
     # #742: record the just-activated version as `last-known-good` so a future
     # marker-absent resolution (resolve-runtime.ps1 tier 2) prefers it over a
     # newest-slot guess. Atomic (temp + rename); best-effort, never fatal.
