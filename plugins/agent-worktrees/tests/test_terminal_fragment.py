@@ -87,10 +87,10 @@ def test_unmanaged_emits_default_column():
 
     # Local self.agent launcher present, named after the project.
     assert "Test Chamber" in names
-    # A bare shell for every OTHER ready machine x env.
-    assert "Emancipation-Cube" in names
-    assert "Emancipation-Cube (WSL)" in names
-    assert "Mantis-Counter" in names
+    # A bare shell for every OTHER ready machine x env, labelled by the full key.
+    assert "emancipation-cube" in names
+    assert "emancipation-cube (WSL)" in names
+    assert "mantis-counter" in names
     # No remote agent-launch combos, no local shells in the default column.
     assert _kinds(result) == {"local-agent", "ssh-shell"}
     # Self is never an SSH target.
@@ -147,42 +147,59 @@ def test_local_launcher_shape_matches_powershell():
 # ---------------------------------------------------------------------------
 
 def test_managed_selection_emits_ssh_shell_and_launch_agent():
+    # Legacy display-name vocabulary in the selection is still accepted (dual
+    # acceptance) even though profiles are now labelled by the canonical key.
     sel = frozenset({
         "Anomalous-Potato|Win|agent",     # self (locked anyway)
-        "Emancipation-Cube|Win|shell",        # plain ssh shell to Emancipation-Cube
-        "Emancipation-Cube|Win|agent",        # launch test-chamber on Emancipation-Cube
+        "Emancipation-Cube|Win|shell",        # plain ssh shell to emancipation-cube
+        "Emancipation-Cube|Win|agent",        # launch test-chamber on emancipation-cube
     })
     proj = ProjectInput(name="test-chamber", display="Test Chamber",
                         selection=sel, roster=_roster())
     result = _build(proj)
     by_name = {p.name: p for p in result.profiles}
 
-    assert by_name["Emancipation-Cube"].commandline == "ssh emancipation-cube"
-    assert by_name["Emancipation-Cube"].kind == "ssh-shell"
-    # Launch profile: "<project display> (<machine>)", pwsh env -> .cmd binstub.
-    assert "Test Chamber (Emancipation-Cube)" in by_name
-    launch = by_name["Test Chamber (Emancipation-Cube)"]
+    assert by_name["emancipation-cube"].commandline == "ssh emancipation-cube"
+    assert by_name["emancipation-cube"].kind == "ssh-shell"
+    # Launch profile: "<project display> (<machine key>)", pwsh env -> .cmd binstub.
+    assert "Test Chamber (emancipation-cube)" in by_name
+    launch = by_name["Test Chamber (emancipation-cube)"]
     assert launch.commandline == "ssh -t emancipation-cube test-chamber.cmd"
     assert launch.kind == "launch-agent"
 
 
+def test_managed_selection_key_vocabulary_matches():
+    """The canonical selection vocabulary is the roster KEY; a key-keyed column
+    produces the same profiles as the legacy display-name column."""
+    sel = frozenset({
+        "anomalous-potato|Win|agent",
+        "emancipation-cube|Win|shell",
+        "emancipation-cube|Win|agent",
+    })
+    proj = ProjectInput(name="test-chamber", display="Test Chamber",
+                        selection=sel, roster=_roster())
+    by_name = {p.name: p for p in _build(proj).profiles}
+    assert by_name["emancipation-cube"].commandline == "ssh emancipation-cube"
+    assert "Test Chamber (emancipation-cube)" in by_name
+
+
 def test_launch_agent_uses_bare_binstub_for_bash_env():
-    sel = frozenset({"Mantis-Counter|Linux|agent"})
+    sel = frozenset({"mantis-counter|Linux|agent"})
     proj = ProjectInput(name="test-chamber", display="Test Chamber",
                         agent_exposed=False, selection=sel, roster=_roster())
     launch = next(p for p in _build(proj).profiles if p.kind == "launch-agent")
     # bash shell -> no ``.cmd`` suffix.
     assert launch.commandline == "ssh -t mantis-counter test-chamber"
-    assert launch.name == "Test Chamber (Mantis-Counter)"
+    assert launch.name == "Test Chamber (mantis-counter)"
 
 
 def test_wsl_ssh_shell_labelled_and_iconed():
-    sel = frozenset({"Emancipation-Cube|WSL|shell"})
+    sel = frozenset({"emancipation-cube|WSL|shell"})
     proj = ProjectInput(name="test-chamber", display="Test Chamber",
                         agent_exposed=False, selection=sel, roster=_roster(),
                         icon="ICON.ico", wsl_icon="WSL.ico")
     p = next(x for x in _build(proj).profiles if x.kind == "ssh-shell")
-    assert p.name == "Emancipation-Cube (WSL)"
+    assert p.name == "emancipation-cube (WSL)"
     assert p.commandline == "ssh emancipation-cube-wsl"
     assert p.icon == "WSL.ico"
 
@@ -194,16 +211,18 @@ def test_wsl_ssh_shell_labelled_and_iconed():
 def test_self_machine_never_becomes_ssh_target():
     # Even if the selection names the self machine as a shell target, no ssh
     # profile to self is emitted (the SSH loop skips self).
-    sel = frozenset({"Anomalous-Potato|Win|shell", "Anomalous-Potato|WSL|shell"})
+    sel = frozenset({"anomalous-potato|Win|shell", "anomalous-potato|WSL|shell"})
     proj = ProjectInput(name="test-chamber", display="Test Chamber",
                         selection=sel, roster=_roster())
     result = _build(proj)
     assert not any(p.commandline.startswith("ssh anomalous-potato") for p in result.profiles)
-    # The Anomalous-Potato|Win|shell selection still produces a LOCAL shell (pwsh),
+    # The anomalous-potato|Win|shell selection still produces a LOCAL shell (pwsh),
     # not an SSH-to-self.
     local_shells = [p for p in result.profiles if p.kind == "local-shell"]
     assert len(local_shells) == 1
     assert local_shells[0].commandline == "pwsh.exe"
+    # Labelled by the canonical full key.
+    assert local_shells[0].name == "anomalous-potato"
 
 
 def test_not_ready_machine_excluded():
@@ -216,20 +235,20 @@ def test_not_ready_machine_excluded():
     proj = ProjectInput(name="test-chamber", display="Test Chamber",
                         selection=None, roster=roster)
     result = _build(proj)
-    # Book2 is not ready -> no bare shell for it in the default column.
-    assert "Book2" not in _names(result)
+    # book2 is not ready -> no bare shell for it in the default column.
+    assert "book2" not in _names(result)
 
 
 def test_shell_profiles_deduped_across_projects():
     """Local + remote *shell* GUIDs are project-independent: two projects both
-    selecting the Emancipation-Cube shell emit ONE Emancipation-Cube profile."""
-    sel = frozenset({"Emancipation-Cube|Win|shell"})
+    selecting the emancipation-cube shell emit ONE emancipation-cube profile."""
+    sel = frozenset({"emancipation-cube|Win|shell"})
     p1 = ProjectInput(name="test-chamber", display="Test Chamber",
                     selection=sel, roster=_roster())
     p2 = ProjectInput(name="agent-worktrees", display="Agent Worktrees",
                     selection=sel, roster=_roster())
     result = tf.build_fragment([p1, p2], "anomalous-potato", computer_name="anomalous-potato")
-    emancipation_cube = [p for p in result.profiles if p.name == "Emancipation-Cube"]
+    emancipation_cube = [p for p in result.profiles if p.name == "emancipation-cube"]
     assert len(emancipation_cube) == 1
 
 
@@ -254,12 +273,12 @@ def test_local_wsl_agent_requires_recorded_distro():
 
 
 def test_local_wsl_shell_honored_without_distro():
-    sel = frozenset({"Anomalous-Potato|WSL|shell"})
+    sel = frozenset({"anomalous-potato|WSL|shell"})
     proj = ProjectInput(name="test-chamber", display="Test Chamber",
                         agent_exposed=False, selection=sel, roster=_roster())
     p = next(x for x in _build(proj).profiles if x.kind == "local-wsl-shell")
     assert p.commandline == "wsl.exe"
-    assert p.name == "Anomalous-Potato (WSL)"
+    assert p.name == "anomalous-potato (WSL)"
 
 
 # ---------------------------------------------------------------------------
@@ -473,6 +492,56 @@ def test_reconcile_heal_and_reclaim_reported_separately():
     assert plan.healed == ["{bbbb}"]
     assert plan.reclaimed == [ours_orphan]
     assert set(plan.remove) == {"{bbbb}", ours_orphan}
+
+
+# ---------------------------------------------------------------------------
+# Selection migration: legacy display_name vocabulary -> canonical key.
+# ---------------------------------------------------------------------------
+
+def test_migrate_selection_rewrites_display_names_to_keys(tmp_path):
+    """A config keyed by display_name is rewritten to the roster key; env/kind
+    preserved, other config keys untouched, and it is idempotent."""
+    import yaml
+
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "machine: anomalous-potato\n"
+        "terminal_profiles:\n"
+        "  - {machine: Anomalous-Potato, env: Win, kind: agent}\n"
+        "  - {machine: Emancipation-Cube, env: Win, kind: shell}\n"
+        "  - {machine: Mantis-Counter, env: Linux, kind: shell}\n",
+        encoding="utf-8")
+
+    changed = tf.migrate_selection_to_keys(cfg_path, _roster())
+    assert changed is True
+
+    data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    assert data["machine"] == "anomalous-potato"   # unrelated key preserved
+    machines = [t["machine"] for t in data["terminal_profiles"]]
+    assert machines == ["anomalous-potato", "emancipation-cube", "mantis-counter"]
+
+    # Idempotent: a second pass makes no change.
+    assert tf.migrate_selection_to_keys(cfg_path, _roster()) is False
+
+
+def test_migrate_selection_preserves_unknown_machine(tmp_path):
+    """A selected machine absent from the roster is left verbatim (no data loss)."""
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "terminal_profiles:\n"
+        "  - {machine: ghost-box, env: Win, kind: shell}\n",
+        encoding="utf-8")
+    assert tf.migrate_selection_to_keys(cfg_path, _roster()) is False
+    import yaml
+    data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    assert data["terminal_profiles"][0]["machine"] == "ghost-box"
+
+
+def test_migrate_no_selection_is_noop(tmp_path):
+    """An unmanaged config (no terminal_profiles key) is never rewritten."""
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text("machine: anomalous-potato\n", encoding="utf-8")
+    assert tf.migrate_selection_to_keys(cfg_path, _roster()) is False
 
 
 def test_is_rfc_v4_or_v5_guid():

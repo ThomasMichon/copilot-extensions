@@ -8835,6 +8835,16 @@ def cmd_terminal_fragment(args: argparse.Namespace) -> int:
     except Exception:
         current = None
 
+    if getattr(args, "migrate_selections", False):
+        changed = tf.migrate_local_selections(current_project=current)
+        if changed:
+            output.header("Migrating terminal_profiles selections to machine keys")
+            for name in changed:
+                output.ok(f"{name}: selection rewritten to canonical keys")
+        else:
+            output.ok("terminal_profiles selections already use machine keys")
+        return 0
+
     if getattr(args, "doctor", False):
         return _terminal_fragment_doctor(machine, current)
 
@@ -14282,6 +14292,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--doctor", action="store_true",
                    help="Read-only report of live Windows Terminal state drift "
                         "(hidden/orphaned/duplicate profiles); no mutation")
+    p.add_argument("--migrate-selections", action="store_true",
+                   help="Rewrite every local project's terminal_profiles "
+                        "selection from the legacy display_name vocabulary to "
+                        "the canonical machine key (full name); prints a "
+                        "summary and does not emit the fragment JSON")
 
     # repair (reconcile local deployed state: terminal profiles + binstubs)
     p = sub.add_parser(

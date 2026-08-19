@@ -48,30 +48,36 @@ def _copilot_envs():
 
 
 def host_cols():
-    """Profiles HOST columns: ``[(label, display_name, env_label), ...]``.
+    """Profiles HOST columns: ``[(label, machine_key, env_label), ...]``.
 
-    One per copilot machine's native-terminal env (Windows / native Linux).
+    One per copilot machine's native-terminal env (Windows / native Linux). The
+    persisted/matched identity is the machine's **roster key** (its canonical
+    full name); the visible header uses that same full name.
     """
     out = []
     for m, name, elabel in _copilot_envs():
         if name in _HOST_ENVS:
             short = _HOST_SHORT.get(elabel, elabel)
-            out.append((f"{m.display_name}\u00b7{short}", m.display_name, elabel))
+            out.append((f"{m.key}\u00b7{short}", m.key, elabel))
     return out
 
 
 def target_envs():
-    """Profiles TARGET ``(display_name, env_label)`` pairs (WSL included)."""
-    return [(m.display_name, elabel) for m, _name, elabel in _copilot_envs()]
+    """Profiles TARGET ``(machine_key, env_label)`` pairs (WSL included).
+
+    The machine axis is the roster **key** (canonical full name), not the
+    cosmetic ``display_name`` -- so a persisted column keys on stable identity.
+    """
+    return [(m.key, elabel) for m, _name, elabel in _copilot_envs()]
 
 
 def local_host():
-    """This machine's ``(display_name, env_label)`` in roster vocabulary.
+    """This machine's ``(machine_key, env_label)`` in roster vocabulary.
 
-    Matches the ``machines.yaml`` display name + short env label used by
-    ``host_cols`` / ``target_envs`` so the self.agent diagonal lines up with the
-    grid. Falls back to ``data_local.LOCAL`` (hostname-based) when the local
-    machine is not represented in the roster.
+    Uses the ``machines.yaml`` **key** (canonical full name) + short env label,
+    matching ``host_cols`` / ``target_envs`` so the self.agent diagonal lines up
+    with the grid. Falls back to ``data_local.LOCAL`` (hostname-based) when the
+    local machine is not represented in the roster.
     """
     import socket
 
@@ -92,6 +98,6 @@ def local_host():
             or (getattr(m, "alias", "") or "").lower() == config_machine
         )
         if is_local_machine and name == plat:
-            return (m.display_name, elabel)
+            return (m.key, elabel)
     return data_local.LOCAL
 

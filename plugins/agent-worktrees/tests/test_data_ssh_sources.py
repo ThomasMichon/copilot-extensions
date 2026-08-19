@@ -62,7 +62,7 @@ def test_local_machine_matched_by_hostname_field(monkeypatch):
     sources = data_ssh._build_sources()
     assert len(sources) == 1
     local = sources[0]
-    assert local.machine == "augloop1"    # display_name, not the raw COMPUTERNAME
+    assert local.machine == "host-augloop1"   # roster key, not the raw COMPUTERNAME
     assert local.env == "Win"
     assert local.local is True
     assert local.argv is None             # in-process, not an SSH-to-self source
@@ -84,7 +84,7 @@ def test_local_machine_needs_no_ssh_profile(monkeypatch):
     local = sources[0]
     assert local.local is True
     assert local.ready is True
-    assert local.machine == "Anomalous-Potato"
+    assert local.machine == "anomalous-potato"
     assert local.env == "Win"  # derived from the running platform
     assert local.argv is None
     assert local.alias == ""
@@ -104,11 +104,11 @@ def test_local_env_is_local_even_when_machine_not_ssh_ready(monkeypatch):
         local_id=("anomalous-potato", "windows"))
 
     by = _by_key(data_ssh._build_sources())
-    assert by[("Anomalous-Potato", "Win")].local is True
-    assert by[("Anomalous-Potato", "Win")].ready is True
+    assert by[("anomalous-potato", "Win")].local is True
+    assert by[("anomalous-potato", "Win")].ready is True
     # WSL of the current machine is not local and the machine is not ready:
     # disabled tab, never contacted.
-    wsl = by[("Anomalous-Potato", "WSL")]
+    wsl = by[("anomalous-potato", "WSL")]
     assert wsl.local is False
     assert wsl.ready is False
     assert wsl.argv is None
@@ -130,7 +130,7 @@ def test_env_without_alias_is_disabled_not_connected(monkeypatch):
         local_id=("anomalous-potato", "windows"))
 
     by = _by_key(data_ssh._build_sources())
-    ghost = by[("Ghost", "Linux")]
+    ghost = by[("ghost", "Linux")]
     assert ghost.ready is False
     assert ghost.argv is None
     assert ghost.local is False
@@ -153,7 +153,7 @@ def test_ready_remote_env_with_alias_is_connected(monkeypatch):
         local_id=("anomalous-potato", "windows"))
 
     by = _by_key(data_ssh._build_sources())
-    mantis_counter = by[("Mantis-Counter", "Linux")]
+    mantis_counter = by[("mantis-counter", "Linux")]
     assert mantis_counter.ready is True
     assert mantis_counter.local is False
     assert mantis_counter.alias == "mantis-counter"
@@ -183,7 +183,7 @@ def test_remote_op_argv_restart_uses_positional_id_and_json(monkeypatch):
     verb is ``restart`` even though the picker labels it 'Stop'); the id is
     positional, not ``--worktree-id``."""
     _remote_roster(monkeypatch)
-    argv = data_ssh.remote_op_argv("Mantis-Counter", "Linux", "restart", "wt-xyz")
+    argv = data_ssh.remote_op_argv("mantis-counter", "Linux", "restart", "wt-xyz")
     assert argv is not None and argv[0] == "ssh"
     inner = argv[-1]
     assert "proj restart wt-xyz --json" in inner
@@ -194,14 +194,14 @@ def test_remote_op_argv_restart_local_returns_none(monkeypatch):
     """A local target yields no SSH argv (the caller runs it in-process)."""
     _remote_roster(monkeypatch)
     assert data_ssh.remote_op_argv(
-        "Anomalous-Potato", "Win", "restart", "wt-xyz") is None
+        "anomalous-potato", "Win", "restart", "wt-xyz") is None
 
 
 def test_remote_op_argv_finalize_uses_positional_id_and_json(monkeypatch):
     """The remote 'finalize' op runs ``<proj> finalize <id> --json`` -- the id
     is positional (the ``finalize`` CLI has no ``--worktree-id`` flag)."""
     _remote_roster(monkeypatch)
-    argv = data_ssh.remote_op_argv("Mantis-Counter", "Linux", "finalize", "wt-xyz")
+    argv = data_ssh.remote_op_argv("mantis-counter", "Linux", "finalize", "wt-xyz")
     assert argv is not None and argv[0] == "ssh"
     inner = argv[-1]
     assert "proj finalize wt-xyz --json" in inner
@@ -212,7 +212,7 @@ def test_recent_messages_argv_remote_builds_worktree_scoped_cli(monkeypatch):
     """The remote recent-messages fetch runs
     ``<proj> recent-messages --worktree <id> --limit N --json``."""
     _remote_roster(monkeypatch)
-    argv = data_ssh.recent_messages_argv("Mantis-Counter", "Linux", "wt-xyz", limit=5)
+    argv = data_ssh.recent_messages_argv("mantis-counter", "Linux", "wt-xyz", limit=5)
     assert argv is not None and argv[0] == "ssh"
     inner = argv[-1]
     assert "proj recent-messages --worktree wt-xyz --limit 5 --json" in inner
@@ -221,7 +221,7 @@ def test_recent_messages_argv_remote_builds_worktree_scoped_cli(monkeypatch):
 def test_recent_messages_argv_local_returns_none(monkeypatch):
     """A local target yields no SSH argv (the caller loads it in-process)."""
     _remote_roster(monkeypatch)
-    assert data_ssh.recent_messages_argv("Anomalous-Potato", "Win", "wt-xyz") is None
+    assert data_ssh.recent_messages_argv("anomalous-potato", "Win", "wt-xyz") is None
 
 
 def test_list_sessions_argv_remote_builds_worktree_scoped_cli(monkeypatch):
@@ -229,7 +229,7 @@ def test_list_sessions_argv_remote_builds_worktree_scoped_cli(monkeypatch):
     ``<proj> list-sessions --worktree <id> --json`` (the enriched registry with
     id + title + is_head, for the picker's diagnostic session list)."""
     _remote_roster(monkeypatch)
-    argv = data_ssh.list_sessions_argv("Mantis-Counter", "Linux", "wt-xyz")
+    argv = data_ssh.list_sessions_argv("mantis-counter", "Linux", "wt-xyz")
     assert argv is not None and argv[0] == "ssh"
     inner = argv[-1]
     assert "proj list-sessions --worktree wt-xyz --json" in inner
@@ -238,7 +238,7 @@ def test_list_sessions_argv_remote_builds_worktree_scoped_cli(monkeypatch):
 def test_list_sessions_argv_local_returns_none(monkeypatch):
     """A local target yields no SSH argv (the caller loads it in-process)."""
     _remote_roster(monkeypatch)
-    assert data_ssh.list_sessions_argv("Anomalous-Potato", "Win", "wt-xyz") is None
+    assert data_ssh.list_sessions_argv("anomalous-potato", "Win", "wt-xyz") is None
 
 
 def test_ssh_not_ready_remote_env_is_disabled(monkeypatch):
@@ -258,7 +258,7 @@ def test_ssh_not_ready_remote_env_is_disabled(monkeypatch):
         local_id=("anomalous-potato", "windows"))
 
     by = _by_key(data_ssh._build_sources())
-    book2 = by[("host-book2", "Win")]
+    book2 = by[("book2", "Win")]
     assert book2.ready is False
     assert book2.argv is None
     assert book2.alias == "book2"
@@ -280,7 +280,7 @@ def test_copilot_false_machine_is_skipped(monkeypatch):
         local_id=("anomalous-potato", "windows"))
 
     by = _by_key(data_ssh._build_sources())
-    assert ("NAS", "Linux") not in by
+    assert ("nas", "Linux") not in by
 
 
 def test_absent_local_machine_still_gets_local_source(monkeypatch):
@@ -308,7 +308,7 @@ def test_absent_local_machine_still_gets_local_source(monkeypatch):
     assert local.argv is None
     assert local.ready is True
     # The remote roster entry is unaffected.
-    assert ("Mantis-Counter", "Linux") in _by_key(sources)
+    assert ("mantis-counter", "Linux") in _by_key(sources)
 
 
 # ── #1421 continuous background poll: LiveLoader.repoll_silent ────────────────

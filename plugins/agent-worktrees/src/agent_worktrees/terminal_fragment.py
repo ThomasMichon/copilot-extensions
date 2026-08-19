@@ -1,36 +1,42 @@
 #!/usr/bin/env python3
-"""Windows Terminal fragment *generation* -- the testable source of truth.
+"""Windows Terminal fragment *generation* -- the SINGLE source of truth.
 
-The installer's PowerShell ``Build-TerminalFragment`` (``scripts/install.ps1``)
-mirrors this module's rules to write the real
-``%LOCALAPPDATA%\\Microsoft\\Windows Terminal\\Fragments\\AgentWorktrees\\agent-worktrees.json``
-fragment. That PowerShell path is imperative and disk-coupled, so the
-*generation flow* -- "given this machine's local config, which Terminal
-profiles get emitted?" -- had no unit-testable Python equivalent and no way to
-**preview** the result without actually deploying it.
+This module is the **only** generator of the Windows Terminal fragment
+``%LOCALAPPDATA%\\Microsoft\\Windows Terminal\\Fragments\\AgentWorktrees\\agent-worktrees.json``.
+The installer (``scripts/install.ps1`` ``Deploy-Shortcuts``) no longer
+reimplements the generation in PowerShell -- the former ``Build-TerminalFragment``
+is **retired**; the installer now captures this module's JSON via
+``agent_worktrees terminal-fragment --machine <key>``. That parallel PS
+reimplementation had silently drifted from these rules and dropped profiles
+(the display-name vs. key mismatch); collapsing to one Python generator removes
+that whole failure class.
 
-This module supplies both:
+This module supplies:
 
 - :func:`build_fragment` -- a **pure** function over explicit inputs
   (:class:`ProjectInput` / :class:`RosterMachine`). No disk, no environment;
-  fully unit-testable. It reproduces the PowerShell rules exactly, including the
-  SHA-256 stable-GUID algorithm (``New-StableGuid``), the locked ``self.agent``
-  diagonal, the default column for unmanaged projects, ``shell``/``agent``
-  gating, cross-project GUID de-duplication, and self-skip.
+  fully unit-testable. It defines the fragment shapes: the SHA-256 stable-GUID
+  algorithm (``stable_guid``), the locked ``self.agent`` diagonal, the default
+  column for unmanaged projects, ``shell``/``agent`` gating, cross-project GUID
+  de-duplication, and self-skip.
 - :func:`collect_local_projects` + :func:`preview_local` -- read *this*
   machine's real ``repos.yaml`` / ``projects.yaml`` / per-project
   ``machines.yaml`` + ``config.yaml`` and feed the pure builder, so the CLI can
   print exactly what the next ``update`` would deploy.
+- :func:`migrate_selection_to_keys` / :func:`migrate_local_selections` --
+  canonicalize a project's ``terminal_profiles`` selection from the legacy
+  ``display_name`` vocabulary to the machine **key** (full name).
+
+**Machine identity is the roster key (full name).** A selection target's
+``machine`` matches on the machines.yaml **key** (e.g. ``tmichon-book2``), and
+every emitted machine/SSH profile is *labelled* by that full name too. A legacy
+display-name column is still accepted at match time (dual acceptance) so old
+configs keep working until ``--migrate-selections`` rewrites them.
 
 The **selection** semantics (default column = minimal per-agent + bare
 cross-machine, the locked diagonal) are delegated to :mod:`agent_worktrees.profiles`
 -- the same model the Picker persists -- so this generator and the Picker never
 diverge on *what a column means*.
-
-Cross-reference: ``scripts/install.ps1`` -> ``Build-TerminalFragment`` (profile
-shapes, seeds), ``Get-DefaultSelection`` (default column), ``Get-SelEnvLabel``
-(env vocabulary). Keep the two in lockstep; the parity is asserted structurally
-by ``tests/test_terminal_fragment.py``.
 """
 from __future__ import annotations
 
@@ -259,7 +265,6 @@ def _local_display(roster: tuple[RosterMachine, ...], self_machine: str) -> str:
 def default_selection_keys(
     roster: tuple[RosterMachine, ...],
     self_machine: str,
-    local_display: str,
     computer_name: str,
 ) -> set[str]:
     """The DEFAULT column for an unmanaged project (install.ps1 ``Get-DefaultSelection``).
@@ -268,8 +273,13 @@ def default_selection_keys(
     (a plain ``shell`` per remote, ready machine x env). Delegates the ON/OFF
     rule to :func:`profiles.default_selection` so the meaning of a column stays
     single-sourced with the Picker.
+
+    The selection vocabulary is the machine's **roster key** (its canonical full
+    name, e.g. ``tmichon-book2``) -- never the cosmetic ``display_name`` -- so a
+    column's meaning is stable regardless of how a machine is labelled in the
+    dropdown.
     """
-    candidates = [profiles.self_diagonal(local_display, "Win")]
+    candidates = [profiles.self_diagonal(self_machine, "Win")]
     for m in roster:
         if _is_self(m, self_machine, computer_name):
             continue
@@ -277,14 +287,31 @@ def default_selection_keys(
             continue
         for e in m.environments:
             se = sel_env_label(e.name)
-            candidates.append(profiles.TargetSel(m.display_name, se, "shell"))
-            candidates.append(profiles.TargetSel(m.display_name, se, "agent"))
-    chosen = profiles.default_selection(candidates, local_display, "Win")
+            candidates.append(profiles.TargetSel(m.key, se, "shell"))
+            candidates.append(profiles.TargetSel(m.key, se, "agent"))
+    chosen = profiles.default_selection(candidates, self_machine, "Win")
     return {f"{s.machine}|{s.env}|{s.kind}" for s in chosen}
 
 
 def _selected(selection: set[str], machine: str, env: str, kind: str) -> bool:
     return f"{machine}|{env}|{kind}" in selection
+
+
+def _selected_any(
+    selection: set[str], aliases, env: str, kind: str
+) -> bool:
+    """Whether the selection carries ``<alias>|env|kind`` for any of ``aliases``.
+
+    The canonical selection vocabulary is the roster **key** (full name), but a
+    legacy config (or a hand edit) may still key a target by the machine's
+    ``display_name``. Accepting either -- the key AND the display_name -- keeps
+    old columns working across the key migration without a hard breakage window;
+    new columns are always written with the key (see :func:`default_selection_keys`
+    and the Picker), and ``config-migrate`` rewrites the rest.
+    """
+    return any(
+        a and f"{a}|{env}|{kind}" in selection for a in aliases
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -300,9 +327,9 @@ def build_fragment(
 ) -> FragmentResult:
     """Generate the terminal fragment for ``projects`` on host ``self_machine``.
 
-    ``self_machine`` is the machine **key** (matches machines.yaml keys);
-    ``computer_name`` participates only in the robust self-skip. This mirrors
-    ``Build-TerminalFragment`` profile-for-profile and GUID-for-GUID.
+    ``self_machine`` is the machine **key** (matches machines.yaml keys) and is
+    the canonical identity used for both selection matching and profile labels;
+    ``computer_name`` participates only in the robust self-skip.
     """
     computer_name = (
         computer_name
@@ -318,19 +345,23 @@ def build_fragment(
 
     for proj in projects:
         local_display = _local_display(proj.roster, self_machine)
+        # Canonical identity is the roster KEY (full name); the display_name is
+        # accepted too so legacy display-keyed columns keep matching.
+        local_aliases = (self_machine, local_display)
 
         unmanaged = proj.selection is None
         if unmanaged:
             sel = default_selection_keys(
-                proj.roster, self_machine, local_display, computer_name
+                proj.roster, self_machine, computer_name
             )
         else:
             sel = set(proj.selection)
 
         # Lock the self.agent diagonal for an agent-exposed project ("a host
-        # always launches itself"), even over an explicit empty '[]'.
+        # always launches itself"), even over an explicit empty '[]'. Keyed by
+        # the canonical full name.
         if proj.agent_exposed:
-            sel.add(f"{local_display}|Win|agent")
+            sel.add(f"{self_machine}|Win|agent")
 
         plan = ProjectPlan(
             name=proj.name,
@@ -346,7 +377,7 @@ def build_fragment(
             plan.profiles.append(p)
 
         # 1) Local Windows agent (self.agent on a Windows host).
-        if _selected(sel, local_display, "Win", "agent"):
+        if _selected_any(sel, local_aliases, "Win", "agent"):
             _emit(EmittedProfile(
                 guid=_guid_field(f"{proj.name}-local-windows"),
                 name=proj.display,
@@ -358,7 +389,7 @@ def build_fragment(
 
         # 2) Local WSL agent -- only when WSL support is recorded.
         if (proj.wsl_state and proj.wsl_distro
-                and _selected(sel, local_display, "WSL", "agent")):
+                and _selected_any(sel, local_aliases, "WSL", "agent")):
             _emit(EmittedProfile(
                 guid=_guid_field(f"{proj.name}-local-wsl"),
                 name=f"{proj.display} (WSL)",
@@ -369,12 +400,13 @@ def build_fragment(
             ))
 
         # 3) Local Windows *shell* -- plain login shell, deduped across projects.
-        if _selected(sel, local_display, "Win", "shell"):
+        #    Labelled by the machine's canonical full name.
+        if _selected_any(sel, local_aliases, "Win", "shell"):
             g = _guid_field(f"shell-local-{self_machine}-windows")
             if g not in emitted_shell_guids:
                 _emit(EmittedProfile(
                     guid=g,
-                    name=local_display,
+                    name=self_machine,
                     commandline="pwsh.exe",
                     icon=proj.icon,
                     project=proj.name,
@@ -383,13 +415,13 @@ def build_fragment(
                 emitted_shell_guids.add(g)
 
         # 4) Local WSL *shell* -- distro optional; deduped across projects.
-        if _selected(sel, local_display, "WSL", "shell"):
+        if _selected_any(sel, local_aliases, "WSL", "shell"):
             g = _guid_field(f"shell-local-{self_machine}-wsl")
             if g not in emitted_shell_guids:
                 cmd = f"wsl.exe -d {proj.wsl_distro}" if proj.wsl_distro else "wsl.exe"
                 _emit(EmittedProfile(
                     guid=g,
-                    name=f"{local_display} (WSL)",
+                    name=f"{self_machine} (WSL)",
                     commandline=cmd,
                     icon=proj.wsl_icon,
                     project=proj.name,
@@ -403,18 +435,20 @@ def build_fragment(
                 continue
             if not m.ssh_ready:
                 continue
+            # Canonical key + display_name both accepted for matching; the
+            # emitted label is always the canonical full name (the key).
+            remote_aliases = (m.key, m.display_name)
             for e in m.environments:
                 sel_env = sel_env_label(e.name)
                 is_bash_env = e.name in ("wsl", "linux")
                 profile_icon = proj.wsl_icon if is_bash_env else proj.icon
-                remote_display = m.display_name
 
                 # Plain SSH (shell) -- gated + deduped across projects.
                 ssh_guid = _guid_field(f"ssh-{m.key}-{e.name}")
-                if (_selected(sel, remote_display, sel_env, "shell")
+                if (_selected_any(sel, remote_aliases, sel_env, "shell")
                         and ssh_guid not in emitted_shell_guids):
-                    pname = (f"{remote_display} (WSL)"
-                             if ssh_env_label(e.name) == "WSL" else remote_display)
+                    pname = (f"{m.key} (WSL)"
+                             if ssh_env_label(e.name) == "WSL" else m.key)
                     _emit(EmittedProfile(
                         guid=ssh_guid,
                         name=pname,
@@ -426,11 +460,11 @@ def build_fragment(
                     emitted_shell_guids.add(ssh_guid)
 
                 # Launch-via-SSH (agent) -- gated; NOT deduped (project-specific).
-                if _selected(sel, remote_display, sel_env, "agent"):
+                if _selected_any(sel, remote_aliases, sel_env, "agent"):
                     binstub = f"{proj.name}.cmd" if e.shell == "pwsh" else proj.name
-                    launch_label = (f"{remote_display} WSL"
+                    launch_label = (f"{m.key} WSL"
                                     if ssh_env_label(e.name) == "WSL"
-                                    else remote_display)
+                                    else m.key)
                     _emit(EmittedProfile(
                         guid=_guid_field(f"{proj.name}-launch-{m.key}-{e.name}"),
                         name=f"{proj.display} ({launch_label})",
@@ -625,6 +659,90 @@ def preview_local(
     """Collect this machine's inputs and build the fragment (no disk write)."""
     projects = collect_local_projects(current_project=current_project)
     return build_fragment(projects, self_machine, self_env=self_env)
+
+
+# ---------------------------------------------------------------------------
+# Selection migration: legacy display_name vocabulary -> canonical key.
+# ---------------------------------------------------------------------------
+
+def _display_to_key_map(roster: tuple[RosterMachine, ...]) -> dict[str, str]:
+    """Lower-cased {display_name|key -> canonical key} for this roster."""
+    out: dict[str, str] = {}
+    for r in roster:
+        out.setdefault(r.key.lower(), r.key)
+        if r.display_name:
+            out.setdefault(r.display_name.lower(), r.key)
+    return out
+
+
+def migrate_selection_to_keys(config_path, roster: tuple[RosterMachine, ...]) -> bool:
+    """Rewrite a project's ``terminal_profiles`` machine field display_name -> key.
+
+    Canonicalizes every selected target's ``machine`` to the roster **key** (the
+    full name) so a column no longer depends on the cosmetic ``display_name``.
+    Entries already keyed by the canonical name -- or naming a machine absent
+    from the roster -- are preserved verbatim. Returns ``True`` iff the file was
+    changed. Every other key in ``config.yaml`` is preserved.
+    """
+    import yaml
+    from pathlib import Path
+
+    if not profiles.has_selection(config_path):
+        return False
+    sels = profiles.load_selection(config_path)
+    dmap = _display_to_key_map(roster)
+
+    changed = False
+    new: list[profiles.TargetSel] = []
+    seen: set[tuple[str, str, str]] = set()
+    for s in sels:
+        key = dmap.get(s.machine.lower())
+        machine = key if key else s.machine
+        if machine != s.machine:
+            changed = True
+        cand = profiles.TargetSel(machine, s.env, s.kind)
+        if cand.key in seen:
+            changed = True  # a display/key pair collapsed into one entry
+            continue
+        seen.add(cand.key)
+        new.append(cand)
+
+    if not changed:
+        return False
+
+    p = Path(config_path)
+    data: dict = {}
+    try:
+        loaded = yaml.safe_load(p.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            data = loaded
+    except (OSError, yaml.YAMLError):
+        return False
+    data[profiles.CONFIG_KEY] = [s.as_dict() for s in new]
+    p.write_text(
+        yaml.safe_dump(data, sort_keys=False, default_flow_style=False),
+        encoding="utf-8",
+    )
+    return True
+
+
+def migrate_local_selections(current_project: str | None = None) -> list[str]:
+    """Migrate every local project's selection to key vocabulary.
+
+    Returns the list of project names whose ``config.yaml`` was rewritten. Safe
+    to run repeatedly (idempotent: a key-vocabulary column is left untouched).
+    """
+    from . import config as cfg
+
+    changed: list[str] = []
+    for proj in collect_local_projects(current_project=current_project):
+        cfg_path = cfg.project_dir(proj.name) / "config.yaml"
+        try:
+            if migrate_selection_to_keys(cfg_path, proj.roster):
+                changed.append(proj.name)
+        except Exception:
+            continue
+    return changed
 
 
 # ---------------------------------------------------------------------------
