@@ -172,6 +172,10 @@ def serve(cfg: Config | None = None, *, passive: bool = False) -> None:
     # Expose the uvicorn server so the app's /shutdown drain-seam can request a
     # clean exit when the cutover orchestrator retires this daemon.
     app.state.uvicorn_server = server
+    # An active (non-passive) coordinator self-published its routing entry above,
+    # so it can arm the generation self-retire tether (opt-in). A passive instance
+    # publishes nothing and must never self-retire before it is promoted.
+    app.state.self_retire_publish = not passive
     try:
         server.run(sockets=[sock])
     finally:
