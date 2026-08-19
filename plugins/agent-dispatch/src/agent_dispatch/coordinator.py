@@ -428,17 +428,24 @@ def create_app(
         # over). The "owner" tracked here is the single active routing generation,
         # with the periodic liveness GC as a backstop.
         #
-        # OPT-IN (default off): armed only when this coordinator self-published its
-        # routing entry (``self_retire_publish`` -- i.e. not a passive instance)
-        # AND ``AGENT_DISPATCH_SELF_RETIRE`` is set. When off, the loop is never
-        # created. Fail-safe on two independent axes -- it exits only once BOTH
+        # OPT-IN (default off): armed whenever ``AGENT_DISPATCH_SELF_RETIRE`` is set;
+        # when off, the loop is never created. The loop **self-gates on active-ness**:
+        # its startup phase waits until the routing table's ``active`` entry is our
+        # own pid before it captures our generation and begins watching. This is what
+        # makes it correct for a **cutover-promoted** coordinator -- one spawned
+        # ``--passive`` (so ``self_retire_publish`` is False) and promoted by the
+        # orchestrator flipping the routing table to it: such a coordinator is exactly
+        # the ``serve --passive`` process this targets, so we must NOT gate on
+        # ``self_retire_publish`` (that would leave the primary target inert). A
+        # passive instance that is never promoted never sees its own pid as active and
+        # arms nothing. Fail-safe on two independent axes -- it exits only once BOTH
         # (a) supersession by a *live, strictly-newer* generation and (b) the safe
         # cutover point (``DrainGate`` reports no in-flight claim) are K-confirmed.
         # So the genuinely-active coordinator (its own pid = active) can never
         # self-retire, and a claim mid-flight is never dropped.
         self_retire_task = None
         _sr_enabled, _sr_poll, _sr_confirmations = _self_retire_settings()
-        if getattr(_app.state, "self_retire_publish", False) and _sr_enabled:
+        if _sr_enabled:
             async def _self_retire_loop() -> None:
                 import os as _os
 

@@ -441,17 +441,24 @@ async def lifespan(app: FastAPI):
     # tracked here is the single active routing generation, with the periodic
     # reapers as a backstop.
     #
-    # OPT-IN (default off): only a daemon that self-published (``publish_on_ready``)
-    # AND has ``AGENT_BRIDGE_SELF_RETIRE`` set arms this; when off, none of the loop
-    # below is created or runs. Fail-safe on two independent axes -- it exits only
-    # once BOTH (a) supersession by a *live, strictly-newer* generation and (b)
-    # local idleness are K-confirmed. So the genuinely-active daemon (which reads
-    # its own pid as active) can never self-retire, and an in-flight turn on a
-    # demoted daemon is never cut mid-flight: it drains as clients follow the
-    # flipped route.
+    # OPT-IN (default off): armed whenever ``AGENT_BRIDGE_SELF_RETIRE`` is set; when
+    # off, none of the loop below is created or runs. The loop **self-gates on
+    # active-ness**: its startup phase waits until the routing table's ``active``
+    # entry is *our own pid* before it captures our generation and begins watching.
+    # This is what makes it correct for a **cutover-promoted** daemon -- one spawned
+    # ``--passive`` (so ``publish_on_ready`` is False) and promoted by the
+    # orchestrator flipping the routing table to it: such a daemon is exactly the
+    # ``serve --passive`` process this targets, so we must NOT gate on
+    # ``publish_on_ready`` (that would leave the primary target inert). A passive
+    # instance that is never promoted simply never sees its own pid as active and
+    # arms nothing. Fail-safe on two independent axes -- it exits only once BOTH
+    # (a) supersession by a *live, strictly-newer* generation and (b) local idleness
+    # are K-confirmed. So the genuinely-active daemon (which reads its own pid as
+    # active) can never self-retire, and an in-flight turn on a demoted daemon is
+    # never cut mid-flight: it drains as clients follow the flipped route.
     self_retire_task = None
     _sr_enabled, _sr_poll, _sr_confirmations = _self_retire_settings()
-    if getattr(app.state, "publish_on_ready", False) and _sr_enabled:
+    if _sr_enabled:
         async def _self_retire_loop() -> None:
             import os as _os
 
