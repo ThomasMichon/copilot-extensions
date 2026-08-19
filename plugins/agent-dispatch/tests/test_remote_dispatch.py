@@ -186,6 +186,17 @@ def test_build_remote_browse_argv_inbox_minimal():
     assert argv[argv.index("--status") + 1] == "proposed"
 
 
+def test_build_remote_browse_argv_inbox_forwards_awaiting_steer():
+    args = _browse_args(status="proposed", awaiting_steer=True)
+    argv = remote_dispatch.build_remote_browse_argv("inbox", args)
+    assert "--awaiting-steer" in argv  # steer surface forwarded to the peer
+    # Absent by default (older callers / list) -> not forwarded.
+    assert "--awaiting-steer" not in remote_dispatch.build_remote_browse_argv(
+        "inbox", _browse_args(status="proposed"))
+    assert "--awaiting-steer" not in remote_dispatch.build_remote_browse_argv(
+        "list", _browse_args(status="proposed", awaiting_steer=True), repo="x")
+
+
 def test_browse_remote_builds_ssh_command(monkeypatch):
     captured = {}
 

@@ -1416,11 +1416,24 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
+    # --awaiting-steer widens the fetch to the owned states (a task blocked on
+    # operator steering is `claimed`/`started`, not a filterable "held" -- HELD
+    # is a derived category), then keeps only the *pickable* (`proposed`) rows
+    # plus any *awaiting-steer* row. This is the picker steer surface's read:
+    # "what I can start + what needs my answer", without the rest of the owned
+    # in-progress queue.
+    steer_only = getattr(args, "awaiting_steer", False)
+    status = "proposed,claimed,started" if steer_only else args.status
     with _client(args) as c:
-        tasks = c.list(repo=None, status=args.status, label=args.label, limit=args.limit)
+        tasks = c.list(repo=None, status=status, label=args.label, limit=args.limit)
     from .queue import machine_matches
 
     inbox = [t for t in tasks if machine_matches(t.get("target_machine"), machine)]
+    if steer_only:
+        inbox = [
+            t for t in inbox
+            if t.get("status") == "proposed" or t.get("awaiting_steer")
+        ]
     return _emit(_enrich(inbox))
 
 
@@ -3286,7 +3299,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--status",
         default="proposed",
-        help="status filter; comma-separate for several (default: proposed)",
+        help="status filter; comma-separate for several (default: proposed). "
+             "Ignored when --awaiting-steer is set.",
+    )
+    p.add_argument(
+        "--awaiting-steer", dest="awaiting_steer", action="store_true",
+        help="show the picker steer surface: pickable (proposed) tasks PLUS any "
+             "task blocked on operator steering (a posted card's request_input, "
+             "in claimed/started), and nothing else of the owned queue. Overrides "
+             "--status.",
     )
     p.add_argument("--label")
     p.add_argument("--limit", type=int, default=200)
