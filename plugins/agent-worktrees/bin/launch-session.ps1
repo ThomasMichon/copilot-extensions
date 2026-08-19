@@ -311,18 +311,40 @@ function Invoke-UpdateApply {
         # (1) Marketplace installer, iff the download changed the payload.
         #     NO re-exec: a launcher-script change applies on the next launch.
         if ($status -and $status.plugin_changed) {
-            Write-SetupStatus 'A new plugin version was downloaded; installing the updated runtime...'
             $pdir = $status.plugin_dir
             $pluginInstaller = if ($pdir) { Join-Path $pdir 'scripts\install.ps1' } else { $null }
             if ($pluginInstaller -and (Test-Path $pluginInstaller)) {
-                $installerArgs = @('update')
-                if ($env:WORKTREE_PROJECT) { $installerArgs += @('-ProjectName', $env:WORKTREE_PROJECT) }
-                & pwsh.exe -NoProfile -File $pluginInstaller @installerArgs 2>&1 |
-                    ForEach-Object { Write-SetupLog "installer: $_" }
-                if ($LASTEXITCODE -eq 0) {
-                    Write-SetupLog 'Installer update succeeded (launcher change, if any, applies next launch)'
+                if ($env:WORKTREE_BLOCKING_INSTALL) {
+                    # Escape hatch (recovery/debug): apply synchronously.
+                    Write-SetupStatus 'A new plugin version was downloaded; installing the updated runtime...'
+                    $installerArgs = @('update')
+                    if ($env:WORKTREE_PROJECT) { $installerArgs += @('-ProjectName', $env:WORKTREE_PROJECT) }
+                    & pwsh.exe -NoProfile -File $pluginInstaller @installerArgs 2>&1 |
+                        ForEach-Object { Write-SetupLog "installer: $_" }
+                    if ($LASTEXITCODE -eq 0) {
+                        Write-SetupLog 'Installer update succeeded (launcher change, if any, applies next launch)'
+                    } else {
+                        Write-SetupLog "Installer update failed (exit $LASTEXITCODE) — continuing with existing version" 'WARN'
+                    }
                 } else {
-                    Write-SetupLog "Installer update failed (exit $LASTEXITCODE) — continuing with existing version" 'WARN'
+                    # Default: DETACH the install so the launch never blocks on the
+                    # (slow) venv rebuild. Immutable versioned slots make this safe --
+                    # the installer builds a NEW versions\<v> slot and flips the
+                    # current-version marker atomically, never touching the slot THIS
+                    # session runs from. Launch on the active slot now; the new version
+                    # applies on the next launch (stage-next), the same way the runtime
+                    # reconcile already runs detached. The installer carries its own
+                    # single-instance lock, so a concurrent background install can't
+                    # collide.
+                    Write-SetupStatus 'A new plugin version was downloaded; installing it in the background (applies on the next launch)...'
+                    $bgArgs = @('-NoProfile', '-File', "`"$pluginInstaller`"", 'update')
+                    if ($env:WORKTREE_PROJECT) { $bgArgs += @('-ProjectName', "`"$($env:WORKTREE_PROJECT)`"") }
+                    try {
+                        Start-Process -FilePath 'pwsh.exe' -ArgumentList $bgArgs -WindowStyle Hidden | Out-Null
+                        Write-SetupLog 'Background install started (new version applies on the next launch)'
+                    } catch {
+                        Write-SetupLog "Background install failed to start ($($_.Exception.Message)) — continuing" 'WARN'
+                    }
                 }
             } else {
                 Write-SetupLog "Plugin installer not found ($pluginInstaller) — skipping" 'WARN'
