@@ -1021,6 +1021,29 @@ Set-Content -Path `$pidFile -Value `$proc.Id
     }
     if ($principal) { $regArgs['Principal'] = $principal }
 
+    # Idempotent no-op when nothing changed. The task's action points at a STABLE,
+    # self-provisioning launcher ($launcherPath) that resolves the live version from
+    # the `current-version` marker at boot -- so the task's action/trigger/principal
+    # are byte-identical across deploys and never need a rewrite. Re-applying an
+    # unchanged S4U (boot) task via Set-ScheduledTask nonetheless requires
+    # elevation, which a routine non-elevated `update` lacks; that failure then
+    # falls into the purge-and-retry below, which would Unregister a perfectly good
+    # boot task before a Register it also cannot perform -- risking the loss of a
+    # working auto-start. So if an existing task already matches the desired action
+    # AND mode (no principal change), leave it untouched -- no elevation required,
+    # no misleading "not configured" warning, no purge of a healthy task.
+    if ($existing -and -not $principalChange) {
+        $curAct = @($existing.Actions)[0]
+        $sameAction = $curAct -and
+            ($curAct.Execute -eq $action.Execute) -and
+            ($curAct.Arguments -eq $action.Arguments) -and
+            (("" + $curAct.WorkingDirectory) -eq ("" + $action.WorkingDirectory))
+        if ($sameAction) {
+            Write-Ok "Scheduled task already configured ($modeLabel) -- unchanged, left as-is"
+            return
+        }
+    }
+
     # Write the task resiliently. Windows Task Scheduler can desync its COM/CIM
     # view from the on-disk store: an Unregister may report success yet leave the
     # task XML, and Get-ScheduledTask may not surface a task whose file still
