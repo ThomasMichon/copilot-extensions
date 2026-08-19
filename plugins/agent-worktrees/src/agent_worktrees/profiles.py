@@ -17,11 +17,16 @@ Storage: a top-level ``terminal_profiles`` list in the machine-local, per-repo
 key there is implicitly scoped to this repo + this machine):
 
     terminal_profiles:
-      - {machine: Anomalous-Potato, env: Win, kind: agent}   # self (locked)
-      - {machine: Emancipation-Cube,    env: WSL, kind: shell}
+      - {machine: tmichon-book2, env: Win, kind: agent}   # self (locked)
+      - {machine: tmichon-dev6, env: WSL, kind: shell}
+
+The ``machine`` field is the roster **key** (the canonical full name), not the
+cosmetic ``display_name``.
 
 This module only models + persists the *selection*. Mirroring it to terminal
-apps is the installer's job (PowerShell ``Build-TerminalFragment``).
+apps is the installer's job: it captures the fragment JSON from the Python
+generator (``agent_worktrees.terminal_fragment``) and writes it to the Windows
+Terminal fragments dir.
 
 This is a DIFFERENT system from ``config.copilot_profiles`` (the agent *backend*
 cloud/local-model selection) -- the two must not be conflated.
@@ -41,10 +46,13 @@ KINDS = ("agent", "shell")
 class TargetSel:
     """One selected launch target in a machine's terminal-profile column.
 
-    ``machine`` / ``env`` are the picker's display labels (machines.yaml
-    ``display_name`` + short env label ``Win`` / ``WSL`` / ``Linux``), matching
-    the roster axes so the grid lines up. ``kind`` is ``agent`` (a worktree
-    launch) or ``shell`` (a plain login shell).
+    ``machine`` is the target's **roster key** -- its canonical full name
+    (e.g. ``tmichon-book2``), matching the machines.yaml keys and
+    ``config.machine``. It is *not* the cosmetic ``display_name`` (the fragment
+    generator accepts a legacy display-name column for back-compat but always
+    writes and prefers the key). ``env`` is the short env label
+    (``Win`` / ``WSL`` / ``Linux``). ``kind`` is ``agent`` (a worktree launch)
+    or ``shell`` (a plain login shell).
     """
 
     machine: str
