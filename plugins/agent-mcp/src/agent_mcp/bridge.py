@@ -17,11 +17,8 @@ import logging
 import sys
 import threading
 
-from .auth import build_injector
 from .config import BridgeConfig, ToolFilter
-from .decorators import BridgeContext, build_decorators
-from .pipeline import Pipeline, UpstreamClient, error_response, is_request
-from .transports import build_transport
+from .session import BridgeSession
 from .watchdog import install_parent_death_watchdog, reap_descendants_on_exit
 
 log = logging.getLogger("agent-mcp.bridge")
@@ -70,32 +67,9 @@ class Bridge:
             sys.stdout.write(line + "\n")
             sys.stdout.flush()
 
-    def _emit_to_client(self, msg: dict) -> None:
-        """Server->client push from a decorator (e.g. list_changed)."""
-        self._write(msg)
-
-    def _on_unsolicited(self, msg: dict) -> None:
-        """Uncorrelated upstream message (server notification / late reply)."""
-        self._write(msg)
-
-    async def _dispatch(self, pipeline: Pipeline, msg: dict) -> None:
-        try:
-            resp = await pipeline.handle(msg)
-        except Exception as exc:  # never let one request kill the loop
-            log.error("pipeline error: %s", exc)
-            resp = error_response(msg, f"bridge error: {exc}") if is_request(msg) else None
-        if resp is not None:
-            self._write(resp)
-
     async def run(self) -> int:
-        injector = build_injector(self.cfg)
-        transport = build_transport(self.cfg, injector)
-        client = UpstreamClient(transport)
-        client.on_unsolicited(self._on_unsolicited)
-        ctx = BridgeContext(new_id=client.new_id, emit_to_client=self._emit_to_client)
-        pipeline = Pipeline(build_decorators(self.cfg, ctx), client.request)
-
-        await transport.start()
+        session = BridgeSession(self.cfg, self._write)
+        await session.start()
 
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[str | None] = asyncio.Queue()
@@ -130,9 +104,8 @@ class Bridge:
         log.info("bridge '%s' started (%s -> %s); %d decorator(s)", self.cfg.name,
                  self.cfg.server.type,
                  self.cfg.server.launch_desc,
-                 len(pipeline.decorators))
+                 session.decorator_count)
 
-        tasks: set[asyncio.Task] = set()
         while True:
             line = await queue.get()
             if line is None:
@@ -145,14 +118,7 @@ class Bridge:
             except json.JSONDecodeError:
                 log.warning("invalid JSON on stdin: %s", text[:200])
                 continue
-            task = asyncio.create_task(self._dispatch(pipeline, msg))
-            tasks.add(task)
-            task.add_done_callback(tasks.discard)
+            session.submit(msg)
 
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-        await pipeline.aclose()
-        client.fail_pending()
-        await transport.end_input()
-        await transport.aclose()
+        await session.aclose()
         return 0

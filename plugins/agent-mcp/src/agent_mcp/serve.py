@@ -46,6 +46,7 @@ from .client import (
     result_text,
 )
 from .config import BridgeConfig, load_config
+from .session import BridgeSession
 
 log = logging.getLogger("agent-mcp.serve")
 
@@ -232,6 +233,12 @@ class Server:
                 except (ValueError, TypeError):
                     await self._send(writer, {"ok": False, "error": "invalid JSON"})
                     continue
+                # A full-session attach hands the whole connection over to a
+                # resident BridgeSession (the work-coalescing multiplexer, #744):
+                # after this the stream carries raw MCP JSON-RPC, not ops.
+                if isinstance(req, dict) and req.get("op") == "attach":
+                    await self._run_session(req, reader, writer)
+                    return
                 resp = await self._dispatch(req)
                 await self._send(writer, resp)
                 if req.get("op") == "shutdown" and resp.get("ok"):
@@ -286,6 +293,81 @@ class Server:
     async def _send(writer: asyncio.StreamWriter, obj: dict) -> None:
         writer.write((json.dumps(obj) + "\n").encode())
         await writer.drain()
+
+    async def _run_session(self, req: dict, reader: asyncio.StreamReader,
+                           writer: asyncio.StreamWriter) -> None:
+        """Host a full MCP session for one attached client over this connection.
+
+        After the ``attach`` op is accepted, the connection stops speaking the
+        op protocol: subsequent lines are raw client->server JSON-RPC dispatched
+        through a per-client :class:`~agent_mcp.session.BridgeSession`, and the
+        session writes responses / decorator pushes / upstream notifications back
+        over the same socket. One resident ``serve`` process can host many such
+        sessions in a single interpreter (#744), each with its own upstream and
+        decorator pipeline, so a stateless-per-call reuse across clients (which
+        MCP's per-session initialize + notification stream forbids) is never
+        attempted.
+        """
+        # Same token gate as the op path (a no-op on AF_UNIX where _token is None).
+        if self._token is not None and req.get("token") != self._token:
+            await self._send(writer, {"ok": False, "error": "unauthorized"})
+            return
+        bridge = req.get("bridge")
+        if not bridge:
+            await self._send(writer, {"ok": False, "error": "missing 'bridge'"})
+            return
+        try:
+            cfg = load_config(bridge)
+        except Exception as exc:
+            await self._send(writer, {"ok": False, "error": f"config: {exc}"})
+            return
+
+        # Client-bound sink: write one complete JSON-RPC line per message and
+        # await the drain so an idle client that stops reading applies real
+        # backpressure (the transport buffer can't grow without bound). A
+        # per-connection lock serializes concurrent dispatch/notification writes
+        # so their lines and drains never interleave.
+        write_lock = asyncio.Lock()
+
+        async def sink(msg: dict) -> None:
+            data = (json.dumps(msg) + "\n").encode()
+            async with write_lock:
+                writer.write(data)
+                try:
+                    await writer.drain()
+                except (ConnectionResetError, BrokenPipeError):
+                    pass  # a closed/broken client just drops the push
+
+        session = BridgeSession(cfg, sink)
+        try:
+            await session.start()
+        except Exception as exc:
+            await self._send(writer, {"ok": False, "error": f"session start: {exc}"})
+            return
+        # Ack; from here the stream is raw MCP JSON-RPC in both directions.
+        await self._send(writer, {"ok": True, "attached": True})
+        log.info("session attached: %s (%d decorators)", bridge,
+                 session.decorator_count)
+        try:
+            while not reader.at_eof():
+                line = await reader.readline()
+                if not line:
+                    break
+                text = line.strip()
+                if not text:
+                    continue
+                try:
+                    msg = json.loads(text)
+                except (ValueError, TypeError):
+                    log.warning("invalid JSON on attached session %s: %s",
+                                bridge, text[:200])
+                    continue
+                session.submit(msg)
+        except (ConnectionResetError, BrokenPipeError):
+            pass
+        finally:
+            await session.aclose()
+            log.info("session detached: %s", bridge)
 
     async def serve_forever(self) -> None:
         self.socket_path.parent.mkdir(parents=True, exist_ok=True)
@@ -399,3 +481,34 @@ async def call_via_socket(socket_path: str | Path, bridge: str, tool: str,
     if resp is None:
         raise OSError("serve socket closed without a response")
     return resp
+
+
+async def open_attached_session(socket_path: str | Path, bridge: str | Path):
+    """Attach a full MCP session on the serve daemon; return ``(reader, writer)``.
+
+    Sends the ``attach`` op and verifies the ack; thereafter the caller speaks
+    line-delimited MCP JSON-RPC directly over the returned stream while the
+    daemon runs that session's upstream + decorator pipeline (the #744
+    multiplexer). Raises ``OSError`` if the daemon can't be reached or refuses
+    the attach, so a consumer falls back to a direct, in-process bridge.
+    """
+    reader, writer, token = await _connect(socket_path)
+    req: dict = {"op": "attach", "bridge": str(bridge)}
+    if token is not None:
+        req["token"] = token
+    writer.write((json.dumps(req) + "\n").encode())
+    await writer.drain()
+    line = await reader.readline()
+    if not line:
+        writer.close()
+        raise OSError("serve closed before attach ack")
+    try:
+        ack = json.loads(line)
+    except (ValueError, TypeError) as exc:
+        writer.close()
+        raise OSError(f"bad attach ack: {exc}") from exc
+    if not (isinstance(ack, dict) and ack.get("ok") and ack.get("attached")):
+        writer.close()
+        reason = ack.get("error") if isinstance(ack, dict) else ack
+        raise OSError(f"attach refused: {reason}")
+    return reader, writer
