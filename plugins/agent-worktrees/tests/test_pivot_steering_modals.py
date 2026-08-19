@@ -446,6 +446,26 @@ def test_newline_fallbacks_alt_enter_and_ctrl_j(monkeypatch, tmp_path):
         asyncio.run(run())
 
 
+def test_shift_enter_esc_cr_parses_as_shift_enter():
+    # Windows Terminal emits ESC+CR (\x1b\r) for Shift+Enter, which Textual would
+    # otherwise collapse to a plain "enter" (indistinguishable from Enter). The
+    # engine registers \x1b\r so the parser surfaces a distinct shift+enter key
+    # (which _AutoExpandTextArea.on_key binds to newline). Importing the engine
+    # (done at module top) applies the registration.
+    from textual._xterm_parser import XTermParser
+
+    def key_names(seq):
+        p = XTermParser()
+        names = []
+        for msg in list(p.feed(seq)) + list(p.feed("")):
+            names.append(getattr(msg, "key", type(msg).__name__))
+        return names
+
+    assert key_names("\x1b\r") == ["shift+enter"]   # Shift+Enter -> distinct key
+    assert key_names("\r") == ["enter"]             # plain Enter unchanged
+    assert key_names("\x1b") == ["escape"]          # lone Esc still save+close
+
+
 def test_ctrl_arrows_cycle_tabs_while_textarea_focused(monkeypatch, tmp_path):
     # The real-world bug: while a text box has focus the TextArea natively
     # consumes ctrl+←/→ (word-move), so the screen's tab bindings never fire.
