@@ -420,6 +420,58 @@ def test_enter_on_other_focuses_box_then_advances(monkeypatch, tmp_path):
     asyncio.run(run())
 
 
+def test_newline_fallbacks_alt_enter_and_ctrl_j(monkeypatch, tmp_path):
+    # A mux (psmux) / non-enhanced terminal collapses shift+enter to bare enter,
+    # so alt+enter and ctrl+j must ALSO insert a newline (and never advance).
+    _drafts(monkeypatch, tmp_path)
+    for nl_key in ("alt+enter", "ctrl+j"):
+        scr = PivotFormScreen(_card(), [{"name": "feedback", "type": "textarea"},
+                                        {"name": "decision", "type": "choice",
+                                         "options": ["a", "b"]}],
+                              "Steer", task_id=f"t-nl-{nl_key}")
+        app = _Host(scr)
+
+        async def run(key=nl_key):
+            async with app.run_test(size=(120, 45)) as pilot:
+                await pilot.pause()
+                ta = scr.query_one("#q-0", _AutoExpandTextArea)
+                ta.focus()
+                await pilot.pause()
+                ta.text = "one"
+                await pilot.press(key)           # inserts a newline (grow)
+                await pilot.pause()
+                assert "\n" in ta.text, key
+                assert app.focused is ta, f"{key} must not advance focus"
+
+        asyncio.run(run())
+
+
+def test_ctrl_arrows_cycle_tabs_while_textarea_focused(monkeypatch, tmp_path):
+    # The real-world bug: while a text box has focus the TextArea natively
+    # consumes ctrl+←/→ (word-move), so the screen's tab bindings never fire.
+    # The box must forward them to the tab actions instead.
+    _drafts(monkeypatch, tmp_path)
+    scr = PivotFormScreen(_card(), _fields(), "Steer", task_id="t-tabs-ta")
+    app = _Host(scr)
+    from textual.widgets import TabbedContent
+
+    async def run():
+        async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+            tabs = scr.query_one("#steer-tabs", TabbedContent)
+            scr.query_one("#q-0", _AutoExpandTextArea).focus()
+            await pilot.pause()
+            assert tabs.active == "tab-0"
+            await pilot.press("ctrl+right")      # forwarded -> next tab
+            await pilot.pause()
+            assert tabs.active == "tab-1"
+            await pilot.press("ctrl+left")       # forwarded -> prev tab
+            await pilot.pause()
+            assert tabs.active == "tab-0"
+
+    asyncio.run(run())
+
+
 def test_ctrl_arrows_cycle_tabs(monkeypatch, tmp_path):
     _drafts(monkeypatch, tmp_path)
     scr = PivotFormScreen(_card(), _flow_fields(), "Steer", task_id="t-tabs")

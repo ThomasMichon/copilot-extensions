@@ -6302,8 +6302,16 @@ class _AutoExpandTextArea(TextArea):
       box grows one row per line of content and caps out (then scrolls) -- no
       manual line math, no off-by-one.
     * **Enter accepts + advances** focus to the next field (or the button row on
-      the last one); **Shift+Enter inserts a newline** (grow the box). This
-      matches the operator's Copilot-CLI muscle memory."""
+      the last one); **Shift+Enter inserts a newline** (grow the box) -- matching
+      the operator's Copilot-CLI muscle memory. Because the picker runs inside a
+      mux (psmux) that strips the enhanced-keyboard protocol, a bare terminal
+      collapses ``shift+enter`` to plain ``enter`` (which would wrongly advance);
+      so **Alt+Enter** and **Ctrl+J** are wired as mux-safe newline fallbacks
+      (both survive a mux and are reported distinctly by Textual).
+    * **Ctrl+Left / Ctrl+Right switch tabs** even while the box has focus: a
+      ``TextArea`` natively binds these to cursor word-movement, which would
+      otherwise swallow them before the screen's tab bindings fire, so we forward
+      them to the screen's ``next_tab`` / ``prev_tab`` actions here."""
 
     def __init__(self, *args, min_height: int = 3, max_height: int = 12, **kw) -> None:
         super().__init__(*args, **kw)
@@ -6320,7 +6328,28 @@ class _AutoExpandTextArea(TextArea):
         return
 
     def on_key(self, event) -> None:
-        if event.key == "enter":
+        key = event.key
+        if key in ("ctrl+left", "ctrl+right"):
+            # Tab-switching wins over the TextArea's native word-movement while a
+            # box is focused (operator request): the TextArea would otherwise
+            # consume these as cursor_word_left/right and the screen's ctrl+←/→
+            # tab bindings would never fire. Forward to the screen's tab actions.
+            event.prevent_default()
+            event.stop()
+            action = "action_next_tab" if key == "ctrl+right" else "action_prev_tab"
+            fn = getattr(self.screen, action, None)
+            if callable(fn):
+                fn()
+        elif key in ("shift+enter", "alt+enter", "ctrl+j"):
+            # Insert a newline (grow the box). ``shift+enter`` is the primary
+            # mechanic, but a mux (psmux) or a terminal without the enhanced
+            # keyboard protocol collapses it to a bare ``enter`` -- so ``alt+enter``
+            # and ``ctrl+j`` (LF, distinct from CR/enter in Textual) are wired as
+            # always-distinguishable, mux-safe fallbacks.
+            event.prevent_default()
+            event.stop()
+            self.insert("\n")
+        elif key == "enter":
             # Accept + advance (Copilot-CLI mechanic) -- do NOT insert a newline.
             # Using the public on_key handler (not the private _on_key) keeps this
             # robust across Textual upgrades.
@@ -6329,10 +6358,6 @@ class _AutoExpandTextArea(TextArea):
             adv = getattr(self.screen, "_advance_focus", None)
             if callable(adv):
                 adv(self)
-        elif event.key == "shift+enter":
-            event.prevent_default()
-            event.stop()
-            self.insert("\n")
 
 
 class _SteerRadioSet(RadioSet):
@@ -6606,8 +6631,8 @@ class PivotFormScreen(ModalScreen[dict]):
         return f"{f['name']}" + (f"  ({hint})" if hint else "") + ":"
 
     def _foot(self) -> str:
-        return ("Enter accept+next · Shift+Enter newline · Space toggle · "
-                "Ctrl+←/→ tabs · Ctrl+S save · Esc save+close  ·  "
+        return ("Enter accept+next · Shift/Alt+Enter (or Ctrl+J) newline · "
+                "Space toggle · Ctrl+←/→ tabs · Ctrl+S save · Esc save+close  ·  "
                 "Confirm submits (never a vote)")
 
     # ---- lifecycle ----------------------------------------------------------
