@@ -4372,18 +4372,27 @@ class PickerScreen(Widget):
 
     def _run_wt_action(self, action, rec: dict) -> None:
         """Run a contributed worktree action (subprocess), report the outcome,
-        and rescan (the action may have changed worktree/session state)."""
+        and rescan (the action may have changed worktree/session state). The
+        subprocess runs OFF the render flow via :meth:`_run_bg`."""
         from . import tasks
 
         label, source = action.label, action.source
-        ok, msg = tasks.run_worktree_action(action, self._wt_action_ctx(rec))
-        self.debug = (f"{label} ({source}): {msg or 'done'}" if ok
-                      else f"{label} ({source}) failed: {msg}")
-        try:
-            self.setup()
-            self.sel = self.default_sel()
-        except Exception:
-            pass
+        ctx = self._wt_action_ctx(rec)
+
+        def _work():
+            return tasks.run_worktree_action(action, ctx)
+
+        def _done(result):
+            ok, msg = result
+            self.debug = (f"{label} ({source}): {msg or 'done'}" if ok
+                          else f"{label} ({source}) failed: {msg}")
+            try:
+                self.setup()
+                self.sel = self.default_sel()
+            except Exception:
+                pass
+
+        self._run_bg(label, _work, _done)
 
     # ---- Recent-messages viewer (read-only session peek) ----
     def _open_msgview(self, rec, *, limit=3):
@@ -4663,18 +4672,27 @@ class PickerScreen(Widget):
 
     def _run_config_section(self, section) -> None:
         """Run a contributed Configuration section (subprocess), report the
-        outcome, and rescan (it may have changed config/session state)."""
+        outcome, and rescan (it may have changed config/session state). The
+        subprocess runs OFF the render flow via :meth:`_run_bg`."""
         from . import tasks
 
         label, source = section.label, section.source
-        ok, msg = tasks.run_config_section(section, self._config_section_ctx())
-        self.debug = (f"{label} ({source}): {msg or 'done'}" if ok
-                      else f"{label} ({source}) failed: {msg}")
-        try:
-            self.setup()
-            self.sel = self.default_sel()
-        except Exception:
-            pass
+        ctx = self._config_section_ctx()
+
+        def _work():
+            return tasks.run_config_section(section, ctx)
+
+        def _done(result):
+            ok, msg = result
+            self.debug = (f"{label} ({source}): {msg or 'done'}" if ok
+                          else f"{label} ({source}) failed: {msg}")
+            try:
+                self.setup()
+                self.sel = self.default_sel()
+            except Exception:
+                pass
+
+        self._run_bg(label, _work, _done)
 
     # ---- registered-pivot (Tasks) action sub-menu ----
     def _open_task_menu(self):
@@ -4721,6 +4739,48 @@ class PickerScreen(Widget):
         ctx["machine"] = self._pivot_machine_id() or ""
         return ctx
 
+    def _run_bg(self, label, work, done=None):
+        """Run a blocking cross-process / IO callable OFF the Textual render flow.
+
+        Every pivot / worktree / config action shells out (agent-dispatch, git,
+        ssh, ...); running that subprocess *inline* in the key or modal-dismiss
+        handler blocked the whole event loop for up to the action timeout (30s),
+        which froze the TUI and read as a crash. Here ``work()`` (the blocking
+        call) runs on a daemon thread, and ``done(result)`` (the UI updates) is
+        marshalled back onto the event loop via Textual's ``call_from_thread`` --
+        so the render flow is never blocked and no widget is mutated off-thread.
+        A worker exception surfaces on the status line instead of killing the
+        thread. Returns immediately."""
+        self.debug = f"{label} · working…"
+
+        def _worker():
+            try:
+                result, err = work(), None
+            except Exception as exc:  # a worker thread must never die silently
+                result, err = None, exc
+
+            def _apply():
+                if err is not None:
+                    detail = str(err).strip()
+                    detail = detail.splitlines()[0] if detail else type(err).__name__
+                    self.debug = f"{label} failed · {detail[:80]}"
+                elif done is not None:
+                    try:
+                        done(result)
+                    except Exception as exc:
+                        self.debug = f"{label} · applied with error: {str(exc)[:60]}"
+
+            app = getattr(self, "app", None)
+            if app is not None:
+                try:
+                    app.call_from_thread(_apply)
+                except Exception:
+                    pass
+
+        threading.Thread(
+            target=_worker, name=f"pivot-action:{label}", daemon=True
+        ).start()
+
     def _run_task_action(self, reg, action, rec):
         """Execute one task action, then invalidate the cached list so the row
         reflects the new state on the next fetch. An INTERNAL (navigation) action
@@ -4753,16 +4813,24 @@ class PickerScreen(Widget):
             self._run_task_action_progress(reg, action, ctx, title)
             return
         rt = self._pivot_runtime(reg)
-        ok, msg = rt.run_action(action, ctx)
-        rt.invalidate()
-        # The focused row may vanish after the action; re-anchor selection.
-        if self.sel not in self.stops():
-            self.sel = self.default_sel()
-        short = (msg or "").splitlines()[0][:80] if msg else ""
-        if ok:
-            self.debug = f"{action.label} · {title}" + (f" — {short}" if short else "")
-        else:
-            self.debug = f"{action.label} failed · {short or 'see command output'}"
+
+        def _work():
+            ok, msg = rt.run_action(action, ctx)
+            rt.invalidate()   # off-thread: the next fetch reflects the new state
+            return ok, msg
+
+        def _done(result):
+            ok, msg = result
+            # The focused row may vanish after the action; re-anchor selection.
+            if self.sel not in self.stops():
+                self.sel = self.default_sel()
+            short = (msg or "").splitlines()[0][:80] if msg else ""
+            if ok:
+                self.debug = f"{action.label} · {title}" + (f" — {short}" if short else "")
+            else:
+                self.debug = f"{action.label} failed · {short or 'see command output'}"
+
+        self._run_bg(action.label, _work, _done)
 
     def _run_task_action_progress(self, reg, action, ctx, title):
         """Run a D4 progress-reporting pivot action: stream its NDJSON progress
@@ -4868,20 +4936,31 @@ class PickerScreen(Widget):
     def _run_pivot_form_submit(self, reg, action, ctx, title, values):
         """Run a submitted form action (A5): resolve ``{field.<name>}`` + entry
         tokens in one safe pass, run the command via the pivot runtime, then
-        invalidate the cached list so the row reflects the new state."""
+        invalidate the cached list so the row reflects the new state. The command
+        (e.g. ``agent-dispatch steer submit``) is a subprocess, so it runs OFF the
+        render flow via :meth:`_run_bg` -- Confirm returns instantly and the UI
+        stays live while the coordinator round-trip completes."""
         from . import pivots as _pivots
 
         rt = self._pivot_runtime(reg)
         argv = _pivots.format_form_template(action.run, ctx, values)
-        ok, msg = rt.run_resolved(argv)
-        rt.invalidate()
-        if self.sel not in self.stops():
-            self.sel = self.default_sel()
-        short = (msg or "").splitlines()[0][:80] if msg else ""
-        if ok:
-            self.debug = f"{action.label} · {title}" + (f" — {short}" if short else "")
-        else:
-            self.debug = f"{action.label} failed · {short or 'see command output'}"
+
+        def _work():
+            ok, msg = rt.run_resolved(argv)
+            rt.invalidate()
+            return ok, msg
+
+        def _done(result):
+            ok, msg = result
+            if self.sel not in self.stops():
+                self.sel = self.default_sel()
+            short = (msg or "").splitlines()[0][:80] if msg else ""
+            if ok:
+                self.debug = f"{action.label} · {title}" + (f" — {short}" if short else "")
+            else:
+                self.debug = f"{action.label} failed · {short or 'see command output'}"
+
+        self._run_bg(action.label, _work, _done)
 
     def _scope_label(self):
         return "All machines" if self.is_all() else \
