@@ -214,11 +214,16 @@ now?*:
 
 ### Opt-in until validated on a real cutover
 
-Because a false positive would exit a *live* fabric daemon, the loop is **opt-in
-and default-off** — it is armed whenever the env guard (`AGENT_BRIDGE_SELF_RETIRE`
-/ `AGENT_DISPATCH_SELF_RETIRE`; cadence and K are env-tunable via the `_POLL_S` /
-`_CONFIRMATIONS` suffixes) is set, and the guard is checked *before any task is
-created*, so with the default off **no self-retire code runs at all**.
+### Default-on, with an opt-out
+
+The loop is **default-on (opt-out)**: it is armed unless the env guard
+(`AGENT_BRIDGE_SELF_RETIRE` / `AGENT_DISPATCH_SELF_RETIRE`) is explicitly falsy
+(`0`/`false`/`no`/`off`; cadence and K are env-tunable via the `_POLL_S` /
+`_CONFIRMATIONS` suffixes). The guard is evaluated *before any task is created*,
+so disabling it means **no self-retire code runs at all**. It became the default
+after real-cutover validation (§ Invariant 7): it arms for cutover-promoted
+daemons and self-retires a demoted generation once idle, without disturbing
+in-flight work or the healthy successor.
 
 Crucially, the loop does **not** gate on "did *this* process self-publish"
 (`publish_on_ready` / `not passive`). A zero-downtime cutover spawns the new
@@ -231,10 +236,6 @@ routing table's `active` entry is *its own pid* before it captures its generatio
 and begins watching. A normal boot daemon satisfies that as soon as it publishes;
 a cutover-promoted daemon satisfies it the moment the orchestrator flips to it; a
 passive daemon that is never promoted never satisfies it and arms nothing.
-
-Promotion to on is gated on a real-cutover rehearsal (§ Invariant 7) — arm it on
-one host, drive a cutover, confirm the demoted daemon self-retires once idle and
-the successor keeps serving, then flip the default.
 
 ## Per-plugin adoption
 
