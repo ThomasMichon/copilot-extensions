@@ -1439,6 +1439,31 @@ try {
     # that need an interactive session, which S4U's non-interactive station lacks.
     $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType S4U -RunLevel Limited
 
+    # Idempotent no-op when nothing changed (mirrors agent-bridge). The coordinator
+    # boot task points at a STABLE, self-provisioning launcher ($launcher) that
+    # resolves the live version at boot, so its action/trigger/principal are
+    # byte-identical across deploys and never need a rewrite. Overwriting an
+    # already-S4U task via `Register -Force` still requires elevation -- which a
+    # routine non-elevated `update` lacks -- and the failure then starts a *second*,
+    # logon-scoped coordinator via the fallback, racing the surviving boot task. So
+    # if an existing task already matches the desired action AND is already S4U,
+    # leave it untouched (and clear any stale logon fallback so nothing races it).
+    $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if ($existingTask -and ($existingTask.Principal.LogonType -in @('S4U', 'Password'))) {
+        $curAct = @($existingTask.Actions)[0]
+        $sameAction = $curAct -and
+            ($curAct.Execute -eq $action.Execute) -and
+            ($curAct.Arguments -eq $action.Arguments) -and
+            (("" + $curAct.WorkingDirectory) -eq ("" + $action.WorkingDirectory))
+        if ($sameAction) {
+            Write-Ok "Coordinator boot task already configured (Scheduled Task '$TaskName') -- unchanged, left as-is"
+            if (Remove-CoordinatorAutostart) {
+                Write-Step "Removed the non-elevated logon fallback -- the Scheduled Task supersedes it"
+            }
+            return
+        }
+    }
+
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     # Register-ScheduledTask raises a TERMINATING "Access is denied" on a
