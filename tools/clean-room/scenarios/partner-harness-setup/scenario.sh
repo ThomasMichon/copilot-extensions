@@ -13,16 +13,17 @@
 #   3. partner's own tests -- the partner's OWN setup/update test suite passes
 #      (stdlib unittest; hermetic, stubbed -- touches nothing real).
 #
-# Name-free of any specific partner: everything is CR_PARTNER_* configurable. The
-# flagship consumer is odsp-web-harness's agent-* re-blit gate.
+# Name-free of any specific partner: everything is CR_PARTNER_* configurable. A
+# consuming gate is a downstream vendored-plugin sync that runs this before it
+# publishes a re-blit; it sets CR_PARTNER_* for its own partner harness.
 #
 # This is Tier P: deterministic, agent-free, no credits. It sources the shared
 # lib and speaks only the helper API (phase/pass/fail/info/jam), so it reports
 # uniformly and the runner stays name-free.
 #
 # Platform note: this runs the partner's NATIVE-unix flow (setup.sh + *_sh tests)
-# in a Linux box. The Windows-native flow (setup.ps1 + *_ps1 tests) runs in a
-# Windows container on cloud2. A partner is validated on the platform whose native
+# in a Linux container. The Windows-native flow (setup.ps1 + *_ps1 tests) runs on
+# a Windows container host. A partner is validated on the platform whose native
 # suite is faithful.
 set -uo pipefail
 
@@ -34,7 +35,7 @@ export CR_SCENARIO_NAME
 # shellcheck source=../../lib/clean-room-lib.sh
 source "${CR_LIB:-$_SELF_DIR/../../lib/clean-room-lib.sh}"
 
-PARTNER_NAME="${CR_PARTNER_NAME:-odsp-web-harness}"
+PARTNER_NAME="${CR_PARTNER_NAME:-partner-harness}"
 PARTNER_PATH="${CR_PARTNER_PATH:-}"
 PARTNER_REPO="${CR_PARTNER_REPO:-}"
 PARTNER_PLUGINS="${CR_PARTNER_PLUGINS:-agent-bridge agent-codespaces}"
@@ -50,15 +51,30 @@ cr_meta "partner" "$PARTNER_NAME"
 
 _PY="$(command -v python3 || command -v python || echo '')"
 
-# read a JSON string field with python (stdlib); prints empty on any error.
-_json_get() {  # <file> <python-expr-on-'d'>
+# Read JSON fields with python (stdlib); values are passed as ARGV, never eval'd,
+# so untrusted CR_PARTNER_* inputs never become code. Prints empty on any error.
+_json_field() {  # <file> <top-level-key>   -> d[key] as a string
     [ -n "$_PY" ] || { printf ''; return 1; }
     "$_PY" - "$1" "$2" <<'PY' 2>/dev/null
 import json, sys
 try:
     with open(sys.argv[1]) as f: d = json.load(f)
-    v = eval(sys.argv[2], {"d": d})
+    v = d.get(sys.argv[2])
     sys.stdout.write("" if v is None else str(v))
+except Exception:
+    sys.stdout.write("")
+PY
+}
+
+_json_plugin_listed() {  # <marketplace-file> <plugin-name> -> name if listed, else ''
+    [ -n "$_PY" ] || { printf ''; return 1; }
+    "$_PY" - "$1" "$2" <<'PY' 2>/dev/null
+import json, sys
+try:
+    with open(sys.argv[1]) as f: d = json.load(f)
+    name = sys.argv[2]
+    hit = next((x for x in d.get("plugins", []) if x.get("name") == name), None)
+    sys.stdout.write(name if hit else "")
 except Exception:
     sys.stdout.write("")
 PY
@@ -124,8 +140,8 @@ for p in $PARTNER_PLUGINS; do
     if [ ! -f "$pdir/plugin.json" ]; then
         jam "drop-structural" "plugins/$p/plugin.json missing" "the re-blitted plugin subtree is incomplete"; continue
     fi
-    pj_name="$(_json_get "$pdir/plugin.json" "d.get('name')")"
-    pj_ver="$(_json_get "$pdir/plugin.json" "d.get('version')")"
+    pj_name="$(_json_field "$pdir/plugin.json" name)"
+    pj_ver="$(_json_field "$pdir/plugin.json" version)"
     if [ "$pj_name" != "$p" ]; then
         jam "drop-structural" "plugins/$p/plugin.json declares name '$pj_name'" "mismatched name breaks marketplace resolution"; continue
     fi
@@ -140,7 +156,7 @@ for p in $PARTNER_PLUGINS; do
         jam "drop-structural" "plugins/$p missing installer(s):$miss" "setup delegates to these installers; a drop without them breaks setup"; continue
     fi
     listed=""
-    [ -f "$MKT" ] && listed="$(_json_get "$MKT" "next((x for x in d.get('plugins',[]) if x.get('name')=='$p'), {}).get('name')")"
+    [ -f "$MKT" ] && listed="$(_json_plugin_listed "$MKT" "$p")"
     if [ "$listed" != "$p" ]; then
         jam "drop-structural" "plugins/$p not listed in $PARTNER_MARKETPLACE" "the manifest and the drop disagree"; continue
     fi

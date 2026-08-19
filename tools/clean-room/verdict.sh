@@ -2,10 +2,10 @@
 # verdict.sh -- reduce a clean-room cr-report.json to a UNIFORM machine verdict.
 #
 # The scenarios emit a rich cr-report.json (phases + jams + env + results). A
-# consuming gate (the odsp-web-harness re-blit sync, the agent-harness-plugins
-# mirror, a CI job) just needs a single, stable PASS/FAIL verdict + exit code,
-# without parsing the whole report. This is that thin adapter -- the "consistent
-# way to handle things" across partners.
+# consuming gate (a downstream vendored-plugin sync, a mirror, a CI job) just
+# needs a single, stable PASS/FAIL verdict + exit code, without parsing the whole
+# report. This is that thin adapter -- the consistent verdict contract every
+# consuming gate shares.
 #
 # Usage:
 #   verdict.sh --report <cr-report.json> [--pretty]
@@ -25,7 +25,9 @@ REPORT=""
 PRETTY=0
 while [ $# -gt 0 ]; do
     case "$1" in
-        --report) REPORT="$2"; shift 2 ;;
+        --report)
+            if [ $# -lt 2 ]; then printf 'verdict.sh: --report needs a path\n' >&2; exit 2; fi
+            REPORT="$2"; shift 2 ;;
         --pretty) PRETTY=1; shift ;;
         -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
         *) printf 'verdict.sh: unknown arg: %s\n' "$1" >&2; exit 2 ;;

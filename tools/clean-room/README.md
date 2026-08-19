@@ -149,7 +149,7 @@ check — proving the substrate generalises without an internal dependency.
 | [`agent-dispatch-cutover`](scenarios/agent-dispatch-cutover/) | P | **Graceful daemon cutover — agent-dispatch** (correct-install-flows, dotfiles#1393): a queued task survives; a claimed+started **held task** survives and the worker re-adopts via the durable queue DB; an **aborted cutover** is healed (undrain); a **wedged daemon** is stood-up-beside and retired. Stdlib-only probe. |
 | [`agent-index-cutover`](scenarios/agent-index-cutover/) | P | **Graceful daemon cutover — agent-index** (service + durable engine): the swappable versioned service cuts over without disturbing the durable, warm embedding engine/model on its own lifecycle. Stdlib-only probe. |
 | [`agent-vault-cutover`](scenarios/agent-vault-cutover/) | P | **Cutover witness — agent-vault** (#609): proves the client-side rendezvous **cutover fallback ladder** (override → live file → legacy) deterministically, and reports the **daemon-side** active/passive zdd cutover as a forward-looking gap (INFO — vault has not yet vendored `zdd`). Stays green today; its phase-3 battery lights up once vault adopts the connection-owner contract. |
-| [`partner-harness-setup`](scenarios/partner-harness-setup/) | P | **Downstream partner-harness setup gate:** given a partner harness tree (mounted `CR_PARTNER_PATH` or cloned `CR_PARTNER_REPO`), assert the vendored plugin **drop is structurally coherent** (plugins parse + are marketplace-listed + ship installers; setup entrypoint + golden-path doc present), the partner's **read-only `setup check` runs without crashing**, and the partner's **OWN setup/update test suite passes**. Name-free via `CR_PARTNER_*`. Flagship consumer: the `odsp-web-harness` agent-* re-blit sync gate — *never publish a drop that breaks the partner's setup flow.* |
+| [`partner-harness-setup`](scenarios/partner-harness-setup/) | P | **Downstream partner-harness setup gate:** given a partner harness tree (mounted `CR_PARTNER_PATH` or cloned `CR_PARTNER_REPO`), assert the vendored plugin **drop is structurally coherent** (plugins parse + are marketplace-listed + ship installers; setup entrypoint + golden-path doc present), the partner's **read-only `setup check` runs without crashing**, and the partner's **OWN setup/update test suite passes**. Name-free via `CR_PARTNER_*`. A consuming gate is a downstream vendored-plugin sync — *never publish a drop that breaks the partner's setup flow.* |
 
 Downstream/internal scenarios (naming a specific harness's repos — e.g.
 `harness-health`, the citadel north-star) live with the **consuming harness** and
@@ -192,13 +192,10 @@ docker run --rm \
 
 **Platform split.** This Linux box runs the partner's **unix-native** flow
 (`setup.sh` + `*_sh` tests). The **Windows-native** flow (`setup.ps1` + `*_ps1`
-tests) runs in a **Windows container on cloud2** (see the dotfiles
-`onboard-cloud2-windows-containers` effort) — a partner is validated on the
-platform whose native suite is faithful. The dotfiles `odsp-web-harness` sync also
-ships a lightweight host-side fill (`tools/owh-validate-drop.ps1`) that runs the
-same checks + owh's `*_ps1` tests directly on the sync box; this clean-room
-scenario is the fresh-box, cross-partner canonical gate the sync's
-`-ValidatorScript` seam points at where a container host is available.
+tests) runs on a **Windows container host** — a partner is validated on the
+platform whose native suite is faithful. A consuming gate points its validator
+seam at this scenario where a container host is available; it may also ship a
+lightweight host-side fill that runs the same checks directly on the sync box.
 
 ## Driving the box over agent-bridge
 
