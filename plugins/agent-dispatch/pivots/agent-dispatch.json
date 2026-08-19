@@ -12,15 +12,8 @@
   "empty_hint": "No proposed or awaiting-steer tasks for this machine.",
   "actions": [
     {
-      "key": "card",
-      "label": "View card",
-      "kind": "card",
-      "when": {"awaiting_steer": true},
-      "description": "Read the full card a blocked worker posted (title/status/link/body). Read-only."
-    },
-    {
       "key": "steer",
-      "label": "Steer — answer the card",
+      "label": "Steer — read the card & answer",
       "kind": "form",
       "fields_from": "card.request_input",
       "title_from": "card.title",
@@ -29,7 +22,7 @@
         "agent-dispatch", "steer", "submit", "{task_id}", "{fields}"
       ],
       "when": {"awaiting_steer": true},
-      "description": "Read the card and answer its questions (any shape), then wake the worker. Never a verdict — the operator's steer, not an ADO vote."
+      "description": "Read the card prose and answer its questions (any shape), then wake the worker. Never a verdict — the operator's steer, not an ADO vote."
     },
     {
       "key": "open-cli",

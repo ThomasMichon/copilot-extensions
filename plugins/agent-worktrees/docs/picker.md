@@ -158,31 +158,39 @@ bridge's "Send message", a dispatcher's "Dispatch task here") via a
 adopt, the more a worktree row can do. See
 [architecture.md § Picker Pivot Registry](architecture.md#picker-pivot-registry-cross-plugin).
 
-### Steering a blocked task — card + form (the DISPATCH pivot)
-A registered pivot's action can declare a native **card** or **form** kind so an
-operator can answer a worker that blocked on input (the agent-dispatch
-card/steer seam). On the **Tasks** pivot, a task that is **awaiting steer** gains
-two verbs (gated `when: {awaiting_steer: true}`):
+### Steering a blocked task — the Steer form (the DISPATCH pivot)
+A registered pivot's `kind: "form"` action lets an operator answer a worker that
+blocked on input (the agent-dispatch card/steer seam). On the **Tasks** pivot, a
+task that is **awaiting steer** gains a **Steer** verb (gated
+`when: {awaiting_steer: true}`) — a **docked card + elicitation** modal in the
+Copilot-CLI style:
 
-- **View card** (`kind: "card"`) — a read-only, scrollable detail overlay of the
-  brief the worker posted (title · status · link · body). Purely informational.
-- **Steer** (`kind: "form"`) — a **docked card + elicitation** modal (a
-  Copilot-CLI-style layout): the card's prose fills the top; a docked section at
-  the bottom presents the worker's questions as **tabs** (one per question, read
-  from the card's `request_input`), each a single-select (`choice`), multi-select
-  (`multichoice`), or free-form **auto-expanding** text box (up to 10 lines). A
-  choice/multichoice can declare an **"Other…"** option (a trailing `*` in the
-  spec, e.g. `severity:choice[low,high,*]`) that reveals a free-text box. A
-  single-line button row sits at the bottom: **Confirm** (submit), **Save**
-  (persist a resumable draft and close — survives Escape or a kill), **Cancel**
-  (discard). On Confirm the answers substitute into the action's `run`
-  (`{field.<name>}` per name, or `{fields}` to submit every question) and call
-  `agent-dispatch steer submit …`, which wakes the worker. `Tab` moves between
-  regions, `←/→` move on the button row, `Ctrl+S` saves, `Esc` saves and closes.
+- The card's **prose fills the top** (scrollable); any http(s) URL in it renders
+  as a clickable/hover-expandable hyperlink.
+- A **docked** section at the bottom presents the worker's questions as **tabs**
+  (one per question, read from the card's `request_input`): a single-select
+  (`choice`), multi-select (`multichoice`), or free-form **auto-expanding** text
+  box (grows with content, up to ~10 lines). A choice/multichoice may declare an
+  **"Other…"** option (a trailing `*` in the spec, e.g. `severity:choice[low,high,*]`)
+  that reveals a free-text box.
+- **Keyboard flow** (Copilot-CLI muscle memory): in a text box **Enter accepts &
+  advances** to the next field, **Shift+Enter inserts a newline**; on a choice
+  **Space toggles and stays**, **Enter toggles and advances** (Enter that lands
+  on "Other…" focuses its box). **Ctrl+←/→** switch tabs. On the last field Enter
+  moves focus onto **Confirm** (it does not auto-submit).
+- A single-line button row: **Confirm** (submit), **Save** (persist a resumable
+  draft and close — survives Escape or a kill), **Cancel** (discard). `Ctrl+S`
+  saves; `Esc` saves and closes.
 
-Saved drafts live under `~/.agent-worktrees/steer-drafts/<task-id>.json`
-(overridable via `AGENT_WORKTREES_STEER_DRAFTS`), so a half-answered card can be
-resumed later.
+On Confirm the answers substitute into the action's `run` (`{field.<name>}` per
+name, or `{fields}` to submit every question) and call `agent-dispatch steer
+submit …`, which wakes the worker. Saved drafts live under
+`~/.agent-worktrees/steer-drafts/<task-id>.json` (overridable via
+`AGENT_WORKTREES_STEER_DRAFTS`), so a half-answered card can be resumed later.
+
+(A read-only `kind: "card"` action — a scrollable card-detail overlay — remains a
+general pivot capability, but the Tasks pivot no longer uses it: the Steer form
+already shows the full card prose.)
 
 This is a **general** steering surface (any blocked dispatched agent can use it),
 and it is **never a verdict path** — it only carries the operator's answer back
