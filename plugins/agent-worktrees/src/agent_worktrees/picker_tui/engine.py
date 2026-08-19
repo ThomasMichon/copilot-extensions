@@ -49,6 +49,47 @@ from . import derive
 from .selection import ListSelection
 
 
+def _register_shift_enter_key() -> None:
+    """Surface **Shift+Enter** as a distinct ``shift+enter`` key.
+
+    Windows Terminal (and most terminals, by the classic meta-key convention)
+    emits ``ESC`` + ``CR`` (``\\x1b\\r``) for Shift+Enter -- it does *not* emit
+    the Kitty ``\\x1b[13;2u`` sequence, even with the Kitty protocol pushed
+    (verified empirically: Shift+Enter -> ``\\x1b\\r`` under kitty flag 1, flag
+    15, and xterm modifyOtherKeys alike). Textual's ``XTermParser`` then
+    reissues that ``ESC``+``CR`` char-by-char, and because ``\\r`` is a tuple
+    entry in ``ANSI_SEQUENCES_KEYS`` the ``alt``/meta flag is dropped -- so
+    Shift+Enter collapses to a plain ``enter``, indistinguishable from Enter
+    (which we bind to accept+advance). That is why Shift+Enter "just advanced".
+
+    The parser looks up the *whole* ``\\x1b\\r`` sequence in
+    ``ANSI_SEQUENCES_KEYS`` **before** the collapsing char-by-char reissue, so
+    registering it there makes the atomic ESC+CR resolve to a real
+    ``shift+enter`` key event (Textual already decodes the Kitty ``\\x1b[13;2u``
+    form to the same key, so both encodings converge). This is the app-side
+    equivalent of what Copilot-CLI does: accept meta+Enter as the newline. A
+    lone ``ESC`` is untouched (it still resolves to ``escape``), so the form's
+    Esc = save+close is preserved.
+    """
+    try:
+        from types import SimpleNamespace
+
+        from textual import _ansi_sequences as _seqmod
+
+        # Value shape matches the map's tuple entries: objects exposing ``.value``
+        # (the parser yields ``events.Key(key.value, ...)`` for tuple matches).
+        _seqmod.ANSI_SEQUENCES_KEYS.setdefault(
+            "\x1b\r", (SimpleNamespace(value="shift+enter"),)
+        )
+    except Exception:
+        # Never let a Textual internal-layout change break the picker; the
+        # Alt+Enter / Ctrl+J newline fallbacks still apply if this no-ops.
+        pass
+
+
+_register_shift_enter_key()
+
+
 def _resolve_version() -> str:
     """Real package version for the picker banner.
 
@@ -6303,11 +6344,12 @@ class _AutoExpandTextArea(TextArea):
       manual line math, no off-by-one.
     * **Enter accepts + advances** focus to the next field (or the button row on
       the last one); **Shift+Enter inserts a newline** (grow the box) -- matching
-      the operator's Copilot-CLI muscle memory. Because the picker runs inside a
-      mux (psmux) that strips the enhanced-keyboard protocol, a bare terminal
-      collapses ``shift+enter`` to plain ``enter`` (which would wrongly advance);
-      so **Alt+Enter** and **Ctrl+J** are wired as mux-safe newline fallbacks
-      (both survive a mux and are reported distinctly by Textual).
+      the operator's Copilot-CLI muscle memory. Windows Terminal emits ``ESC``+
+      ``CR`` for Shift+Enter (not the Kitty ``\\x1b[13;2u`` form), which Textual
+      would otherwise collapse to a plain ``enter``; ``_register_shift_enter_key``
+      (module scope) restores the distinct ``shift+enter`` key. **Alt+Enter** and
+      **Ctrl+J** remain wired as newline fallbacks for terminals that report those
+      distinctly instead.
     * **Ctrl+Left / Ctrl+Right switch tabs** even while the box has focus: a
       ``TextArea`` natively binds these to cursor word-movement, which would
       otherwise swallow them before the screen's tab bindings fire, so we forward
@@ -6631,8 +6673,8 @@ class PivotFormScreen(ModalScreen[dict]):
         return f"{f['name']}" + (f"  ({hint})" if hint else "") + ":"
 
     def _foot(self) -> str:
-        return ("Enter accept+next · Shift/Alt+Enter (or Ctrl+J) newline · "
-                "Space toggle · Ctrl+←/→ tabs · Ctrl+S save · Esc save+close  ·  "
+        return ("Enter accept+next · Shift+Enter newline · Space toggle · "
+                "Ctrl+←/→ tabs · Ctrl+S save · Esc save+close  ·  "
                 "Confirm submits (never a vote)")
 
     # ---- lifecycle ----------------------------------------------------------
