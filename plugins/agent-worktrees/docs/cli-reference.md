@@ -329,6 +329,17 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
   flag, idle past the grace window -- and rides the same cadence. Run it
   explicitly (with the tracked + orphan-directory sweeps) via `gc`; a caller
   worktree's session ending is when its bridge worktree becomes reapable.
+- **Finished session worktrees.** Ordinary (non-managed) worktrees whose work is
+  already landed -- `finalized` / merged / git-COMPLETED -- are auto-collected on
+  the same cadence once **idle past the grace window** (default 48h;
+  `AGENT_WORKTREES_AUTO_CLEAN_GRACE_SECS` overrides), so finished user worktrees
+  don't pile up until a manual `cleanup`. The collection reuses the *exact*
+  conservative safety of the manual cleanup: only the strictly-SAFE buckets are
+  removed; an in-flight claimed resource, a `follow-up`-flagged, paired-pending,
+  `empty`/conversation-only, dirty, wip, or unmerged worktree, and any live
+  session/mux are all spared. No network fetch is done, so a merge not yet
+  locally provable simply waits for a later pass. Disable entirely with
+  `AGENT_WORKTREES_NO_AUTO_CLEAN=1`.
 
 ## Installation & Config
 
