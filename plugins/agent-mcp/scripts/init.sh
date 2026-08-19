@@ -472,11 +472,7 @@ if [[ "$VERSIONED_RUNTIME" -eq 1 && -z "${AGENT_MCP_NO_VERSION_REAP:-}" ]]; then
     # slot is never reaped mid-build. Best-effort; runs via the new slot's python.
     _gc_json="$("$VENV_PYTHON" "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" \
         --link-name '.venv' --json gc --protect-pids --min-age-days 0.05 2>/dev/null || true)"
-    _gc_n="$("$VENV_PYTHON" -c 'import sys, json
-try:
-    print(len(json.loads(sys.argv[1]).get("removed", [])))
-except Exception:
-    print(0)' "$_gc_json" 2>/dev/null || echo 0)"
+    _gc_n="$("$VENV_PYTHON" -c 'import sys,json; a=sys.argv[1] if len(sys.argv)>1 else ""; print(len(json.loads(a).get("removed",[])) if a.strip()[:1]=="{" else 0)' "$_gc_json" 2>/dev/null || echo 0)"
     [[ "${_gc_n:-0}" -gt 0 ]] && _ok "Collected $_gc_n stale version dir(s)"
 fi
 

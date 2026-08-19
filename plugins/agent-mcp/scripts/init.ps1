@@ -656,7 +656,7 @@ if ($VersionedRuntime -and -not $env:AGENT_MCP_NO_VERSION_REAP) {
         $gcJson = & $VenvPython $VrScript --root $InstallDir --link-name '.venv' `
             --json gc --protect-pids --min-age-days 0.05 2>$null
         $gcArg = (($gcJson | Out-String).Trim())
-        $gcN = & $VenvPython -c "import sys, json`ntry:`n    print(len(json.loads(sys.argv[1]).get('removed', [])))`nexcept Exception:`n    print(0)" $gcArg
+        $gcN = & $VenvPython -c 'import sys,json; a=sys.argv[1] if len(sys.argv)>1 else ""; print(len(json.loads(a).get("removed",[])) if a.strip()[:1]=="{" else 0)' $gcArg
         if ([int]$gcN -gt 0) { Write-Ok "Collected $gcN stale version dir(s)" }
     } catch { Write-Skip "Version-gc skipped ($($_.Exception.Message))" }
 }
