@@ -112,6 +112,17 @@ def _lane_flags(spec: dict) -> list[str]:
         argv += ["--headless-label", str(label)]
     for label in spec.get("cli_labels", []) or []:
         argv += ["--cli-label", str(label)]
+    # Fleet dispatch: fan bodies across a pool of remote hosts, each driving the
+    # origin task back over SSH. Mirrors ``ProfileDeclaration.to_supervise_args``;
+    # emitted from spec["fleet"] (which declaration_to_spec now carries). Absent for
+    # a non-fleet lane, so store-backed / non-fleet registrations are unaffected.
+    fleet = spec.get("fleet") or {}
+    if fleet.get("pool"):
+        argv += ["--pool", ",".join(str(h) for h in fleet["pool"])]
+        if fleet.get("origin"):
+            argv += ["--origin", str(fleet["origin"])]
+        if fleet.get("headless"):
+            argv.append("--headless")
     if spec.get("headless_agent"):
         argv += ["--headless-agent", str(spec["headless_agent"])]
     argv += ["--interval", str(spec.get("interval", 30.0))]

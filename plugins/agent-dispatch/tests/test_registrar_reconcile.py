@@ -37,6 +37,56 @@ def test_spec_general_pool_headless():
     assert spec["reactive"] is True
 
 
+def test_spec_fleet_pool_origin_headless():
+    # A fleet declaration (pool/origin/headless) must be carried into the lane spec;
+    # otherwise the serve daemon drops it and the supervisor runs LOCAL (regression:
+    # every fleet supervisor spawned a local body that 404'd on the origin task).
+    decl = load_declaration(
+        {
+            "name": "lane-x",
+            "labels": ["lane-x"],
+            "concurrency": 1,
+            "body": {"type": "headless", "agent": "worker"},
+            "fleet": {
+                "pool": ["host-b"],
+                "origin": "host-a",
+                "headless": True,
+            },
+        }
+    )
+    spec = declaration_to_spec(decl)
+    assert spec["fleet"] == {
+        "pool": ["host-b"],
+        "origin": "host-a",
+        "headless": True,
+    }
+    assert spec["headless_agent"] == "worker"
+
+
+def test_build_command_emits_fleet_flags():
+    # The daemon-built argv must carry --pool/--origin/--headless for a fleet lane
+    # (mirrors ProfileDeclaration.to_supervise_args).
+    decl = load_declaration(
+        {
+            "name": "lane-y",
+            "labels": ["lane-y"],
+            "concurrency": 1,
+            "body": {"type": "headless", "agent": "worker"},
+            "fleet": {
+                "pool": ["host-b", "host-c"],
+                "origin": "host-a",
+                "headless": True,
+            },
+        }
+    )
+    reg = declaration_to_registration(decl, machine="host-a")
+    cmd = build_command(reg)
+    assert cmd[cmd.index("--pool") + 1] == "host-b,host-c"
+    assert cmd[cmd.index("--origin") + 1] == "host-a"
+    assert "--headless" in cmd
+    assert cmd[cmd.index("--headless-agent") + 1] == "worker"
+
+
 def test_spec_lane_and_evaluator():
     decl = load_declaration({"name": "rev", "repos": "lane-a", "evaluator": "/e.py"})
     spec = declaration_to_spec(decl)
