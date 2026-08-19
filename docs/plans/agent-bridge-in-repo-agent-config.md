@@ -63,8 +63,10 @@ of the normal deploy/update step.
 ## Phased plan (design only)
 
 - [ ] **P1 — Schema + reconcile.** Add an `agents:` map to `RepoBridgeConfig`
-      (typed to the `AgentConfig` surface; `extra: ignore` keeps older daemons
-      forward-compatible). Reconcile the intent to an agent-bridge **vision**
+      (typed to the `AgentConfig` surface; the existing
+      `model_config = {"extra": "ignore"}` on `RepoBridgeConfig` keeps older
+      daemons forward-compatible — no `extra` key belongs in the YAML itself).
+      Reconcile the intent to an agent-bridge **vision**
       (agent-bridge has no vision folder yet — this is vision-extending: add the
       "in-repo named-agent config" concept) and check it against
       `docs/patterns/` (config/discovery invariants).
@@ -109,5 +111,5 @@ of the normal deploy/update step.
 - Derived-roster direction — agent-ssh vision *Mesh introspection & derived
   roster* / the `derived-agent-roster` feature (the machines × repos facet;
   this proposal is the adjacent *named specialized bodies* facet).
-- The "retire `acp-agents.json` references now the roster is topology-derived"
-  cleanup (folded in as P5).
+- The "retire `acp-agents.json` references now that the roster is
+  topology-derived" cleanup (folded in as P5).
