@@ -23,13 +23,17 @@ The queue stores the card/steer objects opaquely, so the coordinator stays a
 
 from __future__ import annotations
 
+import json
 import re
 
 #: Supported field types in a ``request-input`` spec.
 FIELD_TEXT = "text"
 FIELD_TEXTAREA = "textarea"
 FIELD_CHOICE = "choice"
-FIELD_TYPES = frozenset({FIELD_TEXT, FIELD_TEXTAREA, FIELD_CHOICE})
+FIELD_MULTICHOICE = "multichoice"
+FIELD_TYPES = frozenset({FIELD_TEXT, FIELD_TEXTAREA, FIELD_CHOICE, FIELD_MULTICHOICE})
+#: The choice-family types (they carry ``options`` and may allow an ``other``).
+FIELD_CHOICE_TYPES = frozenset({FIELD_CHOICE, FIELD_MULTICHOICE})
 
 #: Bounds so a card can never balloon into a transcript (mirrors the progress
 #: beat's discipline).
@@ -60,14 +64,21 @@ def parse_request_input(spec: str | None) -> list[dict]:
     * ``feedback`` / ``feedback:text`` -> a one-line text field
     * ``notes:textarea`` -> a multi-line text field
     * ``decision:choice[revise,post-approved,hold-all]`` -> a single-select
+    * ``tags:multichoice[perf,api,ux]`` -> a multi-select (answer is a JSON array)
+    * a trailing ``*`` option in a choice/multichoice bracket declares an
+      **"Other…"** affordance: ``severity:choice[low,med,high,*]`` -> single-select
+      of low/med/high **or** a free-text "other" answer. ``*`` is stripped from
+      ``options`` and recorded as ``allow_other: true``.
 
-    Returns ``[{"name", "type", "options": [...]}]`` (``options`` only for a
-    choice). A ``None``/empty spec yields ``[]`` (a card with no form -- a pure
-    status/notification card). Raises :class:`SteeringError` on a malformed spec
-    so a producer catches the mistake early.
+    Returns ``[{"name", "type", "options"?, "allow_other"?}]`` (``options`` +
+    ``allow_other`` only for a choice/multichoice). A ``None``/empty spec yields
+    ``[]`` (a card with no form -- a pure status/notification card). Raises
+    :class:`SteeringError` on a malformed spec so a producer catches the mistake
+    early.
 
-    Commas inside ``choice[...]`` are **not** field separators; the bracket
-    content is parsed first, then the remainder split on top-level commas.
+    Commas inside ``choice[...]`` / ``multichoice[...]`` are **not** field
+    separators; the bracket content is parsed first, then the remainder split on
+    top-level commas.
     """
     if not spec or not spec.strip():
         return []
@@ -109,18 +120,27 @@ def parse_request_input(spec: str | None) -> list[dict]:
             fields.append({"name": name, "type": FIELD_TEXT})
             continue
 
-        m = re.match(r"^choice\[(.*)\]$", type_part)
+        m = re.match(r"^(choice|multichoice)\[(.*)\]$", type_part)
         if m:
-            options = [o.strip() for o in m.group(1).split(",") if o.strip()]
+            ftype = m.group(1)
+            raw = [o.strip() for o in m.group(2).split(",") if o.strip()]
+            # A trailing/anywhere ``*`` sentinel opts the question into an
+            # "Other…" free-text answer; it is not a real option.
+            allow_other = "*" in raw
+            options = [o for o in raw if o != "*"]
             if not options:
-                raise SteeringError(f"choice field {name!r} has no options")
-            fields.append({"name": name, "type": FIELD_CHOICE, "options": options})
+                raise SteeringError(f"{ftype} field {name!r} has no options")
+            field = {"name": name, "type": ftype, "options": options}
+            if allow_other:
+                field["allow_other"] = True
+            fields.append(field)
             continue
 
-        if type_part not in FIELD_TYPES or type_part == FIELD_CHOICE:
+        if type_part not in FIELD_TYPES or type_part in FIELD_CHOICE_TYPES:
             raise SteeringError(
                 f"field {name!r}: unknown type {type_part!r} "
-                f"(text | textarea | choice[a,b,...])"
+                f"(text | textarea | choice[a,b,...] | multichoice[a,b,...]; "
+                f"add * for an Other option)"
             )
         fields.append({"name": name, "type": type_part})
 
@@ -164,11 +184,37 @@ def build_card(
     return card
 
 
+def _decode_multi(value: object) -> list[str]:
+    """Decode a multichoice answer into a list of member strings.
+
+    The form encodes a multi-select answer as a JSON array string (so a member
+    that contains a comma -- e.g. an ``Other…`` free-text answer -- survives).
+    Falls back to a comma-split for a bare string, and tolerates an already-
+    decoded list. Never raises.
+    """
+    if isinstance(value, (list, tuple)):
+        return [str(v) for v in value]
+    if value is None:
+        return []
+    s = str(value).strip()
+    if s.startswith("[") and s.endswith("]"):
+        try:
+            decoded = json.loads(s)
+            if isinstance(decoded, list):
+                return [str(v) for v in decoded]
+        except (ValueError, TypeError):
+            pass
+    return [p.strip() for p in s.split(",") if p.strip()]
+
+
 def validate_steer_fields(fields: dict, request_input: list[dict] | None) -> None:
     """Best-effort check of an operator's submitted answer against a card's form.
 
-    * Every declared **choice** field's value (when present) must be one of its
-      options.
+    * A declared **choice**/**multichoice** field's value (when present) must be
+      drawn from its options -- unless the field is ``allow_other`` (a declared
+      "Other…" affordance), in which case any value passes (the operator typed a
+      free-text answer). A ``multichoice`` value is a JSON array of members, each
+      validated the same way.
     * Extra/unknown fields pass through (forward-compatible; a surface may send
       more than the card asked for).
     * A missing field is allowed here (a surface may enforce "required" itself);
@@ -181,10 +227,18 @@ def validate_steer_fields(fields: dict, request_input: list[dict] | None) -> Non
     by_name = {f["name"]: f for f in request_input if isinstance(f, dict) and "name" in f}
     for key, value in fields.items():
         spec = by_name.get(key)
-        if not spec or spec.get("type") != FIELD_CHOICE:
+        if not spec or spec.get("type") not in FIELD_CHOICE_TYPES:
             continue
+        if spec.get("allow_other"):
+            continue  # a declared Other -> any free-text value is valid
         options = spec.get("options") or []
-        if value is not None and str(value) not in options:
+        if spec.get("type") == FIELD_MULTICHOICE:
+            for member in _decode_multi(value):
+                if member not in options:
+                    raise SteeringError(
+                        f"field {key!r} member {member!r} is not one of {options}"
+                    )
+        elif value is not None and str(value) not in options:
             raise SteeringError(
                 f"field {key!r}={value!r} is not one of {options}"
             )

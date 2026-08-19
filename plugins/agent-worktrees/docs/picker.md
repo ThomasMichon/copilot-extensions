@@ -166,12 +166,23 @@ two verbs (gated `when: {awaiting_steer: true}`):
 
 - **View card** (`kind: "card"`) — a read-only, scrollable detail overlay of the
   brief the worker posted (title · status · link · body). Purely informational.
-- **Steer** (`kind: "form"`) — a native elicitation modal that lays out a widget
-  per requested field (`text`→ line, `textarea`→ multi-line, `choice`→ radio),
-  read from the card's `request_input`. On **Submit** it fills `{field.<name>}`
-  in the action's `run` and calls `agent-dispatch steer submit …`, which wakes
-  the worker with the answer. `Tab` moves between fields, `Ctrl+S` submits, `Esc`
-  cancels.
+- **Steer** (`kind: "form"`) — a **docked card + elicitation** modal (a
+  Copilot-CLI-style layout): the card's prose fills the top; a docked section at
+  the bottom presents the worker's questions as **tabs** (one per question, read
+  from the card's `request_input`), each a single-select (`choice`), multi-select
+  (`multichoice`), or free-form **auto-expanding** text box (up to 10 lines). A
+  choice/multichoice can declare an **"Other…"** option (a trailing `*` in the
+  spec, e.g. `severity:choice[low,high,*]`) that reveals a free-text box. A
+  single-line button row sits at the bottom: **Confirm** (submit), **Save**
+  (persist a resumable draft and close — survives Escape or a kill), **Cancel**
+  (discard). On Confirm the answers substitute into the action's `run`
+  (`{field.<name>}` per name, or `{fields}` to submit every question) and call
+  `agent-dispatch steer submit …`, which wakes the worker. `Tab` moves between
+  regions, `←/→` move on the button row, `Ctrl+S` saves, `Esc` saves and closes.
+
+Saved drafts live under `~/.agent-worktrees/steer-drafts/<task-id>.json`
+(overridable via `AGENT_WORKTREES_STEER_DRAFTS`), so a half-answered card can be
+resumed later.
 
 This is a **general** steering surface (any blocked dispatched agent can use it),
 and it is **never a verdict path** — it only carries the operator's answer back
