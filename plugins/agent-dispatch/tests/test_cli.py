@@ -464,6 +464,13 @@ def test_parser_inbox_flags():
     assert args.limit == 5
 
 
+def test_parser_inbox_awaiting_steer_flag():
+    args = build_parser().parse_args(["inbox", "--awaiting-steer"])
+    assert args.awaiting_steer is True
+    # Default off.
+    assert build_parser().parse_args(["inbox"]).awaiting_steer is False
+
+
 class _FakeClient:
     """A stand-in DispatchClient capturing the params passed to ``list``."""
 
@@ -518,6 +525,41 @@ def test_inbox_requires_a_machine(monkeypatch, capsys):
     args = build_parser().parse_args(["inbox"])
     assert args.func(args) == 2
     assert "could not resolve this machine" in capsys.readouterr().err
+
+
+def test_inbox_awaiting_steer_surfaces_proposed_plus_awaiting(monkeypatch, capsys):
+    import json
+
+    from agent_dispatch import __main__, identity
+
+    tasks = [
+        {"id": "p1", "target_machine": "host-a", "status": "proposed",
+         "awaiting_steer": False},
+        {"id": "c1", "target_machine": "host-a", "status": "claimed",
+         "awaiting_steer": True},   # blocked on steering -> kept
+        {"id": "s1", "target_machine": None, "status": "started",
+         "awaiting_steer": False},  # owned, not awaiting -> dropped
+        {"id": "c2", "target_machine": "host-b", "status": "claimed",
+         "awaiting_steer": True},   # awaiting but other machine -> dropped
+    ]
+    fake = _FakeClient(tasks)
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("host-a", "wt-1"))
+
+    args = build_parser().parse_args(["inbox", "--awaiting-steer"])
+    assert args.func(args) == 0
+
+    # The fetch widens to the owned states (a card-blocked task is claimed/
+    # started, not a filterable "held").
+    assert fake.calls == [
+        {"repo": None, "status": "proposed,claimed,started", "label": None, "limit": 200}
+    ]
+    emitted = json.loads(capsys.readouterr().out)
+    ids = {t["id"] for t in emitted}
+    # Pickable proposed (p1) + awaiting-steer on this machine (c1); the owned-but-
+    # not-awaiting started task (s1) and the other machine's awaiting task (c2)
+    # are dropped.
+    assert ids == {"p1", "c1"}
 
 
 # -- Deferred-completion pickup (takeover) + complete owner auto-resolution ---

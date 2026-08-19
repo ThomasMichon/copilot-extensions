@@ -1,7 +1,7 @@
 {
   "label": "Tasks",
   "after": "Worktrees",
-  "list": ["agent-dispatch", "inbox", "--machine", "{machine}", "--status", "proposed,held"],
+  "list": ["agent-dispatch", "inbox", "--machine", "{machine}", "--awaiting-steer"],
   "entry": {
     "id": "id",
     "title": "title",
