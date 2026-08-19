@@ -16161,7 +16161,7 @@ _NO_PROJECT_COMMANDS = {
     "picker", "reap-shells", "status-updater", "status-monitor", "restart", "register-session",
     "head-session", "conclude-session", "link-succession", "config-migrate",
     "session-lock", "machine-context", "reconcile-binstubs",
-    "register-project-entry",
+    "register-project-entry", "terminal-fragment",
 }
 
 
