@@ -336,6 +336,34 @@ def _cmd_leases() -> int:
     return 0
 
 
+def _resolve_relay_port(default: int) -> int:
+    """Resolve the credential-relay port, preferring agent-bridge's LIVE port.
+
+    agent-bridge owns and hosts the shared credential relay and publishes the
+    port it *actually* bound via ``relay_state`` (the daemon binds an ephemeral
+    loopback port by default -- see dotfiles #694/#540 -- rather than a fixed
+    well-known one). The SSH transport already rewrites ``LC_GIT_CREDENTIAL_RELAY``
+    to this live port (``transport._effective_auth_hooks``); the container path
+    must do the same or it injects a stale well-known port and every in-container
+    ADO/git + build-cache auth call targets a dead port once the relay moves
+    (dotfiles #1631).
+
+    ``get_live_relay_port()`` reads the primary daemon's published
+    ``~/.agent-bridge/relay-port`` file, so this works from the separate
+    ``agent-containers exec`` wrapper process. Falls back to ``default`` (the
+    configured/legacy port) when agent-bridge is unavailable or no live port has
+    been published -- preserving prior behavior.
+    """
+    try:
+        from agent_bridge.relay_state import get_live_relay_port
+    except ImportError:  # agent-bridge not importable from this wrapper process
+        log.debug("agent-bridge unavailable; using configured relay port %s", default)
+        return default
+
+    live = get_live_relay_port()
+    return int(live) if live else default
+
+
 def _cmd_exec(args: argparse.Namespace) -> int:
     """Transport wrapper: exec a Copilot ACP agent into a container.
 
@@ -392,7 +420,7 @@ def _cmd_exec(args: argparse.Namespace) -> int:
 
             deploy_shims(args.name, ado=config.relay_deploy_ado)
             env["LC_GIT_CREDENTIAL_RELAY_HOST"] = config.relay_host
-            env["LC_GIT_CREDENTIAL_RELAY"] = str(config.relay_port)
+            env["LC_GIT_CREDENTIAL_RELAY"] = str(_resolve_relay_port(config.relay_port))
             env["LC_GIT_CREDENTIAL_RELAY_TOKEN"] = token_for(args.name)
             relay_env = [
                 "LC_GIT_CREDENTIAL_RELAY_HOST",
