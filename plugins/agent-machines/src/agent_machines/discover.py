@@ -70,12 +70,19 @@ class DiscoveredRepo:
 
 
 def resolve_repo_path(name: str, entry: dict, srcroot: dict, plat: str) -> Path | None:
-    """Resolve a repo's checkout path on ``plat`` from its registry entry."""
+    """Resolve a repo's checkout path on ``plat`` from its registry entry.
+
+    Paths in ``repos.yaml`` may be written with a ``~`` home shorthand (e.g. a
+    WSL entry ``wsl: ~/src/aperture-labs``), so every resolved path is
+    ``expanduser()``-ed. Without this, ``Path('~/src/...').is_dir()`` is False in
+    :func:`discover`, the repo is silently skipped, and none of its machine-state
+    packages are discovered.
+    """
     if isinstance(entry, dict) and entry.get(plat):
-        return Path(str(entry[plat]))
+        return Path(str(entry[plat])).expanduser()
     root = srcroot.get(plat)
     if root:
-        return Path(str(root)) / name
+        return (Path(str(root)) / name).expanduser()
     return None
 
 
