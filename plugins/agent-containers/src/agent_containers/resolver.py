@@ -21,8 +21,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import subprocess
-import sys
 from typing import TYPE_CHECKING
+
+from agent_procutil import no_window_flags
 
 from ._invoke import module_argv
 from .config import load_config
@@ -37,9 +38,7 @@ log = logging.getLogger("agent-containers")
 
 
 def _creation_flags() -> int:
-    if sys.platform == "win32":
-        return subprocess.CREATE_NO_WINDOW
-    return 0
+    return no_window_flags()
 
 
 def host_gh_token() -> str | None:

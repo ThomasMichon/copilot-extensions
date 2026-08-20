@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-vault"
-version = "0.1.0-dev53"
+version = "0.1.0-dev54"
 description = "Local KeePassXC-backed secret store for Copilot CLI agents."
 readme = "README.md"
 license = "MIT"
@@ -12,7 +12,14 @@ requires-python = ">=3.10"
 authors = [
     { name = "Thomas Michon" }
 ]
-dependencies = []
+dependencies = [
+    "agent-procutil",
+]
+
+[tool.uv.sources]
+# Windows-headless process-spawn helpers (module ``agent_procutil``). Vendored
+# per plugin; byte-identical src across copies.
+agent-procutil = { path = "libs/agent-procutil" }
 
 [project.optional-dependencies]
 # The persistent on-disk credential cache (opt-in) encrypts entries with Fernet,

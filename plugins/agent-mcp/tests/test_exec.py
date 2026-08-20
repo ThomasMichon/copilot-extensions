@@ -99,12 +99,12 @@ def test_no_window_creationflags_returns_int_and_posix_zero():
 
 
 def test_no_window_creationflags_win32_branch(monkeypatch):
-    # Simulate Windows on any runner: the helper must return CREATE_NO_WINDOW
-    # without touching the (win32-only) attribute off Windows.
-    import subprocess as sp
+    # The helper now delegates to agent_procutil.no_window_flags, which returns
+    # CREATE_NO_WINDOW when os.name == "nt". Simulate Windows on any runner.
+    import agent_procutil
 
     import agent_mcp._exec as ex
 
-    monkeypatch.setattr(ex.sys, "platform", "win32")
-    monkeypatch.setattr(sp, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(agent_procutil.os, "name", "nt")
+    monkeypatch.setattr(agent_procutil, "_CREATE_NO_WINDOW", 0x08000000)
     assert ex.no_window_creationflags() == 0x08000000

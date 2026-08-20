@@ -20,6 +20,8 @@ from collections.abc import Callable
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any
 
+from agent_procutil import detached_kwargs
+
 from agent_index.indexing.task_store import TERMINAL, TaskStatus
 
 if TYPE_CHECKING:
@@ -421,13 +423,7 @@ class TaskRunner:
                 "stderr": logf,
                 "stdin": subprocess.DEVNULL,
             }
-            if sys.platform == "win32":
-                kwargs["creationflags"] = (
-                    subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
-                    | subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]
-                )
-            else:
-                kwargs["start_new_session"] = True
+            kwargs.update(detached_kwargs())
             return subprocess.Popen(cmd, **kwargs)  # noqa: S603
         finally:
             with suppress(Exception):

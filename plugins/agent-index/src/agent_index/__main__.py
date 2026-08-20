@@ -15,6 +15,7 @@ import time
 import urllib.request
 from typing import Any
 
+from agent_procutil import detached_kwargs
 import httpx
 
 from . import __version__
@@ -529,13 +530,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
             "--passive",
         ]
         kwargs: dict[str, Any] = {}
-        if sys.platform == "win32":
-            kwargs["creationflags"] = (
-                subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
-                | subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]
-            )
-        else:
-            kwargs["start_new_session"] = True
+        kwargs.update(detached_kwargs())
         return subprocess.Popen(cmd, **kwargs)  # noqa: S603
 
     def health_check(check_host: str, port: int) -> bool:

@@ -23,6 +23,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from agent_procutil import no_window_flags
+
 from . import __version__
 from .config import load_config
 from .resolver import build_spawn_command, host_gh_token
@@ -31,9 +33,7 @@ log = logging.getLogger("agent-containers")
 
 
 def _creation_flags() -> int:
-    if sys.platform == "win32":
-        return subprocess.CREATE_NO_WINDOW
-    return 0
+    return no_window_flags()
 
 
 def main(argv: list[str] | None = None) -> int:

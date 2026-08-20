@@ -28,15 +28,14 @@ import logging
 import os
 import shutil
 import subprocess
-import sys
+
+from agent_procutil import no_window_flags
 
 log = logging.getLogger("agent-codespaces")
 
 
 def _creation_flags() -> int:
-    if sys.platform == "win32":
-        return subprocess.CREATE_NO_WINDOW
-    return 0
+    return no_window_flags()
 
 
 def _agent_worktrees_bin() -> str | None:

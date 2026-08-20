@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-index"
-version = "0.1.0-dev70"
+version = "0.1.0-dev71"
 description = "Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem."
 readme = "README.md"
 license = "MIT"
@@ -24,6 +24,9 @@ dependencies = [
     "httpx>=0.27",
     "pydantic>=2.0",
     "agent-zdd",
+    # Windows-headless process-spawn helpers (module ``agent_procutil``); vendored
+    # per plugin, byte-identical src across copies.
+    "agent-procutil",
     # Structured adoption config (.agent-index/config.yaml: role, indexer
     # designation, routing). Small, pure-Python.
     "pyyaml>=6.0",
@@ -33,6 +36,7 @@ dependencies = [
 # zero-downtime cutover primitives -- the routing table + cutover orchestrator
 # (module ``zdd``), extracted from agent-bridge so other services reuse them.
 agent-zdd = { path = "libs/zdd" }
+agent-procutil = { path = "libs/agent-procutil" }
 
 [project.optional-dependencies]
 store = [

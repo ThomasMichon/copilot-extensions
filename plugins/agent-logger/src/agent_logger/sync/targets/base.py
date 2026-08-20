@@ -19,23 +19,19 @@ Concrete targets:
 
 from __future__ import annotations
 
-import subprocess
-import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from agent_procutil import no_window_kwargs
+
 # On Windows, child processes (rsync, ssh) launched from a windowless parent --
 # e.g. pythonw.exe under a Scheduled Task -- each allocate a fresh console
-# window that flashes on screen during the sync flow. CREATE_NO_WINDOW
+# window that flashes on screen during the sync flow. no_window_kwargs()
 # suppresses that allocation. No-op on POSIX, where the flag does not exist and
 # no console is spawned. Spread into every external-tool subprocess call as
 # ``**NO_WINDOW_KWARGS``.
-NO_WINDOW_KWARGS: dict = (
-    {"creationflags": subprocess.CREATE_NO_WINDOW}
-    if sys.platform == "win32"
-    else {}
-)
+NO_WINDOW_KWARGS: dict = no_window_kwargs()
 
 
 @dataclass

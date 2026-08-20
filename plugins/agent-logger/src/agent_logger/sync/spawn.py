@@ -41,6 +41,8 @@ import tempfile
 import time
 from pathlib import Path
 
+from agent_procutil import detached_kwargs
+
 from agent_logger.sync.lock import sync_lock
 
 #: Env var carrying the staging dir into the child so it can self-clean on exit.
@@ -89,15 +91,7 @@ def _stage_package(tmp_root: Path) -> Path:
 
 def _detach_kwargs() -> dict:
     """Platform flags for a fully detached, windowless child process."""
-    if os.name == "nt":
-        creationflags = (
-            getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
-            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
-            | getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
-        )
-        return {"creationflags": creationflags, "close_fds": True}
-    # POSIX: new session so the child outlives the hook's process group.
-    return {"start_new_session": True, "close_fds": True}
+    return {**detached_kwargs(), "close_fds": True}
 
 
 def spawn_detached_sync(cfg, *, prune: bool = False) -> int:

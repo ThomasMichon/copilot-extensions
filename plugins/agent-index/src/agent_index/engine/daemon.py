@@ -23,6 +23,8 @@ import subprocess
 import time
 from pathlib import Path
 
+from agent_procutil import detached_kwargs
+
 
 def engine_home() -> Path:
     """Durable engine root (holds the heavy venv), outside the versioned runtime."""
@@ -99,12 +101,7 @@ def _spawn(cmd: list[str]) -> subprocess.Popen:
         "stderr": subprocess.DEVNULL,
         "env": os.environ.copy(),
     }
-    if os.name == "nt":
-        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | getattr(
-            subprocess, "DETACHED_PROCESS", 0
-        )
-    else:
-        kwargs["start_new_session"] = True
+    kwargs.update(detached_kwargs())
     return subprocess.Popen(cmd, **kwargs)  # type: ignore[arg-type]  # noqa: S603
 
 

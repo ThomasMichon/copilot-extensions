@@ -32,23 +32,21 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
-import sys
 from collections.abc import Sequence
+
+from agent_procutil import no_window_flags
 
 
 def no_window_creationflags() -> int:
     """Windows ``creationflags`` to spawn a child with **no console window**.
 
-    ``CREATE_NO_WINDOW`` on win32, ``0`` elsewhere -- the standard suppression for
-    a piped child subprocess (matches agent-bridge's ``agent_registry`` pattern),
-    so an upstream MCP server (``npx`` -> ``cmd.exe``, ``node``, ``python``) never
-    flashes a console window per bridge. A harmless no-op on POSIX (``0`` is a
-    valid ``creationflags`` everywhere). The ternary short-circuits so the
-    win32-only ``subprocess.CREATE_NO_WINDOW`` attribute is never touched off
-    Windows.
+    ``CREATE_NO_WINDOW`` on Windows, ``0`` elsewhere -- the standard suppression
+    for a piped child subprocess, so an upstream MCP server (``npx`` ->
+    ``cmd.exe``, ``node``, ``python``) never flashes a console window per bridge.
+    A name-stable wrapper for the transports; delegates to the shared
+    :func:`agent_procutil.no_window_flags` so the exact flag can't drift.
     """
-    return subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    return no_window_flags()
 
 
 
