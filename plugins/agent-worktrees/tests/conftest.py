@@ -9,6 +9,72 @@ import pytest
 
 from agent_worktrees import tracking
 
+
+# ---------------------------------------------------------------------------
+# Headless subprocess launches (Windows) -- keep the suite from flashing windows.
+#
+# Many tests shell out to REAL processes (git in the repo/anchor fixtures, bash
+# in the installer tests, pwsh/psmux in the launch tests). On Windows, a console
+# child spawned by a pytest process that has no console of its own allocates a
+# NEW console window -- so a full-suite run flickers dozens of windows. Force
+# ``CREATE_NO_WINDOW`` onto every real ``Popen`` for the duration of the session
+# so the suite runs headless.
+#
+# This touches only REAL spawns: tests that mock ``subprocess.run`` / ``Popen``
+# replace the attribute and never reach this ``__init__``. A deliberate
+# ``CREATE_NEW_CONSOLE`` request (none in-tree today) is left alone -- the two
+# flags are mutually exclusive. No-op off Windows.
+# ---------------------------------------------------------------------------
+
+_CREATE_NO_WINDOW = 0x08000000
+_CREATE_NEW_CONSOLE = 0x00000010
+
+
+def _headless_creationflags(flags: int) -> int:
+    """OR ``CREATE_NO_WINDOW`` onto ``flags`` unless a new console was requested.
+
+    Pure (no platform check) so it is unit-testable; the caller applies it only
+    on Windows. ``CREATE_NO_WINDOW`` and ``CREATE_NEW_CONSOLE`` are mutually
+    exclusive, so an explicit new-console request is passed through untouched.
+    """
+    if flags & _CREATE_NEW_CONSOLE:
+        return flags
+    return flags | _CREATE_NO_WINDOW
+
+
+def pytest_configure(config):
+    import sys
+
+    if sys.platform != "win32":
+        return
+    import subprocess
+
+    orig_init = subprocess.Popen.__init__
+    if getattr(orig_init, "_aw_headless", False):
+        return
+
+    def _headless_init(self, *args, **kwargs):
+        kwargs["creationflags"] = _headless_creationflags(
+            kwargs.get("creationflags", 0))
+        return orig_init(self, *args, **kwargs)
+
+    _headless_init._aw_headless = True
+    _headless_init._aw_orig = orig_init
+    subprocess.Popen.__init__ = _headless_init
+
+
+def pytest_unconfigure(config):
+    import sys
+
+    if sys.platform != "win32":
+        return
+    import subprocess
+
+    cur = subprocess.Popen.__init__
+    orig = getattr(cur, "_aw_orig", None)
+    if orig is not None:
+        subprocess.Popen.__init__ = orig
+
 # ---------------------------------------------------------------------------
 # Global HOME isolation -- the suite must NEVER touch real machine state.
 #
