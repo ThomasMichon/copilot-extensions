@@ -587,21 +587,27 @@ async def lifespan(app: FastAPI):
     from .routes.worktrees import get_cache
     await get_cache().stop()
 
-    # Shutdown: assertively-but-nicely cancel in-flight turns (ACP session/cancel
-    # + a resume_on_reattach flag) before tearing the sessions down, so a bare
-    # `systemctl restart` (no installer drain) is fast and clean, and mid-turn
-    # sessions get a "Resume" once the new frontend reattaches.
+    # Shutdown: prepare in-flight turns for the frontend restart. By default
+    # (dotfiles#1661) this is DETACH-ONLY -- it does NOT cancel the remote
+    # agent's turn; the Session Host keeps running it and the successor frontend
+    # reattaches and continues the SAME turn. Only the opt-in
+    # `cancel_turns_on_redeploy` restores the legacy cancel-then-Resume.
     try:
         await mgr.graceful_cancel_for_redeploy()
     except Exception:
         log.warning("Graceful-cancel on shutdown failed", exc_info=True)
 
-    # Shutdown: stop all active sessions gracefully
+    # Shutdown: detach all active sessions (host + child + turn survive for
+    # reattach). `cancel_turn` mirrors the redeploy policy: detach-only by
+    # default, cancel only if `cancel_turns_on_redeploy` is set.
     for session in mgr.list_sessions():
         if session.client and session.client.is_running:
             try:
-                log.info("Stopping session %s on shutdown", session.session_id)
-                await mgr.stop_session(session.session_id)
+                log.info("Detaching session %s on shutdown", session.session_id)
+                await mgr.stop_session(
+                    session.session_id,
+                    cancel_turn=mgr.cancel_turns_on_redeploy,
+                )
             except Exception:
                 log.warning(
                     "Failed to stop session %s on shutdown",
