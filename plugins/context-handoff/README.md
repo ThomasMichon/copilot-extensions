@@ -6,7 +6,7 @@ This plugin ships two cooperating pieces:
 
 | Piece | Type | Role |
 |-------|------|------|
-| **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; logs threshold warnings and queues agent-facing `session.send()` nudges at 55% / 70% utilization, delivered on the next idle; provides `generate_handoff_prompt`, `save_handoff_prompt`, `consume_handoff`, and `continue_handoff` tools plus the **`/handoff-continue`** and **`/resume-handoff`** slash commands. `save_handoff_prompt` sits **on top of agent-dispatch**: when a coordinator is reachable **and this worktree can be resolved**, it stores the handoff as a `proposed`/`handoff` **task** (payload = metadata plus markdown, pinned to the worktree, no file handoff); otherwise it falls back to a one-time worktree-state file outside the repo checkout. `/resume-handoff` digs up this worktree's pending handoff (task, else file), consumes it once, and **injects its continuation prompt into the current session** |
+| **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; logs threshold warnings and queues agent-facing `session.send()` nudges at 55% / 70% utilization, delivered on the next idle; provides `generate_handoff_prompt`, `save_handoff_prompt`, `consume_handoff`, `continue_handoff`, and `retry_handoff_cutover` tools plus the **`/handoff-continue`** and **`/resume-handoff`** slash commands. `save_handoff_prompt` sits **on top of agent-dispatch**: when a coordinator is reachable **and this worktree can be resolved**, it stores the handoff as a `proposed`/`handoff` **task** (payload = metadata plus markdown, pinned to the worktree, no file handoff); otherwise it falls back to a one-time worktree-state file outside the repo checkout. `retry_handoff_cutover` re-attempts a live cutover from the **already-saved** handoff (no regeneration) — for when a spawned successor window came up empty because its first prompt never submitted, so no session was created. `/resume-handoff` digs up this worktree's pending handoff (task, else file), consumes it once, and **injects its continuation prompt into the current session** |
 | **context-handoff skill** | Skill | The `/handoff` workflow -- composes the continuation prompt from the extension's structured facts and the agent's live context. (Resume is handled by the extension's `/resume-handoff` command, which injects the handoff; the skill documents both) |
 
 ## Why an extension (and not a pure plugin)
@@ -59,7 +59,8 @@ this plugin:
 ## Verify
 
 A loaded extension exposes the `generate_handoff_prompt`,
-`save_handoff_prompt`, `consume_handoff`, and `continue_handoff` tools, plus
+`save_handoff_prompt`, `consume_handoff`, `continue_handoff`, and
+`retry_handoff_cutover` tools, plus
 `/handoff-continue` and `/resume-handoff`; `/extensions` lists it with source **plugin**. It
 intentionally does **not** emit a user-visible "Session started" breadcrumb. If
 it does not load, confirm both requirements above and start a fresh session (the
@@ -93,6 +94,18 @@ retires the predecessor pane through `agent-worktrees handoff-cutover
 
 This keeps recovery safe: if the successor never comes up or never consumes the
 handoff, the predecessor pane remains available and the terminal is not closed.
+
+**Empty-successor recovery (`retry_handoff_cutover`).** A subtle failure mode:
+the cutover spawns the successor window and *types* the seed, but Copilot only
+creates a session (and fires `sessionStart`) once a first prompt is actually
+**submitted**. If that submission never lands, the new window holds a live
+Copilot at an empty prompt with **no session** — so no changeover is recorded and
+the predecessor stays live (closing the empty window drops the operator back onto
+it). Because the handoff is already stored, `retry_handoff_cutover` re-attempts
+the cutover **from that saved handoff without regenerating it**: it recovers the
+worktree's pending task/file, rebuilds the *identical* cutover seed (via the same
+`buildCutoverSeed` used by `save_handoff_prompt`), and spawns a fresh seeded
+successor. Run it from the predecessor.
 
 This split follows the repo-wide
 [`primitives below, orchestration above`](../../docs/patterns/README.md)

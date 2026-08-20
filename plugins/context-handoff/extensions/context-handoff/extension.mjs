@@ -317,6 +317,40 @@ function markFileHandoffConsumed(path, record, sid) {
 }
 
 // --- Live-cutover handoff (issue #2251) ---
+// Normalize a handoff title into the seed's leading topic clause. A handoff
+// title often already begins with "Continue:" (a successor handing off again),
+// which would compound into "Continue: Continue: …" on each hop -- so only
+// prepend when absent. Empty title -> a generic lead.
+function leadFrom(title) {
+  const t = (title || "").toString().trim();
+  if (!t) return "Continue this session";
+  return /^\s*continue\s*:/i.test(t) ? t : `Continue: ${t}`;
+}
+
+// Build the single-line ASCII CUTOVER seed (the HANDOFF_SEED) for a live
+// cutover successor. Kept as the ONE source of this string so save_handoff_prompt
+// and retry_handoff_cutover always spawn an identical successor. `kind` is
+// "task" (agent-dispatch task-backed) or "file" (worktree-state file-backed);
+// `id` is the task id / file handoff id; `lead` comes from `leadFrom(title)`.
+function buildCutoverSeed(kind, id, lead) {
+  if (kind === "task") {
+    return (
+      `${lead}. You are taking over a handoff (agent-dispatch task ` +
+      `${id}) IN PLACE -- do not restart or create a new worktree. ` +
+      `Call the context-handoff consume_handoff tool with arguments ` +
+      `{"task_id":"${id}","defer_complete":true}. That consumes the handoff, ` +
+      `loads your full brief, and retires the predecessor pane only ` +
+      `after you are alive. Do the work, and ONLY when you reach the ` +
+      `handoff's goal run: agent-dispatch complete ${id} .`
+    );
+  }
+  return (
+    `${lead}. Call the context-handoff consume_handoff tool with ` +
+    `arguments {"handoff_id":"${id}"} to load this one-time file-backed ` +
+    `handoff and continue in place.`
+  );
+}
+
 // A live cutover spawns a *seeded successor* Copilot in a new window of this
 // worktree's mux session and cuts the operator over to it. The successor
 // retires the predecessor only after it consumes the stored handoff. The mux choreography lives in
@@ -934,9 +968,7 @@ const session = await joinSession({
         // De-dupe the prefix: a handoff title often already begins with
         // "Continue:" (e.g. a successor handing off again), which would compound
         // into "Continue: Continue: …" on each hop. Only prepend when absent.
-        const lead = title
-          ? (/^\s*continue\s*:/i.test(title) ? title : `Continue: ${title}`)
-          : "Continue this session";
+        const lead = title ? leadFrom(title) : "Continue this session";
 
         // Store the handoff (agent-dispatch task preferred, else worktree file)
         // and derive both the short reply prompt (the baton paste-seed) and the
@@ -972,14 +1004,7 @@ const session = await joinSession({
               `${taskId}); continue the prior session's work IN PLACE -- do not ` +
               `restart or create a new worktree. Load your full brief by ` +
               `running: agent-dispatch consume ${taskId} .`;
-            cutoverSeed =
-              `${lead}. You are taking over a handoff (agent-dispatch task ` +
-              `${taskId}) IN PLACE -- do not restart or create a new worktree. ` +
-              `Call the context-handoff consume_handoff tool with arguments ` +
-              `{"task_id":"${taskId}","defer_complete":true}. That consumes the handoff, ` +
-              `loads your full brief, and retires the predecessor pane only ` +
-              `after you are alive. Do the work, and ONLY when you reach the ` +
-              `handoff's goal run: agent-dispatch complete ${taskId} .`;
+            cutoverSeed = buildCutoverSeed("task", taskId, lead);
             storedMsg = (
               `Handoff stored as agent-dispatch task ${taskId} (proposed, label ` +
               `'handoff', pinned to this worktree). No file handoff was written.\n\n` +
@@ -1008,10 +1033,7 @@ const session = await joinSession({
               "Nothing was written."
             );
           }
-          seed =
-            `${lead}. Call the context-handoff consume_handoff tool with ` +
-            `arguments {"handoff_id":"${fileStored.id}"} to load this one-time file-backed ` +
-            `handoff and continue in place.`;
+          seed = buildCutoverSeed("file", fileStored.id, lead);
           cutoverSeed = seed;
           storedMsg = (
             `Handoff saved to ${fileStored.path}\n\n` +
@@ -1176,7 +1198,110 @@ const session = await joinSession({
           `seeded to consume the handoff; the operator has been cut over to it. ` +
           `The predecessor pane will remain available unless and until the ` +
           `successor consumes the handoff and retires it. Do NOT start new work ` +
-          `here; simply end your turn.`
+          `here; simply end your turn. (If the successor window comes up EMPTY -- ` +
+          `no session created because its first prompt was never submitted -- ` +
+          `call retry_handoff_cutover from here to re-attempt from the same saved ` +
+          `handoff, without regenerating it.)`
+        );
+      },
+    },
+    {
+      name: "retry_handoff_cutover",
+      description:
+        "Re-attempt a live cutover using the ALREADY-SAVED handoff, WITHOUT " +
+        "regenerating or revising it. Use when a prior continue_handoff spawned a " +
+        "successor window but no session was created -- the window came up " +
+        "'empty' because Copilot never received a submitted first prompt, so no " +
+        "sessionStart fired, no changeover was recorded, and the predecessor is " +
+        "still live (closing the empty window drops you back here). This tool " +
+        "recovers this worktree's stored handoff (agent-dispatch task, else " +
+        "worktree file), rebuilds the exact same cutover seed, and spawns a fresh " +
+        "seeded successor in the mux. Run it from the predecessor (the pane you " +
+        "land on after closing the empty window). Takes no arguments.",
+      skipPermission: true,
+      parameters: { type: "object", properties: {} },
+      handler: async (args, invocation) => {
+        void args;
+        ensureState(invocation);
+        const cwd = state.cwd || process.cwd();
+        const sid = state.sessionId || invocation?.sessionId || null;
+
+        // Recover the saved handoff (task preferred, else file) and rebuild the
+        // EXACT cutover seed via the shared builder -- no regeneration.
+        let kind = null;
+        let id = null;
+        let lead = "Continue this session";
+        const wtDir = agentWorktreesGet("worktree-dir", cwd, sid);
+        const worktree = wtDir ? basename(wtDir) : null;
+        if (worktree) {
+          const task = findHandoffTask(cwd, worktree);
+          if (task?.id) {
+            kind = "task";
+            id = task.id;
+            lead = leadFrom(task.title || task.name || "");
+          }
+        }
+        if (!id) {
+          const file = findHandoffFile(cwd, sid);
+          if (file?.record?.id) {
+            kind = "file";
+            id = file.record.id;
+            lead = leadFrom(file.record.title || "");
+          }
+        }
+        if (!id) {
+          return (
+            "Cannot retry the cutover: no saved handoff was found for this " +
+            "worktree (no proposed agent-dispatch 'handoff' task pinned here, and " +
+            "no unconsumed worktree-state handoff file). If you have not saved " +
+            "one yet, run save_handoff_prompt first -- there is nothing to " +
+            "re-attempt."
+          );
+        }
+
+        const seed = buildCutoverSeed(kind, id, lead);
+        const result = runHandoffCutover(cwd, seed, sid);
+        if (!result || !result.ok) {
+          const reason = result?.reason || "error";
+          const tail =
+            " Nothing destructive was done; the saved handoff is untouched. " +
+            "Resume it the normal way (/resume-handoff in a fresh session in this " +
+            "worktree, or paste the reply prompt into /clear).";
+          if (reason === "no-worktree") {
+            return (
+              "Cannot retry the cutover: could not determine which worktree this " +
+              "session belongs to from its working directory (it looks like a " +
+              "bare/HOME-cwd resume). `cd` into this worktree's checkout and try " +
+              "again." +
+              tail +
+              (result?.error ? ` [host: ${result.error}]` : "")
+            );
+          }
+          if (reason === "no-mux") {
+            return (
+              "Cannot retry the cutover: this session is not running under a mux " +
+              "session (no live wt-<id> to cut into)." +
+              tail +
+              (result?.error ? ` [host: ${result.error}]` : "")
+            );
+          }
+          return (
+            "Cannot retry the cutover: the cutover verb failed." +
+            tail +
+            (result?.error ? ` [host: ${result.error}]` : "")
+          );
+        }
+        const src =
+          kind === "task" ? `agent-dispatch task ${id}` : `handoff file ${id}`;
+        return (
+          `Cutover re-attempted from the saved handoff (${src}). A fresh ` +
+          `successor Copilot was spawned in a new window of this worktree's mux ` +
+          `session (pane ${result.new_pane || "?"}) and seeded to consume the ` +
+          `handoff. If a previous EMPTY successor window is still open (one that ` +
+          `never created a session), close it -- it holds no session and nothing ` +
+          `is lost. Do NOT start new work here; end your turn -- this predecessor ` +
+          `remains a recovery point until the successor consumes the handoff and ` +
+          `retires it.`
         );
       },
     },
