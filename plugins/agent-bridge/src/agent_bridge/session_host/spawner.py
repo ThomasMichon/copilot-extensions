@@ -30,11 +30,12 @@ import json
 import logging
 import secrets
 import shlex
-import sys
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
+
+from agent_procutil import no_window_flags
 
 from .launcher import launch_session_host
 
@@ -66,9 +67,7 @@ def _resolve_provision_command() -> str | None:
 
     binstub = shutil.which("agent-codespaces")
     if binstub:
-        creationflags = (
-            subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-        )
+        creationflags = no_window_flags()
         try:
             r = subprocess.run(
                 [binstub, "provision-command"],

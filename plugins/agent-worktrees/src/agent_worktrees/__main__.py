@@ -64,6 +64,8 @@ from pathlib import Path
 
 import yaml
 
+from agent_procutil import detached_kwargs
+
 from . import (
     activity,
     git_ops,
@@ -5233,19 +5235,7 @@ def _spawn_status_updater(worktree_id: str, path: str | None) -> bool:
             # cwd is irrelevant to its work -- root it at HOME.
             "cwd": os.path.expanduser("~"),
         }
-        if os.name == "nt":
-            # Fully detach on Windows: no console window, own process group, and
-            # break away from the job so it outlives the hook process.
-            DETACHED_PROCESS = 0x00000008
-            CREATE_NEW_PROCESS_GROUP = 0x00000200
-            CREATE_NO_WINDOW = 0x08000000
-            CREATE_BREAKAWAY_FROM_JOB = 0x01000000
-            kwargs["creationflags"] = (
-                DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-                | CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB
-            )
-        else:
-            kwargs["start_new_session"] = True  # setsid: survive the hook exit
+        kwargs.update(detached_kwargs(breakaway=True))
 
         subprocess.Popen(argv, **kwargs)  # detached: fixed, trusted argv
         return True
@@ -5550,16 +5540,7 @@ def _spawn_detached(argv: list[str]) -> bool:
         "stderr": subprocess.DEVNULL,
         "cwd": os.path.expanduser("~"),
     }
-    if os.name == "nt":
-        DETACHED_PROCESS = 0x00000008
-        CREATE_NEW_PROCESS_GROUP = 0x00000200
-        CREATE_NO_WINDOW = 0x08000000
-        CREATE_BREAKAWAY_FROM_JOB = 0x01000000
-        kwargs["creationflags"] = (
-            DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-            | CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB)
-    else:
-        kwargs["start_new_session"] = True
+    kwargs.update(detached_kwargs(breakaway=True))
     try:
         subprocess.Popen(argv, **kwargs)  # detached: fixed, trusted argv
         return True
