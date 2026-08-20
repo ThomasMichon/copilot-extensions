@@ -24,6 +24,12 @@ async def health(request: Request) -> dict:
         "protocol_version": HTTP_PROTOCOL_VERSION,
         "min_protocol_version": HTTP_PROTOCOL_MIN_SUPPORTED,
     }
+    # Live Session Host census (dotfiles#1656): how many independent Session
+    # Hosts (each owning a possibly-mid-turn child that survives a frontend
+    # restart) this daemon is fronting. Always surfaced so a drain/cutover is
+    # never judged "clean" while live hosts it must preserve go unaccounted for.
+    if mgr is not None and hasattr(mgr, "live_host_count"):
+        body["live_host_count"] = mgr.live_host_count
     # When drained, surface *how long* and *why* so a stuck/aborted drain is
     # visible to monitoring without grepping logs (#1757).
     if draining and mgr is not None:
