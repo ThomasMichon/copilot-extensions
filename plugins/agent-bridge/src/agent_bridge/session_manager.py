@@ -879,14 +879,32 @@ class SessionManager:
 
     def busy_sessions(self) -> list[str]:
         """Session IDs that must not be torn down: actively streaming a turn
-        (RUNNING) or hosting active background sub-agents (the dev57 busy
-        oracle). This is the signal drain() waits on."""
-        busy: list[str] = []
+        (RUNNING) or mid connect/resume (STARTING), hosting active background
+        sub-agents (the dev57 busy oracle), or backed by a live **remote**
+        Session Host whose far-side child may be mid-work while the local status
+        is stale (dotfiles#1633).
+
+        Remote-boundary correctness: ``codespace:``/``ssh`` sessions are the
+        majority of hosts, and their turn runs across the boundary -- so the
+        local status alone is not a reliable "idle" signal, and keying busy
+        purely off it let ``drain`` report a false-clean "0 busy" and tear a live
+        remote turn down. A live remote host is therefore counted unless its
+        session is *at-rest* ``IDLE`` (which a cutover preserves via host
+        reattach, so it need not block drain; the idle reaper is likewise
+        remote-aware). This is the signal drain() waits on."""
+        busy: set[str] = set()
         for sid, session in self._sessions.items():
-            if session.status == SessionStatus.RUNNING or \
-                    session.has_active_background_tasks:
-                busy.append(sid)
-        return busy
+            if session.status in (SessionStatus.RUNNING, SessionStatus.STARTING) \
+                    or session.has_active_background_tasks:
+                busy.add(sid)
+        for sid in self._live_remote_host_sessions():
+            session = self._sessions.get(sid)
+            if session is not None and session.status == SessionStatus.IDLE:
+                # At-rest remote host -> preserved across a cutover by host
+                # reattach; does not need to block drain.
+                continue
+            busy.add(sid)
+        return sorted(busy)
 
     async def graceful_cancel_for_redeploy(
         self,
@@ -1412,6 +1430,26 @@ class SessionManager:
         if self._host_index is None:
             return []
         return [r for r in self._host_index.all() if self._rec_host_alive(r)]
+
+    def _live_remote_host_sessions(self) -> set[str]:
+        """Session ids backed by a live **remote** (ssh/codespace) Session Host.
+
+        A remote host fronts a child whose turn / tool-call activity runs across
+        the boundary and is **not** reflected by the local session status: a
+        ``--reply-timeout`` detach, a resume-into-``[starting]``, a host reap, or
+        a tunnel flap can leave the local status ``IDLE``/``STARTING`` while the
+        far-side child is mid-work. So these sessions must not be judged
+        idle/not-busy from local state alone (dotfiles#1633) -- the drain must
+        count them and the idle reaper must not free their child. Local-boundary
+        hosts are excluded (their pid + status are locally authoritative)."""
+        out: set[str] = set()
+        for rec in self._live_host_records():
+            if getattr(rec, "boundary", "local") == "local":
+                continue
+            sid = getattr(rec, "session_id", None)
+            if sid:
+                out.add(sid)
+        return out
 
     def _prune_dead_hosts(self) -> None:
         """Drop records whose host is dead (local only -- remote is verified by
@@ -2120,18 +2158,26 @@ class SessionManager:
         The bridge owns session process lifetime: a session that is IDLE (agent
         at its own stop -- never mid-turn), has ZERO active subscribers, holds no
         active background sub-agents, **has run at least one turn** (so it has a
-        persisted ACP conversation a fresh child can ``load_session``), and has
-        been idle+unwatched at least ``idle_reap_ttl_seconds`` is **stopped with
-        its host child reaped** -- freeing the Copilot process while leaving the
-        session resumable (fresh child + ``load_session`` replay). This is what
-        lets a front (Neuron Forge) merely connect/disconnect and never reap for
-        resource reasons. Returns the count reaped. No-op unless enabled +
-        Session-Host mode.
+        persisted ACP conversation a fresh child can ``load_session``), is **not
+        backed by a live remote Session Host** (whose far-side child's activity
+        the frontend cannot see -- dotfiles#1633), and has been idle+unwatched at
+        least ``idle_reap_ttl_seconds`` is **stopped with its host child reaped**
+        -- freeing the Copilot process while leaving the session resumable (fresh
+        child + ``load_session`` replay). This is what lets a front (Neuron
+        Forge) merely connect/disconnect and never reap for resource reasons.
+        Returns the count reaped. No-op unless enabled + Session-Host mode.
         """
         ttl = self._idle_reap_ttl_seconds
         if not ttl or ttl <= 0:
             return 0
         now = now if now is not None else time.time()
+        # Sessions fronted by a live REMOTE host must not be idle-reaped on LOCAL
+        # idle/unwatched signals: a codespace/ssh child can be mid remote
+        # tool-call while the session looks idle here, so "freeing" it decapitates
+        # live remote work (observed: a 15-30min remote build poll whose child was
+        # freed while the session read idle+unwatched -- dotfiles#1633). Local
+        # hosts keep the reaper (their pid + status are locally authoritative).
+        remote_host_sids = self._live_remote_host_sessions()
         reaped = 0
         for sid, s in list(self._sessions.items()):
             if s.status != SessionStatus.IDLE:
@@ -2139,6 +2185,8 @@ class SessionManager:
             if s.subscriber_count > 0:
                 continue
             if s.has_active_background_tasks:
+                continue
+            if sid in remote_host_sids:
                 continue
             if s.turn_count <= 0:
                 # A 0-turn session has no persisted ACP conversation, so a fresh
