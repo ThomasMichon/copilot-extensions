@@ -115,7 +115,24 @@ param(
     # Tier-E only: skip the cheap in-box Tier-P precondition (a `<plugin> --version`
     # smoke check that a broken CLI surface doesn't waste an eval's credits). The
     # gate is ON by default because it is nearly free; pass this to force an eval.
-    [switch]$SkipTierPGate
+    [switch]$SkipTierPGate,
+    # --- Windows arm (formalized Windows-container flow) ---------------------
+    # Run the WINDOWS clean-room arm (a Windows container running scenario.ps1)
+    # instead of the default Linux arm. Requires a Windows-container engine on the
+    # box this runs on. See scenario.ps1 + Dockerfile.windows.
+    [ValidateSet('linux', 'windows')]
+    [string]$Os = 'linux',
+    # docker -H endpoint. Empty = the CLI default (honors $env:DOCKER_HOST). On a
+    # Windows-only host reached via the non-elevated loopback-TCP broker, pass
+    # tcp://127.0.0.1:2375 (or set $env:DOCKER_HOST).
+    [string]$DockerEndpoint = '',
+    # Windows arm: the partner harness tree to validate (mounted at C:\partner),
+    # or -PartnerRepo to clone one on the host first. -PartnerPlugins are the
+    # vendored plugins to structurally check.
+    [string]$PartnerPath = '',
+    [string]$PartnerRepo = '',
+    [string]$PartnerName = 'partner-harness',
+    [string]$PartnerPlugins = 'agent-bridge agent-codespaces'
 )
 $ErrorActionPreference = 'Stop'
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -123,6 +140,90 @@ $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 # --- Until validation: 'all' or a non-negative integer ------------------------
 if ($Until -ne 'all' -and $Until -notmatch '^\d+$') {
     throw "-Until must be 'all' or a non-negative integer (got '$Until')"
+}
+
+# =============================================================================
+# Windows arm -- a self-contained branch that runs a Windows scenario (scenario.ps1)
+# in a Windows container, harmonizing the clean-room across Linux and Windows.
+# It does NOT touch the Linux auth/bridge/eval machinery below (which is
+# ubuntu/agent-oriented and irrelevant to a deterministic Tier-P Windows scenario).
+# Runs on a Windows-container host; the harness-side remote driver
+# (transfer the drop to that host) lives in the consuming harness.
+# =============================================================================
+if ($Os -eq 'windows') {
+    $dh = @()
+    if ($DockerEndpoint) { $dh = @('-H', $DockerEndpoint) }
+    $WinTag = 'copilot-cleanroom:windows'
+    $WinDockerfile = Join-Path $Here 'Dockerfile.windows'
+
+    # scenario resolution — a Windows scenario provides scenario.ps1
+    if (Test-Path -PathType Container $Scenario) { $sdir = (Resolve-Path $Scenario).Path; $sname = Split-Path -Leaf $sdir }
+    elseif (Test-Path -PathType Container (Join-Path $Here "scenarios\$Scenario")) { $sdir = Join-Path $Here "scenarios\$Scenario"; $sname = $Scenario }
+    else { throw "unknown -Scenario '$Scenario'" }
+    if (-not (Test-Path (Join-Path $sdir 'scenario.ps1'))) {
+        throw "scenario '$sname' has no scenario.ps1 (the Windows arm needs a PowerShell scenario)"
+    }
+    $libDir = Join-Path $Here 'lib'
+    if (-not $ResultsDir) { $ResultsDir = $env:CR_RESULTS_DIR }
+    if (-not $ResultsDir) {
+        $root = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $HOME '.local\state' }
+        $ResultsDir = Join-Path $root ("copilot-cleanroom\runs\win-" + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    }
+    New-Item -ItemType Directory -Force -Path $ResultsDir | Out-Null
+
+    function Test-WinImage { [bool](& docker @dh images -q $WinTag 2>$null) }
+    if ($Mode -eq 'down') {
+        & docker @dh rm -f "cr-windows" 2>$null | Out-Null
+        Write-Host "windows: nothing persistent to tear down (scenarios run --rm)."; exit 0
+    }
+    if ($Mode -in @('build', 'all') -or -not (Test-WinImage)) {
+        Write-Host "== building Windows image ($WinTag) from Dockerfile.windows ==" -ForegroundColor Cyan
+        & docker @dh build --isolation=hyperv -f $WinDockerfile -t $WinTag $Here
+        if ($LASTEXITCODE -ne 0) { throw "docker build (windows) failed" }
+        if ($Mode -eq 'build') { exit 0 }
+    }
+
+    # partner tree: an explicit -PartnerPath, or clone -PartnerRepo on the host
+    $partner = $PartnerPath
+    $clonedPartner = $null
+    if (-not $partner -and $PartnerRepo) {
+        $clonedPartner = Join-Path $ResultsDir 'partner-src'
+        Write-Host "== cloning $PartnerRepo -> $clonedPartner ==" -ForegroundColor Cyan
+        & git clone --depth 1 $PartnerRepo $clonedPartner
+        if ($LASTEXITCODE -ne 0) { throw "git clone of -PartnerRepo failed" }
+        $partner = $clonedPartner
+    }
+    if (-not $partner -or -not (Test-Path -LiteralPath $partner)) {
+        throw "the Windows scenario needs a partner tree: pass -PartnerPath <dir> or -PartnerRepo <url>"
+    }
+    $partner = (Resolve-Path -LiteralPath $partner).Path
+
+    $untilArgs = @()
+    if ($Until -ne 'all') { $untilArgs = @('-e', "CR_UNTIL=$Until") }
+
+    Write-Host "== running Windows clean-room scenario '$sname' (through stage $Until) ==" -ForegroundColor Cyan
+    & docker @dh run --rm --isolation=hyperv `
+        -v "${sdir}:C:\scenario" `
+        -v "${libDir}:C:\lib" `
+        -v "${ResultsDir}:C:\out" `
+        -v "${partner}:C:\partner" `
+        -e "CR_LIB=C:\lib\clean-room-lib.ps1" `
+        -e "CR_PARTNER_PATH=C:\partner" `
+        -e "CR_PARTNER_NAME=$PartnerName" `
+        -e "CR_PARTNER_PLUGINS=$PartnerPlugins" `
+        -e "CR_SCENARIO_NAME=$sname" `
+        -e "CR_REPORT=C:\out\cr-report.json" `
+        -e "CR_LOGDIR=C:\out\cr-logs" `
+        @untilArgs `
+        $WinTag powershell -NoProfile -ExecutionPolicy Bypass -File C:\scenario\scenario.ps1
+    $rc = $LASTEXITCODE
+
+    Write-Host "`n== report ==" -ForegroundColor Cyan
+    $repPath = Join-Path $ResultsDir 'cr-report.json'
+    if (Test-Path $repPath) { Get-Content $repPath -Raw | Write-Host }
+    Write-Host "results dir: $ResultsDir"
+    if ($clonedPartner) { Remove-Item -Recurse -Force $clonedPartner -ErrorAction SilentlyContinue }
+    exit $rc
 }
 
 # --- scenario resolution: an explicit dir, else scenarios/<name>/ -------------

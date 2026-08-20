@@ -33,7 +33,7 @@
     { "n": 3, "title": "partner's OWN setup/update test suite passes" }
   ],
   "notes": [
-    "Platform split: this scenario runs the partner's NATIVE-unix setup flow (setup.sh + *_sh tests) in a Linux container. The Windows-native counterpart (setup.ps1 + *_ps1 tests) runs on a Windows container host. A partner is validated on the platform whose native suite is faithful.",
+    "Platform split: this scenario runs the partner's NATIVE-unix setup flow (setup.sh + *_sh tests) in a Linux container via scenario.sh, OR the Windows-native flow (setup.ps1 + *_ps1 tests) in a Windows container via scenario.ps1 (`run.ps1 -Os windows`). Both share the cr-report.json contract. A partner is validated on the platform whose native suite is faithful.",
     "This is a Tier-P gate (no agent, no credits). The agent-driven golden-path (Tier E) eval layers on top later via the same consuming seam."
   ]
 }

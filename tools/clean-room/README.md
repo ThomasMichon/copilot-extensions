@@ -112,6 +112,43 @@ scenarios/<name>/
 report shape (`cr-report.json`) keeps its historical top-level keys and adds an
 `env{}` snapshot and a classified `jams[]` array.
 
+### Windows arm — `run.ps1 -Os windows`
+
+The runner has a **Windows counterpart** that harmonizes the clean-room across
+both OSes: `run.ps1 -Os windows` runs a **Windows scenario in a Windows
+container** (Hyper-V isolated) on a Windows-container host, alongside the default
+Linux arm. It shares the report contract, so Linux and Windows scenarios produce
+the same `cr-report.json`.
+
+```
+scenarios/<name>/
+├── scenario.sh    # the Linux arm (bash) — sources lib/clean-room-lib.sh
+└── scenario.ps1   # the Windows arm (PowerShell) — dot-sources lib/clean-room-lib.ps1
+```
+
+- **`lib/clean-room-lib.ps1`** — the PowerShell port of the helper API (same
+  `phase`/`pass`/`fail`/`info`/`capture`/`envdump`/`jam`/`cr_meta`/`cr_finalize`
+  vocabulary, same `cr-report.json` shape). Windows-PowerShell-5.1 compatible, so
+  it runs under the Server Core image's built-in `powershell.exe` — no pwsh 7 in
+  the image. *(NB: PowerShell is case-insensitive — don't rely on `$X` vs `$x`
+  being distinct the way the bash lib does.)*
+- **`Dockerfile.windows`** — the Windows "fresh machine": a Server Core-based
+  python image (python3 + Windows PowerShell 5.1). `--isolation=hyperv` runs the
+  ltsc2022 base on a newer host.
+- **Usage** (on a Windows-container host whose non-elevated engine is reached via
+  a loopback-TCP broker):
+
+  ```powershell
+  ./run.ps1 -Os windows -Scenario partner-harness-setup `
+      -PartnerPath C:\path\to\partner-tree -DockerEndpoint tcp://127.0.0.1:2375
+  # or -PartnerRepo <url> to clone the partner tree on the host first
+  ```
+
+  It builds `copilot-cleanroom:windows` (once), mounts the scenario + lib + the
+  partner tree + a results dir, and drives `scenario.ps1`. The
+  **remote-to-containers** driver (transfer a drop from another box to the
+  Windows host) lives in the consuming harness; the rig runs locally on the host.
+
 For **Tier-E live** scenarios (that actually create/connect a real CodeSpace) the
 lib also carries the generic **auth shim** — the rig injects only
 `COPILOT_GITHUB_TOKEN` and runs no inner login flow, so a live scenario calls:
