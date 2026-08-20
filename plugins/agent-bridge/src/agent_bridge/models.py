@@ -677,7 +677,20 @@ class ServiceConfig(BaseModel):
         "waits up to this many seconds for the cancelled turns to reach their own "
         "stop (capturing final streamed messages) before stopping. Mid-turn "
         "sessions are flagged to receive a 'Resume' nudge once the restarted "
-        "frontend reattaches.",
+        "frontend reattaches. Only consulted when cancel_turns_on_redeploy is "
+        "set; the default detach-only redeploy neither cancels nor settles.",
+    )
+    cancel_turns_on_redeploy: bool = Field(
+        default=False,
+        description="Whether a frontend redeploy/cutover/shutdown cancels the "
+        "remote agent's in-flight turn (dotfiles#1661). Default False = the "
+        "invariant: a frontend restart is a transport event, NOT an explicit "
+        "host cancel, so in-flight turns are left running on their Session Host "
+        "(which buffers frames -- 'tmux for the agent') and the restarted "
+        "frontend reattaches and continues the SAME turn with no gap. Cancelling "
+        "the remote task is reserved for explicit host actions (interrupt_turn / "
+        "an explicit stop). Set True only to restore the legacy "
+        "cancel-then-Resume redeploy behavior.",
     )
     idle_reap_ttl_seconds: int = Field(
         default=600,
