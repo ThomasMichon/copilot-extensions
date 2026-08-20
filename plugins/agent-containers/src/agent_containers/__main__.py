@@ -380,7 +380,12 @@ def _resolve_relay_port(default: int) -> int:
     try:
         txt = _live_relay_port_file().read_text(encoding="utf-8").strip()
         if txt:
-            return int(txt)
+            port = int(txt)
+            # agent-bridge treats 0/falsy as "no live port" (it unlinks the file);
+            # guard the valid TCP range so a stale/edge value can't yield a bogus
+            # connect port -- fall back to the configured default instead.
+            if 1 <= port <= 65535:
+                return port
     except (OSError, ValueError):
         log.debug("live relay port unavailable; using configured port %s", default)
     return default

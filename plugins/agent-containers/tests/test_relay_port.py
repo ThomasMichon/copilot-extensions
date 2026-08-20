@@ -10,8 +10,6 @@ falls back to the configured default when the file is absent/empty/unreadable.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from agent_containers.__main__ import _live_relay_port_file, _resolve_relay_port
 
 
@@ -36,6 +34,15 @@ def test_falls_back_when_file_garbage(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))
     (tmp_path / "relay-port").write_text("not-a-port", encoding="utf-8")
     assert _resolve_relay_port(9857) == 9857
+
+
+def test_falls_back_on_out_of_range_port(tmp_path, monkeypatch):
+    # agent-bridge treats 0 as "no live port"; a stale/edge 0 (or >65535) must
+    # not become the connect port -- fall back to the configured default.
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))
+    for bad in ("0", "-1", "70000"):
+        (tmp_path / "relay-port").write_text(bad, encoding="utf-8")
+        assert _resolve_relay_port(9857) == 9857
 
 
 def test_result_is_int(tmp_path, monkeypatch):
