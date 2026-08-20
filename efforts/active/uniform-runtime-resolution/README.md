@@ -263,3 +263,20 @@ separate, intentional runtime and keeps its explicit venv.
   `# runtime-resolution: allow`.
 - Guard: **13 -> 10** (agent-bridge 3 -> 0). pwsh parse + shellcheck + binstub
   smoke + 1521 tests green. Bumped agent-bridge 0.4.0-dev304 -> dev305.
+
+### 2026-08-20 - Phase 2 batch 8: agent-dispatch (live coordinator + supervisor daemons)
+- **agent-dispatch** (the live systemd coordinator + supervisor on the dev host):
+  - POSIX binstub sources the deployed `resolve-runtime.sh` -> `-m agent_dispatch`.
+  - The coordinator systemd `ExecStart` and BOTH supervisor-launcher exec lines
+    (`supervise-service.sh`) now use `$VENV_PYTHON` (the slot) instead of
+    `$LINK_PYTHON` (the `.venv` link) -- the slot is baked per install/update.
+  - Windows `.ps1` binstub dot-sources the canonical `resolve-runtime.ps1`
+    (replacing its inline lexicographic resolver); `.cmd` delegates to the `.ps1`.
+  - The Windows conhost `--headless` scheduled-task launchers were left as-is:
+    they derive their root from `$LinkDir` only as a STRING for path arithmetic
+    and resolve `$_py` via the marker (the baked `$LinkPython` is overwritten), so
+    they are already marker-based and link-retirement-safe.
+  - Install-time health-gate `$LINK_PYTHON` uses (import checks, manifest) are
+    left for the final link-retirement sweep (they work while the link exists).
+- Guard: **10 -> 9** (agent-dispatch 1 -> 0). pwsh parse + shellcheck + binstub
+  smoke + 1062 tests green. Bumped agent-dispatch 0.1.0-dev189 -> dev190.
