@@ -554,18 +554,12 @@ function Deploy-Package {
     Stamp-BuildInfo -Python $VenvPython
     Write-ServiceOk "Package installed into venv"
 
-    # Keep the agent-bridge venv's in-process resolver in sync (issue #14): the
-    # bridge imports agent_codespaces for the codespace: namespace + relay, so a
-    # standalone codespaces update must refresh that copy or it drifts stale and
-    # breaks codespace dispatch.
-    $bridgePy = Join-Path $env:USERPROFILE '.agent-bridge\venv\Scripts\python.exe'
-    if (Test-Path $bridgePy) {
-        if (Install-PackageInto -Python $bridgePy) {
-            Write-ServiceOk "Refreshed agent-bridge venv resolver copy"
-        } else {
-            Write-ServiceWarn "Could not refresh agent-bridge venv -- its codespace resolver may be stale"
-        }
-    }
+    # #1643: agent-codespaces is a PURE providers.d marker -- the bridge daemon
+    # drives our binstub over a process boundary and NEVER imports agent_codespaces.
+    # So we install ONLY into our own venv and drop the providers.d marker (via
+    # register-bridge-provider.ps1); we deliberately do NOT vendor a copy into the
+    # agent-bridge venv (the retired issue-#14 sync). agent-bridge's own installer
+    # prunes any stale copy and guards against one lingering.
     return $true
 }
 

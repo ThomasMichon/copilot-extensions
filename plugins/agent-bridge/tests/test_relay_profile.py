@@ -291,21 +291,17 @@ def test_register_provider_relay_prefers_cli(tmp_path):
     with patch("shutil.which", return_value="/bin/agent-codespaces"), \
          patch("subprocess.run", return_value=_cp(0, json.dumps(prof))), \
          patch("importlib.import_module") as imp:
-        _register_provider_relay(b, "agent-codespaces", "agent_codespaces.relay_provider")
+        _register_provider_relay(b, "agent-codespaces")
     imp.assert_not_called()  # CLI path -> no in-process import
     assert b.port == 1 and isinstance(b.validator, FileTokenValidator)
 
 
-def test_register_provider_relay_falls_back_to_import():
+def test_register_provider_relay_no_import_when_cli_unavailable():
+    # #1643: no in-process register_relay import fallback -- when the binstub is
+    # absent the provider contributes NOTHING and no import is ever attempted.
     b = _FakeBuilder()
-    called = {}
-
-    class _Mod:
-        @staticmethod
-        def register_relay(builder):
-            called["yes"] = True
-
     with patch("shutil.which", return_value=None), \
-         patch("importlib.import_module", return_value=_Mod):
-        _register_provider_relay(b, "agent-codespaces", "agent_codespaces.relay_provider")
-    assert called.get("yes") is True
+         patch("importlib.import_module") as imp:
+        _register_provider_relay(b, "agent-codespaces")
+    imp.assert_not_called()
+    assert b.sources == [] and b.port is None and b.validator is None

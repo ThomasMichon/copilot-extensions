@@ -1,36 +1,25 @@
-"""Tests for the #892 Increment 1 process-boundary seams.
+"""Tests for the #1643 pure process-boundary seams.
 
 agent-bridge's CodeSpace dispatch resolves the relay/auth-helper *provision
 command* and the *relay launch env* by shelling out to the ``agent-codespaces``
 binstub (so an agent-codespaces fix reaches the dispatch path from its OWN venv
-with no agent-bridge redeploy), falling back to the in-process import when the
-binstub is absent or the CLI misfires (so it can never regress while the venvs
-are still coupled). These tests exercise both paths by mocking ``shutil.which``
-and ``subprocess.run`` (the helpers do local ``import shutil``/``subprocess``,
-which bind the shared module objects, so patching their attributes works).
+with no agent-bridge redeploy). As of #1643 there is **no** in-process
+``agent_codespaces`` import fallback -- the daemon runs from its own isolated
+venv where a provider package is neither importable nor on ``PATH`` -- so when
+the binstub is absent or the CLI misfires the seam degrades auth-light (``None``
+/ ``("", None)``) rather than importing the provider. These tests exercise both
+the CLI-hit and the degrade paths by mocking ``shutil.which`` and
+``subprocess.run`` (the helpers do local ``import shutil``/``subprocess``, which
+bind the shared module objects, so patching their attributes works).
 """
 
 from __future__ import annotations
 
 import subprocess
-import sys
-import types
 from unittest.mock import patch
 
 from agent_bridge.session_host import spawner
 from agent_bridge import session_manager
-
-
-def _fake_cs_module(**attrs):
-    """Inject a fake ``agent_codespaces.<sub>`` module for the import fallback."""
-    pkg = types.ModuleType("agent_codespaces")
-    mods = {"agent_codespaces": pkg}
-    for sub, members in attrs.items():
-        m = types.ModuleType(f"agent_codespaces.{sub}")
-        for k, v in members.items():
-            setattr(m, k, v)
-        mods[f"agent_codespaces.{sub}"] = m
-    return mods
 
 
 # --- _resolve_provision_command (spawner) --------------------------------
@@ -42,26 +31,18 @@ def test_provision_command_prefers_cli():
         assert spawner._resolve_provision_command() == "echo provision\n"
 
 
-def test_provision_command_falls_back_to_import_on_cli_failure():
+def test_provision_command_none_on_cli_failure():
+    # No in-process import fallback (#1643): a CLI failure degrades to None (the
+    # caller skips the best-effort relay-helper redeploy step), never an import.
     bad = subprocess.CompletedProcess([], 1, "", "boom")
-    mods = _fake_cs_module(codespace_assets={"build_provision_command": lambda: "FALLBACK"})
     with patch("shutil.which", return_value="/bin/agent-codespaces"), \
-         patch("subprocess.run", return_value=bad), \
-         patch.dict(sys.modules, mods):
-        assert spawner._resolve_provision_command() == "FALLBACK"
+         patch("subprocess.run", return_value=bad):
+        assert spawner._resolve_provision_command() is None
 
 
-def test_provision_command_import_fallback_when_no_binstub():
-    mods = _fake_cs_module(codespace_assets={"build_provision_command": lambda: "FB2"})
-    with patch("shutil.which", return_value=None), \
-         patch.dict(sys.modules, mods):
-        assert spawner._resolve_provision_command() == "FB2"
-
-
-def test_provision_command_none_when_unavailable():
-    # No binstub AND no importable agent_codespaces -> None (skip the step).
-    with patch("shutil.which", return_value=None), \
-         patch.dict(sys.modules, {"agent_codespaces": None}):
+def test_provision_command_none_when_no_binstub():
+    # Binstub absent -> None (no in-process agent_codespaces import, #1643).
+    with patch("shutil.which", return_value=None):
         assert spawner._resolve_provision_command() is None
 
 
@@ -98,20 +79,17 @@ def test_relay_launch_env_omits_relay_port_when_none():
     assert "--relay-port" not in seen["argv"]
 
 
-def test_relay_launch_env_falls_back_to_import_on_cli_failure():
+def test_relay_launch_env_none_on_cli_failure():
+    # No in-process import fallback (#1643): a CLI failure degrades auth-light
+    # (("", None)) rather than importing agent_codespaces.
     bad = subprocess.CompletedProcess([], 2, "", "nope")
-    mods = _fake_cs_module(
-        relay_launch={"build_relay_launch_env": lambda cs, relay_port=None: ("PRELUDE", 40000)}
-    )
     with patch("shutil.which", return_value="/bin/agent-codespaces"), \
-         patch("subprocess.run", return_value=bad), \
-         patch.dict(sys.modules, mods):
-        assert session_manager._resolve_relay_launch_env("cs", 1) == ("PRELUDE", 40000)
+         patch("subprocess.run", return_value=bad):
+        assert session_manager._resolve_relay_launch_env("cs", 1) == ("", None)
 
 
-def test_relay_launch_env_auth_light_when_unavailable():
-    with patch("shutil.which", return_value=None), \
-         patch.dict(sys.modules, {"agent_codespaces": None}):
+def test_relay_launch_env_auth_light_when_no_binstub():
+    with patch("shutil.which", return_value=None):
         assert session_manager._resolve_relay_launch_env("cs", None) == ("", None)
 
 

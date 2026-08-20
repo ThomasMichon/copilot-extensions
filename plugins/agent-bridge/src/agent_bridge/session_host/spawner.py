@@ -51,53 +51,45 @@ def _as_list(value: Any) -> list[Any]:
 
 
 def _resolve_provision_command() -> str | None:
-    """Resolve the CodeSpace relay/auth-helper provision command (#892 Inc 1).
+    """Resolve the CodeSpace relay/auth-helper provision command.
 
-    Process-boundary first: shell out to the ``agent-codespaces`` binstub
-    (``provision-command``) so the command comes from agent-codespaces' **own**
-    venv -- a fix there reaches the dispatch path with **no agent-bridge
-    redeploy** (retires the #733 class). Falls back to the in-process import when
-    the binstub is absent or the call fails, so this can never regress the
-    dispatch path while the venvs are still coupled (the vendoring is removed
-    only in a later increment, once every seam is proven). Returns the command
-    string, or ``None`` when unavailable (caller skips the best-effort step).
+    Process-boundary **only** (#1643): shell out to the ``agent-codespaces``
+    binstub (``provision-command``) so the command comes from agent-codespaces'
+    **own** venv -- a fix there reaches the dispatch path with **no agent-bridge
+    redeploy** (retires the #733 class). There is **no** in-process
+    ``agent_codespaces`` import fallback: the daemon runs from its own isolated
+    venv where a provider package is neither importable nor on ``PATH``. Returns
+    the command string, or ``None`` when unavailable (binstub absent or the CLI
+    fails -- the caller skips the best-effort step).
     """
     import shutil
     import subprocess
 
     binstub = shutil.which("agent-codespaces")
-    if binstub:
-        creationflags = no_window_flags()
-        try:
-            r = subprocess.run(
-                [binstub, "provision-command"],
-                capture_output=True, text=True, timeout=15,
-                creationflags=creationflags,
-            )
-            if r.returncode == 0 and r.stdout.strip():
-                return r.stdout
-            log.debug(
-                "agent-codespaces provision-command exited %s -- falling back "
-                "to in-process import", r.returncode,
-            )
-        except Exception:
-            log.debug(
-                "agent-codespaces provision-command CLI failed -- falling back "
-                "to in-process import", exc_info=True,
-            )
-    try:
-        from agent_codespaces.codespace_assets import build_provision_command
-
-        return build_provision_command()
-    except ImportError:
+    if not binstub:
         log.debug(
-            "agent_codespaces not importable -- skipping relay-helper redeploy "
+            "agent-codespaces binstub absent -- skipping relay-helper redeploy "
             "on the dispatch path"
         )
         return None
+    try:
+        r = subprocess.run(
+            [binstub, "provision-command"],
+            capture_output=True, text=True, timeout=15,
+            creationflags=no_window_flags(),
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout
+        log.debug(
+            "agent-codespaces provision-command exited %s -- skipping "
+            "relay-helper redeploy", r.returncode,
+        )
     except Exception:
-        log.warning("build_provision_command failed", exc_info=True)
-        return None
+        log.debug(
+            "agent-codespaces provision-command CLI failed -- skipping "
+            "relay-helper redeploy", exc_info=True,
+        )
+    return None
 
 
 @dataclass

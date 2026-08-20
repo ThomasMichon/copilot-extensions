@@ -53,55 +53,48 @@ _MAX_RESUME_ROUNDS = 3
 def _resolve_relay_launch_env(
     codespace_name: str, relay_port: int | None
 ) -> tuple[str, int | None]:
-    """Resolve ``(prelude, port)`` for a detached CodeSpace launch's relay env
-    (#892 Inc 1).
+    """Resolve ``(prelude, port)`` for a detached CodeSpace launch's relay env.
 
-    Process-boundary first: shell out to ``agent-codespaces relay-launch-env``
-    (from agent-codespaces' **own** venv) so a fix there reaches the dispatch
-    path with **no agent-bridge redeploy** (retires the #733 class). ``relay_port``
-    is the daemon's actually-bound live port (agent-bridge's own signal), injected
-    via ``--relay-port``. Falls back to the in-process import when the binstub is
-    absent or the CLI fails, so relay/auth never regresses while the venvs are
-    still coupled. Returns ``("", None)`` when the relay env is genuinely
-    unavailable (the launch proceeds auth-light), mirroring the prior inline
-    behavior.
+    Process-boundary **only** (#1643): shell out to ``agent-codespaces
+    relay-launch-env`` (from agent-codespaces' **own** venv) so a fix there
+    reaches the dispatch path with **no agent-bridge redeploy** (retires the #733
+    class). ``relay_port`` is the daemon's actually-bound live port (agent-bridge's
+    own signal), injected via ``--relay-port``.
+
+    There is **no** in-process ``agent_codespaces`` import fallback: the daemon
+    runs from its own isolated venv where a provider package is neither importable
+    nor on ``PATH`` (see :mod:`agent_bridge.provider_sources`). When the binstub is
+    absent or the CLI fails, returns ``("", None)`` and the launch proceeds
+    auth-light (fine for ACP + non-ADO turns).
     """
     binstub = shutil.which("agent-codespaces")
-    if binstub:
-        argv = [binstub, "relay-launch-env", codespace_name]
-        if relay_port is not None:
-            argv += ["--relay-port", str(relay_port)]
-        creationflags = no_window_flags()
-        try:
-            r = subprocess.run(
-                argv, capture_output=True, text=True, timeout=15,
-                creationflags=creationflags,
-            )
-            if r.returncode == 0 and r.stdout.strip():
-                data = json.loads(r.stdout)
-                return data.get("prelude", ""), data.get("port")
-            log.debug(
-                "agent-codespaces relay-launch-env exited %s -- falling back "
-                "to in-process import", r.returncode,
-            )
-        except Exception:
-            log.debug(
-                "agent-codespaces relay-launch-env CLI failed -- falling back "
-                "to in-process import", exc_info=True,
-            )
-    try:
-        from agent_codespaces.relay_launch import build_relay_launch_env
-
-        prelude, port = build_relay_launch_env(
-            codespace_name, relay_port=relay_port
-        )
-        return prelude, port
-    except Exception:
+    if not binstub:
         log.info(
-            "CodeSpace relay env unavailable for %s -- launching Session Host "
-            "auth-light", codespace_name,
+            "agent-codespaces binstub absent -- launching Session Host "
+            "auth-light for %s", codespace_name,
         )
         return "", None
+    argv = [binstub, "relay-launch-env", codespace_name]
+    if relay_port is not None:
+        argv += ["--relay-port", str(relay_port)]
+    try:
+        r = subprocess.run(
+            argv, capture_output=True, text=True, timeout=15,
+            creationflags=no_window_flags(),
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            data = json.loads(r.stdout)
+            return data.get("prelude", ""), data.get("port")
+        log.warning(
+            "agent-codespaces relay-launch-env exited %s -- launching Session "
+            "Host auth-light for %s", r.returncode, codespace_name,
+        )
+    except Exception:
+        log.warning(
+            "agent-codespaces relay-launch-env CLI failed -- launching Session "
+            "Host auth-light for %s", codespace_name, exc_info=True,
+        )
+    return "", None
 
 
 def _resolve_codespace_ai_plugin_dirs(
