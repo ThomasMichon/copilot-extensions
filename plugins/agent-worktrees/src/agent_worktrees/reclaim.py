@@ -655,6 +655,7 @@ def ensure_session_copilot_reaped(
     session_id: str,
     *,
     grace: float = 2.0,
+    settle: float = 3.0,
     poll_interval: float = 0.3,
 ) -> dict:
     """Ensure no live Copilot remains bound to *session_id*, reaping an orphan.
@@ -671,28 +672,41 @@ def ensure_session_copilot_reaped(
     brief ``grace`` window to disappear before reaping. If a bound Copilot is
     still alive after that, reap it (and its Copilot children) **precisely** by
     its lock pid -- the successor session's Copilot is a different pid bound to a
-    different session and is never touched.
+    different session and is never touched. Then **block up to ``settle``** for
+    the reaped process to actually disappear (termination is not instantaneous),
+    so a caller that waits on this can trust ``survivors == 0`` means gone.
 
-    Returns ``{checked, found, reaped, survivors, pids}``.
+    Returns ``{checked, found, reaped, survivors, pids, waited_s}``.
     """
     import time
 
-    deadline = time.monotonic() + max(grace, 0.0)
+    started = time.monotonic()
+    deadline = started + max(grace, 0.0)
     bound = resolve_bound_copilots(session_id=session_id)
     while bound and time.monotonic() < deadline:
         time.sleep(poll_interval)
         bound = resolve_bound_copilots(session_id=session_id)
     if not bound:
-        return {"checked": True, "found": 0, "reaped": 0, "survivors": 0, "pids": []}
+        return {"checked": True, "found": 0, "reaped": 0, "survivors": 0,
+                "pids": [], "waited_s": round(time.monotonic() - started, 2)}
     pids = [b["pid"] for b in bound]
     reaped = reap_bound_copilots(bound)
+    # Block for the reaped process(es) to actually exit before reporting -- a
+    # terminate is not instantaneous, so a single immediate snapshot could
+    # falsely report a survivor (or a just-alive orphan the caller is waiting
+    # out). Poll until gone or the settle budget elapses.
+    settle_deadline = time.monotonic() + max(settle, 0.0)
     survivors = resolve_bound_copilots(session_id=session_id)
+    while survivors and time.monotonic() < settle_deadline:
+        time.sleep(poll_interval)
+        survivors = resolve_bound_copilots(session_id=session_id)
     return {
         "checked": True,
         "found": len(bound),
         "reaped": sum(1 for r in reaped if r.get("killed")),
         "survivors": len(survivors),
         "pids": pids,
+        "waited_s": round(time.monotonic() - started, 2),
     }
 
 

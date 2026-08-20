@@ -535,9 +535,9 @@ class TestEnsureSessionCopilotReaped:
             return []
 
         monkeypatch.setattr(reclaim, "reap_bound_copilots", _reap)
-        out = reclaim.ensure_session_copilot_reaped("sid", grace=0)
-        assert out == {"checked": True, "found": 0, "reaped": 0,
-                       "survivors": 0, "pids": []}
+        out = reclaim.ensure_session_copilot_reaped("sid", grace=0, settle=0)
+        assert out["found"] == 0 and out["reaped"] == 0
+        assert out["survivors"] == 0 and out["pids"] == []
         assert called["reap"] is False  # nothing alive -> never reap
 
     def test_orphan_is_reaped(self, monkeypatch):
@@ -551,17 +551,28 @@ class TestEnsureSessionCopilotReaped:
             return [{"pid": 4242, "killed": True, "children_killed": 0}]
 
         monkeypatch.setattr(reclaim, "reap_bound_copilots", _reap)
-        out = reclaim.ensure_session_copilot_reaped("sid", grace=0)
+        out = reclaim.ensure_session_copilot_reaped("sid", grace=0, settle=0)
         assert out["found"] == 1 and out["reaped"] == 1 and out["survivors"] == 0
         assert out["pids"] == [4242]
         assert seen["targets"] == self._BOUND
 
     def test_survivor_when_reap_fails(self, monkeypatch):
-        # The old Copilot outlives the reap -> reported as a survivor (caller
-        # then declares the retire a failure).
+        # The old Copilot outlives the reap + settle window -> reported as a
+        # survivor (caller then declares the retire a failure).
         monkeypatch.setattr(reclaim, "resolve_bound_copilots",
                             self._seq(self._BOUND, self._BOUND))
         monkeypatch.setattr(reclaim, "reap_bound_copilots",
                             lambda t, **k: [{"pid": 4242, "killed": False}])
-        out = reclaim.ensure_session_copilot_reaped("sid", grace=0)
+        out = reclaim.ensure_session_copilot_reaped("sid", grace=0, settle=0)
         assert out["found"] == 1 and out["reaped"] == 0 and out["survivors"] == 1
+
+    def test_settle_waits_for_slow_termination(self, monkeypatch):
+        # The reap lands but the process lingers a beat before exiting -> the
+        # settle poll waits it out and reports survivors == 0 (not a false alarm).
+        monkeypatch.setattr(reclaim, "resolve_bound_copilots",
+                            self._seq(self._BOUND, self._BOUND, []))
+        monkeypatch.setattr(reclaim, "reap_bound_copilots",
+                            lambda t, **k: [{"pid": 4242, "killed": True}])
+        out = reclaim.ensure_session_copilot_reaped(
+            "sid", grace=0, settle=1.0, poll_interval=0.01)
+        assert out["found"] == 1 and out["reaped"] == 1 and out["survivors"] == 0
