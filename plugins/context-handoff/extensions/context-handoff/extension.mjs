@@ -332,14 +332,29 @@ function leadFrom(title) {
 // and retry_handoff_cutover always spawn an identical successor. `kind` is
 // "task" (agent-dispatch task-backed) or "file" (worktree-state file-backed);
 // `id` is the task id / file handoff id; `lead` comes from `leadFrom(title)`.
-function buildCutoverSeed(kind, id, lead) {
+//
+// `retry` (default true) appends an explicit retry-on-not-ready clause: a live
+// cutover seeds the successor's FIRST turn, which can run before the
+// context-handoff extension has finished (re)loading -- so `consume_handoff` is
+// in the tool catalog (tool search finds it) but invoking it fails with a
+// transient 400 / tool-not-found. The clause tells the successor to wait briefly
+// and retry the SAME call so a fresh launch self-heals instead of erroring out.
+// Pass `retry: false` for the human-facing paste prompt (resumed in an
+// already-loaded session, where there is no such race and brevity matters).
+function buildCutoverSeed(kind, id, lead, { retry = true } = {}) {
+  const retryClause = retry
+    ? " If that call fails because the tool is not yet available (e.g. a 400 / " +
+      "tool-not-found on this freshly launched session while the context-handoff " +
+      "extension is still loading), wait a couple of seconds and retry the SAME " +
+      "call, up to 5 attempts, before doing anything else."
+    : "";
   if (kind === "task") {
     return (
       `${lead}. You are taking over a handoff (agent-dispatch task ` +
       `${id}) IN PLACE -- do not restart or create a new worktree. ` +
       `Call the context-handoff consume_handoff tool with arguments ` +
-      `{"task_id":"${id}","defer_complete":true}. That consumes the handoff, ` +
-      `loads your full brief, and retires the predecessor pane only ` +
+      `{"task_id":"${id}","defer_complete":true}.${retryClause} That consumes ` +
+      `the handoff, loads your full brief, and retires the predecessor pane only ` +
       `after you are alive. Do the work, and ONLY when you reach the ` +
       `handoff's goal run: agent-dispatch complete ${id} .`
     );
@@ -347,7 +362,7 @@ function buildCutoverSeed(kind, id, lead) {
   return (
     `${lead}. Call the context-handoff consume_handoff tool with ` +
     `arguments {"handoff_id":"${id}"} to load this one-time file-backed ` +
-    `handoff and continue in place.`
+    `handoff and continue in place.${retryClause}`
   );
 }
 
@@ -1033,8 +1048,8 @@ const session = await joinSession({
               "Nothing was written."
             );
           }
-          seed = buildCutoverSeed("file", fileStored.id, lead);
-          cutoverSeed = seed;
+          seed = buildCutoverSeed("file", fileStored.id, lead, { retry: false });
+          cutoverSeed = buildCutoverSeed("file", fileStored.id, lead);
           storedMsg = (
             `Handoff saved to ${fileStored.path}\n\n` +
             `(Stored as a worktree-scoped handoff file outside the repo checkout ` +

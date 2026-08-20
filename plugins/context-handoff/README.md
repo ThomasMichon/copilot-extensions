@@ -107,6 +107,18 @@ worktree's pending task/file, rebuilds the *identical* cutover seed (via the sam
 `buildCutoverSeed` used by `save_handoff_prompt`), and spawns a fresh seeded
 successor. Run it from the predecessor.
 
+**Extension-load race (self-healing seed).** A live cutover seeds the
+successor's **first turn**, which can run before the context-handoff extension
+has finished (re)loading on the fresh launch — so `consume_handoff` is in the
+tool catalog (tool search finds it) but invoking it fails with a transient
+**400 / tool-not-found**. Because the session must exist (a prompt submitted)
+before the extension can activate, the extension cannot pre-empt this from
+inside. So the **cutover seed itself carries a retry-on-not-ready instruction**:
+if the first `consume_handoff` call errors while the extension is still loading,
+the successor waits briefly and retries the same call (up to 5 attempts) so the
+launch self-heals. The human-facing *paste* prompt (resumed in an
+already-loaded session, no race) stays short and omits the clause.
+
 This split follows the repo-wide
 [`primitives below, orchestration above`](../../docs/patterns/README.md)
 invariant: agent-worktrees provides the lower-level session/worktree mechanisms,
