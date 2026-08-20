@@ -126,7 +126,13 @@ try {
                     '--field', "exit_code=$exitCode", '--field', "runtime=$runtime")
         if ($awWt) { $awArgs += @('--worktree-id', $awWt) }
         if ($env:WORKTREE_LAUNCH_ID) { $awArgs += @('--launch-id', $env:WORKTREE_LAUNCH_ID) }
-        $script:AwActivityProc = Start-Process -FilePath $awPy -ArgumentList $awArgs `
+        # conhost --headless: -WindowStyle Hidden alone is ignored by the DefTerm
+        # handoff and can flash a console; conhost gives the writer its own headless
+        # console so its output stays isolated (windows-launch-hardening #786). The
+        # returned conhost handle exits when the wrapped writer does, so the bounded
+        # WaitForExit below still lets the durable mark land.
+        $script:AwActivityProc = Start-Process -FilePath 'conhost.exe' `
+            -ArgumentList (@('--headless', "`"$awPy`"") + $awArgs) `
             -WindowStyle Hidden -PassThru -ErrorAction Stop
     }
 } catch {}
