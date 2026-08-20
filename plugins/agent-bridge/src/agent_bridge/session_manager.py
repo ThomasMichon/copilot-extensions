@@ -813,6 +813,11 @@ class SessionManager:
                 datetime.fromtimestamp(auto_at, tz=timezone.utc).isoformat()
                 if auto_at is not None else None
             ),
+            # Live Session Host census (dotfiles#1656): how many independent
+            # Session Hosts (each owning a possibly-mid-turn child) this daemon
+            # is currently fronting. Surfaced on /health so a drain/cutover never
+            # looks "clean" while live hosts it must preserve go unaccounted for.
+            "live_host_count": self.live_host_count,
         }
 
     def _arm_drain_watchdog(self) -> None:
@@ -886,6 +891,16 @@ class SessionManager:
         lifespan shutdown to pass ``cancel_turn`` to ``stop_session``.
         """
         return self._cancel_turns_on_redeploy
+
+    @property
+    def live_host_count(self) -> int:
+        """How many live Session Hosts this daemon is currently fronting.
+
+        Each host independently owns a (possibly mid-turn) child that survives a
+        frontend restart. Surfaced on /health and in the drain result so a
+        drain/cutover never looks "clean" while live hosts it must preserve go
+        unaccounted for (dotfiles#1656)."""
+        return len(self._live_host_records())
 
     def busy_sessions(self) -> list[str]:
         """Session IDs that must not be torn down: actively streaming a turn
@@ -1067,7 +1082,11 @@ class SessionManager:
 
         drained = not busy
         if drained:
-            log.info("Drain complete: no busy sessions remain")
+            log.info(
+                "Drain complete: no busy sessions remain%s",
+                f" ({len(preserved)} host-backed turn(s) preserved for reattach: "
+                f"{', '.join(sorted(preserved))})" if preserved else "",
+            )
         elif force:
             log.warning(
                 "Drain timed out after %.0fs with %d busy session(s) -- "
@@ -1083,6 +1102,14 @@ class SessionManager:
             "clean": drained,
             "forced": bool(force and not drained),
             "busy_sessions": busy,
+            # Live Session Host census (dotfiles#1656): a host-backed turn is
+            # PRESERVED across the restart (detached, its turn keeps running on
+            # the host, the successor reattaches) rather than drained. Surface it
+            # explicitly so a `clean` drain never hides an unaccounted-for live
+            # host -- an operator/cutover sees "clean, N turns preserved for
+            # reattach", not a bare clean.
+            "preserved": sorted(preserved),
+            "live_host_count": self.live_host_count,
             "timeout": timeout,
         }
 
