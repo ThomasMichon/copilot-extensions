@@ -413,6 +413,64 @@ function Test-SlotContentCurrent {
     } catch { return $false }
 }
 
+$script:InstallLockHandle = $null
+
+function Enter-InstallLock {
+    <# Cross-process install serialization (ce#776/#777 follow-up: the "overlapping
+       installers rebuild the venv over each other" footgun -- e.g. a same-version
+       reconcile racing a manual/other-triggered install produced a live slot
+       momentarily missing PyYAML, `ModuleNotFoundError: yaml`, dotfiles#1612).
+       Opens $InstallDir/.install.lock with EXCLUSIVE (FileShare.None) access: a
+       second installer's open throws a sharing violation until the holder
+       releases. The OS drops the handle when the holding process dies, so there
+       is NO stale-lock class (no PID reaping). Retries up to $TimeoutSec; returns
+       $true when acquired (handle in $script:InstallLockHandle), $false when
+       another install held it the whole window -- the caller then DEFERS (the
+       in-flight install lands the version). A non-contention error degrades to
+       "proceed WITHOUT the lock" so a lock fault can never wedge the installer. #>
+    param([int]$TimeoutSec = 150)
+    if (-not (Test-Path $InstallDir)) { New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null }
+    $lockPath = Join-Path $InstallDir '.install.lock'
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ($true) {
+        try {
+            $fs = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::OpenOrCreate,
+                    [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+            try {
+                $stamp = [System.Text.Encoding]::UTF8.GetBytes("pid=$PID at=$((Get-Date).ToUniversalTime().ToString('o'))")
+                $fs.SetLength(0); $fs.Write($stamp, 0, $stamp.Length); $fs.Flush()
+            } catch { }
+            $script:InstallLockHandle = $fs
+            return $true
+        } catch [System.IO.IOException] {
+            # Only a sharing/lock violation means "another install holds it" ->
+            # retry until the deadline. Any OTHER IOException (disk full, FS
+            # error) is a real fault: warn + degrade to lock-free rather than
+            # masking it as contention and spinning silently (ce#802 review).
+            $win32 = $_.Exception.HResult -band 0xFFFF
+            if ($win32 -eq 32 -or $win32 -eq 33) {   # ERROR_SHARING_VIOLATION / ERROR_LOCK_VIOLATION
+                if ((Get-Date) -ge $deadline) { return $false }
+                Start-Sleep -Milliseconds 750
+            } else {
+                Write-Warn "Install-lock IO error (not contention): $($_.Exception.Message) -- proceeding WITHOUT the lock."
+                return $true
+            }
+        } catch {
+            Write-Warn "Install-lock error: $($_.Exception.Message) -- proceeding WITHOUT the lock."
+            return $true   # non-contention fault -> degrade to today's lock-free behavior
+        }
+    }
+}
+
+function Exit-InstallLock {
+    <# Release the install lock (also released by the OS on process exit, so an
+       `exit`/crash never leaves a stale lock). #>
+    if ($script:InstallLockHandle) {
+        try { $script:InstallLockHandle.Close(); $script:InstallLockHandle.Dispose() } catch { }
+        $script:InstallLockHandle = $null
+    }
+}
+
 function Invoke-VersionedGc {
     <# Prune old version slots, keeping current + the given previous-good +
        any live-pid-pinned slot. No-op in legacy mode. Best-effort (warns only). #>
@@ -1350,6 +1408,23 @@ function Invoke-Install {
         return
     }
 
+    # Serialize concurrent installers (ce#776/#777 follow-up): an overlapping
+    # install of the same version must not rebuild the venv over an in-flight one
+    # (the racing-rebuild that yields a DOA slot). Wait for any in-flight install;
+    # on timeout DEFER -- it will land the version.
+    if (-not (Enter-InstallLock)) {
+        Write-Warn 'Another agent-bridge install is in progress -- deferring this run (the in-flight install lands the version). No-op.'
+        return
+    }
+    # Re-check after acquiring: the install we waited on may have JUST landed this
+    # exact content, so our rebuild would be redundant (and a live-slot stomp).
+    if (Test-SlotContentCurrent) {
+        Write-Ok "agent-bridge $SrcVersion already installed and healthy after lock wait -- no-op."
+        Write-DeployManifest
+        Exit-InstallLock
+        return
+    }
+
     # Create directories
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) {
@@ -1897,6 +1972,20 @@ function Invoke-Update {
         return
     }
 
+    # Serialize concurrent installers (see Invoke-Install): don't let an
+    # overlapping install/update rebuild the venv over an in-flight one. Defer on
+    # timeout; re-check the no-op after acquiring in case it just landed.
+    if (-not (Enter-InstallLock)) {
+        Write-Warn 'Another agent-bridge install/update is in progress -- deferring this run. No-op.'
+        return
+    }
+    if (Test-SlotContentCurrent) {
+        Write-Ok "agent-bridge $SrcVersion already active after lock wait -- no-op."
+        Write-DeployManifest
+        Exit-InstallLock
+        return
+    }
+
     # Stop running instance first -- a rebuild/repair of the venv (below) must
     # not race a live bridge holding python.exe open.
     $wasRunning = $null -ne (Get-RunningProcess)
@@ -2205,13 +2294,19 @@ function Invoke-Update {
 
 # -- Dispatch ----------------------------------------------------------------
 
-switch ($Action) {
-    'install'   { Invoke-Install }
-    'uninstall' { Invoke-Uninstall }
-    'start'     { Invoke-Start }
-    'stop'      { Invoke-Stop }
-    'status'    { Invoke-Status }
-    'update'    { Invoke-Update }
-    'stamp'     { Invoke-Stamp }
-    'provision' { Invoke-Install }
+try {
+    switch ($Action) {
+        'install'   { Invoke-Install }
+        'uninstall' { Invoke-Uninstall }
+        'start'     { Invoke-Start }
+        'stop'      { Invoke-Stop }
+        'status'    { Invoke-Status }
+        'update'    { Invoke-Update }
+        'stamp'     { Invoke-Stamp }
+        'provision' { Invoke-Install }
+    }
+} finally {
+    # Release the install lock on any exit path (the OS also drops it on process
+    # death, so an `exit`/crash never strands it).
+    Exit-InstallLock
 }
