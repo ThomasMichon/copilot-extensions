@@ -136,6 +136,13 @@ class RegisteredPivotRuntime:
         # its 3-tuple contract; ``get_summary`` reads this.
         self._summaries: dict[object, dict] = {}
         self._inflight: set[object] = set()
+        # Generation counter (guarded by ``_lock``): bumped on every
+        # :meth:`invalidate` so a one-shot fetch that was already in flight when
+        # the cache was invalidated (e.g. by a steer/action that mutated the
+        # queue) drops its now-stale result instead of overwriting the
+        # just-cleared cache -- the invalidate-vs-inflight lost-update that left
+        # the Tasks pivot showing pre-action state until a manual reload.
+        self._gen: int = 0
         # D2: live streaming children tracked for teardown -- a held ``subscribe``
         # stream must be killed on picker exit so no ``list --stream`` is
         # orphaned. Guarded by its own lock; ``_closed`` short-circuits any spawn
@@ -153,7 +160,10 @@ class RegisteredPivotRuntime:
             if machine in self._cache or machine in self._inflight:
                 return
             self._inflight.add(machine)
-        threading.Thread(target=self._run_list, args=(machine,), daemon=True).start()
+            gen = self._gen
+        threading.Thread(
+            target=self._run_list, args=(machine, gen), daemon=True
+        ).start()
 
     def get(self, machine: object) -> tuple[str, list, str]:
         """The cached ``(state, rows, error)`` for ``machine`` (``idle`` before
@@ -174,8 +184,13 @@ class RegisteredPivotRuntime:
 
     def invalidate(self, machine: object = None) -> None:
         """Drop cached results so the next :meth:`ensure` refetches. ``None``
-        clears every machine (used after an action mutates the queue)."""
+        clears every machine (used after an action mutates the queue).
+
+        Bumps :attr:`_gen` so a one-shot fetch already in flight when this runs
+        discards its stale result instead of racing it back into the cache (see
+        :meth:`_run_list`)."""
         with self._lock:
+            self._gen += 1
             if machine is None:
                 self._cache.clear()
                 self._summaries.clear()
@@ -227,7 +242,7 @@ class RegisteredPivotRuntime:
             if proc in self._procs:
                 self._procs.remove(proc)
 
-    def _run_list(self, machine: object) -> None:
+    def _run_list(self, machine: object, gen: object = None) -> None:
         ctx = {"machine": "" if machine is None else str(machine)}
         # D2: a ``stream`` pivot runs the streaming runner, which writes the
         # cache progressively (and, for ``subscribe``, keeps applying live
@@ -239,9 +254,15 @@ class RegisteredPivotRuntime:
             return
         state, rows, err, summary = self._exec_list(ctx)
         with self._lock:
+            self._inflight.discard(machine)
+            # Drop a result whose fetch was invalidated mid-flight (a steer /
+            # action cleared the cache after this fetch started) so stale data
+            # can't overwrite the just-invalidated cache. The next ``ensure``
+            # (cache miss, no longer in flight) refetches the current state.
+            if gen is not None and gen != self._gen:
+                return
             self._cache[machine] = (state, rows, err)
             self._summaries[machine] = summary
-            self._inflight.discard(machine)
 
     def _run_list_stream(self, machine: object, ctx: Mapping[str, object]) -> None:
         """Streaming ``list`` runner (D2): Popen ``list … --stream``, consume the

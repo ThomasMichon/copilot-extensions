@@ -145,6 +145,47 @@ def test_non_stream_pivot_uses_one_shot_path(tmp_path):
     assert [r["id"] for r in rows] == ["a"]
 
 
+def test_one_shot_invalidate_midflight_drops_stale_result(tmp_path):
+    # An invalidate() that fires WHILE a one-shot list fetch is in flight must
+    # not let that fetch's now-stale result overwrite the just-cleared cache --
+    # the invalidate-vs-inflight race that left the Tasks pivot showing pre-steer
+    # state until a manual reload. The generation guard drops the stale write; the
+    # next ensure() refetches the current state.
+    rt = tasks.RegisteredPivotRuntime(_make_pivot(tmp_path, "ndjson", stream=False))
+
+    real_exec = rt._exec_list
+
+    def _exec_then_invalidate(ctx):
+        result = real_exec(ctx)   # the (about-to-be-stale) fetch result
+        rt.invalidate()           # a concurrent action clears the cache mid-flight
+        return result
+
+    rt._exec_list = _exec_then_invalidate
+    rt.ensure(None)
+
+    # wait for the in-flight fetch to finish (inflight cleared)
+    deadline = time.monotonic() + 8.0
+    while time.monotonic() < deadline:
+        with rt._lock:
+            still_inflight = None in rt._inflight
+        if not still_inflight:
+            break
+        time.sleep(0.02)
+    assert not still_inflight, "fetch never completed"
+
+    # the stale result was dropped: the cache stays empty, so get() is 'idle'
+    state, rows, _err = rt.get(None)
+    assert state == "idle"
+    assert rows == []
+
+    # and a subsequent ensure() (no concurrent invalidate) caches normally
+    rt._exec_list = real_exec
+    rt.ensure(None)
+    state, rows, _err = _wait_ready(rt, None)
+    assert state == "ready"
+    assert [r["id"] for r in rows] == ["a"]
+
+
 def test_subscribe_live_delta_then_close_tears_down(tmp_path):
     rt = tasks.RegisteredPivotRuntime(
         _make_pivot(tmp_path, "subscribe", subscribe=True))

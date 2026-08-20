@@ -4911,6 +4911,13 @@ class PickerScreen(Widget):
                 self.sel = self.default_sel()
             short = (msg or "").splitlines()[0][:80] if msg else ""
             if ok:
+                # Kick an immediate re-fetch + repaint of the current scope so the
+                # row reflects the mutation at once (see _run_pivot_form_submit).
+                try:
+                    rt.ensure(self._pivot_scope_key())
+                except Exception:
+                    pass
+                self.refresh()
                 self.debug = f"{action.label} · {title}" + (f" — {short}" if short else "")
             else:
                 self.debug = f"{action.label} failed · {short or 'see command output'}"
@@ -5041,6 +5048,17 @@ class PickerScreen(Widget):
                 self.sel = self.default_sel()
             short = (msg or "").splitlines()[0][:80] if msg else ""
             if ok:
+                # ``_work`` already invalidated the cached list; kick an immediate
+                # re-fetch of the current scope and repaint so the row reflects
+                # the new state at once, instead of waiting on the idle ~2fps tick
+                # (the Tasks pivot has no poll loop of its own). Combined with the
+                # runtime's generation guard, a Confirmed card's status updates in
+                # the pivot the moment the coordinator round-trip lands.
+                try:
+                    rt.ensure(self._pivot_scope_key())
+                except Exception:
+                    pass
+                self.refresh()
                 self.debug = f"{action.label} · {title}" + (f" — {short}" if short else "")
             else:
                 self.debug = f"{action.label} failed · {short or 'see command output'}"
