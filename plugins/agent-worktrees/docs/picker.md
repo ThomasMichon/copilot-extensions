@@ -297,13 +297,17 @@ overlay) into a single styled Rich `Text`, and the app takes an injected data
 `source`. Given the same data, the same grid comes out — so a state can be
 captured with no live terminal and no human watching:
 
-> **Render-flow invariant — never block the event loop.** The Picker runs on a
-> single Textual event-loop thread. No subprocess (an `agent-worktrees --json`
-> verb, `agent-dispatch`, `git`, `ssh`, a mux/session liveness probe) and no
-> blocking IO may run *on* that thread — one blocking call freezes the whole UI
-> (and reads as a crash). Data reads run on the `LiveLoader`'s background threads;
-> actions and cross-process menu-open probes are offloaded via
-> `PickerScreen._run_bg` (worker thread + Textual `call_from_thread`). See
+> **Render-flow invariant — never block the event loop; open-first + spinner +
+> refine.** The Picker runs on a single Textual event-loop thread. No subprocess
+> (an `agent-worktrees --json` verb, `agent-dispatch`, `git`, `ssh`, a mux/session
+> liveness probe) and no blocking IO may run *on* that thread — one blocking call
+> freezes the whole UI (and reads as a crash). Data reads run on the `LiveLoader`'s
+> background threads; actions and cross-process menu-open probes are offloaded via
+> `PickerScreen._run_bg` (worker thread + Textual `call_from_thread`). A
+> load-gated component (e.g. the worktree **Actions** menu) **opens immediately
+> from cached state**, shows the shared **spinner** in its footer while the probe
+> runs, and **refines in place** when it lands — it never waits, and no control
+> ever looks inert. See
 > [architecture.md](architecture.md#the-picker-render-flow----never-block-on-cross-processio-invariant).
 
 - **Screenshot for auditing** — `<project> picker screenshot` renders the current
