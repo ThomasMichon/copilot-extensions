@@ -463,29 +463,39 @@ def _pid_alive(pid: int) -> bool | None:
         return None
 
 
+def _live_snapshot(now: float | None = None) -> OwnerLiveness | None:
+    """Read the beacon **once** and return it iff the Owner is live.
+
+    Live = the beacon is fresh AND its pid is not provably dead. Reading once
+    keeps every liveness answer (``is_owner_live``, the active set) consistent
+    with a single snapshot and avoids double filesystem IO.
+    """
+    live = read_liveness()
+    if live is None:
+        return None
+    if not live.is_fresh(now):
+        return None
+    if _pid_alive(live.pid) is False:
+        return None
+    return live
+
+
 def is_owner_live(now: float | None = None) -> bool:
     """True if a Connection Owner daemon is running + reconciling on this machine.
 
     Fails safe: a missing / stale beacon, or a beacon whose pid is provably dead,
     reads as **not live** so a tenant falls back to owning its own relay.
     """
-    live = read_liveness()
-    if live is None:
-        return False
-    if not live.is_fresh(now):
-        return False
-    return _pid_alive(live.pid) is not False
+    return _live_snapshot(now) is not None
 
 
 def owner_active_codespaces(now: float | None = None) -> set[str]:
     """CodeSpaces the live Owner currently has a relay channel for.
 
     Empty when the Owner is not live (a stale/absent beacon's ``active`` list is
-    meaningless), so callers fail safe.
+    meaningless), so callers fail safe. Reads the beacon once.
     """
-    if not is_owner_live(now):
-        return set()
-    live = read_liveness()
+    live = _live_snapshot(now)
     return set(live.active) if live else set()
 
 
