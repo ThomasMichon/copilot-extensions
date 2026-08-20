@@ -48,7 +48,7 @@ import logging
 import os
 import platform
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any, Protocol
@@ -367,6 +367,10 @@ class OwnerLiveness:
     host: str
     heartbeat_at: float
     interval: float
+    # CodeSpaces the Owner currently has a *live* relay channel for (published so
+    # a tenant can tell the relay it wants to defer to is actually up before it
+    # skips standing up its own -- the timing seam the ssh/dispatch rewire needs).
+    active: tuple[str, ...] = ()
 
     def staleness_threshold(self) -> float:
         return max(_LIVE_STALE_FLOOR, _LIVE_STALE_INTERVALS * max(self.interval, 0.0))
@@ -381,8 +385,13 @@ class OwnerLiveness:
         return age <= self.staleness_threshold()
 
 
-def _write_liveness(interval: float) -> None:
-    """Refresh the daemon liveness beacon (best-effort; never raises)."""
+def _write_liveness(interval: float, active: Iterable[str] | None = None) -> None:
+    """Refresh the daemon liveness beacon (best-effort; never raises).
+
+    ``active`` is the set of CodeSpaces the Owner currently has a live relay
+    channel for; it is published so a tenant can wait for the relay it wants
+    before deferring.
+    """
     try:
         ensure_runtime_dir()
         payload = {
@@ -390,6 +399,7 @@ def _write_liveness(interval: float) -> None:
             "host": _this_host(),
             "heartbeat_at": time.time(),
             "interval": float(interval),
+            "active": sorted(active or ()),
         }
         tmp = LIVE_FILE.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(payload), encoding="utf-8")
@@ -416,12 +426,16 @@ def read_liveness() -> OwnerLiveness | None:
         return None
     if not isinstance(raw, dict):
         return None
+    active_raw = raw.get("active")
+    if not isinstance(active_raw, list):
+        active_raw = []
     try:
         return OwnerLiveness(
             pid=int(raw.get("pid", 0)),
             host=str(raw.get("host", "")),
             heartbeat_at=float(raw.get("heartbeat_at", 0.0)),
             interval=float(raw.get("interval", 0.0)),
+            active=tuple(str(cs) for cs in active_raw if isinstance(cs, str)),
         )
     except (TypeError, ValueError):
         return None
@@ -461,6 +475,28 @@ def is_owner_live(now: float | None = None) -> bool:
     if not live.is_fresh(now):
         return False
     return _pid_alive(live.pid) is not False
+
+
+def owner_active_codespaces(now: float | None = None) -> set[str]:
+    """CodeSpaces the live Owner currently has a relay channel for.
+
+    Empty when the Owner is not live (a stale/absent beacon's ``active`` list is
+    meaningless), so callers fail safe.
+    """
+    if not is_owner_live(now):
+        return set()
+    live = read_liveness()
+    return set(live.active) if live else set()
+
+
+def owner_serves_relay(codespace: str, now: float | None = None) -> bool:
+    """True iff a live Owner is currently serving ``codespace``'s relay.
+
+    This is the gate a tenant checks before deferring: only when the Owner is
+    live **and** already owns this CodeSpace's relay may the tenant skip standing
+    up its own ``-R``.
+    """
+    return bool(codespace) and codespace in owner_active_codespaces(now)
 
 
 # ---------------------------------------------------------------------------
@@ -655,13 +691,15 @@ async def run_owner_daemon(
     """
     stop = stop_event if stop_event is not None else asyncio.Event()
     try:
-        _write_liveness(interval)
+        _write_liveness(interval, active=owner.active_codespaces())
         while not stop.is_set():
             try:
                 await owner.reconcile()
             except Exception as exc:  # a bad cycle must not kill the daemon
                 log.warning("Connection Owner reconcile cycle failed: %s", exc)
-            _write_liveness(interval)  # refresh the beacon each cycle
+            # Refresh the beacon each cycle, publishing which CodeSpaces now have
+            # a live relay channel so tenants can defer to them.
+            _write_liveness(interval, active=owner.active_codespaces())
             try:
                 await asyncio.wait_for(stop.wait(), timeout=interval)
             except (TimeoutError, asyncio.TimeoutError):
