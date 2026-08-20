@@ -85,3 +85,16 @@ def test_resolve_spawn_falls_back_when_no_pwsh_host(tmp_path, monkeypatch):
 
 def test_resolve_spawn_empty():
     assert resolve_spawn([], is_windows=True) == []
+
+
+def test_no_window_creationflags_posix_is_zero():
+    import sys
+
+    from agent_mcp._exec import no_window_creationflags
+
+    # On POSIX the flag is 0 (a valid, no-op creationflags); on win32 it is the
+    # non-zero CREATE_NO_WINDOW. Either way it must be an int the spawn accepts.
+    flags = no_window_creationflags()
+    assert isinstance(flags, int)
+    if sys.platform != "win32":
+        assert flags == 0
