@@ -131,14 +131,34 @@ config, or run commands. Instead, prevent self-delegation via
 **instruction-based guards**:
 
 1. **MCP readiness check.** Every agent with MCP servers must probe one tool on
-   startup. If the tools are unavailable, report the failure and stop
-   immediately.
-2. **Anti-self-delegation rule.** Every agent's instructions must include: "Do
-   NOT use the task tool to spawn another `<agent-name>` agent." This prevents
-   the recursive loop where an MCP failure makes the agent delegate to a fresh
-   copy of itself, which also fails, ad infinitum.
+   startup. If the tools are unavailable, **report the specific tool/MCP error
+   and stop immediately** — do not paraphrase it to a generic "not available."
+   Report the *exact observed* failure; if the runtime exposes no lower-level
+   error, name the specific server/tool that failed to load and state that no
+   further diagnostic was available (don't invent one). The honest, specific
+   stop is *load-bearing*: it is what **surfaces the real runtime fault** (a
+   broken interpreter/venv, an unstarted daemon, a missing binstub, an expired
+   token) so the operator can fix it. Any fallback — a neighboring capability, a
+   shell/curl workaround, or delegating to a fresh copy of the agent — **masks**
+   that fault and, in the recursion case, burns the sub-agent-depth budget until
+   the runtime kills it with a misleading "maximum sub-agent depth reached."
+2. **Anti-self-delegation rule.** Every agent's instructions must include, **as
+   a literal line**: "Do NOT use the task tool to spawn another `<agent-name>`
+   agent." This prevents the recursive loop where an MCP failure makes the agent
+   delegate to a fresh copy of itself, which also fails, ad infinitum.
 
 Both guards belong in the agent's `## MCP Readiness` section.
+
+> **Keep an explicit "Do NOT … spawn / delegate" line — a reworded guard slips
+> past the scanner as *missing*.** The `reviewing-customizations` scan detects
+> this guard with a loose regex over the collapsed agent body — roughly *do not …
+> (task tool | spawn | delegate)* within a short span. It does **not** require
+> the exact canonical sentence, but it **does** require that construction:
+> paraphrases that drop the "do not" opener or those anchor words — "never call
+> `task`", "no sub-agent fallback", "don't re-invoke myself" — do not match, so
+> the agent is flagged as missing the guard (BLOCKING). Safest is to keep the
+> canonical literal line `Do NOT use the task tool to spawn another <agent-name>
+> agent`; rewording it out is a common regression.
 
 ### Hard-rule validation checklist
 
@@ -154,14 +174,61 @@ any applicable box is unchecked:
       frontmatter declares `mcp-servers`, the body must carry the section that
       houses both guards below.
 - [ ] **Readiness probe present.** The section instructs the agent to probe one
-      MCP tool on startup and, on failure, **report and stop** — no bash/curl/
-      HTTP fallback, no silent degradation.
-- [ ] **Anti-self-delegation line present, verbatim intent.** The section
-      contains "Do NOT use the task tool to spawn another `<agent-name>` agent"
-      (with the agent's own name substituted).
+      MCP tool on startup and, on failure, **report the specific error and stop**
+      — no bash/curl/HTTP fallback, no neighboring-capability fallback, no silent
+      degradation. A generic "tools unavailable, stopping" that hides the
+      underlying cause is a weak probe: the specific error (or, absent one, the
+      named server/tool that failed) is what lets the operator repair the runtime.
+- [ ] **Anti-self-delegation line present.** The section contains an explicit
+      "Do NOT … (task tool / spawn / delegate) …" directive — canonically the
+      literal line "Do NOT use the task tool to spawn another `<agent-name>`
+      agent" (with the agent's own name substituted). The scan requires that
+      *construction*, not the exact sentence; a paraphrase that drops the "do
+      not" opener or those anchor words (e.g. "never call `task`", "no sub-agent
+      fallback") reads as **missing**, so keep the canonical wording.
 - [ ] **No MCP agent silently omits the guard.** An agent with `mcp-servers` but
       no readiness/anti-recursion text is a **blocking** finding, not a nit — a
       single missing guard is the exact failure this rule exists to prevent.
 
 An agent with **no** `mcp-servers` still owes the tools rule (row 1) but is
 exempt from the MCP-readiness rows.
+
+## Wrapping an MCP server: make the agent reachable
+
+The guards above stop a wrapped-MCP agent from *misbehaving*, but a subtler
+failure is a request never reaching it. When you wrap an MCP server in a
+sub-agent, that agent becomes the **only** path to its tools — so it must be
+**unambiguously routable**, or a superficially similar request is silently
+captured by a *neighboring capability that operates a different backend*.
+
+The canonical trap: a live-state MCP agent (e.g. one that manages the operator's
+**live, signed-in** browser tabs) sits next to an **automation** capability
+(e.g. Playwright driving a **separate, dedicated** browser profile). A request
+like "organize my browser tabs" reads as browser work, routes to the automation
+skill, and drives the *wrong* browser — or dead-ends when automation can't reach
+live state. The two operate different backends for a request that sounds like one
+capability.
+
+When wrapping an MCP server, therefore:
+
+- **Give the agent a crisp, distinctive description with concrete trigger
+  phrases** for the exact live requests it should own ("organize my Edge tabs",
+  "find an open tab"), and state its **backend/scope** explicitly (live
+  signed-in session vs. a dedicated automation profile) so the router can tell it
+  apart from neighbors.
+- **Pair it with a routing skill when a neighbor competes.** A short skill whose
+  body just delegates to the agent (and names the boundary vs. the neighboring
+  capability) is the reliable way to pin routing — an agent description alone can
+  lose to a well-triggered sibling skill.
+- **Check for capability collisions.** Run the **`reviewing-customizations`**
+  scan over the *loaded* set (`--from-settings`); it surfaces **skill↔skill**
+  trigger overlaps, including LOCAL↔PLUGIN. Know its limit: it does **not** put
+  *agent* descriptions in the collision map, so an **agent-vs-skill** competition
+  (exactly the live-tabs-vs-automation trap) will not show up mechanically. That
+  is a further reason to give the MCP agent a **routing skill** — a skill *is*
+  scanned, so its triggers join the collision map — and to eyeball neighboring
+  skills by hand. Two surfaces that both plausibly answer the same phrase but hit
+  different backends is a routing bug, even when neither is "wrong" in isolation.
+- **State the boundary in both places.** In the MCP agent *and* its neighbor,
+  add a one-line "do not use X for this; that's Y's job" so a mis-route
+  self-corrects instead of quietly driving the wrong backend.
