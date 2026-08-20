@@ -14,6 +14,7 @@ import pytest
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import activity
+from agent_worktrees import reclaim
 from agent_worktrees import sessions
 
 
@@ -215,6 +216,63 @@ class TestCmdHandoffCutover:
         assert rc == 0
         out = json.loads(capfd.readouterr().out)
         assert out["pane"] == "%9" and out["gone"] is True
+
+    def test_retire_reaps_old_copilot_before_success(self, monkeypatch, capfd):
+        # A hard pane-kill left the pane gone; the OLD Copilot process is then
+        # reaped, and only then is success declared.
+        monkeypatch.setattr(sessions, "mux_retire_pane",
+                            lambda p, **k: {"ok": True, "pane": p, "gone": True,
+                                            "method": "hard"})
+        monkeypatch.setattr(activity, "log_event", lambda *a, **k: None)
+        seen = {}
+
+        def _ensure(sid, **k):
+            seen["sid"] = sid
+            return {"checked": True, "found": 1, "reaped": 1,
+                    "survivors": 0, "pids": [7]}
+
+        monkeypatch.setattr(reclaim, "ensure_session_copilot_reaped", _ensure)
+        rc = m.cmd_handoff_cutover(_ns(retire_pane="%9", session_id="old-sess"))
+        assert rc == 0
+        assert seen["sid"] == "old-sess"
+        out = json.loads(capfd.readouterr().out)
+        assert out["ok"] is True and out["copilot"]["reaped"] == 1
+
+    def test_retire_fails_when_old_copilot_survives(self, monkeypatch, capfd):
+        # Pane retired but the old Copilot process survived the reap -> the retire
+        # must NOT declare success (a lingering parallel session remains).
+        monkeypatch.setattr(sessions, "mux_retire_pane",
+                            lambda p, **k: {"ok": True, "pane": p, "gone": True,
+                                            "method": "hard"})
+        monkeypatch.setattr(activity, "log_event", lambda *a, **k: None)
+        monkeypatch.setattr(
+            reclaim, "ensure_session_copilot_reaped",
+            lambda sid, **k: {"checked": True, "found": 1, "reaped": 0,
+                              "survivors": 1, "pids": [7]})
+        rc = m.cmd_handoff_cutover(_ns(retire_pane="%9", session_id="old-sess"))
+        assert rc == 1
+        out = json.loads(capfd.readouterr().out)
+        assert out["ok"] is False and out["copilot"]["survivors"] == 1
+
+    def test_retire_last_window_skip_does_not_reap(self, monkeypatch, capfd):
+        # The last-window guard deliberately keeps the pane + session alive, so
+        # the process reap must be skipped (never kill the session we're keeping).
+        monkeypatch.setattr(sessions, "mux_retire_pane",
+                            lambda p, **k: {"ok": True, "pane": p, "gone": False,
+                                            "method": "last-window-skip"})
+        monkeypatch.setattr(activity, "log_event", lambda *a, **k: None)
+        called = {"n": 0}
+
+        def _ensure(sid, **k):
+            called["n"] += 1
+            return {"checked": True}
+
+        monkeypatch.setattr(reclaim, "ensure_session_copilot_reaped", _ensure)
+        rc = m.cmd_handoff_cutover(_ns(retire_pane="%9", session_id="old-sess"))
+        assert rc == 0
+        assert called["n"] == 0
+        out = json.loads(capfd.readouterr().out)
+        assert "copilot" not in out
 
     def test_spawn_requires_seed(self, capfd):
         rc = m.cmd_handoff_cutover(_ns())

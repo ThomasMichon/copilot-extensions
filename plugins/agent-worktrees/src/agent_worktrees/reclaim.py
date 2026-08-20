@@ -42,6 +42,7 @@ __all__ = [
     "bare_orphan_worktree_ids",
     "live_bridge_worktrees",
     "reap_bound_copilots",
+    "ensure_session_copilot_reaped",
     "filter_stop_unreachable",
     "teardown_detached_mux",
 ]
@@ -648,6 +649,51 @@ def reap_bound_copilots(
             "children_killed": children_killed,
         })
     return out
+
+
+def ensure_session_copilot_reaped(
+    session_id: str,
+    *,
+    grace: float = 2.0,
+    poll_interval: float = 0.3,
+) -> dict:
+    """Ensure no live Copilot remains bound to *session_id*, reaping an orphan.
+
+    Retiring a mux pane (:func:`sessions.mux_retire_pane`) kills the **pane**,
+    which is not the same as killing the Copilot **process**: a swallowed Ctrl-C
+    or a hard ``kill-pane`` can leave the Copilot running as an orphan, which the
+    mux may later restore as a reappearing pane -- a lingering parallel session
+    after a handoff cutover. After a cutover retires the predecessor pane, call
+    this with the predecessor session id so "retired" means the process is truly
+    gone.
+
+    A graceful quit releases its ``inuse.<pid>.lock`` on its own, so give it a
+    brief ``grace`` window to disappear before reaping. If a bound Copilot is
+    still alive after that, reap it (and its Copilot children) **precisely** by
+    its lock pid -- the successor session's Copilot is a different pid bound to a
+    different session and is never touched.
+
+    Returns ``{checked, found, reaped, survivors, pids}``.
+    """
+    import time
+
+    deadline = time.monotonic() + max(grace, 0.0)
+    bound = resolve_bound_copilots(session_id=session_id)
+    while bound and time.monotonic() < deadline:
+        time.sleep(poll_interval)
+        bound = resolve_bound_copilots(session_id=session_id)
+    if not bound:
+        return {"checked": True, "found": 0, "reaped": 0, "survivors": 0, "pids": []}
+    pids = [b["pid"] for b in bound]
+    reaped = reap_bound_copilots(bound)
+    survivors = resolve_bound_copilots(session_id=session_id)
+    return {
+        "checked": True,
+        "found": len(bound),
+        "reaped": sum(1 for r in reaped if r.get("killed")),
+        "survivors": len(survivors),
+        "pids": pids,
+    }
 
 
 def _mux_reachability(worktree_ids) -> dict[str, bool]:

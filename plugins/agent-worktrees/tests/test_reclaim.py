@@ -508,3 +508,60 @@ class TestFindBareOrphans:
                             lambda **k: list(rows))
         ids = reclaim.bare_orphan_worktree_ids(table=table, self_pid=999)
         assert ids == {"wtA"}
+
+
+# ── ensure_session_copilot_reaped (retire process-death verification) ───────
+class TestEnsureSessionCopilotReaped:
+    _BOUND = [{"session_id": "sid", "pid": 4242,
+               "worktree_id": "wt", "homing": "mux"}]
+
+    def _seq(self, *returns):
+        """A resolve_bound_copilots stub returning each value in turn."""
+        state = {"n": 0}
+
+        def _f(**kw):
+            i = min(state["n"], len(returns) - 1)
+            state["n"] += 1
+            return list(returns[i])
+
+        return _f
+
+    def test_no_bound_is_noop(self, monkeypatch):
+        monkeypatch.setattr(reclaim, "resolve_bound_copilots", lambda **k: [])
+        called = {"reap": False}
+
+        def _reap(t, **k):
+            called["reap"] = True
+            return []
+
+        monkeypatch.setattr(reclaim, "reap_bound_copilots", _reap)
+        out = reclaim.ensure_session_copilot_reaped("sid", grace=0)
+        assert out == {"checked": True, "found": 0, "reaped": 0,
+                       "survivors": 0, "pids": []}
+        assert called["reap"] is False  # nothing alive -> never reap
+
+    def test_orphan_is_reaped(self, monkeypatch):
+        # Bound Copilot survives the grace window -> reaped, then gone.
+        monkeypatch.setattr(reclaim, "resolve_bound_copilots",
+                            self._seq(self._BOUND, []))
+        seen = {}
+
+        def _reap(targets, **k):
+            seen["targets"] = targets
+            return [{"pid": 4242, "killed": True, "children_killed": 0}]
+
+        monkeypatch.setattr(reclaim, "reap_bound_copilots", _reap)
+        out = reclaim.ensure_session_copilot_reaped("sid", grace=0)
+        assert out["found"] == 1 and out["reaped"] == 1 and out["survivors"] == 0
+        assert out["pids"] == [4242]
+        assert seen["targets"] == self._BOUND
+
+    def test_survivor_when_reap_fails(self, monkeypatch):
+        # The old Copilot outlives the reap -> reported as a survivor (caller
+        # then declares the retire a failure).
+        monkeypatch.setattr(reclaim, "resolve_bound_copilots",
+                            self._seq(self._BOUND, self._BOUND))
+        monkeypatch.setattr(reclaim, "reap_bound_copilots",
+                            lambda t, **k: [{"pid": 4242, "killed": False}])
+        out = reclaim.ensure_session_copilot_reaped("sid", grace=0)
+        assert out["found"] == 1 and out["reaped"] == 0 and out["survivors"] == 1

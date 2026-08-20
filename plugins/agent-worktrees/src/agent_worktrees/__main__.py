@@ -1467,6 +1467,12 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
       successor-side handoff consumer can retire it after pickup.
     * **retire** (``--retire-pane <id>``): double-Ctrl-C that specific pane
       (Copilot's native clean quit), hard-killing it only if it will not exit.
+      Then, when the predecessor ``--session-id`` is known, **verify its Copilot
+      process is gone** -- reaping an orphan by its ``inuse.<pid>.lock`` pid (the
+      successor is a different pid, untouched) -- so a hard-killed pane never
+      leaves a lingering parallel session that the mux later restores as a
+      reappearing pane. Success requires **both** the pane retired and the old
+      Copilot process gone.
 
     The mux choreography lives here (agent-worktrees owns launch + mux); the
     context-handoff extension is a thin trigger that shells out to this command.
@@ -1476,20 +1482,39 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
     if retire_pane:
         raw_id = getattr(args, "worktree_id", None)
         wt_id = _resolve_worktree_id(raw_id) if raw_id else None
+        session_id = getattr(args, "session_id", None)
         result = sessions.mux_retire_pane(retire_pane)
+        # Pane death is NOT process death. A swallowed Ctrl-C or a hard kill-pane
+        # can leave the OLD Copilot running as an orphan, which the mux later
+        # restores as a reappearing pane -- a lingering parallel session after
+        # the cutover. When the predecessor session is known, authoritatively
+        # ensure its Copilot process is gone (reaping an orphan by its inuse-lock
+        # pid; the successor is a different pid, untouched) BEFORE declaring the
+        # retire a success. Skipped for the last-window guard, where the pane and
+        # its session are deliberately kept alive.
+        reap = {"checked": False}
+        if session_id and result.get("method") != "last-window-skip":
+            reap = reclaim.ensure_session_copilot_reaped(session_id)
+            result["copilot"] = reap
+        proc_ok = (not reap.get("checked")) or reap.get("survivors", 0) == 0
+        overall_ok = bool(result.get("ok")) and proc_ok
+        result["ok"] = overall_ok
         activity.log_event(
             "handoff_predecessor_retire",
             worktree_id=wt_id,
-            session_id=getattr(args, "session_id", None),
+            session_id=session_id,
             source="python",
             old_pane=retire_pane,
             successor_verified=bool(getattr(args, "successor_verified", False)),
             reason=getattr(args, "retire_reason", None),
             method=result.get("method"),
-            outcome="gone" if result.get("gone") else "left-running",
+            outcome="gone" if (result.get("gone") and proc_ok) else "left-running",
+            copilot_found=reap.get("found", 0),
+            copilot_reaped=reap.get("reaped", 0),
+            copilot_survivors=reap.get("survivors", 0),
         )
         _json_output(result)
-        return 0 if result.get("ok") else 1
+        return 0 if overall_ok else 1
 
     # ── Spawn / cutover mode ─────────────────────────────────────────────
     seed = getattr(args, "seed", None)
