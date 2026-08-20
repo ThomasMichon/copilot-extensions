@@ -238,6 +238,24 @@ by `get_live_relay_port()`. Two ways it goes bad:
   daemon with `Stop-Process -Id <pid>` -- never hand-hack `relay-port` /
   `current-version` / `active.json`.
 
+> **Valid state, not a bug: on Windows the two `python.exe` show DIFFERENT
+> interpreter paths.** The supervisor (parent) runs from the versioned-slot path
+> `~/.agent-bridge/versions/<v>/Scripts/python.exe`; its worker **child** runs
+> from the **base interpreter** `C:\Program Files\Python3XX\python.exe` -- and the
+> *base-path child is the one bound to port 9280*. This interpreter-path
+> difference is the **normal Windows stdlib-venv launcher redirect**, NOT version
+> skew and NOT a stray/global install: a stdlib venv's `Scripts\python.exe` is a
+> `venvlauncher.exe` that re-execs `home\python.exe` (from `pyvenv.cfg`) with the
+> slot's `site-packages`. The child is still running the **versioned slot's**
+> code (`sys.executable` = the slot path, `sys._base_executable` = the base). Do
+> **not** kill the `Program Files\Python3XX\python.exe` worker thinking it's a
+> rogue global daemon. Confirm it's one daemon: the base-path child's **PPID is
+> the slot-path supervisor**, both share the **same start time**, and the slot's
+> `pyvenv.cfg` shows `home = C:\Program Files\Python3XX`. (A bare
+> `& "C:\Program Files\Python3XX\python.exe" -c "import agent_bridge"` fails on
+> purpose -- run *directly* it bypasses the venv; the daemon child reaches the
+> slot's packages only *through* the launcher.)
+
 Until the durable fix (**#580**) lands, **end + recreate** is the
 reliable recovery.
 
