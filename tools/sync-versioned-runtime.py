@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fan the canonical versioned_runtime.py out to every Python runtime plugin.
+"""Fan the canonical versioned-runtime files out to the Python runtime plugins.
 
 The immutable-versioned runtime primitive (dotfiles #581) must physically ship
 inside each plugin (`scripts/versioned_runtime.py`) because plugins are pulled
@@ -8,14 +8,23 @@ To keep one source of truth, the canonical copy lives at
 ``libs/versioned-runtime/versioned_runtime.py`` and this script vendors it,
 **byte-identically**, into every Python runtime plugin's ``scripts/`` dir.
 
+It also vendors the canonical parameterized shell resolvers
+(``libs/versioned-runtime/resolve-runtime.sh`` / ``.ps1`` -- the one marker-only
+way a binstub/hook/service launcher resolves the versioned interpreter;
+uniform-runtime-resolution, #765), but **opt-in**: only to plugins that already
+carry a ``scripts/resolve-runtime.*`` copy (a plugin adopts the resolver by
+dropping the file in; sync then keeps it byte-identical). Bespoke-resolver
+plugins (``agent-worktrees``) are excluded so their specialized variant is never
+overwritten.
+
 Usage::
 
     python tools/sync-versioned-runtime.py          # copy canonical -> plugins
     python tools/sync-versioned-runtime.py --check   # verify in sync (CI/pre-push)
 
-``--check`` writes nothing and exits non-zero if any plugin copy is missing or
-drifted (the same invariant ``tools/check-install-contract.py`` enforces, with a
-nudge to run this script). A "Python runtime plugin" is one that ships a
+``--check`` writes nothing and exits non-zero if any vendored copy is missing or
+drifted (``tools/check-install-contract.py`` independently enforces the
+``versioned_runtime.py`` half). A "Python runtime plugin" is one that ships a
 ``pyproject.toml`` **and** a runtime installer (``install.*`` or ``init.*``) --
 the exact set the install contract requires to carry the primitive.
 """
@@ -30,6 +39,20 @@ REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
 CANONICAL = REPO / "libs" / "versioned-runtime" / "versioned_runtime.py"
 VRT_NAME = "versioned_runtime.py"
+
+# Canonical parameterized shell resolvers (uniform-runtime-resolution, #765). The
+# one marker-only way a binstub / hook / service launcher resolves the versioned
+# interpreter, service-parameterized via AGENT_RT_ROOT -> AGENT_RT_PY. Fanned out
+# byte-identically -- like versioned_runtime.py -- but **opt-in**: only to plugins
+# that already carry a copy in scripts/ (a plugin adopts the resolver by dropping
+# in the file; migration then keeps it in sync). This lets the migration land one
+# plugin at a time without forcing the resolver onto not-yet-migrated plugins.
+RESOLVER_DIR = REPO / "libs" / "versioned-runtime"
+RESOLVER_NAMES = ("resolve-runtime.sh", "resolve-runtime.ps1")
+# agent-worktrees ships a *bespoke* resolver (the pre-existing $AW_PY variant with
+# a hardcoded root and its own deploy path, #1106/#742); it is intentionally not
+# the parameterized canonical, so the fan-out never overwrites it.
+RESOLVER_BESPOKE = frozenset({"agent-worktrees"})
 
 
 def _has_installer(plugin: Path) -> bool:
@@ -49,6 +72,22 @@ def _runtime_plugins() -> list[Path]:
     )
 
 
+def _resolver_plugins() -> list[Path]:
+    """Plugins that have opted in to the canonical resolver.
+
+    Opt-in = the plugin already carries at least one ``scripts/resolve-runtime.*``
+    copy. The bespoke-resolver plugins (``agent-worktrees``) are excluded so the
+    fan-out never clobbers their specialized variant.
+    """
+    out: list[Path] = []
+    for p in sorted(PLUGINS_DIR.iterdir()):
+        if not p.is_dir() or p.name in RESOLVER_BESPOKE:
+            continue
+        if any((p / "scripts" / name).exists() for name in RESOLVER_NAMES):
+            out.append(p)
+    return out
+
+
 def _sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
@@ -64,49 +103,68 @@ def main() -> int:
     if not CANONICAL.exists():
         print(f"canonical missing: {CANONICAL.relative_to(REPO)}", file=sys.stderr)
         return 1
-    canonical_bytes = CANONICAL.read_bytes()
-    canonical_sha = _sha(canonical_bytes)
 
     plugins = _runtime_plugins()
     if not plugins:
         print("No Python runtime plugins found.", file=sys.stderr)
         return 1
 
+    # Build the full set of (canonical_bytes, dest) vendor pairs: the primitive
+    # into every runtime plugin, plus each opt-in plugin's resolver copies.
+    pairs: list[tuple[bytes, Path]] = []
+    canonical_bytes = CANONICAL.read_bytes()
+    for plugin in plugins:
+        pairs.append((canonical_bytes, plugin / "scripts" / VRT_NAME))
+
+    resolver_plugins = _resolver_plugins()
+    resolver_bytes: dict[str, bytes] = {}
+    for name in RESOLVER_NAMES:
+        src = RESOLVER_DIR / name
+        if not src.exists():
+            print(f"canonical resolver missing: {src.relative_to(REPO)}", file=sys.stderr)
+            return 1
+        resolver_bytes[name] = src.read_bytes()
+    for plugin in resolver_plugins:
+        for name in RESOLVER_NAMES:
+            pairs.append((resolver_bytes[name], plugin / "scripts" / name))
+
     drifted: list[str] = []
     written: list[str] = []
-    for plugin in plugins:
-        dest = plugin / "scripts" / VRT_NAME
+    for want_bytes, dest in pairs:
         current = dest.read_bytes() if dest.exists() else None
-        if current is not None and _sha(current) == canonical_sha:
+        if current is not None and _sha(current) == _sha(want_bytes):
             continue
         rel = dest.relative_to(REPO).as_posix()
         if args.check:
             drifted.append(f"{rel} ({'missing' if current is None else 'drifted'})")
             continue
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(canonical_bytes)
+        dest.write_bytes(want_bytes)
         written.append(rel)
 
+    n_plugins = len(plugins)
+    n_res = len(resolver_plugins)
+    scope = f"{n_plugins} plugins (+ resolvers in {n_res})"
     if args.check:
         if drifted:
             print(
-                "versioned_runtime.py is out of sync with the canonical source "
-                f"({CANONICAL.relative_to(REPO).as_posix()}):",
+                "vendored versioned-runtime files are out of sync with the "
+                f"canonical sources in {RESOLVER_DIR.relative_to(REPO).as_posix()}:",
                 file=sys.stderr,
             )
             for d in drifted:
                 print(f"  - {d}", file=sys.stderr)
             print("\nRun: python tools/sync-versioned-runtime.py", file=sys.stderr)
             return 1
-        print(f"versioned_runtime.py in sync across {len(plugins)} plugins.")
+        print(f"versioned-runtime files in sync across {scope}.")
         return 0
 
     if written:
-        print(f"Synced versioned_runtime.py to {len(written)} plugin(s):")
+        print(f"Synced versioned-runtime files ({len(written)} file(s)):")
         for w in written:
             print(f"  + {w}")
     else:
-        print(f"Already in sync across {len(plugins)} plugins; nothing to do.")
+        print(f"Already in sync across {scope}; nothing to do.")
     return 0
 
 
