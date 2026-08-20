@@ -17,12 +17,23 @@ and process state cannot tell. Annotate THIS worktree's disposition with
   `agent-worktrees status --follow-up --summary "<what's underway>"`.
 - **Direction changed or you learned more?** Periodically re-summarize:
   `agent-worktrees status --summary "<current focus>"` -- add/keep `--follow-up`
-  while work is owed, or clear it with `--resolved` once nothing is left.
+  while work is owed, or clear it with `--resolved` once nothing is left. If the
+  worktree's *focus* changed (not just its state), also refresh the headline
+  title: `agent-worktrees status --title "<short headline>"` -- the title is the
+  Picker's label, so keep it describing what this worktree is *now* about.
 - **End of a substantive turn?** Before you hand control back, refresh the
   one-line summary so the Picker reflects the latest state:
   `agent-worktrees status --summary "<where things stand>"` (with
   `--follow-up`/`--resolved` as appropriate). This is the highest-signal status
   the Picker has -- keep it current rather than leaving it for finalize.
+
+> **You'll get a reminder.** A `postToolUse` hook watches for drift and, after
+> ~25 tool calls or ~20 minutes without a disposition write, injects a one-line
+> nudge to run `status --summary`/`--title`. It resets when you write one (and on
+> finalize). Treat the nudge as a cue to reflect -- update if the focus/state
+> moved, ignore it if nothing consequential changed. (Silence it for a session
+> with `AGENT_WORKTREES_NUDGE=off`; tune via `AGENT_WORKTREES_NUDGE_CALLS` /
+> `AGENT_WORKTREES_NUDGE_MINUTES`.)
 
 The summary is one line; latest wins. Flag conservatively but honestly: an
 unflagged worktree reads as *resolved and safe to prune*.

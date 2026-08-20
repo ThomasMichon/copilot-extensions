@@ -21,6 +21,14 @@
         "timeoutSec": 10
       }
     ],
+    "postToolUse": [
+      {
+        "type": "command",
+        "powershell": "try { $py=(Get-Command python -ErrorAction SilentlyContinue).Source; $s=\"$env:USERPROFILE\\.agent-worktrees\\bin\\nudge_status.py\"; if ($py -and (Test-Path $s)) { & $py $s } } catch {}; exit 0",
+        "bash": "s=\"$HOME/.agent-worktrees/bin/nudge_status.py\"; if command -v python3 >/dev/null 2>&1 && [ -f \"$s\" ]; then python3 \"$s\" || true; fi; exit 0",
+        "timeoutSec": 10
+      }
+    ],
     "sessionStart": [
       {
         "type": "command",
