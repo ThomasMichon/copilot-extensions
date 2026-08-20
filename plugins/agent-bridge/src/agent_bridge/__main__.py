@@ -1232,7 +1232,7 @@ def _passive_daemon_creationflags() -> int:
         # getattr fallback so this stays importable/testable on non-Windows CI,
         # where subprocess lacks DETACHED_PROCESS (Win32 value 0x00000008); the
         # win32 branch is exercised via monkeypatched sys.platform on Linux.
-        return getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+        return getattr(subprocess, "DETACHED_PROCESS", 0x00000008)  # headless-guard: allow: passive daemon is DETACHED-only (no console at all, not merely no-window)
     return 0
 
 

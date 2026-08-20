@@ -46,7 +46,7 @@ _JobObjectExtendedLimitInformation = 9
 
 # Spawn-time flag a caller uses to place a child *outside* the current job
 # (used by the Session Host launcher to escape the front's kill-on-close job).
-CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+CREATE_BREAKAWAY_FROM_JOB = 0x01000000  # headless-guard: allow: job-object breakaway primitive (winjob is the low-level layer agent_procutil builds on)
 
 
 def _kill_on_close_limit_flags(allow_breakaway: bool) -> int:

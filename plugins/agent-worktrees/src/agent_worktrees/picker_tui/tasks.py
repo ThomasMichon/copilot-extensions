@@ -211,7 +211,7 @@ class RegisteredPivotRuntime:
             kwargs["start_new_session"] = True
         else:
             kwargs["creationflags"] = (
-                getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | _CREATE_NO_WINDOW
+                getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | _CREATE_NO_WINDOW  # headless-guard: allow: own process group for Ctrl-C signal delivery (+ no-window)
             )
         proc = subprocess.Popen(list(argv), **kwargs)
         with self._procs_lock:

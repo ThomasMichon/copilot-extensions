@@ -1082,7 +1082,7 @@ class LiveLoader:
             # CREATE_NO_WINDOW: keep the ssh child off our console so a failing
             # ssh can't clear the console's VT-input mode and break arrow keys.
             kwargs["creationflags"] = (
-                getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)  # headless-guard: allow: own process group (kill-as-group on cancel) + no-window
                 | _CREATE_NO_WINDOW
             )
         proc = subprocess.Popen(argv, **kwargs)
@@ -1122,7 +1122,7 @@ class LiveLoader:
             kwargs["start_new_session"] = True
         else:
             kwargs["creationflags"] = (
-                getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)  # headless-guard: allow: own process group (kill-as-group on cancel) + no-window
                 | _CREATE_NO_WINDOW
             )
         proc = subprocess.Popen(argv, **kwargs)
