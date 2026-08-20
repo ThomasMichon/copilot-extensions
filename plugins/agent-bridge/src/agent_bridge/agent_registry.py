@@ -1541,36 +1541,28 @@ def _relay_profile_via_cli(binstub: str) -> dict | None:
 
 
 def _register_provider_relay(
-    builder, binstub: str, import_path: str,
+    builder, binstub: str,
 ) -> None:
-    """Register one provider's relay profile: CLI seam first, import fallback."""
-    # Process-boundary first (#892 Inc 2): apply the declarative profile from the
-    # provider's `relay-profile` CLI with a file-backed token validator, so a
-    # provider relay fix reaches the daemon from its OWN venv (no bridge redeploy).
-    profile = _relay_profile_via_cli(binstub)
-    if profile is not None:
-        try:
-            _apply_relay_profile(builder, profile)
-            log.info("Applied credential-relay profile (%s, CLI seam #892)", binstub)
-            return
-        except Exception:
-            log.warning(
-                "Failed applying %s relay profile -- falling back to import",
-                binstub, exc_info=True,
-            )
-    # Fallback: the in-process register_relay import (exact prior behavior),
-    # kept until the vendoring is removed in a later increment.
-    try:
-        import importlib
+    """Register one provider's relay profile via its ``relay-profile`` CLI seam.
 
-        mod = importlib.import_module(import_path)
-        mod.register_relay(builder)
-        log.info("Registered credential-relay sources (%s, in-process)", binstub)
-    except ImportError:
-        log.debug("%s not installed -- no relay sources", binstub)
+    Process-boundary **only** (#1643): apply the declarative profile from the
+    provider's ``relay-profile`` CLI with a file-backed token validator, so a
+    provider relay fix reaches the daemon from its OWN venv (no bridge redeploy).
+    There is **no** in-process ``register_relay`` import fallback: the daemon runs
+    from its own isolated venv where a provider package is neither importable nor
+    on ``PATH`` (see :mod:`agent_bridge.provider_sources`). When the binstub is
+    absent or its CLI fails, the provider simply contributes no relay sources.
+    """
+    profile = _relay_profile_via_cli(binstub)
+    if profile is None:
+        log.debug("%s relay-profile unavailable -- no relay sources", binstub)
+        return
+    try:
+        _apply_relay_profile(builder, profile)
+        log.info("Applied credential-relay profile (%s, CLI seam)", binstub)
     except Exception:
         log.warning(
-            "Failed to register %s relay sources", binstub, exc_info=True,
+            "Failed applying %s relay profile", binstub, exc_info=True,
         )
 
 
@@ -1579,19 +1571,15 @@ def register_credential_sources(builder) -> None:
 
     Twin of :func:`_register_namespace_resolvers`: each provider contributes the
     credential sources (and policy/port/token gate) its targets need. agent-bridge
-    owns and runs the relay; providers only inject their per-target profile. As of
-    #892 Inc 2 this is driven over a **process boundary** (the provider's
-    ``relay-profile`` CLI + a file-backed token validator), with the in-process
-    ``register_relay`` import as the degrade-safe fallback.
+    owns and runs the relay; providers only inject their per-target profile. This
+    is driven **purely over a process boundary** (#1643): the provider's
+    ``relay-profile`` CLI + a file-backed token validator, with **no** in-process
+    ``register_relay`` import -- the daemon never imports a provider package.
 
     ``builder`` is a :class:`credential_relay.registry.RelayBuilder`.
     """
-    _register_provider_relay(
-        builder, "agent-codespaces", "agent_codespaces.relay_provider",
-    )
-    _register_provider_relay(
-        builder, "agent-containers", "agent_containers.relay_provider",
-    )
+    _register_provider_relay(builder, "agent-codespaces")
+    _register_provider_relay(builder, "agent-containers")
 
 
 class AgentResolver:

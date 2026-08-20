@@ -612,19 +612,68 @@ function New-SignedVenv {
     return (Test-Path $VenvPython)
 }
 
-# #892 Increment 4: agent-bridge no longer VENDORS sibling plugins into its venv.
-# The `codespace:` / `container:` namespace resolvers AND the credential-relay
-# profiles are now driven over a PROCESS BOUNDARY -- the `agent-<sibling>
-# namespace-* / relay-profile` CLIs, run from each sibling's OWN immutable venv.
-# So a sibling bugfix reaches the dispatch path with NO agent-bridge redeploy,
-# and the #929 vendored-copy-drift / #828 installed-but-unimportable classes are
-# structurally gone. Kept as a no-op (call sites unchanged) for a minimal diff.
+# #1643: venue providers (agent-codespaces / agent-containers) are PURE
+# providers.d markers -- the daemon drives their binstubs over a PROCESS BOUNDARY
+# (the `agent-<sibling> namespace-* / relay-profile / relay-launch-env` CLIs, run
+# from each sibling's OWN immutable venv) and NEVER imports a provider package. So
+# a provider package inside the bridge venv is ALWAYS a stale vendored leftover
+# (retired #892 vendoring model) that causes version skew and breaks dispatch
+# (#1631/#1643). This actively prunes any such copy and GUARDS against one
+# lingering, so the bridge venv stays provider-free.
 # Sibling CLI binstubs remain owned by their own installers (~/.agent-<sibling>).
 function Install-SiblingPlugins {
     param(
         [switch]$Reinstall
     )
-    Write-Step "Sibling plugins not vendored -- process-boundary CLI seams (#892)"
+    Write-Step "Sibling plugins not vendored -- process-boundary CLI seams (#892/#1643)"
+    Remove-VendoredProviders
+}
+
+# Prune any stale venue-provider package from EVERY agent-bridge venv and fail if
+# one is still importable afterward (the #1643 guard). Two venvs can carry a stale
+# copy: the ACTIVE versioned runtime slot (``$VenvPython`` = versions/<v>) and the
+# retired legacy top-level ``~/.agent-bridge/venv`` (the install-contract-v3
+# leftover that agent-codespaces' old installer vendored into). We prune both:
+# uv-uninstall first (clean dist-info removal), then belt-and-suspenders remove any
+# raw-copied dirs, then probe importability from each venv's OWN interpreter.
+function Remove-VendoredProviders {
+    $modules = @('agent_codespaces', 'agent_containers')
+    $pkgs    = @('agent-codespaces', 'agent-containers')
+    $legacyPython = if ($env:OS -eq 'Windows_NT') {
+        Join-Path $InstallDir 'venv\Scripts\python.exe'
+    } else {
+        Join-Path $InstallDir 'venv/bin/python'
+    }
+    $targets = @($VenvPython, $legacyPython) |
+        Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+    if (-not $targets) {
+        Write-Step "No bridge venv yet -- nothing to prune (#1643)"
+        return
+    }
+    foreach ($py in $targets) {
+        foreach ($pkg in $pkgs) {
+            & uv pip uninstall --python $py $pkg 2>&1 | Out-Null
+        }
+        # Belt-and-suspenders: drop any raw-copied package dir / dist-info left
+        # behind by the retired Install-PackageInto vendoring (no uv metadata).
+        $purelib = (& $py -c "import sysconfig; print(sysconfig.get_paths()['purelib'])" 2>$null)
+        if ($purelib -and (Test-Path $purelib)) {
+            foreach ($mod in $modules) {
+                $d = Join-Path $purelib $mod
+                if (Test-Path $d) { Remove-Item -Recurse -Force $d -ErrorAction SilentlyContinue }
+                Get-ChildItem -Path $purelib -Filter "$($mod.Replace('_','?'))-*.dist-info" -Directory -ErrorAction SilentlyContinue |
+                    ForEach-Object { Remove-Item -Recurse -Force $_.FullName -ErrorAction SilentlyContinue }
+            }
+        }
+        # Guard: this venv's interpreter MUST NOT import a provider.
+        $probe = "import importlib.util,sys; bad=[m for m in ['agent_codespaces','agent_containers'] if importlib.util.find_spec(m)]; sys.stdout.write(','.join(bad)); sys.exit(1 if bad else 0)"
+        $leak = & $py -c $probe 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Fail "Provider package(s) still importable from $py after prune: $leak (#1643)"
+            throw "agent-bridge venv must not import a venue provider ($leak) -- see #1643"
+        }
+    }
+    Write-Ok "Bridge venv(s) provider-free (pure providers.d, #1643)"
 }
 
 # Sibling plugin binstubs (e.g. agent-codespaces) are owned by their own

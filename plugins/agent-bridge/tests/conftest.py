@@ -17,6 +17,22 @@ from agent_bridge.session_manager import SessionManager
 from agent_bridge.transport import SpawnTarget
 
 
+@pytest.fixture(autouse=True)
+def _isolate_providers_dir(tmp_path, monkeypatch):
+    """Isolate every test from the machine's real ``~/.agent-bridge/providers.d``.
+
+    Agent enumeration + namespace resolution discover venue providers
+    (``codespace:``/``container:``) from that directory (#1643), so without
+    isolation a dev box's *live* provider registrations leak into unit tests --
+    e.g. ``test_list_agents_empty`` sees the box's real codespace agents and
+    fails. Point the provider-manifest dir at an empty per-test tmp dir; tests
+    that need manifests set ``AGENT_BRIDGE_PROVIDERS_DIR`` themselves and override
+    this (monkeypatch re-set within the test wins)."""
+    d = tmp_path / "providers.d-empty"
+    d.mkdir(exist_ok=True)
+    monkeypatch.setenv("AGENT_BRIDGE_PROVIDERS_DIR", str(d))
+
+
 @pytest.fixture
 def tmp_db(tmp_path: Path) -> Iterator[Database]:
     """Create a temporary SQLite database."""
