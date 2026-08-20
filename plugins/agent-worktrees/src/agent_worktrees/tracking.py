@@ -18,6 +18,7 @@ from typing import Literal
 import yaml
 
 from . import config as cfg
+from . import disposition_history
 from . import obligations
 
 WorktreeStatus = Literal["active", "complete", "pushed", "finalized", "orphaned"]
@@ -1304,15 +1305,30 @@ def set_disposition(
     fresh ``title`` when the worktree's focus changes. ``summary``, ``title`` and
     ``follow_up`` are each applied only when not None, so a caller may update one
     without disturbing the others. Stamps ``status_note_at`` (which the
-    postToolUse nudge watches to reset its drift counter).
+    postToolUse nudge watches to reset its drift counter) and appends a durable
+    entry to the worktree's disposition-history sidecar (see
+    :mod:`agent_worktrees.disposition_history`).
     """
+    changed: list[str] = []
     if summary is not None:
         record.summary = summary.replace("\n", " ").strip()
+        changed.append("summary")
     if title is not None:
         record.title = title.replace("\n", " ").strip() or None
+        changed.append("title")
     if follow_up is not None:
         record.follow_up = follow_up
+        changed.append("follow_up")
     record.status_note_at = _now_iso()
+    if changed:
+        disposition_history.append(
+            record.worktree_id,
+            at=record.status_note_at,
+            summary=record.summary,
+            title=record.title,
+            follow_up=record.follow_up,
+            changed=changed,
+        )
     if save:
         save_record(record)
 
