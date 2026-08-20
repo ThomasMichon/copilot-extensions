@@ -566,6 +566,31 @@ def main(argv: list[str] | None = None) -> int:
         help="Poll interval in seconds (default: 10)",
     )
 
+    # --- owner (persistent Connection Owner relay daemon) ---------------------
+    # Runs the reconcile loop that owns + self-heals each CodeSpace's credential
+    # relay per machine, independent of any one agent-bridge dispatch, so a caller
+    # disconnect / bridge restart no longer drops the relay mid-task
+    # (dotfiles#1320/#1333). Config-gated (default off) + additive: nothing starts
+    # it by default. Making the ssh/dispatch paths defer to it is a later
+    # increment; this entrypoint makes the daemon runnable + live-validatable.
+    owner_p = sub.add_parser(
+        "owner",
+        help="Run the persistent Connection Owner relay daemon "
+             "(config-gated: connection_owner.enabled; default off)",
+    )
+    owner_p.add_argument(
+        "--force", action="store_true",
+        help="run even when connection_owner.enabled is false (validation only)",
+    )
+    owner_p.add_argument(
+        "--once", action="store_true",
+        help="reconcile a single cycle and exit (validation) instead of looping",
+    )
+    owner_p.add_argument(
+        "--interval", type=float, default=None,
+        help="override the reconcile interval in seconds (default: config or 15)",
+    )
+
     # --- status ---
     sub.add_parser("status", help="Show service status")
 
@@ -759,6 +784,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_relay_profile()
         if args.command == "config-migrate":
             return _cmd_config_migrate()
+        if args.command == "owner":
+            return _cmd_owner(args)
     except RuntimeError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
@@ -4136,6 +4163,73 @@ def _cmd_config_migrate() -> int:
         return 0
     results = config_migrations.run_migrations()
     print(config_migrations.summarize(results))
+    return 0
+
+
+def _cmd_owner(args: argparse.Namespace) -> int:
+    """Run the Connection Owner relay reconcile daemon (config-gated; default off).
+
+    The Owner is the single, persistent per-machine owner of each CodeSpace's
+    credential relay, independent of any one agent-bridge dispatch -- so a caller
+    disconnect / bridge restart no longer drops the relay mid-task
+    (dotfiles#1320/#1333). Additive + opt-in: it refuses to run unless
+    ``connection_owner.enabled`` is set (or ``--force`` for validation), so nothing
+    starts it by default. Making the ssh/dispatch paths defer to it is a later
+    increment; this entrypoint makes the daemon runnable + live-validatable.
+
+    ``--once`` reconciles a single cycle and exits (validation): with no holds it
+    is a safe no-op that exercises the wiring without touching a real CodeSpace.
+    """
+    import asyncio
+
+    from .config import load_merged_config
+    from .connection_owner import (
+        ConnectionOwner,
+        list_holds,
+        make_supervised_relay_factory,
+        run_owner_daemon,
+    )
+
+    cfg = load_merged_config(include_cwd=False)
+    co = getattr(cfg, "connection_owner", None)
+    enabled = bool(co and co.enabled)
+    if not enabled and not args.force:
+        print(
+            "connection-owner is disabled (set connection_owner.enabled: true, or "
+            "pass --force to validate); not starting.",
+            file=sys.stderr,
+        )
+        return 0
+
+    interval = (
+        args.interval
+        if args.interval is not None
+        else (float(co.reconcile_interval) if co else 15.0)
+    )
+    if interval <= 0:
+        raise RuntimeError(
+            f"connection-owner reconcile interval must be > 0 (got {interval}); "
+            "check --interval / connection_owner.reconcile_interval."
+        )
+    factory = make_supervised_relay_factory(cfg)
+    owner = ConnectionOwner(factory)
+
+    if args.once:
+        asyncio.run(owner.reconcile())
+        held = sorted(h.codespace for h in list_holds())
+        active = sorted(owner.active_codespaces())
+        print(f"connection-owner: reconciled once; held={held}; active={active}")
+        return 0
+
+    print(
+        f"connection-owner: starting reconcile daemon (interval={interval}s; "
+        "Ctrl-C to stop)...",
+        file=sys.stderr,
+    )
+    try:
+        asyncio.run(run_owner_daemon(owner, interval=interval))
+    except KeyboardInterrupt:
+        pass
     return 0
 
 
