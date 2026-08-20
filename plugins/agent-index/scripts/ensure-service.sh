@@ -25,11 +25,16 @@ esac
 case "$role" in host|engine|server|indexer) : ;; *) exit 0 ;; esac
 
 # Fast health probe on the LIVE routing endpoint (active.json ephemeral port).
-# Prefer the runtime's OWN venv python (always present when installed) over a
-# global python3; fall back to curl so a host without either still works.
+# Resolve the runtime's OWN slot python via the canonical marker-only resolver
+# (uniform-runtime-resolution, #765); if no slot is resolvable yet, fall back to
+# curl so a host without an installed runtime still probes.
 pybin=""
-if [ -x "$INSTALL_DIR/.venv/bin/python" ]; then pybin="$INSTALL_DIR/.venv/bin/python"
-elif command -v python3 >/dev/null 2>&1; then pybin="python3"; fi
+_res="$INSTALL_DIR/bin/resolve-runtime.sh"
+if [ -f "$_res" ]; then
+    AGENT_RT_ROOT="$INSTALL_DIR"; AGENT_RT_PY=""
+    . "$_res"
+    [ -n "$AGENT_RT_PY" ] && pybin="$AGENT_RT_PY"
+fi
 
 healthy=0
 if [ -n "$pybin" ]; then
