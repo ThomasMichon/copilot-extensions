@@ -15,8 +15,20 @@ import subprocess
 import sys
 import time
 
+import pytest
+
 from agent_worktrees import __main__ as m
 from agent_worktrees import update_stage as us
+
+
+@pytest.fixture(autouse=True)
+def _disable_status_monitor(monkeypatch):
+    """This file exercises the legacy per-session updater loop.
+
+    The resident monitor has separate tests; leave it off here so default-on
+    delegation does not short-circuit the mux writes these tests assert.
+    """
+    monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "0")
 
 
 def _ns(**kw):
