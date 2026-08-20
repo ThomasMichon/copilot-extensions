@@ -260,7 +260,8 @@ class CommandInjector(TokenInjector):
 
         A repair (e.g. reinstalling/refreshing the mint tooling) takes no
         git-credential stdin and can be slow, so it runs with ``DEVNULL`` stdin
-        under its own generous timeout. Its output is logged, not consumed.
+        under its own generous timeout. Its stdout is discarded; only bounded
+        stderr is logged, and only when the repair itself fails.
         """
         argv = resolve_argv(self.spec.repair)
         log.warning("auth command failed; running repair once: %s", argv[0])
