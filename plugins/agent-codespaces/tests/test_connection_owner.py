@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+import types
 
 import pytest
 from agent_codespaces import connection_owner as owner
@@ -549,3 +550,68 @@ async def test_daemon_publishes_active_codespaces(store):
     await owner.run_owner_daemon(_Wrapper(), interval=0, stop_event=stop)
     assert seen.get("active") == ("cs-live",)
     assert not owner.LIVE_FILE.exists()  # cleared on exit
+
+
+# ---------------------------------------------------------------------------
+# Tenant defer decision + wait (slice 2c helpers)
+# ---------------------------------------------------------------------------
+
+
+def _cfg(enabled: bool):
+    return types.SimpleNamespace(
+        connection_owner=types.SimpleNamespace(enabled=enabled)
+    )
+
+
+def test_should_defer_no_relay_is_false(store):
+    owner._write_liveness(15.0)  # live
+    assert owner.should_defer_to_owner(_cfg(True), no_relay=True, env={}) is False
+
+
+def test_should_defer_escape_hatch(store):
+    owner._write_liveness(15.0)
+    assert (
+        owner.should_defer_to_owner(
+            _cfg(True), env={"AGENT_CODESPACES_NO_OWNER_DEFER": "1"}
+        )
+        is False
+    )
+
+
+def test_should_defer_disabled_or_missing_config(store):
+    owner._write_liveness(15.0)
+    assert owner.should_defer_to_owner(_cfg(False), env={}) is False
+    assert owner.should_defer_to_owner(types.SimpleNamespace(), env={}) is False
+
+
+def test_should_defer_enabled_but_not_live(store):
+    # No beacon -> Owner not live -> do not defer (own the relay).
+    assert owner.should_defer_to_owner(_cfg(True), env={}) is False
+
+
+def test_should_defer_enabled_and_live(store):
+    owner._write_liveness(15.0)
+    assert owner.should_defer_to_owner(_cfg(True), env={}) is True
+
+
+async def test_await_owner_relay_true_when_served(store):
+    owner._write_liveness(15.0, active=["cs-a"])
+    assert await owner.await_owner_relay("cs-a", timeout=1.0, poll=0.01) is True
+
+
+async def test_await_owner_relay_times_out(store):
+    owner._write_liveness(15.0, active=[])  # live but not serving cs-a
+    assert await owner.await_owner_relay("cs-a", timeout=0.05, poll=0.01) is False
+
+
+async def test_await_owner_relay_becomes_served(store):
+    owner._write_liveness(15.0, active=[])
+
+    async def _serve_later():
+        await asyncio.sleep(0.03)
+        owner._write_liveness(15.0, active=["cs-a"])
+
+    task = asyncio.create_task(_serve_later())
+    result = await owner.await_owner_relay("cs-a", timeout=1.0, poll=0.01)
+    await task
+    assert result is True
