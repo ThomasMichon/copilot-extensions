@@ -590,6 +590,12 @@ def main(argv: list[str] | None = None) -> int:
         "--interval", type=float, default=None,
         help="override the reconcile interval in seconds (default: config or 15)",
     )
+    owner_p.add_argument(
+        "--status", action="store_true",
+        help="print the resolved connection_owner config as JSON "
+             "(enabled/reconcile_interval) and exit; install/update uses this to "
+             "gate service provisioning (does not start the daemon)",
+    )
 
     # --- status ---
     sub.add_parser("status", help="Show service status")
@@ -4179,6 +4185,11 @@ def _cmd_owner(args: argparse.Namespace) -> int:
 
     ``--once`` reconciles a single cycle and exits (validation): with no holds it
     is a safe no-op that exercises the wiring without touching a real CodeSpace.
+
+    ``--status`` prints the resolved ``connection_owner`` config as JSON
+    (``enabled`` / ``reconcile_interval``) and exits without starting anything --
+    the install/update scripts call it to decide whether to provision the
+    per-machine Owner service (config-gated cutover; default off -> inert).
     """
     import asyncio
 
@@ -4193,6 +4204,14 @@ def _cmd_owner(args: argparse.Namespace) -> int:
     cfg = load_merged_config(include_cwd=False)
     co = getattr(cfg, "connection_owner", None)
     enabled = bool(co and co.enabled)
+
+    if getattr(args, "status", False):
+        import json
+
+        interval = float(co.reconcile_interval) if co else 15.0
+        print(json.dumps({"enabled": enabled, "reconcile_interval": interval}))
+        return 0
+
     if not enabled and not args.force:
         print(
             "connection-owner is disabled (set connection_owner.enabled: true, or "

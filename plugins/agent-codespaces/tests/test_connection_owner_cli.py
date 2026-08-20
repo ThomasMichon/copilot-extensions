@@ -126,6 +126,46 @@ def test_owner_rejects_nonpositive_interval(monkeypatch, capsys, store):
     assert "must be > 0" in capsys.readouterr().err
 
 
+def test_owner_status_disabled(monkeypatch, capsys):
+    """--status prints the resolved config as JSON without starting anything."""
+    monkeypatch.setattr(
+        cfg, "load_merged_config", lambda include_cwd=True: _stub_config(enabled=False)
+    )
+    built = {"factory": False}
+
+    def _factory(*_a, **_k):
+        built["factory"] = True
+        return lambda _cs: None
+
+    monkeypatch.setattr(owner, "make_supervised_relay_factory", _factory)
+
+    rc = m.main(["owner", "--status"])
+    assert rc == 0
+    import json
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {"enabled": False, "reconcile_interval": 15.0}
+    assert built["factory"] is False  # never constructs the transport for a probe
+
+
+def test_owner_status_enabled(monkeypatch, capsys):
+    """--status reflects an enabled config (install uses it to gate provisioning)."""
+    monkeypatch.setattr(
+        cfg,
+        "load_merged_config",
+        lambda include_cwd=True: _stub_config(enabled=True, interval=30.0),
+    )
+    monkeypatch.setattr(
+        owner, "make_supervised_relay_factory", lambda *_a, **_k: (lambda _cs: None)
+    )
+    rc = m.main(["owner", "--status"])
+    assert rc == 0
+    import json
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {"enabled": True, "reconcile_interval": 30.0}
+
+
 def test_connection_owner_empty_block_claims_slot(tmp_path, monkeypatch):
     """An explicit (even empty) connection_owner block claims the first-wins slot."""
     repo1 = tmp_path / "r1"

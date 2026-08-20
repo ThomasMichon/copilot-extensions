@@ -591,6 +591,75 @@ MANIFEST
 
 # -- Actions ---------------------------------------------------------------
 
+# -- Connection Owner service (config-gated; default off) ------------------
+# The persistent per-machine Connection Owner relay daemon (dotfiles#1320/#1333)
+# is provisioned as a systemd --user service, but ONLY when connection_owner is
+# enabled in config. Default off -> the unit is ensured ABSENT, so a machine with
+# the feature disabled is unchanged (truly inert). Enabling it is "flip the
+# config, run update" (the install/update convergence contract, ce#488). ExecStart
+# resolves through the stable `.venv` symlink so it survives version cutover.
+SYSTEMD_OWNER_UNIT="agent-codespaces-owner.service"
+
+# Echo "1" if the Connection Owner is enabled in the merged config, else "0".
+# Never fails the caller (disabled on any error).
+_owner_enabled() {
+    PYTHONUTF8=1 "$LINK_PYTHON" -m agent_codespaces owner --status 2>/dev/null \
+        | "$LINK_PYTHON" -c 'import sys, json
+try:
+    print("1" if json.load(sys.stdin).get("enabled") else "0")
+except Exception:
+    print("0")' 2>/dev/null || echo "0"
+}
+
+_remove_owner_service() {
+    if command -v systemctl &>/dev/null; then
+        if [[ -f "$HOME/.config/systemd/user/$SYSTEMD_OWNER_UNIT" ]]; then
+            systemctl --user disable --now "$SYSTEMD_OWNER_UNIT" 2>/dev/null || true
+            rm -f "$HOME/.config/systemd/user/$SYSTEMD_OWNER_UNIT"
+            systemctl --user daemon-reload 2>/dev/null || true
+            _changed "Removed Connection Owner service ($SYSTEMD_OWNER_UNIT)"
+        fi
+    fi
+}
+
+_sync_owner_service() {
+    # Config-gated provisioning: enabled -> install + (re)start the systemd --user
+    # unit; disabled (default) -> ensure it is absent. Idempotent + additive.
+    if [[ "$(_owner_enabled)" != "1" ]]; then
+        _remove_owner_service
+        return 0
+    fi
+    if ! command -v systemctl &>/dev/null; then
+        _skip "Connection Owner enabled but systemd unavailable -- start it manually: agent-codespaces owner"
+        return 0
+    fi
+    local unit_dir="$HOME/.config/systemd/user"
+    mkdir -p "$unit_dir"
+    # Stable `.venv` symlink -> the active versions/<v> slot; never a versions/<v>
+    # absolute a `gc` could remove.
+    local venv_py="$LINK_DIR/bin/python"
+    cat > "$unit_dir/$SYSTEMD_OWNER_UNIT" << EOF
+[Unit]
+Description=agent-codespaces Connection Owner -- persistent per-machine CodeSpace credential-relay owner
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=$venv_py -m agent_codespaces owner
+Restart=on-failure
+RestartSec=5
+WorkingDirectory=$INSTALL_DIR
+Environment=PYTHONUTF8=1
+
+[Install]
+WantedBy=default.target
+EOF
+    systemctl --user daemon-reload 2>/dev/null || true
+    systemctl --user enable "$SYSTEMD_OWNER_UNIT" 2>/dev/null || true
+    systemctl --user restart "$SYSTEMD_OWNER_UNIT" 2>/dev/null || true
+    _ok "Connection Owner service installed + started ($SYSTEMD_OWNER_UNIT)"
+}
+
 do_install() {
     _header "$SERVICE_NAME Install"
 
@@ -626,12 +695,18 @@ do_install() {
         _fail "Verification: module import failed"
     fi
 
+    # Connection Owner daemon (config-gated; default off -> ensured absent).
+    _sync_owner_service
+
     echo ""
     _ok "$SERVICE_NAME installed"
 }
 
 do_uninstall() {
     _header "$SERVICE_NAME Uninstall"
+
+    # Remove the Connection Owner systemd unit (if provisioned).
+    _remove_owner_service
 
     # Stop managed SSH ControlMaster connections before removing files. They
     # multiplex connections to CodeSpaces via sockets under
@@ -785,6 +860,9 @@ do_update() {
     # Update manifest
     write_deploy_manifest
 
+    # Connection Owner daemon (config-gated; default off -> ensured absent).
+    _sync_owner_service
+
     _ok "$SERVICE_NAME updated"
 }
 
@@ -823,6 +901,8 @@ do_provision() {
     else
         _fail "Verification: module import failed"
     fi
+    # Connection Owner daemon (config-gated; default off -> ensured absent).
+    _sync_owner_service
     _ok "$SERVICE_NAME runtime provisioned"
 }
 
