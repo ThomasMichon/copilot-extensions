@@ -334,3 +334,18 @@ separate, intentional runtime and keeps its explicit venv.
   resolves through it" -- still isn't met: install-time health-gates + a couple
   variable-hidden `$LINK_PYTHON` ExecStart lines, e.g. agent-vault:673, still use
   the link, so that is its own careful cross-installer sweep).
+
+### 2026-08-20 - Phase final (a): guard blocking in CI
+- Wired `check-runtime-resolution.py --strict` into `.github/workflows/ci.yml`
+  (alongside the install-contract / version guards). The migration is now
+  **enforced**: any new `.venv`/`venv`-link or PATH-python launch path fails CI.
+- Re-assessment of the remaining physical **link retirement** (stop creating the
+  `.venv`/`venv` symlink in `activate()`): with every *launcher* now marker-only,
+  the link's RedirectionGuard hazard (WinError 448) no longer bites (it only fired
+  when something resolved *through* the junction at runtime under a blocked
+  context). The link is still read by install-time health-gates (a plain import
+  check, not a blocked context) + a couple variable-hidden `$LINK_PYTHON` ExecStart
+  lines (e.g. agent-vault:673), so its precondition ("no consumer resolves through
+  it") isn't met. Retiring it is now a **cleanliness** step (the correctness win is
+  already banked via guard=0 + --strict), and it's a cross-installer sweep touching
+  live-service installers -- carried as a focused follow-on.
