@@ -640,9 +640,9 @@ function Remove-VendoredProviders {
     $modules = @('agent_codespaces', 'agent_containers')
     $pkgs    = @('agent-codespaces', 'agent-containers')
     $legacyPython = if ($env:OS -eq 'Windows_NT') {
-        Join-Path $InstallDir 'venv\Scripts\python.exe'
+        Join-Path $InstallDir 'venv\Scripts\python.exe'  # runtime-resolution: allow legacy-venv cleanup (prune, not launch)
     } else {
-        Join-Path $InstallDir 'venv/bin/python'
+        Join-Path $InstallDir 'venv/bin/python'  # runtime-resolution: allow legacy-venv cleanup (prune, not launch)
     }
     $targets = @($VenvPython, $legacyPython) |
         Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
@@ -1239,20 +1239,25 @@ function Write-Binstubs {
     # then dispatches. Opt out with AGENT_BRIDGE_NO_SELFPROVISION=1. No junction is
     # traversed (marker is a plain file), so RedirectionGuard can't bite. Launches
     # the PSF-signed venv python via -m, never the SAC-blocked trampoline .exe.
+    # Co-deploy the canonical resolvers so the binstub resolves the interpreter
+    # the ONE uniform way (uniform-runtime-resolution, #765).
+    $binDir = Join-Path $InstallDir 'bin'
+    if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
+    foreach ($r in @('resolve-runtime.ps1', 'resolve-runtime.sh')) {
+        $rSrc = Join-Path $PSScriptRoot $r
+        if (Test-Path $rSrc) { Copy-Item $rSrc (Join-Path $binDir $r) -Force }
+    }
     $rootLit = $InstallDir -replace "'", "''"
     $ps1 = @'
 $env:PYTHONUTF8 = '1'
 $_root = '__ROOT__'
-function _resolve_ab_py {
-    $ver = ''
-    try { $ver = ([IO.File]::ReadAllText((Join-Path $_root 'current-version'))).Trim() } catch {}
-    $p = if ($ver) { Join-Path $_root ('versions\' + $ver + '\Scripts\python.exe') } else { '' }
-    if ($p -and (Test-Path -LiteralPath $p)) { return $p }
-    Get-ChildItem (Join-Path $_root 'versions') -Directory -ErrorAction SilentlyContinue |
-        Sort-Object Name | ForEach-Object { Join-Path $_.FullName 'Scripts\python.exe' } |
-        Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Last 1
+$_resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
+function _Resolve-Py {
+    $AgentRtPy = $null
+    if (Test-Path -LiteralPath $_resolver) { $env:AGENT_RT_ROOT = $_root; . $_resolver }
+    return $AgentRtPy
 }
-$_py = _resolve_ab_py
+$_py = _Resolve-Py
 if ($_py) { & $_py -m agent_bridge @args; exit $LASTEXITCODE }
 if ($env:AGENT_BRIDGE_NO_SELFPROVISION) { [Console]::Error.WriteLine('[agent-bridge] runtime not provisioned (AGENT_BRIDGE_NO_SELFPROVISION set).'); exit 1 }
 $_snap = ''
@@ -1264,52 +1269,26 @@ if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) { [Console]::Error.Write
 $_pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
 $_exe = if ($_pwsh) { $_pwsh.Source } else { 'powershell.exe' }
 & $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
-$_py = _resolve_ab_py
+$_py = _Resolve-Py
 if ($_py) { & $_py -m agent_bridge @args; exit $LASTEXITCODE }
 [Console]::Error.WriteLine('[agent-bridge] provisioning did not yield a runtime. See the log above; retry, or run the snapshot installer manually.')
 exit 1
 '@ -replace '__ROOT__', $rootLit
     [System.IO.File]::WriteAllText($BinstubPs1, $ps1, (New-Object System.Text.UTF8Encoding($false)))
 
+    # cmd fallback: delegate entirely to the .ps1 binstub so resolution stays
+    # uniform with the canonical resolve-runtime.ps1 chain and self-provisioning
+    # is shared (uniform-runtime-resolution, #765).
     $cmd = @'
 @echo off
 setlocal
 set "PYTHONUTF8=1"
-set "_ROOT=__ROOT__"
-call :_resolve
-if not defined _PY goto _prov
-"%_PY%" -m agent_bridge %*
-exit /b %ERRORLEVEL%
-:_prov
-if defined AGENT_BRIDGE_NO_SELFPROVISION goto _nope
-set "_SNAP="
-if exist "%_ROOT%\payload-dir" set /p _SNAP=<"%_ROOT%\payload-dir"
-set "_INST=%_SNAP%\scripts\install.ps1"
-if not exist "%_INST%" goto _noinst
-echo [agent-bridge] runtime not provisioned -- provisioning on first use ^(~30-120s^). Do not kill.>&2
+set "_PS1=__PS1__"
+if not exist "%_PS1%" (echo [agent-bridge] binstub not found: %_PS1%>&2 & exit /b 127)
 where pwsh >nul 2>&1
-if %ERRORLEVEL%==0 (pwsh -NoProfile -ExecutionPolicy Bypass -File "%_INST%" provision 1>&2) else (powershell -NoProfile -ExecutionPolicy Bypass -File "%_INST%" provision 1>&2)
-call :_resolve
-if not defined _PY goto _failprov
-"%_PY%" -m agent_bridge %*
+if %ERRORLEVEL%==0 (pwsh -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*) else (powershell -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*)
 exit /b %ERRORLEVEL%
-:_noinst
-echo [agent-bridge] cannot self-provision: snapshot installer not found.>&2
-exit /b 127
-:_nope
-echo [agent-bridge] runtime not provisioned ^(AGENT_BRIDGE_NO_SELFPROVISION set^).>&2
-exit /b 1
-:_failprov
-echo [agent-bridge] provisioning did not yield a runtime.>&2
-exit /b 1
-:_resolve
-set "_PY="
-set "_VER="
-if exist "%_ROOT%\current-version" set /p _VER=<"%_ROOT%\current-version"
-if defined _VER if exist "%_ROOT%\versions\%_VER%\Scripts\python.exe" set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
-if not defined _PY for /f "delims=" %%D in ('dir /b /ad /o-n "%_ROOT%\versions" 2^>nul') do if not defined _PY if exist "%_ROOT%\versions\%%D\Scripts\python.exe" set "_PY=%_ROOT%\versions\%%D\Scripts\python.exe"
-exit /b 0
-'@ -replace '__ROOT__', $InstallDir
+'@ -replace '__PS1__', $BinstubPs1
     [System.IO.File]::WriteAllText($BinstubCmd, $cmd)
 
     Write-Ok "Binstub: $BinstubPs1 (+ .cmd fallback) -- marker-routed, self-provisioning"
