@@ -52,12 +52,40 @@ try {
         if ($vl) { $current = ($vl.Line -replace '.*=\s*"([^"]+)".*', '$1') }
     }
     # The immutable-versioned layout points a stable link at the active slot;
-    # its name is '.venv' for most plugins but 'venv' for a few (agent-bridge).
-    # Accept EITHER so the early-exit actually fires -- otherwise this hook
-    # re-launches the installer on every session start (churn), and under a
-    # version drift it repeatedly attempts a swap.
-    $venvPresent = (Test-Path (Join-Path $InstallDir '.venv')) -or (Test-Path (Join-Path $InstallDir 'venv'))
-    if ($venvPresent -and $deployed -eq $current) { exit 0 }
+    # Runtime "present & healthy" must be read from the immutable-slot COMPLETION
+    # MARKER, not a `venv`/`.venv` link. The Windows layout is junction-free
+    # (marker-only: no `venv` link exists), so a link Test-Path is always false
+    # there -- and this early-exit would then never fire, re-launching the
+    # installer on EVERY session even at the same version. Those redundant
+    # same-version reconciles are what stomped the live slot (ce#776/#777,
+    # dotfiles#1612). So gate on the marker files directly (pure PowerShell, no
+    # python, works pre-venv): the active version + its completion marker.
+    $runtimeHealthy = $false
+    $curVer = $null
+    $curVerFile = Join-Path $InstallDir 'current-version'
+    if (Test-Path $curVerFile) {
+        $curVer = (Get-Content $curVerFile -Raw -ErrorAction SilentlyContinue)
+        if ($curVer) { $curVer = $curVer.Trim() }
+        if ($curVer) {
+            $marker = Join-Path $InstallDir "versions\$curVer\.install-complete.json"
+            if (Test-Path $marker) {
+                try {
+                    $mj = Get-Content $marker -Raw -ErrorAction Stop | ConvertFrom-Json
+                    if ($mj.version -eq $curVer) { $runtimeHealthy = $true }
+                } catch { }
+            }
+        }
+    }
+    # Legacy (pre-versioned) fallback: a real `venv`/`.venv` dir still counts as
+    # present for an install that predates the marker convention.
+    if (-not $runtimeHealthy) {
+        $runtimeHealthy = (Test-Path (Join-Path $InstallDir '.venv')) -or (Test-Path (Join-Path $InstallDir 'venv'))
+    }
+    # No drift AND a healthy runtime whose active slot matches the deployed
+    # version -> nothing to reconcile. (When a legacy fallback set the flag,
+    # $curVer is $null and we fall back to the version-string check alone, as
+    # before.)
+    if ($runtimeHealthy -and $deployed -eq $current -and (-not $curVer -or $curVer -eq $deployed)) { exit 0 }
     $init = Join-Path $PluginDir 'scripts\init.ps1'
     if (Test-Path $init) {
         $targs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $init)
