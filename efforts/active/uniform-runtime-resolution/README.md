@@ -294,3 +294,19 @@ separate, intentional runtime and keeps its explicit venv.
 - Guard: **9 -> 6** (agent-index 3 -> 0). pwsh parse + binstub smoke + 226 tests
   green. Bumped agent-index 0.1.0-dev69 -> dev70. (Pre-existing SC1087 shellcheck
   false positives on pip-extras `$PLUGIN_DIR[store]` syntax are unrelated.)
+
+### 2026-08-20 - Phase 2 batch 10: agent-logger (session-sync timer)
+- **agent-logger**: POSIX binstub sources the deployed `resolve-runtime.sh` ->
+  `-m agent_logger` (was the `.venv/bin/agent-logger` console script via the link);
+  the `session-sync` timer `ExecStart` uses `${VENV}/bin/session-sync` (slot)
+  instead of `${LINK_DIR}/...`; the `install.ps1` non-Windows shim + Windows `.ps1`
+  binstub adopt the canonical resolver, `.cmd` delegates. The `install.sh:191/194`
+  `$VENV`-slot health-gate lines were **false positives** ($VENV IS the slot;
+  uppercase matched the case-insensitive regex) -> annotated
+  `# runtime-resolution: allow`.
+- Fixed a **pre-existing** stale `_build_info.py __version__ = 0.1.1-dev53` (out of
+  sync with pyproject dev55 on main; failed `test_version_matches_build_info` on
+  clean main) -> synced to dev56 alongside the bump.
+- Guard: **6 -> 3** (agent-logger 3 -> 0). pwsh parse + shellcheck + binstub smoke
+  + tests green. Bumped agent-logger 0.1.1-dev55 -> dev56. Only **agent-worktrees**
+  (bespoke) + the final link-retirement remain.

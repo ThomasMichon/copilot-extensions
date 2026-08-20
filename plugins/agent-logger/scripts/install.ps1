@@ -756,12 +756,27 @@ function Deploy-SelfProvisioningBinstub {
     # this very binstub never rewrites the .cmd it is mid-execution.
     if (-not (Test-Path $LocalBin)) { New-Item -ItemType Directory -Path $LocalBin -Force | Out-Null }
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    # Co-deploy the canonical resolvers so every launcher resolves identically
+    # (uniform-runtime-resolution, #765).
+    $binDir = Join-Path $InstallDir 'bin'
+    if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
+    foreach ($r in @('resolve-runtime.ps1', 'resolve-runtime.sh')) {
+        $rSrc = Join-Path $PSScriptRoot $r
+        if (Test-Path $rSrc) { Copy-Item $rSrc (Join-Path $binDir $r) -Force }
+    }
     if ($env:OS -ne 'Windows_NT') {
         $stubPath = Join-Path $LocalBin 'agent-logger'
         $stubContent = @'
 #!/usr/bin/env bash
 export PYTHONUTF8=1
-exec "$HOME/.agent-logger/.venv/bin/python" -m agent_logger "$@"
+_root="$HOME/.agent-logger"
+AGENT_RT_PY=""
+if [ -f "$_root/bin/resolve-runtime.sh" ]; then AGENT_RT_ROOT="$_root"; . "$_root/bin/resolve-runtime.sh"; fi
+[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_logger "$@"
+_i="$(cat "$_root/payload-dir" 2>/dev/null)/scripts/install.sh"
+[ -f "$_i" ] || _i="$(ls "$HOME"/.copilot/installed-plugins/*/agent-logger/scripts/install.sh 2>/dev/null | head -n1)"
+if [ -n "$_i" ] && [ -f "$_i" ]; then echo "[agent-logger] runtime not provisioned; run: bash \"$_i\" provision" >&2; else echo "[agent-logger] runtime not provisioned and the installer was not found; re-enable the plugin, then retry." >&2; fi
+exit 1
 '@
         [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
         Write-Ok "Binstub: $stubPath"
@@ -771,16 +786,13 @@ exec "$HOME/.agent-logger/.venv/bin/python" -m agent_logger "$@"
     $ps1Content = @'
 $env:PYTHONUTF8 = '1'
 $_root = Join-Path $env:USERPROFILE '.agent-logger'
-function _resolve_al_py {
-    $ver = ''
-    try { $ver = ([IO.File]::ReadAllText((Join-Path $_root 'current-version'))).Trim() } catch {}
-    $p = if ($ver) { Join-Path $_root ('versions\' + $ver + '\Scripts\python.exe') } else { '' }
-    if ($p -and (Test-Path -LiteralPath $p)) { return $p }
-    Get-ChildItem (Join-Path $_root 'versions') -Directory -ErrorAction SilentlyContinue |
-        Sort-Object Name | ForEach-Object { Join-Path $_.FullName 'Scripts\python.exe' } |
-        Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Last 1
+$_resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
+function _Resolve-Py {
+    $AgentRtPy = $null
+    if (Test-Path -LiteralPath $_resolver) { $env:AGENT_RT_ROOT = $_root; . $_resolver }
+    return $AgentRtPy
 }
-$_py = _resolve_al_py
+$_py = _Resolve-Py
 if ($_py) { & $_py -m agent_logger @args; exit $LASTEXITCODE }
 if ($env:AGENT_LOGGER_NO_SELFPROVISION) { [Console]::Error.WriteLine('[agent-logger] runtime not provisioned (AGENT_LOGGER_NO_SELFPROVISION set).'); exit 1 }
 $_snap = ''
@@ -792,7 +804,7 @@ if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) { [Console]::Error.Write
 $_pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
 $_exe = if ($_pwsh) { $_pwsh.Source } else { 'powershell.exe' }
 & $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
-$_py = _resolve_al_py
+$_py = _Resolve-Py
 if ($_py) { & $_py -m agent_logger @args; exit $LASTEXITCODE }
 [Console]::Error.WriteLine('[agent-logger] provisioning did not yield a runtime. See the log above; retry, or run the snapshot installer manually.')
 exit 1
@@ -800,43 +812,17 @@ exit 1
     [System.IO.File]::WriteAllText($ps1Path, $ps1Content, $utf8NoBom)
 
     $cmdPath = Join-Path $LocalBin 'agent-logger.cmd'
+    # cmd fallback: delegate to the .ps1 binstub so resolution stays uniform with
+    # the canonical resolve-runtime.ps1 chain and self-provisioning is shared.
     $cmdContent = @'
 @echo off
 setlocal
 set "PYTHONUTF8=1"
-set "_ROOT=%USERPROFILE%\.agent-logger"
-call :_resolve
-if not defined _PY goto _prov
-"%_PY%" -m agent_logger %*
-exit /b %ERRORLEVEL%
-:_prov
-if defined AGENT_LOGGER_NO_SELFPROVISION goto _nope
-set "_SNAP="
-if exist "%_ROOT%\payload-dir" set /p _SNAP=<"%_ROOT%\payload-dir"
-set "_INST=%_SNAP%\scripts\install.ps1"
-if not exist "%_INST%" goto _noinst
-echo [agent-logger] runtime not provisioned -- provisioning on first use ^(~30-120s^). Do not kill.>&2
+set "_PS1=%USERPROFILE%\.local\bin\agent-logger.ps1"
+if not exist "%_PS1%" (echo [agent-logger] binstub not found: %_PS1%>&2 & exit /b 127)
 where pwsh >nul 2>&1
-if %ERRORLEVEL%==0 (pwsh -NoProfile -ExecutionPolicy Bypass -File "%_INST%" provision 1>&2) else (powershell -NoProfile -ExecutionPolicy Bypass -File "%_INST%" provision 1>&2)
-call :_resolve
-if not defined _PY goto _failprov
-"%_PY%" -m agent_logger %*
+if %ERRORLEVEL%==0 (pwsh -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*) else (powershell -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*)
 exit /b %ERRORLEVEL%
-:_noinst
-echo [agent-logger] cannot self-provision: snapshot installer not found.>&2
-exit /b 127
-:_nope
-echo [agent-logger] runtime not provisioned ^(AGENT_LOGGER_NO_SELFPROVISION set^).>&2
-exit /b 1
-:_failprov
-echo [agent-logger] provisioning did not yield a runtime.>&2
-exit /b 1
-:_resolve
-set "_PY="
-set "_VER="
-if exist "%_ROOT%\current-version" set /p _VER=<"%_ROOT%\current-version"
-if defined _VER if exist "%_ROOT%\versions\%_VER%\Scripts\python.exe" set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
-goto :eof
 '@
     [System.IO.File]::WriteAllText($cmdPath, $cmdContent, $utf8NoBom)
     Write-Ok "Binstub: $cmdPath (+ .ps1, self-provisioning)"
