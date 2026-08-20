@@ -68,6 +68,7 @@ from agent_procutil import detached_kwargs
 
 from . import (
     activity,
+    disposition_history,
     git_ops,
     locks,
     output,
@@ -4590,6 +4591,44 @@ def _cmd_status_write(
     return 0
 
 
+def _cmd_status_history(args: argparse.Namespace) -> int:
+    """Read mode of `status --history`: print THIS worktree's durable disposition
+    trajectory (summary / title / follow-up over time), newest last. Resolves the
+    worktree from CWD (or --worktree-id). Honors --json / --limit."""
+    config = cfg.load_config()
+    worktree_id = _infer_worktree_id(getattr(args, "worktree_id", None), config)
+    if not worktree_id:
+        output.err(
+            "Could not determine worktree ID. Run from inside a worktree "
+            "or pass --worktree-id."
+        )
+        return 1
+    worktree_id = _resolve_worktree_id(worktree_id)
+    limit = getattr(args, "limit", None)
+    entries = disposition_history.read(worktree_id, limit=limit)
+    if getattr(args, "json", False):
+        _json_output({"worktree_id": worktree_id, "history": entries})
+        return 0
+    if not entries:
+        print(f"No disposition history for {worktree_id[-4:]}.")
+        return 0
+    print(f"Disposition history for {worktree_id[-4:]} "
+          f"({len(entries)} entr{'y' if len(entries) == 1 else 'ies'}):")
+    for e in entries:
+        at = e.get("at") or "?"
+        changed = ",".join(e.get("changed") or []) or "-"
+        flag = "!" if e.get("follow_up") else " "
+        title = e.get("title")
+        summary = e.get("summary") or ""
+        head = f"  {at} [{flag}] ({changed})"
+        if title:
+            head += f" title: {title}"
+        print(head)
+        if summary:
+            print(f"        {summary}")
+    return 0
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     # worktree-status-core: write mode. When any disposition flag is present,
     # annotate THIS worktree (from CWD) and return -- leaving the fleet-wide
@@ -4605,6 +4644,11 @@ def cmd_status(args: argparse.Namespace) -> int:
     if _summary is not None or _title is not None or _follow is not None:
         return _cmd_status_write(
             args, summary=_summary, title=_title, follow_up=_follow)
+
+    # worktree-status-core: history read mode (per-worktree), orthogonal to the
+    # fleet read below.
+    if getattr(args, "history", False):
+        return _cmd_status_history(args)
 
     tracking_path = cfg.tracking_dir()
 
@@ -6468,6 +6512,7 @@ def cmd_remove_system(args: argparse.Namespace) -> int:
         yaml_path.unlink()
     except OSError:
         pass
+    disposition_history.remove(rec.worktree_id)
     activity.log_event("system_worktree_removed", worktree_id=wt_id)
     if getattr(args, "json", False):
         _json_output({"removed": wt_id})
@@ -6872,6 +6917,7 @@ def _reap_worktree(
 
     # Remove tracking YAML
     (tracking_path / f"{rec.worktree_id}.yaml").unlink(missing_ok=True)
+    disposition_history.remove(rec.worktree_id)
 
     activity.log_event(
         "worktree_reaped",
@@ -7495,6 +7541,7 @@ def _remove_managed_worktree(rec, repo, tracking_path: Path) -> list[str]:
         yaml_path.unlink()
     except OSError:
         pass
+    disposition_history.remove(rec.worktree_id)
     return warns
 
 
@@ -13853,6 +13900,14 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Clear the follow-up flag -- this worktree is resolved (write mode)")
     p.add_argument("--worktree-id", default=None,
                    help="Target worktree id for write mode (default: inferred from CWD)")
+    # worktree-status-core: history read mode -- print THIS worktree's durable
+    # disposition trajectory (summary/title/follow-up over time) so an agent can
+    # grok "what was this worktree doing". A read, orthogonal to the write flags.
+    p.add_argument("--history", action="store_true",
+                   help="Show this worktree's disposition history (summary/title "
+                        "changes over time); read mode, honors --json / --limit")
+    p.add_argument("--limit", type=int, default=None,
+                   help="With --history, show only the most recent N entries")
 
     # status-segment (one styled line for a tmux/psmux status bar)
     p = sub.add_parser(
