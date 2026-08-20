@@ -274,6 +274,22 @@ class CredentialsConfig:
 
 
 @dataclass
+class ConnectionOwnerConfig:
+    """Persistent Connection Owner relay daemon (dotfiles#1320 / #1333).
+
+    Default OFF. When ``enabled``, a single per-machine daemon owns + self-heals
+    each CodeSpace's credential-relay independent of any one agent-bridge
+    dispatch, so a caller disconnect / bridge restart no longer drops the relay
+    mid-task. Nothing starts it by default; enabling is "flip the config, run
+    install/update" (the cutover contract). ``reconcile_interval`` bounds how
+    quickly the live relay set tracks the hold registry.
+    """
+
+    enabled: bool = False
+    reconcile_interval: float = 15.0
+
+
+@dataclass
 class RepoConfig:
     """Per-target-repo CodeSpace settings.
 
@@ -392,6 +408,11 @@ class CodespacesConfig:
 
     # Credential relay
     credentials: CredentialsConfig = field(default_factory=CredentialsConfig)
+
+    # Persistent Connection Owner relay daemon (default off; dotfiles#1320)
+    connection_owner: ConnectionOwnerConfig = field(
+        default_factory=ConnectionOwnerConfig
+    )
 
     # Per-target-repo settings
     repos: dict[str, RepoConfig] = field(default_factory=dict)
@@ -802,6 +823,7 @@ def load_merged_config(include_cwd: bool = True) -> CodespacesConfig:
 
     merged = CodespacesConfig()
     defaults_set = False
+    connection_owner_set = False
 
     # Ordered list of (raw_config, config_dir, source_path) to merge; order =
     # precedence. Adopted repos + cwd first, then USER-LEVEL drop-in providers
@@ -901,6 +923,22 @@ def load_merged_config(include_cwd: bool = True) -> CodespacesConfig:
                         source_raw.get("allowed_resources", [])
                     )
                     existing.allowed_resources = sorted(new_resources)
+
+        # Connection Owner (first repo with a block wins; default off). An
+        # explicit block claims the slot even when empty ({} -> defaults), so a
+        # later repo cannot override a deliberate empty declaration.
+        if "connection_owner" in raw and not connection_owner_set:
+            co_raw = raw.get("connection_owner") or {}
+            merged.connection_owner.enabled = bool(
+                co_raw.get("enabled", merged.connection_owner.enabled)
+            )
+            merged.connection_owner.reconcile_interval = float(
+                co_raw.get(
+                    "reconcile_interval",
+                    merged.connection_owner.reconcile_interval,
+                )
+            )
+            connection_owner_set = True
 
         # Repos (first wins on conflicts)
         for repo_key, repo_raw in raw.get("repos", {}).items():
