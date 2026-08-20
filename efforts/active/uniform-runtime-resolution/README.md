@@ -157,3 +157,22 @@ separate, intentional runtime and keeps its explicit venv.
 - Guard: `check-runtime-resolution` **22 -> 18** (agent-mcp 2 -> 0, agent-machines
   2 -> 0). All guards + ruff + pwsh parse + 72 plugin tests green. Bumped
   agent-mcp 0.2.0-dev57 -> dev58, agent-machines 0.1.0-dev28 -> dev29.
+
+### 2026-08-19 - Phase 2 batch 3: agent-containers
+- Migrated **agent-containers** (the last clean, service-free binstub-only plugin)
+  onto the marker-only resolver, full agent-ssh pattern: vendored the resolvers +
+  installer co-deploys them; POSIX `init.sh` binstub and the `init.ps1` non-Windows
+  shim source `resolve-runtime.sh`; the Windows `.ps1` binstub dot-sources the
+  canonical `resolve-runtime.ps1` (replacing the inline newest-slot resolver); the
+  `.cmd` delegates to the `.ps1`. The non-Windows shim also prints a runnable
+  `bash "<installer>" provision` (batch-2 reviewer feedback, applied proactively).
+- Guard: `check-runtime-resolution` **18 -> 16** (agent-containers 2 -> 0). Guards +
+  ruff + pwsh parse + 110 tests green. Bumped agent-containers 0.1.2-dev58 -> dev59.
+- Remaining (16): the **service/scheduled-task-carrying** plugins (agent-vault,
+  agent-dispatch, agent-logger, agent-index) each have an extra inline resolver in
+  a Windows daemon/scheduled-task launcher (e.g. agent-vault's `conhost --headless
+  "$taskPy"` at-logon task) -- their Windows launchers want operator validation
+  (ties into windows-launch-hardening #786), so they get focused batches; plus
+  agent-codespaces (cross-plugin agent-bridge venv ref + readiness-context `.venv`
+  probes) and agent-worktrees (bespoke; preview-picker dev-echoes + the bin shim's
+  PATH-python last resort -> annotate/retire in the final phase).
