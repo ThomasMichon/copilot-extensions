@@ -400,7 +400,10 @@ _root="`$HOME/.agent-machines"
 AGENT_RT_PY=""
 if [ -f "`$_root/bin/resolve-runtime.sh" ]; then AGENT_RT_ROOT="`$_root"; . "`$_root/bin/resolve-runtime.sh"; fi
 [ -n "`$AGENT_RT_PY" ] && exec "`$AGENT_RT_PY" -m agent_machines "`$@"
-echo "[agent-machines] runtime not provisioned; run scripts/init.sh" >&2; exit 1
+_i="`$(cat "`$_root/payload-dir" 2>/dev/null)/scripts/init.sh"
+[ -f "`$_i" ] || _i="`$(ls "`$HOME"/.copilot/installed-plugins/*/agent-machines/scripts/init.sh 2>/dev/null | head -n1)"
+if [ -n "`$_i" ] && [ -f "`$_i" ]; then echo "[agent-machines] runtime not provisioned; run: bash \"`$_i\" provision" >&2; else echo "[agent-machines] runtime not provisioned and the installer was not found; re-enable the plugin, then retry." >&2; fi
+exit 1
 "@
         [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
         Write-Ok "Binstub: $stubPath"
