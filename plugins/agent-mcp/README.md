@@ -78,6 +78,17 @@ variable is already set (e.g. a no-vault/push machine's static `.env`), it is
 used and the command is **not** run; otherwise the command runs. One bridge
 config then works on both vault-enabled and daemon-less hosts.
 
+Set `auth.repair` on a `command` auth to make it **self-healing**. When the mint
+command *hard-fails* (non-zero exit, missing binary, or timeout), agent-mcp runs
+the `repair` command (string or argv list) **once** and then retries the mint
+**once**. Use it to recover from broken mint *tooling* — e.g. a browser-minting
+bridge whose Playwright is too old to drive an updated Edge can point `repair` at
+a reinstall/refresh command. It is strictly bounded (a single repair + single
+retry, never a loop), fully opt-in (no `repair` = unchanged behavior), and does
+**not** fire on a clean-but-token-less response — only on a tooling failure. The
+repair runs with no stdin under a more generous timeout, since a reinstall is
+slower than a mint.
+
 > **Security — bridge configs are executable code.** `server.command` and
 > `auth.command` run with the host environment and can execute arbitrary local
 > programs. Treat a bridge config like a script: do **not** run an unreviewed or
