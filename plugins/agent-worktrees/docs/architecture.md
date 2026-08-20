@@ -136,6 +136,49 @@ read-time display signal only (`sessions.SessionContext.live_intent`), so it
 cannot corrupt the durable disposition or the single-writer contract. A stale or
 idle pulse greys and then disappears; only the asserted disposition persists.
 
+## The Picker render flow -- never block on cross-process/IO (invariant)
+
+The Picker is a Textual TUI: a **single event-loop thread** drives every repaint,
+key handler, modal-dismiss callback, and `set_interval` tick. **No cross-process
+call (a subprocess: `agent-dispatch`, `git`, `ssh`, an `agent-worktrees --json`
+verb, a mux/session liveness probe) and no blocking IO may run *on* that thread.**
+A single blocking call there freezes the **entire** UI for its full duration
+(actions carry a 30s timeout), which reads to the operator as a crash -- e.g. a
+`steer submit` on Confirm, or the authoritative mux-liveness re-verify when the
+Actions menu opens.
+
+The rule is therefore **always-async from the render flow**:
+
+- **Data plane -- already async.** Fleet enumeration and per-machine reads run on
+  the `LiveLoader`'s background daemon threads (and `RegisteredPivotRuntime.ensure`
+  for pivot lists); the loop only ever reads the *current snapshot*
+  (`loader.records()`) and repaints, so a slow or hung remote never stalls a
+  keystroke. The `_tick` (0.1s) pulls the latest snapshot; the loader resolves
+  underneath.
+- **Control plane -- route through `_run_bg`.** Every action that shells out --
+  the pivot/form **submit** (`_run_pivot_form_submit`), pivot verbs
+  (`_run_task_action`), contributed **worktree** actions (`_run_wt_action`) and
+  **config** sections (`_run_config_section`) -- and every menu-open that needs a
+  fresh cross-process probe (the Actions menu's `verify_worktree_active`) hands the
+  blocking call to **`PickerScreen._run_bg(label, work, done)`**. `work()` runs on a
+  daemon worker thread; the UI update `done(result)` is marshalled back onto the
+  event loop via Textual **`call_from_thread`** (so no widget is mutated
+  off-thread). The handler returns instantly; the status line shows a transient
+  *"… working…"* while the subprocess completes. Progress-reporting actions use the
+  analogous streaming worker (`run_action_stream` + the ProgressScreen).
+- **Cheap in-process work stays inline.** Pure, record-driven computation (verb-set
+  gating via `_session_action_verbs`, menu assembly, formatting) and a single
+  `stat` (e.g. "does this worktree have a tracking record?") are fine on the loop --
+  only *cross-process* and *blocking IO* must be offloaded.
+
+**Enforcement / when you add a feature.** Any new key handler, action, or
+menu-open that reaches a subprocess or blocking IO must go through `_run_bg` (or a
+dedicated daemon worker), never call it inline. A regression test
+(`tests/test_picker_tui.py::test_steer_submit_is_offloaded_off_the_render_flow`)
+gates a runtime whose subprocess blocks on an `Event` and asserts Confirm returns
+*without* having run it -- proving the offload. If you add a blocking edge, add the
+equivalent offload + assertion.
+
 ## Session Lifecycle
 
 ```

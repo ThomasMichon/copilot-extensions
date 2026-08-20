@@ -297,6 +297,15 @@ overlay) into a single styled Rich `Text`, and the app takes an injected data
 `source`. Given the same data, the same grid comes out — so a state can be
 captured with no live terminal and no human watching:
 
+> **Render-flow invariant — never block the event loop.** The Picker runs on a
+> single Textual event-loop thread. No subprocess (an `agent-worktrees --json`
+> verb, `agent-dispatch`, `git`, `ssh`, a mux/session liveness probe) and no
+> blocking IO may run *on* that thread — one blocking call freezes the whole UI
+> (and reads as a crash). Data reads run on the `LiveLoader`'s background threads;
+> actions and cross-process menu-open probes are offloaded via
+> `PickerScreen._run_bg` (worker thread + Textual `call_from_thread`). See
+> [architecture.md](architecture.md#the-picker-render-flow----never-block-on-cross-processio-invariant).
+
 - **Screenshot for auditing** — `<project> picker screenshot` renders the current
   picker headlessly and writes it out for review. `--format svg` (default) is a
   standalone screenshot with colours preserved; `--format text` is the plain

@@ -5741,6 +5741,64 @@ def test_steer_submit_is_offloaded_off_the_render_flow(tmp_path, monkeypatch):
     asyncio.run(run())
 
 
+def test_actions_menu_liveness_verify_is_offloaded(tmp_path, monkeypatch):
+    """Opening the worktree Actions menu re-verifies mux/session liveness -- a
+    cross-process probe. It MUST run off the render flow (via _run_bg): with a
+    gated verify, _open_submenu returns WITHOUT the menu (the loop is not frozen by
+    the 5s probe) and the status shows the working marker; the SubMenuScreen appears
+    only after the probe completes on the worker."""
+    import threading
+
+    from agent_worktrees import config as _cfg
+    from agent_worktrees import sessions as _sessions
+    from agent_worktrees import tracking as _tracking
+
+    src = _fixture_source()
+    wt_id = "anomalous-potato-win-20260627-aaaa"
+    tdir = tmp_path / "worktrees"
+    tdir.mkdir()
+    (tdir / f"{wt_id}.yaml").write_text("id: x\n", encoding="utf-8")
+    monkeypatch.setattr(_cfg, "tracking_dir", lambda: tdir)
+    monkeypatch.setattr(_tracking, "stamp_mux_live", lambda *a, **k: None)
+
+    gate = threading.Event()
+    calls = {"n": 0}
+
+    def _gated_verify(ns):
+        calls["n"] += 1
+        gate.wait(5)                    # block as the real mux/session probe would
+        return types.SimpleNamespace(
+            mux_live=True, mux_clients=1, live_session_ids=["s"], bare=False)
+
+    monkeypatch.setattr(_sessions, "verify_worktree_active", _gated_verify)
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            scr.sel = ("L", 0)
+            await pilot.pause()
+            scr._open_submenu()
+            await pilot.pause()
+            # Offloaded: the menu is NOT open yet (verify gated on the worker) and
+            # the loop was not frozen by the 5s probe.
+            assert _sub_menu(scr) is None, "menu opened before the async verify finished"
+            assert str(scr.debug).endswith("working…")
+            gate.set()
+            for _ in range(200):
+                await pilot.pause()
+                await asyncio.sleep(0.02)
+                if _sub_menu(scr) is not None:
+                    break
+            menu = _sub_menu(scr)
+            assert menu is not None
+            assert calls["n"] == 1
+            assert ("Open" in menu._actions) or ("Resume" in menu._actions)
+
+    asyncio.run(run())
+
+
 def test_registered_pivot_switch_pivot_cycles_left_rail(tmp_path, monkeypatch):
     from agent_worktrees.picker_tui import pivots as pivots_mod
 
