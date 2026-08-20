@@ -350,6 +350,9 @@ class _FakeOwner:
     async def shutdown(self):
         self.shutdowns += 1
 
+    def active_codespaces(self):
+        return set()
+
 
 async def test_run_owner_daemon_reconciles_until_stopped(store):
     fake = _FakeOwner(stop_after=3)
@@ -453,7 +456,96 @@ async def test_daemon_beacon_is_live_during_run_and_cleared_after(store):
         async def shutdown(self) -> None:
             pass
 
+        def active_codespaces(self):
+            return set()
+
     o = _BeaconOwner()
     await owner.run_owner_daemon(o, interval=0, stop_event=o.stop_event)
     assert seen["live"] is True
     assert not owner.LIVE_FILE.exists()  # beacon cleared on exit
+
+
+# ---------------------------------------------------------------------------
+# Active-codespaces publication (tenant defer gate, slice 2b)
+# ---------------------------------------------------------------------------
+
+
+def test_liveness_active_roundtrip(store):
+    owner._write_liveness(15.0, active=["cs-b", "cs-a"])
+    live = owner.read_liveness()
+    assert live is not None
+    assert live.active == ("cs-a", "cs-b")  # sorted on write
+
+
+def test_liveness_active_defaults_empty(store):
+    owner._write_liveness(15.0)
+    assert owner.read_liveness().active == ()
+
+
+def test_owner_active_codespaces_requires_live(store):
+    owner._write_liveness(15.0, active=["cs-a"])
+    assert owner.owner_active_codespaces() == {"cs-a"}
+    # A stale beacon -> no trustworthy active set.
+    live = owner.read_liveness()
+    stale = live.heartbeat_at + live.staleness_threshold() + 1.0
+    assert owner.owner_active_codespaces(now=stale) == set()
+
+
+def test_owner_serves_relay(store):
+    owner._write_liveness(15.0, active=["cs-a"])
+    assert owner.owner_serves_relay("cs-a") is True
+    assert owner.owner_serves_relay("cs-b") is False
+    assert owner.owner_serves_relay("") is False
+
+
+def test_owner_serves_relay_false_when_not_live(store):
+    # No beacon at all -> not serving anything.
+    assert owner.owner_serves_relay("cs-a") is False
+
+
+def test_liveness_active_malformed_tolerated(store):
+    import json
+
+    owner.LIVE_FILE.write_text(
+        json.dumps(
+            {
+                "pid": 1,
+                "host": "h",
+                "heartbeat_at": time.time(),
+                "interval": 15.0,
+                "active": "not-a-list",
+            }
+        ),
+        encoding="utf-8",
+    )
+    live = owner.read_liveness()
+    assert live is not None
+    assert live.active == ()  # a non-list active is dropped, not exploded
+
+
+async def test_daemon_publishes_active_codespaces(store):
+    # A real ConnectionOwner with a held CodeSpace publishes it in the beacon's
+    # active set once its relay channel is up.
+    created: dict[str, FakeRelay] = {}
+    owner.hold("cs-live", "ssh:test")
+    real = owner.ConnectionOwner(_factory(created))
+    stop = asyncio.Event()
+    seen: dict[str, tuple[str, ...]] = {}
+
+    class _Wrapper:
+        async def reconcile(self) -> None:
+            await real.reconcile()
+
+        async def shutdown(self) -> None:
+            await real.shutdown()
+
+        def active_codespaces(self):
+            act = real.active_codespaces()
+            if act:  # populated after the first reconcile starts the channel
+                seen["active"] = tuple(sorted(act))
+                stop.set()
+            return act
+
+    await owner.run_owner_daemon(_Wrapper(), interval=0, stop_event=stop)
+    assert seen.get("active") == ("cs-live",)
+    assert not owner.LIVE_FILE.exists()  # cleared on exit
