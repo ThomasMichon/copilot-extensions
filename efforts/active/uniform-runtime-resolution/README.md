@@ -280,3 +280,17 @@ separate, intentional runtime and keeps its explicit venv.
     left for the final link-retirement sweep (they work while the link exists).
 - Guard: **10 -> 9** (agent-dispatch 1 -> 0). pwsh parse + shellcheck + binstub
   smoke + 1062 tests green. Bumped agent-dispatch 0.1.0-dev189 -> dev190.
+
+### 2026-08-20 - Phase 2 batch 9: agent-index (index service + health probe)
+- **agent-index**: POSIX binstub sources the deployed `resolve-runtime.sh`; the
+  index-service systemd `ExecStart` uses `$VENV_PYTHON` (slot) instead of
+  `$LINK_PYTHON`; `ensure-service.sh`'s health probe resolves the slot python via
+  the canonical resolver (was `.venv/bin/python` else PATH `python3`), degrading to
+  curl when no slot is resolvable; Windows `.ps1` binstub dot-sources the canonical
+  `resolve-runtime.ps1`, `.cmd` delegates to it. The **durable engine venv**
+  (`$ENGINE_VENV_PYTHON`, a separate intentional runtime per
+  `durable-vs-versioned-runtime`) is untouched and out of scope. Install-time
+  `$LINK_PYTHON` health-gate uses left for the final link-retirement sweep.
+- Guard: **9 -> 6** (agent-index 3 -> 0). pwsh parse + binstub smoke + 226 tests
+  green. Bumped agent-index 0.1.0-dev69 -> dev70. (Pre-existing SC1087 shellcheck
+  false positives on pip-extras `$PLUGIN_DIR[store]` syntax are unrelated.)
