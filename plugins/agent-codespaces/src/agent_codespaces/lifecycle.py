@@ -9,9 +9,10 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
-import sys
 from dataclasses import dataclass
 from enum import Enum
+
+from agent_procutil import no_window_flags
 
 from .config import RUNTIME_DIR, CodespacesConfig, RepoConfig
 
@@ -68,9 +69,7 @@ class CodespaceInfo:
 
 
 def _creation_flags() -> int:
-    if sys.platform == "win32":
-        return subprocess.CREATE_NO_WINDOW
-    return 0
+    return no_window_flags()
 
 
 def list_codespaces() -> list[CodespaceInfo]:

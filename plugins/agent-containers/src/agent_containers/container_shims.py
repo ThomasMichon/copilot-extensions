@@ -16,7 +16,8 @@ from __future__ import annotations
 import base64
 import logging
 import subprocess
-import sys
+
+from agent_procutil import no_window_flags
 
 log = logging.getLogger("agent-containers.shims")
 
@@ -118,10 +119,9 @@ def _docker_write(container: str, path: str, content: str, mode: str = "755") ->
     """Write ``content`` to ``path`` in the container (as root) and chmod it."""
     b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
     script = f"echo {b64} | base64 -d > {path} && chmod {mode} {path}"
-    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     res = subprocess.run(
         ["docker", "exec", "-u", "0", container, "bash", "-lc", script],
-        capture_output=True, text=True, timeout=30, creationflags=flags,
+        capture_output=True, text=True, timeout=30, creationflags=no_window_flags(),
     )
     if res.returncode != 0:
         raise RuntimeError(

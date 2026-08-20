@@ -32,11 +32,12 @@ import os
 import platform
 import shutil
 import subprocess
-import sys
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
+
+from agent_procutil import no_window_flags
 
 from . import coordination
 from .config import RUNTIME_DIR, ensure_runtime_dir
@@ -305,9 +306,7 @@ def get_lease(codespace: str, ttl: float = DEFAULT_TTL) -> Lease | None:
 
 
 def _creation_flags() -> int:
-    if sys.platform == "win32":
-        return subprocess.CREATE_NO_WINDOW
-    return 0
+    return no_window_flags()
 
 
 def _agent_worktrees_bin() -> str | None:
