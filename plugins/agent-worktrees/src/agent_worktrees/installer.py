@@ -364,14 +364,15 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
 
     # Deploy bootstrap-check scripts (called by sessionStart hook) + the
     # session-conduct injector (sessionStart additionalContext) + the preToolUse
-    # guards: statelessness_guard + cross_repo_guard + anchor_write_guard.
+    # guards: statelessness_guard + cross_repo_guard + anchor_write_guard + the
+    # postToolUse disposition nudge: nudge_status.
     for name in ("resolve-runtime.ps1", "resolve-runtime.sh",
                  "session-conduct.ps1", "session-conduct.sh",
                  "session-machine.ps1", "session-machine.sh",
                  "session-ext-reload.ps1", "session-ext-reload.sh",
                  "bootstrap-check.ps1", "bootstrap-check.sh",
                  "statelessness_guard.py", "cross_repo_guard.py",
-                 "anchor_write_guard.py"):
+                 "anchor_write_guard.py", "nudge_status.py"):
         src = scripts / name
         if src.exists():
             shutil.copy2(src, bd / name)

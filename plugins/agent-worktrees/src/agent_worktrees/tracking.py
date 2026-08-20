@@ -1291,19 +1291,25 @@ def set_disposition(
     record: WorktreeRecord,
     *,
     summary: str | None = None,
+    title: str | None = None,
     follow_up: bool | None = None,
     save: bool = True,
 ) -> None:
-    """Set the agent-asserted disposition overlay (summary / follow-up) and save.
+    """Set the agent-asserted disposition overlay (summary / title / follow-up)
+    and save.
 
     Orthogonal to git/session state -- this records what only the agent knows:
     whether the worktree is genuinely *resolved* or still has *actionable
-    follow-ups*, plus a one-line summary of what it is/left at. ``summary`` and
-    ``follow_up`` are each applied only when not None, so a caller may update
-    one without disturbing the other. Stamps ``status_note_at``.
+    follow-ups*, plus a one-line summary of what it is/left at and (optionally) a
+    fresh ``title`` when the worktree's focus changes. ``summary``, ``title`` and
+    ``follow_up`` are each applied only when not None, so a caller may update one
+    without disturbing the others. Stamps ``status_note_at`` (which the
+    postToolUse nudge watches to reset its drift counter).
     """
     if summary is not None:
         record.summary = summary.replace("\n", " ").strip()
+    if title is not None:
+        record.title = title.replace("\n", " ").strip() or None
     if follow_up is not None:
         record.follow_up = follow_up
     record.status_note_at = _now_iso()

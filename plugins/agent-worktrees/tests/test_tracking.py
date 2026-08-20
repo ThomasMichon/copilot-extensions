@@ -1782,6 +1782,22 @@ class TestSetDisposition:
         assert again.follow_up is False
         assert again.summary == "new"
 
+    def test_set_title_updates_and_preserves_disposition(self, tmp_path: Path, monkeypatch):
+        rec = self._rec(follow_up=True, summary="keep me")
+        p = tmp_path / "wt.yaml"
+        monkeypatch.setattr("agent_worktrees.tracking.save_record",
+                            lambda record, path=None: save_record(record, p))
+        # title-only update rewrites the headline label, leaving summary/follow_up.
+        set_disposition(rec, title="New focus: nudge subsystem")
+        loaded = load_record(p)
+        assert loaded.title == "New focus: nudge subsystem"
+        assert loaded.summary == "keep me"
+        assert loaded.follow_up is True
+        assert loaded.status_note_at  # a title write also stamps status_note_at
+        # An all-whitespace title clears back to None (no empty headline).
+        set_disposition(loaded, title="   ")
+        assert load_record(p).title is None
+
 
 class TestForwardCompatContract:
     """The single-writer cross-layer contract (docs/architecture.md, the

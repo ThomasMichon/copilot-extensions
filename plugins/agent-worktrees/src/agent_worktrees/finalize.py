@@ -1466,6 +1466,15 @@ def validate_and_finalize(
             # orphans governed by their own prune safety.
             released = tracking.release_all_resources(record, save=False)
             tracking.update_status(record, "finalized")
+            # Reset the postToolUse disposition-nudge sidecar (#nudge): a
+            # finalized worktree's disposition is sealed, so drop its drift
+            # counter. Best-effort -- the nudge hook also self-heals on a
+            # terminal state.
+            try:
+                (cfg.install_dir() / "nudge-state" / f"{worktree_id}.json").unlink(
+                    missing_ok=True)
+            except Exception:
+                pass
             if released:
                 output.warn(
                     f"Released {len(released)} downstream worktree resource(s) "

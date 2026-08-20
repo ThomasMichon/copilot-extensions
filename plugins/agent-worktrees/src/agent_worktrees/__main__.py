@@ -4547,10 +4547,11 @@ def cmd_mark_complete(args: argparse.Namespace) -> int:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _cmd_status_write(
-    args: argparse.Namespace, *, summary: str | None, follow_up: bool | None,
+    args: argparse.Namespace, *, summary: str | None, title: str | None = None,
+    follow_up: bool | None = None,
 ) -> int:
     """Write mode of `status`: annotate THIS worktree's agent-asserted
-    disposition (summary / follow-up). Resolves the worktree from CWD (or
+    disposition (summary / title / follow-up). Resolves the worktree from CWD (or
     --worktree-id). Orthogonal to git/session state; see the worktree-status-core
     effort and the agent-fabric vision (disposition-is-asserted-pulse-is-derived).
     """
@@ -4576,10 +4577,13 @@ def _cmd_status_write(
     with tracking._RecordLock(yaml_path):
         record = tracking.load_record(yaml_path)
         tracking.set_disposition(
-            record, summary=summary, follow_up=follow_up, save=False)
+            record, summary=summary, title=title, follow_up=follow_up,
+            save=False)
         tracking.save_record(record)
     flag = "follow-ups pending" if record.follow_up else "resolved"
     msg = f"[OK] Worktree {worktree_id[-4:]} disposition: {flag}"
+    if title is not None and record.title:
+        msg += f" -- title: {record.title}"
     if record.summary:
         msg += f" -- {record.summary}"
     print(msg)
@@ -4591,14 +4595,16 @@ def cmd_status(args: argparse.Namespace) -> int:
     # annotate THIS worktree (from CWD) and return -- leaving the fleet-wide
     # read path (`status` / `status --json`, no write flags) untouched.
     _summary = getattr(args, "summary", None)
+    _title = getattr(args, "title", None)
     _fu = getattr(args, "follow_up", False)
     _res = getattr(args, "resolved", False)
     if _fu and _res:
         output.err("Pass only one of --follow-up / --resolved.")
         return 1
     _follow = True if _fu else (False if _res else None)
-    if _summary is not None or _follow is not None:
-        return _cmd_status_write(args, summary=_summary, follow_up=_follow)
+    if _summary is not None or _title is not None or _follow is not None:
+        return _cmd_status_write(
+            args, summary=_summary, title=_title, follow_up=_follow)
 
     tracking_path = cfg.tracking_dir()
 
@@ -13838,6 +13844,9 @@ def build_parser() -> argparse.ArgumentParser:
     # per-worktree write (resolved from CWD, or --worktree-id).
     p.add_argument("--summary", default=None,
                    help="Set this worktree's one-line disposition summary (write mode)")
+    p.add_argument("--title", default=None,
+                   help="Set this worktree's title -- the Picker's headline label "
+                        "(write mode). Use when the worktree's focus changes.")
     p.add_argument("--follow-up", dest="follow_up", action="store_true",
                    help="Flag this worktree as having actionable follow-ups (write mode)")
     p.add_argument("--resolved", action="store_true",
