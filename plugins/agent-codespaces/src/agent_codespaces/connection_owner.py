@@ -331,6 +331,129 @@ def release(
 
 
 # ---------------------------------------------------------------------------
+# Liveness beacon (tenant-defer prerequisite, dotfiles#1345)
+# ---------------------------------------------------------------------------
+#
+# The registry above records *intent* (which CodeSpaces should be held). The
+# beacon below records that a Connection Owner daemon is actually **running** and
+# reconciling on this machine. A tenant (a one-off ``agent-codespaces ssh``, an
+# agent-bridge dispatch) may only defer its relay to the Owner when the Owner is
+# live -- otherwise it would skip standing up its own relay and be left with no
+# credential auth. The daemon refreshes the beacon every reconcile cycle and
+# removes it on clean shutdown; a crashed daemon leaves a beacon that ages out
+# within a few intervals, so :func:`is_owner_live` fails safe (the tenant falls
+# back to owning its own relay). Nothing consumes this yet -- it is additive; the
+# consumer rewire (making ssh/dispatch defer) is the next increment.
+
+LIVE_FILE = RUNTIME_DIR / "connection-owner.live.json"
+
+# Treat the Owner as live only if its beacon was refreshed within this many
+# reconcile intervals (with a floor so a very fast interval can't make liveness
+# flap on scheduler jitter).
+_LIVE_STALE_INTERVALS = 3
+_LIVE_STALE_FLOOR = 45.0
+
+
+@dataclass
+class OwnerLiveness:
+    """A snapshot of the running Connection Owner daemon's liveness beacon."""
+
+    pid: int
+    host: str
+    heartbeat_at: float
+    interval: float
+
+    def staleness_threshold(self) -> float:
+        return max(_LIVE_STALE_FLOOR, _LIVE_STALE_INTERVALS * max(self.interval, 0.0))
+
+    def is_fresh(self, now: float | None = None) -> bool:
+        now = time.time() if now is None else now
+        return (now - self.heartbeat_at) <= self.staleness_threshold()
+
+
+def _write_liveness(interval: float) -> None:
+    """Refresh the daemon liveness beacon (best-effort; never raises)."""
+    try:
+        ensure_runtime_dir()
+        payload = {
+            "pid": os.getpid(),
+            "host": _this_host(),
+            "heartbeat_at": time.time(),
+            "interval": float(interval),
+        }
+        tmp = LIVE_FILE.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload), encoding="utf-8")
+        os.replace(tmp, LIVE_FILE)
+    except Exception as exc:  # a beacon write must never crash the daemon
+        log.debug("Connection Owner liveness beacon write failed: %s", exc)
+
+
+def _clear_liveness() -> None:
+    """Remove the daemon liveness beacon (best-effort; never raises)."""
+    try:
+        LIVE_FILE.unlink(missing_ok=True)
+    except Exception as exc:
+        log.debug("Connection Owner liveness beacon clear failed: %s", exc)
+
+
+def read_liveness() -> OwnerLiveness | None:
+    """Read the liveness beacon, or ``None`` if absent / malformed."""
+    try:
+        raw = json.loads(LIVE_FILE.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return OwnerLiveness(
+            pid=int(raw.get("pid", 0)),
+            host=str(raw.get("host", "")),
+            heartbeat_at=float(raw.get("heartbeat_at", 0.0)),
+            interval=float(raw.get("interval", 0.0)),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _pid_alive(pid: int) -> bool | None:
+    """Best-effort: is ``pid`` a live process? ``None`` when undeterminable.
+
+    POSIX uses ``os.kill(pid, 0)``. On Windows ``os.kill`` with a non-control
+    signal calls ``TerminateProcess`` (it would KILL the pid), so we never probe
+    there -- return ``None`` and let heartbeat freshness be the sole signal.
+    """
+    if pid <= 0:
+        return False
+    if platform.system() == "Windows":
+        return None
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists, owned by another user
+    except OSError:
+        return None
+
+
+def is_owner_live(now: float | None = None) -> bool:
+    """True if a Connection Owner daemon is running + reconciling on this machine.
+
+    Fails safe: a missing / stale beacon, or a beacon whose pid is provably dead,
+    reads as **not live** so a tenant falls back to owning its own relay.
+    """
+    live = read_liveness()
+    if live is None:
+        return False
+    if not live.is_fresh(now):
+        return False
+    return _pid_alive(live.pid) is not False
+
+
+# ---------------------------------------------------------------------------
 # Connection Owner reconciler (increment 2)
 # ---------------------------------------------------------------------------
 #
@@ -522,14 +645,17 @@ async def run_owner_daemon(
     """
     stop = stop_event if stop_event is not None else asyncio.Event()
     try:
+        _write_liveness(interval)
         while not stop.is_set():
             try:
                 await owner.reconcile()
             except Exception as exc:  # a bad cycle must not kill the daemon
                 log.warning("Connection Owner reconcile cycle failed: %s", exc)
+            _write_liveness(interval)  # refresh the beacon each cycle
             try:
                 await asyncio.wait_for(stop.wait(), timeout=interval)
             except (TimeoutError, asyncio.TimeoutError):
                 pass
     finally:
+        _clear_liveness()
         await owner.shutdown()

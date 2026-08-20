@@ -8,17 +8,18 @@ semantics, TTL-based tenant reclamation, pin stickiness, and persistence.
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 
 import pytest
 from agent_codespaces import connection_owner as owner
-
 
 @pytest.fixture
 def store(monkeypatch, tmp_path):
     """Redirect Connection Owner state to a tmp dir so tests never touch real state."""
     monkeypatch.setattr(owner, "OWNER_FILE", tmp_path / "connection-owner.json")
     monkeypatch.setattr(owner, "_LOCK_FILE", tmp_path / "connection-owner.lock")
+    monkeypatch.setattr(owner, "LIVE_FILE", tmp_path / "connection-owner.live.json")
     monkeypatch.setattr(owner, "RUNTIME_DIR", tmp_path)
     # ensure_runtime_dir() targets the real RUNTIME_DIR; stub it to a no-op.
     monkeypatch.setattr(owner, "ensure_runtime_dir", lambda: None)
@@ -350,16 +351,97 @@ class _FakeOwner:
         self.shutdowns += 1
 
 
-async def test_run_owner_daemon_reconciles_until_stopped():
+async def test_run_owner_daemon_reconciles_until_stopped(store):
     fake = _FakeOwner(stop_after=3)
     await owner.run_owner_daemon(fake, interval=0, stop_event=fake.stop_event)
     assert fake.reconciles >= 3
     assert fake.shutdowns == 1  # channels stopped on exit
+    assert not owner.LIVE_FILE.exists()  # beacon cleared on exit
 
 
-async def test_run_owner_daemon_survives_a_failing_cycle():
+async def test_run_owner_daemon_survives_a_failing_cycle(store):
     fake = _FakeOwner(stop_after=2, fail_first=True)
     # First reconcile raises; the loop logs and continues to the second, which stops.
     await owner.run_owner_daemon(fake, interval=0, stop_event=fake.stop_event)
     assert fake.reconciles >= 2
     assert fake.shutdowns == 1
+
+
+# ---------------------------------------------------------------------------
+# Liveness beacon
+# ---------------------------------------------------------------------------
+
+
+def test_read_liveness_absent_is_none(store):
+    assert owner.read_liveness() is None
+    assert owner.is_owner_live() is False
+
+
+def test_write_and_read_liveness_roundtrip(store):
+    owner._write_liveness(15.0)
+    live = owner.read_liveness()
+    assert live is not None
+    assert live.pid == os.getpid()
+    assert live.interval == 15.0
+    assert owner.is_owner_live() is True
+
+
+def test_clear_liveness_removes_beacon(store):
+    owner._write_liveness(15.0)
+    assert owner.LIVE_FILE.exists()
+    owner._clear_liveness()
+    assert not owner.LIVE_FILE.exists()
+    assert owner.is_owner_live() is False
+
+
+def test_liveness_stale_beacon_reads_not_live(store):
+    owner._write_liveness(15.0)
+    live = owner.read_liveness()
+    threshold = live.staleness_threshold()
+    # Older than the staleness threshold (max(45, 3*interval) = 45s) -> not live.
+    stale_now = live.heartbeat_at + threshold + 1.0
+    assert live.is_fresh(stale_now) is False
+    assert owner.is_owner_live(now=stale_now) is False
+    # Just within the threshold -> still live.
+    fresh_now = live.heartbeat_at + threshold - 1.0
+    assert owner.is_owner_live(now=fresh_now) is True
+
+
+def test_liveness_pid_gate(store, monkeypatch):
+    owner._write_liveness(15.0)
+    # A provably-dead pid fails safe regardless of freshness.
+    monkeypatch.setattr(owner, "_pid_alive", lambda pid: False)
+    assert owner.is_owner_live() is False
+    # An undeterminable pid (e.g. Windows) does NOT veto liveness.
+    monkeypatch.setattr(owner, "_pid_alive", lambda pid: None)
+    assert owner.is_owner_live() is True
+
+
+def test_liveness_malformed_beacon_is_none(store):
+    owner.LIVE_FILE.write_text("not json", encoding="utf-8")
+    assert owner.read_liveness() is None
+    owner.LIVE_FILE.write_text("[]", encoding="utf-8")  # wrong shape (not a dict)
+    assert owner.read_liveness() is None
+    assert owner.is_owner_live() is False
+
+
+async def test_daemon_beacon_is_live_during_run_and_cleared_after(store):
+    seen: dict[str, bool] = {}
+
+    class _BeaconOwner:
+        def __init__(self) -> None:
+            self.stop_event = asyncio.Event()
+
+        async def reconcile(self) -> None:
+            # The daemon writes the beacon before the first reconcile, so a tenant
+            # checking liveness mid-run sees the Owner as live.
+            seen["live"] = owner.is_owner_live()
+            self.stop_event.set()
+
+        async def shutdown(self) -> None:
+            pass
+
+    o = _BeaconOwner()
+    await owner.run_owner_daemon(o, interval=0, stop_event=o.stop_event)
+    assert seen["live"] is True
+    assert not owner.LIVE_FILE.exists()  # beacon cleared on exit
