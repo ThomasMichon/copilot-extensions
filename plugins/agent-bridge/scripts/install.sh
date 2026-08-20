@@ -874,6 +874,23 @@ do_stamp() {
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
 }
 
+# Cross-process install serialization (ce#776/#777 follow-up; ce#802 review): a
+# second install/update of the same version must not rebuild the venv over an
+# in-flight one (the racing rebuild that yields a DOA slot, dotfiles#1612). flock
+# $INSTALL_DIR/.install.lock via fd 8, held for the whole build; the OS drops it
+# when this process exits, so a crash never strands it. `flock -w` bounds the
+# wait -> on timeout DEFER (the in-flight install lands the version). Degrades to
+# lock-free when flock is absent or the lock file can't be opened. The direct
+# (nohup) daemon start closes fd 8 (8>&-) so a launched daemon never inherits and
+# holds the lock; systemd-launched and python-cutover (close_fds) daemons don't.
+_enter_install_lock() {
+    mkdir -p "$INSTALL_DIR" 2>/dev/null || true
+    exec 8>"$INSTALL_DIR/.install.lock" 2>/dev/null || return 0   # can't open -> lock-free
+    command -v flock >/dev/null 2>&1 || return 0                  # no flock -> lock-free
+    flock -w 150 8 || return 1                                    # held whole window -> defer
+    return 0
+}
+
 do_install() {
     echo ""
     echo "=== agent-bridge install ==="
@@ -888,6 +905,13 @@ do_install() {
     # Guard against a stale checkout downgrading an existing healthy install
     # (#1790). No-op on first install (no installed version to compare).
     _downgrade_guard
+
+    # Serialize concurrent installers (ce#776/#777 follow-up): wait for any
+    # in-flight install; on timeout defer -- it lands the version.
+    if ! _enter_install_lock; then
+        _warn "Another agent-bridge install is in progress -- deferring this run. No-op."
+        return 0
+    fi
 
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
 
@@ -1104,8 +1128,10 @@ do_start() {
         _warn "systemd start failed -- falling back to direct start"
     fi
 
-    # Direct start -- launch through the stable `venv` link.
-    nohup "$LINK_DIR/bin/agent-bridge" start > "$INSTALL_DIR/agent-bridge.log" 2>&1 &
+    # Direct start -- launch through the stable `venv` link. Close fd 8 (8>&-) so
+    # a daemon launched during do_install/do_update never inherits and holds the
+    # install lock (ce#802).
+    nohup "$LINK_DIR/bin/agent-bridge" start > "$INSTALL_DIR/agent-bridge.log" 2>&1 8>&- &
     local pid=$!
     echo "$pid" > "$PID_FILE"
     sleep 2
@@ -1460,6 +1486,13 @@ do_update() {
     # Refuse a downgrade from a stale checkout before touching the live daemon
     # (#1790). Runs first so a rejected update never drains/stops the service.
     _downgrade_guard
+
+    # Serialize concurrent installers (see do_install): don't rebuild the venv
+    # over an in-flight install/update. Defer on timeout.
+    if ! _enter_install_lock; then
+        _warn "Another agent-bridge install/update is in progress -- deferring. No-op."
+        return 0
+    fi
 
     # Is the service currently running?
     local was_running=false
