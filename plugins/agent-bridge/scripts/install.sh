@@ -560,7 +560,7 @@ _install_sibling_plugins() {
 _remove_vendored_providers() {
     local pys=() py pkg mod purelib leak
     [[ -x "$VENV_DIR/bin/python" ]] && pys+=("$VENV_DIR/bin/python")
-    [[ -x "$INSTALL_DIR/venv/bin/python" ]] && pys+=("$INSTALL_DIR/venv/bin/python")
+    [[ -x "$INSTALL_DIR/venv/bin/python" ]] && pys+=("$INSTALL_DIR/venv/bin/python")  # runtime-resolution: allow legacy-venv cleanup (prune, not launch)
     if [[ ${#pys[@]} -eq 0 ]]; then
         _step "No bridge venv yet -- nothing to prune (#1643)"
         return 0
@@ -687,7 +687,7 @@ _install_systemd_unit() {
     # Resolve the daemon through the stable `venv` link (a symlink to the active
     # versions/<v> slot in the immutable-versioned layout), never a versions/<v>
     # absolute a `gc` could remove.
-    local venv_bridge="$LINK_DIR/bin/agent-bridge"
+    local venv_bridge="$VENV_DIR/bin/agent-bridge"
 
     cat > "$unit_dir/$SYSTEMD_UNIT" << EOF
 [Unit]
@@ -800,15 +800,33 @@ _ensure_uv_index() {
 # line + a machine-readable ::agent-provisioning:: signal so a caller can extend
 # its timeout), lock-serialized, fail-fast. Replaces the old thin exec stub.
 deploy_binstub() {
-    mkdir -p "$LOCAL_BIN"
+    mkdir -p "$LOCAL_BIN" "$INSTALL_DIR/bin"
+    # Co-deploy the canonical marker-only resolver so the binstub resolves the
+    # interpreter the ONE uniform way (uniform-runtime-resolution, #765).
+    for r in resolve-runtime.sh resolve-runtime.ps1; do
+        [ -f "$SCRIPT_DIR/$r" ] && cp -f "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r"
+    done
     cat > "$BINSTUB" << 'STUB'
 #!/usr/bin/env bash
 # agent-bridge binstub -- self-provisioning (install-on-first-use).
+# Resolves the interpreter SOLELY via the junction-free versioned-runtime marker
+# (the deployed resolve-runtime.sh; uniform-runtime-resolution, #765): current-
+# version -> last-known-good -> newest complete slot. NEVER the `venv` link, NEVER
+# a PATH python -- when no slot is installed AGENT_RT_PY is empty and we self-
+# provision on first use rather than silently binding the system interpreter.
 export PYTHONUTF8=1
 _name="agent-bridge"
 _root="$HOME/.$_name"
-_console="$_root/venv/bin/$_name"
-[ -x "$_console" ] && exec "$_console" "$@"
+_resolver="$_root/bin/resolve-runtime.sh"
+_resolve() {
+    AGENT_RT_PY=""
+    if [ -f "$_resolver" ]; then
+        AGENT_RT_ROOT="$_root"
+        . "$_resolver"
+    fi
+}
+_resolve
+[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_bridge "$@"
 mkdir -p "$_root"
 _status="$_root/.provision-status"
 printf '%s\n' "[$_name] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout." >&2
@@ -822,17 +840,19 @@ fi
 _lock="$_root/.provision.lock"
 exec 9>"$_lock"
 command -v flock >/dev/null 2>&1 && flock 9 2>/dev/null
-[ -x "$_console" ] && exec "$_console" "$@"
+_resolve
+[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_bridge "$@"
 printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
 bash "$_install" provision >&2
 _rc=$?
-if [ "$_rc" -eq 0 ] && [ -x "$_console" ]; then
+_resolve
+if [ "$_rc" -eq 0 ] && [ -n "$AGENT_RT_PY" ]; then
     printf 'ready %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-    exec "$_console" "$@"
+    exec "$AGENT_RT_PY" -m agent_bridge "$@"
 fi
 printf 'failed rc=%s %s\n' "$_rc" "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
 if [ "$_rc" -eq 0 ]; then
-    printf '%s\n' "[$_name] provisioning reported success but the CLI is still missing ($_console)." >&2
+    printf '%s\n' "[$_name] provisioning reported success but no runtime slot resolved." >&2
     _rc=1
 else
     printf '%s\n' "[$_name] provisioning FAILED (rc=$_rc). See the log above; retry, or run: bash \"$_install\" provision" >&2

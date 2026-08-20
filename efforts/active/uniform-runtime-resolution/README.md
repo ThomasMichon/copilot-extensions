@@ -242,3 +242,24 @@ separate, intentional runtime and keeps its explicit venv.
   - **agent-worktrees** -- bespoke resolver; preview-picker.{sh,ps1} are echoed
     dev-setup instructions (annotate `# runtime-resolution: allow`); bin shim's
     `exec python` PATH fallback + the `.venv`-link retirement are the final phase.
+
+### 2026-08-20 - Phase 2 batch 7: agent-bridge (full, incl. systemd ExecStart)
+- Operator approved **push_all** -- proceed through the live-daemon ExecStart
+  migrations, Windows daemon launchers, and the final link-retirement/--strict.
+- **Key mechanism for daemon ExecStart:** systemd can't source a resolver at
+  launch, but at install time `$VENV_DIR` already IS the slot being built and
+  activated -- so `ExecStart=$LINK_PYTHON/...` (link) becomes
+  `ExecStart=$VENV_DIR/...` (the slot), a direct marker-only path re-written on
+  every install/update (the unit tracks the active version; each daemon runs from
+  its own immutable slot between updates). No resolver needed in the unit; only
+  the persistent binstub resolves dynamically.
+- **agent-bridge** (versioned model, link-name `venv`): POSIX binstub now sources
+  the deployed `resolve-runtime.sh` -> `$AGENT_RT_PY -m agent_bridge` (was the
+  `venv/bin/agent-bridge` console script via the link); `ExecStart` uses the slot
+  (`$VENV_DIR/bin/agent-bridge`); Windows `.ps1` binstub dot-sources the canonical
+  `resolve-runtime.ps1` (replacing its inline lexicographic resolver), `.cmd`
+  delegates to it. The 3 guard-flagged lines were **legacy-venv cleanup** (pruning
+  the retired `~/.agent-bridge/venv`, not launching) -> annotated
+  `# runtime-resolution: allow`.
+- Guard: **13 -> 10** (agent-bridge 3 -> 0). pwsh parse + shellcheck + binstub
+  smoke + 1521 tests green. Bumped agent-bridge 0.4.0-dev304 -> dev305.
