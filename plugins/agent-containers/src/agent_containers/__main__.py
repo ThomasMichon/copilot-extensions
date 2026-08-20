@@ -21,6 +21,7 @@ import logging
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 from . import __version__
 from .config import load_config
@@ -336,6 +337,28 @@ def _cmd_leases() -> int:
     return 0
 
 
+def _live_relay_port_file() -> Path:
+    """Path to agent-bridge's published live-relay-port file.
+
+    agent-bridge records the port its credential relay actually bound to in
+    ``<config_dir>/relay-port`` (``relay_state.set_live_relay_port``), where
+    ``config_dir`` is ``$AGENT_BRIDGE_CONFIG_DIR`` or ``~/.agent-bridge``. An
+    elevated sub-daemon uses ``<primary>/elevated`` and republishes to the
+    **primary** dir, so a config dir named ``elevated`` resolves to its parent
+    (mirrors ``relay_state._primary_config_dir``).
+
+    We read this **file** rather than importing ``agent_bridge`` because the
+    ``agent-containers exec`` wrapper runs in agent-containers' *own* venv, which
+    does not have ``agent_bridge`` installed (the untangle keeps providers in
+    standalone venvs). The file is the cross-process contract agent-bridge
+    publishes for exactly this discovery.
+    """
+    root = Path(os.environ.get("AGENT_BRIDGE_CONFIG_DIR", "~/.agent-bridge")).expanduser()
+    if root.name == "elevated":
+        root = root.parent
+    return root / "relay-port"
+
+
 def _resolve_relay_port(default: int) -> int:
     """Resolve the credential-relay port, preferring agent-bridge's LIVE port.
 
@@ -348,20 +371,19 @@ def _resolve_relay_port(default: int) -> int:
     ADO/git + build-cache auth call targets a dead port once the relay moves
     (dotfiles #1631).
 
-    ``get_live_relay_port()`` reads the primary daemon's published
-    ``~/.agent-bridge/relay-port`` file, so this works from the separate
-    ``agent-containers exec`` wrapper process. Falls back to ``default`` (the
-    configured/legacy port) when agent-bridge is unavailable or no live port has
-    been published -- preserving prior behavior.
+    Reads agent-bridge's published ``relay-port`` file directly (see
+    :func:`_live_relay_port_file`) -- venv-independent, so it works from the
+    standalone ``agent-containers exec`` wrapper process where ``agent_bridge``
+    is not importable. Falls back to ``default`` (the configured/legacy port)
+    when the file is absent, empty, or unreadable -- preserving prior behavior.
     """
     try:
-        from agent_bridge.relay_state import get_live_relay_port
-    except ImportError:  # agent-bridge not importable from this wrapper process
-        log.debug("agent-bridge unavailable; using configured relay port %s", default)
-        return default
-
-    live = get_live_relay_port()
-    return int(live) if live else default
+        txt = _live_relay_port_file().read_text(encoding="utf-8").strip()
+        if txt:
+            return int(txt)
+    except (OSError, ValueError):
+        log.debug("live relay port unavailable; using configured port %s", default)
+    return default
 
 
 def _cmd_exec(args: argparse.Namespace) -> int:
