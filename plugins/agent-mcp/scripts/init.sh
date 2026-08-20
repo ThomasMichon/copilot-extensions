@@ -243,16 +243,39 @@ _ensure_uv_index() {
 # venv's `python -m agent_mcp`; otherwise it provisions on first use -- announcing
 # (a machine-readable ::agent-provisioning:: signal so a caller can extend its
 # timeout), lock-serialized, fail-fast.
+# Co-deploy the canonical marker-only resolver so the binstub (and any launcher)
+# resolves the interpreter the ONE uniform way (uniform-runtime-resolution, #765).
+deploy_resolver() {
+    mkdir -p "$INSTALL_DIR/bin"
+    for r in resolve-runtime.sh resolve-runtime.ps1; do
+        [ -f "$SCRIPT_DIR/$r" ] && cp -f "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r"
+    done
+}
+
 deploy_binstub() {
     mkdir -p "$LOCAL_BIN"
+    deploy_resolver
     cat > "$LOCAL_BIN/agent-mcp" << 'STUBEOF'
 #!/usr/bin/env bash
 # agent-mcp binstub -- self-provisioning (install-on-first-use).
+# Resolves the interpreter SOLELY via the junction-free versioned-runtime marker
+# (the deployed resolve-runtime.sh; uniform-runtime-resolution, #765): current-
+# version -> last-known-good -> newest complete slot. NEVER a `.venv` link, NEVER
+# a PATH python -- when no slot is installed AGENT_RT_PY is empty and we self-
+# provision on first use rather than silently binding the system interpreter.
 export PYTHONUTF8=1
 _name="agent-mcp"
 _root="$HOME/.$_name"
-_py="$_root/.venv/bin/python"
-[ -x "$_py" ] && exec "$_py" -m agent_mcp "$@"
+_resolver="$_root/bin/resolve-runtime.sh"
+_resolve() {
+    AGENT_RT_PY=""
+    if [ -f "$_resolver" ]; then
+        AGENT_RT_ROOT="$_root"
+        . "$_resolver"
+    fi
+}
+_resolve
+[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_mcp "$@"
 mkdir -p "$_root"
 _status="$_root/.provision-status"
 printf '%s\n' "[$_name] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout." >&2
@@ -266,17 +289,19 @@ fi
 _lock="$_root/.provision.lock"
 exec 9>"$_lock"
 command -v flock >/dev/null 2>&1 && flock 9 2>/dev/null
-[ -x "$_py" ] && exec "$_py" -m agent_mcp "$@"
+_resolve
+[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_mcp "$@"
 printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
 bash "$_install" provision >&2
 _rc=$?
-if [ "$_rc" -eq 0 ] && [ -x "$_py" ]; then
+_resolve
+if [ "$_rc" -eq 0 ] && [ -n "$AGENT_RT_PY" ]; then
     printf 'ready %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-    exec "$_py" -m agent_mcp "$@"
+    exec "$AGENT_RT_PY" -m agent_mcp "$@"
 fi
 printf 'failed rc=%s %s\n' "$_rc" "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
 if [ "$_rc" -eq 0 ]; then
-    printf '%s\n' "[$_name] provisioning reported success but the runtime is still missing ($_py)." >&2
+    printf '%s\n' "[$_name] provisioning reported success but no runtime slot resolved." >&2
     _rc=1
 else
     printf '%s\n' "[$_name] provisioning FAILED (rc=$_rc). See the log above; retry, or run: bash \"$_install\" provision" >&2

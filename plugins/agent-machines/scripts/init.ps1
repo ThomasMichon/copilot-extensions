@@ -383,12 +383,27 @@ function Deploy-SelfProvisioningBinstub {
     # is built yet (a ``stamp`` deferred the venv), provision on first use from
     # the slot-local snapshot (``init.ps1 provision``) then dispatch. Opt out with
     # AGENT_MACHINES_NO_SELFPROVISION=1. POSIX gets its sh shim. (#1393)
+    # Co-deploy the canonical resolvers so every launcher resolves identically
+    # (uniform-runtime-resolution, #765).
+    $binDir = Join-Path $InstallDir 'bin'
+    if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
+    foreach ($r in @('resolve-runtime.ps1', 'resolve-runtime.sh')) {
+        $rSrc = Join-Path $PSScriptRoot $r
+        if (Test-Path $rSrc) { Copy-Item $rSrc (Join-Path $binDir $r) -Force }
+    }
     if ($env:OS -ne 'Windows_NT') {
         $stubPath = Join-Path $LocalBin 'agent-machines'
         $stubContent = @"
 #!/usr/bin/env bash
 export PYTHONUTF8=1
-exec "`$HOME/.agent-machines/.venv/bin/python" -m agent_machines "`$@"
+_root="`$HOME/.agent-machines"
+AGENT_RT_PY=""
+if [ -f "`$_root/bin/resolve-runtime.sh" ]; then AGENT_RT_ROOT="`$_root"; . "`$_root/bin/resolve-runtime.sh"; fi
+[ -n "`$AGENT_RT_PY" ] && exec "`$AGENT_RT_PY" -m agent_machines "`$@"
+_i="`$(cat "`$_root/payload-dir" 2>/dev/null)/scripts/init.sh"
+[ -f "`$_i" ] || _i="`$(ls "`$HOME"/.copilot/installed-plugins/*/agent-machines/scripts/init.sh 2>/dev/null | head -n1)"
+if [ -n "`$_i" ] && [ -f "`$_i" ]; then echo "[agent-machines] runtime not provisioned; run: bash \"`$_i\" provision" >&2; else echo "[agent-machines] runtime not provisioned and the installer was not found; re-enable the plugin, then retry." >&2; fi
+exit 1
 "@
         [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
         Write-Ok "Binstub: $stubPath"
@@ -434,6 +449,12 @@ set "_PY="
 set "_VER="
 if exist "%_ROOT%\current-version" set /p _VER=<"%_ROOT%\current-version"
 if defined _VER if exist "%_ROOT%\versions\%_VER%\Scripts\python.exe" set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
+if defined _PY goto :eof
+if not exist "%_ROOT%\bin\resolve-runtime.ps1" goto :eof
+set "_PSX=powershell"
+where pwsh >nul 2>&1
+if %ERRORLEVEL%==0 set "_PSX=pwsh"
+for /f "usebackq delims=" %%p in (`%_PSX% -NoProfile -ExecutionPolicy Bypass -Command "$env:AGENT_RT_ROOT='%_ROOT%'; . '%_ROOT%\bin\resolve-runtime.ps1'; if ($AgentRtPy) { $AgentRtPy }" 2^>nul`) do set "_PY=%%p"
 goto :eof
 '@
     [System.IO.File]::WriteAllText($cmdPath, $cmdContent, $utf8NoBom)

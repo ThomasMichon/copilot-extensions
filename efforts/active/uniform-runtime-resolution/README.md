@@ -138,3 +138,22 @@ separate, intentional runtime and keeps its explicit venv.
   python"`-style binstubs in agent-vault, agent-dispatch, agent-mcp,
   agent-containers, agent-machines, agent-logger, agent-index (+ its bare-
   `python3` service), agent-codespaces (+ its cross-plugin bridge ref).
+
+### 2026-08-19 - Phase 2 batch 2: agent-mcp + agent-machines
+- Migrated **agent-mcp** and **agent-machines** (both clean binstub-only plugins,
+  no service/scheduled-task launchers) onto the marker-only resolver, mirroring
+  batch 1:
+  - Vendored `resolve-runtime.sh`/`.ps1`; the installer co-deploys them to
+    `~/.agent-<svc>/bin/`.
+  - POSIX `init.sh` binstub sources the deployed `resolve-runtime.sh`
+    (`AGENT_RT_ROOT` -> `AGENT_RT_PY`) instead of `.venv/bin/python`; the
+    `init.ps1` non-Windows shim likewise.
+  - Both plugins deliberately ship a **.cmd-only** Windows binstub (stdin-verbatim
+    for the stdio MCP transport; a `.ps1` shim would break stdin), so the `.cmd`
+    keeps its native `current-version` fast path (no PowerShell on the hot path)
+    and gains a canonical tier-2/3 fallback that dot-sources the deployed
+    `resolve-runtime.ps1` via pwsh -- so it agrees with the resolver on
+    `last-known-good` / newest-complete-slot when the marker is absent/stale.
+- Guard: `check-runtime-resolution` **22 -> 18** (agent-mcp 2 -> 0, agent-machines
+  2 -> 0). All guards + ruff + pwsh parse + 72 plugin tests green. Bumped
+  agent-mcp 0.2.0-dev57 -> dev58, agent-machines 0.1.0-dev28 -> dev29.
