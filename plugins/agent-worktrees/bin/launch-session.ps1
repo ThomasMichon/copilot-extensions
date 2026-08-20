@@ -215,7 +215,10 @@ function Write-ActivityLog {
                     '--worktree-id', $WorktreeId, '--source', 'launcher')
         if ($script:LaunchId) { $alArgs += @('--launch-id', $script:LaunchId) }
         foreach ($kv in $Fields) { if ($kv) { $alArgs += @('--field', $kv) } }
-        Start-Process -FilePath $VenvPython -ArgumentList $alArgs `
+        # conhost --headless: -WindowStyle Hidden alone is ignored by the DefTerm
+        # handoff and can flash a console (windows-launch-hardening #786).
+        Start-Process -FilePath 'conhost.exe' `
+            -ArgumentList (@('--headless', "`"$VenvPython`"") + $alArgs) `
             -WindowStyle Hidden -ErrorAction Stop | Out-Null
     } catch {
         Write-SetupLog "activity-log '$EventName' failed: $($_.Exception.Message)" 'WARN'
@@ -340,7 +343,9 @@ function Invoke-UpdateApply {
                     $bgArgs = @('-NoProfile', '-File', "`"$pluginInstaller`"", 'update')
                     if ($env:WORKTREE_PROJECT) { $bgArgs += @('-ProjectName', "`"$($env:WORKTREE_PROJECT)`"") }
                     try {
-                        Start-Process -FilePath 'pwsh.exe' -ArgumentList $bgArgs -WindowStyle Hidden | Out-Null
+                        # conhost --headless: -WindowStyle Hidden alone is ignored
+                        # by the DefTerm handoff (windows-launch-hardening #786).
+                        Start-Process -FilePath 'conhost.exe' -ArgumentList (@('--headless', 'pwsh.exe') + $bgArgs) -WindowStyle Hidden | Out-Null
                         Write-SetupLog 'Background install started (new version applies on the next launch)'
                     } catch {
                         Write-SetupLog "Background install failed to start ($($_.Exception.Message)) — continuing" 'WARN'
@@ -781,7 +786,10 @@ function Start-StatusUpdater {
         $updArgs = @('-m', 'agent_worktrees', 'status-updater',
                      '--session', $Session, '--mux', 'psmux')
         if ($WorkDir) { $updArgs += @('--path', $WorkDir) }
-        Start-Process -FilePath $VenvPython -ArgumentList $updArgs `
+        # conhost --headless: -WindowStyle Hidden alone is ignored by the DefTerm
+        # handoff and can flash a console (windows-launch-hardening #786).
+        Start-Process -FilePath 'conhost.exe' `
+            -ArgumentList (@('--headless', "`"$VenvPython`"") + $updArgs) `
             -WorkingDirectory $HOME -WindowStyle Hidden -ErrorAction Stop | Out-Null
         Write-SetupLog "psmux: started status-updater for $Session"
     } catch {

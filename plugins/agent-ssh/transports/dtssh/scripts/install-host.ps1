@@ -177,7 +177,9 @@ function Start-HostLauncher {
     $args = @('-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', "`"$LauncherDst`"", '-Alias', $Alias, '-Port', "$Port")
     if ($Tunnel) { $args += @('-Tunnel', $Tunnel) }
     if ($User) { $args += @('-User', $User) }
-    Start-Process pwsh -WindowStyle Hidden -ArgumentList $args
+    # conhost --headless: -WindowStyle Hidden alone is ignored by the DefTerm
+    # handoff and can flash a console (windows-launch-hardening #786).
+    Start-Process -FilePath 'conhost.exe' -ArgumentList (@('--headless', 'pwsh') + $args) -WindowStyle Hidden
     Start-Sleep -Seconds 8
     if (Get-HostProcess) { Write-Host "dtssh host started for $Alias on port $Port" } else { Write-Warning "dtssh host did not stay running; check $InstallDir\dtssh-host.log" }
 }
