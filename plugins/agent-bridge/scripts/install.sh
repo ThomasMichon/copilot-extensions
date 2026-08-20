@@ -306,18 +306,28 @@ _bootstrap_python() {
 }
 
 _payload_hash() {
-    # Cheap payload fingerprint for the completion marker (#935): sha256 of
-    # pyproject.toml + the vendored-lib version set. Detects a dev-checkout that
-    # changed the payload WITHOUT bumping the version. Empty on any error.
-    local __parts=""
-    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then __parts="$(cat "$PLUGIN_DIR/pyproject.toml")"; fi
-    if [[ -d "$PLUGIN_DIR/libs" ]]; then
-        local __f
-        while IFS= read -r __f; do
-            __parts="$__parts"$'\n'"$(cat "$__f")"
-        done < <(find "$PLUGIN_DIR/libs" -name pyproject.toml 2>/dev/null | sort)
-    fi
-    printf '%s' "$__parts" | sha256sum 2>/dev/null | awk '{print $1}' || true
+    # Content fingerprint of the RUNTIME PAYLOAD (#935/#776/ce#811): sha256 over
+    # the sorted "<per-file sha256>  <relpath>" list for pyproject.toml plus every
+    # file under src/ and libs/ (excluding caches/build artifacts). A src/-only
+    # edit without a version bump changes this value, so the completion marker +
+    # content guards detect real content drift, not just a pyproject change.
+    # Re-baselined by the accompanying version bump (self-healing). Empty on error.
+    (
+        cd "$PLUGIN_DIR" 2>/dev/null || exit 0
+        {
+            [[ -f pyproject.toml ]] && sha256sum pyproject.toml 2>/dev/null
+            for __sub in src libs; do
+                [[ -d "$__sub" ]] || continue
+                find "$__sub" -type f \
+                    ! -path '*/__pycache__/*' ! -path '*/.venv/*' ! -path '*/venv/*' \
+                    ! -path '*/.pytest_cache/*' ! -path '*/.mypy_cache/*' \
+                    ! -path '*/build/*' ! -path '*/dist/*' ! -path '*.egg-info/*' \
+                    ! -name '*.pyc' -print0 2>/dev/null \
+                  | sort -z \
+                  | xargs -0 -r sha256sum 2>/dev/null
+            done
+        } | sort | sha256sum 2>/dev/null | awk '{print $1}'
+    ) || true
 }
 
 _versioned_slot_clean() {
@@ -642,6 +652,12 @@ _write_deploy_manifest_for() {
         commit="\"$c\""; branch="\"$b\""; dirty="$d"
     fi
 
+    # Content identity (#776): a payload fingerprint so the manifest records WHAT
+    # content is deployed, not just the (reusable) version label -- populated even
+    # for a marketplace copy where "commit" is null.
+    local content_hash
+    content_hash="$(_payload_hash)"
+
     local tmp="$manifest.tmp"
     cat > "$tmp" << EOF
 {
@@ -657,7 +673,8 @@ _write_deploy_manifest_for() {
     "version": "$ver",
     "commit": $commit,
     "branch": $branch,
-    "dirty": $dirty
+    "dirty": $dirty,
+    "content_hash": "$content_hash"
   },
   "venv": "$venv_path",
   "runtime": "python"
