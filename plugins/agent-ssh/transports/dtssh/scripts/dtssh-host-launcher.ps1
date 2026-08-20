@@ -62,11 +62,14 @@
     resolved, the launcher degrades to process-only monitoring (restart on child
     exit) so it never becomes worse than the old one-shot behavior.
 
-    HEADLESS. The `dtssh host` child is started with a detached, redirected
-    `Start-Process -WindowStyle Hidden` — NOT in-process (`& $dtssh`). Invoking a
-    long-running console app in-process from a `-WindowStyle Hidden` pwsh re-shows
-    the launcher's console, popping a visible dtssh/pwsh window at logon. Redirected
-    hidden Start-Process keeps the host fully headless.
+    HEADLESS. The `dtssh host` child is started with a detached, redirected,
+    out-of-process `Start-Process -NoNewWindow` — NOT in-process (`& $dtssh`).
+    Invoking a long-running console app in-process from a hidden pwsh re-shows the
+    launcher's console, popping a visible dtssh/pwsh window at logon. `-NoNewWindow`
+    sets CreateNoWindow (CREATE_NO_WINDOW) so no console window is ever allocated —
+    which, unlike `-WindowStyle Hidden`, the DefTerm handoff cannot re-show as a
+    window (windows-launch-hardening #786). Redirected stdio keeps the host fully
+    headless while the real child handle stays pid-trackable by the watchdog.
 
     Idempotent / single-instance: a named mutex + a running-host check ensure a
     second launch at logon (or a manual start) never double-hosts.
@@ -350,8 +353,11 @@ function Start-HostProc {
     if ($Tunnel) { $dtArgs += @('--tunnel', $Tunnel) }
     if ($User)   { $dtArgs += @('--user', $User) }
     Write-Log "starting: dtssh $($dtArgs -join ' ')"
-    # Hidden + redirected stdio keeps the host fully headless (see .DESCRIPTION).
-    $proc = Start-Process -FilePath $dtExe -ArgumentList $dtArgs -WindowStyle Hidden -PassThru `
+    # -NoNewWindow sets CreateNoWindow (CREATE_NO_WINDOW) so NO console is
+    # allocated -- unlike -WindowStyle Hidden, which the DefTerm handoff ignores and
+    # can flash (windows-launch-hardening #786). It keeps the REAL child handle (pid
+    # tracking + kill in the watchdog) and the native stdio->file redirects.
+    $proc = Start-Process -FilePath $dtExe -ArgumentList $dtArgs -NoNewWindow -PassThru `
         -RedirectStandardOutput $childOut -RedirectStandardError $childErr -ErrorAction Stop
     Write-Log "dtssh host started hidden (pid $($proc.Id))"
     return $proc
