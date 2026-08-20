@@ -407,6 +407,18 @@ def test_liveness_stale_beacon_reads_not_live(store):
     assert owner.is_owner_live(now=fresh_now) is True
 
 
+def test_liveness_future_heartbeat_fails_safe(store):
+    owner._write_liveness(15.0)
+    live = owner.read_liveness()
+    # A beacon whose heartbeat is far in the future (backward clock jump / bogus
+    # timestamp) must NOT read as fresh -- fail safe so tenants don't defer.
+    past_now = live.heartbeat_at - 3600.0
+    assert live.is_fresh(past_now) is False
+    assert owner.is_owner_live(now=past_now) is False
+    # Sub-second skew within tolerance is still fresh.
+    assert live.is_fresh(live.heartbeat_at - 1.0) is True
+
+
 def test_liveness_pid_gate(store, monkeypatch):
     owner._write_liveness(15.0)
     # A provably-dead pid fails safe regardless of freshness.

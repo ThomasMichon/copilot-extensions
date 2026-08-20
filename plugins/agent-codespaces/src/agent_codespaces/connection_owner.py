@@ -352,6 +352,11 @@ LIVE_FILE = RUNTIME_DIR / "connection-owner.live.json"
 # flap on scheduler jitter).
 _LIVE_STALE_INTERVALS = 3
 _LIVE_STALE_FLOOR = 45.0
+# A heartbeat timestamp this far in the future is treated as NOT fresh: a bogus
+# future beacon or a backward clock jump must fail safe (a tenant falls back to
+# owning its own relay), while a sub-second skew is tolerated so liveness does not
+# flap on ordinary clock jitter.
+_LIVE_FUTURE_TOLERANCE = 5.0
 
 
 @dataclass
@@ -368,7 +373,12 @@ class OwnerLiveness:
 
     def is_fresh(self, now: float | None = None) -> bool:
         now = time.time() if now is None else now
-        return (now - self.heartbeat_at) <= self.staleness_threshold()
+        age = now - self.heartbeat_at
+        if age < 0:
+            # Future heartbeat (bogus beacon / backward clock jump): fail safe --
+            # only a sub-second skew within tolerance still counts as fresh.
+            return age >= -_LIVE_FUTURE_TOLERANCE
+        return age <= self.staleness_threshold()
 
 
 def _write_liveness(interval: float) -> None:
