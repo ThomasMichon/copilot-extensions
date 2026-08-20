@@ -38,7 +38,9 @@ ver=""
 # READY iff the binstub exists AND a version is published AND its venv interpreter exists.
 venv_ok=0
 if [ -n "$ver" ]; then
-  for sub in "versions/$ver/bin/python" "versions/$ver/Scripts/python.exe" ".venv/bin/python"; do
+  # READY iff the current-version marker's slot interpreter exists (marker-only;
+  # the retired `.venv` link is no longer probed -- uniform-runtime-resolution #765).
+  for sub in "versions/$ver/bin/python" "versions/$ver/Scripts/python.exe"; do
     [ -x "$InstallDir/$sub" ] && { venv_ok=1; break; }
   done
 fi

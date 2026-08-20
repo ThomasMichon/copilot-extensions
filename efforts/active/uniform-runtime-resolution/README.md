@@ -213,3 +213,32 @@ separate, intentional runtime and keeps its explicit venv.
 - Guard: **16 -> 15** (agent-dispatch 2 -> 1; the remaining `install.sh:507`
   binstub is a real violation, migrated in a later batch). Tooling-only; no plugin
   version bump.
+
+### 2026-08-19 - Phase 2 batch 6: agent-codespaces readiness probe
+- **agent-codespaces** `readiness-context.{sh,ps1}` decided runtime-READY by
+  probing `versions/$ver/{bin,Scripts}/python` and, as a legacy fallback,
+  `.venv/{bin,Scripts}/python`. Dropped the retired `.venv` fallback so readiness
+  is marker-only (the current-version slot), matching the resolution model. This
+  is a probe, not a launcher -- no resolver needed.
+- Guard: **15 -> 13** (agent-codespaces 2 -> 0). shellcheck + pwsh parse + 824
+  tests green. Bumped agent-codespaces 0.4.0-dev53 -> dev54.
+- IMPORTANT triage of the remaining 5 plugins (risk-tiered; some touch LIVE
+  services on the dev host):
+  - **agent-dispatch** -- its POSIX **systemd** unit `ExecStart=$LINK_PYTHON -m
+    agent_dispatch serve` (install.sh:804) launches the LIVE dispatch daemon
+    through the `.venv` link (a real violation the guard can't see behind the
+    variable), plus 4+ Windows conhost/scheduled-task daemon launchers. Only the
+    binstub (install.sh:507) is guard-flagged. Migrating the daemon launchers
+    affects a production service + untested Windows daemons -> wants operator
+    coordination (ties to windows-launch-hardening #786).
+  - **agent-index** -- `ensure-service.sh` picks `.venv/bin/python` else bare
+    `python3` for a service; also a live-ish index service. Needs the marker
+    resolver + likely operator validation.
+  - **agent-logger** -- real: install.ps1:764 POSIX shim; install.sh:191/194 are
+    install-time `$VENV`-slot health-gate false positives (annotate). Has a
+    scheduled orchestrator.
+  - **agent-bridge** -- uses a plain `venv/` dir (not the versioned `.venv`/slot
+    model); needs its own investigation before assuming the marker resolver fits.
+  - **agent-worktrees** -- bespoke resolver; preview-picker.{sh,ps1} are echoed
+    dev-setup instructions (annotate `# runtime-resolution: allow`); bin shim's
+    `exec python` PATH fallback + the `.venv`-link retirement are the final phase.
