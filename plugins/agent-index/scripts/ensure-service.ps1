@@ -58,8 +58,11 @@ try {
     Write-Host '[agent-index] daemon not healthy -- ensuring (user-mode) in background...' -ForegroundColor DarkGray
     $pw = Get-Command pwsh -ErrorAction SilentlyContinue
     $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
-    Start-Process -FilePath $exe -WindowStyle Hidden -ArgumentList @(
-        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $inst, 'ensure'
-    ) | Out-Null
+    # conhost --headless so the DefTerm handoff can't surface a window --
+    # -WindowStyle Hidden ALONE is ignored by DefTerm (windows-launch-hardening #786).
+    Start-Process -FilePath 'conhost.exe' -ArgumentList @(
+        '--headless', "`"$exe`"", '-NoProfile', '-ExecutionPolicy', 'Bypass',
+        '-WindowStyle', 'Hidden', '-File', "`"$inst`"", 'ensure'
+    ) -WindowStyle Hidden | Out-Null
 } catch { }
 exit 0
