@@ -109,6 +109,13 @@ param(
     # scenario, without baking any product/tenant specifics into this public
     # runner. Only names that are actually set on the host are forwarded.
     [string[]]$PassEnv = @(),
+    # Tier-E seam: bind a downstream harness tree (read-only) into the box at
+    # /harness and export CR_HARNESS_MOUNT=/harness, so a name-ful eval scenario
+    # can reach the operator's local plugins/skills (e.g. an in-repo `.ai/`
+    # marketplace) without the public rig naming any repo. Empty = no harness
+    # mount (the scenario's CR_HARNESS_MOUNT default applies). Host path; the
+    # container path is fixed at /harness. Also $env:CR_HARNESS_MOUNT_HOST.
+    [string]$HarnessMount = '',
     # Tier-E only: override the manifest's runs.count (how many times the driven
     # agent is run for flake aggregation). 0/empty = use the manifest (default 1).
     [int]$Runs = 0,
@@ -366,11 +373,29 @@ function Start-Container {
         Set-Item -Path "Env:\$name" -Value $val
         $passArgs += @('-e', $name)
     }
+    # Optional downstream-harness bind (Tier-E seam): mount a harness tree
+    # read-only at /harness and expose CR_HARNESS_MOUNT so a name-ful eval
+    # scenario reaches the operator's local plugins/skills. Host path from
+    # -HarnessMount or $env:CR_HARNESS_MOUNT_HOST; the container path is fixed.
+    $harnessArgs = @()
+    $harnessHost = if ($HarnessMount) { $HarnessMount } else { $env:CR_HARNESS_MOUNT_HOST }
+    if ($harnessHost) {
+        if (-not (Test-Path -PathType Container $harnessHost)) {
+            throw "-HarnessMount '$harnessHost' is not a directory"
+        }
+        $hm = ((Resolve-Path $harnessHost).Path) -replace '\\','/'
+        $harnessArgs = @(
+            '-v', "${hm}:/harness:ro",
+            '-e', 'CR_HARNESS_MOUNT=/harness'
+        )
+        Write-Host "harness bind: $hm -> /harness (ro)  [CR_HARNESS_MOUNT=/harness]" -ForegroundColor DarkGray
+    }
     docker run -d --name $Container `
         -v "${scenDir}:/home/operator/scenario:ro" `
         -v "${libDir}:/home/operator/lib:ro" `
         -v "${res}:/home/operator/out" `
         @scenLibArgs `
+        @harnessArgs `
         -e "CR_LIB=/home/operator/lib/clean-room-lib.sh" `
         -e "CR_SCENARIO_NAME=$ScenarioName" `
         -e "CR_MARKETPLACE_REPO=$MarketplaceRepo" `

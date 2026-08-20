@@ -36,6 +36,7 @@ UV_INDEX="${CR_UV_INDEX:-}"
 TOKEN_ACCOUNT=""
 NO_TOKEN=0
 PASS_ENV=()
+HARNESS_MOUNT="${CR_HARNESS_MOUNT_HOST:-}"
 MODE=run
 RUNS_OVERRIDE=0
 SKIP_TIER_P=0
@@ -50,11 +51,12 @@ while [ $# -gt 0 ]; do
         --uv-index) UV_INDEX="$2"; shift 2 ;;
         --token-account) TOKEN_ACCOUNT="$2"; shift 2 ;;
         --pass-env) PASS_ENV+=("$2"); shift 2 ;;
+        --harness-mount) HARNESS_MOUNT="$2"; shift 2 ;;
         --runs) RUNS_OVERRIDE="$2"; shift 2 ;;
         --skip-tier-p-gate) SKIP_TIER_P=1; shift ;;
         --no-token) NO_TOKEN=1; shift ;;
         build|auth|run|eval|shell|down|bridge-register|bridge-unregister|all) MODE="$1"; shift ;;
-        *) echo "usage: $0 [--image base|pristine] [--name-suffix SUFFIX] [--scenario NAME|DIR] [--until N|all] [--then shell|down] [--npm-registry URL] [--uv-index URL] [--token-account USER] [--pass-env NAME]... [--runs N] [--skip-tier-p-gate] [--no-token] {build|auth|run|eval|shell|down|bridge-register|bridge-unregister|all}" >&2; exit 2 ;;
+        *) echo "usage: $0 [--image base|pristine] [--name-suffix SUFFIX] [--scenario NAME|DIR] [--until N|all] [--then shell|down] [--npm-registry URL] [--uv-index URL] [--token-account USER] [--pass-env NAME]... [--harness-mount DIR] [--runs N] [--skip-tier-p-gate] [--no-token] {build|auth|run|eval|shell|down|bridge-register|bridge-unregister|all}" >&2; exit 2 ;;
     esac
 done
 
@@ -169,11 +171,24 @@ start_container() {
         scen_lib_args=(-v "$SCENARIO_SHARED_LIB:/home/operator/scenario-lib:ro" \
                        -e "CR_SCENARIO_LIB=/home/operator/scenario-lib")
     fi
+    # Optional downstream-harness bind (Tier-E seam): mount a harness tree
+    # read-only at /harness and expose CR_HARNESS_MOUNT so a name-ful eval
+    # scenario reaches the operator's local plugins/skills. Host path from
+    # --harness-mount or $CR_HARNESS_MOUNT_HOST; the container path is fixed.
+    local harness_args=()
+    if [ -n "$HARNESS_MOUNT" ]; then
+        if [ ! -d "$HARNESS_MOUNT" ]; then
+            echo "--harness-mount '$HARNESS_MOUNT' is not a directory" >&2; exit 2
+        fi
+        harness_args=(-v "$HARNESS_MOUNT:/harness:ro" -e "CR_HARNESS_MOUNT=/harness")
+        echo "harness bind: $HARNESS_MOUNT -> /harness (ro)  [CR_HARNESS_MOUNT=/harness]"
+    fi
     docker run -d --name "$CONTAINER" \
         -v "$SCENARIO_DIR:/home/operator/scenario:ro" \
         -v "$LIB_DIR:/home/operator/lib:ro" \
         -v "$RESULTS:/home/operator/out" \
         "${scen_lib_args[@]}" \
+        "${harness_args[@]}" \
         -e "CR_LIB=/home/operator/lib/clean-room-lib.sh" \
         -e "CR_SCENARIO_NAME=$SCENARIO_NAME" \
         -e "CR_MARKETPLACE_REPO=${CR_MARKETPLACE_REPO:-ThomasMichon/copilot-extensions}" \
