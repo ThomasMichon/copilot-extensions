@@ -15,7 +15,7 @@ import json
 import logging
 import os
 
-from .._exec import resolve_argv
+from .._exec import no_window_creationflags, resolve_argv
 from ..runner import resolve_npm_command
 from .base import Transport
 
@@ -62,6 +62,10 @@ class StdioTransport(Transport):
             stderr=None,  # inherit -- child diagnostics go to our stderr
             env=env,
             limit=_STREAM_LIMIT,  # raise the 64 KiB default so large lines survive
+            # Windows: spawn the upstream with no console window (a bridge spawns
+            # one upstream per session; without this each flashes a cmd/python
+            # window). No-op on POSIX.
+            creationflags=no_window_creationflags(),
         )
         self._reader_task = asyncio.create_task(self._pump_stdout())
 
