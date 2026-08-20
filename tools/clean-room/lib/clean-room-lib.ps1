@@ -89,7 +89,16 @@ function envdump {
         $where = ''; $ver = ''
         if ($cmd) {
             $where = $cmd.Source
-            try { $ver = (& $t --version 2>&1 | Select-Object -First 1) } catch { $ver = '' }
+            try {
+                if ($t -eq 'powershell' -or $t -eq 'pwsh') {
+                    # Windows PowerShell 5.1 has no `--version`; read the loaded version.
+                    $ver = & $t -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' 2>&1 | Select-Object -First 1
+                }
+                else {
+                    $ver = (& $t --version 2>&1 | Select-Object -First 1)
+                }
+            }
+            catch { $ver = '' }
         }
         [void]$tools.Add([ordered]@{ tool = $t; path = "$where"; version = "$ver" })
     }

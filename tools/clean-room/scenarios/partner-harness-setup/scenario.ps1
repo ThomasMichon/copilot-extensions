@@ -91,7 +91,8 @@ else { jam 'drop-structural' "golden-path doc missing: $PARTNER_GOLDEN_DOC" "the
 
 # =========================================================================
 phase 2 "read-only setup check (optional -- pwsh-gated)"
-# owh's setup.ps1 check needs pwsh 7; the base python/Server Core image ships only
+# A partner's setup.ps1 check may need pwsh 7; the base python/Server Core image
+# ships only
 # Windows PowerShell 5.1. Run the check only if a pwsh is present; otherwise defer
 # to the unittest suite (phase 3), which is the authoritative *_ps1 contract gate.
 $pwsh = (Get-Command pwsh -ErrorAction SilentlyContinue)
@@ -112,7 +113,7 @@ else {
 # =========================================================================
 phase 3 "partner's OWN *_ps1 setup/update test suite passes"
 $have = $true
-foreach ($m in $TestMods) { $f = Join-Path $ROOT (($m -replace '\.', '\') + '.py'); if (-not (Test-Path -LiteralPath $f)) { $have = $false } }
+foreach ($m in $TestMods) { $f = Join-Path $ROOT (($m.Replace('.', '\')) + '.py'); if (-not (Test-Path -LiteralPath $f)) { $have = $false } }
 if ($have) {
     Push-Location $ROOT
     $rc = capture 'setup-tests' { & $py.Source -m unittest @TestMods }
