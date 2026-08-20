@@ -176,3 +176,28 @@ separate, intentional runtime and keeps its explicit venv.
   agent-codespaces (cross-plugin agent-bridge venv ref + readiness-context `.venv`
   probes) and agent-worktrees (bespoke; preview-picker dev-echoes + the bin shim's
   PATH-python last resort -> annotate/retire in the final phase).
+
+### 2026-08-19 - Phase 2 batch 4: agent-vault (first service-plugin, incl. its at-logon task)
+- Migrated **agent-vault** fully -- the first plugin with a Windows service
+  launcher. POSIX `install.sh` binstub sources the deployed `resolve-runtime.sh`;
+  the Windows `.ps1` binstub dot-sources the canonical `resolve-runtime.ps1` (the
+  `.cmd` delegates to it); and crucially the **at-logon scheduled task**
+  (`Register-AgentVaultTask` -> `conhost --headless "$taskPy" -m
+  agent_vault.service`) now resolves `$taskPy` via the canonical resolver instead
+  of its own inline marker/newest-slot block -- so the daemon binds the same slot
+  as the binstub (last-known-good + completeness-aware).
+- Guard: `check-runtime-resolution` **17 -> 16** (agent-vault 1 -> 0; baseline rose
+  to 17 as concurrent merges surfaced agent-bridge). pwsh parse + shellcheck +
+  binstub smoke test green. Bumped agent-vault 0.1.0-dev52 -> dev53.
+- NOTE: 3 agent-vault pytest failures (`test_client_discovery` TCP-fallback /
+  WSL-ensure, `test_extensions` builtin-fallthrough) are **pre-existing and
+  environment-contaminated** -- they fail identically on clean origin/main because
+  a live agent-vault service on the dev host is discovered as `discovered-tcp`.
+  Unrelated to installer-script changes (pytest never imports install.*); a clean
+  room passes.
+- Guard false positives found (for the guard-accuracy follow-up): `agent-dispatch
+  install.ps1:311` is `<# #>` block-comment prose; `agent-logger install.sh:191/194`
+  are install-time `$VENV`-slot health-gate uses (uppercase matches the case-
+  insensitive regex); `agent-worktrees preview-picker.{sh,ps1}` are echoed dev
+  instructions. The guard skips `#` lines but not `<# #>` blocks -- worth teaching
+  it block-comment + echoed-string awareness (or annotate those lines).
