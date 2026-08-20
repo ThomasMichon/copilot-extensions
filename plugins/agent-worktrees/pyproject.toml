@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-worktrees"
-version = "1.5.3-dev556"
+version = "1.5.3-dev557"
 description = "Worktree isolation system for concurrent Copilot CLI sessions"
 readme = "README.md"
 license = "MIT"
@@ -17,6 +17,7 @@ dependencies = [
     "textual>=8.2.8",
     "agent-config-migrate",
     "agent-plugin-resolve",
+    "agent-procutil",
 ]
 
 [tool.uv.sources]
@@ -28,6 +29,9 @@ agent-config-migrate = { path = "libs/config-migrate" }
 # Copilot CLI + Claude plugin resolution -- marketplaces, plugins, repo settings
 # (module ``plugin_resolve``). Shared with agent-bridge / agent-codespaces.
 agent-plugin-resolve = { path = "libs/plugin-resolve" }
+# Shared Windows-headless / detached process-spawn kwargs (module
+# ``agent_procutil``). Vendored per plugin; byte-identical src across copies.
+agent-procutil = { path = "libs/agent-procutil" }
 
 [project.scripts]
 agent-worktrees = "agent_worktrees.__main__:main"

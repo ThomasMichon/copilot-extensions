@@ -33,6 +33,8 @@ import socket
 import subprocess
 import threading
 
+from agent_procutil import no_window_flags
+
 from .. import config as cfg
 from . import data_local, derive, roster
 
@@ -635,7 +637,7 @@ def _is_classify_unsupported(stderr: str) -> bool:
 # never restores it. CREATE_NO_WINDOW gives the child its own (absent) console
 # so it can't touch ours. stdin=DEVNULL additionally stops ssh from reading the
 # operator's keystrokes.
-_CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+_CREATE_NO_WINDOW = no_window_flags()
 
 
 def _run(argv, timeout):

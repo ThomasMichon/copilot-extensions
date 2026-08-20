@@ -17,12 +17,13 @@ import random
 import re
 import shutil
 import subprocess
-import sys
 import time
 import uuid
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
+
+from agent_procutil import no_window_flags
 
 from .acp_client import AcpClient
 from .connect import ConnectError, ConnectStage, ConnectTracker
@@ -70,9 +71,7 @@ def _resolve_relay_launch_env(
         argv = [binstub, "relay-launch-env", codespace_name]
         if relay_port is not None:
             argv += ["--relay-port", str(relay_port)]
-        creationflags = (
-            subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-        )
+        creationflags = no_window_flags()
         try:
             r = subprocess.run(
                 argv, capture_output=True, text=True, timeout=15,
@@ -230,7 +229,7 @@ def _claim_codespace(codespace_name: str, owner: str) -> tuple[bool, str]:
     binstub = shutil.which("agent-codespaces")
     if not binstub:
         return True, ""
-    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    creationflags = no_window_flags()
     try:
         result = subprocess.run(
             [binstub, "claim", codespace_name, "--owner", owner],
@@ -265,7 +264,7 @@ def _release_codespace_claim(codespace_name: str, owner: str) -> None:
     binstub = shutil.which("agent-codespaces")
     if not binstub:
         return
-    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    creationflags = no_window_flags()
     with contextlib.suppress(Exception):
         subprocess.run(
             [binstub, "release-claim", codespace_name, "--owner", owner],

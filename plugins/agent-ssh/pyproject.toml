@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-ssh"
-version = "0.1.0-dev34"
+version = "0.1.0-dev35"
 description = "SSH profile emitter, verifier, and transport-provider contract for the agent fabric"
 readme = "README.md"
 license = "MIT"
@@ -14,7 +14,13 @@ authors = [
 ]
 dependencies = [
     "pyyaml>=6.0.3",
+    "agent-procutil",
 ]
+
+[tool.uv.sources]
+# Shared Windows-headless / detached process-spawn kwargs, vendored per plugin
+# (byte-identical src across copies; see tools/check-vendored-libs-sync.py).
+agent-procutil = { path = "libs/agent-procutil" }
 
 [project.scripts]
 agent-ssh = "agent_ssh.__main__:main"
