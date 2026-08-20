@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import logging
 import subprocess
-import sys
 from dataclasses import dataclass, field
+
+from agent_procutil import no_window_flags
 
 from .config import FLEET_LABEL, ContainersConfig
 
@@ -22,9 +23,7 @@ STARTABLE_STATES = {"exited", "created", "paused"}
 
 
 def _creation_flags() -> int:
-    if sys.platform == "win32":
-        return subprocess.CREATE_NO_WINDOW
-    return 0
+    return no_window_flags()
 
 
 def _docker(args: list[str], timeout: float = 30.0) -> subprocess.CompletedProcess:

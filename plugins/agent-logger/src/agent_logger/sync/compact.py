@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from agent_procutil import no_window_kwargs
+
 from agent_logger import sessions
 from agent_logger.config import Config
 from agent_logger.segmenter.platform import detect_machine
@@ -36,11 +38,7 @@ from agent_logger.sync.origin import classify_for_sync, effective_harness
 
 # On Windows, shelling out from a windowless parent (pythonw under a Scheduled
 # Task) flashes a console; suppress it. No-op on POSIX.
-_NO_WINDOW_KWARGS: dict = (
-    {"creationflags": subprocess.CREATE_NO_WINDOW}
-    if sys.platform == "win32"
-    else {}
-)
+_NO_WINDOW_KWARGS: dict = no_window_kwargs()
 
 
 @dataclass

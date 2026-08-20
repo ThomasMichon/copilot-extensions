@@ -20,7 +20,8 @@ import json
 import logging
 import shutil
 import subprocess
-import sys
+
+from agent_procutil import no_window_flags
 
 from .config import FLEET_LABEL, ContainersConfig, DotfilesConfig, FleetConfig, HarnessConfig
 from .lifecycle import (
@@ -37,9 +38,7 @@ log = logging.getLogger("agent-containers")
 
 
 def _creation_flags() -> int:
-    if sys.platform == "win32":
-        return subprocess.CREATE_NO_WINDOW
-    return 0
+    return no_window_flags()
 
 
 def _fleet_members(config: ContainersConfig, fleet_name: str) -> list[DockerContainerInfo]:

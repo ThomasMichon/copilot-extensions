@@ -37,6 +37,8 @@ import sys
 import time
 from typing import TYPE_CHECKING
 
+from agent_procutil import detached_kwargs
+
 from agent_index.engine.client import EngineUnavailableError
 
 if TYPE_CHECKING:
@@ -148,13 +150,8 @@ def _spawn_engine(profile: ModelProfile) -> subprocess.Popen:
         "stderr": subprocess.DEVNULL,
         "env": os.environ.copy(),
     }
-    if os.name == "nt":
-        # Detach from the parent console so the engine is independent.
-        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | getattr(
-            subprocess, "DETACHED_PROCESS", 0
-        )
-    else:
-        kwargs["start_new_session"] = True
+    # Detach from the parent console so the engine is independent.
+    kwargs.update(detached_kwargs())
     return subprocess.Popen(cmd, **kwargs)  # type: ignore[arg-type]  # noqa: S603
 
 

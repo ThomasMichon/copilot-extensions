@@ -9,6 +9,8 @@ import sys
 import time
 from pathlib import Path
 
+from agent_procutil import detached_kwargs
+
 from . import config, rendezvous
 from .config import IS_WINDOWS, SOCKET_PATH, ResolvedVault
 from .prompt import prompt_password as gui_prompt_password
@@ -310,12 +312,10 @@ def start_service(tcp_port: int | None = None) -> bool:
         cmd.extend(["--tcp-port", str(tcp_port)])
 
     if IS_WINDOWS:
-        create_no_window = 0x08000000
-        detached_process = 0x00000008
         cmd.append("--foreground")
         subprocess.Popen(
             cmd,
-            creationflags=create_no_window | detached_process,
+            **detached_kwargs(),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

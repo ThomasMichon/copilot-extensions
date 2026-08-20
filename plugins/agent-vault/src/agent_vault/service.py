@@ -14,6 +14,8 @@ import threading
 import time
 from pathlib import Path
 
+from agent_procutil import detached_kwargs
+
 from .config import (
     DEFAULT_TCP_PORT,
     ENDPOINT_ENV,
@@ -1016,15 +1018,13 @@ def daemonize_unix() -> bool:
 
 def daemonize_windows(argv: list[str]) -> None:
     """Start a detached background process (Windows)."""
-    create_no_window = 0x08000000
-    detached_process = 0x00000008
     cmd = [sys.executable, *argv, "--foreground"]
     subprocess.Popen(
         cmd,
         # Neutral cwd: the detached daemon must not inherit (and pin) the
         # caller's directory, which may be a worktree or the plugin payload.
         cwd=str(Path.home()),
-        creationflags=create_no_window | detached_process,
+        **detached_kwargs(),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
