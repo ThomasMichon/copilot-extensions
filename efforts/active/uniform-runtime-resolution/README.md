@@ -201,3 +201,15 @@ separate, intentional runtime and keeps its explicit venv.
   insensitive regex); `agent-worktrees preview-picker.{sh,ps1}` are echoed dev
   instructions. The guard skips `#` lines but not `<# #>` blocks -- worth teaching
   it block-comment + echoed-string awareness (or annotate those lines).
+
+### 2026-08-19 - Phase 2 batch 5: guard accuracy (PowerShell block comments)
+- `check-runtime-resolution.py` skipped single-line `#` comments but not
+  PowerShell `<# .. #>` **block** comments, so a `.venv`/PATH-python path quoted
+  inside block-comment *prose* was a false positive (e.g. `agent-dispatch
+  install.ps1:311`, a legacy-migration doc line). Added `_strip_ps_block_comments`
+  (inline, line-spanning, multi-span) applied to `.ps1/.psm1/.psd1`, plus a unit
+  test (`tools/test_check_runtime_resolution.py`). This is on the critical path to
+  the final `--strict` flip -- false positives can't remain when the guard blocks.
+- Guard: **16 -> 15** (agent-dispatch 2 -> 1; the remaining `install.sh:507`
+  binstub is a real violation, migrated in a later batch). Tooling-only; no plugin
+  version bump.

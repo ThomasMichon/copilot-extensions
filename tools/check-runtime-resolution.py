@@ -78,28 +78,66 @@ def _iter_targets() -> list[Path]:
     return out
 
 
+def _strip_ps_block_comments(line: str, in_block: bool) -> tuple[str, bool]:
+    """Remove PowerShell ``<# ... #>`` block-comment spans from a line.
+
+    Returns the code with comment spans blanked out plus the updated in-block
+    state (block comments may span multiple lines). Handles inline ``<# .. #>``,
+    an opener with no closer (rest of line is comment), and multiple spans.
+    """
+    out: list[str] = []
+    i = 0
+    while i < len(line):
+        if in_block:
+            end = line.find("#>", i)
+            if end == -1:
+                return "".join(out), True
+            in_block = False
+            i = end + 2
+        else:
+            start = line.find("<#", i)
+            if start == -1:
+                out.append(line[i:])
+                return "".join(out), False
+            out.append(line[i:start])
+            in_block = True
+            i = start + 2
+    return "".join(out), in_block
+
+
 def _violations(path: Path) -> list[tuple[int, str, str]]:
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return []
+    is_ps = path.suffix.lower() in (".ps1", ".psm1", ".psd1")
     found: list[tuple[int, str, str]] = []
+    in_block = False
     for n, line in enumerate(text.splitlines(), 1):
+        # Strip PowerShell block comments (<# .. #>) -- the line-based `#` skip
+        # below only catches single-line comments, so a launch-looking path
+        # quoted inside block-comment prose would otherwise be a false positive.
+        code = line
+        if is_ps:
+            code, in_block = _strip_ps_block_comments(line, in_block)
         if ALLOW in line:
             continue
-        stripped = line.strip()
+        stripped = code.strip()
+        if not stripped:
+            continue
         # Skip pure comments (documentation of the rule itself, etc.).
         if stripped.startswith("#"):
             continue
-        low = line.lower()
+        low = code.lower()
         if any(x in low for x in _EXCLUDE_PATH):
             continue
-        if _LINK_PY.search(line):
-            found.append((n, "venv-link", stripped[:160]))
-        elif _CROSS.search(line):
-            found.append((n, "cross-plugin-venv", stripped[:160]))
-        elif _PATH_PY.search(line):
-            found.append((n, "path-python", stripped[:160]))
+        report = line.strip()[:160]
+        if _LINK_PY.search(code):
+            found.append((n, "venv-link", report))
+        elif _CROSS.search(code):
+            found.append((n, "cross-plugin-venv", report))
+        elif _PATH_PY.search(code):
+            found.append((n, "path-python", report))
     return found
 
 
