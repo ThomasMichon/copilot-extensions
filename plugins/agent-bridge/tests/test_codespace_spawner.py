@@ -496,40 +496,40 @@ async def test_endpoint_serving_probe_transport_error_is_healthy(monkeypatch):
 
 
 # -- dispatch-path auth-helper (re)deploy (dotfiles #733 T2) ---------------
-def _install_fake_agent_codespaces(monkeypatch, recorder=None):
-    """Inject a fake ``agent_codespaces.codespace_assets`` whose
-    ``build_provision_command`` returns a sentinel (optionally recording calls),
-    so the spawner's dispatch-path helper (re)deploy has something to import even
-    though agent_codespaces is not an agent-bridge test dependency.
-
-    ``_resolve_provision_command`` prefers the ``agent-codespaces`` *binstub*
-    (a subprocess) over this in-process import, so on any machine where that
-    binstub is installed the real provision command would run instead of the
-    sentinel. Force the binstub lookup to miss so the fallback import (this fake)
-    is exercised deterministically."""
+def _install_fake_provision_binstub(monkeypatch, recorder=None):
+    """Resolve the dispatch-path provision command over the PROCESS BOUNDARY
+    (#1643): make the ``agent-codespaces`` binstub present and its
+    ``provision-command`` CLI print a sentinel command. There is **no** in-process
+    ``agent_codespaces`` import fallback anymore -- the daemon runs from its own
+    isolated venv and never imports a provider -- so the seam is exercised purely
+    via ``shutil.which`` + ``subprocess.run``."""
     import shutil
-    import sys
-    import types
+    import subprocess
 
     _real_which = shutil.which
     monkeypatch.setattr(
         shutil, "which",
         lambda name, *a, **k: (
-            None if name == "agent-codespaces" else _real_which(name, *a, **k)
+            "/bin/agent-codespaces" if name == "agent-codespaces"
+            else _real_which(name, *a, **k)
         ),
     )
 
-    assets = types.ModuleType("agent_codespaces.codespace_assets")
+    _real_run = subprocess.run
 
-    def _build():
-        if recorder is not None:
-            recorder.append(1)
-        return "PROVISION_HELPERS_CMD"
+    def _fake_run(argv, *a, **k):
+        if (
+            isinstance(argv, (list, tuple)) and len(argv) >= 2
+            and argv[1] == "provision-command"
+        ):
+            if recorder is not None:
+                recorder.append(1)
+            return subprocess.CompletedProcess(
+                list(argv), 0, "PROVISION_HELPERS_CMD", "",
+            )
+        return _real_run(argv, *a, **k)
 
-    assets.build_provision_command = _build
-    pkg = types.ModuleType("agent_codespaces")
-    monkeypatch.setitem(sys.modules, "agent_codespaces", pkg)
-    monkeypatch.setitem(sys.modules, "agent_codespaces.codespace_assets", assets)
+    monkeypatch.setattr(subprocess, "run", _fake_run)
 
 
 @pytest.mark.asyncio
@@ -538,7 +538,7 @@ async def test_codespace_dispatch_redeploys_auth_helpers(monkeypatch):
     (Stage-4 provision) BEFORE launching the dispatched agent, so a dispatched
     agent isn't left on a reboot-stale VS Code helper (#733 T2)."""
     _patch_common(monkeypatch)
-    _install_fake_agent_codespaces(monkeypatch)
+    _install_fake_provision_binstub(monkeypatch)
     state = {"pid": 1, "child_pid": 2, "port": 51000,
              "protocol_version": proto.PROTOCOL_VERSION}
     t = _FakeTransport(state)
@@ -558,7 +558,7 @@ async def test_non_codespace_boundary_skips_helper_redeploy(monkeypatch):
     (re)deploy -- it is codespace-specific (#733 T2)."""
     _patch_common(monkeypatch)
     calls: list[int] = []
-    _install_fake_agent_codespaces(monkeypatch, recorder=calls)
+    _install_fake_provision_binstub(monkeypatch, recorder=calls)
     state = {"pid": 1, "child_pid": 2, "port": 51000,
              "protocol_version": proto.PROTOCOL_VERSION}
     t = _FakeTransport(state)
@@ -572,12 +572,19 @@ async def test_non_codespace_boundary_skips_helper_redeploy(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_dispatch_helper_redeploy_missing_agent_codespaces_is_noop(monkeypatch):
-    """When agent_codespaces is not importable, the dispatch-path helper
+    """When the ``agent-codespaces`` binstub is absent, the dispatch-path helper
     (re)deploy is silently skipped and the launch still proceeds (best-effort,
-    #733 T2)."""
+    #733 T2 / #1643 -- no in-process import fallback, so a missing binstub is the
+    degrade condition)."""
     _patch_common(monkeypatch)
-    import sys
-    monkeypatch.setitem(sys.modules, "agent_codespaces", None)
+    import shutil
+    _real_which = shutil.which
+    monkeypatch.setattr(
+        shutil, "which",
+        lambda name, *a, **k: (
+            None if name == "agent-codespaces" else _real_which(name, *a, **k)
+        ),
+    )
     state = {"pid": 1, "child_pid": 2, "port": 51000,
              "protocol_version": proto.PROTOCOL_VERSION}
     t = _FakeTransport(state)

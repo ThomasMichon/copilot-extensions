@@ -536,16 +536,54 @@ _config_migrate_installed() {
     "$VENV_DIR/bin/python" -c 'from config_migrate import migrate_file' 2>/dev/null
 }
 
-# #892 Increment 4: agent-bridge no longer VENDORS sibling plugins into its venv.
-# The `codespace:` / `container:` namespace resolvers AND the credential-relay
-# profiles are now driven over a PROCESS BOUNDARY -- the `agent-<sibling>
-# namespace-* / relay-profile` CLIs, run from each sibling's OWN immutable venv.
-# So a sibling bugfix reaches the dispatch path with NO agent-bridge redeploy,
-# and the #929 vendored-copy-drift / #828 installed-but-unimportable classes are
-# structurally gone. Kept as a no-op (call sites unchanged) for a minimal diff.
+# #1643: venue providers (agent-codespaces / agent-containers) are PURE
+# providers.d markers -- the daemon drives their binstubs over a PROCESS BOUNDARY
+# (the `agent-<sibling> namespace-* / relay-profile / relay-launch-env` CLIs, run
+# from each sibling's OWN immutable venv) and NEVER imports a provider package. So
+# a provider package inside the bridge venv is ALWAYS a stale vendored leftover
+# (retired #892 vendoring model) that causes version skew and breaks dispatch
+# (#1631/#1643). This actively prunes any such copy and GUARDS against one
+# lingering, so the bridge venv stays provider-free.
 # Sibling CLI binstubs remain owned by their own installers (~/.agent-<sibling>).
 _install_sibling_plugins() {
-    _step "Sibling plugins not vendored -- process-boundary CLI seams (#892)"
+    _step "Sibling plugins not vendored -- process-boundary CLI seams (#892/#1643)"
+    _remove_vendored_providers
+}
+
+# Prune any stale venue-provider package from EVERY agent-bridge venv and fail if
+# one is still importable afterward (the #1643 guard). Two venvs can carry a stale
+# copy: the ACTIVE versioned runtime slot ($VENV_DIR) and the retired legacy
+# top-level ~/.agent-bridge/venv (the install-contract-v3 leftover that
+# agent-codespaces' old installer vendored into). We prune both: uv-uninstall
+# first (clean dist-info removal), then belt-and-suspenders remove any raw-copied
+# dirs, then probe importability from each venv's OWN interpreter.
+_remove_vendored_providers() {
+    local pys=() py pkg mod purelib leak
+    [[ -x "$VENV_DIR/bin/python" ]] && pys+=("$VENV_DIR/bin/python")
+    [[ -x "$INSTALL_DIR/venv/bin/python" ]] && pys+=("$INSTALL_DIR/venv/bin/python")
+    if [[ ${#pys[@]} -eq 0 ]]; then
+        _step "No bridge venv yet -- nothing to prune (#1643)"
+        return 0
+    fi
+    for py in "${pys[@]}"; do
+        for pkg in agent-codespaces agent-containers; do
+            uv pip uninstall --python "$py" "$pkg" >/dev/null 2>&1 || true
+        done
+        # Belt-and-suspenders: drop any raw-copied package dir / dist-info left
+        # behind by the retired vendoring (no uv metadata to uninstall).
+        purelib="$("$py" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])' 2>/dev/null || true)"
+        if [[ -n "$purelib" && -d "$purelib" ]]; then
+            for mod in agent_codespaces agent_containers; do
+                rm -rf "$purelib/$mod" 2>/dev/null || true
+                rm -rf "$purelib/$mod"-*.dist-info "$purelib/${mod//_/-}"-*.dist-info 2>/dev/null || true
+            done
+        fi
+        # Guard: this venv's interpreter MUST NOT import a provider.
+        leak="$("$py" -c 'import importlib.util,sys; bad=[m for m in ["agent_codespaces","agent_containers"] if importlib.util.find_spec(m)]; sys.stdout.write(",".join(bad)); sys.exit(1 if bad else 0)' 2>/dev/null)" && continue
+        _fail "Provider package(s) still importable from $py after prune: $leak (#1643)"
+        return 1
+    done
+    _ok "Bridge venv(s) provider-free (pure providers.d, #1643)"
 }
 
 # Sibling plugin binstubs (e.g. agent-codespaces) are owned by their own
@@ -943,6 +981,10 @@ do_install() {
     else
         _step "Config migration skipped"
     fi
+
+    # Prune any stale vendored provider copy from the bridge venv(s) + guard
+    # (#1643): pure providers.d, no in-venv provider packages.
+    _install_sibling_plugins
 
     # Create binstub
     deploy_binstub
