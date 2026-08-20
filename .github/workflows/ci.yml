@@ -57,6 +57,13 @@ jobs:
         run: python tools/check-version-bump.py --base ${{ github.event.pull_request.base.sha }}
       - name: Install contract
         run: python tools/check-install-contract.py
+      - name: Runtime resolution (marker-only, uniform)
+        # Every versioned-runtime plugin must resolve its interpreter the one
+        # uniform marker-only way (uniform-runtime-resolution, #765): the
+        # junction-free current-version -> last-known-good -> newest-complete-slot
+        # chain, never a `.venv`/`venv` link and never a PATH python. --strict
+        # fails the build on any regression now that the migration has landed.
+        run: python tools/check-runtime-resolution.py --strict
       - name: Skills
         run: python tools/check-skills.py
       - name: Docs consistency
