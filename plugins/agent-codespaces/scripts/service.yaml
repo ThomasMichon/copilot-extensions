@@ -5,9 +5,13 @@ description: >
   credential relay (git-credential, gh-auth, az-login), and agent-bridge
   provider integration. Runtime at ~/.agent-codespaces/.
 
-# CLI tool with skills -- not a daemon. Deployed and updated through the
-# standard installer lifecycle. Runs on any machine with Python 3.10+,
-# Git, and the gh CLI.
+# CLI tool with skills -- not a daemon by default. Deployed and updated through
+# the standard installer lifecycle. Runs on any machine with Python 3.10+,
+# Git, and the gh CLI. The install/update scripts additionally provision an
+# OPTIONAL persistent "Connection Owner" relay daemon (a per-user scheduled task
+# on Windows / systemd --user unit on POSIX) -- but only when
+# connection_owner.enabled is set in config (default off -> ensured absent, so a
+# machine with the feature disabled is unchanged).
 type: installed-service
 level: user
 
