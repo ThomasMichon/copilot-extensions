@@ -188,10 +188,10 @@ _versioned_activate() {
     # Returns non-zero on failure. No-op in legacy mode.
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
     local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py="$VENV/bin/python"
+    local py="$VENV/bin/python"  # runtime-resolution: allow install-time slot health-gate (VENV is the versioned slot)
     [[ -x "$py" ]] || py="$LINK_DIR/bin/python"
     [[ -x "$py" ]] || return 0
-    if ! "$VENV/bin/python" -c 'import agent_logger' 2>/dev/null; then
+    if ! "$VENV/bin/python" -c 'import agent_logger' 2>/dev/null; then  # runtime-resolution: allow install-time slot health-gate
         warn "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
         return 1
     fi
@@ -402,15 +402,32 @@ _ensure_uv_index() {
 # auxiliary console-script binstubs (session-sync, collate-session, ...) are plain
 # symlinks created only by a full provision.
 deploy_binstub() {
-    mkdir -p "${LOCAL_BIN}"
+    mkdir -p "${LOCAL_BIN}" "${INSTALL_DIR}/bin"
+    # Co-deploy the canonical marker-only resolver (uniform-runtime-resolution, #765).
+    for r in resolve-runtime.sh resolve-runtime.ps1; do
+        [ -f "${SCRIPT_DIR}/$r" ] && cp -f "${SCRIPT_DIR}/$r" "${INSTALL_DIR}/bin/$r"
+    done
     cat > "${LOCAL_BIN}/agent-logger" << 'STUBEOF'
 #!/usr/bin/env bash
 # agent-logger binstub -- self-provisioning (install-on-first-use).
+# Resolves the interpreter SOLELY via the junction-free versioned-runtime marker
+# (the deployed resolve-runtime.sh; uniform-runtime-resolution, #765): current-
+# version -> last-known-good -> newest complete slot. NEVER a `.venv` link, NEVER
+# a PATH python -- when no slot is installed AGENT_RT_PY is empty and we self-
+# provision on first use rather than silently binding the system interpreter.
 export PYTHONUTF8=1
 _name="agent-logger"
 _root="$HOME/.$_name"
-_console="$_root/.venv/bin/$_name"
-[ -x "$_console" ] && exec "$_console" "$@"
+_resolver="$_root/bin/resolve-runtime.sh"
+_resolve() {
+    AGENT_RT_PY=""
+    if [ -f "$_resolver" ]; then
+        AGENT_RT_ROOT="$_root"
+        . "$_resolver"
+    fi
+}
+_resolve
+[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_logger "$@"
 mkdir -p "$_root"
 _status="$_root/.provision-status"
 printf '%s\n' "[$_name] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout." >&2
@@ -424,17 +441,19 @@ fi
 _lock="$_root/.provision.lock"
 exec 9>"$_lock"
 command -v flock >/dev/null 2>&1 && flock 9 2>/dev/null
-[ -x "$_console" ] && exec "$_console" "$@"
+_resolve
+[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_logger "$@"
 printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
 bash "$_install" provision >&2
 _rc=$?
-if [ "$_rc" -eq 0 ] && [ -x "$_console" ]; then
+_resolve
+if [ "$_rc" -eq 0 ] && [ -n "$AGENT_RT_PY" ]; then
     printf 'ready %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-    exec "$_console" "$@"
+    exec "$AGENT_RT_PY" -m agent_logger "$@"
 fi
 printf 'failed rc=%s %s\n' "$_rc" "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
 if [ "$_rc" -eq 0 ]; then
-    printf '%s\n' "[$_name] provisioning reported success but the CLI is still missing ($_console)." >&2
+    printf '%s\n' "[$_name] provisioning reported success but no runtime slot resolved." >&2
     _rc=1
 else
     printf '%s\n' "[$_name] provisioning FAILED (rc=$_rc). See the log above; retry, or run: bash \"$_install\" provision" >&2
@@ -516,7 +535,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=${LINK_DIR}/bin/session-sync run --prune
+ExecStart=${VENV}/bin/session-sync run --prune
 # Generous start timeout: the FIRST sync cold-copies the entire session
 # history (potentially thousands of sessions over a CIFS mount) and can take
 # 10+ minutes; 120s killed it mid-copy. Incremental runs finish in seconds.
