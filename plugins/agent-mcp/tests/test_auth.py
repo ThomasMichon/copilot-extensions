@@ -253,8 +253,85 @@ async def test_command_caches_until_invalidate():
     assert calls["n"] == 2
 
 
-# -- composite (multi-secret) injector --------------------------------------
+# -- command self-heal (auth.repair) ----------------------------------------
 
+
+def _marker_mint(marker) -> list[str]:
+    # Hard-fails (exit 7) until `marker` exists; then prints a token.
+    return _py(
+        "import os, sys\n"
+        f"m = r'{marker}'\n"
+        "print('password=healed') if os.path.exists(m) else sys.exit(7)\n"
+    )
+
+
+def _touch_repair(marker) -> list[str]:
+    return _py(f"import pathlib; pathlib.Path(r'{marker}').write_text('x')")
+
+
+def test_parse_auth_repair_command():
+    cfg = _cfg({"kind": "command", "command": ["mint"], "repair": ["fix", "--force"]})
+    assert cfg.auths[0].repair == ["fix", "--force"]
+    # a bare string repair is accepted too
+    assert _cfg({"kind": "command", "command": ["m"], "repair": "fixit"}
+                ).auths[0].repair == ["fixit"]
+
+
+def test_parse_auth_repair_defaults_empty():
+    assert _cfg({"kind": "command", "command": ["m"]}).auths[0].repair == []
+
+
+async def test_command_repair_heals_then_retry_succeeds(tmp_path):
+    marker = tmp_path / "healed"
+    inj = build_injector(_command_cfg({
+        "command": _marker_mint(marker),
+        "repair": _touch_repair(marker),
+        "target_env": "API_KEY",
+    }))
+    assert await inj.child_env() == {"API_KEY": "healed"}
+    assert marker.exists()  # repair ran and unblocked the retry
+
+
+async def test_command_repair_that_fails_yields_no_token(tmp_path):
+    inj = build_injector(_command_cfg({
+        "command": _py("import sys; sys.exit(7)"),
+        "repair": _py("import sys; sys.exit(1)"),  # repair itself fails
+        "target_env": "API_KEY",
+    }))
+    assert await inj.child_env() == {}  # no token, and no loop
+
+
+async def test_command_repair_runs_once_and_retries_once(tmp_path):
+    calls = tmp_path / "calls"
+    rcalls = tmp_path / "rcalls"
+    mint = _py(
+        f"import pathlib, sys; p = pathlib.Path(r'{calls}'); "
+        "p.write_text((p.read_text() if p.exists() else '') + 'x'); sys.exit(7)"
+    )
+    repair = _py(
+        f"import pathlib; p = pathlib.Path(r'{rcalls}'); "
+        "p.write_text((p.read_text() if p.exists() else '') + 'r')"
+    )
+    inj = build_injector(_command_cfg({
+        "command": mint, "repair": repair, "target_env": "API_KEY",
+    }))
+    assert await inj.child_env() == {}
+    assert calls.read_text() == "xx"  # mint ran exactly twice (initial + one retry)
+    assert rcalls.read_text() == "r"  # repair ran exactly once -- never a loop
+
+
+async def test_command_success_skips_repair(tmp_path):
+    rcalls = tmp_path / "rcalls"
+    inj = build_injector(_command_cfg({
+        "command": _py("print('password=ok')"),
+        "repair": _py(f"import pathlib; pathlib.Path(r'{rcalls}').write_text('r')"),
+        "target_env": "API_KEY",
+    }))
+    assert await inj.child_env() == {"API_KEY": "ok"}
+    assert not rcalls.exists()  # repair never runs when the mint succeeds
+
+
+# -- composite (multi-secret) injector --------------------------------------
 def _multi_cfg(specs):
     return _cfg(specs, server={"type": "stdio", "command": "npx"})
 

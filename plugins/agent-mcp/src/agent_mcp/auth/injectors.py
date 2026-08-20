@@ -172,9 +172,13 @@ class CommandInjector(TokenInjector):
 
     name = "command"
 
-    def __init__(self, spec: AuthSpec, *, timeout: float = 30.0) -> None:
+    def __init__(self, spec: AuthSpec, *, timeout: float = 30.0,
+                 repair_timeout: float = 300.0) -> None:
         super().__init__(spec)
         self._timeout = timeout
+        # A repair (e.g. reinstalling mint tooling) is inherently slower than a
+        # mint, so it gets its own, more generous timeout.
+        self._repair_timeout = repair_timeout
 
     def _stdin(self) -> bytes:
         """git-credential request body: ``key=value`` lines + blank terminator."""
@@ -192,22 +196,34 @@ class CommandInjector(TokenInjector):
         except ProcessLookupError:
             pass
 
-    async def _acquire(self) -> str | None:
-        # Env-first fallback: if ``source_env`` is configured and that variable is
-        # already set in the host environment (e.g. a push / no-vault machine's
-        # static .env), use it instead of running the command. Lets one bridge
-        # config work on both vault-enabled hosts (env unset -> run command) and
-        # daemon-less hosts (static env present -> no vault needed).
-        if self.spec.source_env:
-            env_val = os.environ.get(self.spec.source_env, "").strip()
-            if env_val:
-                return env_val
-        argv = self.spec.command
-        if not argv:
-            return None
-        # Resolve argv[0] so a .cmd/.bat credential binstub (e.g. vault.cmd)
-        # spawns on Windows -- create_subprocess_exec only auto-appends .exe.
-        argv = resolve_argv(argv)
+    @staticmethod
+    def _bound_err(stderr: bytes) -> str:
+        """Bound possibly-large/sensitive helper stderr for a single log line."""
+        err = stderr.decode(errors="replace").strip().replace("\n", " ")
+        if len(err) > 200:
+            err = err[:200] + "...(truncated)"
+        return err
+
+    def _parse_token(self, out: str) -> str | None:
+        """Extract the secret from a successful command's stdout per ``parse``."""
+        if self.spec.parse == "raw":
+            # Chomp only the CLI's line terminator; preserve any other
+            # whitespace that may be part of the secret.
+            return out.strip("\r\n") or None
+        fields = parse_response(out)
+        if self.spec.field_name:
+            return fields.get(self.spec.field_name)
+        return _token_from(out)
+
+    async def _run_command(self, argv: list[str]) -> tuple[str | None, bool]:
+        """Run the mint command once. Returns ``(token_or_None, hard_failed)``.
+
+        ``hard_failed`` is True only for a *tooling* failure -- timeout, missing
+        binary, or non-zero exit -- i.e. the cases a ``repair`` step might fix. A
+        clean exit whose output merely lacks a token is **not** a hard failure
+        (returns ``(None, False)``), so repair never fires on a well-behaved-but-
+        empty response.
+        """
         proc: asyncio.subprocess.Process | None = None
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -225,31 +241,84 @@ class CommandInjector(TokenInjector):
             # hung helper (e.g. an interactive credential prompt) would otherwise
             # leak a process, one per acquisition/401-retry. Reap it.
             await self._terminate(proc)
-            return None
+            return None, True
         except FileNotFoundError:
             log.error("auth command not found on PATH: %s", argv[0])
-            return None
+            return None, True
 
         if proc.returncode != 0:
-            # Bound the logged stderr: a failing credential helper may emit
-            # large and/or sensitive diagnostics, and this stream is inherited
-            # by the MCP host's logs.
-            err = stderr.decode(errors="replace").strip().replace("\n", " ")
-            if len(err) > 200:
-                err = err[:200] + "...(truncated)"
+            # Bound the logged stderr: a failing credential helper may emit large
+            # and/or sensitive diagnostics inherited by the MCP host's logs.
             log.error("auth command failed (exit %s): %s -- %s",
-                      proc.returncode, argv[0], err)
-            return None
+                      proc.returncode, argv[0], self._bound_err(stderr))
+            return None, True
 
-        out = stdout.decode(errors="replace")
-        if self.spec.parse == "raw":
-            # Chomp only the CLI's line terminator; preserve any other
-            # whitespace that may be part of the secret.
-            return out.strip("\r\n") or None
-        fields = parse_response(out)
-        if self.spec.field_name:
-            return fields.get(self.spec.field_name)
-        return _token_from(out)
+        return self._parse_token(stdout.decode(errors="replace")), False
+
+    async def _run_repair(self) -> bool:
+        """Run the configured ``auth.repair`` command once; True on a clean exit.
+
+        A repair (e.g. reinstalling/refreshing the mint tooling) takes no
+        git-credential stdin and can be slow, so it runs with ``DEVNULL`` stdin
+        under its own generous timeout. Its stdout is discarded; only bounded
+        stderr is logged, and only when the repair itself fails.
+        """
+        argv = resolve_argv(self.spec.repair)
+        log.warning("auth command failed; running repair once: %s", argv[0])
+        proc: asyncio.subprocess.Process | None = None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *argv,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=self._repair_timeout,
+            )
+        except (TimeoutError, asyncio.TimeoutError):
+            log.error("auth repair timed out (%.0fs): %s", self._repair_timeout, argv[0])
+            await self._terminate(proc)
+            return False
+        except FileNotFoundError:
+            log.error("auth repair not found on PATH: %s", argv[0])
+            return False
+        if proc.returncode != 0:
+            log.error("auth repair failed (exit %s): %s -- %s",
+                      proc.returncode, argv[0], self._bound_err(stderr))
+            return False
+        log.warning("auth repair succeeded: %s -- retrying mint", argv[0])
+        return True
+
+    async def _acquire(self) -> str | None:
+        # Env-first fallback: if ``source_env`` is configured and that variable is
+        # already set in the host environment (e.g. a push / no-vault machine's
+        # static .env), use it instead of running the command. Lets one bridge
+        # config work on both vault-enabled hosts (env unset -> run command) and
+        # daemon-less hosts (static env present -> no vault needed).
+        if self.spec.source_env:
+            env_val = os.environ.get(self.spec.source_env, "").strip()
+            if env_val:
+                return env_val
+        argv = self.spec.command
+        if not argv:
+            return None
+        # Resolve argv[0] so a .cmd/.bat credential binstub (e.g. vault.cmd)
+        # spawns on Windows -- create_subprocess_exec only auto-appends .exe.
+        argv = resolve_argv(argv)
+        token, hard_failed = await self._run_command(argv)
+        if not hard_failed:
+            return token
+        # Self-heal (opt-in): when the mint command *hard-fails* and a ``repair``
+        # command is configured, run it ONCE and retry the mint ONCE. Lets a
+        # browser-minting bridge recover from broken tooling (e.g. an out-of-date
+        # Playwright that can't drive an updated Edge) instead of just yielding no
+        # token. Strictly bounded -- a single repair + single retry, never a loop.
+        if self.spec.repair and await self._run_repair():
+            token, hard_failed = await self._run_command(argv)
+            if not hard_failed:
+                return token
+        return None
 
 
 def _build_one(spec: AuthSpec, cfg: BridgeConfig) -> AuthInjector:

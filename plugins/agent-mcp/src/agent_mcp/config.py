@@ -204,6 +204,10 @@ class AuthSpec:
     request: dict[str, str] = field(default_factory=dict)
     parse: str = "keyvalue"
     field_name: str | None = None  # which output key to extract (keyvalue mode)
+    # optional self-heal: a command run ONCE when `command` hard-fails (timeout /
+    # missing binary / non-zero exit), before a single retry -- e.g. reinstall or
+    # refresh broken mint tooling. Opt-in; empty = disabled (no behavior change).
+    repair: list[str] = field(default_factory=list)
     # injection
     inject: str | None = None  # defaults per transport in resolve_inject()
     header: str = "Authorization"
@@ -510,6 +514,7 @@ def _parse_auth_spec(raw_auth: dict[str, Any]) -> AuthSpec:
         request={str(k): str(v) for k, v in (raw_auth.get("request") or {}).items()},
         parse=str(raw_auth.get("parse", "keyvalue")),
         field_name=raw_auth.get("field"),
+        repair=_as_command(raw_auth.get("repair")),
         inject=raw_auth.get("inject"),
         header=str(raw_auth.get("header", "Authorization")),
         format=str(raw_auth.get("format", "Bearer {token}")),
