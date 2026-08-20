@@ -135,8 +135,8 @@ scenarios/<name>/
 - **`Dockerfile.windows`** — the Windows "fresh machine": a Server Core-based
   python image (python3 + Windows PowerShell 5.1). `--isolation=hyperv` runs the
   ltsc2022 base on a newer host.
-- **Usage** (on a Windows-container host — e.g. the mesh's `tmichon-cloud2`, whose
-  non-elevated moby `dockerd` is reached via a loopback-TCP broker):
+- **Usage** (on a Windows-container host whose non-elevated engine is reached via
+  a loopback-TCP broker):
 
   ```powershell
   ./run.ps1 -Os windows -Scenario partner-harness-setup `

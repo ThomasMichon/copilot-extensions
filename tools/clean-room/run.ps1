@@ -116,10 +116,10 @@ param(
     # smoke check that a broken CLI surface doesn't waste an eval's credits). The
     # gate is ON by default because it is nearly free; pass this to force an eval.
     [switch]$SkipTierPGate,
-    # --- Windows arm (formalized cloud2 Windows-container flow) ---------------
+    # --- Windows arm (formalized Windows-container flow) ---------------------
     # Run the WINDOWS clean-room arm (a Windows container running scenario.ps1)
     # instead of the default Linux arm. Requires a Windows-container engine on the
-    # box this runs on (e.g. cloud2's moby dockerd). See scenario.ps1 + Dockerfile.windows.
+    # box this runs on. See scenario.ps1 + Dockerfile.windows.
     [ValidateSet('linux', 'windows')]
     [string]$Os = 'linux',
     # docker -H endpoint. Empty = the CLI default (honors $env:DOCKER_HOST). On a
@@ -147,7 +147,7 @@ if ($Until -ne 'all' -and $Until -notmatch '^\d+$') {
 # in a Windows container, harmonizing the clean-room across Linux and Windows.
 # It does NOT touch the Linux auth/bridge/eval machinery below (which is
 # ubuntu/agent-oriented and irrelevant to a deterministic Tier-P Windows scenario).
-# Runs on a Windows-container host (e.g. cloud2); the harness-side remote driver
+# Runs on a Windows-container host; the harness-side remote driver
 # (transfer the drop to that host) lives in the consuming harness.
 # =============================================================================
 if ($Os -eq 'windows') {
