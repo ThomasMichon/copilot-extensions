@@ -752,9 +752,94 @@ function Write-DeployManifest {
 
 # -- Actions ---------------------------------------------------------------
 
+# -- Connection Owner service (config-gated; default off) ------------------
+# The persistent per-machine Connection Owner relay daemon (dotfiles#1320/#1333)
+# is provisioned as a per-user scheduled task, but ONLY when connection_owner is
+# enabled in config. Default off -> the task is ensured ABSENT, so a machine with
+# the feature disabled is unchanged (truly inert). Enabling it is "flip the
+# config, run update" (the install/update convergence contract, ce#488). The task
+# launches through the stable self-provisioning binstub (agent-codespaces.ps1),
+# which resolves the active versioned slot at runtime, so it survives updates.
+$OwnerTaskName = 'agent-codespaces-owner'
+
+function Get-ConnectionOwnerConfig {
+    <# Ask the freshly-built runtime whether the Connection Owner is enabled.
+       Returns @{ Enabled = <bool>; Interval = <double> }; disabled on any
+       failure (never throws). #>
+    $result = @{ Enabled = $false; Interval = 15.0 }
+    $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    try {
+        $env:PYTHONUTF8 = '1'
+        $json = & $LinkPython -m agent_codespaces owner --status 2>$null
+        if ($LASTEXITCODE -eq 0 -and $json) {
+            $obj = (($json | Out-String).Trim() | ConvertFrom-Json)
+            $result.Enabled = [bool]$obj.enabled
+            if ($obj.reconcile_interval) { $result.Interval = [double]$obj.reconcile_interval }
+        }
+    } catch { }
+    $ErrorActionPreference = $prevEAP
+    return $result
+}
+
+function Unregister-ConnectionOwnerService {
+    <# Stop + remove the Owner scheduled task (used when the feature is disabled
+       or on uninstall). Best-effort; never throws. #>
+    $existing = Get-ScheduledTask -TaskName $OwnerTaskName -ErrorAction SilentlyContinue
+    if ($existing) {
+        try { Stop-ScheduledTask -TaskName $OwnerTaskName -ErrorAction SilentlyContinue } catch { }
+        try {
+            Unregister-ScheduledTask -TaskName $OwnerTaskName -Confirm:$false -ErrorAction Stop
+        } catch {
+            try { & schtasks.exe /Delete /TN $OwnerTaskName /F *> $null } catch { }
+        }
+        Write-ServiceChanged "Removed Connection Owner scheduled task ($OwnerTaskName)"
+    }
+}
+
+function Sync-ConnectionOwnerService {
+    <# Config-gated provisioning of the Connection Owner daemon. Enabled ->
+       register + start the per-user scheduled task; disabled (default) -> ensure
+       it is absent. Idempotent + additive; failures are non-fatal to install. #>
+    $co = Get-ConnectionOwnerConfig
+    if (-not $co.Enabled) {
+        Unregister-ConnectionOwnerService
+        return
+    }
+    $stub = Join-Path $LocalBin 'agent-codespaces.ps1'
+    if (-not (Test-Path $stub)) {
+        Write-ServiceWarn "Connection Owner enabled but binstub missing ($stub) -- skipping service provisioning"
+        return
+    }
+    try {
+        $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
+        $exe = if ($pwshCmd) { $pwshCmd.Source } else { (Get-Command powershell.exe).Source }
+        $action = New-ScheduledTaskAction -Execute $exe `
+            -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$stub`" owner" `
+            -WorkingDirectory $InstallDir
+        # Interactive at-logon: the daemon needs the user's gh/ssh session context.
+        $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+        $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME `
+            -LogonType Interactive -RunLevel Limited
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
+            -DontStopIfGoingOnBatteries -StartWhenAvailable `
+            -ExecutionTimeLimit (New-TimeSpan -Seconds 0) `
+            -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+        Register-ScheduledTask -TaskName $OwnerTaskName -Action $action -Trigger $trigger `
+            -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
+        Write-ServiceChanged "Registered Connection Owner scheduled task ($OwnerTaskName; interval=$($co.Interval)s)"
+        try {
+            Start-ScheduledTask -TaskName $OwnerTaskName -ErrorAction Stop
+            Write-ServiceOk 'Connection Owner daemon started'
+        } catch {
+            Write-ServiceWarn 'Connection Owner task registered but did not start now (no interactive session?) -- it starts at next logon'
+        }
+    } catch {
+        Write-ServiceWarn "Connection Owner service provisioning failed: $_"
+    }
+}
+
 function Invoke-Install {
     Write-ServiceHeader $ServiceName
-
     # Create directories
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) {
@@ -803,6 +888,9 @@ function Invoke-Install {
         Write-ServiceErr 'Verification: module import failed'
     }
 
+    # Connection Owner daemon (config-gated; default off -> ensured absent).
+    Sync-ConnectionOwnerService
+
     Write-Host ''
     Write-ServiceOk "$ServiceName installed"
 }
@@ -834,6 +922,9 @@ function Stop-ManagedSshConnections {
 
 function Invoke-Uninstall {
     Write-ServiceHeader "$ServiceName Uninstall"
+
+    # Remove the Connection Owner scheduled task (if provisioned).
+    Unregister-ConnectionOwnerService
 
     # Stop managed SSH ControlMaster connections before removing files.
     Stop-ManagedSshConnections
@@ -1008,6 +1099,9 @@ function Invoke-Update {
 
     # Update manifest
     Write-DeployManifest
+
+    # Connection Owner daemon (config-gated; default off -> ensured absent).
+    Sync-ConnectionOwnerService
 
     Write-ServiceOk "$ServiceName updated"
 }
