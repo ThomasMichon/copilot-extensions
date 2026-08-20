@@ -22,7 +22,7 @@ import os
 
 from .. import __version__
 from .. import protocol as proto
-from .._exec import resolve_spawn
+from .._exec import no_window_creationflags, resolve_spawn
 from ..auth.base import AuthInjector
 from ..cli_tools import CliTool, CliToolError, build_argv, load_cli_tools, tool_in_scope
 from ..config import BridgeConfig
@@ -179,6 +179,7 @@ class CliTransport(Transport):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=await self._child_env(),
+                creationflags=no_window_creationflags(),  # Windows: no console window
             )
             out_b, err_b = await proc.communicate()
             rc = proc.returncode

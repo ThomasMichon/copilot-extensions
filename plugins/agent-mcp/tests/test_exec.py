@@ -85,3 +85,26 @@ def test_resolve_spawn_falls_back_when_no_pwsh_host(tmp_path, monkeypatch):
 
 def test_resolve_spawn_empty():
     assert resolve_spawn([], is_windows=True) == []
+
+
+def test_no_window_creationflags_returns_int_and_posix_zero():
+    import sys
+
+    from agent_mcp._exec import no_window_creationflags
+
+    flags = no_window_creationflags()
+    assert isinstance(flags, int)
+    if sys.platform != "win32":
+        assert flags == 0
+
+
+def test_no_window_creationflags_win32_branch(monkeypatch):
+    # Simulate Windows on any runner: the helper must return CREATE_NO_WINDOW
+    # without touching the (win32-only) attribute off Windows.
+    import subprocess as sp
+
+    import agent_mcp._exec as ex
+
+    monkeypatch.setattr(ex.sys, "platform", "win32")
+    monkeypatch.setattr(sp, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    assert ex.no_window_creationflags() == 0x08000000
