@@ -373,6 +373,46 @@ function Get-VersionedCurrent {
     return ("$out").Trim()
 }
 
+function Test-SlotContentCurrent {
+    <# Strict same-content idempotency gate (ce#776/#777). Returns $true iff the
+       versioned layout is active AND the target version ($SrcVersion) is ALREADY
+       the current active slot AND that slot carries a valid completion marker
+       whose recorded payload hash matches the payload we would install.
+
+       When true, a (re)install/update MUST be a no-op: the target slot IS the
+       live venv a running daemon pins, so rebuilding its byte-identical content
+       in place would overwrite python.exe / site-packages mid-flight -- the
+       `FileNotFoundError [WinError 2]` crash cascade (dotfiles#1612). Idempotency
+       is keyed on CONTENT (the payload hash), not the mutable version label, so a
+       reused dev label with changed content still fails the gate and rebuilds.
+
+       Fail-safe: any error (no python, helper missing, unparseable) returns
+       $false, so the installer falls through to its existing behavior and a
+       genuine install is never skipped. A deliberate force-rebuild remains a
+       dedicated command (`versioned_runtime toss` + re-install / `service
+       restart`), never a silent side effect of a routine same-version reconcile. #>
+    if (-not $VersionedRuntime) { return $false }
+    try {
+        $vr = Join-Path $ScriptDir 'versioned_runtime.py'
+        # Prefer the slot's OWN python (an already-installed runtime always has it)
+        # and fall back to a bootstrap python only when no slot exists yet -- a
+        # box that only has the venv python would otherwise get $null from
+        # Get-BootstrapPython and never no-op, defeating the gate (ce#788 review).
+        # versioned_runtime is stdlib-only, so any python runs it.
+        $py = if (Test-Path $LinkPython) { $LinkPython }
+              elseif (Test-Path $VenvPython) { $VenvPython }
+              else { Get-BootstrapPython }
+        if (-not $py -or -not (Test-Path $vr)) { return $false }
+        $cur = (& $py $vr --root $InstallDir --link-name 'venv' current 2>$null | Out-String).Trim()
+        if (-not $cur -or $cur -ne $SrcVersion) { return $false }
+        $icArgs = @($vr, '--root', $InstallDir, '--link-name', 'venv', 'is-complete', $SrcVersion)
+        $ph = Get-PayloadHash
+        if ($ph) { $icArgs += @('--expect-hash', $ph) }
+        & $py @icArgs 2>$null | Out-Null
+        return ($LASTEXITCODE -eq 0)
+    } catch { return $false }
+}
+
 function Invoke-VersionedGc {
     <# Prune old version slots, keeping current + the given previous-good +
        any live-pid-pinned slot. No-op in legacy mode. Best-effort (warns only). #>
@@ -1270,6 +1310,18 @@ function Invoke-Install {
     # Check for migration from old installer
     Invoke-MigrationCheck
 
+    # Strict same-content no-op (ce#776/#777): if the target version is already
+    # the active slot AND healthy with matching content, do NOT rebuild it -- the
+    # slot IS the running daemon's live venv, and overwriting it in place is the
+    # WinError-2 crash cascade (dotfiles#1612). Idempotency is keyed on content,
+    # not the mutable version label. A force rebuild/restart stays a dedicated
+    # command, never a routine-reconcile side effect.
+    if (Test-SlotContentCurrent) {
+        Write-Ok "agent-bridge $SrcVersion already installed and healthy (content match) -- no-op (no venv rebuild, no restart)."
+        Write-DeployManifest   # re-assert the manifest so version drift clears and this never re-triggers every session
+        return
+    }
+
     # Create directories
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) {
@@ -1802,6 +1854,19 @@ function Invoke-Update {
         Write-Fail 'uv not found on PATH (required for package management)'
         Write-Fail 'Install: https://docs.astral.sh/uv/getting-started/installation/'
         exit 1
+    }
+
+    # Strict same-content no-op (ce#776/#777) -- checked BEFORE we stop the daemon
+    # or touch the venv. Otherwise the classic same-version path below "downgrades
+    # to stop-and-rebuild" IN PLACE over the live slot: it stops the running
+    # daemon and rewrites its python.exe / site-packages, the WinError-2 crash
+    # cascade (dotfiles#1612). If the active slot already matches the target
+    # content there is nothing to do; a genuine force-restart is a dedicated
+    # command (`service restart`), not an implicit effect of a reconcile.
+    if (Test-SlotContentCurrent) {
+        Write-Ok "agent-bridge $SrcVersion already installed and healthy (content match) -- no-op (no stop, no rebuild)."
+        Write-DeployManifest
+        return
     }
 
     # Stop running instance first -- a rebuild/repair of the venv (below) must
