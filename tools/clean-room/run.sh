@@ -92,7 +92,9 @@ BASE_TAG="copilot-cleanroom:$IMAGE"
 if [ "$IMAGE" = base ]; then AUTH_TAG="copilot-cleanroom:authed"; else AUTH_TAG="copilot-cleanroom:$IMAGE-authed"; fi
 NAME_TAIL=""; [ -n "$NAME_SUFFIX" ] && NAME_TAIL="-$NAME_SUFFIX"
 CONTAINER="cr-$IMAGE$NAME_TAIL"
-AGENT_NAME="cleanroom-$IMAGE$NAME_TAIL"   # agent-bridge agent + provider name for this box
+AGENT_NAME="cleanroom-$IMAGE$NAME_TAIL"   # legacy label (kept for logs)
+DRIVE_AGENT="cleanroom:$CONTAINER"        # the namespaced agent-bridge address
+ACP_COMMAND='copilot --acp --stdio --allow-all-tools'  # eval may add --plugin-dir
 
 if [ -n "${CR_RESULTS_DIR:-}" ]; then
     RESULTS="$CR_RESULTS_DIR"
@@ -212,16 +214,34 @@ do_shell() {
     docker exec -it "$CONTAINER" /bin/bash -l
 }
 do_down() { docker rm -f "$CONTAINER" >/dev/null 2>&1 || true; echo "removed $CONTAINER"; }
-# Register/unregister the container as an agent-bridge agent (drive the
-# in-container Copilot with `agent-bridge send $AGENT_NAME "<prompt>"`). Uses the
-# runtime provider API via bridge_register.py (a docker-exec command agent).
+# Register/unregister the container with agent-bridge (drive the in-container
+# Copilot with `agent-bridge create cleanroom:<container> ...`). Uses the
+# declarative providers.d/ namespace-provider model (agent-bridge >= dev307; the
+# old runtime provider POST API was retired, ce#582): bridge_register.py drops a
+# `cleanroom` manifest and IS the provider CLI the daemon shells out to.
 _py() { command -v python3 || command -v python; }
 do_bridge_register() {
     ensure_container
-    "$(_py)" "$HERE/bridge_register.py" register --container "$CONTAINER" --name "$AGENT_NAME"
-    echo "drive it:  agent-bridge send $AGENT_NAME \"<prompt>\""
+    "$(_py)" "$HERE/bridge_register.py" --acp-command "$ACP_COMMAND" register --container "$CONTAINER" --name "$AGENT_NAME"
+    echo "drive it:  agent-bridge create $DRIVE_AGENT \"<prompt>\""
 }
-do_bridge_unregister() { "$(_py)" "$HERE/bridge_register.py" unregister --name "$AGENT_NAME"; }
+do_bridge_unregister() { "$(_py)" "$HERE/bridge_register.py" unregister --name "$AGENT_NAME" --container "$CONTAINER"; }
+# End any prior agent-bridge session for an agent so a fresh `create` isn't
+# refused with "already has an active session". Idempotent + best-effort.
+end_agent_sessions() {
+    local agent="$1" js sid
+    js="$(agent-bridge --json sessions 2>/dev/null)" || return 0
+    [ -n "$js" ] || return 0
+    while IFS= read -r sid; do
+        [ -n "$sid" ] || continue
+        echo "   (ending prior session $sid for $agent)"
+        agent-bridge end "$sid" --force >/dev/null 2>&1 || true
+    done < <(printf '%s' "$js" | "$(_py)" -c 'import sys,json
+a=sys.argv[1]
+try: d=json.load(sys.stdin)
+except Exception: d=[]
+[print(s.get("session_id","")) for s in d if s.get("agent_name")==a and s.get("session_id")]' "$agent")
+}
 do_run() {
     start_container
     local until_env=()
@@ -307,22 +327,32 @@ full = f"{literal}\n\n--- TASK ---\n\n{prompt}"
 open(os.path.join(eval_dir, "literal-mode.txt"), "w", encoding="utf-8").write(literal)
 open(os.path.join(eval_dir, "prompt.txt"), "w", encoding="utf-8").write(full)
 prompt_hash = hashlib.sha256(full.encode("utf-8")).hexdigest()[:16]
+ev = m.get("eval") or {}
+acp_dirs = " ".join(str(d) for d in (ev.get("acp_plugin_dirs") or []) if d)
 for k, v in (("tier", m.get("tier", "")), ("setup_rel", setup_rel), ("run_count", run_count),
              ("per_turn", per_turn), ("aggregate", aggregate), ("post_check", post_check),
-             ("tierp", tierp), ("family", m.get("family", "")), ("prompt_hash", prompt_hash)):
+             ("tierp", tierp), ("family", m.get("family", "")), ("prompt_hash", prompt_hash),
+             ("acp_dirs", acp_dirs)):
     print(f"{k}\t{v}")
 PY
 )" || { echo "eval: failed to parse manifest.json" >&2; exit 2; }
 
-    local TIER="" SETUP_REL="" RUN_COUNT=1 PER_TURN=0 AGG="unanimous" POST_CHECK="" TIERP="" FAMILY="" PROMPT_HASH=""
+    local TIER="" SETUP_REL="" RUN_COUNT=1 PER_TURN=0 AGG="unanimous" POST_CHECK="" TIERP="" FAMILY="" PROMPT_HASH="" ACP_DIRS=""
     local _k _v
     while IFS=$'\t' read -r _k _v; do
         case "$_k" in
             tier) TIER="$_v" ;; setup_rel) SETUP_REL="$_v" ;; run_count) RUN_COUNT="$_v" ;;
             per_turn) PER_TURN="$_v" ;; aggregate) AGG="$_v" ;; post_check) POST_CHECK="$_v" ;;
             tierp) TIERP="$_v" ;; family) FAMILY="$_v" ;; prompt_hash) PROMPT_HASH="$_v" ;;
+            acp_dirs) ACP_DIRS="$_v" ;;
         esac
     done <<< "$parsed"
+    # Build the driven-agent ACP command: a scenario may declare eval.acp_plugin_dirs
+    # (in-container paths) so the driven Copilot loads its plugins via --plugin-dir.
+    ACP_COMMAND='copilot --acp --stdio --allow-all-tools'
+    local _d
+    for _d in $ACP_DIRS; do ACP_COMMAND="$ACP_COMMAND --plugin-dir $_d"; done
+    echo "eval: ACP command -> $ACP_COMMAND"
 
     if [ "${RUNS_OVERRIDE:-0}" -gt 0 ] 2>/dev/null; then RUN_COUNT="$RUNS_OVERRIDE"; fi
     [ "$TIER" = E ] || echo "warn: scenario '$SCENARIO_NAME' is tier '$TIER', not 'E' -- eval expects a Tier-E scenario." >&2
@@ -356,7 +386,7 @@ PY
         2>/dev/null | head -1)"
 
     # --- 4/5) drive N times + capture transcripts ----------------------------
-    echo "== eval: driving '$AGENT_NAME' x$RUN_COUNT (fresh session; literal-mode + stated purpose) =="
+    echo "== eval: driving '$DRIVE_AGENT' x$RUN_COUNT (fresh session; literal-mode + stated purpose) =="
     [ "${PER_TURN:-0}" -gt 0 ] 2>/dev/null && echo "   per-turn timeout: ${PER_TURN}s"
     local prompt_txt="$eval_dir/prompt.txt" recs="$eval_dir/.runrecords"
     : > "$recs"
@@ -365,7 +395,8 @@ PY
         if [ "$RUN_COUNT" -eq 1 ]; then run_dir="$eval_dir"; else run_dir="$eval_dir/run-$n"; mkdir -p "$run_dir"; fi
         transcript="$run_dir/transcript.txt"
         echo "   -- run $n/$RUN_COUNT --"
-        drive_with_timeout "$AGENT_NAME" "$prompt_txt" "${PER_TURN:-0}" > "$transcript"
+        end_agent_sessions "$DRIVE_AGENT"
+        drive_with_timeout "$DRIVE_AGENT" "$prompt_txt" "${PER_TURN:-0}" > "$transcript"
         rel="${transcript#"$RESULTS"/}"
         printf '%s|%s|%s|%s\n' "$n" "$rel" "$DRIVE_DURATION" "$DRIVE_TIMED_OUT" >> "$recs"
         tag=""; [ "$DRIVE_TIMED_OUT" = 1 ] && tag=" -- TIMED OUT"

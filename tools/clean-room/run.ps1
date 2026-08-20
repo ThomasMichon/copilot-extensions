@@ -266,7 +266,13 @@ $BaseTag    = "copilot-cleanroom:$Image"
 $AuthTag    = if ($Image -eq 'base') { 'copilot-cleanroom:authed' } else { "copilot-cleanroom:$Image-authed" }
 $NameTail   = if ($NameSuffix) { "-$NameSuffix" } else { '' }
 $Container  = "cr-$Image$NameTail"
-$AgentName  = "cleanroom-$Image$NameTail"   # agent-bridge agent + provider name for this box
+$AgentName  = "cleanroom-$Image$NameTail"   # legacy label (kept for logs)
+$DriveAgent = "cleanroom:$Container"        # the namespaced agent-bridge address
+# The in-container Copilot ACP command the cleanroom: provider resolves to. The
+# eval path overrides this to add --plugin-dir for the scenario's plugins (a bare
+# copilot --acp does not reliably load enabled plugins headless). Script-scoped so
+# Invoke-Eval can set it before Invoke-BridgeRegister bakes it into the manifest.
+$script:AcpCommand = 'copilot --acp --stdio --allow-all-tools'
 
 if (-not $ResultsDir) { $ResultsDir = $env:CR_RESULTS_DIR }
 if (-not $ResultsDir) {
@@ -448,22 +454,37 @@ function Invoke-Down {
     Write-Host "removed $Container" -ForegroundColor Green
 }
 
-# Register the running container as an agent-bridge agent so you can drive the
-# in-container Copilot with `agent-bridge send $AgentName "<prompt>"`. Uses the
-# runtime provider API (a `docker exec ... copilot --acp --stdio` command agent);
-# a static acp-agents.json cannot express a raw docker-exec transport.
+# Register the running container with agent-bridge so you can drive the
+# in-container Copilot with `agent-bridge create cleanroom:<container> ...`. Uses
+# the declarative `providers.d/` namespace-provider model (agent-bridge >= dev307;
+# the old runtime provider POST API was retired, ce#582): bridge_register.py drops
+# a `cleanroom` manifest and *is* the provider CLI the daemon shells out to.
 function Invoke-BridgeRegister {
     Ensure-Container
     $py = (Get-Command python -ErrorAction SilentlyContinue) ?? (Get-Command python3 -ErrorAction SilentlyContinue)
-    if (-not $py) { throw "python not found on PATH (needed to call the agent-bridge provider API)" }
-    & $py.Source (Join-Path $Here 'bridge_register.py') register --container $Container --name $AgentName
+    if (-not $py) { throw "python not found on PATH (needed to register the agent-bridge provider)" }
+    & $py.Source (Join-Path $Here 'bridge_register.py') --acp-command $script:AcpCommand register --container $Container --name $AgentName
     if ($LASTEXITCODE -ne 0) { throw "bridge registration failed" }
-    Write-Host "drive it:  agent-bridge send $AgentName `"<prompt>`"" -ForegroundColor Green
+    Write-Host "drive it:  agent-bridge create $DriveAgent `"<prompt>`"" -ForegroundColor Green
 }
 function Invoke-BridgeUnregister {
     $py = (Get-Command python -ErrorAction SilentlyContinue) ?? (Get-Command python3 -ErrorAction SilentlyContinue)
     if (-not $py) { throw "python not found on PATH" }
-    & $py.Source (Join-Path $Here 'bridge_register.py') unregister --name $AgentName
+    & $py.Source (Join-Path $Here 'bridge_register.py') unregister --name $AgentName --container $Container
+}
+# End any prior agent-bridge session for an agent so a fresh `create` isn't
+# refused with "already has an active session" (a recreated box leaves the old
+# session record behind). Idempotent + best-effort.
+function Invoke-EndAgentSessions([string]$Agent) {
+    $json = (& agent-bridge --json sessions 2>$null | Out-String)
+    if (-not $json.Trim()) { return }
+    try { $sessions = $json | ConvertFrom-Json } catch { return }
+    foreach ($s in @($sessions)) {
+        if ($s.agent_name -eq $Agent -and $s.session_id) {
+            Write-Host "   (ending prior session $($s.session_id) for $Agent)" -ForegroundColor DarkGray
+            & agent-bridge end $s.session_id --force 2>$null | Out-Null
+        }
+    }
 }
 
 # Short SHA-256 of a string (first 16 hex chars). Used to fingerprint the exact
@@ -529,6 +550,19 @@ function Invoke-Eval {
     $perTurnTimeout = if ($manifest.runs -and $manifest.runs.per_turn_timeout_s) { [int]$manifest.runs.per_turn_timeout_s } else { 0 }
     $postCheck = $manifest.post_check
     if (-not $postCheck -and (Test-Path (Join-Path $ScenarioDir 'post_check.sh'))) { $postCheck = 'post_check.sh' }
+    # ACP command for the driven agent: a scenario may declare eval.acp_plugin_dirs
+    # (in-container paths) so the driven Copilot loads its plugins via --plugin-dir
+    # (a bare `copilot --acp` does not reliably load enabled plugins headless). The
+    # cleanroom: provider bakes this into its spawn. Kept generic -- the rig names no
+    # plugin; the scenario declares its own in-container plugin dirs.
+    $acp = 'copilot --acp --stdio --allow-all-tools'
+    if ($manifest.eval -and $manifest.eval.acp_plugin_dirs) {
+        foreach ($d in @($manifest.eval.acp_plugin_dirs)) {
+            if ($d) { $acp += " --plugin-dir $d" }
+        }
+    }
+    $script:AcpCommand = $acp
+    Write-Host "eval: ACP command -> $acp" -ForegroundColor DarkGray
     # Tier-P precondition: an in-box command that must exit 0 before we spend the
     # drive (a broken CLI surface would fail the eval for the wrong reason).
     # Explicit manifest.tier_p_precondition wins; else `<first installed plugin>
@@ -592,14 +626,15 @@ function Invoke-Eval {
     # --expand all so thoughts + tool calls land in the transcript for the judge.
     # Each turn is wall-clock bounded (runs.per_turn_timeout_s) so a hung agent is
     # a FAIL, not an infinite wait.
-    Write-Host "== eval: driving '$AgentName' x$runCount (fresh session; literal-mode + stated purpose) ==" -ForegroundColor Cyan
+    Write-Host "== eval: driving '$DriveAgent' x$runCount (fresh session; literal-mode + stated purpose) ==" -ForegroundColor Cyan
     if ($perTurnTimeout -gt 0) { Write-Host "   per-turn timeout: ${perTurnTimeout}s" -ForegroundColor DarkGray }
     $runRecords = @()
     for ($n = 1; $n -le $runCount; $n++) {
         $runDir = if ($runCount -eq 1) { $evalDir } else { $d = Join-Path $evalDir "run-$n"; New-Item -ItemType Directory -Force -Path $d | Out-Null; $d }
         $transcriptPath = Join-Path $runDir 'transcript.txt'
         Write-Host "   -- run $n/$runCount --" -ForegroundColor DarkGray
-        $drv = Invoke-DriveWithTimeout $AgentName $promptTxt $perTurnTimeout
+        Invoke-EndAgentSessions $DriveAgent
+        $drv = Invoke-DriveWithTimeout $DriveAgent $promptTxt $perTurnTimeout
         Set-Content -Path $transcriptPath -Value $drv.transcript -Encoding utf8
         $runRecords += [pscustomobject]@{
             n          = $n
