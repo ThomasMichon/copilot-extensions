@@ -452,43 +452,21 @@ exit 1
     [System.IO.File]::WriteAllText($ps1Path, $ps1Content, $utf8NoBom)
 
     $cmdPath = Join-Path $LocalBin 'agent-ssh.cmd'
+    # cmd fallback: delegate entirely to the .ps1 binstub so resolution stays
+    # uniform with the canonical resolve-runtime.ps1 chain (current-version ->
+    # last-known-good -> newest complete slot) and self-provisioning is shared.
+    # Pure-batch version-sorting can't match the resolver without reintroducing a
+    # lexicographic bug, and PowerShell is always present on Windows (this cmd
+    # already shells to it to provision), so one delegation is the correct parity.
     $cmdContent = @'
 @echo off
 setlocal
 set "PYTHONUTF8=1"
-set "_ROOT=%USERPROFILE%\.agent-ssh"
-call :_resolve
-if not defined _PY goto _prov
-"%_PY%" -m agent_ssh %*
-exit /b %ERRORLEVEL%
-:_prov
-if defined AGENT_SSH_NO_SELFPROVISION goto _nope
-set "_SNAP="
-if exist "%_ROOT%\payload-dir" set /p _SNAP=<"%_ROOT%\payload-dir"
-set "_INST=%_SNAP%\scripts\install.ps1"
-if not exist "%_INST%" goto _noinst
-echo [agent-ssh] runtime not provisioned -- provisioning on first use ^(~30-120s^). Do not kill.>&2
+set "_PS1=%USERPROFILE%\.local\bin\agent-ssh.ps1"
+if not exist "%_PS1%" (echo [agent-ssh] binstub not found: %_PS1%>&2 & exit /b 127)
 where pwsh >nul 2>&1
-if %ERRORLEVEL%==0 (pwsh -NoProfile -ExecutionPolicy Bypass -File "%_INST%" provision 1>&2) else (powershell -NoProfile -ExecutionPolicy Bypass -File "%_INST%" provision 1>&2)
-call :_resolve
-if not defined _PY goto _failprov
-"%_PY%" -m agent_ssh %*
+if %ERRORLEVEL%==0 (pwsh -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*) else (powershell -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*)
 exit /b %ERRORLEVEL%
-:_noinst
-echo [agent-ssh] cannot self-provision: snapshot installer not found.>&2
-exit /b 127
-:_nope
-echo [agent-ssh] runtime not provisioned ^(AGENT_SSH_NO_SELFPROVISION set^).>&2
-exit /b 1
-:_failprov
-echo [agent-ssh] provisioning did not yield a runtime.>&2
-exit /b 1
-:_resolve
-set "_PY="
-set "_VER="
-if exist "%_ROOT%\current-version" set /p _VER=<"%_ROOT%\current-version"
-if defined _VER if exist "%_ROOT%\versions\%_VER%\Scripts\python.exe" set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
-goto :eof
 '@
     [System.IO.File]::WriteAllText($cmdPath, $cmdContent, $utf8NoBom)
     Write-Ok "Binstub: $ps1Path (+ .cmd fallback, self-provisioning)"
