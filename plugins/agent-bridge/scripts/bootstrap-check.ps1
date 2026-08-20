@@ -88,22 +88,21 @@ try {
     if ($runtimeHealthy -and $deployed -eq $current -and (-not $curVer -or $curVer -eq $deployed)) { exit 0 }
     $init = Join-Path $PluginDir 'scripts\init.ps1'
     if (Test-Path $init) {
-        $targs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $init)
+        $reInner = "& `"$init`""
     } else {
         $inst = Join-Path $PluginDir 'scripts\install.ps1'
         if (-not (Test-Path $inst)) { exit 0 }
-        $targs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $inst, 'install', '-NonInteractive')
+        $reInner = "& `"$inst`" install -NonInteractive"
     }
     $pw = Get-Command pwsh -ErrorAction SilentlyContinue
     $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
 
     # Observability (#167): capture the otherwise-silent background reconcile so a
-    # failed auto-update is diagnosable. -RedirectStandard* truncates each file,
-    # so reconcile.log always holds the MOST RECENT reconcile's output.
+    # failed auto-update is diagnosable. The headless pwsh self-redirects ALL its
+    # streams (incl. Write-Host) to reconcile.log with `*>` -- see the launch
+    # below for why an outer redirect can't be used under conhost --headless.
     $reconcileLog = Join-Path $InstallDir 'reconcile.log'
-    $reconcileErr = Join-Path $InstallDir 'reconcile.err.log'
     $statusFile   = Join-Path $InstallDir 'reconcile-status.json'
-    $reconcileIn  = Join-Path $InstallDir 'reconcile.in'
 
     # --- Good boot-citizen guard: single-flight + stale-reap ---
     # This hook fires on EVERY new session. Without a guard, a slow or wedged
@@ -139,34 +138,38 @@ try {
 
     Write-Host "[$name] runtime $deployed -> $current; reconciling in background (log: $InstallDir\reconcile.log)..." -ForegroundColor DarkGray
 
-    # The background reconcile is HEADLESS: the installer must NEVER block on
-    # input. Three independent guards keep this hook non-blocking:
-    #   1. -NonInteractive switch (added to $targs above);
+    # The background reconcile is HEADLESS and non-blocking. Two guards keep the
+    # installer from ever waiting on input:
+    #   1. -NonInteractive switch (on the pwsh below, plus on install.ps1 above);
     #   2. a name-derived <NAME>_NONINTERACTIVE env var the installer honors
-    #      (covers an init.ps1-style installer with no matching switch);
-    #   3. stdin redirected from an EMPTY file below, so any stray Read-Host sees
-    #      immediate EOF (returns, never blocks) AND [Console]::IsInputRedirected
-    #      reports true so the installer's own interactive-desktop gate skips.
-    # (1)+(2) are the deterministic path; (3) is the belt-and-suspenders that
-    # makes "no interactive prompt can wedge us" true regardless of the installer.
+    #      (covers an init.ps1-style installer with no matching switch).
+    # (A prior stdin-EOF file guard is unnecessary under conhost --headless: the
+    # child has no interactive console, and 1+2 already suppress every prompt --
+    # the same proven shape agent-dispatch's bootstrap-check uses.)
     $niEnvVar = (($name -replace '[^A-Za-z0-9]+', '_').ToUpper()) + '_NONINTERACTIVE'
     [Environment]::SetEnvironmentVariable($niEnvVar, '1', 'Process')
-    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllText($reconcileIn, '', $utf8NoBom)  # empty EOF stdin
 
-    $proc = Start-Process -FilePath $exe -WindowStyle Hidden -PassThru `
-        -RedirectStandardInput $reconcileIn `
-        -RedirectStandardOutput $reconcileLog -RedirectStandardError $reconcileErr `
-        -ArgumentList $targs
+    # Launch the reconcile through conhost --headless so Windows Terminal / the
+    # DefTerm handoff cannot surface it as a visible window (-WindowStyle Hidden
+    # ALONE is ignored by DefTerm). conhost --headless gives the child its OWN
+    # headless console, so an outer Start-Process -RedirectStandard* would capture
+    # conhost's (empty) output, not the reconcile's -- the pwsh therefore
+    # self-redirects all streams to reconcile.log via `*>`. The command is
+    # base64-encoded to avoid arg-quoting under conhost; children (uv/python
+    # building the venv) inherit the headless console and stay hidden too.
+    $reCmd = "& { $reInner } *> `"$reconcileLog`""
+    $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($reCmd))
+    $proc = Start-Process -FilePath 'conhost.exe' -PassThru -WindowStyle Hidden `
+        -ArgumentList @('--headless', "`"$exe`"", '-NoProfile', '-ExecutionPolicy', 'Bypass', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc)
     $now = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     $launchedPid = if ($proc) { $proc.Id } else { 0 }
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     $status = [ordered]@{
         at           = $now
         from         = $deployed
         to           = $current
         launched_pid = $launchedPid
         log          = $reconcileLog
-        err_log      = $reconcileErr
     } | ConvertTo-Json -Compress
     [System.IO.File]::WriteAllText($statusFile, $status, $utf8NoBom)
 } catch { }
