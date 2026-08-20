@@ -1975,8 +1975,10 @@ def test_host_record_resume_flag_persists(tmp_path):
 
 @pytest.mark.asyncio
 async def test_graceful_cancel_for_redeploy(tmp_path):
-    """Cancels only in-flight (RUNNING) turns, spares the excluded caller,
-    flags host-backed mid-turn sessions for resume, and waits for settle."""
+    """Opt-in legacy path (cancel_turns_on_redeploy=True): cancels only in-flight
+    (RUNNING) turns, spares the excluded caller, flags host-backed mid-turn
+    sessions for resume, and waits for settle. (The DEFAULT is detach-only --
+    see test_redeploy_detach_not_cancel.py, dotfiles#1661.)"""
     from agent_bridge.db import Database
     from agent_bridge.models import SessionStatus
     from agent_bridge.session_host.host_index import HostRecord
@@ -1987,7 +1989,8 @@ async def test_graceful_cancel_for_redeploy(tmp_path):
     try:
         mgr = SessionManager(db,
                              session_host_state_dir=str(tmp_path / "hosts"),
-                             graceful_cancel_settle_seconds=5)
+                             graceful_cancel_settle_seconds=5,
+                             cancel_turns_on_redeploy=True)
         cancels: list[str] = []
 
         class _FakeClient:

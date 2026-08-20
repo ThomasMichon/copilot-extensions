@@ -631,6 +631,7 @@ class SessionManager:
         session_host_state_dir: str | None = None,
         session_host_stale_reap_seconds: float = 0.0,
         graceful_cancel_settle_seconds: float = 45.0,
+        cancel_turns_on_redeploy: bool = False,
         idle_reap_ttl_seconds: float = 0.0,
         live_stall_interrupt_after_s: float = 900.0,
         session_host_unexpected_reap_seconds: float = 60.0,
@@ -646,6 +647,13 @@ class SessionManager:
         # to host those far-side is the remaining gap, ThomasMichon/copilot-extensions#566.)
         self._session_host_stale_reap_seconds = session_host_stale_reap_seconds
         self._graceful_cancel_settle_seconds = graceful_cancel_settle_seconds
+        # Redeploy turn-cancel policy (dotfiles#1661). Default False = the
+        # invariant: a frontend redeploy/cutover/shutdown DETACHES in-flight
+        # turns (leaves them running on their Session Host for reattach) rather
+        # than cancelling them. Cancelling the remote task is an explicit host
+        # action only (interrupt_turn / explicit stop). True restores the legacy
+        # cancel-then-Resume behavior.
+        self._cancel_turns_on_redeploy = cancel_turns_on_redeploy
         # Idle-session reaper TTL (#1826): stop an idle, unwatched session past
         # this many seconds to free its Copilot child (resumable via replay).
         # 0 disables. Only acts in Session-Host mode.
@@ -869,6 +877,16 @@ class SessionManager:
         except asyncio.CancelledError:
             return
 
+    @property
+    def cancel_turns_on_redeploy(self) -> bool:
+        """Whether a frontend redeploy/cutover/shutdown cancels in-flight turns.
+
+        Default False = the dotfiles#1661 invariant (detach-only; the remote
+        turn keeps running on its Session Host for reattach). Read by the app
+        lifespan shutdown to pass ``cancel_turn`` to ``stop_session``.
+        """
+        return self._cancel_turns_on_redeploy
+
     def busy_sessions(self) -> list[str]:
         """Session IDs that must not be torn down: actively streaming a turn
         (RUNNING) or mid connect/resume (STARTING), hosting active background
@@ -904,35 +922,50 @@ class SessionManager:
         settle_timeout: float | None = None,
         exclude_session_id: str | None = None,
     ) -> dict[str, Any]:
-        """Assertively-but-nicely cancel in-flight turns ahead of a redeploy.
+        """Prepare in-flight turns for a frontend redeploy / cutover / shutdown.
 
-        The Session-Host model keeps the child *alive* across a frontend
-        restart; this decides what to do with an in-flight **turn**. Rather than
-        leave it streaming blind (slow, fragile) or hard-kill it, we:
+        **Default (detach-only, the dotfiles#1661 invariant).** A frontend
+        restart is a *transport* event, not an explicit host-agent cancel, so
+        this does **not** touch the remote agent's turn. The Session Host keeps
+        running the child and buffers its frames ("tmux for the agent"), so the
+        restarted frontend reattaches and the SAME in-flight turn continues with
+        no gap and no re-run. Cancelling the remote task is reserved for explicit
+        host actions (``interrupt_turn`` / an explicit stop).
 
-        1. inject an ACP ``session/cancel`` into every session with an in-flight
-           turn (status RUNNING) -- *except* an optional ``exclude_session_id``
-           (the session that triggered the redeploy, e.g. an agent updating its
-           own bridge -- cancelling it would abort the very command doing the
-           update);
-        2. flag each such host-backed session ``resume_on_reattach`` so the
-           restarted frontend sends it a single ``Resume`` once reattached;
-        3. wait up to ``settle_timeout`` seconds for the cancelled turns to
-           reach their own stop (capturing the final streamed messages), so the
-           subsequent stop is clean and fast.
+        **Legacy (opt-in, ``cancel_turns_on_redeploy=True``).** Restores the old
+        behavior: inject an ACP ``session/cancel`` into every RUNNING turn
+        (except ``exclude_session_id`` -- e.g. the agent updating its own
+        bridge), flag each host-backed session ``resume_on_reattach`` so the
+        restarted frontend sends a single "Resume", and wait up to the settle
+        budget for the cancelled turns to stop.
 
-        Returns a summary.
+        Returns a summary (``mode`` is ``"detach-only"`` or ``"cancel"``).
         """
         import asyncio as _asyncio
 
-        settle = (self._graceful_cancel_settle_seconds
-                  if settle_timeout is None else settle_timeout)
-        # Only in-flight turns (goal: "only in-flight turns"); background-busy
-        # sessions are left alone.
         targets = [
             sid for sid, s in self._sessions.items()
             if s.status == SessionStatus.RUNNING and sid != exclude_session_id
         ]
+
+        if not self._cancel_turns_on_redeploy:
+            # Detach-only (dotfiles#1661): leave every in-flight turn running on
+            # its Session Host; the successor frontend reattaches and continues
+            # it. No ACP cancel, no Resume nudge, no settle wait.
+            if targets:
+                log.info(
+                    "Redeploy detach-only: leaving %d in-flight turn(s) running "
+                    "on their Session Host(s) for reattach (no cancel): %s",
+                    len(targets), ", ".join(targets),
+                )
+            return {
+                "cancelled": [], "preserved": targets, "settled": True,
+                "mode": "detach-only", "enabled": True,
+            }
+
+        # --- opt-in legacy: assertively cancel in-flight turns ---------------
+        settle = (self._graceful_cancel_settle_seconds
+                  if settle_timeout is None else settle_timeout)
         cancelled: list[str] = []
         for sid in targets:
             session = self._sessions.get(sid)
@@ -964,7 +997,10 @@ class SessionManager:
                 "Graceful-cancel: %d turn(s) did not settle within %.0fs "
                 "(proceeding anyway): %s", len(still), settle, ", ".join(still),
             )
-        return {"cancelled": cancelled, "settled": not still, "enabled": True}
+        return {
+            "cancelled": cancelled, "preserved": [], "settled": not still,
+            "mode": "cancel", "enabled": True,
+        }
 
     async def drain(
         self,
@@ -1003,15 +1039,31 @@ class SessionManager:
         await self.graceful_cancel_for_redeploy(
             exclude_session_id=exclude_session_id,
         )
+        # Detach-only redeploy (dotfiles#1661): a session backed by a live
+        # Session Host is PRESERVED across the restart (its turn keeps running on
+        # the host and the successor reattaches), so the drain must not block
+        # waiting for it to "settle" -- it never will, and it doesn't need to.
+        # Only genuinely non-preservable busy work (process-owned command/ssh
+        # turns, background sub-agents) is waited on. When cancelling is opt-in,
+        # nothing is preserved and every busy session is waited on as before.
+        preserved: set[str] = (
+            {r.session_id for r in self._live_host_records()}
+            if not self._cancel_turns_on_redeploy else set()
+        )
         deadline = time.monotonic() + max(0.0, timeout)
-        busy = [s for s in self.busy_sessions() if s != exclude_session_id]
+        busy = [s for s in self.busy_sessions()
+                if s != exclude_session_id and s not in preserved]
         log.info(
-            "Drain started: %d session(s) busy, timeout=%.0fs%s",
-            len(busy), timeout, " (force)" if force else "",
+            "Drain started: %d session(s) busy%s, timeout=%.0fs%s",
+            len(busy),
+            f" ({len(preserved)} host-backed preserved for reattach)"
+            if preserved else "",
+            timeout, " (force)" if force else "",
         )
         while busy and time.monotonic() < deadline:
             await _asyncio.sleep(poll)
-            busy = [s for s in self.busy_sessions() if s != exclude_session_id]
+            busy = [s for s in self.busy_sessions()
+                    if s != exclude_session_id and s not in preserved]
 
         drained = not busy
         if drained:
@@ -3517,7 +3569,9 @@ class SessionManager:
         for session in list(self._sessions.values()):
             await self._notify_host_reapable(session)
 
-    async def _quiesce_session(self, session: Session) -> None:
+    async def _quiesce_session(
+        self, session: Session, *, cancel_turn: bool = True
+    ) -> None:
         """Best-effort teardown of a session's in-flight prompt + ACP client.
 
         Must be resilient to a *mid-turn* session: cancelling an in-flight
@@ -3525,6 +3579,13 @@ class SessionManager:
         stop/end. (A raising shutdown here surfaced as HTTP 500 when ending a
         mid-turn session -- see the credential-hang showcase report.) Errors
         are logged and swallowed so teardown always completes.
+
+        ``cancel_turn`` (default True): send an ACP ``session/cancel`` to the
+        remote agent's in-flight turn. A redeploy/shutdown passes ``False``
+        (dotfiles#1661): the frontend detaches (host + child + turn survive for
+        reattach) WITHOUT telling the remote agent to cancel -- only the local
+        prompt task + ACP client are torn down. Explicit stop/end keep the
+        default so an operator stop still cancels.
         """
         # Signal a GRACEFUL detach to the session host BEFORE tearing down the
         # transport, carrying the child's current reapable state, so an idle
@@ -3534,7 +3595,7 @@ class SessionManager:
         await self._detach_host(session)
         task = session._prompt_task
         if task and not task.done():
-            if session.client:
+            if session.client and cancel_turn:
                 with contextlib.suppress(Exception):
                     await session.client.cancel_prompt()
             task.cancel()
@@ -3635,7 +3696,8 @@ class SessionManager:
         )
 
     async def stop_session(
-        self, session_id: str, *, force: bool = False, reap_host: bool = False
+        self, session_id: str, *, force: bool = False, reap_host: bool = False,
+        cancel_turn: bool = True,
     ) -> None:
         """Stop a session -- shut down ACP client, preserve state for resume.
 
@@ -3654,6 +3716,12 @@ class SessionManager:
         resumable via ``load_session`` replay (a *fresh* child) -- allowed
         because the reaper only ever stops an IDLE session, never mid-turn
         (goal 1).
+
+        ``cancel_turn`` (default True): tell the remote agent to cancel its
+        in-flight turn (ACP ``session/cancel``). A redeploy/shutdown passes
+        ``False`` (dotfiles#1661) so the frontend detaches without cancelling --
+        the host + child + turn survive for reattach. An explicit operator stop
+        keeps the default (a stop IS an explicit host cancel).
         """
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
@@ -3663,7 +3731,7 @@ class SessionManager:
         if not force and session.has_active_background_tasks:
             raise SessionBusyError(session_id, session.active_background_tasks)
 
-        await self._quiesce_session(session)
+        await self._quiesce_session(session, cancel_turn=cancel_turn)
 
         # Idle-reaper only: free the Session Host child (a plain stop detaches
         # to keep it reattachable). Safe here because the session is idle.
@@ -4107,6 +4175,7 @@ def session_manager_from_config(db: Database, cfg: ServiceConfig) -> SessionMana
         retention=cfg.retention,
         session_host_stale_reap_seconds=cfg.session_host_stale_reap_seconds,
         graceful_cancel_settle_seconds=cfg.graceful_cancel_settle_seconds,
+        cancel_turns_on_redeploy=cfg.cancel_turns_on_redeploy,
         idle_reap_ttl_seconds=cfg.idle_reap_ttl_seconds,
         live_stall_interrupt_after_s=cfg.live_stall_interrupt_after_s,
         session_host_unexpected_reap_seconds=cfg.session_host_unexpected_reap_seconds,
