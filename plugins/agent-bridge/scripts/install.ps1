@@ -314,21 +314,37 @@ function Get-BootstrapPython {
 }
 
 function Get-PayloadHash {
-    <# Cheap payload fingerprint for the completion marker (#935): sha256 of
-       pyproject.toml + the vendored-lib version set. Detects a dev-checkout that
-       changed the payload WITHOUT bumping the version (marketplace: version ==
-       content, so this is belt-and-suspenders). Never throws -> '' on error. #>
+    <# Content fingerprint of the RUNTIME PAYLOAD (#935/#776/ce#811). sha256 over
+       the sorted list of "<relpath>:<per-file sha256>" for pyproject.toml plus
+       every file under src/ and libs/ (excluding caches/build artifacts). Unlike
+       the old pyproject-only fingerprint, a src/-only edit WITHOUT a version bump
+       changes this value, so the completion marker + the live-slot content guards
+       detect real content drift, not just a pyproject/version change. The value
+       is re-baselined by the accompanying version bump (a fresh install records
+       the new-algorithm hash), so the algorithm change is self-healing. Never
+       throws -> '' on error. #>
     try {
-        $parts = @()
-        $pp = Join-Path $PluginDir 'pyproject.toml'
-        if (Test-Path $pp) { $parts += (Get-Content $pp -Raw) }
-        $libs = Join-Path $PluginDir 'libs'
-        if (Test-Path $libs) {
-            Get-ChildItem $libs -Recurse -Filter 'pyproject.toml' -ErrorAction SilentlyContinue |
-                Sort-Object FullName | ForEach-Object { $parts += (Get-Content $_.FullName -Raw) }
-        }
-        $joined = [string]::Join("`n", $parts)
         $sha = [System.Security.Cryptography.SHA256]::Create()
+        $base = (Resolve-Path $PluginDir).Path
+        $files = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
+        $pp = Join-Path $base 'pyproject.toml'
+        if (Test-Path $pp) { $files.Add((Get-Item $pp)) }
+        foreach ($sub in @('src', 'libs')) {
+            $d = Join-Path $base $sub
+            if (Test-Path $d) {
+                Get-ChildItem -Path $d -Recurse -File -Force -ErrorAction SilentlyContinue |
+                    Where-Object {
+                        $_.FullName -notmatch '[\\/](__pycache__|\.venv|venv|\.pytest_cache|\.mypy_cache|build|dist|[^\\/]+\.egg-info)[\\/]' -and
+                        $_.Extension -ne '.pyc'
+                    } | ForEach-Object { $files.Add($_) }
+            }
+        }
+        $entries = foreach ($f in $files) {
+            $rel = ($f.FullName.Substring($base.Length).TrimStart('\', '/')) -replace '\\', '/'
+            $fh = [BitConverter]::ToString($sha.ComputeHash([System.IO.File]::ReadAllBytes($f.FullName))).Replace('-', '').ToLower()
+            "${rel}:${fh}"
+        }
+        $joined = [string]::Join("`n", ($entries | Sort-Object))
         $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($joined))
         return (-join ($bytes | ForEach-Object { $_.ToString('x2') }))
     } catch { return '' }
@@ -410,6 +426,34 @@ function Test-SlotContentCurrent {
         if ($ph) { $icArgs += @('--expect-hash', $ph) }
         & $py @icArgs 2>$null | Out-Null
         return ($LASTEXITCODE -eq 0)
+    } catch { return $false }
+}
+
+function Test-SlotIsLiveDifferentContent {
+    <# True iff the target version IS the active slot, that slot is a COMPLETE
+       build whose recorded content hash DIFFERS from the payload we would
+       install, AND a daemon is currently running. In that state an Invoke-Install
+       (which does NOT stop the daemon first) would rebuild the live slot in place
+       and stomp the running runtime's python.exe/site-packages (ce#776/#777,
+       WinError 2, dotfiles#1612). A version slot is immutable: new content must
+       go under a NEW version (bump), or via `update` (which stops before it
+       rebuilds). Fail-safe: any error returns $false (never blocks an install). #>
+    if (-not $VersionedRuntime) { return $false }
+    try {
+        $vr = Join-Path $ScriptDir 'versioned_runtime.py'
+        $py = if (Test-Path $LinkPython) { $LinkPython }
+              elseif (Test-Path $VenvPython) { $VenvPython }
+              else { Get-BootstrapPython }
+        if (-not $py -or -not (Test-Path $vr)) { return $false }
+        $cur = (& $py $vr --root $InstallDir --link-name 'venv' current 2>$null | Out-String).Trim()
+        if (-not $cur -or $cur -ne $SrcVersion) { return $false }        # not the active slot -> normal path
+        & $py $vr --root $InstallDir --link-name 'venv' is-complete $SrcVersion 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) { return $false }                       # not complete -> toss+rebuild is safe
+        $ph = Get-PayloadHash
+        if (-not $ph) { return $false }                                  # no hash -> don't block
+        & $py $vr --root $InstallDir --link-name 'venv' is-complete $SrcVersion --expect-hash $ph 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) { return $false }                       # content MATCHES -> Test-SlotContentCurrent no-ops
+        return ($null -ne (Get-RunningProcess))                          # differs + live daemon -> would stomp
     } catch { return $false }
 }
 
@@ -986,6 +1030,7 @@ function Write-DeployManifestFor {
             commit  = $commit
             branch  = $branch
             dirty   = $dirty
+            content_hash = (Get-PayloadHash)
         }
         venv           = ($VenvPath -replace '\\', '/')
         runtime        = 'python'
@@ -1421,6 +1466,19 @@ function Invoke-Install {
     if (Test-SlotContentCurrent) {
         Write-Ok "agent-bridge $SrcVersion already installed and healthy after lock wait -- no-op."
         Write-DeployManifest
+        Exit-InstallLock
+        return
+    }
+
+    # Never rebuild a LIVE slot in place with DIFFERENT content (ce#776/#777).
+    # Invoke-Install does not stop the daemon before New-SignedVenv, so rebuilding
+    # the active slot while a daemon runs from it overwrites its python.exe in
+    # place (WinError 2, dotfiles#1612). Slots are immutable: deploy new content
+    # under a NEW version (bump), or via `update` (which stops before rebuilding).
+    # Only fires for that exact stomp shape; normal drift ($SrcVersion != current)
+    # is unaffected.
+    if (Test-SlotIsLiveDifferentContent) {
+        Write-Warn "agent-bridge $SrcVersion is the ACTIVE slot but the payload content differs and a daemon is running from it -- refusing an in-place rebuild that would stomp the live runtime (dotfiles#1612). Bump the version to deploy new content, or run 'update' / stop the service first. No-op."
         Exit-InstallLock
         return
     }
