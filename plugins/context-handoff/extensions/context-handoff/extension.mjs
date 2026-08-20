@@ -372,6 +372,17 @@ function runHandoffCutover(cwd, seed, sessionId) {
   }
 }
 
+// Best-effort, user-visible progress line to the (successor) Copilot session.
+// The handoff must never block or fail on logging, so swallow everything.
+function logProgress(msg, opts = { level: "info" }) {
+  try {
+    const p = session?.log?.(msg, opts);
+    if (p && typeof p.catch === "function") p.catch(() => {});
+  } catch {
+    /* logging is best-effort */
+  }
+}
+
 // Retire a specific pane after successor-side consume. Best-effort.
 function retireCutoverPane(cwd, pane, metadata = {}) {
   try {
@@ -385,7 +396,7 @@ function retireCutoverPane(cwd, pane, metadata = {}) {
     if (metadata.sessionId) argv.push("--session-id", metadata.sessionId);
     const out = runCli("agent-worktrees", argv, {
       cwd,
-      timeout: 20000,
+      timeout: 30000,
     });
     return JSON.parse(out);
   } catch {
@@ -511,8 +522,42 @@ function retireAfterConsume(cwd, metadata, sid) {
     result.concluded = concludeOldSessionHandedOff(cwd, sid);
   }
   if (metadata?.oldPane) {
+    const oldSid = metadata.sessionId || sid || null;
+    // Emit what we're waiting on BEFORE the (blocking) retire so the successor's
+    // Copilot shows the pause and its reason -- the retire below blocks until
+    // the OLD Copilot process actually exits (or a bounded timeout).
+    logProgress(
+      "[Context Handoff] Retiring the previous session" +
+        (oldSid ? ` ${oldSid}` : "") +
+        ` (pane ${metadata.oldPane}); waiting for its Copilot process to exit ` +
+        "before continuing…",
+    );
     result.retireResult = retireCutoverPane(cwd, metadata.oldPane, metadata);
-    result.retired = Boolean(result.retireResult?.gone);
+    const rr = result.retireResult || {};
+    const cop = rr.copilot || {};
+    // Success requires BOTH the pane retired AND the old Copilot gone (the host
+    // verb folds that into ``ok``); fall back to the pane ``gone`` flag when the
+    // process check was not run (no session id).
+    result.retired = Boolean(rr.ok ?? rr.gone);
+    if (result.retired) {
+      const reaped =
+        cop.reaped > 0
+          ? ` (reaped pid${(cop.pids || []).length > 1 ? "s" : ""} ` +
+            `${(cop.pids || []).join(", ")})`
+          : "";
+      logProgress(
+        `[Context Handoff] Previous session terminated${reaped}. Continuing.`,
+      );
+    } else {
+      logProgress(
+        "[Context Handoff] WARNING: the previous session did not confirm " +
+          `termination (pane ${metadata.oldPane}` +
+          (oldSid ? `, session ${oldSid}` : "") +
+          "); it may reappear as a parallel session. Force it with: " +
+          `agent-worktrees reclaim --session-id ${oldSid || "<id>"}`,
+        { level: "warning" },
+      );
+    }
   }
   return result;
 }
@@ -585,7 +630,12 @@ function formatConsumeResult(result, { deferComplete = false } = {}) {
     result.id ? `**Handoff:** ${result.id}` : null,
     retireResult
       ? `**Predecessor retire:** ${retireResult.method || "unknown"} ` +
-        `(gone: ${Boolean(retireResult.gone)})`
+        `(pane gone: ${Boolean(retireResult.gone)}` +
+        (retireResult.copilot
+          ? `; old Copilot: reaped ${retireResult.copilot.reaped || 0}, ` +
+            `survivors ${retireResult.copilot.survivors || 0}`
+          : "") +
+        ")"
       : "**Predecessor retire:** no recorded predecessor pane",
     retire.concluded
       ? "**Predecessor session:** marked handed off"
