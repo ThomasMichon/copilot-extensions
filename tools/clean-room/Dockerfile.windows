@@ -1,0 +1,17 @@
+# Windows clean-room image -- the WINDOWS arm's "fresh machine".
+#
+# Server Core-based python image: it carries python3 AND the built-in Windows
+# PowerShell 5.1, which is all a partner's *_ps1 stdlib-unittest setup suite needs
+# (the lone pwsh-7 test auto-skips). Hyper-V isolation (`--isolation=hyperv`) lets
+# this ltsc2022 base run on a newer Windows host (e.g. an ltsc2025 dev box).
+#
+# Counterpart to Dockerfile / Dockerfile.pristine (the Linux arms). Built + run by
+# `run.ps1 -Os windows`.
+FROM python:3.12-windowsservercore-ltsc2022
+
+LABEL org.opencontainers.image.title="copilot-cleanroom-windows"
+LABEL org.opencontainers.image.description="copilot-extensions clean-room fresh-box image (Windows arm): python + Windows PowerShell 5.1 for partner *_ps1 setup-flow validation."
+
+# Scenario + lib + partner tree + results are bind-mounted at run time; the
+# scenario is driven with `powershell -File C:\scenario\scenario.ps1`.
+WORKDIR C:\\cr
