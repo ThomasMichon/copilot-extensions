@@ -4229,38 +4229,60 @@ class PickerScreen(Widget):
         if not rec:
             return
         # #4057: the fleet populate derives liveness cheaply/in bulk (and can lag,
-        # or miss a **bare** un-muxed Copilot the mux view can't see). Opening the
-        # Actions menu is one of the two moments we truly need the truth for THIS
-        # worktree, so authoritatively re-verify its mux + bound-Copilot liveness
-        # here and overlay the fresh signals before computing the verb set. This
-        # keeps Open-vs-Resume, Stop, and Reclaim honest at the point of action.
-        # Gated on real_ops + an on-disk tracking record, so a mock/fixture source
-        # (no record) keeps its hand-set liveness untouched.
-        raw = rec.get("raw") or {}
-        _wt_id = raw.get("id")
+        # or miss a bare un-muxed Copilot the mux view can't see). Opening the
+        # Actions menu is one of the two moments we need the TRUTH for THIS
+        # worktree's mux + bound-Copilot liveness -- but that re-verify touches the
+        # mux + session locks (cross-process), so per the always-async invariant it
+        # MUST run OFF the render flow: probe in the background, overlay the fresh
+        # signals, and THEN open the menu (never freeze the UI while it probes).
+        # A cheap record-existence stat decides whether we'll run the expensive
+        # verify at all; no record (a mock/fixture source, or an untracked row)
+        # keeps its hand-set liveness and opens the menu synchronously (unchanged).
+        _wt_id = (rec.get("raw") or {}).get("id")
+        _need_verify = False
         if self.real_ops and _wt_id:
             try:
-                import types as _types
-
                 from .. import config as _config
-                from .. import sessions as _sessions
-                from .. import tracking as _tracking
-                if (_config.tracking_dir() / f"{_wt_id}.yaml").exists():
-                    _verdict = _sessions.verify_worktree_active(
-                        _types.SimpleNamespace(worktree_id=_wt_id))
-                    rec["mux_live"] = _verdict.mux_live
-                    rec["attached"] = _verdict.mux_clients > 0
-                    rec["session_lock_live"] = bool(_verdict.live_session_ids)
-                    rec["session_bare_orphan"] = _verdict.bare
-                    # #4057: warm the ground-layer cache from this authoritative
-                    # read so the next populate can prefer the hint. refresh=True
-                    # renews the freshness stamp even when the liveness is
-                    # unchanged (throttled), so a steadily-live worktree the
-                    # operator keeps opening doesn't age past the hint TTL.
-                    _tracking.stamp_mux_live(
-                        _wt_id, _verdict.mux_live, refresh=True)
+                _need_verify = (_config.tracking_dir() / f"{_wt_id}.yaml").exists()
             except Exception:
-                pass  # best-effort: fall back to the populate-derived signals
+                _need_verify = False
+        if not _need_verify:
+            self._push_wt_submenu(rec)
+            return
+
+        def _verify():
+            import types as _types
+
+            from .. import sessions as _sessions
+            from .. import tracking as _tracking
+            verdict = _sessions.verify_worktree_active(
+                _types.SimpleNamespace(worktree_id=_wt_id))
+            try:
+                # #4057: warm the ground-layer cache from this authoritative read
+                # so the next populate can prefer the hint. refresh=True renews the
+                # freshness stamp even when liveness is unchanged (throttled), so a
+                # steadily-live worktree the operator keeps opening doesn't age past
+                # the hint TTL.
+                _tracking.stamp_mux_live(_wt_id, verdict.mux_live, refresh=True)
+            except Exception:
+                pass
+            return verdict
+
+        def _done(verdict):
+            if verdict is not None:
+                rec["mux_live"] = verdict.mux_live
+                rec["attached"] = verdict.mux_clients > 0
+                rec["session_lock_live"] = bool(verdict.live_session_ids)
+                rec["session_bare_orphan"] = verdict.bare
+            self._push_wt_submenu(rec)
+
+        self._run_bg("Actions", _verify, _done)
+
+    def _push_wt_submenu(self, rec):
+        """Build the worktree Actions verb set from the (already liveness-refreshed)
+        record and open the native ``SubMenuScreen``. Pure -- engine state only, no
+        IO -- so it is safe on the UI thread (called directly for a mock source, or
+        from ``_open_submenu``'s async-verify done-callback via ``call_from_thread``)."""
         # Primary verb + Stop/Reclaim gating is the pure, record-driven
         # ``_session_action_verbs`` (unit-tested #4058); the bridge/system nav +
         # cross-plugin verbs below need engine state, so they are appended here.

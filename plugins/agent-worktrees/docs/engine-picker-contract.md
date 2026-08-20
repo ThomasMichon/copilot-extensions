@@ -38,6 +38,12 @@ version and be coordinated with the Manager.
   engine rejects it).
 - **Additive-only evolution.** New fields may appear; existing fields keep their
   name and type within a contract version.
+- **Invoked off the render flow.** Because every read and action is a subprocess,
+  the Picker calls these verbs from **background workers**, never on its Textual
+  event-loop thread — reads via the `LiveLoader` threads, actions via
+  `PickerScreen._run_bg`. A slow or hung verb must degrade a single row/action, not
+  freeze the UI (see the render-flow invariant in
+  [architecture.md](architecture.md#the-picker-render-flow----never-block-on-cross-processio-invariant)).
 
 ## Pinned read verbs (the Picker's data plane)
 
