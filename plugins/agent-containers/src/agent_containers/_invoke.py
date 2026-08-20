@@ -62,9 +62,17 @@ def _venv_python() -> str:
     if sys.executable:
         return sys.executable
 
-    # 3. Last resort: the legacy single-venv layout (may be stale).
+    # 3. Last resort: the legacy single-venv layout (may be stale). Only return
+    #    it if it actually exists; otherwise fail fast with a clear error rather
+    #    than handing back a bogus path that spawns with a confusing failure.
     legacy = _LEGACY_VENV_DIR / scripts / exe
-    return str(legacy)
+    if legacy.exists():
+        return str(legacy)
+    raise RuntimeError(
+        "Cannot resolve an agent_containers interpreter: no active versioned "
+        "runtime (~/.agent-containers/current-version -> versions/<ver>), an "
+        "empty sys.executable, and no legacy ~/.agent-containers/.venv."
+    )
 
 
 def module_argv() -> list[str]:

@@ -61,3 +61,27 @@ def test_ignores_current_version_pointing_at_missing_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(_invoke, "_ROOT", tmp_path)
     monkeypatch.setattr(_invoke, "_LEGACY_VENV_DIR", tmp_path / ".venv")
     assert _invoke._venv_python() == sys.executable
+
+
+def test_raises_when_nothing_resolvable(tmp_path, monkeypatch):
+    # No versioned runtime, empty sys.executable, no legacy venv -> fail fast.
+    monkeypatch.setattr(_invoke, "_ROOT", tmp_path)
+    monkeypatch.setattr(_invoke, "_LEGACY_VENV_DIR", tmp_path / ".venv")
+    monkeypatch.setattr(sys, "executable", "")
+    import pytest
+
+    with pytest.raises(RuntimeError):
+        _invoke._venv_python()
+
+
+def test_last_resort_legacy_venv_when_no_executable(tmp_path, monkeypatch):
+    win = sys.platform == "win32"
+    scripts = "Scripts" if win else "bin"
+    exe = "python.exe" if win else "python"
+    legacy = tmp_path / ".venv" / scripts
+    legacy.mkdir(parents=True)
+    (legacy / exe).write_text("", encoding="utf-8")
+    monkeypatch.setattr(_invoke, "_ROOT", tmp_path)  # no versioned runtime
+    monkeypatch.setattr(_invoke, "_LEGACY_VENV_DIR", tmp_path / ".venv")
+    monkeypatch.setattr(sys, "executable", "")
+    assert _invoke._venv_python() == str(legacy / exe)
