@@ -22,7 +22,8 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
-import sys
+
+from agent_procutil import no_window_flags
 
 log = logging.getLogger("agent-bridge")
 
@@ -30,10 +31,8 @@ _CODESPACE_PREFIX = "codespace:"
 
 # Suppress a flashing console window when spawning the transport subprocess on a
 # Windows host (parity with the retired session_manager shell-out, which set this
-# on its ``agent-codespaces`` call). ``CREATE_NO_WINDOW`` exists only on win32.
-_CREATE_NO_WINDOW = (
-    subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0  # type: ignore[attr-defined]
-)
+# on its ``agent-codespaces`` call).
+_CREATE_NO_WINDOW = no_window_flags()
 
 
 class TargetExecError(RuntimeError):

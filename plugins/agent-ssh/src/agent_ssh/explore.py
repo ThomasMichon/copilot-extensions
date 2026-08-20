@@ -33,6 +33,8 @@ import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
 
+from agent_procutil import no_window_flags
+
 for _s in (sys.stdout, sys.stderr):
     try:
         _s.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
@@ -152,7 +154,7 @@ def _ssh_probe(target: str, timeout: int) -> _ProbeProc:
     ``\\r`` breaks a POSIX ``sh``/``dash`` on the far side (``for ...; do\\r`` ->
     "word unexpected (expecting do)").
     """
-    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    creationflags = no_window_flags()
     proc = subprocess.run(
         [
             "ssh",

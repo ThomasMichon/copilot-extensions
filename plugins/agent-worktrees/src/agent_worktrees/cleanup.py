@@ -30,8 +30,9 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
-import sys
 from dataclasses import dataclass
+
+from agent_procutil import no_window_flags
 
 from . import config as cfg
 from . import sweep as sweep_mod
@@ -63,9 +64,7 @@ class ReclaimResult:
 
 
 def _creationflags() -> int:
-    if sys.platform == "win32":
-        return subprocess.CREATE_NO_WINDOW
-    return 0
+    return no_window_flags()
 
 
 def _run_codespaces(args: list[str], *, timeout: float = 300.0):

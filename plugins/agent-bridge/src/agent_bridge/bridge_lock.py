@@ -21,6 +21,8 @@ import logging
 import os
 import subprocess
 
+from agent_procutil import no_window_flags
+
 from .agent_registry import _agent_worktrees_bin
 
 log = logging.getLogger(__name__)
@@ -41,7 +43,7 @@ def _child_env() -> dict[str, str]:
 
 
 def _creationflags() -> int:
-    return subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0  # type: ignore[attr-defined]
+    return no_window_flags()
 
 
 async def write(session_id: str, worktree_id: str | None, child_pid: int | None) -> None:

@@ -23,6 +23,8 @@ import subprocess
 import threading
 from collections.abc import Mapping, Sequence
 
+from agent_procutil import no_window_flags
+
 from .pivots import RegisteredPivot, format_template, parse_list_payload
 
 #: Hard cap on how long a pivot's ``list``/action command may run.
@@ -33,7 +35,7 @@ ACTION_TIMEOUT = 30.0
 #: are kept. A ``subscribe`` (held/live) stream has no overall deadline.
 STREAM_TIMEOUT = 30.0
 
-_CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+_CREATE_NO_WINDOW = no_window_flags()
 
 
 def _kill_proc_tree(proc: subprocess.Popen) -> None:

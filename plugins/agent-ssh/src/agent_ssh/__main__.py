@@ -16,6 +16,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from agent_procutil import no_window_flags
+
 from . import __version__, ssh_profile
 from . import explore as explore_mod
 from . import mesh as mesh_mod
@@ -43,9 +45,7 @@ def _cmd_emit_profile(args: argparse.Namespace) -> int:
 
 
 def _creation_flags() -> int:
-    if sys.platform == "win32":
-        return subprocess.CREATE_NO_WINDOW
-    return 0
+    return no_window_flags()
 
 
 def _cmd_verify(args: argparse.Namespace) -> int:

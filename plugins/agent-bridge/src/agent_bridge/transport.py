@@ -16,12 +16,12 @@ import os
 import shlex
 import shutil
 import signal
-import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from agent_procutil import no_window_flags
 from ssh_manager import SSHProfileSource, get_default_manager
 
 from .connect import ConnectError, ConnectStage, ConnectTracker
@@ -67,9 +67,7 @@ def _creation_flags() -> int:
     (STATUS_DLL_INIT_FAILED / 0xC0000142) when spawning console subsystem
     executables from a headless background service like agent-bridge.
     """
-    if sys.platform == "win32":
-        return subprocess.CREATE_NO_WINDOW
-    return 0
+    return no_window_flags()
 
 
 @dataclass

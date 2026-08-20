@@ -23,6 +23,8 @@ import os
 import subprocess
 from dataclasses import dataclass
 
+from agent_procutil import no_window_flags
+
 from .agent_registry import _agent_worktrees_bin
 
 log = logging.getLogger("agent_bridge.worktree_head")
@@ -71,9 +73,7 @@ def resolve_head(worktree_id: str) -> HeadInfo:
         log.debug("agent-worktrees binstub not found -- head guard fails open")
         return _UNKNOWN
 
-    creationflags = (
-        subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0  # type: ignore[attr-defined]
-    )
+    creationflags = no_window_flags()
     # Run the binstub in its own interpreter context: scrub our venv markers so
     # a uv-managed child Python does not trip an `_sre` module mismatch (the same
     # guard agent_registry.load_local_repos uses).

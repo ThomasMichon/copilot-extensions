@@ -24,6 +24,8 @@ import os
 import subprocess
 import threading
 
+from agent_procutil import no_window_flags
+
 # Per-item lifecycle states (mirror the progress sub-dialog glyphs).
 PENDING, RUNNING, DONE, FAILED = "pending", "running", "done", "failed"
 
@@ -39,7 +41,7 @@ def _ssh_json(argv, timeout=120):
     )
     # On Windows, also keep the child off our console so a failing ssh can't
     # clear the console's VT-input mode and break arrow keys (see data_ssh).
-    _cnw = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    _cnw = no_window_flags()
     if os.name == "nt" and _cnw:
         kwargs["creationflags"] = _cnw
     proc = subprocess.run(argv, **kwargs)

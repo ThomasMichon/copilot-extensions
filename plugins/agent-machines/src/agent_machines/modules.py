@@ -33,6 +33,8 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Any
 
+from agent_procutil import no_window_kwargs
+
 from .manifest import RequirementPackage
 
 #: Per-platform block fallbacks: a wsl module may reuse the linux block.
@@ -123,6 +125,7 @@ def run_module(
         proc = subprocess.run(  # noqa: S603 - argv list, repo-declared trusted module
             command, cwd=str(repo_root), capture_output=True,
             encoding="utf-8", errors="replace", timeout=timeout,
+            **no_window_kwargs(),
         )
     except FileNotFoundError as exc:
         return ModuleResult(name, pkg.source_repo, ran=False, dry_run=dry_run, command=command,

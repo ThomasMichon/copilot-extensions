@@ -23,7 +23,8 @@ import logging
 import re
 import shutil
 import subprocess
-import sys
+
+from agent_procutil import no_window_flags
 
 from . import claimant as _claimant
 from . import config as cfg
@@ -281,8 +282,7 @@ def _github_pr_merged(ref: str) -> bool | None:
         proc = subprocess.run(
             [gh, "pr", "view", *args, "--json", "state"],
             capture_output=True, text=True, timeout=30,
-            creationflags=(subprocess.CREATE_NO_WINDOW if sys.platform == "win32"
-                           else 0),
+            creationflags=no_window_flags(),
         )
     except Exception as exc:
         log.debug("gh pr view for %s degraded: %s", ref, exc)
@@ -344,8 +344,7 @@ def _ado_pr_merged(ref: str) -> bool | None:
             [az, "repos", "pr", "show", *args, "--query", "status", "-o", "tsv"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=45,
-            creationflags=(subprocess.CREATE_NO_WINDOW if sys.platform == "win32"
-                           else 0),
+            creationflags=no_window_flags(),
         )
     except Exception as exc:
         log.debug("az repos pr show for %s degraded: %s", ref, exc)

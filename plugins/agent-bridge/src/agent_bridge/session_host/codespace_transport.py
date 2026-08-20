@@ -21,8 +21,8 @@ import asyncio
 import logging
 import posixpath
 import shlex
-import subprocess
-import sys
+
+from agent_procutil import no_window_flags
 
 from ssh_manager import CodespaceConfigSource, ConnectionManager
 
@@ -30,9 +30,7 @@ log = logging.getLogger("agent-bridge.session-host.codespace")
 
 
 def _creation_flags() -> int:
-    if sys.platform == "win32":
-        return subprocess.CREATE_NO_WINDOW
-    return 0
+    return no_window_flags()
 
 
 class CodeSpaceTransport:

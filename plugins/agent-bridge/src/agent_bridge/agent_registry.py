@@ -34,6 +34,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from agent_procutil import no_window_flags
+
 from .provider_sources import discover_provider_manifests
 from .topology import MachineConfig, SshEnvironment
 from .transport import PluginRef, SpawnTarget
@@ -354,9 +356,7 @@ class CliNamespaceResolver(NamespaceResolver):
             cmd = [exe, *argv]
 
         def _call() -> subprocess.CompletedProcess[str]:
-            creationflags = (
-                subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-            )
+            creationflags = no_window_flags()
             return subprocess.run(
                 cmd, capture_output=True, text=True, timeout=timeout,
                 creationflags=creationflags,
@@ -672,7 +672,6 @@ def load_elevated_projects() -> set[str]:
 
 def _detect_platform() -> str:
     """Detect the local platform: 'windows', 'wsl', or 'linux'."""
-    import sys
     if sys.platform == "win32":
         return "windows"
     try:
@@ -921,9 +920,7 @@ def load_local_repos() -> list[dict]:
     if not exe:
         log.debug("agent-worktrees binstub not found -- no local repo registry")
         return []
-    creationflags = (
-        subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0  # type: ignore[attr-defined]
-    )
+    creationflags = no_window_flags()
     child_env = {
         k: v
         for k, v in os.environ.items()
@@ -1522,7 +1519,7 @@ def _relay_profile_via_cli(binstub: str) -> dict | None:
     exe = shutil.which(binstub)
     if not exe:
         return None
-    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    creationflags = no_window_flags()
     try:
         r = subprocess.run(
             [exe, "relay-profile"], capture_output=True, text=True, timeout=20,

@@ -36,6 +36,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agent_procutil import no_window_flags
+
 from .. import winjob
 from . import protocol as proto
 from .host import SessionHost
@@ -58,7 +60,7 @@ def host_spawn_kwargs() -> dict[str, Any]:
     """
     if sys.platform == "win32":
         # CREATE_NO_WINDOW keeps it headless; breakaway escapes the front's job.
-        return {"creationflags": 0x08000000 | winjob.CREATE_BREAKAWAY_FROM_JOB}
+        return {"creationflags": no_window_flags() | winjob.CREATE_BREAKAWAY_FROM_JOB}
     return {"start_new_session": True}
 
 

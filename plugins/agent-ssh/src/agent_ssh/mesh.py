@@ -25,6 +25,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from agent_procutil import no_window_flags
+
 for _s in (sys.stdout, sys.stderr):
     try:
         _s.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
@@ -82,7 +84,7 @@ def find_machines_file(start: Path | None = None) -> Path | None:
             capture_output=True,
             text=True,
             check=False,
-            creationflags=(subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0),
+            creationflags=no_window_flags(),
         )
         if top.returncode == 0:
             root = Path(top.stdout.strip())

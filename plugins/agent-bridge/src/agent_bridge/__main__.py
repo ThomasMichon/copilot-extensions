@@ -19,6 +19,8 @@ import urllib.error
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from agent_procutil import detached_kwargs
+
 from . import __version__
 
 if TYPE_CHECKING:
@@ -913,12 +915,7 @@ def _service_start() -> None:
         # `agent-bridge start` as a detached background process.
         import subprocess as _sp
 
-        if sys.platform == "win32":
-            # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-            flags = 0x00000008 | 0x00000200
-            popen_kwargs: dict[str, Any] = {"creationflags": flags}
-        else:
-            popen_kwargs = {"start_new_session": True}
+        popen_kwargs: dict[str, Any] = detached_kwargs()
 
         logf = open(os.path.join(_INSTALL_DIR, "agent-bridge.log"), "ab")
         errf = open(os.path.join(_INSTALL_DIR, "agent-bridge-err.log"), "ab")
