@@ -18,24 +18,61 @@ import sys
 from pathlib import Path
 
 _PACKAGE = "agent_containers"
-_VENV_DIR = Path.home() / ".agent-containers" / ".venv"
+_ROOT = Path.home() / ".agent-containers"
+#: Legacy single-venv layout (pre versioned-runtime). Kept only as a last-resort
+#: fallback -- the versioned-runtime migration stopped updating it, so it goes
+#: stale and must NOT be preferred over the active runtime (dotfiles #1631).
+_LEGACY_VENV_DIR = _ROOT / ".venv"
 
 
 def _venv_python() -> str:
-    """Return the interpreter that has ``agent_containers`` installed.
+    """Return the interpreter for the ACTIVE agent-containers runtime.
 
-    Prefers the plugin's dedicated venv (the same interpreter the ``.cmd``
-    binstub targets); falls back to the current interpreter -- e.g. the
-    agent-bridge daemon venv, which carries the provider plugins as
-    siblings -- when the dedicated venv is absent.
+    The versioned-runtime layout installs each version under
+    ``~/.agent-containers/versions/<current-version>`` and records the active one
+    in ``~/.agent-containers/current-version`` -- the same resolution the ``.cmd``
+    binstub's ``:_resolve`` performs. We must target that so a spawned
+    ``agent-containers exec`` wrapper runs the **same code as the active runtime**.
+
+    History / the bug this fixes (dotfiles #1631): this helper used to prefer a
+    hardcoded ``~/.agent-containers/.venv``. After the versioned-runtime
+    migration, updates land in ``versions/<ver>`` and that legacy ``.venv`` is
+    never refreshed -- so preferring it made the daemon spawn the wrapper from
+    **stale** code (e.g. injecting a stale credential-relay port). Resolution
+    order now: active versioned runtime -> the current interpreter (which, when
+    invoked via the binstub, already *is* the active runtime and always has
+    ``agent_containers`` importable) -> the legacy ``.venv`` as a last resort.
     """
-    if sys.platform == "win32":
-        cand = _VENV_DIR / "Scripts" / "python.exe"
-    else:
-        cand = _VENV_DIR / "bin" / "python"
-    if cand.exists():
-        return str(cand)
-    return sys.executable
+    scripts = "Scripts" if sys.platform == "win32" else "bin"
+    exe = "python.exe" if sys.platform == "win32" else "python"
+
+    # 1. The active versioned runtime (current-version -> versions/<ver>).
+    try:
+        ver = (_ROOT / "current-version").read_text(encoding="utf-8").strip()
+    except OSError:
+        ver = ""
+    if ver:
+        cand = _ROOT / "versions" / ver / scripts / exe
+        if cand.exists():
+            return str(cand)
+
+    # 2. The running interpreter -- when spawned via the binstub this is the
+    #    active runtime; in-process it is whatever imported us. It always has
+    #    agent_containers importable, so it is a safe, non-stale default.
+    if sys.executable:
+        return sys.executable
+
+    # 3. Last resort: the legacy single-venv layout (may be stale). Only return
+    #    it if it actually exists; otherwise fail fast with a clear error rather
+    #    than handing back a bogus path that spawns with a confusing failure.
+    legacy = _LEGACY_VENV_DIR / scripts / exe
+    if legacy.exists():
+        return str(legacy)
+    raise RuntimeError(
+        "Cannot resolve an agent_containers interpreter: no active versioned "
+        "runtime (~/.agent-containers/current-version -> versions/<ver>), an "
+        "empty sys.executable, and no legacy ~/.agent-containers/.venv."
+    )
 
 
 def module_argv() -> list[str]:
