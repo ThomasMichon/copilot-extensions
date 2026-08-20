@@ -110,3 +110,31 @@ separate, intentional runtime and keeps its explicit venv.
 - Decision (operator): go **full marker-only**, uniform on every OS.
 - Next: land Phase 1 (contract + pattern + `resolve_python` primitive + canonical
   parameterized resolvers + guard), then migrate plugins in batches.
+
+### 2026-08-19 - Phase 2 batch 1: agent-ssh + resolver fan-out
+- Extended `tools/sync-versioned-runtime.py` to also vendor the canonical
+  parameterized resolvers (`resolve-runtime.sh`/`.ps1`) **opt-in** -- byte-
+  identically to any plugin that already carries a copy in `scripts/`, excluding
+  the bespoke `agent-worktrees` variant. A plugin adopts the resolver by dropping
+  the file in; `--check` then enforces sync (CI/pre-push).
+- Migrated **agent-ssh** fully onto the marker-only resolver:
+  - Vendored `resolve-runtime.sh`/`.ps1` into `scripts/`; installer co-deploys
+    them to `~/.agent-ssh/bin/` alongside the session-start hooks.
+  - Binstub (`install.sh` heredoc) now **sources the deployed
+    `resolve-runtime.sh`** (`AGENT_RT_ROOT` -> `AGENT_RT_PY`) instead of
+    `~/.agent-ssh/.venv/bin/python`; the self-provision block is the confined-
+    first-run fallback (no inline resolver duplication).
+  - Windows `.ps1` binstub now **dot-sources the canonical `resolve-runtime.ps1`**
+    (replacing the inline newest-slot/lexicographic resolver -> last-known-good +
+    completeness-aware, uniform with POSIX). The `install.ps1` non-Windows shim
+    dropped its `.venv/bin/python` line for the marker resolver.
+  - Source wrappers `emit-profile.{sh,ps1}` / `verify.{sh,ps1}` delegate to the
+    resolving binstub (self-provisions), with a source-tree python only as an
+    annotated raw-checkout bootstrap fallback.
+- Guard: `check-runtime-resolution` **26 -> 22** (agent-ssh 4 -> 0). Smoke-tested
+  all three resolver tiers + the binstub happy path; guards + pwsh parse + ruff
+  green. Version-bumped agent-ssh 0.1.0-dev35 -> dev36.
+- Next batches (2-3 plugins each, same pattern): the `_py="$_root/.venv/bin/
+  python"`-style binstubs in agent-vault, agent-dispatch, agent-mcp,
+  agent-containers, agent-machines, agent-logger, agent-index (+ its bare-
+  `python3` service), agent-codespaces (+ its cross-plugin bridge ref).
