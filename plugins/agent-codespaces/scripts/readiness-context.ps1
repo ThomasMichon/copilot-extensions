@@ -39,7 +39,9 @@ if (Test-Path $verFile) { $ver = (Get-Content $verFile -Raw).Trim() }
 
 $venvOk = $false
 if ($ver) {
-  foreach ($sub in @("versions/$ver/Scripts/python.exe","versions/$ver/bin/python",".venv/Scripts/python.exe")) {
+  # READY iff the current-version marker's slot interpreter exists (marker-only;
+  # the retired `.venv` link is no longer probed -- uniform-runtime-resolution #765).
+  foreach ($sub in @("versions/$ver/Scripts/python.exe","versions/$ver/bin/python")) {
     if (Test-Path (Join-Path $InstallDir $sub)) { $venvOk = $true; break }
   }
 }
