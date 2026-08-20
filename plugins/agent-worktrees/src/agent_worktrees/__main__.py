@@ -10478,10 +10478,14 @@ def _reconcile_one_runtime(name: str, platform: str, *, force: bool) -> str:
     else:
         installer = pdir / "scripts" / "install.sh"
         if installer.exists():
-            argv = ["bash", str(installer), "update"]
+            # This argv is handed to bash even from Windows hosts when
+            # reconciling non-Windows runtimes; backslashes are escapes/path
+            # separators bash won't interpret as native filesystem separators.
+            argv = ["bash", installer.as_posix(), "update"]
         else:
             installer = pdir / "scripts" / "init.sh"
-            argv = ["bash", str(installer)] + (["--force"] if force else [])
+            # Same bash argv contract as install.sh: keep separators POSIX.
+            argv = ["bash", installer.as_posix()] + (["--force"] if force else [])
     if not installer.exists():
         return "installer not found"
 
