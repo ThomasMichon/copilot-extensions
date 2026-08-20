@@ -310,3 +310,27 @@ separate, intentional runtime and keeps its explicit venv.
 - Guard: **6 -> 3** (agent-logger 3 -> 0). pwsh parse + shellcheck + binstub smoke
   + tests green. Bumped agent-logger 0.1.1-dev55 -> dev56. Only **agent-worktrees**
   (bespoke) + the final link-retirement remain.
+
+### 2026-08-20 - Phase 2 batch 11: agent-worktrees -> GUARD AT 0
+- **agent-worktrees** (bespoke resolver, plugins[0]): its 3 flagged lines were all
+  legitimate non-launches:
+  - `preview-picker.{sh,ps1}` -- **echoed dev-setup instructions** that mention a
+    `.venv` path. `_EXCLUDE_PATH` already listed `"preview-picker"` but the guard
+    only matched it against *line content*, not the *file path*, so it never fired
+    (a guard bug). Fixed `check-runtime-resolution.py` to also skip a whole file
+    whose path matches `_EXCLUDE_PATH`; added a unit test.
+  - `bin/agent-worktrees` `exec python -m agent_worktrees` -- the deliberate
+    confined-host **PATH-python last resort** (only reached with
+    `AGENT_WORKTREES_NO_SELFPROVISION=1`, after marker/slot resolution +
+    self-provision) -> annotated `# runtime-resolution: allow`.
+- **`check-runtime-resolution`: 3 -> 0, and `--strict` passes.** Every plugin's
+  binstub, service/daemon launcher, and Python caller now resolves the versioned
+  interpreter the one uniform marker-only way. Bumped agent-worktrees
+  1.5.3-dev559 -> dev560 (+ marketplace metadata 1.7.5-dev586 -> dev587).
+  (agent-worktrees full pytest suite has pre-existing sandbox-only flakiness --
+  identical on clean main; the marker-only + guard tests pass.)
+- Remaining for the effort: flip the guard to `--strict` in CI; and the physical
+  `.venv`/`venv` link retirement in `activate()` (its precondition -- "no consumer
+  resolves through it" -- still isn't met: install-time health-gates + a couple
+  variable-hidden `$LINK_PYTHON` ExecStart lines, e.g. agent-vault:673, still use
+  the link, so that is its own careful cross-installer sweep).

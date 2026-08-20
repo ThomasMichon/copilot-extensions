@@ -62,7 +62,10 @@ _PATH_PY = re.compile(
 _CROSS = re.compile(r"""\.agent-[a-z-]+[\\/]\.?venv[\\/]""", re.IGNORECASE)
 
 # Path fragments that are legitimately a durable/dev/bootstrap venv, not the
-# versioned runtime -- never flagged.
+# versioned runtime -- never flagged. Matched against BOTH the file path (to skip
+# a whole dev-only helper file, e.g. preview-picker, whose printed setup
+# instructions mention `.venv`) AND each line's content (to skip an inline durable
+# engine venv reference).
 _EXCLUDE_PATH = ("engine/.venv", "engine\\.venv", "preview-picker")
 
 
@@ -106,6 +109,10 @@ def _strip_ps_block_comments(line: str, in_block: bool) -> tuple[str, bool]:
 
 
 def _violations(path: Path) -> list[tuple[int, str, str]]:
+    # Skip whole dev-only/durable helper files by path (e.g. preview-picker's
+    # printed setup instructions, an engine durable venv helper).
+    if any(x in path.as_posix().lower() for x in _EXCLUDE_PATH):
+        return []
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:

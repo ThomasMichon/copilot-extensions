@@ -63,3 +63,15 @@ def test_allow_marker_suppresses(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     assert _kinds(p) == []
+
+
+def test_excluded_helper_file_by_path_is_skipped(tmp_path: Path) -> None:
+    # A dev-only helper (preview-picker) prints setup instructions that mention a
+    # `.venv` path; the whole file is skipped by path, not flagged line by line.
+    p = tmp_path / "scripts" / "preview-picker.sh"
+    p.parent.mkdir(parents=True)
+    p.write_text(
+        'echo "uv pip install --python .venv/bin/python -e .[dev]" >&2\n',
+        encoding="utf-8",
+    )
+    assert _kinds(p) == []

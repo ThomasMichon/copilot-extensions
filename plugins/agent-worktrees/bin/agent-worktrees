@@ -66,4 +66,4 @@ if [ -z "${AGENT_WORKTREES_NO_SELFPROVISION:-}" ]; then
     exit "${_awrc:-1}"
   fi
 fi
-exec python -m agent_worktrees "$@"
+exec python -m agent_worktrees "$@"  # runtime-resolution: allow -- confined-host last resort when self-provisioning is opted out (AGENT_WORKTREES_NO_SELFPROVISION); marker/slot resolution + self-provision are tried first above
