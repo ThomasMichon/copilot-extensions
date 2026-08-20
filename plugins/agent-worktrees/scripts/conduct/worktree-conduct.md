@@ -38,6 +38,15 @@ and process state cannot tell. Annotate THIS worktree's disposition with
 The summary is one line; latest wins. Flag conservatively but honestly: an
 unflagged worktree reads as *resolved and safe to prune*.
 
+> **Every disposition write is remembered.** Each `status --summary`/`--title`/
+> `--follow-up`/`--resolved` also appends a durable entry to the worktree's
+> disposition-history sidecar (`~/.<project>/worktrees/<id>.history.jsonl`). To
+> grok *what a worktree has been doing* -- its focus shifts and what got done --
+> read the trajectory with `agent-worktrees status --history` (`--limit N`,
+> `--json`). It lives and dies with the tracking record. This is why keeping the
+> summary current pays off twice: it feeds the Picker **and** leaves a legible
+> trail for the next agent.
+
 > `finalize` also **seals a fallback identity** -- it backfills the worktree's
 > title and session registry from session-state so a pruned worktree is never
 > left "(untitled)". That is only a safety net for sessions that never asserted
