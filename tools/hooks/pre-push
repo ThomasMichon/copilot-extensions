@@ -24,6 +24,9 @@ fi
 # No-op unless a private denylist is configured (env / ~/.agent-codespaces).
 "${PY[@]}" "$ROOT/tools/check-no-internal-identifiers.py"
 "${PY[@]}" "$ROOT/tools/check-install-contract.py"
+# Every Windows process launch must be headless: an agent-procutil-adopting
+# plugin must not hand-roll process-creation flags (windows-launch-hardening).
+"${PY[@]}" "$ROOT/tools/check-headless-launch.py"
 # Guard skill loadability: frontmatter validity + the 1024-char description limit
 # the Copilot CLI enforces (over it, a skill is silently dropped at load time).
 "${PY[@]}" "$ROOT/tools/check-skills.py"

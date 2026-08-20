@@ -459,8 +459,8 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
         kwargs: dict[str, Any] = {"env": child_env}
         if _sys.platform == "win32":
             kwargs["creationflags"] = (
-                _subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
-                | _subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]
+                _subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]  # headless-guard: allow: coordinator self-spawn uses the CREATE_NO_WINDOW|DETACHED_PROCESS combo
+                | _subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]  # headless-guard: allow: (paired with the CREATE_NO_WINDOW above)
             )
         else:
             kwargs["start_new_session"] = True

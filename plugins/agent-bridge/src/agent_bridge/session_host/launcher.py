@@ -60,7 +60,7 @@ def host_spawn_kwargs() -> dict[str, Any]:
     """
     if sys.platform == "win32":
         # CREATE_NO_WINDOW keeps it headless; breakaway escapes the front's job.
-        return {"creationflags": no_window_flags() | winjob.CREATE_BREAKAWAY_FROM_JOB}
+        return {"creationflags": no_window_flags() | winjob.CREATE_BREAKAWAY_FROM_JOB}  # headless-guard: allow: no_window_flags() composed with the winjob breakaway primitive
     return {"start_new_session": True}
 
 
