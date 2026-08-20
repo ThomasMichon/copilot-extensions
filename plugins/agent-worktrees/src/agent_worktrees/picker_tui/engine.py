@@ -1204,6 +1204,13 @@ class PickerScreen(Widget):
         # self.profiles_view now, reached via the @property + method shims
         # below; #88 F5 slices 3-4.)
         self.debug = "ready"
+        # Busy indicator for the always-async control plane: while a background
+        # action (``_run_bg``) is in flight, the footer shows the shared animated
+        # spinner + this label instead of a static line (see ``footer``/``_tick``).
+        self._busy_label = None
+        # The cross-plugin verb map backing the OPEN worktree Actions menu; its
+        # dispatch reads this so a live in-place verb refine stays consistent.
+        self._wt_submenu_ext = {}
         self.data = []
         self.machines = []
         self.pulse = 0
@@ -1545,6 +1552,10 @@ class PickerScreen(Widget):
         self.frame += 1
         self.pulse = (self.frame // 5) % 2
         busy = False
+        # A background action (_run_bg) drives the footer spinner: keep the tick
+        # at full fps so it animates.
+        if self._busy_label:
+            busy = True
         # In live mode, stream in worktrees as each machine's load resolves.
         if self.live and self.loader is not None:
             self.data = self.loader.records()
@@ -3279,7 +3290,13 @@ class PickerScreen(Widget):
         else:
             hints = self._focus_hint()
         f = Text(" " + hints, style=C_META)
-        dbg = f"· {self.debug} "
+        if self._busy_label:
+            # Always-async: while a background action runs, show the shared
+            # animated spinner + its label (not a static line), so no control ever
+            # looks like it did nothing. The tick keeps this at ~10 fps.
+            dbg = f"· {self.spin()} {self._busy_label}… "
+        else:
+            dbg = f"· {self.debug} "
         f.append(dbg.rjust(max(1, W - f.cell_len)), style=C_DIM)
         if f.cell_len > W:
             f = Text(f.plain[:W])
@@ -4228,16 +4245,16 @@ class PickerScreen(Widget):
         rec = self._submenu_target()
         if not rec:
             return
-        # #4057: the fleet populate derives liveness cheaply/in bulk (and can lag,
-        # or miss a bare un-muxed Copilot the mux view can't see). Opening the
-        # Actions menu is one of the two moments we need the TRUTH for THIS
-        # worktree's mux + bound-Copilot liveness -- but that re-verify touches the
-        # mux + session locks (cross-process), so per the always-async invariant it
-        # MUST run OFF the render flow: probe in the background, overlay the fresh
-        # signals, and THEN open the menu (never freeze the UI while it probes).
-        # A cheap record-existence stat decides whether we'll run the expensive
-        # verify at all; no record (a mock/fixture source, or an untracked row)
-        # keeps its hand-set liveness and opens the menu synchronously (unchanged).
+        # Always-async UX: OPEN the Actions menu IMMEDIATELY from the record's
+        # current (bulk-derived) liveness -- transition to the next component at
+        # once, show cached content, never freeze while probing. #4057: opening the
+        # menu is one of the two moments we want the TRUTH for THIS worktree's mux +
+        # bound-Copilot liveness, but that re-verify touches the mux + session locks
+        # (cross-process). So when it's warranted (a real worktree with a record) we
+        # run it OFF the render flow and REFINE the verb set in place when it lands;
+        # the modal carries a footer spinner meanwhile. A cheap record-existence
+        # stat decides whether to probe -- a mock/fixture row (no record) just opens
+        # with its hand-set liveness, no spinner, no refine.
         _wt_id = (rec.get("raw") or {}).get("id")
         _need_verify = False
         if self.real_ops and _wt_id:
@@ -4246,27 +4263,27 @@ class PickerScreen(Widget):
                 _need_verify = (_config.tracking_dir() / f"{_wt_id}.yaml").exists()
             except Exception:
                 _need_verify = False
+        self._push_wt_submenu(rec, loading=_need_verify)
         if not _need_verify:
-            self._push_wt_submenu(rec)
             return
 
         def _verify():
-            import types as _types
-
-            from .. import sessions as _sessions
-            from .. import tracking as _tracking
-            verdict = _sessions.verify_worktree_active(
-                _types.SimpleNamespace(worktree_id=_wt_id))
             try:
-                # #4057: warm the ground-layer cache from this authoritative read
-                # so the next populate can prefer the hint. refresh=True renews the
-                # freshness stamp even when liveness is unchanged (throttled), so a
-                # steadily-live worktree the operator keeps opening doesn't age past
-                # the hint TTL.
-                _tracking.stamp_mux_live(_wt_id, verdict.mux_live, refresh=True)
+                import types as _types
+
+                from .. import sessions as _sessions
+                from .. import tracking as _tracking
+                verdict = _sessions.verify_worktree_active(
+                    _types.SimpleNamespace(worktree_id=_wt_id))
+                try:
+                    # #4057: warm the ground-layer cache from this authoritative
+                    # read so the next populate can prefer the hint (throttled).
+                    _tracking.stamp_mux_live(_wt_id, verdict.mux_live, refresh=True)
+                except Exception:
+                    pass
+                return verdict
             except Exception:
-                pass
-            return verdict
+                return None
 
         def _done(verdict):
             if verdict is not None:
@@ -4274,15 +4291,17 @@ class PickerScreen(Widget):
                 rec["attached"] = verdict.mux_clients > 0
                 rec["session_lock_live"] = bool(verdict.live_session_ids)
                 rec["session_bare_orphan"] = verdict.bare
-            self._push_wt_submenu(rec)
+            # Refine the OPEN menu's verbs in place + drop its footer spinner. The
+            # main footer stays quiet -- the modal owns the load indicator.
+            self._refresh_wt_submenu(rec)
 
-        self._run_bg("Actions", _verify, _done)
+        self._run_bg("Actions", _verify, _done, quiet=True)
 
-    def _push_wt_submenu(self, rec):
-        """Build the worktree Actions verb set from the (already liveness-refreshed)
-        record and open the native ``SubMenuScreen``. Pure -- engine state only, no
-        IO -- so it is safe on the UI thread (called directly for a mock source, or
-        from ``_open_submenu``'s async-verify done-callback via ``call_from_thread``)."""
+    def _wt_submenu_verbs(self, rec):
+        """Compute the worktree Actions verb list + the cross-plugin ``ext`` map
+        from the record's CURRENT liveness. Pure -- engine state only, no IO -- so
+        it is safe on the render flow and is recomputed cheaply on an in-place
+        refine."""
         # Primary verb + Stop/Reclaim gating is the pure, record-driven
         # ``_session_action_verbs`` (unit-tested #4058); the bridge/system nav +
         # cross-plugin verbs below need engine state, so they are appended here.
@@ -4315,64 +4334,91 @@ class PickerScreen(Widget):
             except Exception:
                 continue
 
-        # Migrated to a native Textual ``ModalScreen`` (#88 F4): ``push_screen``s a
-        # ``SubMenuScreen`` (native OptionList verbs + a native No-mux Checkbox)
-        # and returns the chosen ``(action_label, no_mux)`` via ``dismiss`` -- or
-        # ``None`` on cancel; ``_after`` dispatches the selected verb.
-        def _after(result):
-            if result is None:
-                return
-            cur, no_mux = result
-            if cur in ext:
-                # A cross-plugin contributed action (#B): run it and rescan.
-                self._run_wt_action(ext[cur], rec)
-                return
-            if cur == "Open":
-                self._decide(self._resume_decision(rec, no_mux=no_mux))
-            elif cur == "Resume":
-                # #4043: No-Mux now rides Resume too (a stopped worktree can be
-                # resumed without the mux wrapper for troubleshooting), not just
-                # Open. no_mux is inert unless the toggle was flipped.
-                self._decide(self._resume_decision(rec, no_mux=no_mux))
-            elif cur == "Bare resume":
-                # Two-step restore: mux + Copilot in HOME, no --resume (#outage).
-                self._decide(self._resume_decision(rec, bare_resume=True))
-            elif cur == "Messages":
-                # Read-only peek at the worktree's latest session messages.
-                self._open_msgview(rec)
-            elif cur == "Jump to host":
-                # Internal navigation -- stay in the picker (#1424).
-                self._jump_to_worktree((rec.get("raw") or {}).get("id"))
-            elif cur == "Jump to caller":
-                # Navigate to the worktree that requested this bridge (#2178).
-                self._jump_to_worktree(
-                    (rec.get("raw") or {}).get("caller_worktree"))
-            elif cur == "Sync":
-                # Real per-worktree FF-sync via the shared dialog (#1427).
-                self._open_sync(ids={rec.get("id4")})
-            elif cur == "Cleanup":
-                self._open_cleanup(ids={rec.get("id4")})
-            elif cur == "Finalize":
-                # Wrap up a conversation-only / unused worktree (#2258 follow-up).
-                self._start_finalize([rec])
-            elif cur == "Stop":
-                # Stop the worktree's Mux/Copilot wrapper on demand (#1343),
-                # freeing it to be re-Opened/Resumed with a fresh Mux + Copilot.
-                self._start_stop(rec)
-            elif cur == "Reclaim":
-                # Kill the exact Copilot process holding the session's lock
-                # (bare orphans Stop cannot reach); then re-Open / Bare resume.
-                self._start_reclaim(rec)
-            elif cur == "Repair":
-                # Reconcile the mux+stray-orphan double-binding: reap the bare
-                # orphan while preserving the healthy mux, clear stale locks.
-                self._start_repair(rec)
-            elif cur == "Refresh":
-                # picker-cache-first-paint (dotfiles#948): on-demand live gather
-                # + cache write-back for THIS worktree (populates an Unknown row
-                # / re-syncs a stale one) without a full-fleet reload.
-                self._start_refresh(rec)
-        self.app.push_screen(SubMenuScreen(rec, acts), _after)
+        return acts, ext
+
+    def _push_wt_submenu(self, rec, *, loading=False):
+        """Open the native ``SubMenuScreen`` for ``rec`` IMMEDIATELY from its
+        current (cached) liveness -- never blocking the render flow. When an
+        authoritative re-verify is in flight (``loading=True``), the modal shows the
+        footer spinner and the verb set is refined in place by
+        :meth:`_refresh_wt_submenu` when the probe lands."""
+        acts, ext = self._wt_submenu_verbs(rec)
+        self._wt_submenu_ext = ext
+        # Migrated to a native Textual ``ModalScreen`` (#88 F4): the modal returns
+        # the chosen ``(action_label, no_mux)`` via ``dismiss`` (or ``None`` on
+        # cancel); ``_wt_submenu_dispatch`` runs the selected verb.
+        self.app.push_screen(
+            SubMenuScreen(rec, acts, loading=loading, engine=self),
+            lambda result: self._wt_submenu_dispatch(rec, result),
+        )
+
+    def _refresh_wt_submenu(self, rec):
+        """Refine the OPEN Actions menu's verbs in place after the async liveness
+        verify lands (and drop its footer spinner). A no-op if the operator already
+        closed the menu."""
+        acts, ext = self._wt_submenu_verbs(rec)
+        self._wt_submenu_ext = ext
+        scr = getattr(self.app, "screen", None)
+        if isinstance(scr, SubMenuScreen):
+            scr.refresh_actions(acts)
+
+    def _wt_submenu_dispatch(self, rec, result):
+        """Run the chosen worktree Actions verb (the ``SubMenuScreen`` dismiss
+        callback). Reads the CURRENT cross-plugin map (``_wt_submenu_ext``) so a
+        live in-place verb refine stays consistent."""
+        if result is None:
+            return
+        cur, no_mux = result
+        ext = getattr(self, "_wt_submenu_ext", {}) or {}
+        if cur in ext:
+            # A cross-plugin contributed action (#B): run it and rescan.
+            self._run_wt_action(ext[cur], rec)
+            return
+        if cur == "Open":
+            self._decide(self._resume_decision(rec, no_mux=no_mux))
+        elif cur == "Resume":
+            # #4043: No-Mux now rides Resume too (a stopped worktree can be
+            # resumed without the mux wrapper for troubleshooting), not just
+            # Open. no_mux is inert unless the toggle was flipped.
+            self._decide(self._resume_decision(rec, no_mux=no_mux))
+        elif cur == "Bare resume":
+            # Two-step restore: mux + Copilot in HOME, no --resume (#outage).
+            self._decide(self._resume_decision(rec, bare_resume=True))
+        elif cur == "Messages":
+            # Read-only peek at the worktree's latest session messages.
+            self._open_msgview(rec)
+        elif cur == "Jump to host":
+            # Internal navigation -- stay in the picker (#1424).
+            self._jump_to_worktree((rec.get("raw") or {}).get("id"))
+        elif cur == "Jump to caller":
+            # Navigate to the worktree that requested this bridge (#2178).
+            self._jump_to_worktree(
+                (rec.get("raw") or {}).get("caller_worktree"))
+        elif cur == "Sync":
+            # Real per-worktree FF-sync via the shared dialog (#1427).
+            self._open_sync(ids={rec.get("id4")})
+        elif cur == "Cleanup":
+            self._open_cleanup(ids={rec.get("id4")})
+        elif cur == "Finalize":
+            # Wrap up a conversation-only / unused worktree (#2258 follow-up).
+            self._start_finalize([rec])
+        elif cur == "Stop":
+            # Stop the worktree's Mux/Copilot wrapper on demand (#1343),
+            # freeing it to be re-Opened/Resumed with a fresh Mux + Copilot.
+            self._start_stop(rec)
+        elif cur == "Reclaim":
+            # Kill the exact Copilot process holding the session's lock
+            # (bare orphans Stop cannot reach); then re-Open / Bare resume.
+            self._start_reclaim(rec)
+        elif cur == "Repair":
+            # Reconcile the mux+stray-orphan double-binding: reap the bare
+            # orphan while preserving the healthy mux, clear stale locks.
+            self._start_repair(rec)
+        elif cur == "Refresh":
+            # picker-cache-first-paint (dotfiles#948): on-demand live gather
+            # + cache write-back for THIS worktree (populates an Unknown row
+            # / re-syncs a stale one) without a full-fleet reload.
+            self._start_refresh(rec)
 
     def _wt_action_ctx(self, rec: dict) -> dict:
         """Placeholder context for a contributed worktree action's argv template:
@@ -4761,7 +4807,7 @@ class PickerScreen(Widget):
         ctx["machine"] = self._pivot_machine_id() or ""
         return ctx
 
-    def _run_bg(self, label, work, done=None):
+    def _run_bg(self, label, work, done=None, *, quiet=False):
         """Run a blocking cross-process / IO callable OFF the Textual render flow.
 
         Every pivot / worktree / config action shells out (agent-dispatch, git,
@@ -4772,8 +4818,16 @@ class PickerScreen(Widget):
         marshalled back onto the event loop via Textual's ``call_from_thread`` --
         so the render flow is never blocked and no widget is mutated off-thread.
         A worker exception surfaces on the status line instead of killing the
-        thread. Returns immediately."""
-        self.debug = f"{label} · working…"
+        thread. Returns immediately.
+
+        While it runs, the footer shows the shared **animated spinner** + ``label``
+        (via ``_busy_label``) so the action never looks inert. Pass ``quiet=True``
+        when a *different* surface already shows the load state (e.g. the Actions
+        menu's own footer spinner while it refines in place) -- then the main
+        footer is left alone and ``done`` is still invoked (with ``None`` on
+        error) so the caller can always finalize (drop its spinner)."""
+        if not quiet:
+            self._busy_label = label
 
         def _worker():
             try:
@@ -4782,10 +4836,19 @@ class PickerScreen(Widget):
                 result, err = None, exc
 
             def _apply():
+                if not quiet:
+                    self._busy_label = None
                 if err is not None:
-                    detail = str(err).strip()
-                    detail = detail.splitlines()[0] if detail else type(err).__name__
-                    self.debug = f"{label} failed · {detail[:80]}"
+                    if quiet:
+                        if done is not None:
+                            try:
+                                done(None)
+                            except Exception:
+                                pass
+                    else:
+                        detail = str(err).strip()
+                        detail = detail.splitlines()[0] if detail else type(err).__name__
+                        self.debug = f"{label} failed · {detail[:80]}"
                 elif done is not None:
                     try:
                         done(result)
@@ -5431,6 +5494,7 @@ class SubMenuScreen(ModalScreen[tuple]):
         background: #ffaf00; color: black; text-style: bold;
     }
     SubMenuScreen #sub-desc { color: grey; height: auto; padding: 1 0 0 0; }
+    SubMenuScreen #sub-foot { color: grey; height: 1; padding: 1 0 0 0; }
     """
     BINDINGS = [
         Binding("escape", "cancel", show=False),
@@ -5441,11 +5505,20 @@ class SubMenuScreen(ModalScreen[tuple]):
     _NOMUX_DESC = ("Launch (Open/Resume) WITHOUT the PSMux/TMux wrapper (for "
                    "troubleshooting). Enter/Space toggles this row.")
 
-    def __init__(self, rec, actions) -> None:
+    def __init__(self, rec, actions, *, loading=False, engine=None) -> None:
         super().__init__()
         self._rec = rec
         self._actions = actions
         self._no_mux = False
+        # Always-async: the menu opens IMMEDIATELY from cached liveness; when an
+        # authoritative re-verify is in flight, ``loading`` shows the shared
+        # animated spinner in the footer and the caller calls ``refresh_actions``
+        # to refine the verbs in place when it lands. ``engine`` supplies the
+        # shared ``spin()`` frame so the spinner is consistent across the app.
+        self._loading = loading
+        self._engine = engine
+        self._foot_frame = 0
+        self._spin_timer = None
         # The No-mux modifier rides the primary launch verb -- Open (live mux /
         # sessionless) OR Resume (stopped session) -- so the toggle row is offered
         # whenever either is available (#4043). It sits at the end of the
@@ -5478,6 +5551,7 @@ class SubMenuScreen(ModalScreen[tuple]):
             yield Static(self._header(), id="sub-head")
             yield OptionList(*self._prompts(), id="sub-list")
             yield Static("", id="sub-desc")
+            yield Static("", id="sub-foot")
 
     def _header(self) -> Text:
         rec = self._rec
@@ -5514,6 +5588,63 @@ class SubMenuScreen(ModalScreen[tuple]):
         if self._actions:
             ol.highlighted = 0
         self._set_desc(0)
+        ol.focus()
+        if self._loading:
+            # Show the shared animated spinner while the liveness re-verify runs;
+            # the verbs above are already actionable from cached state.
+            self._paint_foot()
+            self._spin_timer = self.set_interval(0.1, self._paint_foot)
+
+    def _spin_char(self) -> str:
+        """The current spinner glyph -- the engine's shared frame when available
+        (so it animates in lockstep with the rest of the app), else a local one."""
+        eng = self._engine
+        if eng is not None and hasattr(eng, "spin"):
+            try:
+                return eng.spin()
+            except Exception:
+                pass
+        self._foot_frame += 1
+        return SPINNER[self._foot_frame % len(SPINNER)]
+
+    def _paint_foot(self) -> None:
+        if not self._loading:
+            return
+        t = Text()
+        t.append(f" {self._spin_char()} ", style="#ffaf00")
+        t.append("refreshing worktree liveness…", style=C_DIM)
+        self.query_one("#sub-foot", Static).update(t)
+
+    def refresh_actions(self, new_actions) -> None:
+        """Refine the verb list IN PLACE after the async liveness verify lands and
+        drop the footer spinner (always-async: the menu opened immediately from
+        cached state; this corrects the verbs without a re-open). Preserves the
+        No-mux toggle and re-anchors the highlight."""
+        self._loading = False
+        if self._spin_timer is not None:
+            try:
+                self._spin_timer.stop()
+            except Exception:
+                pass
+            self._spin_timer = None
+        try:
+            self.query_one("#sub-foot", Static).update("")
+        except Exception:
+            pass
+        self._actions = list(new_actions)
+        self._has_nomux = ("Open" in self._actions) or ("Resume" in self._actions)
+        self._nomux_index = len(self._actions) if self._has_nomux else None
+        try:
+            ol = self.query_one("#sub-list", OptionList)
+        except Exception:
+            return
+        prev = ol.highlighted or 0
+        ol.clear_options()
+        ol.add_options(self._prompts())
+        count = ol.option_count
+        if count:
+            ol.highlighted = min(prev, count - 1)
+        self._set_desc(ol.highlighted or 0)
         ol.focus()
 
     def _set_desc(self, i) -> None:

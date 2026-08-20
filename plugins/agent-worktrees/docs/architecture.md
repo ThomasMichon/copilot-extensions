@@ -147,7 +147,10 @@ A single blocking call there freezes the **entire** UI for its full duration
 `steer submit` on Confirm, or the authoritative mux-liveness re-verify when the
 Actions menu opens.
 
-The rule is therefore **always-async from the render flow**:
+The rule is therefore **always-async from the render flow** -- and, on top of it, a
+UX rule: **always transition to the next component immediately; show cached content
+with the shared spinner while the background load completes; then update in place.**
+Never block, and never leave a control that looks like it did nothing.
 
 - **Data plane -- already async.** Fleet enumeration and per-machine reads run on
   the `LiveLoader`'s background daemon threads (and `RegisteredPivotRuntime.ensure`
@@ -158,26 +161,45 @@ The rule is therefore **always-async from the render flow**:
 - **Control plane -- route through `_run_bg`.** Every action that shells out --
   the pivot/form **submit** (`_run_pivot_form_submit`), pivot verbs
   (`_run_task_action`), contributed **worktree** actions (`_run_wt_action`) and
-  **config** sections (`_run_config_section`) -- and every menu-open that needs a
-  fresh cross-process probe (the Actions menu's `verify_worktree_active`) hands the
-  blocking call to **`PickerScreen._run_bg(label, work, done)`**. `work()` runs on a
+  **config** sections (`_run_config_section`) -- hands the blocking call to
+  **`PickerScreen._run_bg(label, work, done, *, quiet=False)`**. `work()` runs on a
   daemon worker thread; the UI update `done(result)` is marshalled back onto the
   event loop via Textual **`call_from_thread`** (so no widget is mutated
-  off-thread). The handler returns instantly; the status line shows a transient
-  *"… working…"* while the subprocess completes. Progress-reporting actions use the
-  analogous streaming worker (`run_action_stream` + the ProgressScreen).
+  off-thread). The handler returns instantly; while it runs the **footer shows the
+  shared animated spinner** (`SPINNER` braille, driven by `frame`) + the action
+  label via `_busy_label` -- never a static line, so no action looks inert. Pass
+  `quiet=True` when a *different* surface already shows the load state (see below).
+  Progress-reporting actions use the analogous streaming worker (`run_action_stream`
+  + the ProgressScreen).
+- **Open-first, spinner, refine (menus & any load-gated component).** A component
+  that needs a fresh cross-process probe **opens immediately from cached state**,
+  shows the **same spinner** while the probe runs off-thread, and **updates in
+  place** when it lands -- it never waits (frozen or blank) for the probe first.
+  The worktree **Actions menu** is the reference: `_open_submenu` opens the
+  `SubMenuScreen` at once from the record's current (bulk-derived) liveness (the
+  verbs are already actionable); a cheap `stat` decides whether an authoritative
+  `verify_worktree_active` re-verify is warranted; if so it runs via
+  `_run_bg(..., quiet=True)` while the modal shows its **footer spinner**
+  (`SubMenuScreen(loading=True)`), and `_refresh_wt_submenu` -> `refresh_actions`
+  **refines the verb set in place** (dropping the spinner) when it completes. Cached
+  verbs are correct in the overwhelming majority of cases; the refine only corrects
+  edge liveness (e.g. a bare orphan), so nothing the operator can pick is a dead
+  button.
 - **Cheap in-process work stays inline.** Pure, record-driven computation (verb-set
-  gating via `_session_action_verbs`, menu assembly, formatting) and a single
-  `stat` (e.g. "does this worktree have a tracking record?") are fine on the loop --
-  only *cross-process* and *blocking IO* must be offloaded.
+  gating via `_session_action_verbs` / `_wt_submenu_verbs`, menu assembly,
+  formatting) and a single `stat` (e.g. "does this worktree have a tracking
+  record?") are fine on the loop -- only *cross-process* and *blocking IO* must be
+  offloaded.
 
 **Enforcement / when you add a feature.** Any new key handler, action, or
 menu-open that reaches a subprocess or blocking IO must go through `_run_bg` (or a
-dedicated daemon worker), never call it inline. A regression test
-(`tests/test_picker_tui.py::test_steer_submit_is_offloaded_off_the_render_flow`)
-gates a runtime whose subprocess blocks on an `Event` and asserts Confirm returns
-*without* having run it -- proving the offload. If you add a blocking edge, add the
-equivalent offload + assertion.
+dedicated daemon worker), never call it inline -- and any load-gated *component*
+should open-first + spinner + refine rather than wait. Two regression tests gate a
+runtime/probe that blocks on an `Event`:
+`test_steer_submit_is_offloaded_off_the_render_flow` (Confirm returns without running
+the submit inline) and `test_actions_menu_liveness_verify_is_offloaded` (the Actions
+menu is open + `loading` immediately, then refines in place when the gate releases).
+If you add a blocking edge, add the equivalent offload + assertion.
 
 ## Session Lifecycle
 

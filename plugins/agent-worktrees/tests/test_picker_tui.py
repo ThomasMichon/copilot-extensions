@@ -5722,9 +5722,10 @@ def test_steer_submit_is_offloaded_off_the_render_flow(tmp_path, monkeypatch):
             form._confirm()
             await pilot.pause()
             # Offloaded: the blocking submit has NOT run (gate closed), and the
-            # loop was not frozen by the 5s wait -- the status shows the marker.
+            # loop was not frozen by the 5s wait -- the footer shows the animated
+            # busy spinner (_busy_label set) instead of a static line.
             assert rt.resolved is None, "submit ran inline on the UI thread (froze)"
-            assert str(scr.debug).endswith("working…")
+            assert scr._busy_label is not None
             # Release the gate; the worker finishes and applies on the loop.
             rt.gate.set()
             for _ in range(200):
@@ -5742,11 +5743,12 @@ def test_steer_submit_is_offloaded_off_the_render_flow(tmp_path, monkeypatch):
 
 
 def test_actions_menu_liveness_verify_is_offloaded(tmp_path, monkeypatch):
-    """Opening the worktree Actions menu re-verifies mux/session liveness -- a
-    cross-process probe. It MUST run off the render flow (via _run_bg): with a
-    gated verify, _open_submenu returns WITHOUT the menu (the loop is not frozen by
-    the 5s probe) and the status shows the working marker; the SubMenuScreen appears
-    only after the probe completes on the worker."""
+    """The worktree Actions menu opens IMMEDIATELY from cached liveness (never
+    frozen), shows a footer spinner while it re-verifies mux/session liveness (a
+    cross-process probe) off the render flow, and refines its verbs in place when
+    the probe lands. With a gated verify: the menu is already open + loading right
+    after _open_submenu (the loop wasn't frozen by the 5s probe); releasing the
+    gate clears the loading state and the verbs are refined."""
     import threading
 
     from agent_worktrees import config as _cfg
@@ -5781,18 +5783,24 @@ def test_actions_menu_liveness_verify_is_offloaded(tmp_path, monkeypatch):
             await pilot.pause()
             scr._open_submenu()
             await pilot.pause()
-            # Offloaded: the menu is NOT open yet (verify gated on the worker) and
-            # the loop was not frozen by the 5s probe.
-            assert _sub_menu(scr) is None, "menu opened before the async verify finished"
-            assert str(scr.debug).endswith("working…")
+            # Open-first: the menu is ALREADY open (from cached verbs) and marked
+            # loading while the gated verify runs on the worker -- the loop was not
+            # frozen by the 5s probe, and the verbs are already actionable.
+            menu = _sub_menu(scr)
+            assert menu is not None, "menu did not open immediately (should be open-first)"
+            assert menu._loading is True
+            assert ("Open" in menu._actions) or ("Resume" in menu._actions)
+            # Release the gate; the probe completes and the verbs refine in place
+            # (loading drops) -- no re-open.
             gate.set()
             for _ in range(200):
                 await pilot.pause()
                 await asyncio.sleep(0.02)
-                if _sub_menu(scr) is not None:
+                if _sub_menu(scr) is not None and not _sub_menu(scr)._loading:
                     break
             menu = _sub_menu(scr)
             assert menu is not None
+            assert menu._loading is False
             assert calls["n"] == 1
             assert ("Open" in menu._actions) or ("Resume" in menu._actions)
 
