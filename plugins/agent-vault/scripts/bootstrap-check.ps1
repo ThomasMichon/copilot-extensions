@@ -55,15 +55,24 @@ try {
     if ($provisioned -and $deployed -eq $current) { exit 0 }
     $init = Join-Path $PluginDir 'scripts\init.ps1'
     if (Test-Path $init) {
-        $targs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $init)
+        $reCmd = "& `"$init`""
     } else {
         $inst = Join-Path $PluginDir 'scripts\install.ps1'
         if (-not (Test-Path $inst)) { exit 0 }
-        $targs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $inst, 'install')
+        $reCmd = "& `"$inst`" install"
     }
     Write-Host "[$name] runtime $deployed -> $current; reconciling in background..." -ForegroundColor DarkGray
     $pw = Get-Command pwsh -ErrorAction SilentlyContinue
     $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
-    Start-Process -FilePath $exe -WindowStyle Hidden -ArgumentList $targs | Out-Null
+    # Launch the background reconcile through conhost --headless so Windows
+    # Terminal / the DefTerm handoff cannot surface it as a visible window --
+    # -WindowStyle Hidden ALONE is ignored by DefTerm (proven pattern; see
+    # agent-bridge). The reconcile command is base64-encoded to avoid any arg
+    # quoting under conhost; children (uv/python building the venv) inherit the
+    # headless console and stay hidden too.
+    $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($reCmd))
+    Start-Process -FilePath 'conhost.exe' `
+        -ArgumentList @('--headless', "`"$exe`"", '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc) `
+        -WindowStyle Hidden | Out-Null
 } catch { }
 exit 0

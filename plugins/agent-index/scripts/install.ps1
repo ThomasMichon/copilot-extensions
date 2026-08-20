@@ -1142,7 +1142,10 @@ function New-TaskSpec {
     # logon trigger still recovers.
     param([string]$LauncherPath)
     @{
-        Action    = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$LauncherPath`""
+        # Launch through conhost --headless so Windows Terminal / the DefTerm
+        # handoff cannot surface the daemon as a visible window -- -WindowStyle
+        # Hidden alone is ignored by DefTerm (proven pattern; see agent-bridge).
+        Action    = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$LauncherPath`""
         Trigger   = New-ScheduledTaskTrigger -AtLogOn
         Settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
         Principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited

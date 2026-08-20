@@ -61,8 +61,13 @@ try {
     Write-Host "[agent-machines] runtime $deployed -> $current; reconciling in background..." -ForegroundColor DarkGray
     $pw = Get-Command pwsh -ErrorAction SilentlyContinue
     $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
-    Start-Process -FilePath $exe -WindowStyle Hidden `
-        -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $init | Out-Null
+    # conhost --headless so Windows Terminal / the DefTerm handoff can't surface
+    # it as a window -- -WindowStyle Hidden ALONE is ignored by DefTerm (see
+    # agent-bridge). Base64-encode the reconcile command to avoid arg quoting.
+    $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes("& `"$init`""))
+    Start-Process -FilePath 'conhost.exe' `
+        -ArgumentList @('--headless', "`"$exe`"", '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc) `
+        -WindowStyle Hidden | Out-Null
 } catch { }
 
 exit 0
