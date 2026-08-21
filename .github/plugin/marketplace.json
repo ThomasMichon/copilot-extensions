@@ -54,7 +54,7 @@
     {
       "name": "context-handoff",
       "description": "Context window monitoring and session handoff - a Copilot CLI session extension that tracks token utilization, stores handoffs as worktree-pinned agent-dispatch tasks when available or one-time worktree-state files otherwise, and performs successor-consume-driven live cutover so the predecessor is retired only after pickup",
-      "version": "0.1.0-dev35",
+      "version": "0.1.0-dev36",
       "source": "plugins/context-handoff"
     },
     {
@@ -90,7 +90,7 @@
     {
       "name": "copilot-extensions-harness",
       "description": "Operator harness for the copilot-extensions repo - portable, owner-authored skills to work ON the plugin suite (contribute changes, diagnose the deployed runtimes, and validate them on a fresh box). Any control repo can enable it instead of hand-writing a per-repo narrative. Reference implementation of the <repo>-harness plugin standard; ships the contributing-to-copilot-extensions, diagnosing-copilot-extensions, and validating-in-clean-room skills plus the clean-room-judge evaluator sub-agent.",
-      "version": "0.1.0-dev19",
+      "version": "0.1.0-dev20",
       "source": "plugins/copilot-extensions-harness"
     },
     {
