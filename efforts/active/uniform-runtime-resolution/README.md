@@ -4,7 +4,10 @@
 - **Repo:** copilot-extensions (PR-required `main`, self-merge)
 - **Branch(es):** per-phase `pr/<slug>` worktrees → landed to `main`
 - **Created:** 2026-08-19
-- **Status:** Active <!-- Draft | Active | Blocked | Done -->
+- **Status:** Done <!-- Draft | Active | Blocked | Done -->
+  <!-- Completed 2026-08-20: guard reports 0 and is --strict in CI; every plugin
+       resolves the interpreter the one marker-only way; the .venv/venv link is
+       retired across all 10 versioned-runtime plugins. 16 PRs. -->
 - **Intent:** **extends** the deploy contract
   ([`docs/install-contract.md`](../../../docs/install-contract.md)) — today it
   states a **dual** resolution model (Windows resolves the active slot directly
