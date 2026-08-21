@@ -422,7 +422,7 @@ async def test_attach_refcount_keeps_host_alive_then_evicts(tmp_path):
     server = Server(sock, idle_timeout=0.3)
     task = asyncio.create_task(server.serve_forever())
     await _await_socket(sock)
-    reader, writer = await open_attached_session(sock, str(bridge))
+    _reader, writer = await open_attached_session(sock, str(bridge))
     # ping reports the live attach count.
     pong = await request_via_socket(sock, {"op": "ping"})
     assert pong["attached"] == 1
@@ -476,7 +476,7 @@ async def test_detach_decrements_refcount_even_if_aclose_raises(tmp_path, monkey
     task = asyncio.create_task(server.serve_forever())
     try:
         await _await_socket(sock)
-        reader, writer = await open_attached_session(sock, str(bridge))
+        _reader, writer = await open_attached_session(sock, str(bridge))
         assert (await request_via_socket(sock, {"op": "ping"}))["attached"] == 1
         writer.close()
         # The failing aclose still drops the refcount; the host then idle-evicts.
