@@ -17,6 +17,7 @@ from agent_bridge.transport import (
     _build_remote_cmd,
     _extract_json_object,
     _looks_unprovisioned_project,
+    _reresolve_stale_interpreter,
     _resolve_remote_existing_cwd,
     _resolve_worktree,
     _resolve_worktree_remote,
@@ -1364,3 +1365,43 @@ class TestLocalResolvePassesProject:
             await _resolve_worktree(target, {})
 
         assert "--project" not in calls[0]
+
+
+class TestReresolveStaleInterpreter:
+    """_reresolve_stale_interpreter -- repoint a pruned versioned interpreter."""
+
+    def test_remaps_pruned_version_to_existing_sibling(self, tmp_path):
+        versions = tmp_path / "versions"
+        current = versions / "0.4.0-dev62" / "Scripts"
+        current.mkdir(parents=True)
+        interpreter = current / "python.exe"
+        interpreter.write_text("")
+        stale = str(versions / "0.4.0-dev39" / "Scripts" / "python.exe")
+
+        out = _reresolve_stale_interpreter([stale, "-m", "agent_codespaces", "ssh"])
+
+        assert out == [str(interpreter), "-m", "agent_codespaces", "ssh"]
+
+    def test_noop_when_interpreter_exists(self, tmp_path):
+        interpreter = tmp_path / "python.exe"
+        interpreter.write_text("")
+        args = [str(interpreter), "-m", "agent_codespaces"]
+
+        assert _reresolve_stale_interpreter(args) == args
+
+    def test_noop_when_no_version_segment(self, tmp_path):
+        args = [str(tmp_path / "missing.exe"), "-m", "x"]
+
+        assert _reresolve_stale_interpreter(args) == args
+
+    def test_noop_when_no_sibling_resolves(self, tmp_path):
+        versions = tmp_path / "versions"
+        (versions / "0.4.0-dev62").mkdir(parents=True)
+        stale = str(versions / "0.4.0-dev39" / "Scripts" / "python.exe")
+        args = [stale, "-m", "agent_codespaces"]
+
+        # dev62 dir exists but lacks the Scripts/python.exe tail -> no remap
+        assert _reresolve_stale_interpreter(args) == args
+
+    def test_empty_args(self):
+        assert _reresolve_stale_interpreter([]) == []
