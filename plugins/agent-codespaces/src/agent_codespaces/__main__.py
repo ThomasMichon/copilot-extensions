@@ -1060,6 +1060,18 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     manager = ConnectionManager()
     relay_forward = None
 
+    # Connection Owner defer (dotfiles#1345): when the Owner daemon is live and
+    # enabled, this one-off ssh becomes a non-owning tenant -- it places a hold so
+    # the Owner keeps this CodeSpace's relay up and does NOT stand up its own -R
+    # (which would collide, #561). Default-off + fail-safe: if the feature is off,
+    # no daemon is live, or the hold fails, we own the relay exactly as before.
+    # The decision here is side-effect-free; the hold itself is placed only AFTER
+    # the target lock is acquired (below), so a busy-target rejection can't leak a
+    # hold that would linger until its TTL.
+    from . import connection_owner as _owner
+    owner_tenant = f"ssh:{os.getpid()}"
+    defer_to_owner = _owner.should_defer_to_owner(config, no_relay=args.no_relay)
+
     # The remote command is assembled inside _run() -- AFTER the relay is up and
     # any --stage-plugin payloads are staged -- so their on-CodeSpace
     # --plugin-dir paths can be folded into the copilot invocation. See
@@ -1103,7 +1115,7 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
                 connection = await manager.ensure_connected(
                     args.name, source, port_forwards,
                 )
-                if not args.no_relay and relay_forward is None:
+                if not args.no_relay and not defer_to_owner and relay_forward is None:
                     relay_forward = await _start_supervised_relay(
                         args.name,
                         connection.config,
@@ -1135,6 +1147,22 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
                 )
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 1.5, 20.0)
+
+        # Deferring to the Connection Owner: wait briefly for it to bring up this
+        # CodeSpace's relay before any git-dependent provisioning runs, so auth
+        # over the relay is ready. Best-effort -- a timeout only warns (the Owner
+        # keeps reconciling; the token cache cushions the gap).
+        if defer_to_owner:
+            if await _owner.await_owner_relay(args.name):
+                log.info(
+                    "Connection Owner relay for %s is live; riding it (no own -R).",
+                    args.name,
+                )
+            else:
+                log.warning(
+                    "Connection Owner did not report a live relay for %s within the "
+                    "wait window -- git auth may lag until it reconciles.", args.name,
+                )
 
         # Cross-harness in-CodeSpace lockfile fence (git-ref-resource-leases
         # Phase 4). The repo-ref L2 store is same-harness-scoped by construction
@@ -1285,6 +1313,24 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         print(busy.user_message(), file=sys.stderr)
         return _BUSY_EXIT
 
+    # Place the Owner hold only AFTER the target lock is held, so a busy-target
+    # rejection above can't leak a hold that would linger until its TTL. The
+    # matching release lives in _run_with_cleanup's finally, which runs iff we
+    # reach it (i.e. iff the lock was acquired and the hold was placed).
+    if defer_to_owner:
+        try:
+            _owner.hold(args.name, owner_tenant)
+            log.info(
+                "Deferring credential relay for %s to the Connection Owner "
+                "(tenant=%s)", args.name, owner_tenant,
+            )
+        except Exception as exc:
+            log.warning(
+                "Owner hold for %s failed (%s) -- owning the relay directly "
+                "instead", args.name, exc,
+            )
+            defer_to_owner = False
+
     async def _run_with_cleanup() -> int:
         try:
             if overall_timeout is not None and overall_timeout > 0:
@@ -1317,6 +1363,13 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
                 )
             if relay_forward is not None:
                 await relay_forward.stop()
+            # Release the Connection Owner hold this tenant placed (idempotent;
+            # the Owner tears the relay down only when no tenant holds it).
+            if defer_to_owner:
+                try:
+                    _owner.release(args.name, owner_tenant)
+                except Exception as exc:
+                    log.debug("Owner release for %s failed: %s", args.name, exc)
             await manager.disconnect(args.name)
 
     try:
