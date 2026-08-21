@@ -352,6 +352,63 @@ class TestBridgeAgentUnsupported:
 
 
 # ---------------------------------------------------------------------------
+# Cold-recreate on resume (dotfiles#1610)
+# ---------------------------------------------------------------------------
+
+
+class TestBridgeAgentColdRecreate:
+    """The upstream resume/load/adopt paths must opt into the end+create last
+    resort (``allow_recreate=True``) so a stale/unloadable but non-deleted
+    session cold-recreates a fresh ACP session under the same bridge id instead
+    of surfacing a raw 500 (operator principle: a non-deleted session must
+    always cold-resume)."""
+
+    def _stopped_session(self, sm):
+        target = SpawnTarget(type="local", cwd="/tmp")
+        session = Session("s1", "test", target)
+        session.status = SessionStatus.STOPPED
+        session.event_log = EventLog()
+        sm._sessions["s1"] = session
+        sm._db.create_session(
+            "s1", "test", None, "/tmp", "local", "stopped", time.time()
+        )
+        return session
+
+    @pytest.mark.asyncio
+    async def test_load_session_allows_recreate(self, bridge_agent, sm, mock_conn):
+        bridge_agent.on_connect(mock_conn)
+        self._stopped_session(sm)
+        sm.resume_session = AsyncMock()
+
+        await bridge_agent.load_session(cwd="/tmp", session_id="s1")
+
+        sm.resume_session.assert_awaited_once()
+        assert sm.resume_session.await_args.kwargs["allow_recreate"] is True
+
+    @pytest.mark.asyncio
+    async def test_resume_session_allows_recreate(self, bridge_agent, sm, mock_conn):
+        bridge_agent.on_connect(mock_conn)
+        self._stopped_session(sm)
+        sm.resume_session = AsyncMock()
+
+        await bridge_agent.resume_session(cwd="/tmp", session_id="s1")
+
+        sm.resume_session.assert_awaited_once()
+        assert sm.resume_session.await_args.kwargs["allow_recreate"] is True
+
+    @pytest.mark.asyncio
+    async def test_adopt_existing_allows_recreate(self, bridge_agent, sm, mock_conn):
+        bridge_agent.on_connect(mock_conn)
+        self._stopped_session(sm)
+        sm.resume_session = AsyncMock()
+
+        await bridge_agent._adopt_existing("s1")
+
+        sm.resume_session.assert_awaited_once()
+        assert sm.resume_session.await_args.kwargs["allow_recreate"] is True
+
+
+# ---------------------------------------------------------------------------
 # Cleanup
 # ---------------------------------------------------------------------------
 
