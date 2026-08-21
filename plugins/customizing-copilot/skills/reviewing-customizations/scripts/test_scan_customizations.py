@@ -310,6 +310,8 @@ def test_context_budget_counts_static_custom_and_metadata(
     nested = repo / "pkg"
     nested.mkdir()
     (nested / "AGENTS.md").write_text("nested rule\n", encoding="utf-8")
+    (nested / "CLAUDE.md").write_text("nested claude\n", encoding="utf-8")
+    (nested / "GEMINI.md").write_text("nested gemini\n", encoding="utf-8")
     (repo / "CLAUDE.md").write_text("claude guidance\n", encoding="utf-8")
     (repo / "GEMINI.md").write_text("gemini guidance\n", encoding="utf-8")
     custom_one = tmp_path / "instructions-one"
@@ -348,7 +350,7 @@ def test_context_budget_counts_static_custom_and_metadata(
     budget = scan.build_context_budget(repo, [source], home=home)
     static = budget["static_instruction_payloads"]
     assert len(static["repository_always_loaded_files"]) == 3
-    assert len(static["repository_conditional_agents_files"]) == 1
+    assert len(static["repository_conditional_instruction_files"]) == 3
     assert len(static["personal_copilot_files"]) == 1
     assert len(static["custom_instruction_dir_files"]) == 2
     assert static["totals"]["characters"] == (
@@ -356,6 +358,8 @@ def test_context_budget_counts_static_custom_and_metadata(
         + len("claude guidance\n")
         + len("gemini guidance\n")
         + len("nested rule\n")
+        + len("nested claude\n")
+        + len("nested gemini\n")
         + len("personal policy\n")
         + len("operator policy one\n")
         + len("operator policy two\n")
@@ -545,7 +549,7 @@ def test_json_context_budget_shape(tmp_path: Path, capsys, monkeypatch):
     assert set(payload["context_budget"]["static_instruction_payloads"]) == {
         "totals",
         "repository_always_loaded_files",
-        "repository_conditional_agents_files",
+        "repository_conditional_instruction_files",
         "personal_copilot_files",
         "custom_instruction_dir_files",
     }
@@ -556,3 +560,41 @@ def test_json_context_budget_shape(tmp_path: Path, capsys, monkeypatch):
         "words": 1,
         "estimated_tokens": 2,
     }
+
+
+def test_custom_instruction_tilde_uses_selected_home(
+    tmp_path: Path, monkeypatch,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    home = tmp_path / "selected-home"
+    instructions = home / ".instructions"
+    instructions.mkdir(parents=True)
+    (instructions / "policy.instructions.md").write_text(
+        "selected policy\n", encoding="utf-8"
+    )
+    monkeypatch.setenv(
+        "COPILOT_CUSTOM_INSTRUCTIONS_DIRS", "~/.instructions"
+    )
+
+    budget = scan.build_context_budget(repo, home=home)
+
+    entries = budget["static_instruction_payloads"][
+        "custom_instruction_dir_files"
+    ]
+    assert len(entries) == 1
+    assert entries[0]["path"] == (
+        "<custom-instructions-1>/policy.instructions.md"
+    )
+
+
+def test_json_without_context_budget_preserves_default_shape(
+    tmp_path: Path, capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    assert scan.main([str(repo), "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert "context_budget" not in payload

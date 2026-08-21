@@ -559,7 +559,7 @@ def scan_text_files(
             is_surface_md = (
                 name == "SKILL.md"
                 or name.endswith(".agent.md")
-                or name == "AGENTS.md"
+                or name in {"AGENTS.md", "CLAUDE.md", "GEMINI.md"}
             )
             # Secrets: only config-shaped customization files.
             config_target = suffix in CONFIG_SUFFIXES and (
@@ -691,7 +691,7 @@ def _measure_files(paths: set[Path], root: Path, *,
         except OSError:
             continue
         text = raw.decode("utf-8", errors="replace")
-        byte_count = len(raw)
+        byte_count = len(text.encode("utf-8"))
         if frontmatter_only:
             split = split_frontmatter(text)
             if split is None:
@@ -706,11 +706,13 @@ def _measure_files(paths: set[Path], root: Path, *,
 
 
 def _repo_instruction_files(root: Path) -> tuple[set[Path], set[Path]]:
-    """Return always-loaded repo instructions and nested conditional AGENTS."""
-    nested_agents = {
-        path for path in _walk_named_files(root, "AGENTS.md")
-        if path != root / "AGENTS.md"
-    }
+    """Return root-loaded and cwd-conditional repository instructions."""
+    conditional: set[Path] = set()
+    for name in ("AGENTS.md", "CLAUDE.md", "GEMINI.md"):
+        conditional.update(
+            path for path in _walk_named_files(root, name)
+            if path != root / name
+        )
     always_loaded: set[Path] = set()
     for name in ("AGENTS.md", "CLAUDE.md", "GEMINI.md"):
         candidate = root / name
@@ -724,10 +726,10 @@ def _repo_instruction_files(root: Path) -> tuple[set[Path], set[Path]]:
         always_loaded.update(
             p for p in instruction_dir.rglob("*.instructions.md") if p.is_file()
         )
-    return always_loaded, nested_agents
+    return always_loaded, conditional
 
 
-def _custom_instruction_dirs() -> list[Path]:
+def _custom_instruction_dirs(home: Path) -> list[Path]:
     raw = os.environ.get("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", "")
     if not raw:
         return []
@@ -738,7 +740,13 @@ def _custom_instruction_dirs() -> list[Path]:
     for value in values:
         if not value.strip():
             continue
-        directory = Path(value.strip()).expanduser()
+        configured = value.strip()
+        if configured == "~":
+            directory = home
+        elif configured.startswith(("~/", "~\\")):
+            directory = home / configured[2:]
+        else:
+            directory = Path(configured)
         key = str(directory.resolve())
         if key not in seen:
             seen.add(key)
@@ -766,10 +774,12 @@ def _instruction_files_in(directory: Path) -> set[Path]:
     return files
 
 
-def _custom_instruction_files() -> tuple[set[Path], tuple[tuple[Path, str], ...]]:
+def _custom_instruction_files(
+    home: Path,
+) -> tuple[set[Path], tuple[tuple[Path, str], ...]]:
     files: set[Path] = set()
     aliases: list[tuple[Path, str]] = []
-    for index, directory in enumerate(_custom_instruction_dirs(), 1):
+    for index, directory in enumerate(_custom_instruction_dirs(home), 1):
         files.update(_instruction_files_in(directory))
         aliases.append((directory, f"custom-instructions-{index}"))
     return files, tuple(aliases)
@@ -928,7 +938,7 @@ def build_context_budget(
         root,
         aliases=((home / ".copilot", "personal-copilot"),),
     )
-    custom_files, custom_aliases = _custom_instruction_files()
+    custom_files, custom_aliases = _custom_instruction_files(home)
     custom_entries = _measure_files(
         custom_files, root, aliases=custom_aliases
     )
@@ -959,7 +969,7 @@ def build_context_budget(
         "static_instruction_payloads": {
             "totals": _sum_metrics(static_entries),
             "repository_always_loaded_files": repo_always_entries,
-            "repository_conditional_agents_files": repo_conditional_entries,
+            "repository_conditional_instruction_files": repo_conditional_entries,
             "personal_copilot_files": personal_entries,
             "custom_instruction_dir_files": custom_entries,
         },
@@ -999,9 +1009,9 @@ def _print_context_budget(budget: dict) -> None:
         ("Repo always-loaded", len(
             static["repository_always_loaded_files"]
         ), _sum_metrics(static["repository_always_loaded_files"])),
-        ("Nested AGENTS (conditional)", len(
-            static["repository_conditional_agents_files"]
-        ), _sum_metrics(static["repository_conditional_agents_files"])),
+        ("Nested repo instructions", len(
+            static["repository_conditional_instruction_files"]
+        ), _sum_metrics(static["repository_conditional_instruction_files"])),
         ("Personal Copilot", len(
             static["personal_copilot_files"]
         ), _sum_metrics(static["personal_copilot_files"])),
@@ -1071,13 +1081,15 @@ def main(argv: list[str] | None = None) -> int:
     budget = build_context_budget(root, sources) if args.context_budget else None
 
     if args.json:
-        print(json.dumps({
+        payload = {
             "root": str(root),
             "blocking": report.blocking,
             "total": len(report.findings),
             "findings": [asdict(f) for f in report.findings],
-            "context_budget": budget,
-        }, indent=2))
+        }
+        if budget is not None:
+            payload["context_budget"] = budget
+        print(json.dumps(payload, indent=2))
     else:
         if not report.findings:
             print("[OK] no mechanical findings")
