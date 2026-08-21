@@ -62,12 +62,14 @@ class _FakeTransport:
         reverse_forwards=None,
         probe_result=None,
         probe_error: Exception | None = None,
+        preflight_result=None,
     ):
         self._state = state
         self.exists = exists
         self._reverse_forwards = list(reverse_forwards or [])
         self.probe_result = probe_result
         self.probe_error = probe_error
+        self.preflight_result = preflight_result
         self.pushed: list[tuple[str, str]] = []
         self.runs: list[str] = []
 
@@ -79,6 +81,8 @@ class _FakeTransport:
 
     async def run(self, command, *, timeout=60.0):
         self.runs.append(command)
+        if command.startswith("python3 -S "):
+            return self.preflight_result or (0, "", "")
         if command.startswith("cat "):
             return (0, json.dumps(self._state), "")
         if "/dev/tcp/127.0.0.1/" in command:
@@ -200,6 +204,8 @@ async def test_codespace_spawner_ships_launches_forwards(monkeypatch):
     assert spawned.protocol_version == proto.PROTOCOL_VERSION
     # bundle shipped once (path_exists returned False)
     assert len(t.pushed) == 1
+    # The staged archive is import-checked without site-packages before launch.
+    assert any(c.startswith("python3 -S ") and "--help" in c for c in t.runs)
     # a detached launch ran, carrying the nonce via env
     assert any("setsid nohup" in c for c in t.runs)
     assert any(sp._NONCE_ENV in c for c in t.runs)
@@ -221,6 +227,24 @@ async def test_codespace_spawner_skips_ship_on_cache_hit(monkeypatch):
         ["copilot"], session_id="s",
     )
     assert t.pushed == []  # already present -> no re-ship
+
+
+@pytest.mark.asyncio
+async def test_codespace_spawner_fails_fast_on_bundle_preflight(monkeypatch):
+    _patch_common(monkeypatch)
+    state = {"pid": 1, "child_pid": 2, "port": 51000}
+    t = _FakeTransport(
+        state,
+        preflight_result=(1, "", "ModuleNotFoundError: missing_dependency"),
+    )
+
+    with pytest.raises(RuntimeError, match="bundle preflight failed") as exc_info:
+        await sp.CodeSpaceSpawner(t, ready_timeout=5).spawn(
+            ["copilot"], session_id="s",
+        )
+
+    assert "missing_dependency" in str(exc_info.value)
+    assert not any("setsid nohup" in command for command in t.runs)
 
 
 @pytest.mark.asyncio

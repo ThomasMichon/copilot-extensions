@@ -27,11 +27,13 @@ import tempfile
 import zipapp
 from pathlib import Path
 
+import agent_procutil
+
 # The minimal host-role import closure (verified to import on Linux with no heavy
 # deps). Deliberately excludes the frontend-only modules (client, acp_adapter,
 # host_index, version_mux, spawner) and agent_runner (which pulls the full
 # agent-bridge). launcher.main() owns a child from an explicit argv and serves.
-_BUNDLE_MODULES = (
+_AGENT_BRIDGE_MODULES = (
     "__init__.py",
     "winjob.py",
     "session_host/__init__.py",
@@ -48,15 +50,23 @@ def _pkg_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def _bundle_sources() -> tuple[tuple[str, Path], ...]:
+    """Archive-relative paths and their source files for the host closure."""
+    procutil_source = Path(agent_procutil.__file__).resolve()
+    return tuple(
+        (f"agent_bridge/{rel}", _pkg_root() / rel)
+        for rel in _AGENT_BRIDGE_MODULES
+    ) + (("agent_procutil/__init__.py", procutil_source),)
+
+
 def bundle_source_hash() -> str:
     """A stable sha256 over the staged **source** (not the zip, whose metadata
     varies) -- the cache key that guarantees byte-identity across host and CS."""
-    root = _pkg_root()
     h = hashlib.sha256()
-    for rel in _BUNDLE_MODULES:
-        h.update(rel.encode("utf-8"))
+    for archive_rel, source in _bundle_sources():
+        h.update(archive_rel.encode("utf-8"))
         h.update(b"\0")
-        h.update((root / rel).read_bytes())
+        h.update(source.read_bytes())
         h.update(b"\0")
     h.update(_MAIN.encode("utf-8"))
     return h.hexdigest()
@@ -87,13 +97,12 @@ def build_session_host_bundle(
     if out.exists():
         return out, sha
 
-    root = _pkg_root()
     with tempfile.TemporaryDirectory(prefix="agbridge-bundle-") as td:
         stage = Path(td) / "src"
-        for rel in _BUNDLE_MODULES:
-            dst = stage / "agent_bridge" / rel
+        for archive_rel, source in _bundle_sources():
+            dst = stage / archive_rel
             dst.parent.mkdir(parents=True, exist_ok=True)
-            dst.write_bytes((root / rel).read_bytes())
+            dst.write_bytes(source.read_bytes())
         tmp_out = Path(td) / "bundle.pyz"
         # A shebang so the far side can also run ``./bundle.pyz`` directly.
         zipapp.create_archive(

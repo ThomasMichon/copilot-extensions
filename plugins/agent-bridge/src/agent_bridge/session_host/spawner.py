@@ -363,6 +363,21 @@ class CodeSpaceSpawner:
         if not await self._transport.path_exists(remote_bundle):
             await self._transport.push_file(str(bundle_path), remote_bundle)
 
+        # Import the staged archive with site-packages disabled before starting
+        # it detached. This catches an incomplete bundle immediately instead of
+        # waiting the full readiness timeout for a process that already crashed.
+        preflight = (
+            f"python3 -S {shlex.quote(remote_bundle)} --help >/dev/null"
+        )
+        preflight_rc, preflight_out, preflight_err = await self._transport.run(
+            preflight, timeout=30.0,
+        )
+        if preflight_rc != 0:
+            raise RuntimeError(
+                "remote Session Host bundle preflight failed "
+                f"(rc={preflight_rc}): {preflight_err or preflight_out}"
+            )
+
         # Re-assert the CodeSpace-side ADO/git auth helpers before launching the
         # dispatched agent (dotfiles #733 T2). The interactive `agent-codespaces
         # ssh` connect path deploys these via Stage-4 `_provision_relay_helpers`,
