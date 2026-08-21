@@ -35,6 +35,7 @@ remaining steps are best-effort and never roll back.
 from __future__ import annotations
 
 import logging
+import socket
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -113,6 +114,7 @@ class CutoverOrchestrator:
         health_check: Callable[[str, int], bool],
         make_client: Callable[[str], _Client],
         pick_free_port: Callable[[], int],
+        service: str | None = None,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
         routing_mod: Any = routing,
@@ -127,6 +129,43 @@ class CutoverOrchestrator:
         self.sleep = sleep
         self.clock = clock
         self.routing = routing_mod
+        # Uniform lifecycle log context. ``service`` defaults to the config-dir
+        # convention (``~/.agent-bridge`` -> ``agent-bridge``); ``node`` is the
+        # source machine. Both are captured once for every emitted record.
+        from zdd import lifecycle
+
+        self.service = service or lifecycle.service_from_config_dir(self.config_dir)
+        self._node = socket.gethostname()
+
+    # -- lifecycle logging ---------------------------------------------------
+
+    def _emit(
+        self,
+        action: str,
+        outcome: str,
+        *,
+        port: int | None = None,
+        detail: dict[str, Any] | None = None,
+    ) -> None:
+        """Append one durable cutover lifecycle record (fail-open).
+
+        Kept entirely separate from ``result.steps`` and the control flow: it
+        records *what happened* to a durable log so an aborted cutover (the
+        "new daemon never bound" incident) is diagnosable after the fact,
+        without ever perturbing the cutover it observes.
+        """
+        from zdd import lifecycle
+
+        lifecycle.record(
+            self.config_dir,
+            action,
+            service=self.service,
+            outcome=outcome,
+            version=self.version,
+            port=port,
+            node=self._node,
+            detail=detail,
+        )
 
     # -- helpers -------------------------------------------------------------
 
@@ -165,6 +204,8 @@ class CutoverOrchestrator:
         force: bool = False,
         poll: float = 0.5,
     ) -> CutoverResult:
+        from zdd import lifecycle
+
         result = CutoverResult(ok=False)
         old = self.routing.read_active_endpoint(self.config_dir)
         result.old_endpoint = old
@@ -183,6 +224,10 @@ class CutoverOrchestrator:
         started_at = breadcrumb.write_breadcrumb(
             self.config_dir, state="started", old=old_dict, new_port=new_port,
         )["started_at"]
+        self._emit(
+            lifecycle.CUTOVER_BEGIN, lifecycle.BEGIN, port=new_port,
+            detail={"old_port": old.port if old is not None else None},
+        )
 
         handle = self.spawn_passive(new_port)
         result.steps.append(f"spawned passive pid={getattr(handle, 'pid', '?')} "
@@ -191,11 +236,22 @@ class CutoverOrchestrator:
         flipped = False
         try:
             if not self._await_health(new_port, health_timeout, poll):
+                # The durable signal that is otherwise missing: a record that
+                # the new daemon never bound its port -- the failure that, left
+                # untraced, strands a client re-dialing a dead advertised port.
+                self._emit(
+                    lifecycle.CUTOVER_NEW_BOUND, lifecycle.FAIL, port=new_port,
+                    detail={"health_timeout": health_timeout},
+                )
                 raise CutoverError(
                     f"new daemon did not become healthy on port {new_port} "
                     f"within {health_timeout:.0f}s"
                 )
             result.steps.append("new daemon healthy")
+            self._emit(
+                lifecycle.CUTOVER_NEW_BOUND, lifecycle.OK, port=new_port,
+                detail={"pid": getattr(handle, "pid", None)},
+            )
 
             # Flip the route: new active, old demoted to previous. From here a
             # new CLI resolution lands on the new daemon; long-lived sockets stay
@@ -211,6 +267,10 @@ class CutoverOrchestrator:
                 self.config_dir, state="flipped", old=old_dict,
                 new_port=new_port, started_at=started_at,
             )
+            self._emit(
+                lifecycle.CUTOVER_FLIP, lifecycle.OK, port=new_port,
+                detail={"old_port": old.port if old is not None else None},
+            )
 
             if old is not None and old.port != new_port:
                 old_client = self.make_client(old.base_url)
@@ -220,6 +280,7 @@ class CutoverOrchestrator:
                     self.config_dir, state="draining", old=old_dict,
                     new_port=new_port, started_at=started_at,
                 )
+                self._emit(lifecycle.DRAIN, lifecycle.BEGIN, port=old.port)
                 drain_res = old_client.drain(
                     timeout=drain_timeout, poll=1.0, force=force
                 )
@@ -229,11 +290,38 @@ class CutoverOrchestrator:
                     f"forced={drain_res.get('forced')}"
                 )
                 if not drain_res.get("drained"):
+                    self._emit(
+                        lifecycle.DRAIN, lifecycle.FAIL, port=old.port,
+                        detail={"busy_sessions": drain_res.get("busy_sessions")},
+                    )
                     raise CutoverError(
                         "old daemon did not drain "
                         f"(busy: {drain_res.get('busy_sessions')}); "
                         "rerun with force to proceed"
                     )
+                self._emit(
+                    lifecycle.DRAIN, lifecycle.OK, port=old.port,
+                    detail={"clean": drain_res.get("clean"),
+                            "forced": drain_res.get("forced")},
+                )
+
+                # Verify-before-retire seam: re-confirm the new daemon is still
+                # live right before we retire the old one. Log-only in this slice
+                # (a fault here is recorded, not yet gated -- that is the next
+                # slice); it makes "we retired the old daemon while the new one
+                # was already unhealthy" a detectable, durable fact.
+                new_live = False
+                try:
+                    new_live = bool(
+                        self.health_check(self._client_host(), new_port)
+                    )
+                except Exception:  # noqa: BLE001 -- verification is observational
+                    new_live = False
+                self._emit(
+                    lifecycle.CUTOVER_VERIFY,
+                    lifecycle.OK if new_live else lifecycle.FAIL,
+                    port=new_port,
+                )
 
                 # COMMIT POINT: retire the old daemon. Past here the new daemon
                 # is the only one, so we never roll back.
@@ -244,6 +332,12 @@ class CutoverOrchestrator:
                 )
                 old_client.shutdown()
                 result.steps.append("old daemon shutdown requested")
+                # The retired daemon is the OLD one, so log its port (matching
+                # `drain`); the new port is carried in detail for correlation.
+                self._emit(
+                    lifecycle.CUTOVER_RETIRE, lifecycle.OK, port=old.port,
+                    detail={"new_port": new_port},
+                )
             else:
                 result.committed = True
                 breadcrumb.write_breadcrumb(
@@ -251,6 +345,11 @@ class CutoverOrchestrator:
                     new_port=new_port, started_at=started_at,
                 )
                 result.steps.append("no prior active daemon -- nothing to retire")
+                # Cold start: nothing was retired; the new port is what now serves.
+                self._emit(
+                    lifecycle.CUTOVER_RETIRE, lifecycle.OK, port=new_port,
+                    detail={"note": "no prior active daemon"},
+                )
 
             # Best-effort: hand the credential relay (9857) to the new daemon
             # once the old one has released it.
@@ -269,6 +368,10 @@ class CutoverOrchestrator:
                 result.ok = True
                 log.error("Cutover post-commit error: %s", exc)
                 breadcrumb.clear_breadcrumb(self.config_dir)
+                self._emit(
+                    lifecycle.ROLLBACK, lifecycle.OK, port=new_port,
+                    detail={"committed_forward": True, "error": str(exc)},
+                )
                 return result
             result.error = str(exc)
             self._rollback(old, handle, new_port, result, flipped=flipped)
@@ -283,6 +386,31 @@ class CutoverOrchestrator:
                     new_port=new_port, error=result.error,
                     started_at=started_at,
                 )
+            # A rollback outcome reflects service AVAILABILITY, not cutover
+            # success. `result.ok` only marks a completed cutover (commit
+            # forward); a normal rollback that *restored the old daemon* leaves
+            # `result.ok` False even though service recovered. So confirm from
+            # the live routing table + a health probe: `ok` when something is
+            # serving again, `fail` only for the alertable case where the
+            # rollback left nothing serving. Best-effort -- a probe failure is
+            # treated as not-serving, never raised.
+            serving = result.ok
+            if not serving:
+                try:
+                    active = self.routing.read_active_endpoint(self.config_dir)
+                    serving = bool(
+                        active
+                        and self.health_check(active.client_host, active.port)
+                    )
+                except Exception:  # noqa: BLE001 -- availability probe is best-effort
+                    serving = False
+            self._emit(
+                lifecycle.ROLLBACK,
+                lifecycle.OK if serving else lifecycle.FAIL,
+                port=new_port,
+                detail={"rolled_back": result.rolled_back, "serving": serving,
+                        "error": result.error},
+            )
             return result
 
     def _adopt_relay(self, new_port: int, result: CutoverResult) -> None:
