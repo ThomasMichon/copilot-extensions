@@ -32,14 +32,24 @@ class DispatchClient:
         token: str | None = None,
         timeout: float = 10.0,
         transport: httpx.BaseTransport | None = None,
+        tunnel: Any = None,
     ):
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         self._http = httpx.Client(
             base_url=base_url.rstrip("/"), headers=headers, timeout=timeout, transport=transport
         )
+        # An optional owned resource (e.g. an SSH failover port-forward) closed
+        # together with the HTTP client, so the transport lives exactly as long
+        # as the client that rides it.
+        self._tunnel = tunnel
 
     def close(self) -> None:
         self._http.close()
+        if self._tunnel is not None:
+            try:
+                self._tunnel.close()
+            finally:
+                self._tunnel = None
 
     def __enter__(self) -> DispatchClient:
         return self

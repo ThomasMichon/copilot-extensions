@@ -29,6 +29,7 @@ from .config import (
     Config,
     client_token,
     client_url,
+    failover_machine,
     has_live_local_coordinator,
     shared_token,
     shared_url,
@@ -142,9 +143,60 @@ def _resolve_client_target(args: argparse.Namespace) -> tuple[str, str | None]:
     return client_url(), (token or client_token())
 
 
+def _cmd_print_endpoint(args: argparse.Namespace) -> int:
+    """Print this machine's local coordinator base URL (``http://host:port``).
+
+    A peer resolves this over SSH (``ssh <alias> agent-dispatch print-endpoint``)
+    to discover the dynamic loopback port to port-forward to for SSH failover.
+    Local-only: it reports *this* host's coordinator, never a failover target.
+    """
+    print(client_url())
+    return 0
+
+
+def _should_ssh_failover(args: argparse.Namespace) -> str | None:
+    """The peer machine to SSH-failover to for this command, or ``None``.
+
+    Applies only on the **default local path** (no explicit ``--url``/``--shared``)
+    when ``AGENT_DISPATCH_FAILOVER_MACHINE`` names a real *peer* and the local
+    coordinator is not live. Preferred over the hosted ``AGENT_DISPATCH_SHARED_URL``
+    HTTP fallback (per-machine SSH identity, no shared secret). Returns the peer
+    machine name, or ``None`` when failover does not apply.
+    """
+    if getattr(args, "url", None) or getattr(args, "shared", False):
+        return None
+    machine = failover_machine()
+    if not machine:
+        return None
+    from . import remote_dispatch
+
+    if not remote_dispatch.is_peer_machine(machine):
+        return None
+    if has_live_local_coordinator():
+        return None
+    return machine
+
+
 def _client(args: argparse.Namespace, *, ensure: bool = True) -> DispatchClient:
     if ensure:
         _ensure_local_coordinator(args)
+    # SSH-transport failover: local coordinator down + a peer configured -> open
+    # an SSH port-forward to the peer's loopback coordinator (per-machine key =
+    # identity, tokenless) and run this command against it, keeping local context.
+    peer = _should_ssh_failover(args)
+    if peer is not None:
+        from . import ssh_tunnel
+
+        try:
+            tunnel = ssh_tunnel.open_coordinator_tunnel(peer)
+        except ssh_tunnel.TunnelUnavailable as exc:
+            print(
+                f"agent-dispatch: local coordinator down and SSH failover to "
+                f"{peer!r} unavailable ({exc})",
+                file=sys.stderr,
+            )
+            raise SystemExit(2) from exc
+        return DispatchClient(tunnel.base_url, token=None, tunnel=tunnel)
     url, token = _resolve_client_target(args)
     return DispatchClient(url, token=token)
 
@@ -3858,6 +3910,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("health", help="check coordinator health")
     p.set_defaults(func=lambda args: _emit(_client(args, ensure=False).health()))
+
+    pe = sub.add_parser(
+        "print-endpoint",
+        help="print this machine's local coordinator base URL (for SSH-failover "
+             "peer discovery)",
+    )
+    pe.set_defaults(func=_cmd_print_endpoint)
 
     # -- Loop recipes: list / describe / render / kick --------------------
     rp = sub.add_parser(

@@ -8,7 +8,13 @@ import pytest
 
 from agent_dispatch import config as config_mod
 from agent_dispatch import rendezvous
-from agent_dispatch.config import DEFAULT_SWEEP_INTERVAL, client_url, load_config, shared_token
+from agent_dispatch.config import (
+    DEFAULT_SWEEP_INTERVAL,
+    client_url,
+    failover_machine,
+    load_config,
+    shared_token,
+)
 
 # The token-from-command tests below invoke `printf` via a no-shell subprocess
 # (shlex-split, no shell). `printf` is not available as a standalone executable
@@ -123,6 +129,15 @@ def test_client_url_degrades_on_resolution_error(monkeypatch):
 
 
 # -- shared coordinator token resolution ------------------------------------
+
+def test_failover_machine_unset_is_none(monkeypatch):
+    monkeypatch.delenv("AGENT_DISPATCH_FAILOVER_MACHINE", raising=False)
+    assert failover_machine() is None
+
+
+def test_failover_machine_from_env(monkeypatch):
+    monkeypatch.setenv("AGENT_DISPATCH_FAILOVER_MACHINE", "peer-host")
+    assert failover_machine() == "peer-host"
 
 
 def test_shared_token_direct_env_wins(monkeypatch):
