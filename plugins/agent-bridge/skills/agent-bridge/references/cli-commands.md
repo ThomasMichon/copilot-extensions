@@ -190,8 +190,11 @@ agent-bridge service status     # running state + bound port + PID
 > interactively signed in. For an always-on machine reached over SSH/RDP with no
 > persistent session, (re)install with `install.ps1 install -NonInteractive`
 > (or `AGENT_BRIDGE_NONINTERACTIVE=1`) to register a **boot-triggered S4U** task
-> instead -- opt-in, preserved across updates. See the `agent-worktrees:copilot-extensions-setup`
-> skill.
+> instead. A working headless registration is preserved across updates. If a
+> requested start remains at `267011` (`SCHED_S_TASK_HAS_NOT_RUN`), the likely
+> cause is an S4U token-acquisition failure; an update without the explicit
+> non-interactive opt-in recovers to the default interactive `AtLogOn` task.
+> See the `agent-worktrees:copilot-extensions-setup` skill.
 
 `agent-bridge start` (no `service`) runs the server in the **foreground** -- it
 is the entry point the service manager invokes, and is useful for debugging.
