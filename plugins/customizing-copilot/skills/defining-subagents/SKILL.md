@@ -120,7 +120,11 @@ domain-specific MCP servers belong in the sub-agent that uses them. For the full
 registration hierarchy, see the **registering-mcp-servers** skill.
 
 If an agent's MCP tools fail to load, report the problem to the administrator and
-stop -- don't attempt workarounds via bash, curl, or other fallbacks.
+stop -- don't improvise a *different* transport to the upstream (raw `curl`/HTTP
+to the service, hand-rolled JSON-RPC, hitting the product API directly) to paper
+over a broken bridge. Invoking the **same bridge** through its own CLI face is
+**not** such a workaround (see *Invoking MCP tools from the shell* below); a raw
+bypass of the bridge is.
 
 ## Anti-recursion and tool access
 
@@ -192,6 +196,52 @@ any applicable box is unchecked:
 
 An agent with **no** `mcp-servers` still owes the tools rule (row 1) but is
 exempt from the MCP-readiness rows.
+
+### Invoking MCP tools from the shell (sanctioned CLI path)
+
+When the MCP server is an **`agent-mcp` bridge** (`command: agent-mcp`, as most
+wrapped upstreams in this ecosystem are) **and the agent has shell access**
+(`execute` — which `tools: ["*"]` grants), the same catalog is invocable straight
+from the CLI, no JSON-RPC by hand. `<bridge>` is the bridge's **registered name or
+the exact config path** the frontmatter uses — e.g. the `--config <path>` the
+`mcp-servers` block passes, given positionally:
+
+- **`agent-mcp call <bridge> <tool> '<arguments-json>'`** — one-shot: invoke a
+  single upstream tool and print the result (pipeable; also reads the args JSON on
+  stdin).
+- **`agent-mcp materialize <bridge>`** — project the whole `tools/list` catalog
+  into a discoverable CLI stub fleet under `~/.agent-mcp/materialized/<server>/`
+  (each stub forwards to `agent-mcp call`, so tools are invocable by name and pipe
+  like any command; `--windows` emits a `.ps1`/`.cmd` shim farm). Re-running
+  rebuilds atomically, so it doubles as a drift refresh.
+
+This is a **first-class, sanctioned path**, not a fault-masking fallback: it loads
+the *same* bridge configuration and follows the *same* upstream auth and
+protocol-negotiation path as the in-process `mcp-servers` block — it is the
+bridge's own CLI face, not an improvised bypass. (Caveat: a shell invocation only
+inherits the ambient environment, **not** variables set *only* in the frontmatter
+`mcp-servers.env` — export those yourself if the bridge relies on them.) It shines
+for **shell-native work**: piping a result through `jq`, chaining tools where one's
+output feeds the next, or reaching a tool the runtime registered as
+*deferred/searchable* rather than immediately callable. See the **`agent-mcp`**
+skill (§ *MCP → CLI: `call` and `materialize`*) for the full mechanics.
+
+Three boundaries keep this coherent with the readiness rule above:
+
+- **Not a way past a failed readiness probe.** Use `call`/`materialize` as
+  ordinary execution options when your MCP surface is **healthy** (or a tool is
+  merely *deferred/searchable* — that is available, not failed). Do **not** reach
+  for the CLI to keep going after the readiness probe *fails*: a probe that fails
+  while the same bridge answers on the CLI is itself a fault (an in-process
+  registration problem) worth surfacing — report that discrepancy and **stop**,
+  per the readiness rule, rather than quietly proceeding.
+- **It cannot rescue a broken bridge.** If the *bridge itself* is broken (upstream
+  down, credentials missing, provisioning failed), `agent-mcp call` fails
+  **identically** — same bridge — so it can't paper over a genuine bridge fault.
+  Report the specific error and stop; don't loop.
+- **Same bridge, not a raw bypass.** The forbidden fallback (previous section) is
+  reaching the upstream by a *different* transport to route around the bridge.
+  `call`/`materialize` go *through* the bridge, so they stay inside the policy.
 
 ## Wrapping an MCP server: make the agent reachable
 
