@@ -478,17 +478,17 @@ if [[ "$VERSIONED_RUNTIME" -eq 1 ]]; then
     # legacy real .venv aside on the first migration. Run via the slot's own
     # python (stdlib-only helper); a CLI plugin has no daemon holding the link.
     if ! "$VENV_PYTHON" "$VR_SCRIPT" --root "$INSTALL_DIR" --link-name '.venv' \
-            activate "$SRC_VERSION" --replace-nonlink >/dev/null 2>&1; then
-        _fail "Failed to activate versioned venv (.venv -> versions/$SRC_VERSION)"
+            activate "$SRC_VERSION" --replace-nonlink --no-link >/dev/null 2>&1; then
+        _fail "Failed to activate versioned runtime slot (versions/$SRC_VERSION; marker-only, no .venv link)"
         exit 1
     fi
-    _ok "Runtime version $SRC_VERSION active (.venv -> versions/$SRC_VERSION)"
+    _ok "Runtime version $SRC_VERSION active (marker-only; versions/$SRC_VERSION)"
     # GC superseded version slots, keeping the current + previous-good and any
     # slot with a live process (--protect-pids), so old versions do not pile up.
     if [[ -n "$PREV_VERSION" ]]; then
-        "$LINK_DIR/bin/python" "$VR_SCRIPT" --root "$INSTALL_DIR" --link-name '.venv' gc --protect-pids --keep "$PREV_VERSION" 2>&1 | sed 's/^/  ...    gc: /' || true
+        "$VENV_PYTHON" "$VR_SCRIPT" --root "$INSTALL_DIR" --link-name '.venv' gc --protect-pids --keep "$PREV_VERSION" 2>&1 | sed 's/^/  ...    gc: /' || true
     else
-        "$LINK_DIR/bin/python" "$VR_SCRIPT" --root "$INSTALL_DIR" --link-name '.venv' gc --protect-pids 2>&1 | sed 's/^/  ...    gc: /' || true
+        "$VENV_PYTHON" "$VR_SCRIPT" --root "$INSTALL_DIR" --link-name '.venv' gc --protect-pids 2>&1 | sed 's/^/  ...    gc: /' || true
     fi
 fi
 # === end install-contract:v3 versioned-venv activate ===
@@ -549,7 +549,7 @@ cat > "$TMP" << EOF
     "branch": $BRANCH,
     "dirty": $DIRTY
   },
-  "venv": "$LINK_DIR",
+  "venv": "$VENV_DIR",
   "runtime": "python"
 }
 EOF

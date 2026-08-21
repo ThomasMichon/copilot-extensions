@@ -349,3 +349,19 @@ separate, intentional runtime and keeps its explicit venv.
   it") isn't met. Retiring it is now a **cleanliness** step (the correctness win is
   already banked via guard=0 + --strict), and it's a cross-installer sweep touching
   live-service installers -- carried as a focused follow-on.
+
+### 2026-08-20 - Phase final (b1): link retirement -- no-daemon CLIs
+- Started the `.venv` symlink retirement (operator: do_it_now). Mechanism per
+  installer: pass **`--no-link`** to `versioned_runtime.py activate` -- which both
+  REMOVES any existing `.venv`/`venv` symlink and stops creating a new one (it's
+  the `link_free` path) -- and repoint the post-activate install-time python uses
+  (gc, health-verify, manifest, status) from the link (`$LINK_DIR/bin/python` /
+  `$LINK_PYTHON`) to the **slot** (`$VENV_PYTHON`/`$VENV_DIR`). `LINK_DIR` is kept
+  ONLY to derive `--link-name '.venv'` so activate/gc can still find + remove a
+  pre-existing link. Pre-slot bootstrap python finders (`_bootstrap_python`) keep
+  their link check -- it's simply skipped once the link is gone (they degrade to a
+  PATH python to run the stdlib-only helper before the slot exists).
+- Batch = the 3 no-daemon CLIs: **agent-ssh, agent-mcp, agent-machines** (lowest
+  risk -- no service resolves through the link). Guard stays `--strict`-clean;
+  shellcheck + tests green. Bumped agent-ssh dev38->39, agent-mcp dev60->61,
+  agent-machines dev29->30.

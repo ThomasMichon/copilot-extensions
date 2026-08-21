@@ -190,6 +190,11 @@ if [[ -z "$SRC_VERSION" ]]; then
 fi
 VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
 VENV_PYTHON="$VENV_DIR/bin/python"
+# Marker-only: retire the `.venv` symlink (uniform-runtime-resolution, #765).
+# LINK_PYTHON now points at the versioned slot directly (the link is no longer
+# created); LINK_DIR is kept ONLY to derive the `--link-name` for versioned_runtime
+# so activate/gc can still find and REMOVE any pre-existing `.venv` link.
+LINK_PYTHON="$VENV_PYTHON"
 
 _versioned_activate() {
     # CLI (no daemon): health-gate the slot, swap the `.venv` symlink onto it
@@ -207,15 +212,15 @@ _versioned_activate() {
     _versioned_mark_complete
     local prev
     prev="$("$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo "")"
-    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink; then
-        _fail "Failed to activate versioned venv (.venv -> versions/$SRC_VERSION)"
+    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link; then
+        _fail "Failed to activate versioned runtime slot (versions/$SRC_VERSION; marker-only, no .venv link)"
         return 1
     fi
-    _ok "Runtime version $SRC_VERSION active (.venv -> versions/$SRC_VERSION)"
+    _ok "Runtime version $SRC_VERSION active (marker-only; versions/$SRC_VERSION)"
     if [[ -n "$prev" ]]; then
-        "$LINK_DIR/bin/python" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids --keep "$prev" 2>&1 | sed 's/^/  gc: /' || true
+        "$VENV_PYTHON" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids --keep "$prev" 2>&1 | sed 's/^/  gc: /' || true
     else
-        "$LINK_DIR/bin/python" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids 2>&1 | sed 's/^/  gc: /' || true
+        "$VENV_PYTHON" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids 2>&1 | sed 's/^/  gc: /' || true
     fi
     return 0
 }
@@ -430,7 +435,7 @@ fi
 
 if [[ "$ACTION" == "status" ]]; then
     echo '=== agent-ssh status ==='
-    [[ -x "$LINK_PYTHON" ]] && _ok "Venv: $LINK_DIR" || _skip "Venv missing: $LINK_DIR"
+    [[ -x "$LINK_PYTHON" ]] && _ok "Runtime: $VENV_DIR" || _skip "Runtime missing: $VENV_DIR"
     [[ -x "$STUB" ]] && _ok "Binstub: $STUB" || _skip "Binstub missing: $STUB"
     [[ -f "$MANIFEST_PATH" ]] && _ok "Deploy manifest: $MANIFEST_PATH" || _skip "Deploy manifest missing"
     exit 0
@@ -548,7 +553,7 @@ cat > "$TMP" << EOF
     "branch": $BRANCH,
     "dirty": $DIRTY
   },
-  "venv": "$LINK_DIR",
+  "venv": "$VENV_DIR",
   "runtime": "python"
 }
 EOF
