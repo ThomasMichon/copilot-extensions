@@ -199,6 +199,31 @@ def test_project_flag_bypasses_help(monkeypatch):
     assert "WORKTREE_PROJECT" not in os.environ
 
 
+def test_project_flag_preserves_invocation_context_before_chdir(monkeypatch, tmp_path):
+    invocation = tmp_path / "invocation"
+    anchor = tmp_path / "anchor"
+    settings = invocation / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text("{}")
+    anchor.mkdir()
+    monkeypatch.chdir(invocation)
+    monkeypatch.setattr(m, "_guard_project_scope", lambda *_args: None)
+    monkeypatch.setattr(
+        m, "_resolve_active_project", lambda _project: ("demo", str(anchor))
+    )
+    monkeypatch.setattr(m, "_cwd_is_inside_project", lambda _anchor: False)
+    contexts = []
+    monkeypatch.setattr(
+        m,
+        "_cmd_update_in_plugin",
+        lambda _args: contexts.append(m._invocation_update_context()) or 0,
+    )
+
+    assert m.main(["--project", "demo", "update", "--no-manager"]) == 0
+    assert Path.cwd() == anchor
+    assert contexts == [invocation]
+
+
 # ── `<repo> <slug>` command-surface router ───────────────────────────────────
 
 
