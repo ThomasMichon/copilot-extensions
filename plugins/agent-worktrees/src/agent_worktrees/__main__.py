@@ -4024,13 +4024,12 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
                 # there is actually a title to write.
                 with tracking._RecordLock(yaml_path):
                     record = tracking.load_record(yaml_path)
-                    _t = args.title.replace("\n", " ").strip()
-                    record.title = _t or None
+                    record.title = tracking.cap_title(args.title)
                     # Only a non-empty title is an authoritative assertion; an
                     # all-whitespace value clears it and re-enables auto-derive.
-                    record.title_asserted = bool(_t)
+                    record.title_asserted = record.title is not None
                     tracking.save_record(record)
-                print(f"[OK] Worktree {worktree_id} title updated: {args.title}")
+                print(f"[OK] Worktree {worktree_id} title updated: {record.title}")
             else:
                 output.err("--title-only requires --title")
                 return 1
@@ -4501,6 +4500,7 @@ def cmd_mark_complete(args: argparse.Namespace) -> int:
     if not yaml_path.exists():
         output.warn(f"Tracking file not found at {yaml_path}")
         print("Creating minimal tracking file...")
+        _capped = tracking.cap_title(args.title)
         record = tracking.WorktreeRecord(
             worktree_id=worktree_id,
             branch=git_ops.get_current_branch("."),
@@ -4511,7 +4511,8 @@ def cmd_mark_complete(args: argparse.Namespace) -> int:
             started_at=datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
             last_resumed_at=datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
             resume_count=0,
-            title=args.title,
+            title=_capped,
+            title_asserted=_capped is not None,
             status="active" if args.title_only else "complete",
             completed_at=None if args.title_only else datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
         )
@@ -4525,10 +4526,9 @@ def cmd_mark_complete(args: argparse.Namespace) -> int:
             with tracking._RecordLock(yaml_path):
                 record = tracking.load_record(yaml_path)
                 if args.title:
-                    _t = args.title.replace("\n", " ").strip()
-                    record.title = _t or None
+                    record.title = tracking.cap_title(args.title)
                     # Only a non-empty title is an authoritative assertion.
-                    record.title_asserted = bool(_t)
+                    record.title_asserted = record.title is not None
                 if not args.title_only:
                     tracking.update_status(record, "complete", save=False)
                 tracking.save_record(record)
@@ -13904,7 +13904,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Set this worktree's one-line disposition summary (write mode)")
     p.add_argument("--title", default=None,
                    help="Set this worktree's title -- the Picker's headline label "
-                        "(write mode). Use when the worktree's focus changes.")
+                        "(write mode). Use when the worktree's focus changes. Keep "
+                        "it short (<=30 chars; longer is truncated) so it fits the "
+                        "status bar / Picker rows -- put detail in --summary.")
     p.add_argument("--follow-up", dest="follow_up", action="store_true",
                    help="Flag this worktree as having actionable follow-ups (write mode)")
     p.add_argument("--resolved", action="store_true",
