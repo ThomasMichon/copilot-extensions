@@ -123,6 +123,34 @@ class TestReresolveOnRejection:
         assert seen[0].startswith("http://127.0.0.1:57585")  # tried old first
         assert seen[-1].startswith("http://127.0.0.1:47000")  # then the new one
 
+    def test_reresolve_preserves_encoded_query(self) -> None:
+        old_base = "http://127.0.0.1:57585"
+        new_base = "http://127.0.0.1:47000"
+        client = BridgeClient(
+            old_base,
+            "tok",
+            connect_grace=0.0,
+            reresolve=lambda: new_base,
+        )
+        seen: list[str] = []
+
+        def by_port(req, timeout=None):
+            seen.append(req.full_url)
+            if req.full_url.startswith(old_base):
+                raise urllib.error.URLError("refused")
+            return _FakeResp({"ok": True})
+
+        with patch("agent_bridge.client.urllib.request.urlopen", side_effect=by_port):
+            result = client._request(
+                "GET",
+                "/api/v1/live-sessions/resolve",
+                params={"handle": "machine/repo & worktree"},
+            )
+
+        assert result == {"ok": True}
+        suffix = "/api/v1/live-sessions/resolve?handle=machine%2Frepo+%26+worktree"
+        assert seen == [f"{old_base}{suffix}", f"{new_base}{suffix}"]
+
     def test_reresolves_on_each_retry_until_port_moves(self) -> None:
         # The first retry happens before active.json flips. A later retry must
         # consult it again rather than memoizing that first unchanged result.

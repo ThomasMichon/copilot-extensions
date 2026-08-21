@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterator
@@ -203,8 +204,8 @@ class BridgeClient:
         def _build_request() -> urllib.request.Request:
             url = f"{self._base}{path}"
             if params:
-                qs = "&".join(
-                    f"{k}={v}" for k, v in params.items() if v is not None
+                qs = urllib.parse.urlencode(
+                    {k: v for k, v in params.items() if v is not None}
                 )
                 if qs:
                     url = f"{url}?{qs}"
