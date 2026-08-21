@@ -12,6 +12,7 @@ from agent_worktrees.tracking import (
     _RecordLock,
     _atomic_write,
     add_resource_claim,
+    cap_title,
     create_new_record,
     deregister_session,
     find_paired_record,
@@ -1817,6 +1818,46 @@ class TestSetDisposition:
         set_disposition(load_record(p), title="hand-set")
         assert "title_asserted: true" in p.read_text()
         assert load_record(p).title_asserted is True
+
+    def test_set_disposition_caps_long_title(self, tmp_path: Path, monkeypatch):
+        from agent_worktrees.tracking import TITLE_MAX
+        rec = self._rec()
+        p = tmp_path / "wt.yaml"
+        monkeypatch.setattr("agent_worktrees.tracking.save_record",
+                            lambda record, path=None: save_record(record, p))
+        long_title = "Session a900: harness improvements (nudge, history, clobber fix)"
+        set_disposition(rec, title=long_title)
+        stored = load_record(p).title
+        assert len(stored) <= TITLE_MAX
+        assert stored.endswith("\u2026")            # truncated with an ellipsis
+        assert stored.startswith("Session a900")     # keeps the leading text
+        assert load_record(p).title_asserted is True
+
+
+class TestCapTitle:
+    """`cap_title` -- agent titles must fit the mux bar + Picker rows (TITLE_MAX)."""
+
+    def test_none_and_whitespace_become_none(self):
+        assert cap_title(None) is None
+        assert cap_title("") is None
+        assert cap_title("   ") is None
+
+    def test_short_title_unchanged(self):
+        assert cap_title("Fix relay port") == "Fix relay port"
+
+    def test_newlines_collapsed_and_stripped(self):
+        assert cap_title("  fix\nthe bug  ") == "fix the bug"
+
+    def test_long_title_truncated_with_ellipsis(self):
+        from agent_worktrees.tracking import TITLE_MAX
+        out = cap_title("x" * 100)
+        assert len(out) == TITLE_MAX
+        assert out.endswith("\u2026")
+
+    def test_boundary_exact_max_not_truncated(self):
+        from agent_worktrees.tracking import TITLE_MAX
+        exact = "y" * TITLE_MAX
+        assert cap_title(exact) == exact  # == TITLE_MAX chars, no ellipsis
 
 
 class TestForwardCompatContract:

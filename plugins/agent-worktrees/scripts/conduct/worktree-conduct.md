@@ -21,6 +21,10 @@ and process state cannot tell. Annotate THIS worktree's disposition with
   worktree's *focus* changed (not just its state), also refresh the headline
   title: `agent-worktrees status --title "<short headline>"` -- the title is the
   Picker's label, so keep it describing what this worktree is *now* about.
+  **Keep the title to ≤30 characters** (it must fit the mux status bar and the
+  Picker's table rows; longer titles are truncated). Put the longer story in
+  `--summary` -- that's what the Picker's actions menu and `status --history`
+  surface, and it can be as detailed as you like.
 - **End of a substantive turn?** Before you hand control back, refresh the
   one-line summary so the Picker reflects the latest state:
   `agent-worktrees status --summary "<where things stand>"` (with

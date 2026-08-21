@@ -21,6 +21,14 @@ from . import config as cfg
 from . import disposition_history
 from . import obligations
 
+#: Max length of an AGENT-ASSERTED worktree title. Agent titles must fit the mux
+#: status bar (120-col default) and the Worktree Picker's table rows; longer prose
+#: belongs in the disposition ``summary`` (Picker actions menu / ``status
+#: --history``). Enforced by :func:`cap_title` on the ``status --title`` write
+#: paths (NOT on auto-derived session-summary titles, which the bar truncates for
+#: display).
+TITLE_MAX = 30
+
 WorktreeStatus = Literal["active", "complete", "pushed", "finalized", "orphaned"]
 
 # A Copilot session's asserted lifecycle state within its worktree
@@ -1298,6 +1306,26 @@ def update_status(
         save_record(record)
 
 
+def cap_title(title: str | None) -> str | None:
+    """Normalize + cap an agent-asserted worktree title at :data:`TITLE_MAX`.
+
+    Agent-written titles must stay short so they fit the mux status bar (120-col
+    default) and the Worktree Picker's table rows -- longer prose belongs in the
+    disposition ``summary`` (shown in the Picker's actions menu and via
+    ``status --history``). Collapses newlines, strips, and truncates to **at
+    most** ``TITLE_MAX`` chars with a trailing ellipsis (an rstrip before the
+    ellipsis can make it slightly shorter). Empty/whitespace -> ``None``.
+    """
+    if not title:
+        return None
+    t = title.replace("\n", " ").strip()
+    if not t:
+        return None
+    if len(t) > TITLE_MAX:
+        t = t[: TITLE_MAX - 1].rstrip() + "\u2026"
+    return t
+
+
 def set_disposition(
     record: WorktreeRecord,
     *,
@@ -1314,17 +1342,18 @@ def set_disposition(
     follow-ups*, plus a one-line summary of what it is/left at and (optionally) a
     fresh ``title`` when the worktree's focus changes. ``summary``, ``title`` and
     ``follow_up`` are each applied only when not None, so a caller may update one
-    without disturbing the others. Stamps ``status_note_at`` (which the
-    postToolUse nudge watches to reset its drift counter) and appends a durable
-    entry to the worktree's disposition-history sidecar (see
-    :mod:`agent_worktrees.disposition_history`).
+    without disturbing the others. An asserted ``title`` is capped at
+    :data:`TITLE_MAX` (:func:`cap_title`) so it fits the status bar / Picker rows.
+    Stamps ``status_note_at`` (which the postToolUse nudge watches to reset its
+    drift counter) and appends a durable entry to the worktree's
+    disposition-history sidecar (see :mod:`agent_worktrees.disposition_history`).
     """
     changed: list[str] = []
     if summary is not None:
         record.summary = summary.replace("\n", " ").strip()
         changed.append("summary")
     if title is not None:
-        record.title = title.replace("\n", " ").strip() or None
+        record.title = cap_title(title)
         # An explicit --title assertion is authoritative; a cleared (empty)
         # title re-enables auto-derivation from the session summary.
         record.title_asserted = record.title is not None
