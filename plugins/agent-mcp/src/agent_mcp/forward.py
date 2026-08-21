@@ -39,6 +39,10 @@ from . import ipc
 
 _FALSEY = {"0", "false", "off", "no", ""}
 
+# How long to wait for a race-spawned serve host's socket to appear before
+# giving up and running the session as a direct in-process bridge.
+_ENSURE_SERVE_TIMEOUT = 5.0
+
 
 def _env_disabled(name: str) -> bool:
     """True when ``name`` is set to a truthy (disabling) value."""
@@ -49,6 +53,16 @@ def _env_disabled(name: str) -> bool:
 def _multiplex_enabled() -> bool:
     """Whether to attempt the serve-host attach (else always run direct)."""
     return not _env_disabled("AGENT_MCP_NO_MULTIPLEX")
+
+
+def _ensure_serve_enabled() -> bool:
+    """Whether the forwarder may spawn a serve host on demand when none is up.
+
+    Disabled by ``AGENT_MCP_NO_ENSURE_SERVE`` (only attach to an already-running
+    host) or by ``AGENT_MCP_NO_SERVE`` (bypass serve entirely).
+    """
+    return not (_env_disabled("AGENT_MCP_NO_ENSURE_SERVE")
+                or os.environ.get("AGENT_MCP_NO_SERVE"))
 
 
 def _looks_like_path(ref: str) -> bool:
@@ -78,16 +92,78 @@ def _abs_bridge_ref(bridge: str) -> str:
     return str(bridge)
 
 
+def _serve_handle(socket_path: str | None) -> str:
+    """The socket handle both the forwarder and a spawned host agree on."""
+    return (socket_path or os.environ.get("AGENT_MCP_SERVE_SOCKET")
+            or str(ipc.default_socket_path()))
+
+
+def _spawn_serve_host(handle: str) -> None:
+    """Spawn a detached ``agent-mcp serve`` host bound to ``handle``.
+
+    Fully detached (its own session/process group) so it **outlives** this
+    forwarder and serves later sessions too; the host installs no parent-death
+    watchdog, and its single-instance lease collapses concurrent spawns from
+    racing forwarders into exactly one live host. Best-effort: a failure to spawn
+    just leaves the caller to fall back to a direct bridge.
+    """
+    import subprocess
+
+    cmd = [sys.executable, "-m", "agent_mcp", "serve", "--socket", handle]
+    kwargs: dict = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+    if os.name == "posix":
+        kwargs["start_new_session"] = True
+    else:  # Windows: detach from the console + this process's job/group
+        flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
+            subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        if flags:
+            kwargs["creationflags"] = flags
+    subprocess.Popen(cmd, **kwargs)  # noqa: S603 - fixed argv, our own runtime
+
+
+def _ensure_serve(socket_path: str | None):
+    """Return a live serve handle, spawning a host on demand; ``None`` on failure.
+
+    Idempotent under concurrency: if a host is already advertised it is returned
+    immediately; otherwise a detached host is spawned and we wait (bounded) for
+    its socket to appear. Racing forwarders may each spawn -- the host lease
+    guarantees only one wins and all of them converge on its socket.
+    """
+    import time
+
+    handle = _serve_handle(socket_path)
+    existing = ipc.serve_socket_if_available(handle)
+    if existing is not None:
+        return existing
+    try:
+        _spawn_serve_host(handle)
+    except OSError:
+        return None
+    deadline = time.monotonic() + _ENSURE_SERVE_TIMEOUT
+    while time.monotonic() < deadline:
+        sock = ipc.serve_socket_if_available(handle)
+        if sock is not None:
+            return sock
+        time.sleep(0.05)
+    return None
+
+
 def run(bridge: str, socket_path: str | None = None) -> int:
     """Forward one session through a resident serve host, or fall back to direct.
 
     Returns a process exit code. The direct fallback is taken (with the heavy
-    bridge tree imported lazily) whenever multiplexing is disabled, no host is
-    advertised, or the attach is refused.
+    bridge tree imported lazily) whenever multiplexing is disabled, no host can
+    be reached or spawned, or the attach is refused.
     """
     if not _multiplex_enabled():
         return _run_direct(bridge)
     socket = ipc.serve_socket_if_available(socket_path)
+    if socket is None and _ensure_serve_enabled():
+        socket = _ensure_serve(socket_path)
     if socket is None:
         return _run_direct(bridge)
     result = asyncio.run(_attach_and_pump(socket, _abs_bridge_ref(bridge)))
