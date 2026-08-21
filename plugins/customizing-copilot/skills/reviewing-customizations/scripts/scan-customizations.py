@@ -43,9 +43,9 @@ same reference-only way. Exit code is 0 unless `--strict` is given and at least
 one BLOCKING finding was reported. `--context-budget` inventories always-loaded
 and conditional repository instructions, standard personal instructions,
 configured instruction directories, enabled skill/agent frontmatter, and
-context/non-context hook registrations without executing hooks or printing file
-contents. Estimated tokens use the fixed, intentionally coarse heuristic
-`ceil(Unicode characters / 4)`.
+additionalContext, prompt, and other hook registrations without executing hooks
+or printing file contents. Estimated tokens use the fixed, intentionally coarse
+heuristic `ceil(Unicode characters / 4)`.
 """
 
 from __future__ import annotations
@@ -151,6 +151,11 @@ class PluginSource:
     controlled: bool = False
     source: str = ""           # upstream repo URL for an external plugin ("" if in-repo/unknown)
 
+    @property
+    def payload_root(self) -> Path:
+        """Return the plugin directory containing skills, agents, and hooks."""
+        return self.skills_root.parent
+
 
 def _load_json(path: Path) -> dict:
     """Best-effort JSON load (settings/manifests); returns {} on any problem."""
@@ -207,6 +212,18 @@ def _plugin_repo_url(footprint: Path) -> str:
     return ""
 
 
+def _has_reviewable_payload(footprint: Path) -> bool:
+    """Return whether a plugin contains skills, agents, or hook declarations."""
+    skills_root = footprint / "skills"
+    agents_root = footprint / "agents"
+    hook_files = (footprint / "hooks.json", footprint / "hooks" / "hooks.json")
+    return (
+        (skills_root.is_dir() and any(skills_root.glob("*/SKILL.md")))
+        or (agents_root.is_dir() and any(agents_root.glob("*.agent.md")))
+        or any(path.is_file() for path in hook_files)
+    )
+
+
 def assemble_enabled_plugins(
     repo_root: Path, installed_root: Path | None = None,
 ) -> list[PluginSource]:
@@ -256,14 +273,7 @@ def assemble_enabled_plugins(
             if not source_url:
                 source_url = _plugin_repo_url(footprint)
 
-        agents_root = footprint / "agents"
-        hook_files = (footprint / "hooks.json", footprint / "hooks" / "hooks.json")
-        has_payload = (
-            (skills_root.is_dir() and any(skills_root.glob("*/SKILL.md")))
-            or (agents_root.is_dir() and any(agents_root.glob("*.agent.md")))
-            or any(p.is_file() for p in hook_files)
-        )
-        if has_payload:
+        if _has_reviewable_payload(footprint):
             out.append(PluginSource(
                 skills_root=skills_root, origin=origin,
                 controlled=controlled, source=source_url,
@@ -476,10 +486,17 @@ def scan_skills(root: Path, report: Report,
 
 
 
-def scan_agents(root: Path, report: Report) -> None:
-    agent_files = sorted(root.glob(".github/agents/*.agent.md"))
-    agent_files += sorted(root.glob("plugins/*/agents/*.agent.md"))
-    for af in agent_files:
+def scan_agents(
+    root: Path,
+    report: Report,
+    plugin_sources: list[PluginSource] | None = None,
+) -> None:
+    agent_files = set(root.glob(".github/agents/*.agent.md"))
+    agent_files.update(root.glob("plugins/*/agents/*.agent.md"))
+    for source in plugin_sources or []:
+        if source.controlled:
+            agent_files.update(source.payload_root.glob("agents/*.agent.md"))
+    for af in sorted(agent_files):
         text = af.read_text(encoding="utf-8", errors="replace")
         fm = split_frontmatter(text)
         if fm is None:
@@ -554,17 +571,16 @@ def scan_text_files(root: Path, report: Report) -> None:
 
 
 def _sources_from_raw_dir(root: Path) -> list[PluginSource]:
-    """Convert a raw installed-plugins tree (``<root>/<mkt>/<plugin>/skills``)
+    """Convert a raw installed-plugins tree (``<root>/<mkt>/<plugin>``)
     into external :class:`PluginSource` entries (reference-only, source read from
     each plugin manifest)."""
     out: list[PluginSource] = []
-    for skills_root in sorted(root.glob("*/*/skills")):
-        if not skills_root.is_dir():
+    for plugin_dir in sorted(root.glob("*/*")):
+        if not plugin_dir.is_dir() or not _has_reviewable_payload(plugin_dir):
             continue
-        plugin_dir = skills_root.parent
         origin = f"{plugin_dir.parent.name}/{plugin_dir.name}"
         out.append(PluginSource(
-            skills_root=skills_root, origin=origin,
+            skills_root=plugin_dir / "skills", origin=origin,
             controlled=False, source=_plugin_repo_url(plugin_dir),
         ))
     return out
@@ -573,18 +589,17 @@ def _sources_from_raw_dir(root: Path) -> list[PluginSource]:
 def run(root: Path, plugin_sources: list[PluginSource] | None = None) -> Report:
     report = Report()
     scan_skills(root, report, plugin_sources)
-    scan_agents(root, report)
+    scan_agents(root, report, plugin_sources)
     scan_text_files(root, report)
     return report
 
 
-def _is_pruned(path: Path, root: Path) -> bool:
-    """Return whether a path beneath root traverses an ignored directory."""
-    try:
-        parts = path.relative_to(root).parts
-    except ValueError:
-        return False
-    return any(part in PRUNE_DIRS for part in parts)
+def _walk_named_files(root: Path, filename: str):
+    """Yield named files without descending into excluded directory trees."""
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [name for name in dirnames if name not in PRUNE_DIRS]
+        if filename in filenames:
+            yield Path(dirpath) / filename
 
 
 def _text_metrics(text: str) -> dict[str, int]:
@@ -650,8 +665,8 @@ def _measure_files(paths: set[Path], root: Path, *,
 def _repo_instruction_files(root: Path) -> tuple[set[Path], set[Path]]:
     """Return always-loaded repo instructions and nested conditional AGENTS."""
     nested_agents = {
-        p for p in root.rglob("AGENTS.md")
-        if p.is_file() and p != root / "AGENTS.md" and not _is_pruned(p, root)
+        path for path in _walk_named_files(root, "AGENTS.md")
+        if path != root / "AGENTS.md"
     }
     always_loaded: set[Path] = set()
     for name in ("AGENTS.md", "CLAUDE.md", "GEMINI.md"):
@@ -737,7 +752,7 @@ def _metadata_files(root: Path,
     files.update(root.glob(".github/agents/*.agent.md"))
     for source in plugin_sources:
         files.update(source.skills_root.glob("*/SKILL.md"))
-        files.update(source.skills_root.parent.glob("agents/*.agent.md"))
+        files.update(source.payload_root.glob("agents/*.agent.md"))
     return {p for p in files if p.is_file()}
 
 
@@ -792,7 +807,7 @@ def _hook_documents(
             )
             documents.append((path, source, {"hooks": hooks}, aliases))
     for source in plugin_sources:
-        footprint = source.skills_root.parent
+        footprint = source.payload_root
         for path in (footprint / "hooks.json", footprint / "hooks" / "hooks.json"):
             if path.is_file():
                 documents.append((
@@ -808,9 +823,10 @@ def _hook_registrations(
     root: Path,
     plugin_sources: list[PluginSource],
     home: Path,
-) -> tuple[list[dict], list[dict]]:
+) -> tuple[list[dict], list[dict], list[dict]]:
     """Enumerate hook declarations without invoking or exposing commands."""
     context_capable: list[dict] = []
+    prompt_hooks: list[dict] = []
     not_additional_context_capable: list[dict] = []
     seen: set[tuple[str, str]] = set()
     for path, source, data, aliases in _hook_documents(
@@ -838,12 +854,18 @@ def _hook_registrations(
                     "type": str(entry.get("type", "command")),
                 }
                 normalized = re.sub(r"[^a-z]", "", str(event).lower())
-                if normalized in ADDITIONAL_CONTEXT_EVENTS:
+                hook_type = re.sub(
+                    r"[^a-z]", "", str(entry.get("type", "command")).lower()
+                )
+                if hook_type == "prompt":
+                    registration["payload_size"] = "unknown"
+                    prompt_hooks.append(registration)
+                elif normalized in ADDITIONAL_CONTEXT_EVENTS:
                     registration["emitted_payload_size"] = "unknown"
                     context_capable.append(registration)
                 else:
                     not_additional_context_capable.append(registration)
-    return context_capable, not_additional_context_capable
+    return context_capable, prompt_hooks, not_additional_context_capable
 
 
 def build_context_budget(
@@ -877,7 +899,9 @@ def build_context_budget(
         frontmatter_only=True,
         aliases=plugin_aliases,
     )
-    context_hooks, other_hooks = _hook_registrations(root, sources, home)
+    context_hooks, prompt_hooks, other_hooks = _hook_registrations(
+        root, sources, home
+    )
     static_entries = (
         repo_always_entries
         + repo_conditional_entries
@@ -905,6 +929,12 @@ def build_context_budget(
                 "count": len(context_hooks),
                 "emitted_payload_size": "unknown",
                 "registrations": context_hooks,
+            },
+            "prompt_hooks": {
+                "count": len(prompt_hooks),
+                "payload_size": "unknown",
+                "additional_context": False,
+                "registrations": prompt_hooks,
             },
             "not_additional_context_capable": {
                 "count": len(other_hooks),
@@ -943,9 +973,12 @@ def _print_context_budget(budget: dict) -> None:
             f"{totals['estimated_tokens']:>10}"
         )
     context_hooks = hooks["additional_context_capable"]
+    prompt_hooks = hooks["prompt_hooks"]
     other_hooks = hooks["not_additional_context_capable"]
-    print(f"Context-capable hooks          {context_hooks['count']:>5}  "
+    print(f"additionalContext hooks        {context_hooks['count']:>5}  "
           "payload size unknown (not executed)")
+    print(f"Prompt hooks                   {prompt_hooks['count']:>5}  "
+          "payload size unknown (not additionalContext)")
     print(f"Other hook events              {other_hooks['count']:>5}  "
           "not additionalContext-capable")
 
@@ -965,8 +998,8 @@ def main(argv: list[str] | None = None) -> int:
                          "bring each into scope -- in-repo plugins fully checked, "
                          "external ones reference-only + source-classified")
     ap.add_argument("--include-plugins", action="append", default=[], metavar="DIR",
-                    help="installed-plugin tree (<root>/<marketplace>/<plugin>/skills/...) "
-                         "whose skills join the collision map; repeatable")
+                    help="installed-plugin tree (<root>/<marketplace>/<plugin>/...) "
+                         "whose payloads join the inventory; repeatable")
     ap.add_argument("--include-installed", action="store_true",
                     help="shortcut for --include-plugins ~/.copilot/installed-plugins")
     args = ap.parse_args(argv)

@@ -42,7 +42,7 @@ into every node the repo actually has:
 
 | Stage | Node (repo supplies the concrete file/skill) | Flow-through it must carry |
 |-------|----------------------------------------------|----------------------------|
-| **Always-on** | the repo's agent-instructions file (`AGENTS.md` / `.github/copilot-instructions.md`) | The three-way reconcile + the hard rule + the proportionality escape hatch. This is the root — the only always-loaded node. Compatibility/fallback prose is owned by the `visions` plugin through a stable marked region or dedicated rule file. |
+| **Always-on** | the repo's agent-instructions file (`AGENTS.md` / `.github/copilot-instructions.md`) | The three-way reconcile + the hard rule + the proportionality escape hatch. This is the repository-owned root of the guidance chain; plugin-injected context kernels may add separately owned always-loaded guidance. Compatibility/fallback prose is owned by the `visions` plugin through a stable marked region or dedicated rule file. |
 | **Planning** | the efforts binding (`docs/efforts.md` / addendum) + the effort skill | An effort **traces to a vision delta** it closes, or **carries an explicit vision extension**. |
 | **Patterns / Architecture** | the visions binding (`docs/visions.md` / addendum), the repo's prescriptive pattern docs (if any), and the arch guide | The intent/spec boundary; patterns are referenced as the reusable **how**, while architectural change reconciles to stated vision intent (bind the "must-hold" rules as design contracts). |
 | **Implementation** | the language/impl standards | Implementation *realizes* stated intent; it must not smuggle in new architectural intent without a vision extension. |

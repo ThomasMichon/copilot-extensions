@@ -133,8 +133,10 @@ behavior stays at the edge and must not change policy semantics.
 
 Context audits count static instruction files and enabled skill/agent
 frontmatter directly. They enumerate hook registrations but report dynamic
-payload size as unknown. Never execute hooks merely to audit their size: a hook
-is arbitrary code, may depend on live state, and may have side effects.
+payload size as unknown. Prompt-type hooks are inventoried separately because
+their prompt payload is not an `additionalContext` contribution. Never execute
+hooks merely to audit their size: a hook is arbitrary code, may depend on live
+state, and may have side effects.
 
 Report Unicode character count, UTF-8 byte count, word count, and an explicitly
 documented fixed token estimate. Keep reports counts-only: paths and metrics,

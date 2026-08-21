@@ -125,6 +125,28 @@ def test_assemble_includes_hook_only_plugin(tmp_path: Path):
     assert [source.origin for source in srcs] == ["mkt/hooks-only"]
 
 
+def test_raw_plugin_discovery_includes_agent_and_hook_only_plugins(
+    tmp_path: Path,
+):
+    installed = tmp_path / "installed"
+    agent_only = installed / "mkt" / "agent-only"
+    _agent(agent_only / "agents", "worker", desc="Worker.")
+    hook_only = installed / "mkt" / "hook-only"
+    hook_only.mkdir(parents=True)
+    (hook_only / "hooks.json").write_text(
+        json.dumps({"hooks": {"sessionStart": []}}), encoding="utf-8"
+    )
+    empty = installed / "mkt" / "empty"
+    empty.mkdir(parents=True)
+
+    sources = scan._sources_from_raw_dir(installed)
+
+    assert [source.origin for source in sources] == [
+        "mkt/agent-only",
+        "mkt/hook-only",
+    ]
+
+
 # ---------------------------------------------------------------------------
 # collision annotation for external plugins
 # ---------------------------------------------------------------------------
@@ -183,6 +205,55 @@ def test_external_plugin_is_reference_only(tmp_path: Path):
                             controlled=False, source="")
     report = _run_with_sources(repo, [ext])
     assert not any(f.check == "name-folder-match" for f in report.findings)
+
+
+def test_controlled_plugin_agents_get_frontmatter_and_recursion_checks(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    plugin = repo / ".ai" / "cap"
+    agents = plugin / "agents"
+    agents.mkdir(parents=True)
+    (agents / "missing.agent.md").write_text(
+        "# Missing frontmatter\n", encoding="utf-8"
+    )
+    (agents / "recursive.agent.md").write_text(
+        "---\ndescription: Recursive.\nmcp-servers:\n  tool: {}\n---\n\n"
+        "# Recursive\n",
+        encoding="utf-8",
+    )
+    source = scan.PluginSource(
+        skills_root=plugin / "skills",
+        origin="repo-plugins/cap",
+        controlled=True,
+    )
+
+    report = scan.run(repo, [source])
+
+    assert any(f.check == "agent-frontmatter" for f in report.findings)
+    assert sum(f.check == "anti-recursion" for f in report.findings) == 2
+
+
+def test_external_plugin_agents_remain_reference_only(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    plugin = tmp_path / "installed" / "mkt" / "external"
+    agents = plugin / "agents"
+    agents.mkdir(parents=True)
+    (agents / "invalid.agent.md").write_text(
+        "# No frontmatter\n", encoding="utf-8"
+    )
+    source = scan.PluginSource(
+        skills_root=plugin / "skills",
+        origin="mkt/external",
+        controlled=False,
+    )
+
+    report = scan.run(repo, [source])
+
+    assert not any(f.check in {"agent-frontmatter", "anti-recursion"}
+                   for f in report.findings)
 
 
 def test_purely_local_collision_has_no_external_annotation(tmp_path: Path):
@@ -317,8 +388,23 @@ def test_custom_instruction_dirs_accept_comma_separator(
     ]
 
 
+def test_repo_instruction_walk_prunes_excluded_trees(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    nested = repo / "src"
+    nested.mkdir()
+    (nested / "AGENTS.md").write_text("included", encoding="utf-8")
+    excluded = repo / "node_modules" / "package"
+    excluded.mkdir(parents=True)
+    (excluded / "AGENTS.md").write_text("excluded", encoding="utf-8")
+
+    _, conditional = scan._repo_instruction_files(repo)
+
+    assert conditional == {nested / "AGENTS.md"}
+
+
 def test_context_budget_splits_hooks_without_executing(
-    tmp_path: Path,
+    tmp_path: Path, capsys,
 ):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -336,6 +422,9 @@ def test_context_budget_splits_hooks_without_executing(
                 "type": "command",
                 "bash": f"touch {marker}",
                 "powershell": f"New-Item '{marker}'",
+            }, {
+                "type": "prompt",
+                "prompt": "Review the current session.",
             }],
             "preToolUse": [{
                 "type": "command",
@@ -370,6 +459,7 @@ def test_context_budget_splits_hooks_without_executing(
     budget = scan.build_context_budget(repo, [source], home=home)
     hooks = budget["hook_registrations"]
     context_hooks = hooks["additional_context_capable"]
+    prompt_hooks = hooks["prompt_hooks"]
     other_hooks = hooks["not_additional_context_capable"]
     assert context_hooks["count"] == 3
     assert context_hooks["emitted_payload_size"] == "unknown"
@@ -380,6 +470,19 @@ def test_context_budget_splits_hooks_without_executing(
         ("<personal-copilot>/hooks/personal.json", "notification"),
         (".github/copilot/settings.json", "postToolUseFailure"),
     }
+    assert prompt_hooks == {
+        "count": 1,
+        "payload_size": "unknown",
+        "additional_context": False,
+        "registrations": [{
+            "path": "<plugin:market/plugin>/hooks.json",
+            "source": "plugin:market/plugin",
+            "event": "sessionStart",
+            "index": 1,
+            "type": "prompt",
+            "payload_size": "unknown",
+        }],
+    }
     assert other_hooks["count"] == 2
     assert {
         (entry["path"], entry["event"]) for entry in other_hooks["registrations"]
@@ -388,6 +491,12 @@ def test_context_budget_splits_hooks_without_executing(
         ("<personal-copilot>/settings.json", "agentStop"),
     }
     assert not marker.exists()
+
+    scan._print_context_budget(budget)
+    output = capsys.readouterr().out
+    assert "additionalContext hooks" in output
+    assert "Prompt hooks" in output
+    assert "payload size unknown (not additionalContext)" in output
 
 
 def test_json_context_budget_shape(tmp_path: Path, capsys, monkeypatch):

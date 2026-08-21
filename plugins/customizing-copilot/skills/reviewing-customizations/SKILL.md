@@ -80,8 +80,10 @@ It counts Unicode characters, UTF-8 bytes, words, and estimated tokens using the
 fixed heuristic `ceil(Unicode characters / 4)`. It separates always-loaded repo
 instructions, nested/conditional `AGENTS.md`, standard personal Copilot
 instructions, `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` payloads, enabled skill/agent
-frontmatter metadata upper bounds, context-capable hook registrations, and
-non-context hook registrations. Dynamic emitted payload size remains unknown.
+frontmatter metadata upper bounds, `additionalContext`-capable command-hook
+registrations, prompt-hook registrations, and other hook registrations. Dynamic
+payload size remains unknown; prompt-hook payloads are reported separately and
+are not counted as `additionalContext`.
 JSON output includes a stable `context_budget` object.
 
 The report prints paths and counts only. It never dumps instruction contents or
