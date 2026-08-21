@@ -5,7 +5,7 @@
     "email": "thomas@thomasmichon.com"
   },
   "metadata": {
-    "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, WSL environment setup, and CLI customization",
+    "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, publication safety, WSL environment setup, and CLI customization",
     "version": "1.7.5-dev597"
   },
   "plugins": [
@@ -116,6 +116,12 @@
       "description": "Binds a stateless Copilot CLI control harness to its private knowledge repo, harness-first: after cloning the harness, ask for (or create) the knowledge repo, register both, write the machine-local knowledge_repo pointer, and assemble a machine-local instructions fragment labeling the concrete harness/knowledge/product paths - keeping the shareable harness tree generic and name-free. Ships the binding-knowledge setup skill.",
       "version": "0.1.0-dev8",
       "source": "plugins/harness-knowledge"
+    },
+    {
+      "name": "ai-attribution",
+      "description": "Ambient publication and AI-attribution safety for git repositories, with portable operator policy, host-qualified local remote hints, an idempotent setup skill, and an on-demand publication workflow. Payload-only: dependency-free Bash and PowerShell session-start hooks plus skills.",
+      "version": "0.1.0-dev1",
+      "source": "plugins/ai-attribution"
     }
   ]
 }

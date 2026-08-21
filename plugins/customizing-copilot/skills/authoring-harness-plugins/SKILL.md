@@ -89,9 +89,10 @@ status). Substance in the plugin; keep the narrative thin.
    Hard-gate the hook by resolved cwd/config applicability, treat source as
    allow-by-default with documented exclusions, preserve bounded
    operator-versus-repo precedence, provide Bash/PowerShell parity, and fail open. Some
-   headless/cloud paths do not load plugin hooks, so do not remove the static
-   fail-safe. Follow `customizing-copilot:authoring-skills` § *sessionStart
-   context injection*.
+   headless/cloud paths do not load plugin hooks, so do not remove or shrink a
+   fuller static policy until the plugin's stable marked fallback is installed
+   and every known hook-less launch path is validated. Follow
+   `customizing-copilot:authoring-skills` § *sessionStart context injection*.
 
 ## README & documentation standard (every plugin)
 
