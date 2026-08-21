@@ -28,9 +28,11 @@ best-effort: no ``ssh`` on PATH, an unreachable host, or a missing remote
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import shutil
 import subprocess
+import time
 from typing import Any
 
 from . import remote_dispatch
@@ -41,6 +43,25 @@ _UNSET: Any = object()
 
 #: Task states a worker actively holds -- only these have a live embodiment.
 _LEASED = frozenset({"claimed", "started"})
+
+#: Total wall-clock budget (seconds) for a `list`'s embodiment enrichment across
+#: a whole batch. The overlay is display-only, so exceeding it degrades to
+#: unenriched output rather than hanging (dotfiles #1704). Overridable via
+#: ``$AGENT_DISPATCH_ENRICH_BUDGET_S``.
+_ENRICH_BUDGET_S = 4.0
+
+
+def _enrich_budget() -> float:
+    """The embodiment-enrichment total budget (env-overridable, positive)."""
+    raw = os.environ.get("AGENT_DISPATCH_ENRICH_BUDGET_S")
+    if raw:
+        try:
+            v = float(raw)
+            if v > 0:
+                return v
+        except ValueError:
+            pass
+    return _ENRICH_BUDGET_S
 
 #: Fields carried into the compact read-only overlay.
 _OVERLAY_KEYS = (
@@ -287,7 +308,17 @@ def enrich_task(
 
 
 def enrich_tasks(tasks: Any) -> Any:
-    """Best-effort embodiment enrichment over a task or a list of tasks."""
+    """Best-effort embodiment enrichment over a task or a list of tasks.
+
+    Bounded by a **total** wall-clock budget (:func:`_enrich_budget`): the
+    embodiment overlay is display-only, so once a batch has spent the budget
+    resolving live sessions we stop probing and return the remaining leased tasks
+    **unenriched** rather than let one slow/hanging bridge-or-ssh resolve wedge
+    the whole ``list`` (dotfiles #1704). Each individual resolve is already
+    per-call bounded (see :func:`resolve_live_session`); this caps the *aggregate*
+    so total time is ~budget + at most one per-call timeout, independent of how
+    many (esp. stale) leased tasks are in the lane.
+    """
     if isinstance(tasks, list):
         if not any(
             isinstance(t, dict) and t.get("status") in _LEASED for t in tasks
@@ -299,8 +330,21 @@ def enrich_tasks(tasks: Any) -> Any:
         bridge_ok = bridge_available()
         ssh_ok = remote_dispatch.ssh_available()
         local = remote_dispatch.local_machine()
-        return [
-            enrich_task(t, bridge_ok=bridge_ok, ssh_ok=ssh_ok, local=local)
-            for t in tasks
-        ]
+        deadline = time.monotonic() + _enrich_budget()
+        out = []
+        for t in tasks:
+            # Only leased tasks incur a (bounded) resolve; a non-leased task passes
+            # through enrich_task cheaply. Skip the probe for a leased task once
+            # the batch budget is spent -> leave it unenriched (display-only).
+            if (
+                isinstance(t, dict)
+                and t.get("status") in _LEASED
+                and time.monotonic() >= deadline
+            ):
+                out.append(t)
+                continue
+            out.append(
+                enrich_task(t, bridge_ok=bridge_ok, ssh_ok=ssh_ok, local=local)
+            )
+        return out
     return enrich_task(tasks)

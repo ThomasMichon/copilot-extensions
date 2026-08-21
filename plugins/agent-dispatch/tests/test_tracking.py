@@ -319,3 +319,74 @@ def test_enrich_tasks_hoists_probes_and_mixes_local_and_remote(monkeypatch):
     assert ("wt-remote", "emancipation-cube") in resolved  # remote owner -> mesh
     assert out[0]["embodiment"]["session_id"] == "s-wt-local"
     assert out[1]["embodiment"]["session_id"] == "s-wt-remote"
+
+
+def test_enrich_budget_env_override_and_fallback(monkeypatch):
+    """`_enrich_budget` honors a positive env override, else the default."""
+    monkeypatch.delenv("AGENT_DISPATCH_ENRICH_BUDGET_S", raising=False)
+    assert tracking._enrich_budget() == tracking._ENRICH_BUDGET_S
+    monkeypatch.setenv("AGENT_DISPATCH_ENRICH_BUDGET_S", "1.5")
+    assert tracking._enrich_budget() == 1.5
+    # non-numeric / non-positive -> fall back to the default (never 0/negative)
+    monkeypatch.setenv("AGENT_DISPATCH_ENRICH_BUDGET_S", "not-a-number")
+    assert tracking._enrich_budget() == tracking._ENRICH_BUDGET_S
+    monkeypatch.setenv("AGENT_DISPATCH_ENRICH_BUDGET_S", "-3")
+    assert tracking._enrich_budget() == tracking._ENRICH_BUDGET_S
+
+
+def test_enrich_tasks_stops_probing_over_budget(monkeypatch):
+    """Once the total budget is spent, remaining leased tasks are returned
+    UNENRICHED instead of probed -- so one slow/hanging resolve cannot wedge the
+    whole `list` (the #1704 list-hang fix)."""
+    monkeypatch.setenv("AGENT_DISPATCH_ENRICH_BUDGET_S", "5")
+    monkeypatch.setattr(tracking, "bridge_available", lambda: True)
+    monkeypatch.setattr(tracking.remote_dispatch, "ssh_available", lambda: True)
+    monkeypatch.setattr(tracking.remote_dispatch, "local_machine", lambda: "m")
+
+    calls = {"n": 0}
+
+    def counting_resolve(wt, **kw):
+        calls["n"] += 1
+        return {"session_id": f"s-{wt}"}
+
+    monkeypatch.setattr(tracking, "resolve_live_session", counting_resolve)
+
+    # Deterministic fake clock: each monotonic() call advances 3s, so the deadline
+    # (set at ~3s + 5s budget = 8s) is crossed after the first task's probe.
+    clock = {"t": 0.0}
+
+    def fake_monotonic():
+        clock["t"] += 3.0
+        return clock["t"]
+
+    monkeypatch.setattr(tracking.time, "monotonic", fake_monotonic)
+
+    tasks = [
+        {"id": f"t{i}", "status": "started", "owner": f"m/wt-{i}"} for i in range(8)
+    ]
+    out = tracking.enrich_tasks(tasks)
+
+    # Bounded: not every leased task was probed.
+    assert calls["n"] < 8
+    # All tasks are still returned, and the over-budget ones are unenriched.
+    assert len(out) == 8
+    assert any("embodiment" not in t for t in out)
+
+
+def test_enrich_tasks_within_budget_enriches_all(monkeypatch):
+    """A generous budget with fast resolves still enriches every leased task, and
+    non-leased tasks pass through untouched."""
+    monkeypatch.setenv("AGENT_DISPATCH_ENRICH_BUDGET_S", "60")
+    monkeypatch.setattr(tracking, "bridge_available", lambda: True)
+    monkeypatch.setattr(tracking.remote_dispatch, "ssh_available", lambda: True)
+    monkeypatch.setattr(tracking.remote_dispatch, "local_machine", lambda: "m")
+    monkeypatch.setattr(
+        tracking, "resolve_live_session", lambda wt, **kw: {"session_id": f"s-{wt}"}
+    )
+    tasks = [
+        {"id": f"t{i}", "status": "started", "owner": f"m/wt-{i}"} for i in range(4)
+    ]
+    out = tracking.enrich_tasks(tasks)
+    assert all("embodiment" in t for t in out)
+    passthrough = tracking.enrich_tasks([{"id": "q", "status": "queued"}])
+    assert "embodiment" not in passthrough[0]
