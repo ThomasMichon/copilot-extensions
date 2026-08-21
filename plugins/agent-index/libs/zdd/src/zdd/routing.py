@@ -43,6 +43,7 @@ import logging
 import os
 import socket
 import sys
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -285,3 +286,123 @@ def clear_if_owner(config_dir: str | os.PathLike[str], pid: int) -> bool:
         return False
     log.info("Cleared active endpoint for pid %d on shutdown", pid)
     return True
+
+
+def reap_stale_active(
+    config_dir: str | os.PathLike[str],
+    *,
+    service: str | None = None,
+    listening: Callable[[str, int], bool] | None = None,
+    pid_alive: Callable[[int | None], bool] | None = None,
+) -> dict:
+    """Dead-port watchdog: proactively retire an advertised-but-dead active endpoint.
+
+    :func:`read_active_endpoint` heals a stale ``active`` only for the one reader
+    that happens to probe it. This is the **proactive** counterpart a watchdog
+    loop runs on a schedule: when the routing table's ``active`` names a port
+    with **no listener** *and* a pid that is **not alive**, the endpoint is
+    advertised-but-dead (exactly the state that wedged the review pipeline for
+    days). It is retired here -- ``previous`` is promoted to ``active`` when it is
+    itself live, otherwise the table is cleared so consumers fall back to the
+    static config -- and a durable lifecycle record is written.
+
+    A ``live-pid-but-no-listener`` active (a daemon mid-startup) is deliberately
+    left alone, matching :func:`read_active_endpoint`'s conservatism: the pid is
+    the authority for "still coming up", the listener for "actually serving".
+
+    ``listening(host, port)`` and ``pid_alive(pid)`` are injectable for testing
+    and default to the module probes. Returns a diagnosis dict
+    ``{"reaped": bool, "reason": str, "dead_port": int|None,
+    "promoted_port": int|None}``. Fail-open on IO.
+    """
+    _listen = listening or _listening
+    _alive = pid_alive or _pid_alive
+    result: dict = {"reaped": False, "reason": "", "dead_port": None,
+                    "promoted_port": None}
+    try:
+        data = read_table(config_dir)
+        if not data or not isinstance(data.get("active"), dict):
+            result["reason"] = "no active endpoint"
+            return result
+        active = Endpoint.from_dict(data["active"])
+        if active is None:
+            result["reason"] = "active endpoint unparseable"
+            return result
+        if _listen(active.client_host, active.port):
+            result["reason"] = "active endpoint is listening"
+            return result
+        # No listener. Reap only on POSITIVE evidence of death: a recorded pid
+        # that is confirmed not alive. A missing pid means we cannot prove the
+        # daemon is dead (it may have published without one, or be mid-startup),
+        # and a live pid means it may still be binding -- in both cases leave it
+        # alone, matching read_active_endpoint's conservatism (the listener is
+        # the authority for "serving", the pid for "still coming up").
+        if not active.pid:
+            result["reason"] = "no listener but pid unknown -- not reaping (unconfirmed)"
+            return result
+        if _alive(active.pid):
+            result["reason"] = "no listener but pid alive (starting)"
+            return result
+
+        # Advertised-but-dead: retire it. Promote a live `previous` if we have
+        # one, else clear the table so readers fall back to config.
+        result["dead_port"] = active.port
+        prev_raw = data.get("previous")
+        prev = Endpoint.from_dict(prev_raw) if isinstance(prev_raw, dict) else None
+        promoted = False
+        if prev is not None and prev.port != active.port and \
+                _listen(prev.client_host, prev.port):
+            publish_active(
+                config_dir, bind=prev.bind, port=prev.port, pid=prev.pid,
+                version=prev.version, demote_existing=False,
+            )
+            promoted = True
+            result["promoted_port"] = prev.port
+            result["reason"] = (
+                f"reaped dead active {active.client_host}:{active.port}; "
+                f"promoted previous {prev.client_host}:{prev.port}"
+            )
+        else:
+            _atomic_write(
+                routing_table_path(config_dir),
+                {"epoch": datetime.now(timezone.utc).isoformat()},
+            )
+            result["reason"] = (
+                f"reaped dead active {active.client_host}:{active.port}; "
+                f"no live previous, cleared table (readers fall back to config)"
+            )
+        result["reaped"] = True
+        log.warning(
+            "Dead-port watchdog reaped advertised-but-dead active %s:%d "
+            "(pid %s); %s", active.client_host, active.port, active.pid,
+            "promoted previous" if promoted else "cleared table",
+        )
+        _emit_reap(config_dir, service, active, result)
+        return result
+    except Exception as exc:  # noqa: BLE001 -- watchdog is best-effort, never fatal
+        result["reason"] = f"error: {exc}"
+        return result
+
+
+def _emit_reap(
+    config_dir: str | os.PathLike[str],
+    service: str | None,
+    dead: Endpoint,
+    result: dict,
+) -> None:
+    """Write a durable lifecycle record for a watchdog reap (fail-open)."""
+    try:
+        from zdd import lifecycle
+
+        lifecycle.record(
+            config_dir,
+            lifecycle.WATCHDOG_REAP,
+            service=service,
+            outcome=lifecycle.OK,
+            port=dead.port,
+            version=dead.version,
+            detail={"dead_pid": dead.pid,
+                    "promoted_port": result.get("promoted_port")},
+        )
+    except Exception:  # noqa: BLE001 -- lifecycle logging is best-effort
+        pass
