@@ -393,3 +393,31 @@ separate, intentional runtime and keeps its explicit venv.
   dev312->313. (agent-vault's 3 pre-existing env-contaminated pytest failures --
   live vault service on the dev host -- are unrelated, per batch 4.)
 - Remaining link retirement: agent-dispatch, agent-index, agent-logger.
+
+### 2026-08-20 - Phase final (b4): link retirement -- agent-dispatch + agent-index + agent-logger (COMPLETE)
+- **agent-dispatch** + **agent-index**: re-pointed `LINK_PYTHON` -> slot (verify +
+  WSL-fallback service start/status), `activate --no-link`, manifest -> slot, and
+  rewrote `_installed_version` (the downgrade guard) to read the current-version
+  marker instead of `$LINK_PYTHON` -- re-pointing it to the NEW slot would have made
+  the guard report the version being installed, defeating it. Their systemd/conhost
+  ExecStart were already slot-based (batches 8/9); gc/current helpers already fall
+  back to the slot.
+- **agent-logger**: `activate --no-link`, gc via the slot `$py` (was
+  `$LINK_DIR/bin/python`), manifest -> `$VENV`. Also synced the out-of-band
+  `_build_info.py __version__` (a 4th, non-triplet version file the bump process
+  doesn't touch) to the bump.
+- Guard stays `--strict`-clean; agent-dispatch (1062) + agent-index (226) +
+  agent-logger tests pass. Bumped dispatch dev193->194, index dev72->73, logger
+  dev57->58.
+
+## THE EFFORT IS COMPLETE
+All four target goals met:
+1. `check-runtime-resolution` reports **0** (and is `--strict` in CI).
+2. Every plugin's binstub, service/daemon launcher, and Python caller resolves the
+   versioned interpreter the ONE uniform marker-only way (current-version ->
+   last-known-good -> newest complete slot).
+3. The `.venv`/`venv` **symlink is retired** across all 10 versioned-runtime plugins
+   (`activate --no-link` removes any existing link + never creates a new one; every
+   install-time consumer resolves the slot directly or via the marker).
+4. The guard is **blocking (`--strict`) in CI**.
+16 PRs (#793, #796, #798, #799, #800, #801, #804-#809, #850, #852, #855, this).
