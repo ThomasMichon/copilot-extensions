@@ -215,13 +215,24 @@ class DispatchClient:
         )
 
     def steer(
-        self, task_id: str, *, fields: dict, sender: str | None = None
+        self,
+        task_id: str,
+        *,
+        fields: dict,
+        sender: str | None = None,
+        wake: bool = True,
+        message: str | None = None,
     ) -> dict:
-        """Submit an operator's answer to a task's card (clears awaiting-steer)."""
+        """Submit an answer and ask the coordinator to resume the task owner."""
         return self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/steer",
-                json={"fields": fields, "sender": sender},
+                json={
+                    "fields": fields,
+                    "sender": sender,
+                    "wake": wake,
+                    "message": message,
+                },
             )
         )
 

@@ -268,6 +268,8 @@ class SteerBody(BaseModel):
 
     fields: dict = Field(default_factory=dict)
     sender: str | None = None
+    wake: bool = True
+    message: str | None = None
 
 
 class SteerTakeBody(BaseModel):
@@ -883,13 +885,20 @@ def create_app(
 
     @app.post("/tasks/{task_id}/steer")
     def steer(task_id: str, body: SteerBody) -> dict:
-        """Submit an operator's answer to a task's card (clears awaiting-steer)."""
-        return _guard(
+        """Persist an operator answer, then best-effort resume its task owner."""
+        task = _guard(
             lambda: queue.submit_steer(
                 task_id, fields=body.fields, sender=body.sender
             ),
             "task.steer",
         )
+        woken: bool | None = None
+        owner = task.get("owner")
+        if body.wake and owner:
+            from . import bridge
+
+            woken = bridge.resume_steered_owner(owner, task_id, body.message)
+        return {**task, "steer_woken": woken}
 
     @app.post("/tasks/{task_id}/steer/take")
     def steer_take(task_id: str, body: SteerTakeBody) -> dict:

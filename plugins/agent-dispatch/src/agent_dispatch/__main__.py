@@ -1190,8 +1190,7 @@ def _cmd_card_show(args: argparse.Namespace) -> int:
 
 
 def _cmd_steer(args: argparse.Namespace) -> int:
-    """Submit an operator's answer to a task's card, then (unless --no-wake)
-    wake the owning worktree so a suspended reviewer resumes and consumes it."""
+    """Submit an answer and have the coordinator resume the owning worktree."""
     fields: dict[str, str] = {}
     for item in args.field or []:
         key, sep, value = item.partition("=")
@@ -1204,21 +1203,23 @@ def _cmd_steer(args: argparse.Namespace) -> int:
         fields[key.strip()] = value
     sender = args.sender or _owner_from_identity(args)
     with _client(args) as c:
-        result = c.steer(args.task_id, fields=fields, sender=sender)
-        woken: bool | None = None
+        result = c.steer(
+            args.task_id,
+            fields=fields,
+            sender=sender,
+            wake=args.wake,
+            message=args.message,
+        )
+        coordinator_reported_wake = "steer_woken" in result
+        woken = result.pop("steer_woken", None)
         owner = result.get("owner")
-        if args.wake and owner:
+        # Compatibility with a coordinator from before wake delivery moved
+        # server-side: old Pydantic models ignore the new request fields and old
+        # responses omit ``steer_woken``.
+        if args.wake and owner and not coordinator_reported_wake:
             from . import bridge
 
-            message = args.message or (
-                f"The operator answered your card on task {args.task_id}. Resume, "
-                f"run `agent-dispatch steer take {args.task_id}` to read the answer, "
-                f"and continue toward your goal."
-            )
-            try:
-                woken = bool(bridge.send_nudge(owner, message))
-            except Exception:
-                woken = False
+            woken = bridge.resume_steered_owner(owner, args.task_id, args.message)
     return _emit({"task": result, "woken": woken})
 
 

@@ -152,6 +152,64 @@ def test_spawn_worker_wait_omits_no_wait(monkeypatch):
     assert result.returncode == 0
 
 
+# -- steer-owner resume ------------------------------------------------------
+
+
+def test_resume_steered_owner_queues_work_prompt(monkeypatch):
+    calls = {}
+
+    def fake_run(cmd, **kwargs):
+        calls["cmd"] = cmd
+        calls["kwargs"] = kwargs
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
+    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+
+    assert bridge.resume_steered_owner("host/worktree-1", "task-42") is True
+    cmd = calls["cmd"]
+    assert cmd[:8] == [
+        "/usr/bin/agent-bridge",
+        "send",
+        "--no-wait",
+        "--queue",
+        "--kind",
+        "prompt",
+        "--sender",
+        "agent-dispatch-steer",
+    ]
+    assert cmd[8] == "host/worktree-1"
+    assert "agent-dispatch steer take task-42" in cmd[9]
+
+
+def test_resume_steered_owner_degrades_when_bridge_unavailable(monkeypatch):
+    monkeypatch.setattr(bridge, "_agent_bridge_launch_prefix", lambda: None)
+    assert bridge.resume_steered_owner("host/worktree-1", "task-42") is False
+
+
+def test_resume_steered_owner_preserves_custom_message(monkeypatch):
+    calls = {}
+
+    def fake_run(cmd, **kwargs):
+        calls["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 1, "", "not live")
+
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
+    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+
+    assert (
+        bridge.resume_steered_owner(
+            "host/worktree-1", "task-42", "Continue with the operator's choice."
+        )
+        is False
+    )
+    assert calls["cmd"][-1] == "Continue with the operator's choice."
+
+
 # -- registered-agent preflight ----------------------------------------------
 
 _AGENTS_JSON = (

@@ -157,6 +157,55 @@ def send_nudge(
     return proc.returncode == 0
 
 
+def resume_steered_owner(
+    owner: str,
+    task_id: str,
+    message: str | None = None,
+    *,
+    timeout: float | None = 20.0,
+) -> bool:
+    """Resume a task owner immediately after an operator submits steering.
+
+    Unlike :func:`send_nudge`, this is a work-bearing ``prompt`` delivery. The
+    bridge queues it when the owner is busy so the current turn is preserved and
+    the steering prompt runs next. Delivery is best-effort: the steer itself is
+    already durable in agent-dispatch, so an unavailable bridge or failed send
+    returns ``False`` without consuming or losing the operator's answer.
+    """
+    exe = _agent_bridge_launch_prefix()
+    if exe is None:
+        return False
+    prompt = message or (
+        f"The operator answered your card on task {task_id}. Resume, run "
+        f"`agent-dispatch steer take {task_id}` to read the answer, and continue "
+        f"toward your goal."
+    )
+    cmd = [
+        *exe,
+        "send",
+        "--no-wait",
+        "--queue",
+        "--kind",
+        "prompt",
+        "--sender",
+        "agent-dispatch-steer",
+        owner,
+        prompt,
+    ]
+    try:
+        proc = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
+            cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            **no_window_kwargs(),
+        )
+    except (subprocess.SubprocessError, OSError):
+        return False
+    return proc.returncode == 0
+
+
 def parse_agent_names(out: str | None) -> set[str] | None:
     """Extract agent ``name`` values from ``agent-bridge --json agents`` stdout.
 

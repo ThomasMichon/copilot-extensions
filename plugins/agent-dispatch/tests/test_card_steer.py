@@ -260,7 +260,17 @@ def _held_over_http(api, worker="w1"):
     return tid
 
 
-def test_card_and_steer_roundtrip_over_http(api):
+def test_card_and_steer_roundtrip_over_http(api, monkeypatch):
+    from agent_dispatch import bridge
+
+    wake_calls = []
+    monkeypatch.setattr(
+        bridge,
+        "resume_steered_owner",
+        lambda owner, task_id, message=None: wake_calls.append(
+            (owner, task_id, message)
+        ) or True,
+    )
     tid = _held_over_http(api)
     card = {
         "title": "Recommend Approve",
@@ -283,6 +293,8 @@ def test_card_and_steer_roundtrip_over_http(api):
     )
     assert r.status_code == 200
     assert r.json()["awaiting_steer"] is False
+    assert r.json()["steer_woken"] is True
+    assert wake_calls == [("w1", tid, None)]
 
     r = api.post(f"/tasks/{tid}/steer/take", json={"worker_id": "w1"})
     assert r.status_code == 200
@@ -311,7 +323,10 @@ def test_card_on_unheld_task_is_409(api):
 
 def test_steer_take_wrong_owner_is_409(api):
     tid = _held_over_http(api, worker="w1")
-    api.post(f"/tasks/{tid}/steer", json={"fields": {"a": "1"}})
+    api.post(
+        f"/tasks/{tid}/steer",
+        json={"fields": {"a": "1"}, "wake": False},
+    )
     r = api.post(f"/tasks/{tid}/steer/take", json={"worker_id": "intruder"})
     assert r.status_code == 409
 
@@ -319,3 +334,39 @@ def test_steer_take_wrong_owner_is_409(api):
 def test_steer_log_missing_task_is_404(api):
     assert api.get("/tasks/nope/steer-log").status_code == 404
 
+
+def test_steer_wake_failure_keeps_answer_durable(api, monkeypatch):
+    from agent_dispatch import bridge
+
+    monkeypatch.setattr(
+        bridge, "resume_steered_owner", lambda owner, task_id, message=None: False
+    )
+    tid = _held_over_http(api)
+
+    r = api.post(
+        f"/tasks/{tid}/steer",
+        json={"fields": {"decision": "revise"}},
+    )
+
+    assert r.status_code == 200
+    assert r.json()["steer_woken"] is False
+    log = api.get(f"/tasks/{tid}/steer-log").json()
+    assert log[0]["fields"] == {"decision": "revise"}
+    assert log[0]["taken"] is False
+
+
+def test_steer_without_owner_persists_without_wake(api, monkeypatch):
+    from agent_dispatch import bridge
+
+    def unexpected_wake(*_args, **_kwargs):
+        raise AssertionError("ownerless task must not be sent to agent-bridge")
+
+    monkeypatch.setattr(bridge, "resume_steered_owner", unexpected_wake)
+    tid = api.post("/tasks", json={"title": "unclaimed"}).json()["id"]
+
+    r = api.post(f"/tasks/{tid}/steer", json={"fields": {"answer": "later"}})
+
+    assert r.status_code == 200
+    assert r.json()["steer_woken"] is None
+    log = api.get(f"/tasks/{tid}/steer-log").json()
+    assert log[0]["fields"] == {"answer": "later"}
