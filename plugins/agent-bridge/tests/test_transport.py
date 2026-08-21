@@ -17,6 +17,7 @@ from agent_bridge.transport import (
     _build_remote_cmd,
     _extract_json_object,
     _looks_unprovisioned_project,
+    _reresolve_stale_interpreter,
     _resolve_remote_existing_cwd,
     _resolve_worktree,
     _resolve_worktree_remote,
@@ -1364,3 +1365,73 @@ class TestLocalResolvePassesProject:
             await _resolve_worktree(target, {})
 
         assert "--project" not in calls[0]
+
+
+class TestReresolveStaleInterpreter:
+    """_reresolve_stale_interpreter -- repoint a pruned versioned interpreter."""
+
+    def test_remaps_pruned_version_to_existing_sibling(self, tmp_path):
+        versions = tmp_path / "versions"
+        current = versions / "0.4.0-dev62" / "Scripts"
+        current.mkdir(parents=True)
+        interpreter = current / "python.exe"
+        interpreter.write_text("")
+        stale = str(versions / "0.4.0-dev39" / "Scripts" / "python.exe")
+
+        out = _reresolve_stale_interpreter([stale, "-m", "agent_codespaces", "ssh"])
+
+        assert out == [str(interpreter), "-m", "agent_codespaces", "ssh"]
+
+    def test_noop_when_interpreter_exists(self, tmp_path):
+        interpreter = tmp_path / "python.exe"
+        interpreter.write_text("")
+        args = [str(interpreter), "-m", "agent_codespaces"]
+
+        assert _reresolve_stale_interpreter(args) == args
+
+    def test_noop_when_no_version_segment(self, tmp_path):
+        args = [str(tmp_path / "missing.exe"), "-m", "x"]
+
+        assert _reresolve_stale_interpreter(args) == args
+
+    def test_noop_when_no_sibling_resolves(self, tmp_path):
+        versions = tmp_path / "versions"
+        (versions / "0.4.0-dev62").mkdir(parents=True)
+        stale = str(versions / "0.4.0-dev39" / "Scripts" / "python.exe")
+        args = [stale, "-m", "agent_codespaces"]
+
+        # dev62 dir exists but lacks the Scripts/python.exe tail -> no remap
+        assert _reresolve_stale_interpreter(args) == args
+
+    def test_prefers_current_version_marker(self, tmp_path):
+        # Two resolvable slots; the marker names the older one -> marker wins.
+        for v in ("0.4.0-dev40", "0.4.0-dev62"):
+            scripts = tmp_path / "versions" / v / "Scripts"
+            scripts.mkdir(parents=True)
+            (scripts / "python.exe").write_text("")
+        (tmp_path / "current-version").write_text("0.4.0-dev40\n")
+        stale = str(tmp_path / "versions" / "0.4.0-dev39" / "Scripts" / "python.exe")
+
+        out = _reresolve_stale_interpreter([stale, "-m", "x"])
+
+        assert out[0] == str(
+            tmp_path / "versions" / "0.4.0-dev40" / "Scripts" / "python.exe"
+        )
+
+    def test_natural_order_not_lexicographic(self, tmp_path):
+        # dev9 and dev62 both resolve; no marker -> newest by NUMBER (dev62),
+        # not lexicographic ("dev9" > "dev62" as strings).
+        for v in ("0.4.0-dev9", "0.4.0-dev62"):
+            scripts = tmp_path / "versions" / v / "Scripts"
+            scripts.mkdir(parents=True)
+            (scripts / "python.exe").write_text("")
+        stale = str(tmp_path / "versions" / "0.4.0-dev39" / "Scripts" / "python.exe")
+
+        out = _reresolve_stale_interpreter([stale, "-m", "x"])
+
+        assert out[0] == str(
+            tmp_path / "versions" / "0.4.0-dev62" / "Scripts" / "python.exe"
+        )
+
+    def test_empty_args(self):
+        assert _reresolve_stale_interpreter([]) == []

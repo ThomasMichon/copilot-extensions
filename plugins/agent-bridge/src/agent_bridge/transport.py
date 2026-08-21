@@ -13,6 +13,7 @@ import base64
 import json
 import logging
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -196,6 +197,70 @@ class AgentProcess:
                 self.proc.kill()
             except ProcessLookupError:
                 pass
+
+
+def _reresolve_stale_interpreter(args: list[str]) -> list[str]:
+    """Repoint a stored command whose versioned interpreter was pruned.
+
+    A ``command`` target persists its full ``spawn_command`` -- including the
+    absolute path to a provider's versioned interpreter, e.g.
+    ``~/.agent-codespaces/versions/0.4.0-dev39/Scripts/python.exe``. When the
+    provider (agent-codespaces, agent-bridge, ...) upgrades and prunes the old
+    ``versions/<ver>/`` slot, resuming that session would spawn a now-missing
+    executable and fail with ``FileNotFoundError`` (WinError 2 on Windows) --
+    before the resume recovery ladder can react.
+
+    When ``args[0]`` is an absolute path that no longer exists but sits under a
+    ``.../versions/<ver>/`` root, remap ``<ver>`` to the provider's current
+    version (its ``current-version`` marker) or, failing that, the newest
+    existing sibling by natural (numeric) order. No-op when the path still
+    exists or no sibling version resolves the same tail.
+    """
+    if not args:
+        return args
+    exe = args[0]
+    if os.path.exists(exe):
+        return args
+    match = re.match(
+        r"(?P<base>.*[\\/]versions[\\/])(?P<ver>[^\\/]+)(?P<tail>[\\/].*)", exe
+    )
+    if match is None:
+        return args
+    base, tail = match.group("base"), match.group("tail")
+
+    # Prefer the provider's authoritative current-version marker (a sibling of
+    # the versions/ dir); fall back to the newest existing sibling by *natural*
+    # (numeric) order so a dev62 slot is never shadowed by a lexicographically
+    # larger dev9.
+    def _natural_key(name: str) -> list[str]:
+        return [
+            f"{int(part):020d}" if part.isdigit() else part
+            for part in re.split(r"(\d+)", name)
+        ]
+
+    ordered: list[str] = []
+    marker = os.path.join(os.path.dirname(base.rstrip("\\/")), "current-version")
+    try:
+        with open(marker, encoding="utf-8") as handle:
+            ordered.append(handle.read().strip())
+    except OSError:
+        pass
+    try:
+        ordered.extend(sorted(os.listdir(base), key=_natural_key, reverse=True))
+    except OSError:
+        pass
+
+    for ver in ordered:
+        if not ver:
+            continue
+        candidate = f"{base}{ver}{tail}"
+        if os.path.exists(candidate):
+            log.warning(
+                "Repointed stale interpreter %r -> %r (version slot pruned)",
+                exe, candidate,
+            )
+            return [candidate, *args[1:]]
+    return args
 
 
 def _wrap_batch_for_windows(
@@ -1136,7 +1201,8 @@ async def spawn_raw(
     env.pop("PYTHONHOME", None)
     env.update(target.env)
 
-    args = _wrap_batch_for_windows(list(target.spawn_command), env)
+    spawn_command = _reresolve_stale_interpreter(list(target.spawn_command))
+    args = _wrap_batch_for_windows(spawn_command, env)
     log.info("Spawning command agent: %s", " ".join(args))
 
     proc = await asyncio.create_subprocess_exec(
