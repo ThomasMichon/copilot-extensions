@@ -256,6 +256,28 @@ def test_external_plugin_agents_remain_reference_only(tmp_path: Path):
                    for f in report.findings)
 
 
+def test_controlled_plugin_text_files_get_secret_checks(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    plugin = repo / ".ai" / "cap"
+    plugin.mkdir(parents=True)
+    secret = "abcdefghijklmnop"
+    (plugin / "config.yaml").write_text(
+        f"api_key: {secret}\n", encoding="utf-8"
+    )
+    source = scan.PluginSource(
+        skills_root=plugin / "skills",
+        origin="repo-plugins/cap",
+        controlled=True,
+    )
+
+    report = scan.run(repo, [source])
+
+    findings = [f for f in report.findings if f.check == "secret"]
+    assert len(findings) == 1
+    assert secret not in findings[0].message
+
+
 def test_purely_local_collision_has_no_external_annotation(tmp_path: Path):
     repo = tmp_path / "repo"
     (repo / ".github" / "skills").mkdir(parents=True)
@@ -284,7 +306,7 @@ def test_context_budget_counts_static_custom_and_metadata(
 ):
     repo = tmp_path / "repo"
     repo.mkdir()
-    (repo / "AGENTS.md").write_text("repo guidance\n", encoding="utf-8")
+    (repo / "AGENTS.md").write_bytes(b"repo guidance\r\n")
     nested = repo / "pkg"
     nested.mkdir()
     (nested / "AGENTS.md").write_text("nested rule\n", encoding="utf-8")
@@ -330,7 +352,7 @@ def test_context_budget_counts_static_custom_and_metadata(
     assert len(static["personal_copilot_files"]) == 1
     assert len(static["custom_instruction_dir_files"]) == 2
     assert static["totals"]["characters"] == (
-        len("repo guidance\n")
+        len("repo guidance\r\n")
         + len("claude guidance\n")
         + len("gemini guidance\n")
         + len("nested rule\n")
@@ -338,6 +360,11 @@ def test_context_budget_counts_static_custom_and_metadata(
         + len("operator policy one\n")
         + len("operator policy two\n")
     )
+    repo_agents = next(
+        entry for entry in static["repository_always_loaded_files"]
+        if entry["path"] == "AGENTS.md"
+    )
+    assert repo_agents["bytes"] == len(b"repo guidance\r\n")
     assert static["personal_copilot_files"][0]["path"] == (
         "<personal-copilot>/copilot-instructions.md"
     )

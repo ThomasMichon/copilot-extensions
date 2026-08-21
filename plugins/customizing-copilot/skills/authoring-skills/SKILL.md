@@ -227,6 +227,8 @@ Always-on context injected into every prompt.
 | Scope | File |
 |-------|------|
 | Repo (always loaded) | `AGENTS.md` in git root and cwd |
+| Repo (always loaded) | `CLAUDE.md` in git root and cwd |
+| Repo (always loaded) | `GEMINI.md` in git root and cwd |
 | Repo (always loaded) | `.github/copilot-instructions.md` |
 | Repo (always loaded) | `.github/instructions/**/*.instructions.md` |
 | Personal (all repos) | `~/.copilot/copilot-instructions.md` |

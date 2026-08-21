@@ -532,42 +532,82 @@ def _walk_customization_files(root: Path):
             yield Path(dirpath) / fn
 
 
-def scan_text_files(root: Path, report: Report) -> None:
-    for p in _walk_customization_files(root):
-        name = p.name
-        suffix = p.suffix.lower()
-        parts = set(p.parts)
-        under_github = ".github" in parts
-        is_mcp = name in (".mcp.json", "mcp-config.json")
-        is_surface_md = name == "SKILL.md" or name.endswith(".agent.md") or name == "AGENTS.md"
-        # Secrets: only config-shaped files that belong to a customization surface.
-        config_target = suffix in CONFIG_SUFFIXES and (
-            under_github or is_mcp or "plugins" in parts
-        )
-        # Raw IPs: surface markdown + those same config files.
-        if not (config_target or is_surface_md):
-            continue
-        try:
-            lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError:
-            continue
-        for n, line in enumerate(lines, 1):
-            if config_target:
-                sm = SECRET_KEY.search(line)
-                if sm:
-                    val = sm.group("val").strip().strip(",")
-                    token = val.split()[0] if val.split() else val
-                    if not SAFE_VALUE.match(val) and CREDENTIAL_SHAPE.match(token):
-                        report.add(BLOCKING, "secret", f"{p}:{n}",
-                                   f"possible hardcoded secret assigned to {sm.group(1)}")
-            im = SSH_RAW_IP.search(line)
-            if im:
-                ip = im.group("ip")
-                window = "\n".join(lines[max(0, n - 4):n])
-                if (not ip.startswith(("0.", "127.", "255."))
-                        and not NEGATIVE_EXAMPLE.search(window)):
-                    report.add(WARNING, "raw-ip", f"{p}:{n}",
-                               f"ssh/scp/rsync targets raw IP {ip} (use an alias)")
+def scan_text_files(
+    root: Path,
+    report: Report,
+    plugin_sources: list[PluginSource] | None = None,
+) -> None:
+    scan_roots = [root]
+    scan_roots.extend(
+        source.payload_root
+        for source in (plugin_sources or [])
+        if source.controlled
+    )
+    seen: set[Path] = set()
+    for scan_root in scan_roots:
+        owned_plugin_payload = scan_root != root
+        for p in _walk_customization_files(scan_root):
+            resolved = p.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            name = p.name
+            suffix = p.suffix.lower()
+            parts = set(p.parts)
+            under_github = ".github" in parts
+            is_mcp = name in (".mcp.json", "mcp-config.json")
+            is_surface_md = (
+                name == "SKILL.md"
+                or name.endswith(".agent.md")
+                or name == "AGENTS.md"
+            )
+            # Secrets: only config-shaped customization files.
+            config_target = suffix in CONFIG_SUFFIXES and (
+                under_github
+                or is_mcp
+                or "plugins" in parts
+                or owned_plugin_payload
+            )
+            # Raw IPs: surface markdown + those same config files.
+            if not (config_target or is_surface_md):
+                continue
+            try:
+                lines = p.read_text(
+                    encoding="utf-8", errors="replace"
+                ).splitlines()
+            except OSError:
+                continue
+            for n, line in enumerate(lines, 1):
+                if config_target:
+                    sm = SECRET_KEY.search(line)
+                    if sm:
+                        val = sm.group("val").strip().strip(",")
+                        token = val.split()[0] if val.split() else val
+                        if (
+                            not SAFE_VALUE.match(val)
+                            and CREDENTIAL_SHAPE.match(token)
+                        ):
+                            report.add(
+                                BLOCKING,
+                                "secret",
+                                f"{p}:{n}",
+                                "possible hardcoded secret assigned to "
+                                f"{sm.group(1)}",
+                            )
+                im = SSH_RAW_IP.search(line)
+                if im:
+                    ip = im.group("ip")
+                    window = "\n".join(lines[max(0, n - 4):n])
+                    if (
+                        not ip.startswith(("0.", "127.", "255."))
+                        and not NEGATIVE_EXAMPLE.search(window)
+                    ):
+                        report.add(
+                            WARNING,
+                            "raw-ip",
+                            f"{p}:{n}",
+                            f"ssh/scp/rsync targets raw IP {ip} (use an alias)",
+                        )
 
 
 def _sources_from_raw_dir(root: Path) -> list[PluginSource]:
@@ -590,7 +630,7 @@ def run(root: Path, plugin_sources: list[PluginSource] | None = None) -> Report:
     report = Report()
     scan_skills(root, report, plugin_sources)
     scan_agents(root, report, plugin_sources)
-    scan_text_files(root, report)
+    scan_text_files(root, report, plugin_sources)
     return report
 
 
@@ -602,12 +642,12 @@ def _walk_named_files(root: Path, filename: str):
             yield Path(dirpath) / filename
 
 
-def _text_metrics(text: str) -> dict[str, int]:
+def _text_metrics(text: str, *, byte_count: int | None = None) -> dict[str, int]:
     """Return reproducible size metrics for a Unicode text payload."""
     characters = len(text)
     return {
         "characters": characters,
-        "bytes": len(text.encode("utf-8")),
+        "bytes": len(text.encode("utf-8")) if byte_count is None else byte_count,
         "words": len(re.findall(r"\S+", text)),
         "estimated_tokens": (
             characters + TOKEN_HEURISTIC_CHARS - 1
@@ -647,17 +687,20 @@ def _measure_files(paths: set[Path], root: Path, *,
     entries: list[dict] = []
     for path in sorted(paths, key=lambda p: str(p)):
         try:
-            text = path.read_text(encoding="utf-8", errors="replace")
+            raw = path.read_bytes()
         except OSError:
             continue
+        text = raw.decode("utf-8", errors="replace")
+        byte_count = len(raw)
         if frontmatter_only:
             split = split_frontmatter(text)
             if split is None:
                 continue
             text = split[0]
+            byte_count = len(text.encode("utf-8"))
         entries.append({
             "path": _display_path(path, root, aliases),
-            **_text_metrics(text),
+            **_text_metrics(text, byte_count=byte_count),
         })
     return entries
 
