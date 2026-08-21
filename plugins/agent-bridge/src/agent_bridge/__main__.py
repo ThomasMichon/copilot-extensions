@@ -37,6 +37,18 @@ def _json_out(data: Any) -> None:
     print(json.dumps(data, indent=2, default=str))
 
 
+def _exit_bridge_outage() -> None:
+    """Report a sustained daemon outage without declaring sessions lost."""
+    print(
+        "[RETRY] agent-bridge is unavailable after the restart grace; it may "
+        "still be restarting or updating.\n"
+        "        This command did not complete. Hosted sessions are preserved "
+        "and resumable; re-run it shortly.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
 def _connection_identity(client, session_id: str) -> dict[str, Any]:
     """The (repo × venue) identity a session connected to, for emit-back.
 
@@ -1173,16 +1185,15 @@ def _cmd_drain(args: argparse.Namespace) -> None:
     The zero-downtime pre-swap step: refuses new sessions/turns, then blocks
     until no session is streaming a turn or hosting background sub-agents.
     Exit 0 when fully drained, 2 on timeout (unless --force)."""
-    from .client import BridgeClientError, BridgeConnectionError
+    from .client import BridgeClientError
 
     client = _get_client()
     try:
         res = client.drain(
             timeout=args.timeout, poll=args.poll, force=args.force
         )
-    except (BridgeClientError, BridgeConnectionError) as exc:
-        detail = getattr(exc, "detail", str(exc))
-        print(f"[FAIL] {detail}", file=sys.stderr)
+    except BridgeClientError as exc:
+        print(f"[FAIL] {exc.detail}", file=sys.stderr)
         sys.exit(1)
 
     if args.json:
@@ -1205,14 +1216,13 @@ def _cmd_drain(args: argparse.Namespace) -> None:
 
 def _cmd_undrain(args: argparse.Namespace) -> None:
     """Release the drain gate -- the daemon resumes accepting new work."""
-    from .client import BridgeClientError, BridgeConnectionError
+    from .client import BridgeClientError
 
     client = _get_client()
     try:
         client.undrain()
-    except (BridgeClientError, BridgeConnectionError) as exc:
-        detail = getattr(exc, "detail", str(exc))
-        print(f"[FAIL] {detail}", file=sys.stderr)
+    except BridgeClientError as exc:
+        print(f"[FAIL] {exc.detail}", file=sys.stderr)
         sys.exit(1)
     print("Drain gate released; accepting new work.")
 
@@ -1359,14 +1369,13 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
 
 def _cmd_gc(args: argparse.Namespace) -> None:
     """Run a GC sweep: prune aged terminal/disconnected sessions + compact DB."""
-    from .client import BridgeClientError, BridgeConnectionError
+    from .client import BridgeClientError
 
     client = _get_client()
     try:
         res = client.gc()
-    except (BridgeClientError, BridgeConnectionError) as exc:
-        detail = getattr(exc, "detail", str(exc))
-        print(f"[FAIL] {detail}", file=sys.stderr)
+    except BridgeClientError as exc:
+        print(f"[FAIL] {exc.detail}", file=sys.stderr)
         sys.exit(1)
 
     if args.json:
@@ -2903,7 +2912,7 @@ def _cmd_end(args: argparse.Namespace) -> None:
     no-op success, and any error prints a one-line message -- never a raw
     client traceback.
     """
-    from .client import BridgeClientError, BridgeConnectionError
+    from .client import BridgeClientError
 
     client = _get_client()
     try:
@@ -2913,9 +2922,6 @@ def _cmd_end(args: argparse.Namespace) -> None:
             print(f"[OK] Session {args.session_id} already ended")
             return
         print(f"[FAIL] Could not end session {args.session_id}: {exc.detail}")
-        sys.exit(1)
-    except BridgeConnectionError:
-        print(f"[FAIL] agent-bridge is not reachable; could not end session {args.session_id}")
         sys.exit(1)
     print(f"[OK] Session {args.session_id} ended")
 
@@ -2940,7 +2946,7 @@ def _cmd_resume(args: argparse.Namespace) -> None:
     Stopping the live CLI first, then re-running with ``--force``, performs the
     affirmative take-over.
     """
-    from .client import BridgeClientError, BridgeConnectionError
+    from .client import BridgeClientError
 
     client = _get_client()
     target = args.session_id
@@ -2962,13 +2968,6 @@ def _cmd_resume(args: argparse.Namespace) -> None:
                 )
                 sys.exit(1)
             # 404 -> not an owned session; fall through to worktree resolution.
-        except BridgeConnectionError:
-            print(
-                "[FAIL] agent-bridge is not reachable; could not resume "
-                f"{target}",
-                file=sys.stderr,
-            )
-            sys.exit(1)
 
     # 2. Treat the target as a worktree handle: load it (dormant = a note) or
     #    take it over (--force past a live holder = break-glass).
@@ -3008,12 +3007,6 @@ def _cmd_resume(args: argparse.Namespace) -> None:
         print(f"[FAIL] Could not resume worktree {target}: {exc.detail}",
               file=sys.stderr)
         sys.exit(1)
-    except BridgeConnectionError:
-        print(
-            f"[FAIL] agent-bridge is not reachable; could not resume {target}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
 
     status = result.get("status", "")
     sid = result.get("session_id", "") or target
@@ -3031,7 +3024,7 @@ def _cmd_handoff(args: argparse.Namespace) -> None:
     in the same worktree, a ``session_handoff`` event announces the changeover,
     and the successor resumes seeded with the brief.
     """
-    from .client import BridgeClientError, BridgeConnectionError
+    from .client import BridgeClientError
 
     client = _get_client()
     target = args.session_id
@@ -3063,12 +3056,6 @@ def _cmd_handoff(args: argparse.Namespace) -> None:
                 file=sys.stderr,
             )
             sys.exit(1)
-    except BridgeConnectionError:
-        print(
-            f"[FAIL] agent-bridge is not reachable; could not hand off {target}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
 
     # 2. Treat the target as a worktree handle.
     try:
@@ -3087,12 +3074,6 @@ def _cmd_handoff(args: argparse.Namespace) -> None:
             sys.exit(1)
         print(f"[FAIL] Could not hand off worktree {target}: {exc.detail}",
               file=sys.stderr)
-        sys.exit(1)
-    except BridgeConnectionError:
-        print(
-            f"[FAIL] agent-bridge is not reachable; could not hand off {target}",
-            file=sys.stderr,
-        )
         sys.exit(1)
     _report(result, "Worktree")
 
@@ -4001,17 +3982,11 @@ def main(argv: list[str] | None = None) -> None:
 
         try:
             args.func(args)
-        except BridgeConnectionError as exc:
-            # The service is unreachable (e.g. mid-restart) and this command
-            # could not ride it out. Surface a clean one-line message instead of
-            # a traceback. Streaming commands (send/read/wait) handle this
-            # internally by reconnecting from the caller's acked cursor.
-            print(
-                f"[FAIL] {exc}\n"
-                "       Is it running? Start it with: agent-bridge service start",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+        except BridgeConnectionError:
+            # The resilient client exhausted its bounded restart grace. Keep
+            # one-shot command framing consistent; streaming commands
+            # reconnect from the caller's acknowledged cursor internally.
+            _exit_bridge_outage()
     else:
         parser.print_help()
 
