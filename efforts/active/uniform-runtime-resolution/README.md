@@ -378,3 +378,18 @@ separate, intentional runtime and keeps its explicit venv.
   agent-index, agent-logger, agent-vault) -- these have systemd/scheduled-task
   ExecStart already on the slot (done in the earlier batches), so their retirement
   is repointing install-time health-gate `$LINK_PYTHON` + `activate --no-link`.
+
+### 2026-08-20 - Phase final (b3): link retirement -- agent-vault + agent-bridge
+- **agent-vault**: re-pointed `LINK_PYTHON` -> slot (which fixes the systemd
+  `ExecStart=$LINK_PYTHON` at :679 -- the last variable-hidden link launcher --
+  and the version-check/verify uses), `activate --no-link`, manifest -> slot. Its
+  `_versioned_current`/`_versioned_gc` already fall back to the slot.
+- **agent-bridge** (link-name `venv`): `activate --no-link`, manifest -> slot, and
+  rewrote `_installed_version` (the downgrade guard) to read the current-version
+  marker instead of `$LINK_DIR/bin/python` (it had NO slot fallback, so it would
+  have silently bypassed once the link was gone). Its systemd ExecStart was already
+  slot-based (batch 7); its gc/current helpers already fall back to the slot.
+- Guard stays `--strict`-clean. Bumped agent-vault dev54->55, agent-bridge
+  dev312->313. (agent-vault's 3 pre-existing env-contaminated pytest failures --
+  live vault service on the dev host -- are unrelated, per batch 4.)
+- Remaining link retirement: agent-dispatch, agent-index, agent-logger.
