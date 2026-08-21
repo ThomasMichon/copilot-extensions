@@ -36,9 +36,11 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -262,6 +264,43 @@ def relay_spawn_command(
         sys.executable, "-m", "agent_bridge", "acp-connect",
         url, "--token", token, "--stdio",
     ]
+
+
+def relay_agent_for(spawn_command: list[str] | None) -> str | None:
+    """If ``spawn_command`` is an elevated sub-daemon relay, return its agent name.
+
+    An elevated relay is ``... acp-connect ws://127.0.0.1:<port>/acp/<agent> ...``
+    (see :func:`relay_spawn_command`), and only exists on the **non-elevated**
+    primary (an elevated daemon spawns such agents locally). Used to re-kick +
+    re-resolve the relay at (re)spawn time so a resume after the elevated
+    sub-daemon idle-exited (600s) re-launches it and cold-resumes from disk,
+    instead of 500ing on a dead port / stale token (dotfiles#1610). Returns None
+    when this is not an elevated relay.
+    """
+    if not spawn_command or is_process_elevated():
+        return None
+    if "acp-connect" not in spawn_command:
+        return None
+    for arg in spawn_command:
+        if isinstance(arg, str) and arg.startswith("ws://"):
+            m = re.match(r"ws://127\.0\.0\.1:\d+/acp/(.+)$", arg)
+            if m:
+                return urllib.parse.unquote(m.group(1))
+    return None
+
+
+def rekick_relay_command(agent: str, *, wait: float = 60.0) -> list[str]:
+    """Re-kick the elevated sub-daemon (idempotent) and return a FRESH relay
+    command for ``agent`` bound to its CURRENT port + token.
+
+    The persisted relay command bakes in the port + token, both of which go
+    stale when the sub-daemon idle-exits and later rebinds an ephemeral port with
+    a fresh token -- so a resume must rebuild, not replay. Raises ``RuntimeError``
+    (fail-soft, actionable) if the sub-daemon can't be started, which callers
+    surface as a clean error rather than a raw connection 500 (dotfiles#1610).
+    """
+    token = ensure_running(wait=wait)
+    return relay_spawn_command(agent, token=token)
 
 
 def discovered_port(fallback: int = ELEVATED_PORT) -> int:
