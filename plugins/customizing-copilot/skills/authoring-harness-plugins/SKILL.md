@@ -92,9 +92,10 @@ status). Substance in the plugin; keep the narrative thin.
    launch paths do not load plugin hooks, and over the **ACP transport**
    repo-scoped plugin hooks are folder-trust-gated (they fire for
    worktree-manager-trusted sessions, but not an untrusted ACP `cwd`), while repo
-   `.github/hooks` never load over ACP at all -- so do not remove the static
-   fail-safe. Follow `customizing-copilot:authoring-skills` § *sessionStart
-   context injection*.
+   `.github/hooks` never load over ACP at all. Do not remove or shrink a fuller
+   static policy until the plugin's stable marked fallback is installed and
+   every known hook-less or trust-gated launch path is validated. Follow
+   `customizing-copilot:authoring-skills` § *sessionStart context injection*.
 
 ## README & documentation standard (every plugin)
 
