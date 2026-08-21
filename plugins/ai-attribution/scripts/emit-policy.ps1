@@ -2,8 +2,11 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 $script:PluginVersion = '0.1.0-dev1'
+$script:MaxPayloadBytes = 65536
 $script:MaxConfigBytes = 65536
 $script:MaxConfigLines = 200
+$script:MaxCustomDirsLength = 65536
+$script:MaxCustomDirsEntries = 128
 $script:Disclosure = 'third-party'
 $script:OwnedAccounts = @()
 $script:ContributionGuides = @()
@@ -39,6 +42,13 @@ function Test-Owner([string] $Value) {
 function Test-Account([string] $Value) {
     $Parts = $Value.Split('/')
     return $Parts.Count -eq 2 -and (Test-Host $Parts[0]) -and (Test-Owner $Parts[1])
+}
+
+function Test-AbsolutePath([string] $Value) {
+    if ($script:IsWindowsPlatform) {
+        return $Value -cmatch '^(?:[A-Za-z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+)'
+    }
+    return $Value.StartsWith('/')
 }
 
 function Test-PathContainsReparsePoint([string] $Path) {
@@ -92,7 +102,7 @@ function Read-PolicyConfig([string] $Path, [string] $Authority) {
         }
         $Stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
         try {
-            $Buffer = New-Object byte[] ($script:MaxConfigBytes + 1)
+            $Buffer = New-Object byte[] ($script:MaxPayloadBytes + 1)
             $Count = 0
             while ($Count -lt $Buffer.Length) {
                 $Read = $Stream.Read($Buffer, $Count, $Buffer.Length - $Count)
@@ -109,11 +119,6 @@ function Read-PolicyConfig([string] $Path, [string] $Authority) {
         $Utf8 = New-Object Text.UTF8Encoding($false, $true)
         $Content = $Utf8.GetString($Buffer, 0, $Count)
         $Lines = $Content -split '\r\n|\n|\r'
-        if ($Content -match '(?:\r\n|\n|\r)$' -and
-            $Lines.Count -gt 1 -and
-            $Lines[-1] -eq '') {
-            $Lines = $Lines[0..($Lines.Count - 2)]
-        }
     } catch {
         Write-Diagnostic "$Path`: could not safely read config; safe defaults remain active"
         return
@@ -173,7 +178,7 @@ function Read-PolicyConfig([string] $Path, [string] $Authority) {
                 }
             }
             default {
-                Write-Diagnostic "$Path`: ignored unknown key '$Key'"
+                Write-Diagnostic "$Path`: ignored unknown config key"
             }
         }
     }
@@ -276,8 +281,18 @@ function Test-PathAtOrBelow([string] $Candidate, [string] $Root) {
 }
 
 function Read-CustomInstructionConfigs {
+    $RawDirectories = [string]$env:COPILOT_CUSTOM_INSTRUCTIONS_DIRS
+    if ($RawDirectories.Length -gt $script:MaxCustomDirsLength) {
+        Write-Diagnostic 'ignored custom instruction directories beyond the 65536-character limit'
+        return
+    }
     $SeparatorPattern = '[,' + [Regex]::Escape([string][IO.Path]::PathSeparator) + ']'
-    foreach ($ConfiguredDir in ($env:COPILOT_CUSTOM_INSTRUCTIONS_DIRS -split $SeparatorPattern)) {
+    $ConfiguredDirectories = @($RawDirectories -split $SeparatorPattern)
+    if ($ConfiguredDirectories.Count -gt $script:MaxCustomDirsEntries) {
+        Write-Diagnostic 'ignored custom instruction directories beyond the 128-entry limit'
+        return
+    }
+    foreach ($ConfiguredDir in $ConfiguredDirectories) {
         if (-not $ConfiguredDir.Trim()) { continue }
         $ResolvedDir = Resolve-ConfigDirectory $ConfiguredDir
         if (-not $ResolvedDir) {
@@ -290,9 +305,36 @@ function Read-CustomInstructionConfigs {
     }
 }
 
+function Read-OperatorConfig(
+    [string] $ConfiguredDirectory,
+    [string] $RelativePath
+) {
+    $ResolvedDirectory = Resolve-ConfigDirectory $ConfiguredDirectory
+    if (-not $ResolvedDirectory) { return }
+    if (Test-PathAtOrBelow $ResolvedDirectory $script:RepoRoot) {
+        Write-Diagnostic 'ignored operator config path at or beneath the session-start repository'
+        return
+    }
+    Read-PolicyConfig (Join-Path $ResolvedDirectory $RelativePath) 'operator'
+}
+
 function Invoke-Policy {
     try {
-        $PayloadText = [Console]::In.ReadToEnd()
+        $Stream = [Console]::OpenStandardInput()
+        $Buffer = New-Object byte[] ($script:MaxConfigBytes + 1)
+        $Count = 0
+        while ($Count -lt $Buffer.Length) {
+            $Read = $Stream.Read($Buffer, $Count, $Buffer.Length - $Count)
+            if ($Read -eq 0) { break }
+            $Count += $Read
+        }
+        if ($Count -gt $script:MaxPayloadBytes) { throw 'oversized payload' }
+        $Utf8 = New-Object Text.UTF8Encoding($false, $true)
+        $PayloadText = $Utf8.GetString($Buffer, 0, $Count)
+        if ($PayloadText.Length -gt $script:MaxPayloadBytes -or
+            $PayloadText.Contains([char]0)) {
+            throw 'oversized or nul payload'
+        }
         if (-not $PayloadText.Trim()) { throw 'missing payload' }
         $Payload = $PayloadText | ConvertFrom-Json -ErrorAction Stop
         if ($Payload -isnot [pscustomobject] -or
@@ -301,7 +343,15 @@ function Invoke-Policy {
             -not $Payload.cwd) {
             throw 'missing cwd'
         }
-        $PayloadCwd = $Payload.cwd
+        if (-not (Test-AbsolutePath $Payload.cwd)) {
+            throw 'relative cwd'
+        }
+        $PayloadCwd = [IO.Path]::GetFullPath(
+            (Resolve-Path -LiteralPath $Payload.cwd -ErrorAction Stop).ProviderPath
+        )
+        if (-not (Test-Path -LiteralPath $PayloadCwd -PathType Container)) {
+            throw 'cwd is not a directory'
+        }
     } catch {
         Write-Diagnostic 'missing or malformed sessionStart payload; no policy context emitted'
         Emit-Empty
@@ -317,7 +367,7 @@ function Invoke-Policy {
         Emit-Empty
     }
 
-    Read-PolicyConfig (Join-Path $HOME '.copilot/ai-attribution.conf') 'operator'
+    Read-OperatorConfig (Join-Path $HOME '.copilot') 'ai-attribution.conf'
     if ($env:XDG_CONFIG_HOME) {
         $ConfigHome = $env:XDG_CONFIG_HOME
     } elseif ($script:IsWindowsPlatform -and $env:APPDATA) {
@@ -325,7 +375,7 @@ function Invoke-Policy {
     } else {
         $ConfigHome = Join-Path $HOME '.config'
     }
-    Read-PolicyConfig (Join-Path $ConfigHome 'ai-attribution/config.conf') 'operator'
+    Read-OperatorConfig (Join-Path $ConfigHome 'ai-attribution') 'config.conf'
 
     if ($env:COPILOT_CUSTOM_INSTRUCTIONS_DIRS) {
         Read-CustomInstructionConfigs
