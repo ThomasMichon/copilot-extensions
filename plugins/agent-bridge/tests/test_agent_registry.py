@@ -941,6 +941,7 @@ class TestElevatedRelayRouting:
             "-m", "agent_bridge", "acp-connect",
             "ws://127.0.0.1:59051/acp/SPO.Core", "--token", "subtok", "--stdio",
         ]
+        assert target.elevated is True
 
     @pytest.mark.asyncio
     async def test_bare_elevated_agent_local_when_not_applicable(self, monkeypatch):
