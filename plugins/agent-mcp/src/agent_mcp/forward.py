@@ -11,10 +11,12 @@ This module is the replacement child. When a resident ``agent-mcp serve``
 session-host is available it **attaches** a full MCP session there (the host owns
 the upstream + decorator pipeline; see :mod:`agent_mcp.serve`) and then does
 nothing but **pump bytes**: client->server JSON-RPC from its stdin into the
-socket, server->client messages from the socket to its stdout. It imports only
-the standard library plus the stdlib-only :mod:`agent_mcp.ipc`; the heavy bridge
-tree is imported **lazily, and only on the fallback path**. So the happy-path
-forwarder is a near-empty interpreter -- that is where the RAM win comes from.
+socket, server->client messages from the socket to its stdout. The happy path
+imports only the standard library plus the stdlib-only, *asyncio-free*
+:mod:`agent_mcp.sockio` -- crucially **not** ``asyncio`` (~7 MiB) nor the eager
+package version (~8 MiB, now lazy) -- so the forwarder child is a ~13 MiB
+interpreter versus a ~27 MiB ``agent-mcp bridge``. The heavy bridge tree is
+imported **lazily, and only on the fallback path**.
 
 The multiplexer is always **optional with a correct inline fallback**: if no host
 is advertised, or the attach is refused, or multiplexing is disabled
@@ -29,13 +31,11 @@ takes the fallback or a fresh attach cleanly.
 
 from __future__ import annotations
 
-import asyncio
 import os
 import sys
-import threading
 from pathlib import Path
 
-from . import ipc
+from . import sockio
 
 _FALSEY = {"0", "false", "off", "no", ""}
 
@@ -95,7 +95,7 @@ def _abs_bridge_ref(bridge: str) -> str:
 def _serve_handle(socket_path: str | None) -> str:
     """The socket handle both the forwarder and a spawned host agree on."""
     return (socket_path or os.environ.get("AGENT_MCP_SERVE_SOCKET")
-            or str(ipc.default_socket_path()))
+            or str(sockio.default_socket_path()))
 
 
 def _spawn_serve_host(handle: str) -> None:
@@ -122,7 +122,7 @@ def _spawn_serve_host(handle: str) -> None:
             subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
         if flags:
             kwargs["creationflags"] = flags
-    subprocess.Popen(cmd, **kwargs)  # noqa: S603 - fixed argv, our own runtime
+    subprocess.Popen(cmd, **kwargs)
 
 
 def _ensure_serve(socket_path: str | None):
@@ -136,7 +136,7 @@ def _ensure_serve(socket_path: str | None):
     import time
 
     handle = _serve_handle(socket_path)
-    existing = ipc.serve_socket_if_available(handle)
+    existing = sockio.serve_socket_if_available(handle)
     if existing is not None:
         return existing
     try:
@@ -145,7 +145,7 @@ def _ensure_serve(socket_path: str | None):
         return None
     deadline = time.monotonic() + _ENSURE_SERVE_TIMEOUT
     while time.monotonic() < deadline:
-        sock = ipc.serve_socket_if_available(handle)
+        sock = sockio.serve_socket_if_available(handle)
         if sock is not None:
             return sock
         time.sleep(0.05)
@@ -161,21 +161,25 @@ def run(bridge: str, socket_path: str | None = None) -> int:
     """
     if not _multiplex_enabled():
         return _run_direct(bridge)
-    socket = ipc.serve_socket_if_available(socket_path)
-    if socket is None and _ensure_serve_enabled():
-        socket = _ensure_serve(socket_path)
-    if socket is None:
+    sock_handle = sockio.serve_socket_if_available(socket_path)
+    if sock_handle is None and _ensure_serve_enabled():
+        sock_handle = _ensure_serve(socket_path)
+    if sock_handle is None:
         return _run_direct(bridge)
-    result = asyncio.run(_attach_and_pump(socket, _abs_bridge_ref(bridge)))
-    if result is None:
-        # Attach was refused/unreachable before any MCP traffic -> safe to fall
-        # back to a direct in-process bridge with no lost session state.
+    try:
+        conn = sockio.attach(sock_handle, _abs_bridge_ref(bridge))
+    except OSError:
+        # Attach refused/unreachable before any MCP traffic -> safe to fall back
+        # to a direct in-process bridge with no lost session state.
         return _run_direct(bridge)
-    return result
+    sockio.pump(conn)
+    return 0
 
 
 def _run_direct(bridge: str) -> int:
     """The inline fallback: run the full in-process bridge (lazy heavy import)."""
+    import asyncio
+
     from .bridge import Bridge
     from .config import ConfigError, load_config
 
@@ -185,95 +189,3 @@ def _run_direct(bridge: str) -> int:
         print(f"agent-mcp forward: {exc}", file=sys.stderr)
         return 1
     return asyncio.run(Bridge(cfg).run())
-
-
-async def _attach_and_pump(socket, ref: str) -> int | None:
-    """Attach a session on the host and pump until either side ends.
-
-    Returns ``None`` if the attach itself fails (caller falls back to direct);
-    otherwise pumps to completion and returns ``0``.
-    """
-    try:
-        reader, writer = await ipc.open_attached_session(socket, ref)
-    except OSError:
-        return None
-    await _pump(reader, writer)
-    return 0
-
-
-async def _pump(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-    """Bidirectionally pump line-delimited JSON-RPC between stdio and the socket.
-
-    stdin is blocking, so it is drained on a daemon thread that hands lines to the
-    event loop; the socket side is native asyncio. Either end reaching EOF (the
-    client closing stdin on session end, or the host going away) stops the pump.
-    A parent-death watchdog covers the Windows ``cmd``-shim grandchild case where
-    stdin EOF never arrives (see :mod:`agent_mcp.watchdog`).
-    """
-    # watchdog is stdlib-only and light; import it here so the module's top-level
-    # footprint stays minimal and the direct-fallback path doesn't pay for it.
-    from .watchdog import install_parent_death_watchdog, reap_descendants_on_exit
-
-    loop = asyncio.get_running_loop()
-    stop = asyncio.Event()
-
-    def _signal_stop() -> None:
-        try:
-            loop.call_soon_threadsafe(stop.set)
-        except RuntimeError:
-            pass  # loop already closing
-
-    reap_descendants_on_exit()
-    install_parent_death_watchdog(_signal_stop)
-
-    in_queue: asyncio.Queue[str | None] = asyncio.Queue()
-
-    def _stdin_reader() -> None:
-        # The watchdog/EOF can end the pump (and close the loop) while this daemon
-        # thread is still blocked on stdin; guard the wakeups so a late read
-        # doesn't raise during interpreter shutdown.
-        try:
-            for line in sys.stdin:
-                loop.call_soon_threadsafe(in_queue.put_nowait, line)
-            loop.call_soon_threadsafe(in_queue.put_nowait, None)
-        except (RuntimeError, ValueError):
-            pass
-
-    threading.Thread(target=_stdin_reader, name="agent-mcp-fwd-stdin",
-                     daemon=True).start()
-
-    async def _client_to_host() -> None:
-        try:
-            while True:
-                line = await in_queue.get()
-                if line is None:
-                    break  # stdin EOF -> client closed the session
-                writer.write(line.encode() if line.endswith("\n")
-                             else (line + "\n").encode())
-                try:
-                    await writer.drain()
-                except (ConnectionResetError, BrokenPipeError):
-                    break
-        finally:
-            stop.set()
-
-    async def _host_to_client() -> None:
-        try:
-            while not reader.at_eof():
-                line = await reader.readline()
-                if not line:
-                    break  # host detached/died
-                sys.stdout.write(line.decode(errors="replace"))
-                sys.stdout.flush()
-        finally:
-            stop.set()
-
-    tasks = [asyncio.create_task(_client_to_host()),
-             asyncio.create_task(_host_to_client())]
-    try:
-        await stop.wait()
-    finally:
-        await ipc.aclose_writer(writer)
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)

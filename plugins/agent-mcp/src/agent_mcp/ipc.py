@@ -1,20 +1,22 @@
-"""Serve IPC transport + client attach -- the light half of ``serve`` (stdlib-only).
+"""Serve IPC transport -- the **async** client for ``call`` + the server side.
 
-Split out of :mod:`agent_mcp.serve` so the thin per-session **forwarder** (the
-#744 multiplexer client, :mod:`agent_mcp.forward`) can locate and attach to a
-resident ``serve`` session-host **without importing the heavy bridge tree**
-(config parsing, credential injectors, the decorator pipeline, transports, the
-upstream client). Importing this module pulls in only the standard library, so
-the per-session forwarder child stays small -- that reduced footprint, replacing
-one full ``agent-mcp bridge`` interpreter per session with one thin forwarder, is
-the whole point of the multiplexer.
+The serve-host discovery + sidecar helpers (``default_socket_path``,
+``serve_socket_if_available``, endpoint parsing) live in the stdlib-only
+:mod:`agent_mcp.sockio` and are re-exported here. This module adds the
+**asyncio** client used by the one-shot ``call`` fast-path and shared with the
+:mod:`agent_mcp.serve` host: the ``request_via_socket`` / ``call_via_socket`` op
+helpers and the ``open_attached_session`` attach.
 
-The transport is chosen per platform by the single :data:`_HAS_AF_UNIX` probe,
-exactly as before: an **AF_UNIX** socket on POSIX (gated by filesystem
-permissions), or a **loopback TCP** listener plus a per-daemon auth token
-advertised in an ``<socket>.endpoint`` sidecar on Windows (where asyncio has no
-AF_UNIX). Both the server (:mod:`agent_mcp.serve`) and every client
-(``call``/forwarder) import these primitives, so the two ends always agree.
+The thin per-session **forwarder** (:mod:`agent_mcp.forward`) deliberately does
+**not** import this module -- it uses :mod:`agent_mcp.sockio`'s synchronous
+socket client instead, so it never pulls in ``asyncio`` (~7 MiB of RSS paid once
+per MCP session). Both ends speak the same wire protocol -- the ``attach`` op and
+line-delimited JSON-RPC -- so an async and a sync client interoperate with one
+host.
+
+The async client selects its transport with the :data:`_HAS_AF_UNIX` probe (an
+AF_UNIX socket on POSIX, a loopback-TCP listener + token sidecar where asyncio
+has no AF_UNIX); the sync forwarder detects the transport by artifact instead.
 """
 
 from __future__ import annotations
@@ -22,67 +24,37 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import os
-import stat
 from pathlib import Path
 
+from .sockio import (
+    _TCP_HOST,
+    _endpoint_path,
+    _read_endpoint,
+    default_socket_path,
+    serve_socket_if_available,
+)
+
 # Whether this runtime's asyncio exposes AF_UNIX sockets (POSIX yes, Windows no).
-# The single switch that selects the serve IPC transport on both server + client.
+# Authoritative for the async server's *bind* choice (serve.serve_forever) and
+# the async client's dial; the forwarder (agent_mcp.sockio) instead detects the
+# transport by artifact so it needs no asyncio. The discovery + sidecar helpers
+# now live in agent_mcp.sockio (stdlib-only) and are re-exported here so callers
+# and tests still ``from agent_mcp.ipc import ...`` / ``from agent_mcp.serve``.
 _HAS_AF_UNIX = hasattr(asyncio, "start_unix_server")
 
-# Loopback host for the Windows/no-AF_UNIX TCP transport.
-_TCP_HOST = "127.0.0.1"
-
-
-def default_socket_path() -> Path:
-    """The default serve socket handle: ``$AGENT_MCP_HOME/serve.sock``.
-
-    On POSIX this is the AF_UNIX socket path itself; on Windows it is a logical
-    handle whose ``.endpoint`` sidecar (see :func:`_endpoint_path`) carries the
-    live loopback port + token.
-    """
-    home = Path(os.environ.get("AGENT_MCP_HOME", Path.home() / ".agent-mcp"))
-    return home / "serve.sock"
-
-
-def _endpoint_path(socket_path: str | Path) -> Path:
-    """The TCP endpoint sidecar for a serve handle (loopback port-discovery)."""
-    return Path(str(socket_path) + ".endpoint")
-
-
-def _read_endpoint(socket_path: str | Path) -> dict | None:
-    """Parse the ``<socket>.endpoint`` sidecar, or ``None`` if absent/invalid."""
-    try:
-        data = json.loads(_endpoint_path(socket_path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    if isinstance(data, dict) and isinstance(data.get("port"), int):
-        return data
-    return None
-
-
-def serve_socket_if_available(explicit: str | None = None) -> Path | None:
-    """Return the serve handle if a live daemon is advertised, else ``None``.
-
-    Honors ``AGENT_MCP_NO_SERVE`` (force the cold path) and
-    ``AGENT_MCP_SERVE_SOCKET`` (override the path). On POSIX only an actual
-    AF_UNIX socket file counts; on Windows the presence of a parseable
-    ``.endpoint`` sidecar counts. A stale handle (crashed daemon) still yields a
-    path, but the client's connect then fails and falls back to the cold path --
-    the same self-healing the unix socket already had.
-    """
-    if os.environ.get("AGENT_MCP_NO_SERVE"):
-        return None
-    raw = explicit or os.environ.get("AGENT_MCP_SERVE_SOCKET")
-    path = Path(raw) if raw else default_socket_path()
-    if _HAS_AF_UNIX:
-        try:
-            if path.exists() and stat.S_ISSOCK(path.stat().st_mode):
-                return path
-        except OSError:
-            return None
-        return None
-    return path if _read_endpoint(path) is not None else None
+__all__ = [
+    "_HAS_AF_UNIX",
+    "_TCP_HOST",
+    "_connect",
+    "_endpoint_path",
+    "_read_endpoint",
+    "aclose_writer",
+    "call_via_socket",
+    "default_socket_path",
+    "open_attached_session",
+    "request_via_socket",
+    "serve_socket_if_available",
+]
 
 
 async def aclose_writer(writer: asyncio.StreamWriter) -> None:
