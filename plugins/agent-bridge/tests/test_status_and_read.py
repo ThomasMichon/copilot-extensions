@@ -40,7 +40,7 @@ def _read_args(**kw):
 
 def test_read_tail_reads_last_n_events(monkeypatch):
     client = _FakeClient(head=100)
-    monkeypatch.setattr(m, "_get_client", lambda: client)
+    monkeypatch.setattr(m, "_get_client", lambda **kw: client)
     m._cmd_read(_read_args(tail=10))
     # last 10 of head=100 -> [91, 100]
     assert client.read_calls == [(91, 100)]
@@ -48,14 +48,14 @@ def test_read_tail_reads_last_n_events(monkeypatch):
 
 def test_read_tail_clamps_at_one(monkeypatch):
     client = _FakeClient(head=3)
-    monkeypatch.setattr(m, "_get_client", lambda: client)
+    monkeypatch.setattr(m, "_get_client", lambda **kw: client)
     m._cmd_read(_read_args(tail=10))
     assert client.read_calls == [(1, 3)]
 
 
 def test_read_since_reads_after_id(monkeypatch):
     client = _FakeClient(head=100)
-    monkeypatch.setattr(m, "_get_client", lambda: client)
+    monkeypatch.setattr(m, "_get_client", lambda **kw: client)
     m._cmd_read(_read_args(since=42))
     # since 42 -> start at 43, open-ended
     assert client.read_calls == [(43, None)]
@@ -87,7 +87,7 @@ def test_status_renders_inflight_tool(monkeypatch, capsys):
         }],
         "updated_at": "2026-06-15T18:00:00+00:00",
     })
-    monkeypatch.setattr(m, "_get_client", lambda: client)
+    monkeypatch.setattr(m, "_get_client", lambda **kw: client)
     m._cmd_status(_status_args())
     out = capsys.readouterr().out
     assert "[running]" in out
@@ -108,7 +108,7 @@ def test_status_idle_when_no_tool(monkeypatch, capsys):
         "head_id": 5, "last_acked_id": 5, "behind": 0, "active_tool": None,
         "updated_at": "2026-06-15T18:00:00+00:00",
     })
-    monkeypatch.setattr(m, "_get_client", lambda: client)
+    monkeypatch.setattr(m, "_get_client", lambda **kw: client)
     m._cmd_status(_status_args())
     out = capsys.readouterr().out
     assert "caught up" in out
@@ -122,7 +122,7 @@ def test_status_404_exits(monkeypatch):
         def get_session_status(self, sid, *, caller_id=None):
             raise BridgeClientError(404, "Session s1 not found")
 
-    monkeypatch.setattr(m, "_get_client", lambda: _C())
+    monkeypatch.setattr(m, "_get_client", lambda **kw: _C())
     with pytest.raises(SystemExit) as ei:
         m._cmd_status(_status_args())
     assert ei.value.code == 1
