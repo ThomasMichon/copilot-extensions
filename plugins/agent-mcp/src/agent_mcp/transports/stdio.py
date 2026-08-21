@@ -16,6 +16,7 @@ import logging
 import os
 
 from .._exec import no_window_creationflags, resolve_argv
+from .._reaper import TreeReaper
 from ..runner import resolve_npm_command
 from .base import Transport
 
@@ -38,6 +39,7 @@ class StdioTransport(Transport):
         super().__init__(cfg, injector)
         self._proc: asyncio.subprocess.Process | None = None
         self._reader_task: asyncio.Task | None = None
+        self._reaper: TreeReaper | None = None
 
     async def start(self) -> None:
         env = dict(os.environ)
@@ -55,6 +57,15 @@ class StdioTransport(Transport):
         # create_subprocess_exec only auto-appends .exe, not PATHEXT.
         argv = resolve_argv(argv)
         log.info("spawning upstream MCP: %s", " ".join(argv))
+        # ``server.reap: tree`` -- govern the whole spawned tree so a launcher's
+        # grandchildren (npx -> node ...) can't leak. On POSIX this needs the
+        # child in its own session/group at spawn time; on Windows the job is
+        # assigned right after spawn (below). Default ``child`` / ``none`` add
+        # nothing here.
+        spawn_extra: dict = {}
+        if self.cfg.server.reap == "tree":
+            self._reaper = TreeReaper()
+            spawn_extra = self._reaper.spawn_kwargs()
         self._proc = await asyncio.create_subprocess_exec(
             *argv,
             stdin=asyncio.subprocess.PIPE,
@@ -66,7 +77,12 @@ class StdioTransport(Transport):
             # one upstream per session; without this each flashes a cmd/python
             # window). No-op on POSIX.
             creationflags=no_window_creationflags(),
+            **spawn_extra,
         )
+        if self._reaper is not None:
+            # Bind the child (and its future descendants) to a kill-on-close job
+            # (Windows) / record its process group (POSIX) for teardown.
+            self._reaper.track(self._proc.pid)
         self._reader_task = asyncio.create_task(self._pump_stdout())
 
     async def _pump_stdout(self) -> None:
@@ -126,6 +142,17 @@ class StdioTransport(Transport):
     async def aclose(self) -> None:
         if self._reader_task and not self._reader_task.done():
             self._reader_task.cancel()
+        # Reap mode governs how the upstream is torn down:
+        #   ``none`` -- leave it alone (a self-managed singleton daemon, e.g.
+        #               Agency's -- killing it would reap a shared process);
+        #   ``tree`` -- kill the whole spawned tree (job close / killpg) so a
+        #               launcher's grandchildren die too;
+        #   ``child`` (default) -- terminate only the direct child.
+        reap = self.cfg.server.reap
+        if reap == "none":
+            return
+        if self._reaper is not None:  # reap == "tree"
+            self._reaper.close()
         if self._proc and self._proc.returncode is None:
             try:
                 self._proc.terminate()

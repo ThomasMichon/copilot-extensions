@@ -31,6 +31,22 @@ import yaml
 # the local CLI->MCP responder that has no upstream MCP at all).
 TRANSPORTS = ("http", "stdio", "cli")
 
+# ``server.reap`` -- how a stdio upstream's process tree is torn down when the
+# bridge closes (or dies). A stdio upstream is often a *launcher* (npx/npx.cmd, a
+# ``.cmd`` shim, uv) whose REAL server runs as a GRANDCHILD; terminating only the
+# direct child leaks those grandchildren (the npx-MCP accumulation). But some
+# upstreams (e.g. an ``agency mcp <tool>`` client) deliberately front a SINGLETON
+# background daemon that must outlive the session -- there, killing the tree would
+# wrongly reap a shared daemon. So the mode is per-bridge:
+#   ``child`` -- terminate only the direct child (DEFAULT; the historical
+#                behavior, safe when the server IS the direct process);
+#   ``tree``  -- kill the ENTIRE spawned tree (Windows kill-on-close Job Object /
+#                POSIX process group) -- for launchers whose grandchildren would
+#                otherwise leak;
+#   ``none``  -- don't terminate anything -- the upstream owns its own lifecycle
+#                (a singleton daemon managed upstream, e.g. by Agency).
+REAP_MODES = ("child", "tree", "none")
+
 # Protocol-era selectors for ``server.protocol``. ``auto`` probes + falls back;
 # ``modern``/``legacy`` force an era; an explicit ``YYYY-MM-DD`` revision forces
 # exactly that version. Validated in :func:`validate_config`.
@@ -124,6 +140,11 @@ class ServerSpec:
     # both are set. See :mod:`agent_mcp.runner`.
     npm: str | None = None
     npm_args: list[str] = field(default_factory=list)
+    # stdio process-control: how to tear down the spawned upstream tree on close
+    # (see REAP_MODES). Default ``child`` preserves the historical
+    # direct-terminate; ``tree`` reaps launcher grandchildren; ``none`` leaves a
+    # self-managed upstream daemon alone.
+    reap: str = "child"
     # cli (CLI->MCP responder): a set of tool sidecar files to expose as MCP
     # tools, and an optional list of execution scopes this host is allowed to
     # run. A sidecar whose ``mcp.scope`` is set and not in ``scopes`` is neither
@@ -583,6 +604,7 @@ def parse_config(data: dict[str, Any], *, name: str | None = None,
         env={str(k): str(v) for k, v in (raw_server.get("env") or {}).items()},
         npm=npm,
         npm_args=npm_args,
+        reap=str(raw_server.get("reap", "child")),
         tools_from=[str(p) for p in (raw_server.get("tools_from") or [])],
         scopes=[str(s) for s in (raw_server.get("scopes") or [])],
     )
@@ -724,6 +746,15 @@ def validate_config(cfg: BridgeConfig) -> list[str]:
         errors.append("server.command or server.npm is required for transport 'stdio'")
     if s.type == "cli" and not s.tools_from:
         errors.append("server.tools_from is required for transport 'cli'")
+
+    # ``server.reap`` process-control mode (stdio tree teardown). Guard the value
+    # and reject a non-default mode on a transport that spawns no child process.
+    if s.reap not in REAP_MODES:
+        errors.append(f"server.reap '{s.reap}' must be one of {REAP_MODES}")
+    if s.reap != "child" and s.type != "stdio":
+        errors.append(
+            f"server.reap is only meaningful for transport 'stdio' (got '{s.type}')"
+        )
 
     # ``server.url_secrets`` -- ``${name}`` placeholders in the URL resolved at
     # spawn from these sources. Only meaningful for http, and the placeholders
