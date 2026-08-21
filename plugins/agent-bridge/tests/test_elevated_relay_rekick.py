@@ -50,6 +50,7 @@ def test_relay_agent_for_none_when_process_elevated(monkeypatch) -> None:
     cmd = ["python", "-m", "agent_bridge", "acp-connect",
            "ws://127.0.0.1:65000/acp/SPO.Core", "--token", "abc", "--stdio"]
     assert elevated.relay_agent_for(cmd) is None
+    assert elevated.relay_agent_from_command(cmd) == "SPO.Core"
 
 
 def test_rekick_relay_command_rebuilds_with_fresh_port_and_token(monkeypatch) -> None:

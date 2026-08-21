@@ -160,7 +160,7 @@ def _session_info(s) -> SessionInfo:  # noqa: ANN001
         target_host=s.target.host,
         project=getattr(s.target, "project", None),
         worktree_id=s.target.worktree_id,
-        elevated=False,
+        elevated=bool(elevated.relay_agent_from_command(s.target.spawn_command)),
         status=s.status,
         pid=s.pid,
         turn_count=s.turn_count,
@@ -465,11 +465,9 @@ async def list_sessions(request: Request, status: str | None = None):
                 elevated.is_up, timeout=0.2
             )
             represented = {
-                session.acp_session_id
-                for session in primary_sessions
-                if session.acp_session_id
+                info.acp_session_id for info in infos if info.acp_session_id
             }
-            represented.update(session.session_id for session in primary_sessions)
+            represented.update(info.session_id for info in infos)
             for row in rows:
                 if row["id"] in represented:
                     continue

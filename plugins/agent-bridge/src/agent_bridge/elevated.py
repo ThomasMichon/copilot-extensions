@@ -316,8 +316,20 @@ def relay_spawn_command(
     ]
 
 
+def relay_agent_from_command(spawn_command: list[str] | None) -> str | None:
+    """Return the agent named by an elevated sub-daemon relay command."""
+    if not spawn_command or "acp-connect" not in spawn_command:
+        return None
+    for arg in spawn_command:
+        if isinstance(arg, str) and arg.startswith("ws://"):
+            m = re.match(r"ws://127\.0\.0\.1:\d+/acp/(.+)$", arg)
+            if m:
+                return urllib.parse.unquote(m.group(1))
+    return None
+
+
 def relay_agent_for(spawn_command: list[str] | None) -> str | None:
-    """If ``spawn_command`` is an elevated sub-daemon relay, return its agent name.
+    """If this process should drive an elevated relay, return its agent name.
 
     An elevated relay is ``... acp-connect ws://127.0.0.1:<port>/acp/<agent> ...``
     (see :func:`relay_spawn_command`), and only exists on the **non-elevated**
@@ -327,16 +339,9 @@ def relay_agent_for(spawn_command: list[str] | None) -> str | None:
     instead of 500ing on a dead port / stale token (dotfiles#1610). Returns None
     when this is not an elevated relay.
     """
-    if not spawn_command or is_process_elevated():
+    if is_process_elevated():
         return None
-    if "acp-connect" not in spawn_command:
-        return None
-    for arg in spawn_command:
-        if isinstance(arg, str) and arg.startswith("ws://"):
-            m = re.match(r"ws://127\.0\.0\.1:\d+/acp/(.+)$", arg)
-            if m:
-                return urllib.parse.unquote(m.group(1))
-    return None
+    return relay_agent_from_command(spawn_command)
 
 
 def rekick_relay_command(agent: str, *, wait: float = 60.0) -> list[str]:

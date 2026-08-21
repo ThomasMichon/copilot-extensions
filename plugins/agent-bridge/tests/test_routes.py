@@ -117,7 +117,18 @@ class TestAuthMiddleware:
         primary = Session(
             "primary-session",
             "outer-session",
-            SpawnTarget(type="command", cwd="/repo"),
+            SpawnTarget(
+                type="command",
+                cwd="/repo",
+                spawn_command=[
+                    "python",
+                    "-m",
+                    "agent_bridge",
+                    "acp-connect",
+                    "ws://127.0.0.1:65000/acp/admin-agent",
+                    "--stdio",
+                ],
+            ),
             "admin-agent",
         )
         primary.status = SessionStatus.STOPPED
@@ -186,6 +197,57 @@ class TestAuthMiddleware:
         assert orphaned["pid"] is None
         assert orphaned["turn_count"] == 3
         assert orphaned["context_pct"] == 25.0
+        assert sessions["primary-session"]["elevated"] is True
+
+    def test_list_status_filter_keeps_normalized_elevated_session(
+        self, client, monkeypatch
+    ) -> None:
+        from agent_bridge import elevated
+
+        manager = client.app.state.session_manager
+        primary = Session(
+            "primary-session",
+            "outer-session",
+            SpawnTarget(type="command", cwd="/repo"),
+            "admin-agent",
+        )
+        primary.status = SessionStatus.RUNNING
+        primary.acp_session_id = "linked-elevated-session"
+        manager._sessions[primary.session_id] = primary
+
+        now = time.time()
+        rows = [{
+            "id": "linked-elevated-session",
+            "name": "linked-inner",
+            "agent_name": "admin-agent",
+            "caller_id": None,
+            "target_dir": "/repo",
+            "target_type": "local",
+            "target_json": None,
+            "status": "running",
+            "pid": 4242,
+            "acp_session_id": "acp-linked",
+            "context_size": None,
+            "context_used": None,
+            "usage_model": None,
+            "last_usage_at": None,
+            "created_at": now - 10,
+            "updated_at": now,
+            "turn_count": 1,
+        }]
+        monkeypatch.setattr(elevated, "is_subdaemon", lambda: False)
+        monkeypatch.setattr(elevated, "persisted_session_rows", lambda: rows)
+        monkeypatch.setattr(elevated, "is_up", lambda **_kwargs: False)
+
+        response = client.get("/api/v1/sessions?status=stopped")
+
+        assert response.status_code == 200
+        sessions = response.json()["sessions"]
+        assert [session["session_id"] for session in sessions] == [
+            "linked-elevated-session"
+        ]
+        assert sessions[0]["status"] == "stopped"
+        assert sessions[0]["elevated"] is True
 
 
 class TestSessionRoutes:
