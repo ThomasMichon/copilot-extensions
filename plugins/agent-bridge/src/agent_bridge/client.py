@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 
 DEFAULT_RESTART_GRACE = 30.0
+DEFAULT_SESSION_SETTLE_GRACE = 5.0
 
 
 class BridgeClientError(Exception):
@@ -51,14 +52,29 @@ class BridgeClient:
         *,
         timeout: int = 120,
         connect_grace: float = DEFAULT_RESTART_GRACE,
+        session_settle_grace: float | None = None,
         reresolve: "Callable[[], str | None] | None" = None,
     ) -> None:
         self._base = base_url.rstrip("/")
         self._token = token
         self._timeout = timeout
-        # Sustained-outage deadline for initial connection refusal or a
-        # session-resource 404 while the active daemon changes.
+        # One sustained-outage budget is shared by every request from this
+        # short-lived CLI client, including its protocol preflight.
         self._connect_grace = max(0.0, connect_grace)
+        self._outage_deadline: float | None = None
+        self._outage_replacement_used = False
+        # A healthy daemon may briefly lack an adopted session around a routing
+        # flip, but a genuinely unknown session must settle much sooner than a
+        # full daemon outage. An explicit shorter connect grace remains an
+        # upper bound for backward-compatible tests and pinned clients.
+        requested_settle_grace = (
+            DEFAULT_SESSION_SETTLE_GRACE
+            if session_settle_grace is None
+            else max(0.0, session_settle_grace)
+        )
+        self._session_settle_grace = min(
+            self._connect_grace, requested_settle_grace
+        )
         # Optional live re-resolver: on a connection rejection, re-read
         # the routing table (listener-verified) to follow a coordinator that
         # moved to a new dynamic port during a zero-downtime cutover, instead of
@@ -70,6 +86,11 @@ class BridgeClient:
         # on /health. Cached for this client's (short) lifetime -- a CLI
         # invocation dials one daemon -- so repeated capability gates cost one GET.
         self._daemon_proto: tuple[int, int] | None = None
+
+    def _mark_connected(self) -> None:
+        """Reset continuous-outage state after confirmed HTTP contact."""
+        self._outage_deadline = None
+        self._outage_replacement_used = False
 
     # -- Factory -------------------------------------------------------------
 
@@ -235,15 +256,20 @@ class BridgeClient:
         import time as _time
 
         sock_timeout = request_timeout if request_timeout is not None else self._timeout
-        deadline = _time.monotonic() + self._connect_grace
+        session_deadline: float | None = None
+        session_replacement_used = False
         backoff = 0.25
         while True:
             try:
                 with urllib.request.urlopen(req, timeout=sock_timeout) as resp:
+                    self._mark_connected()
                     if resp.status == 204:
                         return None
                     return json.loads(resp.read().decode())
             except urllib.error.HTTPError as exc:
+                # The daemon answered, so any continuous connection outage has
+                # ended even when this particular resource is unavailable.
+                self._mark_connected()
                 try:
                     detail = json.loads(exc.read().decode()).get("detail", str(exc))
                 except Exception:
@@ -254,22 +280,38 @@ class BridgeClient:
                 # then keep checking within the same bounded restart grace.
                 session_resource = path.startswith("/api/v1/sessions/")
                 if exc.code == 404 and session_resource and self._reresolve is not None:
-                    if _follow_active_endpoint():
-                        continue
-                    if _time.monotonic() + backoff < deadline:
+                    if session_deadline is None:
+                        session_deadline = (
+                            _time.monotonic() + self._session_settle_grace
+                        )
+                    if not session_replacement_used:
+                        if _follow_active_endpoint():
+                            session_replacement_used = True
+                            continue
+                    if _time.monotonic() + backoff < session_deadline:
                         _time.sleep(backoff)
                         backoff = min(backoff * 2, 1.0)
                         continue
                 raise BridgeClientError(exc.code, detail) from exc
             except urllib.error.URLError:
+                if self._outage_deadline is None:
+                    self._outage_deadline = (
+                        _time.monotonic() + self._connect_grace
+                    )
                 # A connection rejection against the remembered endpoint. Before
                 # spending the grace window retrying the SAME port, follow the
                 # listener-verified routing table. Re-resolve after every
                 # failed attempt because a cutover may publish only after an
                 # earlier retry; the deadline still bounds a genuinely-down
                 # service.
-                if _follow_active_endpoint():
-                    continue
+                now = _time.monotonic()
+                if now < self._outage_deadline:
+                    if _follow_active_endpoint():
+                        continue
+                elif not self._outage_replacement_used:
+                    if _follow_active_endpoint():
+                        self._outage_replacement_used = True
+                        continue
                 # Stage 1 (CONNECT_BRIDGE): the service may be mid-restart
                 # (e.g. a plugin self-update bounced the daemon). Retry within
                 # the grace window, then raise BridgeConnectionError -- never
@@ -280,7 +322,7 @@ class BridgeClient:
                 # One-shot command handlers surface this as a clean message via
                 # the top-level guard in main(); the streaming engine catches it
                 # and resumes from the caller's acked cursor.
-                if _time.monotonic() + backoff < deadline:
+                if _time.monotonic() + backoff < self._outage_deadline:
                     _time.sleep(backoff)
                     backoff = min(backoff * 2, 1.0)
                     continue
@@ -314,7 +356,9 @@ class BridgeClient:
         """Stream SSE events from an endpoint. Yields parsed event dicts.
 
         Raises ``BridgeConnectionError`` if the service is unreachable so the
-        streaming engine can reconnect (rather than killing the process).
+        streaming engine can reconnect (rather than killing the process). A
+        successful SSE connection resets request outage state, but stream retry
+        duration remains owned by the streaming engine.
         """
         url = f"{self._base}{path}"
         if params:
@@ -329,6 +373,7 @@ class BridgeClient:
         try:
             resp = urllib.request.urlopen(req, timeout=120)
         except urllib.error.HTTPError as exc:
+            self._mark_connected()
             try:
                 detail = json.loads(exc.read().decode()).get("detail", str(exc))
             except Exception:
@@ -339,6 +384,7 @@ class BridgeClient:
                 f"Cannot connect to agent-bridge at {self._base}: {exc}"
             ) from exc
 
+        self._mark_connected()
         try:
             event_type = ""
             event_id = ""
