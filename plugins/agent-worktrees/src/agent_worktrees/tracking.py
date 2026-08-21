@@ -380,6 +380,13 @@ class WorktreeRecord:
     follow_up: bool = False
     summary: str = ""
     status_note_at: str | None = None
+    # worktree-status-core: True when the title was AGENT-ASSERTED via
+    # `agent-worktrees status --title` (vs. auto-derived from a session summary).
+    # An asserted title is authoritative: the status-updater's per-tick
+    # `_persist_segment_title` must NOT clobber it with the live session summary.
+    # Emitted only when True (like `follow_up`), so un-annotated YAMLs stay
+    # byte-identical; absent (legacy) = False = auto-derive as before.
+    title_asserted: bool = False
     # #4057 cached liveness (single-owning-layer): the last-known multiplexer
     # liveness for this worktree, stamped by the authoritative single-worktree
     # verify at the action moments (Actions-menu / Enter) and cleared on Stop, so
@@ -928,6 +935,7 @@ def load_record(path: Path) -> WorktreeRecord:
         resources=resources_list,
         follow_up=bool(data.get("follow_up", False)),
         summary=str(data.get("summary", "") or ""),
+        title_asserted=bool(data.get("title_asserted", False)),
         status_note_at=(str(data["status_note_at"])
                         if data.get("status_note_at") else None),
         mux_live=(bool(data["mux_live"])
@@ -1049,6 +1057,8 @@ def save_record(record: WorktreeRecord, path: Path | None = None) -> None:
     if record.summary:
         safe_summary = record.summary.replace("'", "''")
         content += f"summary: '{safe_summary}'\n"
+    if record.title_asserted:
+        content += "title_asserted: true\n"
     if record.status_note_at:
         content += f"status_note_at: {record.status_note_at}\n"
     # #4057 cached liveness -- emitted only when stamped (None absent), so a
@@ -1315,6 +1325,9 @@ def set_disposition(
         changed.append("summary")
     if title is not None:
         record.title = title.replace("\n", " ").strip() or None
+        # An explicit --title assertion is authoritative; a cleared (empty)
+        # title re-enables auto-derivation from the session summary.
+        record.title_asserted = record.title is not None
         changed.append("title")
     if follow_up is not None:
         record.follow_up = follow_up

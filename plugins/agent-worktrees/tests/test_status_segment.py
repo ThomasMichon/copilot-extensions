@@ -168,6 +168,33 @@ def test_updater_does_not_clobber_finalized_title(monkeypatch):
     assert saved == []
 
 
+def test_updater_does_not_clobber_agent_asserted_title(monkeypatch):
+    # An agent-asserted title (`status --title`, title_asserted=True) is
+    # authoritative: the per-tick persist must NOT overwrite it with the live
+    # session summary, and the segment renders the asserted title. This is the
+    # fix for the "mux bar reverts to the session summary" bug.
+    target = str(Path("wt-asserted").resolve())
+    rec = _record(worktree_path=target, title="Agent-Set Headline",
+                  status="active", title_asserted=True)
+    saved = _wire_persist(monkeypatch, target, rec=rec, summary="Live Summary")
+    seg = m._render_status_segment(target, persist_title=True, plain=True)
+    assert rec.title == "Agent-Set Headline"   # not clobbered
+    assert saved == []                          # no write at all
+    assert "Agent-Set Headline" in seg          # displayed
+
+
+def test_updater_persists_when_title_not_asserted(monkeypatch):
+    # Control: with title_asserted False (auto-derived), the persist still lands
+    # the session summary as before -- the guard is scoped to asserted titles.
+    target = str(Path("wt-notasserted").resolve())
+    rec = _record(worktree_path=target, title=None, status="active",
+                  title_asserted=False)
+    saved = _wire_persist(monkeypatch, target, rec=rec, summary="Derived Title")
+    m._render_status_segment(target, persist_title=True)
+    assert rec.title == "Derived Title"
+    assert saved == ["Derived Title"]
+
+
 def test_updater_title_persist_is_noop_when_unchanged(monkeypatch):
     target = str(Path("wt-same").resolve())
     rec = _record(worktree_path=target, title="Investigate X", status="active")

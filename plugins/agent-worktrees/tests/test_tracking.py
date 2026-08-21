@@ -356,10 +356,12 @@ class TestSaveLoadRoundTrip:
         assert "follow_up" not in txt
         assert "summary" not in txt
         assert "status_note_at" not in txt
+        assert "title_asserted" not in txt
         loaded = load_record(path)
         assert loaded.follow_up is False
         assert loaded.summary == ""
         assert loaded.status_note_at is None
+        assert loaded.title_asserted is False
 
     def test_disposition_round_trip(self, tmp_path: Path):
         rec = self._make_record(
@@ -1794,9 +1796,27 @@ class TestSetDisposition:
         assert loaded.summary == "keep me"
         assert loaded.follow_up is True
         assert loaded.status_note_at  # a title write also stamps status_note_at
-        # An all-whitespace title clears back to None (no empty headline).
+        assert loaded.title_asserted is True  # an explicit --title is authoritative
+        # An all-whitespace title clears back to None (no empty headline) and
+        # re-enables auto-derivation from the session summary.
         set_disposition(loaded, title="   ")
-        assert load_record(p).title is None
+        cleared = load_record(p)
+        assert cleared.title is None
+        assert cleared.title_asserted is False
+
+    def test_title_asserted_round_trips(self, tmp_path: Path, monkeypatch):
+        rec = self._rec()
+        p = tmp_path / "wt.yaml"
+        monkeypatch.setattr("agent_worktrees.tracking.save_record",
+                            lambda record, path=None: save_record(record, p))
+        # A summary-only write must NOT assert the title (auto-derive still allowed).
+        set_disposition(rec, summary="s")
+        assert load_record(p).title_asserted is False
+        assert "title_asserted" not in p.read_text()  # emitted only when True
+        # Asserting a title flips + persists the marker.
+        set_disposition(load_record(p), title="hand-set")
+        assert "title_asserted: true" in p.read_text()
+        assert load_record(p).title_asserted is True
 
 
 class TestForwardCompatContract:
