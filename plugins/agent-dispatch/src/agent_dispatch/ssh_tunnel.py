@@ -150,15 +150,43 @@ def open_coordinator_tunnel(
 ) -> CoordinatorTunnel:
     """Open an SSH local port-forward to ``machine``'s loopback coordinator.
 
-    Resolves the peer's dynamic coordinator port over SSH, then holds an
-    ``ssh -N -L`` forward open and returns a :class:`CoordinatorTunnel` whose
-    ``base_url`` addresses the peer coordinator through loopback. Raises
-    :class:`TunnelUnavailable` if ssh is missing, the peer endpoint can't be
-    resolved, or the forward doesn't come up within ``ready_timeout``.
+    Resolves the peer's dynamic coordinator port over SSH, holds an ``ssh -N -L``
+    forward open, and **verifies it reaches a live coordinator** (a ``/health``
+    probe through the forward) before returning. The peer's coordinator binds an
+    OS-assigned port that moves on a zero-downtime cutover, so the port resolved a
+    moment ago can be stale by the time the forward is up; on a failed probe the
+    resolve+open is retried once with a fresh port. Raises
+    :class:`TunnelUnavailable` if ssh is missing, the endpoint can't be resolved,
+    or a live coordinator can't be reached within the attempts.
     """
     exe = shutil.which("ssh")
     if exe is None:
         raise TunnelUnavailable("ssh not found on PATH")
+    last_err: str = ""
+    for _attempt in range(2):
+        tunnel = _open_forward_once(exe, machine, ready_timeout=ready_timeout)
+        if tunnel is None:
+            last_err = "ssh forward did not become ready"
+            continue
+        if _coordinator_reachable(tunnel.base_url):
+            return tunnel
+        # The forward is up but no live coordinator answers -- the resolved port
+        # went stale (a cutover between resolve and connect). Drop it and retry
+        # with a freshly-resolved port.
+        last_err = "forward reached no live coordinator (stale port?)"
+        tunnel.close()
+    raise TunnelUnavailable(f"SSH failover to {machine!r} failed: {last_err}")
+
+
+def _open_forward_once(
+    exe: str, machine: str, *, ready_timeout: float
+) -> CoordinatorTunnel | None:
+    """Resolve the peer endpoint and open one ``ssh -N -L`` forward.
+
+    Returns a :class:`CoordinatorTunnel` once the local end accepts connections,
+    or ``None`` if the forward didn't come up within ``ready_timeout``. Raises
+    :class:`TunnelUnavailable` only for a hard resolve/ssh error.
+    """
     remote_host, remote_port = resolve_peer_endpoint(machine)
     local_port = _pick_local_port()
     cmd = [
@@ -191,12 +219,29 @@ def open_coordinator_tunnel(
                 base_url=f"http://127.0.0.1:{local_port}", _proc=proc, _machine=machine
             )
         time.sleep(0.1)
-    # Timed out: tear the half-open forward down before failing.
+    # Timed out: tear the half-open forward down before returning None.
     proc.terminate()
     try:
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
         proc.kill()
-    raise TunnelUnavailable(
-        f"ssh forward to {machine!r} did not become ready within {ready_timeout:.0f}s"
-    )
+    return None
+
+
+def _coordinator_reachable(base_url: str, *, timeout: float = 4.0) -> bool:
+    """True if ``GET {base_url}/health`` returns 2xx through the forward.
+
+    ``_port_accepts`` only proves the *local* forward end accepts a TCP
+    connection (ssh binds it regardless of the remote's health); a live-coordinator
+    probe confirms the forwarded connection actually reaches a coordinator, which
+    is what distinguishes a good tunnel from one pointed at a just-vacated port.
+    """
+    import urllib.error
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"{base_url.rstrip('/')}/health", timeout=timeout) as resp:  # noqa: S310 -- fixed loopback URL
+            return 200 <= resp.status < 300
+    except (urllib.error.URLError, OSError):
+        return False
+
