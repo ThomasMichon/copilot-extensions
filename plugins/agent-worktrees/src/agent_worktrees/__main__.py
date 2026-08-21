@@ -5629,6 +5629,81 @@ def _ensure_status_monitor() -> bool:
         [sys.executable, "-m", "agent_worktrees", "status-monitor"])
 
 
+def _restart_status_monitor() -> dict:
+    """Reap a superseded status-monitor and (re)spawn the current-runtime one.
+
+    Called by the auto-update cutover (the installer, after it activates a new
+    runtime slot) so a deploy never leaves live sessions' status bars frozen:
+    the outgoing monitor self-retires on supersession, but only RESPAWNS on the
+    next session start -- so a long-lived, un-restarted session's bar stays stuck
+    until then (the observed "mux bar frozen after a deploy" bug). This closes
+    the gap: reap the superseded monitor now and start the current one now, which
+    then re-serves every live registered ``wt-*`` session's bar with no session
+    restart needed.
+
+    Best-effort; never raises. Returns a small status dict for logging. A no-op
+    (no spawn) when the resident monitor is opted out
+    (``AGENT_WORKTREES_STATUS_MONITOR=0``). Runs from the NEWLY-ACTIVATED slot's
+    interpreter, so ``sys.executable`` / ``sys.prefix`` are the current runtime.
+    """
+    result: dict = {"enabled": _status_monitor_enabled(), "reaped": None,
+                    "spawned": False, "already_current": False}
+    if not result["enabled"]:
+        return result
+    try:
+        from . import locks as _locks
+        lock = _monitor_lock_path()
+        data = _locks.read_lock(lock)
+        if _locks.lock_is_live(data) and isinstance(data, dict):
+            pid = data.get("pid")
+            prefix = data.get("prefix")
+            superseded = bool(prefix) and _runtime_superseded(prefix=prefix)
+            if pid == os.getpid():
+                pass  # our own lock (shouldn't happen from the installer) -- ignore
+            elif superseded and isinstance(pid, int):
+                # The running monitor is on the outgoing slot: reap it now (it
+                # would otherwise linger up to a full tick) and clear its lock so
+                # the fresh monitor doesn't defer to a ghost owner.
+                from . import procs as _procs
+                if _procs.terminate_pid(pid):
+                    result["reaped"] = pid
+                _locks.remove_lock(lock)
+            elif not superseded:
+                # A CURRENT monitor already owns the host -- nothing to restart.
+                result["already_current"] = True
+                return result
+        else:
+            # Stale/dead lock -> clear it so the new monitor doesn't stand down
+            # behind a ghost owner.
+            _locks.remove_lock(lock)
+    except Exception:
+        pass
+    result["spawned"] = _spawn_detached(
+        [sys.executable, "-m", "agent_worktrees", "status-monitor"])
+    return result
+
+
+def cmd_status_monitor_restart(args: argparse.Namespace) -> int:
+    """``status-monitor-restart`` -- reap+respawn the resident monitor.
+
+    The auto-update cutover seam (installer-invoked from the new slot). Prints a
+    one-line summary; always exits 0 (advisory, never fails a deploy)."""
+    r = _restart_status_monitor()
+    if not r.get("enabled"):
+        print("status-monitor: disabled (AGENT_WORKTREES_STATUS_MONITOR=0) -- skipped")
+        return 0
+    if r.get("already_current"):
+        print("status-monitor: a current monitor already owns the host -- left as-is")
+        return 0
+    bits = []
+    if r.get("reaped"):
+        bits.append(f"reaped superseded pid {r['reaped']}")
+    bits.append("spawned current monitor" if r.get("spawned")
+                else "spawn failed")
+    print("status-monitor: " + ", ".join(bits))
+    return 0
+
+
 def _monitor_mux_set(mux_bin: str, sess: str, opt: str, val: str) -> None:
     """Push a session-scoped mux option (best-effort, bounded)."""
     try:
@@ -13969,6 +14044,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--interval", type=int, default=15,
                    help="Sweep cadence in seconds (min 2)")
+    # status-monitor-restart (auto-update cutover seam: reap+respawn the monitor)
+    sub.add_parser(
+        "status-monitor-restart",
+        help="Reap a superseded status-monitor and spawn the current-runtime "
+             "one (invoked by the auto-update cutover so a deploy never leaves "
+             "live sessions' status bars frozen)",
+    )
     # handoff-cutover (live-cutover handoff: seeded successor window + pane retire)
     p = sub.add_parser(
         "handoff-cutover",
@@ -15886,6 +15968,7 @@ COMMAND_MAP = {
     "status-context": cmd_status_context,
     "status-updater": cmd_status_updater,
     "status-monitor": cmd_status_monitor,
+    "status-monitor-restart": cmd_status_monitor_restart,
     "handoff-cutover": cmd_handoff_cutover,
     "embody": cmd_embody,
     "list": cmd_list,
@@ -16261,7 +16344,7 @@ def _git_toplevel(path: Path | None) -> Path | None:
 # and balks helpfully when neither is available.
 _NO_PROJECT_COMMANDS = {
     "--version", "-V", "--help", "-h", "repos", "accounts", "related", "install", "register", "hook",
-    "picker", "reap-shells", "status-updater", "status-monitor", "restart", "register-session",
+    "picker", "reap-shells", "status-updater", "status-monitor", "status-monitor-restart", "restart", "register-session",
     "head-session", "conclude-session", "link-succession", "config-migrate",
     "session-lock", "machine-context", "reconcile-binstubs",
     "register-project-entry", "terminal-fragment",
