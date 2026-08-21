@@ -2,11 +2,19 @@
 
 Subcommands:
   bridge <name|--config FILE>   Run the stdio MCP bridge from a config file.
+  forward <name|--config FILE>  Thin per-session forwarder: attach to a resident
+                                serve session-host and pump stdio<->socket, with a
+                                direct-bridge fallback (the #744 multiplexer child).
   validate <name|FILE>          Parse + schema-check a bridge config (no run).
   status                        Show prerequisites and available bridges.
   call <bridge> <tool> [args]   One-shot: invoke one upstream tool, print result.
   materialize <bridge>          Project the upstream catalog into a CLI stub fleet.
   serve                         Resident warmth daemon: keep upstreams warm over a socket.
+
+Heavy imports (the bridge tree: config, credential injectors, decorators,
+transports, the upstream client, the serve daemon) are deferred into each command
+handler rather than imported at module load, so the light paths -- above all
+``forward``, spawned once per MCP session -- start a near-empty interpreter.
 """
 
 from __future__ import annotations
@@ -15,28 +23,12 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import shutil
 import sys
 from pathlib import Path
 
 from . import __version__
-from . import materialize as _materialize
-from . import serve as _serve
-from .bridge import Bridge
-from .client import (
-    OneShotSession,
-    UpstreamError,
-    result_is_error,
-    result_structured,
-    result_text,
-)
-from .config import (
-    BRIDGES_DIR,
-    BridgeConfig,
-    ConfigError,
-    discover_plugin_bridges,
-    load_config,
-)
 
 
 def _configure_logging(level: str) -> None:
@@ -48,11 +40,29 @@ def _configure_logging(level: str) -> None:
     )
 
 
+# ``bridge`` opt-in: when set truthy, ``agent-mcp bridge`` delegates to the thin
+# ``forward`` path (attach to a resident serve host, direct-bridge fallback)
+# without any re-materialization -- one env flag flips a live host to the
+# multiplexer for the #744 A/B. Kept opt-in until the RAM win is proven (slice 4).
+_MULTIPLEX_TRUTHY = {"1", "true", "on", "yes"}
+
+
+def _bridge_should_multiplex() -> bool:
+    raw = os.environ.get("AGENT_MCP_MULTIPLEX")
+    return raw is not None and raw.strip().lower() in _MULTIPLEX_TRUTHY
+
+
 def _cmd_bridge(args: argparse.Namespace) -> int:
     target = args.config or args.name
     if not target:
         print("agent-mcp bridge: a bridge name or --config FILE is required", file=sys.stderr)
         return 2
+    # Opt-in multiplexer: route the same invocation through the thin forwarder.
+    if _bridge_should_multiplex():
+        from . import forward
+        return forward.run(target)
+    from .bridge import Bridge
+    from .config import ConfigError, load_config
     try:
         cfg = load_config(target)
     except ConfigError as exc:
@@ -61,7 +71,18 @@ def _cmd_bridge(args: argparse.Namespace) -> int:
     return asyncio.run(Bridge(cfg).run())
 
 
+def _cmd_forward(args: argparse.Namespace) -> int:
+    target = args.config or args.name
+    if not target:
+        print("agent-mcp forward: a bridge name or --config FILE is required",
+              file=sys.stderr)
+        return 2
+    from . import forward
+    return forward.run(target, socket_path=args.socket)
+
+
 def _cmd_validate(args: argparse.Namespace) -> int:
+    from .config import ConfigError, load_config
     try:
         cfg = load_config(args.name)
     except ConfigError as exc:
@@ -75,6 +96,7 @@ def _cmd_validate(args: argparse.Namespace) -> int:
 
 
 def _cmd_status(_args: argparse.Namespace) -> int:
+    from .config import BRIDGES_DIR, discover_plugin_bridges
     print(f"agent-mcp {__version__}")
     print("prerequisites:")
     for tool in ("python", "az", "gh", "git"):
@@ -116,6 +138,7 @@ def _extract_args(obj: object, *, where: str) -> dict:
         if isinstance(inner, dict):
             return inner
         return obj
+    from .config import ConfigError
     raise ConfigError(f"{where}: expected a JSON object, got {type(obj).__name__}")
 
 
@@ -141,6 +164,7 @@ def _resolve_arguments(inline: str | None, request_file: str | None,
 
 def _resolve_stub(manifest_path: str, stub: str) -> tuple[str, str]:
     """Read a materialize manifest and resolve ``stub`` -> (bridge_ref, tool)."""
+    from .config import ConfigError
     data = json.loads(Path(manifest_path).expanduser().read_text(encoding="utf-8"))
     bridge_ref = data.get("bridge")
     entry = (data.get("tools") or {}).get(stub)
@@ -162,7 +186,13 @@ def _emit_call_output(text: str, structured: object | None, is_error: bool,
     return 0
 
 
-async def _run_call(cfg: BridgeConfig, tool: str, arguments: dict) -> int:
+async def _run_call(cfg, tool: str, arguments: dict) -> int:
+    from .client import (
+        OneShotSession,
+        result_is_error,
+        result_structured,
+        result_text,
+    )
     async with OneShotSession(cfg) as sess:
         result = await sess.call_tool(tool, arguments)
     return _emit_call_output(result_text(result), result_structured(result),
@@ -177,7 +207,8 @@ def _try_serve_call(bridge_ref: str, tool: str, arguments: dict,
     real upstream/config error), or ``None`` when the daemon is unavailable so
     the caller falls back to the stateless one-shot cold path.
     """
-    socket = None if no_serve else _serve.serve_socket_if_available()
+    from . import ipc
+    socket = None if no_serve else ipc.serve_socket_if_available()
     if socket is None:
         return None
     # The daemon's CWD may differ from ours: send an absolute bridge path so it
@@ -190,7 +221,7 @@ def _try_serve_call(bridge_ref: str, tool: str, arguments: dict,
     except OSError:
         pass
     try:
-        resp = asyncio.run(_serve.call_via_socket(socket, ref, tool, arguments))
+        resp = asyncio.run(ipc.call_via_socket(socket, ref, tool, arguments))
     except OSError:
         return None  # socket vanished/refused -> fall back to cold path
     if not resp.get("ok"):
@@ -201,6 +232,8 @@ def _try_serve_call(bridge_ref: str, tool: str, arguments: dict,
 
 
 def _cmd_call(args: argparse.Namespace) -> int:
+    from .client import UpstreamError
+    from .config import ConfigError, load_config
     try:
         if args.stub:
             if not args.manifest:
@@ -245,12 +278,16 @@ def _cmd_call(args: argparse.Namespace) -> int:
 # materialize -- project the upstream catalog into a CLI stub fleet
 # ---------------------------------------------------------------------------
 
-async def _run_materialize(cfg: BridgeConfig) -> list[dict]:
+async def _run_materialize(cfg) -> list[dict]:
+    from .client import OneShotSession
     async with OneShotSession(cfg) as sess:
         return await sess.list_tools()
 
 
 def _cmd_materialize(args: argparse.Namespace) -> int:
+    from . import materialize as _materialize
+    from .client import UpstreamError
+    from .config import ConfigError, load_config
     try:
         cfg = load_config(args.name)
     except ConfigError as exc:
@@ -288,7 +325,9 @@ def _cmd_materialize(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 def _cmd_serve(args: argparse.Namespace) -> int:
-    socket_path = args.socket or str(_serve.default_socket_path())
+    from . import ipc
+    from . import serve as _serve
+    socket_path = args.socket or str(ipc.default_socket_path())
     server = _serve.Server(socket_path, idle_timeout=args.idle_timeout)
     print(f"agent-mcp serve: listening on {socket_path} "
           f"(idle-timeout {args.idle_timeout:g}s; Ctrl-C to stop)", file=sys.stderr)
@@ -310,6 +349,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_bridge.add_argument("name", nargs="?", help="bridge name under ~/.agent-mcp/bridges/")
     p_bridge.add_argument("--config", help="explicit path to a bridge config file")
     p_bridge.set_defaults(func=_cmd_bridge)
+
+    p_forward = sub.add_parser(
+        "forward", help="thin per-session forwarder: attach to a resident serve "
+                        "session-host and pump stdio<->socket (direct-bridge fallback)")
+    p_forward.add_argument("name", nargs="?",
+                           help="bridge name under ~/.agent-mcp/bridges/")
+    p_forward.add_argument("--config", help="explicit path to a bridge config file")
+    p_forward.add_argument("--socket", help="serve socket handle to attach "
+                                            "(default: $AGENT_MCP_HOME/serve.sock)")
+    p_forward.set_defaults(func=_cmd_forward)
 
     p_validate = sub.add_parser("validate", help="validate a bridge config")
     p_validate.add_argument("name", help="bridge name or path to a config file")
