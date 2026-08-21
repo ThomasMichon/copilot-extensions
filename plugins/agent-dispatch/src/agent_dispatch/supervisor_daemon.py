@@ -31,6 +31,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import platform
 import subprocess
 import sys
 import time
@@ -157,8 +158,8 @@ def build_command(
     - ``schedule``       -> the timer producer (``schedule serve``) over a
       one-entry spec materialized to a file (a *self-run emitter*, dedup-keyed
       ``sched:<id>:<epoch>`` by the producer);
-    - ``emitter``        -> the reactive producer (``webhook``) over a config
-      materialized to a file (dedup-keyed by the producer).
+    - ``emitter``        -> either a periodic command emitter (``emitter serve``)
+      or the legacy reactive producer (``webhook``), over a materialized config.
 
     Kinds that carry an inline spec dict need a ``materialize(name, spec) -> path``
     callback (the daemon supplies one that writes a per-registration file);
@@ -201,6 +202,9 @@ def build_command(
 
     if kind == RegistrationKind.EMITTER:
         path = _need_materialize("emitter", spec)
+        if "command" in spec:
+            holder = str(reg.get("machine") or platform.node() or "local")
+            return base + ["emitter", "serve", path, "--holder", holder]
         argv = base + ["webhook", "--config", path]
         argv += ["--host", str(spec.get("host", "127.0.0.1"))]
         argv += ["--port", str(spec.get("port", 9331))]
