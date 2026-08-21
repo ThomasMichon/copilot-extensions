@@ -69,6 +69,29 @@ gate. It is a **heuristic aid, not a proof** — it deliberately under-flags rat
 than cry wolf; feed its findings into the design critique, don't treat a clean
 scan as a full review.
 
+Add `--context-budget` for a reproducible, counts-only inventory:
+
+```bash
+python3 <skill-dir>/scripts/scan-customizations.py <repo-root> \
+  --from-settings --context-budget
+```
+
+It counts Unicode characters, UTF-8 bytes, words, and estimated tokens using the
+fixed heuristic `ceil(Unicode characters / 4)`. It separates always-loaded repo
+instructions, nested/conditional `AGENTS.md`, standard personal Copilot
+instructions, `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` payloads, enabled skill/agent
+frontmatter metadata upper bounds, context-capable hook registrations, and
+non-context hook registrations. Dynamic emitted payload size remains unknown.
+JSON output includes a stable `context_budget` object.
+
+The report prints paths and counts only. It never dumps instruction contents or
+hook commands, and it **never executes hooks merely to measure them**. The token
+estimate is a comparison heuristic, not a tokenizer result; metadata is an upper
+bound, and dynamic context remains unknown until runtime. The budget excludes
+runtime MCP tool schemas unless an authoritative runtime measurement is
+available. MCP configuration bytes are not rendered tool-schema cost and must
+not be reported as though they were.
+
 **Scan the plugin set actually LOADED for the repo — `--from-settings`.** Trigger
 collisions are computed from both the structured `Trigger phrases include:` list
 **and** inline prose (`Use when asked to "…"`) — a skill hides no triggers by
@@ -127,11 +150,12 @@ equivalent independent reviewer. Ask it for **bugs and design flaws, not style**
 - ambiguous, overlapping, or colliding **trigger phrases** across skills;
 - **duplicate or redundant** skills that should merge (context-budget waste);
 - **ambient-guidance skills that restate standing rules one-shot** instead of
-  pointing at an always-on home — a skill whose body *is* a persona/style/safety
-  rule meant to hold for the rest of the session decays after its turn; it should
-  **load and enforce** the durable guidance (`AGENTS.md` / a linked doc) rather
-  than embed a transient copy (see `authoring-skills` § Action-sequence vs
-  ambient-guidance skills);
+  respecting the authoritative owner — a skill whose body *is* a
+  persona/style/safety rule meant to hold for the rest of the session decays
+  after its turn. Repository-owned invariants stay in `AGENTS.md`; plugin-owned
+  policy should be injected by the plugin as a concise context kernel; detailed
+  procedures stay in the skill (see `customizing-copilot:authoring-skills`
+  § *sessionStart context injection*);
 - **contradictory rules** between `AGENTS.md`, skills, and hooks;
 - sub-agents missing the **anti-recursion / MCP-readiness** guard;
 - **footguns** — destructive commands without confirmation, hardcoded paths,
@@ -152,7 +176,7 @@ Cross-check each artifact against the skill that governs its format:
 | Sub-agents | **`defining-subagents`** | `.agent.md` frontmatter, valid `tools` aliases, per-agent MCP ownership, anti-recursion pattern |
 | MCP servers | **`registering-mcp-servers`** | registration scope (per-agent vs project vs global), config shape, env substitution, no inline secrets |
 | Plugin registration | **`installing-plugins`** | repo `settings.json` (`extraKnownMarketplaces` + `enabledPlugins`), payload-vs-runtime, no "just in case" plugins |
-| Instructions | this skill + `authoring-skills` | `AGENTS.md` points at skills instead of restating them; rules are consistent and non-redundant |
+| Instructions | this skill + `authoring-skills` | `AGENTS.md` is a lean map with repository-owned invariants/fail-safes; plugin ambient policy uses config-backed injection; skills hold detailed procedures; headless/cloud fallback coverage remains |
 
 ## Output and follow-through
 

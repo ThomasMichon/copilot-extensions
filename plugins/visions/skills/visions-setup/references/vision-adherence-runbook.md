@@ -42,7 +42,7 @@ into every node the repo actually has:
 
 | Stage | Node (repo supplies the concrete file/skill) | Flow-through it must carry |
 |-------|----------------------------------------------|----------------------------|
-| **Always-on** | the repo's agent-instructions file (`AGENTS.md` / `.github/copilot-instructions.md`) | The three-way reconcile + the hard rule + the proportionality escape hatch. This is the root — the only always-loaded node. |
+| **Always-on** | the repo's agent-instructions file (`AGENTS.md` / `.github/copilot-instructions.md`) | The three-way reconcile + the hard rule + the proportionality escape hatch. This is the root — the only always-loaded node. Compatibility/fallback prose is owned by the `visions` plugin through a stable marked region or dedicated rule file. |
 | **Planning** | the efforts binding (`docs/efforts.md` / addendum) + the effort skill | An effort **traces to a vision delta** it closes, or **carries an explicit vision extension**. |
 | **Patterns / Architecture** | the visions binding (`docs/visions.md` / addendum), the repo's prescriptive pattern docs (if any), and the arch guide | The intent/spec boundary; patterns are referenced as the reusable **how**, while architectural change reconciles to stated vision intent (bind the "must-hold" rules as design contracts). |
 | **Implementation** | the language/impl standards | Implementation *realizes* stated intent; it must not smuggle in new architectural intent without a vision extension. |
@@ -54,8 +54,15 @@ into every node the repo actually has:
 ### Bootstrap (greenfield — repo has only an AGENTS.md)
 1. **Adopt the constructs** — run `visions-setup` (scaffold `visions/` + addendum)
    and the efforts plugin's `efforts-setup` (scaffold `efforts/` + addendum).
-2. **Install the always-on principle** — add the three-kinds reconcile + hard rule
-   + proportionality escape hatch to the repo's agent-instructions file.
+2. **Install the always-on principle** — idempotently reconcile the three-kinds
+   reconcile + hard rule + proportionality escape hatch in a stable
+   `<!-- visions:vision-adherence:start -->` /
+   `<!-- visions:vision-adherence:end -->` region in the repo's
+   agent-instructions file (or a dedicated `visions`-named instruction file).
+   Do not append a second copy on rerun. The owner marker is also the future
+   migration seam: once equivalent plugin injection covers the launch paths,
+   setup can shrink or remove this fallback without touching adjacent
+   repository-owned instructions.
 3. **Thread the chain** — add the per-node flow-through sentence to each guidebook
    the repo has (planning -> architecture -> implementation -> quality). Where a
    node doesn't exist yet, note it; don't invent heavyweight process.
@@ -69,8 +76,10 @@ into every node the repo actually has:
 Walk each node in the table; for each, check the flow-through is present (in
 substance, not verbatim) -> mark **present / weak / missing**; **report** a concise
 status table and, for gaps, **propose the exact insertion** in that node's voice.
-Prefer **report-and-propose** over auto-applying — landing wording is a reviewed
-edit. A clean re-run (zero gaps) is the completion check.
+For the always-on node, also report **owned marker present / equivalent unmarked
+guidance / missing**. Prefer **report-and-propose** over auto-applying — landing
+wording is a reviewed edit. If applying an approved repair, reconcile the marked
+region rather than appending. A clean re-run (zero gaps) is the completion check.
 
 ## Optional teeth (repo decides)
 

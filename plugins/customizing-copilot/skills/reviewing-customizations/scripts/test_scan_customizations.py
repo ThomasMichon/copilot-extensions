@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -108,6 +109,22 @@ def test_assemble_skips_disabled_and_missing_footprint(tmp_path: Path):
     assert [s.origin for s in srcs] == ["mkt/present"]  # absent (no footprint) + off skipped
 
 
+def test_assemble_includes_hook_only_plugin(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    installed = tmp_path / "installed"
+    plugin = installed / "mkt" / "hooks-only"
+    plugin.mkdir(parents=True)
+    (plugin / "hooks.json").write_text(
+        json.dumps({"hooks": {"sessionStart": []}}), encoding="utf-8"
+    )
+    _settings(repo, {"hooks-only@mkt": True}, {})
+
+    srcs = scan.assemble_enabled_plugins(repo, installed_root=installed)
+
+    assert [source.origin for source in srcs] == ["mkt/hooks-only"]
+
+
 # ---------------------------------------------------------------------------
 # collision annotation for external plugins
 # ---------------------------------------------------------------------------
@@ -177,3 +194,229 @@ def test_purely_local_collision_has_no_external_annotation(tmp_path: Path):
     coll = [f for f in report.findings if f.check == "trigger-collision"]
     assert len(coll) == 1
     assert "OUTSIDE this repo's control" not in coll[0].message
+
+
+# ---------------------------------------------------------------------------
+# context-budget inventory
+# ---------------------------------------------------------------------------
+
+def _agent(dir_: Path, name: str, *, desc: str) -> None:
+    dir_.mkdir(parents=True, exist_ok=True)
+    (dir_ / f"{name}.agent.md").write_text(
+        f"---\ndescription: {desc}\n---\n\n# {name}\n",
+        encoding="utf-8",
+    )
+
+
+def test_context_budget_counts_static_custom_and_metadata(
+    tmp_path: Path, monkeypatch,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "AGENTS.md").write_text("repo guidance\n", encoding="utf-8")
+    nested = repo / "pkg"
+    nested.mkdir()
+    (nested / "AGENTS.md").write_text("nested rule\n", encoding="utf-8")
+    (repo / "CLAUDE.md").write_text("claude guidance\n", encoding="utf-8")
+    (repo / "GEMINI.md").write_text("gemini guidance\n", encoding="utf-8")
+    custom_one = tmp_path / "instructions-one"
+    custom_one.mkdir()
+    (custom_one / "operator.instructions.md").write_text(
+        "operator policy one\n", encoding="utf-8")
+    (custom_one / "unrelated.md").write_text(
+        "not an instruction payload\n", encoding="utf-8")
+    custom_two = tmp_path / "instructions-two"
+    custom_two.mkdir()
+    (custom_two / "machine.instructions.md").write_text(
+        "operator policy two\n", encoding="utf-8"
+    )
+    monkeypatch.setenv(
+        "COPILOT_CUSTOM_INSTRUCTIONS_DIRS",
+        f"{custom_one}{os.pathsep}{custom_two}",
+    )
+    home = tmp_path / "home"
+    personal = home / ".copilot"
+    personal.mkdir(parents=True)
+    (personal / "copilot-instructions.md").write_text(
+        "personal policy\n", encoding="utf-8"
+    )
+
+    _skill(repo / ".github" / "skills", "local", desc="Local description.")
+    _agent(repo / ".github" / "agents", "local-agent",
+           desc="Agent description.")
+
+    plugin = tmp_path / "plugin"
+    _skill(plugin / "skills", "enabled", desc="Enabled description.")
+    _agent(plugin / "agents", "enabled-agent", desc="Enabled agent.")
+    source = scan.PluginSource(
+        skills_root=plugin / "skills", origin="market/enabled",
+    )
+
+    budget = scan.build_context_budget(repo, [source], home=home)
+    static = budget["static_instruction_payloads"]
+    assert len(static["repository_always_loaded_files"]) == 3
+    assert len(static["repository_conditional_agents_files"]) == 1
+    assert len(static["personal_copilot_files"]) == 1
+    assert len(static["custom_instruction_dir_files"]) == 2
+    assert static["totals"]["characters"] == (
+        len("repo guidance\n")
+        + len("claude guidance\n")
+        + len("gemini guidance\n")
+        + len("nested rule\n")
+        + len("personal policy\n")
+        + len("operator policy one\n")
+        + len("operator policy two\n")
+    )
+    assert static["personal_copilot_files"][0]["path"] == (
+        "<personal-copilot>/copilot-instructions.md"
+    )
+    assert {
+        entry["path"] for entry in static["custom_instruction_dir_files"]
+    } == {
+        "<custom-instructions-1>/operator.instructions.md",
+        "<custom-instructions-2>/machine.instructions.md",
+    }
+    metadata = budget["metadata_upper_bounds"]
+    assert len(metadata["files"]) == 4
+    assert any(
+        entry["path"] == "<plugin:market/enabled>/skills/enabled/SKILL.md"
+        for entry in metadata["files"]
+    )
+    assert metadata["totals"]["estimated_tokens"] > 0
+    assert budget["token_estimate"] == {
+        "heuristic": "ceil(unicode_characters / 4)",
+        "characters_per_token": 4,
+    }
+
+
+def test_custom_instruction_dirs_accept_comma_separator(
+    tmp_path: Path, monkeypatch,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    (first / "first.instructions.md").write_text("first", encoding="utf-8")
+    (second / "second.instructions.md").write_text("second", encoding="utf-8")
+    monkeypatch.setenv(
+        "COPILOT_CUSTOM_INSTRUCTIONS_DIRS", f"{first},{second}"
+    )
+
+    budget = scan.build_context_budget(
+        repo, home=tmp_path / "empty-home"
+    )
+
+    files = budget["static_instruction_payloads"][
+        "custom_instruction_dir_files"
+    ]
+    assert [entry["path"] for entry in files] == [
+        "<custom-instructions-1>/first.instructions.md",
+        "<custom-instructions-2>/second.instructions.md",
+    ]
+
+
+def test_context_budget_splits_hooks_without_executing(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    home = tmp_path / "home"
+    user_hooks = home / ".copilot" / "hooks"
+    user_hooks.mkdir(parents=True)
+    plugin = tmp_path / "plugin"
+    (plugin / "skills").mkdir(parents=True)
+    marker = tmp_path / "hook-ran"
+    hook = plugin / "hooks.json"
+    hook.write_text(json.dumps({
+        "version": 1,
+        "hooks": {
+            "sessionStart": [{
+                "type": "command",
+                "bash": f"touch {marker}",
+                "powershell": f"New-Item '{marker}'",
+            }],
+            "preToolUse": [{
+                "type": "command",
+                "bash": f"touch {marker}",
+            }],
+        },
+    }), encoding="utf-8")
+    (user_hooks / "personal.json").write_text(json.dumps({
+        "hooks": {
+            "notification": [{"type": "command", "bash": f"touch {marker}"}],
+        },
+    }), encoding="utf-8")
+    user_settings = home / ".copilot" / "settings.json"
+    user_settings.write_text(json.dumps({
+        "hooks": {
+            "agentStop": [{"type": "command", "bash": f"touch {marker}"}],
+        },
+    }), encoding="utf-8")
+    repo_settings = repo / ".github" / "copilot" / "settings.json"
+    repo_settings.parent.mkdir(parents=True)
+    repo_settings.write_text(json.dumps({
+        "hooks": {
+            "postToolUseFailure": [
+                {"type": "command", "bash": f"touch {marker}"}
+            ],
+        },
+    }), encoding="utf-8")
+    source = scan.PluginSource(
+        skills_root=plugin / "skills", origin="market/plugin",
+    )
+
+    budget = scan.build_context_budget(repo, [source], home=home)
+    hooks = budget["hook_registrations"]
+    context_hooks = hooks["additional_context_capable"]
+    other_hooks = hooks["not_additional_context_capable"]
+    assert context_hooks["count"] == 3
+    assert context_hooks["emitted_payload_size"] == "unknown"
+    assert {
+        (entry["path"], entry["event"]) for entry in context_hooks["registrations"]
+    } == {
+        ("<plugin:market/plugin>/hooks.json", "sessionStart"),
+        ("<personal-copilot>/hooks/personal.json", "notification"),
+        (".github/copilot/settings.json", "postToolUseFailure"),
+    }
+    assert other_hooks["count"] == 2
+    assert {
+        (entry["path"], entry["event"]) for entry in other_hooks["registrations"]
+    } == {
+        ("<plugin:market/plugin>/hooks.json", "preToolUse"),
+        ("<personal-copilot>/settings.json", "agentStop"),
+    }
+    assert not marker.exists()
+
+
+def test_json_context_budget_shape(tmp_path: Path, capsys, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "AGENTS.md").write_text("abcde", encoding="utf-8")
+    monkeypatch.delenv("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", raising=False)
+    monkeypatch.setattr(scan.Path, "home", lambda: tmp_path / "empty-home")
+
+    assert scan.main([str(repo), "--json", "--context-budget"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert set(payload["context_budget"]) == {
+        "token_estimate",
+        "static_instruction_payloads",
+        "metadata_upper_bounds",
+        "hook_registrations",
+        "known_totals",
+    }
+    assert set(payload["context_budget"]["static_instruction_payloads"]) == {
+        "totals",
+        "repository_always_loaded_files",
+        "repository_conditional_agents_files",
+        "personal_copilot_files",
+        "custom_instruction_dir_files",
+    }
+    totals = payload["context_budget"]["static_instruction_payloads"]["totals"]
+    assert totals == {
+        "characters": 5,
+        "bytes": 5,
+        "words": 1,
+        "estimated_tokens": 2,
+    }

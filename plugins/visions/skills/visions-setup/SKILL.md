@@ -96,11 +96,22 @@ So visions are actually used, add to the repo's agent instructions
   specifications).
 - Add visions to the repo's **sources of new efforts** — the vision→reality delta
   is a backlog generator.
-- **A persistent cross-repo sequencing rule — install it as an *always-on*
-  rule, not an on-demand skill.** This plugin ships only on-demand skills, so a
-  standing rule it wants enforced must be **materialized** in the adopting repo's
-  own always-on instructions (`AGENTS.md` / `.github/copilot-instructions.md`, or
-  a small dedicated rule file the guidance references). Add this rule: *When a
+- **A persistent cross-repo sequencing rule — keep the compatibility/fallback
+  rule until plugin injection exists.** This plugin currently ships only
+  on-demand skills, so setup must still add a concise rule to the adopting
+  repo's always-on instructions (`AGENTS.md` /
+  `.github/copilot-instructions.md`). This is a behavior-safe compatibility and
+  fallback path, not the target ownership model: future plugin-owned ambient
+  guidance should follow `customizing-copilot:authoring-skills`
+  § *sessionStart context injection*, then shrink the static copy without losing
+  the invariant or launch-path fallback.
+
+  Reconcile the rule idempotently inside this stable owner region (or in a
+  dedicated `visions`-named instruction file):
+
+  ```markdown
+  <!-- visions:cross-repo-sequencing:start -->
+  When a
   vision revision in this **review-gated** repo also drives a change in a related
   repo you push **directly** — no PR, no pre-merge review — land the
   **vision-update PR first**, before the direct push that realizes it; the
@@ -108,10 +119,16 @@ So visions are actually used, add to the repo's agent instructions
   **completion markers** (journal "done" entries, `Status:` flips, checklist
   ticks, "shipped in
   `<commit>`") are recorded **after** the cross-repo work — everything stating
-  intent belongs in the earlier PR.* A repo that already carries equivalent
+  intent belongs in the earlier PR.
+  <!-- visions:cross-repo-sequencing:end -->
+  ```
+
+  A repo that already carries equivalent
   standing guidance need only confirm it covers this ordering (the
   **equivalent-guidance** path). A repo that is *not* review-gated, or that never
-  pushes directly to a related repo, can skip it.
+  pushes directly to a related repo, can skip it. Future setup versions use the
+  owner marker to update, shrink, or remove the compatibility text without
+  appending duplicates or editing neighboring repo-owned prose.
 
 ### 4. Seed at least one real vision
 
@@ -125,7 +142,8 @@ concrete leaf — so the shape is demonstrated, not just described.
 - `visions/TEMPLATE.md` matches the addendum's section set.
 - The repo's agent instructions route standing intent to visions and name the
   vision→effort delta.
-- The repo's **always-on** instructions carry the cross-repo sequencing rule
+- The repo's **compatibility/fallback always-on** instructions carry the
+  cross-repo sequencing rule in the stable `visions` owner region
   (vision-update PR before an unreviewed direct push; only completion markers
   after) — or equivalent standing guidance already covers it. (Skip only when the
   repo is not review-gated or never pushes directly to a related repo.)
