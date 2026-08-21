@@ -626,7 +626,7 @@ class ServiceConfig(BaseModel):
     # Schema version marker for the config-migrate framework. A real field (not
     # an ignored extra) so it round-trips through model_dump / save_config. Keep
     # in sync with agent_bridge.config_migrations.CONFIG_VERSION.
-    schema_version: int = 1
+    schema_version: int = 2
 
     # Port 0 is the "unset" sentinel: the daemon binds an OS-assigned ephemeral
     # port and advertises it via active.json (dotfiles #694 -- no fixed 9280/9281

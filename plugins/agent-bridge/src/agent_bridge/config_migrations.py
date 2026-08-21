@@ -49,12 +49,46 @@ SCHEMA_CONFIG = "agent-bridge/config"
 #: ``schema_version`` field default on :class:`ServiceConfig`. Bump both together
 #: (and add a ``vN->vN+1`` migrator + prior-version fixture) when the shape
 #: first changes.
-CONFIG_VERSION = 1
+CONFIG_VERSION = 2
+
+#: The legacy fixed listen ports a pre-dynamic-bind installer seeded into
+#: ``config.yaml`` -- ``9280`` (host) / ``9281`` (WSL guest). These are exactly
+#: the values that still hold a machine on a fixed port now that dynamic bind is
+#: the default (dotfiles #694), so the v1->v2 migrator unpins *only* these.
+_LEGACY_FIXED_PORTS = (9280, 9281)
+
+
+def _v1_to_v2_unpin_legacy_default_port(doc: dict[str, Any]) -> dict[str, Any]:
+    """v1->v2: drop the legacy fixed-port pin so the daemon binds dynamic.
+
+    A pre-dynamic-bind installer seeded ``config.yaml`` with ``port: 9280``
+    (host) or ``port: 9281`` (WSL guest). Dynamic (OS-assigned ephemeral) bind is
+    now the default (dotfiles #694) and a positive ``port`` pins a fixed bind, so
+    those legacy pins are what still hold a machine on a fixed port. Removing the
+    key restores the unset sentinel (``ServiceConfig.port == 0``) -> dynamic bind,
+    advertised via ``active.json``. Only the two legacy *default* values are
+    unpinned; a deliberately customised port is preserved. Pure (no in-place
+    mutation).
+    """
+    port = doc.get("port")
+    try:
+        port_int = int(port) if port is not None else None
+    except (TypeError, ValueError):
+        port_int = None
+    if port_int in _LEGACY_FIXED_PORTS:
+        new = dict(doc)
+        new.pop("port", None)
+        return new
+    return doc
 
 
 def _build_registry() -> Any:
     reg = SchemaRegistry()
-    reg.register(SCHEMA_CONFIG, current_version=CONFIG_VERSION)
+    reg.register(
+        SCHEMA_CONFIG,
+        current_version=CONFIG_VERSION,
+        migrators={1: _v1_to_v2_unpin_legacy_default_port},
+    )
     return reg
 
 
