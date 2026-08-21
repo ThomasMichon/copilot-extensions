@@ -19,6 +19,91 @@ def _isolate_discovery(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENT_DISPATCH_RUN_DIR", str(tmp_path / "run"))
     monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(tmp_path / "routing"))
     monkeypatch.delenv("AGENT_DISPATCH_ENDPOINT", raising=False)
+    monkeypatch.delenv("AGENT_DISPATCH_FAILOVER_MACHINE", raising=False)
+
+
+# -- SSH-transport failover routing (_should_ssh_failover + _client) ---------
+
+
+def test_should_ssh_failover_none_when_unset(monkeypatch):
+    from agent_dispatch import __main__ as m
+
+    monkeypatch.delenv("AGENT_DISPATCH_FAILOVER_MACHINE", raising=False)
+    assert m._should_ssh_failover(_args(["list"])) is None
+
+
+def test_should_ssh_failover_none_on_explicit_url_or_shared(monkeypatch):
+    from agent_dispatch import __main__ as m
+
+    monkeypatch.setenv("AGENT_DISPATCH_FAILOVER_MACHINE", "peer-host")
+    monkeypatch.setattr("agent_dispatch.remote_dispatch.is_peer_machine", lambda _m: True)
+    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda: False)
+    assert m._should_ssh_failover(_args(["--url", "http://x:9847", "list"])) is None
+    assert m._should_ssh_failover(_args(["--shared", "list"])) is None
+
+
+def test_should_ssh_failover_none_when_local_live(monkeypatch):
+    from agent_dispatch import __main__ as m
+
+    monkeypatch.setenv("AGENT_DISPATCH_FAILOVER_MACHINE", "peer-host")
+    monkeypatch.setattr("agent_dispatch.remote_dispatch.is_peer_machine", lambda _m: True)
+    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda: True)
+    assert m._should_ssh_failover(_args(["list"])) is None
+
+
+def test_should_ssh_failover_none_when_not_a_peer(monkeypatch):
+    from agent_dispatch import __main__ as m
+
+    monkeypatch.setenv("AGENT_DISPATCH_FAILOVER_MACHINE", "myself")
+    monkeypatch.setattr("agent_dispatch.remote_dispatch.is_peer_machine", lambda _m: False)
+    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda: False)
+    assert m._should_ssh_failover(_args(["list"])) is None
+
+
+def test_should_ssh_failover_returns_peer_when_local_down(monkeypatch):
+    from agent_dispatch import __main__ as m
+
+    monkeypatch.setenv("AGENT_DISPATCH_FAILOVER_MACHINE", "peer-host")
+    monkeypatch.setattr("agent_dispatch.remote_dispatch.is_peer_machine", lambda _m: True)
+    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda: False)
+    assert m._should_ssh_failover(_args(["list"])) == "peer-host"
+
+
+def test_client_opens_and_owns_ssh_tunnel_on_failover(monkeypatch):
+    from agent_dispatch import __main__ as m
+
+    monkeypatch.setattr(m, "_should_ssh_failover", lambda _args: "peer-host")
+    monkeypatch.setattr(m, "_ensure_local_coordinator", lambda _args: None)
+
+    class _FakeTunnel:
+        base_url = "http://127.0.0.1:59123"
+        closed = False
+
+        def close(self):
+            type(self).closed = True
+
+    fake = _FakeTunnel()
+    monkeypatch.setattr("agent_dispatch.ssh_tunnel.open_coordinator_tunnel", lambda _p: fake)
+    client = m._client(_args(["list"]))
+    # The client rides the tunnel URL, carries no token, and owns the tunnel.
+    assert client._tunnel is fake
+    client.close()
+    assert _FakeTunnel.closed is True
+
+
+def test_client_failover_tunnel_unavailable_exits(monkeypatch):
+    from agent_dispatch import __main__ as m
+    from agent_dispatch import ssh_tunnel
+
+    monkeypatch.setattr(m, "_should_ssh_failover", lambda _args: "peer-host")
+    monkeypatch.setattr(m, "_ensure_local_coordinator", lambda _args: None)
+
+    def _boom(_peer):
+        raise ssh_tunnel.TunnelUnavailable("ssh down")
+
+    monkeypatch.setattr("agent_dispatch.ssh_tunnel.open_coordinator_tunnel", _boom)
+    with pytest.raises(SystemExit):
+        m._client(_args(["list"]))
 
 
 def test_parse_affinity():
