@@ -40,7 +40,7 @@ def _no_user_global(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def _no_invocation_context(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep existing tests focused on configured repository contexts."""
-    monkeypatch.setattr(m, "_invocation_update_context", lambda: None)
+    monkeypatch.setattr(m, "_INVOCATION_CWD", Path("/missing/invocation"))
 
 
 def _install_config(monkeypatch: pytest.MonkeyPatch, anchor: str) -> None:
@@ -122,12 +122,15 @@ def test_repo_declared_marketplace_operations_run_from_declaring_anchor(monkeypa
     assert all(cwd == anchor for _argv, cwd in calls)
 
 
-def test_trusted_invocation_context_wins_over_untrusted_anchor(monkeypatch):
+def test_trusted_invocation_context_wins_over_untrusted_anchor(monkeypatch, tmp_path):
     """A linked invocation worktree supplies settings instead of its main anchor."""
     anchor = Path("/repo/anchor")
-    invocation = Path("/repo/worktree")
+    invocation = tmp_path / "worktree"
+    settings = invocation / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text("{}")
     _install_config(monkeypatch, str(anchor))
-    monkeypatch.setattr(m, "_invocation_update_context", lambda: invocation)
+    monkeypatch.setattr(m, "_INVOCATION_CWD", invocation)
     monkeypatch.setattr(
         reconcile, "read_enabled_plugins", lambda repo_dir: ["context-handoff"]
     )
