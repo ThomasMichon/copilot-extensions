@@ -11715,6 +11715,38 @@ def _ensure_repo_current(repo_dir: Path, config: cfg.Config) -> None:
         output.warn(f"Could not sync anchor: {exc}")
 
 
+def _is_copilot_plugin_name(name: str) -> bool:
+    """True when ``name`` is an installed Copilot plugin.
+
+    Checks ``~/.copilot/installed-plugins/<marketplace>/<name>``. Used by the
+    services CLI to route a plugin-owned name -- one whose deployment the plugin
+    itself manages, so there is no in-repo installer to run -- to the plugin's
+    own binstub instead of erroring.
+    """
+    try:
+        root = Path.home() / ".copilot" / "installed-plugins"
+        if not root.is_dir():
+            return False
+        return any(
+            (mkt / name).is_dir() for mkt in root.iterdir() if mkt.is_dir()
+        )
+    except OSError:
+        return False
+
+
+def _plugin_managed_notice(name: str) -> int:
+    """Report that a plugin-owned name manages its own deployment (exit 0)."""
+    output.info(
+        f"'{name}' is a Copilot plugin that manages its own deployment -- "
+        "there is no in-repo installer to run here."
+    )
+    output.info(
+        f"Use the plugin's own binstub (e.g. '{name} update' / '{name} status') "
+        f"or 'copilot plugin update {name}'."
+    )
+    return 0
+
+
 def _cmd_service_passthrough(name: str, action_args: list[str]) -> int:
     """Forward an action to a specific service's installer."""
     repo_dir = _find_repo_dir()
@@ -11745,6 +11777,10 @@ def _cmd_service_passthrough(name: str, action_args: list[str]) -> int:
 
     match = [s for s in services if s.name == name]
     if not match:
+        # A plugin-owned name (its pointer removed, or never present) manages its
+        # own deployment -- route to the plugin binstub instead of "not found".
+        if _is_copilot_plugin_name(name):
+            return _plugin_managed_notice(name)
         output.err(f"Service {name!r} not found in {env}")
         if services:
             output.info("Available: " + ", ".join(s.name for s in services))
@@ -11752,6 +11788,11 @@ def _cmd_service_passthrough(name: str, action_args: list[str]) -> int:
 
     service = match[0]
     if not service.installer_path:
+        # A doc-only pointer to a plugin-owned service (ownership.model: plugin),
+        # or an installed plugin name: the plugin owns its deployment, so there is
+        # no in-repo installer here -- use the plugin's own binstub.
+        if service.ownership_model == "plugin" or _is_copilot_plugin_name(name):
+            return _plugin_managed_notice(name)
         output.err(f"{name} has no installer")
         return 1
 
