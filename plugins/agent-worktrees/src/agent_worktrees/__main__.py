@@ -10338,9 +10338,12 @@ def _project_update_context() -> Path | None:
         return Path.cwd()
 
 
+_INVOCATION_CWD: Path | None = None
+
+
 def _invocation_update_context() -> Path | None:
     """Return the invoking checkout when it carries repository Copilot settings."""
-    cwd = Path.cwd()
+    cwd = _INVOCATION_CWD or Path.cwd()
     for candidate in (cwd, *cwd.parents):
         if (candidate / ".github" / "copilot" / "settings.json").is_file():
             return candidate
@@ -17871,6 +17874,12 @@ def cmd_pr_dispatch(argv: list[str]) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    global _INVOCATION_CWD
+    try:
+        _INVOCATION_CWD = Path.cwd()
+    except OSError:
+        _INVOCATION_CWD = None
+
     output.ensure_utf8_stdio()
     args_list = argv if argv is not None else sys.argv[1:]
 
