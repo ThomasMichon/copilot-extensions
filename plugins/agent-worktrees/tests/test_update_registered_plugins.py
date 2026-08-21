@@ -93,6 +93,29 @@ def test_loop_covers_all_registered_including_payload_only(monkeypatch):
         ] in calls
 
 
+def test_repo_declared_marketplace_operations_run_from_declaring_anchor(monkeypatch):
+    """Copilot children inherit the repo settings that declare the marketplace."""
+    anchor = Path("/repo/anchor")
+    _install_config(monkeypatch, str(anchor))
+    monkeypatch.setattr(
+        reconcile, "read_enabled_plugins", lambda repo_dir: ["context-handoff"]
+    )
+    monkeypatch.setattr(
+        reconcile, "installed_payload_dir", lambda name: Path(f"/inst/{name}")
+    )
+    calls: list[tuple[list[str], Path | None]] = []
+
+    def fake_run(argv, **kw):
+        calls.append((list(argv), kw.get("cwd")))
+        return _ok()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert m._update_registered_plugins() is True
+    assert calls
+    assert all(cwd == anchor for _argv, cwd in calls)
+
+
 def test_missing_plugin_uses_install_path(monkeypatch):
     """A plugin whose payload is not installed is installed, not updated."""
     _install_config(monkeypatch, "/repo/anchor")
@@ -144,7 +167,7 @@ def test_single_failure_warns_and_continues(monkeypatch):
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     # Must not raise despite bbb failing.
-    m._update_registered_plugins()
+    assert m._update_registered_plugins() is False
 
     # All three were attempted (loop continued past the failure).
     assert updated == ["aaa", "bbb", "ccc"]
@@ -173,7 +196,7 @@ def test_timeout_on_one_plugin_does_not_abort(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
-    m._update_registered_plugins()
+    assert m._update_registered_plugins() is False
 
     assert attempted == ["aaa", "bbb"]
 
@@ -189,7 +212,7 @@ def test_no_config_is_non_fatal(monkeypatch):
         raise AssertionError("subprocess.run should not run without config")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    m._update_registered_plugins()  # must not raise
+    assert m._update_registered_plugins() is True
 
 
 def test_no_registered_plugins_skips_marketplace(monkeypatch):
@@ -201,12 +224,15 @@ def test_no_registered_plugins_skips_marketplace(monkeypatch):
         raise AssertionError("no subprocess calls expected")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    m._update_registered_plugins()
+    assert m._update_registered_plugins() is True
 
 
-def test_ordering_plugins_before_services(monkeypatch):
+@pytest.mark.parametrize(("payload_result", "expected_rc"), [(True, 0), (False, 1)])
+def test_ordering_plugins_before_services(monkeypatch, payload_result, expected_rc):
     """cmd_update refreshes ALL plugin payloads BEFORE service modules/runtimes."""
+    _install_config(monkeypatch, "/repo/anchor")
     order: list[str] = []
+    run_cwds: list[Path | None] = []
 
     # Step 1: agent-worktrees payload update (subprocess).
     def fake_run(argv, **kw):
@@ -216,7 +242,7 @@ def test_ordering_plugins_before_services(monkeypatch):
     monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.setattr(
         m, "_update_registered_plugins",
-        lambda: order.append("registered-plugins"),
+        lambda: (order.append("registered-plugins"), payload_result)[1],
     )
     monkeypatch.setattr(
         m, "_find_installed_plugin_dir", lambda: Path("/plugin/dir")
@@ -245,6 +271,7 @@ def test_ordering_plugins_before_services(monkeypatch):
             order.append("aw-plugin-update")
         else:
             order.append("aw-installer-run")
+        run_cwds.append(kw.get("cwd"))
         return _ok()
 
     monkeypatch.setattr(subprocess, "run", routed_run)
@@ -261,7 +288,8 @@ def test_ordering_plugins_before_services(monkeypatch):
         recreate_venv=False, skip_modules=None, no_anchor_sync=False
     )
     rc = m.cmd_update(args)
-    assert rc == 0
+    assert rc == expected_rc
+    assert run_cwds[0] == Path("/repo/anchor")
 
     # Registered plugin payloads happen before modules (services/runtimes).
     assert order.index("registered-plugins") < order.index("modules")
@@ -346,4 +374,3 @@ def test_user_global_updates_without_project_config(monkeypatch):
     assert [
         "copilot", "plugin", "update", f"visions@{reconcile.MARKETPLACE}"
     ] in calls
-
