@@ -126,10 +126,42 @@ def test_open_tunnel_returns_when_port_ready(monkeypatch):
     proc = _FakeProc(alive=True)
     monkeypatch.setattr(ssh_tunnel.subprocess, "Popen", lambda *a, **k: proc)
     monkeypatch.setattr(ssh_tunnel, "_port_accepts", lambda port, **k: True)
+    monkeypatch.setattr(ssh_tunnel, "_coordinator_reachable", lambda url, **k: True)
     tun = ssh_tunnel.open_coordinator_tunnel("peer-host")
     assert tun.base_url == "http://127.0.0.1:51999"
     tun.close()
     assert proc.terminated
+
+
+def test_open_tunnel_retries_on_stale_port(monkeypatch):
+    # First forward reaches no live coordinator (stale port after a cutover);
+    # the second, freshly-resolved forward succeeds.
+    monkeypatch.setattr(ssh_tunnel.shutil, "which", lambda _x: "/usr/bin/ssh")
+    monkeypatch.setattr(ssh_tunnel, "resolve_peer_endpoint", lambda m, **k: ("127.0.0.1", 9000))
+    procs = [_FakeProc(alive=True), _FakeProc(alive=True)]
+    made = []
+    monkeypatch.setattr(ssh_tunnel, "_pick_local_port", lambda: 51000 + len(made))
+    monkeypatch.setattr(
+        ssh_tunnel.subprocess, "Popen", lambda *a, **k: made.append(1) or procs[len(made) - 1]
+    )
+    monkeypatch.setattr(ssh_tunnel, "_port_accepts", lambda port, **k: True)
+    reachable = iter([False, True])
+    monkeypatch.setattr(ssh_tunnel, "_coordinator_reachable", lambda url, **k: next(reachable))
+    tun = ssh_tunnel.open_coordinator_tunnel("peer-host")
+    assert tun._proc is procs[1]
+    assert procs[0].terminated  # the stale first forward was torn down
+    tun.close()
+
+
+def test_open_tunnel_raises_when_never_reachable(monkeypatch):
+    monkeypatch.setattr(ssh_tunnel.shutil, "which", lambda _x: "/usr/bin/ssh")
+    monkeypatch.setattr(ssh_tunnel, "resolve_peer_endpoint", lambda m, **k: ("127.0.0.1", 9000))
+    monkeypatch.setattr(ssh_tunnel, "_pick_local_port", lambda: 51001)
+    monkeypatch.setattr(ssh_tunnel.subprocess, "Popen", lambda *a, **k: _FakeProc(alive=True))
+    monkeypatch.setattr(ssh_tunnel, "_port_accepts", lambda port, **k: True)
+    monkeypatch.setattr(ssh_tunnel, "_coordinator_reachable", lambda url, **k: False)
+    with pytest.raises(ssh_tunnel.TunnelUnavailable):
+        ssh_tunnel.open_coordinator_tunnel("peer-host")
 
 
 def test_open_tunnel_ssh_exits_early_raises(monkeypatch):
