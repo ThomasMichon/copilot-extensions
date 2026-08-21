@@ -206,6 +206,11 @@ if [[ -z "$SRC_VERSION" ]]; then
 fi
 VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
 VENV_PYTHON="$VENV_DIR/bin/python"
+# Marker-only: retire the `.venv` symlink (uniform-runtime-resolution, #765).
+# LINK_PYTHON now points at the versioned slot directly (the link is no longer
+# created); LINK_DIR is kept ONLY to derive the `--link-name` so activate/gc can
+# still find and REMOVE any pre-existing `.venv` link.
+LINK_PYTHON="$VENV_PYTHON"
 VENV_BIN="$VENV_DIR/bin/agent-codespaces"
 
 _versioned_activate() {
@@ -225,15 +230,15 @@ _versioned_activate() {
     _versioned_mark_complete
     local prev
     prev="$("$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo "")"
-    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink; then
-        _fail "Failed to activate versioned venv (.venv -> versions/$SRC_VERSION)"
+    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link; then
+        _fail "Failed to activate versioned runtime slot (versions/$SRC_VERSION; marker-only, no .venv link)"
         return 1
     fi
-    _ok "Runtime version $SRC_VERSION active (.venv -> versions/$SRC_VERSION)"
+    _ok "Runtime version $SRC_VERSION active (marker-only; versions/$SRC_VERSION)"
     if [[ -n "$prev" ]]; then
-        "$LINK_DIR/bin/python" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids --keep "$prev" 2>&1 | sed 's/^/  gc: /' || true
+        "$VENV_PYTHON" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids --keep "$prev" 2>&1 | sed 's/^/  gc: /' || true
     else
-        "$LINK_DIR/bin/python" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids 2>&1 | sed 's/^/  gc: /' || true
+        "$VENV_PYTHON" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids 2>&1 | sed 's/^/  gc: /' || true
     fi
     return 0
 }
@@ -581,7 +586,7 @@ write_deploy_manifest() {
     "branch": $branch,
     "dirty": $dirty
   },
-  "venv": "$LINK_DIR",
+  "venv": "$VENV_DIR",
   "runtime": "python"
 }
 MANIFEST
@@ -637,7 +642,7 @@ _sync_owner_service() {
     mkdir -p "$unit_dir"
     # Stable `.venv` symlink -> the active versions/<v> slot; never a versions/<v>
     # absolute a `gc` could remove.
-    local venv_py="$LINK_DIR/bin/python"
+    local venv_py="$VENV_PYTHON"
     cat > "$unit_dir/$SYSTEMD_OWNER_UNIT" << EOF
 [Unit]
 Description=agent-codespaces Connection Owner -- persistent per-machine CodeSpace credential-relay owner
@@ -757,7 +762,7 @@ do_status() {
 
     # Venv
     if [[ -f "$LINK_PYTHON" ]]; then
-        _ok "Venv: $LINK_DIR"
+        _ok "Runtime: $VENV_DIR"
     else
         _fail "Venv missing"
     fi

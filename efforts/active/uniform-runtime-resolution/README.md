@@ -365,3 +365,16 @@ separate, intentional runtime and keeps its explicit venv.
   risk -- no service resolves through the link). Guard stays `--strict`-clean;
   shellcheck + tests green. Bumped agent-ssh dev38->39, agent-mcp dev60->61,
   agent-machines dev29->30.
+
+### 2026-08-20 - Phase final (b2): link retirement -- remaining no-daemon plugins
+- **agent-containers** + **agent-codespaces** (both no-daemon `.venv-as-symlink`
+  CLIs): same retirement pattern -- `activate --no-link` (removes + stops creating
+  the link), post-activate gc/manifest/status repointed to the slot, agent-codespaces
+  `LINK_PYTHON` re-pointed to the slot so its many owner-status/verify uses follow.
+  Guard stays `--strict`-clean; tests green. Bumped agent-containers dev60->61,
+  agent-codespaces dev60->61.
+- Link retirement done for all 5 no-daemon plugins (ssh, mcp, machines, containers,
+  codespaces). Remaining: the 5 daemon/timer plugins (agent-bridge, agent-dispatch,
+  agent-index, agent-logger, agent-vault) -- these have systemd/scheduled-task
+  ExecStart already on the slot (done in the earlier batches), so their retirement
+  is repointing install-time health-gate `$LINK_PYTHON` + `activate --no-link`.
