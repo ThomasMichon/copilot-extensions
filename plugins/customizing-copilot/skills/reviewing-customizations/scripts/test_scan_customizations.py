@@ -74,6 +74,31 @@ def test_assemble_directory_marketplace_is_controlled(tmp_path: Path):
     assert srcs[0].origin == "repo-plugins/cap"
 
 
+def test_local_settings_can_disable_base_plugin(tmp_path: Path):
+    repo = tmp_path / "repo"
+    plugin = repo / ".ai" / "cap"
+    (plugin / "skills").mkdir(parents=True)
+    _skill(plugin / "skills", "cap")
+    settings = repo / ".github" / "copilot"
+    settings.mkdir(parents=True)
+    marketplace = {
+        "repo-plugins": {
+            "source": {"source": "directory", "path": "./.ai"}
+        }
+    }
+    (settings / "settings.json").write_text(json.dumps({
+        "enabledPlugins": {"cap@repo-plugins": True},
+        "extraKnownMarketplaces": marketplace,
+    }), encoding="utf-8")
+    (settings / "settings.local.json").write_text(json.dumps({
+        "enabledPlugins": {"cap@repo-plugins": False},
+    }), encoding="utf-8")
+
+    assert scan.assemble_enabled_plugins(
+        repo, installed_root=tmp_path / "none"
+    ) == []
+
+
 def test_assemble_github_marketplace_is_external_with_source(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -259,7 +284,7 @@ def test_external_plugin_agents_remain_reference_only(tmp_path: Path):
 def test_controlled_plugin_text_files_get_secret_checks(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
-    plugin = repo / ".ai" / "cap"
+    plugin = repo / "local-plugins" / "cap"
     plugin.mkdir(parents=True)
     secret = "abcdefghijklmnop"
     (plugin / "config.yaml").write_text(
@@ -276,6 +301,58 @@ def test_controlled_plugin_text_files_get_secret_checks(tmp_path: Path):
     findings = [f for f in report.findings if f.check == "secret"]
     assert len(findings) == 1
     assert secret not in findings[0].message
+
+
+def test_manifest_declared_hook_path_is_inventoried(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    plugin = tmp_path / "plugin"
+    custom_hook = plugin / "hooks" / "session-start.json"
+    custom_hook.parent.mkdir(parents=True)
+    custom_hook.write_text(json.dumps({
+        "hooks": {
+            "sessionStart": [{"type": "command", "bash": "true"}],
+        },
+    }), encoding="utf-8")
+    (plugin / "plugin.json").write_text(json.dumps({
+        "name": "custom-hook",
+        "hooks": "hooks/session-start.json",
+    }), encoding="utf-8")
+    source = scan.PluginSource(
+        skills_root=plugin / "skills",
+        origin="market/custom-hook",
+    )
+
+    assert scan._has_reviewable_payload(plugin)
+    budget = scan.build_context_budget(repo, [source], home=tmp_path / "home")
+
+    registrations = budget["hook_registrations"][
+        "additional_context_capable"
+    ]["registrations"]
+    assert registrations[0]["path"] == (
+        "<plugin:market/custom-hook>/hooks/session-start.json"
+    )
+
+
+def test_native_manifest_hook_path_wins_over_claude_fallback(tmp_path: Path):
+    plugin = tmp_path / "plugin"
+    native_hook = plugin / "hooks" / "native.json"
+    fallback_hook = plugin / "hooks" / "fallback.json"
+    native_hook.parent.mkdir(parents=True)
+    native_hook.write_text("{}", encoding="utf-8")
+    fallback_hook.write_text("{}", encoding="utf-8")
+    (plugin / "plugin.json").write_text(json.dumps({
+        "name": "native",
+        "hooks": "hooks/native.json",
+    }), encoding="utf-8")
+    fallback_manifest = plugin / ".claude-plugin" / "plugin.json"
+    fallback_manifest.parent.mkdir()
+    fallback_manifest.write_text(json.dumps({
+        "name": "fallback",
+        "hooks": "hooks/fallback.json",
+    }), encoding="utf-8")
+
+    assert scan._plugin_hook_files(plugin) == {native_hook}
 
 
 def test_purely_local_collision_has_no_external_annotation(tmp_path: Path):
@@ -483,6 +560,14 @@ def test_context_budget_splits_hooks_without_executing(
             ],
         },
     }), encoding="utf-8")
+    local_settings = repo / ".github" / "copilot" / "settings.local.json"
+    local_settings.write_text(json.dumps({
+        "hooks": {
+            "sessionStart": [
+                {"type": "command", "bash": f"touch {marker}"}
+            ],
+        },
+    }), encoding="utf-8")
     source = scan.PluginSource(
         skills_root=plugin / "skills", origin="market/plugin",
     )
@@ -492,7 +577,7 @@ def test_context_budget_splits_hooks_without_executing(
     context_hooks = hooks["additional_context_capable"]
     prompt_hooks = hooks["prompt_hooks"]
     other_hooks = hooks["not_additional_context_capable"]
-    assert context_hooks["count"] == 3
+    assert context_hooks["count"] == 4
     assert context_hooks["emitted_payload_size"] == "unknown"
     assert {
         (entry["path"], entry["event"]) for entry in context_hooks["registrations"]
@@ -500,6 +585,7 @@ def test_context_budget_splits_hooks_without_executing(
         ("<plugin:market/plugin>/hooks.json", "sessionStart"),
         ("<personal-copilot>/hooks/personal.json", "notification"),
         (".github/copilot/settings.json", "postToolUseFailure"),
+        (".github/copilot/settings.local.json", "sessionStart"),
     }
     assert prompt_hooks == {
         "count": 1,

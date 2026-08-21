@@ -172,13 +172,15 @@ def _merged_settings(repo_root: Path) -> tuple[dict, dict]:
     Reads the repo's committed ``.github/copilot/settings.json`` (and the
     ``.claude/settings.json`` fallback) plus the user ``~/.copilot/settings.json``,
     and returns ``(enabled_plugins, marketplaces)``. Repo settings take
-    precedence over user settings for a marketplace of the same name; a plugin
-    is *enabled* if either layer enables it.
+    precedence over user settings for a marketplace of the same name. Plugin
+    booleans use last-layer-wins semantics, including explicit ``false``.
     """
     layers = [
         Path.home() / ".copilot" / "settings.json",
         repo_root / ".claude" / "settings.json",
+        repo_root / ".claude" / "settings.local.json",
         repo_root / ".github" / "copilot" / "settings.json",
+        repo_root / ".github" / "copilot" / "settings.local.json",
     ]
     enabled: dict[str, bool] = {}
     marketplaces: dict[str, dict] = {}
@@ -187,8 +189,8 @@ def _merged_settings(repo_root: Path) -> tuple[dict, dict]:
         ep = data.get("enabledPlugins")
         if isinstance(ep, dict):
             for k, v in ep.items():
-                if v:
-                    enabled[str(k)] = True
+                if isinstance(v, bool):
+                    enabled[str(k)] = v
         mk = data.get("extraKnownMarketplaces")
         if isinstance(mk, dict):
             for k, v in mk.items():
@@ -212,15 +214,38 @@ def _plugin_repo_url(footprint: Path) -> str:
     return ""
 
 
+def _plugin_hook_files(footprint: Path) -> set[Path]:
+    """Return conventional and manifest-declared hook files for a plugin."""
+    manifest_data: dict = {}
+    for manifest in (
+        footprint / "plugin.json",
+        footprint / ".claude-plugin" / "plugin.json",
+    ):
+        data = _load_json(manifest)
+        if data:
+            manifest_data = data
+            break
+    configured = manifest_data.get("hooks")
+    values = [configured] if isinstance(configured, str) else configured
+    if isinstance(values, list):
+        paths = {
+            footprint / value
+            for value in values
+            if isinstance(value, str) and value.strip()
+        }
+    else:
+        paths = {footprint / "hooks.json", footprint / "hooks" / "hooks.json"}
+    return {path for path in paths if path.is_file()}
+
+
 def _has_reviewable_payload(footprint: Path) -> bool:
     """Return whether a plugin contains skills, agents, or hook declarations."""
     skills_root = footprint / "skills"
     agents_root = footprint / "agents"
-    hook_files = (footprint / "hooks.json", footprint / "hooks" / "hooks.json")
     return (
         (skills_root.is_dir() and any(skills_root.glob("*/SKILL.md")))
         or (agents_root.is_dir() and any(agents_root.glob("*.agent.md")))
-        or any(path.is_file() for path in hook_files)
+        or bool(_plugin_hook_files(footprint))
     )
 
 
@@ -242,6 +267,8 @@ def assemble_enabled_plugins(
     enabled, marketplaces = _merged_settings(repo_root)
     out: list[PluginSource] = []
     for key in sorted(enabled):
+        if not enabled[key]:
+            continue
         name, _, mkt = key.partition("@")
         name = name.strip()
         mkt = mkt.strip()
@@ -537,12 +564,12 @@ def scan_text_files(
     report: Report,
     plugin_sources: list[PluginSource] | None = None,
 ) -> None:
-    scan_roots = [root]
-    scan_roots.extend(
+    scan_roots = [
         source.payload_root
         for source in (plugin_sources or [])
         if source.controlled
-    )
+    ]
+    scan_roots.append(root)
     seen: set[Path] = set()
     for scan_root in scan_roots:
         owned_plugin_payload = scan_root != root
@@ -815,8 +842,12 @@ def _settings_paths(root: Path, home: Path) -> list[tuple[Path, str, str]]:
          "user-settings", "personal-copilot"),
         (root / ".claude" / "settings.json",
          "repository-settings", "repository"),
+        (root / ".claude" / "settings.local.json",
+         "repository-local-settings", "repository"),
         (root / ".github" / "copilot" / "settings.json",
          "repository-settings", "repository"),
+        (root / ".github" / "copilot" / "settings.local.json",
+         "repository-local-settings", "repository"),
     ]
 
 
@@ -861,14 +892,13 @@ def _hook_documents(
             documents.append((path, source, {"hooks": hooks}, aliases))
     for source in plugin_sources:
         footprint = source.payload_root
-        for path in (footprint / "hooks.json", footprint / "hooks" / "hooks.json"):
-            if path.is_file():
-                documents.append((
-                    path,
-                    f"plugin:{source.origin}",
-                    _load_json(path),
-                    ((footprint, f"plugin:{source.origin}"),),
-                ))
+        for path in _plugin_hook_files(footprint):
+            documents.append((
+                path,
+                f"plugin:{source.origin}",
+                _load_json(path),
+                ((footprint, f"plugin:{source.origin}"),),
+            ))
     return documents
 
 
