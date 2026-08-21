@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
 import json
 import sys
 import threading
 import time
+
+import pytest
 
 from agent_mcp import forward
 from agent_mcp.ipc import serve_socket_if_available
@@ -162,14 +165,16 @@ def test_forward_attaches_and_pumps(tmp_path, monkeypatch):
 
 
 def test_forward_falls_back_to_direct_when_no_host(tmp_path, monkeypatch, capsys):
-    """No serve host advertised -> the forwarder runs the in-process bridge and
-    still answers a request over its own stdio (behaviour identical to
-    ``agent-mcp bridge``)."""
+    """No serve host advertised and ensure-serve disabled -> the forwarder runs
+    the in-process bridge and still answers a request over its own stdio
+    (behaviour identical to ``agent-mcp bridge``)."""
     bridge = _write_bridge_config(tmp_path)
-    # Point at an absent socket so no host is found; multiplex stays enabled.
+    # Point at an absent socket so no host is found; keep multiplex on but disable
+    # the on-demand spawn so we exercise the pure direct-fallback path.
     monkeypatch.setenv("AGENT_MCP_SERVE_SOCKET", str(tmp_path / "absent.sock"))
     monkeypatch.delenv("AGENT_MCP_NO_SERVE", raising=False)
     monkeypatch.delenv("AGENT_MCP_NO_MULTIPLEX", raising=False)
+    monkeypatch.setenv("AGENT_MCP_NO_ENSURE_SERVE", "1")
     monkeypatch.setenv("AGENT_MCP_PARENT_WATCHDOG", "0")
 
     req = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
@@ -264,3 +269,72 @@ def test_forward_config_error_reports_nonzero(tmp_path, monkeypatch, capsys):
     rc = forward.run(str(tmp_path / "does-not-exist.yaml"))
     assert rc == 1
     assert "forward" in capsys.readouterr().err
+
+
+# -- ensure-serve: race-spawn a host on demand (#744 slice 3) ------------------
+
+def test_ensure_serve_returns_existing_without_spawning(tmp_path, monkeypatch):
+    """When a host is already advertised, _ensure_serve returns it and never
+    spawns a second one."""
+    sock = tmp_path / "serve.sock"
+
+    server = Server(sock)
+    ready = threading.Event()
+    loop_box = {}
+
+    def _run_server():
+        loop = asyncio.new_event_loop()
+        loop_box["loop"] = loop
+        asyncio.set_event_loop(loop)
+
+        async def _serve():
+            starter = asyncio.create_task(server.serve_forever())
+            for _ in range(100):
+                if serve_socket_if_available(str(sock)):
+                    break
+                await asyncio.sleep(0.02)
+            ready.set()
+            await starter
+
+        loop.run_until_complete(_serve())
+        loop.close()
+
+    t = threading.Thread(target=_run_server, daemon=True)
+    t.start()
+    assert ready.wait(timeout=5)
+
+    monkeypatch.delenv("AGENT_MCP_NO_SERVE", raising=False)
+    monkeypatch.setattr(forward, "_spawn_serve_host",
+                        lambda *_a, **_k: pytest.fail("must not spawn when host is up"))
+    try:
+        got = forward._ensure_serve(str(sock))
+        assert got == sock
+    finally:
+        with contextlib.suppress(Exception):
+            asyncio.run(request_via_socket(sock, {"op": "shutdown"}))
+        t.join(timeout=5)
+
+
+def test_ensure_serve_spawns_a_real_host(tmp_path, monkeypatch):
+    """With no host up, _ensure_serve spawns a detached `agent-mcp serve`, waits
+    for its socket, and returns it; the spawned host answers a ping."""
+    sock = tmp_path / "serve.sock"
+    monkeypatch.delenv("AGENT_MCP_NO_SERVE", raising=False)
+    monkeypatch.delenv("AGENT_MCP_NO_ENSURE_SERVE", raising=False)
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path))
+
+    got = forward._ensure_serve(str(sock))
+    assert got is not None, "ensure-serve did not bring up a host in time"
+    try:
+        pong = asyncio.run(request_via_socket(got, {"op": "ping"}))
+        assert pong["ok"] and pong["pong"]
+    finally:
+        with contextlib.suppress(Exception):
+            asyncio.run(request_via_socket(got, {"op": "shutdown"}))
+
+
+def test_ensure_serve_disabled_returns_none(tmp_path, monkeypatch):
+    """AGENT_MCP_NO_ENSURE_SERVE means run() never spawns -- it falls through to
+    the direct bridge instead."""
+    monkeypatch.setenv("AGENT_MCP_NO_ENSURE_SERVE", "1")
+    assert forward._ensure_serve_enabled() is False
