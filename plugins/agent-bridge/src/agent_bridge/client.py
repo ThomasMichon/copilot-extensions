@@ -198,24 +198,41 @@ class BridgeClient:
         request_timeout: float | None = None,
     ) -> dict[str, Any] | None:
         """Make an authenticated HTTP request. Returns parsed JSON or None for 204."""
-        url = f"{self._base}{path}"
-        if params:
-            qs = "&".join(f"{k}={v}" for k, v in params.items() if v is not None)
-            if qs:
-                url = f"{url}?{qs}"
-
         data = json.dumps(body).encode() if body else None
-        req = urllib.request.Request(url, data=data, method=method)
-        req.add_header("Authorization", f"Bearer {self._token}")
-        if data:
-            req.add_header("Content-Type", "application/json")
+
+        def _build_request() -> urllib.request.Request:
+            url = f"{self._base}{path}"
+            if params:
+                qs = "&".join(
+                    f"{k}={v}" for k, v in params.items() if v is not None
+                )
+                if qs:
+                    url = f"{url}?{qs}"
+            request = urllib.request.Request(url, data=data, method=method)
+            request.add_header("Authorization", f"Bearer {self._token}")
+            if data:
+                request.add_header("Content-Type", "application/json")
+            return request
+
+        def _follow_active_endpoint() -> bool:
+            """Rebuild the request if endpoint discovery reports a new daemon."""
+            nonlocal req
+            if self._reresolve is None:
+                return False
+            new_base = self._reresolve()
+            if not new_base or new_base.rstrip("/") == self._base:
+                return False
+            self._base = new_base.rstrip("/")
+            req = _build_request()
+            return True
+
+        req = _build_request()
 
         import time as _time
 
         sock_timeout = request_timeout if request_timeout is not None else self._timeout
         deadline = _time.monotonic() + self._connect_grace
         backoff = 0.25
-        reresolved = False
         while True:
             try:
                 with urllib.request.urlopen(req, timeout=sock_timeout) as resp:
@@ -227,34 +244,28 @@ class BridgeClient:
                     detail = json.loads(exc.read().decode()).get("detail", str(exc))
                 except Exception:
                     detail = str(exc)
+                # A session-scoped 404 can come from the retiring daemon after
+                # active.json has flipped (or just before it flips) to the
+                # daemon that adopted the session. Follow discovery immediately,
+                # then keep checking within the same bounded restart grace.
+                session_resource = path.startswith("/api/v1/sessions/")
+                if exc.code == 404 and session_resource and self._reresolve is not None:
+                    if _follow_active_endpoint():
+                        continue
+                    if _time.monotonic() + backoff < deadline:
+                        _time.sleep(backoff)
+                        backoff = min(backoff * 2, 1.0)
+                        continue
                 raise BridgeClientError(exc.code, detail) from exc
             except urllib.error.URLError:
                 # A connection rejection against the remembered endpoint. Before
-                # spending the grace window retrying the SAME port, try once to
-                # follow a dynamic-port cutover: re-resolve the routing
-                # table (listener-verified) and, if the live endpoint moved,
-                # switch to it and retry immediately. This is what turns a
-                # "dial the retired port forever" wedge into an automatic
-                # follow-the-cutover. Only re-resolve once per request so a
-                # genuinely-down service still degrades through the grace window
-                # to a clean BridgeConnectionError rather than looping.
-                if not reresolved and self._reresolve is not None:
-                    reresolved = True
-                    new_base = self._reresolve()
-                    if new_base and new_base.rstrip("/") != self._base:
-                        self._base = new_base.rstrip("/")
-                        url = f"{self._base}{path}"
-                        if params:
-                            qs = "&".join(
-                                f"{k}={v}" for k, v in params.items() if v is not None
-                            )
-                            if qs:
-                                url = f"{url}?{qs}"
-                        req = urllib.request.Request(url, data=data, method=method)
-                        req.add_header("Authorization", f"Bearer {self._token}")
-                        if data:
-                            req.add_header("Content-Type", "application/json")
-                        continue
+                # spending the grace window retrying the SAME port, follow the
+                # listener-verified routing table. Re-resolve after every
+                # failed attempt because a cutover may publish only after an
+                # earlier retry; the deadline still bounds a genuinely-down
+                # service.
+                if _follow_active_endpoint():
+                    continue
                 # Stage 1 (CONNECT_BRIDGE): the service may be mid-restart
                 # (e.g. a plugin self-update bounced the daemon). Retry within
                 # the grace window, then raise BridgeConnectionError -- never
