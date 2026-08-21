@@ -92,8 +92,9 @@ def test_stream_feed_tolerates_request_failure_in_settled_check(monkeypatch):
 
 
 def test_sustained_outage_is_framed_as_resumable(capsys):
+    detail = "Cannot connect to agent-bridge at http://127.0.0.1:47000"
     with pytest.raises(SystemExit) as exc_info:
-        m._exit_bridge_outage()
+        m._exit_bridge_outage(BridgeConnectionError(detail))
 
     assert exc_info.value.code == 1
     err = capsys.readouterr().err
@@ -101,4 +102,5 @@ def test_sustained_outage_is_framed_as_resumable(capsys):
     assert "restart grace" in err
     assert "preserved and resumable" in err
     assert "re-run it shortly" in err
-    assert not {"died", "stale", "gone"} & set(err.lower().split())
+    assert detail in err
+    assert all(word not in err.lower() for word in ("died", "stale", "gone"))

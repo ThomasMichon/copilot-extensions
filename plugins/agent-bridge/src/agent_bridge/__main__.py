@@ -37,13 +37,14 @@ def _json_out(data: Any) -> None:
     print(json.dumps(data, indent=2, default=str))
 
 
-def _exit_bridge_outage() -> None:
+def _exit_bridge_outage(exc: Exception) -> None:
     """Report a sustained daemon outage without declaring sessions lost."""
     print(
         "[RETRY] agent-bridge is unavailable after the restart grace; it may "
         "still be restarting or updating.\n"
         "        This command did not complete. Hosted sessions are preserved "
-        "and resumable; re-run it shortly.",
+        "and resumable; re-run it shortly.\n"
+        f"        Detail: {exc}",
         file=sys.stderr,
     )
     sys.exit(1)
@@ -3982,11 +3983,11 @@ def main(argv: list[str] | None = None) -> None:
 
         try:
             args.func(args)
-        except BridgeConnectionError:
+        except BridgeConnectionError as exc:
             # The resilient client exhausted its bounded restart grace. Keep
             # one-shot command framing consistent; streaming commands
             # reconnect from the caller's acknowledged cursor internally.
-            _exit_bridge_outage()
+            _exit_bridge_outage(exc)
     else:
         parser.print_help()
 
