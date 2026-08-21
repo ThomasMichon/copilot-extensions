@@ -47,6 +47,10 @@ class ServiceInfo:
     # owned by another deployer (e.g. VAV) and agent-worktrees must skip it in
     # automatic update sweeps. Explicit single-service actions still run.
     auto_update: bool = True
+    # extensions.ownership.model -- "plugin" marks a pointer to a Copilot plugin
+    # that owns its own deployment (no in-repo installer here); the services CLI
+    # routes such a name to the plugin's own binstub instead of erroring.
+    ownership_model: str = ""
 
 
 @dataclass
@@ -165,6 +169,8 @@ def _parse_service_yaml(
     _aw = _ext.get("agent-worktrees") or {}
     _auto = _aw.get("auto_update", True)
     auto_update = _auto if isinstance(_auto, bool) else True
+    _own = _ext.get("ownership") or {}
+    ownership_model = _own.get("model", "") if isinstance(_own, dict) else ""
 
     # --- Modern: explicit deployments block ---
     deployments = data.get("deployments")
@@ -186,6 +192,7 @@ def _parse_service_yaml(
                 deployment_type=dep_type,
                 source_dir=str(service_dir),
                 auto_update=auto_update,
+                ownership_model=ownership_model,
             )
         # Has deployments but this env isn't listed → skip
         return None
@@ -225,6 +232,7 @@ def _parse_service_yaml(
         deployment_type="full",
         source_dir=str(service_dir),
         auto_update=auto_update,
+        ownership_model=ownership_model,
     )
 
 
