@@ -4,26 +4,26 @@
     "sessionStart": [
       {
         "type": "command",
-        "powershell": "$s = \"$env:USERPROFILE\\.copilot\\installed-plugins\\copilot-extensions\\agent-codespaces\\scripts\\readiness-context.ps1\"; if (Test-Path $s) { $p = Get-Command pwsh -ErrorAction SilentlyContinue; if ($p) { & $p.Source -NoProfile -File $s } else { powershell.exe -NoProfile -ExecutionPolicy Bypass -File $s } }",
-        "bash": "s=\"$HOME/.copilot/installed-plugins/copilot-extensions/agent-codespaces/scripts/readiness-context.sh\"; [ -f \"$s\" ] && bash \"$s\"",
+        "powershell": "$s = (Join-Path (Get-Location).Path 'scripts\\readiness-context.ps1'); if (Test-Path $s) { $p = Get-Command pwsh -ErrorAction SilentlyContinue; if ($p) { & $p.Source -NoProfile -File $s } else { powershell.exe -NoProfile -ExecutionPolicy Bypass -File $s } }",
+        "bash": "s=\"$PWD/scripts/readiness-context.sh\"; [ -f \"$s\" ] && bash \"$s\"",
         "timeoutSec": 10
       },
       {
         "type": "command",
-        "powershell": "$s = \"$env:USERPROFILE\\.copilot\\installed-plugins\\copilot-extensions\\agent-codespaces\\scripts\\bootstrap-check.ps1\"; if (Test-Path $s) { $p = Get-Command pwsh -ErrorAction SilentlyContinue; if ($p) { & $p.Source -NoProfile -File $s } else { powershell.exe -NoProfile -ExecutionPolicy Bypass -File $s } }",
-        "bash": "s=\"$HOME/.copilot/installed-plugins/copilot-extensions/agent-codespaces/scripts/bootstrap-check.sh\"; [ -f \"$s\" ] && bash \"$s\"",
+        "powershell": "$s = (Join-Path (Get-Location).Path 'scripts\\bootstrap-check.ps1'); if (Test-Path $s) { $p = Get-Command pwsh -ErrorAction SilentlyContinue; if ($p) { & $p.Source -NoProfile -File $s } else { powershell.exe -NoProfile -ExecutionPolicy Bypass -File $s } }",
+        "bash": "s=\"$PWD/scripts/bootstrap-check.sh\"; [ -f \"$s\" ] && bash \"$s\"",
         "timeoutSec": 15
       },
       {
         "type": "command",
-        "powershell": "$s = \"$env:USERPROFILE\\.copilot\\installed-plugins\\copilot-extensions\\agent-codespaces\\scripts\\register-bridge-provider.ps1\"; if (Test-Path $s) { $p = Get-Command pwsh -ErrorAction SilentlyContinue; if ($p) { & $p.Source -NoProfile -File $s } else { powershell.exe -NoProfile -ExecutionPolicy Bypass -File $s } }",
-        "bash": "s=\"$HOME/.copilot/installed-plugins/copilot-extensions/agent-codespaces/scripts/register-bridge-provider.sh\"; [ -f \"$s\" ] && bash \"$s\"",
+        "powershell": "$s = (Join-Path (Get-Location).Path 'scripts\\register-bridge-provider.ps1'); if (Test-Path $s) { $p = Get-Command pwsh -ErrorAction SilentlyContinue; if ($p) { & $p.Source -NoProfile -File $s } else { powershell.exe -NoProfile -ExecutionPolicy Bypass -File $s } }",
+        "bash": "s=\"$PWD/scripts/register-bridge-provider.sh\"; [ -f \"$s\" ] && bash \"$s\"",
         "timeoutSec": 10
       },
       {
         "type": "command",
-        "powershell": "$s = \"$env:USERPROFILE\\.copilot\\installed-plugins\\copilot-extensions\\agent-codespaces\\scripts\\emit-codespace-map.ps1\"; if (Test-Path $s) { $p = Get-Command pwsh -ErrorAction SilentlyContinue; if ($p) { & $p.Source -NoProfile -File $s } else { powershell.exe -NoProfile -ExecutionPolicy Bypass -File $s } }",
-        "bash": "s=\"$HOME/.copilot/installed-plugins/copilot-extensions/agent-codespaces/scripts/emit-codespace-map.sh\"; [ -f \"$s\" ] && bash \"$s\"",
+        "powershell": "$s = (Join-Path (Get-Location).Path 'scripts\\emit-codespace-map.ps1'); if (Test-Path $s) { $p = Get-Command pwsh -ErrorAction SilentlyContinue; if ($p) { & $p.Source -NoProfile -File $s } else { powershell.exe -NoProfile -ExecutionPolicy Bypass -File $s } }",
+        "bash": "s=\"$PWD/scripts/emit-codespace-map.sh\"; [ -f \"$s\" ] && bash \"$s\"",
         "timeoutSec": 10
       }
     ]
