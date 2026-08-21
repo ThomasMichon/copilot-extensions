@@ -332,3 +332,35 @@ class TestSessionNotFoundGrace:
                 client._request("GET", "/api/v1/agents/missing")
 
         reresolve.assert_not_called()
+
+
+class TestRefreshEndpoint:
+    """BridgeClient.refresh_endpoint() follows a routing-table cutover so the
+    streaming path can be re-pointed at a new dynamic port (dotfiles#1713)."""
+
+    def test_refresh_follows_new_base(self):
+        client = BridgeClient(
+            "http://127.0.0.1:9280", "tok",
+            reresolve=lambda: "http://127.0.0.1:55123",
+        )
+        assert client.refresh_endpoint() is True
+        assert client._base == "http://127.0.0.1:55123"
+
+    def test_refresh_noop_when_unchanged(self):
+        client = BridgeClient(
+            "http://127.0.0.1:9280", "tok",
+            reresolve=lambda: "http://127.0.0.1:9280",
+        )
+        assert client.refresh_endpoint() is False
+        assert client._base == "http://127.0.0.1:9280"
+
+    def test_refresh_noop_without_resolver(self):
+        client = BridgeClient("http://127.0.0.1:9280", "tok")
+        assert client.refresh_endpoint() is False
+
+    def test_refresh_noop_when_resolver_returns_none(self):
+        client = BridgeClient(
+            "http://127.0.0.1:9280", "tok", reresolve=lambda: None,
+        )
+        assert client.refresh_endpoint() is False
+        assert client._base == "http://127.0.0.1:9280"
