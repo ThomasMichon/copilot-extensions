@@ -813,8 +813,12 @@ function Sync-ConnectionOwnerService {
     try {
         $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
         $exe = if ($pwshCmd) { $pwshCmd.Source } else { (Get-Command powershell.exe).Source }
-        $action = New-ScheduledTaskAction -Execute $exe `
-            -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$stub`" owner" `
+        # conhost --headless so Windows Terminal / the DefTerm handoff can't surface
+        # this at-logon task's pwsh as a visible console window -- -WindowStyle Hidden
+        # alone is ignored by DefTerm (windows-launch-hardening #786; matches the
+        # agent-bridge / agent-dispatch scheduled-task pattern).
+        $action = New-ScheduledTaskAction -Execute 'conhost.exe' `
+            -Argument "--headless `"$exe`" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$stub`" owner" `
             -WorkingDirectory $InstallDir
         # Interactive at-logon: the daemon needs the user's gh/ssh session context.
         $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME

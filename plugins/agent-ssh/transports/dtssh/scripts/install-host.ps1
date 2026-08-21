@@ -161,10 +161,16 @@ function Install-Shortcut {
     $launcherArgs = @('-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', "`"$LauncherDst`"", '-Alias', $Alias, '-Port', "$Port")
     if ($Tunnel) { $launcherArgs += @('-Tunnel', $Tunnel) }
     if ($User) { $launcherArgs += @('-User', $User) }
+    # Point the Startup shortcut at conhost --headless, not pwsh directly: a .lnk
+    # whose TargetPath is pwsh.exe flashes a console window at logon even with
+    # WindowStyle 7 / -WindowStyle Hidden, both of which the DefTerm handoff ignores.
+    # conhost --headless gives the launcher a windowless console (matches the runtime
+    # Start-HostLauncher path + the agent-bridge task pattern; windows-launch-hardening #786).
+    $conhost = Join-Path $env:SystemRoot 'System32\conhost.exe'
     $ws = New-Object -ComObject WScript.Shell
     $shortcut = $ws.CreateShortcut($StartupLnk)
-    $shortcut.TargetPath = $pwsh
-    $shortcut.Arguments = ($launcherArgs -join ' ')
+    $shortcut.TargetPath = $conhost
+    $shortcut.Arguments = "--headless `"$pwsh`" " + ($launcherArgs -join ' ')
     $shortcut.WorkingDirectory = $InstallDir
     $shortcut.WindowStyle = 7
     $shortcut.Description = 'agent-ssh-dtssh host launcher'
