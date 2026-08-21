@@ -165,9 +165,19 @@ def _liveness_line(s: dict) -> str | None:
     return liveness
 
 
-def _get_client():
-    """Build a BridgeClient from config. Exits on failure."""
+def _get_client(*, ensure: bool = True):
+    """Build a BridgeClient from config. Exits on failure.
+
+    ``ensure`` (default True): when the daemon is down, best-effort **boot it**
+    first so a daemon-touching command self-heals across a crash / idle-exit /
+    missing restart task (dotfiles#1713 Slice 3) rather than failing. Pure
+    reporters that must reflect reality (``status``, session ``status``) pass
+    ``ensure=False`` -- they must never boot what they report on. Set
+    ``AGENT_BRIDGE_NO_ENSURE=1`` to disable the boot globally.
+    """
     from .client import BridgeClient, BridgeClientError, BridgeConnectionError
+    if ensure:
+        _ensure_daemon()
     client = BridgeClient.from_config()
     # #632: fail fast if THIS client predates the daemon's advertised support
     # floor (min_protocol_version) -- a genuine past-the-support-window
@@ -478,7 +488,7 @@ def _cmd_status(args: argparse.Namespace) -> None:
     if getattr(args, "session_id", None):
         _cmd_session_status(args)
         return
-    client = _get_client()
+    client = _get_client(ensure=False)
     base = getattr(client, "_base", "")
     try:
         info = client.health()
@@ -499,7 +509,7 @@ def _cmd_session_status(args: argparse.Namespace) -> None:
     """Render a single session's compact, low-context dispatch status."""
     from .client import BridgeClientError
 
-    client = _get_client()
+    client = _get_client(ensure=False)
     caller_id = _caller_id_for(args)
     sid = args.session_id
     try:
@@ -988,6 +998,108 @@ def _spawn_detached_daemon() -> None:
             argv, stdout=logf, stderr=errf, stdin=_sp.DEVNULL,
             **detached_kwargs(),
         )
+
+
+# On-demand daemon ensure (dotfiles#1713 Slice 3): a daemon-touching CLI command
+# self-heals a down daemon by booting it, so a crash / idle-exit / missing
+# restart task no longer surfaces as a hard failure.
+_ENSURE_BACKOFF_S = 30.0  # crash-loop guard: don't re-boot within this window
+_ENSURE_LOCK = os.path.join(_INSTALL_DIR, ".ensure.lock")
+_ENSURE_MARKER = os.path.join(_INSTALL_DIR, ".ensure-attempt")
+
+
+def _acquire_ensure_lock() -> int | None:
+    """Best-effort single-flight lock so concurrent CLI invocations don't each
+    boot a daemon. Returns an open fd on success, else None (someone else holds
+    a fresh lock). Breaks a lock older than the backoff window (a stale holder).
+    """
+    import time
+
+    try:
+        fd = os.open(_ENSURE_LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, str(os.getpid()).encode())
+        return fd
+    except FileExistsError:
+        try:
+            age = time.time() - os.path.getmtime(_ENSURE_LOCK)
+        except OSError:
+            age = _ENSURE_BACKOFF_S + 1
+        if age > _ENSURE_BACKOFF_S:
+            try:
+                os.unlink(_ENSURE_LOCK)
+            except OSError:
+                return None
+            return _acquire_ensure_lock()
+        return None
+    except OSError:
+        return None
+
+
+def _release_ensure_lock(fd: int) -> None:
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+    try:
+        os.unlink(_ENSURE_LOCK)
+    except OSError:
+        pass
+
+
+def _ensure_daemon() -> bool:
+    """Boot the daemon if it is down, so a daemon-touching command self-heals.
+
+    Returns True when the daemon is (now) up. Best-effort and non-fatal: if the
+    boot doesn't take, the caller proceeds and the client's own connect-grace +
+    the top-level ``BridgeConnectionError`` handler frame it as resumable, never
+    a death verdict. Guards:
+
+    * **Kill switch** -- ``AGENT_BRIDGE_NO_ENSURE=1`` disables the boot entirely.
+    * **Crash-loop backoff** -- if a boot was attempted within
+      ``_ENSURE_BACKOFF_S`` and the daemon is still down, don't hammer a daemon
+      that keeps dying on start; let the caller surface the resumable framing.
+    * **Single-flight** -- an ensure-lock so overlapping invocations boot at most
+      one daemon (the daemon's own singleton guard is the backstop); a loser
+      waits briefly for the winner's daemon to come up.
+    """
+    if os.environ.get("AGENT_BRIDGE_NO_ENSURE") == "1":
+        return _service_is_running()
+    if _service_is_running():
+        return True
+
+    import time
+
+    now = time.time()
+    try:
+        last_attempt = os.path.getmtime(_ENSURE_MARKER)
+    except OSError:
+        last_attempt = 0.0
+    if now - last_attempt < _ENSURE_BACKOFF_S:
+        # Recently tried and still down -> a crash loop; don't hammer.
+        return _service_is_running()
+
+    fd = _acquire_ensure_lock()
+    if fd is None:
+        # Another invocation is booting -- wait briefly for its daemon.
+        for _ in range(15):
+            time.sleep(1)
+            if _service_is_running():
+                return True
+        return _service_is_running()
+    try:
+        try:
+            with open(_ENSURE_MARKER, "w") as fh:
+                fh.write(str(now))
+        except OSError:
+            pass
+        _spawn_detached_daemon()
+        for _ in range(20):
+            time.sleep(1)
+            if _service_is_running():
+                return True
+        return False
+    finally:
+        _release_ensure_lock(fd)
 
 
 def _service_start() -> None:
