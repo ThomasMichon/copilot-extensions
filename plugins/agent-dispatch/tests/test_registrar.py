@@ -49,6 +49,43 @@ def test_full_general_pool_declaration():
     assert d.owner == "test-chamber"
 
 
+def test_periodic_emitter_declaration():
+    d = load_declaration(
+        {
+            "name": "review-inbox",
+            "kind": "emitter",
+            "spec": {
+                "id": "review-inbox",
+                "command": ["review-emitter", "tick"],
+                "interval_seconds": 3600,
+            },
+            "filters": {"permit": {"machine": ["host-a"]}},
+        }
+    )
+    assert d.kind == "emitter"
+    assert d.spec["command"] == ["review-emitter", "tick"]
+    assert d.filters.permit["machine"] == frozenset({"host-a"})
+    args = d.to_supervise_args()
+    assert args[:4] == ["supervise", "register", "--kind", "emitter"]
+    assert "--spec" in args
+
+
+def test_non_lane_declaration_rejects_lane_fields():
+    with pytest.raises(RegistrarError, match="does not accept lane fields"):
+        load_declaration(
+            {
+                "name": "review-inbox",
+                "kind": "emitter",
+                "labels": ["review"],
+                "spec": {
+                    "id": "review-inbox",
+                    "command": ["review-emitter", "tick"],
+                    "interval_seconds": 3600,
+                },
+            }
+        )
+
+
 def test_name_is_required():
     with pytest.raises(RegistrarError, match="name"):
         load_declaration({"labels": ["general"]})

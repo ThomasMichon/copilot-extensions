@@ -35,7 +35,10 @@ def declared_registration_id(decl: ProfileDeclaration) -> str:
 
 
 def declaration_to_spec(decl: ProfileDeclaration) -> dict:
-    """Map a declaration to the daemon lane ``spec`` (mirrors ``to_supervise_args``)."""
+    """Map a declaration to its daemon ``spec``."""
+    if decl.kind != RegistrationKind.SUPERVISED_LANE:
+        return dict(decl.spec)
+
     spec: dict = {
         "labels": list(decl.labels),
         "max_concurrent": decl.concurrency,
@@ -90,7 +93,12 @@ def declaration_to_registration(
     decl: ProfileDeclaration, *, machine: str | None, env: str = "default"
 ) -> dict:
     """Map a declaration to a daemon registration dict scoped to ``(machine, env)``."""
-    kind = RegistrationKind.EVALUATOR if decl.evaluator else RegistrationKind.SUPERVISED_LANE
+    kind = (
+        decl.kind
+        if decl.kind != RegistrationKind.SUPERVISED_LANE
+        else RegistrationKind.EVALUATOR if decl.evaluator
+        else RegistrationKind.SUPERVISED_LANE
+    )
     return {
         "id": declared_registration_id(decl),
         "kind": kind,

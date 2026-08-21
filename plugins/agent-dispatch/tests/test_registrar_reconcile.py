@@ -113,6 +113,28 @@ def test_declaration_to_registration_kind_and_scope():
     assert ev["kind"] == "evaluator"
 
 
+def test_periodic_emitter_declaration_maps_to_emitter_registration():
+    decl = load_declaration(
+        {
+            "name": "review-inbox",
+            "kind": "emitter",
+            "spec": {
+                "id": "review-inbox",
+                "command": ["review-emitter", "tick"],
+                "interval_seconds": 3600,
+            },
+        }
+    )
+    reg = declaration_to_registration(decl, machine="host-a")
+    assert reg["kind"] == "emitter"
+    assert reg["spec"] == dict(decl.spec)
+    cmd = build_command(
+        reg, python="PY", materialize=lambda name, _payload: f"/run/{name}.json"
+    )
+    assert cmd[:5] == ["PY", "-m", "agent_dispatch", "emitter", "serve"]
+    assert cmd[cmd.index("--holder") + 1] == "host-a"
+
+
 def test_runs_on_machine_respects_permit_filter():
     pinned = load_declaration(
         {"name": "g", "filters": {"permit": {"machine": ["host-a"]}}}

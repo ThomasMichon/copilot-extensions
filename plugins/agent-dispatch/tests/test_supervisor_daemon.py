@@ -240,6 +240,25 @@ def test_build_command_emitter():
     assert "--port" in cmd and "9400" in cmd
 
 
+def test_build_command_periodic_emitter():
+    reg = _reg(
+        "m",
+        kind="emitter",
+        machine="anomalous-potato",
+        spec={
+            "id": "review-inbox",
+            "command": ["review-emitter", "tick"],
+            "interval_seconds": 3600,
+        },
+    )
+    cmd = build_command(
+        reg, python="PY", materialize=lambda n, p: f"/run/{n}.json"
+    )
+    assert cmd[:5] == ["PY", "-m", "agent_dispatch", "emitter", "serve"]
+    assert "/run/emitter.json" in cmd
+    assert cmd[cmd.index("--holder") + 1] == "anomalous-potato"
+
+
 def test_build_command_needs_materializer_for_inline_spec():
     reg = _reg("s", kind="schedule", spec={"id": "n", "repo": TEST_REPO})
     with pytest.raises(UnsupportedKind):
