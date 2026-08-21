@@ -332,7 +332,8 @@ class VaultService:
 
     # -- request handler -----------------------------------------------------
 
-    def handle_request(self, request: dict, peer: str = "?") -> dict:
+    def handle_request(self, request: dict, peer: str = "?",
+                       transport: str = "unknown") -> dict:
         self.keepalive()
         self._check_password_ttl()
         action = request.get("action")
@@ -375,6 +376,14 @@ class VaultService:
                 "cli": self.cli.status(),
                 "unlocked_vaults": self.cli.unlocked_vaults(),
             }
+
+        if action == "handoff-export":
+            # Drain-safe cutover (#743): hand the unlocked master secret to an
+            # incoming generation, but ONLY over the owner-gated local transport
+            # (AF_UNIX / pipe). The response carries the plaintext master
+            # password(s) -- never log it, never serve it over loopback TCP.
+            from .cutover import handoff_export_response
+            return handoff_export_response(self, transport=transport)
 
         if action == "get":
             entry = request.get("entry", "")
@@ -689,6 +698,7 @@ async def handle_client(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
     service: VaultService,
+    transport: str = "unknown",
 ) -> None:
     peer = writer.get_extra_info("peername", "?")
     try:
@@ -708,7 +718,7 @@ async def handle_client(
         log.debug("< %s from %s%s", action, peer, f" client={client}" if client else "")
 
         response = await asyncio.get_event_loop().run_in_executor(
-            None, service.handle_request, request, str(peer)
+            None, service.handle_request, request, str(peer), transport
         )
 
         ok = response.get("ok", False)
@@ -773,7 +783,7 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
         if os.path.exists(SOCKET_PATH):
             os.unlink(SOCKET_PATH)
         unix_srv = await asyncio.start_unix_server(
-            lambda r, w: handle_client(r, w, service),
+            lambda r, w: handle_client(r, w, service, transport="unix"),
             path=SOCKET_PATH,
         )
         os.chmod(SOCKET_PATH, 0o600)
@@ -786,7 +796,7 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
     bound_port: int | None = None
     try:
         tcp_srv = await asyncio.start_server(
-            lambda r, w: handle_client(r, w, service),
+            lambda r, w: handle_client(r, w, service, transport="tcp"),
             host="127.0.0.1",
             port=port,
         )
@@ -813,7 +823,7 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
     if IS_WINDOWS:
         try:
             pipe_servers = await start_pipe_server(
-                PIPE_PATH, lambda r, w: handle_client(r, w, service)
+                PIPE_PATH, lambda r, w: handle_client(r, w, service, transport="pipe")
             )
             pipe_bound = bool(pipe_servers)
             if pipe_bound:
