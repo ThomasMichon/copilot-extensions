@@ -6,11 +6,12 @@ import asyncio
 import contextlib
 import json
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
+from .. import elevated
 from ..models import (
     AnswerAskUserRequest,
     CursorAckRequest,
@@ -159,6 +160,8 @@ def _session_info(s) -> SessionInfo:  # noqa: ANN001
         target_host=s.target.host,
         project=getattr(s.target, "project", None),
         worktree_id=s.target.worktree_id,
+        elevated=s.target.elevated,
+        read_only=False,
         status=s.status,
         pid=s.pid,
         turn_count=s.turn_count,
@@ -181,6 +184,68 @@ def _session_info(s) -> SessionInfo:  # noqa: ANN001
             if s.last_heartbeat_at else None
         ),
         liveness=s.liveness_state(),
+    )
+
+
+def _persisted_session_info(
+    row: dict[str, Any], *, daemon_running: bool
+) -> SessionInfo:
+    """Convert an elevated database row to its read-only public view."""
+    from datetime import datetime, timezone
+
+    target_json = row.get("target_json")
+    target = (
+        SpawnTarget.from_json(target_json)
+        if target_json
+        else SpawnTarget(
+            type=row.get("target_type", "local"),
+            cwd=row.get("target_dir", "."),
+        )
+    )
+    session_status = SessionStatus(row["status"])
+    if not daemon_running and session_status in {
+        SessionStatus.CREATED,
+        SessionStatus.STARTING,
+        SessionStatus.RUNNING,
+        SessionStatus.IDLE,
+        SessionStatus.STOPPING,
+    }:
+        session_status = SessionStatus.STOPPED
+
+    context_size = row.get("context_size")
+    context_used = row.get("context_used")
+    context_pct = (
+        round(context_used / context_size * 100, 1)
+        if context_size and context_used is not None
+        else None
+    )
+    last_usage_at = row.get("last_usage_at")
+    return SessionInfo(
+        session_id=row["id"],
+        name=row["name"],
+        agent_name=row.get("agent_name"),
+        caller_id=row.get("caller_id"),
+        acp_session_id=row.get("acp_session_id"),
+        target_dir=target.cwd,
+        target_type=target.type,
+        target_host=target.host,
+        project=getattr(target, "project", None),
+        worktree_id=target.worktree_id,
+        elevated=True,
+        read_only=True,
+        status=session_status,
+        pid=row.get("pid") if daemon_running else None,
+        turn_count=row.get("turn_count", 0),
+        context_size=context_size,
+        context_used=context_used,
+        context_pct=context_pct,
+        usage_model=row.get("usage_model"),
+        last_usage_at=(
+            datetime.fromtimestamp(last_usage_at, tz=timezone.utc).isoformat()
+            if last_usage_at else None
+        ),
+        created_at=datetime.fromtimestamp(row["created_at"], tz=timezone.utc),
+        updated_at=datetime.fromtimestamp(row["updated_at"], tz=timezone.utc),
     )
 
 
@@ -384,10 +449,39 @@ async def start_session(req: StartSessionRequest, request: Request):
 @router.get("", response_model=SessionListResponse)
 async def list_sessions(request: Request, status: str | None = None):
     mgr: SessionManager = request.app.state.session_manager
-    sessions = mgr.list_sessions(status=status)
-    return SessionListResponse(
-        sessions=[_session_info(s) for s in sessions]
-    )
+    status = status or None
+    primary_sessions = mgr.list_sessions()
+    infos = [
+        _session_info(session)
+        for session in primary_sessions
+        if status is None or session.status.value == status
+    ]
+
+    # Elevated sessions live in a separate daemon/database. The primary daemon
+    # remains their discovery surface after that daemon idle-exits; rows already
+    # represented by a primary relay session are omitted to avoid showing the
+    # same conversation twice.
+    if not elevated.is_subdaemon():
+        rows = await asyncio.to_thread(elevated.persisted_session_rows)
+        if rows:
+            daemon_running = await asyncio.to_thread(
+                elevated.is_up, timeout=0.2
+            )
+            represented = {
+                info.acp_session_id for info in infos if info.acp_session_id
+            }
+            represented.update(info.session_id for info in infos)
+            for row in rows:
+                if row["id"] in represented:
+                    continue
+                info = _persisted_session_info(
+                    row, daemon_running=daemon_running
+                )
+                if status is None or info.status.value == status:
+                    infos.append(info)
+
+    infos.sort(key=lambda info: info.updated_at, reverse=True)
+    return SessionListResponse(sessions=infos)
 
 
 @router.get("/{session_id}", response_model=SessionInfo)
