@@ -333,15 +333,28 @@ function leadFrom(title) {
 // "task" (agent-dispatch task-backed) or "file" (worktree-state file-backed);
 // `id` is the task id / file handoff id; `lead` comes from `leadFrom(title)`.
 //
-// `retry` (default true) appends an explicit retry-on-not-ready clause: a live
-// cutover seeds the successor's FIRST turn, which can run before the
-// context-handoff extension has finished (re)loading -- so `consume_handoff` is
-// in the tool catalog (tool search finds it) but invoking it fails with a
-// transient 400 / tool-not-found. The clause tells the successor to wait briefly
-// and retry the SAME call so a fresh launch self-heals instead of erroring out.
+// For a TASK-backed cutover we prefer a BASH-FIRST seed (see GitHub issue #853): the
+// successor's first action is a plain shell-command chain, NOT the
+// `consume_handoff` extension tool. The CLI's startup extension-reload race can
+// route an external-tool request to an extension generation that is torn down
+// mid-launch; the request then never returns -- no completion event, no error --
+// and the tool call hangs indefinitely (observed: multi-hour stalls). The `bash`
+// tool is a CORE tool (not extension-provided), so it cannot be orphaned that
+// way. The retry-on-not-ready clause below was an earlier mitigation, but it only
+// helps when the bad call fails FAST (a 400 / tool-not-found the model can see
+// and retry) -- it does nothing for the silent-hang case, which is why the
+// bash-first path exists. The bash-first seed is used only when the predecessor
+// pane / worktree / session id are known (`oldPane`, `worktree`, `sessionId`);
+// otherwise, and for file-backed handoffs, we fall back to the tool-based seed +
+// retry clause.
+//
+// `retry` (default true) appends the retry-on-not-ready clause described above.
 // Pass `retry: false` for the human-facing paste prompt (resumed in an
 // already-loaded session, where there is no such race and brevity matters).
-function buildCutoverSeed(kind, id, lead, { retry = true } = {}) {
+function buildCutoverSeed(
+  kind, id, lead,
+  { retry = true, oldPane = null, worktree = null, sessionId = null } = {},
+) {
   const retryClause = retry
     ? " If that call fails because the tool is not yet available (e.g. a 400 / " +
       "tool-not-found on this freshly launched session while the context-handoff " +
@@ -349,6 +362,26 @@ function buildCutoverSeed(kind, id, lead, { retry = true } = {}) {
       "call, up to 5 attempts, before doing anything else."
     : "";
   if (kind === "task") {
+    // Bash-first path: the three verbs are exactly what consume_handoff shells
+    // to -- load the brief + take ownership (agent-dispatch consume
+    // --defer-complete), conclude the predecessor, then retire + reap its pane --
+    // reproduced here as a single shell chain so no extension tool sits in the
+    // reload-window critical path.
+    if (oldPane && worktree && sessionId) {
+      return (
+        `${lead}. You are taking over a handoff (agent-dispatch task ${id}) IN ` +
+        `PLACE -- do not restart or create a new worktree. As your FIRST action, ` +
+        `run this single shell command -- it loads your full brief, then retires ` +
+        `the predecessor now that you are alive: agent-dispatch consume ${id} ` +
+        `--defer-complete && agent-worktrees conclude-session --worktree ` +
+        `${worktree} --session ${sessionId} --state handed-off && agent-worktrees ` +
+        `handoff-cutover --retire-pane ${oldPane} --successor-verified ` +
+        `--retire-reason handoff-consume --worktree-id ${worktree} --session-id ` +
+        `${sessionId} . The first command prints your full brief; the trailing ` +
+        `JSON lines are bookkeeping. Then continue the prior session's work, and ` +
+        `ONLY when you reach the handoff's goal run: agent-dispatch complete ${id} .`
+      );
+    }
     return (
       `${lead}. You are taking over a handoff (agent-dispatch task ` +
       `${id}) IN PLACE -- do not restart or create a new worktree. ` +
@@ -1019,7 +1052,11 @@ const session = await joinSession({
               `${taskId}); continue the prior session's work IN PLACE -- do not ` +
               `restart or create a new worktree. Load your full brief by ` +
               `running: agent-dispatch consume ${taskId} .`;
-            cutoverSeed = buildCutoverSeed("task", taskId, lead);
+            cutoverSeed = buildCutoverSeed("task", taskId, lead, {
+              oldPane: stored?.metadata?.oldPane,
+              worktree: stored?.metadata?.worktree,
+              sessionId: sid,
+            });
             storedMsg = (
               `Handoff stored as agent-dispatch task ${taskId} (proposed, label ` +
               `'handoff', pinned to this worktree). No file handoff was written.\n\n` +
@@ -1032,8 +1069,7 @@ const session = await joinSession({
               `  ${seed}\n` +
               `Do NOT paste the handoff contents -- the payload lives in the task ` +
               `and is loaded on demand by the embedded command. In a live cutover, ` +
-              `the successor consumes it with consume_handoff and retires the ` +
-              `predecessor after pickup.`
+              `the successor loads it and retires the predecessor after pickup.`
             );
           }
           // Task creation failed -- fall through to the file flow.
@@ -1274,7 +1310,12 @@ const session = await joinSession({
           );
         }
 
-        const seed = buildCutoverSeed(kind, id, lead);
+        const seed = buildCutoverSeed(
+          kind, id, lead,
+          kind === "task"
+            ? { oldPane: currentPaneId(), worktree, sessionId: sid }
+            : {},
+        );
         const result = runHandoffCutover(cwd, seed, sid);
         if (!result || !result.ok) {
           const reason = result?.reason || "error";
