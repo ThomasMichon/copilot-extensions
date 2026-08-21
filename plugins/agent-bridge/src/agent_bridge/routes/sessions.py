@@ -419,6 +419,12 @@ async def start_session(req: StartSessionRequest, request: Request):
             cwd=req.target_dir or ".",
         )
 
+    # Per-session env overrides (e.g. BYOK provider selection) merge onto the
+    # resolved agent's declared env, per-session winning. Applied to the spawned
+    # Copilot process by the transport (``env.update(target.env)``).
+    if req.env:
+        target.env = {**target.env, **req.env}
+
     try:
         session = await mgr.start_session(
             target, agent_name=req.agent, caller_id=req.caller_id,
