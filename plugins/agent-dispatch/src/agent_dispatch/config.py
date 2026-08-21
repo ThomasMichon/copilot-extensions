@@ -341,6 +341,22 @@ def client_token() -> str | None:
     return os.environ.get("AGENT_DISPATCH_TOKEN") or None
 
 
+def failover_machine() -> str | None:
+    """The peer machine (its SSH alias) to fail dispatch over to when this
+    environment's local coordinator is down (``AGENT_DISPATCH_FAILOVER_MACHINE``).
+
+    This is the **SSH-transport** failover: rather than a hosted HTTP endpoint
+    behind a bearer, the client opens an SSH local port-forward to the peer's
+    loopback coordinator (authenticated by the machine's own SSH key -- no token)
+    and runs the command against it, keeping the caller's local repo/worktree
+    context. ``None`` when unset -- the client is then local-only (or uses the
+    hosted ``AGENT_DISPATCH_SHARED_URL`` fallback, if configured). Preferred over
+    the hosted HTTP fallback when both are set: per-machine identity, no shared
+    secret.
+    """
+    return os.environ.get("AGENT_DISPATCH_FAILOVER_MACHINE") or None
+
+
 def shared_url() -> str | None:
     """The **shared/elected coordinator** base URL for cross-machine dispatch.
 
