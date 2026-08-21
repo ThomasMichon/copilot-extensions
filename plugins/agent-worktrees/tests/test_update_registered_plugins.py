@@ -150,6 +150,17 @@ def test_trusted_invocation_context_wins_over_untrusted_anchor(monkeypatch, tmp_
     assert all(cwd == invocation for _argv, cwd in calls)
 
 
+def test_manager_transport_context_wins_after_project_chdir(monkeypatch, tmp_path):
+    invocation = tmp_path / "invocation"
+    settings = invocation / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text("{}")
+    monkeypatch.setattr(m, "_INVOCATION_CWD", Path("/repo/anchor"))
+    monkeypatch.setenv(m._UPDATE_CONTEXT_ENV, str(invocation))
+
+    assert m._invocation_update_context() == invocation
+
+
 def test_missing_plugin_uses_install_path(monkeypatch):
     """A plugin whose payload is not installed is installed, not updated."""
     _install_config(monkeypatch, "/repo/anchor")

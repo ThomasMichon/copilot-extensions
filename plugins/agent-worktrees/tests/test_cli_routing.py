@@ -1085,22 +1085,42 @@ def _update_args(**over):
     return argparse.Namespace(**base)
 
 
-def test_update_hands_off_to_usable_manager(monkeypatch):
+def test_update_hands_off_to_usable_manager(monkeypatch, tmp_path):
     """`update` with a usable Manager execs `worktree-manager update` and does
     NOT run the in-plugin mechanics."""
+    invocation = tmp_path / "invocation"
+    settings = invocation / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text("{}")
+    monkeypatch.setattr(m, "_INVOCATION_CWD", invocation)
+    monkeypatch.delenv(m._UPDATE_CONTEXT_ENV, raising=False)
     monkeypatch.setattr(m, "_usable_worktree_manager", lambda: "/usr/bin/worktree-manager")
     monkeypatch.setattr(m.cfg, "active_project", lambda: "demo")
     seam = {}
+
+    def fake_exec(mgr, project, *, subcommand=None):
+        seam.update(
+            mgr=mgr,
+            project=project,
+            subcommand=subcommand,
+            update_context=m.os.environ.get(m._UPDATE_CONTEXT_ENV),
+        )
+        return 0
+
     monkeypatch.setattr(
-        m, "_exec_worktree_manager",
-        lambda mgr, project, *, subcommand=None: seam.update(
-            mgr=mgr, project=project, subcommand=subcommand) or 0)
+        m, "_exec_worktree_manager", fake_exec
+    )
     monkeypatch.setattr(m, "_cmd_update_in_plugin",
                         lambda args: pytest.fail("manager present: must not run in-plugin update"))
     rc = m.cmd_update(_update_args())
     assert rc == 0
-    assert seam == {"mgr": "/usr/bin/worktree-manager", "project": "demo",
-                    "subcommand": ["update"]}
+    assert seam == {
+        "mgr": "/usr/bin/worktree-manager",
+        "project": "demo",
+        "subcommand": ["update"],
+        "update_context": str(invocation),
+    }
+    assert m._UPDATE_CONTEXT_ENV not in m.os.environ
 
 
 def test_update_threads_flags_through_seam(monkeypatch):
