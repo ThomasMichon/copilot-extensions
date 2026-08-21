@@ -490,8 +490,11 @@ agent-dispatch steer take <id>              # -> {"steer": {"fields": {...}, "se
   compact field spec (`name[:text|textarea|choice[a,b,...]]`, comma-separated).
 - **`steer submit`** appends the operator's answer to the task's append-only steer
   inbox and clears `awaiting_steer`; it is **not** worker-owned (the operator, or a
-  surface acting for them, answers). `steer take` is the owner-gated wake-side read
-  that hands the next answer to the resumed worker.
+  surface acting for them, answers). After persistence, the coordinator asks
+  agent-bridge to resume the owner immediately (and queues the prompt if that
+  owner is busy), regardless of which surface submitted the answer. Bridge
+  failure never loses the durable steer. `steer take` is the owner-gated
+  wake-side read that hands the next answer to the resumed worker.
 - **General, not domain-specific.** The coordinator stores card/steer objects
   opaquely, so any dispatched agent that must block on operator input uses this --
   the same transport a picker "form" surface or an `ask_user` skill writes through.

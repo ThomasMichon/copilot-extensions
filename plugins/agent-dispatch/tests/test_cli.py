@@ -26,6 +26,70 @@ def test_parse_affinity():
     assert _parse_affinity(None) == {}
 
 
+# -- steer wake ownership ----------------------------------------------------
+
+
+def test_steer_uses_coordinator_wake_result(monkeypatch, capsys):
+    import json
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def steer(self, task_id, **kwargs):
+            assert task_id == "task-1"
+            assert kwargs["wake"] is True
+            return {
+                "id": task_id,
+                "owner": "host/worktree-1",
+                "steer_woken": True,
+            }
+
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda _args: FakeClient())
+    args = _args(["steer", "submit", "task-1", "--field", "decision=continue"])
+
+    assert args.func(args) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["woken"] is True
+    assert "steer_woken" not in output["task"]
+
+
+def test_steer_falls_back_when_old_coordinator_omits_wake_result(
+    monkeypatch, capsys
+):
+    import json
+
+    from agent_dispatch import bridge
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def steer(self, task_id, **_kwargs):
+            return {"id": task_id, "owner": "host/worktree-1"}
+
+    calls = []
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda _args: FakeClient())
+    monkeypatch.setattr(
+        bridge,
+        "resume_steered_owner",
+        lambda owner, task_id, message=None: calls.append(
+            (owner, task_id, message)
+        ) or True,
+    )
+    args = _args(["steer", "submit", "task-1", "--field", "decision=continue"])
+
+    assert args.func(args) == 0
+    assert json.loads(capsys.readouterr().out)["woken"] is True
+    assert calls == [("host/worktree-1", "task-1", None)]
+
+
 # -- coordinator target resolution: local vs shared/elected -----------------
 
 
