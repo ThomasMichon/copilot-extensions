@@ -228,11 +228,14 @@ def _plugin_hook_files(footprint: Path) -> set[Path]:
     configured = manifest_data.get("hooks")
     values = [configured] if isinstance(configured, str) else configured
     if isinstance(values, list):
-        paths = {
-            footprint / value
-            for value in values
-            if isinstance(value, str) and value.strip()
-        }
+        payload_root = footprint.resolve()
+        paths = set()
+        for value in values:
+            if not isinstance(value, str) or not value.strip():
+                continue
+            candidate = (footprint / value).resolve()
+            if candidate.is_relative_to(payload_root):
+                paths.add(candidate)
     else:
         paths = {footprint / "hooks.json", footprint / "hooks" / "hooks.json"}
     return {path for path in paths if path.is_file()}
@@ -586,7 +589,13 @@ def scan_text_files(
             is_surface_md = (
                 name == "SKILL.md"
                 or name.endswith(".agent.md")
-                or name in {"AGENTS.md", "CLAUDE.md", "GEMINI.md"}
+                or name in {
+                    "AGENTS.md",
+                    "CLAUDE.md",
+                    "GEMINI.md",
+                    "copilot-instructions.md",
+                }
+                or name.endswith(".instructions.md")
             )
             # Secrets: only config-shaped customization files.
             config_target = suffix in CONFIG_SUFFIXES and (
@@ -694,10 +703,6 @@ def _display_path(
 ) -> str:
     """Render a shareable path, redacting locations outside the reviewed repo."""
     resolved = path.resolve()
-    try:
-        return resolved.relative_to(root.resolve()).as_posix()
-    except ValueError:
-        pass
     for base, label in aliases:
         try:
             relative = resolved.relative_to(base.resolve())
@@ -705,6 +710,10 @@ def _display_path(
             continue
         suffix = relative.as_posix()
         return f"<{label}>/{suffix}" if suffix != "." else f"<{label}>"
+    try:
+        return resolved.relative_to(root.resolve()).as_posix()
+    except ValueError:
+        pass
     return "<external-path>"
 
 
@@ -829,7 +838,12 @@ def _personal_instruction_files(home: Path) -> set[Path]:
 def _metadata_files(root: Path,
                     plugin_sources: list[PluginSource]) -> set[Path]:
     files = set(root.glob(".github/skills/*/SKILL.md"))
+    files.update(root.glob(".claude/skills/*/SKILL.md"))
+    files.update(root.glob(".agents/skills/*/SKILL.md"))
     files.update(root.glob(".github/agents/*.agent.md"))
+    files.update(root.glob(".claude/agents/*.agent.md"))
+    files.update(root.glob("plugins/*/skills/*/SKILL.md"))
+    files.update(root.glob("plugins/*/agents/*.agent.md"))
     for source in plugin_sources:
         files.update(source.skills_root.glob("*/SKILL.md"))
         files.update(source.payload_root.glob("agents/*.agent.md"))
@@ -892,7 +906,7 @@ def _hook_documents(
             documents.append((path, source, {"hooks": hooks}, aliases))
     for source in plugin_sources:
         footprint = source.payload_root
-        for path in _plugin_hook_files(footprint):
+        for path in sorted(_plugin_hook_files(footprint)):
             documents.append((
                 path,
                 f"plugin:{source.origin}",

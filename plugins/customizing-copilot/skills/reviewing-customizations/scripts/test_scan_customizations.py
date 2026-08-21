@@ -355,6 +355,19 @@ def test_native_manifest_hook_path_wins_over_claude_fallback(tmp_path: Path):
     assert scan._plugin_hook_files(plugin) == {native_hook}
 
 
+def test_manifest_hook_path_cannot_escape_plugin(tmp_path: Path):
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    outside = tmp_path / "outside.json"
+    outside.write_text("{}", encoding="utf-8")
+    (plugin / "plugin.json").write_text(json.dumps({
+        "name": "escaped",
+        "hooks": "../outside.json",
+    }), encoding="utf-8")
+
+    assert scan._plugin_hook_files(plugin) == set()
+
+
 def test_purely_local_collision_has_no_external_annotation(tmp_path: Path):
     repo = tmp_path / "repo"
     (repo / ".github" / "skills").mkdir(parents=True)
@@ -466,6 +479,39 @@ def test_context_budget_counts_static_custom_and_metadata(
         "heuristic": "ceil(unicode_characters / 4)",
         "characters_per_token": 4,
     }
+
+
+def test_metadata_inventory_covers_supported_repo_surfaces(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _skill(repo / ".claude" / "skills", "claude-skill")
+    _skill(repo / ".agents" / "skills", "agents-skill")
+    _agent(
+        repo / ".claude" / "agents",
+        "claude-agent",
+        desc="Claude agent.",
+    )
+    plugin = repo / "plugins" / "local-plugin"
+    _skill(plugin / "skills", "plugin-skill")
+    source = scan.PluginSource(
+        skills_root=plugin / "skills",
+        origin="local/local-plugin",
+        controlled=True,
+    )
+
+    budget = scan.build_context_budget(repo, [source], home=tmp_path / "home")
+    paths = {
+        entry["path"]
+        for entry in budget["metadata_upper_bounds"]["files"]
+    }
+
+    assert ".claude/skills/claude-skill/SKILL.md" in paths
+    assert ".agents/skills/agents-skill/SKILL.md" in paths
+    assert ".claude/agents/claude-agent.agent.md" in paths
+    assert (
+        "<plugin:local/local-plugin>/skills/plugin-skill/SKILL.md"
+        in paths
+    )
 
 
 def test_custom_instruction_dirs_accept_comma_separator(
