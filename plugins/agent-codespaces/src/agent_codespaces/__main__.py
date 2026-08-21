@@ -1065,22 +1065,12 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     # the Owner keeps this CodeSpace's relay up and does NOT stand up its own -R
     # (which would collide, #561). Default-off + fail-safe: if the feature is off,
     # no daemon is live, or the hold fails, we own the relay exactly as before.
+    # The decision here is side-effect-free; the hold itself is placed only AFTER
+    # the target lock is acquired (below), so a busy-target rejection can't leak a
+    # hold that would linger until its TTL.
     from . import connection_owner as _owner
     owner_tenant = f"ssh:{os.getpid()}"
     defer_to_owner = _owner.should_defer_to_owner(config, no_relay=args.no_relay)
-    if defer_to_owner:
-        try:
-            _owner.hold(args.name, owner_tenant)
-            log.info(
-                "Deferring credential relay for %s to the Connection Owner "
-                "(tenant=%s)", args.name, owner_tenant,
-            )
-        except Exception as exc:
-            log.warning(
-                "Owner hold for %s failed (%s) -- owning the relay directly "
-                "instead", args.name, exc,
-            )
-            defer_to_owner = False
 
     # The remote command is assembled inside _run() -- AFTER the relay is up and
     # any --stage-plugin payloads are staged -- so their on-CodeSpace
@@ -1322,6 +1312,24 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     except TargetBusyError as busy:
         print(busy.user_message(), file=sys.stderr)
         return _BUSY_EXIT
+
+    # Place the Owner hold only AFTER the target lock is held, so a busy-target
+    # rejection above can't leak a hold that would linger until its TTL. The
+    # matching release lives in _run_with_cleanup's finally, which runs iff we
+    # reach it (i.e. iff the lock was acquired and the hold was placed).
+    if defer_to_owner:
+        try:
+            _owner.hold(args.name, owner_tenant)
+            log.info(
+                "Deferring credential relay for %s to the Connection Owner "
+                "(tenant=%s)", args.name, owner_tenant,
+            )
+        except Exception as exc:
+            log.warning(
+                "Owner hold for %s failed (%s) -- owning the relay directly "
+                "instead", args.name, exc,
+            )
+            defer_to_owner = False
 
     async def _run_with_cleanup() -> int:
         try:
