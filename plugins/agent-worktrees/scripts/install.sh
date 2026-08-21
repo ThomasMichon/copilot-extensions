@@ -358,6 +358,13 @@ _versioned_activate() {
         return 1
     fi
     ok "Runtime version $SRC_VERSION active (marker -> versions/$SRC_VERSION)"
+    # Consolidated-status-daemon Phase 1 (#1696): the cutover just superseded any
+    # running status-monitor, which self-retires but only RESPAWNS on the next
+    # session start -- leaving live sessions' status bars frozen until then. Reap
+    # the superseded monitor + spawn the current one now (from the NEW slot's
+    # python), so every live session's bar is re-served with no session restart.
+    # Best-effort, never fatal.
+    "$VENV_PYTHON" -m agent_worktrees status-monitor-restart 2>&1 | sed 's/^/  → monitor: /' || true
     # #742: record the just-activated version as `last-known-good` so a future
     # marker-absent resolution (resolve-runtime.sh tier 2) prefers it over a
     # newest-slot guess. Atomic (temp + rename); best-effort, never fatal.

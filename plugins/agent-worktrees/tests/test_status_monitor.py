@@ -218,3 +218,102 @@ def test_activate_force_clears_prior_project_on_unresolved(monkeypatch):
 
 def _boom(*a, **k):  # pragma: no cover - only fires on regression
     raise AssertionError("per-session loop ran despite monitor being enabled")
+
+
+# ---------------------------------------------------------------------------
+# _restart_status_monitor -- the auto-update cutover seam (consolidated-status-
+# daemon Phase 1, dotfiles#1696): reap a superseded monitor + spawn the current
+# one so a deploy never leaves live sessions' bars frozen.
+# ---------------------------------------------------------------------------
+
+def _wire_restart(monkeypatch, *, lock_data, live, superseded, spawn_ok=True):
+    """Stub the lock read/liveness/supersession/spawn/terminate seams."""
+    monkeypatch.setattr(m, "_monitor_lock_path", lambda: "/tmp/mon.lock")
+    import agent_worktrees.locks as _locks
+    monkeypatch.setattr(_locks, "read_lock", lambda p: lock_data)
+    monkeypatch.setattr(_locks, "lock_is_live", lambda d: live)
+    removed = {"n": 0}
+
+    def _rm(p):
+        removed["n"] += 1
+    monkeypatch.setattr(_locks, "remove_lock", _rm)
+    monkeypatch.setattr(m, "_runtime_superseded", lambda **k: superseded)
+    spawned = {"argv": None}
+    def _spawn(argv):
+        spawned["argv"] = argv
+        return spawn_ok
+    monkeypatch.setattr(m, "_spawn_detached", _spawn)
+    import agent_worktrees.procs as _procs
+    reaped = {"pid": None}
+    def _term(pid):
+        reaped["pid"] = pid
+        return True
+    monkeypatch.setattr(_procs, "terminate_pid", _term)
+    return spawned, reaped, removed
+
+
+def test_restart_disabled_is_noop(monkeypatch):
+    monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "0")
+    spawned, _r, _rm = _wire_restart(monkeypatch, lock_data=None, live=False, superseded=False)
+    r = m._restart_status_monitor()
+    assert r["enabled"] is False
+    assert r["spawned"] is False
+    assert spawned["argv"] is None  # never spawned when opted out
+
+
+def test_restart_reaps_superseded_and_spawns(monkeypatch):
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    spawned, reaped, removed = _wire_restart(
+        monkeypatch, lock_data={"pid": 4242, "prefix": "/old/slot"},
+        live=True, superseded=True)
+    r = m._restart_status_monitor()
+    assert r["reaped"] == 4242          # old monitor reaped
+    assert reaped["pid"] == 4242
+    assert removed["n"] >= 1            # stale lock cleared
+    assert r["spawned"] is True
+    assert spawned["argv"][-1] == "status-monitor"  # current one spawned
+
+
+def test_restart_leaves_current_monitor_alone(monkeypatch):
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    spawned, reaped, _rm = _wire_restart(
+        monkeypatch, lock_data={"pid": 999, "prefix": "/cur/slot"},
+        live=True, superseded=False)
+    r = m._restart_status_monitor()
+    assert r["already_current"] is True
+    assert r["spawned"] is False        # no duplicate spawn
+    assert reaped["pid"] is None        # never reap a current monitor
+    assert spawned["argv"] is None
+
+
+def test_restart_clears_dead_lock_then_spawns(monkeypatch):
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    spawned, reaped, removed = _wire_restart(
+        monkeypatch, lock_data={"pid": 1, "prefix": "/x"},
+        live=False, superseded=False)  # lock present but dead
+    r = m._restart_status_monitor()
+    assert removed["n"] >= 1            # dead lock cleared
+    assert reaped["pid"] is None        # nothing live to reap
+    assert r["spawned"] is True
+    assert spawned["argv"][-1] == "status-monitor"
+
+
+def test_cmd_restart_always_exits_zero(monkeypatch, capsys):
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    _wire_restart(monkeypatch, lock_data=None, live=False, superseded=False)
+    rc = m.cmd_status_monitor_restart(argparse.Namespace())
+    assert rc == 0
+    assert "status-monitor:" in capsys.readouterr().out
+
+
+def test_installers_invoke_monitor_restart_at_cutover():
+    # Consolidated-status-daemon Phase 1 contract: BOTH runtime installers must
+    # invoke `status-monitor-restart` at the version cutover, or a deploy silently
+    # regresses to frozen bars. Pin it so an installer refactor can't drop it.
+    from pathlib import Path
+    scripts = Path(m.__file__).resolve().parents[2] / "scripts"
+    for name in ("install.ps1", "install.sh"):
+        text = (scripts / name).read_text("utf-8")
+        assert "status-monitor-restart" in text, (
+            f"{name} must invoke `status-monitor-restart` after activating the "
+            "new runtime slot (consolidated-status-daemon Phase 1, dotfiles#1696)")
