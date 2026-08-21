@@ -349,6 +349,16 @@ function Invoke-VersionedActivate {
         return $false
     }
     Write-ServiceOk "Runtime version $SrcVersion active (marker -> versions/$SrcVersion)"
+    # Consolidated-status-daemon Phase 1 (#1696): the cutover just superseded any
+    # running status-monitor, which self-retires but only RESPAWNS on the next
+    # session start -- leaving live sessions' status bars frozen until then. Reap
+    # the superseded monitor + spawn the current one now (from the NEW slot's
+    # python), so every live session's bar is re-served with no session restart.
+    # Best-effort, never fatal.
+    try {
+        & $LinkPython -m agent_worktrees status-monitor-restart 2>&1 |
+            ForEach-Object { Write-ServiceChanged "monitor: $_" }
+    } catch {}
     # #742: record the just-activated version as `last-known-good` so a future
     # marker-absent resolution (resolve-runtime.ps1 tier 2) prefers it over a
     # newest-slot guess. Atomic (temp + rename); best-effort, never fatal.
