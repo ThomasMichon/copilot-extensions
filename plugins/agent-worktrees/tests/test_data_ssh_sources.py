@@ -405,7 +405,9 @@ def test_argv_for_pwsh_uses_encoded_command():
 
     argv = data_ssh._argv_for("pwsh", "host-dev6", "dotfiles", classify=True)
     assert argv[0] == "ssh"
-    assert argv[1] == "host-dev6"
+    # Hardening options sit between "ssh" and the alias; the alias is now the
+    # second-to-last element and the remote command stays last (dotfiles#1702).
+    assert argv[-2] == "host-dev6"
     remote = argv[-1]
     assert remote.startswith("pwsh -NoProfile -WindowStyle Hidden -EncodedCommand ")
     assert "-Command '" not in remote
@@ -428,6 +430,38 @@ def test_wrap_remote_pwsh_uses_encoded_command():
     # bash path stays a plain -lc invocation
     b = data_ssh._wrap_remote("bash", "mantis-counter", "dotfiles cleanup --json")
     assert b[-1] == "bash -lc 'dotfiles cleanup --json'"
+
+
+def test_remote_argv_carries_ssh_hardening():
+    """Every remote argv self-limits so an unreachable peer can't leak an
+    immortal orphaned ssh child (dotfiles#1702).
+
+    The hardening options sit between ``ssh`` and the alias -- so ``argv[0]`` is
+    still ``ssh``, the alias is second-to-last, and the remote command stays last
+    -- and are present for both the list-fetch (``_argv_for``) and the generic
+    (``_wrap_remote``) builders, on both pwsh and bash targets.
+    """
+    def _opts(argv):
+        # the "-o KEY=VAL" pairs between ssh and the alias
+        pairs = {}
+        i = 1
+        while i < len(argv) - 2 and argv[i] == "-o":
+            k, _, v = argv[i + 1].partition("=")
+            pairs[k] = v
+            i += 2
+        return pairs
+
+    for argv in (
+        data_ssh._argv_for("pwsh", "host-dev6", "dotfiles", classify=True),
+        data_ssh._argv_for("bash", "mantis-counter", "proj", classify=True),
+        data_ssh._wrap_remote("pwsh", "host-cloud1", "dotfiles cleanup --json"),
+        data_ssh._wrap_remote("bash", "mantis-counter", "dotfiles cleanup --json"),
+    ):
+        assert argv[0] == "ssh"
+        opts = _opts(argv)
+        assert opts.get("BatchMode") == "yes"
+        assert "ConnectTimeout" in opts and int(opts["ConnectTimeout"]) > 0
+        assert "ServerAliveInterval" in opts and "ServerAliveCountMax" in opts
 
 
 def test_classify_fallback_is_encoding_aware(monkeypatch):

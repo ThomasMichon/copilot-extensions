@@ -227,13 +227,42 @@ def _is_cache_only_unsupported(stderr: str) -> bool:
     return "unrecognized arguments" in s and "--cache-only" in s
 
 
+# Every picker load fans out to each ready machine over SSH via a dtssh
+# ProxyCommand. Against an offline/unreachable peer, a bare ``ssh`` blocks
+# indefinitely in ProxyCommand setup; if the picker is then gone, the child is an
+# immortal orphan (own process group, no window, nobody to reap it) --
+# dotfiles#1702. Harden every remote argv so the ssh child self-terminates at the
+# OS level, independent of the picker being alive:
+#   * BatchMode=yes         -- never block on a credential/host-key prompt.
+#   * ConnectTimeout        -- bound the connect (modern OpenSSH honors this
+#                              through a ProxyCommand), so a dead peer errors in
+#                              seconds instead of hanging forever.
+#   * ServerAlive*          -- bound a session that wedges after the handshake.
+_SSH_HARDENING = (
+    "-o", "BatchMode=yes",
+    "-o", "ConnectTimeout=10",
+    "-o", "ServerAliveInterval=8",
+    "-o", "ServerAliveCountMax=3",
+)
+
+
+def _ssh_argv(alias: str, remote: str) -> list[str]:
+    """``ssh`` argv with hardening options so an unreachable host fails fast.
+
+    Options go between ``ssh`` and the alias, so ``argv[0] == "ssh"`` and the
+    remote command stays ``argv[-1]`` (the encoding-aware editors and every
+    caller that reads the last element are unaffected).
+    """
+    return ["ssh", *_SSH_HARDENING, alias, remote]
+
+
 def _argv_for(shell: str, alias: str, project: str, *, classify: bool,
               reconcile: bool = False):
     """Remote list argv for a machine/env: pwsh on Windows, bash elsewhere."""
     cmd = f"{project} {_list_args(shell, classify=classify, reconcile=reconcile)}"
     if shell == "pwsh":
-        return ["ssh", alias, _pwsh_remote(cmd)]
-    return ["ssh", alias, f"bash -lc '{cmd}'"]
+        return _ssh_argv(alias, _pwsh_remote(cmd))
+    return _ssh_argv(alias, f"bash -lc '{cmd}'")
 
 
 def _build_sources():
@@ -317,8 +346,8 @@ def _build_sources():
 def _wrap_remote(shell: str, alias: str, inner: str):
     """SSH argv that runs *inner* under the right login shell on *alias*."""
     if shell == "pwsh":
-        return ["ssh", alias, _pwsh_remote(inner)]
-    return ["ssh", alias, f"bash -lc '{inner}'"]
+        return _ssh_argv(alias, _pwsh_remote(inner))
+    return _ssh_argv(alias, f"bash -lc '{inner}'")
 
 
 def _stream_argv(source):
