@@ -211,9 +211,10 @@ def _reresolve_stale_interpreter(args: list[str]) -> list[str]:
     before the resume recovery ladder can react.
 
     When ``args[0]`` is an absolute path that no longer exists but sits under a
-    ``.../versions/<ver>/`` root, remap ``<ver>`` to a currently-present sibling
-    version so the resume lands on the upgraded interpreter. No-op when the path
-    still exists or no sibling version resolves the same tail.
+    ``.../versions/<ver>/`` root, remap ``<ver>`` to the provider's current
+    version (its ``current-version`` marker) or, failing that, the newest
+    existing sibling by natural (numeric) order. No-op when the path still
+    exists or no sibling version resolves the same tail.
     """
     if not args:
         return args
@@ -226,11 +227,32 @@ def _reresolve_stale_interpreter(args: list[str]) -> list[str]:
     if match is None:
         return args
     base, tail = match.group("base"), match.group("tail")
+
+    # Prefer the provider's authoritative current-version marker (a sibling of
+    # the versions/ dir); fall back to the newest existing sibling by *natural*
+    # (numeric) order so a dev62 slot is never shadowed by a lexicographically
+    # larger dev9.
+    def _natural_key(name: str) -> list[str]:
+        return [
+            f"{int(part):020d}" if part.isdigit() else part
+            for part in re.split(r"(\d+)", name)
+        ]
+
+    ordered: list[str] = []
+    marker = os.path.join(os.path.dirname(base.rstrip("\\/")), "current-version")
     try:
-        siblings = sorted(os.listdir(base), reverse=True)
+        with open(marker, encoding="utf-8") as handle:
+            ordered.append(handle.read().strip())
     except OSError:
-        return args
-    for ver in siblings:
+        pass
+    try:
+        ordered.extend(sorted(os.listdir(base), key=_natural_key, reverse=True))
+    except OSError:
+        pass
+
+    for ver in ordered:
+        if not ver:
+            continue
         candidate = f"{base}{ver}{tail}"
         if os.path.exists(candidate):
             log.warning(

@@ -1403,5 +1403,35 @@ class TestReresolveStaleInterpreter:
         # dev62 dir exists but lacks the Scripts/python.exe tail -> no remap
         assert _reresolve_stale_interpreter(args) == args
 
+    def test_prefers_current_version_marker(self, tmp_path):
+        # Two resolvable slots; the marker names the older one -> marker wins.
+        for v in ("0.4.0-dev40", "0.4.0-dev62"):
+            scripts = tmp_path / "versions" / v / "Scripts"
+            scripts.mkdir(parents=True)
+            (scripts / "python.exe").write_text("")
+        (tmp_path / "current-version").write_text("0.4.0-dev40\n")
+        stale = str(tmp_path / "versions" / "0.4.0-dev39" / "Scripts" / "python.exe")
+
+        out = _reresolve_stale_interpreter([stale, "-m", "x"])
+
+        assert out[0] == str(
+            tmp_path / "versions" / "0.4.0-dev40" / "Scripts" / "python.exe"
+        )
+
+    def test_natural_order_not_lexicographic(self, tmp_path):
+        # dev9 and dev62 both resolve; no marker -> newest by NUMBER (dev62),
+        # not lexicographic ("dev9" > "dev62" as strings).
+        for v in ("0.4.0-dev9", "0.4.0-dev62"):
+            scripts = tmp_path / "versions" / v / "Scripts"
+            scripts.mkdir(parents=True)
+            (scripts / "python.exe").write_text("")
+        stale = str(tmp_path / "versions" / "0.4.0-dev39" / "Scripts" / "python.exe")
+
+        out = _reresolve_stale_interpreter([stale, "-m", "x"])
+
+        assert out[0] == str(
+            tmp_path / "versions" / "0.4.0-dev62" / "Scripts" / "python.exe"
+        )
+
     def test_empty_args(self):
         assert _reresolve_stale_interpreter([]) == []
