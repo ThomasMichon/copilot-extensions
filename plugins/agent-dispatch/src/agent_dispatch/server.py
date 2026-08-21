@@ -18,6 +18,11 @@ from .rendezvous import clear_endpoint, write_endpoint
 
 log = logging.getLogger("agent-dispatch.server")
 
+# Set once this coordinator process has logged a START lifecycle record, so the
+# shutdown path emits a matching STOP even after a cutover demotes us. One
+# coordinator per process, so a module-level flag is sufficient.
+_lifecycle_started = False
+
 
 class UnsafeBindError(RuntimeError):
     """Raised when the coordinator would bind the LAN without a bearer token."""
@@ -83,6 +88,13 @@ def _publish_routing(cfg: Config, bound_port: int, *, passive: bool = False) -> 
     try:
         from zdd import routing
 
+        try:
+            # Dead-port watchdog: retire any advertised-but-dead endpoint a prior
+            # crashed coordinator/cutover left before we announce ourselves.
+            routing.reap_stale_active(routing_dir(), service="agent-dispatch")
+        except Exception:
+            log.debug("startup dead-port sweep skipped", exc_info=True)
+
         routing.publish_active(
             routing_dir(),
             bind=cfg.host,
@@ -91,6 +103,22 @@ def _publish_routing(cfg: Config, bound_port: int, *, passive: bool = False) -> 
             version=__version__,
             demote_existing=True,
         )
+        try:
+            from zdd import lifecycle
+
+            rec = lifecycle.record(
+                routing_dir(), lifecycle.START, service="agent-dispatch",
+                outcome=lifecycle.OK, version=__version__, port=bound_port,
+            )
+            # Remember we logged START -- only if it was actually written (record
+            # is fail-open and returns None on failure) -- so shutdown emits a
+            # matching STOP even if a later cutover demotes us, and never a STOP
+            # without a START.
+            if rec is not None:
+                global _lifecycle_started
+                _lifecycle_started = True
+        except Exception:
+            log.debug("start lifecycle record skipped", exc_info=True)
     except Exception as exc:  # noqa: BLE001 -- routing is additive, never fatal
         log.warning("could not publish zdd routing table (%s); discovery degraded", exc)
 
@@ -105,6 +133,21 @@ def _clear_routing() -> None:
     try:
         from zdd import routing
 
+        # STOP iff this process logged START -- so start/stop pair up regardless
+        # of whether a later cutover demoted us (active -> previous). A passive
+        # instance that never published logged no START and emits no STOP.
+        if _lifecycle_started:
+            try:
+                from zdd import lifecycle
+
+                lifecycle.record(
+                    routing_dir(), lifecycle.STOP, service="agent-dispatch",
+                    outcome=lifecycle.OK,
+                )
+            except Exception:
+                log.debug("stop lifecycle record skipped", exc_info=True)
+        # Retract our active entry (no-op if a successor already flipped the
+        # table -- clear_if_owner only clears when we are still the active).
         routing.clear_if_owner(routing_dir(), os.getpid())
     except Exception:
         log.debug("zdd routing clear-on-shutdown skipped", exc_info=True)

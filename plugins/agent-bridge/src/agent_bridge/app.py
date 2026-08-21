@@ -407,6 +407,7 @@ async def lifespan(app: FastAPI):
 
             from . import __version__ as _ver
             from zdd import routing
+            from . import lifecycle_hooks
             from .config import config_dir
 
             server = getattr(app.state, "uvicorn_server", None)
@@ -415,6 +416,12 @@ async def lifespan(app: FastAPI):
                 if server is not None and getattr(server, "started", False):
                     break
                 await asyncio.sleep(0.1)
+            started = server is not None and getattr(server, "started", False)
+            # Dead-port watchdog: before announcing ourselves, retire any
+            # advertised-but-dead endpoint a prior crashed daemon/cutover may
+            # have left in the routing table (self-heals a stale port on a plain
+            # restart, not only on a redeploy). Best-effort / fail-open.
+            await asyncio.to_thread(lifecycle_hooks.startup_sweep, config_dir())
             try:
                 # Advertise the *actually bound* port (dotfiles #694): equals
                 # cfg.port in the default path, but the real OS-assigned port
@@ -430,6 +437,16 @@ async def lifespan(app: FastAPI):
                     version=_ver,
                     demote_existing=True,
                 )
+                # Durable lifecycle record: emitted only when the server is
+                # confirmed listening, so a START never claims "serving" for a
+                # daemon whose startup timed out without binding. (The publish
+                # above still runs: a live-pid-but-not-yet-listening entry is
+                # intentional -- consumers wait on it rather than the old port.)
+                # The recorded flag gates the shutdown STOP on a matching START.
+                if started:
+                    app.state.lifecycle_started = await asyncio.to_thread(
+                        lifecycle_hooks.record_start, config_dir(), _ver, _bound_port
+                    )
             except Exception:
                 log.warning("Failed to publish routing table", exc_info=True)
 
@@ -538,7 +555,12 @@ async def lifespan(app: FastAPI):
         import os as _os
 
         from zdd import routing
+        from . import lifecycle_hooks
         from .config import config_dir
+        # STOP only if we emitted a matching START (the server confirmed
+        # listening), so a daemon that never actually served records neither.
+        if getattr(app.state, "lifecycle_started", False):
+            await asyncio.to_thread(lifecycle_hooks.record_stop, config_dir())
         try:
             await asyncio.to_thread(routing.clear_if_owner, config_dir(), _os.getpid())
         except Exception:
