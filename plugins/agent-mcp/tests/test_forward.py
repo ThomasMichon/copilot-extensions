@@ -243,7 +243,11 @@ def test_forward_config_error_reports_nonzero(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
     rc = forward.run(str(tmp_path / "does-not-exist.yaml"))
     assert rc == 1
-    assert "forward" in capsys.readouterr().err
+    # Generic "agent-mcp:" prefix (not "forward:") so `bridge` and `forward`
+    # report config errors identically.
+    err = capsys.readouterr().err
+    assert err.startswith("agent-mcp:")
+    assert "does-not-exist" in err
 
 
 def test_looks_like_path_and_abs_ref(tmp_path, monkeypatch):
@@ -296,3 +300,48 @@ def test_ensure_serve_spawns_a_real_host(tmp_path, monkeypatch):
 def test_ensure_serve_disabled(monkeypatch):
     monkeypatch.setenv("AGENT_MCP_NO_ENSURE_SERVE", "1")
     assert forward._ensure_serve_enabled() is False
+
+
+# -- default-on: `bridge` delegates to the multiplexer forwarder ---------------
+
+def test_bridge_defaults_to_multiplexer(monkeypatch):
+    """`agent-mcp bridge` routes through forward.run by default (multiplex-on)."""
+    from agent_mcp.__main__ import _cmd_bridge
+
+    called = {}
+
+    def _fake_run(target, **_kw):
+        called["target"] = target
+        return 0
+
+    monkeypatch.setattr(forward, "run", _fake_run)
+
+    class _NS:
+        config = None
+        name = "echo"
+
+    rc = _cmd_bridge(_NS())
+    assert rc == 0
+    assert called["target"] == "echo"
+
+
+def test_bridge_opt_out_runs_direct(tmp_path, monkeypatch, capsys):
+    """AGENT_MCP_NO_MULTIPLEX makes `bridge` (via forward) run the classic
+    in-process bridge."""
+    from agent_mcp.__main__ import _cmd_bridge
+
+    bridge = _write_bridge_config(tmp_path)
+    monkeypatch.setenv("AGENT_MCP_NO_MULTIPLEX", "1")
+    monkeypatch.setenv("AGENT_MCP_PARENT_WATCHDOG", "0")
+    req = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                      "params": {"name": "echo", "arguments": {"d": 1}}}) + "\n"
+    monkeypatch.setattr(sys, "stdin", io.StringIO(req))
+
+    class _NS:
+        config = str(bridge)
+        name = None
+
+    rc = _cmd_bridge(_NS())
+    assert rc == 0
+    replies = [json.loads(x) for x in capsys.readouterr().out.splitlines() if x.strip()]
+    assert json.loads(replies[0]["result"]["content"][0]["text"]) == {"d": 1}
