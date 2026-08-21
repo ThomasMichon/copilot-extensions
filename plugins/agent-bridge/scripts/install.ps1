@@ -37,7 +37,7 @@ param(
     # runs while the user is interactively signed in. Useful for an always-on
     # workstation accessed over SSH/RDP with no persistent interactive session.
     # Can also be set via AGENT_BRIDGE_NONINTERACTIVE=1. Never forced; an
-    # existing non-interactive task is preserved across updates.
+    # existing working non-interactive task is preserved across updates.
     [switch]$NonInteractive,
 
     # DEPRECATED / no-op (Thread B): the graceful ZDD cutover is now the DEFAULT on
@@ -235,6 +235,7 @@ $BinstubPs1 = Join-Path $LocalBin 'agent-bridge.ps1'
 $Binstub    = $BinstubPs1   # primary entry point (shown in summaries)
 $PidFile    = Join-Path $InstallDir 'agent-bridge.pid'
 $TaskName   = 'Agent Bridge'
+$ScheduledTaskHasNotRunResult = 267011  # 0x41303 / SCHED_S_TASK_HAS_NOT_RUN
 $Port       = 9280
 $RelayPort  = 9857   # integrated credential relay (in-process with the bridge)
 
@@ -1042,13 +1043,25 @@ function Write-DeployManifestFor {
     Write-Ok "Deploy manifest written (source: $kind)"
 }
 
+function Get-ScheduledTaskLastResult {
+    param([Parameter(Mandatory)][string]$Name)
+
+    try {
+        $info = Get-ScheduledTaskInfo -TaskName $Name -ErrorAction Stop
+        if ($null -eq $info) { return $null }
+        return [int64]$info.LastTaskResult
+    } catch {
+        return $null
+    }
+}
+
 function Resolve-DaemonLogonMode {
     <# Decide whether the daemon's scheduled task runs non-interactively ("run
        whether the user is logged on or not", boot-triggered) or in the default
        at-logon interactive mode. Opt-in only, resolved from (in priority order):
          1. the -NonInteractive switch or AGENT_BRIDGE_NONINTERACTIVE env var;
-         2. an existing task that is already non-interactive (preserve across
-            updates so an `update` never silently reverts it);
+         2. an existing task that is already non-interactive, unless an S4U task
+            never launched (267011), in which case recover to the default;
          3. an interactive desktop install prompt (skipped over SSH/headless).
        Sets $Script:UseNonInteractive. Never forces the choice. #>
     $Script:UseNonInteractive = $false
@@ -1060,7 +1073,19 @@ function Resolve-DaemonLogonMode {
 
     $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if ($existing -and ($existing.Principal.LogonType -in @('S4U', 'Password'))) {
-        # An operator already opted in; keep it that way on update/reinstall.
+        # A requested S4U start can fail before the action launches when Windows
+        # cannot acquire the user's logon token. Do not let that never-ran task
+        # make headless mode sticky: absent an explicit opt-in above, recover to
+        # the default interactive AtLogOn task. Password tasks and S4U tasks that
+        # have run keep their existing intentional mode.
+        $lastTaskResult = Get-ScheduledTaskLastResult -Name $TaskName
+        if (($existing.Principal.LogonType -eq 'S4U') -and
+            ($lastTaskResult -eq $ScheduledTaskHasNotRunResult)) {
+            Write-Warn "Existing S4U scheduled task never launched (LastTaskResult=$lastTaskResult); selecting the default interactive AtLogOn mode"
+            Write-Warn '  Re-run with -NonInteractive only if headless startup is still required.'
+            return
+        }
+
         $Script:UseNonInteractive = $true
         return
     }
@@ -1785,6 +1810,14 @@ function Invoke-Start {
         # up is most likely "nobody logged on"; fall through to the direct spawn
         # as a last resort so the daemon isn't left down, and hint the durable fix.
         if ($headless) {
+            $lastTaskResult = Get-ScheduledTaskLastResult -Name $TaskName
+            if (($task.Principal.LogonType -eq 'S4U') -and
+                ($lastTaskResult -eq $ScheduledTaskHasNotRunResult)) {
+                Write-Warn "Task Scheduler accepted the start request but did not launch the action (LastTaskResult=$lastTaskResult / SCHED_S_TASK_HAS_NOT_RUN)"
+                Write-Warn '  This likely means Windows could not acquire the S4U logon token at startup (for example, the account authority was unavailable).'
+                Write-Warn '  Clear AGENT_BRIDGE_NONINTERACTIVE and run "install.ps1 update" to replace it with the default interactive AtLogOn task.'
+                return
+            }
             Write-Warn 'agent-bridge did not become healthy within 30s via the scheduled task -- check agent-bridge-err.log'
             return
         }
