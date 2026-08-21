@@ -7,6 +7,8 @@ plugin_version="0.1.0-dev1"
 max_payload_bytes=65536
 max_config_bytes=65536
 max_config_lines=200
+max_custom_dirs_length=65536
+max_custom_dirs_entries=128
 disclosure="third-party"
 owned_accounts=""
 contribution_guides=""
@@ -89,34 +91,58 @@ contribution_guide_is_valid() {
     [[ -f "$guide_path" ]]
 }
 
+path_contains_symlink() {
+    local path="$1"
+    local current="" segment remaining
+    [[ "$path" == /* ]] || return 0
+    remaining="${path#/}"
+    while [[ -n "$remaining" ]]; do
+        segment="${remaining%%/*}"
+        remaining="${remaining#"$segment"}"
+        remaining="${remaining#/}"
+        [[ -n "$segment" ]] || continue
+        current="$current/$segment"
+        [[ ! -L "$current" ]] || return 0
+    done
+    return 1
+}
+
 read_config() {
     local path="$1"
     local authority="$2"
-    local content raw line key value line_count=0
+    local content="" raw line key value line_count newline_free nul_found=0
     [[ -e "$path" || -L "$path" ]] || return 0
-    if [[ -L "$path" || ! -f "$path" || ! -r "$path" ]]; then
+    if path_contains_symlink "$path" || [[ ! -f "$path" || ! -r "$path" ]]; then
         diag "$path: could not safely read config; safe defaults remain active"
         return 0
     fi
-    if ! content="$(LC_ALL=C head -c $((max_config_bytes + 1)) -- "$path" 2>/dev/null)"; then
+    local byte_count
+    if ! byte_count="$(LC_ALL=C wc -c < "$path" 2>/dev/null)"; then
         diag "$path: could not safely read config; safe defaults remain active"
         return 0
     fi
-    if (( ${#content} > max_config_bytes )); then
+    byte_count="${byte_count//[[:space:]]/}"
+    if [[ ! "$byte_count" =~ ^[0-9]+$ ]] || (( byte_count > max_config_bytes )); then
         diag "$path: config exceeds the 65536-byte limit; safe defaults remain active"
         return 0
     fi
-    while IFS= read -r raw || [[ -n "$raw" ]]; do
-        ((line_count += 1))
-        if (( line_count > max_config_lines )); then
-            diag "$path: config exceeds the 200-line limit; safe defaults remain active"
-            return 0
-        fi
-    done <<< "$content"
+    IFS= LC_ALL=C read -r -d '' content < "$path" && nul_found=1
+    if (( nul_found )); then
+        diag "$path: could not safely read config; safe defaults remain active"
+        return 0
+    fi
+    content="${content//$'\r\n'/$'\n'}"
+    content="${content//$'\r'/$'\n'}"
+    if [[ -n "$content" ]]; then
+        newline_free="${content//$'\n'/}"
+        line_count=$(( ${#content} - ${#newline_free} + 1 ))
+    fi
+    if (( line_count > max_config_lines )); then
+        diag "$path: config exceeds the 200-line limit; safe defaults remain active"
+        return 0
+    fi
 
-    line_count=0
     while IFS= read -r raw || [[ -n "$raw" ]]; do
-        ((line_count += 1))
         line="$(trim "$raw")"
         [[ -z "$line" || "${line:0:1}" == "#" ]] && continue
         if [[ "$line" != *"="* ]]; then
@@ -166,10 +192,10 @@ read_config() {
                 fi
                 ;;
             *)
-                diag "$path: ignored unknown key '$key'"
+                diag "$path: ignored unknown config key"
                 ;;
         esac
-    done <<< "$content"
+    done < <(printf '%s' "$content")
 }
 
 remote_account() {
@@ -342,6 +368,7 @@ json_skip_value() {
             if [[ "${json_text:json_pos:1}" == ',' ]]; then
                 ((json_pos += 1))
                 json_skip_space
+                [[ "${json_text:json_pos:1}" != '}' ]] || return 1
                 continue
             fi
             [[ "${json_text:json_pos:1}" == '}' ]] || return 1
@@ -361,6 +388,8 @@ json_skip_value() {
             json_skip_space
             if [[ "${json_text:json_pos:1}" == ',' ]]; then
                 ((json_pos += 1))
+                json_skip_space
+                [[ "${json_text:json_pos:1}" != ']' ]] || return 1
                 continue
             fi
             [[ "${json_text:json_pos:1}" == ']' ]] || return 1
@@ -411,6 +440,8 @@ extract_payload_cwd() {
         json_skip_space
         if [[ "${json_text:json_pos:1}" == ',' ]]; then
             ((json_pos += 1))
+            json_skip_space
+            [[ "${json_text:json_pos:1}" != '}' ]] || return 1
             continue
         fi
         [[ "${json_text:json_pos:1}" == '}' ]] || return 1
@@ -430,12 +461,43 @@ resolve_config_dir() {
         '~/'*|'~\'*) configured="${HOME:-}/${configured:2}" ;;
     esac
     [[ -d "$configured" ]] || return 1
+    path_contains_symlink "$configured" && return 1
     (cd -P -- "$configured" 2>/dev/null && pwd -P)
 }
 
+path_at_or_below() {
+    [[ "$1" == "$2" || "$1" == "$2/"* ]]
+}
+
+read_operator_config() {
+    local configured_dir="$1"
+    local relative_path="$2"
+    local resolved_dir
+    if ! resolved_dir="$(resolve_config_dir "$configured_dir")"; then
+        return 0
+    fi
+    if path_at_or_below "$resolved_dir" "$repo_root"; then
+        diag "ignored operator config path at or beneath the session-start repository"
+        return 0
+    fi
+    read_config "$resolved_dir/$relative_path" "operator"
+}
+
 read_custom_instruction_configs() {
-    local remaining_dirs config_dir resolved_dir
-    remaining_dirs="${COPILOT_CUSTOM_INSTRUCTIONS_DIRS//,/:}"
+    local raw_dirs="${COPILOT_CUSTOM_INSTRUCTIONS_DIRS:-}"
+    local remaining_dirs config_dir resolved_dir entry_count=0
+    if (( ${#raw_dirs} > max_custom_dirs_length )); then
+        diag "ignored custom instruction directories beyond the 65536-character limit"
+        return 0
+    fi
+    remaining_dirs="${raw_dirs//,/:}"
+    entry_count=1
+    local separators="${remaining_dirs//[^:]/}"
+    ((entry_count += ${#separators}))
+    if (( entry_count > max_custom_dirs_entries )); then
+        diag "ignored custom instruction directories beyond the 128-entry limit"
+        return 0
+    fi
     while :; do
         if [[ "$remaining_dirs" == *:* ]]; then
             config_dir="${remaining_dirs%%:*}"
@@ -447,7 +509,7 @@ read_custom_instruction_configs() {
         if [[ -n "$(trim "$config_dir")" ]]; then
             if ! resolved_dir="$(resolve_config_dir "$config_dir")"; then
                 diag "ignored unresolved custom instruction directory"
-            elif [[ "$resolved_dir" == "$repo_root" || "$resolved_dir" == "$repo_root/"* ]]; then
+            elif path_at_or_below "$resolved_dir" "$repo_root"; then
                 diag "ignored custom instruction directory at or beneath the session-start repository"
             else
                 read_config "$resolved_dir/ai-attribution.conf" "operator"
@@ -458,26 +520,34 @@ read_custom_instruction_configs() {
 }
 
 main() {
-    local config_home account guide kernel payload_cwd
+    local config_home account guide kernel payload_cwd payload_nul=0
 
-    json_text="$(LC_ALL=C head -c $((max_payload_bytes + 1)) 2>/dev/null || true)"
-    if (( ${#json_text} > max_payload_bytes )) ||
+    IFS= LC_ALL=C read -r -d '' -n $((max_payload_bytes + 1)) json_text && payload_nul=1
+    if (( payload_nul || ${#json_text} > max_payload_bytes )) ||
         [[ -z "$json_text" ]] ||
         ! payload_cwd="$(extract_payload_cwd)"; then
         diag "missing or malformed sessionStart payload; no policy context emitted"
         emit_empty
     fi
+    [[ "$payload_cwd" == /* ]] || {
+        diag "missing or malformed sessionStart payload; no policy context emitted"
+        emit_empty
+    }
+    payload_cwd="$(cd -P -- "$payload_cwd" 2>/dev/null && pwd -P)" || {
+        diag "missing or malformed sessionStart payload; no policy context emitted"
+        emit_empty
+    }
     repo_root="$(git -C "$payload_cwd" rev-parse --show-toplevel 2>/dev/null || true)"
     [[ -n "$repo_root" ]] || emit_empty
     repo_root="$(cd -P -- "$repo_root" 2>/dev/null && pwd -P)" || emit_empty
 
-    read_config "${HOME:-}/.copilot/ai-attribution.conf" "operator"
+    read_operator_config "${HOME:-}/.copilot" "ai-attribution.conf"
     if [[ -n "${XDG_CONFIG_HOME:-}" ]]; then
         config_home="$XDG_CONFIG_HOME"
     else
         config_home="${HOME:-}/.config"
     fi
-    read_config "$config_home/ai-attribution/config.conf" "operator"
+    read_operator_config "$config_home/ai-attribution" "config.conf"
 
     if [[ -n "${COPILOT_CUSTOM_INSTRUCTIONS_DIRS:-}" ]]; then
         read_custom_instruction_configs
