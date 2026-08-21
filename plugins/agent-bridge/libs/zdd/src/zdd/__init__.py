@@ -31,6 +31,7 @@ from .routing import (
     publish_active,
     read_active_endpoint,
     read_table,
+    reap_stale_active,
     routing_table_path,
 )
 
@@ -47,6 +48,7 @@ __all__ = [
     "read_active_endpoint",
     "read_breadcrumb",
     "read_table",
+    "reap_stale_active",
     "recover_stale_cutover",
     "routing",
     "routing_table_path",
