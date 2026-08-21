@@ -161,6 +161,7 @@ def _session_info(s) -> SessionInfo:  # noqa: ANN001
         project=getattr(s.target, "project", None),
         worktree_id=s.target.worktree_id,
         elevated=bool(elevated.relay_agent_from_command(s.target.spawn_command)),
+        read_only=False,
         status=s.status,
         pid=s.pid,
         turn_count=s.turn_count,
@@ -231,6 +232,7 @@ def _persisted_session_info(
         project=getattr(target, "project", None),
         worktree_id=target.worktree_id,
         elevated=True,
+        read_only=True,
         status=session_status,
         pid=row.get("pid") if daemon_running else None,
         turn_count=row.get("turn_count", 0),
@@ -447,6 +449,7 @@ async def start_session(req: StartSessionRequest, request: Request):
 @router.get("", response_model=SessionListResponse)
 async def list_sessions(request: Request, status: str | None = None):
     mgr: SessionManager = request.app.state.session_manager
+    status = status or None
     primary_sessions = mgr.list_sessions()
     infos = [
         _session_info(session)

@@ -193,11 +193,13 @@ class TestAuthMiddleware:
         }
         orphaned = sessions["orphaned-elevated-session"]
         assert orphaned["elevated"] is True
+        assert orphaned["read_only"] is True
         assert orphaned["status"] == "stopped"
         assert orphaned["pid"] is None
         assert orphaned["turn_count"] == 3
         assert orphaned["context_pct"] == 25.0
         assert sessions["primary-session"]["elevated"] is True
+        assert sessions["primary-session"]["read_only"] is False
 
     def test_list_status_filter_keeps_normalized_elevated_session(
         self, client, monkeypatch
@@ -257,6 +259,7 @@ class TestSessionRoutes:
         resp = client.get("/api/v1/sessions")
         assert resp.status_code == 200
         assert resp.json()["sessions"] == []
+        assert client.get("/api/v1/sessions?status=").json()["sessions"] == []
 
     def test_get_nonexistent_session(self, client) -> None:
         resp = client.get("/api/v1/sessions/nonexistent")

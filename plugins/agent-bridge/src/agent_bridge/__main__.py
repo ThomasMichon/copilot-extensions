@@ -1418,7 +1418,8 @@ def _cmd_sessions(args: argparse.Namespace) -> None:
         print(f"  {sid}  ({name})  [{status}]")
         print(f"    Agent:   {agent}")
         if s.get("elevated"):
-            print("    Mode:    elevated")
+            mode = "elevated (persisted)" if s.get("read_only") else "elevated"
+            print(f"    Mode:    {mode}")
         if caller:
             print(f"    Caller:  {caller}")
         if context:
@@ -2411,6 +2412,7 @@ def _find_caller_session(client, agent_name: str, caller_id: str | None) -> dict
             s.get("agent_name") == agent_name
             and s.get("caller_id") == caller_id
             and s.get("status", "") in _REUSABLE_SESSION_STATES
+            and not s.get("read_only", False)
         ):
             return s
     return None
