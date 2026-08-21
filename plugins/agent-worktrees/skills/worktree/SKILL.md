@@ -390,6 +390,16 @@ directory**: the target worktree and its anchor repo are discovered from CWD
 CWD were that project's anchor repo* — so you can act on another repo's
 worktrees from anywhere without env-var contamination.
 
+> **`register` (adopt) is the exception — cwd is the only *implicit* locator.**
+> Because a project binstub / `--project <name>` resolves an *already-adopted*
+> project, those levers don't exist for the repo you're about to adopt.
+> `agent-worktrees register <name>` therefore takes the repo **path from cwd** (the
+> git root of the current directory → its anchor) unless you name one explicitly;
+> `<name>` is only the project **label**. So run `register` **from inside the
+> target repo's checkout**, or pass `--repo-dir <path>` (or use `repos add <name>
+> <path>`). Running `register <name>` from a *different* repo silently adopts
+> *that* repo's path under `<name>`.
+
 | Action | Command |
 |--------|---------|
 | **Push changes to the default branch** (normal sign-off step 1) | `agent-worktrees push-changes --title "desc"` |

@@ -88,8 +88,17 @@ to), do **not** edit the anchor checkout. Use the agent-worktrees
 lifecycle so concurrent flows stay isolated:
 
 ```bash
-# One-time: adopt the repo as an agent-worktrees project
-agent-worktrees register <repo>          # or: repos add <name> <path> --class worktree
+# One-time: adopt the repo as an agent-worktrees project.
+#   `register` takes the repo PATH from your CURRENT DIRECTORY (the git root of
+#   cwd -> its main checkout), so RUN IT FROM INSIDE the target repo's checkout.
+#   The <name> argument is only the project LABEL -- it does NOT locate the repo,
+#   so `register <name>` run from a DIFFERENT repo adopts THAT repo's path under
+#   <name> (a common footgun). To adopt a repo you are not standing in, pass an
+#   explicit path instead of relying on cwd:
+cd <target-repo-checkout> && agent-worktrees register <name>   # cwd = the subject
+#   …or, from anywhere, name the path explicitly:
+agent-worktrees register <name> --repo-dir <path>
+agent-worktrees repos add <name> <path> --class worktree       # path-first alt
 
 # Per task: create an isolated worktree, edit there, push, finalize
 #   Agents/automation: create the worktree WITHOUT launching a session. This

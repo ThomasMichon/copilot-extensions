@@ -14455,10 +14455,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--machine", default=None)
 
     # register (new project)
-    p = sub.add_parser("register", help="Register a new project with the worktree manager")
-    p.add_argument("project_name", help="Project name (e.g. 'my-project')")
+    p = sub.add_parser(
+        "register",
+        help="Adopt a repo as a worktree project (repo taken from cwd by default)",
+        description=(
+            "Adopt a repo as an agent-worktrees project. The repository is taken "
+            "from the CURRENT WORKING DIRECTORY (the git root of cwd, resolved to "
+            "the main checkout) -- so run this FROM INSIDE the target repo's "
+            "checkout. project_name is only the LABEL; it does NOT locate the "
+            "repo, so `register <name>` run from a different repo adopts THAT "
+            "repo's path under <name>. To adopt a repo you are not standing in, "
+            "pass --repo-dir <path> (or use `agent-worktrees repos add <name> "
+            "<path> --class worktree`)."
+        ),
+    )
+    p.add_argument("project_name",
+                   help="Project LABEL (e.g. 'my-project') -- NOT a repo locator; "
+                        "the path comes from cwd (or --repo-dir)")
     p.add_argument("--repo-dir", default=None,
-                   help="Path to the repository (defaults to cwd detection)")
+                   help="Explicit repo path to adopt (overrides cwd detection); "
+                        "use this to register a repo you are not standing in")
     p.add_argument("--default-branch", default=None,
                    help="Default branch (auto-detected from origin/HEAD if omitted)")
     p.add_argument("--force", action="store_true")
