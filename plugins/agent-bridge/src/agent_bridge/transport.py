@@ -1107,6 +1107,28 @@ async def spawn_raw(
     if not target.spawn_command:
         raise ValueError("Command target requires spawn_command")
 
+    # Elevated-relay re-resolve (dotfiles#1610): if this command relays to the
+    # elevated sub-daemon, re-kick that daemon (it idle-exits after 600s) and
+    # rebuild the relay with its CURRENT port + token BEFORE spawning -- so a
+    # resume of an elevated session after the sub-daemon went away re-launches it
+    # and cold-resumes from disk, instead of 500ing on a dead port / stale token.
+    # Fail soft with an actionable error rather than a raw connection failure.
+    from . import elevated
+    _relay_agent = elevated.relay_agent_for(target.spawn_command)
+    if _relay_agent is not None:
+        loop = asyncio.get_running_loop()
+        try:
+            target.spawn_command = await loop.run_in_executor(
+                None, lambda: elevated.rekick_relay_command(_relay_agent)
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"elevated sub-daemon for '{_relay_agent}' is not running and "
+                f"could not be (re)started ({exc}); the session's state is "
+                f"preserved -- run `agent-bridge elevated ensure` or see "
+                f"~/.agent-bridge/elevated/elevated-daemon.log"
+            ) from exc
+
     env = os.environ.copy()
     # Strip bridge's venv vars so child processes use their own Python
     env.pop("VIRTUAL_ENV", None)
