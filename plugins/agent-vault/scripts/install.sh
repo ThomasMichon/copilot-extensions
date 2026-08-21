@@ -204,6 +204,12 @@ if [[ -z "$SRC_VERSION" ]]; then
 fi
 VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
 VENV_PYTHON="$VENV_DIR/bin/python"
+# Marker-only: retire the `.venv` symlink (uniform-runtime-resolution, #765).
+# LINK_PYTHON now points at the versioned slot directly (the link is no longer
+# created) -- this is what the systemd ExecStart + version checks use. LINK_DIR is
+# kept ONLY to derive `--link-name` so activate/gc can still find and REMOVE any
+# pre-existing `.venv` link.
+LINK_PYTHON="$VENV_PYTHON"
 # === end install-contract:v3 versioned-venv ===
 
 # === install-contract:v3 versioned-venv helpers (agent-vault) ===
@@ -216,11 +222,11 @@ _versioned_activate() {
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py="$VENV_DIR/bin/python"
     [[ -x "$py" ]] || py="$LINK_DIR/bin/python"
-    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink; then
-        _fail "Failed to activate versioned venv (.venv -> versions/$SRC_VERSION)"
+    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link; then
+        _fail "Failed to activate versioned runtime slot (versions/$SRC_VERSION; marker-only, no .venv link)"
         return 1
     fi
-    _ok "Runtime version $SRC_VERSION active (.venv -> versions/$SRC_VERSION)"
+    _ok "Runtime version $SRC_VERSION active (marker-only; versions/$SRC_VERSION)"
 }
 
 _versioned_current() {
@@ -644,7 +650,7 @@ _write_manifest() {
     "branch": $branch,
     "dirty": $dirty
   },
-  "venv": "$LINK_DIR",
+  "venv": "$VENV_DIR",
   "runtime": "python"
 }
 EOF

@@ -258,8 +258,8 @@ _versioned_activate() {
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py="$VENV_DIR/bin/python"
     [[ -x "$py" ]] || py="$LINK_DIR/bin/python"
-    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name "venv" activate "$SRC_VERSION" --replace-nonlink; then
-        _fail "Failed to activate versioned venv (venv -> versions/$SRC_VERSION)"
+    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name "venv" activate "$SRC_VERSION" --replace-nonlink --no-link; then
+        _fail "Failed to activate versioned runtime slot (versions/$SRC_VERSION; marker-only, no venv link)"
         return 1
     fi
     _ok "Runtime version $SRC_VERSION active (venv -> versions/$SRC_VERSION)"
@@ -685,10 +685,10 @@ EOF
 }
 
 _write_deploy_manifest() {
-    # The manifest `venv` field records the stable `venv` link ($LINK_DIR), never
-    # a versions/<v> slot.
+    # The manifest `venv` field records the active versioned slot ($VENV_DIR);
+    # the `venv` link is retired (marker-only, uniform-runtime-resolution #765).
     _write_deploy_manifest_for "agent-bridge" "agent-bridge" \
-        "$INSTALL_DIR" "$PLUGIN_DIR" "$LINK_DIR"
+        "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR"
 }
 
 _install_systemd_unit() {
@@ -1280,10 +1280,14 @@ _runtime_healthy() {
 # Prints the version to stdout; returns 1 if it cannot be determined (e.g. no
 # venv, or a broken install) so the caller can skip the downgrade guard.
 _installed_version() {
-    # The version currently ACTIVE (via the `venv` link), for the downgrade guard.
-    [[ -x "$LINK_DIR/bin/python" ]] || return 1
+    # The version currently ACTIVE (via the current-version marker), for the
+    # downgrade guard. Marker-only -- the `venv` link is retired (#765).
+    local ver="" py=""
+    [[ -f "$INSTALL_DIR/current-version" ]] && ver="$(tr -d ' \t\r\n' < "$INSTALL_DIR/current-version" 2>/dev/null)"
+    [[ -n "$ver" ]] && py="$INSTALL_DIR/versions/$ver/bin/python"
+    [[ -x "$py" ]] || return 1
     local v
-    v="$("$LINK_DIR/bin/python" -c \
+    v="$("$py" -c \
         'from importlib.metadata import version; print(version("agent-bridge"))' \
         2>/dev/null)" || return 1
     [[ -n "$v" ]] || return 1
