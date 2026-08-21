@@ -59,6 +59,12 @@ from .ipc import (
 )
 from .session import BridgeSession
 
+try:
+    from single_instance_lease import AlreadyRunningError, SingleInstance
+except ImportError:  # pragma: no cover - the vendored lib is always installed
+    AlreadyRunningError = None  # type: ignore[assignment,misc]
+    SingleInstance = None  # type: ignore[assignment,misc]
+
 log = logging.getLogger("agent-mcp.serve")
 
 _SWEEP_INTERVAL = 30.0  # seconds between idle sweeps
@@ -181,17 +187,51 @@ class WarmPool:
 
 
 class Server:
-    """A local-IPC server fronting a :class:`WarmPool` (AF_UNIX / loopback TCP)."""
+    """A local-IPC server fronting a :class:`WarmPool` (AF_UNIX / loopback TCP).
+
+    The host is a **losable, refcounted, idle-exiting** accelerator (#744):
+
+    * A **single-instance lease** (keyed on the socket handle's directory, i.e.
+      ``AGENT_MCP_HOME``) guarantees at most one live host per home. A second host
+      that can't take the lease stands down before binding the socket -- so the
+      thin forwarders can race-spawn the host on demand without ever creating a
+      duplicate.
+    * Attached multiplexer sessions are **refcounted**; when the last one detaches
+      and no ``call``/``list`` activity or warm session remains for
+      ``idle_timeout`` seconds, the host **evicts itself**, freeing its RAM until
+      the next forwarder spawns a fresh one.
+    """
 
     def __init__(self, socket_path: str | Path, *, pool: WarmPool | None = None,
-                 idle_timeout: float = _DEFAULT_IDLE_TIMEOUT) -> None:
+                 idle_timeout: float = _DEFAULT_IDLE_TIMEOUT,
+                 enable_lease: bool = True,
+                 lease_service: str = "agent-mcp-serve") -> None:
         self.socket_path = Path(socket_path)
         self.pool = pool or WarmPool(idle_timeout=idle_timeout)
+        self._idle_timeout = idle_timeout
         self._stop = asyncio.Event()
         self._server: asyncio.AbstractServer | None = None
         # Per-daemon auth token, minted only for the loopback-TCP transport
         # (``None`` on AF_UNIX, where filesystem permissions gate access).
         self._token: str | None = None
+        # Attached-session refcount + last-activity clock drive the host's own
+        # idle self-eviction (distinct from the WarmPool's per-session idle).
+        self._attached = 0
+        self._last_active = time.monotonic()
+        # Single-instance lease: one host per AGENT_MCP_HOME. Disabled only in
+        # tests that intentionally run two hosts on one home.
+        self._enable_lease = enable_lease and SingleInstance is not None
+        self._lease_service = lease_service
+        self._lease = None
+
+    @property
+    def attached(self) -> int:
+        """Number of live attached multiplexer sessions (test/diagnostic hook)."""
+        return self._attached
+
+    def _touch(self) -> None:
+        """Mark host activity so the idle self-eviction clock resets."""
+        self._last_active = time.monotonic()
 
     async def _handle(self, reader: asyncio.StreamReader,
                       writer: asyncio.StreamWriter) -> None:
@@ -228,8 +268,10 @@ class Server:
         if self._token is not None and req.get("token") != self._token:
             return {"ok": False, "error": "unauthorized"}
         op = req.get("op")
+        self._touch()  # any op is host activity; reset the idle self-evict clock
         if op == "ping":
-            return {"ok": True, "pong": True, "sessions": self.pool.size}
+            return {"ok": True, "pong": True, "sessions": self.pool.size,
+                    "attached": self._attached}
         if op == "shutdown":
             return {"ok": True}
         if op in ("call", "list"):
@@ -318,8 +360,10 @@ class Server:
             return
         # Ack; from here the stream is raw MCP JSON-RPC in both directions.
         await self._send(writer, {"ok": True, "attached": True})
-        log.info("session attached: %s (%d decorators)", bridge,
-                 session.decorator_count)
+        self._attached += 1
+        self._touch()
+        log.info("session attached: %s (%d decorators; %d live)", bridge,
+                 session.decorator_count, self._attached)
         try:
             while not reader.at_eof():
                 line = await reader.readline()
@@ -338,37 +382,79 @@ class Server:
         except (ConnectionResetError, BrokenPipeError):
             pass
         finally:
-            await session.aclose()
-            log.info("session detached: %s", bridge)
+            # The refcount MUST drop on detach even if teardown fails, or the host
+            # would believe a session is still attached and never idle-evict. Drop
+            # it first, then tear the session down fail-soft.
+            self._attached -= 1
+            self._touch()  # last detach starts the host's idle-eviction clock
+            try:
+                await session.aclose()
+            except Exception as exc:  # teardown must not wedge the handler/refcount
+                log.warning("session aclose error for %s: %s", bridge, exc)
+            log.info("session detached: %s (%d live)", bridge, self._attached)
+
+    def _acquire_lease(self) -> bool:
+        """Take the single-instance lease; return ``False`` to stand down.
+
+        Keyed on the socket handle's directory (``AGENT_MCP_HOME``) so at most one
+        host runs per home. A second host that loses the race returns ``False``
+        and must exit **before** binding the socket, so it never disturbs the live
+        host's handle.
+        """
+        if not self._enable_lease:
+            return True
+        self._lease = SingleInstance(
+            self.socket_path.parent, service=self._lease_service, logger=log)
+        try:
+            self._lease.acquire()
+        except AlreadyRunningError as exc:
+            log.info("serve: another host already holds the lease (%s); "
+                     "standing down", exc.holder_pid)
+            self._lease = None
+            return False
+        return True
+
+    def _release_lease(self) -> None:
+        if self._lease is not None:
+            with contextlib.suppress(Exception):
+                self._lease.release()
+            self._lease = None
 
     async def serve_forever(self) -> None:
+        # Take the single-instance lease before binding so a losing host never
+        # touches the winner's socket handle. Standing down is a clean no-op exit.
+        if not self._acquire_lease():
+            return
         self.socket_path.parent.mkdir(parents=True, exist_ok=True)
-        if _HAS_AF_UNIX:
-            # Clear a stale socket from a previous run (safe: a live server holds it).
-            if self.socket_path.exists():
-                self.socket_path.unlink()
-            self._server = await asyncio.start_unix_server(
-                self._handle, path=str(self.socket_path))
-            log.info("serving on unix:%s", self.socket_path)
-        else:
-            # No AF_UNIX (Windows): bind loopback TCP and advertise the port +
-            # a fresh auth token in the endpoint sidecar for port-discovery.
-            self._token = secrets.token_hex(16)
-            self._server = await asyncio.start_server(
-                self._handle, host=_TCP_HOST, port=0)
-            port = self._server.sockets[0].getsockname()[1]
-            self._write_endpoint(port, self._token)
-            log.info("serving on tcp:%s:%d (handle %s)", _TCP_HOST, port,
-                     self.socket_path)
-        sweeper = asyncio.create_task(self._sweep_loop())
         try:
-            await self._stop.wait()
+            if _HAS_AF_UNIX:
+                # Clear a stale socket from a previous run (safe: we hold the lease).
+                if self.socket_path.exists():
+                    self.socket_path.unlink()
+                self._server = await asyncio.start_unix_server(
+                    self._handle, path=str(self.socket_path))
+                log.info("serving on unix:%s", self.socket_path)
+            else:
+                # No AF_UNIX (Windows): bind loopback TCP and advertise the port +
+                # a fresh auth token in the endpoint sidecar for port-discovery.
+                self._token = secrets.token_hex(16)
+                self._server = await asyncio.start_server(
+                    self._handle, host=_TCP_HOST, port=0)
+                port = self._server.sockets[0].getsockname()[1]
+                self._write_endpoint(port, self._token)
+                log.info("serving on tcp:%s:%d (handle %s)", _TCP_HOST, port,
+                         self.socket_path)
+            sweeper = asyncio.create_task(self._sweep_loop())
+            try:
+                await self._stop.wait()
+            finally:
+                sweeper.cancel()
+                self._server.close()
+                await self._server.wait_closed()
+                await self.pool.close_all()
+                self._cleanup_endpoint()
         finally:
-            sweeper.cancel()
-            self._server.close()
-            await self._server.wait_closed()
-            await self.pool.close_all()
-            self._cleanup_endpoint()
+            self._release_lease()
 
     def _write_endpoint(self, port: int, token: str) -> None:
         """Publish the loopback port + token to the endpoint sidecar (owner-only)."""
@@ -392,9 +478,32 @@ class Server:
         self._stop.set()
 
     async def _sweep_loop(self) -> None:
+        # Check at least twice per idle window (capped at the 30s default) so a
+        # small idle_timeout evicts promptly and a large one stays cheap.
+        interval = _SWEEP_INTERVAL
+        if self._idle_timeout > 0:
+            interval = max(0.05, min(_SWEEP_INTERVAL, self._idle_timeout / 2))
         try:
             while True:
-                await asyncio.sleep(_SWEEP_INTERVAL)
+                await asyncio.sleep(interval)
                 await self.pool.sweep_idle()
+                self._maybe_idle_evict()
         except asyncio.CancelledError:
             pass
+
+    def _maybe_idle_evict(self) -> None:
+        """Self-evict when nothing has used the host for ``idle_timeout``.
+
+        The host is losable: once no multiplexer session is attached, no warm
+        ``call`` session remains, and no op has arrived for the idle window, it
+        stops itself and releases its RAM. A fresh forwarder simply re-spawns one.
+        A non-positive ``idle_timeout`` disables self-eviction (run forever).
+        """
+        if self._idle_timeout <= 0:
+            return
+        if self._attached > 0 or self.pool.size > 0:
+            return
+        if time.monotonic() - self._last_active > self._idle_timeout:
+            log.info("serve: idle for %.0fs with no attached sessions; "
+                     "evicting host", self._idle_timeout)
+            self._stop.set()

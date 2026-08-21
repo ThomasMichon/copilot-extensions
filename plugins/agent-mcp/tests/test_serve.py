@@ -376,3 +376,113 @@ async def test_attached_session_survives_invalid_json(tmp_path):
     finally:
         await request_via_socket(sock, {"op": "shutdown"})
         await asyncio.wait_for(task, timeout=5)
+
+
+# -- host lifecycle: single-instance lease + attach refcount + idle-evict (#744) --
+
+async def test_second_host_stands_down_under_lease(tmp_path):
+    """A second host on the same home (lock dir) can't take the single-instance
+    lease, so it stands down without binding -- the first host keeps the socket."""
+    sock = tmp_path / "serve.sock"
+    server_a = Server(sock)
+    task_a = asyncio.create_task(server_a.serve_forever())
+    try:
+        await _await_socket(sock)
+        # A second host pointed at the same home stands down immediately: its
+        # serve_forever returns without ever binding (it never took the lease).
+        server_b = Server(sock)
+        await asyncio.wait_for(server_b.serve_forever(), timeout=5)
+        assert server_b._server is None  # never bound
+        # The first host is still live and answering.
+        pong = await request_via_socket(sock, {"op": "ping"})
+        assert pong["ok"] and pong["pong"]
+    finally:
+        await request_via_socket(sock, {"op": "shutdown"})
+        await asyncio.wait_for(task_a, timeout=5)
+
+
+async def test_host_idle_evicts_with_no_attached_sessions(tmp_path):
+    """With nothing attached and no activity, the host self-evicts after its idle
+    window -- serve_forever returns on its own (the losable/refcounted property)."""
+    sock = tmp_path / "serve.sock"
+    server = Server(sock, idle_timeout=0.2)
+    # serve_forever should return by itself (idle self-eviction), no shutdown op.
+    await asyncio.wait_for(server.serve_forever(), timeout=5)
+    # Handle cleaned up on the self-eviction path.
+    assert serve_socket_if_available(str(sock)) is None
+
+
+async def test_attach_refcount_keeps_host_alive_then_evicts(tmp_path):
+    """An attached session holds the host open past the idle window; once it
+    detaches and the window elapses, the host evicts itself."""
+    from agent_mcp.serve import open_attached_session
+
+    sock = tmp_path / "serve.sock"
+    bridge = _write_bridge_config(tmp_path)
+    server = Server(sock, idle_timeout=0.3)
+    task = asyncio.create_task(server.serve_forever())
+    await _await_socket(sock)
+    reader, writer = await open_attached_session(sock, str(bridge))
+    # ping reports the live attach count.
+    pong = await request_via_socket(sock, {"op": "ping"})
+    assert pong["attached"] == 1
+    # Hold well past the idle window; the attached session keeps the host alive.
+    await asyncio.sleep(0.6)
+    assert not task.done()
+    # Detach; now the host should evict itself after the idle window elapses.
+    writer.close()
+    await asyncio.wait_for(task, timeout=5)
+    assert serve_socket_if_available(str(sock)) is None
+
+
+async def test_disabling_lease_allows_two_hosts(tmp_path):
+    """enable_lease=False lets a test run two hosts on one home (the lease is the
+    only thing preventing it) -- a guard that the stand-down above is lease-driven."""
+    sock_a = tmp_path / "a.sock"
+    sock_b = tmp_path / "b.sock"
+    a = Server(sock_a, enable_lease=False)
+    b = Server(sock_b, enable_lease=False, lease_service="agent-mcp-serve")
+    ta = asyncio.create_task(a.serve_forever())
+    tb = asyncio.create_task(b.serve_forever())
+    try:
+        await _await_socket(sock_a)
+        await _await_socket(sock_b)
+        assert (await request_via_socket(sock_a, {"op": "ping"}))["ok"]
+        assert (await request_via_socket(sock_b, {"op": "ping"}))["ok"]
+    finally:
+        await request_via_socket(sock_a, {"op": "shutdown"})
+        await request_via_socket(sock_b, {"op": "shutdown"})
+        await asyncio.wait_for(ta, timeout=5)
+        await asyncio.wait_for(tb, timeout=5)
+
+
+async def test_detach_decrements_refcount_even_if_aclose_raises(tmp_path, monkeypatch):
+    """A teardown error on detach must not wedge the refcount: _attached still
+    returns to 0, so idle-eviction is never blocked by a failed aclose."""
+    import agent_mcp.serve as serve_mod
+    from agent_mcp.serve import open_attached_session
+
+    orig_aclose = serve_mod.BridgeSession.aclose
+
+    async def _boom(self):
+        await orig_aclose(self)
+        raise RuntimeError("teardown blew up")
+
+    monkeypatch.setattr(serve_mod.BridgeSession, "aclose", _boom)
+
+    sock = tmp_path / "serve.sock"
+    bridge = _write_bridge_config(tmp_path)
+    server = Server(sock, idle_timeout=0.3)
+    task = asyncio.create_task(server.serve_forever())
+    try:
+        await _await_socket(sock)
+        reader, writer = await open_attached_session(sock, str(bridge))
+        assert (await request_via_socket(sock, {"op": "ping"}))["attached"] == 1
+        writer.close()
+        # The failing aclose still drops the refcount; the host then idle-evicts.
+        await asyncio.wait_for(task, timeout=5)
+        assert server.attached == 0
+    finally:
+        if not task.done():
+            await request_via_socket(sock, {"op": "shutdown"})
+            await asyncio.wait_for(task, timeout=5)

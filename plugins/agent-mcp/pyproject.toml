@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-mcp"
-version = "0.2.0-dev62"
+version = "0.2.0-dev63"
 description = "MCP swiss-army bridge -- wrap an upstream MCP server and apply auth + a decorator stack (filter, rename, defer, code-mode, storage, transform, gate)"
 readme = "README.md"
 license = "MIT"
@@ -16,6 +16,7 @@ dependencies = [
     "pyyaml>=6.0.3",
     "agent-credential-relay",
     "agent-procutil",
+    "agent-single-instance-lease",
 ]
 
 [tool.uv.sources]
@@ -26,6 +27,11 @@ agent-credential-relay = { path = "libs/credential-relay" }
 # Windows-headless process-spawn helpers (module ``agent_procutil``). Vendored per
 # plugin; byte-identical src across copies.
 agent-procutil = { path = "libs/agent-procutil" }
+# single-instance lease (module ``single_instance_lease``). Vendored per plugin;
+# byte-identical src across copies. The serve session-host acquires it so at most
+# one warm multiplexer host runs per AGENT_MCP_HOME, making it safe for the thin
+# forwarders to race-spawn it on demand (#744).
+agent-single-instance-lease = { path = "libs/single-instance-lease" }
 
 [project.scripts]
 agent-mcp = "agent_mcp.__main__:main"
