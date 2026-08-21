@@ -128,13 +128,16 @@ passes tests.
   channel.** The vault holds an unlocked master password + a warm credential
   cache in process memory only. During a zero-downtime cutover (#743) the
   outgoing (active) generation may hand that unlocked state to the incoming
-  generation **only** over the same loopback/AF_UNIX control transport the vault
-  already serves on — same-host, single-user–gated (AF_UNIX filesystem
-  permissions) or loopback-TCP token-gated — and **never** over a
-  non-loopback socket, the network, a file on disk, an environment variable, a
-  log line, or any third party. The secret is transferred, used, and dropped; it
-  is not persisted by the handoff. (The opt-in persistent cache is a separate,
-  explicitly-encrypted surface and is unchanged by this.)
+  generation **only** over a transport we can prove is access-gated to the owner
+  — today the vault's AF_UNIX control socket (`0o600`, single-user by filesystem
+  permission) — and **never** over a non-loopback socket, plain loopback TCP, the
+  network, a file on disk, an environment variable, a log line, or any third
+  party. The Windows named pipe is **excluded** from the handoff until it carries
+  a hardened owner-only security descriptor (the current pipe binds with the
+  default DACL); a host without a qualifying transport safely degrades to
+  re-unlock. The secret is transferred, used, and dropped; it is not persisted by
+  the handoff. (The opt-in persistent cache is a separate, explicitly-encrypted
+  surface and is unchanged by this.)
 - **One active vault per host.** A cutover stands up a passive generation on a
   fresh port, health-gates it, atomically flips the routing record, and drains
   the predecessor; the single-instance lease guarantees exactly one active owner
