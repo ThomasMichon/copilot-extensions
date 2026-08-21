@@ -14880,7 +14880,31 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--launch-id", dest="launch_id", default=None,
                     help="Launch-flow correlation id (from WORKTREE_LAUNCH_ID)")
 
-    # backfill-sessions (one-time registry population)
+    # bind-session -- the agent explicitly declares its worktree (self-identifying)
+    sp = sub.add_parser(
+        "bind-session",
+        help="Explicitly bind the current Copilot session to a worktree it declares",
+    )
+    sp.add_argument("--worktree-dir", dest="worktree_dir", default=None,
+                    help="The worktree checkout dir the session is in (default: cwd)")
+    sp.add_argument("--worktree-id", default=None,
+                    help="Worktree ID (alternative to --worktree-dir)")
+    sp.add_argument("--session-id", default=None,
+                    help="Copilot session ID (default: COPILOT_AGENT_SESSION_ID)")
+    sp.add_argument("--pane", default=None,
+                    help="Mux pane id (defaults to TMUX_PANE/PSMUX_PANE)")
+    sp.add_argument("--pid", type=int, default=None,
+                    help="PID of the Copilot process (diagnostic only)")
+
+    # bind-nudge -- postToolUse hook: nudge an unbound-but-active session to bind
+    sp = sub.add_parser(
+        "bind-nudge",
+        help="Hook: emit an additionalContext nudge when an active worktree is unbound",
+    )
+    sp.add_argument("--cwd", default=None,
+                    help="The session's working directory (default: process cwd)")
+    sp.add_argument("--stdin", action="store_true",
+                    help="Read the Copilot postToolUse JSON payload from stdin (for workingDirectory)")
     sub.add_parser("backfill-sessions",
                    help="Populate empty session registries from session-state data")
 
@@ -15172,6 +15196,202 @@ def cmd_register_session(args: argparse.Namespace) -> int:
             upd_path = None
     _spawn_status_updater(wt_id, upd_path)
     return 0
+
+
+def cmd_bind_session(args: argparse.Namespace) -> int:
+    """Explicitly bind THIS Copilot session to a worktree it declares (JSON out).
+
+    The self-identifying, agent-driven counterpart to the ``sessionStart``
+    ``register-session`` hook. ``register-session`` binds once at start from the
+    payload cwd; a session that began life elsewhere (a bare/HOME-cwd resume, a
+    spawned cutover successor, an ACP/STDIO launch that lands at ``$HOME``) is
+    never registered and leaves its worktree looking unowned -- and the CLI has no
+    cwd-change hook to re-bind when the agent later moves into the worktree.
+
+    So the agent *declares* its worktree by running this verb from within it
+    (``--worktree-dir`` defaults to the process cwd). We resolve identity the way
+    a deliberate tool subprocess can -- the session id from ``--session-id`` or the
+    ``COPILOT_AGENT_SESSION_ID`` env the CLI sets for tool calls, the mux pane from
+    ``--pane`` or ``TMUX_PANE``/``PSMUX_PANE`` -- and fold into the *same*
+    idempotent ``tracking.register_session`` the hook uses (which also completes a
+    pending handoff predecessor<->successor link and initializes the head). Binding
+    is what brings the worktree's live tracking to life, so we (re)assert the
+    status-updater exactly as the hook does. The binding reflects what the agent
+    asserted, never a background sniff.
+    """
+    session_id = getattr(args, "session_id", None) or (
+        os.environ.get("COPILOT_AGENT_SESSION_ID") or None
+    )
+    if not session_id:
+        return _json_error(
+            "could not determine the session id to bind: pass --session-id "
+            "(COPILOT_AGENT_SESSION_ID was not set)",
+            exit_code=2,
+        )
+
+    pane_id = (
+        getattr(args, "pane", None)
+        or os.environ.get("TMUX_PANE")
+        or os.environ.get("PSMUX_PANE")
+        or None
+    )
+    if isinstance(pane_id, str):
+        pane_id = pane_id.strip() or None
+
+    wt_id = getattr(args, "worktree_id", None)
+    wdir = getattr(args, "worktree_dir", None) or os.getcwd()
+    if wt_id:
+        wt_id = _resolve_worktree_id(wt_id)
+    else:
+        # Resolve the worktree from the declared dir. Like register-session, this
+        # is a no-project verb, so activate project context from the dir before
+        # the tracking lookup (which needs cfg.tracking_dir()).
+        _activate_project_for_path(wdir)
+        try:
+            wt_id = tracking.find_worktree_id_by_cwd(wdir)
+        except Exception:
+            wt_id = None
+    if not wt_id:
+        return _json_error(
+            f"'{wdir}' is not inside a tracked worktree; pass --worktree-dir "
+            "pointing at the worktree checkout (or --worktree-id)",
+            exit_code=3,
+        )
+
+    try:
+        tracking.register_session(
+            wt_id, session_id,
+            pid=getattr(args, "pid", None),
+            pane_id=pane_id,
+        )
+    except Exception as e:
+        return _json_error(f"failed to bind session: {e}")
+
+    activity.log_event(
+        "session_bound",
+        worktree_id=wt_id,
+        session_id=session_id,
+        source="bind-session",
+        pane=pane_id,
+    )
+
+    # Binding activates live tracking: (re)assert the status-updater for this
+    # worktree's mux, exactly as the register-session hook does.
+    upd_path = None
+    try:
+        rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+        if rec_path.exists():
+            upd_path = tracking.load_record(rec_path).worktree_path
+    except Exception:
+        upd_path = None
+    _spawn_status_updater(wt_id, upd_path or wdir)
+
+    try:
+        record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
+        head = record.resolved_head_session
+    except Exception:
+        head = None
+    _json_output({
+        "worktree_id": wt_id,
+        "session": session_id,
+        "pane": pane_id,
+        "bound": True,
+        "head_session": head,
+    })
+    return 0
+
+
+# Cooldown between bind nudges for the same worktree (seconds). A postToolUse
+# hook fires on every tool call; without this it would nudge each call while the
+# session stays unbound. One reminder, then quiet for the window.
+_BIND_NUDGE_COOLDOWN_S = 90
+
+
+def _bind_nudge_should_fire(record) -> bool:
+    """Whether an active agent in this worktree looks UNBOUND and should be nudged.
+
+    True when the worktree has **no live/asserted head session** -- i.e. an agent
+    is operating here (this hook is firing) yet nothing owns the worktree on
+    record. A properly bound session sets the head, so head-present means owned
+    (no nudge); head-absent means the active agent never registered (nudge). The
+    detector deliberately needs no session id (command hooks don't get one): it
+    keys on the worktree's ownership state, and the *bind* is the agent's own
+    explicit act.
+    """
+    if record is None:
+        return False
+    try:
+        return record.resolved_head_session is None
+    except Exception:
+        return False
+
+
+def cmd_bind_nudge(args: argparse.Namespace) -> int:
+    """postToolUse hook: nudge an unbound-but-active session to bind (JSON out).
+
+    Emits ``{"additionalContext": "..."}`` inviting the agent to run
+    ``bind-session --worktree-dir=<dir>`` when the current directory is a tracked
+    worktree that has no live head session, and ``{}`` otherwise. Fail-open: any
+    error prints ``{}`` and exits 0 so a nudge never disturbs the tool result. The
+    hook never binds -- it only detects and prompts; the agent's explicit
+    ``bind-session`` call does the binding.
+    """
+    import json as _json
+    import time as _time
+
+    def _emit(obj) -> int:
+        try:
+            sys.stdout.write(_json.dumps(obj))
+        except Exception:
+            pass
+        return 0
+
+    try:
+        cwd = getattr(args, "cwd", None)
+        if not cwd and getattr(args, "stdin", False):
+            payload = _read_hook_stdin()
+            if payload:
+                cwd = payload.get("workingDirectory") or payload.get("cwd")
+        cwd = cwd or os.getcwd()
+        _activate_project_for_path(cwd)
+        try:
+            wt_id = tracking.find_worktree_id_by_cwd(cwd)
+        except Exception:
+            return _emit({})
+        if not wt_id:
+            return _emit({})
+        yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+        if not yaml_path.exists():
+            return _emit({})
+        record = tracking.load_record(yaml_path)
+        if not _bind_nudge_should_fire(record):
+            return _emit({})
+
+        # Debounce: at most one nudge per worktree per cooldown window.
+        stamp = cfg.tracking_dir() / f"{wt_id}.bind-nudge-at"
+        now = _time.time()
+        try:
+            if stamp.exists() and (now - stamp.stat().st_mtime) < _BIND_NUDGE_COOLDOWN_S:
+                return _emit({})
+        except Exception:
+            pass
+
+        wdir = record.worktree_path or cwd
+        msg = (
+            "[agent-worktrees] This worktree has no session bound on record, but "
+            "you are working in it -- so its live tracking (status bar, picker) is "
+            "inactive. If you started here (or changed directory in) without being "
+            "registered, restore the binding by running:\n"
+            f"    agent-worktrees bind-session --worktree-dir={wdir}\n"
+            "This is a one-time declaration; once bound, this reminder stops."
+        )
+        try:
+            stamp.write_text(str(now), encoding="utf-8")
+        except Exception:
+            pass
+        return _emit({"additionalContext": msg})
+    except Exception:
+        return _emit({})
 
 
 def _activate_session_binding(session_id: str | None) -> str | None:
@@ -16128,6 +16348,8 @@ COMMAND_MAP = {
     "dev": cmd_dev,
     "register-session": cmd_register_session,
     "deregister-session": cmd_deregister_session,
+    "bind-session": cmd_bind_session,
+    "bind-nudge": cmd_bind_nudge,
     "backfill-sessions": cmd_backfill_sessions,
     "doctor": cmd_doctor,
     "list-sessions": cmd_list_sessions,
@@ -16465,6 +16687,8 @@ def _git_toplevel(path: Path | None) -> Path | None:
 _NO_PROJECT_COMMANDS = {
     "--version", "-V", "--help", "-h", "repos", "accounts", "related", "install", "register", "hook",
     "picker", "reap-shells", "status-updater", "status-monitor", "status-monitor-restart", "restart", "register-session",
+    "bind-session",
+    "bind-nudge",
     "head-session", "conclude-session", "link-succession", "config-migrate",
     "session-lock", "machine-context", "reconcile-binstubs",
     "register-project-entry", "terminal-fragment",
