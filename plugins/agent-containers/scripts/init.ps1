@@ -536,11 +536,17 @@ if (-not $pythonCmd) {
 }
 Write-Ok "Python: $pythonCmd"
 
-$dockerVer = docker --version 2>$null
-if ($LASTEXITCODE -ne 0) {
-    Write-Step 'docker CLI not found -- agent-containers requires Docker for fleet operations'
-} else {
+if (Get-Command docker -ErrorAction SilentlyContinue) {
+    $dockerVer = & docker --version 2>$null
     Write-Ok "Docker: $dockerVer"
+} else {
+    # Non-fatal: an installer must not fail on a missing prerequisite other than
+    # Python/uv. Docker is only needed for *runtime* fleet operations; the CLI +
+    # venv still install fine on a machine without it (matches init.sh's
+    # `command -v docker` guard). Calling `docker` unguarded here throws a
+    # CommandNotFoundException under ErrorActionPreference=Stop and aborts the
+    # reconcile with exit 1 on every Docker-less box (e.g. augloop1).
+    Write-Step 'docker CLI not found -- agent-containers fleet operations unavailable on this machine (non-fatal)'
 }
 
 # Check for uv -- install via winget if missing
