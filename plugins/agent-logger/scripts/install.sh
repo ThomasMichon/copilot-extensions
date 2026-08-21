@@ -198,15 +198,15 @@ _versioned_activate() {
     _versioned_mark_complete
     local prev
     prev="$("$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo "")"
-    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink; then
-        warn "Failed to activate versioned venv (.venv -> versions/$SRC_VERSION)"
+    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link; then
+        warn "Failed to activate versioned runtime slot (versions/$SRC_VERSION; marker-only, no .venv link)"
         return 1
     fi
-    ok "Runtime version $SRC_VERSION active (.venv -> versions/$SRC_VERSION)"
+    ok "Runtime version $SRC_VERSION active (marker-only; versions/$SRC_VERSION)"
     if [[ -n "$prev" ]]; then
-        "$LINK_DIR/bin/python" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids --keep "$prev" 2>&1 | sed 's/^/  gc: /' || true
+        "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids --keep "$prev" 2>&1 | sed 's/^/  gc: /' || true
     else
-        "$LINK_DIR/bin/python" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids 2>&1 | sed 's/^/  gc: /' || true
+        "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids 2>&1 | sed 's/^/  gc: /' || true
     fi
     return 0
 }
@@ -340,7 +340,7 @@ _write_deploy_manifest() {
     "branch": $branch,
     "dirty": $dirty
   },
-  "venv": "$LINK_DIR",
+  "venv": "$VENV",
   "runtime": "python"
 }
 EOF

@@ -253,6 +253,11 @@ if [[ -z "$SRC_VERSION" ]]; then
 fi
 VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
 VENV_PYTHON="$VENV_DIR/bin/python"
+# Marker-only: retire the `.venv` symlink (uniform-runtime-resolution, #765).
+# LINK_PYTHON now points at the versioned slot directly (the link is no longer
+# created). LINK_DIR is kept ONLY to derive `--link-name` so activate/gc can still
+# find and REMOVE any pre-existing `.venv` link.
+LINK_PYTHON="$VENV_PYTHON"
 
 _versioned_activate() {
     # Swap the stable `.venv` symlink to this version's freshly-built slot, moving
@@ -264,11 +269,11 @@ _versioned_activate() {
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py="$VENV_DIR/bin/python"
     [[ -x "$py" ]] || py="$LINK_DIR/bin/python"
-    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink; then
-        _fail "Failed to activate versioned venv (.venv -> versions/$SRC_VERSION)"
+    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link; then
+        _fail "Failed to activate versioned runtime slot (versions/$SRC_VERSION; marker-only, no .venv link)"
         return 1
     fi
-    _ok "Runtime version $SRC_VERSION active (.venv -> versions/$SRC_VERSION)"
+    _ok "Runtime version $SRC_VERSION active (marker-only; versions/$SRC_VERSION)"
 }
 
 _versioned_current() {
@@ -373,10 +378,14 @@ _source_kind() {
 
 # -- Version helpers + downgrade guard (parity with agent-bridge #1790) ------
 _installed_version() {
-    # The version currently ACTIVE (via the `.venv` link), for the downgrade guard.
-    [[ -x "$LINK_PYTHON" ]] || return 1
+    # The version currently ACTIVE (via the current-version marker), for the
+    # downgrade guard. Marker-only -- the `.venv` link is retired (#765).
+    local ver="" py=""
+    [[ -f "$INSTALL_DIR/current-version" ]] && ver="$(tr -d ' \t\r\n' < "$INSTALL_DIR/current-version" 2>/dev/null)"
+    [[ -n "$ver" ]] && py="$INSTALL_DIR/versions/$ver/bin/python"
+    [[ -x "$py" ]] || return 1
     local v
-    v="$("$LINK_PYTHON" -c \
+    v="$("$py" -c \
         'from importlib.metadata import version; print(version("agent-dispatch"))' \
         2>/dev/null)" || return 1
     [[ -n "$v" ]] || return 1
@@ -706,7 +715,7 @@ _write_manifest() {
     "branch": $branch,
     "dirty": $dirty
   },
-  "venv": "$LINK_DIR",
+  "venv": "$VENV_DIR",
   "runtime": "python"
 }
 EOF
