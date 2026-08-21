@@ -509,6 +509,46 @@ def owner_serves_relay(codespace: str, now: float | None = None) -> bool:
     return bool(codespace) and codespace in owner_active_codespaces(now)
 
 
+def should_defer_to_owner(
+    config: Any, *, no_relay: bool = False, env: Any | None = None
+) -> bool:
+    """Whether a one-off tenant should defer its credential relay to a live Owner.
+
+    True only when the relay is wanted (not ``no_relay``), the operator has not
+    set the ``AGENT_CODESPACES_NO_OWNER_DEFER`` escape hatch,
+    ``connection_owner.enabled`` is on, and an Owner daemon is actually live. On
+    the default fleet (feature off / no daemon) this is False, so the tenant keeps
+    owning its own relay and behavior is unchanged.
+    """
+    if no_relay:
+        return False
+    env = os.environ if env is None else env
+    if env.get("AGENT_CODESPACES_NO_OWNER_DEFER"):
+        return False
+    co = getattr(config, "connection_owner", None)
+    if not (co and getattr(co, "enabled", False)):
+        return False
+    return is_owner_live()
+
+
+async def await_owner_relay(
+    codespace: str, *, timeout: float = 30.0, poll: float = 0.5
+) -> bool:
+    """Wait up to ``timeout`` s for the live Owner to serve ``codespace``'s relay.
+
+    Returns True as soon as the Owner reports a live relay for it, else False on
+    timeout. A tenant that has placed a hold calls this so git-dependent
+    provisioning does not run before the Owner's relay is actually up.
+    """
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        if owner_serves_relay(codespace):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        await asyncio.sleep(poll)
+
+
 # ---------------------------------------------------------------------------
 # Connection Owner reconciler (increment 2)
 # ---------------------------------------------------------------------------
