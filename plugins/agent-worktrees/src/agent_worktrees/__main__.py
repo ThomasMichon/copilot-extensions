@@ -14457,7 +14457,7 @@ def build_parser() -> argparse.ArgumentParser:
     # register (new project)
     p = sub.add_parser(
         "register",
-        help="Adopt the repo in the CURRENT directory as a worktree project",
+        help="Adopt a repo as a worktree project (repo taken from cwd by default)",
         description=(
             "Adopt a repo as an agent-worktrees project. The repository is taken "
             "from the CURRENT WORKING DIRECTORY (the git root of cwd, resolved to "
