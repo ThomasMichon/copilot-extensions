@@ -842,8 +842,6 @@ def _metadata_files(root: Path,
     files.update(root.glob(".agents/skills/*/SKILL.md"))
     files.update(root.glob(".github/agents/*.agent.md"))
     files.update(root.glob(".claude/agents/*.agent.md"))
-    files.update(root.glob("plugins/*/skills/*/SKILL.md"))
-    files.update(root.glob("plugins/*/agents/*.agent.md"))
     for source in plugin_sources:
         files.update(source.skills_root.glob("*/SKILL.md"))
         files.update(source.payload_root.glob("agents/*.agent.md"))
