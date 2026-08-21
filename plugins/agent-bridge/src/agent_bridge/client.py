@@ -11,9 +11,12 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Iterator
+from typing import TYPE_CHECKING, Any, Iterator
 
 import yaml
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class BridgeClientError(Exception):
@@ -44,6 +47,7 @@ class BridgeClient:
         *,
         timeout: int = 120,
         connect_grace: float = 5.0,
+        reresolve: "Callable[[], str | None] | None" = None,
     ) -> None:
         self._base = base_url.rstrip("/")
         self._token = token
@@ -51,6 +55,13 @@ class BridgeClient:
         # Grace window (seconds) to retry an initial connection refusal -- the
         # service may be briefly down mid-restart (stage 1, transient).
         self._connect_grace = max(0.0, connect_grace)
+        # Optional live re-resolver: on a connection rejection, re-read
+        # the routing table (listener-verified) to follow a coordinator that
+        # moved to a new dynamic port during a zero-downtime cutover, instead of
+        # hammering the remembered-but-dead port. ``None`` (e.g. an explicit-URL
+        # or directly-constructed client) disables re-resolution -- behavior is
+        # then exactly the old memoized-endpoint retry.
+        self._reresolve = reresolve
         # Memoized (protocol_version, min_protocol_version) the daemon advertises
         # on /health. Cached for this client's (short) lifetime -- a CLI
         # invocation dials one daemon -- so repeated capability gates cost one GET.
@@ -101,11 +112,31 @@ class BridgeClient:
         # overridden; absence falls back to the config port (backward compatible).
         base_url = f"http://{bind}:{port}"
         explicit = os.environ.get("AGENT_BRIDGE_BASE_URL")
+        # A live re-resolver follows a dynamic-port cutover on a connection
+        # rejection. Enabled only on the routing-table discovery path --
+        # an explicit URL or a disabled routing table pins the endpoint, so
+        # re-resolution stays off there (the operator dialed a specific daemon).
+        reresolve: "Callable[[], str | None] | None" = None
         if explicit:
             # Highest priority: the deploy orchestrator dials a *specific*
             # daemon (old or passive) by URL, bypassing the table entirely.
             base_url = explicit.rstrip("/")
         elif os.environ.get("AGENT_BRIDGE_NO_ROUTING_TABLE") not in ("1", "true"):
+            def _reresolve_from_table() -> str | None:
+                """The current listener-verified active endpoint, or None.
+
+                ``verify_listener=True`` skips an advertised-but-dead port
+                (healing active->previous), so a stale entry pointing at a
+                retired daemon is never handed back as 'live'."""
+                try:
+                    from zdd.routing import read_active_endpoint
+
+                    ep = read_active_endpoint(config_dir, verify_listener=True)
+                except Exception:
+                    return None
+                return ep.base_url if ep is not None else None
+
+            reresolve = _reresolve_from_table
             try:
                 from zdd.routing import read_active_endpoint
 
@@ -153,7 +184,7 @@ class BridgeClient:
             )
             sys.exit(1)
 
-        return cls(base_url, str(token), timeout=timeout)
+        return cls(base_url, str(token), timeout=timeout, reresolve=reresolve)
 
     # -- HTTP helpers --------------------------------------------------------
 
@@ -184,6 +215,7 @@ class BridgeClient:
         sock_timeout = request_timeout if request_timeout is not None else self._timeout
         deadline = _time.monotonic() + self._connect_grace
         backoff = 0.25
+        reresolved = False
         while True:
             try:
                 with urllib.request.urlopen(req, timeout=sock_timeout) as resp:
@@ -197,6 +229,32 @@ class BridgeClient:
                     detail = str(exc)
                 raise BridgeClientError(exc.code, detail) from exc
             except urllib.error.URLError:
+                # A connection rejection against the remembered endpoint. Before
+                # spending the grace window retrying the SAME port, try once to
+                # follow a dynamic-port cutover: re-resolve the routing
+                # table (listener-verified) and, if the live endpoint moved,
+                # switch to it and retry immediately. This is what turns a
+                # "dial the retired port forever" wedge into an automatic
+                # follow-the-cutover. Only re-resolve once per request so a
+                # genuinely-down service still degrades through the grace window
+                # to a clean BridgeConnectionError rather than looping.
+                if not reresolved and self._reresolve is not None:
+                    reresolved = True
+                    new_base = self._reresolve()
+                    if new_base and new_base.rstrip("/") != self._base:
+                        self._base = new_base.rstrip("/")
+                        url = f"{self._base}{path}"
+                        if params:
+                            qs = "&".join(
+                                f"{k}={v}" for k, v in params.items() if v is not None
+                            )
+                            if qs:
+                                url = f"{url}?{qs}"
+                        req = urllib.request.Request(url, data=data, method=method)
+                        req.add_header("Authorization", f"Bearer {self._token}")
+                        if data:
+                            req.add_header("Content-Type", "application/json")
+                        continue
                 # Stage 1 (CONNECT_BRIDGE): the service may be mid-restart
                 # (e.g. a plugin self-update bounced the daemon). Retry within
                 # the grace window, then raise BridgeConnectionError -- never

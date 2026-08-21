@@ -79,3 +79,84 @@ class TestConnectGrace:
             with pytest.raises(BridgeConnectionError):
                 client._request("GET", "/health")
         assert calls["n"] == 1
+
+
+class TestReresolveOnRejection:
+    """follow-the-cutover: on a connection rejection, follow a dynamic-port cutover by
+    re-resolving the routing table (listener-verified) instead of hammering the
+    remembered-but-dead port."""
+
+    def test_reresolves_to_new_port_and_succeeds(self) -> None:
+        # Old port refuses; the re-resolver reports the daemon moved to a new
+        # port; the request switches to it and succeeds -- no grace needed.
+        new_base = "http://127.0.0.1:47000"
+        client = BridgeClient(
+            "http://127.0.0.1:57585",
+            "tok",
+            connect_grace=0.0,
+            reresolve=lambda: new_base,
+        )
+        seen: list[str] = []
+
+        def by_port(req, timeout=None):
+            seen.append(req.full_url)
+            if req.full_url.startswith("http://127.0.0.1:57585"):
+                raise urllib.error.URLError("refused")
+            return _FakeResp({"ok": True})
+
+        with patch("agent_bridge.client.urllib.request.urlopen", side_effect=by_port):
+            result = client._request("GET", "/health")
+
+        assert result == {"ok": True}
+        assert client._base == new_base  # switched permanently for later calls
+        assert seen[0].startswith("http://127.0.0.1:57585")  # tried old first
+        assert seen[-1].startswith("http://127.0.0.1:47000")  # then the new one
+
+    def test_reresolve_same_port_falls_through_to_grace(self) -> None:
+        # The re-resolver returns the SAME port (no move) -> no switch; degrade
+        # through the (zero) grace window to a clean BridgeConnectionError.
+        client = BridgeClient(
+            "http://127.0.0.1:57585",
+            "tok",
+            connect_grace=0.0,
+            reresolve=lambda: "http://127.0.0.1:57585",
+        )
+
+        def always_fail(_req, timeout=None):
+            raise urllib.error.URLError("refused")
+
+        with patch("agent_bridge.client.urllib.request.urlopen", side_effect=always_fail):
+            with pytest.raises(BridgeConnectionError):
+                client._request("GET", "/health")
+
+    def test_reresolve_none_falls_through_to_grace(self) -> None:
+        # The re-resolver finds no live endpoint (dead advertised port healed to
+        # None) -> no switch; clean failure after grace, not an infinite loop.
+        calls = {"n": 0}
+        client = BridgeClient(
+            "http://127.0.0.1:57585",
+            "tok",
+            connect_grace=0.0,
+            reresolve=lambda: None,
+        )
+
+        def always_fail(_req, timeout=None):
+            calls["n"] += 1
+            raise urllib.error.URLError("refused")
+
+        with patch("agent_bridge.client.urllib.request.urlopen", side_effect=always_fail):
+            with pytest.raises(BridgeConnectionError):
+                client._request("GET", "/health")
+        # One initial attempt + at most the re-resolve attempt -- bounded, no loop.
+        assert calls["n"] <= 2
+
+    def test_no_reresolver_is_unchanged_behavior(self) -> None:
+        # A directly-constructed client (no reresolve) behaves exactly as before.
+        client = BridgeClient("http://127.0.0.1:0", "tok", connect_grace=0.0)
+
+        def always_fail(_req, timeout=None):
+            raise urllib.error.URLError("refused")
+
+        with patch("agent_bridge.client.urllib.request.urlopen", side_effect=always_fail):
+            with pytest.raises(BridgeConnectionError):
+                client._request("GET", "/health")
