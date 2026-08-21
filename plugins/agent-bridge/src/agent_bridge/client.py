@@ -620,6 +620,7 @@ class BridgeClient:
         force_new: bool = False,
         worktree_id: str | None = None,
         reclaim: bool = False,
+        env: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """POST /api/v1/sessions
 
@@ -628,6 +629,10 @@ class BridgeClient:
         into a worktree whose ground-layer head is still ``active`` is refused
         (409 ``reason: worktree_head_active``) unless ``reclaim=true`` -- the
         break-glass take-over (sibling of ``resume_worktree(reclaim=...)``).
+
+        ``env`` sets per-session environment overrides merged onto the resolved
+        agent's declared env and applied to the spawned Copilot CLI -- e.g. BYOK
+        provider selection (``COPILOT_PROVIDER_BASE_URL`` / ``COPILOT_MODEL``).
         """
         body: dict[str, Any] = {}
         if agent:
@@ -646,6 +651,8 @@ class BridgeClient:
             body["worktree_id"] = worktree_id
         if reclaim:
             body["reclaim"] = True
+        if env:
+            body["env"] = env
         # Always declare this client's HTTP contract version so a (cross-host)
         # receiver can gate capability across version skew (dotfiles #632).
         from .protocol import HTTP_PROTOCOL_VERSION

@@ -166,6 +166,14 @@ class StartSessionRequest(BaseModel):
     # agent's own args are preserved; these are added after them. None / omitted
     # changes nothing.
     copilot_args: list[str] | None = None
+    # Per-session environment overrides merged into the spawned Copilot CLI's
+    # process env (on top of the resolved agent's declared ``env``). The primary
+    # use is BYOK provider selection -- pointing a session's brain at a local
+    # inference front (``COPILOT_PROVIDER_BASE_URL`` / ``COPILOT_MODEL`` /
+    # ``COPILOT_OFFLINE``) without hand-editing provider config -- but any env a
+    # caller wants set for this session only is honored. Merged after the agent's
+    # own env so a per-session value wins; None / omitted changes nothing.
+    env: dict[str, str] | None = None
     # The caller's HTTP wire-contract protocol version (dotfiles #632). A caller
     # predating negotiation omits it -> the receiving daemon treats it as
     # unversioned. Lets a (cross-host) receiver know which capabilities the
