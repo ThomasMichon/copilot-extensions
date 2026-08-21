@@ -20,6 +20,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
+DEFAULT_RESTART_GRACE = 30.0
+
+
 class BridgeClientError(Exception):
     """Raised when the API returns an error."""
 
@@ -47,14 +50,14 @@ class BridgeClient:
         token: str,
         *,
         timeout: int = 120,
-        connect_grace: float = 5.0,
+        connect_grace: float = DEFAULT_RESTART_GRACE,
         reresolve: "Callable[[], str | None] | None" = None,
     ) -> None:
         self._base = base_url.rstrip("/")
         self._token = token
         self._timeout = timeout
-        # Grace window (seconds) to retry an initial connection refusal -- the
-        # service may be briefly down mid-restart (stage 1, transient).
+        # Sustained-outage deadline for initial connection refusal or a
+        # session-resource 404 while the active daemon changes.
         self._connect_grace = max(0.0, connect_grace)
         # Optional live re-resolver: on a connection rejection, re-read
         # the routing table (listener-verified) to follow a coordinator that
