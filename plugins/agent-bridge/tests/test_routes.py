@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -20,6 +21,7 @@ def _isolate_local_discovery(tmp_path, monkeypatch):
         "AGENT_WORKTREES_PROJECTS_YAML",
         str(tmp_path / "nonexistent-projects.yaml"),
     )
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path / "bridge"))
 
 
 @pytest.fixture(autouse=True)
@@ -105,6 +107,85 @@ class TestAuthMiddleware:
     def test_valid_token(self, client) -> None:
         resp = client.get("/api/v1/sessions")
         assert resp.status_code == 200
+
+    def test_list_includes_offline_persisted_elevated_sessions(
+        self, client, monkeypatch
+    ) -> None:
+        from agent_bridge import elevated
+
+        manager = client.app.state.session_manager
+        primary = Session(
+            "primary-session",
+            "outer-session",
+            SpawnTarget(type="command", cwd="/repo"),
+            "admin-agent",
+        )
+        primary.status = SessionStatus.STOPPED
+        primary.acp_session_id = "linked-elevated-session"
+        manager._sessions[primary.session_id] = primary
+
+        now = time.time()
+        rows = [
+            {
+                "id": "linked-elevated-session",
+                "name": "linked-inner",
+                "agent_name": "admin-agent",
+                "caller_id": None,
+                "target_dir": "/repo",
+                "target_type": "local",
+                "target_json": None,
+                "status": "stopped",
+                "pid": None,
+                "acp_session_id": "acp-linked",
+                "context_size": None,
+                "context_used": None,
+                "usage_model": None,
+                "last_usage_at": None,
+                "created_at": now - 20,
+                "updated_at": now - 10,
+                "turn_count": 1,
+            },
+            {
+                "id": "orphaned-elevated-session",
+                "name": "orphaned-inner",
+                "agent_name": "admin-agent",
+                "caller_id": None,
+                "target_dir": "/repo",
+                "target_type": "local",
+                "target_json": None,
+                "status": "running",
+                "pid": 4242,
+                "acp_session_id": "acp-orphaned",
+                "context_size": 1000,
+                "context_used": 250,
+                "usage_model": "example",
+                "last_usage_at": now - 5,
+                "created_at": now - 30,
+                "updated_at": now,
+                "turn_count": 3,
+            },
+        ]
+        monkeypatch.setattr(elevated, "is_subdaemon", lambda: False)
+        monkeypatch.setattr(elevated, "persisted_session_rows", lambda: rows)
+        monkeypatch.setattr(elevated, "is_up", lambda **_kwargs: False)
+
+        response = client.get("/api/v1/sessions?status=stopped")
+
+        assert response.status_code == 200
+        sessions = {
+            session["session_id"]: session
+            for session in response.json()["sessions"]
+        }
+        assert set(sessions) == {
+            "primary-session",
+            "orphaned-elevated-session",
+        }
+        orphaned = sessions["orphaned-elevated-session"]
+        assert orphaned["elevated"] is True
+        assert orphaned["status"] == "stopped"
+        assert orphaned["pid"] is None
+        assert orphaned["turn_count"] == 3
+        assert orphaned["context_pct"] == 25.0
 
 
 class TestSessionRoutes:

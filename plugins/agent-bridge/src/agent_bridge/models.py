@@ -76,6 +76,7 @@ class SessionInfo(BaseModel):
     target_host: str | None = None
     project: str | None = None  # resolved repo/binstub (agent-worktrees project)
     worktree_id: str | None = None  # agent-worktrees worktree ID
+    elevated: bool = False
     status: SessionStatus
     pid: int | None = None
     turn_count: int = 0

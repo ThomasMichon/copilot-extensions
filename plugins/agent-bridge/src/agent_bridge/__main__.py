@@ -1417,6 +1417,8 @@ def _cmd_sessions(args: argparse.Namespace) -> None:
 
         print(f"  {sid}  ({name})  [{status}]")
         print(f"    Agent:   {agent}")
+        if s.get("elevated"):
+            print("    Mode:    elevated")
         if caller:
             print(f"    Caller:  {caller}")
         if context:
