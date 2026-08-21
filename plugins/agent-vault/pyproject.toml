@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-vault"
-version = "0.1.0-dev55"
+version = "0.1.0-dev56"
 description = "Local KeePassXC-backed secret store for Copilot CLI agents."
 readme = "README.md"
 license = "MIT"
@@ -14,12 +14,24 @@ authors = [
 ]
 dependencies = [
     "agent-procutil",
+    "agent-zdd",
+    "agent-single-instance-lease",
 ]
 
 [tool.uv.sources]
 # Windows-headless process-spawn helpers (module ``agent_procutil``). Vendored
 # per plugin; byte-identical src across copies.
 agent-procutil = { path = "libs/agent-procutil" }
+# zero-downtime cutover primitives -- routing table + cutover orchestrator +
+# recovery breadcrumb (module ``zdd``). Vendored per plugin; byte-identical src
+# across copies. Lets a vault version bump drain-and-cut-over instead of a hard
+# restart, so the unlocked master secret survives (#743).
+agent-zdd = { path = "libs/zdd" }
+# single-instance lease + supersession self-retire (module
+# ``single_instance_lease``). Vendored per plugin; byte-identical src across
+# copies. Guards "one active vault per host" and drives the drained predecessor's
+# self-retire during a cutover (#743).
+agent-single-instance-lease = { path = "libs/single-instance-lease" }
 
 [project.optional-dependencies]
 # The persistent on-disk credential cache (opt-in) encrypts entries with Fernet,

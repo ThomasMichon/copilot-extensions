@@ -110,6 +110,42 @@ The Windows installer registers a Scheduled Task named `AgentVault`, triggered a
 
 Windows `update` includes `Stop-VaultDaemonGraceful` in `scripts/install.ps1`: after building/activating the new slot, it pings the old daemon, sends the cooperative `--stop` action, waits briefly for the endpoint to be released, then starts/registers the scheduled task. This is the plugin's light connection-owner cutover: short in-flight requests finish, but the in-memory master password is intentionally released; reconnect is via the opt-in persistent cache or a single re-unlock. POSIX `update` reinstalls and restarts the systemd user service.
 
+> **In progress (#743):** the restart-based update above is being replaced by the
+> shared drain-safe zero-downtime cutover (the `zdd` + `single-instance-lease`
+> primitives, now vendored), so a routine version bump stands up the new
+> generation, health-gates it, flips the routing record, and drains the old one —
+> with **no forced re-unlock**. This closes the `plugin-services`
+> §*zero-downtime-cutover* behavior for agent-vault. See the invariants below for
+> the binding security constraint on how the unlocked secret crosses generations.
+
+## Invariants
+
+Binding, must-always-hold rules (the interim Design-Contract home until a
+`specifications/` layer exists). A change that violates one is wrong even if it
+passes tests.
+
+- **The unlocked master secret never leaves a trusted local, authenticated
+  channel.** The vault holds an unlocked master password + a warm credential
+  cache in process memory only. During a zero-downtime cutover (#743) the
+  outgoing (active) generation may hand that unlocked state to the incoming
+  generation **only** over the same loopback/AF_UNIX control transport the vault
+  already serves on — same-host, single-user–gated (AF_UNIX filesystem
+  permissions) or loopback-TCP token-gated — and **never** over a
+  non-loopback socket, the network, a file on disk, an environment variable, a
+  log line, or any third party. The secret is transferred, used, and dropped; it
+  is not persisted by the handoff. (The opt-in persistent cache is a separate,
+  explicitly-encrypted surface and is unchanged by this.)
+- **One active vault per host.** A cutover stands up a passive generation on a
+  fresh port, health-gates it, atomically flips the routing record, and drains
+  the predecessor; the single-instance lease guarantees exactly one active owner
+  and reaps any drained-but-live stray. A failed/aborted cutover leaves the
+  original active generation serving (fail-safe rollback), never zero live
+  daemons.
+- **A cutover never forces a re-unlock on a routine version bump.** If the
+  incoming generation cannot obtain the unlocked state from the outgoing one, it
+  falls back to the existing behavior (provider unlock, opt-in cache, or a single
+  prompt) — it does not silently serve locked or crash the update.
+
 ## SUDO_ASKPASS
 
 `install.sh` writes `~/.local/bin/vault-askpass`. The helper sets `VAULT_NONINTERACTIVE=1` and executes:
