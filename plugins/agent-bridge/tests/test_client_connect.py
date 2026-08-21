@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import io
 import json
 import urllib.error
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
-from agent_bridge.client import BridgeClient, BridgeConnectionError
+from agent_bridge.client import BridgeClient, BridgeClientError, BridgeConnectionError
 
 
 class _FakeResp:
@@ -24,6 +25,16 @@ class _FakeResp:
 
     def read(self):
         return json.dumps(self._payload).encode()
+
+
+def _not_found(detail: str = "Session not found") -> urllib.error.HTTPError:
+    return urllib.error.HTTPError(
+        "http://127.0.0.1/api/v1/sessions/s1",
+        404,
+        "Not Found",
+        {},
+        io.BytesIO(json.dumps({"detail": detail}).encode()),
+    )
 
 
 class TestConnectGrace:
@@ -112,6 +123,63 @@ class TestReresolveOnRejection:
         assert seen[0].startswith("http://127.0.0.1:57585")  # tried old first
         assert seen[-1].startswith("http://127.0.0.1:47000")  # then the new one
 
+    def test_reresolve_preserves_encoded_query(self) -> None:
+        old_base = "http://127.0.0.1:57585"
+        new_base = "http://127.0.0.1:47000"
+        client = BridgeClient(
+            old_base,
+            "tok",
+            connect_grace=0.0,
+            reresolve=lambda: new_base,
+        )
+        seen: list[str] = []
+
+        def by_port(req, timeout=None):
+            seen.append(req.full_url)
+            if req.full_url.startswith(old_base):
+                raise urllib.error.URLError("refused")
+            return _FakeResp({"ok": True})
+
+        with patch("agent_bridge.client.urllib.request.urlopen", side_effect=by_port):
+            result = client._request(
+                "GET",
+                "/api/v1/live-sessions/resolve",
+                params={"handle": "machine/repo & worktree"},
+            )
+
+        assert result == {"ok": True}
+        suffix = "/api/v1/live-sessions/resolve?handle=machine%2Frepo+%26+worktree"
+        assert seen == [f"{old_base}{suffix}", f"{new_base}{suffix}"]
+
+    def test_reresolves_on_each_retry_until_port_moves(self) -> None:
+        # The first retry happens before active.json flips. A later retry must
+        # consult it again rather than memoizing that first unchanged result.
+        old_base = "http://127.0.0.1:57585"
+        new_base = "http://127.0.0.1:47000"
+        endpoints = iter((old_base, new_base))
+        client = BridgeClient(
+            old_base,
+            "tok",
+            connect_grace=2.0,
+            reresolve=lambda: next(endpoints),
+        )
+        seen: list[str] = []
+
+        def by_port(req, timeout=None):
+            seen.append(req.full_url)
+            if req.full_url.startswith(old_base):
+                raise urllib.error.URLError("refused")
+            return _FakeResp({"ok": True})
+
+        with (
+            patch("agent_bridge.client.urllib.request.urlopen", side_effect=by_port),
+            patch("time.sleep"),
+        ):
+            result = client._request("GET", "/health")
+
+        assert result == {"ok": True}
+        assert seen == [f"{old_base}/health", f"{old_base}/health", f"{new_base}/health"]
+
     def test_reresolve_same_port_falls_through_to_grace(self) -> None:
         # The re-resolver returns the SAME port (no move) -> no switch; degrade
         # through the (zero) grace window to a clean BridgeConnectionError.
@@ -160,3 +228,98 @@ class TestReresolveOnRejection:
         with patch("agent_bridge.client.urllib.request.urlopen", side_effect=always_fail):
             with pytest.raises(BridgeConnectionError):
                 client._request("GET", "/health")
+
+
+class TestSessionNotFoundGrace:
+    def test_follows_new_endpoint_after_session_404(self) -> None:
+        old_base = "http://127.0.0.1:57585"
+        new_base = "http://127.0.0.1:47000"
+        client = BridgeClient(
+            old_base,
+            "tok",
+            connect_grace=0.0,
+            reresolve=lambda: new_base,
+        )
+        seen: list[str] = []
+
+        def by_port(req, timeout=None):
+            seen.append(req.full_url)
+            if req.full_url.startswith(old_base):
+                raise _not_found()
+            return _FakeResp({"id": "s1"})
+
+        with patch("agent_bridge.client.urllib.request.urlopen", side_effect=by_port):
+            result = client._request("GET", "/api/v1/sessions/s1/status")
+
+        assert result == {"id": "s1"}
+        assert seen == [
+            f"{old_base}/api/v1/sessions/s1/status",
+            f"{new_base}/api/v1/sessions/s1/status",
+        ]
+
+    def test_waits_for_routing_flip_after_session_404(self) -> None:
+        old_base = "http://127.0.0.1:57585"
+        new_base = "http://127.0.0.1:47000"
+        endpoints = iter((old_base, new_base))
+        client = BridgeClient(
+            old_base,
+            "tok",
+            connect_grace=2.0,
+            reresolve=lambda: next(endpoints),
+        )
+        seen: list[str] = []
+
+        def by_port(req, timeout=None):
+            seen.append(req.full_url)
+            if req.full_url.startswith(old_base):
+                raise _not_found()
+            return _FakeResp({"id": "s1"})
+
+        with (
+            patch("agent_bridge.client.urllib.request.urlopen", side_effect=by_port),
+            patch("time.sleep"),
+        ):
+            result = client._request("GET", "/api/v1/sessions/s1/status")
+
+        assert result == {"id": "s1"}
+        assert seen == [
+            f"{old_base}/api/v1/sessions/s1/status",
+            f"{old_base}/api/v1/sessions/s1/status",
+            f"{new_base}/api/v1/sessions/s1/status",
+        ]
+
+    def test_settled_session_404_is_reported_after_grace(self) -> None:
+        client = BridgeClient(
+            "http://127.0.0.1:57585",
+            "tok",
+            connect_grace=0.0,
+            reresolve=lambda: "http://127.0.0.1:57585",
+        )
+
+        with patch(
+            "agent_bridge.client.urllib.request.urlopen",
+            side_effect=_not_found("Session s1 not found"),
+        ):
+            with pytest.raises(BridgeClientError) as exc_info:
+                client._request("GET", "/api/v1/sessions/s1/status")
+
+        assert exc_info.value.status == 404
+        assert exc_info.value.detail == "Session s1 not found"
+
+    def test_non_session_404_remains_immediate(self) -> None:
+        reresolve = Mock(return_value="http://127.0.0.1:47000")
+        client = BridgeClient(
+            "http://127.0.0.1:57585",
+            "tok",
+            connect_grace=2.0,
+            reresolve=reresolve,
+        )
+
+        with patch(
+            "agent_bridge.client.urllib.request.urlopen",
+            side_effect=_not_found("Agent missing"),
+        ):
+            with pytest.raises(BridgeClientError):
+                client._request("GET", "/api/v1/agents/missing")
+
+        reresolve.assert_not_called()
