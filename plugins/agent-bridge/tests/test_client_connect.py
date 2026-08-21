@@ -9,7 +9,12 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from agent_bridge.client import BridgeClient, BridgeClientError, BridgeConnectionError
+from agent_bridge.client import (
+    DEFAULT_RESTART_GRACE,
+    BridgeClient,
+    BridgeClientError,
+    BridgeConnectionError,
+)
 
 
 class _FakeResp:
@@ -38,6 +43,10 @@ def _not_found(detail: str = "Session not found") -> urllib.error.HTTPError:
 
 
 class TestConnectGrace:
+    def test_default_covers_a_sustained_restart(self) -> None:
+        client = BridgeClient("http://127.0.0.1:0", "tok")
+        assert client._connect_grace == DEFAULT_RESTART_GRACE == 30.0
+
     def test_retries_then_succeeds(self) -> None:
         """A transient connection refusal within the grace window is retried."""
         client = BridgeClient("http://127.0.0.1:0", "tok", connect_grace=2.0)
