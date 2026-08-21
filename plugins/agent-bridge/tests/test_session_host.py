@@ -1407,7 +1407,7 @@ async def test_session_host_bundle_runs_and_secures(tmp_path):
     sf = tmp_path / "state.json"
     env = dict(os.environ, AGENT_BRIDGE_SESSION_HOST_NONCE="bundlenonce")
     proc = subprocess.Popen(
-        [sys.executable, str(path), "--port", "0", "--state-file", str(sf),
+        [sys.executable, "-S", str(path), "--port", "0", "--state-file", str(sf),
          "--", sys.executable, "-c", _STREAMER], env=env)
     child_pid = None
     try:
