@@ -899,6 +899,16 @@ def _systemd_available() -> bool:
 
 
 def _win_task_exists() -> bool:
+    """True when the ``Agent Bridge`` scheduled task is registered.
+
+    ``schtasks /Query`` from a **non-elevated** shell against a task registered
+    with elevated/highest privileges (or an S4U boot task) returns a non-zero
+    exit and prints ``ERROR: Access is denied.`` -- the task *exists*, it just
+    can't be read without elevation. Treating that as "absent" (dotfiles#227 root
+    cause #2) made ``_service_start`` skip the ``schtasks /Run`` path and mislead
+    the caller. Classify access-denied as **exists**; only a genuine "cannot
+    find / does not exist" (or a query error) counts as absent.
+    """
     import subprocess as sp
 
     try:
@@ -906,9 +916,13 @@ def _win_task_exists() -> bool:
             ["schtasks", "/Query", "/TN", _WIN_TASK_NAME],
             capture_output=True, text=True, timeout=15,
         )
-        return out.returncode == 0
     except (OSError, sp.TimeoutExpired):
         return False
+    if out.returncode == 0:
+        return True
+    blob = f"{out.stdout or ''}\n{out.stderr or ''}".casefold()
+    # Elevated/S4U task readable only with elevation -> it exists.
+    return "access is denied" in blob
 
 
 def _daemon_launch_argv() -> list[str]:
@@ -945,40 +959,79 @@ def _daemon_launch_argv() -> list[str]:
     return ["agent-bridge", "start"]
 
 
+def _spawn_detached_daemon() -> None:
+    """Spawn ``agent-bridge start`` as a detached, job-surviving daemon.
+
+    Uses ``detached_kwargs(breakaway=True)`` so the daemon escapes the caller's
+    Windows **Job object** and outlives whoever started it -- the persistence
+    gotcha behind dotfiles#227/#1713: a daemon spawned as a plain child (or a
+    non-breakaway detached child) dies when an SSH/CLI/agent-session caller in a
+    kill-on-close job exits, leaving the bridge down with nothing to restart it.
+    ``CREATE_BREAKAWAY_FROM_JOB`` fails with ``OSError`` when the caller's job
+    lacks ``JOB_OBJECT_LIMIT_BREAKAWAY_OK`` (a job that forbids escape), so fall
+    back to a plain detached spawn -- best effort from inside a restrictive job,
+    correct (job-surviving) everywhere else.
+    """
+    import subprocess as _sp
+
+    argv = _daemon_launch_argv()
+    logf = open(os.path.join(_INSTALL_DIR, "agent-bridge.log"), "ab")
+    errf = open(os.path.join(_INSTALL_DIR, "agent-bridge-err.log"), "ab")
+    try:
+        _sp.Popen(
+            argv, stdout=logf, stderr=errf, stdin=_sp.DEVNULL,
+            **detached_kwargs(breakaway=True),
+        )
+    except OSError:
+        # Caller's job forbids breakaway -> plain detached spawn.
+        _sp.Popen(
+            argv, stdout=logf, stderr=errf, stdin=_sp.DEVNULL,
+            **detached_kwargs(),
+        )
+
+
 def _service_start() -> None:
     import subprocess as sp
+    import time
 
     if _service_is_running():
         print(f"[OK] agent-bridge already running (port {_service_port()})")
         return
 
+    used_platform_manager = False
     if _systemd_available():
         sp.run(["systemctl", "--user", "start", _SYSTEMD_UNIT])
+        used_platform_manager = True
     elif sys.platform == "win32" and _win_task_exists():
         sp.run(["schtasks", "/Run", "/TN", _WIN_TASK_NAME],
                capture_output=True, text=True)
+        used_platform_manager = True
     else:
-        # Fallback (no systemd unit / scheduled task): spawn the foreground
-        # `agent-bridge start` as a detached background process.
-        import subprocess as _sp
+        # No systemd unit / scheduled task: spawn a detached daemon directly.
+        _spawn_detached_daemon()
 
-        popen_kwargs: dict[str, Any] = detached_kwargs()
-
-        logf = open(os.path.join(_INSTALL_DIR, "agent-bridge.log"), "ab")
-        errf = open(os.path.join(_INSTALL_DIR, "agent-bridge-err.log"), "ab")
-        _sp.Popen(
-            _daemon_launch_argv(),
-            stdout=logf, stderr=errf, stdin=_sp.DEVNULL, **popen_kwargs,
-        )
-
-    # Wait for health
-    import time
-
+    # Wait for health.
     for _ in range(15):
         time.sleep(1)
         if _service_is_running():
             print(f"[OK] agent-bridge started (port {_service_port()})")
             return
+
+    # The platform manager (systemd / scheduled task) issued a start but the
+    # daemon never came up -- notably an **S4U / RunLevel-Limited** boot task,
+    # which cannot reliably launch the daemon into the user session on an
+    # on-demand ``schtasks /Run`` (observed live on cloud1: LastTaskResult
+    # SCHED_S_TASK_HAS_NOT_RUN, no daemon). Fall back to a direct detached spawn
+    # so a mid-session restart still works regardless of the task's logon type
+    # (dotfiles#227). Skip when we already spawned directly above.
+    if used_platform_manager:
+        _spawn_detached_daemon()
+        for _ in range(15):
+            time.sleep(1)
+            if _service_is_running():
+                print(f"[OK] agent-bridge started (port {_service_port()})")
+                return
+
     print("[WARN] agent-bridge start issued but health check did not pass yet "
           "-- check ~/.agent-bridge/agent-bridge-err.log", file=sys.stderr)
 
