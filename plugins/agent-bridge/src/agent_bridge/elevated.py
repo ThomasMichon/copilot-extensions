@@ -37,12 +37,14 @@ from __future__ import annotations
 import json
 import logging
 import re
+import sqlite3
 import subprocess
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 import yaml
 from zdd.routing import read_active_endpoint
@@ -72,6 +74,54 @@ def elevated_dir() -> Path:
     d = config_dir() / _SUBDIR
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def is_subdaemon() -> bool:
+    """True only inside the bridge instance launched for elevated work."""
+    return (
+        config_dir().name.casefold() == _SUBDIR
+        and is_process_elevated()
+    )
+
+
+def persisted_session_rows() -> list[dict[str, Any]]:
+    """Read elevated sessions from disk without starting the sub-daemon.
+
+    The primary daemon owns discovery even while the elevated daemon is
+    idle-exited. Open its database read-only so listing cannot create, migrate,
+    or otherwise mutate elevated state.
+    """
+    db_path = config_dir() / _SUBDIR / "sessions.db"
+    if not db_path.is_file():
+        return []
+
+    try:
+        conn = sqlite3.connect(
+            f"{db_path.resolve().as_uri()}?mode=ro",
+            uri=True,
+            timeout=0.25,
+        )
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(
+                """
+                SELECT sessions.*,
+                       (SELECT COUNT(*) FROM turns
+                        WHERE turns.session_id = sessions.id) AS turn_count
+                FROM sessions
+                ORDER BY updated_at DESC
+                """
+            ).fetchall()
+        finally:
+            conn.close()
+    except (OSError, sqlite3.Error):
+        log.warning(
+            "Failed to read persisted elevated sessions from %s",
+            db_path,
+            exc_info=True,
+        )
+        return []
+    return [dict(row) for row in rows]
 
 
 def _venv_python() -> str:
@@ -266,8 +316,20 @@ def relay_spawn_command(
     ]
 
 
+def relay_agent_from_command(spawn_command: list[str] | None) -> str | None:
+    """Return the agent named by an elevated sub-daemon relay command."""
+    if not spawn_command or "acp-connect" not in spawn_command:
+        return None
+    for arg in spawn_command:
+        if isinstance(arg, str) and arg.startswith("ws://"):
+            m = re.match(r"ws://127\.0\.0\.1:\d+/acp/(.+)$", arg)
+            if m:
+                return urllib.parse.unquote(m.group(1))
+    return None
+
+
 def relay_agent_for(spawn_command: list[str] | None) -> str | None:
-    """If ``spawn_command`` is an elevated sub-daemon relay, return its agent name.
+    """If this process should drive an elevated relay, return its agent name.
 
     An elevated relay is ``... acp-connect ws://127.0.0.1:<port>/acp/<agent> ...``
     (see :func:`relay_spawn_command`), and only exists on the **non-elevated**
@@ -277,16 +339,9 @@ def relay_agent_for(spawn_command: list[str] | None) -> str | None:
     instead of 500ing on a dead port / stale token (dotfiles#1610). Returns None
     when this is not an elevated relay.
     """
-    if not spawn_command or is_process_elevated():
+    if is_process_elevated():
         return None
-    if "acp-connect" not in spawn_command:
-        return None
-    for arg in spawn_command:
-        if isinstance(arg, str) and arg.startswith("ws://"):
-            m = re.match(r"ws://127\.0\.0\.1:\d+/acp/(.+)$", arg)
-            if m:
-                return urllib.parse.unquote(m.group(1))
-    return None
+    return relay_agent_from_command(spawn_command)
 
 
 def rekick_relay_command(agent: str, *, wait: float = 60.0) -> list[str]:

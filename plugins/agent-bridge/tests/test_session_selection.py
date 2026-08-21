@@ -134,6 +134,15 @@ def test_find_caller_session_excludes_other_caller():
     assert m._find_caller_session(client, "codespace:cs", "host-A") is None
 
 
+def test_find_caller_session_excludes_read_only_listing():
+    session = _sess(
+        "s1", agent="admin:repo", caller="host-A", status="stopped"
+    )
+    session["read_only"] = True
+    client = FakeClient(sessions=[session])
+    assert m._find_caller_session(client, "admin:repo", "host-A") is None
+
+
 # -- send (force_new=False) implied reuse ------------------------------------
 
 

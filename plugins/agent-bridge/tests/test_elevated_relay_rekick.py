@@ -9,9 +9,12 @@ port / stale token. All elevation side effects are mocked here.
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from agent_bridge import elevated
+from agent_bridge.db import Database
 import agent_bridge.transport as transport
 from agent_bridge.transport import SpawnTarget, spawn_raw
 
@@ -47,6 +50,7 @@ def test_relay_agent_for_none_when_process_elevated(monkeypatch) -> None:
     cmd = ["python", "-m", "agent_bridge", "acp-connect",
            "ws://127.0.0.1:65000/acp/SPO.Core", "--token", "abc", "--stdio"]
     assert elevated.relay_agent_for(cmd) is None
+    assert elevated.relay_agent_from_command(cmd) == "SPO.Core"
 
 
 def test_rekick_relay_command_rebuilds_with_fresh_port_and_token(monkeypatch) -> None:
@@ -56,6 +60,30 @@ def test_rekick_relay_command_rebuilds_with_fresh_port_and_token(monkeypatch) ->
     assert "acp-connect" in cmd
     assert "ws://127.0.0.1:54321/acp/SPO.Core" in cmd
     assert "fresh-token" in cmd
+
+
+def test_persisted_session_rows_reads_without_starting_daemon(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))
+    db = Database(tmp_path / "elevated" / "sessions.db")
+    now = time.time()
+    db.create_session(
+        "elevated-session",
+        "quiet-river",
+        "admin-agent",
+        "/repo",
+        "local",
+        "stopped",
+        now,
+    )
+    db.close()
+
+    rows = elevated.persisted_session_rows()
+
+    assert len(rows) == 1
+    assert rows[0]["id"] == "elevated-session"
+    assert rows[0]["turn_count"] == 0
 
 
 # -- spawn_raw re-resolve ----------------------------------------------------
