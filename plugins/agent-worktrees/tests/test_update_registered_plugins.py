@@ -37,6 +37,12 @@ def _no_user_global(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(reconcile, "read_user_enabled_plugins", lambda: [])
 
 
+@pytest.fixture(autouse=True)
+def _no_invocation_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep existing tests focused on configured repository contexts."""
+    monkeypatch.setattr(m, "_invocation_update_context", lambda: None)
+
+
 def _install_config(monkeypatch: pytest.MonkeyPatch, anchor: str) -> None:
     repo = cfg.RepoConfig(
         anchor=anchor,
@@ -114,6 +120,31 @@ def test_repo_declared_marketplace_operations_run_from_declaring_anchor(monkeypa
     assert m._update_registered_plugins() is True
     assert calls
     assert all(cwd == anchor for _argv, cwd in calls)
+
+
+def test_trusted_invocation_context_wins_over_untrusted_anchor(monkeypatch):
+    """A linked invocation worktree supplies settings instead of its main anchor."""
+    anchor = Path("/repo/anchor")
+    invocation = Path("/repo/worktree")
+    _install_config(monkeypatch, str(anchor))
+    monkeypatch.setattr(m, "_invocation_update_context", lambda: invocation)
+    monkeypatch.setattr(
+        reconcile, "read_enabled_plugins", lambda repo_dir: ["context-handoff"]
+    )
+    monkeypatch.setattr(
+        reconcile, "installed_payload_dir", lambda name: Path(f"/inst/{name}")
+    )
+    calls: list[tuple[list[str], Path | None]] = []
+
+    def fake_run(argv, **kw):
+        calls.append((list(argv), kw.get("cwd")))
+        return _ok()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert m._update_registered_plugins() is True
+    assert calls
+    assert all(cwd == invocation for _argv, cwd in calls)
 
 
 def test_missing_plugin_uses_install_path(monkeypatch):

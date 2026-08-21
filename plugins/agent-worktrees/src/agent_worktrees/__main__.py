@@ -10185,7 +10185,7 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
     plugin_ref = "agent-worktrees@copilot-extensions"
     output.info(f"Updating plugin: {plugin_ref}")
     payloads_ok = True
-    update_context = _project_update_context()
+    update_context = _invocation_update_context() or _project_update_context()
     try:
         r = subprocess.run(
             [_resolve_copilot() or "copilot", "plugin", "update", plugin_ref],
@@ -10338,6 +10338,15 @@ def _project_update_context() -> Path | None:
         return Path.cwd()
 
 
+def _invocation_update_context() -> Path | None:
+    """Return the invoking checkout when it carries repository Copilot settings."""
+    cwd = Path.cwd()
+    for candidate in (cwd, *cwd.parents):
+        if (candidate / ".github" / "copilot" / "settings.json").is_file():
+            return candidate
+    return None
+
+
 def _refresh_marketplace(marketplace: str, *, cwd: Path | None = None) -> None:
     """Refresh the local marketplace catalog (best-effort, non-fatal).
 
@@ -10452,6 +10461,20 @@ def _update_registered_plugins() -> bool:
     from . import reconcile
 
     contexts: dict[str, Path | None] = {}
+
+    # Prefer the invoking checkout for plugins it declares. Linked worktrees are
+    # trusted by the launcher, while a repository's main anchor may intentionally
+    # be untrusted and therefore have its repository settings ignored by Copilot.
+    invocation_context = _invocation_update_context()
+    if invocation_context is not None:
+        try:
+            for name in reconcile.read_enabled_plugins(invocation_context):
+                contexts.setdefault(name, invocation_context)
+        except Exception as exc:
+            output.warn(
+                "Could not read enabled plugins from invocation context "
+                f"{invocation_context}: {exc}"
+            )
 
     # 1. Repo-scoped enabled plugins (each managed repo's settings).
     try:
