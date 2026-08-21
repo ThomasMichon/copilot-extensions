@@ -9257,7 +9257,7 @@ def _validate_machine_registry(
         output.err(f"Machine registry not found at {cfg.machines_yaml_path(repo_dir)}")
         output.info("Create .agent-worktrees/machines.yaml with an entry for this machine.")
         return None
-    except ValueError as exc:
+    except (RuntimeError, ValueError) as exc:
         output.err(str(exc))
         return None
 
@@ -10184,10 +10184,13 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
     # Step 1 -- update the Copilot CLI plugin (pulls latest from marketplace)
     plugin_ref = "agent-worktrees@copilot-extensions"
     output.info(f"Updating plugin: {plugin_ref}")
+    payloads_ok = True
+    update_context = _project_update_context()
     try:
         r = subprocess.run(
             [_resolve_copilot() or "copilot", "plugin", "update", plugin_ref],
             capture_output=True, text=True, timeout=120,
+            cwd=update_context,
         )
         if r.returncode == 0:
             for line in r.stdout.strip().splitlines():
@@ -10197,14 +10200,17 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
                 x for x in [r.stdout.strip(), r.stderr.strip()] if x
             )
             output.warn(f"Plugin update returned non-zero:\n{detail}")
+            payloads_ok = False
     except OSError:
         # FileNotFoundError (no `copilot` on PATH) or PermissionError /
         # ENOEXEC -- e.g. under WSL interop a bare `copilot` resolves to a
         # non-executable Windows entry (dotfiles#990). Skip, don't crash.
         output.warn("'copilot' CLI not found or not executable -- "
                     "skipping plugin update")
+        payloads_ok = False
     except subprocess.TimeoutExpired:
         output.warn("Plugin update timed out -- continuing with installed version")
+        payloads_ok = False
 
     # Step 1b -- refresh EVERY registered copilot-extensions plugin payload.
     # All plugin payloads are updated first (this step), then service payloads /
@@ -10214,7 +10220,8 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
     # agent-worktrees payload update above stays first (it provides this flow);
     # read_enabled_plugins already excludes agent-worktrees so it is not
     # double-updated here.
-    _update_registered_plugins()
+    if _update_registered_plugins() is False:
+        payloads_ok = False
 
     # Step 2 -- find the installed plugin directory
     plugin_dir = _find_installed_plugin_dir()
@@ -10317,10 +10324,21 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
     if not getattr(args, "no_anchor_sync", False):
         _fast_forward_project_anchors()
 
-    return 0
+    return 0 if payloads_ok else 1
 
 
-def _refresh_marketplace(marketplace: str) -> None:
+def _project_update_context() -> Path | None:
+    """The active project's anchor, whose settings declare marketplace context."""
+    try:
+        return Path(cfg.load_config().default_repo.anchor)
+    except ValueError as exc:
+        output.warn(
+            f"Could not resolve project marketplace context; using current directory: {exc}"
+        )
+        return Path.cwd()
+
+
+def _refresh_marketplace(marketplace: str, *, cwd: Path | None = None) -> None:
     """Refresh the local marketplace catalog (best-effort, non-fatal).
 
     ``copilot plugin update <name>`` resolves the target version from the
@@ -10333,6 +10351,7 @@ def _refresh_marketplace(marketplace: str) -> None:
         r = subprocess.run(
             [_resolve_copilot() or "copilot", "plugin", "marketplace", "update", marketplace],
             capture_output=True, text=True, timeout=120,
+            cwd=cwd,
         )
         if r.returncode != 0:
             output.warn("Marketplace refresh returned non-zero -- continuing")
@@ -10343,7 +10362,9 @@ def _refresh_marketplace(marketplace: str) -> None:
         output.warn("Marketplace refresh timed out -- continuing")
 
 
-def _update_one_plugin_payload(name: str, marketplace: str) -> str:
+def _update_one_plugin_payload(
+    name: str, marketplace: str, *, cwd: Path | None = None
+) -> str:
     """Update (or install) a single copilot-extensions plugin payload.
 
     Idempotent and network-facing. Chooses ``update`` when the payload is
@@ -10363,6 +10384,7 @@ def _update_one_plugin_payload(name: str, marketplace: str) -> str:
         r = subprocess.run(
             [_resolve_copilot() or "copilot", "plugin", verb, ref],
             capture_output=True, text=True, timeout=120,
+            cwd=cwd,
         )
     except OSError:
         output.warn("'copilot' CLI not found or not executable -- "
@@ -10389,6 +10411,7 @@ def _update_one_plugin_payload(name: str, marketplace: str) -> str:
         r2 = subprocess.run(
             [_resolve_copilot() or "copilot", "plugin", "install", ref],
             capture_output=True, text=True, timeout=120,
+            cwd=cwd,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
         output.warn(f"Plugin install retry for {name} failed: {exc}")
@@ -10401,7 +10424,7 @@ def _update_one_plugin_payload(name: str, marketplace: str) -> str:
     return f"install exited {r2.returncode}"
 
 
-def _update_registered_plugins() -> None:
+def _update_registered_plugins() -> bool:
     """Update every enabled copilot-extensions plugin's payload.
 
     ``update`` must refresh EVERY enabled plugin's payload -- including
@@ -10428,7 +10451,7 @@ def _update_registered_plugins() -> None:
     """
     from . import reconcile
 
-    names: set[str] = set()
+    contexts: dict[str, Path | None] = {}
 
     # 1. Repo-scoped enabled plugins (each managed repo's settings).
     try:
@@ -10445,26 +10468,40 @@ def _update_registered_plugins() -> None:
             continue
         seen_anchors.add(anchor)
         try:
-            names.update(reconcile.read_enabled_plugins(Path(anchor)))
+            context = Path(anchor)
+            for name in reconcile.read_enabled_plugins(context):
+                contexts.setdefault(name, context)
         except Exception as exc:
             output.warn(f"Could not read enabled plugins from {anchor}: {exc}")
 
     # 2. User-global enabled plugins (#653) -- enabled but absent from any managed
     #    repo's settings would otherwise be silently skipped and left stale.
     try:
-        names.update(reconcile.read_user_enabled_plugins())
+        for name in reconcile.read_user_enabled_plugins():
+            contexts.setdefault(name, None)
     except Exception as exc:
         output.warn(f"Could not read user-global enabled plugins: {exc}")
 
-    if not names:
-        return
+    if not contexts:
+        return True
 
     output.header("Updating Registered Plugin Payloads")
-    _refresh_marketplace(reconcile.MARKETPLACE)
+    refreshed: set[Path | None] = set()
+    for context in contexts.values():
+        if context not in refreshed:
+            _refresh_marketplace(reconcile.MARKETPLACE, cwd=context)
+            refreshed.add(context)
 
     results: list[tuple[str, str]] = []
-    for name in sorted(names):
-        results.append((name, _update_one_plugin_payload(name, reconcile.MARKETPLACE)))
+    for name in sorted(contexts):
+        results.append(
+            (
+                name,
+                _update_one_plugin_payload(
+                    name, reconcile.MARKETPLACE, cwd=contexts[name]
+                ),
+            )
+        )
 
     output.header("Plugin Payload Update Summary")
     for name, status in results:
@@ -10472,6 +10509,7 @@ def _update_registered_plugins() -> None:
             output.ok(name if status == "OK" else f"{name} ({status})")
         else:
             output.warn(f"{name}: {status}")
+    return all(status.startswith("OK") for _, status in results)
 
 
 def _module_names(plugin_dir: Path) -> set[str]:
