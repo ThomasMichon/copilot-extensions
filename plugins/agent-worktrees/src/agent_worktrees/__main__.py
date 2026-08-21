@@ -4024,7 +4024,11 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
                 # there is actually a title to write.
                 with tracking._RecordLock(yaml_path):
                     record = tracking.load_record(yaml_path)
-                    record.title = args.title.replace("\n", " ").strip()
+                    _t = args.title.replace("\n", " ").strip()
+                    record.title = _t or None
+                    # Only a non-empty title is an authoritative assertion; an
+                    # all-whitespace value clears it and re-enables auto-derive.
+                    record.title_asserted = bool(_t)
                     tracking.save_record(record)
                 print(f"[OK] Worktree {worktree_id} title updated: {args.title}")
             else:
@@ -4521,7 +4525,10 @@ def cmd_mark_complete(args: argparse.Namespace) -> int:
             with tracking._RecordLock(yaml_path):
                 record = tracking.load_record(yaml_path)
                 if args.title:
-                    record.title = args.title.replace("\n", " ").strip()
+                    _t = args.title.replace("\n", " ").strip()
+                    record.title = _t or None
+                    # Only a non-empty title is an authoritative assertion.
+                    record.title_asserted = bool(_t)
                 if not args.title_only:
                     tracking.update_status(record, "complete", save=False)
                 tracking.save_record(record)
@@ -4905,11 +4912,15 @@ def _persist_segment_title(
 
     Only the session summary is persisted (never the commit-subject fallback,
     which would lock in a poor title), and a finalized/completed worktree's
-    curated PR/squash title is left untouched.  A no-op when nothing changed,
-    so per-tick writes don't churn the YAML.
+    curated PR/squash title is left untouched.  An AGENT-ASSERTED title
+    (``agent-worktrees status --title``) is likewise authoritative and never
+    clobbered.  A no-op when nothing changed, so per-tick writes don't churn the
+    YAML.
     """
     if ctx is None:
         return
+    if getattr(rec, "title_asserted", False):
+        return  # agent-asserted --title is authoritative -- don't clobber
     if (rec.status or "").lower() in ("finalized", "complete", "completed"):
         return  # curated title -- don't clobber
     summary = ctx.latest_summary.get(_normalize_path(path), "")
