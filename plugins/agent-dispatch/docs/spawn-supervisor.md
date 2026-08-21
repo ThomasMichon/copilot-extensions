@@ -208,8 +208,10 @@ set against the registry on every tick.
   `supervise --evaluator` flag), the evaluator spec materialized to a file;
   **schedule** → the timer producer (`schedule serve`) over a one-entry spec (a
   *self-run emitter*, dedup-keyed `sched:<id>:<epoch>` by the producer);
-  **emitter** → the reactive producer (`webhook`) over a config, on the spec's
-  `host`/`port`, dedup-keyed by the producer. Each registration's inline spec is
+  **emitter** → either a periodic command emitter (`emitter serve`) with a
+  declared `command` argv, `interval_seconds`, and pin-not-failover job lease,
+  or the reactive producer (`webhook`) over a config on the spec's `host`/`port`.
+  Each registration's inline spec is
   **materialized** to a per-registration file under the run dir so its subprocess
   can read it. A kind the daemon can't build a command for is logged and skipped,
   never fatal.
@@ -220,6 +222,29 @@ set against the registry on every tick.
 > schedule, emitter) are built — the daemon runs each as its own subprocess,
 > subsuming the foreground `supervise --evaluator` flag into an evaluator
 > registration. The bare `supervise` foreground loop remains available.
+
+Registrar declarations can name any daemon kind with a generic `kind` + `spec`
+shape. A periodic emitter declaration is therefore source-controlled beside its
+producer and discovered like a pool:
+
+```yaml
+name: repository-sweep
+kind: emitter
+spec:
+  id: repository-sweep
+  command: [repository-sweep, tick]
+  interval_seconds: 3600
+  timeout_seconds: 900
+filters:
+  permit:
+    machine: [host-a]
+```
+
+The machine filter selects which singleton may run the unit; the emitter's
+`emitter:<id>` job lease is a second, cross-host single-producer guard.
+`supervise daemon-status` inspects the discovered unit and `supervise override
+disable|enable declared:<owner>:<name>` provides immediate pause/resume parity
+without racing a declaration sync.
 
 ### Operator overrides (built) — the kill-switch
 

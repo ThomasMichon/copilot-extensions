@@ -52,6 +52,11 @@ def test_validate_accepts_each_kind():
     validate_registration(RegistrationKind.SCHEDULE, {"id": "nightly", "repo": TEST_REPO})
     validate_registration(RegistrationKind.EMITTER, {"url": "http://x"})
     validate_registration(
+        RegistrationKind.EMITTER,
+        {"id": "review-inbox", "command": ["review-emitter", "tick"],
+         "interval_seconds": 3600},
+    )
+    validate_registration(
         RegistrationKind.EVALUATOR, {"evaluator_spec": {}, "all_repos": True}
     )
     validate_registration(
@@ -69,6 +74,11 @@ def test_validate_accepts_each_kind():
         (RegistrationKind.SCHEDULE, {"repo": TEST_REPO}, "needs an 'id'"),
         (RegistrationKind.SCHEDULE, {"id": "n"}, "needs a 'repo'"),
         (RegistrationKind.EMITTER, {}, "non-empty"),
+        (RegistrationKind.EMITTER, {"command": ["tick"], "interval_seconds": 1}, "id"),
+        (RegistrationKind.EMITTER,
+         {"id": "x", "command": "tick", "interval_seconds": 1}, "list"),
+        (RegistrationKind.EMITTER,
+         {"id": "x", "command": ["tick"], "interval_seconds": 0}, "> 0"),
         (RegistrationKind.EVALUATOR, {}, "non-empty"),
         (RegistrationKind.EVALUATOR, {"all_repos": True}, "evaluator_spec"),
         (RegistrationKind.EVALUATOR, {"evaluator": "e.json"}, "needs a 'repo'"),
@@ -325,6 +335,15 @@ def test_cli_serve_and_daemon_status_parse():
     assert b.supervise_command == "daemon-status" and b.machine == "m1"
 
 
+def test_cli_periodic_emitter_tick_and_serve_parse():
+    tick = _parse(["emitter", "tick", "emitter.json", "--holder", "host-a"])
+    assert tick.emitter_command == "tick"
+    assert tick.spec == "emitter.json"
+    assert tick.holder == "host-a"
+    serve = _parse(["emitter", "serve", "emitter.json", "--holder", "host-a"])
+    assert serve.emitter_command == "serve"
+
+
 def test_cli_register_ensure_flag():
     a = _parse(["supervise", "register", "--repo", TEST_REPO, "--ensure"])
     assert a.ensure is True
@@ -362,5 +381,3 @@ def test_cli_build_spec_rejects_evaluator_on_lane():
     with pytest.raises(SystemExit) as exc:
         _build_registration_spec(args)  # --evaluator on a supervised-lane is rejected
     assert "only valid with" in str(exc.value)
-
-

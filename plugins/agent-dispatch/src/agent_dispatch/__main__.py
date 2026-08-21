@@ -1715,6 +1715,25 @@ def _cmd_schedule(args: argparse.Namespace) -> int:
     raise SystemExit(f"unknown schedule command: {cmd!r}")
 
 
+def _cmd_emitter(args: argparse.Namespace) -> int:
+    from .producers import emitter
+
+    spec = emitter.load_spec(args.spec)
+    if args.emitter_command == "serve":
+        url, token = _resolve_client_target(args)
+        emitter.serve(
+            args.spec,
+            url=url,
+            token=token,
+            holder=args.holder,
+        )
+        return 0
+    if args.emitter_command == "tick":
+        with _client(args) as client:
+            return _emit(emitter.run_tick(client, spec, holder=args.holder))
+    raise SystemExit(f"unknown emitter command: {args.emitter_command!r}")
+
+
 def _cmd_webhook(args: argparse.Namespace) -> int:
     from .producers import webhook
 
@@ -3496,6 +3515,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true", help="reassign a lease held by another holder"
     )
     sp.set_defaults(func=_cmd_schedule)
+
+    p = sub.add_parser(
+        "emitter",
+        help="lease-gated periodic command emitter managed by the singleton supervisor",
+    )
+    emitter_sub = p.add_subparsers(dest="emitter_command", required=True)
+    ep = emitter_sub.add_parser("tick", help="run one lease-gated emitter tick")
+    ep.add_argument("spec", help="path to the JSON command-emitter spec")
+    ep.add_argument("--holder", required=True, help="this producer's machine identity")
+    ep.set_defaults(func=_cmd_emitter)
+    ep = emitter_sub.add_parser(
+        "serve", help="run a command emitter on its declared interval"
+    )
+    ep.add_argument("spec", help="path to the JSON command-emitter spec")
+    ep.add_argument("--holder", required=True, help="this producer's machine identity")
+    ep.set_defaults(func=_cmd_emitter)
 
     p = sub.add_parser(
         "webhook",

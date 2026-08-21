@@ -17,6 +17,7 @@ own the file-watching and the running.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 
@@ -48,6 +49,8 @@ _KNOWN_KEYS = frozenset(
         "evaluator",
         "owner",
         "description",
+        "kind",
+        "spec",
     }
 )
 _KNOWN_BODY_KEYS = frozenset({"type", "agent", "headless_labels", "cli_labels"})
@@ -162,6 +165,8 @@ class ProfileDeclaration:
     """
 
     name: str
+    kind: str = "supervised-lane"
+    spec: Mapping[str, object] = field(default_factory=dict)
     labels: tuple[str, ...] = ()
     repos: str = "all"  # "all" -> --all-repos, else a lane (--repo <lane>)
     concurrency: int = 1
@@ -186,6 +191,16 @@ class ProfileDeclaration:
         the proof of *lossless superset*: every legacy env profile maps to a
         declaration whose rendered args reproduce its old invocation.
         """
+        if self.kind != "supervised-lane":
+            return [
+                "supervise",
+                "register",
+                "--kind",
+                self.kind,
+                "--spec",
+                json.dumps(dict(self.spec), sort_keys=True),
+            ]
+
         args: list[str] = ["supervise"]
         if self.repos == "all":
             args.append("--all-repos")
@@ -466,8 +481,39 @@ def load_declaration(data: Mapping) -> ProfileDeclaration:
         if v is not None and not isinstance(v, str):
             raise RegistrarError(f"{opt_key}: expected a string, got {v!r}")
 
+    kind = data.get("kind", "supervised-lane")
+    if not isinstance(kind, str):
+        raise RegistrarError(f"kind: expected a string, got {kind!r}")
+    if kind != "supervised-lane":
+        from .registrations import RegistrationError, validate_registration
+
+        allowed = {"name", "kind", "spec", "filters", "owner", "description"}
+        extras = sorted(set(data) - allowed)
+        if extras:
+            raise RegistrarError(
+                f"declaration kind {kind!r} does not accept lane fields: {extras}"
+            )
+        spec = data.get("spec")
+        if not isinstance(spec, Mapping):
+            raise RegistrarError(
+                f"declaration kind {kind!r} needs a 'spec' mapping"
+            )
+        try:
+            validate_registration(kind, dict(spec))
+        except RegistrationError as exc:
+            raise RegistrarError(str(exc)) from exc
+        return ProfileDeclaration(
+            name=name,
+            kind=kind,
+            spec=dict(spec),
+            filters=_load_filters(data.get("filters")),
+            owner=data.get("owner"),
+            description=data.get("description"),
+        )
+
     decl = ProfileDeclaration(
         name=name,
+        kind=kind,
         labels=_as_str_tuple(data.get("labels"), key="labels"),
         repos=repos,
         concurrency=_as_int(data.get("concurrency", 1), key="concurrency", minimum=1),

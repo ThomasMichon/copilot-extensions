@@ -137,6 +137,13 @@ def validate_registration(kind: str, spec: dict) -> None:
     elif kind == RegistrationKind.EMITTER:
         if not spec:
             raise RegistrationError("emitter registration needs a non-empty spec")
+        if "command" in spec:
+            from .producers.emitter import EmitterError, validate_spec
+
+            try:
+                validate_spec(spec)
+            except EmitterError as exc:
+                raise RegistrationError(str(exc)) from exc
     elif kind == RegistrationKind.EVALUATOR:
         if not spec:
             raise RegistrationError("evaluator registration needs a non-empty spec")

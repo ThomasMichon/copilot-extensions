@@ -288,6 +288,41 @@ the same `not_before` + `sched:<id>:<epoch>` idempotency, so a lease holder that
 sleeps and wakes simply replays just-missed occurrences via each schedule's
 lookback window without double-creating.
 
+### Periodic command emitters (`agent-dispatch emitter`)
+
+A domain producer that exposes an idempotent one-shot command can be declared as
+an **emitter** and run on a cadence by the singleton supervisor. The supervisor
+owns the process lifetime; the emitter loop owns the interval and a
+pin-not-failover job lease, so multiple eligible hosts may discover the same
+declaration but only the lease holder invokes the command.
+
+```yaml
+name: review-inbox
+kind: emitter
+spec:
+  id: review-inbox
+  command: [review-emitter, tick]
+  interval_seconds: 3600
+  timeout_seconds: 900
+  cwd: /path/to/producer
+filters:
+  permit:
+    machine: [host-a]
+```
+
+Place the declaration in a registrar-discovered directory and run the singleton
+with `agent-dispatch supervise serve`. `supervise daemon-status` and registrar
+listing inspect it; `supervise override disable|enable
+declared:<owner>:review-inbox` pauses/resumes it immediately without editing the
+declaration. The command is an argv list (never a shell string); optional `env`
+adds string-valued environment variables. `lease_scope` defaults to
+`emitter:<id>` and can be supplied explicitly when several declarations share
+one producer election.
+
+`agent-dispatch emitter tick|serve SPEC --holder HOST` is the diagnostic/direct
+surface used by the supervised child. Normal deployments declare the emitter
+rather than wiring cron, a Scheduled Task, or another external timer.
+
 
 ### Reactive webhook producer (`agent-dispatch webhook`)
 
@@ -636,8 +671,8 @@ wind-down-on-remove / crash-revive) and single-instance-guarded by a crash-safe 
 lock (a second daemon stands down; a crashed one's lock is auto-released so a
 restart reclaims it). All four kinds are daemon-run: **supervised-lane** and
 **evaluator** drive the embody loop (the latter subsuming `supervise
---evaluator`), **schedule** runs the timer producer, **emitter** runs the webhook
-producer — each dedup-keyed so a re-emit never doubles a task. Re-registering the
+--evaluator`), **schedule** runs the timer producer, while **emitter** runs either a periodic
+lease-gated command or the webhook producer. Re-registering the
 same unit is idempotent (the derived handle identifies it). See
 [`docs/spawn-supervisor.md`](docs/spawn-supervisor.md#the-singleton-daemon-built--one-master-per-unit-subprocesses)
 for the registration + daemon model.
