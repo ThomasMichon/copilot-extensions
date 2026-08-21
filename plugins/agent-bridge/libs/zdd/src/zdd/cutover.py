@@ -207,6 +207,15 @@ class CutoverOrchestrator:
         from zdd import lifecycle
 
         result = CutoverResult(ok=False)
+        # Dead-port watchdog: before standing up the new daemon, retire any
+        # advertised-but-dead endpoint a previously-aborted cutover may have left
+        # behind (the state that wedged the pipeline). Best-effort -- it only acts
+        # when the active endpoint has no listener *and* a dead pid, so a healthy
+        # or still-starting daemon is never disturbed. Logs its own reap.
+        try:
+            self.routing.reap_stale_active(self.config_dir, service=self.service)
+        except Exception:  # noqa: BLE001 -- watchdog is best-effort, never fatal
+            pass
         old = self.routing.read_active_endpoint(self.config_dir)
         result.old_endpoint = old
 
@@ -305,11 +314,13 @@ class CutoverOrchestrator:
                             "forced": drain_res.get("forced")},
                 )
 
-                # Verify-before-retire seam: re-confirm the new daemon is still
-                # live right before we retire the old one. Log-only in this slice
-                # (a fault here is recorded, not yet gated -- that is the next
-                # slice); it makes "we retired the old daemon while the new one
-                # was already unhealthy" a detectable, durable fact.
+                # Verify-before-retire GATE: re-confirm the new daemon is still
+                # live right before we retire the old one. If it died between the
+                # flip and here, retiring the old daemon would strand every
+                # client (active -> dead new, previous -> retired old). Raising
+                # *before* the commit point routes into rollback, which restores
+                # and undrains the old daemon -- so a cutover can never retire the
+                # old daemon while the new one is already dead (#5322).
                 new_live = False
                 try:
                     new_live = bool(
@@ -322,6 +333,12 @@ class CutoverOrchestrator:
                     lifecycle.OK if new_live else lifecycle.FAIL,
                     port=new_port,
                 )
+                if not new_live:
+                    raise CutoverError(
+                        f"new daemon unhealthy on port {new_port} at the "
+                        f"verify-before-retire gate; refusing to retire the old "
+                        f"daemon (rolling back to keep it serving)"
+                    )
 
                 # COMMIT POINT: retire the old daemon. Past here the new daemon
                 # is the only one, so we never roll back.

@@ -275,3 +275,141 @@ def test_cold_start_records_retire(tmp_path: Path):
     assert ("cutover-begin", "begin") in trail
     assert ("cutover-new-bound", "ok") in trail
     assert ("cutover-retire", "ok") in trail
+
+
+def test_verify_before_retire_gate_rolls_back(tmp_path: Path, monkeypatch):
+    # New daemon is healthy at bind/flip but dies before the verify-before-retire
+    # gate (e.g. it crashes during the old daemon's drain). The gate must refuse
+    # to retire the old daemon and roll back to keep it serving (#5322).
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
+    registry: dict = {}
+    state = {"new_alive": True}
+
+    def health_check(host, p):
+        if p == 9290:
+            return state["new_alive"]
+        return p == 9281  # old stays alive
+
+    class DrainKillsNew(_Client):
+        def drain(self, *, timeout, poll, force):
+            self.calls.append("drain")
+            state["new_alive"] = False  # new dies during the drain window
+            return self.drain_result
+
+    def make_client(url):
+        if url.endswith(":9281"):
+            return registry.get(url) or DrainKillsNew(url, registry)
+        return registry.get(url) or _Client(url, registry)
+
+    handle = _Handle()
+    orch = CutoverOrchestrator(
+        tmp_path, bind="127.0.0.1", version="1.0.0",
+        spawn_passive=lambda p: handle, health_check=health_check,
+        make_client=make_client, pick_free_port=lambda: 9290,
+        sleep=lambda _s: None, clock=_clock(),
+    )
+    res = orch.run(health_timeout=1, drain_timeout=1)
+    assert res.ok is False
+    assert res.committed is False
+    old_client = registry["http://127.0.0.1:9281"]
+    assert "shutdown" not in old_client.calls   # old daemon was NOT retired
+    assert "undrain" in old_client.calls          # its drain gate was released
+    assert routing.read_table(tmp_path)["active"]["port"] == 9281  # old restored
+    trail = _actions(tmp_path)
+    assert ("cutover-verify", "fail") in trail
+    assert not any(a == "cutover-retire" for a, _ in trail)
+    assert ("rollback", "ok") in trail            # service recovered to old
+
+
+# -- dead-port watchdog ------------------------------------------------------
+
+
+def test_watchdog_reaps_dead_active_promotes_live_previous(tmp_path: Path):
+    # active=9290 (dead), previous=9281 (live) -> promote previous, log a reap.
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9290, pid=222,
+                           demote_existing=True)
+    diag = routing.reap_stale_active(
+        tmp_path, service="agent-bridge",
+        listening=lambda h, p: p == 9281,        # only the old port serves
+        pid_alive=lambda pid: pid != 222,        # the dead active's pid is gone
+    )
+    assert diag["reaped"] is True
+    assert diag["dead_port"] == 9290
+    assert diag["promoted_port"] == 9281
+    assert routing.read_table(tmp_path)["active"]["port"] == 9281
+    trail = _actions(tmp_path)
+    assert ("watchdog-reap", "ok") in trail
+
+
+def test_watchdog_clears_table_when_no_live_previous(tmp_path: Path):
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9290, pid=222)
+    diag = routing.reap_stale_active(
+        tmp_path, listening=lambda h, p: False, pid_alive=lambda pid: False,
+    )
+    assert diag["reaped"] is True and diag["promoted_port"] is None
+    # Table cleared: no active endpoint -> readers fall back to config.
+    assert routing.read_active_endpoint(tmp_path) is None
+    assert ("watchdog-reap", "ok") in _actions(tmp_path)
+
+
+def test_watchdog_leaves_live_active(tmp_path: Path):
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9290, pid=222)
+    diag = routing.reap_stale_active(
+        tmp_path, listening=lambda h, p: True, pid_alive=lambda pid: True,
+    )
+    assert diag["reaped"] is False
+    assert _actions(tmp_path) == []   # nothing logged when nothing reaped
+
+
+def test_watchdog_leaves_starting_active(tmp_path: Path):
+    # No listener yet, but the pid is alive (mid-startup) -> do not reap.
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9290, pid=222)
+    diag = routing.reap_stale_active(
+        tmp_path, listening=lambda h, p: False, pid_alive=lambda pid: True,
+    )
+    assert diag["reaped"] is False
+    assert "starting" in diag["reason"]
+
+
+def test_cutover_watchdog_uses_injected_routing(tmp_path: Path):
+    # The startup dead-port sweep must go through the injected routing_mod, not
+    # the module global, so an orchestrator with a custom routing implementation
+    # sweeps the same table it reads/publishes to.
+    calls: list = []
+
+    class SpyRouting:
+        def read_active_endpoint(self, *a, **k):
+            return routing.read_active_endpoint(*a, **k)
+
+        def publish_active(self, *a, **k):
+            return routing.publish_active(*a, **k)
+
+        def reap_stale_active(self, config_dir, **k):
+            calls.append(config_dir)
+            return routing.reap_stale_active(config_dir, **k)
+
+    handle = _Handle()
+    orch = CutoverOrchestrator(
+        tmp_path, bind="127.0.0.1", version="1.0.0",
+        spawn_passive=lambda p: handle,
+        health_check=lambda host, p: p == 9290,
+        make_client=lambda url: _Client(url, {}),
+        pick_free_port=lambda: 9290, sleep=lambda _s: None, clock=_clock(),
+        routing_mod=SpyRouting(),
+    )
+    orch.run(health_timeout=1, drain_timeout=1)
+    assert calls == [tmp_path]   # reaped via the injected routing_mod
+
+
+def test_watchdog_leaves_active_with_unknown_pid(tmp_path: Path):
+    # No listener, but the endpoint was published without a pid: we cannot prove
+    # it is dead, so the watchdog must NOT reap it (conservative).
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9290, pid=None)
+    diag = routing.reap_stale_active(
+        tmp_path, listening=lambda h, p: False, pid_alive=lambda pid: False,
+    )
+    assert diag["reaped"] is False
+    assert "unconfirmed" in diag["reason"]
+    assert _actions(tmp_path) == []

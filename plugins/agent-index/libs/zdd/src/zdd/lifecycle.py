@@ -72,6 +72,9 @@ CUTOVER_VERIFY = "cutover-verify"
 CUTOVER_FLIP = "cutover-flip"
 CUTOVER_RETIRE = "cutover-retire"
 ROLLBACK = "rollback"
+#: A dead-port watchdog retired an advertised-but-dead endpoint (see
+#: ``zdd.routing.reap_stale_active``).
+WATCHDOG_REAP = "watchdog-reap"
 
 #: Every recognized action. An unrecognized action is still logged (fail-open),
 #: but callers should prefer a constant so the vocabulary stays uniform.
@@ -88,6 +91,7 @@ ACTIONS = frozenset(
         CUTOVER_FLIP,
         CUTOVER_RETIRE,
         ROLLBACK,
+        WATCHDOG_REAP,
     }
 )
 
