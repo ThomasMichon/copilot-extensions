@@ -20,15 +20,12 @@ handler rather than imported at module load, so the light paths -- above all
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 import logging
 import os
 import shutil
 import sys
 from pathlib import Path
-
-from . import __version__
 
 
 def _configure_logging(level: str) -> None:
@@ -68,6 +65,7 @@ def _cmd_bridge(args: argparse.Namespace) -> int:
     except ConfigError as exc:
         print(f"agent-mcp: {exc}", file=sys.stderr)
         return 1
+    import asyncio
     return asyncio.run(Bridge(cfg).run())
 
 
@@ -96,6 +94,7 @@ def _cmd_validate(args: argparse.Namespace) -> int:
 
 
 def _cmd_status(_args: argparse.Namespace) -> int:
+    from . import __version__
     from .config import BRIDGES_DIR, discover_plugin_bridges
     print(f"agent-mcp {__version__}")
     print("prerequisites:")
@@ -220,6 +219,7 @@ def _try_serve_call(bridge_ref: str, tool: str, arguments: dict,
             ref = str(p.resolve())
     except OSError:
         pass
+    import asyncio
     try:
         resp = asyncio.run(ipc.call_via_socket(socket, ref, tool, arguments))
     except OSError:
@@ -267,6 +267,7 @@ def _cmd_call(args: argparse.Namespace) -> int:
     except ConfigError as exc:
         print(f"agent-mcp: {exc}", file=sys.stderr)
         return 1
+    import asyncio
     try:
         return asyncio.run(_run_call(cfg, tool, arguments))
     except UpstreamError as exc:
@@ -285,6 +286,9 @@ async def _run_materialize(cfg) -> list[dict]:
 
 
 def _cmd_materialize(args: argparse.Namespace) -> int:
+    import asyncio
+
+    from . import __version__
     from . import materialize as _materialize
     from .client import UpstreamError
     from .config import ConfigError, load_config
@@ -325,6 +329,8 @@ def _cmd_materialize(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 def _cmd_serve(args: argparse.Namespace) -> int:
+    import asyncio
+
     from . import ipc
     from . import serve as _serve
     socket_path = args.socket or str(ipc.default_socket_path())
@@ -338,9 +344,28 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+class _LazyVersionAction(argparse.Action):
+    """Print the version and exit, resolving it only when ``--version`` is used.
+
+    A plain ``action="version"`` would read ``__version__`` at parser-build time
+    -- i.e. on *every* invocation, including the hot ``forward`` path -- paying
+    the importlib.metadata cost the lazy ``__version__`` exists to avoid.
+    """
+
+    def __init__(self, option_strings, dest, **kwargs) -> None:
+        kwargs.setdefault("nargs", 0)
+        kwargs.setdefault("help", "show the version and exit")
+        super().__init__(option_strings, dest, **kwargs)
+
+    def __call__(self, parser, namespace, values, option_string=None) -> None:
+        from . import __version__
+        print(f"agent-mcp {__version__}")
+        parser.exit()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agent-mcp", description=__doc__)
-    parser.add_argument("--version", action="version", version=f"agent-mcp {__version__}")
+    parser.add_argument("--version", action=_LazyVersionAction)
     parser.add_argument("--log-level", default="info",
                         help="logging level (debug/info/warning/error)")
     sub = parser.add_subparsers(dest="command", required=True)
