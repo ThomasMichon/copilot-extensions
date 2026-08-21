@@ -288,6 +288,26 @@ class BridgeClient:
                     f"Cannot connect to agent-bridge at {self._base}"
                 )
 
+    def refresh_endpoint(self) -> bool:
+        """Re-resolve the daemon endpoint from the routing table.
+
+        Follows a ZDD cutover to a **new dynamic port** (post-#694): the
+        streaming path (:meth:`_stream_sse`) pins ``self._base`` at construction
+        and, unlike :meth:`_request`, does not re-resolve mid-flight, so a
+        streaming caller (``wait``/``read``) that loses the connection across a
+        daemon restart must call this to follow the daemon to its new port
+        before reconnecting -- otherwise it retries a dead port forever. Returns
+        True when the base actually changed. Safe/no-op when the client was built
+        without a re-resolver.
+        """
+        if self._reresolve is None:
+            return False
+        new_base = self._reresolve()
+        if not new_base or new_base.rstrip("/") == self._base:
+            return False
+        self._base = new_base.rstrip("/")
+        return True
+
     def _stream_sse(
         self, path: str, *, params: dict[str, str] | None = None
     ) -> Iterator[dict[str, Any]]:

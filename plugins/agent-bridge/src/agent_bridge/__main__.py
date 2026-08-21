@@ -2395,6 +2395,13 @@ def _make_renderer(args: argparse.Namespace):
 _PROGRESS_INTERVAL = 20.0
 # Backoff between reconnect attempts (e.g. while the service restarts).
 _RECONNECT_BACKOFF = 1.0
+# A session-scoped 404 seen *mid-stream* (wait/read) is treated as transient --
+# the daemon bounced and has not re-registered the session yet -- and retried for
+# up to this long before it is reported. Distinguishes a genuine "unknown
+# session" (still 404 after the daemon is back and settled) from the re-register
+# race across a restart. Mirrors _request's session-404 grace for the streaming
+# path (which does not route through _request). (dotfiles#1713)
+_STREAM_404_GRACE_S = 30.0
 
 
 def _turn_settled(client, session_id: str, cursor: int) -> bool:
@@ -2765,6 +2772,11 @@ def _stream_feed(
     # running" liveness lines so a completed turn never looks like it is still
     # hanging with a climbing timer (#189c).
     turn_complete_seen = False
+    # First timestamp of a consecutive run of mid-stream session-404s (the daemon
+    # bounced and has not re-registered the session yet). Reset on any delivered
+    # event or clean reconnect; only a 404 that persists past _STREAM_404_GRACE_S
+    # is reported (dotfiles#1713).
+    first_404_at: float | None = None
 
     def _ack(up_to: int) -> None:
         # Best-effort: a failed ack just means a future read re-delivers
@@ -2832,6 +2844,7 @@ def _stream_feed(
                 if new_id > cursor:
                     cursor = new_id
                     _ack(cursor)
+                    first_404_at = None  # delivered event -> session exists
 
                 # The terminal turn event: stop emitting liveness lines, and
                 # return as soon as the session has settled (idle/terminal, no
@@ -2857,14 +2870,34 @@ def _stream_feed(
             )
             return "interrupted"
         except BridgeConnectionError:
-            pass  # service unreachable (restarting?) -- back off and resume
+            # Service unreachable (restarting?) -- follow a cutover to the new
+            # dynamic port, then back off and resume. Not a session-404 run.
+            first_404_at = None
+            client.refresh_endpoint()
         except (OSError, urllib.error.URLError):
-            pass
+            first_404_at = None
+            client.refresh_endpoint()
         except BridgeClientError as exc:
             if exc.status == 404:
-                print(f"\n[FAIL] Session {session_id} not found", file=sys.stderr)
-                return "error"
-            # transient -- retry
+                # A mid-stream session-404: the daemon bounced and has not
+                # re-registered the session yet. Follow any port cutover and
+                # retry within the grace window rather than declaring the session
+                # gone; report (with resumable framing) only once the grace is
+                # exhausted -- a settled 404 = genuinely unknown (dotfiles#1713).
+                now = time.monotonic()
+                if first_404_at is None:
+                    first_404_at = now
+                if now - first_404_at < _STREAM_404_GRACE_S:
+                    client.refresh_endpoint()
+                else:
+                    print(
+                        f"\n[RETRY] Session {session_id} is not currently "
+                        "registered (the bridge may be mid-restart); if it "
+                        "exists it is preserved and resumable -- re-run shortly.",
+                        file=sys.stderr,
+                    )
+                    return "error"
+            # non-404 transient -- retry
 
         now = time.monotonic()
         if deadline and now > deadline:
