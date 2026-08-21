@@ -790,6 +790,7 @@ class TestAdminResolver:
             "ws://127.0.0.1:59051/acp/local-agent",
             "--token", "subtok", "--stdio",
         ]
+        assert target.elevated is True
 
     @pytest.mark.asyncio
     async def test_resolve_posix_uses_sudo(self, monkeypatch):
@@ -804,6 +805,7 @@ class TestAdminResolver:
         target = await admin.resolve("local-agent")
         assert target.type == "command"
         assert target.spawn_command[:2] == ["sudo", "-A"]
+        assert target.elevated is True
 
     @pytest.mark.asyncio
     async def test_resolve_ssh_agent_raises(self):
@@ -957,6 +959,18 @@ class TestElevatedRelayRouting:
 
         assert target.type == "local"
         assert target.project == "SPO.Core"
+
+    @pytest.mark.asyncio
+    async def test_bare_elevated_agent_marks_inherited_elevation(self, monkeypatch):
+        from agent_bridge import elevated
+
+        monkeypatch.setattr(elevated, "relay_applicable", lambda req: False)
+        monkeypatch.setattr(elevated, "is_process_elevated", lambda: True)
+
+        target = await self._resolver().resolve_async("SPO.Core")
+
+        assert target.type == "local"
+        assert target.elevated is True
 
     @pytest.mark.asyncio
     async def test_non_elevated_agent_never_relays(self, monkeypatch):

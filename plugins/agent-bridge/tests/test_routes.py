@@ -128,6 +128,7 @@ class TestAuthMiddleware:
                     "ws://127.0.0.1:65000/acp/admin-agent",
                     "--stdio",
                 ],
+                elevated=True,
             ),
             "admin-agent",
         )

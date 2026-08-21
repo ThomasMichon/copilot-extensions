@@ -31,6 +31,7 @@ import asyncio
 import logging
 import shutil
 import sys
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -114,6 +115,7 @@ class AdminResolver:
             cwd=target.cwd,
             env=target.env,
             project=target.project,
+            elevated=True,
         )
 
     async def resolve(self, name: str, *, extra_plugins: "list[PluginRef]" = ()) -> "SpawnTarget":
@@ -158,7 +160,10 @@ class AdminResolver:
                 name, elevated.discovered_port(),
             )
             return ST(
-                type="command", spawn_command=cmd, project=target.project,
+                type="command",
+                spawn_command=cmd,
+                project=target.project,
+                elevated=True,
             )
 
         # Windows but already elevated (e.g. this *is* the sub-daemon): spawn
@@ -167,7 +172,7 @@ class AdminResolver:
             log.info(
                 "admin:%s -- daemon already elevated, spawning locally", name,
             )
-            return target
+            return replace(target, elevated=True)
 
         # Linux/WSL: no sub-daemon; elevate with sudo -A.
         log.info(

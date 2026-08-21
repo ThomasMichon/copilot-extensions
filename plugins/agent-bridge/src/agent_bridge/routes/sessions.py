@@ -160,7 +160,7 @@ def _session_info(s) -> SessionInfo:  # noqa: ANN001
         target_host=s.target.host,
         project=getattr(s.target, "project", None),
         worktree_id=s.target.worktree_id,
-        elevated=bool(elevated.relay_agent_from_command(s.target.spawn_command)),
+        elevated=s.target.elevated,
         read_only=False,
         status=s.status,
         pid=s.pid,

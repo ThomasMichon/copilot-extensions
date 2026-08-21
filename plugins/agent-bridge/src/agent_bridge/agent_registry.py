@@ -2032,7 +2032,14 @@ class AgentResolver:
         relay = await self._maybe_elevated_relay(agent_name)
         if relay is not None:
             return relay
-        return self._resolve_static(agent_name)
+        target = self._resolve_static(agent_name)
+        config = self._agents.get(agent_name)
+        if config is not None and config.requires_admin:
+            from . import elevated
+
+            if elevated.is_process_elevated():
+                return replace(target, elevated=True)
+        return target
 
     async def _maybe_elevated_relay(
         self, agent_name: str,
@@ -2061,7 +2068,10 @@ class AgentResolver:
             config.name, elevated.discovered_port(),
         )
         return SpawnTarget(
-            type="command", spawn_command=cmd, project=config.project,
+            type="command",
+            spawn_command=cmd,
+            project=config.project,
+            elevated=True,
         )
 
     async def _gather_bare_candidates(

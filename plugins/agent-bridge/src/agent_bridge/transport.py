@@ -108,6 +108,7 @@ class SpawnTarget:
     #                                      caller's qualified ClaimRef, stamped as
     #                                      the bridge worktree's owner_ref so its
     #                                      finalize settles the caller's obligation
+    elevated: bool = False  # process executes with administrator/root privileges
     spawn_command: list[str] | None = None  # raw command for provider agents
     codespace: dict | None = None  # structured CodeSpace metadata (#177): {name,
     #                                repo, acp_command, workspace_folder} -- lets
