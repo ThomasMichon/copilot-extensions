@@ -9,6 +9,8 @@ so the engine reconnects and resumes from the caller's acked cursor.
 
 from __future__ import annotations
 
+import pytest
+
 from agent_bridge import __main__ as m
 from agent_bridge.client import BridgeConnectionError
 
@@ -87,3 +89,18 @@ def test_stream_feed_tolerates_request_failure_in_settled_check(monkeypatch):
         _Client(), "s1", caller_id=None, renderer=_Renderer(), command_timeout=0
     )
     assert result == "complete"
+
+
+def test_sustained_outage_is_framed_as_resumable(capsys):
+    detail = "Cannot connect to agent-bridge at http://127.0.0.1:47000"
+    with pytest.raises(SystemExit) as exc_info:
+        m._exit_bridge_outage(BridgeConnectionError(detail))
+
+    assert exc_info.value.code == 1
+    err = capsys.readouterr().err
+    assert "[RETRY]" in err
+    assert "restart grace" in err
+    assert "preserved and resumable" in err
+    assert "re-run it shortly" in err
+    assert detail in err
+    assert all(word not in err.lower() for word in ("died", "stale", "gone"))
