@@ -313,8 +313,14 @@ class BridgeAgent(Agent):
             raise RequestError.invalid_params(f"Session '{session_id}' not found")
         if session.status == SessionStatus.STOPPED:
             permission_cb = self._make_permission_callback()
+            # An upstream load must land a working session: opt into the
+            # end+create last resort so a stale/unloadable (e.g. elevated
+            # sub-daemon idle-exited) ACP session cold-recreates a fresh ACP
+            # session under the same bridge id instead of 500ing -- mirrors
+            # submit_prompt's auto-resume (dotfiles#1610).
             await self._sm.resume_session(
                 session_id, permission_callback=permission_cb,
+                allow_recreate=True,
             )
         self._track_session(session_id)
         return LoadSessionResponse()
@@ -332,8 +338,11 @@ class BridgeAgent(Agent):
             raise RequestError.invalid_params(f"Session '{session_id}' not found")
         if session.status == SessionStatus.STOPPED:
             permission_cb = self._make_permission_callback()
+            # See load_session: cold-recreate rather than 500 a resumable
+            # session (dotfiles#1610).
             await self._sm.resume_session(
                 session_id, permission_callback=permission_cb,
+                allow_recreate=True,
             )
         self._track_session(session_id)
         return ResumeSessionResponse()
@@ -389,8 +398,11 @@ class BridgeAgent(Agent):
                 f"Session '{session_id}' not found"
             )
         if session.status == SessionStatus.STOPPED:
+            # See load_session: cold-recreate rather than 500 a resumable
+            # session on adopt (dotfiles#1610).
             await self._sm.resume_session(
                 session_id, permission_callback=self._make_permission_callback(),
+                allow_recreate=True,
             )
         self._adopted_sessions.add(session_id)
         log.info(
