@@ -10141,8 +10141,21 @@ def cmd_update(args: argparse.Namespace) -> int:
     if not getattr(args, "no_manager", False):
         mgr = _usable_worktree_manager()
         if mgr:
-            return _exec_worktree_manager(mgr, cfg.active_project(),
-                                          subcommand=["update", *_update_flags(args)])
+            previous_context = os.environ.get(_UPDATE_CONTEXT_ENV)
+            invocation_context = _invocation_update_context()
+            if invocation_context is not None:
+                os.environ[_UPDATE_CONTEXT_ENV] = str(invocation_context)
+            try:
+                return _exec_worktree_manager(
+                    mgr,
+                    cfg.active_project(),
+                    subcommand=["update", *_update_flags(args)],
+                )
+            finally:
+                if previous_context is None:
+                    os.environ.pop(_UPDATE_CONTEXT_ENV, None)
+                else:
+                    os.environ[_UPDATE_CONTEXT_ENV] = previous_context
     return _cmd_update_in_plugin(args)
 
 
@@ -10339,11 +10352,13 @@ def _project_update_context() -> Path | None:
 
 
 _INVOCATION_CWD: Path | None = None
+_UPDATE_CONTEXT_ENV = "AGENT_WORKTREES_UPDATE_CONTEXT"
 
 
 def _invocation_update_context() -> Path | None:
     """Return the invoking checkout when it carries repository Copilot settings."""
-    cwd = _INVOCATION_CWD or Path.cwd()
+    transported = os.environ.get(_UPDATE_CONTEXT_ENV)
+    cwd = Path(transported) if transported else (_INVOCATION_CWD or Path.cwd())
     for candidate in (cwd, *cwd.parents):
         if (candidate / ".github" / "copilot" / "settings.json").is_file():
             return candidate
