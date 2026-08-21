@@ -134,15 +134,18 @@ as-is) → **contribution** (this file + the harness skills, how-to-land).
 
 > **The full landing procedure is the `contributing-to-copilot-extensions`
 > skill** — repo layout, the worktree contribution flow, the mandatory version
-> bump, the test + install-contract gates, deploy-after-push, and the
+> bump, the test + install-contract gates, deploy-after-merge, and the
 > source-of-truth rules. This section is the always-on summary; that skill is the
 > step-by-step, and `diagnosing-copilot-extensions` covers a broken plugin or
 > deploy.
 
-### Branch and Push
+### Branch and Publication
 
-We own this repo -- branch directly, no fork or PR required. Use
-descriptive branch names.
+This repo is **PR-required** and uses the `pr-self-merge` profile. Work in an
+isolated worktree, publish with `copilot-extensions create-pr`, give the
+non-blocking Copilot review a chance to report, then merge with
+`copilot-extensions pr-merge <PR> --now` and finalize. Direct pushes to `main`
+are blocked by tooling and repository policy.
 
 ### Coordinating Across Control Repos
 
@@ -158,14 +161,22 @@ public face:
   systems, or context. The proprietary "why" stays in the driver's own private
   planning, which links to the public issue.
 
-Pushes to `main` are single-writer: rebase before pushing and re-check your
-version bump in case a concurrent push already consumed it.
+PR merges to `main` are single-writer: update from `origin/main` before
+publication or merge and re-check the version bump in case a concurrent merge
+already consumed it.
 
-### Version Bump -- Required Before Every Push
+<!-- visions:cross-repo-sequencing:start -->
+When a vision revision in this review-gated repository also drives a directly
+published change in a related repository with no PR review, land the
+vision-update PR first. Only completion markers follow the related-repository
+implementation; all intent belongs in the earlier reviewed PR.
+<!-- visions:cross-repo-sequencing:end -->
 
-**Every push to `main` must include a version bump** for each plugin you
+### Version Bump -- Required For Every Plugin Change
+
+**Every PR that changes a plugin must include a version bump** for each plugin
 changed. The marketplace detects updates by comparing versions; skip the bump
-and machines report "already at latest" and silently ignore your change.
+and machines report "already at latest" and silently ignore the change.
 
 For **each plugin `<p>` you touched**, bump these **in the same commit**:
 
@@ -186,9 +197,9 @@ Default bump: **patch with a `-devN` suffix** (e.g., `1.3.1` -> `1.3.2-dev1`).
 Do not bump minor or major unless the maintainer explicitly requests it.
 See `CONTRIBUTING.md` for the full versioning scheme. (The
 `tools/check-docs-consistency.py` guard keeps the plugin lists/counts in the
-docs honest; run it before pushing doc changes.)
+docs honest; run it before publishing doc changes.)
 
-### Test Before Push
+### Test Before PR Publication
 
 > **Full testing guide: `TESTING.md`** — the runner reference, the
 > lint/contract gates, and the **opt-in end-to-end smoke tests** (real-infra,
@@ -209,8 +220,8 @@ python tools/run-plugin-tests.py agent-worktrees -k picker  # filter
 Fast structural/contract checks are marked `@pytest.mark.guard` (marketplace +
 picker integrity: overlay-registry, palette, shipped-manifest contract, key
 canonicalization, F3 binding invariants) so `--guards` runs them in
-sub-second-per-plugin. There is intentionally **no** automatic push/PR gate yet
-— run the suite yourself before pushing a runtime change.
+sub-second-per-plugin. Copilot review is non-blocking, so run the relevant suite
+yourself before publishing a plugin change.
 
 **Per-plugin coverage** — what each plugin's suite exercises — lives in
 `TESTING.md` § *Per-plugin coverage*, not here (that enumeration drifts as
@@ -218,9 +229,9 @@ plugins are added). The largest is **agent-worktrees**: a ~1400-test suite
 covering worktree lifecycle, the status/tracking model, PR flow, and the Textual
 **Picker** (with a real-framework `pilot.press` keyboard harness).
 
-### Deploy After Push
+### Deploy After Merge
 
-After pushing to `main`, deploy on each target machine. **Payload-only plugins**
+After the PR merges to `main`, deploy on each target machine. **Payload-only plugins**
 (skills / hooks / extensions — e.g. efforts, visions, context-handoff, agent-ssh,
 customizing-copilot, copilot-extensions-harness) need only `copilot plugin
 update` — no runtime installer. **Runtime plugins** additionally run their own
@@ -249,7 +260,7 @@ cd plugins/agent-containers     # or plugins/agent-mcp
 .\scripts\init.ps1 -Force       # Windows
 ```
 
-### Local Testing (Without Pushing)
+### Local Testing (Before PR Publication)
 
 Run the installer from the local checkout to deploy your uncommitted
 changes through the real pipeline:
@@ -292,8 +303,8 @@ cd plugins/agent-bridge
 - **Do not copy source files into the runtime directory**
   (`~/.agent-worktrees/lib/`, `~/.agent-bridge/venv/`). This bypasses
   version tracking, the installer pipeline, and leaves other machines
-  on the old version. Always commit, bump, push, then update.
-- **Do not push without a version bump.** Machines will silently ignore
+  on the old version. Always commit, bump, publish through a PR, merge, then update.
+- **Do not publish a plugin change without a version bump.** Machines will silently ignore
   the update.
 - **Do not edit installed plugin copies** under
   `~/.copilot/installed-plugins/`. The marketplace overwrites them on

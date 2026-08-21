@@ -29,6 +29,7 @@ never edited to record that cycle; it changes only when the **intent** changes.
 
 | Vision | Scope | Subject |
 |--------|-------|---------|
+| [harness-guidance](harness-guidance/README.md) | leaf | **Harness guidance ownership and delivery** — repositories own local identity and invariants, plugins own concise generic ambient policy, skills own task-time procedures, operator policy remains portable, and context use is attributable and budgeted. |
 | [plugin-services](plugin-services/README.md) | branch | The plugin **service model** — how installer-deployed plugin runtimes expose, coordinate, and are reached as local services, à la carte and without shared infrastructure. |
 | [installer](installer/README.md) | leaf | The **Installer & Configurator** — the standalone, out-of-plugin, self-updating app that bootstraps a bare machine into a working harness (one-line bootstrap → prereqs → core install → first harness repo), remains the non-agentic surface for doctoring, config, plugin-prerequisite validation, **plugin updating + cross-plugin alignment**, repo discovery, and Git-referenced presets, and serves as the **optional worktree/agent control-plane** (the Worktree Picker, session management, terminal muxing, launch) — never a dependency of the self-sufficient plugins. |
 | [agent-fabric](agent-fabric/README.md) | branch | The layered **agent coordination fabric** — how many Copilot agents across worktrees, machines, CodeSpaces, and containers are spun up, discovered, delegated to, communicated with, and recovered as one legible whole. |
@@ -92,8 +93,13 @@ Provenance). No repo-specific renames or additions.
 
 ### Cross-repo sequencing
 
-This repo is **directly pushed** (branch to `main`, no PR gate required), so the
-visions-system's review-gated sequencing rule does not bind here. When work is
-driven from a **review-gated** control repo that *also* changes this repo,
-follow that repo's ordering rule (land the reviewed intent before the unreviewed
-change).
+This repo is **PR-required** with a `pr-self-merge` profile. A vision revision
+that also drives implementation elsewhere lands through its PR before any
+unreviewed direct change in a related repository. Completion-only markers may
+follow implementation.
+
+This sequencing policy is intentionally retained in the stable
+`visions:cross-repo-sequencing` owner region in `AGENTS.md`. The marker makes
+the always-on compatibility/fallback explicit and idempotently reconcilable;
+future plugin injection may shrink it through that same marker, but must not
+silently remove the ordering invariant.

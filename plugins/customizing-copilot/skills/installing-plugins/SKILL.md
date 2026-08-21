@@ -225,40 +225,43 @@ into `~/.copilot/installed-plugins/`.
 > to the **payload** only; a runtime plugin can read "updated" while its actual
 > runtime (venv/binstub/service) is unchanged until its installer runs.
 
-## Installing a plugin's standing rule into `AGENTS.md`
+## Delivering a plugin's ambient guidance
 
 Enabling a plugin makes its **skills** available, but skills are **on-demand**:
 a skill's guidance applies most strongly the turn it is invoked and fades after
 (see `authoring-skills` § Action-sequence vs ambient-guidance skills). So a
-plugin that wants a rule to hold for the *rest of the session* — a standing or
-ambient convention (planning discipline, a cross-repo sequencing rule, a
-knowledge-routing entry, a safety guard) — cannot rely on enablement alone. The
-rule must be **materialized into the adopting repo's always-on instructions**
-(`AGENTS.md` / `.github/copilot-instructions.md`, or a small dedicated rule file
-those reference).
+plugin that wants a rule to hold for the *rest of the session* cannot rely on a
+skill body alone.
 
-Treat this as the **guidance analogue of payload-vs-runtime**: enabling the
-plugin deploys the *payload* (skills); writing its standing rule into `AGENTS.md`
-deploys the *always-on guidance*. A plugin whose value depends on a persistent
-rule is only half-installed until both are done.
+Follow `customizing-copilot:authoring-skills` § *sessionStart context
+injection*:
 
-**The seam (generalized from `efforts:efforts-setup` / `visions:visions-setup`):** when a
-plugin's setup ships a standing rule, its setup skill should **add a short,
-declarative entry to the repo's always-on instructions** that:
+1. **Keep ownership authoritative.** Repository identity, configuration,
+   irreducible local invariants, and minimal fail-safes stay in the repository's
+   `AGENTS.md` / custom instructions. Generic plugin policy stays with the
+   plugin.
+2. **Inject plugin-owned policy.** The owning plugin emits a concise,
+   owner-marked, cwd/config-gated `sessionStart` `additionalContext` kernel and
+   points at an on-demand skill for detailed mechanics. Source is
+   allow-by-default; exclude only documented incompatible sources.
+3. **Keep configuration declarative.** Repository overrides take precedence
+   over operator policy only for an explicit plugin-declared allowlist of
+   repo-delegable keys, which then precedes plugin defaults. Reject unknown or
+   unauthorized keys. Safety, publication, attribution, and sanitization policy
+   is non-overridable. Parse data; never execute configuration.
+4. **Preserve fallback coverage.** Some headless/cloud launch paths do not load
+   plugin hooks. Keep an irreducible static fallback for critical safety and
+   publication rules on those paths.
 
-1. **States the rule in the adopting repo's own voice** — not a copy of the
-   plugin's internal docs, just the durable "always do X" the repo must enforce.
-2. **Points at the on-demand skill for the mechanics** — `AGENTS.md` carries the
-   rule + a skill pointer, not the full procedure (keep it a table-of-contents
-   entry, per the harness runbook's Phase 4).
-3. **Is idempotent** — reconcile on re-run (audit mode) rather than appending a
-   duplicate; if the rule already exists, leave it.
-
-This is the declarative way a bootstrapped harness installs ambient guidance so
-it actually persists. When authoring a `-setup` skill for a plugin that carries
-standing guidance, include this AGENTS.md-materialization step; when auditing a
-harness, verify each such rule is present in the always-on layer, not stranded in
-an on-demand skill.
+Static `AGENTS.md` rules are still correct for genuinely repository-owned
+invariants and minimal fallbacks. Copying a plugin's wholesale standing policy
+into every adopting repository is a legacy compatibility path; migrate it only
+after the plugin has an equivalent injection hook, then shrink the static copy
+without losing its fail-safe. Any setup-written compatibility/fallback prose
+must live in a stable marked region or dedicated rule file naming the owning
+plugin. Setup reruns reconcile that region idempotently; later versions use the
+same marker to shrink or remove it without duplicating or disturbing adjacent
+repo-owned prose.
 
 ## Keeping a repo's plugins fresh automatically
 
@@ -267,5 +270,7 @@ session launch -- ensuring every enabled plugin's payload is installed and, for
 runtime plugins, that the deployed runtime matches the installed payload version
 (acting only on drift). Where that exists, booting via the harness's launcher
 keeps the plugin set fresh without manual `plugin update` calls. (Headless
-`copilot -p --autopilot` runs do **not** merge repo `enabledPlugins`, so those
-machines need required plugins installed globally, out-of-band.)
+`copilot -p --autopilot` runs do **not** merge repo `enabledPlugins`, and some
+headless/cloud paths do not load plugin hooks, so those machines need required
+plugins and irreducible static policy supplied through their supported launch
+path.)
