@@ -656,9 +656,43 @@ _WIN_TASK_NAME = "Agent Bridge"
 _SYSTEMD_UNIT = "agent-bridge.service"
 
 
+def _active_endpoint_port() -> int | None:
+    """The live daemon's port from the routing table (``active.json``), or None.
+
+    Post-#694 the daemon binds an OS-assigned **dynamic** port and advertises it
+    via ``active.json`` -- the config's ``port`` is 0 (the dynamic sentinel), so
+    it cannot tell you where the daemon actually listens. Any liveness/port
+    resolver that reads only ``config.yaml`` therefore probes the legacy 9280 and
+    falsely reports the daemon down while it is healthy on a dynamic port (the
+    #1713 liveness bug: ``service status`` FAILing on 9280, and ``service start``
+    warning "health check did not pass" against a daemon that did come up). Read
+    the routing table first -- ``verify_listener=False`` so a mid-startup port is
+    still reported (the caller does its own health probe). Returns None when there
+    is no routing table (a fixed-port or never-started deployment).
+    """
+    try:
+        from zdd.routing import read_active_endpoint
+
+        ep = read_active_endpoint(_INSTALL_DIR, verify_listener=False)
+        if ep is not None and ep.port:
+            return int(ep.port)
+    except Exception:
+        pass
+    return None
+
+
 def _service_port() -> int:
-    """Resolved bridge port from config, else platform default."""
+    """Resolved bridge port: live routing table > config > platform default.
+
+    Prefers the live/last port advertised in ``active.json`` so a dynamic-port
+    daemon (#694) is probed where it actually listens, not the legacy 9280
+    fallback (#1713). Falls back to a config-pinned fixed port, then the default.
+    """
     from .models import default_port
+
+    live = _active_endpoint_port()
+    if live:
+        return live
 
     cfg_path = os.path.join(_INSTALL_DIR, "config.yaml")
     if os.path.exists(cfg_path):
