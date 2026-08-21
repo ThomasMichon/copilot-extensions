@@ -179,6 +179,7 @@ the exemplars, and the vision it serves):
 
 | Pattern | Concern |
 |---------|---------|
+| [context-injection](context-injection.md) | How repositories, plugins, skills, and operator policy retain clear ownership while plugin-owned ambient guidance is injected as a concise, gated `sessionStart` context kernel with fail-open behavior, static safety fallback, cross-platform parity, and non-executing budget inventory |
 | [local-endpoint-discovery](local-endpoint-discovery.md) | How a service exposes a discoverable, collision-free, local-first endpoint — the anti-static-port pattern, incl. the rendezvous / port-mapping file |
 | [service-transport](service-transport.md) | Which channel a service exposes — the transport ladder (stdio → OS-native socket/pipe → OS-assigned loopback → tunnel) and the named-pipe/UDS reality |
 | [service-lifecycle-supervision](service-lifecycle-supervision.md) | Platform-native always-on supervision (Windows Scheduled Task / systemd user unit) and its lifecycle verbs |

@@ -81,6 +81,17 @@ status). Substance in the plugin; keep the narrative thin.
    map; the repo's `CONTRIBUTING.md` / `AGENTS.md` / architecture docs remain the
    versioned source of truth. Reference them rather than duplicating detail that
    drifts.
+5. **Own generic ambient policy.** If the harness plugin carries policy that
+   must remain active throughout a session, keep it config-backed and inject a
+   concise `sessionStart` context kernel from the plugin. Leave repository
+   identity, local invariants, and minimal safety/publication fail-safes in the
+   target repository's lean `AGENTS.md`; keep detailed procedures in skills.
+   Hard-gate the hook by resolved cwd/config applicability, treat source as
+   allow-by-default with documented exclusions, preserve bounded
+   operator-versus-repo precedence, provide Bash/PowerShell parity, and fail open. Some
+   headless/cloud paths do not load plugin hooks, so do not remove the static
+   fail-safe. Follow `customizing-copilot:authoring-skills` § *sessionStart
+   context injection*.
 
 ## README & documentation standard (every plugin)
 

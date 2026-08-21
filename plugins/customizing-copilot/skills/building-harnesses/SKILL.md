@@ -71,11 +71,12 @@ opinionated one, apply the opinion and move on.
 3. Adopt the harness + register/link related target repos (skills:
    `agent-worktrees:agent-worktrees-repos`, `agent-worktrees:agent-worktrees-related`, `agent-worktrees:working-cross-repo`).
 4. `AGENTS.md` + connective-tissue skills (skills: `authoring-skills`,
-   `defining-subagents`). **Standing/ambient rules** (persona, style, safety,
-   cross-repo sequencing) are materialized into the always-on `AGENTS.md` and the
-   skill load+enforces them — never embedded as a decaying one-shot copy (the
-   ambient-guidance principle; the "install a persistent rule into `AGENTS.md`"
-   seam lives in `installing-plugins`).
+   `defining-subagents`). Keep repository identity, local invariants, and minimal
+   fail-safes in a lean `AGENTS.md`; plugin-owned ambient policy is config-backed
+   and injected by its owning plugin, with detailed procedures in skills. Retain
+   static coverage for critical rules on headless/cloud paths that do not load
+   plugin hooks (see `customizing-copilot:authoring-skills` § *sessionStart
+   context injection*).
 5. SSH mesh + agent-bridge topology (skills: `agent-ssh:agent-ssh`, `agent-bridge:agent-bridge`).
 6. Validate end-to-end through the **Picker**.
 7. Enable efforts + visions (skills: `efforts:efforts-setup`, `visions:visions-setup`).

@@ -404,17 +404,16 @@ states, concisely:
 - **Pointers, not prose** — reference the skills below and the plugin skills
   rather than restating them. `AGENTS.md` is a table of contents with rules,
   not a manual.
-- **Standing / ambient rules live here, not in on-demand skills.** Guidance meant
-  to hold for the *rest of the session* — persona/voice, style bars, safety and
-  error-response disciplines, cross-repo sequencing — must be **materialized into
-  this always-on file** (or a small rule file it references), because a skill's
-  guidance applies most strongly the turn it is invoked and **fades after** (the
-  *ambient-guidance* principle — `authoring-skills` § Action-sequence vs
-  ambient-guidance skills). A plugin that ships such a rule installs it here via
-  its `-setup` skill (the "install a persistent rule into `AGENTS.md`" seam —
-  `customizing-copilot:installing-plugins`); the on-demand skill then **loads and enforces** the rule
-  for the session rather than embedding a decaying one-shot copy. Phase 8's review
-  (`customizing-copilot:reviewing-customizations`) flags any skill that violates this.
+- **Keep ambient guidance with its owner.** Repository identity, irreducible
+  local invariants, configuration pointers, and minimal safety/publication
+  fail-safes live here. Generic plugin-owned ambient policy is config-backed and
+  injected by the owning plugin as a concise `sessionStart` context kernel;
+  detailed procedures live in on-demand skills. A one-shot skill body decays,
+  but copying wholesale plugin policy into `AGENTS.md` creates a second owner.
+  Follow `docs/patterns/context-injection.md`.
+- **Preserve launch-path fallbacks.** Some headless/cloud paths do not load
+  plugin hooks. Keep critical static fail-safes on those paths even after
+  plugin-owned injection exists.
 
 Keep it **voice-neutral** unless the operator explicitly wants personality
 (unopinionated seam #7).
@@ -562,10 +561,12 @@ organization seam). Day-to-day work uses the **`visions:envisioning`** skill. A 
 **pure should-be**, revised in place; **efforts are carved from the delta**
 between a vision and reality.
 
-**How they steer change (bake this into `AGENTS.md`):** every architectural or
-behavioral change reconciles to the vision — it either *closes* a stated gap
-(cite the vision item), *extends* intent (revise the vision first), or is
-*below-altitude* (trivial; just say so). Visions **guide**, never **gate**.
+**How they steer change:** every architectural or behavioral change reconciles
+to the vision — it either *closes* a stated gap (cite the vision item),
+*extends* intent (revise the vision first), or is *below-altitude* (trivial;
+just say so). Until the visions plugin ships equivalent ambient injection, its
+setup keeps this invariant as a concise compatibility/fallback rule in
+`AGENTS.md`. Visions **guide**, never **gate**.
 
 **Done when:** `efforts/` and `visions/` exist with their addenda; `AGENTS.md`
 references the reconcile-to-vision habit and the "plan as an effort" rule.
@@ -671,8 +672,9 @@ place. Highest-value checks, in order:
 2. **Related repos use narratives, not copies** (Phase 3). If product code or a
    full `services/`/`tools/` suite was replicated into the harness, flag it and
    propose extracting it to a related repo.
-3. **`AGENTS.md` points at skills instead of restating them** (Phase 4), and
-   connective-tissue skills pass the `authoring-skills` checklist.
+3. **Guidance ownership is coherent** (Phase 4): `AGENTS.md` is a lean map with
+   repository-owned invariants/fail-safes, plugin ambient policy is injected by
+   its owner where supported, and skills contain detailed procedures.
 4. **efforts + visions are adopted with addenda** (Phase 7); planning lives in
    `efforts/`, not scattered `docs/plans/*.md`.
 5. **SSH uses aliases, never raw IPs** (Phase 5).

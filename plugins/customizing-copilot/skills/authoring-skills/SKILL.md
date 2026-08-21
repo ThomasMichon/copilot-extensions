@@ -208,16 +208,17 @@ fades on later turns. Author with that grain, not against it:
 - **Ambient-guidance skills** — standing rules meant to hold for the *rest of
   the session* (a voice/persona, a style bar, a safety discipline). A one-shot
   skill body decays after its turn, so the guidance quietly stops applying.
-  Instead, keep the durable guidance in an **always-on home** (root `AGENTS.md` /
-  custom instructions, or a linked doc) and have the skill **point at it and
-  activate it** — e.g. *"Load and enforce the guidance at `<link>` for the
-  remainder of the session; if it is already in context, keep applying it."* The
-  skill's job becomes *loading + activating* ambient guidance, not *being* a
-  transient copy of it.
+  Put the durable guidance in its authoritative always-on channel: genuinely
+  repository-owned invariants stay in `AGENTS.md` / custom instructions, while
+  generic plugin-owned policy is injected by that plugin as a concise
+  `sessionStart` context kernel. Keep detailed mechanics in a skill or linked
+  file and have the kernel point at them with a faux-link. The skill's job is
+  the task-time procedure, not a transient or materialized copy of ambient
+  policy.
 
-This mirrors "Skills vs custom instructions" above: always-on guidance belongs in
-custom instructions; a skill that must reach ambient guidance should **install or
-enforce** it (point at the durable home) rather than restate it one-shot.
+This preserves one owner for each rule and prevents both skill decay and
+`AGENTS.md` bloat. Follow *sessionStart context injection* below when a plugin
+owns the ambient policy.
 
 ## Custom Instructions
 
@@ -226,6 +227,8 @@ Always-on context injected into every prompt.
 | Scope | File |
 |-------|------|
 | Repo (always loaded) | `AGENTS.md` in git root and cwd |
+| Repo (always loaded) | `CLAUDE.md` in git root and cwd |
+| Repo (always loaded) | `GEMINI.md` in git root and cwd |
 | Repo (always loaded) | `.github/copilot-instructions.md` |
 | Repo (always loaded) | `.github/instructions/**/*.instructions.md` |
 | Personal (all repos) | `~/.copilot/copilot-instructions.md` |
@@ -245,8 +248,9 @@ Suppress with `--no-custom-instructions`.
 > live state and the session's `cwd`, so a single globally-installed plugin injects
 > *different* context per repo -- something a fixed instructions dir cannot do. It
 > also removes the launcher's `COPILOT_CUSTOM_INSTRUCTIONS_DIRS`-injection
-> dependency, so the context loads under **any** launch path (interactive, resumed,
-> or a bare `copilot` the launcher didn't wrap). Prefer the static dir for truly
+> dependency for launch paths that load plugin hooks. Some headless/cloud paths
+> do not load plugin hooks, so irreducible safety and publication rules still
+> need a minimal static fail-safe there. Prefer the static dir for truly
 > fixed, always-identical text; reach for the hook when the payload is dynamic,
 > conditional, or repo-scoped. Because hook `additionalContext` is capped (10 KB,
 > joined across hooks) and shares the context budget, keep the injected text lean:
@@ -269,12 +273,11 @@ skills) rather than inlining reference detail that has a home elsewhere.
 is the always-on instruction file, so keep what the session genuinely needs
 *every turn* and link the rest:
 
-- A **control harness** (the agent *is* the operator) legitimately keeps its
-  **ambient guidance inline** -- persona/voice, safety discipline, standing
-  procedure -- because that must apply on every turn (see *Action-sequence vs
-  ambient-guidance skills* above). Such an `AGENTS.md` is part manual *and* map;
-  it still faux-links *reference* material (tool indexes, per-service docs)
-  instead of pasting it.
+- A **control harness** (the agent *is* the operator) keeps repository-owned
+  identity, irreducible local invariants, and minimal fail-safes inline. Generic
+  plugin-owned ambient policy is injected by its owner; the repository should
+  configure or override it rather than copy it. `AGENTS.md` still faux-links
+  reference material instead of pasting it.
 - A **product / library / marketplace** repo (the agent is a *contributor*, not
   a persona) carries little always-on guidance, so its `AGENTS.md` is a
   mostly-navigational contributor guide -- a lean map with a few contribution
@@ -282,8 +285,8 @@ is the always-on instruction file, so keep what the session genuinely needs
 
 The shared failure mode is an `AGENTS.md` bloated with *reference* detail agents
 must crawl, or that auto-loads the tree every session. Factor *reference* detail
-out; keep *ambient* guidance in -- and don't gut a harness's persona/procedure in
-the name of "keeping it lean."
+out; keep repository-owned ambient guidance and fail-safes inline, and inject
+plugin-owned ambient policy from its owner.
 
 ## Hooks
 
@@ -394,13 +397,24 @@ interactive sessions only -- not resume, not `-p`), the `additionalContext`
 mechanism also applies on **resume**, so it can carry the always-on guidance an
 instructions file used to. Shape:
 
-```bash
-# sessionStart hook: read cwd from stdin, emit repo-targeted guidance
-payload=$(cat); cwd=$(printf '%s' "$payload" | jq -r .cwd)
-case "$cwd" in
-  *"/my-repo"*) printf '{"additionalContext":%s}' "$(jq -Rs . < guidance.md)" ;;
-  *)            printf '{}' ;;   # not our repo -- inject nothing
-esac
+```json
+{"cwd":"/path/to/repository","source":"<runtime-provided value>"}
+```
+
+```text
+read one JSON payload from stdin using the platform standard library
+extract cwd and source without assuming a source vocabulary
+resolve cwd and applicable repository markers/config to canonical paths
+if cwd/config proves applicability and source is not explicitly excluded:
+    emit {"additionalContext":"[owner: example-plugin@1.2.3]\n<concise kernel>"}
+else:
+    emit {}
+```
+
+Reference output:
+
+```json
+{"additionalContext":"[owner: example-plugin@1.2.3]\n<concise kernel>"}
 ```
 
 Discipline (context is a **shared, capped** resource -- 10 KB across all hooks):
@@ -408,12 +422,38 @@ Discipline (context is a **shared, capped** resource -- 10 KB across all hooks):
 - **Inline only what every turn needs**; for the rest, inject a short pointer -- a
   one-line summary plus a **backtick faux-link** to a file the agent reads on
   demand (`` `~/.my-tool/notes.md` ``) -- rather than pasting the whole document.
-- **Self-gate hard.** Emit `{}` (not a partial nudge) when the session isn't in a
-  repo you own; a globally-installed plugin otherwise leaks its guidance into
-  every unrelated repo.
+- **Mark ownership.** Begin every injected kernel with a stable owner marker:
+  the plugin name, preferably plus its version. Budget reports and diagnostics
+  need to attribute the emitted bytes.
+- **Self-gate hard on applicability.** Emit `{}` (not a partial nudge) when
+  resolved cwd/config does not prove the policy applies. Prefer a capability or
+  repository marker; use configured target-root lists only as a fallback. Never
+  use substring matching or repository-name inference.
+- **Allow source by default.** Source is an opaque runtime value. Exclude only
+  explicitly documented incompatible sources; do not invent an allowlist.
+  Command-hook `additionalContext` applies on resume, so preserve resume
+  behavior.
+- **Treat configuration as data with bounded delegation.** Apply documented
+  repository-over-operator-over-default precedence only for an explicit
+  plugin-declared allowlist of repo-delegable keys. Reject unknown keys and
+  unauthorized repository overrides. Safety, publication, attribution, and
+  sanitization policy remains operator/plugin-owned and non-overridable. Never
+  source, import, or execute configuration.
+- **Fail open.** Missing optional config or hook errors emit `{}` and may log to
+  stderr; they do not block startup. Retain a minimal static fail-safe for
+  critical rules on launch paths that do not load plugin hooks.
+- **Own written fallbacks.** If setup writes compatibility/fallback prose into
+  `AGENTS.md` or custom instructions, idempotently reconcile it inside a stable
+  region naming the plugin (or a dedicated plugin-named rule file). Future setup
+  versions use the same marker to update, shrink, or remove the fallback without
+  duplicate text or collateral edits.
 - **Prefer this over a fixed instructions dir** when the guidance is dynamic
   (machine/account/state-derived), conditional, or repo-scoped; keep the static
   dir for genuinely always-identical text.
+
+This section is the portable normative summary for installed skills. The suite
+design rationale remains in the copilot-extensions repository's
+`docs/patterns/context-injection.md`.
 
 ### Script I/O
 
