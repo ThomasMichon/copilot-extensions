@@ -186,6 +186,6 @@ def _run_direct(bridge: str) -> int:
     try:
         cfg = load_config(bridge)
     except ConfigError as exc:
-        print(f"agent-mcp forward: {exc}", file=sys.stderr)
+        print(f"agent-mcp: {exc}", file=sys.stderr)
         return 1
     return asyncio.run(Bridge(cfg).run())

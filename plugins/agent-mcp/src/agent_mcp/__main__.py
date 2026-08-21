@@ -1,7 +1,11 @@
 """CLI entry point for agent-mcp.
 
 Subcommands:
-  bridge <name|--config FILE>   Run the stdio MCP bridge from a config file.
+  bridge <name|--config FILE>   Run the stdio MCP bridge. Multiplexed by default
+                                (attach to a resident serve session-host via the
+                                thin forwarder, with a direct-bridge fallback);
+                                AGENT_MCP_NO_MULTIPLEX runs the classic in-process
+                                bridge.
   forward <name|--config FILE>  Thin per-session forwarder: attach to a resident
                                 serve session-host and pump stdio<->socket, with a
                                 direct-bridge fallback (the #744 multiplexer child).
@@ -22,7 +26,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import shutil
 import sys
 from pathlib import Path
@@ -37,16 +40,13 @@ def _configure_logging(level: str) -> None:
     )
 
 
-# ``bridge`` opt-in: when set truthy, ``agent-mcp bridge`` delegates to the thin
-# ``forward`` path (attach to a resident serve host, direct-bridge fallback)
-# without any re-materialization -- one env flag flips a live host to the
-# multiplexer for the #744 A/B. Kept opt-in until the RAM win is proven (slice 4).
-_MULTIPLEX_TRUTHY = {"1", "true", "on", "yes"}
-
-
-def _bridge_should_multiplex() -> bool:
-    raw = os.environ.get("AGENT_MCP_MULTIPLEX")
-    return raw is not None and raw.strip().lower() in _MULTIPLEX_TRUTHY
+# ``bridge`` is now backed by the thin multiplexer forwarder **by default**: the
+# per-``(host, server)`` serve session-host + a light per-session forwarder cut
+# resident RAM ~20% on a multi-session host (see #744 / examples/multiplexer_ab).
+# It always carries a correct inline direct-bridge fallback, and the whole
+# multiplexer is opt-out via ``AGENT_MCP_NO_MULTIPLEX`` (run the classic in-process
+# bridge), with ``AGENT_MCP_NO_SERVE`` / ``AGENT_MCP_NO_ENSURE_SERVE`` for finer
+# control. ``forward.run`` owns that decision, so ``bridge`` simply delegates.
 
 
 def _cmd_bridge(args: argparse.Namespace) -> int:
@@ -54,19 +54,8 @@ def _cmd_bridge(args: argparse.Namespace) -> int:
     if not target:
         print("agent-mcp bridge: a bridge name or --config FILE is required", file=sys.stderr)
         return 2
-    # Opt-in multiplexer: route the same invocation through the thin forwarder.
-    if _bridge_should_multiplex():
-        from . import forward
-        return forward.run(target)
-    from .bridge import Bridge
-    from .config import ConfigError, load_config
-    try:
-        cfg = load_config(target)
-    except ConfigError as exc:
-        print(f"agent-mcp: {exc}", file=sys.stderr)
-        return 1
-    import asyncio
-    return asyncio.run(Bridge(cfg).run())
+    from . import forward
+    return forward.run(target)
 
 
 def _cmd_forward(args: argparse.Namespace) -> int:
@@ -370,7 +359,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="logging level (debug/info/warning/error)")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_bridge = sub.add_parser("bridge", help="run the stdio MCP bridge")
+    p_bridge = sub.add_parser(
+        "bridge", help="run the stdio MCP bridge (multiplexed by default; "
+                       "AGENT_MCP_NO_MULTIPLEX for the classic in-process bridge)")
     p_bridge.add_argument("name", nargs="?", help="bridge name under ~/.agent-mcp/bridges/")
     p_bridge.add_argument("--config", help="explicit path to a bridge config file")
     p_bridge.set_defaults(func=_cmd_bridge)

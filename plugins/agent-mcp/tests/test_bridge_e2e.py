@@ -9,6 +9,7 @@ pure-pipeline unit tests do not.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import textwrap
@@ -43,11 +44,15 @@ UPSTREAM = textwrap.dedent(
 
 
 def _run_bridge(cfg_path, lines):
+    # This e2e targets the classic in-process bridge protocol; pin it off the
+    # default-on multiplexer so it exercises the bridge loop directly (and does
+    # not spawn a serve host in the real home). The multiplexer has its own tests.
+    env = dict(os.environ, AGENT_MCP_NO_MULTIPLEX="1")
     proc = subprocess.run(
         [sys.executable, "-m", "agent_mcp", "--log-level", "error",
          "bridge", "--config", str(cfg_path)],
         input="\n".join(lines) + "\n",
-        capture_output=True, text=True, timeout=60,
+        capture_output=True, text=True, timeout=60, env=env,
     )
     out = [json.loads(line_) for line_ in proc.stdout.splitlines() if line_.strip()]
     return out, proc
