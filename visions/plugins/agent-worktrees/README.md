@@ -44,6 +44,24 @@ the same record at once), reads are cheap, and the store is the one place the
 truth lives. Consumers never keep a parallel copy; they read this owner and
 **derive** over it.
 
+### The worktree remembers — binding and a bounded history in the record
+The worktree is the durable unit an agent belongs to, so **the record it already
+keeps is where a session declares itself and where the worktree's recent intent
+lives**. Two things follow. First, a session **binds to its worktree by an explicit
+self-identifying assertion** — the agent *declares* "this is my worktree" — rather
+than the store inferring ownership from whatever directory a background signal
+happened to observe; the binding is what brings the worktree's live tracking (the
+reducer, the status surface, the picker view) to life for that session. Second, the
+record carries a **bounded, append-only, session-tagged history** of the *terse
+values an agent already reports about its own work* — its focus/disposition, and the
+reference to a handoff it produced. This is **memory, not a log**: a small, capped
+series of structured entries (each stamped with the session that wrote it), never
+prose and never an event stream. The worktree's *current* disposition is simply the
+**tail** of that history, and because the handoff reference lives here too, the
+worktree can say what it was doing — and hand that to a successor — **from its own
+record alone**.
+
+
 ### The aggregate is derived — single-writer slots, one reducer
 The worktree's **aggregate** status and current-session (head) are **not a shared
 cell** any contributor writes; they are a **pure reduction over independent,
@@ -158,6 +176,25 @@ intent signals) and agent-bridge's **ACP tool/message events**. Each enriches wh
 present; none is required, and a producer failing to initialize never subtracts
 from what the backbone already guarantees.
 
+### explicit session binding
+A session becomes **bound to its worktree by declaring so**, and a session that is
+active in a worktree yet unbound is **detected and invited to declare** — never
+silently attached from an inferred directory. The declaration is self-identifying
+(the session and its terminal are knowable to the agent's own tool call), so the
+binding reflects *what the agent asserted*, not what a background observer guessed.
+This closes the gap where a session that did not begin life in its worktree (a
+resume that starts elsewhere, a spawned successor, a headless launch) would
+otherwise never register and leave the worktree looking unowned.
+
+### the record remembers — a bounded, session-tagged history
+The record retains a **small, capped, append-only history** of the terse values an
+agent reports about its own work — focus/disposition and handoff references — each
+entry tagged with the session that wrote it. It is **memory, not logging**: bounded
+by construction, structured not prose, and the worktree's *current* disposition is
+the **tail** of it rather than a separate cell. A worktree therefore always carries
+an agent-digestible account of what it has recently been doing, across the sessions
+that worked it.
+
 ## Behaviors
 
 ### graceful degradation
@@ -215,6 +252,23 @@ they are absent or fail to start, **polling still guarantees** a correct answer.
 two compose: events are an accelerant over a self-sufficient poll, never a
 dependency of it.
 
+### binding is an explicit assertion, never a sniff
+Ownership of a worktree by a session is established by an **explicit declaration**,
+not inferred from an incidental directory a hook or background pass happened to see.
+The store may **detect** an unbound-but-active session and **prompt** for the
+declaration, but the bind itself is the agent's own asserted act — auditable and
+intentional — so a stray observation can never mis-attach a session to the wrong
+worktree.
+
+### recovery is record-first
+What a worktree was doing — its recent focus and the reference to any handoff it
+produced — is recoverable **from the worktree's own record**, without a second
+service being reachable and without a live-handoff transfer having succeeded. A
+successor (or a fresh session, or an operator) reconstructs the worktree's intent
+from the store alone; richer transports make a handoff *smoother* when present, but
+none is a **precondition** for the worktree remembering itself. The durable record
+is the floor under recovery, not an optimization layered on a fragile transfer.
+
 ## Non-Goals / Boundaries
 
 - **Not dependent on agent-bridge for tracking.** agent-bridge is an *optional*
@@ -234,6 +288,11 @@ dependency of it.
   repeatedly reading the entire session-state tree or a whole event log is out of
   bounds; growing datasets are read incrementally by cursor/watermark, and single
   resources by random access.
+- **The record's memory is not a log.** The session-tagged history holds a small,
+  capped set of the terse values agents already report (focus/disposition, handoff
+  references) — it is **not** a transcript, an event stream, or an audit log, and
+  must stay bounded. Rich session history and replay are the session-sync / record
+  domain, not this store.
 - **Not the presentation surface.** How this state is *displayed and acted on*
   interactively is the Worktree Picker's subject (its own vision); this vision is
   about *owning and serving* the state, not rendering it.
@@ -290,3 +349,18 @@ dependency of it.
   also clarified that succession *completeness* is a **liveness-aware reconciliation**
   (repair layer), not a static record-local fold. Realized operationally by the
   `worktree-state-live-db` effort (cells + journal + deterministic derivation).
+- **2026-08-21** — Extended for **the worktree remembering itself**, after a failed
+  handoff-cutover investigation (a HOME-started / bare-resumed successor never binds
+  because `sessionStart` registration keys on the start cwd, and there is no
+  cwd-change hook to re-bind). Added §Concepts/*the worktree remembers — binding and
+  a bounded history in the record*, §Features/*explicit session binding* + *the
+  record remembers — a bounded, session-tagged history*, §Behaviors/*binding is an
+  explicit assertion, never a sniff* + *recovery is record-first*, and the *record's
+  memory is not a log* Non-Goal. Two new properties: a session binds to its worktree
+  by an **explicit self-identifying assertion** (with detect-and-prompt for an
+  unbound-but-active session, never a background sniff), and the record keeps a
+  **bounded, session-tagged history** of the terse focus/handoff values agents
+  already report — so the worktree's disposition is the tail and a handoff recovers
+  **record-first**, independent of any transport or a successful live cutover. Mined
+  from an operator design conversation carved into the aperture-labs
+  `worktree-self-knowledge` effort.
