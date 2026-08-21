@@ -89,6 +89,20 @@ jobs:
         run: python tools/check-no-internal-identifiers.py --base ${{ github.event.pull_request.base.sha }}
       - name: Ruff (F, E9)
         run: ruff check --select F,E9 --output-format=github .
+      - name: JS unit tests (node --test)
+        # JS-only plugins (e.g. context-handoff) ship node --test suites under
+        # plugins/<name>/tests/*.test.mjs -- there is no pytest suite to carry
+        # them. Run any that exist; a clean no-op when there are none, so this
+        # step costs nothing until a plugin adds JS tests.
+        run: |
+          shopt -s nullglob
+          suites=(plugins/*/tests/*.test.mjs)
+          if [ ${#suites[@]} -eq 0 ]; then
+            echo "no JS test suites found; skipping"
+            exit 0
+          fi
+          echo "running ${#suites[@]} JS test file(s): ${suites[*]}"
+          node --test "${suites[@]}"
 
   worktree-manager:
     name: worktree-manager (out-of-plugin)
