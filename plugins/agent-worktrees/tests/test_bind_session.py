@@ -282,3 +282,63 @@ class TestNoteHandoff:
             worktree_id=None, session_id="s"))
         assert rc == 0
         assert captured["noted"] is False
+
+
+class TestSessionRole:
+    def _rec(self, sessions, head=None):
+        from agent_worktrees.tracking import WorktreeRecord
+        return WorktreeRecord(
+            worktree_id="wt", branch="b", worktree_path="/w", repo="r",
+            machine="m", platform="wsl", started_at="t", last_resumed_at="t",
+            resume_count=0, title=None, status="active", completed_at=None,
+            sessions=sessions, head_session=head)
+
+    def _entry(self, sid, state="active"):
+        from agent_worktrees.tracking import SessionEntry
+        return SessionEntry(session_id=sid, started_at="t", state=state)
+
+    def test_role_head(self):
+        r = self._rec([self._entry("A")], head="A")
+        assert m._session_role(r, "A")["role"] == "head"
+        assert m._session_role(r, "A")["is_head"] is True
+
+    def test_role_superseded_when_registered_and_not_head(self):
+        r = self._rec([self._entry("A"), self._entry("B")], head="A")
+        assert m._session_role(r, "B")["role"] == "superseded"
+
+    def test_role_unbound_when_unregistered_and_active_head(self):
+        r = self._rec([self._entry("A")], head="A")
+        assert m._session_role(r, "NEW")["role"] == "unbound"
+
+    def test_role_successor_elect_on_pending_handoff(self):
+        r = self._rec([self._entry("A", state="handed-off")])
+        role = m._session_role(r, "NEW")
+        assert role["role"] == "successor-elect"
+        assert role["pending_handoff_predecessor"] == "A"
+
+    def test_role_head_elect_when_empty(self):
+        r = self._rec([])
+        assert m._session_role(r, "NEW")["role"] == "head-elect"
+
+    def test_succession_header_pending(self):
+        r = self._rec([self._entry("Apred", state="handed-off")])
+        h = m._succession_header(r)
+        assert "handoff is pending" in h
+
+    def test_succession_header_active_head(self):
+        r = self._rec([self._entry("Ahead")], head="Ahead")
+        h = m._succession_header(r)
+        assert "current head session on record" in h
+
+    def test_succession_header_none_when_no_head(self):
+        assert m._succession_header(self._rec([])) == ""
+
+    def test_cmd_session_role_untracked(self, monkeypatch, capsys):
+        monkeypatch.setattr(m, "_resolve_worktree_for_read",
+                            lambda wid, wd=None, sid=None: None)
+        captured = {}
+        monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))
+        rc = m.cmd_session_role(argparse.Namespace(
+            session_id="s", worktree_id=None, worktree_dir=None))
+        assert rc == 0
+        assert captured["role"] == "untracked"
