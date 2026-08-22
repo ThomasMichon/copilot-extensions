@@ -1133,6 +1133,41 @@ function Remove-RegisteredTask {
     $ErrorActionPreference = $prevEAP
 }
 
+function Ensure-ScheduledTask {
+    <# Routine-safe scheduled-task step for the `update` path (the decoupled
+       model, dotfiles#227).
+
+       The scheduled task is **write-once bootstrap infrastructure** whose action
+       is version-stable: it invokes the `start-agent-bridge.ps1` supervisor,
+       which resolves the live runtime from the `current-version` marker at boot.
+       A version update therefore carries NO task change -- the new slot is picked
+       up by the marker + supervisor (plain-file, no-elevation updates), never by
+       rewriting the task. Rewriting an existing task (especially an S4U/boot task)
+       needs elevation and, on failure, churns or destroys a working auto-start.
+
+       So a routine `update`:
+         * task PRESENT -> leave it entirely untouched (adopt whatever mode it has,
+           never flip/Set/purge/re-register). Zero Task Scheduler writes, so no
+           elevation is ever required and a healthy auto-start is never disturbed.
+         * task ABSENT  -> provision it ONCE, in the default non-elevated
+           interactive AtLogOn mode (first install, or after a manual removal).
+
+       Deliberate (re)provisioning, mode flips (interactive <-> S4U), and repair of
+       a broken/never-ran task are the explicit, elevation-aware `provision`
+       action's job (Invoke-Install -> Register-ScheduledTask_), never a routine
+       update. #>
+    $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if ($existing) {
+        $mode = if ($existing.Principal.LogonType -in @('S4U', 'Password')) {
+            'headless boot'
+        } else { 'at logon' }
+        Write-Ok "Scheduled task present ($mode) -- left untouched (version updates never rewrite it; run 'install.ps1 provision' elevated to change/repair it)"
+        return
+    }
+    # No task yet -> create it once (default interactive mode; non-elevated).
+    Register-ScheduledTask_
+}
+
 function Register-ScheduledTask_ {
     if (-not (Test-Path $LinkPython)) {
         Write-Warn "agent-bridge venv not found -- skipping scheduled task"
@@ -1143,7 +1178,7 @@ function Register-ScheduledTask_ {
 
     # Create launcher script
     $launcherPath = Join-Path $InstallDir 'start-agent-bridge.ps1'
-    @"
+    $launcherBody = @"
 # Start agent-bridge service -- called by scheduled task at logon.
 # Launch via the venv's signed python (-m), never the unsigned console-script
 # trampoline .exe -- Smart App Control blocks unsigned, zero-reputation exes.
@@ -1185,7 +1220,17 @@ if (Test-Path `$pidFile) {
     -RedirectStandardOutput `$logFile ``
     -RedirectStandardError `$errFile
 Set-Content -Path `$pidFile -Value `$proc.Id
-"@ | Set-Content -Path $launcherPath -Encoding UTF8
+"@
+    # Idempotent write: only rewrite the supervisor when its content actually
+    # changes, so a routine update doesn't churn the file (and its mtime) on every
+    # deploy. The supervisor is version-independent (it reads `current-version`),
+    # so in practice it is written once and never changes across version updates.
+    $existingBody = if (Test-Path $launcherPath) {
+        Get-Content -Path $launcherPath -Raw -ErrorAction SilentlyContinue
+    } else { $null }
+    if ($existingBody -ne $launcherBody) {
+        $launcherBody | Set-Content -Path $launcherPath -Encoding UTF8
+    }
 
     $pwshPath = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\pwsh.exe'
     if (-not (Test-Path $pwshPath)) {
@@ -1295,14 +1340,33 @@ Set-Content -Path `$pidFile -Value `$proc.Id
             Write-Ok "Scheduled task registered ($modeLabel)"
         }
     } catch {
-        Write-Warn "Scheduled task write failed ($($_.Exception.Message.Trim())); purging stale registration and retrying"
-        Remove-RegisteredTask $TaskName
+        # A write failure here is almost always "Access is denied" trying to
+        # modify an existing elevated/S4U (boot) task from a non-elevated shell.
+        # Do NOT purge a task we may be unable to recreate -- that would destroy a
+        # working auto-start. Only purge-and-retry when the change is unavoidable
+        # (a principal flip) AND we are elevated; otherwise leave the existing task
+        # intact and tell the operator the one, explicit, elevation-aware fix.
+        $isAdmin = $false
         try {
-            Register-ScheduledTask @regArgs -Force | Out-Null
-            Write-Ok "Scheduled task registered on retry ($modeLabel)"
-        } catch {
-            Write-Warn "Could not register the '$TaskName' scheduled task: $($_.Exception.Message.Trim())"
-            Write-Warn "agent-bridge is installed, but auto-start ($modeLabel) is not configured -- start it now with 'agent-bridge start', then re-run this installer to retry the task."
+            $isAdmin = ([Security.Principal.WindowsPrincipal] `
+                [Security.Principal.WindowsIdentity]::GetCurrent()
+            ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        } catch {}
+        if ($principalChange -and $isAdmin) {
+            Write-Warn "Scheduled task write failed ($($_.Exception.Message.Trim())); purging stale registration and retrying (elevated)"
+            Remove-RegisteredTask $TaskName
+            try {
+                Register-ScheduledTask @regArgs -Force | Out-Null
+                Write-Ok "Scheduled task registered on retry ($modeLabel)"
+            } catch {
+                Write-Warn "Could not register the '$TaskName' scheduled task: $($_.Exception.Message.Trim())"
+                Write-Warn "agent-bridge is installed, but auto-start ($modeLabel) is not configured -- start it now with 'agent-bridge start'."
+            }
+        } else {
+            Write-Warn "Scheduled task write failed ($($_.Exception.Message.Trim())) -- the existing task was left intact."
+            Write-Warn "This change (e.g. switching an elevated/S4U task to interactive, or repairing a broken one) needs elevation. Re-run the task step ONCE from an elevated PowerShell:"
+            Write-Warn "    pwsh -File `"$PSCommandPath`" provision"
+            Write-Warn "Routine updates do not touch the task; the daemon self-heals on demand meanwhile ('agent-bridge start' or any daemon-touching command)."
         }
     }
 }
@@ -2336,8 +2400,15 @@ function Invoke-Update {
     # clearing drift must not depend on the best-effort task step succeeding.
     Write-DeployManifest
 
-    # Update scheduled task
-    Register-ScheduledTask_
+    # Scheduled task: routine updates NEVER rewrite it. The task is version-stable
+    # bootstrap infrastructure (its action points at the start-agent-bridge.ps1
+    # supervisor, which resolves the live runtime from the `current-version`
+    # marker at boot), so a version update carries zero task changes. Rewriting an
+    # existing (esp. S4U/boot) task needs elevation and churns/breaks a working
+    # auto-start -- so `update` only *creates* the task when it is absent and
+    # otherwise leaves it entirely untouched. Deliberate (re)provisioning and
+    # repair are the explicit, elevation-aware `provision` action's job.
+    Ensure-ScheduledTask
 
     # Bring the new build into service. The zero-downtime path hands off via the
     # ZDD cutover (`agent-bridge deploy`: new daemon on a fresh port -> flip the
