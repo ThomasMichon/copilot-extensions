@@ -28,11 +28,17 @@ project="$(PYTHONPATH="" "$PY" -m agent_worktrees get project 2>/dev/null || tru
 defn="$(PYTHONPATH="" "$PY" -m agent_worktrees state-root --conduct 2>/dev/null || true)"
 dir="$HOME/.agent-worktrees/bin/conduct"
 
-PYTHONPATH="" "$PY" - "$dir" "$defn" <<'PYEOF'
+# Dynamic: the worktree's own recent-history recovery digest (record-first
+# recovery -- what this worktree has been doing, so a fresh/successor session
+# inherits it even if a live handoff never completed). Empty when no history.
+digest="$(PYTHONPATH="" "$PY" -m agent_worktrees history-digest 2>/dev/null || true)"
+
+PYTHONPATH="" "$PY" - "$dir" "$defn" "$digest" <<'PYEOF'
 import json, os, sys
 
 d = sys.argv[1]
 defn = sys.argv[2] if len(sys.argv) > 2 else ""
+digest = sys.argv[3] if len(sys.argv) > 3 else ""
 parts = []
 if defn.strip():
     parts.append(defn.strip())
@@ -44,6 +50,8 @@ if os.path.isdir(d):
             text = fh.read().rstrip()
         if text:
             parts.append(text)
+if digest.strip():
+    parts.append(digest.strip())
 
 print(json.dumps({"additionalContext": "\n\n".join(parts)}) if parts else "{}")
 PYEOF

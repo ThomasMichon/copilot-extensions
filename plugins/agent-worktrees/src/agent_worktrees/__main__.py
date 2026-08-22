@@ -4586,6 +4586,7 @@ def _cmd_status_write(
         record = tracking.load_record(yaml_path)
         tracking.set_disposition(
             record, summary=summary, title=title, follow_up=follow_up,
+            session_id=(os.environ.get("COPILOT_AGENT_SESSION_ID") or None),
             save=False)
         tracking.save_record(record)
     flag = "follow-ups pending" if record.follow_up else "resolved"
@@ -4625,14 +4626,44 @@ def _cmd_status_history(args: argparse.Namespace) -> int:
         at = e.get("at") or "?"
         changed = ",".join(e.get("changed") or []) or "-"
         flag = "!" if e.get("follow_up") else " "
+        kind = e.get("kind") or "status"
+        sess = e.get("session")
+        sess_tag = f" {sess[-6:]}" if isinstance(sess, str) and sess else ""
         title = e.get("title")
         summary = e.get("summary") or ""
-        head = f"  {at} [{flag}] ({changed})"
+        head = f"  {at} [{flag}] {kind}{sess_tag} ({changed})"
         if title:
             head += f" title: {title}"
         print(head)
         if summary:
             print(f"        {summary}")
+    return 0
+
+
+def cmd_history_digest(args: argparse.Namespace) -> int:
+    """Print a compact recovery digest of THIS worktree's recent history.
+
+    The record-first recovery surface: the ``sessionStart`` conduct hook calls
+    this and injects the output as ``additionalContext`` so a fresh or successor
+    session inherits what the worktree has recently been doing -- straight from
+    the worktree's own memory, even if a live handoff never completed. Resolves
+    the worktree from CWD (or ``--worktree-id``); prints nothing (exit 0) when the
+    cwd is not a tracked worktree or there is no history, so it is a safe no-op in
+    the hook. Never a hard error.
+    """
+    from . import disposition_history
+    try:
+        config = cfg.load_config()
+    except Exception:
+        return 0
+    worktree_id = _infer_worktree_id(getattr(args, "worktree_id", None), config)
+    if not worktree_id:
+        return 0
+    worktree_id = _resolve_worktree_id(worktree_id)
+    limit = getattr(args, "limit", None) or 8
+    text = disposition_history.digest(worktree_id, limit=limit)
+    if text:
+        print(text)
     return 0
 
 
@@ -14905,6 +14936,16 @@ def build_parser() -> argparse.ArgumentParser:
                     help="The session's working directory (default: process cwd)")
     sp.add_argument("--stdin", action="store_true",
                     help="Read the Copilot postToolUse JSON payload from stdin (for workingDirectory)")
+
+    # history-digest -- compact recovery digest of this worktree's history
+    sp = sub.add_parser(
+        "history-digest",
+        help="Print a compact recovery digest of this worktree's recent history",
+    )
+    sp.add_argument("--worktree-id", default=None,
+                    help="Worktree ID (default: resolved from cwd)")
+    sp.add_argument("--limit", type=int, default=8,
+                    help="Max recent entries to include (default: 8)")
     sub.add_parser("backfill-sessions",
                    help="Populate empty session registries from session-state data")
 
@@ -15273,6 +15314,21 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
         session_id=session_id,
         source="bind-session",
         pane=pane_id,
+    )
+
+    # Record the bind in the worktree's own memory: a session-tagged `bind`
+    # entry, so the history shows WHEN a session declared ownership (and a
+    # successor/operator reading the digest sees the binding event). Best-effort.
+    from . import disposition_history
+    disposition_history.append(
+        wt_id,
+        at=tracking._now_iso(),
+        summary="",
+        title=None,
+        follow_up=False,
+        changed=[],
+        kind="bind",
+        session_id=session_id,
     )
 
     # Binding activates live tracking: (re)assert the status-updater for this
@@ -16350,6 +16406,7 @@ COMMAND_MAP = {
     "deregister-session": cmd_deregister_session,
     "bind-session": cmd_bind_session,
     "bind-nudge": cmd_bind_nudge,
+    "history-digest": cmd_history_digest,
     "backfill-sessions": cmd_backfill_sessions,
     "doctor": cmd_doctor,
     "list-sessions": cmd_list_sessions,
@@ -16689,6 +16746,7 @@ _NO_PROJECT_COMMANDS = {
     "picker", "reap-shells", "status-updater", "status-monitor", "status-monitor-restart", "restart", "register-session",
     "bind-session",
     "bind-nudge",
+    "history-digest",
     "head-session", "conclude-session", "link-succession", "config-migrate",
     "session-lock", "machine-context", "reconcile-binstubs",
     "register-project-entry", "terminal-fragment",

@@ -61,12 +61,26 @@ def append(
     title: str | None,
     follow_up: bool,
     changed: list[str],
+    kind: str = "status",
+    session_id: str | None = None,
 ) -> None:
-    """Append one disposition snapshot for *worktree_id*. Best-effort (never
-    raises). Trims oldest entries past :data:`MAX_ENTRIES`.
+    """Append one history entry for *worktree_id*. Best-effort (never raises).
+    Trims oldest entries past :data:`MAX_ENTRIES`.
 
     ``changed`` names the fields THIS write touched (a subset of :data:`_FIELDS`);
     the snapshot carries the resulting values so each line is self-contained.
+
+    ``kind`` classifies the entry -- ``"status"`` (a disposition write; the
+    default so every existing caller is unchanged), ``"bind"`` (a session
+    declared ownership), or ``"handoff"`` (a terse handoff reference). ``kind``
+    is what lets the worktree remember *what kind of thing* each session did, not
+    just its latest disposition.
+
+    ``session_id`` tags the entry with the session that wrote it, so the history
+    is session-attributed ("each session contributes its own marked entries").
+    Both are omitted from the line when at their neutral default (``status`` /
+    ``None``) so legacy readers and byte-comparisons of status-only histories are
+    unaffected.
     """
     try:
         entry: dict[str, Any] = {
@@ -76,6 +90,10 @@ def append(
             "summary": summary,
             "follow_up": bool(follow_up),
         }
+        if kind and kind != "status":
+            entry["kind"] = kind
+        if session_id:
+            entry["session"] = session_id
         path = history_path(worktree_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         lines: list[str] = []
@@ -128,3 +146,37 @@ def remove(worktree_id: str) -> None:
         history_path(worktree_id).unlink(missing_ok=True)
     except OSError:
         pass
+
+
+def digest(worktree_id: str, *, limit: int = 8) -> str:
+    """A compact, human/agent-readable recovery digest of a worktree's recent
+    history, newest last, or ``""`` when there is none. Never raises.
+
+    This is the **record-first recovery** surface: injected into a fresh or
+    successor session at start so it inherits "what this worktree has recently
+    been doing" straight from the worktree's own memory -- no second service
+    reachable, no successful live handoff required. Deliberately terse (one line
+    per entry) so it is cheap to carry as session context.
+    """
+    try:
+        entries = read(worktree_id, limit=limit)
+        if not entries:
+            return ""
+        lines = ["This worktree's recent history (most recent last):"]
+        for e in entries:
+            at = (e.get("at") or "?")
+            kind = e.get("kind") or "status"
+            sess = e.get("session")
+            sess_tag = f" {sess[-6:]}" if isinstance(sess, str) and sess else ""
+            flag = " !" if e.get("follow_up") else ""
+            title = e.get("title")
+            summary = (e.get("summary") or "").strip()
+            label = summary or (title or "")
+            if kind != "status" and not label:
+                label = f"({kind})"
+            line = f"- {at} [{kind}{sess_tag}]{flag} {label}".rstrip()
+            lines.append(line)
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
