@@ -2511,8 +2511,9 @@ _RECONNECT_BACKOFF = 1.0
 # the daemon bounced and has not re-registered the session yet -- and retried for
 # up to this long before it is reported. Distinguishes a genuine "unknown
 # session" (still 404 after the daemon is back and settled) from the re-register
-# race across a restart. Mirrors _request's session-404 grace for the streaming
-# path (which does not route through _request). (dotfiles#1713)
+# race across a restart. The streaming path owns a longer window than one-shot
+# requests because it may reconnect throughout a long-running command and does
+# not route through _request's shared outage budget. (#891)
 _STREAM_404_GRACE_S = 30.0
 
 
