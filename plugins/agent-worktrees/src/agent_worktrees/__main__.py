@@ -4652,11 +4652,13 @@ def cmd_history_digest(args: argparse.Namespace) -> int:
     the hook. Never a hard error.
     """
     from . import disposition_history
-    try:
-        config = cfg.load_config()
-    except Exception:
-        return 0
-    worktree_id = _infer_worktree_id(getattr(args, "worktree_id", None), config)
+    # history-digest is a _NO_PROJECT_COMMANDS verb, so main() does NOT resolve a
+    # project for it -- the command must activate project context from cwd itself
+    # (like register-session / bind-session) or cfg.tracking_dir() resolves to the
+    # wrong dir and the history reads back empty. Best-effort; a cwd outside any
+    # adopted project stays a silent no-op.
+    _activate_project_for_path(os.getcwd())
+    worktree_id = _infer_worktree_id(getattr(args, "worktree_id", None))
     if not worktree_id:
         return 0
     worktree_id = _resolve_worktree_id(worktree_id)
