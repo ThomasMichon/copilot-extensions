@@ -206,3 +206,41 @@ class TestBindNudgeCmd:
         rc = m.cmd_bind_nudge(argparse.Namespace(cwd="/tmp/src/wt-q", stdin=False))
         assert rc == 0
         assert capsys.readouterr().out.strip() == "{}"
+
+
+class TestHistoryDigestCmd:
+    def test_digest_cmd_activates_project_and_prints(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch, capsys
+    ):
+        # Regression: history-digest is a _NO_PROJECT_COMMANDS verb, so it must
+        # activate project context from cwd itself -- otherwise tracking_dir()
+        # resolves wrong and the history reads back empty (caught in live verify).
+        import agent_worktrees.disposition_history as dh
+
+        _save_record(tmp_tracking_dir, "wt-h", "/tmp/src/wt-h")
+        dh.append("wt-h", at="2026-01-01T00:00:01", summary="did work",
+                  title=None, follow_up=False, changed=["summary"],
+                  session_id="sess-h")
+        activated = {}
+        monkeypatch.setattr(m, "_activate_project_for_path",
+                            lambda c: activated.update(cwd=c))
+        monkeypatch.setattr(m, "_infer_worktree_id", lambda wid, cfg=None: "wt-h")
+        monkeypatch.setattr(m, "_resolve_worktree_id", lambda wid: wid)
+
+        rc = m.cmd_history_digest(
+            argparse.Namespace(worktree_id=None, limit=8)
+        )
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "recent history" in out
+        assert "did work" in out
+        assert activated.get("cwd")  # project WAS activated from cwd
+
+    def test_digest_cmd_empty_when_no_worktree(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch, capsys
+    ):
+        monkeypatch.setattr(m, "_activate_project_for_path", lambda c: None)
+        monkeypatch.setattr(m, "_infer_worktree_id", lambda wid, cfg=None: None)
+        rc = m.cmd_history_digest(argparse.Namespace(worktree_id=None, limit=8))
+        assert rc == 0
+        assert capsys.readouterr().out.strip() == ""
