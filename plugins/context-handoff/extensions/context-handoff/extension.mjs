@@ -205,6 +205,24 @@ function agentWorktreesGet(key, cwd, sessionId) {
 const HANDOFF_META_PREFIX = "<!-- context-handoff:";
 const HANDOFF_META_SUFFIX = "-->";
 
+// Mirror the stored handoff into the worktree's OWN record as a terse,
+// session-tagged `handoff` entry (record-first recovery): the sessionStart
+// digest then surfaces "a handoff was produced here (task <id>, topic <title>)"
+// even if agent-dispatch is unreachable or a live cutover never completed. The
+// full brief still lives in the task/file; this is only the durable pointer.
+// Best-effort -- a miss never affects the handoff itself.
+function noteHandoffInRecord(cwd, sid, ref, title) {
+  try {
+    const argv = ["note-handoff"];
+    if (ref) argv.push("--task", ref);
+    if (title) argv.push("--title", title);
+    if (sid) argv.push("--session-id", sid);
+    runCli("agent-worktrees", argv, { cwd, timeout: 5000 });
+  } catch {
+    /* history is advisory -- ignore */
+  }
+}
+
 function safePathSegment(value) {
   return String(value || "unknown")
     .replace(/[^A-Za-z0-9._-]/g, "_")
@@ -982,6 +1000,8 @@ const session = await joinSession({
               worktree: stored?.metadata?.worktree,
               sessionId: sid,
             });
+            // Mirror the handoff into the worktree record (record-first recovery).
+            noteHandoffInRecord(cwd, sid, taskId, title);
             storedMsg = (
               `Handoff stored as agent-dispatch task ${taskId} (proposed, label ` +
               `'handoff', pinned to this worktree). No file handoff was written.\n\n` +
@@ -1011,6 +1031,8 @@ const session = await joinSession({
           }
           seed = buildCutoverSeed("file", fileStored.id, lead, { retry: false });
           cutoverSeed = buildCutoverSeed("file", fileStored.id, lead);
+          // Mirror the handoff into the worktree record (record-first recovery).
+          noteHandoffInRecord(cwd, sid, fileStored.id, title);
           storedMsg = (
             `Handoff saved to ${fileStored.path}\n\n` +
             `(Stored as a worktree-scoped handoff file outside the repo checkout ` +

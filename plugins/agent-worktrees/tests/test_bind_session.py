@@ -244,3 +244,41 @@ class TestHistoryDigestCmd:
         rc = m.cmd_history_digest(argparse.Namespace(worktree_id=None, limit=8))
         assert rc == 0
         assert capsys.readouterr().out.strip() == ""
+
+
+class TestNoteHandoff:
+    def test_appends_session_tagged_handoff_entry(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch, capsys
+    ):
+        import agent_worktrees.disposition_history as dh
+
+        _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
+        monkeypatch.setattr(m, "_activate_project_for_path", lambda c: None)
+        monkeypatch.setattr(m, "find_worktree_id_by_cwd", lambda c: "wt-hd", raising=False)
+        monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: "wt-hd")
+        captured = {}
+        monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))
+        monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "sess-pred")
+
+        rc = m.cmd_note_handoff(argparse.Namespace(
+            task="task123", title="Fix the widget",
+            worktree_dir="/tmp/src/wt-hd", worktree_id=None, session_id=None))
+        assert rc == 0
+        assert captured["noted"] is True
+        e = dh.read("wt-hd")[-1]
+        assert e["kind"] == "handoff"
+        assert e["session"] == "sess-pred"
+        assert "task123" in e["summary"] and "Fix the widget" in e["summary"]
+
+    def test_untracked_is_silent_noop(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch
+    ):
+        monkeypatch.setattr(m, "_activate_project_for_path", lambda c: None)
+        monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: None)
+        captured = {}
+        monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))
+        rc = m.cmd_note_handoff(argparse.Namespace(
+            task="t", title=None, worktree_dir="/tmp/nope",
+            worktree_id=None, session_id="s"))
+        assert rc == 0
+        assert captured["noted"] is False
