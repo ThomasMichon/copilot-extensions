@@ -4640,6 +4640,152 @@ def _cmd_status_history(args: argparse.Namespace) -> int:
     return 0
 
 
+def _resolve_worktree_for_read(worktree_id, worktree_dir=None, session_id=None):
+    """Resolve a worktree id for a read-only, no-project verb, robustly.
+
+    Order: explicit ``worktree_id`` -> the declared dir / cwd (activating project
+    context first, like register-session) -> the session->worktree binding by
+    ``session_id`` (``find_worktree_id_by_session``). The last is what lets a
+    HOME-cwd ACP / bare-resumed session -- which cannot resolve its worktree from
+    cwd -- still get its digest / role. Returns a resolved id or None. Never raises.
+    """
+    try:
+        if worktree_id:
+            return _resolve_worktree_id(worktree_id)
+        wdir = worktree_dir or os.getcwd()
+        _activate_project_for_path(wdir)
+        wid = _infer_worktree_id(None)
+        if wid:
+            return _resolve_worktree_id(wid)
+        if session_id:
+            wid = tracking.find_worktree_id_by_session(session_id)
+            if wid:
+                return _resolve_worktree_id(wid)
+    except Exception:
+        return None
+    return None
+
+
+def _session_role(record, session_id):
+    """Compute a session's role relative to a worktree's asserted head.
+
+    Roles (over ``resolved_head_session`` + the succession chain + a pending
+    handoff): ``head`` (this session IS the current head -> it should drive),
+    ``superseded`` (a *different* active head exists -> assist / hand off, do not
+    seize the head), ``successor-elect`` (no active head but a handoff is pending
+    -> consume it to take the head), ``head-elect`` (no head and no pending
+    handoff -> this session becomes head once it binds), ``unbound`` (a session id
+    that isn't registered here yet and the worktree already has an active head),
+    or ``none`` when there is nothing to say. Returns a JSON-able dict.
+    """
+    head = record.resolved_head_session
+    head_entry = record.session_entry(head) if head else None
+    head_state = head_entry.state if head_entry is not None else None
+    registered = bool(session_id and record.session_entry(session_id) is not None)
+    pending = _pending_handoff_predecessor_safe(record, exclude=session_id or "")
+    is_head = bool(session_id and head == session_id)
+
+    if is_head:
+        role = "head"
+    elif head and head_state not in _CONCLUDED_STATES:
+        # An active head that is not us.
+        role = "superseded" if registered else "unbound"
+    elif pending is not None:
+        role = "successor-elect"
+    else:
+        role = "head-elect"
+    return {
+        "role": role,
+        "head_session": head,
+        "head_state": head_state,
+        "is_head": is_head,
+        "registered": registered,
+        "pending_handoff_predecessor": (pending.session_id if pending else None),
+    }
+
+
+# _CONCLUDED_SESSION_STATES lives in tracking; mirror the tuple lazily to avoid a
+# hard import cycle at module import time.
+_CONCLUDED_STATES = ("handed-off", "concluded")
+
+
+def _pending_handoff_predecessor_safe(record, *, exclude):
+    try:
+        return tracking._pending_handoff_predecessor(record, exclude=exclude)
+    except Exception:
+        return None
+
+
+def _succession_header(record) -> str:
+    """A terse succession/role line for the sessionStart digest, or ``""``.
+
+    Session-id-agnostic (the sessionStart conduct hook runs before this session
+    registers and does not reliably know its own id), so it describes the
+    WORKTREE's head state and what an arriving session should do about it: take
+    over a pending handoff, or coordinate rather than seizing an active head.
+    """
+    try:
+        head = record.resolved_head_session
+        pending = _pending_handoff_predecessor_safe(record, exclude="")
+        if pending is not None:
+            return (
+                "Worktree succession: a handoff is pending here (predecessor "
+                f"{pending.session_id[-6:]} handed off, no successor yet). If you "
+                "are the seeded successor, consume the handoff (see the handoff "
+                "entry above) to take over the head; otherwise do not start "
+                "parallel work."
+            )
+        if head:
+            entry = record.session_entry(head)
+            state = entry.state if entry is not None else "active"
+            if state not in _CONCLUDED_STATES:
+                return (
+                    f"Worktree succession: the current head session on record is "
+                    f"{head[-6:]} (active). If that is not you, another session may "
+                    "still hold the head -- coordinate rather than starting parallel "
+                    "work; if you are resuming it, you are the head."
+                )
+        return ""
+    except Exception:
+        return ""
+
+
+def cmd_session_role(args: argparse.Namespace) -> int:
+    """Report THIS session's role relative to its worktree's head (JSON out).
+
+    The queryable form of the succession logic: a session (or a tool) asks "am I
+    the rightful head that should drive this worktree, or a predecessor that
+    should assist the cutover?" Self-identifies from ``--session-id`` /
+    ``COPILOT_AGENT_SESSION_ID``; resolves the worktree from ``--worktree-id`` /
+    ``--worktree-dir`` / cwd, falling back to the session->worktree binding so a
+    HOME-cwd ACP session still resolves. Fail-open: an untracked worktree yields
+    ``role: "untracked"`` (exit 0), never an error.
+    """
+    session_id = getattr(args, "session_id", None) or (
+        os.environ.get("COPILOT_AGENT_SESSION_ID") or None
+    )
+    wt_id = _resolve_worktree_for_read(
+        getattr(args, "worktree_id", None),
+        getattr(args, "worktree_dir", None),
+        session_id,
+    )
+    if not wt_id:
+        _json_output({"role": "untracked", "worktree_id": None,
+                      "session": session_id})
+        return 0
+    try:
+        record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
+    except Exception:
+        _json_output({"role": "untracked", "worktree_id": wt_id,
+                      "session": session_id})
+        return 0
+    result = _session_role(record, session_id)
+    result["worktree_id"] = wt_id
+    result["session"] = session_id
+    _json_output(result)
+    return 0
+
+
 def cmd_history_digest(args: argparse.Namespace) -> int:
     """Print a compact recovery digest of THIS worktree's recent history.
 
@@ -4653,19 +4799,32 @@ def cmd_history_digest(args: argparse.Namespace) -> int:
     """
     from . import disposition_history
     # history-digest is a _NO_PROJECT_COMMANDS verb, so main() does NOT resolve a
-    # project for it -- the command must activate project context from cwd itself
-    # (like register-session / bind-session) or cfg.tracking_dir() resolves to the
-    # wrong dir and the history reads back empty. Best-effort; a cwd outside any
-    # adopted project stays a silent no-op.
-    _activate_project_for_path(os.getcwd())
-    worktree_id = _infer_worktree_id(getattr(args, "worktree_id", None))
+    # project for it -- the command must resolve the worktree itself. Resolve via
+    # explicit id -> cwd (activating project) -> the session->worktree binding, so
+    # a HOME-cwd ACP / bare-resumed session still gets its digest.
+    session_id = getattr(args, "session_id", None) or (
+        os.environ.get("COPILOT_AGENT_SESSION_ID") or None
+    )
+    worktree_id = _resolve_worktree_for_read(
+        getattr(args, "worktree_id", None),
+        getattr(args, "worktree_dir", None),
+        session_id,
+    )
     if not worktree_id:
         return 0
-    worktree_id = _resolve_worktree_id(worktree_id)
     limit = getattr(args, "limit", None) or 8
     text = disposition_history.digest(worktree_id, limit=limit)
-    if text:
-        print(text)
+    # Prepend the succession/role header so an arriving session learns not just
+    # what the worktree was doing, but whether it should drive or defer.
+    header = ""
+    try:
+        record = tracking.load_record(cfg.tracking_dir() / f"{worktree_id}.yaml")
+        header = _succession_header(record)
+    except Exception:
+        header = ""
+    combined = "\n\n".join([p for p in (text, header) if p])
+    if combined:
+        print(combined)
     return 0
 
 
@@ -14945,9 +15104,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print a compact recovery digest of this worktree's recent history",
     )
     sp.add_argument("--worktree-id", default=None,
-                    help="Worktree ID (default: resolved from cwd)")
+                    help="Worktree ID (default: resolved from cwd / session id)")
+    sp.add_argument("--worktree-dir", dest="worktree_dir", default=None,
+                    help="The worktree checkout dir (default: cwd)")
+    sp.add_argument("--session-id", default=None,
+                    help="Session id for the session->worktree binding fallback "
+                         "(default: COPILOT_AGENT_SESSION_ID)")
     sp.add_argument("--limit", type=int, default=8,
                     help="Max recent entries to include (default: 8)")
+
+    # session-role -- this session's role vs the worktree head (drive vs assist)
+    sp = sub.add_parser(
+        "session-role",
+        help="Report this session's role vs the worktree head (head/superseded/...)",
+    )
+    sp.add_argument("--session-id", default=None,
+                    help="Session id (default: COPILOT_AGENT_SESSION_ID)")
+    sp.add_argument("--worktree-id", default=None,
+                    help="Worktree ID (default: resolved from cwd / session id)")
+    sp.add_argument("--worktree-dir", dest="worktree_dir", default=None,
+                    help="The worktree checkout dir (default: cwd)")
 
     # note-handoff -- append a session-tagged handoff ref to the history
     sp = sub.add_parser(
@@ -16490,6 +16666,7 @@ COMMAND_MAP = {
     "bind-nudge": cmd_bind_nudge,
     "history-digest": cmd_history_digest,
     "note-handoff": cmd_note_handoff,
+    "session-role": cmd_session_role,
     "backfill-sessions": cmd_backfill_sessions,
     "doctor": cmd_doctor,
     "list-sessions": cmd_list_sessions,
@@ -16831,6 +17008,7 @@ _NO_PROJECT_COMMANDS = {
     "bind-nudge",
     "history-digest",
     "note-handoff",
+    "session-role",
     "head-session", "conclude-session", "link-succession", "config-migrate",
     "session-lock", "machine-context", "reconcile-binstubs",
     "register-project-entry", "terminal-fragment",
