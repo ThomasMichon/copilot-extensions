@@ -45,6 +45,13 @@ if (Test-Path $dir) {
         if ($t) { $parts += $t.TrimEnd() }
     }
 }
+
+# Dynamic: the worktree's own recent-history recovery digest (record-first
+# recovery -- what this worktree has been doing, so a fresh/successor session
+# inherits it even if a live handoff never completed). Empty when no history.
+$digest = (& $python -m agent_worktrees history-digest 2>$null | Out-String).Trim()
+if ($digest) { $parts += $digest }
+
 if ($parts.Count -eq 0) { Emit-Empty }
 
 $ctx = ($parts -join "`n`n")

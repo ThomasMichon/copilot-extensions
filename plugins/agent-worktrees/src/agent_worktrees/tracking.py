@@ -1332,6 +1332,7 @@ def set_disposition(
     summary: str | None = None,
     title: str | None = None,
     follow_up: bool | None = None,
+    session_id: str | None = None,
     save: bool = True,
 ) -> None:
     """Set the agent-asserted disposition overlay (summary / title / follow-up)
@@ -1370,6 +1371,8 @@ def set_disposition(
             title=record.title,
             follow_up=record.follow_up,
             changed=changed,
+            kind="status",
+            session_id=session_id,
         )
     if save:
         save_record(record)
