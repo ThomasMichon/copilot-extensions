@@ -38,6 +38,16 @@ def _drain(lines: list[str]) -> list[dict]:
 
 
 class TestSseCommentParsing:
+    def test_successful_stream_resets_outage_budget(self) -> None:
+        client = BridgeClient("http://127.0.0.1:0", "tok")
+        client._outage_deadline = 1.0
+        with patch(
+            "agent_bridge.client.urllib.request.urlopen",
+            return_value=_FakeSseResp([": heartbeat", ""]),
+        ):
+            assert list(client.stream_events("sess-1"))
+        assert client._outage_deadline is None
+
     def test_tool_progress_comment_becomes_liveness_dict(self) -> None:
         payload = json.dumps(
             {"title": "Build webapp", "command": "rush build", "elapsed_s": 1027}

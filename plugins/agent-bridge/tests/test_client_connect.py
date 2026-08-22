@@ -11,6 +11,7 @@ import pytest
 
 from agent_bridge.client import (
     DEFAULT_RESTART_GRACE,
+    DEFAULT_SESSION_SETTLE_GRACE,
     BridgeClient,
     BridgeClientError,
     BridgeConnectionError,
@@ -46,6 +47,186 @@ class TestConnectGrace:
     def test_default_covers_a_sustained_restart(self) -> None:
         client = BridgeClient("http://127.0.0.1:0", "tok")
         assert client._connect_grace == DEFAULT_RESTART_GRACE == 30.0
+        assert (
+            client._session_settle_grace
+            == DEFAULT_SESSION_SETTLE_GRACE
+            == 5.0
+        )
+
+    def test_explicit_settle_grace_cannot_exceed_connect_grace(self) -> None:
+        client = BridgeClient(
+            "http://127.0.0.1:0",
+            "tok",
+            connect_grace=0.0,
+            session_settle_grace=5.0,
+        )
+        assert client._session_settle_grace == 0.0
+
+    def test_requests_share_one_continuous_outage_budget(self) -> None:
+        client = BridgeClient(
+            "http://127.0.0.1:0", "tok", connect_grace=2.0
+        )
+        calls = {"n": 0}
+        clock = {"now": -1.0}
+
+        def always_fail(_req, timeout=None):
+            calls["n"] += 1
+            raise urllib.error.URLError("refused")
+
+        def tick():
+            clock["now"] += 0.5
+            return clock["now"]
+
+        with (
+            patch("agent_bridge.client.urllib.request.urlopen", side_effect=always_fail),
+            patch("time.monotonic", side_effect=tick),
+            patch("time.sleep"),
+        ):
+            with pytest.raises(BridgeConnectionError):
+                client._request("GET", "/health")
+            first_request_calls = calls["n"]
+            with pytest.raises(BridgeConnectionError):
+                client._request("GET", "/api/v1/sessions")
+
+        assert first_request_calls == 2
+        assert calls["n"] == 3
+
+    def test_session_settle_window_starts_at_first_404(self) -> None:
+        client = BridgeClient(
+            "http://127.0.0.1:0",
+            "tok",
+            connect_grace=10.0,
+            session_settle_grace=2.0,
+            reresolve=lambda: "http://127.0.0.1:0",
+        )
+        clock = {"now": -1.0}
+        outcomes = iter(
+            (
+                urllib.error.URLError("refused"),
+                urllib.error.URLError("refused"),
+                urllib.error.URLError("refused"),
+                _not_found(),
+                _FakeResp({"id": "s1"}),
+            )
+        )
+
+        def tick():
+            clock["now"] += 0.5
+            return clock["now"]
+
+        def urlopen(_req, timeout=None):
+            outcome = next(outcomes)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+        with (
+            patch("agent_bridge.client.urllib.request.urlopen", side_effect=urlopen),
+            patch("time.monotonic", side_effect=tick),
+            patch("time.sleep") as sleep,
+        ):
+            result = client._request("GET", "/api/v1/sessions/s1")
+
+        assert result == {"id": "s1"}
+        assert [call.args[0] for call in sleep.call_args_list] == [
+            0.25,
+            0.5,
+            1.0,
+            0.25,
+        ]
+
+    def test_endpoint_changes_remain_inside_outage_budget(self) -> None:
+        endpoints = iter(
+            (
+                "http://127.0.0.1:47000",
+                "http://127.0.0.1:48000",
+            )
+        )
+        client = BridgeClient(
+            "http://127.0.0.1:46000",
+            "tok",
+            connect_grace=2.0,
+            reresolve=lambda: next(endpoints),
+        )
+        clock = {"now": -1.0}
+        calls = {"n": 0}
+
+        def tick():
+            clock["now"] += 3.0
+            return clock["now"]
+
+        def always_fail(_req, timeout=None):
+            calls["n"] += 1
+            raise urllib.error.URLError("refused")
+
+        with (
+            patch("agent_bridge.client.urllib.request.urlopen", side_effect=always_fail),
+            patch("time.monotonic", side_effect=tick),
+            patch("time.sleep"),
+        ):
+            with pytest.raises(BridgeConnectionError):
+                client._request("GET", "/health")
+
+        assert calls["n"] == 2
+
+    def test_replacement_allowance_does_not_renew_across_requests(self) -> None:
+        client = BridgeClient(
+            "http://127.0.0.1:46000",
+            "tok",
+            connect_grace=0.0,
+            reresolve=Mock(
+                side_effect=(
+                    "http://127.0.0.1:47000",
+                    "http://127.0.0.1:48000",
+                )
+            ),
+        )
+        calls = {"n": 0}
+
+        def always_fail(_req, timeout=None):
+            calls["n"] += 1
+            raise urllib.error.URLError("refused")
+
+        with patch(
+            "agent_bridge.client.urllib.request.urlopen",
+            side_effect=always_fail,
+        ):
+            with pytest.raises(BridgeConnectionError):
+                client._request("GET", "/health")
+            with pytest.raises(BridgeConnectionError):
+                client._request("GET", "/api/v1/sessions")
+
+        assert calls["n"] == 3
+        assert client._reresolve.call_count == 1
+
+    def test_session_404_endpoint_churn_is_bounded(self) -> None:
+        client = BridgeClient(
+            "http://127.0.0.1:46000",
+            "tok",
+            connect_grace=0.0,
+            reresolve=Mock(
+                side_effect=(
+                    "http://127.0.0.1:47000",
+                    "http://127.0.0.1:48000",
+                )
+            ),
+        )
+        calls = {"n": 0}
+
+        def not_found(_req, timeout=None):
+            calls["n"] += 1
+            raise _not_found()
+
+        with patch(
+            "agent_bridge.client.urllib.request.urlopen",
+            side_effect=not_found,
+        ):
+            with pytest.raises(BridgeClientError) as exc_info:
+                client._request("GET", "/api/v1/sessions/s1")
+
+        assert exc_info.value.status == 404
+        assert calls["n"] == 2
+        assert client._reresolve.call_count == 1
 
     def test_retries_then_succeeds(self) -> None:
         """A transient connection refusal within the grace window is retried."""
