@@ -190,13 +190,44 @@ downstream agent.
 | Action | Description |
 |--------|-------------|
 | `stamp` | Fast first-install path: snapshot the payload and write the self-provisioning binstub; defers venv/service work to first use. |
-| `provision` | First-use path invoked by the binstub when no runtime slot exists; equivalent to a full install from the stamped snapshot. |
+| `provision` | First-use path invoked by the binstub when no runtime slot exists; equivalent to a full install from the stamped snapshot. **Also the explicit, elevation-aware scheduled-task (re)provision/repair path** — run it from an elevated shell to change an S4U/boot task's mode or repair a broken/never-ran task (routine `update` never does this). |
 | `install` | Full deploy: versioned venv slot, package/libs, binstub, service, manifest |
 | `update` | Build/verify a new versioned slot, activate it, then perform installer-driven graceful cutover when a daemon is live; falls back to drain/stop/start on failure. |
 | `start` | Start the service (`--passive` for a cutover spare -- see below) |
 | `stop` | Stop the service |
 | `status` | Show service status |
 | `uninstall` | Remove service (`--remove-config` for config too) |
+
+### Scheduled task: write-once bootstrap (decoupled from the runtime version)
+
+On Windows the auto-start scheduled task is **write-once bootstrap
+infrastructure**, deliberately decoupled from the runtime version so routine
+updates rarely — in practice never — touch it:
+
+- **The task's action is version-stable.** It launches the stable
+  `~/.agent-bridge/start-agent-bridge.ps1` supervisor, which resolves the live
+  runtime from the `current-version` marker at boot. A version cutover only
+  rewrites the marker (and, if its content changed, the supervisor file) — both
+  plain-file writes that need no elevation. The task's action/trigger/principal
+  are byte-identical across every deploy.
+- **`update` never rewrites an existing task.** The routine update path calls
+  `Ensure-ScheduledTask`, which *creates* the task only when it is **absent**
+  (first install / after a manual removal, in the default non-elevated
+  interactive AtLogOn mode) and otherwise leaves it **entirely untouched** —
+  adopting whatever mode it already has, with zero Task Scheduler writes. This is
+  what keeps a routine `update` from needing elevation and from churning or
+  breaking a working auto-start (an S4U/boot task can only be modified with
+  elevation; a failed rewrite used to purge a healthy task).
+- **Mode changes and repair are the explicit, elevation-aware `provision`
+  action's job.** Switching interactive ⇄ headless S4U, or repairing a
+  broken/never-ran task, happens only when an operator runs `install.ps1
+  provision` (from an **elevated** shell for an S4U/boot task) — never silently
+  during a version update. If a routine step ever does need such a change it
+  leaves the existing task intact and prints the one elevated command to run.
+- **Meanwhile the daemon self-heals** regardless of the task: any daemon-touching
+  CLI command boots a down daemon on demand (persistence-correct detached
+  spawn), and `service`/restart fall back to a direct spawn when a task can't be
+  run on demand. So auto-start-at-logon is a convenience, not a dependency.
 
 ### Deploy Manifest
 

@@ -268,6 +268,47 @@ reliable recovery.
   connection re-warms/verifies auth on that one connection (it does **not** fix
   the in-flight bridge session's git -- that still needs end + recreate).
 
+## Windows: daemon won't stay up / "auto-start not configured"
+
+**Signature.** On Windows the daemon keeps ending up down (after a reboot, a
+sleep, or a self-update), and/or the installer prints `auto-start ... is not
+configured` or a scheduled-task `Access is denied.` warning. Often the daemon is
+actually **up on a dynamic port** while `service status` looked wrong on the
+legacy 9280 (fixed separately) -- always confirm via the routing table.
+
+**What's fine / by design.**
+
+- The scheduled task is **write-once bootstrap** and is *decoupled from the
+  runtime version*: routine `update`s never rewrite it, and the daemon
+  **self-heals on demand** -- any daemon-touching command (`send`/`wait`/`read`/
+  `agents`/`sessions`) boots a down daemon (persistence-correct detached spawn).
+  So a missing/broken auto-start task is a convenience gap, not an outage: the
+  next command brings the bridge back. Confirm live state, don't assume "down":
+
+  ```pwsh
+  Get-Content ~/.agent-bridge/active.json | ConvertFrom-Json | Select -Expand active
+  # then GET http://127.0.0.1:<that port>/health
+  ```
+
+**Repairing a broken/never-ran auto-start task (the one elevated step).** A stale
+**S4U/boot** task that never launches (`LastTaskResult = 267011` /
+`SCHED_S_TASK_HAS_NOT_RUN`) can't be rewritten by a routine non-elevated update
+(that's *why* updates leave it untouched). Fix it once, from an **elevated**
+PowerShell:
+
+```pwsh
+# 1) remove the stale elevated task(s) (elevated shell)
+Unregister-ScheduledTask -TaskName 'Agent Bridge' -Confirm:$false -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName 'agent-bridge-elevated' -Confirm:$false -ErrorAction SilentlyContinue
+# 2) re-provision the clean default (interactive AtLogOn) task
+pwsh -File <plugin>/scripts/install.ps1 provision
+```
+
+Prefer the default **interactive AtLogOn** task; only opt into headless S4U
+(`install.ps1 provision -NonInteractive`) for an always-on box reached over
+SSH/RDP with no persistent interactive session -- and know S4U can silently fail
+to acquire the logon token (the 267011 case).
+
 ## Related skills
 
 - `agent-bridge` -- the CLI/service reference (same plugin).
