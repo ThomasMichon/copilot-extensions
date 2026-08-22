@@ -14948,6 +14948,22 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Worktree ID (default: resolved from cwd)")
     sp.add_argument("--limit", type=int, default=8,
                     help="Max recent entries to include (default: 8)")
+
+    # note-handoff -- append a session-tagged handoff ref to the history
+    sp = sub.add_parser(
+        "note-handoff",
+        help="Append a handoff reference to this worktree's history (record-first recovery)",
+    )
+    sp.add_argument("--task", default=None,
+                    help="The agent-dispatch handoff task id (the pointer to the full brief)")
+    sp.add_argument("--title", default=None,
+                    help="A one-line topic for the handoff")
+    sp.add_argument("--worktree-dir", dest="worktree_dir", default=None,
+                    help="The worktree checkout dir (default: cwd)")
+    sp.add_argument("--worktree-id", default=None,
+                    help="Worktree ID (alternative to --worktree-dir)")
+    sp.add_argument("--session-id", default=None,
+                    help="Predecessor session ID (default: COPILOT_AGENT_SESSION_ID)")
     sub.add_parser("backfill-sessions",
                    help="Populate empty session registries from session-state data")
 
@@ -15382,6 +15398,70 @@ def _bind_nudge_should_fire(record) -> bool:
         return record.resolved_head_session is None
     except Exception:
         return False
+
+
+def cmd_note_handoff(args: argparse.Namespace) -> int:
+    """Append a session-tagged ``handoff`` entry to this worktree's history.
+
+    Called by context-handoff's handoff flow right after it stores a handoff, so
+    the handoff is mirrored into the worktree's OWN memory (record-first
+    recovery): a successor -- or an operator -- sees "a handoff was produced here,
+    task ``<id>``, topic ``<title>``" straight from the worktree record and its
+    sessionStart digest, without agent-dispatch being reachable and without a live
+    cutover having completed. The full brief still lives in the agent-dispatch
+    task / handoff file; this is the terse durable *pointer* to it.
+
+    Self-identifies the predecessor session from ``--session-id`` /
+    ``COPILOT_AGENT_SESSION_ID``. Resolves the worktree from ``--worktree-dir``
+    (default cwd) or ``--worktree-id``. Best-effort + JSON out; a cwd outside a
+    tracked worktree is a silent no-op (``noted: false``) so the handoff flow is
+    never broken by a history hiccup.
+    """
+    from . import disposition_history
+    session_id = getattr(args, "session_id", None) or (
+        os.environ.get("COPILOT_AGENT_SESSION_ID") or None
+    )
+    wt_id = getattr(args, "worktree_id", None)
+    wdir = getattr(args, "worktree_dir", None) or os.getcwd()
+    if wt_id:
+        wt_id = _resolve_worktree_id(wt_id)
+    else:
+        _activate_project_for_path(wdir)
+        try:
+            wt_id = tracking.find_worktree_id_by_cwd(wdir)
+        except Exception:
+            wt_id = None
+    if not wt_id:
+        _json_output({"noted": False, "reason": "not a tracked worktree"})
+        return 0
+
+    task = (getattr(args, "task", None) or "").strip()
+    title = (getattr(args, "title", None) or "").strip()
+    # Terse one-line summary: topic + the task pointer that loads the full brief.
+    parts = []
+    if title:
+        parts.append(title)
+    if task:
+        parts.append(f"handoff task {task}")
+    summary = " -- ".join(parts) if parts else "handoff stored"
+
+    disposition_history.append(
+        wt_id,
+        at=tracking._now_iso(),
+        summary=summary,
+        title=None,
+        follow_up=False,
+        changed=[],
+        kind="handoff",
+        session_id=session_id,
+    )
+    _json_output({
+        "noted": True,
+        "worktree_id": wt_id,
+        "session": session_id,
+        "task": task or None,
+    })
+    return 0
 
 
 def cmd_bind_nudge(args: argparse.Namespace) -> int:
@@ -16409,6 +16489,7 @@ COMMAND_MAP = {
     "bind-session": cmd_bind_session,
     "bind-nudge": cmd_bind_nudge,
     "history-digest": cmd_history_digest,
+    "note-handoff": cmd_note_handoff,
     "backfill-sessions": cmd_backfill_sessions,
     "doctor": cmd_doctor,
     "list-sessions": cmd_list_sessions,
@@ -16749,6 +16830,7 @@ _NO_PROJECT_COMMANDS = {
     "bind-session",
     "bind-nudge",
     "history-digest",
+    "note-handoff",
     "head-session", "conclude-session", "link-succession", "config-migrate",
     "session-lock", "machine-context", "reconcile-binstubs",
     "register-project-entry", "terminal-fragment",

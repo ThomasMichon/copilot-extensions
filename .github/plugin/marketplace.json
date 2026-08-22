@@ -12,7 +12,7 @@
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.5.3-dev577",
+      "version": "1.5.3-dev578",
       "source": "plugins/agent-worktrees"
     },
     {
@@ -54,7 +54,7 @@
     {
       "name": "context-handoff",
       "description": "Context window monitoring and session handoff - a Copilot CLI session extension that tracks token utilization, stores handoffs as worktree-pinned agent-dispatch tasks when available or one-time worktree-state files otherwise, and performs successor-consume-driven live cutover so the predecessor is retired only after pickup",
-      "version": "0.1.0-dev36",
+      "version": "0.1.0-dev37",
       "source": "plugins/context-handoff"
     },
     {
