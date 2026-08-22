@@ -284,6 +284,7 @@ class BridgeClient:
                         session_deadline = (
                             _time.monotonic() + self._session_settle_grace
                         )
+                        backoff = 0.25
                     if not session_replacement_used:
                         if _follow_active_endpoint():
                             session_replacement_used = True

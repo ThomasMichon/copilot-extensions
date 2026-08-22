@@ -103,6 +103,8 @@ class TestConnectGrace:
         outcomes = iter(
             (
                 urllib.error.URLError("refused"),
+                urllib.error.URLError("refused"),
+                urllib.error.URLError("refused"),
                 _not_found(),
                 _FakeResp({"id": "s1"}),
             )
@@ -121,11 +123,17 @@ class TestConnectGrace:
         with (
             patch("agent_bridge.client.urllib.request.urlopen", side_effect=urlopen),
             patch("time.monotonic", side_effect=tick),
-            patch("time.sleep"),
+            patch("time.sleep") as sleep,
         ):
             result = client._request("GET", "/api/v1/sessions/s1")
 
         assert result == {"id": "s1"}
+        assert [call.args[0] for call in sleep.call_args_list] == [
+            0.25,
+            0.5,
+            1.0,
+            0.25,
+        ]
 
     def test_endpoint_changes_remain_inside_outage_budget(self) -> None:
         endpoints = iter(
