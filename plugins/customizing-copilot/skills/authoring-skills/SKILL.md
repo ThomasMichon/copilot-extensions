@@ -385,16 +385,22 @@ Two consequences shape how a plugin author writes them:
   existence check so a partial install fails open. Keep it under the perf budget
   below; do expensive work in a background process and have the hook read a cheap
   state file.
-- **The ACP transport gates repo-scoped hooks on folder-trust.** A host that
-  drives the agent over **ACP** (for example an ACP-mode bridge) creates a real
-  session that *can* load plugin hooks, but ACP sessions default to **unattested
-  folder-trust** and never run the interactive trust prompt. A plugin enabled only
-  at **repository scope** activates through a folder-trust-gated repo settings
-  file, so its hooks may not run over ACP unless the session's `cwd` was trusted
-  out-of-band -- and a repository's own `.github/hooks` are **not loaded over ACP
-  at all**. If a plugin's hooks *must* run over ACP, enable it at **user scope**
-  (which is not folder-trust-gated) and/or ensure the working directory is
-  trusted, and keep the static `AGENTS.md` fail-safe.
+- **The ACP transport and repo-scoped hooks — trust-gated, but usually fine.** A
+  host that drives the agent over **ACP** (for example an ACP-mode bridge) creates
+  a real session that loads plugin hooks, but ACP sessions **do not run the
+  interactive trust prompt** -- they honor only *persisted* folder-trust. A plugin
+  enabled at **repository scope** activates through a folder-trust-gated repo
+  settings file, so whether its `sessionStart` hook fires over ACP depends on
+  whether the session's `cwd` is already persisted-trusted. **In practice it
+  usually is:** a worktree manager (e.g. agent-worktrees) adds each worktree to the
+  trusted-folders store on creation, so a repo-scoped plugin's hook **does fire
+  over ACP** for those sessions (verified empirically). The gap bites only an ACP
+  `cwd` that was **never** trusted -- for that case enable the plugin at **user
+  scope** (not folder-trust-gated) and/or pre-trust the directory, and keep the
+  static `AGENTS.md` fail-safe. **Repo `.github/hooks` are different:** those file
+  hooks are deferred and **never load over ACP at all**, trusted or not
+  (confirmed) -- a hook that must run over ACP belongs in the plugin's own
+  `hooks.json` or in user hooks, not `.github/hooks`.
 
 ### sessionStart context injection
 
