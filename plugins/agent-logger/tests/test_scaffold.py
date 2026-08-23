@@ -31,6 +31,53 @@ def test_version_matches_build_info() -> None:
     assert __version__ == match.group(1)
 
 
+def test_runtime_is_reconciled_on_every_machine() -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    manifest = json.loads((plugin_root / "plugin.json").read_text(encoding="utf-8"))
+    install_ps1 = (plugin_root / "scripts" / "install.ps1").read_text(
+        encoding="utf-8"
+    )
+    install_sh = (plugin_root / "scripts" / "install.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert manifest["runtimeScope"] == "universal"
+    assert "[System.IO.FileShare]::None" in install_ps1
+    assert "Timed out waiting for the agent-logger install lock" in install_ps1
+    assert "$lockContended" in install_ps1
+    assert "$script:SkipPackageInstall" in install_ps1
+    assert "$script:SkipStamp" in install_ps1
+    assert "Refusing stale agent-logger" in install_ps1
+    assert "Move-Item -LiteralPath $stampedTmp" in install_ps1
+    assert (
+        "$Action -in @('install', 'update', 'provision', 'stamp')" in install_ps1
+    )
+    assert "$lockContended -and $Action" not in install_ps1
+    assert "ConvertTo-AgentLoggerVersionKey" in install_ps1
+    assert ".install-complete.json" in install_ps1
+    assert 'flock -w 300 8' in install_sh
+    assert "__install_lock_contended" in install_sh
+    assert "SKIP_PACKAGE_INSTALL" in install_sh
+    assert "__version_cmp" in install_sh
+    assert "SKIP_STAMP" in install_sh
+    assert "printf '%s' -1" in install_sh
+    assert "refusing stale agent-logger" in install_sh
+    assert "left_major" in install_sh
+    assert 'elif [[ -f "$INSTALL_DIR/deploy-manifest.json" ]]' in install_sh
+    assert 'mv -f "$version_tmp" "${INSTALL_DIR}/stamped-version"' in install_sh
+    assert '"$ACTION" =~ ^(install|update|provision|stamp)$' in install_sh
+    assert (
+        '"$__install_lock_contended" = 1 && "$ACTION" =~ ^(install|update|provision)'
+        not in install_sh
+    )
+    assert 'VENV="$INSTALL_DIR/versions/$__current"' in install_sh
+    assert (
+        'if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then _write_deploy_manifest; fi'
+        in install_sh
+    )
+    assert ".install-complete.json" in install_sh
+
+
 def test_log_writer_is_a_read_only_renderer() -> None:
     plugin_root = Path(__file__).resolve().parents[1]
     agent = (plugin_root / "agents" / "session-log-writer.agent.md").read_text(

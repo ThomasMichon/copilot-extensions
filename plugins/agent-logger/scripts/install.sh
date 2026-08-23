@@ -13,6 +13,8 @@
 set -euo pipefail
 
 ACTION="${1:-status}"
+SKIP_PACKAGE_INSTALL=0
+SKIP_STAMP=0
 INSTALL_DIR="${HOME}/.agent-logger"
 VENV="${INSTALL_DIR}/.venv"
 LOCAL_BIN="${HOME}/.local/bin"
@@ -375,6 +377,120 @@ PY
     return 1
 }
 
+# Serialize the complete mutating installer. The session-start reconciler and
+# agent-worktrees universal reconciler may discover the same version drift at
+# once; flock is process-held and released automatically on every exit path.
+if [[ "$ACTION" != "status" ]]; then
+    mkdir -p "$INSTALL_DIR"
+    if ! command -v flock >/dev/null 2>&1; then
+        printf 'ERROR: flock is required to serialize agent-logger installation\n' >&2
+        exit 1
+    fi
+    exec 8>"$INSTALL_DIR/.install.lock"
+    __install_lock_contended=0
+    if ! flock -n 8; then
+        __install_lock_contended=1
+    fi
+    if [[ "$__install_lock_contended" = 1 ]] && ! flock -w 300 8; then
+        printf 'ERROR: timed out waiting for agent-logger install lock\n' >&2
+        exit 1
+    fi
+    # Reject stale payloads after every lock acquisition. A delayed older
+    # process may acquire an uncontended lock after the newer install exits.
+    if [[ "$ACTION" =~ ^(install|update|provision|stamp)$ ]]; then
+        __desired="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/plugin.json" | head -1)"
+        __current="$(tr -d '[:space:]' < "$INSTALL_DIR/current-version" 2>/dev/null || true)"
+        __deployed=""
+        __lock_py="$(command -v python3 || command -v python || true)"
+        if [[ -n "$__lock_py" && -f "$INSTALL_DIR/deploy-manifest.json" ]]; then
+            __deployed="$("$__lock_py" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("source",{}).get("version",""))' "$INSTALL_DIR/deploy-manifest.json" 2>/dev/null || true)"
+        elif [[ -f "$INSTALL_DIR/deploy-manifest.json" ]]; then
+            __deployed="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$INSTALL_DIR/deploy-manifest.json" | head -1)"
+        fi
+        __version_cmp() {
+            local left="$1" right="$2"
+            if [[ -z "$__lock_py" ]]; then
+                local left_major left_minor left_patch left_dev
+                local right_major right_minor right_patch right_dev
+                if [[ "$left" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-dev([0-9]+))?$ ]]; then
+                    left_major="${BASH_REMATCH[1]}"; left_minor="${BASH_REMATCH[2]}"
+                    left_patch="${BASH_REMATCH[3]}"; left_dev="${BASH_REMATCH[5]:-}"
+                else
+                    printf '%s' -1
+                    return
+                fi
+                if [[ "$right" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-dev([0-9]+))?$ ]]; then
+                    right_major="${BASH_REMATCH[1]}"; right_minor="${BASH_REMATCH[2]}"
+                    right_patch="${BASH_REMATCH[3]}"; right_dev="${BASH_REMATCH[5]:-}"
+                else
+                    printf '%s' -1
+                    return
+                fi
+                local left_parts=("$left_major" "$left_minor" "$left_patch")
+                local right_parts=("$right_major" "$right_minor" "$right_patch")
+                local index left_part right_part
+                for index in 0 1 2; do
+                    left_part="${left_parts[$index]}"
+                    right_part="${right_parts[$index]}"
+                    if (( 10#$left_part > 10#$right_part )); then printf '%s' 1; return; fi
+                    if (( 10#$left_part < 10#$right_part )); then printf '%s' -1; return; fi
+                done
+                if [[ -z "$left_dev" && -n "$right_dev" ]]; then printf '%s' 1; return; fi
+                if [[ -n "$left_dev" && -z "$right_dev" ]]; then printf '%s' -1; return; fi
+                if [[ -n "$left_dev" ]]; then
+                    if (( 10#$left_dev > 10#$right_dev )); then printf '%s' 1; return; fi
+                    if (( 10#$left_dev < 10#$right_dev )); then printf '%s' -1; return; fi
+                fi
+                printf '%s' 0
+                return
+            fi
+            "$__lock_py" -c '
+import re, sys
+def key(value):
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?", value)
+    if not match:
+        return None
+    major, minor, patch, dev = match.groups()
+    return (int(major), int(minor), int(patch), int(dev) if dev is not None else sys.maxsize)
+left, right = key(sys.argv[1]), key(sys.argv[2])
+print((left > right) - (left < right) if left is not None and right is not None else -1)
+' "$left" "$right" 2>/dev/null || printf '%s' -1
+        }
+        __stamped="$(tr -d '[:space:]' < "$INSTALL_DIR/stamped-version" 2>/dev/null || true)"
+        if [[ "$ACTION" =~ ^(install|update|provision)$ && -n "$__desired" ]]; then
+            if [[ -n "$__current" && -f "$INSTALL_DIR/versions/$__current/.install-complete.json" ]]; then
+                __active_cmp="$(__version_cmp "$__current" "$__desired")"
+                if [[ "$__active_cmp" = 1 || ( "$__install_lock_contended" = 1 && "$__active_cmp" = 0 && "$__deployed" = "$__current" ) ]]; then
+                    SKIP_PACKAGE_INSTALL=1
+                    # Action-specific unit work must target the active newer
+                    # slot, not the queued payload's stale SRC_VERSION.
+                    VENV="$INSTALL_DIR/versions/$__current"
+                fi
+            fi
+            if [[ "$SKIP_PACKAGE_INSTALL" = 0 && -n "$__stamped" && -f "$INSTALL_DIR/payload-dir" ]]; then
+                __stamped_cmp="$(__version_cmp "$__stamped" "$__desired")"
+                if [[ "$__stamped_cmp" = 1 ]]; then
+                    printf 'ERROR: refusing stale agent-logger %s payload %s; stamped payload %s is newer\n' "$ACTION" "$__desired" "$__stamped" >&2
+                    exit 1
+                fi
+            fi
+        elif [[ "$ACTION" = stamp && -n "$__desired" ]]; then
+            if [[ -n "$__current" && -f "$INSTALL_DIR/versions/$__current/.install-complete.json" ]]; then
+                __current_cmp="$(__version_cmp "$__current" "$__desired")"
+                if [[ "$__current_cmp" = 1 || ( "$__install_lock_contended" = 1 && "$__current_cmp" = 0 ) ]]; then
+                    SKIP_STAMP=1
+                fi
+            fi
+            if [[ "$SKIP_STAMP" = 0 && -n "$__stamped" && -f "$INSTALL_DIR/payload-dir" ]]; then
+                __stamped_cmp="$(__version_cmp "$__stamped" "$__desired")"
+                if [[ "$__stamped_cmp" = 1 || ( "$__install_lock_contended" = 1 && "$__stamped_cmp" = 0 ) ]]; then
+                    SKIP_STAMP=1
+                fi
+            fi
+        fi
+    fi
+fi
+
 # Mirror pip's configured index to uv on a governed box (public PyPI TLS-blocked):
 # uv does not read pip.conf, so derive index-url from pip config / the pip.conf
 # files and export it. No-op where pip has no index (e.g. pristine -- the index
@@ -468,7 +584,12 @@ STUBEOF
 # build to first use (fits a sessionStart hook's grace window). No venv, no uv.
 do_stamp() {
     mkdir -p "${INSTALL_DIR}" "${LOCAL_BIN}"
-    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "${INSTALL_DIR}/payload-dir"
+    local payload_tmp="${INSTALL_DIR}/payload-dir.tmp.$$"
+    local version_tmp="${INSTALL_DIR}/stamped-version.tmp.$$"
+    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$payload_tmp"
+    printf '%s\n' "$SRC_VERSION" > "$version_tmp"
+    mv -f "$payload_tmp" "${INSTALL_DIR}/payload-dir"
+    mv -f "$version_tmp" "${INSTALL_DIR}/stamped-version"
     deploy_binstub
     ok "stamped: binstub on PATH; runtime provisions on first use."
 }
@@ -563,26 +684,26 @@ EOF
 
 case "${ACTION}" in
   install)
-    install_package
+    if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then install_package; fi
     write_units
     systemctl --user daemon-reload
     systemctl --user enable --now "${TIMER_NAME}.timer"
-    _write_deploy_manifest
+    if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then _write_deploy_manifest; fi
     ok "timer enabled (every 4h)"
     ;;
   stamp)
-    do_stamp
+    if [[ "$SKIP_STAMP" = 0 ]]; then do_stamp; fi
     ;;
   provision)
-    install_package
-    _write_deploy_manifest
+    if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then install_package; fi
+    if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then _write_deploy_manifest; fi
     ok "runtime provisioned"
     ;;
   update)
-    install_package
+    if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then install_package; fi
     write_units
     systemctl --user daemon-reload || true
-    _write_deploy_manifest
+    if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then _write_deploy_manifest; fi
     ok "package + units updated"
     ;;
   uninstall)
