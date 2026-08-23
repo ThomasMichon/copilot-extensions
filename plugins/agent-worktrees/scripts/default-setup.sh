@@ -21,6 +21,7 @@ RECOVERY=false
 SETUP_HOOK=""
 SESSION_PATH=""
 ENV_SCRIPT=""
+COPILOT_PATH_OVERRIDE=""
 COPILOT_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -30,6 +31,7 @@ while [[ $# -gt 0 ]]; do
         --setup-hook)   SETUP_HOOK="$2"; shift 2 ;;
         --session-path) SESSION_PATH="$2"; shift 2 ;;
         --env-script)   ENV_SCRIPT="$2"; shift 2 ;;
+        --copilot-path) COPILOT_PATH_OVERRIDE="$2"; shift 2 ;;
         *)              COPILOT_ARGS+=("$1"); shift ;;
     esac
 done
@@ -113,7 +115,14 @@ say "  Path:     $PWD"
 say ""
 
 # -- Launch Copilot -------------------------------------------------------
-if command -v copilot &>/dev/null; then
+if [[ -n "$COPILOT_PATH_OVERRIDE" ]]; then
+    if command -v "$COPILOT_PATH_OVERRIDE" &>/dev/null; then
+        exec "$COPILOT_PATH_OVERRIDE" "${COPILOT_ARGS[@]}"
+    else
+        echo "ERROR: Configured Copilot executable not found: $COPILOT_PATH_OVERRIDE" >&2
+        exit 1
+    fi
+elif command -v copilot &>/dev/null; then
     exec copilot "${COPILOT_ARGS[@]}"
 elif command -v gh &>/dev/null; then
     exec gh copilot "${COPILOT_ARGS[@]}"
