@@ -126,9 +126,12 @@ class TestNormalizeRemoteCmdFile:
         with pytest.raises(SystemExit):
             _normalize_remote_cmd_file(self._parser(), args)
 
-    def test_read_refreshes_mtime(self, tmp_path):
-        # Reading the payload bumps mtime to ~now so the GC treats it as fresh.
-        f = tmp_path / "p.remotecmd"
+    def test_read_refreshes_mtime_for_dispatch_file(self, tmp_path, monkeypatch):
+        # Reading OUR dispatch payload bumps its mtime to ~now (last-launch).
+        dispatch = tmp_path / "dispatch"
+        dispatch.mkdir()
+        monkeypatch.setattr(resolver, "_DISPATCH_DIR", dispatch)
+        f = dispatch / "cs-abc.remotecmd"
         f.write_text("the-command", encoding="utf-8")
         old = time.time() - 10_000
         os.utime(f, (old, old))
@@ -137,6 +140,20 @@ class TestNormalizeRemoteCmdFile:
         _normalize_remote_cmd_file(argparse.ArgumentParser(), args)
 
         assert os.stat(f).st_mtime > old + 100
+
+    def test_read_does_not_touch_arbitrary_user_file(self, tmp_path, monkeypatch):
+        # A user-supplied --remote-cmd-file outside the dispatch dir is read but
+        # its metadata must NOT be mutated.
+        monkeypatch.setattr(resolver, "_DISPATCH_DIR", tmp_path / "dispatch")
+        f = tmp_path / "user-file.txt"
+        f.write_text("the-command", encoding="utf-8")
+        old = time.time() - 10_000
+        os.utime(f, (old, old))
+        args = argparse.Namespace(remote_cmd_file=str(f), remote_cmd=None)
+
+        _normalize_remote_cmd_file(argparse.ArgumentParser(), args)
+
+        assert os.stat(f).st_mtime == pytest.approx(old, abs=2)
 
 
 class TestDispatchGc:

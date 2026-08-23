@@ -154,9 +154,15 @@ def _normalize_remote_cmd_file(
             "re-dispatch the CodeSpace to regenerate it"
         )
     # mtime = last-launch time, so the dispatch-file GC keeps only files whose
-    # session still resumes (see resolver.prune_stale_dispatch_files).
+    # session still resumes (see resolver.prune_stale_dispatch_files). Scope this
+    # to OUR payload files under ~/.agent-codespaces/dispatch -- never mutate the
+    # metadata of an arbitrary user-supplied --remote-cmd-file.
     try:
-        os.utime(path, None)
+        from . import resolver
+
+        resolved = Path(path).resolve()
+        if resolved.parent == resolver._DISPATCH_DIR.resolve():
+            os.utime(resolved, None)
     except OSError:
         pass
 
