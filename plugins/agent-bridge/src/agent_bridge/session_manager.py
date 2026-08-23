@@ -2651,6 +2651,18 @@ class SessionManager:
                 "Session %s (%s) started, pid=%s, acp=%s",
                 session_id, name, session.pid, acp_sid,
             )
+            # Phase 4a (worktree-self-knowledge): register this ACP session into
+            # the agent-worktrees ground layer so the derived head is correct and
+            # the worktree is not left "looking unowned" (the vision's *explicit
+            # session binding* names "a spawned successor, a headless launch").
+            # LOCAL worktrees only -- a remote worktree's ground layer lives on
+            # its own machine. Best-effort / fail-open: never breaks a launch.
+            if target.type == "local" and target.worktree_id and acp_sid:
+                from . import worktree_lineage
+                with contextlib.suppress(Exception):
+                    worktree_lineage.register_session(
+                        target.worktree_id, acp_sid, pid=session.pid,
+                    )
         except ConnectError as exc:
             # Structured failure: we know exactly which stage failed and
             # whether a retry could help -- never an opaque "agent died".
@@ -4124,6 +4136,28 @@ class SessionManager:
         now = time.time()
         self._db.link_succession(session_id, successor.session_id, now)
 
+        # 3b. Phase 4b (worktree-self-knowledge): write the succession into the
+        #     agent-worktrees GROUND LAYER -- the authoritative, single-owner
+        #     lineage the facility derives the head from. The `_db` link above is
+        #     the bridge's *private* event bookkeeping; the source of truth is the
+        #     ground layer (the vision's *derive-dont-duplicate*). One atomic
+        #     write marks the predecessor `handed-off` + makes the successor the
+        #     derived head; a companion note mirrors the handoff into the worktree
+        #     record's history. LOCAL worktrees only (a remote worktree's ground
+        #     layer lives on its own machine); best-effort / fail-open.
+        gl_worktree = getattr(session.target, "worktree_id", None)
+        gl_local = getattr(session.target, "type", None) == "local"
+        pred_acp = session.acp_session_id
+        succ_acp = successor.acp_session_id
+        if gl_local and gl_worktree and pred_acp and succ_acp:
+            from . import worktree_lineage
+            with contextlib.suppress(Exception):
+                worktree_lineage.link_succession(gl_worktree, pred_acp, succ_acp)
+            with contextlib.suppress(Exception):
+                worktree_lineage.note_handoff(
+                    gl_worktree, pred_acp, title=(reason or "context-pressure"),
+                )
+
         # 4. Announce the changeover on BOTH event streams.
         payload = {
             "rolled_from": session_id,
@@ -4140,12 +4174,25 @@ class SessionManager:
             successor.event_log.append("session_handoff", payload)
 
         # 5. Seed the successor's opening turn with the brief (fire-and-forget;
-        #    the successor processes it as its first turn).
+        #    the successor processes it as its first turn). Phase 4c: prepend the
+        #    successor's ground-layer role + the worktree history digest, because
+        #    the `sessionStart` role/digest hook CANNOT fire under `copilot --acp`
+        #    -- so the ACP successor learns its lineage from its opening turn
+        #    instead. Fail-open: a missing digest never blocks the warm seed.
         if seed:
+            seed_prompt = self._build_seed_prompt(brief)
+            if gl_local and gl_worktree and succ_acp:
+                from . import worktree_lineage
+                with contextlib.suppress(Exception):
+                    role = worktree_lineage.session_role(gl_worktree, succ_acp)
+                    digest = worktree_lineage.history_digest(gl_worktree, succ_acp)
+                    header = worktree_lineage.build_succession_seed_header(
+                        role, digest, predecessor=pred_acp,
+                    )
+                    if header:
+                        seed_prompt = header + seed_prompt
             with contextlib.suppress(Exception):
-                await self.submit_prompt(
-                    successor.session_id, self._build_seed_prompt(brief)
-                )
+                await self.submit_prompt(successor.session_id, seed_prompt)
 
         # 6. Retire the predecessor: STOPPED keeps it resumable and preserves its
         #    transcript + succession link (end_session would delete both).

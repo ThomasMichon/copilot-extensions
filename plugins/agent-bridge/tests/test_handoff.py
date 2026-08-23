@@ -177,3 +177,74 @@ class TestHandoffPrimitive:
         pred.status = SessionStatus.RUNNING
         with pytest.raises(ValueError, match="not idle"):
             await session_manager.handoff_session(pred.session_id)
+
+
+class TestHandoffGroundLayerLineage:
+    """Phase 4 (worktree-self-knowledge): a bridge/NF handoff writes the
+    succession into the agent-worktrees GROUND LAYER (not just the bridge DB)
+    and seeds the ACP successor with its role + the worktree history digest."""
+
+    @staticmethod
+    def _local_wt_target() -> SpawnTarget:
+        # A local target carrying a ground-layer worktree id activates the
+        # Phase 4 writes (the default fixture has no worktree_id, so it doesn't).
+        return SpawnTarget(type="local", cwd="/tmp/test-dir", worktree_id="wt-gl")
+
+    @pytest.mark.asyncio
+    async def test_handoff_writes_ground_layer_and_seeds_role(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp,
+        mock_acp_client,
+    ) -> None:
+        mock_acp_client.send_prompt = AsyncMock(return_value={
+            "response_text": "## Objective\nShip it", "stop_reason": "end_turn",
+        })
+        target = self._local_wt_target()
+
+        with patch("agent_bridge.worktree_lineage.register_session") as m_reg, \
+                patch("agent_bridge.worktree_lineage.link_succession") as m_link, \
+                patch("agent_bridge.worktree_lineage.note_handoff") as m_note, \
+                patch(
+                    "agent_bridge.worktree_lineage.session_role",
+                    return_value={"role": "head", "head_session": "acp"},
+                ), \
+                patch(
+                    "agent_bridge.worktree_lineage.history_digest",
+                    return_value="focus: ship it",
+                ):
+            pred = await session_manager.start_session(target, caller_id="wt-gl")
+            succ = await session_manager.handoff_session(pred.session_id)
+
+            # 4a: the ACP session was registered into the ground layer at start
+            # (fired for both the predecessor and the successor start).
+            assert m_reg.call_count >= 1
+            assert m_reg.call_args_list[0].args[0] == "wt-gl"
+
+            # 4b: succession + handoff note written to the ground layer.
+            assert m_link.call_count == 1
+            link_args = m_link.call_args.args
+            assert link_args[0] == "wt-gl"  # worktree id
+            assert m_note.call_count == 1
+            assert m_note.call_args.args[0] == "wt-gl"
+
+        # 4c: the successor's opening turn carries the lineage header + digest.
+        if succ._prompt_task is not None:
+            await succ._prompt_task
+        user_msgs = _events(succ, "user_message")
+        assert user_msgs
+        content = user_msgs[0].data["content"]
+        assert "place in this worktree's lineage" in content
+        assert "focus: ship it" in content
+        # ...and still carries the warm brief.
+        assert "CONTINUATION BRIEF" in content
+
+    @pytest.mark.asyncio
+    async def test_no_ground_layer_write_without_worktree_id(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp,
+    ) -> None:
+        # The default fixture target has no worktree_id -> no ground-layer write.
+        with patch("agent_bridge.worktree_lineage.link_succession") as m_link, \
+                patch("agent_bridge.worktree_lineage.register_session") as m_reg:
+            pred = await session_manager.start_session(spawn_target, caller_id="wt-x")
+            await session_manager.handoff_session(pred.session_id)
+            assert m_link.call_count == 0
+            assert m_reg.call_count == 0
