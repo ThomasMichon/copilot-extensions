@@ -2557,7 +2557,7 @@ def test_tui_renders_local_worktrees():
             out = pcap.screen_to_text(scr)
             assert "Worktree Manager" in out
             # Canonical state vocabulary (test-chamber #1290).
-            assert "WIP" in out
+            assert "ACTIVE" in out
             assert "UNUSED" in out
             assert "FINAL" in out
             # Real machine identity from the source.

@@ -105,7 +105,10 @@ with `Tab`:
 - **Worktree rows** — each shows machine · environment · `repo:id4` and a **state
   block** (`WIP`, `DIRTY`, `UNUSED`, `CONVO 💬N`, `FINAL`, `ORPHAN`) with an
   `↑ahead`/`↓behind` sync tag. Same vocabulary as the status bar and
-  [worktree-lifecycle.md § states](worktree-lifecycle.md#worktree-states).
+  [worktree-lifecycle.md § states](worktree-lifecycle.md#worktree-states). The
+  `LIVE` column distinguishes an attached (`●N`) or detached (`○`) terminal
+  multiplexer, a live Copilot process without a mux (`PROC`), and stale PID-lock
+  residue without a live process (`LOCK`).
 - **⚙ Configuration** menu — hosts **Profiles** (user-local Copilot backend
   profiles; never repo-managed) and other settings. Installed plugins can
   **contribute their own sections** here (an SSH layer an "SSH" home, an MCP

@@ -466,31 +466,24 @@ def _count_user_turns(entry: Path) -> int:
     return turns
 
 
-def worktree_has_live_session(rec) -> bool:
-    """Cheap ACTIVE check for the picker's cache-only first paint (dotfiles#948).
+def worktree_session_lock_state(rec) -> tuple[bool, list[int]]:
+    """Return live-binding presence and stale lock PIDs for one worktree.
 
-    Does any of this worktree's REGISTERED sessions currently hold a live
-    ``inuse.<pid>.lock`` (a running bound Copilot -- mux OR bare)? Targeted via
-    the per-worktree session registry (``rec.sessions``), so it globs ONLY this
-    worktree's own session dirs and pid-checks ONLY the few that actually carry a
-    lock file -- no ``events.jsonl`` read, no ``workspace.yaml`` parse, and no
-    machine-wide process-table scan. This is the same lock-file liveness signal
-    ``scan_sessions_fast`` derives (``session_lock_live``), factored out so the
-    first paint can surface ACTIVE immediately instead of waiting for the
-    git-classify populate -- whose OWN ``active`` derivation depends on exactly
-    this lock scan (``_build_active_paths``), so without it a running worktree
-    renders ``?``/stale until Pass 2.
+    The targeted scan covers only the worktree's registered session directories
+    and their ``inuse.<pid>.lock`` files. It does not read events/workspace data
+    or enumerate the machine process table. A PID owned by a live Copilot is a
+    binding; any other PID is stale lock residue.
 
-    Best-effort: never raises. Returns False for an unindexed worktree
-    (``sessions`` None/empty) -- the cached ``bound_live`` hint and the Pass 2
-    populate cover that case.
+    Best-effort: never raises. An unindexed worktree returns ``(False, [])``;
+    the cached ``bound_live`` hint and the full populate cover that case.
     """
     sessions_list = getattr(rec, "sessions", None)
     if not sessions_list:
-        return False
+        return False, []
     state_dir = _session_state_dir()
     if not state_dir.exists():
-        return False
+        return False, []
+    stale_pids: list[int] = []
     for entry in sessions_list:
         sid = getattr(entry, "session_id", None)
         if not sid:
@@ -518,8 +511,14 @@ def worktree_has_live_session(rec) -> bool:
             # fails for a dead pid), so a stale lock from a crashed session does
             # not count.
             if _is_copilot_process(pid):
-                return True
-    return False
+                return True, stale_pids
+            stale_pids.append(pid)
+    return False, stale_pids
+
+
+def worktree_has_live_session(rec) -> bool:
+    """Cheap ACTIVE check for the picker's cache-only first paint."""
+    return worktree_session_lock_state(rec)[0]
 
 
 def _enrich_session_dir(

@@ -319,8 +319,11 @@ def row_text(rec, cols, width, selected, indent=1, pulse=0, mark=None):
             style = C_DISPO.get(rec.get("dispo_level", ""), "")
         elif k == "pr" and rec.get("pr", "").endswith("✓"):
             style = C_PR_MERGED
-        elif k == "sess" and rec.get("sess", "").startswith("●"):
-            style = C_PULSE[pulse]   # glowy pulse for live sessions
+        elif k == "sess":
+            if rec.get("sess", "").startswith("●") or rec.get("sess") == "PROC":
+                style = C_PULSE[pulse]
+            elif rec.get("sess") == "LOCK":
+                style = C_STATE["WIP"]
         t.append(cell, style=style)
     if t.cell_len < width:
         t.append(" " * (width - t.cell_len))
@@ -343,12 +346,12 @@ def header_text(cols, width, label_style=C_HEADER, indent=1):
 ACTIVE_SPECS = [
     ("id4", "id", 4, "l", 2), ("state", "state", 6, "l", 4),
     ("machine_env", "machine env", 19, "l", 5),
-    ("age", "age", 4, "l", 7), ("sess", "sess", 4, "l", 8),
+    ("age", "age", 4, "l", 7), ("sess", "live", 4, "l", 8),
     ("pr", "pr", 8, "l", 3), ("title", "title", 10, "l", 1),
 ]
 LIST_SPECS = [
     ("id4", "id", 4, "l", 2), ("state", "state", 6, "l", 4),
-    ("age", "age", 4, "l", 6), ("sess", "sess", 4, "l", 7),
+    ("age", "age", 4, "l", 6), ("sess", "live", 4, "l", 7),
     ("turns", "t", 3, "r", 8), ("pr", "pr", 8, "l", 3),
     ("title", "title", 10, "l", 1),
 ]
