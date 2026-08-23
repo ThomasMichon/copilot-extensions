@@ -1374,6 +1374,17 @@ try {
         if ($haveSchedMod) {
             switch (Remove-CoordinatorTask) {
                 'removed' { Write-Step 'Removed prior boot Scheduled Task (interactive mode: logon auto-start owns startup)' }
+                'blocked' {
+                    # The prior boot task was registered by an ELEVATED install, so its
+                    # task-file ACL denies a non-elevated Unregister. Left in place it
+                    # keeps an -AtLogOn trigger whose action is a bare
+                    # `powershell.exe -WindowStyle Hidden` -- which DefTerm/Windows
+                    # Terminal ignore, so it FLASHES a console at every logon (the
+                    # headless HKCU Run auto-start below is the real service). A routine
+                    # non-elevated `update` can't remove it, so surface an actionable
+                    # remediation instead of degrading silently. See copilot-extensions#920.
+                    Write-Warn "A prior ELEVATED boot Scheduled Task '$TaskName' remains and cannot be removed without elevation -- it flashes a console window at each logon. The headless logon auto-start below supersedes it; to remove the stale task run this ONCE in an elevated PowerShell: Unregister-ScheduledTask -TaskName '$TaskName' -Confirm:`$false"
+                }
                 default   { }
             }
         }
