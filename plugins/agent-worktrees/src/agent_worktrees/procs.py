@@ -238,8 +238,15 @@ def terminate_pid(pid: int) -> bool:
                 k32 = _win_kernel32()
             except OSError:
                 return False
-            return _terminate_windows(k32, pid)
-        return _terminate_posix(pid)
+            killed = _terminate_windows(k32, pid)
+        else:
+            killed = _terminate_posix(pid)
+        try:
+            from . import reap_audit
+            reap_audit.record("pid", pid, reason="terminate_pid", killed=killed)
+        except Exception:
+            pass
+        return killed
     except OSError:
         return False
 
@@ -310,5 +317,12 @@ def terminate_processes_under(
             ok = killer(t["pid"])
         except OSError:
             ok = False
+        try:
+            from . import reap_audit
+            reap_audit.record("cwd-proc", t["pid"],
+                              reason="terminate_processes_under", killed=ok,
+                              root=root, name=t.get("name"))
+        except Exception:
+            pass
         results.append({**t, "killed": ok})
     return results
